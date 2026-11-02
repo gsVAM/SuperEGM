@@ -23,7 +23,9 @@ def digest(data):
 
 def safe_name(name):
     path = PurePosixPath(name)
-    if not name or path.is_absolute() or '..' in path.parts or path.as_posix() != name or '\\' in name or '\x00' in name or name == '.':
+    devices = {'CON', 'PRN', 'AUX', 'NUL', *(f'{prefix}{n}' for prefix in ('COM', 'LPT') for n in '123456789¹²³')}
+    windows_alias = any(p.endswith((' ', '.')) or p.split('.')[0].upper() in devices for p in path.parts)
+    if not name or path.is_absolute() or '..' in path.parts or path.as_posix() != name or '\\' in name or ':' in name or any(ord(c) < 32 for c in name) or windows_alias or name == '.':
         raise ValueError('Unsafe artifact path')
     return name
 

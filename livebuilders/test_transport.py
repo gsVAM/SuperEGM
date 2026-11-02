@@ -192,7 +192,7 @@ class TransportTests(unittest.TestCase):
         self.prepare("print('done')\n")
         self.execute()
         original = self.store.optional(self.out + 'manifest.json')
-        for name in ('../escape', '/absolute', 'a//b', 'a/./b', 'a\\b'):
+        for name in ('../escape', '/absolute', 'a//b', 'a/./b', 'a\\b', 'C:/escape', 'a/.. /escape', 'NUL.txt', 'a/CON'):
             with self.assertRaises(ValueError):
                 safe_name(name)
         bad = json.loads(json.dumps(original))
