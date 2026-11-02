@@ -24,6 +24,10 @@ def digest(data):
 
 
 def safe_name(name):
+    try:
+        name.encode('utf-8')
+    except UnicodeEncodeError:
+        raise ValueError('Path is not valid UTF-8') from None
     if len(encoded(name)) > MAX_NAME_JSON_BYTES:
         raise ValueError('Path exceeds 512 serialized bytes')
     path = PurePosixPath(name)

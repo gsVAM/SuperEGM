@@ -82,6 +82,35 @@ class TransportTests(unittest.TestCase):
         laptop.state.mkdir(exist_ok=True)
         return laptop
 
+    @unittest.skipUnless(sys.platform == 'linux', 'Linux surrogateescape filename regression')
+    def test_non_utf8_output_name_publishes_terminal_failure(self):
+        self.prepare("import os\nwith open(os.fsencode(os.environ['LB_OUTPUT_DIR'])+b'/\\xff','wb') as f: f.write(b'result')\n")
+        original = self.store.put
+        def utf8_only(key, data, **conditions):
+            key.encode('utf-8')  # Match S3 SDK key encoding, unlike a local filesystem.
+            return original(key, data, **conditions)
+        self.store.put = utf8_only
+        self.execute()
+        final = self.laptop().status(self.run_id)
+        self.assertEqual(final['status'], 'failed')
+        self.assertEqual(final['output_error_reason'], 'path_encoding')
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(self.laptop().watch(self.run_id, once=True)['status'], 'failed')
+
+    def test_output_failure_preserves_timeout_and_safe_reason(self):
+        self.prepare("import os,time\nfrom pathlib import Path\nPath(os.environ['LB_OUTPUT_DIR'],'answer.txt').write_text('ghp_'+'x'*25)\ntime.sleep(60)\n", timeout=1)
+        self.execute()
+        final = self.laptop().status(self.run_id)
+        self.assertEqual(final['status'], 'failed')
+        self.assertEqual(final['job_status'], 'timed_out')
+        self.assertEqual(final['output_error_reason'], 'credential_pattern')
+        self.assertLess(final['exit_code'], 0)
+        destination = self.root / 'timeout-invalid'
+        self.laptop().fetch(self.run_id, destination)
+        saved = json.loads((destination / 'result.json').read_text())
+        self.assertEqual(saved['job_status'], 'timed_out')
+        self.assertEqual(saved['output_error_reason'], 'credential_pattern')
+
     def test_invalid_output_path_publishes_terminal_failure(self):
         self.prepare("import os\nfrom pathlib import Path\np=Path(os.environ['LB_OUTPUT_DIR'])\nfor i in range(6): p=p/('x'*100)\np.mkdir(parents=True)\n(p/'answer.txt').write_text('result')\n")
         self.execute()
@@ -389,7 +418,7 @@ class TransportTests(unittest.TestCase):
         self.prepare("print('done')\n")
         self.execute()
         original = self.store.optional(self.out + 'manifest.json')
-        for name in ('../escape', '/absolute', 'a//b', 'a/./b', 'a\\b', 'C:/escape', 'a/.. /escape', 'NUL.txt', 'a/CON'):
+        for name in ('artifacts/\udcff', '../escape', '/absolute', 'a//b', 'a/./b', 'a\\b', 'C:/escape', 'a/.. /escape', 'NUL.txt', 'a/CON'):
             with self.assertRaises(ValueError):
                 safe_name(name)
         bad = json.loads(json.dumps(original))

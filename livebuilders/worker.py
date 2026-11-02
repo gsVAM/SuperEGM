@@ -13,6 +13,19 @@ from pathlib import Path
 from protocol import MAX_BYTES, MAX_FILES, Store, checked, digest, encoded, prefixes, redacted, safe_name, scan, unpack
 
 
+OUTPUT_REASONS = {
+    'Path is not valid UTF-8': 'path_encoding',
+    'Path exceeds 512 serialized bytes': 'path_too_long',
+    'Unsafe artifact path': 'unsafe_path',
+    'Artifact directory must not be a symlink': 'non_regular',
+    'Only regular output files may be uploaded': 'non_regular',
+    'Too many output artifacts': 'too_many',
+    'Output exceeds limit': 'too_large',
+    'Output grew beyond limit': 'too_large',
+    'Credential pattern detected; object was not published': 'credential_pattern',
+}
+
+
 def kill_group(process):
     if process is not None:
         try:
@@ -167,7 +180,7 @@ def execute(store, owner, run_id, request_hash, root):
             process.stdin.close()
             process.stdout.close()
 
-    result = {'schema': 1, 'owner': owner, 'run_id': run_id, 'status': status, 'exit_code': exit_code, 'elapsed_seconds': round(time.monotonic() - started, 2)}
+    result = {'schema': 1, 'owner': owner, 'run_id': run_id, 'status': status, 'job_status': status, 'exit_code': exit_code, 'elapsed_seconds': round(time.monotonic() - started, 2)}
     try:
         artifacts = root / 'artifacts'
         if artifacts.is_symlink():
@@ -198,8 +211,9 @@ def execute(store, owner, run_id, request_hash, root):
         # Validation finishes before any artifact upload. Publish a small safe
         # failure result, not partial/secret-bearing outputs or an endless wait.
         status = 'failed'
-        result.update(status=status, output_error_type=type(error).__name__)
-        event('error', stage='outputs', error_type=type(error).__name__)
+        reason = 'filesystem_error' if isinstance(error, OSError) else OUTPUT_REASONS.get(str(error), 'validation_failed')
+        result.update(status=status, output_error_type=type(error).__name__, output_error_reason=reason)
+        event('error', stage='outputs', error_type=type(error).__name__, reason=reason)
         collected = [('job.log', b'Output validation failed; job log and artifacts omitted.\n'), ('result.json', encoded(result))]
     entries = []
     for name, data in collected:

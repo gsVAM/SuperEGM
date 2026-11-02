@@ -82,7 +82,7 @@ directory is the extracted snapshot. Put deliverables in `LB_OUTPUT_DIR`; the
 working tree, dependencies and database are not automatically downloaded.
 
 Inputs and output files are limited to 512 MiB total and 20,000 files. Final
-manifest JSON is limited to 32 MiB on both publication and read. Both source and output paths are limited to 512 bytes in their JSON encoding,
+manifest JSON is limited to 32 MiB on both publication and read. Both source and output paths must be valid UTF-8 and are limited to 512 bytes in their JSON encoding,
 keeping even 20,000 manifest entries within the budget. Non-ASCII BMP characters
 count as six bytes each, and characters outside the BMP count as twelve. The mailbox
 is limited to 128 messages/64 KiB, each message to 4 KiB. Source packaging excludes
@@ -97,7 +97,8 @@ publishes the destination only after all files pass. It never applies or execute
 patch. Hashes detect corruption; they do not make agent-produced content trusted.
 The worker validates all collected outputs before uploading any. Invalid output
 publishes a failed manifest containing only a safe diagnostic log and result; the
-rejected artifacts are omitted. If a worker or artifact upload fails before the manifest, status remains
+rejected artifacts are omitted. `job_status` preserves the command outcome (including
+cancellation or timeout), and `output_error_reason` gives a fixed safe reason code. If a worker or artifact upload fails before the manifest, status remains
 `incomplete`. It does not falsely report success or assume the worker is alive.
 Progress events omit command arguments. Logs replace lines longer than 64 KiB with an omission marker (so a cut cannot
 expose a partial token) and stop recording after 16 MiB while continuing to drain
