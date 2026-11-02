@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 MAX_BYTES = 512 * 1024 * 1024
 MAX_FILES = 20000
 MAX_MANIFEST_BYTES = 32 * 1024 * 1024
+MAX_NAME_JSON_BYTES = 512
 SECRET = re.compile(rb"(?:sk-ant-[A-Za-z0-9_-]{12,}|(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]{20,}|(?:AKIA|ASIA)[A-Z0-9]{16}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----)")
 EXCLUDED = {'.git', '.aws', '.ssh', '.claude', '.codex', 'node_modules', '__pycache__', '.venv', 'dist', 'coverage'}
 
@@ -23,6 +24,8 @@ def digest(data):
 
 
 def safe_name(name):
+    if len(encoded(name)) > MAX_NAME_JSON_BYTES:
+        raise ValueError('Artifact path exceeds 512 serialized bytes')
     path = PurePosixPath(name)
     devices = {'CON', 'PRN', 'AUX', 'NUL', *(f'{prefix}{n}' for prefix in ('COM', 'LPT') for n in '123456789¹²³')}
     windows_alias = any(p.endswith((' ', '.')) or p.split('.')[0].upper() in devices for p in path.parts)

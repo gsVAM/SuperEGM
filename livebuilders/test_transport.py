@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 
 from lb import Laptop
-from protocol import Store, bundle, digest, encoded, output_entries, prefixes, safe_name, unpack
+from protocol import MAX_FILES, MAX_MANIFEST_BYTES, Store, bundle, digest, encoded, output_entries, prefixes, safe_name, unpack
 from worker import run
 
 
@@ -81,6 +81,45 @@ class TransportTests(unittest.TestCase):
         laptop.state = self.root / 'state'
         laptop.state.mkdir(exist_ok=True)
         return laptop
+
+    def test_manifest_path_budget_fits_production_writer_and_reader(self):
+        with self.assertRaises(ValueError):
+            safe_name('目录/' * 100 + 'file')
+        files = []
+        for index in range(MAX_FILES):
+            name = 'artifacts/' + 'x' * 200 + '/' + 'y' * 200 + '/' + str(index)
+            safe_name(name)
+            files.append({'name': name, 'key': self.out + 'out/' + name, 'size': 0, 'sha256': digest(b'')})
+        final = {'schema': 1, 'status': 'passed', 'files': files}
+        self.assertLess(len(encoded(final)), MAX_MANIFEST_BYTES)
+        Store.put_json(self.store, self.out + 'manifest.json', final)
+        restored, _ = Store.json(self.store, self.out + 'manifest.json')
+        self.assertEqual(len(output_entries(restored, self.out)), MAX_FILES)
+
+    def test_truncated_line_never_emits_a_partial_token(self):
+        self.prepare("print('x'*65520 + 'ghp_' + 'a'*40 + 'y'*5000)\nprint('completed')\n")
+        self.execute()
+        self.assertEqual(self.laptop().status(self.run_id)['status'], 'passed')
+        for file in (self.store.root / self.out / 'events').iterdir():
+            self.assertNotIn(b'ghp_', file.read_bytes())
+        self.assertNotIn(b'ghp_', self.store.get(self.out + 'out/job.log')[0])
+
+    def test_failed_event_upload_does_not_leave_a_gap(self):
+        self.prepare("print('output')\n")
+        original = self.store.put_json
+        failed = []
+        def once(key, value, **conditions):
+            if key.endswith('events/00000002.json') and not failed:
+                failed.append(True)
+                raise OSError('temporary write failure')
+            return original(key, value, **conditions)
+        self.store.put_json = once
+        self.execute()
+        self.assertEqual(self.laptop().status(self.run_id)['status'], 'failed')
+        with contextlib.redirect_stdout(io.StringIO()):
+            observed = self.laptop().watch(self.run_id, once=True)
+        self.assertEqual(observed['status'], 'failed')
+        self.assertEqual(observed['last_event'], self.laptop().status(self.run_id)['last_event'])
 
     def test_runtime_owner_pin_and_preflight_retry_admission(self):
         self.prepare("print('ok')\n")
@@ -261,7 +300,7 @@ class TransportTests(unittest.TestCase):
         self.prepare("raise RuntimeError('must not execute')\n")
         self.store.put(self.inp + 'source.tar.gz', b'tampered')
         self.execute()
-        self.assertIsNone(self.store.optional(self.out + 'manifest.json'))
+        self.assertEqual(self.laptop().status(self.run_id)['status'], 'failed')
         self.assertFalse((self.root / 'worker/started').exists())
         self.assertFalse((self.root / 'worker/workspace').exists())
 

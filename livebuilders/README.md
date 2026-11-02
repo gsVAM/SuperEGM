@@ -28,10 +28,11 @@ python3 tools/livebuilders/lb.py --config /path/to/builders.json cleanup RUN_ID
 ```
 
 `run` returns after starting the remote worker. It prints the run ID before its first S3 upload, so an ambiguous connection failure can be retried with `resume RUN_ID`.
-`resume` reuses the immutable request and session ID. Preflight download/validation failures remain retryable; `resume` can launch a new
+`resume` reuses the immutable request and session ID. Preflight transport failures remain retryable; `resume` can launch a new
 worker after the failed preflight exits. A process lock prevents concurrent preflight
 workers, and a durable marker written after staging and before command launch
-prevents executing the same command twice. After a worker crash, the marker prevents
+prevents executing the same command twice. Deterministic validation failures publish
+a failed result without executing the command. After a worker crash, the marker prevents
 automatic replay: inspect the run and start a new run explicitly if appropriate.
 
 `watch` polls saved S3 events about once per second; it is near-live, not a terminal
@@ -81,7 +82,9 @@ directory is the extracted snapshot. Put deliverables in `LB_OUTPUT_DIR`; the
 working tree, dependencies and database are not automatically downloaded.
 
 Inputs and output files are limited to 512 MiB total and 20,000 files. Final
-manifest JSON is limited to 32 MiB on both publication and read. The mailbox
+manifest JSON is limited to 32 MiB on both publication and read. Each artifact path
+is limited to 512 bytes in its JSON encoding, keeping even 20,000 entries within
+the manifest budget. The mailbox
 is limited to 128 messages/64 KiB, each message to 4 KiB. Source packaging excludes
 credential directories, `.env*`, private-key files, dependencies and build outputs;
 it skips excluded symlinks without following or archiving them, and rejects other
@@ -94,8 +97,9 @@ publishes the destination only after all files pass. It never applies or execute
 patch. Hashes detect corruption; they do not make agent-produced content trusted.
 If a worker or artifact upload fails before the manifest, status remains
 `incomplete`. It does not falsely report success or assume the worker is alive.
-Progress events omit command arguments. Logs truncate overlong lines at 64 KiB
-and stop recording after 16 MiB while continuing to drain stdout.
+Progress events omit command arguments. Logs replace lines longer than 64 KiB with an omission marker (so a cut cannot
+expose a partial token) and stop recording after 16 MiB while continuing to drain
+stdout.
 The job deadline is at most 2,400 seconds; configure the AgentCore maximum lifetime
 above that. AWS request delays can extend cancellation/deadline handling. Instance
 lifetime still bounds the session. Jobs must not daemonize/escape their process

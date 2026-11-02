@@ -53,9 +53,10 @@ def execute(store, owner, run_id, request_hash, root):
 
     def event(kind, **fields):
         nonlocal sequence
-        sequence += 1
-        payload = {'schema': 1, 'run_id': run_id, 'sequence': sequence, 'type': kind, **fields}
-        store.put_json(out + f'events/{sequence:08d}.json', payload)
+        next_sequence = sequence + 1
+        payload = {'schema': 1, 'run_id': run_id, 'sequence': next_sequence, 'type': kind, **fields}
+        store.put_json(out + f'events/{next_sequence:08d}.json', payload)
+        sequence = next_sequence
 
     try:
         raw, _ = store.get(inp + 'request.json', 1024 * 1024)
@@ -129,7 +130,7 @@ def execute(store, owner, run_id, request_hash, root):
                     pending += part[:available]
                     truncated = truncated or len(part) > available
                     if index < len(parts) - 1:
-                        text = redacted(pending.decode(errors='replace')) + (' [line truncated]' if truncated else '')
+                        text = '[oversized line omitted]' if truncated else redacted(pending.decode(errors='replace'))
                         remaining = 16 * 1024 * 1024 - log_bytes
                         if remaining > 0:
                             data = (text + '\n').encode()[:remaining]
@@ -143,7 +144,7 @@ def execute(store, owner, run_id, request_hash, root):
             if process.poll() is not None and not selector.get_map():
                 break
         if pending and log_bytes < 16 * 1024 * 1024:
-            text = redacted(pending.decode(errors='replace')) + (' [line truncated]' if truncated else '')
+            text = '[oversized line omitted]' if truncated else redacted(pending.decode(errors='replace'))
             text = text.encode()[:16 * 1024 * 1024 - log_bytes].decode(errors='ignore')
             log.append(text)
             event('output', text=text)
@@ -151,7 +152,7 @@ def execute(store, owner, run_id, request_hash, root):
         if status not in ('cancelled', 'timed_out'):
             status = 'passed' if exit_code == 0 else 'failed'
     except Exception as error:
-        if not admitted:
+        if not admitted and not isinstance(error, (ValueError, KeyError, TypeError)):
             # No command ran. A later resume may safely repeat preflight.
             (root / 'preflight-error.txt').write_text(type(error).__name__)
             return
