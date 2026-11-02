@@ -160,6 +160,18 @@ class TransportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.laptop().fetch(self.run_id, self.root / 'cross-run')
 
+    def test_fetch_rejects_names_that_collide_on_case_insensitive_laptops(self):
+        self.prepare("print('done')\n")
+        self.execute()
+        final = self.store.optional(self.out + 'manifest.json')
+        alias = dict(final['files'][0], name='JOB.LOG', key=self.out + 'out/JOB.LOG')
+        self.store.put(alias['key'], self.store.get(final['files'][0]['key'])[0])
+        final['files'].append(alias)
+        self.store.put_json(self.out + 'manifest.json', final)
+        with self.assertRaises(ValueError):
+            self.laptop().fetch(self.run_id, self.root / 'case-alias')
+        self.assertFalse((self.root / 'case-alias').exists())
+
     def test_bundle_excludes_credentials_and_rejects_symlinks_and_tokens(self):
         (self.source / '.env').write_text('PRIVATE=do-not-upload')
         (self.source / 'ok.txt').write_text('hello')

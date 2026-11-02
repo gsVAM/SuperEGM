@@ -8,6 +8,7 @@ import shutil
 import sys
 import tempfile
 import time
+import unicodedata
 import uuid
 from pathlib import Path
 
@@ -177,20 +178,29 @@ class Laptop:
         if manifest is None:
             raise ValueError('Run has no final manifest; output is incomplete')
         self.validate_manifest(manifest, request, sha, out)
+        entries = output_entries(manifest, out)
+        names = {'manifest.json'}
+        for item in entries:
+            portable = unicodedata.normalize('NFC', item['name']).casefold()
+            if portable in names:
+                raise ValueError('Artifact names collide on a case-insensitive filesystem')
+            names.add(portable)
         destination = Path(destination).absolute()
         if destination.exists() or destination.is_symlink():
             raise ValueError('Fetch destination must not already exist')
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = Path(tempfile.mkdtemp(prefix='.lb-fetch-', dir=destination.parent))
         try:
-            for item in output_entries(manifest, out):
+            for item in entries:
                 data, _ = self.store.get(item['key'], item['size'])
                 checked(data, item)
                 scan(data)
                 file = temporary / item['name']
                 file.parent.mkdir(parents=True, exist_ok=True)
-                file.write_bytes(data)
-            (temporary / 'manifest.json').write_bytes(encoded(manifest))
+                with file.open('xb') as stream:
+                    stream.write(data)
+            with (temporary / 'manifest.json').open('xb') as stream:
+                stream.write(encoded(manifest))
             temporary.rename(destination)
         except BaseException:
             shutil.rmtree(temporary)
