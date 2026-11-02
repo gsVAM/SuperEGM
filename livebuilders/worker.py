@@ -167,29 +167,42 @@ def execute(store, owner, run_id, request_hash, root):
             process.stdin.close()
             process.stdout.close()
 
-    artifacts = root / 'artifacts'
-    artifacts.mkdir(exist_ok=True)
     result = {'schema': 1, 'owner': owner, 'run_id': run_id, 'status': status, 'exit_code': exit_code, 'elapsed_seconds': round(time.monotonic() - started, 2)}
-    (root / 'job.log').write_text(''.join(log))
-    (root / 'result.json').write_bytes(encoded(result))
-    files = [('job.log', root / 'job.log'), ('result.json', root / 'result.json')]
-    files += [('artifacts/' + p.relative_to(artifacts).as_posix(), p) for p in sorted(artifacts.rglob('*')) if not p.is_dir() or p.is_symlink()]
-    if len(files) > MAX_FILES:
-        raise ValueError('Too many output artifacts')
+    try:
+        artifacts = root / 'artifacts'
+        if artifacts.is_symlink():
+            raise ValueError('Artifact directory must not be a symlink')
+        artifacts.mkdir(exist_ok=True)
+        collected = [('job.log', ''.join(log).encode()), ('result.json', encoded(result))]
+        total = sum(len(data) for _, data in collected)
+        for _, data in collected:
+            scan(data)
+        for file in sorted(artifacts.rglob('*')):
+            if file.is_dir() and not file.is_symlink():
+                continue
+            if len(collected) >= MAX_FILES:
+                raise ValueError('Too many output artifacts')
+            name = safe_name('artifacts/' + file.relative_to(artifacts).as_posix())
+            if file.is_symlink() or not file.is_file():
+                raise ValueError('Only regular output files may be uploaded')
+            if total + file.stat().st_size > MAX_BYTES:
+                raise ValueError('Output exceeds limit')
+            with file.open('rb') as stream:
+                data = stream.read(MAX_BYTES - total + 1)
+            total += len(data)
+            if total > MAX_BYTES:
+                raise ValueError('Output grew beyond limit')
+            scan(data)
+            collected.append((name, data))
+    except (ValueError, OSError) as error:
+        # Validation finishes before any artifact upload. Publish a small safe
+        # failure result, not partial/secret-bearing outputs or an endless wait.
+        status = 'failed'
+        result.update(status=status, output_error_type=type(error).__name__)
+        event('error', stage='outputs', error_type=type(error).__name__)
+        collected = [('job.log', b'Output validation failed; job log and artifacts omitted.\n'), ('result.json', encoded(result))]
     entries = []
-    total = 0
-    for name, file in files:
-        safe_name(name)
-        if file.is_symlink() or not file.is_file():
-            raise ValueError('Only regular output files may be uploaded')
-        if total + file.stat().st_size > MAX_BYTES:
-            raise ValueError('Output exceeds limit')
-        with file.open('rb') as stream:
-            data = stream.read(MAX_BYTES - total + 1)
-        total += len(data)
-        if total > MAX_BYTES:
-            raise ValueError('Output grew beyond limit')
-        scan(data)
+    for name, data in collected:
         key = out + 'out/' + name
         store.put(key, data)
         entries.append({'name': name, 'key': key, 'size': len(data), 'sha256': digest(data)})

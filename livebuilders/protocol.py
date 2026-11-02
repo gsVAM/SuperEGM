@@ -25,7 +25,7 @@ def digest(data):
 
 def safe_name(name):
     if len(encoded(name)) > MAX_NAME_JSON_BYTES:
-        raise ValueError('Artifact path exceeds 512 serialized bytes')
+        raise ValueError('Path exceeds 512 serialized bytes')
     path = PurePosixPath(name)
     devices = {'CON', 'PRN', 'AUX', 'NUL', *(f'{prefix}{n}' for prefix in ('COM', 'LPT') for n in '123456789¹²³')}
     windows_alias = any(p.endswith((' ', '.')) or p.split('.')[0].upper() in devices for p in path.parts)

@@ -82,6 +82,26 @@ class TransportTests(unittest.TestCase):
         laptop.state.mkdir(exist_ok=True)
         return laptop
 
+    def test_invalid_output_path_publishes_terminal_failure(self):
+        self.prepare("import os\nfrom pathlib import Path\np=Path(os.environ['LB_OUTPUT_DIR'])\nfor i in range(6): p=p/('x'*100)\np.mkdir(parents=True)\n(p/'answer.txt').write_text('result')\n")
+        self.execute()
+        self.assertEqual(self.laptop().status(self.run_id)['status'], 'failed')
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(self.laptop().watch(self.run_id, once=True)['status'], 'failed')
+        destination = self.root / 'invalid-output'
+        self.laptop().fetch(self.run_id, destination)
+        self.assertEqual(json.loads((destination / 'result.json').read_text())['output_error_type'], 'ValueError')
+        self.assertEqual(sorted(p.name for p in destination.iterdir()), ['job.log', 'manifest.json', 'result.json'])
+
+    def test_secret_shaped_output_is_not_published_but_failure_is(self):
+        self.prepare("import os\nfrom pathlib import Path\nPath(os.environ['LB_OUTPUT_DIR'],'answer.txt').write_text('ghp_'+'x'*25)\n")
+        self.execute()
+        final = self.laptop().status(self.run_id)
+        self.assertEqual(final['status'], 'failed')
+        self.assertEqual(len(final['files']), 2)
+        for file in (self.store.root / self.out).rglob('*'):
+            if file.is_file(): self.assertNotIn(b'ghp_', file.read_bytes())
+
     def test_manifest_path_budget_fits_production_writer_and_reader(self):
         with self.assertRaises(ValueError):
             safe_name('目录/' * 100 + 'file')
