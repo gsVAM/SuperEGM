@@ -57,6 +57,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError('Unknown action')
             owner, run_id, sha = request['owner'], request['run_id'], request['request_sha256']
             prefixes(owner, run_id)
+            if owner != os.environ.get('LB_OWNER'):
+                raise ValueError('Runtime is pinned to a different owner')
             if not re.fullmatch('[0-9a-f]{64}', sha):
                 raise ValueError('Invalid request hash')
             with LOCK:
@@ -64,7 +66,10 @@ class Handler(BaseHTTPRequestHandler):
                 if identity in WORKERS:
                     if WORKERS[identity][0] != sha:
                         raise ValueError('Run already bound to another request')
-                    return self.respond(200, {'accepted': True, 'duplicate': True, 'run_id': run_id})
+                    root = Path('/mnt/workspace/livebuilders') / owner / run_id
+                    if WORKERS[identity][1].poll() is None or (root / 'started').exists():
+                        return self.respond(200, {'accepted': True, 'duplicate': True, 'run_id': run_id})
+                    # An exited preflight worker has no command side effects; retry.
                 root = Path('/mnt/workspace/livebuilders') / owner / run_id
                 root.mkdir(parents=True, exist_ok=True, mode=0o700)
                 with (root / 'worker.log').open('ab') as log:

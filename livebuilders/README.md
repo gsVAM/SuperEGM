@@ -27,9 +27,10 @@ python3 tools/livebuilders/lb.py --config /path/to/builders.json fetch RUN_ID \
 python3 tools/livebuilders/lb.py --config /path/to/builders.json cleanup RUN_ID
 ```
 
-`run` returns after starting the remote worker. It prints the run ID before invoking
-AWS, so an ambiguous connection failure can be retried with `resume RUN_ID`.
-`resume` reuses the immutable request and session ID. A durable worker marker
+`run` returns after starting the remote worker. It prints the run ID before its first S3 upload, so an ambiguous connection failure can be retried with `resume RUN_ID`.
+`resume` reuses the immutable request and session ID. Preflight download/validation failures remain retryable; `resume` can launch a new
+worker after the failed preflight exits. A process lock prevents concurrent preflight
+workers, and a durable marker written after staging and before command launch
 prevents executing the same command twice. After a worker crash, the marker prevents
 automatic replay: inspect the run and start a new run explicitly if appropriate.
 
@@ -56,7 +57,9 @@ delete S3 evidence. The bucket's configured lifecycle controls evidence retentio
 ## Objects and completion
 
 The owner component is a hash of the authenticated IAM user ARN. It organizes data;
-**it is not an IAM isolation boundary**. The current sandbox role can access more
+**it is not an IAM isolation boundary**. The single-user runtime requires `LB_OWNER`
+to equal this hash and rejects other owner namespaces. This pin is not caller
+authentication: only the dedicated user may have invoke permission. The current sandbox role can access more
 than one run. Do not onboard coworkers until their session and object permissions
 are enforced separately.
 
@@ -77,10 +80,12 @@ The worker gets `LB_INPUT_DIR`, `LB_BRIEF_PATH`, and `LB_OUTPUT_DIR`. The workin
 directory is the extracted snapshot. Put deliverables in `LB_OUTPUT_DIR`; the
 working tree, dependencies and database are not automatically downloaded.
 
-Inputs and output files are limited to 512 MiB total and 20,000 files. The mailbox
+Inputs and output files are limited to 512 MiB total and 20,000 files. Final
+manifest JSON is limited to 32 MiB on both publication and read. The mailbox
 is limited to 128 messages/64 KiB, each message to 4 KiB. Source packaging excludes
 credential directories, `.env*`, private-key files, dependencies and build outputs;
-it rejects other symlinks and recognizable credential patterns. This scan is best
+it skips excluded symlinks without following or archiving them, and rejects other
+symlinks and recognizable credential patterns. This scan is best
 effort, not proof that arbitrary files contain no secrets. Select inputs carefully.
 Extraction rejects traversal, duplicate paths, symlinks and special files.
 
@@ -89,6 +94,8 @@ publishes the destination only after all files pass. It never applies or execute
 patch. Hashes detect corruption; they do not make agent-produced content trusted.
 If a worker or artifact upload fails before the manifest, status remains
 `incomplete`. It does not falsely report success or assume the worker is alive.
+Progress events omit command arguments. Logs truncate overlong lines at 64 KiB
+and stop recording after 16 MiB while continuing to drain stdout.
 The job deadline is at most 2,400 seconds; configure the AgentCore maximum lifetime
 above that. AWS request delays can extend cancellation/deadline handling. Instance
 lifetime still bounds the session. Jobs must not daemonize/escape their process
@@ -98,8 +105,8 @@ group; session deletion is the final cleanup boundary.
 
 `runtime.py` provides AgentCore's `/ping` and `/invocations` endpoints. It reports
 `HealthyBusy` while workers are active. Build `Dockerfile` using a pinned workspace
-image that already has Python/boto3 and the job's tools. Set `LB_BUCKET` and
-`AWS_REGION` in the runtime configuration. Bind the intended runtime version before
+image that already has Python/boto3 and the job's tools. Set `LB_BUCKET`, `AWS_REGION`, and `LB_OWNER` (the first 24 hex characters of
+SHA-256 of the dedicated IAM user ARN) in the runtime configuration. Bind the intended runtime version before
 launching work; do not update an active runtime during a job.
 
 The laptop needs S3 Get/Put under `inputs/livebuilders/*`, Get under

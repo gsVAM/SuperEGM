@@ -8,11 +8,13 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
+import runtime
 import uuid
 from pathlib import Path
 
 from lb import Laptop
-from protocol import bundle, digest, encoded, output_entries, prefixes, safe_name, unpack
+from protocol import Store, bundle, digest, encoded, output_entries, prefixes, safe_name, unpack
 from worker import run
 
 
@@ -80,6 +82,129 @@ class TransportTests(unittest.TestCase):
         laptop.state.mkdir(exist_ok=True)
         return laptop
 
+    def test_runtime_owner_pin_and_preflight_retry_admission(self):
+        self.prepare("print('ok')\n")
+        class Process:
+            code = None
+            def poll(inner):
+                return inner.code
+        process = Process()
+        class Request:
+            path = '/invocations'
+            value = {'action': 'start', 'owner': self.owner, 'run_id': self.run_id, 'request_sha256': self.sha}
+            def read_body(inner):
+                return encoded(inner.value)
+            def respond(inner, code, value):
+                inner.response = code, value
+        request = Request()
+        original_path = Path
+        def local_path(value):
+            return self.root / 'runtime' if value == '/mnt/workspace/livebuilders' else original_path(value)
+        with patch.dict(runtime.os.environ, {'LB_OWNER': self.owner, 'LB_BUCKET': 'test', 'AWS_REGION': 'test'}), patch.object(runtime, 'WORKERS', {}), patch.object(runtime, 'Path', local_path), patch.object(runtime.subprocess, 'Popen', return_value=process) as launch:
+            request.value = dict(request.value, owner='b' * 24)
+            runtime.Handler.do_POST(request)
+            self.assertEqual(request.response[0], 400)
+            launch.assert_not_called()
+            request.value['owner'] = self.owner
+            runtime.Handler.do_POST(request)
+            self.assertEqual(request.response[0], 202)
+            runtime.Handler.do_POST(request)
+            self.assertTrue(request.response[1]['duplicate'])
+            self.assertEqual(launch.call_count, 1)
+            process.code = 0
+            runtime.Handler.do_POST(request)
+            self.assertEqual(launch.call_count, 2)
+            (self.root / 'runtime' / self.owner / self.run_id / 'started').touch()
+            runtime.Handler.do_POST(request)
+            self.assertTrue(request.response[1]['duplicate'])
+            self.assertEqual(launch.call_count, 2)
+
+    def test_started_event_omits_opaque_command_argument(self):
+        self.prepare("print('done')\n")
+        self.request['command'].append('opaque-credential-example')
+        self.store.put_json(self.inp + 'request.json', self.request)
+        self.sha = digest(encoded(self.request))
+        self.execute()
+        self.assertNotIn(b'opaque-credential-example', self.store.get(self.out + 'events/00000001.json')[0])
+
+    def test_large_manifest_status_fetch_and_forced_cleanup(self):
+        self.prepare("print('done')\n")
+        self.execute()
+        final = self.store.optional(self.out + 'manifest.json')
+        for index in range(5000):
+            name = 'artifacts/' + str(index) + '-' + 'x' * 100
+            key = self.out + 'out/' + name
+            self.store.put(key, b'x')
+            final['files'].append({'name': name, 'key': key, 'size': 1, 'sha256': digest(b'x')})
+        self.store.put_json(self.out + 'manifest.json', final)
+        self.assertGreater(len(encoded(final)), 1024 * 1024)
+        # Exercise the production JSON read limit over local object bytes.
+        self.store.json = lambda key: Store.json(self.store, key)
+        laptop = self.laptop()
+        self.assertEqual(laptop.status(self.run_id)['status'], 'passed')
+        self.assertEqual(laptop.fetch(self.run_id, self.root / 'large')['verified_files'], 5002)
+        class Agent:
+            def delete_capacity_provider_session(inner, **kwargs):
+                return {'status': 'Deprovisioning'}
+        laptop.agent, laptop.config = Agent(), {'capacity_provider_id': 'test'}
+        self.assertEqual(laptop.cleanup(self.run_id)['status'], 'Deprovisioning')
+        self.store.put(self.out + 'manifest.json', b'not-json')
+        self.assertEqual(laptop.cleanup(self.run_id, force=True)['status'], 'Deprovisioning')
+
+    def test_ambiguous_upload_prints_id_before_first_write(self):
+        (self.source / 'job.py').write_text('pass')
+        brief = self.root / 'brief.txt'
+        brief.write_text('test')
+        laptop = self.laptop()
+        laptop.config = {'runtime_arn': 'runtime'}
+        output = io.StringIO()
+        def failed_put(key, data, **kwargs):
+            self.assertIn(laptop.last_run_id, output.getvalue())
+            self.assertIn('false', output.getvalue())
+            raise OSError('lost response')
+        self.store.put = failed_put
+        with contextlib.redirect_stdout(output), self.assertRaises(OSError):
+            laptop.run(self.source, brief, ['python3', 'job.py'], 10)
+
+    def test_preflight_failure_is_retryable_without_replaying_execution(self):
+        self.prepare("print('executed once')\n")
+        original = self.store.get
+        def transient(key, limit=None):
+            if key.endswith('source.tar.gz'):
+                raise OSError('temporary source failure')
+            return original(key, limit)
+        self.store.get = transient
+        self.execute()
+        self.assertFalse((self.root / 'worker/started').exists())
+        self.assertIsNone(self.store.optional(self.out + 'manifest.json'))
+        self.store.get = original
+        self.execute()
+        self.assertEqual(self.laptop().status(self.run_id)['status'], 'passed')
+        manifest = self.store.get(self.out + 'manifest.json')[0]
+        self.execute()
+        self.assertEqual(self.store.get(self.out + 'manifest.json')[0], manifest)
+
+    def test_long_lines_do_not_fail_job_or_expose_command_arguments(self):
+        self.prepare("import time\nprint('x'*100000,flush=True)\ntime.sleep(.2)\nprint('completed')\n")
+        self.request['command'].append('opaque-credential-example')
+        self.store.put_json(self.inp + 'request.json', self.request)
+        self.sha = digest(encoded(self.request))
+        self.execute()
+        self.assertEqual(self.laptop().status(self.run_id)['status'], 'passed')
+        self.assertIn(b'completed', self.store.get(self.out + 'out/job.log')[0])
+        for file in (self.store.root / self.out / 'events').iterdir():
+            self.assertNotIn(b'opaque-credential-example', file.read_bytes())
+
+    def test_excluded_symlinks_are_not_followed_or_archived(self):
+        outside = self.root / 'outside'
+        outside.mkdir()
+        (outside / 'secret').write_text('sk-ant-' + 'x' * 25)
+        (self.source / 'node_modules').symlink_to(outside, target_is_directory=True)
+        (self.source / '.env').symlink_to(outside / 'secret')
+        (self.source / 'ok').write_text('included')
+        unpack(bundle(self.source), self.root / 'excluded')
+        self.assertEqual([p.name for p in (self.root / 'excluded').iterdir()], ['ok'])
+
     def test_followup_reconnect_fetch_and_duplicate_start(self):
         self.prepare("import os,json,sys,time\nfrom pathlib import Path\nprint('ready',flush=True)\nm=json.loads(sys.stdin.readline())\nprint(m['text'],flush=True)\ntime.sleep(.2)\nPath(os.environ['LB_OUTPUT_DIR'],'answer.txt').write_text(m['text'])\n")
         thread = threading.Thread(target=self.execute)
@@ -136,7 +261,8 @@ class TransportTests(unittest.TestCase):
         self.prepare("raise RuntimeError('must not execute')\n")
         self.store.put(self.inp + 'source.tar.gz', b'tampered')
         self.execute()
-        self.assertEqual(self.store.optional(self.out + 'manifest.json')['status'], 'failed')
+        self.assertIsNone(self.store.optional(self.out + 'manifest.json'))
+        self.assertFalse((self.root / 'worker/started').exists())
         self.assertFalse((self.root / 'worker/workspace').exists())
 
     def test_fetch_rejects_tamper_and_does_not_publish_partial_directory(self):

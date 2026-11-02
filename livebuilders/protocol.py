@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath
 
 MAX_BYTES = 512 * 1024 * 1024
 MAX_FILES = 20000
+MAX_MANIFEST_BYTES = 32 * 1024 * 1024
 SECRET = re.compile(rb"(?:sk-ant-[A-Za-z0-9_-]{12,}|(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]{20,}|(?:AKIA|ASIA)[A-Z0-9]{16}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----)")
 EXCLUDED = {'.git', '.aws', '.ssh', '.claude', '.codex', 'node_modules', '__pycache__', '.venv', 'dist', 'coverage'}
 
@@ -145,14 +146,17 @@ class Store:
         return data, response['ETag']
 
     def json(self, key):
-        data, etag = self.get(key, 1024 * 1024)
+        data, etag = self.get(key, MAX_MANIFEST_BYTES if key.endswith('/manifest.json') else 1024 * 1024)
         return json.loads(data), etag
 
     def put(self, key, data, **conditions):
         return self.client.put_object(Bucket=self.bucket, Key=key, Body=data, ServerSideEncryption='AES256', **conditions)
 
     def put_json(self, key, value, **conditions):
-        return self.put(key, encoded(value), **conditions)
+        data = encoded(value)
+        if key.endswith('/manifest.json') and len(data) > MAX_MANIFEST_BYTES:
+            raise ValueError('Manifest exceeds 32 MiB')
+        return self.put(key, data, **conditions)
 
     def optional(self, key):
         try:

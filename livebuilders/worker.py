@@ -1,5 +1,7 @@
 """One detached job. S3 is the mailbox and durable output, never a shared checkout."""
 import argparse
+import fcntl
+import shutil
 import json
 import os
 import selectors
@@ -24,13 +26,22 @@ def run(store, owner, run_id, request_hash, root):
     inp, out = prefixes(owner, run_id)
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    # The volume survives a compute restart. An old marker deliberately prevents
-    # replaying arbitrary side effects, even if the first worker died mid-command.
-    try:
-        marker = os.open(root / 'started', os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    except FileExistsError:
-        return
-    os.close(marker)
+    # A process lock admits one preflight at a time and is released on a crash.
+    with (root / 'worker.lock').open('a') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return
+        if (root / 'started').exists():
+            return  # Never replay a command that may have had side effects.
+        for name in ('workspace', 'artifacts'):
+            shutil.rmtree(root / name, ignore_errors=True)
+        return execute(store, owner, run_id, request_hash, root)
+
+
+def execute(store, owner, run_id, request_hash, root):
+    inp, out = prefixes(owner, run_id)
+    admitted = False
     sequence = 0
     process = None
     selector = None
@@ -65,7 +76,11 @@ def run(store, owner, run_id, request_hash, root):
         (root / 'brief.md').write_text(request.get('brief', ''))
         artifacts = root / 'artifacts'
         artifacts.mkdir(mode=0o700)
-        event('started', command=command)
+        # Preflight is complete. Persist admission before any command side effects.
+        marker = os.open(root / 'started', os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.close(marker)
+        admitted = True
+        event('started')
         env = dict(os.environ, LB_INPUT_DIR=str(work), LB_OUTPUT_DIR=str(artifacts), LB_BRIEF_PATH=str(root / 'brief.md'), PYTHONUNBUFFERED='1')
         process = subprocess.Popen(command, cwd=work, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
         os.set_blocking(process.stdout.fileno(), False)
@@ -73,6 +88,7 @@ def run(store, owner, run_id, request_hash, root):
         selector = selectors.DefaultSelector()
         selector.register(process.stdout, selectors.EVENT_READ)
         pending = b''
+        truncated = False
         stdin_pending = b''
         next_poll = 0.0
         while process.poll() is None or selector.get_map():
@@ -106,29 +122,39 @@ def run(store, owner, run_id, request_hash, root):
                 if not chunk:
                     selector.unregister(key.fileobj)
                     continue
-                pending += chunk
                 lines = []
-                while b'\n' in pending:
-                    line, pending = pending.split(b'\n', 1)
-                    if log_bytes < 16 * 1024 * 1024:
-                        text = redacted(line.decode(errors='replace'))[:65536]
-                        log_bytes += len(text.encode())
-                        log.append(text + '\n')
-                        lines.append(text)
+                parts = chunk.split(b'\n')
+                for index, part in enumerate(parts):
+                    available = 65536 - len(pending)
+                    pending += part[:available]
+                    truncated = truncated or len(part) > available
+                    if index < len(parts) - 1:
+                        text = redacted(pending.decode(errors='replace')) + (' [line truncated]' if truncated else '')
+                        remaining = 16 * 1024 * 1024 - log_bytes
+                        if remaining > 0:
+                            data = (text + '\n').encode()[:remaining]
+                            log_bytes += len(data)
+                            text = data.decode(errors='ignore')
+                            log.append(text)
+                            lines.append(text.rstrip('\n'))
+                        pending, truncated = b'', False
                 if lines:
                     event('output', text='\n'.join(lines))
-                if len(pending) > 65536:
-                    raise ValueError('Job emitted an oversized output line')
             if process.poll() is not None and not selector.get_map():
                 break
-        if pending:
-            text = redacted(pending.decode(errors='replace'))
+        if pending and log_bytes < 16 * 1024 * 1024:
+            text = redacted(pending.decode(errors='replace')) + (' [line truncated]' if truncated else '')
+            text = text.encode()[:16 * 1024 * 1024 - log_bytes].decode(errors='ignore')
             log.append(text)
             event('output', text=text)
         exit_code = process.wait()
         if status not in ('cancelled', 'timed_out'):
             status = 'passed' if exit_code == 0 else 'failed'
     except Exception as error:
+        if not admitted:
+            # No command ran. A later resume may safely repeat preflight.
+            (root / 'preflight-error.txt').write_text(type(error).__name__)
+            return
         # Do not publish SDK exception bodies, presigned URLs, or command secrets.
         event('error', error_type=type(error).__name__)
         status = 'failed'

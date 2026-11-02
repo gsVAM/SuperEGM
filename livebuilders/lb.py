@@ -76,6 +76,7 @@ class Laptop:
                    'command': command, 'timeout_seconds': timeout,
                    'source': {'size': len(archive), 'sha256': digest(archive)},
                    'brief': text.decode(), 'runtime_arn': self.config['runtime_arn']}
+        print(json.dumps({'run_id': run_id, 'inputs_uploaded': False}), flush=True)
         self.store.put(inp + 'source.tar.gz', archive, IfNoneMatch='*')
         self.store.put_json(inp + 'control.json', {'schema': 1, 'stop': False, 'messages': []}, IfNoneMatch='*')
         self.store.put_json(inp + 'request.json', request, IfNoneMatch='*')
@@ -208,8 +209,8 @@ class Laptop:
         return {'run_id': run_id, 'status': manifest['status'], 'verified_files': len(manifest['files']), 'directory': str(destination)}
 
     def cleanup(self, run_id, force=False):
-        result = self.status(run_id)
-        if result['status'] == 'incomplete' and not force:
+        self.request(run_id)  # Still verify ownership when forcing cleanup.
+        if not force and self.status(run_id)['status'] == 'incomplete':
             raise ValueError('No final manifest; stop and collect first, or explicitly use --force')
         response = self.agent.delete_capacity_provider_session(capacityProviderId=self.config['capacity_provider_id'], sessionId=run_id)
         return {'run_id': run_id, 'status': response['status']}
