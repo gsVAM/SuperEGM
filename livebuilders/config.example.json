@@ -1,0 +1,8 @@
+{
+  "profile": "YOUR_RESTRICTED_BUILDERS_PROFILE",
+  "region": "us-east-1",
+  "account_id": "YOUR_BUILDERS_ACCOUNT_ID",
+  "bucket": "YOUR_BUILDERS_BUCKET",
+  "runtime_arn": "arn:aws:bedrock-agentcore:us-east-1:YOUR_BUILDERS_ACCOUNT_ID:runtime/YOUR_RUNTIME_ID",
+  "capacity_provider_id": "YOUR_CAPACITY_PROVIDER_ID"
+}
