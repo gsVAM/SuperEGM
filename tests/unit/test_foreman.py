@@ -364,3 +364,17 @@ def test_collect_not_run_accepts_any_non_terminal_round(world, phase, outcome, o
     assert saved == {**entry, "phase": "collected", "outcome": "not run (fetch failed)"}
   else:
     assert code == 1 and f"U01 round 1 is terminal (`{phase}`)" in out and saved == entry
+
+
+@pytest.mark.parametrize("commits, failures", [
+    ([("test(S1): hook", "tests/unit/test_hooks.py"), ("feat(S1): hook", "src/hooks.py")], []),
+    ([("feat(S1): hook", "src/hooks.py"), ("test(S1): hook", "tests/unit/test_hooks.py")], ["S1: feat(S1) precedes test(S1)"]),
+    ([("test(S1): hook", "src/hooks.py"), ("feat(S1): hook", "src/hooks.py")],
+     ["S1: no test(S1) commit touches tests/unit/test_hooks.py", "test(S1) touches src/hooks.py outside tests/"]),
+    ([("test(S1): hook", "tests/unit/test_hooks.py")], ["S1: no feat(S1) commit touches src/hooks.py"]),
+])
+def test_tdd_order(world, tmp_path, monkeypatch, commits, failures):
+  w = prepared(world, tmp_path, monkeypatch, commits=commits)
+  code, out = world.run("tdd-order", "--unit", UNIT, "--dispatch", w.did)
+  assert (code, out.strip().splitlines()) == ((1, failures) if failures else (0, ["tdd-order: ok"]))
+  assert tdd_order.check(BODY, [(s, [p]) for s, p in commits]) == failures
