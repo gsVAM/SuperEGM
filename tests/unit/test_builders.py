@@ -373,3 +373,25 @@ def test_allowed_tools_composition(configured, expect):
       allowed_tools(configured, "superegm/h/U07", body)
   else:
     assert allowed_tools(configured, "superegm/h/U07", body) == expect
+
+
+def test_interrupt_records_a_launch_or_marks_a_prepared_round(world):
+  s, card, hid, _ = seed(world)
+  launched(s, UNIT, "running")
+  foreman(s, UNIT, [{"round": 1, "runcard": card, "launch": 1, "head": "a" * 40, "phase": "prepared", "dispatch_id": "d1", "outcome": None, "posted_at": None}])
+  code, out = world.run("runcard", "open", "--skill", "interrupt", "--artifact", UNIT)
+  assert code == 0, out
+  icard = out.split()[-1]
+  code, out = world.run("interrupt", "--unit", UNIT, "--launch", 1, "--runcard", icard)
+  assert code == 0 and out.strip() == "U07 launch 1 interrupted" and launches_of(s)[0]["status"] == "interrupted"
+  code, out = world.run("interrupt", "--unit", UNIT, "--launch", 1, "--runcard", icard)
+  assert code == 1 and "interrupt: U07 launch 1 is already terminal (interrupted)" in out
+  code, out = world.run("interrupt", "--unit", UNIT, "--round", 1, "--runcard", icard)
+  rounds = json.loads(s.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"]
+  assert code == 0 and (rounds[0]["phase"], rounds[0]["outcome"]) == ("collected", "not run (interrupted: owner)")
+  code, out = world.run("interrupt", "--unit", UNIT, "--round", 1, "--runcard", icard)
+  assert code == 1 and "interrupt: U07 round 1 is not a prepared round (collected)" in out
+  code, out = world.run("interrupt", "--unit", UNIT, "--round", 2, "--runcard", icard)
+  assert code == 1 and "interrupt: U07 has no round 2" in out
+  journal = s.path("journal").read_text(encoding="utf-8")
+  assert "U07 launch 1 interrupted" in journal and "U07 round 1 interrupted: owner" in journal
