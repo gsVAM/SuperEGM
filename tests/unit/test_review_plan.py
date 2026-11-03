@@ -173,3 +173,45 @@ def test_fix_design_voids_the_approval(planned):
     code, out = w.run("approve-spec", "--void", "--review", rid, "--spec", str(w.spec), "--runcard", w.review_card)
     assert code == 0, out
     assert json.loads(approval.read_text(encoding="utf-8"))["voided_by"] == rid
+
+
+HELPER_CALL = re.compile(r"<HELPER>' ([a-z][a-z0-9-]*)(?: ([a-z][a-z0-9-]*))?"
+                         r"((?: --[a-z0-9-]+(?: '[^']*'| <[^>]*>| [\w./,-]+)?)*)")
+
+
+def flags_of(sub, verb):
+    parser = argparse.ArgumentParser()
+    subs = parser.add_subparsers(dest="sub")
+    for module in (approve_spec, graph, init, review, review_plan, runcard, scan):
+        module.register(subs)
+    target = subs.choices[sub]
+    if verb:
+        target = next(a for a in target._actions
+                      if isinstance(a, argparse._SubParsersAction)).choices[verb]
+    return {flag for a in target._actions for flag in a.option_strings}
+
+
+def test_skill_body_form_and_helper_calls():
+    text = SKILL.read_text(encoding="utf-8")
+    assert text.startswith("---\nname: review-plan\n")
+    body = text.split("---", 2)[2]
+    assert len(body.encode("utf-8")) <= 24_000
+    assert "In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first." in body
+    assert "`${CLAUDE_PLUGIN_ROOT}/skills/plan/scripts/superegm.py`" in body
+    calls = HELPER_CALL.findall(body)
+    assert {(s, v) for s, v, _ in calls} >= {
+        ("init", ""), ("runcard", "open"), ("runcard", "close"), ("review-plan", "due"),
+        ("review-plan", "set-input"), ("review-plan", "proportion-input"), ("review", "open"),
+        ("review", "record"), ("review", "settle"), ("review", "status"), ("review", "rule"),
+        ("approve-spec", ""), ("graph", ""), ("scan", "")}
+    for sub, verb, rest in calls:
+        missing = set(re.findall(r"--[a-z0-9-]+", rest)) - flags_of(sub, verb or None)
+        assert not missing, (sub, verb, missing)
+    for needle in ("--reviewer set", "once per round", "superegm:readiness", "concurrently",
+                   "skills/review-spec/references/review_loop.md",
+                   "resources/document_standards/handoff-standard.md", "plan-<unit>-c<n>",
+                   "ends the invocation for that unit", "--void", "/superegm:review-spec",
+                   "/superegm:file", "pauses the owner", "readiness,proportion,set", "superegm:zoom-out",
+                   "references/proportion.md", "proportion-input", "plan/scan/<unit>.json", "question 11"):
+        assert needle in body, needle
+    assert "merge" not in body.lower() and "gh issue create" not in body
