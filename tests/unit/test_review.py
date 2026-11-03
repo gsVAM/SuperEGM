@@ -2,8 +2,7 @@
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
 # Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03); the review loop and approve-spec (U04).
 
-"""U04: the review loop (`review open|record|settle|status|rule`) and `approve-spec`; EGM's approve tests moved here by U03
-stay until S12 replaces them."""
+"""U04: the review loop (`review open|record|settle|status|rule`) and `approve-spec` (spec section 8)."""
 
 import hashlib, json, re, subprocess
 from pathlib import Path
@@ -12,40 +11,6 @@ from superegm import store, atomic_write
 from superegm.review import parse_findings
 from superegm.review import derive_what_ran
 from superegm.review import PANEL_OF
-
-from conftest import DESIGN, git as conftest_git   # S2's `git(world, *args)` fixture shadows conftest's; the EGM tests go at S12
-
-
-def test_approve_checks_and_records(world):
-  design = world.repo / "docs/designs/sample.md"
-  code, out = world.run("approve-spec", "--design", design)
-  assert code == 0 and "Approve `" in out and "Options: Approve | Stop" in out
-  code, out = world.run("approve-spec", "--design", design, "--yes")
-  assert code == 0
-  record = json.loads((world.artifacts / "approvals/sample.json").read_text(encoding="utf-8"))
-  assert record["path"] == str(design) and record["handoff_id"].startswith("sample-")
-  design.write_text(DESIGN + "\nchanged\n", encoding="utf-8")
-  code, out = world.run("approve-spec", "--design", design)
-  assert code == 1 and "tracked but not clean" in out
-
-  code, out = world.run("graph", "--plan", world.plan)
-  assert code == 1 and "spec changed since the approval: run approve-spec again" in out
-  conftest_git(["checkout", "--", "docs/designs/sample.md"], world.repo)
-  (world.repo / "docs/designs/plain.md").write_text("# Plain\n\nNo plan.\n", encoding="utf-8")
-  conftest_git(["add", "-A"], world.repo)
-  conftest_git(["commit", "-qm", "plain"], world.repo)
-  plain = world.repo / "docs/designs/plain.md"
-  code, out = world.run("approve-spec", "--design", plain, "--runcard", world.open_card("review-spec", plain), card=None)
-  assert code == 1 and "Detailed Implementation Plan" in out and "egm-draft" in out
-
-
-def test_approve_refuses_an_untracked_or_ignored_design(world):
-  """A clean `git status -- <path>` says nothing about an ignored file."""
-  design = world.repo / "docs/designs/ignored.md"
-  design.write_text(DESIGN, encoding="utf-8")
-  (world.repo / ".gitignore").write_text("docs/designs/ignored.md\n", encoding="utf-8")
-  code, out = world.run("approve-spec", "--design", design, "--runcard", world.open_card("review-spec", design), card=None)
-  assert code == 1 and "not tracked by git" in out
 
 
 # ---------------------------------------------------------------- S1: the findings line
@@ -419,3 +384,25 @@ def test_settle_writes_head_outcome(world):
   head_round(world, 2, "posted", wcid, "revise")
   assert record(world, hid, 2, "change-review", [], child, sha=A)[0] == 0
   assert rjson(world, hid, "round-2.json")["runcard"] == wcid              # the round carries the top-level card
+
+
+# ---------------------------------------------------------------- S12: `approve-spec`
+
+def test_approve_spec_asks_then_commits_by_path(world):
+  spec, cid, rid = converged_spec(world)
+  sha = hashlib.sha256(spec.read_bytes()).hexdigest()
+  (world.repo / "notes.txt").write_text("untracked\n", encoding="utf-8")
+  code, out = approve(world, spec, cid)
+  assert code == 0 and f"Approve `{spec}` (sha256 `{sha[:12]}`) at review {rid}?" in out and "--yes" in out
+  assert not store(world.repo).path("approvals", SLUG).exists()
+  code, out = approve(world, spec, cid, "--yes")
+  assert code == 0 and "approval recorded" in out, out
+  rec = approval(world)
+  assert (rec["path"], rec["sha256"], rec["review"], rec["runcard"]) == (str(spec), sha, rid, cid)
+  assert rec["commit"] == git(world, "rev-parse", "HEAD") and rec["handoff_id"] == f"2026-11-03-sample-de-{sha[:6]}"
+  assert rec["amended"] == [] and rec["voided_by"] is None and rec["approved_at"]
+  assert git(world, "log", "-1", "--format=%s") == f"superegm: approve {SLUG} at review {rid}"
+  names = git(world, "show", "--name-only", "--format=", "HEAD").splitlines()
+  assert f"docs/specs/{SLUG}.md" in names and "notes.txt" not in names and "?? notes.txt" in git(world, "status", "--porcelain")
+  code, out = approve(world, spec, cid, "--leavemealone")
+  assert code == 0 and "approval recorded" in out and "Approve `" not in out
