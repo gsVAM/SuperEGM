@@ -61,6 +61,70 @@ def test_wait_prints_deadline_only_and_saves_once(world, monkeypatch):
   assert "units" in json.loads(st.path("state").read_text(encoding="utf-8"))["status"]
 
 
+def put(path, text):
+  path.parent.mkdir(parents=True, exist_ok=True); path.write_text(text, encoding="utf-8")
+
+
+def pr(gh, ci=None, merged=None, number=70, sha=SHA, issue=2):
+  """make_pr(gh, number, sha, merged=merged, closes=[(REPO, issue)]) plus its gh.graphql[issue] node; `ci`
+  adds one completed `tests` check run in gh.check_runs[sha] (green → success, red → failure) and a success
+  gh.combined[sha]."""
+  node = make_pr(gh, number, sha, merged=merged, closes=[(REPO, issue)])
+  gh.graphql[issue] = [{**node, "repository": {"nameWithOwner": REPO}}]
+  if ci:
+    gh.check_runs[sha] = [{"name": "tests", "status": "completed", "conclusion": "success" if ci == "green" else "failure"}]
+    gh.combined[sha] = {"state": "success", "statuses": []}
+  return node
+
+
+def launch(st, result_file, status="running", started_at=T0):
+  """put() one round-1 launches[] entry with `status`, `started_at` and `result_file` (U09's keys) at
+  st.path("launches", "U01")."""
+  put(st.path("launches", "U01"), json.dumps({"launches": [
+      {"round": 1, "status": status, "started_at": started_at, "result_file": str(result_file)}]}))
+
+
+def comment(gh, body, login="builder-bot", cid=500, at="2026-11-03T10:05:00Z", number=2):
+  """Appends {id: cid, body, user: {login}, created_at: at} to gh.comments[number], which the fake's
+  comments endpoint serves."""
+  gh.comments.setdefault(number, []).append({"id": cid, "body": body, "user": {"login": login}, "created_at": at})
+
+
+def closed(gh, number, login, reason="not_planned"):
+  """Closes gh.issues[number] (made if absent: id 1000 + number, labels []) with state_reason=reason and
+  closed_by.login."""
+  issue = gh.issues.setdefault(number, {"number": number, "id": 1000 + number, "labels": []})
+  issue.update({"state": "closed", "state_reason": reason, "closed_by": {"login": login}})
+
+
+HEAD = f"U01 head pr=70 sha={SHA} ci="
+KINDS = [
+  ("head pending", lambda gh, st, tmp: pr(gh), [HEAD + "pending"]),
+  ("head green", lambda gh, st, tmp: pr(gh, "green"), [HEAD + "green"]),
+  ("head red", lambda gh, st, tmp: pr(gh, "red"), [HEAD + "red:tests"]),
+  ("exit", lambda gh, st, tmp: (launch(st, tmp / "r1.json"), (tmp / "r1.json.exit").write_text("0\n")),
+   ["U01 exit code=0 pr=none status=none"]),
+  ("status", lambda gh, st, tmp: comment(gh, "**Builder status:** DONE"),
+   ["U01 status word=DONE comment=500 by=builder-bot"]),
+  ("landed", lambda gh, st, tmp: (pr(gh, merged="2026-11-02T10:00:00Z"), closed(gh, 2, "gsvam", "completed")),
+   ["U01 landed pr=70"]),
+  ("closed pr by the builder", lambda gh, st, tmp: (pr(gh, "green"), gh.prs[70].update(state="CLOSED"),
+                                                     closed(gh, 70, "builder-bot")),
+   [HEAD + "green", "U01 closed pr=70 by=builder-bot"]),
+  ("closed issue by the owner", lambda gh, st, tmp: (pr(gh, "green"), closed(gh, 2, "gsvam")),
+   [HEAD + "green", "U01 closed issue=2 by=gsvam"]),
+]
+
+
+@pytest.mark.parametrize("kind,arrange,lines", KINDS, ids=[k[0] for k in KINDS])
+def test_six_event_kinds(world, monkeypatch, tmp_path, kind, arrange, lines):
+  gh, st, card = seed(world, monkeypatch)
+  arrange(gh, st, tmp_path)
+  code, out = world.run(*WAIT, card)
+  assert code == 0 and out.splitlines() == lines, out
+  assert not world.sleeps
+
+
 def test_status_landed_ready_decisions_and_shared_edges(world):
   gh = applied(world)
   code, out = world.run("status", "--plan", world.plan)
