@@ -419,3 +419,20 @@ def test_review_post_guards(world, tmp_path, monkeypatch, case):
   assert out.strip().splitlines()[0].startswith(expected[1]), out
   if case == "header-present":
     assert entry["posted_at"] == "2026-11-03T09:00:00Z"
+
+
+@pytest.mark.parametrize("merge_pr", [False, True])
+def test_review_post_target_moved(world, tmp_path, monkeypatch, merge_pr):
+  w = prepared(world, tmp_path, monkeypatch)
+  assert world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)[0] == 0
+  if merge_pr:   # the base now contains the head: the merge base moved onto it
+    w.g("merge", "-q", "--ff-only", w.head)
+  else:          # an unrelated commit on the base branch leaves the merge base unchanged
+    (w.target / "NOTES.md").write_text("later\n", encoding="utf-8"); w.g("add", "-A"); w.g("commit", "-qm", "unrelated")
+  code, out = world.run("review", "post", "--unit", UNIT, "--round", 1, "--dispatch", w.did, "--runcard", w.child)
+  entry = json.loads(w.st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][0]
+  if merge_pr:
+    assert (code, out.strip(), len(w.posted)) == (3, "target-moved", 0)
+    assert entry["phase"] == "collected" and entry["outcome"] == "not run (target-moved)"
+  else:
+    assert (code, len(w.posted)) == (0, 1) and entry["phase"] == "posted"
