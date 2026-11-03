@@ -253,3 +253,13 @@ CASES = [
 @pytest.mark.parametrize("path,needle,present", CASES, ids=[f"{p.name}:{n[:40]}" for p, n, _ in CASES])
 def test_files_name_the_new_forms_and_not_the_retired_ones(path, needle, present):
     assert (needle in path.read_text(encoding="utf-8")) is present, needle
+
+
+def test_proportion_input(planned):
+    w = planned
+    write(w.store.path("unit", "U02").parent / "plan/scan/U02.json", json.dumps(
+        {"bytes": 900, "fenced_share": 0.1, "steps": 1, "spec_range_bytes": 300, "ratio": 3.0, "warnings": []}))
+    code, out = w.run("review-plan", "proportion-input", "--unit", "U02", "--spec", str(w.spec))
+    assert code == 0, out
+    assert out.index(body("U02", "U01")) < out.index('"spec_range_bytes": 300') < out.index("| U02 | the worker | U01 | S |")
+    assert "## 1. Intent" not in out and "| U03 | the admin | U02 | S |" not in out
