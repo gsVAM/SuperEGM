@@ -1524,3 +1524,31 @@ def test_config_and_label_renames(world, where, expected):
   else:
     assert world.run("graph", "--plan", world.plan)[0] == 0
     assert (world.artifacts / expected).is_file() and not (world.artifacts / "handoff_state.json").exists()
+
+
+def test_init_writes_the_config_with_every_key_and_refuses_another_base(tmp_path, capsys, monkeypatch):
+  repo = make_repo(tmp_path / "fresh")
+  monkeypatch.chdir(repo)
+  harness = Harness(capsys)
+  code, out = harness.run("init", "--artifacts-dir", str(tmp_path / "store"))
+  assert code == 0 and "branch protection" in out and "builder account" in out and "SUPEREGM_BUILDER_TOKEN" in out
+  config = json.loads((repo / ".superegm/config.json").read_text(encoding="utf-8"))
+  assert set(config) == {"repo", "base", "artifacts_dir", "mode", "max_in_flight", "labels", "issue_template",
+                         "tracking_issue_title", "banned_terms", "fix_request_mention", "allowed_mentions",
+                         "reviewers", "astra", "judges", "builder", "ci_wait_minutes"}
+  assert config["repo"] == REPO and config["base"] == "main" and config["artifacts_dir"] == str(tmp_path / "store")
+  assert config["mode"] == "normal" and config["max_in_flight"] == 5 and config["ci_wait_minutes"] == 30
+  assert config["labels"]["stopped"] == "superegm:stopped" and config["reviewers"] == {"spec": [], "plan": [], "head": [], "integrate": []}
+  assert config["judges"]["min_vendors"] == 1 and [m["name"] for m in config["judges"]["members"]] == ["fable", "opus", "astra"]
+  assert config["builder"]["permission_mode"] == "acceptEdits" and config["builder"]["gh_token_env"] == "SUPEREGM_BUILDER_TOKEN"
+  assert "gh pr create" in config["builder"]["allowed_tools"] and "git push" not in config["builder"]["allowed_tools"]
+  assert git(["status", "--porcelain"], repo).strip().startswith("??"), "init writes; approve-spec commits (§7)"
+  import superegm
+  assert superegm.load_config(repo)["ci_wait_minutes"] == 30
+  code, out = harness.run("init", "--artifacts-dir", str(tmp_path / "store"))
+  assert code == 1 and ".superegm/config.json exists" in out
+  (repo / ".superegm/config.json").unlink()
+  code, out = harness.run("init", "--artifacts-dir", str(tmp_path / "store"), "--base", "develop")
+  assert code == 1 and "default branch" in out
+  code, out = harness.run("init", "--artifacts-dir", str(repo / "inside"))
+  assert code == 1 and "outside the working tree" in out
