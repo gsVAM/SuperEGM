@@ -2,7 +2,13 @@
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
 # Modified by SuperEGM (gsVAM), 2026: renamed from EGM's handoff helper; reduced to main(), the subcommands live in the superegm package.
 
-"""SuperEGM helper entry point: `python3 '<absolute path>' <subcommand> ...`; see the superegm package."""
+"""SuperEGM helper entry point: `python3 '<absolute path>' <subcommand> ...`.
+
+The subcommands live in the `superegm` package beside this file (one module
+each, found through `superegm.SUBCOMMANDS`); the `plan`, `file`, `wave`,
+`integrate` and `judges` skills run them under an open run card. The store
+is the config's `artifacts_dir`; tests inject `GH`, `SLEEP` and `NOW` on the package.
+"""
 
 import sys
 
