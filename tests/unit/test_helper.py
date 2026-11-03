@@ -167,7 +167,8 @@ def test_helper_runs_under_its_new_name(world):
 
 MODULES = ("init", "runcard", "approve_spec", "graph", "scan", "review", "gate", "dry_run", "apply",
            "verify", "status", "launch", "launch_builder", "record_launch", "foreman", "prepare",
-           "collect", "tdd_order", "decide", "decision", "interrupt", "clean", "report", "close", "judges")
+           "collect", "tdd_order", "decide", "decision", "interrupt", "clean", "report", "close", "judges",
+           "review_plan")
 
 
 @pytest.mark.parametrize("name", MODULES)
