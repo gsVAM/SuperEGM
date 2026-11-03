@@ -343,3 +343,25 @@ def test_graph_hashes_unfiled_bodies(world):
   before = find(world, "handoff_units.json").read_bytes()
   assert graph(world, plan, card)[0] == 0 and find(world, "handoff_units.json").read_bytes() == before
   assert "unit_U02.md" in find(world, "unit_U02.md").name and find(world, "handoff_bodies.md").is_file()
+
+
+def file_unit(world, uid, number):
+  s = state(world)
+  s["units"][uid]["number"] = number
+  atomic_write(store_root(world) / "state.json", s)
+
+
+def test_graph_refuses_an_edited_filed_section(world):
+  spec, sha, plan, card = planned(world)
+  assert graph(world, plan, card)[0] == 0
+  file_unit(world, "U01", 7)
+  filed_body, filed_hash = body_of(world, "U01"), state(world)["units"]["U01"]["body_sha256"]
+  edited = plan.read_text(encoding="utf-8").replace("| Objective | Queue exists. |", "| Objective | A queue exists. |")
+  edited = edited.replace("| Objective | Worker exists. |", "| Objective | A worker exists. |")
+  plan.write_text(edited, encoding="utf-8")
+  code, out = graph(world, plan, card)
+  assert code == 1 and "graph: U01 is filed (#7) and its section differs from the stored handoff_plan.md" in out
+  plan.write_text(edited.replace("| Objective | A queue exists. |", "| Objective | Queue exists. |"), encoding="utf-8")
+  assert graph(world, plan, card)[0] == 0
+  assert body_of(world, "U01") == filed_body and state(world)["units"]["U01"]["body_sha256"] == filed_hash
+  assert "A worker exists." in body_of(world, "U02")
