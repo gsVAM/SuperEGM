@@ -486,3 +486,17 @@ def test_plan_skill_body_names_the_phase_2_commands():
   assert "## Scope, order and risk" in template and "#<tracking>" in template
   scenarios = (ROOT / "skills/plan/test_scenarios.yaml").read_text(encoding="utf-8")
   assert 'skill: "plan"' in scenarios and "review-plan" in scenarios
+
+
+PROSE = ("skills/plan/SKILL.md", "skills/plan/references/handoff_plan.md", "skills/plan/references/issue_template.md")
+CODE = ("skills/plan/scripts/superegm/graph.py", "skills/plan/scripts/superegm/scan.py", "skills/plan/scripts/superegm/decide.py")
+REMOVED_PROSE = ("defer", "--published", "- [ ]", "egm:generated", "<!-- egm:handoff=", "gate --", "readiness test", "65,000",
+                 "Stage 10", "egm-resolve", "docs/superpowers/plans", "handoff_state.json", "pending_approval", "fingerprint")
+REMOVED_CODE = ("defer", "published", "<!-- egm:handoff=", "65_000", "handoff_state.json", "pending_approval", "fingerprint",
+                "egm:generated", "require_binding")
+FORMS = [(p, f) for p in PROSE for f in REMOVED_PROSE] + [(p, f) for p in CODE for f in REMOVED_CODE]
+
+
+@pytest.mark.parametrize("path,form", FORMS, ids=[f"{p.rsplit('/', 1)[1]}-{f}" for p, f in FORMS])
+def test_no_removed_form_in_u05_files(path, form):
+  assert form not in (ROOT / path).read_text(encoding="utf-8"), f"{path} still names {form!r}"
