@@ -39,6 +39,14 @@ def units_is_last_h2(text: str) -> bool:
   return bool(h2s) and bool(UNITS_H2.match(h2s[-1]))
 
 
+def handoff_id_for(st: core.Store, sha: str, stem: str) -> str:
+  """`state.json`'s id while the handoff is open (a `handoff_id` and no `closed_at`), else a fresh one."""
+  state = core.load_state(st.root)
+  if state.get("handoff_id") and not state.get("closed_at"):
+    return state["handoff_id"]
+  return f"{handoff_slug(stem)}-{sha[:6]}"
+
+
 def commit_by_path(repo_root: Path, paths: list[str], message: str) -> str:
   """Add and commit `paths` alone, ignoring other changes in the tree; the commit may be empty."""
   core.run_git(["add", "--", *paths], repo_root)
@@ -72,7 +80,7 @@ def run(args):
     print(f"Approve `{spec}` (sha256 `{sha[:12]}`) at review {rid}?")
     print("Options: Approve | Stop. Run again with --yes after the owner chose Approve.")
     return 0
-  handoff_id = f"{handoff_slug(spec.stem)}-{sha[:6]}"
+  handoff_id = handoff_id_for(st, sha, spec.stem)
   commit = commit_by_path(root, [spec.relative_to(root).as_posix(), CONFIG], f"superegm: approve {slug} at review {rid}")
   record = {"path": str(spec), "sha256": sha, "commit": commit, "runcard": args.runcard, "review": rid,
             "approved_at": core.now_iso(), "amended": [], "voided_by": None, "handoff_id": handoff_id}
