@@ -76,6 +76,9 @@ class Unit(core.Unit):
     self.steps = ""          # the Steps text, verbatim
     self.decide = []         # the raw `Decide before build` lines
 
+  def to_json(self, wave, preds):
+    return {**super().to_json(wave, preds), "interfaces": self.interfaces, "review_focus": self.review_focus}
+
 
 class Plan(core.Plan):
   """EGM's plan with the section 9.1 blocks after each unit's table and the
@@ -250,8 +253,9 @@ class Handoff(core.Handoff):
 
   def write_graph_files(self) -> None:
     g = self.graph
+    hashes = {uid: core.sha256_text(self.render_unit(uid)) for uid in g.order}
     core.atomic_write(self.store.path("plan"), self.plan.text)
-    units = {u: self.plan.units[u].to_json(g.wave[u], g.preds[u]) for u in g.order}
+    units = {u: {**self.plan.units[u].to_json(g.wave[u], g.preds[u]), "body_sha256": hashes[u]} for u in g.order}
     data = {"handoff_id": self.handoff_id, "repo": self.config["repo"],
             "design": {"path": str(self.design_path), "sha256": self.design_sha,
                        "commit": self.design_commit, "title": self.design_title},
@@ -268,7 +272,11 @@ class Handoff(core.Handoff):
                        "plan": str(self.plan_path),
                        "design": {"path": str(self.design_path), "sha256": self.design_sha,
                                   "commit": self.design_commit}})
+    records = self.state.setdefault("units", {})
+    for uid in g.order:
+      records.setdefault(uid, {})["body_sha256"] = hashes[uid]
     core.save_state(self.artifact_dir, self.state)
+    core.journal(self.store, f"graph {self.handoff_id}: {len(g.order)} units, {len(g.waves)} waves")
 
 
 def load(store: core.Store, plan) -> Handoff:
