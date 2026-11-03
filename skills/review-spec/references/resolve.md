@@ -1,223 +1,95 @@
----
-name: egm-resolve
-license: Apache-2.0
-disable-model-invocation: true
-description: >-
-  The Elephant resolution skill. Ingests flat deficiency reports from
-  concurrent Goldfish reviewers, applies automated fixes for PROPOSE FIX
-  items via UI multiple-choice gates, and presents interactive
-  negotiation/re-sync checkpoints.
----
-
-<!-- Modified by SuperEGM (gsVAM), 2026: moved from skills/egm-resolve/SKILL.md; Codex line removed. -->
-
+<!-- Copyright 2026 Google LLC. SPDX-License-Identifier: Apache-2.0. -->
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: run card on the report, persisted dispositions per stage and round. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: EGM's resolve skill rewritten as the settle step of the one review loop: the four categories are the five dispositions, written with `superegm review settle`; the report files are gone, the store is the record (spec section 8). -->
 
-# Goldfish Review: Resolve
+# Resolve: settle a round's findings
 
-In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.
+Run between rounds, in the conversation that produced the artifact (the elephant), on every
+finding of the round just recorded. The round file,
+`<artifacts_dir>/reviews/<id>/round-<n>.json`, holds every reviewer's findings with their ids;
+nothing is written anywhere else: no report file, no dispositions file. The store is the
+record, and `superegm review status` reads it.
 
-## Overview
+## 1. Read
 
-This skill instructs the agent on how to operate within the primary Elephant
-context window to parse flat deficiency reports from concurrent Goldfish
-reviewers. It defends accurate design choices, applies automated textual
-repairs, and manages interactive negotiation checkpoints.
+Read the artifact and the round file. For each finding, the id, severity, location,
+`regression: yes|no` and claim are the goldfish's; you decide the disposition and nothing
+else.
 
-## Prerequisites & Context Strategy
+## 2. Decide
 
-*   **Context Recommendation (Elephant Memory)**: This skill should be run in
-    the persistent conversation session that generated the target document (the
-    Elephant) to recall earlier reasoning and craft higher-quality fixes.
+Give each finding exactly one disposition:
 
-## Inputs
-
-The caller or orchestration driver provides exactly these parameters:
-
-*   **`TargetFile`**: Absolute or relative path to target document.
-*   **`LineRange`**: Exact line numbers (or `full file`).
-*   **`FindingsList`**: Aggregated flat list of findings from Goldfish
-    reviewers.
-*   **`Round`** (optional, fork): the review-loop round number; `1` when
-    omitted.
-*   **`Stage`** (optional, fork): the review stage, `7`, `9` or `10` (the
-    handoff gate); `0` when omitted.
-*   **`RunCard`** (optional, fork): text to put at the top of the report.
-
-## Execution Workflow
-
-### Step 1: Intake Validation & Gather Context
-
-1.  **Hybrid Execution UX**: Detect if execution arguments are present:
-
-    *   *Automated Mode*: If all parameters are provided, execute silently as a
-        subprocess.
-    *   *Standalone Human Mode*: If parameters are omitted, trigger a friendly
-        onboarding flow. Prompt for one piece of input at a time, waiting for
-        the user's response after each turn. Once all inputs are specified,
-        display the final setup and verify the user is ready to continue.
-
-2.  Read `TargetFile` at `LineRange` by reading it and parse the `FindingsList`.
-
-### Step 2: Evaluate & Categorize
-
-Give each finding exactly one category:
-
-*   **CONTEST**: The critique is inaccurate or relies on a misunderstanding of
-    the codebase. Cite evidence that the reviewer could read: a file and
-    symbol, or a decision recorded in the document.
-*   **ESCALATE**: The critique is inaccurate, but the evidence is outside every
-    file the reviewer could read (for example, a team convention or a verbal
-    decision). State that fact. Do not fix the finding. Give it to the user.
-*   **PROPOSE FIX**: The critique is valid. Define precise textual replacements
-    or structural formatting adjustments to resolve the gap.
-*   **DECLINE**: The finding is a Nit. Record it. Do not fix it. You can use
-    PROPOSE FIX for a Nit if the fix is worth it.
+- **fixed**: the critique is valid. Change the artifact: a precise replacement, a deletion, a
+  narrowed contract. The next round reviews the new bytes; a later goldfish that raises the same
+  defect at the same scope marks it `regression: yes`, so a fix that moved the defect does not
+  converge.
+- **contested**: the critique is inaccurate or rests on a misunderstanding. Cite evidence the
+  reviewer could read: a file and symbol, or a decision recorded in the artifact. For a high or
+  medium this is a decision point (section 4).
+- **declined**: a low you will not fix (record it; fix it anyway when the fix is worth it), or a
+  high or medium the owner or the judges decline (section 4).
+- **escalated**: the critique may be right but the evidence is outside every file the reviewer
+  could read (a team convention, a verbal decision), or it belongs to someone else: a new unit, or
+  a decision point of the plan. State the fact, do not fix it here, and name where it went. It
+  is settled.
+- **fix-design**: the defect is in the frozen spec, not in this artifact (a plan or integrate
+  review). Never worked around; refused on a head. `review status` exits 4 and the skill runs
+  `superegm approve-spec --spec <path> --void --review <id>`: the spec returns to spec review.
 
 Apply these rules:
 
-*   **A contest must be checkable.** "This was intentional" is not evidence.
-    If you cannot cite evidence the reviewer could read, use ESCALATE or
-    PROPOSE FIX.
-*   **Do not add context only to satisfy a reviewer.** Add context when a human
-    reader of the document needs it. If only a zero-context subagent needs it,
-    use ESCALATE.
-*   **Do not contest a comprehension gap.** If a fresh reader could not follow
-    the document, the document is missing context.
-*   **Do not change a severity.** If you think a Blocker is a Nit, CONTEST it
-    and state the reason.
-*   You wrote the document under review. A wish to contest is not evidence
-    that the reviewer is wrong.
+- **A contest must be checkable.** "This was intentional" is not evidence. If you cannot cite
+  evidence the reviewer could read, settle it `escalated` or fix it.
+- **Do not add context only to satisfy a reviewer.** Add context when a human reader of the
+  document needs it. If only a zero-context subagent needs it, settle it `escalated`.
+- **Do not contest a comprehension gap.** If a fresh reader could not follow the document, the
+  document is missing context.
+- **Do not change a severity.** If you think a high is a low, contest it and state the reason.
+- You wrote the artifact under review. A wish to contest is not evidence that the reviewer is
+  wrong.
+- The `foreman` finding that records CI not green on a head is settled by no one: `collect`
+  records it afresh each round from the CI file and omits it when CI is green; `superegm review
+  settle` refuses it.
 
-### Step 3: Report Fixes
+## 3. Write
 
-Construct the final report and save it named
-`goldfish_review_report.md` in the working directory (or your harness's artifact directory, if it has one)
-using your file-writing tool. Use this layout:
+Apply the fixes to the artifact first, then write every disposition:
 
-```markdown
-# Goldfish Annotated Review Report
+    superegm review settle --review <id> --finding <fid> --disposition fixed|contested|declined|escalated|fix-design --runcard <id> [--owner | --judges <judges-id>]
 
-[RunCard and the reviewer status lines, when the caller passed them]
+The helper prints `<fid> <disposition>`, stores it on the finding with who ruled (`owner`,
+`judges:<id>`, or nothing), and re-derives the review's convergence. A finding in any recorded
+round settles, whether or not its round was `completed`; a finding settled once stays settled
+when a later goldfish raises it again at the same scope, unless it was `fixed` (then it is a
+regression, section 2).
 
-**Target:** `[TargetFile]` (`[LineRange]`)
+## 4. The one gate: a high or medium contested or declined
 
-## Prioritized Findings & AI Suggestions
+A high or medium finding is overruled by nobody but the owner or the judges (spec section
+13.2, point 1). The helper refuses `contested` and `declined` on such a finding without
+`--owner` in normal mode and without `--judges <id>` in leavemealone-mode; a low needs neither.
 
-{{range findings, ordered by Severity}}
-### [Issue 1] [`[ReviewerPersona]`] - Severity: [High | Medium | Low]
-*   **Affected Scope:** [Lines Start-End]([RelativePath]#L[Start]-L[End]) ([Sub-header])
-*   **Discrepancy Description:** [copied from FindingsList]
-*   **Rationale:** [copied from FindingsList]
-*   ***AI Suggestion:*** [CONTEST | ESCALATE | PROPOSE FIX | DECLINE]
-*   ***Justification:*** [Detailed reason]
-*   ***Proposed Edit:***
-    *   Location: [Line/Header]
-    *   Change: [Precise replacement string or deletion note]
-{{end}}
-```
+- **Normal mode**: after the fixes, put every high and medium you want to contest or decline to
+  the owner in one question, one per round: the finding line, your reason, and the options
+  `finding upheld` and `finding overruled` (your reason verbatim as the overrule option's
+  text). Then write each answer: overruled, `--disposition contested --owner` (or `declined
+  --owner`); upheld, leave it unsettled and fix it in this round, or settle it `escalated` when
+  it is not yours to fix.
+- **Leavemealone-mode** (`--leavemealone` or `config.mode`): render the same question from the
+  record with `superegm judges question --review <id> --round <n> --reason <fid>=<your
+  reason>…`, open the panel with `superegm judges open --parent <your run card>`, dispatch the
+  judges as the `judges` skill says, and apply each converged answer with `--disposition
+  contested --judges <panel-id>` (or `declined`); an unconverged question pauses the owner with
+  the record. A ruling that overrules a finding settles it `contested`; one that upholds it
+  leaves it unsettled for you to fix.
+- On a head, a builder's `contested` reply reaches the same gate through `collect`'s
+  `builder_contested[]`; `collect` carries an upheld finding forward as a `foreman` high until a
+  later builder reply marks it `fixed`.
 
-### Step 4: Interactive Resolution Gate
+## 5. Then
 
-If any finding is `ESCALATE`, list those findings first in the chat message.
-They need the user's knowledge, not only approval.
-
-Before proceeding, output a visible chat message to the user: *"I have compiled
-the audit findings into `goldfish_review_report.md`. Please review the findings there and choose how you would like to
-proceed:
-
--   **Comment directly on the file**: Review `goldfish_review_report.md` in
-    chat or the file and leave comments/edits to approve, reject, or contest
-    specific items.
--   **Auto accept**: Reply "auto accept" to batch-apply all proposed fixes
-    (skipping contested items).
--   **Continue to next phase**: Reply "continue" or "no changes" to proceed
-    without applying fixes.
--   **Interactive breakdown**: Reply "interactive breakdown" for a guided,
-    item-by-item walkthrough in chat with detailed explanations for each
-    proposed edit or contested finding before making decisions.
--   **Custom instruction / Wildcard request**: Reply with any custom
-    instruction, question, or out-of-band request."*
-
-You **MUST** immediately yield active execution by calling **zero tools** in
-this turn payload. You must stop execution and go idle, waiting for the human
-developer to comment on/edit the artifact or reply in the chat.
-
-Interpret the user's action/response as follows:
-
--   **"Auto accept" / "Accept all suggestions" / User clicks "Proceed" without
-    contesting**: Apply all fixes where the AI suggestion was `PROPOSE FIX`
-    directly to `TargetFile` at `LineRange` in a single batch using
-    your file-editing tool. Any items categorized as `CONTEST`, `ESCALATE`, or
-    `DECLINE` are explicitly bypassed. Then proceed to Step 5.
--   **"Continue to next phase" / "No changes"**: Do not apply any automated
-    fixes. Then proceed to Step 5.
--   **"Interactive breakdown"**: Enter a sequential breakdown loop over ALL
-    finding items (all categories except `DECLINE`):
-
-    1.  For each item `i`, output a visible chat message formatting the full
-        finding details and explanation in rich markdown:
-
-        ```markdown
-        ### Breakdown Item [i]: [Issue Title] [`[ReviewerPersona]`]
-        * **Scope:** [Lines Start-End]([RelativePath]#L[Start]-L[End]) ([Sub-header])
-        * **Description:** [Description]
-        * **AI Suggestion:** [CONTEST | ESCALATE | PROPOSE FIX]
-        * **Explanation & Justification:** [Detailed reason and background explaining why the fix is proposed or why the finding is contested]
-        * **Proposed Edit:** [Precise replacement text or deletion note]
-        ```
-
-        Then prompt the user in chat for their decision on this item (calling
-        **zero tools** and going idle):
-
-        *   If `PROPOSE FIX`: Ask the user to reply with **Accept proposed
-            fix**, **Skip / ignore**, or **Discuss**.
-        *   If `CONTEST`: Ask the user to reply with **Skip / agree with
-            contest**, **Overrule contest (propose fix)**, or **Discuss**.
-        *   If `ESCALATE`: Ask the user to reply with **Confirm (no change)**,
-            **Add the fact to the document**, or **Discuss**.
-
-    2.  Record the user's decisions in an internal memory checklist (e.g., *Item
-        1: Accepted*, *Item 2: Ignored*, *Item 3: Overruled*). **Do NOT call any
-        file editing tools during this sequential loop.**
-
-    3.  Once all items have been decided, summarize the accepted edits, execute
-        them using your file-editing tool, and proceed to Step 5.
-
--   **Custom instruction / Out-of-band edit**: If the user provides targeted
-    instructions, apply them and proceed.
-
-### Step 5: Post-Resolution Synchronization & Exit
-
-1.  **Re-verify Lines**: If changes were made to `TargetFile`, verify that the
-    file remains structurally coherent and valid markdown.
-2.  Mark the report as resolved (add a `Status: resolved` line at the top).
-3.  **Persist dispositions (fork)**: Write
-    `goldfish_dispositions_s[Stage]_r[Round].md` next to the report, one row per
-    finding id, from the user's final decision at the gate, never from the AI
-    suggestion. Final categories: `fixed` (an edit was applied, including an
-    overruled contest or an escalation the user resolved by adding the fact),
-    `contested` (the user agreed with the contest, or auto accept bypassed
-    it), `declined` (a Nit, or a proposed fix the user skipped or did not
-    apply), `escalated` (given to the user and left unchanged).
-
-    ```markdown
-    # Goldfish dispositions, stage [Stage], round [Round]
-
-    **Target:** `[TargetFile]` (`[LineRange]`)
-
-    | Id | Reviewer | Final | Reason | Changed lines |
-    | --- | --- | --- | --- | --- |
-    | [finding id] | [ReviewerPersona] | [fixed \| contested \| declined \| escalated] | [one line] | [Start-End, or -] |
-    ```
-
-    A `Reason` names no other reviewer's finding: on a resumed Astra round the
-    `astra-*` rows go to OpenAI (`resources/astra_lane.md` section 7). A merged
-    entry (`design-2-1 + astra-2-3 (F4)`, `astra_lane.md` section 6) gets one
-    row per id, each naming only its own reviewer, with the same Final and
-    Changed lines and a Reason written for that row alone.
-
-4.  **Handoff**: Exit cleanly back to the caller (such as `egm-review-loop`)
-    with the count of accepted fixes, contested items, escalated items,
-    declined items, and remaining unaddressed issues, and the dispositions
-    file path.
+`superegm review status --review <id> --runcard <id>`: the exit code says whether the artifact
+converged, needs another round, is at its cap, voids the approval or stalled
+(`references/review_loop.md` section 5). Converging at round 2 is the normal case. When counts
+stop falling, change the thing, not the round.
