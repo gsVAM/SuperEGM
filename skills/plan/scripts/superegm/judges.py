@@ -266,6 +266,22 @@ def open_questions(panel: dict, questions: list[dict], before_round: int) -> lis
   return compute_verdict(earlier, questions)["open"]
 
 
+def astra_answers(record: dict) -> tuple[str | None, str]:
+  """The Astra lane's `result.json` as `(summary, "")`, else `(None, reason)`
+  (the claudex-loop runner's record; a changed field is a reason, never an answer)."""
+  response = record.get("response") or {}
+  if record.get("status") == "failed":
+    return None, str(record.get("error") or "failed")
+  if record.get("status") != "completed":
+    return None, "killed"
+  if response.get("verdict") == "BLOCKED":
+    return None, f"blocked: {response.get('limitations') or 'no limitations given'}"
+  summary = response.get("summary")
+  if not isinstance(summary, str) or not summary.strip():
+    return None, "no summary in the result"
+  return summary, ""
+
+
 def cmd_record(args, store) -> int:
   panel = load_panel(store, args.panel)
   panel_card(args, store, panel)
@@ -305,7 +321,22 @@ def cmd_record(args, store) -> int:
     model = args.model or f"{member['model']}:{member['model']}"
     effort = args.effort or f"{member['effort']}:{member['effort']}"
   elif args.result:
-    raise core.HandoffError("judges: --result is not built yet")
+    path = Path(args.result).expanduser()
+    if not path.is_file():
+      raise core.HandoffError(f"judges: result {path} does not exist")
+    record = json.loads(core.read_text(path))
+    text, reason = astra_answers(record)
+    if text is not None:
+      try:
+        answers = parse_verdict(text, questions)
+        missing = [q for q in open_questions(panel, questions, n) if q not in answers]
+        if missing:
+          raise ValueError(f"no answer for {missing[0]}")
+      except ValueError as error:
+        text, reason = None, str(error)
+    isolation = "runner"
+    model = f"{member['model']}:{record.get('effective_model') or 'requested only'}"
+    effort = f"{member['effort']}:{record.get('effective_effort') or 'requested only'}"
   else:
     reason = args.not_run
   if reason:
