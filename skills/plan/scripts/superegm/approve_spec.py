@@ -14,6 +14,7 @@ from superegm.review import evaluate, latest_cycle, review_id
 WRITES = frozenset(["approvals"])  # the store kinds this subcommand writes
 SKILLS = frozenset(["review-spec", "review-plan", "integrate"])  # the skills whose card this subcommand accepts
 CONFIG = ".superegm/config.json"
+UNITS_H2 = re.compile(r"^## (?:\d+\.?\s+)?Units\s*$")
 
 
 def register(subparsers):
@@ -30,6 +31,12 @@ def register(subparsers):
 
 def handoff_slug(stem: str) -> str:
   return re.sub(r"[^a-z0-9]+", "-", stem.lower()).strip("-")[:20].rstrip("-")
+
+
+def units_is_last_h2(text: str) -> bool:
+  """The spec's last H2, after any numeric prefix, is `Units` (section 5)."""
+  h2s = [line for line in text.splitlines() if line.startswith("## ")]
+  return bool(h2s) and bool(UNITS_H2.match(h2s[-1]))
 
 
 def commit_by_path(repo_root: Path, paths: list[str], message: str) -> str:
@@ -52,7 +59,15 @@ def run(args):
     raise core.HandoffError(f"approve-spec: no spec review for {slug}")
   rid = review_id(st, "spec", str(spec), review["cycle"])
   status = evaluate(st, review, card.get("parent") or args.runcard)
+  if status.code != 0:
+    raise core.HandoffError(f"approve-spec: review {rid} is not converged (review status exit {status.code})")
   sha = core.sha256_file(spec)
+  if sha != status.sha:
+    raise core.HandoffError("approve-spec: spec bytes differ from the converged round's")
+  if not units_is_last_h2(core.read_text(spec)):
+    raise core.HandoffError("approve-spec: last H2 must be `Units`")
+  if not (root / CONFIG).is_file():
+    raise core.HandoffError(f"approve-spec: {CONFIG} missing: run superegm init")
   if not (args.yes or args.leavemealone or card["mode"] == "leavemealone"):
     print(f"Approve `{spec}` (sha256 `{sha[:12]}`) at review {rid}?")
     print("Options: Approve | Stop. Run again with --yes after the owner chose Approve.")
