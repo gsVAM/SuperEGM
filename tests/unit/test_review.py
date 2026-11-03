@@ -450,3 +450,19 @@ def test_handoff_id_copy_rule(world, carried, extra, keeps):
   second = approval(world)["handoff_id"]
   assert (second == first) is keeps
   assert second.endswith(hashlib.sha256(spec2.read_bytes()).hexdigest()[:6]) is not keeps
+
+
+# ---------------------------------------------------------------- S15: `approve-spec --void`
+
+def test_approve_spec_void(world):
+  spec, cid, rid = converged_spec(world)
+  assert approve(world, spec, cid, "--yes")[0] == 0
+  _, pcid, prid = opened(world, "plan")
+  assert record(world, prid, 1, "readiness", [F("readiness", 1, 1)], pcid, sha=A)[0] == 0
+  assert record(world, prid, 1, "proportion", [], pcid, sha=A)[0] == 0 and record(world, prid, 1, "set", [], pcid, sha=A)[0] == 0
+  code, out = approve(world, spec, pcid, "--void", "--review", prid)
+  assert code == 1 and f"approve-spec: review {prid} has no fix-design finding" in out and approval(world)["voided_by"] is None
+  assert settle(world, prid, "readiness-1-1", "fix-design", pcid)[0] == 0 and status(world, prid, pcid)[0] == 4
+  assert approve(world, spec, pcid, "--void", "--review", prid)[0] == 0 and approval(world)["voided_by"] == prid
+  store(world.repo).path("approvals", SLUG).unlink()
+  assert f"approve-spec: no approval for {SLUG}" in approve(world, spec, pcid, "--void", "--review", prid)[1]
