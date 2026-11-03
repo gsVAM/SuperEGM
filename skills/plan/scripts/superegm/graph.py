@@ -116,6 +116,17 @@ class Plan(core.Plan):
     return i
 
 
+def require_free_store(state: dict, handoff_id: str) -> dict:
+  """One handoff per store: the state as it is, a fresh one once the held handoff
+  is closed, or a refusal while another handoff is open."""
+  held = state.get("handoff_id")
+  if not held or held == handoff_id:
+    return state
+  if state.get("closed_at"):
+    return {}
+  raise core.HandoffError(f"graph: the store holds handoff {held}, not closed: run /superegm:integrate --close first")
+
+
 class Handoff(core.Handoff):
   """EGM's handoff under an approval record: the handoff id and the spec sha
   are the approval's, the plan file is never written."""
@@ -142,7 +153,7 @@ class Handoff(core.Handoff):
                               if l.startswith("# ")), self.design_path.stem)
     self.config = core.load_config(self.repo_root)
     self.graph = core.Graph(self.plan)
-    self.state = state
+    self.state = require_free_store(state, self.handoff_id)
     store.handoff_id = self.handoff_id
     self.check_labels()
 
