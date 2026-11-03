@@ -1,72 +1,496 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03).
+# Modified by SuperEGM (gsVAM), 2026: the builders' tests (U09): launch, launch-builder, record-launch, interrupt, clean, the orders and the two skill bodies.
 
-"""EGM's tests of the subcommands U09 (builders) changes, moved from test_helper.py by U03;
-that unit rewrites the ones whose form it changes."""
+"""The builders (spec section 11): `launch` and its preconditions, `launch-builder`'s worktree,
+prompt file and command line, `record-launch`, `interrupt`, `clean`, the builder orders and the
+`interrupt` and `clean` skill bodies."""
 
-import json
-
+import hashlib, json, re, subprocess
+from pathlib import Path
 import pytest
+from superegm import store, spec_slug, DEFAULT_CONFIG
+from superegm.body import fill_numbers, normalise
+from conftest import make_pr
 
-from conftest import applied, state_of, foreman_path, round_of
-
-
-def test_record_launch_persists_the_run_folder_before_the_wait(world):
-  """R18: nothing persisted between `prepared` and `collected` on the no-teams
-  path, so a session ending in between redid the round."""
-  applied(world)
-  assert world.run("record-launch", "--plan", world.plan, "--unit", "U01",
-                   "--round", 2, "--run-folder", "/tmp/egm-astra/claudex-abc")[0] == 0
-  data = json.loads(foreman_path(world, "U01").read_text(encoding="utf-8"))
-  assert round_of(data, 2)["phase"] == "launched"
-  assert round_of(data, 2)["run_folder"].endswith("claudex-abc")
-  assert round_of(data, 2)["status"] == "running"
-  assert world.run("record-launch", "--plan", world.plan, "--unit", "U01",
-                   "--round", 3, "--not-run", "denied")[0] == 0
-  data = json.loads(foreman_path(world, "U01").read_text(encoding="utf-8"))
-  assert round_of(data, 3)["status"] == "not run (denied)"
-  assert round_of(data, 2)["run_folder"], "an earlier round must survive"
-
-
-def test_launch_refuses_a_unit_that_is_not_ready(world):
-  """R3-09: launch validated only that the unit id parsed."""
-  applied(world)
-  code, out = world.run("launch", "--plan", world.plan, "--wave", 1, "--units", "U03")
-  assert code == 1 and "nothing was launched" in out
-  assert "U03" in out and ("not ready" in out or "blocking decision" in out)
-  assert not (state_of(world)["units"].get("U03") or {}).get("launched")
+ROOT = Path(__file__).resolve().parents[2]
+REPO, BASE, UNIT, ISSUE, TRACKING, PR = "example-org/webhooks", "main", "U07", 7, 1, 70
+F = "`" * 3
+BODY = (f"<!-- superegm:handoff=HID unit=UID spec=SHA -->\n# UID — Worker\n\n## Objective\nA worker exists.\n\n"
+        f"## Definition of done\n1. The test for each Step was committed before its implementation (checked by superegm tdd-order)\n"
+        f"2. Run `pytest tests/unit/test_worker.py -q` — the worker's cases pass\n3. Exists `src/worker.py`\n4. CI green on the head\n\n"
+        f"## Steps\n1. Write the failing test `test_w` in `tests/unit/test_worker.py`:\n   {F}python\n   def test_w(): ...\n   {F}\n"
+        f"   Run `pytest tests/unit/test_worker.py::test_w -q`; expected: FAIL (`ImportError`).\n"
+        f"   Implement `w() -> None` in `src/worker.py`.\n   Run the same command; expected: PASS. Commit `test(S1): w` then `feat(S1): w`.\n\n"
+        f"## Scope, order and risk\nScope: `src/worker.py` (create) · Blocked by: none · Shared files: none · Risk: low: new · Size: S\n"
+        f"Branch: `superegm/HID/UID` · Part of #<tracking>\n")
+SECTION = ("### UID: Worker\n| Field | Value |\n| --- | --- |\n| Objective | A worker exists. |\n| Scope paths | `src/worker.py` (create) |\n"
+           "| Design range | `SPEC:1-2 (# title)` |\n| Blocked by | none |\n| Shared files | none |\n| Risk | low: new |\n| Size | S |\n\n"
+           "Definition of done\n1. `pytest tests/unit/test_worker.py -q` passes.\n2. CI green.\n\nDecide before build\n- none\n")
+RULESET = {"id": 1, "name": "base", "enforcement": "active", "target": "branch",
+           "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}}, "rules": [{"type": "update"}],
+           "bypass_actors": [{"actor_type": "RepositoryRole", "actor_id": 5, "bypass_mode": "always"}]}
 
 
-def test_record_launch_not_run_cannot_erase_a_recorded_launch(world, tmp_path):
-  """R10-01: nulling the run folder hid a live runner from every cleanup guard."""
-  applied(world)
-  folder = tmp_path / "run"; folder.mkdir()
-  assert world.run("record-launch", "--plan", world.plan, "--unit", "U01",
-                   "--round", 1, "--run-folder", str(folder))[0] == 0
-  code, out = world.run("record-launch", "--plan", world.plan, "--unit", "U01",
-                        "--round", 1, "--not-run", "skipped")
-  assert code == 1 and "already recorded a launch" in out, out
-  data = json.loads(foreman_path(world, "U01").read_text(encoding="utf-8"))
-  assert round_of(data, 1)["run_folder"].endswith("run"), "the folder must survive"
-  assert round_of(data, 1)["run_status"] == "running"
-  # a round that never launched may still be recorded not run
-  assert world.run("record-launch", "--plan", world.plan, "--unit", "U01",
-                   "--round", 2, "--not-run", "lane off")[0] == 0
+def git(args, cwd):
+  return subprocess.run(["git", *args], cwd=str(cwd), check=True, capture_output=True, text=True).stdout
 
 
-def test_record_launch_is_immutable_per_round(world, tmp_path):
-  """R11-02: re-pointing a live round at another folder let an old result be
-  collected in its place."""
-  applied(world)
-  a, b = tmp_path / "a", tmp_path / "b"; a.mkdir(); b.mkdir()
-  assert world.run("record-launch", "--plan", world.plan, "--unit", "U01",
-                   "--round", 1, "--run-folder", str(a))[0] == 0
-  code, out = world.run("record-launch", "--plan", world.plan, "--unit", "U01",
-                        "--round", 1, "--run-folder", str(a))
-  assert code == 0 and "already recorded" in out
-  code, out = world.run("record-launch", "--plan", world.plan, "--unit", "U01",
-                        "--round", 1, "--run-folder", str(b))
-  assert code == 1 and "a new round" in out, out
-  data = json.loads(foreman_path(world, "U01").read_text(encoding="utf-8"))
-  assert round_of(data, 1)["run_folder"] == str(a)
+def put(path, text):
+  """A store file as a subcommand left it (the store's folders do not exist before the first write)."""
+  path.parent.mkdir(parents=True, exist_ok=True); path.write_text(text, encoding="utf-8")
+
+
+def github(world, *, builder="builder-bot", me="owner", role="write", classic=None, rulesets=(RULESET,),
+           branch_rules=({"type": "non_fast_forward"}, {"type": "deletion"})):
+  """Routes on U03's fake gh (`extend("api", …)`, one handler per word): an endpoint handler takes
+  (args, token, match) and returns the JSON (pages for --paginate --slurp) or (404, text); `-q .key`
+  prints that key, as gh does; everything else falls through to the built-in `do_api`."""
+  h = {}
+  h[r"^user$"] = lambda a, t, m: {"login": builder if t else me}
+  h[rf"^repos/{REPO}/collaborators/[^/]+/permission$"] = lambda a, t, m: {"role_name": role}
+  h[rf"^repos/{REPO}/branches/{BASE}/protection$"] = lambda a, t, m: classic if classic is not None else (404, "Branch not protected")
+  h[rf"^repos/{REPO}/rulesets$"] = lambda a, t, m: [list(rulesets)]
+  h[rf"^repos/{REPO}/rulesets/(\d+)$"] = lambda a, t, m: next(r for r in rulesets if r["id"] == int(m.group(1)))
+  h[rf"^repos/{REPO}/rules/branches/.+$"] = lambda a, t, m: list(branch_rules)
+  h[rf"^repos/{REPO}/issues/(\d+)/comments$"] = lambda a, t, m: [world.gh.comments.get(int(m.group(1)), [])]
+  h[rf"^repos/{REPO}/pulls/(\d+)/reviews$"] = lambda a, t, m: [world.gh.reviews.get(int(m.group(1)), [])]
+
+  def api(args, cwd, token=None):
+    endpoint = world.gh.endpoint_of(args).partition("?")[0]
+    for pattern, handler in h.items():
+      match = re.match(pattern, endpoint)
+      if match:
+        data = handler(args, token, match)
+        if isinstance(data, tuple):
+          return 1, "", f"gh: {data[1]} (HTTP {data[0]})"
+        if "-q" in args:
+          return 0, f"{data[args[args.index('-q') + 1].lstrip('.')]}\n", ""
+        return world.gh.ok(data)
+    return world.gh.do_api(args)
+  world.gh.extend("api", api)
+
+
+def seed(world, units=(UNIT,), max_in_flight=5, workflow="on: [push, pull_request]\n"):
+  """Filed units as U07's `apply` and the owner's approval push leave them: store, plan file, issues, origin/<base>, an open wave card."""
+  repo, s = world.repo, store(world.repo)
+  spec = next(repo.glob("docs/**/*.md")).resolve()
+  profile = repo.parent / "profile"; profile.mkdir(exist_ok=True)
+  cfg = json.loads((repo / ".superegm/config.json").read_text(encoding="utf-8"))
+  cfg["max_in_flight"], cfg["builder"] = max_in_flight, {**DEFAULT_CONFIG["builder"], "profile_dir": str(profile)}
+  (repo / ".superegm/config.json").write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
+  (repo / ".github/workflows").mkdir(parents=True, exist_ok=True)
+  (repo / ".github/workflows/tests.yml").write_text(workflow, encoding="utf-8")
+  git(["add", "-A"], repo); git(["commit", "-qm", "superegm: approve"], repo)
+  sha = hashlib.sha256(spec.read_bytes()).hexdigest()
+  hid = f"{spec_slug(spec)}-{sha[:6]}"
+  s.handoff_id = hid
+  bare = repo.parent / "origin.git"
+  git(["clone", "-q", "--bare", str(repo), str(bare)], repo.parent)
+  git(["remote", "set-url", "origin", str(bare)], repo)  # fetch/push hit the bare clone
+  world.ns["find_remote"] = lambda root, repo: "origin"  # `remote -v` shows that path, not GitHub
+  sections = "\n".join(SECTION.replace("UID", u).replace("SPEC", str(spec)) for u in units)
+  plan = repo.parent / "plan.md"
+  plan_text = f"# Handoff plan: Worker\n\nDesign: `{spec}`\n\n## 1. Issue template\n\n## 2. Units\n\n{sections}"
+  plan.write_text(plan_text, encoding="utf-8"); put(s.path("plan"), plan_text)
+  writes = [["issue", "tracking", "Build", ["superegm:tracking"], "Tracking"]]
+  world.gh.issues[TRACKING] = {"number": TRACKING, "id": 1000, "body": "Tracking", "labels": ["superegm:tracking"], "state": "open", "state_reason": None}
+  numbers = {u: 7 + i for i, u in enumerate(units)}
+  bodies = {}
+  for u, n in numbers.items():
+    body = BODY.replace("HID", hid).replace("UID", u).replace("SHA", sha)
+    bodies[u] = body
+    put(s.path("unit", u), f"{SECTION.replace('UID', u).replace('SPEC', str(spec))}\n## Issue body as posted\n\n{F}markdown\n{body}{F}\n")
+    writes.append(["issue", u, f"{u}: Worker", ["superegm:unit"], body])
+    world.gh.issues[n] = {"number": n, "id": 1000 + n, "body": fill_numbers(body, numbers, TRACKING), "labels": ["superegm:unit"], "state": "open", "state_reason": None}
+  put(s.path("approvals", f"{spec_slug(spec)}.json"), json.dumps({"path": str(spec), "sha256": sha, "commit": git(["rev-parse", "--short", "HEAD"], repo).strip(),
+      "runcard": "c0", "review": "r0", "approved_at": "2026-11-03T00:00:00Z", "amended": [], "voided_by": None, "handoff_id": hid}))
+  put(s.path("state"), json.dumps({"handoff_id": hid, "repo": REPO, "plan": str(plan), "confirmed_sha256": "x",
+      "design": {"path": str(spec), "sha256": sha},
+      "verify": {"complete": True, "sha256": "x", "problems": []}, "tracking": {"number": TRACKING, "id": 1000},
+      "units": {u: {"number": n, "id": 1000 + n} for u, n in numbers.items()},
+      "filings": [{"sha256": "x", "writes": writes, "at": "2026-11-03T00:00:00Z"}]}))
+  world.gh.comments, world.gh.reviews = {}, {}
+  github(world)
+  code, out = world.run("runcard", "open", "--skill", "wave", "--artifact", str(spec))
+  assert code == 0, out
+  return s, out.split()[-1], hid, bodies
+
+
+def state_of(s):
+  return json.loads(s.path("state").read_text(encoding="utf-8"))
+
+
+def launches_of(s, uid=UNIT):
+  return json.loads(s.path("launches", f"{uid}.json").read_text(encoding="utf-8"))["launches"]
+
+
+def test_launch_marks_ready_units_and_records_the_builder_login(world, monkeypatch):
+  s, card, hid, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  code, out = world.run("launch", "--runcard", card)
+  assert code == 0 and out.splitlines()[:2] == ["in flight: none", "marked: U07"], out
+  assert state_of(s)["units"][UNIT]["launched"]["runcard"] == card
+  rc = json.loads(s.path("runcards", f"{card}.json").read_text(encoding="utf-8"))
+  assert rc["builder"][-1] == {"login": "builder-bot", "token_env": "SUPEREGM_BUILDER_TOKEN"}
+  assert git(["rev-parse", "refs/superegm/base"], world.repo).strip() == git(["rev-parse", "HEAD"], world.repo).strip()
+  assert "ghp_builder" not in out and not any("ghp_builder" in " ".join(c) for c in world.gh.calls)
+  assert "U07 marked for launch" in s.path("journal").read_text(encoding="utf-8")
+
+
+def push_to_origin(world, rel, text):
+  path = world.repo / rel
+  path.parent.mkdir(parents=True, exist_ok=True); path.write_text(text, encoding="utf-8")
+  git(["add", "-A"], world.repo); git(["commit", "-qm", "edit"], world.repo); git(["push", "-q", "origin", BASE], world.repo)
+
+
+@pytest.mark.parametrize("case, reason", [
+  ("classic", None),
+  ("spec", "spec at origin/main is not the approved bytes"),
+  ("config", ".superegm/config.json is absent at origin/main"),
+  ("workflow", "origin/main carries no workflow triggered on pull_request"),
+  ("no-token", "SUPEREGM_BUILDER_TOKEN is not set"),
+  ("own-login", "the builder token is the elephant's own login (owner)"),
+  ("no-restriction", "base branch main: updates are not restricted to the owner (no classic restrictions, no active ruleset update rule)"),
+  ("role-bypass", "base branch main: ruleset base lets the builder's role (write) bypass"),
+  ("team-bypass", "base branch main: ruleset base lets a team bypass"),
+  ("no-force-push", "superegm/**: no active ruleset forbids force-push (non_fast_forward)"),
+  ("no-deletion", "superegm/**: no active ruleset forbids deletion"),
+])
+def test_launch_refuses_each_precondition(world, monkeypatch, case, reason):
+  s, card, hid, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  spec = next(world.repo.glob("docs/**/*.md"))
+  bypass = lambda actor: [{**RULESET, "bypass_actors": [actor]}]
+  if case == "classic":
+    github(world, rulesets=[], classic={"restrictions": {"users": [{"login": "owner"}], "teams": [], "apps": []}})
+  if case == "spec":
+    push_to_origin(world, spec.relative_to(world.repo), spec.read_text(encoding="utf-8") + "\nedited\n")
+  if case == "config":
+    git(["rm", "-q", "--cached", ".superegm/config.json"], world.repo); git(["commit", "-qm", "x"], world.repo); git(["push", "-q", "origin", BASE], world.repo)
+  if case == "workflow":
+    push_to_origin(world, ".github/workflows/tests.yml", "on: [push]\n")
+  if case == "no-token":
+    monkeypatch.delenv("SUPEREGM_BUILDER_TOKEN")
+  if case == "own-login":
+    github(world, builder="owner")
+  if case == "no-restriction":
+    github(world, rulesets=[])
+  if case == "role-bypass":
+    github(world, rulesets=bypass({"actor_type": "RepositoryRole", "actor_id": 4, "bypass_mode": "always"}))
+  if case == "team-bypass":
+    github(world, rulesets=bypass({"actor_type": "Team", "actor_id": 9, "bypass_mode": "always"}))
+  if case == "no-force-push":
+    github(world, branch_rules=[{"type": "deletion"}])
+  if case == "no-deletion":
+    github(world, branch_rules=[{"type": "non_fast_forward"}])
+  code, out = world.run("launch", "--runcard", card)
+  if reason is None:
+    assert code == 0 and "marked: U07" in out, out
+    return
+  assert code == 1 and f"launch: {reason}" in out, out
+  assert "launched" not in state_of(s)["units"][UNIT]
+
+
+def launched(s, uid, status, rnd=1):
+  entry = {"round": rnd, "worktree": str(s.path("worktrees", uid, f"r{rnd}")), "branch": f"superegm/h/{uid}", "started_at": "2026-11-03T00:00:00Z",
+           "status": status, "result_file": str(s.path("launches", f"{uid}_r{rnd}_result.json")), "prompt_sha256": "0" * 64}
+  put(s.path("launches", f"{uid}.json"), json.dumps({"launches": [entry]}))
+  if status.startswith("exited"):
+    Path(entry["result_file"] + ".exit").write_text(status.split()[1] + "\n", encoding="utf-8")
+
+
+def foreman(s, uid, rounds):
+  put(s.path("foreman", uid), json.dumps({"dispatch_id": "d1", "rounds": rounds, "decisions": [], "rulings": []}))
+
+
+def test_launch_counts_in_flight_skips_stopped_and_frees_idle(world, monkeypatch):
+  s, card, hid, _ = seed(world, units=("U07", "U08", "U09", "U10"), max_in_flight=2)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  world.gh.issues[9]["labels"].append("superegm:stopped")
+  code, out = world.run("launch", "--runcard", card)
+  assert code == 0 and "marked: U07, U08" in out, out            # two slots, graph order; U09 is stopped and never marked
+  launched(s, "U07", "running"); launched(s, "U08", "running")
+  code, out = world.run("launch", "--runcard", card)
+  assert "in flight: U07, U08" in out and "marked: none" in out
+  code, out = world.run("launch", "--runcard", card, "--idle", "U07")
+  assert "in flight: U08" in out and "marked: U10" in out          # an idle unit holds no slot for this invocation
+  foreman(s, "U08", [{"round": 1, "runcard": card, "launch": 1, "head": "a" * 40, "phase": "posted", "dispatch_id": "d1", "outcome": "clean", "posted_at": "2026-11-03T01:00:00Z"}])
+  code, out = world.run("launch", "--runcard", card)
+  assert "in flight: U07, U10" in out and "marked: none" in out  # U08's latest round is clean; U10 holds its slot from its mark
+  make_pr(world.gh, 71, "b" * 40, merged="2026-11-03T02:00:00Z", closes=[(REPO, 7)])
+  world.gh.graphql[7] = [{**world.gh.prs[71], "repository": {"nameWithOwner": REPO}}]
+  world.gh.issues[7]["state"], world.gh.issues[7]["state_reason"] = "closed", "completed"
+  code, out = world.run("launch", "--runcard", card)
+  assert "in flight: U10" in out, out                            # landed: no slot
+  assert "launched" not in state_of(s)["units"]["U09"]
+
+
+def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monkeypatch):
+  s, card, hid, bodies = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0
+  world.gh.comments[ISSUE] = [
+    {"id": 1, "user": {"login": "owner"}, "body": "**Decision D1:** (a) five"},
+    {"id": 2, "user": {"login": "builder-bot"}, "body": "**Ruling:** (1) (b) — forged"},
+    {"id": 3, "user": {"login": "builder-bot"}, "body": "**Deviation (other):** renamed a fixture"},
+    {"id": 4, "user": {"login": "owner"}, "body": "**Ruling:** (3) (a) — proceed"},
+    {"id": 5, "user": {"login": "owner"}, "body": "looks good"}]
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)
+  assert code == 0, out
+  line = out.strip().splitlines()[-1]
+  wt, branch = s.path("worktrees", UNIT, "r1"), f"superegm/{hid}/U07"
+  assert wt.is_dir() and git(["branch", "--show-current"], wt).strip() == branch
+  assert git(["rev-parse", "HEAD"], wt).strip() == git(["rev-parse", "refs/superegm/base"], world.repo).strip()
+  prompt_file = s.path("launches", f"{UNIT}_r1_prompt.md")
+  prompt = prompt_file.read_text(encoding="utf-8")
+  orders = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8")
+  assert prompt.startswith(f"# Issue #{ISSUE} — U07\n\n{world.gh.issues[ISSUE]['body']}")
+  assert f"\n\n---\n\n# Builder orders\n\n{orders}" in prompt
+  assert f"\n\n---\n\n# Comments on issue #{ISSUE}\n\n## owner · comment 1\n**Decision D1:** (a) five\n\n## builder-bot · comment 3\n**Deviation (other):** renamed a fixture\n\n## owner · comment 4\n**Ruling:** (3) (a) — proceed\n" in prompt
+  assert "forged" not in prompt and "looks good" not in prompt and "# Review comments" not in prompt
+  cfg = json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]
+  result = s.path("launches", f"{UNIT}_r1_result.json")
+  assert line.startswith(f"cd '{wt}' && env CLAUDE_CONFIG_DIR='{cfg['profile_dir']}' GH_TOKEN=\"$SUPEREGM_BUILDER_TOKEN\" SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{card}' GIT_CONFIG_COUNT=3 "
+                        "GIT_CONFIG_KEY_0=credential.https://github.com.helper GIT_CONFIG_VALUE_0='!gh auth git-credential' "
+                        "GIT_CONFIG_KEY_1=url.https://github.com/.pushInsteadOf GIT_CONFIG_VALUE_1=git@github.com: "
+                        "GIT_CONFIG_KEY_2=url.https://github.com/.pushInsteadOf GIT_CONFIG_VALUE_2=ssh://git@github.com/ "
+                        f"claude -p \"$(cat '{prompt_file}')\" --model '{cfg['model']}' --permission-mode '{cfg['permission_mode']}' --allowedTools '"), line
+  tools = line.split("--allowedTools '")[1].split("'")[0].split(",")
+  assert tools == cfg["allowed_tools"] + [f"Bash(git push origin {branch}:*)", "Bash(pytest:*)"]
+  assert line.endswith(f"' --output-format json > '{result}'; echo $? > '{result}.exit'")
+  assert "ghp_builder" not in out
+  assert not s.path("launches", f"{UNIT}.json").exists()           # the record is record-launch's
+
+
+def test_record_launch_appends_running_then_records_the_exit(world, monkeypatch):
+  s, card, hid, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0
+  code, out = world.run("record-launch", "--unit", UNIT, "--runcard", card)
+  assert code == 1 and "record-launch: U07 launch 1 has no prompt file: run launch-builder first" in out
+  assert world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)[0] == 0
+  code, out = world.run("record-launch", "--unit", UNIT, "--runcard", card)
+  assert code == 0 and out.strip() == "U07 launch 1 running"
+  entry = launches_of(s)[0]
+  prompt = s.path("launches", f"{UNIT}_r1_prompt.md")
+  assert entry == {"round": 1, "worktree": str(s.path("worktrees", UNIT, "r1")), "branch": f"superegm/{hid}/U07", "started_at": entry["started_at"],
+                   "status": "running", "result_file": str(s.path("launches", f"{UNIT}_r1_result.json")),
+                   "prompt_sha256": hashlib.sha256(prompt.read_bytes()).hexdigest()}
+  code, out = world.run("record-launch", "--unit", UNIT, "--runcard", card)
+  assert code == 1 and "record-launch: U07 launch 1 is already recorded (running)" in out
+  code, out = world.run("record-launch", "--unit", UNIT, "--exit", 0, "--runcard", card)
+  assert code == 1 and "record-launch: U07 launch 1 has no exit file" in out
+  Path(entry["result_file"] + ".exit").write_text("1\n", encoding="utf-8")
+  code, out = world.run("record-launch", "--unit", UNIT, "--exit", 0, "--runcard", card)
+  assert code == 1 and "record-launch: the exit file of U07 launch 1 says 1, not 0" in out
+  code, out = world.run("record-launch", "--unit", UNIT, "--exit", 1, "--runcard", card)
+  assert code == 0 and out.strip() == "U07 launch 1 exited 1" and launches_of(s)[0]["status"] == "exited 1"
+  assert "U07 launch 1 exited 1" in s.path("journal").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("case, reason", [
+  ("unmarked", "U07 is not marked by launch"),
+  ("running", "U07 launch 1 is not terminal"),
+  ("count", "--round 3 is not the next launch count (2)"),
+  ("own-login", "the builder token is the elephant's own login (owner)"),
+  ("profile-missing", "builder profile"),
+  ("profile-claude-md", "holds CLAUDE.md"),
+  ("profile-plugins", "holds plugins"),
+  ("body", "issue #7 body differs from the filed body"),
+  ("no-pr", "U07 round 2 has no recorded PR: run status first"),
+])
+def test_launch_builder_refuses_each_precondition(world, monkeypatch, case, reason):
+  s, card, hid, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  profile = Path(json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]["profile_dir"])
+  rnd = 1
+  if case != "unmarked":
+    assert world.run("launch", "--runcard", card)[0] == 0
+  if case == "running":
+    launched(s, UNIT, "running"); rnd = 2
+  if case in ("count", "no-pr"):
+    launched(s, UNIT, "exited 0"); rnd = 3 if case == "count" else 2
+  if case == "own-login":
+    github(world, builder="owner")
+  if case == "profile-missing":
+    profile.rmdir()
+  if case == "profile-claude-md":
+    (profile / "CLAUDE.md").write_text("x\n", encoding="utf-8")
+  if case == "profile-plugins":
+    (profile / "plugins").mkdir(); (profile / "plugins/installed_plugins.json").write_text("{}", encoding="utf-8")
+  if case == "body":
+    world.gh.issues[ISSUE]["body"] += "\nedited by hand\n"
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", rnd, "--runcard", card)
+  assert code == 1 and "launch-builder: " in out and reason in out, out
+  assert not s.path("worktrees", UNIT).exists() and not s.path("launches", f"{UNIT}_r{rnd}_prompt.md").exists()
+
+
+def test_launch_builder_round_2_detaches_the_earlier_worktree_and_carries_the_review(world, monkeypatch):
+  s, card, hid, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0
+  assert world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)[0] == 0
+  assert world.run("record-launch", "--unit", UNIT, "--runcard", card)[0] == 0
+  r1, branch = s.path("worktrees", UNIT, "r1"), f"superegm/{hid}/U07"
+  (r1 / "src").mkdir(); (r1 / "src/worker.py").write_text("def w(): pass\n", encoding="utf-8")
+  git(["add", "-A"], r1); git(["commit", "-qm", "feat(S1): w"], r1); git(["push", "-q", "origin", branch], r1)
+  head = git(["rev-parse", "HEAD"], r1).strip()
+  git(["update-ref", f"refs/pull/{PR}/head", head], world.repo.parent / "origin.git")
+  (r1 / "scratch.txt").write_text("unsaved\n", encoding="utf-8")
+  Path(launches_of(s)[0]["result_file"] + ".exit").write_text("0\n", encoding="utf-8")
+  assert world.run("record-launch", "--unit", UNIT, "--exit", 0, "--runcard", card)[0] == 0
+  make_pr(world.gh, PR, head, branch=branch, closes=[(REPO, ISSUE)])
+  state = state_of(s); state["units"][UNIT]["pr"] = {"number": PR, "head": head, "base_ref": BASE}
+  s.path("state").write_text(json.dumps(state), encoding="utf-8")
+  world.gh.reviews[PR] = [{"id": 9, "user": {"login": "owner"}, "commit_id": head, "body": "**Review round 1 (head " + head[:7] + ")**\n- change-review-1-1 | high | src/worker.py:1 | regression: no | w does nothing"},
+                          {"id": 10, "user": {"login": "builder-bot"}, "commit_id": head, "body": "self review"}]
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", 2, "--runcard", card)
+  assert code == 0, out
+  assert git(["branch", "--show-current"], r1).strip() == "" and (r1 / "scratch.txt").is_file()   # detached, nothing removed
+  r2 = s.path("worktrees", UNIT, "r2")
+  assert git(["branch", "--show-current"], r2).strip() == branch and git(["rev-parse", "HEAD"], r2).strip() == head
+  prompt = s.path("launches", f"{UNIT}_r2_prompt.md").read_text(encoding="utf-8")
+  assert f"\n\n---\n\n# Review comments on PR #{PR}\n\n## owner · review 9 on {head[:7]}\n**Review round 1" in prompt and "self review" not in prompt
+  assert out.strip().splitlines()[-1].startswith(f"cd '{r2}' && env ")
+
+
+import superegm  # the harness reloads the package per test: read HandoffError at call time
+from superegm.launch_builder import allowed_tools
+
+@pytest.mark.parametrize("configured, expect", [
+  (["Read", "Edit", "Bash(git add:*)"], ["Read", "Edit", "Bash(git add:*)", "Bash(git push origin superegm/h/U07:*)", "Bash(pytest:*)"]),
+  (["Bash(pytest:*)", "Read"], ["Bash(pytest:*)", "Read", "Bash(git push origin superegm/h/U07:*)"]),
+  (["Read", "Agent"], "Agent"),
+  (["Read", "Skill"], "Skill"),
+  (["Read", "Bash"], "Bash"),
+  (["Read", "Bash(*)"], "Bash(*)"),
+])
+def test_allowed_tools_composition(configured, expect):
+  body = BODY.replace("HID", "h").replace("UID", "U07")
+  if isinstance(expect, str):
+    with pytest.raises(superegm.HandoffError, match=re.escape(f"allowed_tools carries {expect}: a builder never spawns, never invokes skills, never runs unrestricted Bash")):
+      allowed_tools(configured, "superegm/h/U07", body)
+  else:
+    assert allowed_tools(configured, "superegm/h/U07", body) == expect
+
+
+def test_interrupt_records_a_launch_or_marks_a_prepared_round(world):
+  s, card, hid, _ = seed(world)
+  launched(s, UNIT, "running")
+  foreman(s, UNIT, [{"round": 1, "runcard": card, "launch": 1, "head": "a" * 40, "phase": "prepared", "dispatch_id": "d1", "outcome": None, "posted_at": None}])
+  code, out = world.run("runcard", "open", "--skill", "interrupt", "--artifact", UNIT)
+  assert code == 0, out
+  icard = out.split()[-1]
+  code, out = world.run("interrupt", "--unit", UNIT, "--launch", 1, "--runcard", icard)
+  assert code == 0 and out.strip() == "U07 launch 1 interrupted" and launches_of(s)[0]["status"] == "interrupted"
+  code, out = world.run("interrupt", "--unit", UNIT, "--launch", 1, "--runcard", icard)
+  assert code == 1 and "interrupt: U07 launch 1 is already terminal (interrupted)" in out
+  code, out = world.run("interrupt", "--unit", UNIT, "--round", 1, "--runcard", icard)
+  rounds = json.loads(s.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"]
+  assert code == 0 and (rounds[0]["phase"], rounds[0]["outcome"]) == ("collected", "not run (interrupted: owner)")
+  code, out = world.run("interrupt", "--unit", UNIT, "--round", 1, "--runcard", icard)
+  assert code == 1 and "interrupt: U07 round 1 is not a prepared round (collected)" in out
+  code, out = world.run("interrupt", "--unit", UNIT, "--round", 2, "--runcard", icard)
+  assert code == 1 and "interrupt: U07 has no round 2" in out
+  journal = s.path("journal").read_text(encoding="utf-8")
+  assert "U07 launch 1 interrupted" in journal and "U07 round 1 interrupted: owner" in journal
+
+
+def test_clean_refuses_until_terminal_then_removes_what_it_can_prove(world, monkeypatch):
+  s, card, hid, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0
+  assert world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)[0] == 0
+  assert world.run("record-launch", "--unit", UNIT, "--runcard", card)[0] == 0
+  r1 = s.path("worktrees", UNIT, "r1")
+  code, out = world.run("runcard", "open", "--skill", "clean", "--artifact", UNIT)
+  ccard = out.split()[-1]
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", ccard)
+  assert code == 1 and "clean: U07 launch 1 is not terminal" in out and r1.is_dir()
+  Path(launches_of(s)[0]["result_file"] + ".exit").write_text("0\n", encoding="utf-8")
+  assert world.run("record-launch", "--unit", UNIT, "--exit", 0, "--runcard", card)[0] == 0
+  foreman(s, UNIT, [{"round": 1, "runcard": card, "launch": 1, "head": "a" * 40, "phase": "prepared", "dispatch_id": "d1", "outcome": None, "posted_at": None}])
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", ccard)
+  assert code == 1 and "clean: U07 round 1 is not terminal (prepared)" in out and r1.is_dir()
+  foreman(s, UNIT, [{"round": 1, "runcard": card, "launch": 1, "head": "a" * 40, "phase": "posted", "dispatch_id": "d1", "outcome": "clean", "posted_at": "2026-11-03T01:00:00Z"}])
+  review = s.path("review", UNIT, f"pr{PR}")
+  review.parent.mkdir(parents=True, exist_ok=True)
+  git(["worktree", "add", "-q", "--detach", str(review), "HEAD"], world.repo)
+  git(["update-ref", f"refs/superegm/pr/{PR}", "HEAD"], world.repo)
+  (review / "scratch.txt").write_text("unsaved\n", encoding="utf-8")
+  (r1 / "scratch.txt").write_text("unsaved\n", encoding="utf-8")
+  stray = s.path("worktrees", UNIT, "r9")
+  git(["worktree", "add", "-q", "--detach", str(stray), "HEAD"], world.repo)
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", ccard)
+  assert code == 1 and "uncommitted changes" in out and review.is_dir() and r1.is_dir()   # EGM's dirty refusal on a review worktree; nothing removed
+  (review / "scratch.txt").unlink()
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", ccard)
+  assert code == 0, out
+  assert not review.exists() and not r1.exists()                      # a builder worktree goes dirty or not: the typed skill is the owner's decision
+  assert stray.is_dir() and f"kept {stray}: no launch records it" in out   # keeps what it cannot prove
+  assert subprocess.run(["git", "-C", str(world.repo), "rev-parse", "--verify", "-q", f"refs/superegm/pr/{PR}"], capture_output=True).returncode != 0
+  assert "worktrees" not in git(["worktree", "list", "--porcelain"], world.repo).replace(str(stray), "")
+  assert "U07 cleaned" in s.path("journal").read_text(encoding="utf-8")
+
+
+from superegm.launch_builder import DOD_RESULT_RE
+
+def test_builder_orders_carry_the_discipline_and_the_dod_results_form():
+  text = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8")
+  assert text.startswith("<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the implementer prompt, receiving-code-review and test-driven-development absorbed into the builder orders. -->\n")
+  for form in ("follow the Steps in order", "test first", "one `test(S<n>)` commit then one `feat(S<n>)` commit per Step",
+               "paste each item's output in the PR body under its item number", "`git push origin <branch>`", "never to any other branch",
+               "**draft** pull request", "`Closes #<issue>`", "never retarget or close it", "**Deviation (<kind>):**", "interface | dod | test | other",
+               "verify each review finding against the code before changing anything", "**Reply <fid>:** fixed | contested — <reason>",
+               "finding upheld", "finding overruled", "**Builder status:** DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT",
+               "- (a) <option>", "the first the builder's own proposal", "never spawn", "never touches files outside its scope paths", "never merges",
+               "### DoD <n>", "pytest <test path>::<test name> -q", "pytest <test path> -k <test name> -q",
+               "test(S<n>): <test name>", "feat(S<n>): <test name>"):
+    assert form in text, form
+  assert "ask your human partner" not in text and "You're absolutely right" not in text
+  sample = f"U07\n\n### DoD 1\n{F}\nchecked by superegm tdd-order\n{F}\n\n### DoD 2\n{F}\n$ pytest tests/unit/test_worker.py -q\n1 passed\n{F}\n\nCloses #7\n"
+  assert [(m.group(1), m.group(2).splitlines()[-1]) for m in DOD_RESULT_RE.finditer(sample)] == [("1", "checked by superegm tdd-order"), ("2", "1 passed")]
+  assert sample.splitlines()[0] == "U07" and sample.rstrip().splitlines()[-1] == "Closes #7"
+
+
+@pytest.mark.parametrize("skill, line, sentence", [
+  ("interrupt", "superegm interrupt --unit <unit> (--launch <n> | --round <n>) --runcard <id>", "an owner's decision is not a guess"),
+  ("clean", "superegm clean --unit <unit> --runcard <id>", "refuses while any launch or round of the unit is not terminal, and keeps what it cannot prove"),
+])
+def test_interrupt_and_clean_skill_bodies(skill, line, sentence):
+  text = (ROOT / f"skills/{skill}/SKILL.md").read_text(encoding="utf-8")
+  body = text.split("---", 2)[2]
+  assert len(body.encode("utf-8")) <= 24_000 and "stub" not in body.lower()
+  assert "In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first." in body
+  assert f"superegm runcard open --skill {skill} --artifact <unit>" in body and line in body and "superegm runcard close <id>" in body
+  assert sentence in body and "every effect refuses without an open run card" in body
+
+
+REMOVED = re.compile(r"run_folder|run-folder|--not-run|--wave\b|\begm[-/_]|foreman_<|head-moved|\bdefer\b|whoever picks|merge locally|"
+                     r"completion notice|Astra inspect|claudex|no-teams|dangerous|publish")
+
+@pytest.mark.parametrize("path", ["skills/plan/scripts/superegm/launch.py", "skills/plan/scripts/superegm/launch_builder.py",
+                                  "skills/plan/scripts/superegm/record_launch.py", "skills/plan/scripts/superegm/interrupt.py",
+                                  "skills/plan/scripts/superegm/clean.py", "skills/wave/references/builder_orders.md",
+                                  "skills/interrupt/SKILL.md", "skills/clean/SKILL.md"])
+def test_no_removed_mechanism_is_named_in_this_units_files(path):
+  hits = [l for l in (ROOT / path).read_text(encoding="utf-8").splitlines() if REMOVED.search(l)]
+  assert hits == [], hits
+
+
+@pytest.mark.parametrize("argv", [
+  ["launch"], ["launch-builder", "--unit", UNIT, "--round", "1"], ["record-launch", "--unit", UNIT],
+  ["interrupt", "--unit", UNIT, "--launch", "1"], ["clean", "--unit", UNIT],
+])
+def test_every_writing_subcommand_refuses_without_its_card(world, monkeypatch, argv):
+  s, card, hid, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  launched(s, UNIT, "running")
+  code, out = world.run("runcard", "open", "--skill", "plan", "--artifact", str(next(world.repo.glob("docs/**/*.md"))))
+  other = out.split()[-1]
+  code, out = world.run(*argv, "--runcard", other)
+  assert code == 1 and out.startswith("superegm: runcard: "), out
+  code, out = world.run(*argv, "--runcard", "c-missing")
+  assert code == 1 and out.startswith("superegm: runcard: "), out
+  assert launches_of(s)[0]["status"] == "running" and "launched" not in state_of(s)["units"][UNIT]
