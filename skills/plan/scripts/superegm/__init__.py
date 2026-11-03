@@ -1091,6 +1091,9 @@ class Handoff:
     if new_text != text:
       atomic_write(self.plan_path, new_text)
       self.plan = Plan(self.plan_path)
+    # The store's copy: `require_frozen_units` compares a filed unit's section
+    # in the plan file with the one stored here.
+    atomic_write(self.store.path("plan"), self.plan.text)
     units = {u: self.plan.units[u].to_json(self.graph.wave[u], self.graph.preds[u])
              for u in self.graph.order}
     data = {"handoff_id": self.handoff_id, "repo": self.config["repo"],
