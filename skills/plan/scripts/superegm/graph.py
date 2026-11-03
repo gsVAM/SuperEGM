@@ -223,8 +223,27 @@ class Handoff(core.Handoff):
     self.state = require_free_store(state, self.handoff_id)
     store.handoff_id = self.handoff_id
     self.check_labels()
+    self.check_frozen()
+
+  def filed(self, uid: str):
+    """The unit's issue number once filed, else None."""
+    return ((self.state.get("units") or {}).get(uid) or {}).get("number")
+
+  def check_frozen(self) -> None:
+    """A filed unit's section in the plan file equals the stored handoff_plan.md's (spec section 7)."""
+    stored_path = self.store.path("plan")
+    stored = Plan(stored_path) if stored_path.is_file() else None
+    for uid, record in (self.state.get("units") or {}).items():
+      if not record.get("number"):
+        continue
+      if stored is None or uid not in stored.units or uid not in self.plan.units \
+          or core.unit_section_text(self.plan, uid) != core.unit_section_text(stored, uid):
+        raise core.HandoffError(f"graph: {uid} is filed (#{record['number']}) and its section differs "
+                                "from the stored handoff_plan.md")
 
   def render_unit(self, uid: str) -> str:
+    if self.filed(uid) is not None:
+      return core.unit_file_body(self.unit_file(uid)) + "\n"
     unit = self.plan.units[uid]
     shared = "; ".join(f"`{path}`: " + ", ".join(f"after {self.ref(o)}" if k == "after" else f"before {self.forward_ref(o)}"
                                                  for k, o in orders) for path, orders in unit.shared)
@@ -265,7 +284,8 @@ class Handoff(core.Handoff):
             "units": units}
     core.atomic_write(self.store.path("units"), data)
     for uid in g.order:
-      core.atomic_write(self.unit_file(uid), self.unit_file_text(uid))
+      if self.filed(uid) is None:
+        core.atomic_write(self.unit_file(uid), self.unit_file_text(uid))
     core.atomic_write(self.store.path("bodies"), self.bodies_text())
     self.state.update({"handoff_id": self.handoff_id, "repo": self.config["repo"],
                        "remote": self.config["remote"], "repo_root": str(self.repo_root),
