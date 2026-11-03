@@ -10,6 +10,8 @@ WRITES = frozenset()  # the store kinds this subcommand writes
 
 QUESTION_RE = re.compile(r"^## Q(\d+) (.+)$")
 OPTION_RE = re.compile(r"^- \(([a-z])\) (.+)$")
+ANSWER_RE = re.compile(r"^Q(\d+): \(([a-z])\)\s*$")
+NOTE_KEYS = {"reason": "reason", "would change my mind": "would_change"}
 
 
 def parse_questions(text: str) -> list[dict]:
@@ -39,6 +41,33 @@ def parse_questions(text: str) -> list[dict]:
     if len(question["options"]) < 2:
       raise ValueError(f"{question['id']}: fewer than two options")
   return questions
+
+
+def parse_verdict(text: str, questions: list[dict]) -> dict[str, dict]:
+  """`Q<n>: (<id>)` lines, each with optional `reason:` and `would change my mind:`
+  lines; a verdict may answer a subset (coverage is `record`'s check)."""
+  options = {q["id"]: q["options"] for q in questions}
+  answers = {}
+  last = None
+  for n, line in enumerate(text.splitlines(), start=1):
+    if not line.strip():
+      continue
+    if match := ANSWER_RE.match(line):
+      qid, oid = f"Q{match.group(1)}", match.group(2)
+      if qid not in options:
+        raise ValueError(f"unknown question {qid}")
+      if oid not in options[qid]:
+        raise ValueError(f"{qid}: unknown option ({oid})")
+      if qid in answers:
+        raise ValueError(f"duplicate answer {qid}")
+      last = answers[qid] = {"option": oid, "reason": None, "would_change": None}
+      continue
+    key, sep, value = line.partition(":")
+    if sep and key.strip().lower() in NOTE_KEYS and last is not None:
+      last[NOTE_KEYS[key.strip().lower()]] = value.strip()
+    else:
+      raise ValueError(f"line {n}: expected `Q<n>: (<id>)`")
+  return answers
 
 
 def register(subparsers):
