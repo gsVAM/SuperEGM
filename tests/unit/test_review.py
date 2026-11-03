@@ -214,3 +214,25 @@ def test_review_open_cycles(world):
   rounds(world, rid2, cid, [[]])
   assert status(world, rid2, cid)[0] == 0 and opened(world)[2] == rid2                # converged, same bytes: same cycle
   assert opened(world, text=SPEC.replace("Text.", "Changed."))[2] == f"spec-{SLUG}-c3"   # a spec change after convergence
+
+
+# ---------------------------------------------------------------- S4: `review record`
+
+def test_review_record_writes_the_round(world):
+  spec, cid, rid = opened(world, astra="on")
+  sha = hashlib.sha256(spec.read_bytes()).hexdigest()
+  code, out = record(world, rid, 1, "design", [F("design", 1, 1), F("design", 1, 2, "low")], cid)
+  assert (code, out.strip()) == (0, "round 1 design recorded, what_ran not run (zoom-out: no record)"), out
+  rnd = rjson(world, rid, "round-1.json")
+  assert (rnd["round"], rnd["runcard"], rnd["artifact_sha256"], rnd["builder_contested"]) == (1, cid, sha, [])
+  design = rnd["reviewers"]["design"]
+  assert (design["isolation"], design["model"], design["effort"], design["not_run"]) == ("clean", "inherit:opus", "inherit:high", None)
+  assert [(f["id"], f["severity"], f["regression"], f["disposition"], f["ruling"]) for f in design["findings"]] == [
+      ("design-1-1", "high", "no", None, None), ("design-1-2", "low", "no", None, None)]
+  assert "what_ran not run (astra: no record)" in record(world, rid, 1, "zoom-out", [], cid)[1]   # an empty file is a record
+  assert record(world, rid, 1, "astra", cid=cid, not_run="result.json: failed")[0] == 0        # the lane's not-run counts
+  rnd = rjson(world, rid, "round-1.json")
+  assert rnd["what_ran"] == "completed" and rnd["reviewers"]["astra"]["not_run"] == "result.json: failed"
+  assert record(world, rid, 1, "design", [F("design", 1, 1)], cid)[0] == 0                     # a retry's record replaces the first
+  assert len(rjson(world, rid, "round-1.json")["reviewers"]["design"]["findings"]) == 1
+  assert rjson(world, rid)["astra_incomplete"] == 1
