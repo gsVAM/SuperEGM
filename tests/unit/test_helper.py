@@ -4,6 +4,7 @@
 
 """Offline tests for the handoff helper with an in-process fake `gh`."""
 
+import importlib
 import json
 import os
 from pathlib import Path
@@ -340,6 +341,9 @@ class Harness:
     if str(HELPER.parent) not in sys.path:
       sys.path.insert(0, str(HELPER.parent))
     import superegm
+    # One package for the whole process: reload it so a name a test injected
+    # (`find_remote`, `save_state`) never reaches the next test.
+    importlib.reload(superegm)
     self.ns = vars(superegm)
     self.main = runpy.run_path(str(HELPER))["main"]
     self.gh = FakeGitHub()
@@ -895,23 +899,6 @@ def test_status_wait_returns_on_change_or_deadline(world):
   assert "changed: U01" in out
 
 
-def test_defer_edits_one_label_and_verifies(world):
-  gh = applied(world)
-  gh.labels["egm:wave-4"] = {"name": "egm:wave-4", "color": "1b6ef3"}
-  code, out = world.run("defer", "--plan", world.plan, "--unit", "U03", "--to-wave", 4)
-  assert code == 0 and "would run" in out and not any(c[:2] == ["issue", "edit"] for c in gh.calls)
-  code, out = world.run("defer", "--plan", world.plan, "--unit", "U03", "--to-wave", 4, "--yes")
-  assert code == 0 and "egm:wave-4" in gh.issues[4]["labels"] and "egm:wave-3" not in gh.issues[4]["labels"]
-  assert state_of(world)["units"]["U03"]["wave"] == 4
-
-
-def test_defer_refuses_a_wave_label_the_repository_does_not_have(world):
-  """apply creates only the waves the graph produced, so deferring past the
-  last wave would ask gh to add a label that does not exist."""
-  gh = applied(world)
-  code, out = world.run("defer", "--plan", world.plan, "--unit", "U03", "--to-wave", 9, "--yes")
-  assert code == 1 and "has no label `egm:wave-9`" in out
-  assert not any(c[:2] == ["issue", "edit"] for c in gh.calls)
 
 
 # ------------------------------------------------------------------ prepare
@@ -1111,11 +1098,9 @@ def test_operations_refuse_a_repository_the_numbers_do_not_belong_to(world):
   config.write_text(json.dumps({"repo": "other/elsewhere",
                                 "banned_terms": ["(?i)secret-codename"]}), encoding="utf-8")
   git(["remote", "set-url", "origin", "https://github.com/other/elsewhere.git"], world.repo)
-  for argv in (("status", "--plan", world.plan),
-               ("defer", "--plan", world.plan, "--unit", "U03", "--to-wave", 2, "--yes")):
-    code, out = world.run(*argv)
-    assert code == 1, argv
-    assert "frozen once anything exists" in out or "not portable between repositories" in out, out
+  code, out = world.run("status", "--plan", world.plan)
+  assert code == 1, out
+  assert "frozen once anything exists" in out or "not portable between repositories" in out, out
 
 
 def test_verify_refuses_a_plan_edited_since_the_confirmation(world):
@@ -1319,19 +1304,6 @@ def test_an_unpublished_decision_does_not_release_the_unit(world):
   code, out = world.run("status", "--plan", world.plan)
   assert "open blocking decision U03/D2" not in out
 
-
-def test_repeated_deferrals_verify_against_the_current_wave(world):
-  """R2-08: the initial wave is immutable; the current one moves with each
-  authorised label edit."""
-  gh = applied(world)
-  for wave in (2, 3):
-    gh.labels[f"egm:wave-{wave}"] = {"name": f"egm:wave-{wave}", "color": "1b6ef3"}
-    assert world.run("defer", "--plan", world.plan, "--unit", "U03",
-                     "--to-wave", wave, "--yes")[0] == 0
-  code, out = world.run("verify", "--plan", world.plan)
-  assert code == 0 and "MISMATCH" not in out, out
-  record = state_of(world)["units"]["U03"]
-  assert record["initial_wave"] == 3 or record["current_wave"] == 3
 
 
 

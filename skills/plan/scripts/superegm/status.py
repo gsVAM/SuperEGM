@@ -1,0 +1,80 @@
+# Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
+# Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module.
+
+"""superegm status: landed and ready sets, PRs, CI; refuses without a complete receipt."""
+
+import superegm as core
+
+
+def register(subparsers):
+  p = core.add_parser(subparsers, "status", "landed and ready sets, PRs, CI; refuses without a complete receipt")
+  p.add_argument("--wait", type=int, help="seconds; exit when a unit changes or the deadline passes")
+  p.add_argument("--watch", action="append", help="U03=412 records that PR for the unit")
+  p.add_argument("--confirm-landed", action="append", help="unit the user confirmed landed")
+  p.set_defaults(run=run)
+
+
+def run(args):
+  plan = core.locate(args)
+  handoff = core.Handoff(plan)
+  state = handoff.state
+  core.require_receipt(state)
+  core.require_repo(handoff)
+  core.require_confirmed_plan(handoff)
+  core.require_reviewed_pair(handoff)
+  state.setdefault("units", {})
+  if args.wait and (args.watch or args.confirm_landed):
+    raise core.HandoffError(
+        "--wait only watches; it does not record a choice. Run `status --watch "
+        "<unit>=<pr>` or `--confirm-landed <unit>` on its own first, then "
+        "`status --wait`.")
+  for item in args.watch or []:
+    uid, _, number = item.partition("=")
+    if uid not in handoff.plan.units or not number.isdigit():
+      raise core.HandoffError(f"--watch takes U<nn>=<pr number>, got {item}")
+    pr = core.read_pr(handoff.config["repo"], int(number))
+    pr["head_seen_at"] = core.NOW()
+    record = state["units"].setdefault(uid, {})
+    # The selection is the user's and is merged on its own terms; `pr` below is
+    # only the first observation of it.
+    # One write: a selection whose observation describes a different PR would
+    # send `prepare` to the old one.
+    record["watch"] = {"number": int(number), "at": core.now_iso()}
+    record["pr"] = pr
+    record["status"] = None
+  for uid in args.confirm_landed or []:
+    view = core.unit_view(handoff, uid)
+    if view["pr"] or not core.issue_closed_completed(handoff, uid):
+      raise core.HandoffError(
+          f"--confirm-landed {uid} is only for an issue closed as completed with "
+          f"no watched PR; {uid} is {view['status']}")
+    target = state["units"].setdefault(uid, {})
+    target["landed_confirmed"] = core.now_iso()
+    target.pop("landed_confirmation_void", None)
+  fingerprint = lambda s: {u: (v["pr"], v["head"], v["status"], v["landed"],
+                              v.get("issue_state"), v.get("pr_state"),
+                              v.get("base_ref"), v.get("base_sha"))
+                           for u, v in s["units"].items()}
+  previous = fingerprint(state["status"]) if state.get("status") else None
+  summary, open_blocking = core.status_pass(handoff, save=not args.wait)
+  if args.wait:
+    deadline = core.NOW() + args.wait
+    previous = previous if previous is not None else fingerprint(summary)
+    while True:
+      current = fingerprint(summary)
+      changed = sorted(u for u in current if current[u] != previous.get(u))
+      if changed:
+        print("changed: " + ", ".join(changed))
+        break
+      if core.NOW() >= deadline:
+        print("deadline: no change")
+        break
+      core.SLEEP(min(core.WAIT_INTERVAL, max(1, deadline - core.NOW())))
+      summary, open_blocking = core.status_pass(handoff, save=False)
+  if args.wait:
+    # One write, when the wait is over: while it waits it only reads, so no
+    # other command can be overwritten by a sleeping watcher.
+    core.save_state(handoff.artifact_dir, state)
+  core.print_status(handoff, summary, open_blocking)
+  return 0
