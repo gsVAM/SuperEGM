@@ -13,6 +13,7 @@ WRITES = frozenset(["judges", "runcards"])  # the store kinds this subcommand wr
 SKILLS = frozenset(["judges"])  # the skills whose card this subcommand accepts
 PARENT_SKILLS = ("review-spec", "review-plan", "plan", "wave", "integrate")
 CAP = 5  # rounds per panel
+ISOLATION_RE = re.compile(r"^(clean|exposed:.+)$")
 
 QUESTION_RE = re.compile(r"^## Q(\d+) (.+)$")
 OPTION_RE = re.compile(r"^- \(([a-z])\) (.+)$")
@@ -221,10 +222,104 @@ def cmd_open(args, store) -> int:
   return 0
 
 
+def compute_verdict(panel: dict, questions: list[dict]) -> dict:
+  """Per-question convergence over the recorded rounds in order: a question
+  converges in the first round where every answering judge chose one option
+  and those judges span `min_vendors` vendors; `degraded` when any round had
+  fewer than two answering vendors."""
+  members, min_vendors = panel["judges"], panel["min_vendors"]
+  result = {q["id"]: {"converged": False, "option": None, "round": None, "positions": {}, "vendors": [],
+                      "reason": None} for q in questions}
+  open_ids = [q["id"] for q in questions]
+  degraded = False
+  rounds = sorted(panel["rounds"], key=int)
+  for key in rounds:
+    entries = panel["rounds"][key]
+    answered = [j for j in members if "options" in entries.get(j, {})]
+    if len({members[j]["vendor"] for j in answered}) < 2:
+      degraded = True
+    for qid in list(open_ids):
+      positions = {}
+      for judge in answered:
+        option = entries[judge]["options"].get(qid)
+        if option:
+          positions.setdefault(option, []).append(judge)
+      if not positions:
+        continue
+      vendors = sorted({members[j]["vendor"] for judges in positions.values() for j in judges})
+      question = result[qid]
+      question.update(positions={k: positions[k] for k in sorted(positions)}, vendors=vendors, reason=None)
+      if len(positions) > 1:
+        continue
+      if len(vendors) < min_vendors:
+        question["reason"] = f"vendors {len(vendors)} < min_vendors {min_vendors}"
+        continue
+      question.update(converged=True, option=next(iter(positions)), round=int(key))
+      open_ids.remove(qid)
+  return {"questions": result, "open": open_ids, "converged": not open_ids, "degraded": degraded,
+          "cap_reached": bool(open_ids) and len(rounds) >= CAP}
+
+
+def open_questions(panel: dict, questions: list[dict], before_round: int) -> list[str]:
+  """The ids not converged by the rounds before `before_round`."""
+  earlier = {**panel, "rounds": {k: v for k, v in panel["rounds"].items() if int(k) < before_round}}
+  return compute_verdict(earlier, questions)["open"]
+
+
 def cmd_record(args, store) -> int:
   panel = load_panel(store, args.panel)
   panel_card(args, store, panel)
-  raise core.HandoffError("judges: record is not built yet")
+  pid, n, judge = panel["id"], args.round, args.judge
+  if judge not in panel["judges"]:
+    raise core.HandoffError(f"judges: unknown judge {judge}")
+  if n > CAP:
+    raise core.HandoffError(f"judges: cap of {CAP} rounds reached")
+  if n < 1:
+    raise core.HandoffError(f"judges: round must be 1..{CAP}")
+  folder = store.path("judges", pid)
+  if n >= 2 and not (folder / f"round-{n - 1}" / "diff.md").is_file():
+    raise core.HandoffError(f"judges: round {n - 1} not diffed")
+  rounds = panel["rounds"].setdefault(str(n), {})
+  if judge in rounds:
+    raise core.HandoffError(f"judges: round {n}: {judge} already recorded")
+  questions = parse_questions(core.read_text(folder / "question.md"))
+  member = panel["judges"][judge]
+  reason, text = None, None
+  if args.verdict:
+    if not args.isolation:
+      raise core.HandoffError("judges: --isolation required with --verdict")
+    if not ISOLATION_RE.match(args.isolation):
+      raise core.HandoffError("judges: isolation must be clean or exposed:<what>")
+    path = Path(args.verdict).expanduser()
+    if not path.is_file():
+      raise core.HandoffError(f"judges: verdict file {path} does not exist")
+    text = core.read_text(path)
+    try:
+      answers = parse_verdict(text, questions)
+      missing = [q for q in open_questions(panel, questions, n) if q not in answers]
+      if missing:
+        raise ValueError(f"no answer for {missing[0]}")
+    except ValueError as error:
+      raise core.HandoffError(f"judges: verdict file: {error}")
+    isolation = args.isolation
+    model = args.model or f"{member['model']}:{member['model']}"
+    effort = args.effort or f"{member['effort']}:{member['effort']}"
+  elif args.result:
+    raise core.HandoffError("judges: --result is not built yet")
+  else:
+    reason = args.not_run
+  if reason:
+    rounds[judge] = {"not_run": reason, "recorded_at": core.now_iso()}
+    core.journal(store, f"judges {pid}: round {n} {judge} not run ({reason})")
+    print(f"not run ({reason})")
+  else:
+    core.atomic_write(folder / f"round-{n}" / f"{judge}.md", text)
+    rounds[judge] = {"isolation": isolation, "model": model, "effort": effort,
+                     "options": {q: a["option"] for q, a in answers.items()}, "recorded_at": core.now_iso()}
+    core.journal(store, f"judges {pid}: round {n} {judge} recorded ({isolation})")
+    print("recorded")
+  write_json(folder / "panel.json", panel)
+  return 0
 
 
 COMMANDS = {"open": cmd_open, "record": cmd_record}
