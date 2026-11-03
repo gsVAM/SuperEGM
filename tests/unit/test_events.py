@@ -6,7 +6,6 @@
 
 import json
 import os
-import re
 from pathlib import Path
 
 import pytest
@@ -26,8 +25,8 @@ def seed(world, monkeypatch, units=None):
   1000 + n, since `status` reads every unit's issue under its complete receipt) plus an open
   card from `runcard open --skill wave --artifact <repo>/docs/designs/sample.md` (`assert code == 0, out`).
   Stubs `world.ns["require_frozen_units"]`: the package name every module reaches as `core.<name>`.
-  EGM's fake `gh` has no comments endpoint: wraps `gh.do_api` so `/issues/<n>/comments` answers
-  `gh.ok([gh.comments.get(n, [])])`. Returns (gh, store(world.repo), card id)."""
+  Comments come from conftest's fake (`/issues/<n>/comments` answers `gh.comments.get(n, [])`), since
+  every `status` run reads them. Returns (gh, store(world.repo), card id)."""
   units = {"U01": 2, "U02": 3, "U03": 4} | (units or {})
   assert world.run("graph", "--plan", world.plan)[0] == 0
   path = world.artifacts / "state.json"
@@ -39,12 +38,6 @@ def seed(world, monkeypatch, units=None):
   for n in units.values():
     gh.issues[n] = {"number": n, "id": 1000 + n, "labels": [], "state": "open", "state_reason": None}
   world.ns["require_frozen_units"] = lambda handoff: None
-  real = gh.do_api
-
-  def do_api(args):
-    match = re.fullmatch(r"repos/[^/]+/[^/]+/issues/(\d+)/comments", gh.endpoint_of(args).partition("?")[0])
-    return gh.ok([gh.comments.get(int(match.group(1)), [])]) if match else real(args)
-  monkeypatch.setattr(gh, "do_api", do_api)
   code, out = world.run("runcard", "open", "--skill", "wave", "--artifact", str(world.spec), card=None)
   assert code == 0, out
   return gh, store(world.repo), out.strip()
@@ -66,11 +59,12 @@ def put(path, text):
 
 
 def pr(gh, ci=None, merged=None, number=70, sha=SHA, issue=2):
-  """make_pr(gh, number, sha, merged=merged, closes=[(REPO, issue)]) plus its gh.graphql[issue] node; `ci`
-  adds one completed `tests` check run in gh.check_runs[sha] (green → success, red → failure) and a success
-  gh.combined[sha]."""
+  """make_pr(gh, number, sha, merged=merged, closes=[(REPO, issue)]) plus its gh.graphql[issue] node (the live
+  dict, so a later `gh.prs[number].update(...)` reaches both reads); `ci` adds one completed `tests` check run in
+  gh.check_runs[sha] (green → success, red → failure) and a success gh.combined[sha]."""
   node = make_pr(gh, number, sha, merged=merged, closes=[(REPO, issue)])
-  gh.graphql[issue] = [{**node, "repository": {"nameWithOwner": REPO}}]
+  node["repository"] = {"nameWithOwner": REPO}
+  gh.graphql[issue] = [node]
   if ci:
     gh.check_runs[sha] = [{"name": "tests", "status": "completed", "conclusion": "success" if ci == "green" else "failure"}]
     gh.combined[sha] = {"state": "success", "statuses": []}
