@@ -571,3 +571,19 @@ def test_a_label_prefix_with_reserved_url_characters_still_recovers(tmp_path, ca
   listing = [c for c in w.gh.calls if c[0] == "api" and "/issues?" in c[1]]
   assert listing and "%2B" in listing[0][1], listing
   assert w.run("verify", "--spec", spec, "--runcard", card)[0] == 0
+
+
+def test_the_file_skill_body_runs_the_filing_in_order_and_asks_one_question():
+  body = (ROOT / "skills/file/SKILL.md").read_text(encoding="utf-8").split("---", 2)[2]
+  assert len(body.encode("utf-8")) <= 24_000
+  assert "In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first." in body
+  order = ["runcard open --skill file", "gate --pass", "dry-run", "Create these <n> issues and <m> links on OWNER/NAME as handoff_dryrun.md shows?",
+           "apply --yes", "verify", "runcard close"]
+  positions = [body.index(s) for s in order]
+  assert positions == sorted(positions), order
+  assert "Create, Change the plan, Stop" in body
+  assert "Create: automatic (leavemealone)" in body
+  assert "A filed issue body is never edited; a deviation during the build is a comment on the issue (§10)." in body
+  assert "filings[]" in body and "base_at_start" in body and "/superegm:wave" in body
+  for helper_call in re.findall(r"<HELPER>'\s+([a-z-]+)((?:\s+--[a-z-]+(?:\s+'[^']*'|\s+<[^>]*>)?)*)", body):
+    assert helper_call[0] in ("runcard", "gate", "dry-run", "apply", "verify"), helper_call
