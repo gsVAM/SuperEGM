@@ -465,3 +465,15 @@ def test_interrupt_and_clean_skill_bodies(skill, line, sentence):
   assert "In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first." in body
   assert f"superegm runcard open --skill {skill} --artifact <unit>" in body and line in body and "superegm runcard close <id>" in body
   assert sentence in body and "every effect refuses without an open run card" in body
+
+
+REMOVED = re.compile(r"run_folder|run-folder|--not-run|--wave\b|\begm[-/_]|foreman_<|head-moved|\bdefer\b|whoever picks|merge locally|"
+                     r"completion notice|Astra inspect|claudex|no-teams|dangerous|publish")
+
+@pytest.mark.parametrize("path", ["skills/plan/scripts/superegm/launch.py", "skills/plan/scripts/superegm/launch_builder.py",
+                                  "skills/plan/scripts/superegm/record_launch.py", "skills/plan/scripts/superegm/interrupt.py",
+                                  "skills/plan/scripts/superegm/clean.py", "skills/wave/references/builder_orders.md",
+                                  "skills/interrupt/SKILL.md", "skills/clean/SKILL.md"])
+def test_no_removed_mechanism_is_named_in_this_units_files(path):
+  hits = [l for l in (ROOT / path).read_text(encoding="utf-8").splitlines() if REMOVED.search(l)]
+  assert hits == [], hits
