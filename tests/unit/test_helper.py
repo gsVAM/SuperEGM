@@ -1881,3 +1881,15 @@ def test_an_interrupted_round_is_collected_but_its_worktree_is_never_removed(wor
   (folder / "result.json").write_text(json.dumps({"status": "failed"}), encoding="utf-8")
   code, out = world.run("prepare", "--plan", world.plan, "--unit", "U01", "--round", 1, "--clean")
   assert code == 0 and "cleaned" in out, out
+
+
+def test_helper_runs_under_its_new_name(world):
+  """U01: EGM's helper, one file, renamed; every contract still EGM's."""
+  assert HELPER == ROOT / "skills/plan/scripts/superegm.py"
+  assert world.ns["build_parser"]().prog == "superegm.py"
+  code, out = world.run("graph", "--plan", world.plan)
+  assert code == 0, out
+  assert "<!-- egm:generated start -->" in world.plan.read_text(encoding="utf-8")
+  assert (world.artifacts / "handoff_units.json").is_file()
+  for skill in ("skills/plan/SKILL.md", "skills/wave/SKILL.md"):
+    assert "egm_handoff.py" not in (ROOT / skill).read_text(encoding="utf-8"), skill
