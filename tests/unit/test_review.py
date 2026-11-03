@@ -279,3 +279,25 @@ REC, NR = {"findings": [], "not_run": None}, lambda why: {"findings": [], "not_r
 ])
 def test_what_ran_derivation(review, recs, entry, expect):
   assert derive_what_ran(review, {"reviewers": recs}, entry) == expect
+
+
+# ---------------------------------------------------------------- S7: record refusals
+
+@pytest.mark.parametrize("kind,prior,call,expect", [
+  ("plan", [], dict(n=1, reviewer="readiness"), "review record: --sha256 required for kind plan"),
+  ("plan", [dict(n=1, reviewer="readiness", sha=A)], dict(n=1, reviewer="set", sha="b" * 64), "review record: sha256 differs from the round's"),
+  ("spec", [], dict(n=1, reviewer="comprehension"), "review record: comprehension is not on the panel"),
+  ("spec", [], dict(n=1, reviewer="astra"), "review record: astra is not on the panel"),
+  ("spec", [], dict(n=2, reviewer="design"), "review record: round 1 is next"),
+  ("head", [], dict(n=1, reviewer="change-review", sha=A), "review record: no rounds[] entry for round 1"),
+  ("spec", [], dict(n=1, reviewer="design", lines=["design-1-1 | high | §1"]), ":1: expected 5 fields"),
+  ("spec", [], dict(n=1, reviewer="design", lines=[F("zoom-out", 1, 1)]), ":1: id must be design-1-<n>"),
+])
+def test_record_refusals(world, kind, prior, call, expect):
+  spec, cid, rid = opened(world, kind)
+  for kw in prior:
+    assert record(world, rid, cid=cid, **kw)[0] == 0
+  code, out = record(world, rid, cid=cid, **call)
+  assert code == 1 and expect in out, out
+  if not prior:
+    assert not rpath(world, rid, f"round-{call['n']}.json").exists()
