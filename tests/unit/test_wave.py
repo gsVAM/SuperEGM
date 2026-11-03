@@ -153,3 +153,36 @@ def test_the_loop_never_reviews_what_dispatch_refuses(world, unit, state, why):
   view = json.loads(s.path("state").read_text(encoding="utf-8"))["status"]["units"]["U01"]
   assert unit_state("U01", view, foreman_of(s, "U01"), card_json, {}, NOW) == state
   assert foreman_of(s, "U01")["rounds"] == unit.get("rounds", []), "a refusal writes no round"
+
+
+# ---------------------------------------------------------------- S2: the report file and the end line
+
+
+def test_report_rewrites_the_wave_report_and_prints_the_end_line(world):
+  card = open_wave_card(world)
+  s = wave_store(world,
+      U01={"pr": 70, "head": "a" * 40, "ci": "green", "launches": [{"round": 1, "status": "exited 0"}],
+           "rounds": [{"round": 1, "phase": "posted", "outcome": "clean", "launch": 1, "head": "a" * 40}]},
+      U02={"pr": 71, "head": "b" * 40, "ci": "pending", "launches": [{"round": 1, "status": "running"}],
+           "rounds": [{"round": 1, "phase": "posted", "outcome": "contested: f-1-2", "launch": 1, "head": "b" * 40}]},
+      U03={"launched": False, "ready": True})
+  code, out = world.run("report", "--runcard", card)
+  assert code == 0, out
+  path = s.path("wave_report", 1)
+  assert out.splitlines()[0] == str(path) and path.name == "wave_1_report.md"
+  assert "idle: none" in out and "pending: none" in out and "loop: continuing (in flight: U02)" in out
+  text = path.read_text(encoding="utf-8")
+  assert text.startswith(f"# Wave 1 report\nRun card: {card}\n")
+  assert "- U01 #2: clean · pr #70 head aaaaaaa · ci green · rounds 1 (r1 posted clean) · launch 1 exited 0" in text
+  assert "- U02 #3: active · pr #71 head bbbbbbb · ci pending · rounds 1 (r1 posted contested: f-1-2) · launch 1 running" in text
+  assert "## Non-terminal launches\n- U02 launch 1 running" in text
+  assert "## Heads with pending or absent CI\n- U02 bbbbbbb waiting-for-ci" in text
+  assert "## Ready, unlaunched\n- U03 (slot free)" in text
+  assert "## Stopped\n- none" in text
+  assert not any(c[0] in ("api", "pr", "issue") for c in world.gh.calls), "report reads the store only"
+  assert world.run("report", "--runcard", card)[0] == 0
+  assert path.read_text(encoding="utf-8").count("# Wave 1 report") == 1, "rewritten, not appended"
+  card2 = open_wave_card(world)  # a re-typed wave is the next wave number
+  assert world.run("report", "--runcard", card2)[0] == 0 and s.path("wave_report", 2).is_file()
+  code, out = world.run("report", "--runcard", "no-such-card")
+  assert code == 1 and out.startswith("superegm: runcard: ")  # U03's main prefixes every HandoffError
