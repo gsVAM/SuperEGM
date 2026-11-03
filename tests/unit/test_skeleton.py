@@ -188,3 +188,12 @@ def test_ci_workflow_runs_the_unit_suite_on_pull_request() -> None:
   assert any(s.get("with", {}).get("python-version") == "3.11" for s in steps)
   assert any("pytest tests/unit" in s.get("run", "") for s in steps)
   assert any("pyyaml" in s.get("run", "") for s in steps)
+
+
+def test_readme_skeleton_names_the_install_and_the_sections_u11_fills() -> None:
+  text = (ROOT / "README.md").read_text(encoding="utf-8")
+  assert text.startswith("# SuperEGM\n")
+  for line in ("claude plugin marketplace add gsVAM/superegm", "claude plugin install superegm@superegm",
+               "## Install", "## Before the first run", "## Skills", "## Licence"):
+    assert line in text, line
+  assert "<!-- superegm:u11 -->" in text
