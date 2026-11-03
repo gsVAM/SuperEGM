@@ -1604,3 +1604,33 @@ def test_body_parsers_markers_and_heading():
   import superegm
   assert superegm.DEFAULT_TEMPLATE.splitlines()[0] == "<!-- superegm:handoff={{handoff_id}} unit={{unit_id}} spec={{spec_sha256}} -->"
   assert superegm.TRACKING_TEMPLATE.splitlines()[0] == "<!-- superegm:handoff={{handoff_id}} unit=tracking spec={{spec_sha256}} -->"
+
+
+def test_runcard_open_close_child_and_interrupt(world):
+  import superegm
+  read = lambda rid: json.loads((world.artifacts / f"runcards/{rid}.json").read_text(encoding="utf-8"))
+  code, out = world.run("runcard", "open", "--skill", "plan", "--artifact", world.spec)
+  first = out.strip()
+  assert code == 0 and first == "plan-0001"
+  card = read(first)
+  assert set(card) == {"skill", "artifact", "artifact_sha256", "reviewers", "tiering", "mode", "parent",
+                       "opened_at", "closed_at", "interrupted_at", "produced"}
+  assert card["artifact"] == str(world.spec) and card["artifact_sha256"] == hashlib.sha256(world.spec.read_bytes()).hexdigest()
+  assert card["mode"] == "normal" and card["produced"] == [] and card["closed_at"] is None and card["parent"] is None
+  assert world.run("runcard", "open", "--skill", "wave", "--artifact", world.spec, "--mode", "leavemealone")[1].strip() == "wave-0002"
+  assert read("wave-0002")["mode"] == "leavemealone"
+  code, out = world.run("runcard", "open", "--skill", "judges", "--artifact", "q.md", "--parent", first)
+  child = out.strip()
+  assert code == 0 and read(child)["parent"] == first and read(child)["artifact"] == "q.md"
+  code, out = world.run("runcard", "open", "--skill", "judges", "--artifact", "q.md", "--parent", "plan-9999")
+  assert code == 1 and "runcard: parent plan-9999 not found" in out
+  second = world.run("runcard", "open", "--skill", "plan", "--artifact", world.spec)[1].strip()
+  assert read(first)["interrupted_at"] and read(child)["interrupted_at"] is None and read("wave-0002")["interrupted_at"] is None
+  superegm.card_add(superegm.store(world.repo), second, "produced", "handoff_plan.md")
+  assert read(second)["produced"] == ["handoff_plan.md"]
+  assert world.run("runcard", "close", second) == (0, f"closed {second}\n")
+  assert read(second)["closed_at"]
+  code, out = world.run("runcard", "close", second)
+  assert code == 1 and f"runcard: {second} is closed" in out
+  lines = (world.artifacts / "journal.md").read_text(encoding="utf-8")
+  assert f"runcard open {first} plan" in lines and f"runcard interrupted {first}" in lines and f"runcard close {second}" in lines

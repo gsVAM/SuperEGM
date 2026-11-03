@@ -377,6 +377,8 @@ class Harness:
     self.ns["SLEEP"] = lambda s: (self.sleeps.append(s), self.advance(s))
     self.ns["NOW"] = lambda: self.clock
     self.capsys = capsys
+    self.spec = None
+    self.cards = {}
 
   @staticmethod
   def never(args, cwd, token=None):
@@ -389,6 +391,17 @@ class Harness:
     code = self.main([str(a) for a in argv])
     captured = self.capsys.readouterr()
     return code, captured.out + captured.err
+
+  def open_card(self, skill, artifact):
+    code, out = self.run("runcard", "open", "--skill", skill, "--artifact", artifact, card=None)
+    assert code == 0, out
+    return out.strip()
+
+  def card(self, skill):
+    """One open card per skill on the spec, reused across a test's runs."""
+    if skill not in self.cards:
+      self.cards[skill] = self.open_card(skill, self.spec)
+    return self.cards[skill]
 
 
 def make_world(tmp_path, capsys, monkeypatch, config=None, origin_url=f"https://github.com/{REPO}.git"):
