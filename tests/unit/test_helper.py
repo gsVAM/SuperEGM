@@ -118,26 +118,6 @@ def test_a_dirty_review_worktree_is_never_force_removed(world, tmp_path):
   assert not tree.exists()
 
 
-def test_a_different_design_may_not_reuse_a_directory_that_created_issues(world):
-  """R2-07: the refusal must come before approve overwrites the approval or
-  graph rewrites the artifacts, so the existing handoff stays intact."""
-  applied(world)
-  before = unit_path(world, "U01").read_text(encoding="utf-8")
-  other = world.repo / "docs/designs/other.md"
-  other.write_text(DESIGN.replace("# Webhook", "# Other"), encoding="utf-8")
-  git(["add", "-A"], world.repo)
-  git(["commit", "-qm", "other"], world.repo)
-  code, out = world.run("approve-spec", "--design", other, "--yes", "--runcard", world.open_card("review-spec", other), card=None)
-  assert code == 1 and "new artifact directory" in out and "Nothing was changed" in out
-  state = state_of(world)
-  assert state["design"]["path"].endswith("sample.md")
-  assert state["units"]["U01"]["number"], "the existing handoff must be untouched"
-  assert unit_path(world, "U01").read_text(encoding="utf-8") == before
-
-
-
-
-
 def test_a_completed_label_write_binds_the_destination(world):
   """R3-03: created_anything ignored labels, so a bounded apply that only made
   labels left the destination free to move."""
@@ -249,7 +229,7 @@ def test_store_paths_are_prefixed_by_the_handoff_hex(world):
   assert world.run("graph", "--plan", world.plan)[0] == 0 and (root / "state.json").is_file()
 
 
-WRITES = {"approve_spec": {"approvals", "state"}, "graph": {"state", "plan", "units", "unit", "bodies"},
+WRITES = {"approve_spec": {"approvals"}, "graph": {"state", "plan", "units", "unit", "bodies"},
           "scan": {"file"}, "gate": {"state", "file", "plan", "units", "unit", "bodies"},
           "dry_run": {"state", "file", "plan", "units", "unit", "bodies"}, "apply": {"state", "file"},
           "verify": {"state"}, "status": {"state"}, "launch": {"state", "runcards"}, "decide": {"state", "plan", "units", "unit", "bodies", "file"},
@@ -441,7 +421,7 @@ def test_runcard_refusals(world, setup, unit, reason):
       superegm.require_runcard(args, {"wave", "foreman"})
 
 
-GATED = [(("approve-spec", "--design", "SPEC", "--yes"), "review-spec"), (("graph",), "plan"),
+GATED = [(("approve-spec", "--spec", "SPEC", "--yes"), "review-spec"), (("graph",), "plan"),
          (("gate", "--reviewed", "--round", "1"), "file"), (("dry-run",), "file"), (("apply", "--yes"), "file"),
          (("verify",), "file"), (("status",), "wave"), (("launch",), "wave"),
          (("decide", "--unit", "U03", "--decision", "D2", "--answer", "25"), "plan"),
@@ -468,18 +448,27 @@ def test_every_absorbed_writing_subcommand_is_gated(world, argv, skill):
 
 
 def test_approve_spec_writes_the_approvals_record_with_handoff_id(world):
-  code, out = world.run("approve-spec", "--design", world.spec)
+  """U04: the spec ends in `## Units`, its review is converged, and the record names the review (spec section 8)."""
+  world.spec.write_text(DESIGN + "\n## Units\n\n| Unit | Scope | Blocked by | Size |\n| --- | --- | --- | --- |\n| U01 | queue | — | S |\n",
+                        encoding="utf-8")
+  cid = world.card("review-spec")
+  code, out = world.run("review", "open", "--kind", "spec", "--artifact", world.spec, "--reviewers", "design", "--runcard", cid)
+  assert code == 0, out
+  rid = out.strip()
+  (world.artifacts.parent / "design-1.txt").write_text("", encoding="utf-8")
+  code, out = world.run("review", "record", "--review", rid, "--round", "1", "--reviewer", "design",
+                        "--findings", world.artifacts.parent / "design-1.txt", "--runcard", cid)
+  assert code == 0, out
+  code, out = world.run("approve-spec", "--spec", world.spec)
   assert code == 0 and "Approve | Stop" in out and not (world.artifacts / "state.json").exists()
-  code, out = world.run("approve-spec", "--design", world.spec, "--yes")
+  code, out = world.run("approve-spec", "--spec", world.spec, "--yes")
   assert code == 0, out
   record = json.loads((world.artifacts / "approvals/sample.json").read_text(encoding="utf-8"))
   sha = hashlib.sha256(world.spec.read_bytes()).hexdigest()
   assert set(record) == {"path", "sha256", "commit", "runcard", "review", "approved_at", "amended", "voided_by", "handoff_id"}
   assert record["path"] == str(world.spec) and record["sha256"] == sha and record["handoff_id"] == f"sample-{sha[:6]}"
-  assert record["runcard"] == world.card("review-spec") and record["review"] is None and record["amended"] == [] and record["voided_by"] is None
-  assert len(record["commit"]) >= 7 and git(["rev-parse", "--short", "HEAD"], world.repo).strip().startswith(record["commit"])
-  state = state_of(world)
-  assert "approval" not in state and "pending_approval" not in state and state["design"]["sha256"] == sha
+  assert record["runcard"] == cid and record["review"] == rid and record["amended"] == [] and record["voided_by"] is None
+  assert record["commit"] == git(["rev-parse", "HEAD"], world.repo).strip()
   assert world.run("graph", "--plan", world.plan)[0] == 0
   assert state_of(world)["handoff_id"] == record["handoff_id"]
   assert json.loads((world.artifacts / "handoff_units.json").read_text(encoding="utf-8"))["handoff_id"] == record["handoff_id"]
@@ -569,9 +558,7 @@ def test_removed_mechanisms_are_not_named(path, pattern):
   assert not hits, hits
 
 
-MOVED = [("test_review.py", "test_approve_checks_and_records"),
-         ("test_review.py", "test_approve_refuses_an_untracked_or_ignored_design"),
-         ("test_plan.py", "test_scan_banned_terms_mentions_and_size"),
+MOVED = [("test_plan.py", "test_scan_banned_terms_mentions_and_size"),
          ("test_file.py", "test_apply_creates_in_order_and_rerun_writes_nothing"),
          ("test_file.py", "test_subprocess_command_shape_with_fake_gh_on_path"),
          ("test_file.py", "test_marker_recovery_finds_issues_created_before_a_crash"),

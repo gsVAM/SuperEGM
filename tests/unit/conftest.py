@@ -582,11 +582,23 @@ def mark_launched(world, *units):
 
 def launchable(world):
   """What `launch` checks before the filed units: origin/main (a bare clone the fetch reaches)
-  carrying the spec, the config and a pull_request workflow, and the spec's approval record."""
+  carrying the spec, the config and a pull_request workflow, and the spec's approval record
+  (U04's form: the spec ends in `## Units` and a converged spec review precedes `approve-spec --spec`)."""
   (world.repo / ".github/workflows").mkdir(parents=True)
   (world.repo / ".github/workflows/tests.yml").write_text("on: [push, pull_request]\n", encoding="utf-8")
+  world.spec.write_text(world.spec.read_text(encoding="utf-8") + "\n## Units\n\n| Unit | Scope | Blocked by | Size |\n"
+                        "| --- | --- | --- | --- |\n| U01 | queue | — | S |\n", encoding="utf-8")
   git(["add", "-A"], world.repo); git(["commit", "-qm", "workflow"], world.repo)
-  assert world.run("approve-spec", "--design", world.spec, "--yes")[0] == 0
+  cid = world.card("review-spec")
+  code, out = world.run("review", "open", "--kind", "spec", "--artifact", world.spec, "--reviewers", "design", "--runcard", cid, card=None)
+  assert code == 0, out
+  findings = world.artifacts.parent / "design-1.txt"
+  findings.write_text("", encoding="utf-8")
+  code, out = world.run("review", "record", "--review", out.strip(), "--round", "1", "--reviewer", "design",
+                        "--findings", findings, "--runcard", cid, card=None)
+  assert code == 0, out
+  code, out = world.run("approve-spec", "--spec", world.spec, "--yes")
+  assert code == 0, out
   bare = world.repo.parent / "origin.git"
   git(["clone", "-q", "--bare", str(world.repo), str(bare)], world.repo.parent)
   git(["remote", "set-url", "origin", str(bare)], world.repo)

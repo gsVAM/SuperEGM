@@ -1,6 +1,8 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: panel presets,
-routing table, run card and configuration. Not part of google/elephant-goldfish-model. -->
+routing table, run card and configuration. Not part of google/elephant-goldfish-model.
+Modified by SuperEGM (gsVAM), 2026: section 7's convergence rule and cap live in
+skills/review-spec/references/review_loop.md; the second clean round for document reviews is gone. -->
 
 # Review panels, run card and configuration
 
@@ -257,7 +259,11 @@ round.
 **Cap: 5 rounds, then pause.** At round 5, stop and put the choice to the user
 in one line with the trend and the open findings: continue, accept the
 remainder, or stop. Never start round 6 without their answer. The cap is a
-cost guard, not a quality bar: converging at round 2 is the normal case.
+cost guard, not a quality bar: converging at round 2 is the normal case. The
+rule itself, the cap and the stall predicate are implemented once, in the
+helper's `superegm review status`, and written out in
+`skills/review-spec/references/review_loop.md` section 6: one `completed`,
+clean, non-regressing round converges every kind.
 
 ### When it does not converge, change the thing, not the round
 
@@ -290,7 +296,3 @@ to support two commands running at once, which nobody had asked for. Removing
 concurrency support, rather than fixing the lock a fifth time, deleted that
 defect class outright. The lesson is the general one: when a review stops
 converging, the next move is a deletion, not a patch.
-
-Where the loops differ: the handoff gate may also require two consecutive
-clean rounds, because a document round is cheap. A wave's PR review does not,
-because every round costs an inspect run and a round of builder time.

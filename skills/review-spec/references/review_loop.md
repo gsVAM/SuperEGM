@@ -1,231 +1,203 @@
----
-name: egm-review-loop
-license: Apache-2.0
-disable-model-invocation: true
-description: >-
-  Executes the Antagonistic-Review process from the Elephant-Goldfish
-  Model (EGM) via an automated multi-agent review loop to audit documents
-  against qualitative standards and structural templates, and automatically
-  apply approved fixes. Use when reviewing design docs, READMEs, feature
-  specifications, implementation plans, or verifying document completeness
-  and tone.
----
-
-<!-- Modified by SuperEGM (gsVAM), 2026: moved from skills/egm-review-loop/SKILL.md; Codex line removed. -->
-
+<!-- Copyright 2026 Google LLC. SPDX-License-Identifier: Apache-2.0. -->
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: Astra lane, per-reviewer model and effort, persisted dispositions. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: EGM's review-loop skill rewritten as the one review loop over the helper's `superegm review` subcommands (spec section 8); the stages, the report files and the second clean round are gone. -->
 
-# Goldfish Review: Loop (Orchestration Driver)
+# The review loop
 
-In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.
+The one loop for every review kind: `spec` (this skill), `plan` (`review-plan`, one review per
+unit), `head` (the foreman, one review per pull request) and `integrate`. The helper records
+and judges; the dispatching session dispatches. Every number here comes from the helper:
+`superegm review status` holds the only cap and stall predicates, and every skill asks it.
+`<helper>` is `python3 '${CLAUDE_PLUGIN_ROOT}/skills/plan/scripts/superegm.py'`, run from the
+target repository under an open run card (`--runcard <id>` on every writing subcommand).
 
-## Overview
+The findings line, one per finding, is the same for every reviewer and every kind:
 
-This skill acts as the central orchestration engine driving the multi-agent
-review loop. It coordinates two distinct agent memory models:
+    <reviewer>-<round>-<n> | high|medium|low | <location> | regression: yes|no | <claim>
 
-*   **The Goldfish (Adversarial Auditors)**: Subagents spawned in isolated,
-    fresh context windows to catch unstated assumptions without historical bias.
-*   **The Elephant (Persistent Resolver)**: The primary agent context holding
-    institutional knowledge to evaluate findings and apply approved repairs.
+`regression: yes` when the finding is in text or code the previous round's fix touched, or is
+the same defect moved somewhere else. The goldfish writes the line; the helper refuses any
+other grammar (`review record: <file>:<line>: <reason>`).
 
-The driver manages argument intake, resolves paths for reviewers and standards,
-unconditionally re-parses target line ranges before every iteration, spawns
-concurrent specialized Goldfish auditors based on configuration, and coordinates
-with the Elephant context to resolve findings.
+## 1. Open
 
-## Delegation
+1. The run card first: `superegm runcard open --skill <skill> --artifact <spec path>` (the unit
+   id for `interrupt` and `clean`; `--mode leavemealone` when the owner asked for it).
+2. The panel: `config.reviewers.<kind>` from `.superegm/config.json` unless the invocation
+   gave `--reviewers`; the kind's first reviewer is fixed (`design` for a spec, `readiness` for a
+   plan, `change-review` for a head; `integrate` has no fixed first). One to six ids from
+   `design, zoom-out, comprehension, readiness, structural, style, codebase-details,
+   change-review, set, proportion`. The panel cannot change after this; only the owner changes
+   it, between reviews.
+3. The Astra preflight, for kinds `spec`, `plan` and `integrate` when `config.astra.enabled` is
+   true: `resources/astra_lane.md` section 1, read with the config keys in place of its
+   variables (`config.astra.model`, `config.astra.effort`; the lane is on or off by the config
+   key, not an environment variable). When the preflight fails, open with `--astra off` and say
+   why in one line; the review runs on the Claude panel alone.
+4. `superegm review open --kind spec|plan|head|integrate --artifact <path or unit id>
+   [--sha256 <hex>] --reviewers a,b,c [--astra on|off] --runcard <id>` prints the review id
+   (`spec-<slug>-c<n>`, `spec-<slug>-integrate-c<n>`, `<6 hex>-plan-<unit>-c<n>`,
+   `<6 hex>-head-<unit>-c<n>`). An artifact whose latest cycle is still open resumes it: a
+   re-typed skill continues where the last invocation stopped, with the stored panel. A closed
+   cycle (an `accept` or `stop` ruling, or a spec whose bytes moved after convergence) gets the
+   next number with a fresh cap. The helper hashes a spec itself; a plan body or a head passes
+   `--sha256`.
 
-A Goldfish runs in a fresh context with no conversation history. Spawn each
-subagent with your harness's subagent tool (Antigravity: `invoke_subagent`; Claude Code: `Agent`; Codex: `spawn_agent`). Each subagent is defined in `agents/<file>.md`, and its
-frontmatter `name` (for example `egm-zoom-out`) is the subagent type to request
-where your harness registers named subagents. Otherwise spawn a general-purpose
-subagent and tell it to read that persona file first. Pass the prompt verbatim
-and wait for the report. If your harness cannot nest subagents,
-use direct dispatch instead of the synthesizer. See `docs/harnesses.md`.
-If your harness has no subagent tool, stop and tell the user: a review in the same
-context is not a Goldfish review.
+## 2. Round
 
-## Inputs
+Each round the whole panel is dispatched **concurrently**, one message with every Agent call,
+each through its own adapter `superegm:<id>` (`.claude-plugin/agents/<id>.md`: `model:
+inherit`, `omitClaudeMd: true`, tools `Read, Grep, Glob`). The adapter is what keeps the
+context fresh, whether or not the call is named; a general-purpose agent reading the persona
+is not a goldfish. Goldfish never spawn. `set` and `proportion` are the `readiness` and
+`zoom-out` adapters with the briefs `review-plan` names (spec section 9.2).
 
-The caller or user provides exactly these parameters:
+Each goldfish receives only:
 
-*   **`TargetFile`**: Absolute or relative path to target document.
-*   **`SemanticTarget`**: Descriptive targeting string (e.g., *"Target the H4
-    block with SS-ID 'S1.12'"*), or `full file`.
-*   **`Reviewers`**: List of reviewer names (shortnames or paths).
-*   **`Standards`**: Mapping of reviewer names to standard names (shortnames or
-    paths).
-*   **`GoldfishContext`**: A reading list (source files, directories, or
-    documentation URLs) fed to reviewers to establish their baseline.
-*   **Fork inputs (optional)**: `AstraLane` (`on` or `off`, default `off`),
-    `Stage` (`7`, `9` or `10`, for the Astra brief), `RunCard` (text for the
-    top of
-    every report), `GoldfishModel` and `GoldfishEffort` (see
-    `resources/review_panels.md` section 6). `Reviewers` may be empty when
-    the panel is Astra only; then skip the Claude swarm and run the lane alone.
-*   **Reviewer isolation (fork)**: spawn every goldfish through its own
-    adapter. The adapter sets `omitClaudeMd: true` and the read-only tool
-    list, and that is what keeps the context fresh; it holds whether or not
-    the spawn is named. Reviewing with a general-purpose agent instead of the
-    adapter is what ends the fresh context.
+- the artifact (the spec; a unit's rendered body; a pull request's diff and unit body; for
+  `integrate`, the frozen spec and `git diff <base_at_start>..<base>`), named by absolute path;
+- the standard the kind names: `resources/document_standards/feature-spec-standard.md` for a
+  spec (`zoom-out` reads `zoom-out-standard.md`), `handoff-standard.md` plus the four plan
+  questions for a plan, the unit's issue body for a head;
+- from round 2, the prior round's findings with their dispositions, rendered by you from
+  `reviews/<id>/round-<n-1>.json` as findings lines followed by `-> <disposition>`; a
+  `fixed` line tells the goldfish where to look for a regression;
+- the round number and its own reviewer id, so its ids are `<id>-<round>-<n>`;
+- the instruction to write its findings file and nothing else, one findings line per finding,
+  an empty file when it found nothing, and to end its report with what it saw besides the
+  brief (nothing, or the text a hook or an instruction file injected).
 
-## Path & Standard Resolution Logic
+Model and effort: the rules of `resources/review_panels.md` section 6 with the variables
+renamed. `SUPEREGM_GOLDFISH_MODEL` (`inherit`, `sonnet`, `opus`, `haiku`, `fable`; default
+`inherit`) and `SUPEREGM_GOLDFISH_EFFORT` (`inherit`, `low`, `medium`, `high`, `xhigh`, `max`;
+default `inherit`), read once with `printenv`, validated against those lists, and passed per
+Agent call as `model:` and `effort:` only when not `inherit` and the tool offers the parameter;
+`CLAUDE_CODE_SUBAGENT_MODEL_FORCE` on means no per-call model. Never put an environment value
+into a shell command.
 
-When resolving names in `Reviewers` and `Standards`:
+The Astra lane (kinds `spec`, `plan`, `integrate`, when the review opened with it):
 
-*   **Reviewer Shortnames**: Map reviewer shortname (e.g., `design_critic`,
-    `structural`, `style`, `implementation_readiness`,
-    `codebase_details`, `comprehension`, `zoom_out`) to `agents/{name}.md`.
-    The persona file defines the reviewer's core mandates, audit vectors, and
-    output format.
-*   **Standard Shortnames**: Map standard shortname (e.g., `feature-spec-standard`,
-    `implementation-readiness-standard`, `zoom-out-standard`, `heilmeier-standard`,
-    `re-implementation-standard`) to `resources/document_standards/{name}.md`.
-*   **Custom Paths**: If the name contains a slash (`/`), treat it as an
-    absolute or workspace-relative path and read it directly.
+- The brief: `resources/astra_lane.md` section 2's template, written by you to
+  `<artifacts_dir>/reviews/<id>/astra_brief_r<n>.md`, with the artifact's range lines and
+  standard; from round 2 it ends with the `astra-*` lines of round n-1 and their dispositions,
+  rendered from `round-<n-1>.json`, and no other reviewer's.
+- The launch, from the main conversation with the Bash tool, `run_in_background: true`, and the
+  tool's `timeout` set to the runner's plus 300 seconds in milliseconds (`2100000`); never from
+  a subagent, because a background command dies with the agent that started it. One command,
+  absolute paths in single quotes, nothing chained:
 
-## Execution Workflow
+      env SUPEREGM_ROLE=goldfish SUPEREGM_RUNCARD=<card> python3 '<RUNNER>' review --host claude --repo '<REPO_ROOT>' --plan '<ARTIFACT>' --feedback '<artifacts_dir>/reviews/<id>/astra_brief_r<n>.md' --model <config.astra.model> --effort <config.astra.effort> --timeout 1800 --artifacts "${TMPDIR:-/tmp}/superegm-astra"
 
-### Step 1: Intake & Configuration UX
+  `<RUNNER>` is the claudex-loop `runner.py` the preflight found. Round 1 of a cycle is a fresh
+  session; round n > 1 adds `--resume '<round n-1 result.json>'` when section 7 of
+  `resources/astra_lane.md` says the previous round is resumable (`status` completed, the same
+  model, effort, repository and artifact, a UUID `session_id`), else it launches fresh and says
+  so. Dispatch the Claude panel right after, in the same turn; do not edit the artifact while
+  the run is live.
+- Collect from the run's `result.json` as section 5 of `resources/astra_lane.md` says: a
+  `completed` run with a verdict maps each finding to a line `astra-<round>-<n> | <severity> |
+  <path> | regression: yes|no | <claim>`; anything else is recorded `--not-run "<reason>"`
+  (`killed`, `failed: <error>`, `blocked: <limitations>`, `skipped by user`). The lane is never
+  retried within a round, and after two incomplete runs in one review it is not launched again:
+  the helper counts them (`astra_incomplete`) and excuses the lane from `what_ran` from then on.
+- Data notice, once per session when the lane first starts: the whole artifact, the brief and
+  any file Astra opens in the repository go to OpenAI under the account `codex login status`
+  reports; reply `skip astra` to stop waiting for it in this review.
 
-Evaluate the provided inputs (`TargetFile`, `SemanticTarget`, `Reviewers`,
-`Standards`, `GoldfishContext`).
+## 3. Record
 
-1.  **Identify Missing Inputs**: Determine which of the required parameters are
-    missing.
-2.  **Interactive Onboarding**:
-    *   If **all** inputs are present, proceed to Step 2.
-    *   If **some or all** inputs are missing, interactively prompt the user
-        **only for the missing inputs**, one at a time via chat messages.
-3.  **Reviewer Recommendations**:
-    *   *Feature Specs*: Recommend `design_critic` (mapped to
-        `resources/document_standards/feature-spec-standard.md`) and
-        `structural` (mapped to `resources/document_standards/feature-spec-standard.md`).
-    *   *Implementation Plans*: Recommend `implementation_readiness`
-        (mapped to `resources/document_standards/implementation-readiness-standard.md`)
-        and `codebase_details`.
-4.  **Confirm Configuration**: Display the consolidated plan (Target, Reviewers,
-    and mapped Standards) and ask the user to confirm before proceeding.
+Record every reviewer of the round, the lane included, as its result arrives:
 
-### Step 2: The Sharpening Loop (Iterative Cycle)
+    superegm review record --review <id> --round <n> [--sha256 <hex>] --reviewer <reviewer> \
+      --findings <file> --isolation clean|exposed:<what> --model <requested>:<effective> \
+      --effort <requested>:<effective> --runcard <id>
 
-Execute the following sequence in a continuous loop:
+- The findings file is the goldfish's own, written beside the round:
+  `<artifacts_dir>/reviews/<id>/round-<n>-<reviewer>.txt`. An empty file is a record: a
+  reviewer with no findings ran.
+- `--isolation clean` when the goldfish reported seeing nothing beyond its brief, else
+  `exposed:<what it reported>`; `--model` and `--effort` as `requested:effective` from the run
+  card line (section 7).
+- A dispatch that times out, fails or returns no file did not review: re-dispatch it once within
+  the round; when it fails again record it with `--not-run "<reason>"` instead of `--findings`.
+  Never record a failed reviewer as one with zero findings. The Astra lane is the exception:
+  `--not-run` at once, no retry.
+- `--reviewer set` takes the set reviewer's whole file; the helper keeps the lines whose
+  location names this unit or no unit. On a head, `--reviewer foreman` carries the helper's own
+  findings (CI, scope, deviations) outside the panel.
+- The helper derives the round's `what_ran` from the records: `completed` when every panel
+  reviewer has a record (an empty file counts; the lane's `--not-run` counts) and, on a head,
+  the round is `posted`; otherwise `not run (<the first reviewer without a record, or the
+  reason>)`, printed on every record. Only a `completed` round counts toward the cap or can
+  converge; the findings of any other round settle nothing and block nothing.
+- The first record of a new round is refused with `review record: review at its cap: rule
+  first` (exit 2) while the review is at its cap (section 6). A record with a grammar error
+  writes nothing: fix the goldfish's file and record again.
 
-#### 2.1 Unconditional Target Resolution
+## 4. Settle
 
-Before every iteration, unconditionally re-scan `TargetFile` by reading it
-and using the stable `SemanticTarget` string (e.g., locating the target header) to
-dynamically determine the updated absolute start and end line numbers. This
-ensures absolute accuracy even if the file was edited in prior rounds. (If `full
-file` mode is specified, confirm full-file line bounds).
+Between rounds the elephant fixes the artifact and settles each finding of the round as
+`references/resolve.md` says: `fixed | contested | declined | escalated | fix-design`, each
+written with `superegm review settle`. A high or medium `contested` or `declined` is the owner's
+call in normal mode (`--owner`) and the judges' in leavemealone-mode (`--judges <id>`); the
+helper refuses it without. `fixed` changes the artifact, so its bytes differ from the round's
+sha: the next round reviews the new bytes, and a goldfish that finds the same defect at the same
+scope marks it `regression: yes`.
 
-#### 2.2 Review Swarm Execution
+## 5. Status
 
-0.  **Astra lane (fork, Claude Code only)**: When `AstraLane` is `on`, read
-    `resources/astra_lane.md` and follow it before you spawn the Claude
-    reviewers: write the brief, decide fresh or resume (its section 7), and
-    start one background command from this main context, never from a
-    subagent.
-1.  **Launch Subagent Swarm**:
-    Spawn subagents to execute the review. Pass `GoldfishModel` and
-    `GoldfishEffort` per call as `resources/review_panels.md` section 6 says:
-    *   **Hierarchical Dispatch (Synthesizer)**: Spawn the intermediate
-        synthesizer subagent (`agents/synthesizer.md` / `egm-synthesizer`).
-        The synthesizer spawns the Goldfish review swarm in
-        parallel, deduplicates findings, writes the report artifact, and
-        returns a single summary message to avoid context pollution in the root
-        conversation. Pass it the Failed Reviewers rule below. Its summary must
-        give a status, `completed` or `not run`, for each requested reviewer.
-    *   **Direct Dispatch (Flat Swarm)**: Alternatively, spawn each requested
-        reviewer subagent in `Reviewers` directly.
-        Instruct each subagent to first read its persona definition in
-        `agents/{name}.md`, then audit `TargetFile` at the resolved line range
-        against its designated standard in `resources/document_standards/`,
-        supplying `GoldfishContext`.
-    *   Each reviewer produces findings with severity (🔴 Blocker, 🟡 Major, 🟢
-        Nit), line numbers, discrepancy descriptions, and rationales.
-2.  **Consolidate Findings**: Collect all findings across reviewers into a single
-    flat `FindingsList`. Give each finding a stable id
-    (`<reviewer>-<round>-<n>`) and record its reviewer, severity, and affected
-    scope. When the Astra lane ran, wait for it (`resources/astra_lane.md`
-    section 4), then add its findings with ids `astra-<round>-<n>`, mapping
-    high, medium and low to Blocker, Major and Nit (its section 6), and put
-    the run card and the Astra status line at the top of the report.
-3.  **Failed Reviewers**: A reviewer that times out, fails, or returns no report
-    did not review. Retry it once. If it fails again, record it as **not run**
-    in the report. Never count it as a reviewer with zero findings. If the
-    synthesizer summary has no status for a requested reviewer, record that
-    reviewer as not run. The Astra lane is the exception: when it does not
-    complete, record it as not run with the reason and do not retry it in
-    this round.
+Ask the helper after every settle and before every round:
 
-#### 2.3 Aggregated Resolution Hand-off
+    superegm review status --review <id> --runcard <id>
 
-1.  Pass `TargetFile`, the active line range, the aggregated `FindingsList`,
-    `Stage`, the round number as `Round` and the `RunCard` to the
-    **`egm-resolve`** workflow. It writes the user's final decisions to
-    `goldfish_dispositions_s<Stage>_r<n>.md`; a resumed Astra round reads its
-    `astra-*` rows.
-2.  Execute the resolution workflow in the primary Elephant context:
-    *   Categorize findings into `CONTEST` vs. `PROPOSE FIX`.
-    *   Save `goldfish_review_report.md` with your file-writing tool.
-    *   Present the interactive decision gate (Auto accept, Continue, Interactive
-        breakdown).
-    *   Apply approved text repairs to `TargetFile` using your file-editing tool.
+It prints one line, `round <n>: <clean|not clean>, regressions <k>, converged <yes|no|by ruling
+R<n>>, cap <yes|no>, stalled <yes|no>, sha256 <hex of the converged round|none>`, and the trend
+line `rounds: a -> b -> c (regressions x, y, z)`: the findings per round and the regressions
+among them. The exit code is the verdict, and the skill's next action follows from it alone:
 
-#### 2.4 Iteration Check & Turn Boundary
+| Exit | Meaning | The skill |
+| --- | --- | --- |
+| exit 0 | converged (section 6), or `accept` ruled | spec: `superegm approve-spec` (the SKILL.md); plan: the unit's body is reviewed at the printed sha; head: the helper wrote `clean` on the posted round and journaled `<unit> awaiting merge`; integrate: close the handoff when nothing was escalated |
+| exit 3 | open: not clean, a regression, or no completed round yet | fix and settle (section 4), then the next round; also `not opened` for an unknown id |
+| exit 2 | at the cap without an `accept`, or `stop` was ruled | no further round starts; request the ruling of spec section 13.2 point 2 (continue one bounded round, accept the remainder, stop; a head has no `accept`) and record it with `superegm review rule --review <id> --ruling continue|accept|stop (--owner | --judges <id>) --runcard <id>`; after `stop` the cycle stays at exit 2 and a new invocation starts the next cycle |
+| exit 4 | a `fix-design` finding in any round | the defect is in the frozen spec: `superegm approve-spec --spec <path> --void --review <id>`, then spec review reopens as a new cycle |
+| exit 5 | stalled: the two latest rounds are not `completed` and both ran under this run card | end this invocation for the artifact with the record (the round file names the reviewer and reason); a re-typed skill opens a new run card and resumes the same cycle |
 
-Fresh reviewers sample differently each round, so a round with zero findings
-is rare even when the document improves. Use these rules instead:
+Doctrine, from `resources/review_panels.md` section 7: change the thing, not the round. Counts
+that stop falling, or regressions that do not fall, mean the artifact is too large or too
+clever for what it has to do. When two consecutive rounds regress on the same area, the next
+fix is a deletion, a narrowed contract or a smaller surface, not a patch, and the journal says
+what was removed.
 
-*   **Settled findings**: A finding is settled when it is contested or
-    recorded without a fix (accepted risk). Keep the settled list across
-    rounds. If a new reviewer raises a settled finding again (same affected
-    scope, same issue), do not re-open it.
-*   **Fixed findings**: An applied fix does not settle a finding. If a later
-    reviewer raises the same issue at the same scope, the fix failed or a
-    later edit reintroduced the issue. Re-open the finding.
-*   **Clean round**: A round is clean when no reviewer raises a Blocker or
-    Major finding that is not settled. Nits do not block. A reviewer recorded
-    as not run makes the round not clean. Decide this from the review results,
-    before you apply the fixes of that round. The optional Astra lane is the
-    exception: when it did not run, judge the round on the Claude reviewers
-    and say the round was Claude-only. In the Astra only panel it is the only
-    reviewer, so a round in which it did not complete is not clean; after two
-    such rounds, follow `resources/astra_lane.md` section 5.
-*   **Converged** (`resources/review_panels.md` section 7): clean, **and** no
-    finding in the round attributable to the previous round's fixes - mark each
-    finding `regression: yes|no` as you record it. For a document review, also
-    two consecutive clean rounds: one is not enough, because the next fresh
-    reviewer can find a different gap in the same text, and a document round is
-    cheap. Report the counts per round, for example
-    `rounds: 19 -> 14 -> 9 (regressions 7, 2)`; counts that stop falling, or
-    regressions that do not fall, mean the approach needs changing rather than
-    another round.
-*   **Cap**: 5 rounds, then pause and put the choice to the user; never
-    start round 6 without their answer.
-*   **Churn**: A new finding is at the scope of an applied fix, and reverting
-    that fix would resolve it.
+## 6. The one convergence rule and the cap
 
-On converged, go to Step 3. On cap or churn, write a short list of the open
-findings by severity, then ask the user one question: accept and proceed,
-continue past the cap, or return the document to drafting.
+Implemented once, in the helper, and consumed unchanged by spec review, plan review, the
+foreman and integrate:
 
-**Crucial Turn-Taking Requirement**: After the resolution phase finishes for a
-given round, the loop driver **MUST respect the turn-taking checkpoint in
-`egm-resolve`**. The driver must remain idle across human turns,
-only looping back to Step 2.1 when the user explicitly confirms they wish to run
-another round of review.
+- A round is **clean** when no high or medium finding in it is unsettled. Lows never block.
+- The artifact is **converged** when a round is `completed` and clean and no high or medium
+  finding in it is `regression: yes`:
+  one `completed`, clean, non-regressing round converges every kind.
+  EGM's second consecutive clean round for document reviews is dropped; the regression mark
+  carries what it guarded.
+- The review is **at its cap** when its `completed` rounds number 5 plus its `continue` rulings;
+  `continue` may be ruled once per cycle, `accept` converges the artifact (`converged: by ruling
+  R<n>`, never on a head), and after `stop` no ruling is accepted and the cycle stays at its cap
+  until `superegm review open` starts the next one. No review has a second kind of cap.
+- A review may instead be **stalled** (section 5), which ends the invocation for that artifact
+  and nothing else.
 
-### Step 3: Output Boundary & Final Checkpoint
+## 7. The run card line
 
-Upon completion (converged, cap or churn accepted by the user, or manual
-halt):
+Show the card in chat before the first round and keep it in the journal, one line per role
+with `requested -> effective`:
 
-*   **Programmatic Callers**: If running as a subflow of `egm-review`, exit
-    cleanly to hand execution back to the parent workflow.
-*   **Manual Invocations**: Output a summary of completion in chat: *"The review
-    loop has completed after [N] rounds ([converged | accepted at cap | halted]).
-Open findings are in the report. Would you like to proceed to
-    the next stage, or do you have any final questions?"*
+| Role | Model: requested -> effective | Effort: requested -> effective |
+| --- | --- | --- |
+| Elephant | the session's model -> same | session setting -> session setting |
+| Claude goldfish | `SUPEREGM_GOLDFISH_MODEL` -> the alias passed, or the session's model for `inherit`, or the forced model | `SUPEREGM_GOLDFISH_EFFORT` -> the value passed, or `inherit` |
+| Astra goldfish | `config.astra.model` -> `result.json`'s `effective_model`, `requested only` before the run | `config.astra.effort` -> `effective_effort`, `requested only` before the run |
+
+Any value you cannot know is `unknown`; never present a configuration value as an observed
+one. The same pairs go on every `superegm review record` as `--model` and `--effort`, so the
+round file carries what each dispatch ran on.
