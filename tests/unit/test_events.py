@@ -1,14 +1,64 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03).
+# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03); `status --wait`, the event lines and the folding (U09b).
 
-"""EGM's tests of the subcommands U09b (events) changes, moved from test_helper.py by U03;
-that unit rewrites the ones whose form it changes."""
+"""U09b: `status --wait`, the event lines, the folding; plus EGM's `status` tests U03 moved here."""
 
+import json
+import os
+import re
+from pathlib import Path
 
 import pytest
 
 from conftest import REPO, make_pr, applied, state_of, close_as_completed, mark_launched
+from superegm import store
+
+SHA = "a" * 40
+T0 = "2026-11-03T10:00:00Z"
+WAIT = ("status", "--wait", 200, "--runcard")
+
+
+def seed(world, monkeypatch, units=None):
+  """A filed handoff as the absorbed `status` reads it (EGM's by-hand seed in
+  test_foreman.py::test_prepare_fetches_from_the_recorded_remote_into_private_refs; every sample unit is filed,
+  U01 #2, U02 #3, U03 #4, `units` overriding: state.json's `units[<id>].number` and one open issue each, id
+  1000 + n, since `status` reads every unit's issue under its complete receipt) plus an open
+  card from `runcard open --skill wave --artifact <repo>/docs/designs/sample.md` (`assert code == 0, out`).
+  Stubs `world.ns["require_frozen_units"]`: the package name every module reaches as `core.<name>`.
+  EGM's fake `gh` has no comments endpoint: wraps `gh.do_api` so `/issues/<n>/comments` answers
+  `gh.ok([gh.comments.get(n, [])])`. Returns (gh, store(world.repo), card id)."""
+  units = {"U01": 2, "U02": 3, "U03": 4} | (units or {})
+  assert world.run("graph", "--plan", world.plan)[0] == 0
+  path = world.artifacts / "state.json"
+  state = json.loads(path.read_text(encoding="utf-8"))
+  state.update({"remote": "origin", "confirmed_sha256": "x", "verify": {"complete": True, "sha256": "x", "problems": []},
+                "units": {uid: {"number": n} for uid, n in units.items()}})
+  path.write_text(json.dumps(state), encoding="utf-8")
+  gh = world.gh
+  for n in units.values():
+    gh.issues[n] = {"number": n, "id": 1000 + n, "labels": [], "state": "open", "state_reason": None}
+  world.ns["require_frozen_units"] = lambda handoff: None
+  real = gh.do_api
+
+  def do_api(args):
+    match = re.fullmatch(r"repos/[^/]+/[^/]+/issues/(\d+)/comments", gh.endpoint_of(args).partition("?")[0])
+    return gh.ok([gh.comments.get(int(match.group(1)), [])]) if match else real(args)
+  monkeypatch.setattr(gh, "do_api", do_api)
+  code, out = world.run("runcard", "open", "--skill", "wave", "--artifact", str(world.spec), card=None)
+  assert code == 0, out
+  return gh, store(world.repo), out.strip()
+
+
+def test_wait_prints_deadline_only_and_saves_once(world, monkeypatch):
+  gh, st, card = seed(world, monkeypatch)
+  writes, real = [], os.replace
+  monkeypatch.setattr(os, "replace", lambda src, dst: (writes.append(Path(dst).name), real(src, dst)))
+  code, out = world.run(*WAIT, card)
+  assert code == 0 and out == "deadline\n", out
+  assert world.sleeps and max(world.sleeps) <= 90 and sum(world.sleeps) >= 200
+  assert writes.count("state.json") == 1, writes
+  assert "units" in json.loads(st.path("state").read_text(encoding="utf-8"))["status"]
 
 
 def test_status_landed_ready_decisions_and_shared_edges(world):
@@ -91,16 +141,6 @@ def test_status_ci_states(world):
   world.advance(31 * 60)
   code, out = world.run("status", "--plan", world.plan)
   assert "no-ci" in out
-
-
-def test_status_wait_returns_on_change_or_deadline(world):
-  gh = applied(world)
-  code, out = world.run("status", "--plan", world.plan, "--wait", 200)
-  assert code == 0 and "deadline: no change" in out and world.sleeps and max(world.sleeps) <= 90
-  make_pr(gh, 70, "a" * 40, closes=[(REPO, 2)])
-  gh.graphql[2] = [{**gh.prs[70], "repository": {"nameWithOwner": REPO}}]
-  code, out = world.run("status", "--plan", world.plan, "--wait", 200)
-  assert "changed: U01" in out
 
 
 def test_a_landed_confirmation_lapses_when_the_issue_reopens(world):
