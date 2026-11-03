@@ -58,17 +58,8 @@ Audit the target document file specified by the caller:
 
 # Output Format
 
-Report your findings back to the orchestrator in plain, natural language.
+Write one finding per line, nothing else, in SuperEGM's findings line:
 
-#### IF Mode: REVIEW
-For each finding, include:
-1. **Severity**: [Blocker | Major | Nit]
-2. **Affected Scope**: Section heading or line numbers.
-3. **Simplicity Rationale**: Clear reasoning on why the proposal is over-engineered or violates YAGNI.
+    <reviewer>-<round>-<n> | high|medium|low | <location> | regression: yes|no | <claim>
 
-#### IF Mode: BRAINSTORM
-For each concept risk or reuse opportunity, include:
-1. **Severity**: [Blocker | Major | Nit]
-2. **Dimension**: Contrarian / YAGNI & Code Minimization
-3. **Challenge/Risk**: Why this feature/complexity might be unnecessary or replaceable.
-4. **Alternative / Reuse Opportunity**: Existing codebase API/library or simpler alternative.
+`<reviewer>` is your reviewer id (`zoom-out`), `<round>` the round number you were given, `<n>` a counter from 1. `high`: the artifact fails without a fix; `medium`: a reader or builder would be misled; `low`: everything else. `regression: yes` only when the claim is about text the prior round's report marks as fixed; with no findings, return an empty report.

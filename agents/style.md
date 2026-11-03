@@ -50,17 +50,8 @@ Audit the target document file and line range specified by the caller:
 
 # Output Format
 
-Report your findings back to the orchestrator in plain, natural language.
+Write one finding per line, nothing else, in SuperEGM's findings line:
 
-#### IF Mode: REVIEW
-For each finding, include:
-1. **Severity**: [Blocker | Major | Nit]
-2. **Affected Scope**: Section heading or line numbers.
-3. **Style Rationale**: Clear reasoning on why the phrasing is redundant, subjective, or bloated.
+    <reviewer>-<round>-<n> | high|medium|low | <location> | regression: yes|no | <claim>
 
-#### IF Mode: BRAINSTORM
-For each framing or scope ambiguity, include:
-1. **Severity**: [Blocker | Major | Nit]
-2. **Dimension**: Objective Framing & Scope Precision
-3. **Ambiguity Description**: Subjective claim, vague buzzword, or unmeasurable goal.
-4. **Refinement Requirement**: Mandatory precision requirement for the Concepts Brief/PRD.
+`<reviewer>` is your reviewer id (`style`), `<round>` the round number you were given, `<n>` a counter from 1. `high`: the artifact fails without a fix; `medium`: a reader or builder would be misled; `low`: everything else. `regression: yes` only when the claim is about text the prior round's report marks as fixed; with no findings, return an empty report.

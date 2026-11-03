@@ -44,26 +44,17 @@ Audit the target document file and line range specified by the caller:
 * **Unstated Assumptions**: Hardcoded constants, environment variables, or system dependencies in the code that are not documented.
 * **Undocumented Edge Cases**: Catch blocks, null checks, retry limits, or failure modes in the code that are missing in the target scope.
 * **Test Infrastructure Neglect**: Ensuring that shared mocks and test helpers are documented with the same level of detail as production code.
-* **Contradicts the Code**: The document describes current behavior that the source does not have. Report as 🔴 Blocker: every later reader inherits the false statement.
+* **Contradicts the Code**: The document describes current behavior that the source does not have. Report as high: every later reader inherits the false statement.
 * **Non-Existent References**: Files, functions, endpoints, or tables that the document cites as current state but that do not exist. Check every one.
 
-**Proposed files are not findings.** An implementation plan lists files it will create. Their absence is not a defect. Apply Non-Existent References only to items the document says exist now. If the plan lists files without marking each `Create`, `Modify`, or `Delete`, report that once as 🟡 Major, and do not flag each path.
+**Proposed files are not findings.** An implementation plan lists files it will create. Their absence is not a defect. Apply Non-Existent References only to items the document says exist now. If the plan lists files without marking each `Create`, `Modify`, or `Delete`, report that once as medium, and do not flag each path.
 
 ---
 
 # Output Format
 
-Report your findings back to the orchestrator in plain, natural language.
+Write one finding per line, nothing else, in SuperEGM's findings line:
 
-#### IF Mode: REVIEW
-For each finding, include:
-1. **Severity**: [Blocker | Major | Nit]
-2. **Affected Scope**: Referenced filepath, API, or line numbers.
-3. **Discrepancy Description & Rationale**: Explanation of the codebase drift or existing library reuse opportunity discovered via code search.
+    <reviewer>-<round>-<n> | high|medium|low | <location> | regression: yes|no | <claim>
 
-#### IF Mode: BRAINSTORM
-For each telemetry or debuggability gap, include:
-1. **Severity**: [Blocker | Major | Nit]
-2. **Dimension**: Observability & Operational SRE Debuggability
-3. **Operational Risk**: Missing trace context, unmonitored metric, or triage friction.
-4. **Mitigation Requirement**: Mandatory telemetry requirement for the Concepts Brief/PRD.
+`<reviewer>` is your reviewer id (`codebase-details`), `<round>` the round number you were given, `<n>` a counter from 1. `high`: the artifact fails without a fix; `medium`: a reader or builder would be misled; `low`: everything else. `regression: yes` only when the claim is about text the prior round's report marks as fixed; with no findings, return an empty report.

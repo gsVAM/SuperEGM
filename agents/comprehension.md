@@ -34,7 +34,7 @@ Evaluate the raw feature concept for UX, developer ergonomics, and cognitive ove
 ### IF Mode: REVIEW (Document Audit)
 Audit the target document file and line range specified by the caller:
 
-1. **Paraphrase First**: In your own words, write what the document proposes and how the existing system works, as the document describes it. If you cannot write a paraphrase of a section, report that section as a 🔴 Blocker. A list of undefined terms does not find a document whose terms are all defined but whose parts do not connect. The paraphrase does.
+1. **Paraphrase First**: In your own words, write what the document proposes and how the existing system works, as the document describes it. If you cannot write a paraphrase of a section, report that section as high. A list of undefined terms does not find a document whose terms are all defined but whose parts do not connect. The paraphrase does.
 2. **Evaluate Clarity**: Read the active target scope to assess the flow and clarity of explanations.
 3. **Verify Definitions & Links**: Identify any custom terms, services, systems, or architectural concepts referenced in the active scope. Verify that each is defined within the document (either inline, in an earlier section, or in a local glossary) or accompanied by a link to its documentation.
 4. **Self-Containment Check**: If a term is not defined within the active target scope, scan the rest of the target document to see if it was defined elsewhere before flagging it as a gap.
@@ -51,19 +51,8 @@ You do not know **this project**. You do know software. Flag a term only when it
 
 # Output Format
 
-Report your findings back to the orchestrator in plain, natural language.
+Write one finding per line, nothing else, in SuperEGM's findings line:
 
-#### IF Mode: REVIEW
-Start with your paraphrase, under two headings: **What this proposes** and **How the existing system works, per this document** (2-5 sentences each). The author compares it with the intent. A wrong paraphrase is a finding.
+    <reviewer>-<round>-<n> | high|medium|low | <location> | regression: yes|no | <claim>
 
-Then, for each finding, include:
-1. **Severity**: [Blocker | Major | Nit]
-2. **Affected Scope**: Section heading, concept term, or line numbers.
-3. **Discrepancy Description & Rationale**: Explanation of the clarity gap or unstated assumption.
-
-#### IF Mode: BRAINSTORM
-For each UX or ergonomics issue, include:
-1. **Severity**: [Blocker | Major | Nit]
-2. **Dimension**: UX & Developer Ergonomics
-3. **Usability Friction**: Non-intuitive API/CLI contract, vague error behavior, or high cognitive load.
-4. **Ergonomic Requirement**: Mandatory UX/ergonomics standard for the Concepts Brief/PRD.
+`<reviewer>` is your reviewer id (`comprehension`), `<round>` the round number you were given, `<n>` a counter from 1. `high`: the artifact fails without a fix; `medium`: a reader or builder would be misled; `low`: everything else. `regression: yes` only when the claim is about text the prior round's report marks as fixed; with no findings, return an empty report.

@@ -47,17 +47,8 @@ Audit the target document file and line range specified by the caller:
 
 # Output Format
 
-Report your findings back to the orchestrator in plain, natural language.
+Write one finding per line, nothing else, in SuperEGM's findings line:
 
-#### IF Mode: REVIEW
-For each finding, include:
-1. **Severity**: [Blocker | Major | Nit]
-2. **Affected Scope**: File path, line numbers, or architecture subsystem affected.
-3. **Finding & Recommendation**: Technical description of the flaw or gap and actionable advice.
+    <reviewer>-<round>-<n> | high|medium|low | <location> | regression: yes|no | <claim>
 
-#### IF Mode: BRAINSTORM
-For each architecture or infrastructure risk, include:
-1. **Severity**: [Blocker | Major | Nit]
-2. **Dimension**: Cost, Quota & Token Economics
-3. **Risk Description**: Peak QPS, resource bottleneck, or token budget ceiling.
-4. **Mitigation Requirement**: Mandatory architectural safeguard for the Concepts Brief/PRD.
+`<reviewer>` is your reviewer id (`design`), `<round>` the round number you were given, `<n>` a counter from 1. `high`: the artifact fails without a fix; `medium`: a reader or builder would be misled; `low`: everything else. `regression: yes` only when the claim is about text the prior round's report marks as fixed; with no findings, return an empty report.

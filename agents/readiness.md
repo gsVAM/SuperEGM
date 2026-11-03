@@ -46,17 +46,8 @@ Audit the target document file and line range specified by the caller:
 
 # Output Format
 
-Report your findings back to the orchestrator in plain, natural language.
+Write one finding per line, nothing else, in SuperEGM's findings line:
 
-#### IF Mode: REVIEW
-For each finding, include:
-1. **Severity**: [Blocker | Major | Nit]
-2. **Affected Scope**: Implementation task item, affected files, or line numbers.
-3. **Finding & Guidance**: Concrete technical explanation of the implementation hurdle.
+    <reviewer>-<round>-<n> | high|medium|low | <location> | regression: yes|no | <claim>
 
-#### IF Mode: BRAINSTORM
-For each migration or compatibility risk, include:
-1. **Severity**: [Blocker | Major | Nit]
-2. **Dimension**: Migration & Backward Compatibility
-3. **Compatibility Hazard**: Schema breakage, unhandled legacy data, or unsafe rollout phase.
-4. **Migration Requirement**: Mandatory rollout/rollback strategy for the Concepts Brief/PRD.
+`<reviewer>` is your reviewer id (`readiness`), `<round>` the round number you were given, `<n>` a counter from 1. `high`: the artifact fails without a fix; `medium`: a reader or builder would be misled; `low`: everything else. `regression: yes` only when the claim is about text the prior round's report marks as fixed; with no findings, return an empty report.
