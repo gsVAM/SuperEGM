@@ -1,6 +1,7 @@
 ---
 name: drift-report
 license: Apache-2.0
+effects: working-tree
 disable-model-invocation: true
 description: >-
   Runs drift detection on all design documents to check for document and

@@ -1,9 +1,13 @@
 ---
 name: systematic-debugging
+license: MIT
+effects: working-tree
 description: Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes
 ---
 
 # Systematic Debugging
+
+In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.
 
 ## Overview
 

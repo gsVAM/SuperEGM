@@ -1,6 +1,7 @@
 ---
 name: draft
 license: Apache-2.0
+effects: working-tree
 disable-model-invocation: true
 description: >-
   Drafts a design document section-by-section using the concepts brief from

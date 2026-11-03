@@ -1,9 +1,13 @@
 ---
 name: writing-skills
+license: MIT
+effects: working-tree
 description: Use when creating new skills, editing existing skills, or verifying skills work before deployment
 ---
 
 <!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the Skill Discovery Optimization section moved to references/skill_discovery_optimization.md; the other runtimes' skill paths removed. -->
+
+In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.
 
 # Writing Skills
 

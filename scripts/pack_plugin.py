@@ -11,6 +11,7 @@
 import argparse
 import json
 from pathlib import Path
+import re
 import tempfile
 import zipfile
 
@@ -68,6 +69,27 @@ REQUIRED_SHARED = (
         "re-implementation", "zoom-out", "handoff",
     )
 )
+
+
+FRONTMATTER_KEY = re.compile(r"^([A-Za-z_-]+):\s?(.*)$")
+
+
+def read_frontmatter(path: Path) -> dict[str, str]:
+  """Return the top-level frontmatter keys of a SKILL.md in file order."""
+  text = path.read_text(encoding="utf-8")
+  if not text.startswith("---\n"):
+    raise ValueError(f"Frontmatter must open {path}")
+  fields: dict[str, str] = {}
+  key = None
+  for line in text.split("\n")[1:]:
+    if line == "---":
+      break
+    match = FRONTMATTER_KEY.match(line)
+    if match:
+      key, fields[key] = match.group(1), match.group(2)
+    elif key and line.startswith(" "):
+      fields[key] = f"{fields[key]} {line.strip()}".strip()
+  return fields
 
 
 def build(root: Path, output: Path) -> tuple[Path, Path]:

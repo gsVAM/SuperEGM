@@ -1,9 +1,13 @@
 ---
 name: test-driven-development
+license: MIT
+effects: working-tree
 description: Use when implementing any feature or bugfix, before writing implementation code
 ---
 
 # Test-Driven Development (TDD)
+
+In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.
 
 ## Overview
 

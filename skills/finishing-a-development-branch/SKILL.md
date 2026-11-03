@@ -1,9 +1,15 @@
 ---
 name: finishing-a-development-branch
+license: MIT
+effects: external
+effect_kinds: [github-write, remote-branch, state-store]
+disable-model-invocation: true
 description: Use when implementation is complete, all tests pass, and you need to decide how to integrate the work
 ---
 
 # Finishing a Development Branch
+
+In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.
 
 ## Overview
 
