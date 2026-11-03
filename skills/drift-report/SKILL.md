@@ -7,10 +7,10 @@ description: >-
   Runs drift detection on all design documents to check for document and
   code consistency. Produces an actionable report with differences. Use when the
   user asks to detect drift or check for consistency across all design documents
-  or READMEs in a directory.
+  or READMEs in a directory. Typed by the owner after `/superegm:integrate`.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: renamed to drift-report; Codex line removed. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: renamed to drift-report; the second host's line removed; typed after integrate. -->
 
 # Detect Drift In Designs and Code
 

@@ -1,5 +1,7 @@
 # [Feature/Project Name]
 
+<!-- Modified by SuperEGM (gsVAM), 2026: the final Units section. -->
+
 *   **Author:** [Author Name or GitHub Handle]
 *   **Status:** [Draft | Proposed | In Review | Approved]
 *   **Date:** [YYYY-MM-DD]
@@ -169,6 +171,14 @@ implementation. What metrics should be measured to verify success?
 *   **Static Analysis & Linting**: [e.g., `eslint`, `ruff check`, `golangci-lint`]
 *   **Test Coverage Requirement**: [e.g., 85%+ branch coverage]
 *   **E2E/Integration**: [e.g., Integration test command or automated eval runner]
+
+## Units
+
+<!-- The last H2 of the document: one row per buildable unit. -->
+
+| Unit | Title | Blocked by |
+| --- | --- | --- |
+| U01 | [Unit title] | [none or the unit ids it waits on] |
 
 --------------------------------------------------------------------------------
 

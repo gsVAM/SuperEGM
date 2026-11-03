@@ -4,13 +4,11 @@ license: Apache-2.0
 effects: working-tree
 disable-model-invocation: true
 description: >-
-  Drafts a design document section-by-section using the concepts brief from
-  egm-brainstorm (or user notes). This is the second step in the Elephant-Goldfish (EGM)
-  feature flow. Use when you are ready to write a design doc after aligning on
-  requirements + solution.
+  Typed by the owner in phase 0 to draft a spec from a brief when brainstorming was
+  skipped, section by section, ending in `## Units`.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: renamed to draft; Codex line removed. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: renamed to draft; the second host's line removed; draft from a brief, the Units step, docs/specs, the review-spec handoff. -->
 
 # Design Drafting (Document Construction)
 
@@ -75,7 +73,7 @@ the aligned problem and requirements from the brainstorm phase.
 ## Inputs
 
 *   **`Context File`** (Optional): File path to a predecessor document (e.g.,
-    `docs/designs/<feature_name>.md`, `concepts_brief.md`, or
+    `docs/specs/<feature_name>.md`, `concepts_brief.md`, or
     `discussion_summary.md`). If omitted, the skill defaults to consuming
     predecessor context (e.g., `concepts_brief.md` or `discussion_summary.md`).
 
@@ -95,7 +93,7 @@ this strict generation order:
 1.  **Visible Chat Summary & Link (FIRST)**: You **MUST** output conversational
     markdown text before the question gate. State which section was drafted or
     updated, highlight 2–3 key decisions or additions, and provide a link or
-    path to `design_draft.md` (e.g., `[design draft](/absolute/project/design_draft.md)` in Codex).
+    path to `design_draft.md` (e.g., `[design draft](/absolute/project/design_draft.md)`).
 2.  **Approval Gate (SECOND)**: In the same turn, present the single-select
     approval choice (using a structured question tool such as `ask_question`
     with `len(questions) == 1` and `is_multi_select: false` if your harness has
@@ -153,11 +151,11 @@ this strict generation order:
         `concepts_brief.md` is not found, check for `discussion_summary.md` in
         `./discussion_summary.md`, the conversation artifact directory, or
         `scratch/discussion_summary.md`. If found, ingest and parse the summary.
-        **Do NOT** prompt the user to start `/egm-brainstorm` or warn of
+        **Do NOT** prompt the user to start `/superegm:brainstorming` or warn of
         deprecation.
     *   **Priority 3: Interactive Chat Prompt**: If neither file exists, prompt
         the user in chat for the feature's problem statement, goals, and
-        technical context, or offer to launch `/egm-brainstorm`.
+        technical context, or offer to launch `/superegm:brainstorming`.
 3.  **Verify State**: Parse the document. Present a quick confirmation to the
     user to ensure we are starting with the correct context.
 4.  **Consensus**: Get explicit approval to start drafting the document.
@@ -234,10 +232,12 @@ any impactful decisions. Follow these guidelines:
     intra-package and sibling documentation links.
 5.  **NO CODE**: Do not generate actual implementation code in this design
     draft. Pseudocode, APIs, or schemas are allowed.
-6.  **Update Draft Artifact (MANDATORY)**: Update `design_draft.md` to
+6.  **Units**: end the document with `## Units`, the last H2, one row per
+    buildable unit (id, title, blocked by).
+7.  **Update Draft Artifact (MANDATORY)**: Update `design_draft.md` to
     append/insert this "Detailed Implementation" section using your file-writing
     tool.
-7.  **Notify & Verify (No Chat Dumps)**: You are **STRICTLY FORBIDDEN** from
+8.  **Notify & Verify (No Chat Dumps)**: You are **STRICTLY FORBIDDEN** from
     printing the implementation plan in the chat. Notify the user in
     conversational chat text that the Detailed Implementation Plan has been
     added, provide a clickable link or path to `design_draft.md`, and present
@@ -250,7 +250,7 @@ strictly:
 
 1.  **Reconcile against the Predecessor Context**: Do not grade the draft
     against the Zoom Out standard here. The session that wrote the draft agrees
-    with it; `/egm-review` Stage 5 runs that check from a fresh context.
+    with it; `/superegm:review-spec` Stage 5 runs that check from a fresh context.
     Instead, re-read the context ingested at Step 1 and compare it with the
     draft. No Goldfish can do this check, because no Goldfish reads the brief.
     *   **Contradiction**: the brief decided a question and the draft decides it
@@ -270,8 +270,8 @@ strictly:
 
 2.  **Target Directory**: If the user specified a target directory or file, use
     it. Otherwise, probe the workspace for existing design directories (from
-    `Context File` directory, `docs/designs/`, or `<project>/docs/designs/`),
-    bind `[DiscoveredPath]` (defaulting to `docs/designs/`), and present a
+    `Context File` directory, `docs/specs/`, or `<project>/docs/specs/`),
+    bind `[DiscoveredPath]` (defaulting to `docs/specs/`), and present a
     single-select gate (using a structured question tool such as `ask_question`
     with `len(questions) == 1` and `is_multi_select: false` if your harness has
     one, or plain chat):
@@ -312,5 +312,5 @@ strictly:
     that the user review the document with:
 
     ```markdown
-    `egm-review` <DESIGN_PATH>
+    `/superegm:review-spec <DESIGN_PATH>`
     ```
