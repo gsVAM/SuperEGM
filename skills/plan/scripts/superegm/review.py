@@ -251,7 +251,17 @@ def record_round(args) -> int:
     sha = core.sha256_file(Path(review["artifact"]))
   else:
     sha = args.sha256 or (existing["artifact_sha256"] if existing else review["artifact_sha256"] if n == 1 else None)
-  entry = head_entry(st, review["artifact"], n) if kind == "head" else None
+    if not sha:
+      raise core.HandoffError(f"review record: --sha256 required for kind {kind}")
+  if existing and existing["artifact_sha256"] != sha:
+    raise core.HandoffError("review record: sha256 differs from the round's")
+  entry = None
+  if kind == "head":  # a head's rounds are the unit's `rounds[]` entries
+    entry = head_entry(st, review["artifact"], n)
+    if entry is None:
+      raise core.HandoffError(f"review record: no rounds[] entry for round {n}")
+  elif not existing and n != (nxt := max(round_numbers(st, rid), default=0) + 1):
+    raise core.HandoffError(f"review record: round {nxt} is next")
   if args.not_run:
     record = {"findings": [], "not_run": args.not_run, "isolation": None, "model": None, "effort": None}
   else:
