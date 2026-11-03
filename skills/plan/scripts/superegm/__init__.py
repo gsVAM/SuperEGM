@@ -178,9 +178,10 @@ class Store:
            "units": "handoff_units.json", "bodies": "handoff_bodies.md"}
   KEYED = ("unit", "foreman", "launches", "worktrees", "review")
 
-  def __init__(self, root: Path, handoff_id: str | None = None):
+  def __init__(self, root: Path, handoff_id: str | None = None, config: dict | None = None):
     self.root = Path(root)
     self.handoff_id = handoff_id
+    self.config = config
 
   def path(self, kind, *parts) -> Path:
     parts = [str(p) for p in parts]
@@ -235,9 +236,57 @@ STORE = None
 def store(repo_root: Path) -> Store:
   """The store `.superegm/config.json` names, with the handoff `state.json` records."""
   global STORE
-  root = Path(load_config(repo_root)["artifacts_dir"])
-  STORE = Store(root, handoff_id=load_state(root).get("handoff_id"))
+  config = load_config(repo_root)
+  root = Path(config["artifacts_dir"])
+  STORE = Store(root, handoff_id=load_state(root).get("handoff_id"), config=config)
   return STORE
+
+
+# ---------------------------------------------------------------- run cards
+
+
+RUNCARD_REVIEWERS = {"review-spec": "spec", "review-plan": "plan", "wave": "head", "integrate": "integrate"}
+
+
+def load_card(store: Store, id: str) -> dict:
+  path = store.path("runcards", id)
+  if not path.is_file():
+    raise HandoffError(f"runcard: {id} not found")
+  return json.loads(read_text(path))
+
+
+def open_runcard(store: Store, skill: str, artifact: str, parent=None, mode=None) -> str:
+  """Open `<skill>-<n>`; every open card of the same skill and artifact is
+  marked interrupted first. `artifact` is stored resolved when it is a file."""
+  if parent is not None and not store.path("runcards", parent).is_file():
+    raise HandoffError(f"runcard: parent {parent} not found")
+  path = Path(artifact).expanduser()
+  sha = sha256_file(path) if path.is_file() else None
+  artifact = str(path.resolve()) if path.is_file() else artifact
+  folder = store.path("runcards", "x").parent
+  folder.mkdir(parents=True, exist_ok=True)
+  existing = sorted(folder.glob("*.json"))
+  rid = f"{skill}-{len(existing) + 1:04d}"
+  for other in existing:
+    card = json.loads(read_text(other))
+    if (card["skill"], card["artifact"]) == (skill, artifact) and not card["closed_at"] and not card["interrupted_at"]:
+      card["interrupted_at"] = now_iso()
+      atomic_write(other, card)
+      journal(store, f"runcard interrupted {other.stem} by {rid}")
+  config = store.config or {}
+  card = {"skill": skill, "artifact": artifact, "artifact_sha256": sha,
+          "reviewers": list((config.get("reviewers") or {}).get(RUNCARD_REVIEWERS.get(skill, ""), [])),
+          "tiering": None, "mode": mode or config.get("mode", "normal"), "parent": parent,
+          "opened_at": now_iso(), "closed_at": None, "interrupted_at": None, "produced": []}
+  atomic_write(store.path("runcards", rid), card)
+  journal(store, f"runcard open {rid} {skill} {artifact}")
+  return rid
+
+
+def card_add(store: Store, id: str, key: str, item) -> None:
+  card = load_card(store, id)
+  card.setdefault(key, []).append(item)
+  atomic_write(store.path("runcards", id), card)
 
 
 def journal(store: Store, line: str) -> None:
