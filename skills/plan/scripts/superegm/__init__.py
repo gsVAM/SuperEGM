@@ -864,6 +864,12 @@ def topo_order(preds):
 # ---------------------------------------------------------------- rendering
 
 
+def parse_plan(path: Path):
+  """One plan grammar (spec section 9.1): the parser is `graph.Plan`, for every subcommand."""
+  from superegm import graph  # here, not at the top: graph imports this module
+  return graph.Plan(path)
+
+
 class Handoff:
   """A parsed plan, its graph, config, design facts and rendered bodies."""
 
@@ -871,7 +877,7 @@ class Handoff:
     self.plan_path = plan_path.resolve()
     self.store = store
     self.artifact_dir = store.root
-    self.plan = Plan(self.plan_path)
+    self.plan = parse_plan(self.plan_path)
     design = Path(self.plan.design).expanduser()
     if not design.is_absolute():
       design = (self.plan_path.parent / design).resolve()
@@ -1094,7 +1100,7 @@ class Handoff:
       new_text = text.rstrip("\n") + "\n\n" + section
     if new_text != text:
       atomic_write(self.plan_path, new_text)
-      self.plan = Plan(self.plan_path)
+      self.plan = parse_plan(self.plan_path)
     # The store's copy: `require_frozen_units` compares a filed unit's section
     # in the plan file with the one stored here.
     atomic_write(self.store.path("plan"), self.plan.text)
@@ -1372,7 +1378,7 @@ def require_frozen_units(handoff) -> None:
   if not filed:
     return
   stored_path = handoff.store.path("plan")
-  stored = Plan(stored_path) if stored_path.is_file() else None
+  stored = parse_plan(stored_path) if stored_path.is_file() else None
   for uid in filed:
     if stored is None or uid not in stored.units or uid not in handoff.plan.units \
         or unit_section_text(handoff.plan, uid) != unit_section_text(stored, uid):

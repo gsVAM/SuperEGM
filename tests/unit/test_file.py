@@ -88,24 +88,35 @@ def test_dry_run_refuses_101_units_missing_extra_and_warns_above_450(world):
         | Field | Value |
         | --- | --- |
         | Objective | Unit {n} exists. |
-        | Scope paths | `src/u{n}.ts` (create) |
+        | Scope paths | `src/u{n}.ts` (create), `src/u{n}.test.ts` (create) |
         | Design range | `docs/designs/sample.md:13-15 (#### 1. src/webhooks/queue.ts)` |
         | Blocked by | {"none" if n == 1 else f"U{n - 1:02d}" if n == 2 else f"U{n - 1:02d}, U{n - 2:02d}"} |
         | Shared files | none |
         | Risk | low: small |
         | Size | S |
 
+        Interfaces
+        - Produces: u{n}() -> void
+
         Definition of done
-        1. `npm test -- src/u{n}.test.ts` passes.
+        1. The test for each Step was committed before its implementation (checked by superegm tdd-order)
+        2. Run `npm test -- src/u{n}.test.ts` — passes
+
+        Review focus (this unit)
+        - U{n:02d}: the unit — exists; pinned by `u{n}_exists`
+
+        Steps
+        1. Write the failing test `u{n}_exists` in `src/u{n}.test.ts`:
+           Implement `u{n}()` in `src/u{n}.ts`.
 
         Decide before build
         - none
         """))
-  world.plan.write_text(f"# Big\n\nDesign: `{world.repo / 'docs/designs/sample.md'}`\n\n" + "\n".join(big), encoding="utf-8")
+  world.plan.write_text(f"# Big\n\nDesign: `{world.repo / 'docs/designs/sample.md'}`\n\n## Global constraints\n- none\n\n## 2. Units\n\n" + "\n".join(big), encoding="utf-8")
   pass_gate(world)
   code, out = world.run("dry-run", "--plan", world.plan)
   assert code == 1 and "split the handoff" in out
-  world.plan.write_text(f"# Big\n\nDesign: `{world.repo / 'docs/designs/sample.md'}`\n\n" + "\n".join(big[:100]), encoding="utf-8")
+  world.plan.write_text(f"# Big\n\nDesign: `{world.repo / 'docs/designs/sample.md'}`\n\n## Global constraints\n- none\n\n## 2. Units\n\n" + "\n".join(big[:100]), encoding="utf-8")
   pass_gate(world)
   code, out = world.run("dry-run", "--plan", world.plan)
   assert code == 0, out

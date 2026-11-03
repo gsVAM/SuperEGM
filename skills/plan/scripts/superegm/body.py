@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the issue-body parsers of spec section 9.1; EGM's `fill_numbers` and `normalise` moved here.
+# Modified by SuperEGM (gsVAM), 2026: the issue-body parsers of spec section 9.1; EGM's `fill_numbers` and `normalise` moved here; a Step's command defaults from its `Write` line.
 
 """The unit issue body (spec section 9.1) read back: its marker, its DoD items,
 its Steps' commands and paths, and the interfaces it consumes."""
@@ -14,6 +14,7 @@ STEP_RE = re.compile(r"^(\d+)\. Write the failing test\b")
 RUN_RE = re.compile(r"^\s*Run `([^`]+)`")
 SPAN_RE = re.compile(r"`([^`]+)`")
 CONSUMES_RE = re.compile(r"^- Consumes: (.+) \((U\d{2,})\)\s*$")
+PARAMETRIZE_RE = re.compile(r"@pytest\.mark\.parametrize")
 
 
 def sections(body: str) -> dict:
@@ -41,11 +42,18 @@ def steps(body: str) -> list:
 
 
 def run_commands(body: str) -> list:
+  """The DoD `Run` commands, then each Step's one command: its first `Run`
+  line, else `pytest <test path>::<test name> -q` (`-k <test name>` when
+  the fence holds `@pytest.mark.parametrize`) from the `Write` line."""
   commands = [text for _, kind, text in dod_items(body) if kind == "run"]
   for _, lines in steps(body):
     first = next((RUN_RE.match(l) for l in lines if RUN_RE.match(l)), None)
+    spans = SPAN_RE.findall(lines[0])
     if first:
       commands.append(first.group(1))
+    elif len(spans) > 1:
+      select = f" -k {spans[0]}" if any(PARAMETRIZE_RE.search(l) for l in lines) else f"::{spans[0]}"
+      commands.append(f"pytest {spans[1]}{select} -q")
   return commands
 
 
