@@ -299,3 +299,31 @@ def test_graph_section_grammar(world, old, new, message):
   plan.write_text(text.replace(old, new, 1), encoding="utf-8")
   code, out = graph(world, plan, card)
   assert code == 1 and f"{plan}:" in out and message in out, out
+
+
+def test_body_layout_markers_and_placeholders(world):
+  spec, sha, plan, card = planned(world)
+  assert graph(world, plan, card)[0] == 0
+  body = body_of(world, "U02")
+  lines = body.splitlines()
+  assert MARKER_RE.match(lines[0]).groups() == (f"2026-11-03-webhooks-{sha[:6]}", "U02", sha)
+  assert lines[1] == "# U02 — Worker"
+  assert lines[2] == (f"Spec: `docs/specs/2026-11-03-webhooks-design.md` @ {sha[:7]} · "
+                      "`docs/specs/2026-11-03-webhooks-design.md:5-10 (## Units)`")
+  assert [l for l in lines if l.startswith("## ")] == [
+      "## Objective", "## Interfaces", "## Definition of done", "## Global constraints",
+      "## Review focus (this unit)", "## Steps", "## Decide before build", "## Scope, order and risk"]
+  assert "\n- Python 3.11, standard library only\n" in body and "- [ ]" not in body
+  assert "\n" + FIXED_DOD_1 + "\n2. Run `pytest tests/test_u02.py -q` — the module's cases pass\n" in body
+  assert "- Consumes: u01_fn(x: int) -> int (U01)\n- Produces: u02_fn(x: int) -> int\n" in body
+  assert "- U02: an empty input — returns 0; pinned by `test_u02_empty`\n" in body
+  assert "1. Write the failing test `test_u02_empty` in `tests/test_u02.py`:\n   " + FENCE + "python\n" in body
+  assert "\n" + D1 + "\n" in body
+  assert ("Scope: `src/u02.ts` (create), `tests/test_u02.py` (create) · Blocked by: #<U01> · "
+          "Shared files: none · Risk: low: new module · Size: S\n") in body
+  assert body.endswith(f"Branch: `superegm/2026-11-03-webhooks-{sha[:6]}/U02` · Part of #<tracking>\n")
+  filled = fill_numbers(body, {"U01": 11}, tracking=10)
+  assert "Blocked by: #11 ·" in filled and "Part of #10" in filled
+  bodies = find(world, "handoff_bodies.md").read_text(encoding="utf-8")
+  assert f"<!-- superegm:handoff=2026-11-03-webhooks-{sha[:6]} unit=tracking spec={sha} -->" in bodies
+  assert "Blocked by: none ·" in body_of(world, "U01")
