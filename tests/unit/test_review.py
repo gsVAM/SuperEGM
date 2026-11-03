@@ -487,3 +487,24 @@ def test_approve_spec_amend_units(world):
   assert code == 1 and "approve-spec: a line outside ## Units changed" in out and approval(world) == rec
   store(world.repo).path("approvals", SLUG).unlink()
   assert "approve-spec: no approval to amend" in approve(world, spec, icid, "--amend-units")[1]
+
+
+# ---------------------------------------------------------------- S17: the references
+
+REFS = ROOT / "skills" / "review-spec" / "references"
+
+def test_review_loop_and_resolve_references():
+  loop = (REFS / "review_loop.md").read_text(encoding="utf-8")
+  for phrase in ("superegm review open", "superegm review record", "superegm review settle", "superegm review status", "superegm review rule",
+                 "exit 0", "exit 5", "exit 2", "exit 4", "exit 3", "regression: yes|no",
+                 "EGM's second consecutive clean round for document reviews is dropped",
+                 "one `completed`, clean, non-regressing round converges every kind",
+                 "SUPEREGM_GOLDFISH_MODEL", "SUPEREGM_GOLDFISH_EFFORT", "requested -> effective",
+                 "runner.py", "review --host claude", "--resume", "astra-<round>-<n>", "two incomplete runs",
+                 "run_in_background", "SUPEREGM_ROLE=goldfish", "change the thing, not the round", "--not-run"):
+    assert phrase in loop, phrase
+  resolve = (REFS / "resolve.md").read_text(encoding="utf-8")
+  for phrase in ("fixed", "contested", "declined", "escalated", "fix-design", "superegm review settle",
+                 "A contest must be checkable", "Do not contest a comprehension gap", "Do not change a severity"):
+    assert phrase in resolve, phrase
+  assert len(loop.encode()) < 24_000 and len(resolve.encode()) < 12_000
