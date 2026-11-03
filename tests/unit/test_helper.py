@@ -512,7 +512,7 @@ def test_require_frozen_units_refuses_a_filed_units_drift(world):
   unit_file = world.artifacts / state["handoff_id"][-6:] / "unit_U01.md"
   unit_file.write_text(unit_file.read_text(encoding="utf-8") + "\n## Decisions answered since the issue was posted\n\n- none\n", encoding="utf-8")
   assert world.run("status")[0] == 0, "text outside the fence is not the body"
-  unit_file.write_text(unit_file.read_text(encoding="utf-8").replace("**Objective.** An in-memory queue", "**Objective.** A queue"), encoding="utf-8")
+  unit_file.write_text(unit_file.read_text(encoding="utf-8").replace("## Objective\nAn in-memory queue", "## Objective\nA queue"), encoding="utf-8")
   code, out = world.run("status")
   assert code == 1 and "U01 is filed and frozen: unit_U01.md no longer carries the filed body" in out
   for name in ("status", "launch", "prepare"):
@@ -527,7 +527,7 @@ def test_defer_and_published_are_gone(world):
   assert "defer" not in subs
   assert "--published" not in {f for a in subs["decide"]._actions for f in a.option_strings}
   gh = applied(world)
-  assert "open blocking decision U03/D2" in world.run("status")[1]
+  assert state_of(world)["decisions"]["U03/D2"]["answer"] == "(a)"  # answered before the filing (spec section 9.1)
   code, out = world.run("decide", "--unit", "U03", "--decision", "D2", "--answer", "(b)")
   assert code == 0 and "PUBLISHED" not in out
   code, out = world.run("status")
