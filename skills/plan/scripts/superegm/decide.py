@@ -1,42 +1,50 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_decide` as the decide module.
+# Modified by SuperEGM (gsVAM), 2026: the answer is one of the item's options, written into the plan line of an unfiled unit; a filed unit gets the comment file only.
 
-"""superegm decide: record the user's answer to a decide-before-build item."""
+"""superegm decide: answer a decide-before-build item in place."""
+
+import re
+from pathlib import Path
 
 import superegm as core
+from superegm import graph
 
-WRITES = frozenset(['file', 'state', 'unit'])  # the store kinds this subcommand writes
-SKILLS = frozenset(['plan'])  # the skills whose card this subcommand accepts
+WRITES = frozenset(['bodies', 'file', 'plan', 'state', 'unit', 'units'])  # the store kinds this subcommand writes
+SKILLS = frozenset(['plan', 'wave'])  # the skills whose card this subcommand accepts
 
 
 def register(subparsers):
-  p = core.add_parser(subparsers, "decide", "record the user's answer to a decide-before-build item")
+  p = core.add_parser(subparsers, "decide", "answer a decide-before-build item in place")
   p.add_argument("--unit", required=True)
   p.add_argument("--decision", required=True)
-  p.add_argument("--answer", required=True)
+  which = p.add_mutually_exclusive_group(required=True)
+  which.add_argument("--answer", help='the option id, as "(b)"')
+  which.add_argument("--default", action="store_true", help="the item's default option")
+  p.add_argument("--judges", help="the judges panel id whose verdict this answer is")
   p.set_defaults(run=run, writes=WRITES)
 
 
 def run(args):
-  card = core.require_runcard(args, SKILLS)
-  plan, st = core.locate(args)
-  handoff = core.Handoff(plan, st)
-  unit = handoff.plan.units.get(args.unit)
+  st = core.store(core.git_toplevel(Path.cwd()))
+  handoff = graph.load(st, args.plan)
+  core.require_runcard(args, SKILLS)
+  uid, did = args.unit, args.decision
+  unit = handoff.plan.units.get(uid)
   if not unit:
-    raise core.HandoffError(f"unknown unit {args.unit}")
-  decision = next((d for d in unit.decisions if d["id"] == args.decision), None)
+    raise core.HandoffError(f"decide: unknown unit {uid}")
+  decision = next((d for d in unit.decisions if d["id"] == did), None)
   if not decision:
-    raise core.HandoffError(f"{args.unit} has no decision {args.decision}")
-  key = f"{args.unit}/{args.decision}"
-  fingerprint = core.sha256_text(core.canonical([decision["question"], decision["owner"],
-                                       decision["default"], decision["blocking"]]))[:16]
-  handoff.state.setdefault("decisions", {})[key] = {"answer": args.answer,
-                                                    "decided_at": core.now_iso(),
-                                                    "fingerprint": fingerprint}
-  core.save_state(handoff.artifact_dir, handoff.state)
-  core.atomic_write(handoff.unit_file(args.unit), handoff.unit_file_text(args.unit))
-  comment = handoff.artifact_dir / f"decision_comment_{args.unit}_{args.decision}.md"
-  core.atomic_write(comment, f"**Decision {args.decision}** ({decision['question']}): {args.answer}\n")
-  print(f"recorded {key}; re-rendered {handoff.unit_file(args.unit).name}; comment in {comment.name}")
+    raise core.HandoffError(f"decide: {uid} has no decision {did}")
+  answer = decision["default"] if args.default else args.answer
+  by = f"judges:{args.judges}" if args.judges else "owner"
+  lines = core.read_text(handoff.plan_path).split("\n")
+  index = decision["line"] - 1
+  lines[index] = re.sub(r"; answer: \(\w\)$", "", lines[index]) + f"; answer: {answer}"
+  core.atomic_write(handoff.plan_path, "\n".join(lines))
+  handoff = graph.load(st, handoff.plan_path)
+  handoff.state.setdefault("decisions", {})[f"{uid}/{did}"] = {"answer": answer, "by": by, "decided_at": core.now_iso()}
+  handoff.write_graph_files()
+  core.journal(st, f"decide {uid}/{did} {answer} by {by}")
+  print(f"recorded {uid}/{did} {answer}; re-rendered unit_{uid}.md")
   return 0
