@@ -3,7 +3,10 @@
 
 """superegm review open|record|settle|status|rule: the one review loop (spec section 8)."""
 
+import argparse
+import contextlib
 from dataclasses import dataclass
+import io
 import json
 from pathlib import Path
 import re
@@ -11,7 +14,7 @@ import sys
 
 import superegm as core
 
-WRITES = frozenset({"reviews", "foreman", "runcards"})  # the store kinds this subcommand writes
+WRITES = frozenset({"reviews", "foreman", "runcards", "review"})  # the store kinds this subcommand writes
 SKILLS = frozenset({"review-spec", "review-plan", "wave", "integrate"})  # the skills whose card this subcommand accepts
 KINDS = ("spec", "plan", "head", "integrate")
 REVIEWERS = ("design", "zoom-out", "comprehension", "readiness", "structural", "style",
@@ -56,7 +59,10 @@ def register(subparsers):
   u.add_argument("--review", required=True)
   u.add_argument("--ruling", choices=RULINGS, required=True)
   by_whom(u, required=True)
-  core.add_parser(action, "post", "post a head round's review to its pull request (not built yet: U10)")
+  v = core.add_parser(action, "post", "post a head round's review to its pull request, bound to the reviewed commit")
+  v.add_argument("--unit", required=True)
+  v.add_argument("--round", type=int, required=True)
+  v.add_argument("--dispatch", required=True, help="the dispatch id `foreman dispatch` printed")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -67,11 +73,26 @@ def by_whom(parser, required):
 
 
 def run(args):
-  if args.action == "post":
-    print("superegm: review post is not built yet", file=sys.stderr)
+  try:
+    return {"open": open_review, "record": record_round, "settle": settle_finding,
+            "status": status_review, "rule": rule_review, "post": post}[args.action](args)
+  except Refusal as refusal:
+    print(refusal)
     return 1
-  return {"open": open_review, "record": record_round, "settle": settle_finding,
-          "status": status_review, "rule": rule_review}[args.action](args)
+
+
+class Refusal(core.HandoffError):
+  """A refusal the subcommand prints as is: one line on stdout, exit 1."""
+
+
+def require_dispatch(unit: str, data: dict, dispatch_id: str) -> dict:
+  """The round entry of the unit's current dispatch; a stale or unknown id is refused."""
+  if dispatch_id != data.get("dispatch_id"):
+    raise Refusal(f"dispatch: {dispatch_id} is not {unit}'s current dispatch ({data.get('dispatch_id')})")
+  entry = next((e for e in reversed(data["rounds"]) if e.get("dispatch_id") == dispatch_id), None)
+  if entry is None:
+    raise Refusal(f"dispatch: {unit} has no round for {dispatch_id}")
+  return entry
 
 
 # ---------------------------------------------------------------- the findings line
@@ -162,6 +183,12 @@ def round_numbers(st: core.Store, rid: str) -> list[int]:
                 if (m := re.fullmatch(r"round-(\d+)\.json", p.name)))
 
 
+def head_review_id(st: core.Store, unit: str):
+  """The unit's latest `head-<unit>-c<n>` review id, or None before the first dispatch."""
+  latest, _ = latest_cycle(st, "head", unit)
+  return review_id(st, "head", unit, latest["cycle"]) if latest else None
+
+
 def head_entry(st: core.Store, unit: str, n: int):
   """The unit's `rounds[]` entry of round `n`, or None."""
   return next((e for e in core.load_foreman(st, unit)["rounds"] if e.get("round") == n), None)
@@ -222,7 +249,7 @@ def open_review(args) -> int:
     return 0
   cycle = latest["cycle"] + 1 if latest else 1
   rid = review_id(st, kind, artifact, cycle)
-  astra = args.astra or ("on" if (st.config.get("astra") or {}).get("enabled") else "off")
+  astra = getattr(args, "astra", None) or ("on" if (st.config.get("astra") or {}).get("enabled") else "off")
   review = {"kind": kind, "artifact": artifact, "cycle": cycle,
             "reviewers": reviewers + (["astra"] if astra == "on" and kind in LANE_KINDS else []),
             "runcard": args.runcard, "artifact_sha256": args.sha256, "astra_incomplete": 0,
@@ -437,6 +464,125 @@ def status_review(args) -> int:
   print(status.line)
   print(status.trend)
   return status.code
+
+
+# ---------------------------------------------------------------- post: a head round on its pull request
+
+
+def header(round_n: int, head: str) -> str:
+  return f"**SuperEGM review round {round_n} (head {head[:7]})**"
+
+
+def render_comment(round_json: dict, head: str, ci_verdict: str, mention) -> str:
+  """The configured mention as line 1 when set, the header, the round's finding lines (section 8's form)
+  and `CI: <verdict>`; no run card, no model names."""
+  lines = [mention] if mention else []
+  lines += [header(round_json["round"], head), ""]
+  for record in (round_json.get("reviewers") or {}).values():
+    lines += [f"{f['id']} | {f['severity']} | {f['location']} | regression: {f['regression']} | {f['claim']}"
+              for f in record["findings"]]
+  lines += ["", f"CI: {ci_verdict}"]
+  return "\n".join(lines) + "\n"
+
+
+def post(args) -> int:
+  """EGM's posting guard in the helper: the round's review goes to the pull-request reviews API bound to the
+  commit it reviewed, as a COMMENT, after the raw-text scan; the response's `commit_id` must be that sha
+  for the round to count `posted`."""
+  st = core.store(core.git_toplevel(Path.cwd()))
+  card = core.require_runcard(args, SKILLS)
+  unit, n = args.unit, args.round
+  data = core.load_foreman(st, unit)
+  require_dispatch(unit, data, args.dispatch)
+  entry = next((e for e in data["rounds"] if e.get("round") == n), None)
+  if entry is None or not entry.get("head"):
+    raise core.HandoffError(f"review post: {unit} has no prepared round {n}")
+  rid = head_review_id(st, unit)
+  if rid is None:
+    raise core.HandoffError(f"review post: {unit} has no head review")
+  config, head = st.config, entry["head"]
+  repo, number = config["repo"], core.load_state(st.root)["units"][unit]["pr"]["number"]
+  runcard = card.get("parent") or args.runcard
+  present = next((r for r in core.gh_pages(f"repos/{repo}/pulls/{number}/reviews")
+                  if (r.get("body") or "").startswith(header(n, head))), None)
+  if present:  # never posted twice: counted when bound to the reviewed sha, refused otherwise
+    if present.get("commit_id") != head:
+      raise Refusal(f"header present on {(present.get('commit_id') or '')[:7]}")
+    print(f"posted {count_posted(st, unit, entry, present['submitted_at'], rid, runcard)} (already on the PR)")
+    return 0
+  folder = st.path("review", unit, f"pr{number}") / f"r{n}"
+  verdict = json.loads(core.read_text(folder / "ci.json"))["verdict"]
+  rnd = load_round(st, rid, n) or {"round": n, "reviewers": {}, "builder_contested": []}
+  body = render_comment(rnd, head, verdict, config.get("fix_request_mention") or None)
+  problems = core.scan_text(body, config, "comment", label="comment")
+  if problems:
+    raise Refusal(problems[0])
+  root = core.git_toplevel(Path.cwd())
+  if merge_base_moved(root, core.load_state(st.root).get("remote") or config["remote"], config["base"], number, entry):
+    entry.update({"phase": "collected", "outcome": "not run (target-moved)"})
+    core.save_foreman(st, unit, data)
+    core.journal(st, f"{unit} round {n} collected (not run (target-moved)) under {runcard}")
+    print("target-moved")
+    return 3
+  core.atomic_write(folder / "comment.md", body)
+  _, text = core.gh_post(f"repos/{repo}/pulls/{number}/reviews",
+                         {"commit_id": head, "event": "COMMENT", "body": f"@{folder / 'comment.md'}"})
+  response = json.loads(text) if text.strip() else {}
+  if response.get("commit_id") != head:
+    raise Refusal(f"posted on {(response.get('commit_id') or '')[:7]}, not {head[:7]}: round {n} not counted")
+  word = count_posted(st, unit, entry, response.get("submitted_at") or core.now_iso(), rid, runcard)
+  print(f"posted {word}")
+  return 0
+
+
+def outcome_word(status_exit: int, contested: list) -> str:
+  """The posted round's return word (section 11), in this order."""
+  if contested:
+    return "contested: " + ", ".join(contested)
+  return {0: "clean", 2: "cap-reached"}.get(status_exit, "revise")
+
+
+def contested_fids(round_json: dict) -> list:
+  """The `builder_contested[].fid` whose `foreman` finding in the round has no disposition."""
+  open_fids = {f["id"] for f in ((round_json.get("reviewers") or {}).get("foreman") or {}).get("findings") or []
+               if f["disposition"] is None}
+  return [c["fid"] for c in round_json.get("builder_contested") or [] if c["fid"] in open_fids]
+
+
+def count_posted(st: core.Store, unit: str, entry: dict, posted_at: str, review_id: str, runcard: str) -> str:
+  """The round is `posted` at `posted_at`; its `what_ran` is re-derived, its `outcome` is the word `review
+  status` and `builder_contested[]` imply, and `clean` journals `<unit> awaiting merge`."""
+  data = core.load_foreman(st, unit)
+  saved = next(e for e in data["rounds"] if e["round"] == entry["round"])
+  saved.update({"phase": "posted", "posted_at": posted_at})
+  core.save_foreman(st, unit, data)
+  review, rnd = load_review(st, review_id), load_round(st, review_id, entry["round"])
+  if rnd:
+    rnd["what_ran"] = derive_what_ran(review, rnd, saved)
+    core.atomic_write(st.path("reviews", review_id, f"round-{entry['round']}.json"), rnd)
+  word = outcome_word(status_code(review_id, runcard), contested_fids(rnd or {}))
+  saved["outcome"] = word
+  entry.update(saved)
+  core.save_foreman(st, unit, data)
+  core.journal(st, f"{unit} round {entry['round']} posted {word} under {runcard}")
+  if word == "clean":
+    core.journal(st, f"{unit} awaiting merge under {runcard}")
+  return word
+
+
+def merge_base_moved(root: Path, remote: str, base: str, pr: int, entry: dict) -> bool:
+  """Fetch the base tip and compare the merge base of the fetched refs, at the repository root (never
+  inside the worktree), with the one `prepare` recorded: an unrelated base commit leaves it unchanged."""
+  core.run_git(["fetch", "--no-write-fetch-head", remote, f"+refs/heads/{base}:refs/superegm/base/{pr}"], root)
+  now = core.run_git(["merge-base", f"refs/superegm/base/{pr}", f"refs/superegm/pr/{pr}"], root).strip()
+  return now != entry.get("merge_base")
+
+
+def status_code(review_id: str, runcard: str) -> int:
+  """`review status` in-process with its stdout captured: the exit code alone (0 converged, 2 cap, 3 open or
+  not clean, 4 fix-design, 5 stalled)."""
+  with contextlib.redirect_stdout(io.StringIO()):
+    return status_review(argparse.Namespace(review=review_id, runcard=runcard, unit=None, design=None, plan=None))
 
 
 # ---------------------------------------------------------------- rule
