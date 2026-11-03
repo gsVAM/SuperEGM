@@ -226,3 +226,46 @@ def test_report_idle_names_a_launch_builder_refusal(world):
   assert "idle: U02" in world.run("report", "--runcard", card)[1], "idle persists for the invocation"
   assert "idle: none" in world.run("report", "--runcard", open_wave_card(world))[1], "and not beyond it"
   assert world.run("report", "--runcard", card, "--idle", "U09=stalled")[0] == 1, "an unknown unit"
+
+
+# ---------------------------------------------------------------- S4: decision open
+
+
+PRIOR = {"id": "q1", "point": 3, "source": "comment 60", "head": "a" * 40, "question": BLOCKED, "asked_at": "t"}
+
+
+@pytest.mark.parametrize("point,source,decisions,rulings,expect", [
+  (1, "review head-U01-c1 round 2", [], [], "options: finding upheld; finding overruled"),
+  (2, "review head-U01-c1 cap", [], [], "options: one more round; stop"),
+  (3, "comment 77", [], [], "options: (a) use the in-memory queue; (b) use Redis; stop the unit"),
+  (3, "launch 2", [], [], "options: relaunch; stop the unit"),
+  (3, "closed 70", [PRIOR], [{"decision": "q1", "ruling": "relaunch", "by": "owner", "posted_at": "t"}],
+   "ruled: stop the unit (relaunch already used)"),
+  (3, "comment 79", [PRIOR, {**PRIOR, "id": "q2", "source": "comment 70"}],
+   [{"decision": "q1", "ruling": "(a)", "by": "owner", "posted_at": "t"}, {"decision": "q2", "ruling": "(a)", "by": "owner", "posted_at": "t"}],
+   "options: relaunch; stop the unit"),
+  (3, "comment 79", [PRIOR, {**PRIOR, "id": "q2", "head": "b" * 40}],
+   [{"decision": "q1", "ruling": "(a)", "by": "owner", "posted_at": "t"}, {"decision": "q2", "ruling": "(a)", "by": "owner", "posted_at": "t"}],
+   "options: (a) use the in-memory queue; (b) use Redis; stop the unit"),
+])
+def test_decision_open_records_the_question_and_prints_its_options(world, point, source, decisions, rulings, expect):
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "decisions": decisions, "rulings": rulings})
+  q = question(world, BLOCKED if source.startswith("comment") else "rounds: 5 -> 3 -> 2\n")
+  argv = ["decision", "open", "--unit", "U01", "--point", point, "--question", q, "--source", source, "--runcard", card]
+  code, out = world.run(*argv)
+  assert code == 0, out
+  qid, line2 = out.splitlines()[:2]
+  assert qid == f"q{len(decisions) + 1}" and line2 == expect
+  f = foreman_of(s, "U01")
+  d = f["decisions"][-1]
+  assert (d["id"], d["point"], d["source"], d["head"], d["question"]) == (qid, point, source, "a" * 40, q.read_text(encoding="utf-8"))
+  assert d["asked_at"]
+  if expect.startswith("ruled"):
+    assert f["rulings"][-1] == {"decision": qid, "ruling": "stop the unit", "by": "superegm",
+                                "reason": "relaunch already used", "posted": None, "posted_at": f["rulings"][-1]["posted_at"]}
+    assert f["stopped"]["reason"] == "stop the unit" and "superegm:stopped" in world.gh.issues[2]["labels"]
+  else:
+    code, out = world.run(*argv)
+    assert code == 1 and out == f"decision: U01 has a pending decision {qid}\n"
+  assert f"Decision {qid} (point {point}, {source}): U01" in s.path("journal").read_text(encoding="utf-8")
