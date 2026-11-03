@@ -380,3 +380,17 @@ def test_judges_skill_body():
   scenarios = yaml.safe_load((ROOT / "skills/judges/test_scenarios.yaml").read_text(encoding="utf-8"))
   assert scenarios["skill"] == "judges"
   assert {s["scenario_id"] for s in scenarios["scenarios"]} >= {"advisory_never_applies", "astra_down_runs_claude_only"}
+
+
+REMOVED = ("--judges 1", "--judges 3", "Blocker |", "| Major", "| Nit", "egm-", "egm_handoff", "egm:",
+           "synthesizer", "goldfish_dispositions", "EGM_ASTRA", "Mode: BRAINSTORM")
+
+
+@pytest.mark.parametrize("path", [
+    "skills/judges/SKILL.md", "skills/judges/references/astra_judge.md", "skills/judges/test_scenarios.yaml",
+    "agents/judge.md", ".claude-plugin/agents/judge.md", "skills/plan/scripts/superegm/judges.py",
+])
+def test_no_removed_forms(path):
+  text = (ROOT / path).read_text(encoding="utf-8")
+  for term in REMOVED:
+    assert term not in text, f"{path}: {term}"
