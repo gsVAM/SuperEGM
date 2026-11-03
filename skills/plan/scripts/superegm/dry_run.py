@@ -52,10 +52,7 @@ def run(args):
   lines = [f"# Handoff dry run: `{handoff.handoff_id}` on {handoff.config['repo']}", "",
            f"Config: `{handoff.config['_source']}`. Remote: `{handoff.config['remote']}`. "
            f"Template: `{handoff.config['issue_template'] or 'default (built into the helper)'}`.",
-           f"Gate: plan `{plan_sha[:12]}`, bodies `{bodies_sha[:12]}` "
-           f"({state.get('gate', {}).get('passed', 'recorded')}, round {state.get('gate', {}).get('round', '?')}).",
-           "What ran: " + ("; ".join(state.get("gate", {}).get("what_ran", [])) or "not recorded"),
-           "Readiness: " + state.get("readiness", {}).get("summary", "not recorded"),
+           f"Gate: plan `{plan_sha[:12]}`, bodies `{bodies_sha[:12]}` ({state.get('gate', {}).get('passed', 'recorded')}).",
            f"Preflight: gh auth ok; push access ok; {len(checks['labels'])} labels on the repository.", "",
            f"Writes: {len(to_create)} labels, {len(issues)} issues (1 tracking, {len(issues) - 1} units), "
            f"{len(subs)} sub-issue links, {len(blocked)} blocked-by links; {total} content-creating "

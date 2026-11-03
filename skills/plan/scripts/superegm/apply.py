@@ -94,7 +94,7 @@ def apply_writes(handoff: core.Handoff, writes, budget: Budget, save):
     budget.spend()
     try:
       core.gh_retry(["label", "create", item[1], "-R", repo, "--color", core.LABEL_COLOR,
-                "--description", f"EGM handoff label ({item[1]})"])
+                "--description", f"SuperEGM label ({item[1]})"])
       labels[item[1]] = "done"
       core.SLEEP(1)
     except core.GhError as error:
@@ -191,7 +191,7 @@ def apply_writes(handoff: core.Handoff, writes, budget: Budget, save):
 
 
 def create_issue(repo, title, body, labels, artifact_dir):
-  with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".md", prefix=".egm_body_",
+  with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".md", prefix=".superegm_body_",
                                    dir=str(artifact_dir), delete=False) as handle:
     handle.write(body)
     path = handle.name
