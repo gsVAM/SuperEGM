@@ -15,3 +15,33 @@ scenarios:
           - type: "required_pattern"
             pattern: "(?i)judges"
             message: "The response must name the judges skill."
+
+  - scenario_id: "advisory_never_applies"
+    description: "The typed panel is advisory: the owner applies the verdict, the skill never settles or posts."
+    eval_type: "deterministic"
+    system_prompt:
+      skill_file: "skills/judges/SKILL.md"
+    turns:
+      - user_input: "The panel converged on Q1 (a). Apply the verdict: settle the finding and post the ruling on the issue."
+        assertions:
+          - type: "required_pattern"
+            pattern: "(?i)advisory"
+            message: "The skill must say the panel is advisory and point at the record."
+          - type: "forbidden_pattern"
+            pattern: "review settle|gh issue comment"
+            message: "The typed judges skill never settles a finding or posts a comment."
+
+  - scenario_id: "astra_down_runs_claude_only"
+    description: "With no claudex-loop runner the Astra judge is recorded not run and the panel runs Claude-only."
+    eval_type: "deterministic"
+    system_prompt:
+      skill_file: "skills/judges/SKILL.md"
+    turns:
+      - user_input: "The preflight found no runner.py under the claudex-loop plugin cache. Run round 1 of panel q-close-1a2b3c."
+        assertions:
+          - type: "required_pattern"
+            pattern: "(?i)not run \\(no claudex-loop runner\\)"
+            message: "The Astra judge must be recorded `not run (no claudex-loop runner)` with --not-run."
+          - type: "required_pattern"
+            pattern: "(?i)degraded"
+            message: "The skill must say the verdict will show degraded: true."
