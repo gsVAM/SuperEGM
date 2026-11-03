@@ -98,6 +98,8 @@ def run(args):
     state.setdefault("filings", []).append({"sha256": sha, "writes": confirmed["writes"], "at": core.now_iso()})
     state.setdefault("base_at_start", core.run_git(["rev-parse", handoff.config["base"]], handoff.repo_root).strip())
     core.journal(st, f"filing {sha[:12]}: {len(units)} units ({', '.join(sorted(units))})")
+    if card["mode"] == "leavemealone":
+      core.journal(st, "Create: automatic (leavemealone)")
     core.save_state(handoff.artifact_dir, state)
   state.setdefault("confirmed_at", core.now_iso())
   budget = Budget(args.max_writes)
