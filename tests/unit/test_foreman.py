@@ -454,3 +454,20 @@ def test_foreman_adapter_frontmatter_and_tools():
     assert line in fm.splitlines(), line
   assert "memory" not in fm and "${CLAUDE_PLUGIN_ROOT}/skills/wave/references/foreman_brief.md" in text
   assert "Modified by SuperEGM (gsVAM), 2026" in text or "Added by SuperEGM (gsVAM), 2026" in text
+
+
+@pytest.mark.parametrize("line", [
+    "superegm prepare --unit <unit-id> --dispatch <dispatch-id> --runcard <child-card>",
+    "`change-review` first",
+    "without `name`",
+    "superegm review record --review <review-id> --round <n> --sha256 <head> --reviewer <id> --findings <file>",
+    "superegm collect --unit <unit-id> --dispatch <dispatch-id> --runcard <child-card>",
+    "--not-run \"<reason>\"",
+    "superegm review post --unit <unit-id> --round <n> --dispatch <dispatch-id> --runcard <child-card>",
+    "clean | revise | contested: <ids> | cap-reached | target-moved | error",
+    "`target-moved` when `review post` exited 3",
+    "`error` otherwise",
+    "never merges, never approves, never edits the owner's working tree, never removes a worktree, never launches a session, never convenes the judges, never infers that a builder died",
+])
+def test_foreman_brief_carries_the_round(line):
+  assert line in (ROOT / "skills/wave/references/foreman_brief.md").read_text(encoding="utf-8"), line
