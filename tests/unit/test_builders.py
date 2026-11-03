@@ -355,7 +355,7 @@ def test_launch_builder_round_2_detaches_the_earlier_worktree_and_carries_the_re
   assert out.strip().splitlines()[-1].startswith(f"cd '{r2}' && env ")
 
 
-from superegm import HandoffError
+import superegm  # the harness reloads the package per test: read HandoffError at call time
 from superegm.launch_builder import allowed_tools
 
 @pytest.mark.parametrize("configured, expect", [
@@ -369,7 +369,7 @@ from superegm.launch_builder import allowed_tools
 def test_allowed_tools_composition(configured, expect):
   body = BODY.replace("HID", "h").replace("UID", "U07")
   if isinstance(expect, str):
-    with pytest.raises(HandoffError, match=re.escape(f"allowed_tools carries {expect}: a builder never spawns, never invokes skills, never runs unrestricted Bash")):
+    with pytest.raises(superegm.HandoffError, match=re.escape(f"allowed_tools carries {expect}: a builder never spawns, never invokes skills, never runs unrestricted Bash")):
       allowed_tools(configured, "superegm/h/U07", body)
   else:
     assert allowed_tools(configured, "superegm/h/U07", body) == expect
