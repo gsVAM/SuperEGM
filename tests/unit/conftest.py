@@ -569,3 +569,25 @@ def make_pr(gh, number, head, base_sha="b" * 40, merged=None, closes=(), branch=
                     "closingIssuesReferences": [{"number": n, "repository": {"name": r.split("/")[1], "owner": {"login": r.split("/")[0]}}}
                                                 for r, n in closes]}
   return gh.prs[number]
+
+
+def mark_launched(world, *units):
+  """The mark `launch` leaves on a unit, written as another writer would: `launch`'s own
+  preconditions (builder token, origin, protection) are the builders' tests' (test_builders.py)."""
+  state = state_of(world)
+  for uid in units:
+    state["units"][uid]["launched"] = {"at": world.ns["now_iso"](), "runcard": world.card("wave")}
+  (world.artifacts / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+
+def launchable(world):
+  """What `launch` checks before the filed units: origin/main (a bare clone the fetch reaches)
+  carrying the spec, the config and a pull_request workflow, and the spec's approval record."""
+  (world.repo / ".github/workflows").mkdir(parents=True)
+  (world.repo / ".github/workflows/tests.yml").write_text("on: [push, pull_request]\n", encoding="utf-8")
+  git(["add", "-A"], world.repo); git(["commit", "-qm", "workflow"], world.repo)
+  assert world.run("approve-spec", "--design", world.spec, "--yes")[0] == 0
+  bare = world.repo.parent / "origin.git"
+  git(["clone", "-q", "--bare", str(world.repo), str(bare)], world.repo.parent)
+  git(["remote", "set-url", "origin", str(bare)], world.repo)
+  world.ns["find_remote"] = lambda root, repo: "origin"  # `remote -v` shows that path, not GitHub
