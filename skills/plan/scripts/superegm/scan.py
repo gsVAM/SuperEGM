@@ -10,8 +10,10 @@ from pathlib import Path
 import superegm as core
 from superegm import graph
 
-WRITES = frozenset()  # the store kinds this subcommand writes
+WRITES = frozenset(['file'])  # the store kinds this subcommand writes: the derived `plan/scan/<unit>.json`
 BODY_LIMIT = 49_152
+WARN = {"bytes": (32_768, "32,768"), "steps": (20, "20"), "fenced_share": (0.40, "0.40")}  # limit, as printed
+FENCE_LINE = re.compile(r"^\s*`{3,}")
 NAME_RE = re.compile(r"^[A-Za-z_][\w.]*")
 CHECKBOX_RE = re.compile(r"^\s*- \[[ xX]\]")
 FOCUS_RE = re.compile(r"^- (U\d{2,}): .+; pinned by `([^`]+)`$")
@@ -166,6 +168,24 @@ def scan_body(uid: str, body: str, handoff: graph.Handoff) -> list:
   return [problem for rule in RULES.values() for problem in rule(uid, body, handoff)]
 
 
+def numbers(uid: str, body: str, handoff: graph.Handoff) -> dict:
+  """The proportion reviewer's evidence: bytes, the share inside fences (fence
+  lines included), Steps, the Design range's bytes in the spec, and the ratio."""
+  size, fenced, inside = len(body.encode("utf-8")), 0, False
+  for line in body.splitlines(keepends=True):
+    fence = bool(FENCE_LINE.match(line))
+    inside = inside != fence
+    fenced += len(line.encode("utf-8")) if inside or fence else 0
+  _, start, end, _ = handoff.plan.units[uid].design_range
+  spec_lines = core.read_text(handoff.design_path).splitlines(keepends=True)
+  spec_bytes = len("".join(spec_lines[start - 1:end]).encode("utf-8"))
+  found = {"bytes": size, "fenced_share": round(fenced / size, 2) if size else 0.0,
+           "steps": len(core.body.step_paths(body)), "spec_range_bytes": spec_bytes,
+           "ratio": round(size / spec_bytes, 2) if spec_bytes else 0.0}
+  found["warnings"] = [f"{key} {found[key]:,} > {text}" for key, (limit, text) in WARN.items() if found[key] > limit]
+  return found
+
+
 def scan_handoff(handoff: graph.Handoff) -> list:
   problems = []
   for item in handoff.writes():
@@ -184,6 +204,16 @@ def run(args):
     path = Path(args.comment).expanduser().resolve()
     problems = scan_text(core.read_text(path), handoff.config, "comment", label=path.name)
   else:
+    rows = []
+    for uid in handoff.graph.order:
+      found = numbers(uid, handoff.render_unit(uid), handoff)
+      core.atomic_write(handoff.unit_file(uid).parent / "plan" / "scan" / f"{uid}.json", found)
+      rows.append([uid] + [f"{found[k]:,}" for k in ("bytes", "fenced_share", "steps", "spec_range_bytes", "ratio")]
+                  + ["; ".join(found["warnings"])])
+    widths = [max(len(r[i]) for r in [["unit", "bytes", "fenced_share", "steps", "spec_range_bytes", "ratio", "warnings"]] + rows)
+              for i in range(7)]
+    for row in [["unit", "bytes", "fenced_share", "steps", "spec_range_bytes", "ratio", "warnings"]] + rows:
+      print("  ".join(cell.ljust(widths[i]) for i, cell in enumerate(row)).rstrip())
     problems = scan_handoff(handoff)
   for problem in problems:
     print(problem)
