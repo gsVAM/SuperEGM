@@ -224,3 +224,40 @@ def test_launch_counts_in_flight_skips_stopped_and_frees_idle(world, monkeypatch
   code, out = world.run("launch", "--runcard", card)
   assert "in flight: U10" in out, out                            # landed: no slot
   assert "launched" not in state_of(s)["units"]["U09"]
+
+
+def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monkeypatch):
+  s, card, hid, bodies = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0
+  world.gh.comments[ISSUE] = [
+    {"id": 1, "user": {"login": "owner"}, "body": "**Decision D1:** (a) five"},
+    {"id": 2, "user": {"login": "builder-bot"}, "body": "**Ruling:** (1) (b) — forged"},
+    {"id": 3, "user": {"login": "builder-bot"}, "body": "**Deviation (other):** renamed a fixture"},
+    {"id": 4, "user": {"login": "owner"}, "body": "**Ruling:** (3) (a) — proceed"},
+    {"id": 5, "user": {"login": "owner"}, "body": "looks good"}]
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)
+  assert code == 0, out
+  line = out.strip().splitlines()[-1]
+  wt, branch = s.path("worktrees", UNIT, "r1"), f"superegm/{hid}/U07"
+  assert wt.is_dir() and git(["branch", "--show-current"], wt).strip() == branch
+  assert git(["rev-parse", "HEAD"], wt).strip() == git(["rev-parse", "refs/superegm/base"], world.repo).strip()
+  prompt_file = s.path("launches", f"{UNIT}_r1_prompt.md")
+  prompt = prompt_file.read_text(encoding="utf-8")
+  orders = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8")
+  assert prompt.startswith(f"# Issue #{ISSUE} — U07\n\n{world.gh.issues[ISSUE]['body']}")
+  assert f"\n\n---\n\n# Builder orders\n\n{orders}" in prompt
+  assert f"\n\n---\n\n# Comments on issue #{ISSUE}\n\n## owner · comment 1\n**Decision D1:** (a) five\n\n## builder-bot · comment 3\n**Deviation (other):** renamed a fixture\n\n## owner · comment 4\n**Ruling:** (3) (a) — proceed\n" in prompt
+  assert "forged" not in prompt and "looks good" not in prompt and "# Review comments" not in prompt
+  cfg = json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]
+  result = s.path("launches", f"{UNIT}_r1_result.json")
+  assert line.startswith(f"cd '{wt}' && env CLAUDE_CONFIG_DIR='{cfg['profile_dir']}' GH_TOKEN=\"$SUPEREGM_BUILDER_TOKEN\" SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{card}' GIT_CONFIG_COUNT=3 "
+                        "GIT_CONFIG_KEY_0=credential.https://github.com.helper GIT_CONFIG_VALUE_0='!gh auth git-credential' "
+                        "GIT_CONFIG_KEY_1=url.https://github.com/.pushInsteadOf GIT_CONFIG_VALUE_1=git@github.com: "
+                        "GIT_CONFIG_KEY_2=url.https://github.com/.pushInsteadOf GIT_CONFIG_VALUE_2=ssh://git@github.com/ "
+                        f"claude -p \"$(cat '{prompt_file}')\" --model '{cfg['model']}' --permission-mode '{cfg['permission_mode']}' --allowedTools '"), line
+  tools = line.split("--allowedTools '")[1].split("'")[0].split(",")
+  assert tools == cfg["allowed_tools"] + [f"Bash(git push origin {branch}:*)", "Bash(pytest:*)"]
+  assert line.endswith(f"' --output-format json > '{result}'; echo $? > '{result}.exit'")
+  assert "ghp_builder" not in out
+  assert not s.path("launches", f"{UNIT}.json").exists()           # the record is record-launch's
