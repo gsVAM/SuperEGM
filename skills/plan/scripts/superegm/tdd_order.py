@@ -4,21 +4,33 @@
 """superegm tdd-order: for each Step a `test(S<n>)` commit touching its test path precedes a `feat(S<n>)`
 commit touching its implementation path, and every `test(…)` commit touches only paths under `tests/`."""
 
-import sys
+from pathlib import Path
 
 import superegm as core
-from superegm import body as body_mod
+from superegm import body as body_mod, review
 
-WRITES = frozenset()  # the store kinds this subcommand writes
+WRITES = frozenset()  # the store kinds this subcommand writes: none, it reads
 
 
 def register(subparsers):
-  subparsers.add_parser("tdd-order", help="check that each Step's test commit precedes its implementation").set_defaults(run=run, writes=WRITES)
+  p = core.add_parser(subparsers, "tdd-order", "check that each Step's test commit precedes its implementation", runcard=False)
+  p.add_argument("--unit", required=True)
+  p.add_argument("--dispatch", required=True, help="the dispatch id of the prepared round")
+  p.set_defaults(run=run, writes=WRITES)
 
 
 def run(args):
-  print("superegm: tdd-order is not built yet", file=sys.stderr)
-  return 1
+  st = core.store(core.git_toplevel(Path.cwd()))
+  try:
+    entry = review.require_dispatch(args.unit, core.load_foreman(st, args.unit), args.dispatch)
+  except review.Refusal as refusal:
+    print(refusal)
+    return 1
+  if not entry.get("worktree"):
+    raise core.HandoffError(f"{args.unit} round {entry['round']} is not prepared")
+  failures = check(core.unit_file_body(st.path("unit", args.unit)), commits_of(Path(entry["worktree"]), entry["merge_base"]))
+  print("\n".join(failures) if failures else "tdd-order: ok")
+  return 1 if failures else 0
 
 
 def commits_of(worktree, merge_base: str) -> list:
