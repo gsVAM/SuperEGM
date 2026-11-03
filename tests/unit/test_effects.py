@@ -210,3 +210,25 @@ def test_brainstorming_path_gate_and_removals() -> None:
     assert banned not in text, banned
   for name in ("builder-check-prompt.md", "visual-companion.md", "scripts"):
     assert not (folder / name).exists(), name
+
+
+MENU = """Implementation complete. What would you like to do?
+
+1. Push and open a pull request as the owner, for a colleague's review
+2. Keep the branch as-is (I'll handle it later)
+
+Which option?"""
+
+
+def test_finishing_offers_no_merge() -> None:
+  text = skill_text("finishing-a-development-branch")
+  assert MENU in text
+  for needle in ("Type 'discard' to confirm.", "A forced push is never offered.",
+                 "superegm runcard open --skill finishing-a-development-branch --artifact",
+                 "superegm runcard close", "only the owner updates <base-branch>"):
+    assert needle in text, needle
+  for banned in ("Merge back", "Merge Locally", "merge locally", "Merge locally", "git merge",
+                 "git pull", "| Merge |", "force-push only", "Reduced 2 options",
+                 "Standard 3 options"):
+    assert banned not in text, banned
+  assert text.count("Which option?") == 2
