@@ -80,6 +80,11 @@ def run(args):
   if core.sha256_text(core.canonical(writes)) != confirmed["sha256"] \
       or core.canonical(writes) != core.canonical(confirmed["writes"]):
     raise core.HandoffError("the write list changed since the dry run (plan, config, template or repo): run dry-run again")
+  hashes = gate.body_hashes(handoff)
+  for uid in sorted(units):
+    converged, sha = gate.converged_review(handoff.artifact_dir, uid)
+    if not converged or sha != hashes[uid]:
+      raise core.HandoffError(f"apply: {uid} body differs from its converged round")
   # A banned_terms or mention rule added after the dry run leaves the write list
   # unchanged, so the hash above cannot catch it. Scan the outgoing text itself.
   problems = scan.scan_handoff(handoff)
