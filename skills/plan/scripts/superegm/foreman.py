@@ -37,6 +37,10 @@ def run(args):
   pr = core.gh_json(["pr", "view", str(number), "-R", repo, "--json", "number,headRefOid,baseRefName,body"])
   launches = load_launches(st, unit)
   rid = head_review_id(st, unit)
+  recovered = recover_posted(st, unit, data, core.gh_pages(f"repos/{repo}/pulls/{number}/reviews"), args.runcard)
+  if recovered:
+    print(f"recovered {recovered}")
+    return 1
   status_exit = review.status_code(rid, args.runcard) if rid else 0
   reason = dispatch_refusal(pr, core.read_ci(repo, pr["headRefOid"]), launches, rounds, data["decisions"],
                             data["rulings"], status_exit)
@@ -61,6 +65,19 @@ def run(args):
   core.journal(st, f"{unit} round {n} dispatched {did} under {args.runcard}")
   print(f"{did} {child}")
   return 0
+
+
+def recover_posted(st, unit: str, data: dict, reviews: list, runcard: str):
+  """A `collected` round without an outcome whose review the PR already carries at the reviewed sha is
+  counted `posted` (section 11); returns its outcome word, or None."""
+  for entry in data["rounds"]:
+    if entry.get("phase") != "collected" or entry.get("outcome") or not entry.get("head"):
+      continue
+    header = review.header(entry["round"], entry["head"])
+    for posted in reviews:
+      if (posted.get("body") or "").startswith(header) and posted.get("commit_id") == entry["head"]:
+        return review.count_posted(st, unit, entry, posted["submitted_at"], head_review_id(st, unit), runcard)
+  return None
 
 
 def dispatch_refusal(pr: dict, ci: dict, launches: list, rounds: list, decisions: list, rulings: list,

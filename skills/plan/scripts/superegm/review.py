@@ -442,6 +442,48 @@ def status_review(args) -> int:
   return status.code
 
 
+# ---------------------------------------------------------------- post: a head round on its pull request
+
+
+def header(round_n: int, head: str) -> str:
+  return f"**SuperEGM review round {round_n} (head {head[:7]})**"
+
+
+def outcome_word(status_exit: int, contested: list) -> str:
+  """The posted round's return word (section 11), in this order."""
+  if contested:
+    return "contested: " + ", ".join(contested)
+  return {0: "clean", 2: "cap-reached"}.get(status_exit, "revise")
+
+
+def contested_fids(round_json: dict) -> list:
+  """The `builder_contested[].fid` whose `foreman` finding in the round has no disposition."""
+  open_fids = {f["id"] for f in ((round_json.get("reviewers") or {}).get("foreman") or {}).get("findings") or []
+               if f["disposition"] is None}
+  return [c["fid"] for c in round_json.get("builder_contested") or [] if c["fid"] in open_fids]
+
+
+def count_posted(st: core.Store, unit: str, entry: dict, posted_at: str, review_id: str, runcard: str) -> str:
+  """The round is `posted` at `posted_at`; its `what_ran` is re-derived, its `outcome` is the word `review
+  status` and `builder_contested[]` imply, and `clean` journals `<unit> awaiting merge`."""
+  data = core.load_foreman(st, unit)
+  saved = next(e for e in data["rounds"] if e["round"] == entry["round"])
+  saved.update({"phase": "posted", "posted_at": posted_at})
+  core.save_foreman(st, unit, data)
+  review, rnd = load_review(st, review_id), load_round(st, review_id, entry["round"])
+  if rnd:
+    rnd["what_ran"] = derive_what_ran(review, rnd, saved)
+    core.atomic_write(st.path("reviews", review_id, f"round-{entry['round']}.json"), rnd)
+  word = outcome_word(status_code(review_id, runcard), contested_fids(rnd or {}))
+  saved["outcome"] = word
+  entry.update(saved)
+  core.save_foreman(st, unit, data)
+  core.journal(st, f"{unit} round {entry['round']} posted {word} under {runcard}")
+  if word == "clean":
+    core.journal(st, f"{unit} awaiting merge under {runcard}")
+  return word
+
+
 def status_code(review_id: str, runcard: str) -> int:
   """`review status` in-process with its stdout captured: the exit code alone (0 converged, 2 cap, 3 open or
   not clean, 4 fix-design, 5 stalled)."""
