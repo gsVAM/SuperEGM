@@ -1336,22 +1336,48 @@ def require_reviewed_pair(handoff) -> None:
         f"unit_<id>.md: run the gate again and re-confirm.")
 
 
-def require_confirmed_plan(handoff) -> None:
-  """Refuse to read readiness off a plan edited since the confirmation.
+def unit_file_body(path: Path) -> str:
+  """The body inside `unit_<id>.md`'s fence after `## Issue body as posted`:
+  the first ```markdown (three or more backticks) line after that heading up
+  to the line equal to that backtick run; text outside the fence is not the body."""
+  lines = read_text(path).splitlines() if path.is_file() else []
+  if "## Issue body as posted" not in lines:
+    return ""
+  start, fence = lines.index("## Issue body as posted") + 1, None
+  while start < len(lines) and fence is None:
+    match = re.match(r"^(`{3,})markdown$", lines[start])
+    fence = match.group(1) if match else None
+    start += 1
+  if fence is None:
+    return ""
+  inside = []
+  for line in lines[start:]:
+    if line == fence:
+      break
+    inside.append(line)
+  return "\n".join(inside)
 
-  `status` derives landed and ready from the graph it parses now, but the
-  receipt describes the issues on GitHub. Deleting a blocker locally would
-  otherwise make a unit ready while its issue is still blocked by it."""
-  confirmed = handoff.state.get("confirmed") or {}
-  if not confirmed.get("sha256"):
+
+def require_frozen_units(handoff) -> None:
+  """A filed unit (one with an issue number) is frozen (spec section 7): its
+  section in the plan file equals the stored `handoff_plan.md`'s, and the body
+  its filing's write list in `filings[]` stores is still what `unit_<id>.md`
+  carries in its fence. Runs before any read of GitHub."""
+  state = handoff.state
+  filed = [uid for uid, record in (state.get("units") or {}).items() if record.get("number")]
+  if not filed:
     return
-  current = sha256_text(canonical(handoff.writes()))
-  if current != confirmed["sha256"]:
-    raise HandoffError(
-        f"{handoff.plan_path.name} no longer matches the confirmed snapshot "
-        f"({current[:12]} vs {confirmed['sha256'][:12]}): the issues on "
-        f"{confirmed.get('repo')} were created from the confirmed plan. Restore "
-        f"it, or run the gate and dry-run again and re-confirm.")
+  stored_path = handoff.store.path("plan")
+  stored = Plan(stored_path) if stored_path.is_file() else None
+  for uid in filed:
+    if stored is None or uid not in stored.units or uid not in handoff.plan.units \
+        or unit_section_text(handoff.plan, uid) != unit_section_text(stored, uid):
+      raise HandoffError(f"{uid} is filed and frozen: its section in handoff_plan.md differs from the stored one")
+  for filing in state.get("filings") or []:
+    for item in filing.get("writes") or []:
+      if item[0] == "issue" and item[1] in filed \
+          and body.normalise(item[4]) != body.normalise(unit_file_body(handoff.unit_file(item[1]))):
+        raise HandoffError(f"{item[1]} is filed and frozen: unit_{item[1]}.md no longer carries the filed body")
 
 
 def receipt_ok(state) -> bool:

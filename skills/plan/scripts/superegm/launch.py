@@ -21,11 +21,10 @@ def run(args):
   card = core.require_runcard(args, SKILLS)
   plan, st = core.locate(args)
   handoff = core.Handoff(plan, st)
+  core.require_frozen_units(handoff)
   state = handoff.state
   core.require_receipt(state)
   core.require_repo(handoff)
-  core.require_confirmed_plan(handoff)
-  core.require_reviewed_pair(handoff)
   for uid in args.units:
     if uid not in handoff.plan.units:
       raise core.HandoffError(f"unknown unit {uid}")

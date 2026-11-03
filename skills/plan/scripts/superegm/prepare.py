@@ -31,24 +31,10 @@ def run(args):
   card = core.require_runcard(args, SKILLS)
   plan, st = core.locate(args)
   handoff = core.Handoff(plan, st)
+  core.require_frozen_units(handoff)
   state = handoff.state
   root = Path(state.get("repo_root") or handoff.repo_root)
   remote, repo = state.get("remote") or handoff.config["remote"], handoff.config["repo"]
-  if not args.clean:
-    # A review judges the PR against unit_<id>.md, so both the plan AND that
-    # file must still be what the gate reviewed. Hashing the plan alone is not
-    # enough: the unit file is a separate artefact on disk and is what the
-    # foreman actually reads.
-    core.require_reviewed_pair(handoff)
-    unit_file = handoff.unit_file(args.unit)
-    expected = handoff.unit_file_text(args.unit)
-    if not unit_file.is_file() or core.read_text(unit_file) != expected:
-      raise core.HandoffError(
-          f"{unit_file.name} is not what the reviewed plan renders: it was "
-          f"edited, or the plan changed and `graph` was not re-run. The "
-          f"foreman reviews that file, so a review would judge the PR against "
-          f"text nobody approved. Run `graph`, then the gate again if the plan "
-          f"changed.")
   record = state.get("units", {}).get(args.unit) or {}
   pr = record.get("pr")
   if not pr:
