@@ -232,3 +232,20 @@ def test_finishing_offers_no_merge() -> None:
                  "Standard 3 options"):
     assert banned not in text, banned
   assert text.count("Which option?") == 2
+
+
+def test_draft_and_drift_report_edits() -> None:
+  draft = ROOT / "skills/draft"
+  fm = PACKER["read_frontmatter"](draft / "SKILL.md")
+  assert "draft a spec from a brief when brainstorming was skipped" in fm["description"]
+  text = skill_text("draft")
+  for needle in ("/superegm:review-spec", "docs/specs/", "`## Units`", "/superegm:brainstorming"):
+    assert needle in text, needle
+  for banned in ("egm-brainstorm", "`egm-review`", "docs/designs/", "Codex", "ChatGPT"):
+    assert banned not in text, banned
+  template = (draft / "references/design_doc.md").read_text(encoding="utf-8")
+  assert re.findall(r"^## (.+)$", template, re.MULTILINE)[-1] == "Units"
+  drift = skill_text("drift-report")
+  assert "{YYYY-MM-DD}_DRIFT_REPORT.md" in drift
+  assert "after `/superegm:integrate`" in drift
+  assert "Codex" not in drift
