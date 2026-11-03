@@ -47,6 +47,13 @@ def handoff_id_for(st: core.Store, sha: str, stem: str) -> str:
   return f"{handoff_slug(stem)}-{sha[:6]}"
 
 
+def before_units(text: str) -> str:
+  """The text up to and including the last `## … Units` line (the whole text when there is none)."""
+  lines = text.splitlines(keepends=True)
+  last = max((i for i, line in enumerate(lines) if UNITS_H2.match(line)), default=len(lines))
+  return "".join(lines[:last + 1])
+
+
 def commit_by_path(repo_root: Path, paths: list[str], message: str) -> str:
   """Add and commit `paths` alone, ignoring other changes in the tree; the commit may be empty."""
   core.run_git(["add", "--", *paths], repo_root)
@@ -64,6 +71,8 @@ def run(args):
   slug = core.spec_slug(spec)
   if args.void:
     return void_approval(args, st, spec)
+  if args.amend_units:
+    return amend_units(args, st, spec, root)
   review, _ = latest_cycle(st, "spec", str(spec))
   if review is None:
     raise core.HandoffError(f"approve-spec: no spec review for {slug}")
@@ -109,4 +118,26 @@ def void_approval(args, st: core.Store, spec: Path) -> int:
   core.atomic_write(st.path("approvals", slug), approval)
   core.journal(st, f"approve-spec void {slug} by review {rid} under {args.runcard}")
   print(f"approval of {slug} voided by review {rid}")
+  return 0
+
+
+def amend_units(args, st: core.Store, spec: Path, root: Path) -> int:
+  """`--amend-units` (section 12): rows appended to `## Units` are re-approved without a review round;
+  any change to a line before that heading refuses."""
+  slug = core.spec_slug(spec)
+  approval = core.load_approval(st, spec)
+  if approval is None:
+    raise core.HandoffError("approve-spec: no approval to amend")
+  rel = spec.relative_to(root).as_posix()
+  approved = core.run_git(["show", f"{approval['commit']}:{rel}"], root)
+  if before_units(approved) != before_units(core.read_text(spec)):
+    raise core.HandoffError("approve-spec: a line outside ## Units changed")
+  sha = core.sha256_file(spec)
+  commit = commit_by_path(root, [rel, CONFIG], f"superegm: approve {slug} at review {approval['review']}")
+  approval.update({"sha256": sha, "commit": commit})
+  approval["amended"].append({"sha256": sha, "commit": commit, "at": core.now_iso()})
+  path = st.path("approvals", slug)
+  core.atomic_write(path, approval)
+  core.journal(st, f"approve-spec amend-units {approval['handoff_id']} sha256 {sha[:12]} commit {commit[:12]} under {args.runcard}")
+  print(f"approval recorded in {path}")
   return 0
