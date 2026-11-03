@@ -7,12 +7,12 @@ round, the head review and the child card of a round."""
 import argparse
 import contextlib
 import io
-import re
 from pathlib import Path
 
 import superegm as core
 from superegm import review
 from superegm.launch import load_launches
+from superegm.review import head_review_id  # the unit's latest `head-<unit>-c<n>` review id, or None
 
 WRITES = frozenset({"foreman", "reviews", "runcards"})  # the store kinds this subcommand writes
 SKILLS = frozenset({"wave"})  # the skills whose card this subcommand accepts
@@ -103,14 +103,6 @@ def dispatch_refusal(pr: dict, ci: dict, launches: list, rounds: list, decisions
   if status_exit == 5:
     return "review stalled"
   return None
-
-
-def head_review_id(st, unit: str):
-  """The unit's latest `reviews/*head-<unit>-c<n>` directory name, or None before the first dispatch."""
-  folder = st.path("reviews")
-  found = [(int(m.group(2)), p.name) for p in folder.iterdir()
-           if (m := re.search(rf"(^|-)head-{re.escape(unit)}-c(\d+)$", p.name))] if folder.is_dir() else []
-  return max(found)[1] if found else None
 
 
 def supersede(rounds: list) -> None:

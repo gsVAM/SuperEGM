@@ -14,7 +14,7 @@ import sys
 
 import superegm as core
 
-WRITES = frozenset({"reviews", "foreman", "runcards"})  # the store kinds this subcommand writes
+WRITES = frozenset({"reviews", "foreman", "runcards", "review"})  # the store kinds this subcommand writes
 SKILLS = frozenset({"review-spec", "review-plan", "wave", "integrate"})  # the skills whose card this subcommand accepts
 KINDS = ("spec", "plan", "head", "integrate")
 REVIEWERS = ("design", "zoom-out", "comprehension", "readiness", "structural", "style",
@@ -59,7 +59,10 @@ def register(subparsers):
   u.add_argument("--review", required=True)
   u.add_argument("--ruling", choices=RULINGS, required=True)
   by_whom(u, required=True)
-  core.add_parser(action, "post", "post a head round's review to its pull request (not built yet: U10)")
+  v = core.add_parser(action, "post", "post a head round's review to its pull request, bound to the reviewed commit")
+  v.add_argument("--unit", required=True)
+  v.add_argument("--round", type=int, required=True)
+  v.add_argument("--dispatch", required=True, help="the dispatch id `foreman dispatch` printed")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -70,11 +73,12 @@ def by_whom(parser, required):
 
 
 def run(args):
-  if args.action == "post":
-    print("superegm: review post is not built yet", file=sys.stderr)
+  try:
+    return {"open": open_review, "record": record_round, "settle": settle_finding,
+            "status": status_review, "rule": rule_review, "post": post}[args.action](args)
+  except Refusal as refusal:
+    print(refusal)
     return 1
-  return {"open": open_review, "record": record_round, "settle": settle_finding,
-          "status": status_review, "rule": rule_review}[args.action](args)
 
 
 class Refusal(core.HandoffError):
@@ -177,6 +181,12 @@ def load_round(st: core.Store, rid: str, n: int):
 def round_numbers(st: core.Store, rid: str) -> list[int]:
   return sorted(int(m.group(1)) for p in st.path("reviews", rid).glob("round-*.json")
                 if (m := re.fullmatch(r"round-(\d+)\.json", p.name)))
+
+
+def head_review_id(st: core.Store, unit: str):
+  """The unit's latest `head-<unit>-c<n>` review id, or None before the first dispatch."""
+  latest, _ = latest_cycle(st, "head", unit)
+  return review_id(st, "head", unit, latest["cycle"]) if latest else None
 
 
 def head_entry(st: core.Store, unit: str, n: int):
@@ -461,6 +471,52 @@ def status_review(args) -> int:
 
 def header(round_n: int, head: str) -> str:
   return f"**SuperEGM review round {round_n} (head {head[:7]})**"
+
+
+def render_comment(round_json: dict, head: str, ci_verdict: str, mention) -> str:
+  """The configured mention as line 1 when set, the header, the round's finding lines (section 8's form)
+  and `CI: <verdict>`; no run card, no model names."""
+  lines = [mention] if mention else []
+  lines += [header(round_json["round"], head), ""]
+  for record in (round_json.get("reviewers") or {}).values():
+    lines += [f"{f['id']} | {f['severity']} | {f['location']} | regression: {f['regression']} | {f['claim']}"
+              for f in record["findings"]]
+  lines += ["", f"CI: {ci_verdict}"]
+  return "\n".join(lines) + "\n"
+
+
+def post(args) -> int:
+  """EGM's posting guard in the helper: the round's review goes to the pull-request reviews API bound to the
+  commit it reviewed, as a COMMENT, after the raw-text scan; the response's `commit_id` must be that sha
+  for the round to count `posted`."""
+  st = core.store(core.git_toplevel(Path.cwd()))
+  card = core.require_runcard(args, SKILLS)
+  unit, n = args.unit, args.round
+  data = core.load_foreman(st, unit)
+  require_dispatch(unit, data, args.dispatch)
+  entry = next((e for e in data["rounds"] if e.get("round") == n), None)
+  if entry is None or not entry.get("head"):
+    raise core.HandoffError(f"review post: {unit} has no prepared round {n}")
+  rid = head_review_id(st, unit)
+  if rid is None:
+    raise core.HandoffError(f"review post: {unit} has no head review")
+  config, head = st.config, entry["head"]
+  repo, number = config["repo"], core.load_state(st.root)["units"][unit]["pr"]["number"]
+  runcard = card.get("parent") or args.runcard
+  folder = st.path("review", unit, f"pr{number}") / f"r{n}"
+  verdict = json.loads(core.read_text(folder / "ci.json"))["verdict"]
+  rnd = load_round(st, rid, n) or {"round": n, "reviewers": {}, "builder_contested": []}
+  body = render_comment(rnd, head, verdict, config.get("fix_request_mention") or None)
+  problems = core.scan_text(body, config, "comment", label="comment")
+  if problems:
+    raise Refusal(problems[0])
+  core.atomic_write(folder / "comment.md", body)
+  _, text = core.gh_post(f"repos/{repo}/pulls/{number}/reviews",
+                         {"commit_id": head, "event": "COMMENT", "body": f"@{folder / 'comment.md'}"})
+  response = json.loads(text) if text.strip() else {}
+  word = count_posted(st, unit, entry, response.get("submitted_at") or core.now_iso(), rid, runcard)
+  print(f"posted {word}")
+  return 0
 
 
 def outcome_word(status_exit: int, contested: list) -> str:
