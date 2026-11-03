@@ -1,0 +1,17 @@
+# Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
+
+skill: "using-superegm"
+description: "Behavioral evaluation scenario suite for the using-superegm skill."
+
+scenarios:
+  - scenario_id: "using_superegm_reads_its_skill"
+    description: "The agent follows the using-superegm skill when asked."
+    eval_type: "deterministic"
+    system_prompt:
+      skill_file: "skills/using-superegm/SKILL.md"
+    turns:
+      - user_input: "Hi, can you help me with this repository?"
+        assertions:
+          - type: "required_pattern"
+            pattern: "(?i)using-superegm"
+            message: "The response must name the using-superegm skill."

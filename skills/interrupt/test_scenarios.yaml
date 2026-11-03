@@ -1,0 +1,17 @@
+# Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
+
+skill: "interrupt"
+description: "Behavioral evaluation scenario suite for the interrupt skill."
+
+scenarios:
+  - scenario_id: "interrupt_reads_its_skill"
+    description: "The agent follows the interrupt skill when asked."
+    eval_type: "deterministic"
+    system_prompt:
+      skill_file: "skills/interrupt/SKILL.md"
+    turns:
+      - user_input: "Stop the wave, I need to change the design."
+        assertions:
+          - type: "required_pattern"
+            pattern: "(?i)interrupt"
+            message: "The response must name the interrupt skill."
