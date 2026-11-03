@@ -68,3 +68,39 @@ def test_frontmatter_order_and_opening_line(skill: str) -> None:
     assert fm["disable-model-invocation"] == "true"
   assert fm["description"].strip()
   assert text.count(HARNESS_LINE) == 1, f"{skill}: harness line must appear once"
+
+
+def write_skill(root: Path, name: str, frontmatter: str) -> None:
+  path = root / "skills" / name / "SKILL.md"
+  path.parent.mkdir(parents=True)
+  path.write_text(frontmatter + "\n# Skill\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("name,frontmatter,reason", [
+    ("clean", "---\nname: clean\nlicense: Apache-2.0\ndisable-model-invocation: true\n"
+     "description: x\n---", "effects missing"),
+    ("clean", "---\nname: clean\nlicense: Apache-2.0\neffects: writes\n"
+     "disable-model-invocation: true\ndescription: x\n---", "unknown effects writes"),
+    ("clean", "---\nname: clean\nlicense: Apache-2.0\neffects: external\n"
+     "disable-model-invocation: true\ndescription: x\n---", "effect_kinds missing"),
+    ("clean", "---\nname: clean\nlicense: Apache-2.0\neffects: external\n"
+     "effect_kinds: [publish, state-store]\ndisable-model-invocation: true\n"
+     "description: x\n---", "unknown effect kind publish"),
+    ("clean", "---\nname: clean\nlicense: Apache-2.0\neffects: external\n"
+     "effect_kinds: [destructive-local, state-store]\ndescription: x\n---",
+     "external but not disable-model-invocation: true"),
+    ("draft", "---\nname: draft\nlicense: Apache-2.0\neffects: working-tree\n"
+     "description: x\n---", "typed but not disable-model-invocation: true"),
+])
+def test_check_effects_refuses(tmp_path: Path, name: str, frontmatter: str, reason: str) -> None:
+  write_skill(tmp_path, name, frontmatter)
+  with pytest.raises(ValueError) as error:
+    PACKER["check_effects"](tmp_path)
+  assert str(error.value) == f"Effects: {name}: {reason}"
+
+
+def test_check_effects_accepts_the_tree_and_pins_the_typed_set() -> None:
+  PACKER["check_effects"](ROOT)
+  assert PACKER["TYPED_SKILLS"] == frozenset(TYPED)
+  assert PACKER["EFFECT_KINDS"] == ("github-write", "remote-branch", "start-session",
+                                   "state-store", "destructive-local")
