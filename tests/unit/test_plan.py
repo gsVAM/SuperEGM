@@ -519,3 +519,34 @@ def test_step_defaults_derived_from_the_write_line():
   assert run_commands(SHORT) == ["pytest tests/unit/test_x.py -q", "pytest tests/unit/test_x.py::test_a -q",
                                  "pytest tests/unit/test_x.py -k test_b -q", "pytest tests/unit/test_x.py -k test_c -q"]
   assert step_paths(SHORT) == [(1, "tests/unit/test_x.py", "src/x.py"), (2, "tests/unit/test_x.py", "src/x.py"), (3, "tests/unit/test_x.py", "src/x.py")]
+
+
+U02_STEP_END = "   Implement `u02_fn(x: int) -> int` in `src/u02.ts`.\n   Run the same command; expected: PASS. Commit `test(S1): u02 empty` then `feat(S1): u02 empty`.\n"
+MORE_STEPS = "".join(f"{n}. Write the failing test `test_u02_{n}` in `tests/test_u02.py`:\n   {FENCE}python\n   def test_u02_{n}(): assert u02_fn({n}) == {n}\n   {FENCE}\n"
+                     f"   Implement the `{n}` case of `u02_fn(x: int) -> int` in `src/u02.ts`, returning its input unchanged.\n" for n in range(2, 23))
+NUMBERS = [
+  pytest.param("| Objective | Worker exists. |", "| Objective | Worker " + "x" * 33_000 + " exists. |", "bytes", "32,768", id="bytes"),
+  pytest.param(U02_STEP_END, U02_STEP_END + MORE_STEPS, "steps", "20", id="steps"),
+  pytest.param("def test_u02_empty(): assert u02_fn(0) == 0", "def test_u02_empty(): assert u02_fn(0) == 0  # " + "x" * 3_000, "fenced_share", "0.40", id="fenced-share"),
+]
+
+
+@pytest.mark.parametrize("old,new,key,limit", NUMBERS)
+def test_scan_numbers_and_warnings(world, old, new, key, limit):
+  spec, sha, plan, card = planned(world)
+  assert graph(world, plan, card)[0] == 0
+  code, out = world.run("scan")
+  numbers = json.loads(find(world, "U02.json").read_text(encoding="utf-8"))
+  assert code == 0 and re.search(r"^unit\s+bytes\s+fenced_share\s+steps\s+spec_range_bytes\s+ratio", out, re.M), out
+  assert set(numbers) == {"bytes", "fenced_share", "steps", "spec_range_bytes", "ratio", "warnings"} and numbers["warnings"] == []
+  assert numbers["bytes"] == len(body_of(world, "U02").encode("utf-8")) and numbers["steps"] == 1
+  assert numbers["spec_range_bytes"] == len("".join(SPEC.splitlines(keepends=True)[4:10]).encode("utf-8"))
+  assert numbers["ratio"] == round(numbers["bytes"] / numbers["spec_range_bytes"], 2) and 0 < numbers["fenced_share"] < 0.40
+  text = plan_text(spec)
+  assert old in text
+  plan.write_text(text.replace(old, new, 1), encoding="utf-8")
+  assert graph(world, plan, card)[0] == 0
+  code, out = world.run("scan")
+  numbers = json.loads(find(world, "U02.json").read_text(encoding="utf-8"))
+  assert code == 0 and out.rstrip().endswith("scan: clean") and numbers[key] > float(limit.replace(",", "")), out
+  assert numbers["warnings"] == [f"{key} {numbers[key]:,} > {limit}"]
