@@ -56,14 +56,30 @@ def launch(args, card):
     raise core.HandoffError(problems[0])
   core.card_add(st, args.runcard, "builder", {"login": builder, "token_env": token_env})
   summary, _ = core.status_pass(handoff, save=False)
-  marked = list(summary["ready"])
+  label = urllib.parse.quote(config["labels"]["stopped"], safe="")
+  stopped_numbers = {issue["number"] for issue in core.gh_pages(f"repos/{config['repo']}/issues?labels={label}&state=all&per_page=100")}
+  stopped = {uid for uid, record in state["units"].items() if record.get("number") in stopped_numbers}
+  idle = set(filter(None, args.idle.split(",")))
+  views = {uid: {**summary["units"][uid], "launched": state["units"][uid].get("launched"), "stopped": uid in stopped}
+           for uid in handoff.graph.order}
+  flying = [uid for uid in handoff.graph.order if in_flight(st, uid, views[uid], idle)]
+  marked = [uid for uid in summary["ready"] if uid not in stopped][:max(0, config["max_in_flight"] - len(flying))]
   for uid in marked:
-    state.setdefault("units", {}).setdefault(uid, {})["launched"] = {"at": core.now_iso(), "runcard": args.runcard}
+    state["units"].setdefault(uid, {})["launched"] = {"at": core.now_iso(), "runcard": args.runcard}
     core.journal(st, f"{uid} marked for launch")
   core.save_state(handoff.artifact_dir, state)
-  print("in flight: " + (", ".join(summary["in_flight"]) or "none"))
+  print("in flight: " + (", ".join(flying) or "none"))
   print("marked: " + (", ".join(marked) or "none"))
   return 0
+
+
+def in_flight(store, uid, view, idle):
+  """True from the unit's mark (the mark reserves the slot) until its latest round is posted
+  `clean`, it has landed, it carries the stopped label, or this invocation names it idle."""
+  if not view.get("launched") or view.get("landed") or view.get("stopped") or uid in idle:
+    return False
+  latest = max(core.load_foreman(store, uid)["rounds"], key=lambda r: r.get("round") or 0, default={})
+  return not (latest.get("phase") == "posted" and latest.get("outcome") == "clean")
 
 
 def builder_login(config, token_env_value):
