@@ -72,6 +72,11 @@ REQUIRED_SHARED = (
 
 
 FRONTMATTER_KEY = re.compile(r"^([A-Za-z_-]+):\s?(.*)$")
+EFFECT_KINDS = ("github-write", "remote-branch", "start-session", "state-store", "destructive-local")
+TYPED_SKILLS = frozenset((  # section 14: every external skill, the two gates, draft, drift-report
+    "review-spec", "plan", "review-plan", "file", "wave", "interrupt", "clean",
+    "finishing-a-development-branch", "integrate", "judges", "draft", "drift-report",
+))
 
 
 def read_frontmatter(path: Path) -> dict[str, str]:
@@ -90,6 +95,31 @@ def read_frontmatter(path: Path) -> dict[str, str]:
     elif key and line.startswith(" "):
       fields[key] = f"{fields[key]} {line.strip()}".strip()
   return fields
+
+
+def check_effects(root: Path) -> None:
+  """Refuse a SKILL.md whose effects frontmatter breaks section 6."""
+  for path in sorted(root.glob("skills/*/SKILL.md")):
+    name, fm = path.parent.name, read_frontmatter(path)
+    effects = fm.get("effects")
+    kinds = fm.get("effect_kinds", "").strip("[]").replace(",", " ").split()
+    unknown = [kind for kind in kinds if kind not in EFFECT_KINDS]
+    typed = fm.get("disable-model-invocation") == "true"
+    if effects is None:
+      reason = "effects missing"
+    elif effects not in ("none", "working-tree", "external"):
+      reason = f"unknown effects {effects}"
+    elif effects == "external" and not kinds:
+      reason = "effect_kinds missing"
+    elif unknown:
+      reason = f"unknown effect kind {unknown[0]}"
+    elif effects == "external" and not typed:
+      reason = "external but not disable-model-invocation: true"
+    elif name in TYPED_SKILLS and not typed:
+      reason = "typed but not disable-model-invocation: true"
+    else:
+      continue
+    raise ValueError(f"Effects: {name}: {reason}")
 
 
 def build(root: Path, output: Path) -> tuple[Path, Path]:
@@ -118,6 +148,7 @@ def build(root: Path, output: Path) -> tuple[Path, Path]:
   for name in REQUIRED_SHARED:
     if Path(name) not in files:
       raise ValueError(f"Missing required file: {name}")
+  check_effects(root)
   manifest = json.loads((root / MANIFEST).read_text())
   portable = json.loads((root / "plugin.json").read_text())
   if manifest.get("hooks") or portable.get("hooks"):
