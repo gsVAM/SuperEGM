@@ -12,6 +12,7 @@ from pathlib import Path
 
 import superegm as core
 from superegm import review
+from superegm.launch import load_launches
 
 WRITES = frozenset({"foreman", "reviews", "runcards"})  # the store kinds this subcommand writes
 SKILLS = frozenset({"wave"})  # the skills whose card this subcommand accepts
@@ -29,9 +30,20 @@ def run(args):
   core.require_runcard(args, SKILLS)
   st = core.store(core.git_toplevel(Path.cwd()))
   unit, data = args.unit, core.load_foreman(st, args.unit)
-  rounds = data["rounds"]
-  supersede(rounds)
+  rounds, repo = data["rounds"], st.config["repo"]
+  number = ((core.load_state(st.root).get("units") or {}).get(unit) or {}).get("pr", {}).get("number")
+  if not number:
+    raise core.HandoffError(f"{unit} has no watched PR: run `status` first")
+  pr = core.gh_json(["pr", "view", str(number), "-R", repo, "--json", "number,headRefOid,baseRefName,body"])
+  launches = load_launches(st, unit)
   rid = head_review_id(st, unit)
+  status_exit = review.status_code(rid, args.runcard) if rid else 0
+  reason = dispatch_refusal(pr, core.read_ci(repo, pr["headRefOid"]), launches, rounds, data["decisions"],
+                            data["rulings"], status_exit)
+  if reason:
+    print(f"dispatch refused: {reason}")
+    return 1
+  supersede(rounds)
   if rid is None:
     with contextlib.redirect_stdout(io.StringIO()):
       code = review.run(argparse.Namespace(action="open", kind="head", artifact=unit, sha256=None,
@@ -42,7 +54,8 @@ def run(args):
   child = core.open_runcard(st, "wave", unit, parent=args.runcard)
   n = len(rounds) + 1
   did = f"d{n}"
-  rounds.append({"round": n, "runcard": args.runcard, "launch": 1, "head": None, "phase": "fetched", "dispatch_id": did})
+  rounds.append({"round": n, "runcard": args.runcard, "launch": launches[-1]["round"], "head": None, "phase": "fetched",
+                 "dispatch_id": did})
   data["dispatch_id"] = did
   core.save_foreman(st, unit, data)
   core.journal(st, f"{unit} round {n} dispatched {did} under {args.runcard}")
@@ -50,10 +63,35 @@ def run(args):
   return 0
 
 
+def dispatch_refusal(pr: dict, ci: dict, launches: list, rounds: list, decisions: list, rulings: list,
+                     status_exit: int):
+  """Spec section 11's predicate, its first failing clause: CI concluded on the head, the latest launch
+  terminal, no round posted since it, no decision pending, the review not stalled."""
+  if not ci["check_runs"] and not ci["statuses"]:
+    return "ci absent"
+  if core.ci_verdict(ci) == "waiting-for-ci":
+    return "ci pending"
+  if not launches:
+    return "no launch"
+  latest = launches[-1]
+  if not (latest["status"].startswith("exited") or latest["status"] == "interrupted"):
+    return f"launch {latest['round']} not terminal"
+  for entry in rounds:
+    if entry.get("phase") == "posted" and entry.get("launch") == latest["round"]:
+      return f"round {entry['round']} posted since launch {latest['round']}"
+  ruled = {r.get("decision") for r in rulings}
+  for decision in decisions:
+    if decision["id"] not in ruled:
+      return f"decision {decision['id']} pending"
+  if status_exit == 5:
+    return "review stalled"
+  return None
+
+
 def head_review_id(st, unit: str):
   """The unit's latest `reviews/*head-<unit>-c<n>` directory name, or None before the first dispatch."""
   folder = st.path("reviews")
-  found = [(int(m.group(1)), p.name) for p in folder.iterdir()
+  found = [(int(m.group(2)), p.name) for p in folder.iterdir()
            if (m := re.search(rf"(^|-)head-{re.escape(unit)}-c(\d+)$", p.name))] if folder.is_dir() else []
   return max(found)[1] if found else None
 

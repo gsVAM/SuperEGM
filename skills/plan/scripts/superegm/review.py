@@ -3,7 +3,10 @@
 
 """superegm review open|record|settle|status|rule: the one review loop (spec section 8)."""
 
+import argparse
+import contextlib
 from dataclasses import dataclass
+import io
 import json
 from pathlib import Path
 import re
@@ -437,6 +440,13 @@ def status_review(args) -> int:
   print(status.line)
   print(status.trend)
   return status.code
+
+
+def status_code(review_id: str, runcard: str) -> int:
+  """`review status` in-process with its stdout captured: the exit code alone (0 converged, 2 cap, 3 open or
+  not clean, 4 fix-design, 5 stalled)."""
+  with contextlib.redirect_stdout(io.StringIO()):
+    return status_review(argparse.Namespace(review=review_id, runcard=runcard, unit=None, design=None, plan=None))
 
 
 # ---------------------------------------------------------------- rule
