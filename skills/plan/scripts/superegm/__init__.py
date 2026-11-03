@@ -283,6 +283,41 @@ def open_runcard(store: Store, skill: str, artifact: str, parent=None, mode=None
   return rid
 
 
+def subcommand_artifact(args, store: Store) -> str:
+  """What the running subcommand acts on: its unit, else its spec, else the
+  handoff's spec from the state."""
+  if getattr(args, "unit", None):
+    return args.unit
+  if getattr(args, "design", None):
+    return str(Path(args.design).expanduser().resolve())
+  return ((load_state(store.root).get("design") or {}).get("path")) or ""
+
+
+def require_runcard(args, skills) -> dict:
+  """The card `--runcard` names, open (or a child of an open or interrupted
+  parent), of one of `skills`, on this subcommand's artifact or on the
+  handoff's spec (spec section 6). Every refusal starts `runcard: `."""
+  rid = getattr(args, "runcard", None)
+  if not rid:
+    raise HandoffError("runcard: --runcard is required")
+  st = STORE or store(git_toplevel(Path.cwd()))
+  card = load_card(st, rid)
+  if card["closed_at"]:
+    raise HandoffError(f"runcard: {rid} is closed")
+  if card["parent"]:
+    if load_card(st, card["parent"])["closed_at"]:
+      raise HandoffError(f"runcard: {rid}'s parent {card['parent']} is closed")
+  elif card["interrupted_at"]:
+    raise HandoffError(f"runcard: {rid} is interrupted")
+  if card["skill"] not in skills:
+    raise HandoffError(f"runcard: {rid} belongs to {card['skill']}, not {'|'.join(sorted(skills))}")
+  ours = subcommand_artifact(args, st)
+  spec = (load_state(st.root).get("design") or {}).get("path")
+  if card["artifact"] != ours and not (getattr(args, "unit", None) and card["artifact"] == spec):
+    raise HandoffError(f"runcard: {rid} is for {card['artifact']}, not {ours}")
+  return card
+
+
 def card_add(store: Store, id: str, key: str, item) -> None:
   card = load_card(store, id)
   card.setdefault(key, []).append(item)
