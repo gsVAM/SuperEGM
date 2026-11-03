@@ -118,3 +118,45 @@ def test_phase_sentence_verbatim(skill: str) -> None:
 def test_verification_never_updates_snapshots_or_fixtures() -> None:
   text = skill_text("verification-before-completion")
   assert "never updates snapshots or fixtures" in text
+
+
+HOOK_COMMAND = '"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd" session-start'
+
+
+def run_hook(**env: str) -> subprocess.CompletedProcess:
+  return subprocess.run(
+      ["bash", str(ROOT / "hooks/run-hook.cmd"), "session-start"],
+      env={"PATH": os.environ["PATH"], "HOME": os.environ.get("HOME", "/"), **env},
+      capture_output=True, timeout=30)
+
+
+def test_hooks_json_declares_one_session_start_command() -> None:
+  hooks = json.loads((ROOT / "hooks/hooks.json").read_text(encoding="utf-8"))
+  assert list(hooks) == ["hooks"] and list(hooks["hooks"]) == ["SessionStart"]
+  [entry] = hooks["hooks"]["SessionStart"]
+  assert entry["matcher"] == "startup|clear|compact"
+  [hook] = entry["hooks"]
+  assert hook == {"type": "command", "command": HOOK_COMMAND, "shell": "bash", "async": False}
+  for script in ("run-hook.cmd", "session-start"):
+    assert os.access(ROOT / "hooks" / script, os.X_OK), script
+
+
+def test_session_start_injects_using_superegm() -> None:
+  result = run_hook()
+  assert result.returncode == 0, result.stderr
+  assert result.stderr == b""
+  output = json.loads(result.stdout)
+  assert list(output) == ["hookSpecificOutput"]
+  inner = output["hookSpecificOutput"]
+  assert list(inner) == ["hookEventName", "additionalContext"]
+  assert inner["hookEventName"] == "SessionStart"
+  context = inner["additionalContext"]
+  assert skill_text("using-superegm").rstrip("\n") in context
+  assert "'superegm:using-superegm' skill" in context
+  assert "superpowers" not in context.replace("From superpowers 7.0.0 (MIT)", "")
+
+
+@pytest.mark.parametrize("role", ["goldfish", "builder"])
+def test_session_start_silent_under_role(role: str) -> None:
+  result = run_hook(SUPEREGM_ROLE=role)
+  assert (result.returncode, result.stdout, result.stderr) == (0, b"", b"")
