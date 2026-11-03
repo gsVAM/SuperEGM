@@ -283,14 +283,27 @@ def open_runcard(store: Store, skill: str, artifact: str, parent=None, mode=None
   return rid
 
 
+def handoff_spec(args, store: Store) -> str:
+  """The handoff's spec: the state's `design.path`, else (before the first
+  `graph`) the `Design:` line of `--plan`."""
+  spec = (load_state(store.root).get("design") or {}).get("path")
+  plan = Path(args.plan).expanduser().resolve() if getattr(args, "plan", None) else None
+  if not spec and plan and plan.is_file():
+    match = re.search(r"^Design: `([^`]+)`", read_text(plan), re.M)
+    if match:
+      design = Path(match.group(1)).expanduser()
+      spec = str(design if design.is_absolute() else (plan.parent / design).resolve())
+  return spec or ""
+
+
 def subcommand_artifact(args, store: Store) -> str:
   """What the running subcommand acts on: its unit, else its spec, else the
-  handoff's spec from the state."""
+  handoff's spec."""
   if getattr(args, "unit", None):
     return args.unit
   if getattr(args, "design", None):
     return str(Path(args.design).expanduser().resolve())
-  return ((load_state(store.root).get("design") or {}).get("path")) or ""
+  return handoff_spec(args, store)
 
 
 def require_runcard(args, skills) -> dict:
@@ -312,8 +325,7 @@ def require_runcard(args, skills) -> dict:
   if card["skill"] not in skills:
     raise HandoffError(f"runcard: {rid} belongs to {card['skill']}, not {'|'.join(sorted(skills))}")
   ours = subcommand_artifact(args, st)
-  spec = (load_state(st.root).get("design") or {}).get("path")
-  if card["artifact"] != ours and not (getattr(args, "unit", None) and card["artifact"] == spec):
+  if card["artifact"] != ours and not (getattr(args, "unit", None) and card["artifact"] == handoff_spec(args, st)):
     raise HandoffError(f"runcard: {rid} is for {card['artifact']}, not {ours}")
   return card
 
@@ -1660,8 +1672,12 @@ SUBCOMMANDS = ("init", "runcard", "approve_spec", "graph", "scan", "review", "ga
 
 
 def add_parser(subparsers, name, help_text, *, runcard=True):
+  """A subcommand parser with `--plan`; `runcard=True` (a writing subcommand)
+  adds `--runcard`, checked first by `require_runcard`."""
   p = subparsers.add_parser(name, help=help_text)
   p.add_argument("--plan", help="the plan file (default: the one the state names)")
+  if runcard:
+    p.add_argument("--runcard", help="the open run card this effect runs under")
   return p
 
 

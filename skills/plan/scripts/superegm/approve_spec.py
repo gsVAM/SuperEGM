@@ -11,6 +11,7 @@ from pathlib import Path
 import superegm as core
 
 WRITES = frozenset(['approvals', 'state'])  # the store kinds this subcommand writes
+SKILLS = frozenset(['review-spec'])  # the skills whose card this subcommand accepts
 
 
 def register(subparsers):
@@ -22,6 +23,7 @@ def register(subparsers):
 
 
 def run(args):
+  card = core.require_runcard(args, SKILLS)
   design = Path(args.design).expanduser().resolve()
   if not design.is_file():
     raise core.HandoffError(f"design {design} does not exist")

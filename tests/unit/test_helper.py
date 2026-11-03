@@ -146,7 +146,8 @@ def test_approve_checks_and_records(world):
   (world.repo / "docs/designs/plain.md").write_text("# Plain\n\nNo plan.\n", encoding="utf-8")
   git(["add", "-A"], world.repo)
   git(["commit", "-qm", "plain"], world.repo)
-  code, out = world.run("approve-spec", "--design", world.repo / "docs/designs/plain.md")
+  plain = world.repo / "docs/designs/plain.md"
+  code, out = world.run("approve-spec", "--design", plain, "--runcard", world.open_card("review-spec", plain), card=None)
   assert code == 1 and "Detailed Implementation Plan" in out and "egm-draft" in out
 
 
@@ -155,7 +156,7 @@ def test_approve_refuses_an_untracked_or_ignored_design(world):
   design = world.repo / "docs/designs/ignored.md"
   design.write_text(DESIGN, encoding="utf-8")
   (world.repo / ".gitignore").write_text("docs/designs/ignored.md\n", encoding="utf-8")
-  code, out = world.run("approve-spec", "--design", design)
+  code, out = world.run("approve-spec", "--design", design, "--runcard", world.open_card("review-spec", design), card=None)
   assert code == 1 and "not tracked by git" in out
 
 
@@ -518,6 +519,7 @@ def test_prepare_fetches_from_the_recorded_remote_into_private_refs(tmp_path, ca
   artifacts = tmp_path / "artifacts"
   monkeypatch.chdir(checkout)
   harness = Harness(capsys)
+  harness.spec = checkout / "docs/designs/sample.md"
   harness.ns["find_remote"] = lambda root, repo: "upstream"
   assert harness.run("graph", "--plan", plan)[0] == 0
   state = json.loads((artifacts / "state.json").read_text(encoding="utf-8"))
@@ -805,7 +807,7 @@ def test_a_different_design_may_not_reuse_a_directory_that_created_issues(world)
   other.write_text(DESIGN.replace("# Webhook", "# Other"), encoding="utf-8")
   git(["add", "-A"], world.repo)
   git(["commit", "-qm", "other"], world.repo)
-  code, out = world.run("approve-spec", "--design", other, "--yes")
+  code, out = world.run("approve-spec", "--design", other, "--yes", "--runcard", world.open_card("review-spec", other), card=None)
   assert code == 1 and "new artifact directory" in out and "Nothing was changed" in out
   state = state_of(world)
   assert state["design"]["path"].endswith("sample.md")
@@ -1207,7 +1209,8 @@ def test_allowed_mentions_are_explicit_and_validated(world):
   assert any("@acme/release" in p for p in scan("@acme/release please look\n", team, "body"))
   bare = {"banned_terms": [], "fix_request_mention": None, "allowed_mentions": ["@types"]}
   assert any("@types/node" in p for p in scan("uses @types/node\n", bare, "body"))
-  # the config refuses anything that is not an @name
+  # the config refuses anything that is not an @name (the card is opened while it still loads)
+  world.card("plan")
   set_config(world, repo=REPO, allowed_mentions=["types"])
   code, out = world.run("graph", "--plan", world.plan)
   assert code == 1 and "allowed_mentions must be a list of `@name` strings" in out

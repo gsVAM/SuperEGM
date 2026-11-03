@@ -7,6 +7,7 @@
 import superegm as core
 
 WRITES = frozenset(['bodies', 'plan', 'state', 'unit', 'units'])  # the store kinds this subcommand writes
+SKILLS = frozenset(['plan'])  # the skills whose card this subcommand accepts
 
 
 def register(subparsers):
@@ -15,6 +16,7 @@ def register(subparsers):
 
 
 def run(args):
+  card = core.require_runcard(args, SKILLS)
   plan, st = core.locate(args)
   handoff = core.Handoff(plan, st)
   handoff.write_graph_files()

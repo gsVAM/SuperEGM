@@ -12,6 +12,7 @@ from pathlib import Path
 import superegm as core
 
 WRITES = frozenset(['foreman'])  # the store kinds this subcommand writes
+SKILLS = frozenset(['wave'])  # the skills whose card this subcommand accepts
 
 
 def register(subparsers):
@@ -29,6 +30,7 @@ def run(args):
   Cleanup guards read the saved round state, not the run folder, so a round
   that is reported in chat but never recorded stays `launched` and blocks
   `prepare --remove` for ever."""
+  card = core.require_runcard(args, SKILLS)
   plan, st = core.locate(args)
   handoff = core.Handoff(plan, st)
   data = core.load_foreman(handoff.store, args.unit)

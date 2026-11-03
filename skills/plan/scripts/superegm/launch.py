@@ -7,6 +7,7 @@
 import superegm as core
 
 WRITES = frozenset(['state'])  # the store kinds this subcommand writes
+SKILLS = frozenset(['wave'])  # the skills whose card this subcommand accepts
 
 
 def register(subparsers):
@@ -17,6 +18,7 @@ def register(subparsers):
 
 
 def run(args):
+  card = core.require_runcard(args, SKILLS)
   plan, st = core.locate(args)
   handoff = core.Handoff(plan, st)
   state = handoff.state

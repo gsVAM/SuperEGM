@@ -7,6 +7,7 @@
 import superegm as core
 
 WRITES = frozenset(['state'])  # the store kinds this subcommand writes
+SKILLS = frozenset(['file'])  # the skills whose card this subcommand accepts
 
 
 def register(subparsers):
@@ -120,6 +121,7 @@ def run_verify(handoff: core.Handoff, writes=None):
 
 
 def run(args):
+  card = core.require_runcard(args, SKILLS)
   plan, st = core.locate(args)
   handoff = core.Handoff(plan, st)
   return run_verify(handoff)

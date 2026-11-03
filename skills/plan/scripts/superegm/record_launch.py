@@ -9,6 +9,7 @@ from pathlib import Path
 import superegm as core
 
 WRITES = frozenset(['foreman'])  # the store kinds this subcommand writes
+SKILLS = frozenset(['wave'])  # the skills whose card this subcommand accepts
 
 
 def register(subparsers):
@@ -28,6 +29,7 @@ def run(args):
   the prepare subagent has already returned and the collect subagent is not
   spawned until the run completes, so a session that ends in between restarts
   the round and abandons a finished Astra run."""
+  card = core.require_runcard(args, SKILLS)
   plan, st = core.locate(args)
   handoff = core.Handoff(plan, st)
   data = core.load_foreman(handoff.store, args.unit)
