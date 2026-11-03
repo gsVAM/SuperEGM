@@ -119,6 +119,27 @@ def save_review(st: core.Store, rid: str, review: dict) -> None:
   core.atomic_write(st.path("reviews", rid, "review.json"), review)
 
 
+def load_round(st: core.Store, rid: str, n: int):
+  path = st.path("reviews", rid, f"round-{n}.json")
+  return json.loads(core.read_text(path)) if path.is_file() else None
+
+
+def latest_cycle(st: core.Store, kind: str, artifact: str) -> tuple[dict | None, bool]:
+  """The latest cycle's `review.json` of this artifact and whether that cycle is closed: by an
+  `accept` or `stop` ruling, or (a spec) by the artifact's bytes moving off the converged round's."""
+  base = review_id(st, kind, artifact, 0)[:-3]
+  cycles = [int(m.group(1)) for p in st.path("reviews").glob(f"{base}-c*")
+            if (m := re.fullmatch(rf"{re.escape(base)}-c(\d+)", p.name)) and (p / "review.json").is_file()]
+  if not cycles:
+    return None, False
+  review = load_review(st, f"{base}-c{max(cycles)}")
+  closed = any(r["ruling"] in ("accept", "stop") for r in review["rulings"])
+  if not closed and kind in ("spec", "integrate") and review["converged_round"]:
+    rnd = load_round(st, f"{base}-c{max(cycles)}", review["converged_round"])
+    closed = core.sha256_file(Path(artifact)) != rnd["artifact_sha256"]
+  return review, closed
+
+
 def bind(args, review: dict) -> dict:
   """A by-id subcommand acts on the review's artifact: the card rule reads it from `args`."""
   if review["kind"] in ("spec", "integrate"):
@@ -149,9 +170,17 @@ def open_review(args) -> int:
     raise core.HandoffError(f"review open: first reviewer must be {FIRST[kind]}")
   if kind in ("plan", "head") and not st.handoff_id:
     raise core.HandoffError("review open: no handoff_id in state.json")
-  rid = review_id(st, kind, artifact)
+  latest, closed = latest_cycle(st, kind, artifact)
+  if latest and not closed:  # a re-typed skill resumes the open cycle; the panel cannot change
+    rid = review_id(st, kind, artifact, latest["cycle"])
+    core.card_add(st, args.runcard, "produced", rid)
+    core.journal(st, f"review open {rid} resumed under {args.runcard}")
+    print(rid)
+    return 0
+  cycle = latest["cycle"] + 1 if latest else 1
+  rid = review_id(st, kind, artifact, cycle)
   astra = args.astra or ("on" if (st.config.get("astra") or {}).get("enabled") else "off")
-  review = {"kind": kind, "artifact": artifact, "cycle": 1,
+  review = {"kind": kind, "artifact": artifact, "cycle": cycle,
             "reviewers": reviewers + (["astra"] if astra == "on" and kind in LANE_KINDS else []),
             "runcard": args.runcard, "artifact_sha256": args.sha256, "astra_incomplete": 0,
             "converged": "no", "converged_round": None, "rulings": []}
