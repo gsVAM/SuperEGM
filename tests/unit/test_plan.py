@@ -452,3 +452,18 @@ def test_decide_refuses_an_answer_outside_the_options(world):
   code, out = world.run("decide", "--unit", "U02", "--decision", "D1", "--default", "--judges", "judges-7", "--runcard", card)
   assert code == 0 and D1_YES + "; answer: (a)" in plan.read_text(encoding="utf-8")
   assert state(world)["decisions"]["U02/D1"]["by"] == "judges:judges-7"
+
+
+def test_decide_on_a_filed_unit_leaves_the_body_as_filed(world):
+  spec, sha, plan, card = planned(world)
+  assert graph(world, plan, card)[0] == 0
+  file_unit(world, "U02", 8)
+  plan_before, unit_before = plan.read_bytes(), find(world, "unit_U02.md").read_bytes()
+  hash_before = state(world)["units"]["U02"]["body_sha256"]
+  code, out = world.run("decide", "--unit", "U02", "--decision", "D1", "--answer", "(b)", "--runcard", card)
+  assert code == 0 and "recorded U02/D1 (b); post decision_comment_U02_D1.md on #8 under a github-write card" in out, out
+  assert plan.read_bytes() == plan_before and find(world, "unit_U02.md").read_bytes() == unit_before
+  assert state(world)["units"]["U02"]["body_sha256"] == hash_before
+  comment = find(world, "decision_comment_U02_D1.md").read_text(encoding="utf-8")
+  assert comment.startswith("**Decision D1:** (b) 10 attempts\n") and "Retry ceiling?" in comment
+  assert state(world)["decisions"]["U02/D1"]["answer"] == "(b)"
