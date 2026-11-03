@@ -19,7 +19,8 @@ from pathlib import Path
 import pytest
 
 from conftest import (ROOT, SCRIPTS, HELPER, REPO, DESIGN, Harness, make_world, make_repo, make_plan, make_pr,
-                      set_config, applied, pass_gate, dry_run, result_for, state_of, close_as_completed, git)
+                      set_config, applied, pass_gate, dry_run, result_for, state_of, unit_path, foreman_path,
+                      close_as_completed, git)
 
 
 # ------------------------------------------------------------------ parsing
@@ -60,7 +61,7 @@ def test_graph_writes_waves_critical_path_placeholders_and_id(world):
   bodies = (world.artifacts / "handoff_bodies.md").read_text(encoding="utf-8")
   assert "**Blocked by.** #<U01>" in bodies and "after #<U01>, before U03 (Admin endpoint)" in bodies
   assert "Part of #<tracking>. Wave 2." in bodies
-  unit = (world.artifacts / "unit_U02.md").read_text(encoding="utf-8")
+  unit = unit_path(world, "U02").read_text(encoding="utf-8")
   assert unit.startswith("### U02: Delivery worker") and "#<U01>" in unit
   plan = world.plan.read_text(encoding="utf-8")
   assert "<!-- egm:generated start -->" in plan and "| U01 | U02 | shared file `src/webhooks/queue.ts`; blocked by |" in plan
@@ -193,7 +194,7 @@ def test_dry_run_writes_file_and_calls_only_three_reads(world):
   assert state["labels"]["egm:unit"] == "missing"
   kinds = [c[:2] for c in world.gh.calls]
   assert kinds == [["auth", "status"], ["api", f"repos/{REPO}"], ["api", f"repos/{REPO}/labels"]]
-  writes = world.ns["Handoff"](world.plan).writes()
+  writes = world.ns["Handoff"](world.plan, world.ns["store"](world.repo)).writes()
   assert writes[0] == ["repo", REPO] and writes[1][0] == "gate" and writes[1][1] == state["gate_plan_sha256"]
 
 
@@ -208,10 +209,10 @@ def test_dry_run_refuses_without_gate_or_after_plan_or_template_change(world):
   assert code == 1 and "changed after the gate" in out
   world.plan.write_text(text, encoding="utf-8")
   assert world.run("dry-run", "--plan", world.plan)[0] == 0
-  template = world.repo / ".egm/template.md"
+  template = world.repo / ".superegm/template.md"
   template.write_text("<!-- egm:handoff={{handoff_id}} unit={{unit_id}} -->\n{{objective}}\n{{scope}}\n{{dod}}\n"
                       "{{blocked_by}} #{{tracking}} `{{branch}}`\n", encoding="utf-8")
-  set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"], issue_template=".egm/template.md")
+  set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"], issue_template=".superegm/template.md")
   code, out = world.run("dry-run", "--plan", world.plan)
   assert code == 1 and "changed after the gate" in out
 
@@ -268,16 +269,16 @@ def test_apply_refusals(world):
   assert code == 1 and "--yes" in out
   state = state_of(world)
   confirmed = state.pop("confirmed_sha256")
-  (world.artifacts / "handoff_state.json").write_text(json.dumps(state), encoding="utf-8")
+  (world.artifacts / "state.json").write_text(json.dumps(state), encoding="utf-8")
   code, out = world.run("apply", "--plan", world.plan, "--yes")
   assert code == 1 and "no confirmed_sha256" in out
   state["confirmed_sha256"] = confirmed
   state["repo"] = "someone/else"
-  (world.artifacts / "handoff_state.json").write_text(json.dumps(state), encoding="utf-8")
+  (world.artifacts / "state.json").write_text(json.dumps(state), encoding="utf-8")
   code, out = world.run("apply", "--plan", world.plan, "--yes")
   assert code == 1 and "differs from the state's" in out
   state["repo"] = REPO
-  (world.artifacts / "handoff_state.json").write_text(json.dumps(state), encoding="utf-8")
+  (world.artifacts / "state.json").write_text(json.dumps(state), encoding="utf-8")
   text = world.plan.read_text(encoding="utf-8")
   world.plan.write_text(text.replace("low: new module", "low: a new module"), encoding="utf-8")
   code, out = world.run("apply", "--plan", world.plan, "--yes")
@@ -405,7 +406,7 @@ def test_status_landed_ready_decisions_and_shared_edges(world):
   code, out = world.run("status", "--plan", world.plan)
   assert "landed: U01, U02" in out and "ready: none" in out, out
   assert world.run("decide", "--plan", world.plan, "--unit", "U03", "--decision", "D2", "--answer", "25")[0] == 0
-  assert "- Decision: 25" in (world.artifacts / "unit_U03.md").read_text(encoding="utf-8")
+  assert "- Decision: 25" in unit_path(world, "U03").read_text(encoding="utf-8")
   assert (world.artifacts / "decision_comment_U03_D2.md").read_text(encoding="utf-8").startswith("**Decision D2** (Page size")
   code, out = world.run("status", "--plan", world.plan)
   assert "ready: none" in out and "NOT PUBLISHED" in out
@@ -414,7 +415,7 @@ def test_status_landed_ready_decisions_and_shared_edges(world):
   code, out = world.run("status", "--plan", world.plan)
   assert "ready: U03" in out
   assert world.run("graph", "--plan", world.plan)[0] == 0
-  assert "- Decision: 25" in (world.artifacts / "unit_U03.md").read_text(encoding="utf-8")
+  assert "- Decision: 25" in unit_path(world, "U03").read_text(encoding="utf-8")
 
 
 def test_status_pr_matching_rules(world):
@@ -513,14 +514,17 @@ def test_prepare_fetches_from_the_recorded_remote_into_private_refs(tmp_path, ca
   git(["remote", "add", "upstream", str(target)], checkout)
   git(["config", "user.email", "egm@example.invalid"], checkout)
   git(["config", "user.name", "EGM"], checkout)
-  plan = make_plan(tmp_path / "artifacts", checkout)
+  plan = make_plan(tmp_path / "plans", checkout)
+  artifacts = tmp_path / "artifacts"
+  monkeypatch.chdir(checkout)
   harness = Harness(capsys)
   harness.ns["find_remote"] = lambda root, repo: "upstream"
   assert harness.run("graph", "--plan", plan)[0] == 0
-  state = json.loads((plan.parent / "handoff_state.json").read_text(encoding="utf-8"))
+  state = json.loads((artifacts / "state.json").read_text(encoding="utf-8"))
+  hexd = state["handoff_id"][-6:]
   state.update({"remote": "upstream", "confirmed_sha256": "x", "verify": {"complete": True, "sha256": "x", "problems": []},
                 "units": {"U01": {"number": 2, "pr": {"number": 7, "head": head, "base_ref": "main", "base_sha": base_sha}}}})
-  (plan.parent / "handoff_state.json").write_text(json.dumps(state), encoding="utf-8")
+  (artifacts / "state.json").write_text(json.dumps(state), encoding="utf-8")
   harness.ns["parse_remote_url"] = lambda url: REPO if url.strip() == str(target) else None
   harness.gh.check_runs[head] = [{"name": "tests", "status": "completed", "conclusion": "success"}]
   harness.gh.combined[head] = {"state": "success", "statuses": []}
@@ -534,16 +538,16 @@ def test_prepare_fetches_from_the_recorded_remote_into_private_refs(tmp_path, ca
   assert (fetch_head.read_bytes() if fetch_head.exists() else None) == before
   tree = Path(re.search(r"worktree (\S+) at", out).group(1))
   assert tree.is_dir() and "egm-wave" in str(tree)
-  diff = (plan.parent / "pr_7_r1.diff").read_bytes()
+  diff = (artifacts / "pr_7_r1.diff").read_bytes()
   expected = subprocess.run(["git", "-C", str(tree), "diff", "--no-ext-diff", "--no-textconv", "--binary",
                              base_sha, "--"], capture_output=True, check=True).stdout
   assert diff == expected and b"+changed" in diff
-  ci = json.loads((plan.parent / "ci_7_r1.json").read_text(encoding="utf-8"))
+  ci = json.loads((artifacts / "ci_7_r1.json").read_text(encoding="utf-8"))
   assert ci["verdict"] == "ci green"
-  launch = (plan.parent / "foreman_U01_r1_launch.md").read_text(encoding="utf-8")
+  launch = (artifacts / "foreman_U01_r1_launch.md").read_text(encoding="utf-8")
   line = [l for l in launch.splitlines() if "inspect" in l][0]
   assert f"--base '{base_sha}'" in line and "--resume" not in line and not re.search(r"\$EGM_|&&|\||;|\s>", line)
-  foreman = json.loads((plan.parent / "foreman_U01_state.json").read_text(encoding="utf-8"))
+  foreman = json.loads((artifacts / hexd / "foreman/U01.json").read_text(encoding="utf-8"))
   assert foreman["phase"] == "prepared" and foreman["rounds"]["1"]["merge_base"] == base_sha
   # A leftover clean worktree is removed on the next call; a dirty one is refused.
   code, out = harness.run("prepare", "--plan", plan, "--unit", "U01", "--round", 2)
@@ -556,7 +560,7 @@ def test_prepare_fetches_from_the_recorded_remote_into_private_refs(tmp_path, ca
   assert code == 0 and tree.exists(), out  # the worktree lives until the unit lands
   # A moved head stops the round.
   state["units"]["U01"]["pr"]["head"] = "0" * 40
-  (plan.parent / "handoff_state.json").write_text(json.dumps(state), encoding="utf-8")
+  (artifacts / "state.json").write_text(json.dumps(state), encoding="utf-8")
   code, out = harness.run("prepare", "--plan", plan, "--unit", "U01", "--round", 4)
   assert code == 3 and "head-moved" in out
   # A remote that no longer names the repository is refused.
@@ -615,7 +619,7 @@ sys.exit("unexpected: " + " ".join(args))
 @pytest.mark.skipif(os.name == "nt", reason="a fake gh script on PATH needs a POSIX shell-free exec")
 def test_subprocess_command_shape_with_fake_gh_on_path(tmp_path, capsys, monkeypatch):
   repo = make_repo(tmp_path / "repo", config={"repo": REPO})
-  plan = make_plan(tmp_path / "artifacts", repo)
+  plan = make_plan(tmp_path / "plans", repo)
   bin_dir = tmp_path / "bin"
   bin_dir.mkdir()
   script = bin_dir / "gh"
@@ -625,7 +629,7 @@ def test_subprocess_command_shape_with_fake_gh_on_path(tmp_path, capsys, monkeyp
 
   def run(*argv):
     return subprocess.run([sys.executable, str(HELPER), *[str(a) for a in argv]], env=env,
-                          capture_output=True, text=True)
+                          cwd=str(repo), capture_output=True, text=True)
   assert run("graph", "--plan", plan).returncode == 0
   assert run("gate", "--plan", plan, "--reviewed", "--round", 1).returncode == 0
   assert run("gate", "--plan", plan, "--pass").returncode == 0
@@ -675,7 +679,7 @@ def test_state_is_written_atomically_and_a_poll_keeps_other_writers_fields(world
   assert after["units"]["U01"]["launched"]["wave"] == 1
   assert after["units"]["U01"]["number"]
   # no temporary file is left behind by the atomic replace
-  assert not list(world.artifacts.glob("handoff_state.json.tmp*"))
+  assert not list(world.artifacts.glob("state.json.tmp*"))
 
 
 def test_operations_refuse_a_repository_the_numbers_do_not_belong_to(world):
@@ -747,7 +751,7 @@ def test_the_posted_body_never_changes_when_a_decision_is_answered(world):
                    "--decision", "D2", "--answer", "50")[0] == 0
   code, out = world.run("verify", "--plan", world.plan)
   assert code == 0 and "MISMATCH" not in out, out
-  unit_file = (world.artifacts / "unit_U03.md").read_text(encoding="utf-8")
+  unit_file = unit_path(world, "U03").read_text(encoding="utf-8")
   assert "Decisions answered since the issue was posted" in unit_file
   assert "Decision: 50" in unit_file
 
@@ -776,13 +780,13 @@ def test_record_launch_persists_the_run_folder_before_the_wait(world):
   applied(world)
   assert world.run("record-launch", "--plan", world.plan, "--unit", "U01",
                    "--round", 2, "--run-folder", "/tmp/egm-astra/claudex-abc")[0] == 0
-  data = json.loads((world.artifacts / "foreman_U01_state.json").read_text(encoding="utf-8"))
+  data = json.loads(foreman_path(world, "U01").read_text(encoding="utf-8"))
   assert data["rounds"]["2"]["phase"] == "launched"
   assert data["rounds"]["2"]["run_folder"].endswith("claudex-abc")
   assert data["rounds"]["2"]["status"] == "running"
   assert world.run("record-launch", "--plan", world.plan, "--unit", "U01",
                    "--round", 3, "--not-run", "denied")[0] == 0
-  data = json.loads((world.artifacts / "foreman_U01_state.json").read_text(encoding="utf-8"))
+  data = json.loads(foreman_path(world, "U01").read_text(encoding="utf-8"))
   assert data["rounds"]["3"]["status"] == "not run (denied)"
   assert data["rounds"]["2"]["run_folder"], "an earlier round must survive"
 
@@ -791,7 +795,7 @@ def test_a_different_design_may_not_reuse_a_directory_that_created_issues(world)
   """R2-07: the refusal must come before approve overwrites the approval or
   graph rewrites the artifacts, so the existing handoff stays intact."""
   applied(world)
-  before = (world.artifacts / "unit_U01.md").read_text(encoding="utf-8")
+  before = unit_path(world, "U01").read_text(encoding="utf-8")
   other = world.repo / "docs/designs/other.md"
   other.write_text(DESIGN.replace("# Webhook", "# Other"), encoding="utf-8")
   git(["add", "-A"], world.repo)
@@ -801,7 +805,7 @@ def test_a_different_design_may_not_reuse_a_directory_that_created_issues(world)
   state = state_of(world)
   assert state["design"]["path"].endswith("sample.md")
   assert state["units"]["U01"]["number"], "the existing handoff must be untouched"
-  assert (world.artifacts / "unit_U01.md").read_text(encoding="utf-8") == before
+  assert unit_path(world, "U01").read_text(encoding="utf-8") == before
 
 
 def test_approval_binds_to_the_design_it_displayed(world):
@@ -850,7 +854,7 @@ def test_marker_recovery_finds_issues_created_before_a_crash(world):
     unit.pop("number", None), unit.pop("id", None), unit.pop("done", None)
   for key in ("number", "id", "done"):
     (state.get("tracking") or {}).pop(key, None)
-  (world.artifacts / "handoff_state.json").write_text(json.dumps(state), encoding="utf-8")
+  (world.artifacts / "state.json").write_text(json.dumps(state), encoding="utf-8")
   before = len([c for c in gh.calls if c[:2] == ["issue", "create"]])
   assert world.run("apply", "--plan", world.plan, "--yes")[0] == 0
   after = state_of(world)
@@ -908,7 +912,7 @@ def test_prepare_refuses_a_selection_its_observation_contradicts(world):
   gh = applied(world)
   make_pr(gh, 70, "a" * 40, closes=[(REPO, 2)])
   assert world.run("status", "--plan", world.plan, "--watch", "U01=70")[0] == 0
-  path = world.artifacts / "handoff_state.json"
+  path = world.artifacts / "state.json"
   state = json.loads(path.read_text(encoding="utf-8"))
   state["units"]["U01"]["watch"]["number"] = 71
   path.write_text(json.dumps(state), encoding="utf-8")
@@ -1025,7 +1029,7 @@ def test_collect_records_a_round_and_guards_cleanup(world, tmp_path):
   code, out = world.run("collect", "--plan", world.plan, "--unit", "U01",
                         "--round", 1, "--verdict", "clean")
   assert code == 0 and "collected" in out, out
-  data = json.loads((world.artifacts / "foreman_U01_state.json").read_text(encoding="utf-8"))
+  data = json.loads(foreman_path(world, "U01").read_text(encoding="utf-8"))
   assert data["rounds"]["1"]["phase"] == "collected"
   assert data["rounds"]["1"]["run_status"] == "completed"
 
@@ -1072,9 +1076,9 @@ def test_the_helper_is_single_writer_by_design(world):
   make_pr(gh, 70, "a" * 40, closes=[(REPO, 2)])
   code, out = world.run("status", "--plan", world.plan, "--wait", 60, "--watch", "U01=70")
   assert code == 1 and "--wait only watches" in out
-  before = (world.artifacts / "handoff_state.json").read_text(encoding="utf-8")
+  before = (world.artifacts / "state.json").read_text(encoding="utf-8")
   assert world.run("status", "--plan", world.plan, "--wait", 60)[0] == 0
-  after = (world.artifacts / "handoff_state.json").read_text(encoding="utf-8")
+  after = (world.artifacts / "state.json").read_text(encoding="utf-8")
   assert after != before, "a wait still records what it saw, once, when it returns"
 
 
@@ -1102,7 +1106,7 @@ def test_prepare_refuses_a_unit_file_the_plan_does_not_render(world):
   gh = applied(world)
   make_pr(gh, 70, "a" * 40, closes=[(REPO, 2)])
   assert world.run("status", "--plan", world.plan, "--watch", "U01=70")[0] == 0
-  unit_file = world.artifacts / "unit_U01.md"
+  unit_file = unit_path(world, "U01")
   unit_file.write_text(unit_file.read_text(encoding="utf-8")
                        + "\n\nExtra instruction nobody approved.\n", encoding="utf-8")
   code, out = world.run("prepare", "--plan", world.plan, "--unit", "U01")
@@ -1141,13 +1145,13 @@ def test_collect_accepts_a_round_whose_lane_never_launched(world):
   applied(world)
   data = {"unit": "U01", "rounds": {"1": {"phase": "prepared", "pr": 70,
                                           "worktree": "/tmp/egm-wave/x"}}}
-  (world.artifacts / "foreman_U01_state.json").write_text(json.dumps(data), encoding="utf-8")
+  foreman_path(world, "U01").write_text(json.dumps(data), encoding="utf-8")
   code, out = world.run("collect", "--plan", world.plan, "--unit", "U01", "--round", 1)
   assert code == 1 and "--not-run" in out, out
   code, out = world.run("collect", "--plan", world.plan, "--unit", "U01",
                         "--round", 1, "--not-run", "lane off")
   assert code == 0, out
-  saved = json.loads((world.artifacts / "foreman_U01_state.json").read_text(encoding="utf-8"))
+  saved = json.loads(foreman_path(world, "U01").read_text(encoding="utf-8"))
   assert saved["rounds"]["1"]["phase"] == "collected"
   assert "not run (lane off)" in saved["rounds"]["1"]["run_status"]
 
@@ -1244,7 +1248,7 @@ def test_record_launch_not_run_cannot_erase_a_recorded_launch(world, tmp_path):
   code, out = world.run("record-launch", "--plan", world.plan, "--unit", "U01",
                         "--round", 1, "--not-run", "skipped")
   assert code == 1 and "already recorded a launch" in out, out
-  data = json.loads((world.artifacts / "foreman_U01_state.json").read_text(encoding="utf-8"))
+  data = json.loads(foreman_path(world, "U01").read_text(encoding="utf-8"))
   assert data["rounds"]["1"]["run_folder"].endswith("run"), "the folder must survive"
   assert data["rounds"]["1"]["run_status"] == "running"
   # a round that never launched may still be recorded not run
@@ -1288,7 +1292,7 @@ def test_record_launch_is_immutable_per_round(world, tmp_path):
   code, out = world.run("record-launch", "--plan", world.plan, "--unit", "U01",
                         "--round", 1, "--run-folder", str(b))
   assert code == 1 and "a new round" in out, out
-  data = json.loads((world.artifacts / "foreman_U01_state.json").read_text(encoding="utf-8"))
+  data = json.loads(foreman_path(world, "U01").read_text(encoding="utf-8"))
   assert data["rounds"]["1"]["run_folder"] == str(a)
 
 
@@ -1365,7 +1369,7 @@ def test_an_interrupted_round_is_collected_but_its_worktree_is_never_removed(wor
   tree = tmp_path / "wt-u01"; tree.mkdir()
   assert world.run("record-launch", "--plan", world.plan, "--unit", "U01",
                    "--round", 1, "--run-folder", str(folder))[0] == 0
-  path = world.artifacts / "foreman_U01_state.json"
+  path = foreman_path(world, "U01")
   data = json.loads(path.read_text(encoding="utf-8"))
   data["rounds"]["1"].update({"pr": 70, "worktree": str(tree)})
   path.write_text(json.dumps(data), encoding="utf-8")
@@ -1441,3 +1445,31 @@ def test_world_fixture_lives_in_conftest_and_injects_the_package(world):
   with pytest.raises(superegm.GhError):
     superegm.gh(["nope"])
   assert world.spec == world.repo / "docs/designs/sample.md" and Path.cwd() == world.repo
+
+
+def test_store_paths_are_prefixed_by_the_handoff_hex(world):
+  import superegm
+  root = world.artifacts
+  assert superegm.store(world.repo).root == root and not str(root).startswith(str(world.repo))
+  assert superegm.load_config(world.repo)["_source"].endswith(".superegm/config.json")
+  a, b = superegm.Store(root, handoff_id="sample-111111"), superegm.Store(root, handoff_id="sample-222222")
+  assert a.path("state") == b.path("state") == root / "state.json"
+  assert a.path("runcards", "plan-0001") == root / "runcards/plan-0001.json"
+  assert a.path("approvals", "sample") == root / "approvals/sample.json"
+  assert a.path("plan") == root / "handoff_plan.md" and a.path("report", 2) == root / "wave_2_report.md"
+  assert a.path("unit", "U01") == root / "111111/unit_U01.md" and b.path("unit", "U01") == root / "222222/unit_U01.md"
+  assert a.path("foreman", "U01") == root / "111111/foreman/U01.json"
+  assert a.path("launches", "U01_r1_prompt.md") == root / "111111/launches/U01_r1_prompt.md"
+  assert a.path("review", "U01", 7) == root / "111111/review/U01/pr7" and a.path("worktrees", "U01") == root / "111111/worktrees/U01"
+  with pytest.raises(superegm.HandoffError, match="no handoff in this store"):
+    superegm.Store(root).path("foreman", "U01")
+  superegm.atomic_write(a.path("foreman", "U01"), {"rounds": []})
+  assert json.loads((root / "111111/foreman/U01.json").read_text(encoding="utf-8")) == {"rounds": []}
+  superegm.atomic_write(a.path("file", "x.diff"), b"\x00bin")
+  assert (root / "x.diff").read_bytes() == b"\x00bin"
+  superegm.journal(a, "first fact"); superegm.journal(a, "second fact")
+  lines = (root / "journal.md").read_text(encoding="utf-8").splitlines()
+  assert [l.split(" ", 1)[1] for l in lines] == ["first fact", "second fact"] and lines[0].startswith("2023-")
+  assert superegm.spec_slug("/x/docs/specs/2026-11-03-superegm-design.md") == "2026-11-03-superegm-design"
+  assert not list(root.rglob("*.tmp*"))
+  assert world.run("graph", "--plan", world.plan)[0] == 0 and (root / "state.json").is_file()

@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "skills/plan/scripts"
 HELPER = SCRIPTS / "superegm.py"
 REPO = "example-org/webhooks"
-CONFIG = ".egm/handoff.json"
+CONFIG = ".superegm/config.json"
 
 for folder in (SCRIPTS, Path(__file__).resolve().parent):
   if str(folder) not in sys.path:
@@ -139,7 +139,7 @@ def make_repo(path: Path, origin_url=f"https://github.com/{REPO}.git", config=No
   (path / "docs/designs").mkdir(parents=True)
   (path / "docs/designs/sample.md").write_text(DESIGN, encoding="utf-8")
   if config is not None:
-    write_config(path, config)
+    write_config(path, {"artifacts_dir": str(path.parent / "artifacts"), **config})
   git(["add", "-A"], path)
   git(["commit", "-qm", "Sample design"], path)
   git(["remote", "add", "origin", origin_url], path)
@@ -396,17 +396,18 @@ def make_world(tmp_path, capsys, monkeypatch, config=None, origin_url=f"https://
   if config is None:
     config = {"repo": REPO, "banned_terms": ["(?i)secret-codename"]}
   repo = make_repo(tmp_path / "repo", origin_url=origin_url, config=config)
-  plan = make_plan(tmp_path / "artifacts", repo)
+  plan = make_plan(tmp_path / "plans", repo)
   harness = Harness(capsys)
-  harness.repo, harness.plan, harness.artifacts = repo, plan, plan.parent
+  harness.repo, harness.plan, harness.artifacts = repo, plan, tmp_path / "artifacts"
   harness.spec = repo / "docs/designs/sample.md"
   monkeypatch.chdir(repo)
   return harness
 
 
 def set_config(world, **keys):
-  """Replace the repository's config with `keys`."""
-  write_config(world.repo, keys)
+  """Replace the repository's config with `keys`, keeping `artifacts_dir`."""
+  current = json.loads((world.repo / CONFIG).read_text(encoding="utf-8"))
+  write_config(world.repo, {"artifacts_dir": current["artifacts_dir"], **keys})
 
 
 @pytest.fixture
@@ -414,20 +415,29 @@ def world(tmp_path, capsys, monkeypatch):
   return make_world(tmp_path, capsys, monkeypatch)
 
 
+def state_of(world):
+  return json.loads((world.artifacts / "state.json").read_text(encoding="utf-8"))
+
+
+def unit_path(world, uid):
+  """`unit_<id>.md` under the handoff's 6-hex prefix (after `graph` ran)."""
+  return world.artifacts / state_of(world)["handoff_id"][-6:] / f"unit_{uid}.md"
+
+
+def foreman_path(world, uid):
+  return world.artifacts / state_of(world)["handoff_id"][-6:] / "foreman" / f"{uid}.json"
+
+
 def result_for(world, uid, rnd):
   """An inspect result that is attributable to this round: full identity."""
-  unit_file = world.artifacts / f"unit_{uid}.md"
-  data = json.loads((world.artifacts / f"foreman_{uid}_state.json").read_text(encoding="utf-8")) \
-      if (world.artifacts / f"foreman_{uid}_state.json").is_file() else {}
+  unit_file = unit_path(world, uid)
+  data = json.loads(foreman_path(world, uid).read_text(encoding="utf-8")) \
+      if foreman_path(world, uid).is_file() else {}
   record = (data.get("rounds") or {}).get(str(rnd)) or {}
   return {"status": "completed", "plan": str(unit_file),
           "plan_sha256": hashlib.sha256(unit_file.read_bytes()).hexdigest(),
           "base": record.get("merge_base"), "repo": record.get("worktree"),
           "started_at": world.clock}
-
-
-def state_of(world):
-  return json.loads((world.artifacts / "handoff_state.json").read_text(encoding="utf-8"))
 
 
 def pass_gate(world):
