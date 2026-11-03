@@ -44,10 +44,7 @@ def prepare(args, card):
   record = state["units"][unit]
   branch, number = handoff.branch(unit), record["number"]
   issue_body = filed_body(state, unit)
-  tools = list(builder_config["allowed_tools"]) + [f"Bash(git push origin {branch}:*)"]
-  for command in body.run_commands(issue_body):
-    if f"Bash({command.split()[0]}:*)" not in tools:
-      tools.append(f"Bash({command.split()[0]}:*)")
+  tools = allowed_tools(builder_config["allowed_tools"], branch, issue_body)
   pr = (record.get("pr") or {}).get("number") if rnd >= 2 else None
   comments = core.gh_pages(f"repos/{repo}/issues/{number}/comments")
   reviews = core.gh_pages(f"repos/{repo}/pulls/{pr}/reviews") if pr else []
@@ -93,6 +90,19 @@ def profile_problem(profile_dir):
   if plugins.is_dir() and any(plugins.iterdir()):
     return f"builder profile {profile_dir} holds plugins"
   return None
+
+
+def allowed_tools(configured, branch, body_text):
+  """The configured allow-list plus a push prefix for the unit's own branch and `Bash(<first
+  word>:*)` for every command the body runs; `Agent`, `Skill` and unrestricted Bash are refused."""
+  for entry in ("Agent", "Skill", "Bash", "Bash(*)"):
+    if entry in configured:
+      raise core.HandoffError(f"allowed_tools carries {entry}: a builder never spawns, never invokes skills, never runs unrestricted Bash")
+  tools = list(configured) + [f"Bash(git push origin {branch}:*)"]
+  for command in body.run_commands(body_text):
+    if f"Bash({command.split()[0]}:*)" not in tools:
+      tools.append(f"Bash({command.split()[0]}:*)")
+  return tools
 
 
 def filed_body(state, unit):
