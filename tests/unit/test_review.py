@@ -10,8 +10,9 @@ from pathlib import Path
 import pytest
 from superegm import store, atomic_write
 from superegm.review import parse_findings
+from superegm.review import PANEL_OF
 
-from conftest import DESIGN, git
+from conftest import DESIGN, git as conftest_git   # S2's `git(world, *args)` fixture shadows conftest's; the EGM tests go at S12
 
 
 def test_approve_checks_and_records(world):
@@ -28,10 +29,10 @@ def test_approve_checks_and_records(world):
 
   code, out = world.run("graph", "--plan", world.plan)
   assert code == 1 and "spec changed since the approval: run approve-spec again" in out
-  git(["checkout", "--", "docs/designs/sample.md"], world.repo)
+  conftest_git(["checkout", "--", "docs/designs/sample.md"], world.repo)
   (world.repo / "docs/designs/plain.md").write_text("# Plain\n\nNo plan.\n", encoding="utf-8")
-  git(["add", "-A"], world.repo)
-  git(["commit", "-qm", "plain"], world.repo)
+  conftest_git(["add", "-A"], world.repo)
+  conftest_git(["commit", "-qm", "plain"], world.repo)
   plain = world.repo / "docs/designs/plain.md"
   code, out = world.run("approve-spec", "--design", plain, "--runcard", world.open_card("review-spec", plain), card=None)
   assert code == 1 and "Detailed Implementation Plan" in out and "egm-draft" in out
@@ -69,3 +70,132 @@ def test_findings_line_grammar(line, error):
       parse_findings(line + "\n", "design", 2)
   assert parse_findings("\n  \n", "design", 1) == []
   assert parse_findings("set-2-1 | high | U07 Interfaces | regression: no | x\n", "set", 1)[0]["id"] == "set-2-1"   # a set id carries the set's own round
+
+
+# ---------------------------------------------------------------- S2: the shared fixtures and `review open`
+
+ROOT = Path(__file__).resolve().parents[2]
+SPEC = ("# Sample\n\n## 1. Intent\n\nText.\n\n## 2. Units\n\n| Unit | Scope | Blocked by | Size |\n"
+        "| --- | --- | --- | --- |\n| U01 | a thing | — | S |\n")
+SLUG, HID, A = "2026-11-03-sample-design", "sample-abc123", "a" * 64
+SKILL_OF = {"spec": "review-spec", "integrate": "integrate", "plan": "review-plan", "head": "wave"}
+
+def git(world, *args):
+  return subprocess.run(["git", "-C", str(world.repo), *args], check=True, capture_output=True, text=True).stdout.strip()
+
+def spec_file(world, text=SPEC):
+  path = world.repo / "docs" / "specs" / f"{SLUG}.md"
+  path.parent.mkdir(parents=True, exist_ok=True)
+  path.write_text(text, encoding="utf-8")
+  return path.resolve()
+
+def seed_handoff(world, spec, hid=HID, **extra):
+  """state.json as approve-spec and graph leave it: the handoff id and the spec the plan and head cards are on."""
+  state = {"units": {"U07": {}}, "design": {"path": str(spec)}, **extra}
+  atomic_write(store(world.repo).path("state"), state | ({"handoff_id": hid} if hid else {}))
+
+def card(world, artifact, skill="review-spec", mode=None, parent=None):
+  argv = ["runcard", "open", "--skill", skill, "--artifact", str(artifact)]
+  argv += ["--mode", mode] if mode else []
+  argv += ["--parent", parent] if parent else []
+  code, out = world.run(*argv)
+  assert code == 0, out
+  return out.strip()
+
+def opened(world, kind="spec", reviewers=None, astra="off", mode=None, text=SPEC):
+  spec = spec_file(world, text)
+  if kind in ("plan", "head"):
+    seed_handoff(world, spec)
+  cid = card(world, spec, SKILL_OF[kind], mode)
+  artifact = str(spec) if kind in ("spec", "integrate") else "U07"
+  code, out = world.run("review", "open", "--kind", kind, "--artifact", artifact, "--reviewers",
+                        reviewers or PANEL_OF[kind], "--astra", astra, "--runcard", cid)
+  assert code == 0, out
+  return spec, cid, out.strip()
+
+def rpath(world, rid, *parts):
+  return store(world.repo).path("reviews", rid, *parts)
+
+def rjson(world, rid, name="review.json"):
+  return json.loads(rpath(world, rid, name).read_text(encoding="utf-8"))
+
+def F(reviewer, n, i, sev="high", reg="no", loc="§1"):
+  return f"{reviewer}-{n}-{i} | {sev} | {loc} | regression: {reg} | claim {i}"
+
+HIGH = lambda n: [F("design", n, 1)]
+
+def record(world, rid, n, reviewer, lines=(), cid=None, sha=None, not_run=None):
+  argv = ["review", "record", "--review", rid, "--round", str(n), "--reviewer", reviewer, "--runcard", cid]
+  if not_run:
+    argv += ["--not-run", not_run]
+  else:
+    path = world.repo.parent / f"{rid}-{n}-{reviewer}.txt"
+    path.write_text("".join(line + "\n" for line in lines), encoding="utf-8")
+    argv += ["--findings", str(path), "--isolation", "clean", "--model", "inherit:opus", "--effort", "inherit:high"]
+  return world.run(*argv, *(["--sha256", sha] if sha else []))
+
+def rounds(world, rid, cid, per_round, start=1):
+  """One spec round per item: design's lines (None = design never recorded); zoom-out always empty."""
+  for n, lines in enumerate(per_round, start):
+    if lines is not None:
+      assert record(world, rid, n, "design", lines, cid)[0] == 0
+    assert record(world, rid, n, "zoom-out", [], cid)[0] == 0
+
+def head_round(world, n, phase, cid, outcome=None, unit="U07"):
+  path = store(world.repo).path("foreman", unit)
+  data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"rounds": [], "decisions": [], "rulings": []}
+  data["rounds"].append({"round": n, "runcard": cid, "launch": 1, "head": "f" * 40, "phase": phase,
+                         "dispatch_id": f"d{n}", "outcome": outcome, "posted_at": None})
+  atomic_write(path, data)
+
+def status(world, rid, cid):
+  return world.run("review", "status", "--review", rid, "--runcard", cid)
+
+def settle(world, rid, fid, disposition, cid, *extra):
+  return world.run("review", "settle", "--review", rid, "--finding", fid, "--disposition", disposition, "--runcard", cid, *extra)
+
+def rule(world, rid, ruling, cid, by=("--owner",)):
+  return world.run("review", "rule", "--review", rid, "--ruling", ruling, *by, "--runcard", cid)
+
+def converged_spec(world, text=SPEC):
+  spec, cid, rid = opened(world, text=text)
+  rounds(world, rid, cid, [[]])
+  assert status(world, rid, cid)[0] == 0
+  return spec, cid, rid
+
+def approve(world, spec, cid, *extra):
+  return world.run("approve-spec", "--spec", str(spec), "--runcard", cid, *extra)
+
+def approval(world):
+  return json.loads(store(world.repo).path("approvals", SLUG).read_text(encoding="utf-8"))
+
+@pytest.mark.parametrize("kind,reviewers,astra,expect", [
+  ("spec", "design,zoom-out", "off", f"spec-{SLUG}-c1"),
+  ("integrate", "zoom-out,design", "off", f"spec-{SLUG}-integrate-c1"),
+  ("plan", "readiness,proportion,set", "off", "abc123-plan-U07-c1"),
+  ("head", "change-review,codebase-details", "off", "abc123-head-U07-c1"),
+  ("spec", "design", "on", f"spec-{SLUG}-c1"),
+  ("head", "change-review", "on", "abc123-head-U07-c1"),
+  ("spec", "zoom-out,design", "off", "review open: first reviewer must be design"),
+  ("plan", "set,readiness", "off", "review open: first reviewer must be readiness"),
+  ("head", "codebase-details", "off", "review open: first reviewer must be change-review"),
+  ("spec", "design,critic", "off", "review open: unknown reviewer critic"),
+  ("spec", "design,zoom-out,comprehension,readiness,structural,style,codebase-details", "off", "review open: 1 to 6 reviewers"),
+  ("plan", "readiness", "off", "review open: no handoff_id in state.json"),
+])
+def test_review_open_ids_panel_and_lane(world, kind, reviewers, astra, expect):
+  spec = spec_file(world)
+  seed_handoff(world, spec, hid=None if "handoff_id" in expect else HID)
+  cid = card(world, spec, SKILL_OF[kind])
+  artifact = str(spec) if kind in ("spec", "integrate") else "U07"
+  code, out = world.run("review", "open", "--kind", kind, "--artifact", artifact, "--reviewers", reviewers,
+                        "--astra", astra, "--runcard", cid)
+  if expect.startswith("review open:"):
+    assert code == 1 and expect in out, out
+    return
+  assert code == 0 and out.strip() == expect, out
+  review = rjson(world, expect)
+  lane = astra == "on" and kind != "head"
+  assert (review["kind"], review["cycle"], review["runcard"], review["artifact"]) == (kind, 1, cid, artifact)
+  assert review["reviewers"] == reviewers.split(",") + (["astra"] if lane else [])
+  assert review["converged"] == "no" and review["converged_round"] is None and review["rulings"] == []
