@@ -280,3 +280,37 @@ def test_diff_refuses_an_unrecorded_judge(world):
   assert record(world, pid, card, 1, "fable", {"Q1": "a", "Q2": "a"})[0] == 0
   code, out = world.run("judges", "diff", "--panel", pid, "--round", 1, "--runcard", card)
   assert code == 1 and "judges: round 1: opus not recorded" in out, out
+
+
+@pytest.mark.parametrize("case, votes, min_vendors, code, converged, degraded", [
+    ("all agree", {"fable": "a", "opus": "a", "astra": "a"}, 1, 0, True, False),
+    ("one differs", {"fable": "a", "opus": "a", "astra": "b"}, 1, 2, False, False),
+    ("degraded one vendor", {"fable": "a", "opus": "a", "astra": None}, 1, 0, True, True),
+    ("one vendor below min_vendors", {"fable": "a", "opus": "a", "astra": None}, 2, 2, False, True),
+])
+def test_verdict_convergence(world, case, votes, min_vendors, code, converged, degraded):
+  config_path = world.repo / ".superegm/config.json"
+  config = json.loads(config_path.read_text(encoding="utf-8"))
+  config.setdefault("judges", {})["min_vendors"] = min_vendors
+  config_path.write_text(json.dumps(config), encoding="utf-8")
+  pid, card, _ = open_panel(world, text=ONE)
+  for judge, option in votes.items():
+    assert record(world, pid, card, 1, judge, {"Q1": option} if option else None,
+                  not_run=None if option else "no claudex-loop runner")[0] == 0
+  got, out = world.run("judges", "verdict", "--panel", pid, "--runcard", card)
+  assert got == code, out
+  verdict = json.loads(out)
+  assert verdict == json.loads((world.artifacts / "judges" / pid / "verdict.json").read_text(encoding="utf-8"))
+  q1 = verdict["questions"]["Q1"]
+  assert (verdict["converged"], q1["converged"], verdict["degraded"]) == (converged, converged, degraded)
+  assert verdict["min_vendors"] == min_vendors and verdict["cap_reached"] is False
+  if converged:
+    assert (q1["option"], q1["round"]) == ("a", 1)
+  if case == "one differs":
+    assert q1["positions"] == {"a": ["fable", "opus"], "b": ["astra"]}
+  if case == "one vendor below min_vendors":
+    assert q1["reason"] == "vendors 1 < min_vendors 2"
+  if votes["astra"] is None:
+    assert verdict["rounds"]["1"]["astra"]["not_run"] == "no claudex-loop runner"
+  assert verdict["judges"]["astra"]["vendor"] == "openai" and verdict["rounds"]["1"]["fable"]["isolation"] == "clean"
+  assert (f"judges {pid}: Q1 converged (a) round 1" in journal(world)) is converged
