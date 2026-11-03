@@ -345,3 +345,18 @@ def test_cap_of_five_rounds(world):
   code, out = record(world, pid, card, 6, "fable", {"Q1": "a"})
   assert code == 1 and "judges: cap of 5 rounds reached" in out, out
   assert f"judges {pid}: verdict not converged: Q1 (cap reached)" in journal(world)
+
+
+def test_judge_adapter_and_persona():
+  adapter = (ROOT / ".claude-plugin/agents/judge.md").read_text(encoding="utf-8")
+  config = yaml.safe_load(adapter.split("---", 2)[1])
+  assert config["name"] == "judge" and set(config["tools"]) == {"Read", "Grep", "Glob"}
+  assert config["model"] == "inherit" and config["omitClaudeMd"] is True and "memory" not in config
+  assert "${CLAUDE_PLUGIN_ROOT}/agents/judge.md" in adapter
+  persona = (ROOT / "agents/judge.md").read_text(encoding="utf-8")
+  canonical = yaml.safe_load(persona.split("---", 2)[1])
+  assert canonical["name"] == "judge" and "tools" not in canonical and "omitClaudeMd" not in canonical
+  for phrase in ("Q<n>: (<id>)", "reason:", "would change my mind:", "only the question file and the evidence",
+                 "no findings", "option id", "saw:", "never spawn"):
+    assert phrase in persona, phrase
+  assert "Severity" not in persona and "Mode:" not in persona
