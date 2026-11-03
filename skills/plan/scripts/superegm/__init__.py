@@ -59,7 +59,6 @@ LABEL_COLOR = "1b6ef3"
 BRANCH_PREFIX = "superegm"
 WAITING_STATES = {"queued", "in_progress", "waiting", "requested", "pending"}
 GREEN_CONCLUSIONS = {"success", "neutral", "skipped"}
-NO_CI_SECONDS = 30 * 60
 WAIT_INTERVAL = 90
 EFFORTS = ("low", "medium", "high", "xhigh")
 MODEL_RE = re.compile(r"^[a-z0-9][a-z0-9.\-]{1,63}$")

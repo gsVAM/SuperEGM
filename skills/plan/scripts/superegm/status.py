@@ -21,7 +21,7 @@ EMPTY = {"pr": None, "head": None, "ci": None, "exit": None, "builder_status": N
 
 def register(subparsers):
   p = core.add_parser(subparsers, "status", "landed and ready sets, PRs, CI; refuses without a complete receipt")
-  p.add_argument("--wait", type=int, help="seconds; exit when a unit changes or the deadline passes")
+  p.add_argument("--wait", type=int, help="seconds; print every unreported event line, or deadline")
   p.add_argument("--watch", action="append", help="U03=412 records that PR for the unit")
   p.add_argument("--confirm-landed", action="append", help="unit the user confirmed landed")
   p.set_defaults(run=run, writes=WRITES)
@@ -46,7 +46,6 @@ def run(args):
     if uid not in handoff.plan.units or not number.isdigit():
       raise core.HandoffError(f"--watch takes U<nn>=<pr number>, got {item}")
     pr = core.read_pr(handoff.config["repo"], int(number))
-    pr["head_seen_at"] = core.NOW()
     record = state["units"].setdefault(uid, {})
     # The selection is the user's and is merged on its own terms; `pr` below is
     # only the first observation of it.
@@ -184,22 +183,13 @@ def unit_view(handoff, uid):
       view["status"] = "ambiguous: PRs " + ", ".join(f"#{m['number']}" for m in matches) + " (choose with --watch)"
     view["candidates"] = [c["number"] for c in candidates]
   if pr:
-    if record.get("pr", {}).get("head") != pr["head"]:
-      pr["head_seen_at"] = core.NOW()
-    else:
-      pr["head_seen_at"] = record["pr"].get("head_seen_at", core.NOW())
     record["pr"] = pr
     view["pr"], view["head"] = pr["number"], pr["head"]
     view["pr_state"] = "MERGED" if pr.get("merged_at") else (pr.get("state") or "OPEN").upper()
     if pr["merged_at"]:
       view["status"] = "merged"
     else:
-      ci = core.read_ci(repo, pr["head"])
-      verdict = core.ci_verdict(ci)
-      if verdict == "waiting-for-ci" and not ci["check_runs"] and not ci["statuses"] \
-          and core.NOW() - pr["head_seen_at"] >= core.NO_CI_SECONDS:
-        verdict = "no-ci"
-      view["status"] = verdict
+      view["status"] = core.ci_verdict(core.read_ci(repo, pr["head"]))
     view["ci"] = ci_word(view["status"])
   closed_done = issue.get("state") == "closed" and issue.get("state_reason") == "completed"
   if pr and not pr.get("merged_at") and (pr.get("state") or "").upper() == "CLOSED":
