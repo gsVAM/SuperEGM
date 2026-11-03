@@ -1727,3 +1727,17 @@ def test_foreman_file_schema_and_round_entries(world):
   assert superegm.round_entry(data, 2) is data["rounds"][0]
   assert superegm.round_entry(data, 3)["round"] == 3 and [r["round"] for r in data["rounds"]] == [2, 3]
   assert not list(world.artifacts.glob("foreman_*_state.json"))
+
+
+def test_state_plan_is_the_outside_path_and_graph_copies_the_plan(world):
+  assert world.run("graph", "--plan", world.plan)[0] == 0
+  state = state_of(world)
+  assert state["plan"] == str(world.plan) and not str(world.plan).startswith(str(world.artifacts))
+  assert (world.artifacts / "handoff_plan.md").read_text(encoding="utf-8") == world.plan.read_text(encoding="utf-8")
+  code, out = world.run("scan")
+  assert code == 0 and "scan: clean" in out, out
+  with pytest.raises(SystemExit):
+    world.run("scan", "--state", str(world.artifacts / "state.json"))
+  (world.artifacts / "state.json").unlink()
+  code, out = world.run("scan")
+  assert code == 1 and "run `graph --plan <file>` first" in out
