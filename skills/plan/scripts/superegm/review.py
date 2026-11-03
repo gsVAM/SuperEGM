@@ -98,6 +98,11 @@ def parse_findings(text: str, reviewer: str, rnd: int) -> list[dict]:
   return findings
 
 
+def keep_for_unit(findings: list[dict], unit: str) -> list[dict]:
+  """The set reviewer's findings that name this unit, or no unit at all."""
+  return [f for f in findings if unit in f["location"] or not re.search(r"U\d\d", f["location"])]
+
+
 def derive_what_ran(review: dict, rnd: dict, entry: dict | None) -> str:
   """`completed` when every panel reviewer has a record for the round (an empty findings file counts;
   the Astra lane's `--not-run` counts, and the lane is excused after two incomplete runs) and, on a
@@ -237,6 +242,11 @@ def record_round(args) -> int:
     raise core.HandoffError(f"review {rid}: not opened")
   card = bind(args, review)
   kind, existing = review["kind"], load_round(st, rid, n)
+  if reviewer == "foreman":  # the helper's own findings (section 11), outside the panel
+    if kind != "head":
+      raise core.HandoffError("review record: foreman is accepted on a head only")
+  elif reviewer not in review["reviewers"]:
+    raise core.HandoffError(f"review record: {reviewer} is not on the panel")
   if kind in ("spec", "integrate"):
     sha = core.sha256_file(Path(review["artifact"]))
   else:
@@ -250,6 +260,8 @@ def record_round(args) -> int:
       findings = parse_findings(core.read_text(path), reviewer, n)
     except ValueError as error:
       raise core.HandoffError(f"review record: {path}:{error}")
+    if reviewer == "set":
+      findings = keep_for_unit(findings, review["artifact"])
     record = {"findings": findings, "not_run": None, "isolation": args.isolation, "model": args.model,
               "effort": args.effort}
   rnd = existing or {"round": n, "runcard": card.get("parent") or args.runcard, "artifact_sha256": sha,
