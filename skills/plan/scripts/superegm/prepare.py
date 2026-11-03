@@ -58,6 +58,7 @@ def prepare(args, card):
     print(f"cleaned {tree}")
     return 0
   pr = core.gh_json(["pr", "view", str(number), "-R", repo, "--json", "number,headRefOid,baseRefName,body"])
+  require_base(pr, base)
   url = core.run_git(["remote", "get-url", remote], root)
   if (core.parse_remote_url(url) or "").lower() != repo.lower():
     raise core.HandoffError(f"remote {remote} no longer names {repo} ({url.strip()}): refusing to fetch")
@@ -91,6 +92,12 @@ def prepare(args, card):
   core.journal(st, f"{unit} round {n} prepared head {head[:7]} under {args.runcard}")
   print(f"prepared: head {head[:7]} merge-base {merge_base[:7]} {ci['verdict']} previous {previous or '-'}")
   return 0
+
+
+def require_base(pr: dict, base: str) -> None:
+  """A PR not targeting `<base>` is refused before any fetch (spec section 11)."""
+  if pr.get("baseRefName") != base:
+    raise review.Refusal(f"base: PR #{pr['number']} targets {pr.get('baseRefName')}, not {base}")
 
 
 def write_comments(path: Path, issue: tuple, pr: tuple, login: str) -> None:
