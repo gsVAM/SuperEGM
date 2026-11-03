@@ -172,3 +172,27 @@ def test_manifest_hook_hash_matches_script() -> None:
 def test_hooks_directory_is_exactly_three_files() -> None:
   names = sorted(p.name for p in (ROOT / "hooks").iterdir())
   assert names == ["hooks.json", "run-hook.cmd", "session-start"]
+
+
+def test_using_superegm_dispatcher_text() -> None:
+  folder = ROOT / "skills/using-superegm"
+  text = skill_text("using-superegm")
+  for needle in (
+      "If you think there is even a 1% chance a skill might apply to what you are doing, "
+      "you ABSOLUTELY MUST invoke the skill.",
+      "Invoke relevant or requested skills BEFORE any response or action",
+      "superegm:brainstorming first", "superegm:systematic-debugging first",
+      PHASE_SENTENCE, "## Typed only", "## May be auto-invoked",
+      "`references/claude-code-tools.md`"):
+    assert needle in text, needle
+  for skill in TYPED:
+    assert f"/superegm:{skill}" in text, skill
+  for skill in set(SKILLS) - TYPED:
+    assert f"superegm:{skill}" in text, skill
+  for banned in ("superpowers:", "You have superpowers", "SUBAGENT-STOP", "codex-tools",
+                 "pi-tools", "antigravity", "hermes", "muse-tools", "Codex"):
+    assert banned not in text, banned
+  assert sorted(p.name for p in (folder / "references").iterdir()) == ["claude-code-tools.md"]
+  reference = (folder / "references/claude-code-tools.md").read_text(encoding="utf-8")
+  assert "subagent-driven-development" not in reference
+  assert "SessionStart hooks run for sessions, not for Agent-tool subagents" in reference
