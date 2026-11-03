@@ -1764,3 +1764,33 @@ def test_defer_and_published_are_gone(world):
 def test_removed_mechanisms_are_not_named(path, pattern):
   hits = [l for l in (ROOT / path).read_text(encoding="utf-8").splitlines() if re.search(pattern, l)]
   assert not hits, hits
+
+
+MOVED = [("test_review.py", "test_approve_checks_and_records"),
+         ("test_review.py", "test_approve_refuses_an_untracked_or_ignored_design"),
+         ("test_plan.py", "test_graph_writes_waves_critical_path_placeholders_and_id"),
+         ("test_plan.py", "test_scan_banned_terms_mentions_and_size"),
+         ("test_plan.py", "test_the_posted_body_never_changes_when_a_decision_is_answered"),
+         ("test_file.py", "test_apply_creates_in_order_and_rerun_writes_nothing"),
+         ("test_file.py", "test_subprocess_command_shape_with_fake_gh_on_path"),
+         ("test_file.py", "test_marker_recovery_finds_issues_created_before_a_crash"),
+         ("test_builders.py", "test_launch_refuses_a_unit_that_is_not_ready"),
+         ("test_builders.py", "test_record_launch_is_immutable_per_round"),
+         ("test_events.py", "test_status_wait_returns_on_change_or_deadline"),
+         ("test_events.py", "test_status_pr_matching_rules"),
+         ("test_events.py", "test_the_helper_is_single_writer_by_design"),
+         ("test_foreman.py", "test_prepare_fetches_from_the_recorded_remote_into_private_refs"),
+         ("test_foreman.py", "test_collect_records_a_round_and_guards_cleanup")]
+DELETED = ("test_every_helper_command_the_skills_document_exists", "test_the_command_reference_documents_only_real_flags",
+           "test_defer_edits_one_label_and_verifies", "test_defer_refuses_a_wave_label_the_repository_does_not_have",
+           "test_repeated_deferrals_verify_against_the_current_wave", "test_an_unpublished_decision_does_not_release_the_unit",
+           "test_the_wave_skill_records_decision_publication", "test_prepare_refuses_a_unit_file_the_plan_does_not_render")
+
+
+@pytest.mark.parametrize("target, name", MOVED)
+def test_later_units_tests_live_in_their_own_files(target, name):
+  here = Path(__file__).parent
+  assert f"def {name}(" in (here / target).read_text(encoding="utf-8")
+  assert f"def {name}(" not in (here / "test_helper.py").read_text(encoding="utf-8")
+  everywhere = "".join(p.read_text(encoding="utf-8") for p in here.glob("test_*.py"))
+  assert not [d for d in DELETED if f"def {d}(" in everywhere]
