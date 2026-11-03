@@ -411,10 +411,6 @@ def test_status_landed_ready_decisions_and_shared_edges(world):
   assert "- Decision: 25" in unit_path(world, "U03").read_text(encoding="utf-8")
   assert (world.artifacts / "decision_comment_U03_D2.md").read_text(encoding="utf-8").startswith("**Decision D2** (Page size")
   code, out = world.run("status", "--plan", world.plan)
-  assert "ready: none" in out and "NOT PUBLISHED" in out
-  assert world.run("decide", "--plan", world.plan, "--unit", "U03", "--decision", "D2",
-                   "--published", "https://github.com/x/y/issues/4#c1")[0] == 0
-  code, out = world.run("status", "--plan", world.plan)
   assert "ready: U03" in out
   assert world.run("graph", "--plan", world.plan)[0] == 0
   assert "- Decision: 25" in unit_path(world, "U03").read_text(encoding="utf-8")
@@ -872,21 +868,6 @@ def test_a_label_prefix_with_reserved_url_characters_still_recovers(tmp_path, ca
   assert w.run("verify", "--plan", w.plan)[0] == 0
 
 
-def test_an_unpublished_decision_does_not_release_the_unit(world):
-  """R2-12: an answer the builder cannot see is not an answer."""
-  applied(world)
-  assert world.run("verify", "--plan", world.plan)[0] == 0
-  code, out = world.run("decide", "--plan", world.plan, "--unit", "U03",
-                        "--decision", "D2", "--answer", "50")
-  assert code == 0 and "NOT YET PUBLISHED" in out
-  code, out = world.run("status", "--plan", world.plan)
-  assert "U03/D2" in out and "NOT PUBLISHED" in out
-  code, out = world.run("decide", "--plan", world.plan, "--unit", "U03",
-                        "--decision", "D2", "--published", "https://github.com/x/y/issues/4#c1")
-  assert code == 0
-  code, out = world.run("status", "--plan", world.plan)
-  assert "open blocking decision U03/D2" not in out
-
 
 
 
@@ -969,14 +950,6 @@ def test_verify_reports_a_link_the_handoff_no_longer_wants(world):
   assert code == 1 and "obsolete blocked-by link" in out, out
 
 
-def test_the_wave_skill_records_decision_publication(world):
-  """R3-05: the helper gates on `published`, so a skill that never records it
-  leaves every answered decision blocking its unit."""
-  root = Path(__file__).resolve().parents[2]
-  skill = " ".join((root / "skills/wave/SKILL.md").read_text(encoding="utf-8").split())
-  assert "--published" in skill
-  assert "stays blocked until that runs" in skill
-
 
 # --------------------------------------------- inspection round 4 regressions
 
@@ -1053,8 +1026,6 @@ def test_an_answer_does_not_survive_its_question_changing(world):
   applied(world)
   assert world.run("decide", "--plan", world.plan, "--unit", "U03",
                    "--decision", "D2", "--answer", "50")[0] == 0
-  assert world.run("decide", "--plan", world.plan, "--unit", "U03", "--decision", "D2",
-                   "--published", "https://github.com/x/y/issues/4#c1")[0] == 0
   text = world.plan.read_text(encoding="utf-8")
   world.plan.write_text(text.replace("Page size for the listing?",
                                      "Retention window for failed jobs?", 1), encoding="utf-8")
@@ -1755,3 +1726,25 @@ def test_require_frozen_units_refuses_a_filed_units_drift(world):
     source = (SCRIPTS / f"superegm/{name}.py").read_text(encoding="utf-8")
     assert "require_frozen_units" in source and "require_confirmed_plan" not in source and "require_reviewed_pair" not in source
   assert "not what the reviewed plan renders" not in (SCRIPTS / "superegm/prepare.py").read_text(encoding="utf-8")
+
+
+def test_defer_and_published_are_gone(world):
+  import superegm
+  subs = next(a for a in superegm.build_parser()._actions if isinstance(a, argparse._SubParsersAction)).choices
+  assert "defer" not in subs
+  assert "--published" not in {f for a in subs["decide"]._actions for f in a.option_strings}
+  gh = applied(world)
+  assert "open blocking decision U03/D2" in world.run("status")[1]
+  code, out = world.run("decide", "--unit", "U03", "--decision", "D2", "--answer", "25")
+  assert code == 0 and "PUBLISHED" not in out
+  code, out = world.run("status")
+  assert code == 0 and "U03/D2" not in out and "PUBLISHED" not in out
+  assert set(state_of(world)["decisions"]["U03/D2"]) == {"answer", "decided_at", "fingerprint"}
+  close_as_completed(gh, 2); close_as_completed(gh, 3)
+  make_pr(gh, 41, "a" * 40, merged="2026-11-02T10:00:00Z", closes=[(REPO, 3)])
+  gh.graphql[3] = [{**gh.prs[41], "repository": {"nameWithOwner": REPO}}]
+  assert world.run("status", "--confirm-landed", "U01")[0] == 0
+  code, out = world.run("launch", "--wave", "3", "--units", "U03")
+  assert code == 0 and "launched in wave 3: U03" in out, out
+  for name in ("apply", "verify", "launch", "status"):
+    assert "deferred" not in (SCRIPTS / f"superegm/{name}.py").read_text(encoding="utf-8")
