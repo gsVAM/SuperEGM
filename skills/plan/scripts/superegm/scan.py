@@ -12,12 +12,30 @@ from superegm import graph
 
 WRITES = frozenset()  # the store kinds this subcommand writes
 BODY_LIMIT = 49_152
+NAME_RE = re.compile(r"^[A-Za-z_][\w.]*")
 
 
 def register(subparsers):
   p = core.add_parser(subparsers, "scan", "the section 9.1 body rules, one named rule per line", runcard=False)
   p.add_argument("--comment", help="scan this comment file instead of the bodies")
   p.set_defaults(run=run, writes=WRITES)
+
+
+def names_of(item: str) -> list:
+  """What an interface item is matched on: a store line's key paths, a
+  subcommand's words, else the leading identifier."""
+  if " key " in item:
+    keys = item.split(" key ", 1)[1].split(" (", 1)[0]
+    return [k.strip() for k in keys.split(", ")]
+  if item.startswith("superegm "):
+    words = ["superegm"]
+    for word in item.split()[1:]:
+      if word[0] in "-<[→;":
+        break
+      words.append(word)
+    return [" ".join(words)]
+  match = NAME_RE.match(item)
+  return [match.group(0)] if match else []
 
 
 def scan_text(text: str, config: dict, kind: str, dod=None, label="body") -> list:
