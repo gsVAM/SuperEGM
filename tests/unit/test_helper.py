@@ -210,7 +210,7 @@ def test_dry_run_refuses_without_gate_or_after_plan_or_template_change(world):
   world.plan.write_text(text, encoding="utf-8")
   assert world.run("dry-run", "--plan", world.plan)[0] == 0
   template = world.repo / ".superegm/template.md"
-  template.write_text("<!-- egm:handoff={{handoff_id}} unit={{unit_id}} -->\n{{objective}}\n{{scope}}\n{{dod}}\n"
+  template.write_text("<!-- superegm:handoff={{handoff_id}} unit={{unit_id}} spec={{spec_sha256}} -->\n{{objective}}\n{{scope}}\n{{dod}}\n"
                       "{{blocked_by}} #{{tracking}} `{{branch}}`\n", encoding="utf-8")
   set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"], issue_template=".superegm/template.md")
   code, out = world.run("dry-run", "--plan", world.plan)
@@ -1552,3 +1552,55 @@ def test_init_writes_the_config_with_every_key_and_refuses_another_base(tmp_path
   assert code == 1 and "default branch" in out
   code, out = harness.run("init", "--artifacts-dir", str(repo / "inside"))
   assert code == 1 and "outside the working tree" in out
+
+
+F = chr(96) * 3
+BODY = f"""<!-- superegm:handoff=sample-abc123 unit=U07 spec=deadbeef -->
+# U07 — File
+Spec: `docs/specs/x.md` @ a263acc · `docs/specs/x.md:732-756 (## 10. File (phase 4))`
+
+## Objective
+One sentence.
+## Interfaces
+- Consumes: store(repo_root) (U03)
+- Consumes: superegm runcard open (U03)
+- Produces: superegm apply --yes → one line; exit 0/1
+## Definition of done
+1. The test for each Step was committed before its implementation (checked by superegm tdd-order)
+2. Run `pytest tests/unit/test_file.py -q` — the filing tests pass
+3. Exists `skills/plan/scripts/superegm/apply.py`
+4. CI green on the head
+## Global constraints
+- Python 3.11, standard library only
+## Review focus (this unit)
+- U07: a crash mid-apply — recovery reuses the issue; pinned by `test_marker_recovery`
+## Steps
+1. Write the failing test `test_marker_recovery` in `tests/unit/test_file.py`:
+   {F}python
+   def test_marker_recovery(world): ...
+   {F}
+   Run `pytest tests/unit/test_file.py::test_marker_recovery -q`; expected: FAIL (`AttributeError`).
+   Implement `recover(handoff) -> dict` in `skills/plan/scripts/superegm/apply.py`.
+   Run the same command; expected: PASS. Commit `test(S1): recovery` then `feat(S1): recovery`.
+## Decide before build
+- none
+## Scope, order and risk
+Scope: … · Size: M
+"""
+
+
+def test_body_parsers_markers_and_heading():
+  from superegm import body
+  assert body.run_commands(BODY) == ["pytest tests/unit/test_file.py -q", "pytest tests/unit/test_file.py::test_marker_recovery -q"]
+  assert body.step_paths(BODY) == [(1, "tests/unit/test_file.py", "skills/plan/scripts/superegm/apply.py")]
+  assert body.dod_items(BODY) == [(2, "run", "pytest tests/unit/test_file.py -q"),
+                                  (3, "exists", "skills/plan/scripts/superegm/apply.py"), (4, "ci", "CI green on the head")]
+  assert body.consumes(BODY) == [("store", "U03"), ("superegm runcard open", "U03")]
+  assert body.MARKER_RE.match(BODY).groups() == ("sample-abc123", "U07", "deadbeef")
+  assert body.MARKER_RE.match("<!-- egm:handoff=x unit=U01 -->") is None
+  assert body.fill_numbers("see #<U04> and #<tracking>", {"U04": 12}, 7) == "see #12 and #7"
+  assert body.normalise("a \r\nb  \n\n") == "a\nb"
+  assert body.DECISION_HEADING.format(id="D1") == "**Decision D1:**"
+  import superegm
+  assert superegm.DEFAULT_TEMPLATE.splitlines()[0] == "<!-- superegm:handoff={{handoff_id}} unit={{unit_id}} spec={{spec_sha256}} -->"
+  assert superegm.TRACKING_TEMPLATE.splitlines()[0] == "<!-- superegm:handoff={{handoff_id}} unit=tracking spec={{spec_sha256}} -->"
