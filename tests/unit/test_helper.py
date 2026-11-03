@@ -4,408 +4,22 @@
 
 """Offline tests for the handoff helper with an in-process fake `gh`."""
 
+import argparse
+import hashlib
 import importlib
 import json
 import os
-from pathlib import Path
 import re
-import runpy
-import time
 import subprocess
-import urllib.parse
 import sys
 import textwrap
-import traceback
+import time
+from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[2]
-HELPER = ROOT / "skills/plan/scripts/superegm.py"
-REPO = "example-org/webhooks"
-
-DESIGN = """# Webhook delivery
-
-*   **Status:** Approved
-
-## Open Questions
-
-*   Retry ceiling: 5 or 10 attempts?
-
-## Detailed Implementation Plan
-
-### Target Files to Create/Modify
-
-#### 1. `src/webhooks/queue.ts` (Create)
-
-*   **Proposed Changes**: `enqueue(event)` and `dequeue()`.
-
-#### 2. `src/webhooks/deliver.ts` (Create)
-
-*   **Proposed Changes**: `deliver(job)`; `queue.ts` gains `requeue(job, delay)`.
-
-#### 3. `src/webhooks/admin.ts` (Create)
-
-*   **Proposed Changes**: `GET /admin/webhooks` lists jobs.
-
-### Verification Plan
-
-*   `npm test -- src/webhooks/queue.test.ts`
-*   `npm test -- src/webhooks/deliver.test.ts`
-*   `npm test -- src/webhooks/admin.test.ts`
-"""
-
-UNITS = """### U01: Webhook queue
-| Field | Value |
-| --- | --- |
-| Objective | An in-memory queue with enqueue and dequeue exists. |
-| Scope paths | `src/webhooks/queue.ts` (create), `src/webhooks/queue.test.ts` (create) |
-| Design range | `docs/designs/sample.md:13-15 (#### 1. src/webhooks/queue.ts)` |
-| Blocked by | none |
-| Shared files | `src/webhooks/queue.ts`: before U02 |
-| Risk | low: new module |
-| Size | S |
-
-Definition of done
-1. `npm test -- src/webhooks/queue.test.ts` passes with enqueue and dequeue order cases.
-2. CI (typecheck, lint, tests) is green on the PR head.
-
-Decide before build
-- none
-
-### U02: Delivery worker
-| Field | Value |
-| --- | --- |
-| Objective | A delivery worker posts payloads and retries failed jobs. |
-| Scope paths | `src/webhooks/deliver.ts` (create), `src/webhooks/deliver.test.ts` (create), `src/webhooks/queue.ts` (modify) |
-| Design range | `docs/designs/sample.md:17-19 (#### 2. src/webhooks/deliver.ts)` |
-| Blocked by | U01 |
-| Shared files | `src/webhooks/queue.ts`: after U01, before U03; `src/webhooks/types.ts`: before U03 |
-| Risk | medium: touches the request path |
-| Size | S |
-
-Definition of done
-1. `npm test -- src/webhooks/deliver.test.ts` passes with cases A, B, C.
-2. CI (typecheck, lint, tests) is green on the PR head.
-
-Decide before build
-- D1 Retry ceiling (5 or 10 attempts)? owner: the design author; default: 5; blocking: no
-
-### U03: Admin endpoint
-| Field | Value |
-| --- | --- |
-| Objective | An admin endpoint lists queued and failed jobs. |
-| Scope paths | `src/webhooks/admin.ts` (create), `src/webhooks/admin.test.ts` (create), `src/webhooks/queue.ts` (modify) |
-| Design range | `docs/designs/sample.md:21-23 (#### 3. src/webhooks/admin.ts)` |
-| Blocked by | U02 |
-| Shared files | `src/webhooks/queue.ts`: after U02; `src/webhooks/types.ts`: after U02 |
-| Risk | low: read-only endpoint |
-| Size | S |
-
-Definition of done
-1. `npm test -- src/webhooks/admin.test.ts` passes with the listing case.
-2. CI (typecheck, lint, tests) is green on the PR head.
-
-Decide before build
-- D2 Page size for the listing? owner: the user; default: 50; blocking: yes
-"""
-
-
-def git(args, cwd):
-  return subprocess.run(["git", *args], cwd=str(cwd), check=True, capture_output=True,
-                        text=True).stdout
-
-
-def make_repo(path: Path, origin_url=f"https://github.com/{REPO}.git", config=None) -> Path:
-  path.mkdir(parents=True, exist_ok=True)
-  git(["init", "-q", "-b", "main"], path)
-  git(["config", "user.email", "egm@example.invalid"], path)
-  git(["config", "user.name", "EGM"], path)
-  (path / "docs/designs").mkdir(parents=True)
-  (path / "docs/designs/sample.md").write_text(DESIGN, encoding="utf-8")
-  if config is not None:
-    (path / ".egm").mkdir()
-    (path / ".egm/handoff.json").write_text(json.dumps(config), encoding="utf-8")
-  git(["add", "-A"], path)
-  git(["commit", "-qm", "Sample design"], path)
-  git(["remote", "add", "origin", origin_url], path)
-  return path
-
-
-def make_plan(artifacts: Path, repo: Path, units=UNITS) -> Path:
-  artifacts.mkdir(parents=True, exist_ok=True)
-  plan = artifacts / "handoff_plan.md"
-  plan.write_text(f"# Handoff plan: Webhook delivery\n\nDesign: `{repo / 'docs/designs/sample.md'}`\n\n"
-                  f"## Units\n\n{units}", encoding="utf-8")
-  return plan
-
-
-class FakeGitHub:
-  """An in-process `gh` that keeps a small GitHub in memory and records calls."""
-
-  def __init__(self, repo=REPO):
-    self.repo = repo
-    self.labels = {"bug": {"name": "bug", "color": "d73a4a"}}
-    self.issues = {}
-    self.next_number, self.next_id = 1, 1000
-    self.sub_issues, self.blocked_by = {}, {}
-    self.prs, self.graphql = {}, {}
-    self.check_runs, self.combined = {}, {}
-    self.calls = []
-    self.push = True
-    self.rate_limit_hits = 0
-    self.link_422_once = set()
-    self.read_only = False
-
-  def __call__(self, args, cwd, stdin=None):
-    args = list(args)
-    self.calls.append(args)
-    if args[0] in ("api", "auth") and "-R" in args:
-      return 1, "", "unknown shorthand flag: 'R' in -R"
-    if any("{owner}" in a or "{repo}" in a for a in args):
-      return 1, "", "placeholder would resolve from cwd"
-    try:
-      return getattr(self, "do_" + args[0])(args)
-    except KeyError as error:
-      return 1, "", f"gh: Not Found (HTTP 404): {error!r}\n{traceback.format_exc()}"
-
-  def ok(self, data=None, text=None):
-    return 0, text if text is not None else (json.dumps(data) if data is not None else ""), ""
-
-  def do_auth(self, args):
-    assert args[1:] == ["status", "--hostname", "github.com"], args
-    return self.ok(text="Logged in to github.com\n")
-
-  def do_label(self, args):
-    assert args[1] == "create" and "-R" in args and "--force" not in args, args
-    self.assert_write()
-    name = args[2]
-    if name in self.labels:
-      return 1, "", "label already exists (HTTP 422)"
-    self.labels[name] = {"name": name, "color": args[args.index("--color") + 1]}
-    return self.ok(text=f"https://github.com/{self.repo}/labels/{name}\n")
-
-  def assert_write(self):
-    if self.read_only:
-      raise AssertionError("write in a read-only run")
-
-  def do_issue(self, args):
-    assert "-R" in args and args[args.index("-R") + 1] == self.repo, args
-    if args[1] == "create":
-      self.assert_write()
-      if self.rate_limit_hits:
-        self.rate_limit_hits -= 1
-        return 1, "", "gh: You have exceeded a secondary rate limit (HTTP 403)"
-      body = Path(args[args.index("--body-file") + 1]).read_text(encoding="utf-8")
-      labels = [args[i + 1] for i, a in enumerate(args) if a == "--label" and args[i + 1] in self.labels]
-      number = self.next_number
-      self.next_number += 1
-      self.issues[number] = {"number": number, "id": self.next_id, "title": args[args.index("--title") + 1],
-                             "body": body, "labels": labels, "state": "open", "state_reason": None}
-      self.next_id += 1
-      return self.ok(text=f"https://github.com/{self.repo}/issues/{number}\n")
-    if args[1] == "view":
-      issue = self.issues[int(args[2])]
-      return self.ok({"body": issue["body"], "labels": [{"name": l} for l in issue["labels"]]})
-    if args[1] == "edit":
-      self.assert_write()
-      issue = self.issues[int(args[2])]
-      added = args[args.index("--add-label") + 1]
-      if added not in self.labels:
-        # The real gh refuses a label the repository does not have; a fake that
-        # appends it hides exactly the bug this guards.
-        return 1, "", f"could not add label: '{added}' not found (HTTP 422)"
-      issue["labels"] = [l for l in issue["labels"] if l != args[args.index("--remove-label") + 1]]
-      issue["labels"].append(added)
-      return self.ok(text="")
-    raise AssertionError(args)
-
-  def do_pr(self, args):
-    assert "-R" in args, args
-    if args[1] == "view":
-      return self.ok(self.prs[int(args[2])])
-    if args[1] == "list":
-      assert "--limit" in args and args[args.index("--limit") + 1] == "1000", args
-      return self.ok(list(self.prs.values()))
-    raise AssertionError(args)
-
-  @staticmethod
-  def endpoint_of(args):
-    skip = False
-    for arg in args[1:]:
-      if skip:
-        skip = False
-      elif arg in ("-X", "-F", "-f", "-q"):
-        skip = True
-      elif not arg.startswith("-"):
-        return arg
-    raise AssertionError(args)
-
-  def do_api(self, args):
-    endpoint = self.endpoint_of(args)
-    paginate = "--paginate" in args
-    if endpoint == "graphql":
-      query = next(a for a in args if a.startswith("query="))
-      assert "includeClosedPrs: true" in query and "$endCursor" in query, query
-      # R9-03: String! variables must travel with -f; -F would coerce `2048`
-      # or `true` to a non-string and GraphQL would reject them.
-      for key in ("owner=", "name="):
-        i = next(i for i, a in enumerate(args) if a.startswith(key))
-        assert args[i - 1] == "-f", (key, args)
-      i = next(i for i, a in enumerate(args) if a.startswith("number="))
-      assert args[i - 1] == "-F", args
-      assert paginate and "--slurp" in args
-      number = int(args[args.index("number=" + args[args.index("-F", args.index("-F") + 1) + 1][7:]) + 1][7:]) \
-          if False else int([a for a in args if a.startswith("number=")][0][7:])
-      nodes = self.graphql.get(number, [])
-      return self.ok([{"data": {"repository": {"issue": {"closedByPullRequestsReferences": {
-          "nodes": nodes, "pageInfo": {"hasNextPage": False, "endCursor": None}}}}}}])
-    if "-X" in args and args[args.index("-X") + 1] == "POST":
-      self.assert_write()
-      assert "-i" in args, args
-      fields = dict(a.split("=", 1) for a in args[args.index("-F") + 1::2] if "=" in a)
-      fields = {k: v for k, v in fields.items() if not k.startswith("-")}
-      match = re.fullmatch(r"repos/([^/]+/[^/]+)/issues/(\d+)/sub_issues", endpoint)
-      if match:
-        assert fields["sub_issue_id"].isdigit(), fields
-        if ("sub", int(match.group(2))) in self.link_422_once:
-          self.link_422_once.discard(("sub", int(match.group(2))))
-          self.sub_issues.setdefault(int(match.group(2)), []).append(int(fields["sub_issue_id"]))
-          return 1, "HTTP/2.0 422 Unprocessable Entity\n\n{}", "gh: Validation Failed (HTTP 422)"
-        self.sub_issues.setdefault(int(match.group(2)), []).append(int(fields["sub_issue_id"]))
-        return self.ok(text="HTTP/2.0 201 Created\ncontent-type: application/json\n\n{}")
-      match = re.fullmatch(r"repos/([^/]+/[^/]+)/issues/(\d+)/dependencies/blocked_by", endpoint)
-      if match:
-        assert fields["issue_id"].isdigit(), fields
-        self.blocked_by.setdefault(int(match.group(2)), []).append(int(fields["issue_id"]))
-        return self.ok(text="HTTP/2.0 201 Created\n\n{}")
-      raise AssertionError(args)
-    path, _, query = endpoint.partition("?")
-    assert path.startswith(f"repos/{self.repo}") or path.startswith("repos/"), endpoint
-    rest = path[len(f"repos/{self.repo}"):]
-    if rest == "":
-      assert args[2:4] == ["-q", ".permissions"], args
-      return self.ok({"push": self.push, "pull": True})
-    if rest == "/labels":
-      assert paginate and "--slurp" in args, args
-      return self.ok([list(self.labels.values())])
-    if rest == "/issues":
-      assert paginate, args
-      label = urllib.parse.parse_qs(query).get("labels", [None])[0]
-      items = [i for i in self.issues.values() if label in i["labels"]]
-      return self.ok([items])
-    match = re.fullmatch(r"/issues/(\d+)", rest)
-    if match:
-      issue = self.issues[int(match.group(1))]
-      return self.ok({**issue, "labels": [{"name": l} for l in issue["labels"]]})
-    match = re.fullmatch(r"/issues/(\d+)/sub_issues", rest)
-    if match:
-      assert paginate, args
-      ids = self.sub_issues.get(int(match.group(1)), [])
-      return self.ok([[{"id": i, "number": self.number_of(i)} for i in ids]])
-    match = re.fullmatch(r"/issues/(\d+)/dependencies/blocked_by", rest)
-    if match:
-      assert paginate, args
-      ids = self.blocked_by.get(int(match.group(1)), [])
-      return self.ok([[{"id": i, "number": self.number_of(i)} for i in ids]])
-    match = re.fullmatch(r"/commits/([0-9a-f]+)/check-runs", rest)
-    if match:
-      assert paginate, args
-      runs = self.check_runs.get(match.group(1), [])
-      return self.ok([{"total_count": len(runs), "check_runs": runs}])
-    match = re.fullmatch(r"/commits/([0-9a-f]+)/status", rest)
-    if match:
-      data = self.combined.get(match.group(1), {"state": "pending", "statuses": []})
-      pages = data.get("pages") or [{"state": data["state"], "statuses": data.get("statuses", [])}]
-      if paginate:
-        # `--paginate --slurp` yields an array of pages. A fake that returned a
-        # dict here made read_ci iterate dict keys, collect nothing and fall
-        # back silently - so the pagination path was never exercised (R7-05).
-        assert "--slurp" in args, args
-        return self.ok(pages)
-      # The non-paginated endpoint returns the FIRST page only, like GitHub.
-      # Returning [] here let the pagination test pass for the wrong reason
-      # (empty CI -> waiting-for-ci), R8-05.
-      return self.ok({"state": data["state"], "statuses": pages[0]["statuses"]})
-    raise AssertionError(args)
-
-  def number_of(self, issue_id):
-    return next(i["number"] for i in self.issues.values() if i["id"] == issue_id)
-
-
-class Harness:
-  """One helper namespace with the fake injected; `run` returns (code, stdout)."""
-
-  def __init__(self, capsys, now=1_700_000_000.0):
-    # The subcommand modules reach every shared name as `core.<name>`, so an
-    # injection into the package's namespace reaches all of them.
-    if str(HELPER.parent) not in sys.path:
-      sys.path.insert(0, str(HELPER.parent))
-    import superegm
-    # One package for the whole process: reload it so a name a test injected
-    # (`find_remote`, `save_state`) never reaches the next test.
-    importlib.reload(superegm)
-    self.ns = vars(superegm)
-    self.main = runpy.run_path(str(HELPER))["main"]
-    self.gh = FakeGitHub()
-    self.sleeps = []
-    self.clock = now
-    self.ns["GH"] = self.gh
-    self.ns["_subprocess_gh"] = self.never
-    self.ns["SLEEP"] = lambda s: (self.sleeps.append(s), self.advance(s))
-    self.ns["NOW"] = lambda: self.clock
-    self.capsys = capsys
-
-  @staticmethod
-  def never(args, cwd, stdin=None):
-    raise AssertionError(f"real gh must not run in tests: {args}")
-
-  def advance(self, seconds):
-    self.clock += seconds
-
-  def run(self, *argv):
-    code = self.main([str(a) for a in argv])
-    captured = self.capsys.readouterr()
-    return code, captured.out + captured.err
-
-
-@pytest.fixture
-def world(tmp_path, capsys):
-  repo = make_repo(tmp_path / "repo", config={"repo": REPO, "banned_terms": ["(?i)secret-codename"]})
-  plan = make_plan(tmp_path / "artifacts", repo)
-  harness = Harness(capsys)
-  harness.repo, harness.plan, harness.artifacts = repo, plan, plan.parent
-  return harness
-
-
-def result_for(world, uid, rnd):
-  """An inspect result that is attributable to this round: full identity."""
-  import hashlib
-  unit_file = world.artifacts / f"unit_{uid}.md"
-  data = json.loads((world.artifacts / f"foreman_{uid}_state.json").read_text(encoding="utf-8")) \
-      if (world.artifacts / f"foreman_{uid}_state.json").is_file() else {}
-  record = (data.get("rounds") or {}).get(str(rnd)) or {}
-  return {"status": "completed", "plan": str(unit_file),
-          "plan_sha256": hashlib.sha256(unit_file.read_bytes()).hexdigest(),
-          "base": record.get("merge_base"), "repo": record.get("worktree"),
-          "started_at": world.clock}
-
-
-def state_of(world):
-  return json.loads((world.artifacts / "handoff_state.json").read_text(encoding="utf-8"))
-
-
-def pass_gate(world):
-  assert world.run("graph", "--plan", world.plan)[0] == 0
-  assert world.run("gate", "--plan", world.plan, "--reviewed", "--round", 1)[0] == 0
-  code, out = world.run("gate", "--plan", world.plan, "--pass", "--what-ran", "astra: not run (test)")
-  assert code == 0, out
-
-
-def dry_run(world):
-  pass_gate(world)
-  code, out = world.run("dry-run", "--plan", world.plan)
-  assert code == 0, out
-  return out
+from conftest import (ROOT, SCRIPTS, HELPER, REPO, DESIGN, Harness, make_world, make_repo, make_plan, make_pr,
+                      set_config, applied, pass_gate, dry_run, result_for, state_of, close_as_completed, git)
 
 
 # ------------------------------------------------------------------ parsing
@@ -456,31 +70,26 @@ def test_graph_writes_waves_critical_path_placeholders_and_id(world):
   assert world.plan.read_text(encoding="utf-8") == plan
 
 
-def test_long_derived_label_is_refused(tmp_path, capsys):
-  repo = make_repo(tmp_path / "repo", config={"repo": REPO, "labels": {"handoff_prefix": "x" * 45}})
-  plan = make_plan(tmp_path / "artifacts", repo)
-  harness = Harness(capsys)
-  code, out = harness.run("graph", "--plan", plan)
+def test_long_derived_label_is_refused(tmp_path, capsys, monkeypatch):
+  w = make_world(tmp_path, capsys, monkeypatch, config={"repo": REPO, "labels": {"handoff_prefix": "x" * 45}})
+  code, out = w.run("graph", "--plan", w.plan)
   assert code == 1 and "longer than 50 characters" in out
 
 
-def test_config_defaults_and_remote_resolution(tmp_path, capsys):
-  repo = make_repo(tmp_path / "repo", origin_url="git@github.com:fork-user/webhooks.git")
-  git(["remote", "add", "upstream", f"ssh://git@github.com/{REPO}"], repo)
-  (repo / ".egm").mkdir()
-  (repo / ".egm/handoff.json").write_text(json.dumps({"repo": REPO}), encoding="utf-8")
-  plan = make_plan(tmp_path / "artifacts", repo)
-  harness = Harness(capsys)
-  assert harness.run("graph", "--plan", plan)[0] == 0
-  state = json.loads((plan.parent / "handoff_state.json").read_text(encoding="utf-8"))
+def test_config_defaults_and_remote_resolution(tmp_path, capsys, monkeypatch):
+  w = make_world(tmp_path, capsys, monkeypatch, config={"repo": REPO},
+                 origin_url="git@github.com:fork-user/webhooks.git")
+  git(["remote", "add", "upstream", f"ssh://git@github.com/{REPO}"], w.repo)
+  assert w.run("graph", "--plan", w.plan)[0] == 0
+  state = state_of(w)
   assert state["remote"] == "upstream" and state["repo"] == REPO
-  config = harness.ns["load_config"](repo)
+  config = w.ns["load_config"](w.repo)
   assert config["banned_terms"] == [] and config["fix_request_mention"] is None
-  (repo / ".egm/handoff.json").write_text(json.dumps({"repo": "other/name"}), encoding="utf-8")
-  code, out = harness.run("graph", "--plan", plan)
+  set_config(w, repo="other/name")
+  code, out = w.run("graph", "--plan", w.plan)
   assert code == 1 and "no remote for other/name" in out
-  (repo / ".egm/handoff.json").write_text(json.dumps({"repo": REPO, "bogus": 1}), encoding="utf-8")
-  code, out = harness.run("graph", "--plan", plan)
+  set_config(w, repo=REPO, bogus=1)
+  code, out = w.run("graph", "--plan", w.plan)
   assert code == 1 and "unknown keys" in out
 
 
@@ -602,18 +211,14 @@ def test_dry_run_refuses_without_gate_or_after_plan_or_template_change(world):
   template = world.repo / ".egm/template.md"
   template.write_text("<!-- egm:handoff={{handoff_id}} unit={{unit_id}} -->\n{{objective}}\n{{scope}}\n{{dod}}\n"
                       "{{blocked_by}} #{{tracking}} `{{branch}}`\n", encoding="utf-8")
-  config = json.loads((world.repo / ".egm/handoff.json").read_text(encoding="utf-8"))
-  config["issue_template"] = ".egm/template.md"
-  (world.repo / ".egm/handoff.json").write_text(json.dumps(config), encoding="utf-8")
+  set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"], issue_template=".egm/template.md")
   code, out = world.run("dry-run", "--plan", world.plan)
   assert code == 1 and "changed after the gate" in out
 
 
 def test_dry_run_refuses_101_units_missing_extra_and_warns_above_450(world):
   pass_gate(world)
-  config = json.loads((world.repo / ".egm/handoff.json").read_text(encoding="utf-8"))
-  config["labels"] = {"extra": ["needs-triage"]}
-  (world.repo / ".egm/handoff.json").write_text(json.dumps(config), encoding="utf-8")
+  set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"], labels={"extra": ["needs-triage"]})
   pass_gate(world)
   code, out = world.run("dry-run", "--plan", world.plan)
   assert code == 1 and "create the label `needs-triage`" in out
@@ -780,24 +385,7 @@ def test_verify_records_mismatches(world):
 # ------------------------------------------------------------------- status
 
 
-def applied(world):
-  dry_run(world)
-  assert world.run("apply", "--plan", world.plan, "--yes")[0] == 0
-  world.gh.calls.clear()
-  return world.gh
 
-
-def close_as_completed(gh, number):
-  gh.issues[number]["state"], gh.issues[number]["state_reason"] = "closed", "completed"
-
-
-def make_pr(gh, number, head, base_sha="b" * 40, merged=None, closes=(), branch="feature"):
-  gh.prs[number] = {"number": number, "state": "MERGED" if merged else "OPEN", "headRefName": branch,
-                    "headRefOid": head, "baseRefName": "main", "baseRefOid": base_sha, "mergedAt": merged,
-                    "isDraft": False,
-                    "closingIssuesReferences": [{"number": n, "repository": {"name": r.split("/")[1], "owner": {"login": r.split("/")[0]}}}
-                                                for r, n in closes]}
-  return gh.prs[number]
 
 
 def test_status_landed_ready_decisions_and_shared_edges(world):
@@ -904,7 +492,7 @@ def test_status_wait_returns_on_change_or_deadline(world):
 # ------------------------------------------------------------------ prepare
 
 
-def test_prepare_fetches_from_the_recorded_remote_into_private_refs(tmp_path, capsys):
+def test_prepare_fetches_from_the_recorded_remote_into_private_refs(tmp_path, capsys, monkeypatch):
   target = make_repo(tmp_path / "target", config={"repo": REPO})
   (target / "src").mkdir()
   (target / "src/a.txt").write_text("base\n", encoding="utf-8")
@@ -1025,7 +613,7 @@ sys.exit("unexpected: " + " ".join(args))
 
 
 @pytest.mark.skipif(os.name == "nt", reason="a fake gh script on PATH needs a POSIX shell-free exec")
-def test_subprocess_command_shape_with_fake_gh_on_path(tmp_path, capsys):
+def test_subprocess_command_shape_with_fake_gh_on_path(tmp_path, capsys, monkeypatch):
   repo = make_repo(tmp_path / "repo", config={"repo": REPO})
   plan = make_plan(tmp_path / "artifacts", repo)
   bin_dir = tmp_path / "bin"
@@ -1094,9 +682,7 @@ def test_operations_refuse_a_repository_the_numbers_do_not_belong_to(world):
   """R02: issue numbers are not portable; only apply checked the destination."""
   applied(world)
   assert world.run("verify", "--plan", world.plan)[0] == 0
-  config = world.repo / ".egm/handoff.json"
-  config.write_text(json.dumps({"repo": "other/elsewhere",
-                                "banned_terms": ["(?i)secret-codename"]}), encoding="utf-8")
+  set_config(world, repo="other/elsewhere", banned_terms=["(?i)secret-codename"])
   git(["remote", "set-url", "origin", "https://github.com/other/elsewhere.git"], world.repo)
   code, out = world.run("status", "--plan", world.plan)
   assert code == 1, out
@@ -1124,8 +710,7 @@ def test_apply_scans_again_with_the_current_rules(world):
   """R11: a banned_terms rule added after the dry run leaves the write list,
   and therefore its hash, untouched."""
   dry_run(world)
-  config = world.repo / ".egm/handoff.json"
-  config.write_text(json.dumps({"repo": REPO, "banned_terms": ["(?i)webhook"]}), encoding="utf-8")
+  set_config(world, repo=REPO, banned_terms=["(?i)webhook"])
   code, out = world.run("apply", "--plan", world.plan, "--yes")
   assert code == 1 and "the current scan refuses" in out
   assert not any(c[:2] == ["issue", "create"] for c in world.gh.calls)
@@ -1275,13 +860,9 @@ def test_marker_recovery_finds_issues_created_before_a_crash(world):
   assert len(gh.issues) == 4, f"no duplicate issues: {sorted(gh.issues)}"
 
 
-def test_a_label_prefix_with_reserved_url_characters_still_recovers(tmp_path, capsys):
+def test_a_label_prefix_with_reserved_url_characters_still_recovers(tmp_path, capsys, monkeypatch):
   """R13: a permitted prefix such as `egm:handoff+` must survive the query."""
-  repo = make_repo(tmp_path / "repo",
-                   config={"repo": REPO, "labels": {"handoff_prefix": "egm:handoff+"}})
-  plan = make_plan(tmp_path / "artifacts", repo)
-  w = Harness(capsys)
-  w.repo, w.plan, w.artifacts = repo, plan, plan.parent
+  w = make_world(tmp_path, capsys, monkeypatch, config={"repo": REPO, "labels": {"handoff_prefix": "egm:handoff+"}})
   dry_run(w)
   assert w.run("apply", "--plan", w.plan, "--yes")[0] == 0
   listing = [c for c in w.gh.calls if c[0] == "api" and "/issues?" in c[1]]
@@ -1343,8 +924,7 @@ def test_a_completed_label_write_binds_the_destination(world):
   state = state_of(world)
   assert not (state.get("units") or {}), "this bounded apply must not reach an issue"
   assert "done" in state["labels"].values()
-  (world.repo / ".egm/handoff.json").write_text(
-      json.dumps({"repo": "other/elsewhere"}), encoding="utf-8")
+  set_config(world, repo="other/elsewhere")
   git(["remote", "add", "other", "https://github.com/other/elsewhere.git"], world.repo)
   code, out = world.run("status", "--plan", world.plan)
   assert code == 1 and "frozen once anything exists" in out
@@ -1618,8 +1198,7 @@ def test_allowed_mentions_are_explicit_and_validated(world):
   bare = {"banned_terms": [], "fix_request_mention": None, "allowed_mentions": ["@types"]}
   assert any("@types/node" in p for p in scan("uses @types/node\n", bare, "body"))
   # the config refuses anything that is not an @name
-  (world.repo / ".egm/handoff.json").write_text(
-      json.dumps({"repo": REPO, "allowed_mentions": ["types"]}), encoding="utf-8")
+  set_config(world, repo=REPO, allowed_mentions=["types"])
   code, out = world.run("graph", "--plan", world.plan)
   assert code == 1 and "allowed_mentions must be a list of `@name` strings" in out
 
@@ -1673,16 +1252,14 @@ def test_record_launch_not_run_cannot_erase_a_recorded_launch(world, tmp_path):
                    "--round", 2, "--not-run", "lane off")[0] == 0
 
 
-def test_a_mixed_case_remote_url_resolves(tmp_path, capsys):
+def test_a_mixed_case_remote_url_resolves(tmp_path, capsys, monkeypatch):
   """R10-02: find_remote and the pre-fetch recheck compared case-sensitively,
   rejecting a valid remote before discovery could run."""
-  repo = make_repo(tmp_path / "repo", origin_url="https://github.com/Example-Org/WebHooks.git",
-                   config={"repo": REPO})
-  plan = make_plan(tmp_path / "artifacts", repo)
-  harness = Harness(capsys)
-  code, out = harness.run("graph", "--plan", plan)
+  w = make_world(tmp_path, capsys, monkeypatch, config={"repo": REPO},
+                 origin_url="https://github.com/Example-Org/WebHooks.git")
+  code, out = w.run("graph", "--plan", w.plan)
   assert code == 0 and "(remote origin)" in out, out
-  state = json.loads((plan.parent / "handoff_state.json").read_text(encoding="utf-8"))
+  state = state_of(w)
   assert state["remote"] == "origin" and state["repo"] == REPO
 
 
@@ -1740,8 +1317,7 @@ def test_binding_checks_fold_repository_case(world):
   """R11-04: after confirmation, a case-only change to the config or remote is
   the same repository, not a different frozen destination."""
   applied(world)
-  (world.repo / ".egm/handoff.json").write_text(
-      json.dumps({"repo": REPO.upper(), "banned_terms": ["(?i)secret-codename"]}), encoding="utf-8")
+  set_config(world, repo=REPO.upper(), banned_terms=["(?i)secret-codename"])
   git(["remote", "set-url", "origin", f"https://github.com/{REPO.upper()}.git"], world.repo)
   code, out = world.run("status", "--plan", world.plan)
   assert code == 0, out
@@ -1856,7 +1432,8 @@ def test_one_module_per_subcommand(name):
 
 def test_world_fixture_lives_in_conftest_and_injects_the_package(world):
   import conftest, superegm
-  assert callable(conftest.make_pr) and "def world(" not in Path(__file__).read_text(encoding="utf-8")
+  # A definition sits at column 0; the plan's bare `"def world("` would match this very line.
+  assert callable(conftest.make_pr) and "\ndef world(" not in Path(__file__).read_text(encoding="utf-8")
   assert world.ns is vars(superegm) and superegm.GH is world.gh and superegm.NOW() == world.clock
   world.gh.extend("widget", lambda args, cwd, token=None: (0, json.dumps({"args": args[1:], "token": token}), ""))
   seen = json.loads(superegm.gh(["widget", "list"], token="t0k"))

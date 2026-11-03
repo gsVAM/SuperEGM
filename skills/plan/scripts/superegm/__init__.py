@@ -197,9 +197,12 @@ def gh_env():
   return env
 
 
-def _subprocess_gh(args, cwd, stdin=None):
+def _subprocess_gh(args, cwd, token=None):
+  env = gh_env()
+  if token:
+    env["GH_TOKEN"] = token
   result = subprocess.run(["gh", *args], cwd=str(cwd), capture_output=True,
-                          text=True, encoding="utf-8", input=stdin, env=gh_env())
+                          text=True, encoding="utf-8", env=env)
   return result.returncode, result.stdout, result.stderr
 
 
@@ -209,21 +212,23 @@ NOW = time.time
 ARTIFACT_DIR = Path.cwd()
 
 
-def gh(args, stdin=None) -> str:
-  """Run `gh <args>` with cwd = the artifact directory; raise GhError on failure."""
+def gh(args, *, token=None) -> str:
+  """Run `gh <args>` with cwd = the artifact directory; raise GhError on failure.
+
+  `token`, when given, is the account the call runs as (GH_TOKEN)."""
   args = [str(a) for a in args]
-  code, out, err = GH(args, ARTIFACT_DIR, stdin)
+  code, out, err = GH(args, ARTIFACT_DIR, token=token)
   if code != 0:
     raise GhError(args, code, out, err)
   return out
 
 
-def gh_retry(args, stdin=None) -> str:
+def gh_retry(args) -> str:
   """`gh` with the same bounded rate-limit retries the issue and link writes
   get: a secondary limit on a label must not end the run at the first refusal."""
   for attempt in range(4):
     try:
-      return gh(args, stdin)
+      return gh(args)
     except GhError as error:
       if error.rate_limited and attempt < 3:
         SLEEP(error.retry_after or 60)
