@@ -6,6 +6,7 @@
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from superegm import review
 WRITES = frozenset(['foreman', 'review'])  # the store kinds this subcommand writes
 SKILLS = frozenset(['wave'])  # the skills whose card this subcommand accepts
 AGED = ("**Deviation", "**Decision D", "**Ruling:**")  # the comment kinds kept regardless of age (section 11)
+HEADER_RE = re.compile(r"^### (issue|pr) #(\d+) comment (\d+) by (\S+) at (\S+)$")  # comments.md's entry header
 
 
 def register(subparsers):
@@ -111,6 +113,8 @@ def write_comments(path: Path, issue: tuple, pr: tuple, since, login: str) -> No
     for comment in comments:
       if since and comment["created_at"] <= since and not comment["body"].startswith(AGED):
         continue
+      # a body line shaped like a header is indented: a builder's comment never forges another entry
+      body = "\n".join(" " + l if HEADER_RE.match(l) else l for l in comment["body"].splitlines())
       lines += [f"### {kind} #{number} comment {comment['id']} by {comment['user']['login']} at {comment['created_at']}",
-                comment["body"], ""]
+                body, ""]
   core.atomic_write(path, "\n".join(lines) + "\n")
