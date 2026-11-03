@@ -17,6 +17,17 @@ import pytest
 from conftest import REPO, Harness, make_repo, make_plan, make_pr, applied, result_for, foreman_path, round_of, git
 
 
+def launched(world, unit, rnd, folder):
+  """A round as EGM's `record-launch --run-folder` left it: `launched` with its run folder (U09
+  removed that form; `collect` and `prepare` still read the phase until U10 rewrites them)."""
+  import superegm
+  st = superegm.store(world.repo)
+  data = superegm.load_foreman(st, unit)
+  superegm.round_entry(data, rnd).update({"runcard": world.card("wave"), "phase": "launched", "run_folder": str(folder),
+                                          "status": "running", "run_status": "running", "at": superegm.now_iso()})
+  superegm.save_foreman(st, unit, data)
+
+
 def test_prepare_fetches_from_the_recorded_remote_into_private_refs(tmp_path, capsys, monkeypatch):
   target = make_repo(tmp_path / "target", config={"repo": REPO})
   (target / "src").mkdir()
@@ -115,8 +126,7 @@ def test_collect_records_a_round_and_guards_cleanup(world, tmp_path):
   was still `launched` for ever."""
   applied(world)
   folder = tmp_path / "run"; folder.mkdir()
-  assert world.run("record-launch", "--plan", world.plan, "--unit", "U01",
-                   "--round", 1, "--run-folder", str(folder))[0] == 0
+  launched(world, "U01", 1, folder)
   code, out = world.run("collect", "--plan", world.plan, "--unit", "U01", "--round", 1)
   assert code == 1 and "does not exist" in out
   (folder / "result.json").write_text(json.dumps({"status": "running"}), encoding="utf-8")
@@ -163,8 +173,7 @@ def test_collect_refuses_a_result_from_a_different_review(world, tmp_path):
   unit file against this round's merge base."""
   applied(world)
   folder = tmp_path / "run"; folder.mkdir()
-  assert world.run("record-launch", "--plan", world.plan, "--unit", "U01",
-                   "--round", 1, "--run-folder", str(folder))[0] == 0
+  launched(world, "U01", 1, folder)
   bad = dict(result_for(world, "U01", 1), plan="/elsewhere/unit_U09.md")
   (folder / "result.json").write_text(json.dumps(bad), encoding="utf-8")
   code, out = world.run("collect", "--plan", world.plan, "--unit", "U01", "--round", 1)
@@ -186,8 +195,7 @@ def test_a_launched_round_is_never_re_prepared(world, tmp_path):
   make_pr(gh, 70, "a" * 40, closes=[(REPO, 2)])
   assert world.run("status", "--plan", world.plan, "--watch", "U01=70")[0] == 0
   folder = tmp_path / "run"; folder.mkdir()
-  assert world.run("record-launch", "--plan", world.plan, "--unit", "U01",
-                   "--round", 1, "--run-folder", str(folder))[0] == 0
+  launched(world, "U01", 1, folder)
   code, out = world.run("prepare", "--plan", world.plan, "--unit", "U01", "--round", 1)
   assert code == 1 and "prepare round 2" in out, out
 
@@ -195,8 +203,7 @@ def test_a_launched_round_is_never_re_prepared(world, tmp_path):
 def test_collect_without_not_run_still_requires_a_completed_result(world, tmp_path):
   applied(world)
   folder = tmp_path / "run"; folder.mkdir()
-  assert world.run("record-launch", "--plan", world.plan, "--unit", "U01",
-                   "--round", 1, "--run-folder", str(folder))[0] == 0
+  launched(world, "U01", 1, folder)
   code, out = world.run("collect", "--plan", world.plan, "--unit", "U01", "--round", 1)
   assert code == 1 and "does not exist" in out, out
   (folder / "result.json").write_text(json.dumps({"status": "running"}), encoding="utf-8")
@@ -214,8 +221,7 @@ def test_an_interrupted_round_is_collected_but_its_worktree_is_never_removed(wor
   assert world.run("status", "--plan", world.plan, "--watch", "U01=70")[0] == 0
   folder = tmp_path / "run"; folder.mkdir()
   tree = tmp_path / "wt-u01"; tree.mkdir()
-  assert world.run("record-launch", "--plan", world.plan, "--unit", "U01",
-                   "--round", 1, "--run-folder", str(folder))[0] == 0
+  launched(world, "U01", 1, folder)
   path = foreman_path(world, "U01")
   data = json.loads(path.read_text(encoding="utf-8"))
   round_of(data, 1).update({"pr": 70, "worktree": str(tree)})

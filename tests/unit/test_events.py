@@ -8,7 +8,7 @@ that unit rewrites the ones whose form it changes."""
 
 import pytest
 
-from conftest import REPO, make_pr, applied, state_of, unit_path, close_as_completed
+from conftest import REPO, make_pr, applied, state_of, unit_path, close_as_completed, mark_launched
 
 
 def test_status_landed_ready_decisions_and_shared_edges(world):
@@ -38,11 +38,11 @@ def test_status_landed_ready_decisions_and_shared_edges(world):
 
 def test_status_pr_matching_rules(world):
   gh = applied(world)
-  assert world.run("launch", "--plan", world.plan, "--wave", 1, "--units", "U01")[0] == 0
+  mark_launched(world, "U01")
   # A closing reference naming another repository with the same number does not match.
   make_pr(gh, 50, "c" * 40, closes=[("other/repo", 2)], branch="superegm/U01-old")
   code, out = world.run("status", "--plan", world.plan)
-  assert "U01 #2 launched wave 1: no pr; waiting-for-pr" in out, out
+  assert "U01 #2 launched: no pr; waiting-for-pr" in out, out
   # The exact branch of this handoff is a candidate, watched only after --watch.
   make_pr(gh, 51, "d" * 40, branch=f"superegm/{state_of(world)['handoff_id']}/U01")
   code, out = world.run("status", "--plan", world.plan)
@@ -74,7 +74,7 @@ def test_status_ci_states(world):
   gh = applied(world)
   make_pr(gh, 70, "a" * 40, closes=[(REPO, 2)])
   gh.graphql[2] = [{**gh.prs[70], "repository": {"nameWithOwner": REPO}}]
-  assert world.run("launch", "--plan", world.plan, "--wave", 1, "--units", "U01")[0] == 0
+  mark_launched(world, "U01")
   code, out = world.run("status", "--plan", world.plan)
   assert "waiting-for-ci" in out
   for status in ("pending", "waiting", "requested", "mystery"):
