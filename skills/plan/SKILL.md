@@ -89,6 +89,19 @@ and `## 2. Units`.
 2.  Nothing is committed under the repository's docs: the plan file stays
     outside the tree, and the store keeps its copy.
 
+**Writing a Step** (spec section 9.1; the full rules are section 3 of
+`references/handoff_plan.md`). The fence carries the test's signature (name, fixtures, any `@pytest.mark.parametrize`)
+and its assertions with the spec's exact values, with arrange/act lines only where those do not determine them;
+a full test body appears only for an algorithm or data the assertions do not determine.
+The `Implement` line is one sentence: the signature, the file and the values the spec pins;
+it never restates what the test asserts.
+A rule family is one parametrized Step, never one Step per rule; a copy/rename table or an edit list is test data,
+one parametrized test over it (the test is the table) and an `Implement` line that says "make the table hold".
+The `Run` line and the closing line are optional: absent, the Step's command is `pytest <test path>::<test name> -q`,
+or `pytest <test path> -k <test name> -q` when the fence is parametrized, and the commits are
+`test(S<n>): <test name>` then `feat(S<n>): <test name>`; an explicit ``Run `<command>` `` line
+overrides the default and is the Step's one command.
+
 ## Step 3: graph
 
 Run `python3 '<HELPER>' graph --plan '<plan file>' --runcard '<CARD>'`. It

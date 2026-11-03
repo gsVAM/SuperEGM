@@ -3,6 +3,8 @@ name: writing-plans
 description: Use when you have a spec or requirements for a multi-step task, before touching code
 ---
 
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the SuperEGM Step form and its derived defaults. -->
+
 # Writing Plans
 
 ## Overview
@@ -136,6 +138,22 @@ git add tests/path/test.py src/path/file.py
 git commit -m "feat: add specific feature"
 ```
 ````
+
+## The SuperEGM Step
+
+In a SuperEGM plan a task is a unit section and a step is one group: a
+`Write` line naming the test and its path, a fence, and an `Implement` line.
+The fence carries the test's signature (name, fixtures, any `@pytest.mark.parametrize`)
+and its assertions with the spec's exact values, with arrange/act lines only where those do not determine them;
+a full test body appears only for an algorithm or data the assertions do not determine.
+The `Implement` line is one sentence: the signature, the file and the values the spec pins;
+it never restates what the test asserts.
+A rule family is one parametrized Step, never one Step per rule; a copy/rename table or an edit list is test data,
+one parametrized test over it (the test is the table) and an `Implement` line that says "make the table hold".
+The `Run` line and the closing line are optional: absent, the Step's command is `pytest <test path>::<test name> -q`,
+or `pytest <test path> -k <test name> -q` when the fence is parametrized, and the commits are
+`test(S<n>): <test name>` then `feat(S<n>): <test name>`; an explicit ``Run `<command>` `` line
+overrides the default and is the Step's one command.
 
 ## What a Step Contains
 
