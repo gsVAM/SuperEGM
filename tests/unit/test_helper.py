@@ -233,7 +233,7 @@ WRITES = {"approve_spec": {"approvals"}, "graph": {"state", "plan", "units", "un
           "scan": {"file"}, "gate": {"state", "file", "plan", "units", "unit", "bodies"},
           "dry_run": {"state", "file", "plan", "units", "unit", "bodies"}, "apply": {"state", "file"},
           "verify": {"state"}, "status": {"state"}, "launch": {"state", "runcards"}, "decide": {"state", "plan", "units", "unit", "bodies", "file"},
-          "record_launch": {"launches"}, "collect": {"foreman"}, "prepare": {"foreman", "review"},
+          "record_launch": {"launches"}, "collect": {"foreman", "review", "reviews"}, "prepare": {"foreman", "review"},
           "launch_builder": {"launches"}, "interrupt": {"launches", "foreman"}, "clean": set(),
           "runcard": {"runcards"}, "init": set()}
 
@@ -426,7 +426,7 @@ GATED = [(("approve-spec", "--spec", "SPEC", "--yes"), "review-spec"), (("graph"
          (("verify",), "file"), (("status",), "wave"), (("launch",), "wave"),
          (("decide", "--unit", "U03", "--decision", "D2", "--answer", "25"), "plan"),
          (("record-launch", "--unit", "U01"), "wave"),
-         (("collect", "--unit", "U01", "--round", "1"), "wave"), (("prepare", "--unit", "U01", "--dispatch", "d1"), "wave")]
+         (("collect", "--unit", "U01", "--dispatch", "d1"), "wave"), (("prepare", "--unit", "U01", "--dispatch", "d1"), "wave")]
 
 
 @pytest.mark.parametrize("argv, skill", GATED)

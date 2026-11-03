@@ -300,3 +300,50 @@ def test_prepare_writes_comments_after_posted_at_plus_the_aged_kinds(world, tmp_
   assert text.startswith("builder: builder-bot\n")
   assert "### issue #2 comment 13 by owner at 2026-11-02T14:00:00Z\nlooks fine\n" in text
   assert (f"### pr #70 comment 12 by builder-bot at {at}\n{body}\n" in text) is kept
+
+
+DEV = "**Deviation (dod):** item 3 is wrong\n- (a) drop it\n- (b) keep it\n**Builder status:** BLOCKED"
+CASES = {
+    "clean": ({}, []),
+    "ci": ({"ci": "failure"}, ["ci | regression: no | CI not green on this head: ci red (tests)"]),
+    "exists": ({"commits": [("test(S1): hook", "tests/unit/test_hooks.py")]},
+               ["src/hooks.py | regression: no | Exists item 3: path absent",
+                "tests/unit/test_hooks.py | regression: no | tdd-order: S1: no feat(S1) commit touches src/hooks.py"]),
+    "run": ({"pr_body": "U01\n\nCloses #2\n"}, ["pr_body.md | regression: no | Run item 2: no fenced output"]),
+    "scope": ({"commits": [("test(S1): hook", "tests/unit/test_hooks.py"), ("feat(S1): hook", "src/hooks.py"), ("feat(S1): more", "src/other.py")]},
+              ["src/other.py | regression: no | changed path outside Scope paths"]),
+    "tdd-order": ({"commits": [("feat(S1): hook", "src/hooks.py"), ("test(S1): hook", "tests/unit/test_hooks.py")]},
+                  ["tests/unit/test_hooks.py | regression: no | tdd-order: S1: feat(S1) precedes test(S1)"]),
+    "deviation": ({"comments": {2: [c(12, "builder-bot", DEV)]}}, ["issue #2 comment 12 | regression: no | deviation (dod) unruled"]),
+    "deviation-ruled": ({"comments": {2: [c(12, "builder-bot", DEV), c(13, "owner", "**Ruling:** (12) (a) — drop it")]}}, []),
+    "deviation-ruled-by-builder": ({"comments": {2: [c(12, "builder-bot", DEV), c(13, "builder-bot", "**Ruling:** (12) (a) — drop it")]}},
+                                   ["issue #2 comment 12 | regression: no | deviation (dod) unruled"]),
+    "contested": ({"prior": True, "comments": {70: [c(14, "builder-bot", "**Reply change-review-1-1:** contested — the test covers it")]}},
+                  ["pr #70 comment 14 | regression: no | contested change-review-1-1: the test covers it"]),
+    "upheld": ({"prior": True, "comments": {2: [c(15, "owner", "**Ruling:** change-review-1-1 finding upheld (fix it)")]}},
+               ["issue #2 comment 15 | regression: no | upheld change-review-1-1: no `fixed` reply"]),
+    "ci-reply-ignored": ({"prior": True, "comments": {70: [c(16, "builder-bot", "**Reply foreman-1-1:** contested — flaky")]}}, []),
+}
+
+
+@pytest.mark.parametrize("name", list(CASES))
+def test_collect_records_foreman_findings(world, tmp_path, monkeypatch, name):
+  kw, expected = dict(CASES[name][0]), CASES[name][1]
+  prior = kw.pop("prior", False)
+  if prior:
+    kw.update(rounds=[POSTED_R1], launches=TWO_LAUNCHES)
+  if prior:  # the last posted round: one change-review high and the CI finding
+    st0, card0, _ = seed(world, **{k: v for k, v in kw.items() if k != "commits"})
+    open_head_review(world, st0, card0, "0" * 40, {
+        "change-review": "change-review-1-1 | high | src/hooks.py:1 | regression: no | no hook\n",
+        "foreman": "foreman-1-1 | high | ci | regression: no | CI not green on this head: ci red (tests)\n"})
+  w = prepared(world, tmp_path, monkeypatch, **kw)
+  r = 2 if prior else 1
+  code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
+  assert (code, out.strip()) == (0, f"collected: {len(expected)} foreman findings"), out
+  lines = (w.dir / f"r{r}/foreman.findings").read_text(encoding="utf-8").splitlines()
+  assert lines == [f"foreman-{r}-{i} | high | {e}" for i, e in enumerate(expected, 1)]
+  rnd = json.loads((w.st.path("reviews", w.rid) / f"round-{r}.json").read_text(encoding="utf-8"))
+  assert rnd["builder_contested"] == ([{"fid": f"foreman-{r}-1", "reason": "the test covers it"}] if name == "contested" else [])
+  assert rnd["what_ran"].startswith("not run")
+  assert json.loads(w.st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][-1]["phase"] == "collected"
