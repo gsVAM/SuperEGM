@@ -528,29 +528,28 @@ def test_apply_scans_again_with_the_current_rules(world):
   assert not any(c[:2] == ["issue", "create"] for c in world.gh.calls)
 
 
-def test_marker_recovery_finds_issues_created_before_a_crash(world):
-  """R2-13/R13: the recovery listing is the only way home after a crash between
-  the create call and the state write, and its label is URL-encoded."""
-  dry_run(world)
-  gh = world.gh
-  # a crash after creating the tracking issue and U01, before either was saved
-  assert world.run("apply", "--plan", world.plan, "--yes", "--max-writes", 8)[0] == 0
+def test_apply_recovers_issues_by_the_new_marker_after_a_crash(world):
+  spec, plan, handoff_id, card = dry_run(world)
+  issue_edit_handler(world.gh)
+  # 6 labels + the tracking issue + U01 = 8 writes; then a crash before the state was saved
+  assert world.run("apply", "--spec", spec, "--runcard", card, "--yes", "--max-writes", 8)[0] == 0
   state = state_of(world)
-  created = {u: d["number"] for u, d in (state.get("units") or {}).items() if d.get("number")}
-  assert created, "the bounded apply must have created something"
-  # erase every local trace of those writes, as an interrupted save would
-  for unit in (state.get("units") or {}).values():
-    unit.pop("number", None), unit.pop("id", None), unit.pop("done", None)
-  for key in ("number", "id", "done"):
-    (state.get("tracking") or {}).pop(key, None)
-  (world.artifacts / "state.json").write_text(json.dumps(state), encoding="utf-8")
-  before = len([c for c in gh.calls if c[:2] == ["issue", "create"]])
-  assert world.run("apply", "--plan", world.plan, "--yes")[0] == 0
+  assert state["tracking"]["number"] == 1 and state["units"]["U01"]["number"] == 2 and "number" not in state["units"].get("U02", {})
+  for record in (state["tracking"], *state["units"].values()):
+    for key in ("number", "id", "done", "filing"):
+      record.pop(key, None)
+  atomic_write(world.artifacts / "state.json", state)
+  gh = world.gh
+  gh.calls.clear()
+  assert world.run("apply", "--spec", spec, "--runcard", card, "--yes")[0] == 0
+  listing = [c for c in gh.calls if c[0] == "api" and "/issues?" in c[1]]
+  assert listing and f"superegm%3Ahandoff-{handoff_id[-6:]}" in listing[0][1], listing
   after = state_of(world)
-  for uid, number in created.items():
-    assert after["units"][uid]["number"] == number, "recovery must reuse the issue"
-    assert after["units"][uid]["id"], "recovery must backfill the database id"
-  assert len(gh.issues) == 4, f"no duplicate issues: {sorted(gh.issues)}"
+  assert after["tracking"]["number"] == 1 and after["units"]["U01"] | {"number": 2} == after["units"]["U01"]
+  assert after["units"]["U01"]["id"] == gh.issues[2]["id"] and after["units"]["U02"]["number"] == 3
+  assert len(gh.issues) == 3, f"no duplicate issues: {sorted(gh.issues)}"
+  assert [c[2] for c in gh.calls if c[:2] == ["issue", "edit"]] == ["1"]  # the recovered tracking body is re-asserted once
+  assert after["tracking"]["filing"] == after["confirmed_sha256"] and len(after["filings"]) == 1
 
 
 def test_a_label_prefix_with_reserved_url_characters_still_recovers(tmp_path, capsys, monkeypatch):
