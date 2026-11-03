@@ -395,3 +395,40 @@ def test_interrupt_records_a_launch_or_marks_a_prepared_round(world):
   assert code == 1 and "interrupt: U07 has no round 2" in out
   journal = s.path("journal").read_text(encoding="utf-8")
   assert "U07 launch 1 interrupted" in journal and "U07 round 1 interrupted: owner" in journal
+
+
+def test_clean_refuses_until_terminal_then_removes_what_it_can_prove(world, monkeypatch):
+  s, card, hid, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0
+  assert world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)[0] == 0
+  assert world.run("record-launch", "--unit", UNIT, "--runcard", card)[0] == 0
+  r1 = s.path("worktrees", UNIT, "r1")
+  code, out = world.run("runcard", "open", "--skill", "clean", "--artifact", UNIT)
+  ccard = out.split()[-1]
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", ccard)
+  assert code == 1 and "clean: U07 launch 1 is not terminal" in out and r1.is_dir()
+  Path(launches_of(s)[0]["result_file"] + ".exit").write_text("0\n", encoding="utf-8")
+  assert world.run("record-launch", "--unit", UNIT, "--exit", 0, "--runcard", card)[0] == 0
+  foreman(s, UNIT, [{"round": 1, "runcard": card, "launch": 1, "head": "a" * 40, "phase": "prepared", "dispatch_id": "d1", "outcome": None, "posted_at": None}])
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", ccard)
+  assert code == 1 and "clean: U07 round 1 is not terminal (prepared)" in out and r1.is_dir()
+  foreman(s, UNIT, [{"round": 1, "runcard": card, "launch": 1, "head": "a" * 40, "phase": "posted", "dispatch_id": "d1", "outcome": "clean", "posted_at": "2026-11-03T01:00:00Z"}])
+  review = s.path("review", UNIT, f"pr{PR}")
+  review.parent.mkdir(parents=True, exist_ok=True)
+  git(["worktree", "add", "-q", "--detach", str(review), "HEAD"], world.repo)
+  git(["update-ref", f"refs/superegm/pr/{PR}", "HEAD"], world.repo)
+  (review / "scratch.txt").write_text("unsaved\n", encoding="utf-8")
+  (r1 / "scratch.txt").write_text("unsaved\n", encoding="utf-8")
+  stray = s.path("worktrees", UNIT, "r9")
+  git(["worktree", "add", "-q", "--detach", str(stray), "HEAD"], world.repo)
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", ccard)
+  assert code == 1 and "uncommitted changes" in out and review.is_dir() and r1.is_dir()   # EGM's dirty refusal on a review worktree; nothing removed
+  (review / "scratch.txt").unlink()
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", ccard)
+  assert code == 0, out
+  assert not review.exists() and not r1.exists()                      # a builder worktree goes dirty or not: the typed skill is the owner's decision
+  assert stray.is_dir() and f"kept {stray}: no launch records it" in out   # keeps what it cannot prove
+  assert subprocess.run(["git", "-C", str(world.repo), "rev-parse", "--verify", "-q", f"refs/superegm/pr/{PR}"], capture_output=True).returncode != 0
+  assert "worktrees" not in git(["worktree", "list", "--porcelain"], world.repo).replace(str(stray), "")
+  assert "U07 cleaned" in s.path("journal").read_text(encoding="utf-8")
