@@ -56,6 +56,25 @@ def body_hashes(handoff) -> dict:
           for uid, unit in json.loads(core.read_text(handoff.store.path("units")))["units"].items()}
 
 
+def pending_writes(handoff, units=None) -> list:
+  """EGM's canonical write list with every issue and link of a filed unit removed: filed is a
+  number in `state.units` when `units` is None, else not in `units` (a resumed `apply` keeps the
+  dry run's set). `repo`, `gate`, every label and the tracking issue always stay."""
+  import superegm.apply as apply  # at call time: apply imports this module
+  state = handoff.state
+  pending = [uid for uid in handoff.graph.order
+             if (uid in units if units is not None else handoff.filed(uid) is None)]
+  items = [["repo", handoff.config["repo"]],
+           ["gate", state.get("gate_plan_sha256"), state.get("gate_bodies_sha256")]]
+  items += [["label", name] for name in apply.derived_labels(handoff)]
+  items.append(["issue", "tracking", handoff.tracking_title(), apply.tracking_labels(handoff), handoff.render_tracking()])
+  items += [["issue", uid, handoff.unit_title(uid), apply.unit_labels(handoff, uid), handoff.render_unit(uid)]
+            for uid in pending]
+  items += [["sub_issue", uid] for uid in pending]
+  items += [["blocked_by", uid, b] for uid in pending for b in sorted(handoff.plan.units[uid].blockers)]
+  return items
+
+
 def run(args):
   core.require_runcard(args, SKILLS)
   handoff = open_handoff(Path(args.design))

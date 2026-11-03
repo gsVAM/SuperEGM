@@ -23,6 +23,26 @@ def register(subparsers):
   p.set_defaults(run=run, writes=WRITES)
 
 
+def handoff_label(handoff) -> str:
+  """The 6-hex handoff label (spec section 10)."""
+  return handoff.labels["handoff_prefix"] + handoff.handoff_id[-6:]
+
+
+def derived_labels(handoff) -> list:
+  """Creation order: unit, tracking, the handoff label, stopped, then one per wave."""
+  names = [handoff.labels["unit"], handoff.labels["tracking"], handoff_label(handoff), handoff.labels["stopped"]]
+  return names + [handoff.wave_label(w) for w in sorted(handoff.graph.waves)]
+
+
+def unit_labels(handoff, uid) -> list:
+  return sorted({handoff.labels["unit"], handoff.wave_label(handoff.graph.wave[uid]), handoff_label(handoff),
+                 *handoff.labels["extra"]})
+
+
+def tracking_labels(handoff) -> list:
+  return sorted({handoff.labels["tracking"], handoff_label(handoff)})
+
+
 class Budget:
   """Counts content-creating writes and stops cleanly at --max-writes."""
 
