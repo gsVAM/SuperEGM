@@ -178,3 +178,13 @@ def test_manifests_name_superegm_1_0_0() -> None:
   for path in ("plugin.json", ".claude-plugin/plugin.json", ".claude-plugin/marketplace.json"):
     text = (ROOT / path).read_text(encoding="utf-8").lower()
     assert not any(w in text for w in ("bootstrap", "synthesizer", "openai", "codex")), path
+
+
+def test_ci_workflow_runs_the_unit_suite_on_pull_request() -> None:
+  workflow = yaml.safe_load((ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8"))
+  triggers = workflow.get("on", workflow.get(True))  # PyYAML reads a bare `on:` as True
+  assert "pull_request" in triggers and "main" in triggers["push"]["branches"]
+  steps = workflow["jobs"]["unit"]["steps"]
+  assert any(s.get("with", {}).get("python-version") == "3.11" for s in steps)
+  assert any("pytest tests/unit" in s.get("run", "") for s in steps)
+  assert any("pyyaml" in s.get("run", "") for s in steps)
