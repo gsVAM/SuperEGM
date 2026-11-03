@@ -31,5 +31,8 @@
     "./.claude-plugin/agents/structural.md",
     "./.claude-plugin/agents/style.md",
     "./.claude-plugin/agents/zoom-out.md"
-  ]
+  ],
+  "superegm": {
+    "hook_sha256": "d39f4318a15dca09d75e799bf75ba75cf71a9ba1a720ff52bb4507cbd9ff9ef7"
+  }
 }
