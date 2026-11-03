@@ -632,3 +632,24 @@ def test_later_units_tests_live_in_their_own_files(target, name):
   assert f"def {name}(" not in (here / "test_helper.py").read_text(encoding="utf-8")
   everywhere = "".join(p.read_text(encoding="utf-8") for p in here.glob("test_*.py"))
   assert not [d for d in DELETED if f"def {d}(" in everywhere]
+
+
+def test_store_kinds_answer_to_the_interfaces_names(world):
+  """The Interfaces block names `handoff_plan|handoff_units|handoff_bodies|wave_report|questions`;
+  S3's test names `plan|units|bodies|report`. A sibling unit may use either."""
+  import superegm
+  root = world.artifacts
+  a = superegm.Store(root, handoff_id="sample-111111")
+  assert a.path("handoff_plan") == a.path("plan") and a.path("handoff_units") == a.path("units")
+  assert a.path("handoff_bodies") == a.path("bodies") and a.path("wave_report", 2) == a.path("report", 2)
+  assert a.path("approvals", "sample.json") == a.path("approvals", "sample")
+  assert a.path("runcards", "plan-0001.json") == a.path("runcards", "plan-0001")
+  assert a.path("questions", "q1.md") == root / "questions/q1.md" and a.kind_of(root / "questions/q1.md") == "questions"
+  assert a.kind_of(a.path("handoff_units")) == "units"
+  superegm.STORE, superegm.CURRENT_WRITES, superegm.CURRENT_SUBCOMMAND = a, frozenset({"handoff_units"}), "x"
+  try:
+    superegm.atomic_write(a.path("units"), {})  # a module may declare the kind under either name
+    with pytest.raises(superegm.HandoffError, match="x may not write plan"):
+      superegm.atomic_write(a.path("handoff_plan"), "")
+  finally:
+    superegm.STORE = superegm.CURRENT_WRITES = superegm.CURRENT_SUBCOMMAND = None
