@@ -1474,3 +1474,28 @@ def test_store_paths_are_prefixed_by_the_handoff_hex(world):
   assert superegm.spec_slug("/x/docs/specs/2026-11-03-superegm-design.md") == "2026-11-03-superegm-design"
   assert not list(root.rglob("*.tmp*"))
   assert world.run("graph", "--plan", world.plan)[0] == 0 and (root / "state.json").is_file()
+
+
+WRITES = {"approve_spec": {"approvals", "state"}, "graph": {"state", "plan", "units", "unit", "bodies"},
+          "scan": set(), "gate": {"state", "file", "plan", "units", "unit", "bodies"},
+          "dry_run": {"state", "file", "plan", "units", "unit", "bodies"}, "apply": {"state", "file"},
+          "verify": {"state"}, "status": {"state"}, "launch": {"state"}, "decide": {"state", "unit", "file"},
+          "record_launch": {"foreman"}, "collect": {"foreman"}, "prepare": {"foreman", "file"},
+          "runcard": {"runcards"}, "init": set()}
+
+
+@pytest.mark.parametrize("name, kinds", sorted(WRITES.items()))
+def test_atomic_write_enforces_each_modules_writes(world, monkeypatch, name, kinds):
+  import superegm
+  module = importlib.import_module(f"superegm.{name}")
+  assert module.WRITES == frozenset(kinds)
+  st = superegm.Store(world.artifacts, handoff_id="sample-abcdef")
+  monkeypatch.setattr(superegm, "STORE", st)
+  monkeypatch.setattr(superegm, "CURRENT_WRITES", module.WRITES)
+  monkeypatch.setattr(superegm, "CURRENT_SUBCOMMAND", name)
+  for kind in kinds:
+    superegm.atomic_write(st.path(kind, *{"review": ("U01", 1), "report": (1,)}.get(kind, ("U01",) if kind not in ("state", "plan", "units", "bodies") else ())), "x")
+  with pytest.raises(superegm.HandoffError, match=f"{name} may not write judges"):
+    superegm.atomic_write(st.path("judges", "q1", "verdict.json"), {})
+  superegm.atomic_write(world.plan, world.plan.read_text(encoding="utf-8"))  # outside the store: unchecked
+  assert not list(world.artifacts.rglob("*.tmp*"))
