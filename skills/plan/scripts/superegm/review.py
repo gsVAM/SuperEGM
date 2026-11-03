@@ -3,6 +3,7 @@
 
 """superegm review open|record|settle|status|rule: the one review loop (spec section 8)."""
 
+from dataclasses import dataclass
 import json
 from pathlib import Path
 import re
@@ -21,6 +22,7 @@ LANE_KINDS = ("spec", "plan", "integrate")  # the kinds the Astra lane joins
 SEVERITIES = ("high", "medium", "low")
 DISPOSITIONS = ("fixed", "contested", "declined", "escalated", "fix-design")
 RULINGS = ("continue", "accept", "stop")
+CAP = 5  # completed rounds per cycle, plus one per `continue` ruling (section 5)
 
 
 def register(subparsers):
@@ -68,7 +70,8 @@ def run(args):
   if args.action == "post":
     print("superegm: review post is not built yet", file=sys.stderr)
     return 1
-  return {"open": open_review, "record": record_round, "settle": settle_finding}[args.action](args)
+  return {"open": open_review, "record": record_round, "settle": settle_finding,
+          "status": status_review}[args.action](args)
 
 
 # ---------------------------------------------------------------- the findings line
@@ -281,7 +284,7 @@ def record_round(args) -> int:
     review["astra_incomplete"] += 1
   rnd["what_ran"] = derive_what_ran(review, rnd, entry)
   core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
-  save_review(st, rid, review)
+  store_verdict(st, rid, review, rnd["runcard"])
   core.journal(st, f"review record {rid} round {n} {reviewer} what_ran {rnd['what_ran']} under {args.runcard}")
   print(f"round {n} {reviewer} recorded, what_ran {rnd['what_ran']}")
   return 0
@@ -325,6 +328,94 @@ def settle_finding(args) -> int:
   finding["disposition"] = disposition
   finding["ruling"] = "owner" if args.owner else f"judges:{args.judges}" if args.judges else None
   core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
+  store_verdict(st, rid, review, card.get("parent") or args.runcard)
   core.journal(st, f"review settle {rid} {fid} {disposition} by {finding['ruling'] or 'the elephant'} under {args.runcard}")
   print(f"{fid} {disposition}")
   return 0
+
+
+# ---------------------------------------------------------------- status: the predicates live here alone
+
+
+@dataclass
+class Status:
+  code: int
+  line: str
+  trend: str
+  converged: str
+  converged_round: int | None
+  sha: str | None
+
+
+def findings_of(rnd: dict) -> list[dict]:
+  return [f for record in rnd["reviewers"].values() for f in record["findings"]]
+
+
+def regressions_of(rnd: dict) -> int:
+  return sum(blocking(f) and f["regression"] == "yes" for f in findings_of(rnd))
+
+
+def rounds_of(st: core.Store, rid: str, review: dict) -> list[dict]:
+  """The review's rounds in order: the round files, or on a head the unit's `rounds[]` entries, each
+  with its `what_ran` re-derived from the entry (one without a file is `not run` with the entry's
+  reason and carries the entry's `runcard`)."""
+  files = {n: load_round(st, rid, n) for n in round_numbers(st, rid)}
+  if review["kind"] != "head":
+    return list(files.values())
+  rounds = []
+  for entry in sorted(core.load_foreman(st, review["artifact"])["rounds"], key=lambda e: e["round"]):
+    rnd = files.get(entry["round"]) or {"round": entry["round"], "runcard": entry.get("runcard"),
+                                        "artifact_sha256": entry.get("head"), "builder_contested": [], "reviewers": {}}
+    rounds.append(rnd | {"what_ran": derive_what_ran(review, rnd, entry)})
+  return rounds
+
+
+def evaluate(st: core.Store, review: dict, runcard: str) -> Status:
+  """The one convergence rule (section 5), the cap and the stall rule (section 8); exit order 4, 0, 5, 2, 3."""
+  rid = review_id(st, review["kind"], review["artifact"], review["cycle"])
+  rounds = rounds_of(st, rid, review)
+  completed = [r for r in rounds if r["what_ran"] == "completed"]
+  latest = completed[-1] if completed else None
+  rulings = [r["ruling"] for r in review["rulings"]]
+  fix_design = any(f["disposition"] == "fix-design" for r in rounds for f in findings_of(r))
+  clean = latest is not None and not any(blocking(f) and f["disposition"] is None for f in findings_of(latest))
+  regressions = regressions_of(latest) if latest else 0
+  accept = next((r for r in review["rulings"] if r["ruling"] == "accept"), None)
+  converged, converged_round = "no", None
+  if fix_design:
+    pass
+  elif accept:
+    converged, converged_round = f"by ruling {accept['id']}", review["converged_round"]
+  elif clean and not regressions:
+    converged, converged_round = "yes", latest["round"]
+  cap = "stop" in rulings or len(completed) >= CAP + rulings.count("continue")
+  stalled = len(rounds) >= 2 and all(r["what_ran"] != "completed" and r.get("runcard") == runcard for r in rounds[-2:])
+  sha = next((r["artifact_sha256"] for r in rounds if r["round"] == converged_round), None)
+  code = 4 if fix_design else 0 if converged != "no" else 5 if stalled else 2 if cap else 3
+  line = (f"round {latest['round'] if latest else 0}: {'clean' if clean else 'not clean'}, regressions {regressions}, "
+          f"converged {converged}, cap {'yes' if cap else 'no'}, stalled {'yes' if stalled else 'no'}, sha256 {sha or 'none'}")
+  trend = (f"rounds: {' -> '.join(str(len(findings_of(r))) for r in rounds)} "
+           f"(regressions {', '.join(str(regressions_of(r)) for r in rounds)})") if rounds else "rounds: none"
+  return Status(code, line, trend, converged, converged_round, sha)
+
+
+def store_verdict(st: core.Store, rid: str, review: dict, runcard: str) -> Status:
+  """Re-derive `converged` and `converged_round` into `review.json` after a record or a settle."""
+  status = evaluate(st, review, runcard)
+  review["converged"], review["converged_round"] = status.converged, status.converged_round
+  save_review(st, rid, review)
+  return status
+
+
+def status_review(args) -> int:
+  """Prints the state line and the trend; writes nothing; the exit code is the verdict."""
+  st = core.store(core.git_toplevel(Path.cwd()))
+  review = load_review(st, args.review)
+  if review is None:
+    print(f"review {args.review}: not opened")
+    return 3
+  card = bind(args, review)
+  status = evaluate(st, review, card.get("parent") or args.runcard)
+  print(status.line)
+  print(status.trend)
+  return status.code
