@@ -60,24 +60,24 @@ def run(args):
         f"describes #{pr['number']}: run `status` again before preparing")
   number = pr["number"]
   foreman = core.load_foreman(handoff.store, args.unit)
-  rounds = foreman.setdefault("rounds", {})
-  running = [r for r, v in rounds.items()
+  rounds = foreman["rounds"]
+  this_round = next((r for r in rounds if r.get("round") == args.round), {})
+  running = [v["round"] for v in rounds
              if v.get("phase") == "launched"
              and v.get("run_status", v.get("status")) == "running"]
-  if not args.clean and (rounds.get(str(args.round)) or {}).get("run_folder"):
+  if not args.clean and this_round.get("run_folder"):
     # Re-preparing would keep the old run folder, so the replacement launch
     # would be refused and left unrecorded (R12-03). An interrupted launched
     # round is collected as not run; its replacement is the NEXT round. This
     # runs before any fetch or worktree work.
     raise core.HandoffError(
         f"{args.unit} round {args.round} already recorded a launch "
-        f"({rounds[str(args.round)]['run_folder']}): collect it (--not-run <reason> if it was "
+        f"({this_round['run_folder']}): collect it (--not-run <reason> if it was "
         f"interrupted), then prepare round {args.round + 1}.")
   if args.clean:
     # Only at landing. There is no mid-round removal any more: a review
     # worktree lives until the unit lands, so no cleanup can race a runner
     # that still reads it (rounds 9-11 each found a door to that race).
-    this_round = rounds.get(str(args.round)) or {}
     if not this_round.get("pr") or not this_round.get("worktree"):
       raise core.HandoffError(
           f"{args.unit} round {args.round} has no recorded PR and worktree, so "
@@ -86,20 +86,18 @@ def run(args):
           f"prepared, or remove the worktree by hand.")
     number = this_round["pr"]
     tree = Path(this_round["worktree"])
-    blocking = [r for r in running if r == str(args.round)
-                or (rounds[r].get("worktree") or "") == str(tree)]
     # Liveness comes from the run folder, never from the administrative phase:
     # a round collected as "interrupted" still has a runner that may be
     # reading this worktree (panel, cap decision, Q2).
-    unresolved = [r for r, v in rounds.items()
+    unresolved = [v["round"] for v in rounds
                   if v.get("run_folder") and not core.run_terminated(v["run_folder"])
-                  and (r == str(args.round) or (v.get("worktree") or "") == str(tree))]
+                  and (v["round"] == args.round or (v.get("worktree") or "") == str(tree))]
     if unresolved:
       # Refusing to REMOVE must not refuse to LAND: a leftover worktree costs
       # disk; a failed landing becomes a stop that reaches the owner. Keep it,
       # say so, and finish. Removal is a human's option, never an agent's
       # inference (panel, cap decision, Q2).
-      rounds.setdefault(str(args.round), {})["phase"] = "kept"
+      core.round_entry(foreman, args.round)["phase"] = "kept"
       core.save_foreman(handoff.store, args.unit, foreman)
       print(f"kept {tree}: round {unresolved[0]} of {args.unit} recorded a launch with no "
             f"terminal result, so this helper cannot know its runner has stopped reading "
@@ -112,8 +110,7 @@ def run(args):
       for ref in (f"refs/egm/pr/{number}", f"refs/egm/base/{number}"):
         subprocess.run(["git", "-C", str(root), "update-ref", "-d", ref], capture_output=True)
       core.run_git(["worktree", "prune"], root)
-    foreman["phase"] = "cleaned"
-    rounds.setdefault(str(args.round), {})["phase"] = "cleaned"
+    core.round_entry(foreman, args.round)["phase"] = "cleaned"
     core.save_foreman(handoff.store, args.unit, foreman)
     print(f"cleaned {tree}")
     return 0
@@ -130,10 +127,8 @@ def run(args):
   core.run_git(["fetch", "--no-write-fetch-head", remote,
            f"+refs/pull/{number}/head:refs/egm/pr/{number}",
            f"+refs/heads/{pr['base_ref']}:refs/egm/base/{number}"], root)
-  foreman.update({"pr": number, "phase": "fetched", "round": args.round})
-  rounds.setdefault(str(args.round), {}).update(
-      {"pr": number, "phase": "fetched", "worktree": str(tree)})
-  core.save_foreman(handoff.store, args.unit, foreman)
+  core.round_entry(foreman, args.round).update(
+      {"pr": number, "phase": "fetched", "worktree": str(tree), "runcard": card["parent"] or args.runcard})
   core.save_foreman(handoff.store, args.unit, foreman)
   fetched = core.run_git(["rev-parse", f"refs/egm/pr/{number}"], root).strip()
   if fetched != pr["head"]:
@@ -144,9 +139,7 @@ def run(args):
       raise core.HandoffError(f"{tree} exists but is not a registered worktree: remove it by hand")
     if core.run_git(["status", "--porcelain"], tree).strip():
       raise core.HandoffError(f"worktree {tree} has changes: remove it by hand")
-    running = [r for r in foreman.get("rounds", {}).values()
-               if r.get("phase") == "launched" and r.get("run_status", r.get("status")) == "running"]
-    unresolved = [r for r, v in rounds.items()
+    unresolved = [v["round"] for v in rounds
                   if v.get("run_folder") and not core.run_terminated(v["run_folder"])
                   and (v.get("worktree") or "") == str(tree)]
     if unresolved:
@@ -171,8 +164,7 @@ def run(args):
                   "diff": str(diff_path), "ci": str(ci_path), "ci_verdict": ci["verdict"]}
   # Update, never replace: the PR this round reviewed is what `--remove` and
   # `--clean` resolve from, and a later round may watch a different PR.
-  foreman.setdefault("rounds", {}).setdefault(str(args.round), {}).update(round_record)
-  foreman.update({"phase": "prepared", "worktree": str(tree), "head": pr["head"], "merge_base": merge_base})
+  core.round_entry(foreman, args.round).update(round_record)
   core.save_foreman(handoff.store, args.unit, foreman)
   if args.runner:
     if not core.MODEL_RE.match(args.model or "") or args.effort not in core.EFFORTS:

@@ -33,8 +33,8 @@ def run(args):
   plan, st = core.locate(args)
   handoff = core.Handoff(plan, st)
   data = core.load_foreman(handoff.store, args.unit)
-  rounds = data.setdefault("rounds", {})
-  record = rounds.setdefault(str(args.round), {})
+  record = core.round_entry(data, args.round)
+  record["runcard"] = card["parent"] or args.runcard
   if args.not_run:
     if record.get("run_folder"):
       # A launch was recorded: the runner may still be reading its worktree.

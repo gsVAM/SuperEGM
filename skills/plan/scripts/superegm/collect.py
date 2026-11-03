@@ -34,9 +34,10 @@ def run(args):
   plan, st = core.locate(args)
   handoff = core.Handoff(plan, st)
   data = core.load_foreman(handoff.store, args.unit)
-  record = (data.get("rounds") or {}).get(str(args.round))
+  record = next((r for r in data["rounds"] if r.get("round") == args.round), None)
   if not record:
     raise core.HandoffError(f"{args.unit} has no round {args.round} to collect")
+  record["runcard"] = card["parent"] or args.runcard
   allowed = ("prepared", "launched", "collected") if args.not_run else ("launched", "collected")
   if record.get("phase") not in allowed:
     raise core.HandoffError(
@@ -60,7 +61,6 @@ def run(args):
       # non-terminal and tells the human to remove the worktree by hand.
       record["run_status"] = f"not run (interrupted: {args.not_run})"
       record.update({"phase": "collected", "collected_at": core.now_iso(), "verdict": None})
-      data["phase"] = "collected"
       core.save_foreman(handoff.store, args.unit, data)
       print(f"{args.unit} round {args.round}: collected ({record['run_status']}; run folder "
             f"kept; the worktree stays until a human removes it or the unit lands)")
@@ -103,7 +103,6 @@ def run(args):
     record["run_status"] = f"not run ({args.not_run})" if args.not_run else "not run"
   record.update({"phase": "collected", "collected_at": core.now_iso(),
                  "verdict": args.verdict, "head": record.get("head")})
-  data["phase"] = "collected"
   core.save_foreman(handoff.store, args.unit, data)
   print(f"{args.unit} round {args.round}: collected ({record['run_status']}"
         + (f", verdict {args.verdict}" if args.verdict else "") + ")")

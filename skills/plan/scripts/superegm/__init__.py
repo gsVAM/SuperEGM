@@ -1224,9 +1224,13 @@ CURRENT_SUBCOMMAND = None
 def locate(args):
   """The store of the repository the working directory is in, and the plan."""
   st = store(git_toplevel(Path.cwd()))
-  if not getattr(args, "plan", None):
-    raise HandoffError("state holds no plan path: run `graph --plan <file>` first")
-  plan = Path(args.plan).expanduser().resolve()
+  if getattr(args, "plan", None):
+    plan = Path(args.plan).expanduser().resolve()
+  else:
+    recorded = load_state(st.root).get("plan")
+    if not recorded:
+      raise HandoffError("state holds no plan path: run `graph --plan <file>` first")
+    plan = Path(recorded)
   if not plan.is_file():
     raise HandoffError(f"plan {plan} does not exist")
   return plan, st
@@ -1608,9 +1612,24 @@ def print_status(handoff: Handoff, summary, open_blocking):
 # ---------------------------------------------------------------- prepare
 
 
+ROUND_KEYS = ("round", "runcard", "launch", "head", "phase", "dispatch_id", "outcome", "posted_at")
+
+
 def load_foreman(store: Store, uid):
+  """`foreman/<unit>.json` per spec section 7: `dispatch_id`, `rounds[]`, `decisions[]`, `rulings[]`."""
   path = store.path("foreman", uid)
-  return json.loads(read_text(path)) if path.is_file() else {"unit": uid, "rounds": {}}
+  return json.loads(read_text(path)) if path.is_file() else {"dispatch_id": None, "rounds": [], "decisions": [], "rulings": []}
+
+
+def round_entry(data: dict, n: int) -> dict:
+  """The `rounds[]` entry of round `n`, created with every key None when missing."""
+  for entry in data["rounds"]:
+    if entry.get("round") == n:
+      return entry
+  entry = {key: None for key in ROUND_KEYS}
+  entry["round"] = n
+  data["rounds"].append(entry)
+  return entry
 
 
 def save_foreman(store: Store, uid, data):
