@@ -287,3 +287,40 @@ def test_record_launch_appends_running_then_records_the_exit(world, monkeypatch)
   code, out = world.run("record-launch", "--unit", UNIT, "--exit", 1, "--runcard", card)
   assert code == 0 and out.strip() == "U07 launch 1 exited 1" and launches_of(s)[0]["status"] == "exited 1"
   assert "U07 launch 1 exited 1" in s.path("journal").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("case, reason", [
+  ("unmarked", "U07 is not marked by launch"),
+  ("running", "U07 launch 1 is not terminal"),
+  ("count", "--round 3 is not the next launch count (2)"),
+  ("own-login", "the builder token is the elephant's own login (owner)"),
+  ("profile-missing", "builder profile"),
+  ("profile-claude-md", "holds CLAUDE.md"),
+  ("profile-plugins", "holds plugins"),
+  ("body", "issue #7 body differs from the filed body"),
+  ("no-pr", "U07 round 2 has no recorded PR: run status first"),
+])
+def test_launch_builder_refuses_each_precondition(world, monkeypatch, case, reason):
+  s, card, hid, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  profile = Path(json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]["profile_dir"])
+  rnd = 1
+  if case != "unmarked":
+    assert world.run("launch", "--runcard", card)[0] == 0
+  if case == "running":
+    launched(s, UNIT, "running"); rnd = 2
+  if case in ("count", "no-pr"):
+    launched(s, UNIT, "exited 0"); rnd = 3 if case == "count" else 2
+  if case == "own-login":
+    github(world, builder="owner")
+  if case == "profile-missing":
+    profile.rmdir()
+  if case == "profile-claude-md":
+    (profile / "CLAUDE.md").write_text("x\n", encoding="utf-8")
+  if case == "profile-plugins":
+    (profile / "plugins").mkdir(); (profile / "plugins/installed_plugins.json").write_text("{}", encoding="utf-8")
+  if case == "body":
+    world.gh.issues[ISSUE]["body"] += "\nedited by hand\n"
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", rnd, "--runcard", card)
+  assert code == 1 and "launch-builder: " in out and reason in out, out
+  assert not s.path("worktrees", UNIT).exists() and not s.path("launches", f"{UNIT}_r{rnd}_prompt.md").exists()
