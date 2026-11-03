@@ -4,19 +4,99 @@
 
 """superegm report: rewrite `wave_<n>_report.md` from the store and print the idle, pending and loop lines."""
 
-import sys
+import json
+from pathlib import Path
 
-WRITES = frozenset()  # the store kinds this subcommand writes
+import superegm as core
+from superegm.launch import load_launches
+
+WRITES = frozenset({"report"})  # the store kinds this subcommand writes
+SKILLS = frozenset({"wave"})  # the skills whose card this subcommand accepts
 TERMINAL = ("landed", "stopped", "pending", "idle", "clean")  # every state the loop never dispatches
 
 
 def register(subparsers):
-  subparsers.add_parser("report", help="write the wave report").set_defaults(run=run, writes=WRITES)
+  p = core.add_parser(subparsers, "report", "rewrite the wave report; print the idle, pending and loop lines")
+  p.set_defaults(run=run, writes=WRITES)
 
 
 def run(args):
-  print("superegm: report is not built yet", file=sys.stderr)
-  return 1
+  card = core.require_runcard(args, SKILLS)
+  st = core.store(core.git_toplevel(Path.cwd()))
+  state, config, now = core.load_state(st.root), st.config, core.NOW()
+  units = state.get("units") or {}
+  views = {uid: unit_view(state, uid) for uid in units}
+  launched = [uid for uid in units if units[uid].get("launched")]
+  foremen = {uid: core.load_foreman(st, uid) for uid in launched}
+  states = {uid: unit_state(uid, views[uid], foremen[uid], card, config, now) for uid in launched}
+  free = config["max_in_flight"] - sum(states[uid] in ("active", "pending") for uid in launched)
+  ready = [uid for uid in (state.get("status") or {}).get("ready") or [] if uid not in launched]
+  ended, why = loop_ended(states, ready, free)
+  n = wave_number(st, args.runcard, card)
+  path = st.path("wave_report", n)
+  lines = [f"# Wave {n} report", f"Run card: {args.runcard}", f"Loop: {'ended' if ended else 'continuing'} ({why})", "",
+           "## Units"]
+  for uid in units:
+    lines.append(unit_line(uid, units[uid], views[uid], states.get(uid, "unlaunched"), foremen.get(uid, {}),
+                           load_launches(st, uid)))
+  idle = [uid for uid in launched if states[uid] == "idle"]
+  lines += section("Non-terminal launches", [f"{uid} launch {e['round']} {e['status']}" for uid in launched
+                                              for e in load_launches(st, uid) if not e["status"].startswith("exited")
+                                              and e["status"] != "interrupted"])
+  lines += section("Heads with pending or absent CI", [f"{uid} {views[uid]['head'][:7]} waiting-for-ci" for uid in launched
+                                                       if views[uid]["head"] and views[uid]["ci"] in (None, "pending")])
+  lines += section("Idle", [f"{uid}: {reason}" for uid, reason in idle_reasons(card, states, views, config, now)])
+  lines += section("Ready, unlaunched", [f"{uid} ({'slot free' if free > 0 else 'no free slot'})" for uid in ready])
+  lines += section("Pending decisions", [])
+  lines += section("Stopped", [])
+  core.atomic_write(path, "\n".join(lines) + "\n")
+  print(path)
+  print("idle: " + (",".join(idle) or "none"))
+  print("pending: none")
+  print(f"loop: {'ended' if ended else 'continuing'} ({why})")
+  return 0
+
+
+def unit_view(state: dict, uid: str) -> dict:
+  """The one reader of `status.units[<id>]` (what `status --wait` saves): `pr, head, ci, landed`."""
+  saved = ((state.get("status") or {}).get("units") or {}).get(uid) or {}
+  return {key: saved.get(key) for key in ("pr", "head", "ci")} | {"landed": bool(saved.get("landed"))}
+
+
+def wave_number(st, rid: str, card: dict) -> int:
+  """The card's ordinal by `opened_at` among the store's top-level `wave` cards on the same artifact."""
+  folder = st.path("runcards", "x").parent
+  cards = []
+  for other in folder.glob("*.json"):
+    data = json.loads(core.read_text(other))
+    if data["skill"] == "wave" and data["artifact"] == card["artifact"] and not data["parent"]:
+      cards.append((data["opened_at"], other.stem))
+  return sorted(cards).index((card["opened_at"], rid)) + 1
+
+
+def unit_line(uid: str, record: dict, view: dict, state: str, foreman: dict, launches: list) -> str:
+  rounds = foreman.get("rounds") or []
+  detail = ", ".join(f"r{r.get('round')} {r.get('phase')}" + (f" {r['outcome']}" if r.get("outcome") else "") for r in rounds)
+  latest = launches[-1] if launches else None
+  return (f"- {uid} #{record.get('number')}: {state} · pr {'#%s' % view['pr'] if view['pr'] else 'none'} "
+          f"head {view['head'][:7] if view['head'] else 'none'} · ci {view['ci'] or 'none'} · rounds {len(rounds)}"
+          f"{' (' + detail + ')' if rounds else ''} · launch {'%s %s' % (latest['round'], latest['status']) if latest else 'none'}")
+
+
+def section(title: str, items: list) -> list:
+  return ["", f"## {title}"] + [f"- {item}" for item in items or ["none"]]
+
+
+def idle_reasons(card: dict, states: dict, views: dict, config: dict, now: float) -> list:
+  """`(unit, reason)` per idle unit: the card's `idle[]` reasons, then the CI bound with its minutes."""
+  reasons = [(entry["unit"], entry["reason"]) for entry in card.get("idle") or [] if entry["unit"] in states]
+  for uid, state in states.items():
+    seen = ci_seen_at(uid, views[uid], card)
+    if state == "idle" and seen is not None and not any(u == uid for u, _ in reasons):
+      reasons.append((uid, f"ci {views[uid]['ci'] or 'absent'} for {int((now - seen) // 60)} min "
+                           f"(ci_wait_minutes {config.get('ci_wait_minutes', 30)})"))
+  return reasons
+
 
 
 def unit_state(uid: str, view: dict, foreman: dict, card: dict, config: dict, now: float) -> str:
