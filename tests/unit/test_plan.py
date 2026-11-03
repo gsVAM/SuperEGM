@@ -265,3 +265,37 @@ def test_graph_records_the_plan_path_and_copies_the_plan(world):
   assert "A worker exists." in find(world, "handoff_plan.md").read_text(encoding="utf-8")
   assert plan.read_text(encoding="utf-8") == plan_text(spec).replace("Worker exists.", "A worker exists.")
   assert world.run("scan")[0] == 0
+
+
+FIXED_DOD_1 = "1. The test for each Step was committed before its implementation (checked by superegm tdd-order)"
+GRAMMAR = [
+  pytest.param("Interfaces\n- Consumes: u01_fn(x: int) -> int (U01)\n- Produces: u02_fn(x: int) -> int\n\n", "",
+               "U02: expected `Interfaces`", id="no-interfaces"),
+  pytest.param("- Produces: u02_fn(x: int) -> int", "- Gives: u02_fn(x: int) -> int",
+               "U02: interfaces line must read `- Consumes: <name> (U<nn>)` or `- Produces: <name>`", id="interfaces-line"),
+  pytest.param(FIXED_DOD_1 + "\n2. Run `pytest tests/test_u01.py -q`", "1. Run `pytest tests/test_u01.py -q`",
+               "U01: definition-of-done item 1 must read `The test for each Step", id="dod-1"),
+  pytest.param("3. Exists `src/u02.ts`", "3. `src/u02.ts` is documented",
+               "U02: definition-of-done item 3 is not `Run `, `Exists ` or `CI green on the head`", id="dod-kind"),
+  pytest.param("Review focus (this unit)\n- U02:", "- U02:", "U02: expected `Review focus (this unit)`", id="no-review-focus"),
+  pytest.param("Steps\n1. Write the failing test `test_u02_empty`", "1. Write the failing test `test_u02_empty`",
+               "U02: expected `Steps`", id="no-steps"),
+  pytest.param("options: (a) 5 attempts; (b) 10 attempts; owner", "options: (a) 5 attempts; owner",
+               "U02: decide-before-build item D1 needs two or more options", id="decide-one-option"),
+  pytest.param("default: (a); blocking: no", "default: (c); blocking: no",
+               "U02: decide-before-build item D1 default (c) is not one of its options", id="decide-default"),
+  pytest.param(D1, "- D1 Retry ceiling? owner: the owner; default: 5; blocking: no",
+               "U02: decide-before-build item must read `- D<n> <question> options: (a) <option>; (b) <option>", id="decide-egm-form"),
+  pytest.param("## Global constraints\n- Python 3.11, standard library only\n\n", "",
+               "no `## Global constraints` section", id="no-global-constraints"),
+]
+
+
+@pytest.mark.parametrize("old,new,message", GRAMMAR)
+def test_graph_section_grammar(world, old, new, message):
+  spec, sha, plan, card = planned(world)
+  text = plan_text(spec)
+  assert old in text
+  plan.write_text(text.replace(old, new, 1), encoding="utf-8")
+  code, out = graph(world, plan, card)
+  assert code == 1 and f"{plan}:" in out and message in out, out
