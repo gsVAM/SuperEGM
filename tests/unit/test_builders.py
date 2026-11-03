@@ -324,3 +324,32 @@ def test_launch_builder_refuses_each_precondition(world, monkeypatch, case, reas
   code, out = world.run("launch-builder", "--unit", UNIT, "--round", rnd, "--runcard", card)
   assert code == 1 and "launch-builder: " in out and reason in out, out
   assert not s.path("worktrees", UNIT).exists() and not s.path("launches", f"{UNIT}_r{rnd}_prompt.md").exists()
+
+
+def test_launch_builder_round_2_detaches_the_earlier_worktree_and_carries_the_review(world, monkeypatch):
+  s, card, hid, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0
+  assert world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)[0] == 0
+  assert world.run("record-launch", "--unit", UNIT, "--runcard", card)[0] == 0
+  r1, branch = s.path("worktrees", UNIT, "r1"), f"superegm/{hid}/U07"
+  (r1 / "src").mkdir(); (r1 / "src/worker.py").write_text("def w(): pass\n", encoding="utf-8")
+  git(["add", "-A"], r1); git(["commit", "-qm", "feat(S1): w"], r1); git(["push", "-q", "origin", branch], r1)
+  head = git(["rev-parse", "HEAD"], r1).strip()
+  git(["update-ref", f"refs/pull/{PR}/head", head], world.repo.parent / "origin.git")
+  (r1 / "scratch.txt").write_text("unsaved\n", encoding="utf-8")
+  Path(launches_of(s)[0]["result_file"] + ".exit").write_text("0\n", encoding="utf-8")
+  assert world.run("record-launch", "--unit", UNIT, "--exit", 0, "--runcard", card)[0] == 0
+  make_pr(world.gh, PR, head, branch=branch, closes=[(REPO, ISSUE)])
+  state = state_of(s); state["units"][UNIT]["pr"] = {"number": PR, "head": head, "base_ref": BASE}
+  s.path("state").write_text(json.dumps(state), encoding="utf-8")
+  world.gh.reviews[PR] = [{"id": 9, "user": {"login": "owner"}, "commit_id": head, "body": "**Review round 1 (head " + head[:7] + ")**\n- change-review-1-1 | high | src/worker.py:1 | regression: no | w does nothing"},
+                          {"id": 10, "user": {"login": "builder-bot"}, "commit_id": head, "body": "self review"}]
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", 2, "--runcard", card)
+  assert code == 0, out
+  assert git(["branch", "--show-current"], r1).strip() == "" and (r1 / "scratch.txt").is_file()   # detached, nothing removed
+  r2 = s.path("worktrees", UNIT, "r2")
+  assert git(["branch", "--show-current"], r2).strip() == branch and git(["rev-parse", "HEAD"], r2).strip() == head
+  prompt = s.path("launches", f"{UNIT}_r2_prompt.md").read_text(encoding="utf-8")
+  assert f"\n\n---\n\n# Review comments on PR #{PR}\n\n## owner · review 9 on {head[:7]}\n**Review round 1" in prompt and "self review" not in prompt
+  assert out.strip().splitlines()[-1].startswith(f"cd '{r2}' && env ")
