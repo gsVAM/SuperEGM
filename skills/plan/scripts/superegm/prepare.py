@@ -14,6 +14,7 @@ from superegm import review
 
 WRITES = frozenset(['foreman', 'review'])  # the store kinds this subcommand writes
 SKILLS = frozenset(['wave'])  # the skills whose card this subcommand accepts
+AGED = ("**Deviation", "**Decision D", "**Ruling:**")  # the comment kinds kept regardless of age (section 11)
 
 
 def register(subparsers):
@@ -84,8 +85,9 @@ def prepare(args, card):
   env = config["builder"]["gh_token_env"]
   login = core.gh(["api", "user", "-q", ".login"], token=os.environ.get(env) if env else None).strip()
   issue = record["number"]
+  since = max((e["posted_at"] for e in data["rounds"] if e.get("posted_at")), default=None)
   write_comments(r / "comments.md", (issue, core.gh_pages(f"repos/{repo}/issues/{issue}/comments")),
-                 (number, core.gh_pages(f"repos/{repo}/issues/{number}/comments")), login)
+                 (number, core.gh_pages(f"repos/{repo}/issues/{number}/comments")), since, login)
   entry.update({"head": head, "phase": "prepared", "merge_base": merge_base, "worktree": str(tree)})
   core.save_foreman(st, unit, data)
   previous = max((e["round"] for e in data["rounds"] if e.get("phase") == "posted"), default=None)
@@ -100,12 +102,15 @@ def require_base(pr: dict, base: str) -> None:
     raise review.Refusal(f"base: PR #{pr['number']} targets {pr.get('baseRefName')}, not {base}")
 
 
-def write_comments(path: Path, issue: tuple, pr: tuple, login: str) -> None:
-  """Line 1 `builder: <login>`, then each comment of `(number, comments)` its header line, the body and a
-  blank line."""
+def write_comments(path: Path, issue: tuple, pr: tuple, since, login: str) -> None:
+  """Line 1 `builder: <login>`, then each comment of `(number, comments)` created after `since` (the latest
+  `posted_at`; None keeps everything) or of an aged kind (`**Deviation`, `**Decision D`, `**Ruling:**`): its
+  header line, the body and a blank line."""
   lines = [f"builder: {login}"]
   for kind, (number, comments) in (("issue", issue), ("pr", pr)):
     for comment in comments:
+      if since and comment["created_at"] <= since and not comment["body"].startswith(AGED):
+        continue
       lines += [f"### {kind} #{number} comment {comment['id']} by {comment['user']['login']} at {comment['created_at']}",
                 comment["body"], ""]
   core.atomic_write(path, "\n".join(lines) + "\n")
