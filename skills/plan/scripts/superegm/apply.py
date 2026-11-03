@@ -112,7 +112,7 @@ def apply_writes(handoff: core.Handoff, writes, budget: Budget, save):
   for issue in listing:
     if "pull_request" in issue:
       continue
-    match = core.MARKER_RE.match((issue.get("body") or "").lstrip())
+    match = core.body.MARKER_RE.match((issue.get("body") or "").lstrip())
     if not match or match.group(1) != handoff.handoff_id:
       continue
     target = tracking if match.group(2) == "tracking" else units.setdefault(match.group(2), {})
@@ -136,7 +136,7 @@ def apply_writes(handoff: core.Handoff, writes, budget: Budget, save):
     if kind != "tracking" and not tracking.get("number"):
       raise core.HandoffError("tracking issue missing: it is created first")
     numbers = {u: d["number"] for u, d in units.items() if d.get("number")}
-    text = core.fill_numbers(body, numbers, tracking.get("number"))
+    text = core.body.fill_numbers(body, numbers, tracking.get("number"))
     budget.spend()
     number = create_issue(repo, title, text, label_set, handoff.artifact_dir)
     # Record the number before the id read: a failure between them must leave a

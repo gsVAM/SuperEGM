@@ -25,6 +25,8 @@ import tempfile
 import time
 from graphlib import CycleError, TopologicalSorter
 from pathlib import Path
+
+from . import body
 LABEL_RE = re.compile(r"^[^,\s]{1,50}$")
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 MENTION_CONFIG_RE = re.compile(r"^@[A-Za-z0-9][A-Za-z0-9-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)?(?:\[bot\])?$")
@@ -44,7 +46,6 @@ RISK_RE = re.compile(r"^(low|medium|high): (.+)$")
 DOD_RE = re.compile(r"^(\d+)\. (.+)$")
 DECIDE_RE = re.compile(
     r"^- (D\d+) (.+?) owner: (.+?); default: (.+?); blocking: (yes|no)$")
-MARKER_RE = re.compile(r"^<!-- egm:handoff=(\S+) unit=(\S+) -->")
 GEN_START, GEN_END = "<!-- egm:generated start -->", "<!-- egm:generated end -->"
 FIELDS = ("Objective", "Scope paths", "Design range", "Blocked by",
           "Shared files", "Risk", "Size")
@@ -89,7 +90,7 @@ DEFAULT_CONFIG = {
     "ci_wait_minutes": 30,
 }
 
-DEFAULT_TEMPLATE = """<!-- egm:handoff={{handoff_id}} unit={{unit_id}} -->
+DEFAULT_TEMPLATE = """<!-- superegm:handoff={{handoff_id}} unit={{unit_id}} spec={{spec_sha256}} -->
 **Objective.** {{objective}}
 
 **Scope.**
@@ -113,7 +114,7 @@ DEFAULT_TEMPLATE = """<!-- egm:handoff={{handoff_id}} unit={{unit_id}} -->
 Part of #{{tracking}}. Wave {{wave}}. Branch: `{{branch}}`
 """
 
-TRACKING_TEMPLATE = """<!-- egm:handoff={{handoff_id}} unit=tracking -->
+TRACKING_TEMPLATE = """<!-- superegm:handoff={{handoff_id}} unit=tracking spec={{spec_sha256}} -->
 Tracking issue for the build of `{{design}}`. Each unit below is one issue and one PR on a branch `{{branch_prefix}}/<unit>`; a unit starts when every unit it is blocked by has landed.
 
 **Units by wave.**
@@ -468,9 +469,9 @@ def load_config(repo_root: Path) -> dict:
 
 def check_template(template: str) -> None:
   first = template.splitlines()[0] if template else ""
-  if first != "<!-- egm:handoff={{handoff_id}} unit={{unit_id}} -->":
+  if first != "<!-- superegm:handoff={{handoff_id}} unit={{unit_id}} spec={{spec_sha256}} -->":
     raise HandoffError("issue template must start with the marker line "
-                       "`<!-- egm:handoff={{handoff_id}} unit={{unit_id}} -->`")
+                       "`<!-- superegm:handoff={{handoff_id}} unit={{unit_id}} spec={{spec_sha256}} -->`")
   for name in ("{{objective}}", "{{scope}}", "{{dod}}"):
     if name not in template:
       raise HandoffError(f"issue template lacks {name}")
@@ -886,6 +887,7 @@ class Handoff:
       shared.append(f"- `{path}`: " + ", ".join(parts))
     values = {
         "handoff_id": self.handoff_id, "unit_id": uid, "title": unit.title,
+        "spec_sha256": self.design_sha,
         "objective": unit.objective,
         "scope": "\n".join(f"- `{p}` ({a})" for p, a in unit.scope),
         "dod": "\n".join(f"- [ ] {item}" for item in unit.dod),
@@ -910,7 +912,7 @@ class Handoff:
       for path, _ in unit.shared:
         shared.setdefault(path, []).append(unit.id)
     shared_lines = [f"- `{p}`: " + ", ".join(sorted(set(us))) for p, us in sorted(shared.items())]
-    values = {"handoff_id": self.handoff_id, "design": self.design_ref(),
+    values = {"handoff_id": self.handoff_id, "spec_sha256": self.design_sha, "design": self.design_ref(),
               "branch_prefix": f"{BRANCH_PREFIX}/{self.handoff_id}",
               "waves": "\n".join(rows),
               "critical_path": " -> ".join(g.critical_path),
@@ -1036,15 +1038,6 @@ def substitute(template: str, values: dict) -> str:
   return re.sub(r"\{\{(\w+)\}\}", replace, template)
 
 
-def fill_numbers(body: str, numbers: dict, tracking=None) -> str:
-  def replace(match):
-    key = match.group(1)
-    if key == "tracking":
-      return f"#{tracking}" if tracking else match.group(0)
-    return f"#{numbers[key]}" if key in numbers else match.group(0)
-  return re.sub(r"#<([A-Za-z0-9]+)>", replace, body)
-
-
 # ---------------------------------------------------------------- state
 
 
@@ -1061,10 +1054,6 @@ def save_state(artifact_dir: Path, state: dict) -> None:
   """Replace the state file atomically: a truncating write interrupted here
   leaves invalid JSON and no handoff can be resumed from it."""
   atomic_write(state_path(artifact_dir), state)
-
-
-def normalise(body: str) -> str:
-  return "\n".join(line.rstrip() for line in body.replace("\r\n", "\n").split("\n")).strip("\n")
 
 
 # ---------------------------------------------------------------- scan

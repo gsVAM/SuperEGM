@@ -46,8 +46,8 @@ def run_verify(handoff: core.Handoff, writes=None):
           continue
         live = core.gh_json(["issue", "view", str(target["number"]), "-R", repo, "--json", "body,labels"])
         numbers = {u: d["number"] for u, d in units.items() if d.get("number")}
-        expected = core.fill_numbers(item[4], numbers, tracking.get("number"))
-        if core.normalise(live.get("body") or "") != core.normalise(expected):
+        expected = core.body.fill_numbers(item[4], numbers, tracking.get("number"))
+        if core.body.normalise(live.get("body") or "") != core.body.normalise(expected):
           problems.append(f"MISMATCH body of #{target['number']} ({item[1]}) differs from the rendered body")
         live_labels = {l["name"] for l in live.get("labels", [])}
         expected_labels = set(item[3])
