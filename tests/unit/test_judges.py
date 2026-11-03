@@ -191,3 +191,36 @@ def test_runcard_rules(world, case):
     assert world.run("runcard", "close", wave)[0] == 0
     code, out = record(world, pid, wave, 1, "fable", {"Q1": "a", "Q2": "a"})
   assert code == 1 and "runcard: " in out, out
+
+
+def test_record_claude_verdict(world):
+  pid, card, _ = open_panel(world)
+  code, out = record(world, pid, card, 1, "fable", {"Q1": "a", "Q2": "c"},
+                     extra=["--model", "fable:fable-5-1", "--effort", "max:max"])
+  assert (code, out.strip()) == (0, "recorded"), out
+  assert (world.artifacts / "judges" / pid / "round-1/fable.md").read_text(encoding="utf-8") == "Q1: (a)\nQ2: (c)\n"
+  entry = panel_json(world, pid)["rounds"]["1"]["fable"]
+  assert (entry["isolation"], entry["model"], entry["effort"]) == ("clean", "fable:fable-5-1", "max:max")
+  assert entry["options"] == {"Q1": "a", "Q2": "c"}
+  assert record(world, pid, card, 1, "opus", {"Q1": "a", "Q2": "c"}, isolation="exposed:SubagentStart hook")[0] == 0
+  opus = panel_json(world, pid)["rounds"]["1"]["opus"]
+  assert (opus["isolation"], opus["model"], opus["effort"]) == ("exposed:SubagentStart hook", "opus:opus", "max:max")
+  assert f"judges {pid}: round 1 fable recorded (clean)" in journal(world)
+
+
+@pytest.mark.parametrize("judge, rnd, answers, isolation, reason", [
+    ("sonnet", 1, {"Q1": "a", "Q2": "a"}, "clean", "judges: unknown judge sonnet"),
+    ("fable", 0, {"Q1": "a", "Q2": "a"}, "clean", "judges: round must be 1..5"),
+    ("fable", 2, {"Q1": "a", "Q2": "a"}, "clean", "judges: round 1 not diffed"),
+    ("fable", 1, {"Q1": "a"}, "clean", "judges: verdict file: no answer for Q2"),
+    ("fable", 1, {"Q1": "a", "Q2": "a"}, "dirty", "judges: isolation must be clean or exposed:<what>"),
+    ("fable", 1, {"Q1": "a", "Q2": "a"}, None, "judges: --isolation required with --verdict"),
+    ("fable", 1, "again", "clean", "judges: round 1: fable already recorded"),
+])
+def test_record_refusals(world, judge, rnd, answers, isolation, reason):
+  pid, card, _ = open_panel(world)
+  if answers == "again":
+    answers = {"Q1": "a", "Q2": "a"}
+    assert record(world, pid, card, 1, "fable", answers)[0] == 0
+  code, out = record(world, pid, card, rnd, judge, answers, isolation=isolation)
+  assert code == 1 and reason in out, out
