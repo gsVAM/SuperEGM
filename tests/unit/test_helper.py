@@ -715,7 +715,7 @@ def test_verify_refuses_a_plan_edited_since_the_confirmation(world):
   for argv in (("status", "--plan", world.plan),
                ("launch", "--plan", world.plan, "--wave", 1, "--units", "U03")):
     code, out = world.run(*argv)
-    assert code == 1 and "no longer matches the confirmed snapshot" in out, argv
+    assert code == 1 and "is filed and frozen" in out, argv
 
 
 def test_apply_scans_again_with_the_current_rules(world):
@@ -1044,8 +1044,7 @@ def test_an_edit_the_bodies_do_not_show_still_blocks(world):
       text.replace(marker, marker + "\n\nBuild note: use the legacy client.", 1),
       encoding="utf-8")
   code, out = world.run("status", "--plan", world.plan)
-  assert code == 1 and "differ from the pair the gate reviewed" in out
-  assert "unit_<id>.md" in out
+  assert code == 1 and "U01 is filed and frozen" in out
 
 
 def test_an_answer_does_not_survive_its_question_changing(world):
@@ -1097,18 +1096,6 @@ def test_apply_refuses_a_body_invisible_plan_edit(world):
   assert code == 1 and "differ from the pair the gate reviewed" in out, out
   assert not any(c[:2] == ["issue", "create"] for c in world.gh.calls)
 
-
-def test_prepare_refuses_a_unit_file_the_plan_does_not_render(world):
-  """R6-03: the plan hash says nothing about unit_<id>.md, which is the file
-  the foreman actually reviews the pull request against."""
-  gh = applied(world)
-  make_pr(gh, 70, "a" * 40, closes=[(REPO, 2)])
-  assert world.run("status", "--plan", world.plan, "--watch", "U01=70")[0] == 0
-  unit_file = unit_path(world, "U01")
-  unit_file.write_text(unit_file.read_text(encoding="utf-8")
-                       + "\n\nExtra instruction nobody approved.\n", encoding="utf-8")
-  code, out = world.run("prepare", "--plan", world.plan, "--unit", "U01")
-  assert code == 1 and "not what the reviewed plan renders" in out, out
 
 
 def test_ci_reads_every_page_of_status_contexts(world):
@@ -1741,3 +1728,30 @@ def test_state_plan_is_the_outside_path_and_graph_copies_the_plan(world):
   (world.artifacts / "state.json").unlink()
   code, out = world.run("scan")
   assert code == 1 and "run `graph --plan <file>` first" in out
+
+
+def test_require_frozen_units_refuses_a_filed_units_drift(world):
+  applied(world)
+  assert world.run("status")[0] == 0
+  text = world.plan.read_text(encoding="utf-8")
+  world.plan.write_text(text.replace("An in-memory queue with enqueue and dequeue exists.", "A queue exists."), encoding="utf-8")
+  for argv in (("status",), ("launch", "--wave", "1", "--units", "U01"), ("prepare", "--unit", "U01")):
+    world.gh.calls.clear()
+    code, out = world.run(*argv)
+    assert code == 1 and "U01 is filed and frozen: its section in handoff_plan.md differs from the stored one" in out, (argv, out)
+    assert not world.gh.calls
+  world.plan.write_text(text, encoding="utf-8")
+  state = state_of(world)
+  state["filings"] = [{"sha256": state["confirmed_sha256"], "writes": state["confirmed"]["writes"], "at": "2026-11-03T00:00:00Z"}]
+  (world.artifacts / "state.json").write_text(json.dumps(state), encoding="utf-8")
+  assert world.run("status")[0] == 0
+  unit_file = world.artifacts / state["handoff_id"][-6:] / "unit_U01.md"
+  unit_file.write_text(unit_file.read_text(encoding="utf-8") + "\n## Decisions answered since the issue was posted\n\n- none\n", encoding="utf-8")
+  assert world.run("status")[0] == 0, "text outside the fence is not the body"
+  unit_file.write_text(unit_file.read_text(encoding="utf-8").replace("**Objective.** An in-memory queue", "**Objective.** A queue"), encoding="utf-8")
+  code, out = world.run("status")
+  assert code == 1 and "U01 is filed and frozen: unit_U01.md no longer carries the filed body" in out
+  for name in ("status", "launch", "prepare"):
+    source = (SCRIPTS / f"superegm/{name}.py").read_text(encoding="utf-8")
+    assert "require_frozen_units" in source and "require_confirmed_plan" not in source and "require_reviewed_pair" not in source
+  assert "not what the reviewed plan renders" not in (SCRIPTS / "superegm/prepare.py").read_text(encoding="utf-8")
