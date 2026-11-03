@@ -382,8 +382,10 @@ def test_judges_skill_body():
   assert {s["scenario_id"] for s in scenarios["scenarios"]} >= {"advisory_never_applies", "astra_down_runs_claude_only"}
 
 
-REMOVED = ("--judges 1", "--judges 3", "Blocker |", "| Major", "| Nit", "egm-", "egm_handoff", "egm:",
-           "synthesizer", "goldfish_dispositions", "EGM_ASTRA", "Mode: BRAINSTORM")
+REMOVED = ("--judges 1", "--judges 3", "Blocker |", "| Major", "| Nit", "synthesizer", "goldfish_dispositions",
+           "EGM_ASTRA", "Mode: BRAINSTORM")
+# EGM's own names (egm-<skill>, egm:<skill>, egm_handoff); SuperEGM's (superegm:judge, superegm-judges) are not removed forms.
+EGM_NAME_RE = re.compile(r"(?<!super)egm[-:_]")
 
 
 @pytest.mark.parametrize("path", [
@@ -394,3 +396,4 @@ def test_no_removed_forms(path):
   text = (ROOT / path).read_text(encoding="utf-8")
   for term in REMOVED:
     assert term not in text, f"{path}: {term}"
+  assert not EGM_NAME_RE.search(text), f"{path}: {EGM_NAME_RE.search(text).group()}"
