@@ -224,3 +224,32 @@ def test_record_refusals(world, judge, rnd, answers, isolation, reason):
     assert record(world, pid, card, 1, "fable", answers)[0] == 0
   code, out = record(world, pid, card, rnd, judge, answers, isolation=isolation)
   assert code == 1 and reason in out, out
+
+
+@pytest.mark.parametrize("result, expect", [
+    ({"status": "completed", "effective_model": "gpt-6-astra", "effective_effort": "xhigh",
+      "response": {"verdict": "REVISE", "summary": "Q1: (a)\nreason: the evidence shows it\nQ2: (c)\n"}}, "recorded"),
+    ({"status": "failed", "error": "codex not logged in"}, "not run (codex not logged in)"),
+    ({"status": "completed", "response": {"verdict": "BLOCKED", "limitations": "question file unreadable"}},
+     "not run (blocked: question file unreadable)"),
+    ({"status": "running"}, "not run (killed)"),
+    ({"status": "completed", "response": {"verdict": "APPROVED", "summary": "Q1: (a)\n"}}, "not run (no answer for Q2)"),
+])
+def test_record_astra_result(world, result, expect):
+  pid, card, _ = open_panel(world)
+  path = world.repo.parent / "result.json"
+  path.write_text(json.dumps(result), encoding="utf-8")
+  code, out = world.run("judges", "record", "--panel", pid, "--round", 1, "--judge", "astra",
+                        "--result", path, "--runcard", card)
+  assert (code, out.strip()) == (0, expect), out
+  panel = panel_json(world, pid)
+  entry = panel["rounds"]["1"]["astra"]
+  if expect == "recorded":
+    requested = panel["judges"]["astra"]["model"]
+    assert entry == {"isolation": "runner", "model": f"{requested}:gpt-6-astra",
+                     "effort": f"{panel['judges']['astra']['effort']}:xhigh",
+                     "options": {"Q1": "a", "Q2": "c"}, "recorded_at": entry["recorded_at"]}
+    assert (world.artifacts / "judges" / pid / "round-1/astra.md").read_text(encoding="utf-8") == result["response"]["summary"]
+  else:
+    assert entry == {"not_run": expect[len("not run ("):-1], "recorded_at": entry["recorded_at"]}
+    assert f"judges {pid}: round 1 astra not run ({entry['not_run']})" in journal(world)
