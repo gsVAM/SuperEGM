@@ -1,0 +1,13 @@
+{
+  "name": "superegm",
+  "owner": {
+    "name": "gsVAM"
+  },
+  "plugins": [
+    {
+      "name": "superegm",
+      "source": "./",
+      "description": "One Claude Code plugin for the whole workflow: brainstorm, spec review, plan, plan review, file, wave, integrate."
+    }
+  ]
+}

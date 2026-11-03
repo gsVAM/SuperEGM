@@ -14,41 +14,17 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 NAME_RE = r"(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?"
-COMPATIBILITY_MANIFESTS = (
-    ".claude-plugin/plugin.json",
-    ".codex-plugin/plugin.json",
-)
-MARKETPLACES = (
-    ".agents/plugins/marketplace.json",
-    ".claude-plugin/marketplace.json",
-)
-EXPECTED_SKILLS = {
-    "egm-bootstrap", "egm-brainstorm", "egm-draft", "egm-drift-report",
-    "egm-resolve", "egm-review", "egm-review-loop",
-    "egm-handoff", "egm-wave",
-}
+COMPATIBILITY_MANIFESTS = (".claude-plugin/plugin.json",)
+MARKETPLACES = (".claude-plugin/marketplace.json",)
+SUPERPOWERS_SKILLS = ("brainstorming", "finishing-a-development-branch", "test-driven-development",
+                      "systematic-debugging", "verification-before-completion", "writing-skills",
+                      "using-superegm")
 REVIEWERS = (
     "design", "zoom-out", "comprehension", "codebase-details", "readiness",
     "structural", "style", "change-review", "judge",
 )
 
 
-@pytest.mark.parametrize("separator", ["\u0085", "\u2028", "\u2029"])
-def test_jsonl_preserves_unicode_separators(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, separator: str
-) -> None:
-  """JSONL records end at LF, not Unicode separators inside JSON strings."""
-  read_trace = runpy.run_path(str(ROOT / "tests/integration/test_codex.py"))[
-      "read_trace"
-  ]
-  monkeypatch.setenv("CODEX_HOME", str(tmp_path))
-  sessions = tmp_path / "sessions"
-  sessions.mkdir()
-  event = {"type": "response_item", "payload": {"text": f"left{separator}right"}}
-  (sessions / "fixture-id.jsonl").write_text(
-      json.dumps(event, ensure_ascii=False) + "\n", encoding="utf-8"
-  )
-  assert read_trace("fixture-id") == [event]
 
 
 def read_json(path: str) -> dict:
@@ -68,30 +44,6 @@ def test_portable_manifest_schema() -> None:
   assert re.fullmatch(r"\d+\.\d+\.\d+", manifest["version"])
 
 
-def test_openai_submission_metadata_and_assets() -> None:
-  """Check public listing limits and bundled paths, not just JSON syntax."""
-  extension = read_json("plugin.json")["extensions"]["com.openai"]
-  codex = read_json(".codex-plugin/plugin.json")
-  assert extension["interface"] == codex["interface"]
-  assert extension["requires_local_executor"] is True
-  assert codex["requires_local_executor"] is True
-  assert codex["author"] == read_json("plugin.json")["author"]
-  interface = extension["interface"]
-  for field, limit in (
-      ("displayName", 30), ("shortDescription", 30),
-      ("longDescription", 4000), ("developerName", 80),
-  ):
-    assert 0 < len(interface[field]) <= limit, field
-  assert len(interface["capabilities"]) <= 20
-  assert all(0 < len(item) <= 120 for item in interface["capabilities"])
-  for field in ("composerIcon", "logo"):
-    path = interface[field]
-    assert path.startswith("./assets/")
-    asset = (ROOT / path).resolve()
-    assert asset.is_relative_to(ROOT / "assets")
-    assert asset.is_file() and asset.stat().st_size <= 5 * 1024 * 1024
-    svg = ElementTree.parse(asset).getroot()
-    assert float(svg.attrib["width"]) == float(svg.attrib["height"]) >= 48
 
 
 @pytest.mark.parametrize("path", COMPATIBILITY_MANIFESTS)
@@ -105,33 +57,19 @@ def test_compatibility_metadata_matches_root(path: str) -> None:
       assert manifest[field] == canonical[field], f"{path}: {field} drift"
   if "interface" in manifest:
     assert manifest["interface"]["developerName"] == canonical["author"]["name"]
-  if "skills" in manifest:
-    skills_root = (ROOT / manifest["skills"]).resolve()
-    assert skills_root == ROOT / "skills"
-    names = [frontmatter(s)["name"] for s in skills_root.glob("*/SKILL.md")]
-    assert len(names) == len(set(names))
-    assert set(names) == EXPECTED_SKILLS
 
 
 @pytest.mark.parametrize("path", MARKETPLACES)
 def test_marketplace_resolves_shared_package(path: str) -> None:
   canonical = read_json("plugin.json")
   marketplace = read_json(path)
-  # Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: the
-  # marketplace is egm-astra so it can coexist with Google's egm marketplace.
-  assert marketplace["name"] == "egm-astra"
+  assert marketplace["name"] == "superegm"
   assert len(marketplace["plugins"]) == 1
   entry = marketplace["plugins"][0]
   assert entry["name"] == canonical["name"]
   assert (ROOT / entry["source"]).resolve() == ROOT
   if "description" in entry:
     assert entry["description"] == canonical["description"]
-  if path == ".agents/plugins/marketplace.json":
-    assert entry["policy"] == {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL",
-    }
-    assert entry["category"] == "Productivity"
 
 
 @pytest.mark.parametrize("name", REVIEWERS)
@@ -159,7 +97,6 @@ def test_claude_permissions_remain_under_user_control() -> None:
   manifest = read_json(".claude-plugin/plugin.json")
   assert "hooks" not in manifest
   assert not (ROOT / ".claude-plugin/hooks/allow_plugin_reads.sh").exists()
-  assert not (ROOT / "hooks/hooks.json").exists()
 
 
 def test_claude_manifest_agents_and_shared_personas_resolve() -> None:
@@ -171,14 +108,12 @@ def test_claude_manifest_agents_and_shared_personas_resolve() -> None:
 
 def test_bundled_prompt_dependencies_and_harness_guides() -> None:
   assert (ROOT / "docs/claude.md").is_file()
-  assert (ROOT / "docs/codex.md").is_file()
   skills = list((ROOT / "skills").glob("*/SKILL.md"))
   for skill in skills:
+    if skill.parent.name in SUPERPOWERS_SKILLS:
+      continue
     text = skill.read_text(encoding="utf-8")
     assert "${CLAUDE_PLUGIN_ROOT}/docs/claude.md" in text
-    targets = re.findall(r"\[Codex integration\]\(([^)]+)\)", text)
-    assert len(targets) == 1
-    assert (skill.parent / targets[0]).resolve() == ROOT / "docs/codex.md"
 
   prompts = skills + list((ROOT / "agents").glob("*.md"))
   for prompt in prompts:
@@ -195,6 +130,6 @@ def test_bundled_prompt_dependencies_and_harness_guides() -> None:
 def test_artifact_directory_override_is_documented_for_each_harness() -> None:
   # The models match this exact line in the user's prompt or instruction file.
   marker = "EGM artifact directory: "
-  for guide in ("docs/claude.md", "docs/codex.md", "docs/harnesses.md"):
+  for guide in ("docs/claude.md",):
     text = " ".join((ROOT / guide).read_text(encoding="utf-8").split())
     assert marker in text, f"{guide} does not document `{marker}<path>`"

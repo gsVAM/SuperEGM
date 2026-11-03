@@ -1,0 +1,35 @@
+{
+  "name": "superegm",
+  "version": "1.0.0",
+  "description": "One Claude Code plugin for the whole workflow: brainstorm, spec review, plan, plan review, file, wave, integrate.",
+  "author": {
+    "name": "gsVAM"
+  },
+  "homepage": "https://github.com/gsVAM/superegm",
+  "repository": "https://github.com/gsVAM/superegm",
+  "license": "Apache-2.0",
+  "displayName": "SuperEGM",
+  "keywords": [
+    "spec-driven-development",
+    "design-review",
+    "tdd",
+    "workflow"
+  ],
+  "icon": "./.claude-plugin/icon.png",
+  "documentationUrl": "https://github.com/gsVAM/superegm/blob/main/docs/claude.md",
+  "supportUrl": "https://github.com/gsVAM/superegm/issues",
+  "privacyPolicyUrl": "https://github.com/gsVAM/superegm/blob/main/docs/privacy.md",
+  "termsOfServiceUrl": "https://github.com/gsVAM/superegm/blob/main/LICENSE",
+  "agents": [
+    "./.claude-plugin/agents/change-review.md",
+    "./.claude-plugin/agents/codebase-details.md",
+    "./.claude-plugin/agents/comprehension.md",
+    "./.claude-plugin/agents/design.md",
+    "./.claude-plugin/agents/foreman.md",
+    "./.claude-plugin/agents/judge.md",
+    "./.claude-plugin/agents/readiness.md",
+    "./.claude-plugin/agents/structural.md",
+    "./.claude-plugin/agents/style.md",
+    "./.claude-plugin/agents/zoom-out.md"
+  ]
+}
