@@ -261,3 +261,29 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   assert line.endswith(f"' --output-format json > '{result}'; echo $? > '{result}.exit'")
   assert "ghp_builder" not in out
   assert not s.path("launches", f"{UNIT}.json").exists()           # the record is record-launch's
+
+
+def test_record_launch_appends_running_then_records_the_exit(world, monkeypatch):
+  s, card, hid, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0
+  code, out = world.run("record-launch", "--unit", UNIT, "--runcard", card)
+  assert code == 1 and "record-launch: U07 launch 1 has no prompt file: run launch-builder first" in out
+  assert world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)[0] == 0
+  code, out = world.run("record-launch", "--unit", UNIT, "--runcard", card)
+  assert code == 0 and out.strip() == "U07 launch 1 running"
+  entry = launches_of(s)[0]
+  prompt = s.path("launches", f"{UNIT}_r1_prompt.md")
+  assert entry == {"round": 1, "worktree": str(s.path("worktrees", UNIT, "r1")), "branch": f"superegm/{hid}/U07", "started_at": entry["started_at"],
+                   "status": "running", "result_file": str(s.path("launches", f"{UNIT}_r1_result.json")),
+                   "prompt_sha256": hashlib.sha256(prompt.read_bytes()).hexdigest()}
+  code, out = world.run("record-launch", "--unit", UNIT, "--runcard", card)
+  assert code == 1 and "record-launch: U07 launch 1 is already recorded (running)" in out
+  code, out = world.run("record-launch", "--unit", UNIT, "--exit", 0, "--runcard", card)
+  assert code == 1 and "record-launch: U07 launch 1 has no exit file" in out
+  Path(entry["result_file"] + ".exit").write_text("1\n", encoding="utf-8")
+  code, out = world.run("record-launch", "--unit", UNIT, "--exit", 0, "--runcard", card)
+  assert code == 1 and "record-launch: the exit file of U07 launch 1 says 1, not 0" in out
+  code, out = world.run("record-launch", "--unit", UNIT, "--exit", 1, "--runcard", card)
+  assert code == 0 and out.strip() == "U07 launch 1 exited 1" and launches_of(s)[0]["status"] == "exited 1"
+  assert "U07 launch 1 exited 1" in s.path("journal").read_text(encoding="utf-8")
