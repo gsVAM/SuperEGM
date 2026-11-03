@@ -12,6 +12,8 @@ QUESTION_RE = re.compile(r"^## Q(\d+) (.+)$")
 OPTION_RE = re.compile(r"^- \(([a-z])\) (.+)$")
 ANSWER_RE = re.compile(r"^Q(\d+): \(([a-z])\)\s*$")
 NOTE_KEYS = {"reason": "reason", "would change my mind": "would_change"}
+DEFAULT_MEMBERS = {"fable": {"via": "adapter"}, "opus": {"via": "adapter"}, "astra": {"via": "runner"}}
+VENDOR_OF = {"adapter": "anthropic", "runner": "openai"}
 
 
 def parse_questions(text: str) -> list[dict]:
@@ -68,6 +70,25 @@ def parse_verdict(text: str, questions: list[dict]) -> dict[str, dict]:
     else:
       raise ValueError(f"line {n}: expected `Q<n>: (<id>)`")
   return answers
+
+
+def judge_members(config: dict) -> dict[str, dict]:
+  """`config.judges.members` as `{id: {via, vendor, model, effort}}`; a list of
+  dicts (keyed `id`, or `name` as `init` writes it) or of ids is normalised."""
+  judges_cfg = config.get("judges") or {}
+  astra = config.get("astra") or {}
+  members = judges_cfg.get("members") or DEFAULT_MEMBERS
+  if isinstance(members, list):
+    members = {(m if isinstance(m, str) else m.get("id") or m.get("name")): ({} if isinstance(m, str) else m)
+               for m in members}
+  out = {}
+  for jid, spec in members.items():
+    via = spec.get("via", "runner" if jid == "astra" else "adapter")
+    runner = via == "runner"
+    out[jid] = {"via": via, "vendor": VENDOR_OF[via],
+                "model": spec.get("model") or (astra.get("model", "gpt-6-astra") if runner else jid),
+                "effort": spec.get("effort") or (astra.get("effort", "xhigh") if runner else "max")}
+  return out
 
 
 def register(subparsers):
