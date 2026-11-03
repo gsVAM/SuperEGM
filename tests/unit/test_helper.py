@@ -122,7 +122,7 @@ def test_a_completed_label_write_binds_the_destination(world):
   """R3-03: created_anything ignored labels, so a bounded apply that only made
   labels left the destination free to move."""
   dry_run(world)
-  assert world.run("apply", "--plan", world.plan, "--yes", "--max-writes", 2)[0] == 0
+  assert world.run("apply", "--spec", world.spec, "--yes", "--max-writes", 2)[0] == 0
   state = state_of(world)
   assert not any(u.get("number") for u in state["units"].values()), "this bounded apply must not reach an issue"
   assert "done" in state["labels"].values()
@@ -422,7 +422,7 @@ def test_runcard_refusals(world, setup, unit, reason):
 
 
 GATED = [(("approve-spec", "--spec", "SPEC", "--yes"), "review-spec"), (("graph",), "plan"),
-         (("gate", "--pass", "--spec", "SPEC"), "file"), (("dry-run", "--spec", "SPEC"), "file"), (("apply", "--yes"), "file"),
+         (("gate", "--pass", "--spec", "SPEC"), "file"), (("dry-run", "--spec", "SPEC"), "file"), (("apply", "--yes", "--spec", "SPEC"), "file"),
          (("verify",), "file"), (("status",), "wave"), (("launch",), "wave"),
          (("decide", "--unit", "U03", "--decision", "D2", "--answer", "25"), "plan"),
          (("record-launch", "--unit", "U01"), "wave"),

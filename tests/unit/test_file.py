@@ -288,6 +288,21 @@ def test_dry_run_refuses_101_units_missing_extra_and_warns_above_450(world):
   assert "WARNING" in text and "--max-writes" in text
 
 
+def test_apply_appends_the_filing_and_base_at_start_before_its_first_write(world):
+  spec, plan, handoff_id, card = dry_run(world)
+  world.gh.read_only = True  # the fake raises on the first write
+  with pytest.raises(AssertionError, match="write in a read-only run"):
+    world.run("apply", "--spec", spec, "--runcard", card, "--yes")
+  state = state_of(world)
+  assert [f["sha256"] for f in state["filings"]] == [state["confirmed_sha256"]]
+  assert state["filings"][0]["writes"] == state["confirmed"]["writes"]
+  assert state["base_at_start"] == git(["rev-parse", "main"], world.repo).strip()  # the config's default `base`
+  assert not world.gh.issues and all(s != "done" for s in state["labels"].values())
+  journal = (world.artifacts / "journal.md").read_text(encoding="utf-8")
+  assert f"filing {state['confirmed_sha256'][:12]}: 2 units (U01, U02)" in journal
+  assert "Create: automatic" not in journal
+
+
 def test_apply_refusals(world):
   dry_run(world)
   code, out = world.run("apply", "--plan", world.plan)
