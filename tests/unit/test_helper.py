@@ -559,7 +559,7 @@ def test_removed_mechanisms_are_not_named(path, pattern):
 
 
 MOVED = [("test_plan.py", "test_scan_banned_terms_mentions_and_size"),
-         ("test_file.py", "test_apply_creates_in_order_and_rerun_writes_nothing"),
+         ("test_file.py", "test_apply_creates_labels_issues_and_links_in_order_and_a_rerun_writes_nothing"),
          ("test_file.py", "test_subprocess_command_shape_with_fake_gh_on_path"),
          ("test_file.py", "test_marker_recovery_finds_issues_created_before_a_crash"),
          ("test_builders.py", "test_launch_refuses_each_precondition"),

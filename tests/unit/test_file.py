@@ -330,38 +330,33 @@ def test_apply_refusals(world):
   assert not any(c[0] in ("label", "issue") for c in world.gh.calls)
 
 
-def test_apply_creates_in_order_and_rerun_writes_nothing(world):
-  dry_run(world)
+def test_apply_creates_labels_issues_and_links_in_order_and_a_rerun_writes_nothing(world):
+  spec, plan, handoff_id, card = dry_run(world)
   world.gh.calls.clear()
-  code, out = world.run("apply", "--plan", world.plan, "--yes")
+  code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes")
   assert code == 0, out
-  gh = world.gh
-  labels = [c[2] for c in gh.calls if c[0] == "label"]
-  assert labels == ["superegm:unit", "superegm:tracking", "superegm:handoff-" + state_of(world)["handoff_id"],
-                    "superegm:wave-1", "superegm:wave-2", "superegm:wave-3"]
+  gh, six = world.gh, handoff_id[-6:]
+  assert [c[2] for c in gh.calls if c[0] == "label"] == [
+      "superegm:unit", "superegm:tracking", f"superegm:handoff-{six}", "superegm:stopped", "superegm:wave-1", "superegm:wave-2"]
   assert "bug" in gh.labels and all("--force" not in c for c in gh.calls)
-  creates = [c for c in gh.calls if c[:2] == ["issue", "create"]]
-  titles = [c[c.index("--title") + 1] for c in creates]
-  assert titles == ["Build: Webhook delivery", "U01: Webhook queue", "U02: Delivery worker", "U03: Admin endpoint"]
-  first_label_or_issue = next(i for i, c in enumerate(gh.calls) if c[0] in ("label", "issue"))
-  first_issue = next(i for i, c in enumerate(gh.calls) if c[:2] == ["issue", "create"])
-  assert first_label_or_issue < first_issue
-  assert gh.issues[3]["body"].count("#1") >= 1 and "**Blocked by.** #2" in gh.issues[3]["body"]
-  assert "after #2, before U03 (Admin endpoint)" in gh.issues[3]["body"]
-  assert "**Blocked by.** #3" in gh.issues[4]["body"]
-  assert gh.issues[2]["labels"] == ["superegm:handoff-" + state_of(world)["handoff_id"], "superegm:unit", "superegm:wave-1"]
-  assert world.sleeps.count(1) >= 4
-  assert gh.sub_issues[1] == [gh.issues[2]["id"], gh.issues[3]["id"], gh.issues[4]["id"]]
-  assert gh.blocked_by == {3: [gh.issues[2]["id"]], 4: [gh.issues[3]["id"]]}
+  titles = [c[c.index("--title") + 1] for c in gh.calls if c[:2] == ["issue", "create"]]
+  assert titles == ["Build: Sample design", "U01: Queue", "U02: Worker"]
+  assert gh.issues[1]["labels"] == [f"superegm:handoff-{six}", "superegm:tracking"]
+  assert gh.issues[2]["labels"] == [f"superegm:handoff-{six}", "superegm:unit", "superegm:wave-1"]
+  assert gh.issues[1]["body"].startswith(f"<!-- superegm:handoff={handoff_id} unit=tracking spec=")
+  body = gh.issues[3]["body"]
+  assert body.startswith(f"<!-- superegm:handoff={handoff_id} unit=U02 spec=")
+  assert "#2" in body and "Part of #1" in body and "#<" not in body
+  assert gh.sub_issues[1] == [gh.issues[2]["id"], gh.issues[3]["id"]] and gh.blocked_by == {3: [gh.issues[2]["id"]]}
   state = state_of(world)
-  assert state["units"]["U02"]["number"] == 3 and state["tracking"]["number"] == 1
-  assert state["links"]["blocked:U03<-U02"] == "done" and state["verify"]["complete"] is True
-  assert state["verify"]["problems"] == [] and state["verify"]["sha256"] == state["confirmed_sha256"]
-  assert state["verify"]["checked"] == "15 of 15"
+  assert state["tracking"]["number"] == 1 and state["tracking"]["filing"] == state["confirmed_sha256"]
+  assert state["units"]["U02"]["number"] == 3 and state["links"]["blocked:U02<-U01"] == "done"
+  assert state["verify"]["complete"] is True and state["verify"]["problems"] == []
+  assert state["verify"]["checked"] == "12 of 12" and state["verify"]["sha256"] == state["confirmed_sha256"]
   gh.calls.clear()
-  code, out = world.run("apply", "--plan", world.plan, "--yes")
-  assert code == 0, out
-  assert not any(c[0] == "label" or c[:2] == ["issue", "create"] or "POST" in c for c in gh.calls)
+  assert world.run("apply", "--spec", spec, "--runcard", card, "--yes")[0] == 0
+  assert not any(c[0] == "label" or c[:2] in (["issue", "create"], ["issue", "edit"]) or "POST" in c for c in gh.calls)
+  assert len(state_of(world)["filings"]) == 1
 
 
 def test_apply_state_saved_after_each_write_and_422_link_reread(world):
