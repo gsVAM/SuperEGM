@@ -68,3 +68,39 @@ def test_nothing_not_kept_and_no_source_tree_is_in_the_repository() -> None:
     assert "codex.md" not in text and "harnesses.md" not in text, doc
   for skill in ROOT.glob("skills/*/SKILL.md"):
     assert "[Codex integration]" not in skill.read_text(encoding="utf-8"), skill
+
+
+SP_KEPT = (
+    "LICENSE-MIT", "skills/brainstorming/SKILL.md", "skills/finishing-a-development-branch/SKILL.md",
+    "skills/test-driven-development/SKILL.md", "skills/test-driven-development/writing-good-tests.md",
+    "skills/systematic-debugging/SKILL.md", "skills/systematic-debugging/root-cause-tracing.md",
+    "skills/systematic-debugging/find-polluter.sh", "skills/verification-before-completion/SKILL.md",
+    "skills/writing-skills/SKILL.md", "skills/writing-skills/anthropic-best-practices.md",
+    "skills/writing-skills/testing-skills-with-subagents.md", "skills/writing-skills/render-graphs.js",
+    "skills/writing-skills/references/skill_discovery_optimization.md",
+    "skills/using-superegm/SKILL.md", "skills/using-superegm/references/claude-code-tools.md",
+    "skills/plan/references/writing_plans.md", "skills/wave/references/builder_orders.md",
+)
+SP_NOT_KEPT = (
+    "skills/brainstorming/scripts", "skills/brainstorming/visual-companion.md",
+    "skills/brainstorming/builder-check-prompt.md", "skills/using-superpowers", "skills/writing-plans",
+    "skills/executing-plans", "skills/subagent-driven-development", "skills/requesting-code-review",
+    "skills/receiving-code-review", "skills/dispatching-parallel-agents", "skills/using-git-worktrees",
+    "skills/diagnosing-superpowers",
+) + tuple(f"skills/using-superegm/references/{h}-tools.md"
+          for h in ("codex", "gemini", "pi", "antigravity", "hermes", "muse"))
+
+
+def test_superpowers_files_are_kept_under_the_section_14_names() -> None:
+  missing = [p for p in SP_KEPT if not (ROOT / p).is_file()]
+  present = [p for p in SP_NOT_KEPT if (ROOT / p).exists()]
+  assert (missing, present) == ([], [])
+  licence = (ROOT / "LICENSE-MIT").read_text(encoding="utf-8")
+  assert licence.startswith("MIT License") and "Copyright (c) 2025 Jesse Vincent" in licence
+  using = (ROOT / "skills/using-superegm/SKILL.md").read_text(encoding="utf-8")
+  assert using.count("-tools.md") == 1 and "references/claude-code-tools.md" in using
+  writing = (ROOT / "skills/writing-skills/SKILL.md").read_text(encoding="utf-8")
+  assert "codex-tools.md" not in writing and "gemini-tools.md" not in writing
+  assert "## Skill Discovery Optimization (SDO)" not in writing
+  assert "references/skill_discovery_optimization.md" in writing
+  assert len(writing.split("---", 2)[2].strip().encode("utf-8")) <= 24_000
