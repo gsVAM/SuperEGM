@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from superegm import store, atomic_write
 from superegm.review import parse_findings
+from superegm.review import derive_what_ran
 from superegm.review import PANEL_OF
 
 from conftest import DESIGN, git as conftest_git   # S2's `git(world, *args)` fixture shadows conftest's; the EGM tests go at S12
@@ -254,3 +255,27 @@ def test_record_set_and_foreman_reviewers(world):
   assert rjson(world, hid, "round-1.json")["what_ran"] == "not run (change-review: no record)"   # foreman never counts
   assert record(world, hid, 1, "change-review", [], wcid, sha=A)[0] == 0
   assert rjson(world, hid, "round-1.json")["what_ran"] == "completed"
+
+
+# ---------------------------------------------------------------- S6: what_ran
+
+SPEC_PANEL = {"kind": "spec", "reviewers": ["design", "zoom-out"], "astra_incomplete": 0}
+LANE = lambda n: {"kind": "spec", "reviewers": ["design", "astra"], "astra_incomplete": n}
+HEAD = {"kind": "head", "reviewers": ["change-review"], "astra_incomplete": 0}
+REC, NR = {"findings": [], "not_run": None}, lambda why: {"findings": [], "not_run": why}
+
+@pytest.mark.parametrize("review,recs,entry,expect", [
+  (SPEC_PANEL, {"design": REC, "zoom-out": REC}, None, "completed"),
+  (SPEC_PANEL, {"design": REC}, None, "not run (zoom-out: no record)"),
+  (SPEC_PANEL, {"zoom-out": REC, "design": NR("timeout")}, None, "not run (design: timeout)"),
+  (LANE(1), {"design": REC, "astra": NR("killed")}, None, "completed"),
+  (LANE(2), {"design": REC}, None, "completed"),
+  (LANE(0), {"design": REC}, None, "not run (astra: no record)"),
+  (HEAD, {"change-review": REC, "foreman": REC}, {"phase": "posted", "outcome": "revise"}, "completed"),
+  (HEAD, {"change-review": REC}, {"phase": "collected", "outcome": "not run (superseded)"}, "not run (superseded)"),
+  (HEAD, {"change-review": REC}, {"phase": "prepared", "outcome": None}, "not run (phase prepared)"),
+  (HEAD, {}, {"phase": "collected", "outcome": "not run (fetch failed)"}, "not run (fetch failed)"),
+  (HEAD, {"foreman": REC}, {"phase": "posted", "outcome": "revise"}, "not run (change-review: no record)"),
+])
+def test_what_ran_derivation(review, recs, entry, expect):
+  assert derive_what_ran(review, {"reviewers": recs}, entry) == expect
