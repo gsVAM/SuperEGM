@@ -115,3 +115,16 @@ def test_due_lists_the_units_a_round_dispatches(planned):
     assert w.run("review", "rule", "--review", rc, "--ruling", "accept", "--owner",
                  "--runcard", w.review_card)[0] == 0
     assert due(w)["U02"] == ["converged", rc, "-", "e" * 64]
+
+
+def test_set_input_carries_the_units_table_and_each_unfiled_body_interfaces_only(planned):
+    w = planned
+    code, out = w.run("review-plan", "set-input", "--spec", str(w.spec))
+    assert code == 0, out
+    assert "| U03 | the admin | U02 | S |" in out                      # the spec's `## Units`, whole
+    assert "- Produces: u01_fn(x: int) -> int" in out
+    assert "- Consumes: u01_fn (U01)" in out
+    assert "Scope: `src/u02.py` (create) · Blocked by: #<U01> · Shared files: none" in out
+    assert "## U03" not in out and "u03_fn" not in out                 # filed: not in the set
+    assert "## Steps" not in out and "test_x" not in out and "Definition of done" not in out
+    assert out.index("| U01 | the queue") < out.index("## U01") < out.index("## U02")
