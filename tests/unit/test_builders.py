@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from superegm import store, spec_slug, DEFAULT_CONFIG
 from superegm.body import fill_numbers, normalise
+from conftest import make_pr
 
 ROOT = Path(__file__).resolve().parents[2]
 REPO, BASE, UNIT, ISSUE, TRACKING, PR = "example-org/webhooks", "main", "U07", 7, 1, 70
@@ -189,3 +190,37 @@ def test_launch_refuses_each_precondition(world, monkeypatch, case, reason):
     return
   assert code == 1 and f"launch: {reason}" in out, out
   assert "launched" not in state_of(s)["units"][UNIT]
+
+
+def launched(s, uid, status, rnd=1):
+  entry = {"round": rnd, "worktree": str(s.path("worktrees", uid, f"r{rnd}")), "branch": f"superegm/h/{uid}", "started_at": "2026-11-03T00:00:00Z",
+           "status": status, "result_file": str(s.path("launches", f"{uid}_r{rnd}_result.json")), "prompt_sha256": "0" * 64}
+  put(s.path("launches", f"{uid}.json"), json.dumps({"launches": [entry]}))
+  if status.startswith("exited"):
+    Path(entry["result_file"] + ".exit").write_text(status.split()[1] + "\n", encoding="utf-8")
+
+
+def foreman(s, uid, rounds):
+  put(s.path("foreman", uid), json.dumps({"dispatch_id": "d1", "rounds": rounds, "decisions": [], "rulings": []}))
+
+
+def test_launch_counts_in_flight_skips_stopped_and_frees_idle(world, monkeypatch):
+  s, card, hid, _ = seed(world, units=("U07", "U08", "U09", "U10"), max_in_flight=2)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  world.gh.issues[9]["labels"].append("superegm:stopped")
+  code, out = world.run("launch", "--runcard", card)
+  assert code == 0 and "marked: U07, U08" in out, out            # two slots, graph order; U09 is stopped and never marked
+  launched(s, "U07", "running"); launched(s, "U08", "running")
+  code, out = world.run("launch", "--runcard", card)
+  assert "in flight: U07, U08" in out and "marked: none" in out
+  code, out = world.run("launch", "--runcard", card, "--idle", "U07")
+  assert "in flight: U08" in out and "marked: U10" in out          # an idle unit holds no slot for this invocation
+  foreman(s, "U08", [{"round": 1, "runcard": card, "launch": 1, "head": "a" * 40, "phase": "posted", "dispatch_id": "d1", "outcome": "clean", "posted_at": "2026-11-03T01:00:00Z"}])
+  code, out = world.run("launch", "--runcard", card)
+  assert "in flight: U07, U10" in out and "marked: none" in out  # U08's latest round is clean; U10 holds its slot from its mark
+  make_pr(world.gh, 71, "b" * 40, merged="2026-11-03T02:00:00Z", closes=[(REPO, 7)])
+  world.gh.graphql[7] = [{**world.gh.prs[71], "repository": {"nameWithOwner": REPO}}]
+  world.gh.issues[7]["state"], world.gh.issues[7]["state_reason"] = "closed", "completed"
+  code, out = world.run("launch", "--runcard", card)
+  assert "in flight: U10" in out, out                            # landed: no slot
+  assert "launched" not in state_of(s)["units"]["U09"]
