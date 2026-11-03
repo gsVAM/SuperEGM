@@ -14,6 +14,8 @@ from superegm.launch import builder_login, load_launches, terminal
 WRITES = frozenset(["launches"])  # the store kinds this subcommand writes
 SKILLS = frozenset(["wave"])  # the skills whose card this subcommand accepts
 PROMPT_COMMENT_RE = re.compile(r"^\*\*(Deviation \([a-z]+\)|Decision D\d+|Ruling):\*\*")
+# The PR body's DoD-results form (the orders): `### DoD <n>` then one fenced block per item.
+DOD_RESULT_RE = re.compile(r"^### DoD (\d+)\n```[^\n]*\n(.*?)\n```", re.M | re.S)
 ORDERS = Path(__file__).resolve().parents[4] / "skills/wave/references/builder_orders.md"
 
 
