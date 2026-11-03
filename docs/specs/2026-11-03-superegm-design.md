@@ -11,6 +11,8 @@ contracts and invariants only; its mechanics belong to the U09/U09b/U10/U10b pla
 become tests; the self-build's plumbing belongs to the U01/U03 plans. The spec says what; the
 plans say how.
 
+Amendment 1 (2026-11-03): §9.1 plan-grammar simplification, §9.2 proportion angle, §17 rows U04/U05/U06/U09; owner-approved by text.
+
 ## 1. Intent
 
 SuperEGM is one Claude Code plugin that is the owner's entire software workflow, from an idea to a
@@ -617,7 +619,7 @@ Each unit section carries EGM's fields and the superpowers additions:
 | Size | `S\|M\|L` by scope-path count (`L` is about twenty Step groups, the most a 48 KB body holds) |
 | **Interfaces** | `Consumes:` and `Produces:` lines, one item per line (grammar below) |
 | Definition of done | numbered items; item 1 is always `The test for each Step was committed before its implementation (checked by superegm tdd-order)`; every other item is one of ``Run `<command>` — <what passing means>``, ``Exists `<path>` ``, or `CI green on the head`; only `Run` items are commands |
-| **Steps** | numbered groups, each: a `Write` line, the fenced test code, a `Run` line expecting FAIL, an `Implement` line, and a closing line that runs the same command, expects PASS and commits (grammar below); a rule family may be one Step whose test is parametrized |
+| **Steps** | numbered groups, each: a `Write` line, a fence carrying the test's signature and assertions (a full body only for an algorithm or data the assertions do not determine), and a one-sentence `Implement` line that never restates what the test asserts (grammar below); the `Run` line expecting FAIL and the closing line that runs the same command, expects PASS and commits are optional and default from the `Write` line; a rule family is one Step whose test is parametrized, never one Step per rule |
 | Decide before build | `- none` or `- D<n> <question> options: (a) <option>; (b) <option>[; …]; owner: <owner>; default: (a); blocking: yes\|no` — two or more options, the default among them |
 
 Grammar (each line is one `scan` rule, each with a test):
@@ -628,28 +630,45 @@ Grammar (each line is one `scan` rule, each with a test):
 - `Consumes: <name> (U04)` — the same name form plus the producing unit; `scan` refuses a
   Consumes whose name no sibling's Produces defines, and a producing unit that is not a direct or
   transitive blocker.
-- A Step group (the inner fence is the test code):
+- A Step group, in its short form (the inner fence is the test's signature and assertions):
 
 ````
 3. Write the failing test `test_body_over_48kb_refused` in `tests/unit/test_plan_scan.py`:
    ```python
-   def test_body_over_48kb_refused(world): ...
+   def test_body_over_48kb_refused(world):
+       with pytest.raises(SystemExit, match="split it"):
+           check_body_size("x" * 49_153)
    ```
-   Run `pytest tests/unit/test_plan_scan.py::test_body_over_48kb_refused -q`; expected: FAIL (`unknown rule`).
    Implement `check_body_size(body: str) -> None` in `skills/plan/scripts/superegm/scan.py`.
-   Run the same command; expected: PASS. Commit `test(S3): …` then `feat(S3): …`.
 ````
 
-  The `Write` line carries the test path in its second backtick span; the first `Run` line
-  carries the Step's one command; the `Implement` line carries the implementation path in its
-  last backtick span; the closing line names no command. Commit subjects carry the Step number as
-  `test(S<n>)` and `feat(S<n>)`. The parsers of a body live in `superegm/body.py` and nothing
-  else parses a body: `run_commands(body)` (the Step commands and the DoD `Run` commands),
-  `step_paths(body)` (Step number, test path, implementation path), `dod_items(body)` (item
-  number, kind `run` | `exists` | `ci`, value) and `consumes(body)` (name, producing unit);
-  their callers are `scan`, `launch-builder`, `tdd-order`, `collect` and `judges question`. The
-  plan file's fields (Scope paths among them) are read through EGM's plan parser, by `graph` and
-  by `collect` from the unit's frozen section in `handoff_plan.md`.
+  The `Write` line carries the test name in its first backtick span and the test path in its
+  second; the `Implement` line carries the implementation path in its last backtick span. The
+  fence carries the test's signature (name, fixtures, any `@pytest.mark.parametrize`), its
+  assertions with the spec's exact values, and arrange/act lines only where the signature and
+  assertions do not determine them; a full test body appears only for an algorithm or data the
+  assertions do not determine (a plan longer than the code it describes has written the code
+  instead). The `Implement` line is one sentence: the signature, the file and the values the
+  spec pins; it never restates what the test asserts. A rule family is one parametrized Step,
+  never one Step per rule. A copy/rename table or an edit list is test data: one parametrized
+  test over the table (the test is the table), and the `Implement` line says "make the table
+  hold"; no prose copy of a table in an `Implement` line. The `Run` line and the closing line are
+  optional. When absent, the Step's command is `pytest <test path>::<test name> -q`, or `pytest
+  <test path> -k <test name> -q` when the fence contains `@pytest.mark.parametrize`; the Step
+  still ends "run the same command, expect PASS, commit `test(S<n>)` then `feat(S<n>)`", and both
+  commit subjects default to `test(S<n>): <test name>` and `feat(S<n>): <test name>`. An explicit
+  `Run` line (``Run `<command>`; expected: FAIL``) or closing line (runs the same command, expects
+  PASS, names the commit subjects) remains valid and overrides the default: the first `Run` line
+  then carries the Step's one command and the closing line names no command. Commit subjects
+  carry the Step number as `test(S<n>)` and `feat(S<n>)`. The parsers of a body live in
+  `superegm/body.py` and nothing else parses a body: `run_commands(body)` (the Step commands and
+  the DoD `Run` commands) and `step_paths(body)` (Step number, test path, implementation path),
+  which derive the defaults above when a Step's `Run` or closing line is absent, so every caller
+  sees one form; `dod_items(body)` (item number, kind `run` | `exists` | `ci`, value) and
+  `consumes(body)` (name, producing unit); their callers are `scan`, `launch-builder`,
+  `tdd-order`, `collect` and `judges question`. The plan file's fields (Scope paths among them)
+  are read through EGM's plan parser, by `graph` and by `collect` from the unit's frozen section
+  in `handoff_plan.md`.
 - `## Review focus` lines: ``- U06: <input or failure mode> — <expected behaviour>; pinned by
   `<test name>` ``; the test name must appear in the owning unit's Steps.
 - `## Global constraints`: one line each, exact values; rendered verbatim into every body.
@@ -687,6 +706,11 @@ The tracking issue's marker is `<!-- superegm:handoff=<id> unit=tracking spec=<s
 Rules `graph` and `scan` enforce (each a test; `graph` owns plan-shape rules, `scan` owns body
 rules; there is no third checker):
 - Body ≤ 49,152 bytes; a larger unit is refused with "split it".
+- `scan` reports per unit, as a stdout table and as `plan/scan/<unit>.json` in the store: `bytes`,
+  `fenced_share` (bytes inside fences / bytes), `steps`, `spec_range_bytes` (the Design range's
+  bytes in the frozen spec) and `ratio` (bytes / spec_range_bytes). It warns (exit 0;
+  `warnings[]` in the json) when bytes > 32,768, or steps > 20, or fenced_share > 0.40. Warnings
+  are the `proportion` reviewer's evidence (§9.2); they never block alone.
 - Numbered lists only. Never `- [ ]`. EGM's default issue template is replaced by the layout
   above and EGM's marker regex by the markers above.
 - **Byte identity, as EGM does it today.** `body_sha256` and the write-list hash the dry run
@@ -697,19 +721,20 @@ rules; there is no third checker):
 - No placeholders: `TBD`, `handle edge cases`, `add appropriate validation`, `write tests for
   the above`, or a Consumes name no Produces line defines.
 - Global constraints and review focus present in every body; every review-focus test appears in
-  its owning unit's Steps; every Step group has both paths and its one command, each path under
-  one of the unit's Scope paths; every `D<n>` line has two or more options with the default
-  among them.
+  its owning unit's Steps; every Step group has both paths and its one command (explicit or
+  derived), each path under one of the unit's Scope paths; every `D<n>` line has two or more
+  options with the default among them.
 - The marker line's spec sha256 equals the approval's; `graph` refuses otherwise.
 - A filed unit's section equals the stored one; `graph` refuses otherwise (§7).
 - No cycles in blocked-by; no shared-file chain that contradicts the blockers (EGM's `graph`).
 - The raw-text mention and banned-term scan with `allowed_mentions` (EGM's `scan`).
 
 ### 9.2 Plan review
-`/superegm:review-plan <spec-path> [--units U01,U02] [--reviewers readiness,set,…] [--leavemealone]`
+`/superegm:review-plan <spec-path> [--units U01,U02] [--reviewers readiness,proportion,set,…] [--leavemealone]`
 
 - One review per unit, id `plan-<unit>-c<n>`, kind `plan`, over the unit's current rendered
-  bytes, `readiness` first. A re-render between rounds is a new round of the same review;
+  bytes; the panel is `readiness` first, then `proportion`, then `set` (`PANEL_OF["plan"] =
+  "readiness,proportion,set"` in `review.py`). A re-render between rounds is a new round of the same review;
   `apply` requires a body's `body_sha256` to equal the converged round's. Each `review-plan`
   round dispatches every unfiled unit that is not converged, not stalled in this invocation, or
   whose current `body_sha256` differs from its converged round's; a `set` finding naming a
@@ -718,16 +743,27 @@ rules; there is no third checker):
   over the set, for interface consistency and the cut: it receives the spec's `## Units` and,
   from every unfiled body, the Interfaces block and the Scope, Blocked by and Shared files lines
   only. Its one findings file is given to every unit's `review record --reviewer set`, which
-  keeps the findings for that unit (§8). Any other reviewer receives one body, the approved spec
+  keeps the findings for that unit (§8). Any reviewer other than `set` and `proportion` receives one body, the approved spec
   at its hash, and every sibling's Interfaces block. Units run **concurrently**, and the goldfish
   within a unit's panel concurrently.
+- The reviewer id `proportion` is the zoom-out persona (`agents/zoom-out.md`, adapter
+  `.claude-plugin/agents/zoom-out.md`) dispatched with the plan brief
+  `skills/review-plan/references/proportion.md`: it receives the body, that unit's
+  `plan/scan/<unit>.json` (§9.1) and the unit's spec range at the frozen hash, and answers
+  question 11 only. A proportion finding names the Step and the bytes it would remove; its
+  severity is `medium` at most. Dispositions follow §8 unchanged.
 - The standard is `resources/document_standards/handoff-standard.md` (EGM's seven questions)
-  plus three: 8, interfaces present and consistent; 9, every Step group complete and DoD item 1
-  present; 10, global constraints and review focus present. A `fix-design` disposition makes
+  plus four: 8, interfaces present and consistent; 9, every Step group complete and DoD item 1
+  present; 10, global constraints and review focus present; 11, "Is the body no longer than the
+  decisions the builder cannot make alone: no fenced test the signature and assertions already
+  determine, no Implement line that restates the test, no Step a parametrized sibling covers, no
+  prose table that should be test data?" A `fix-design` disposition makes
   `review status` exit 4; the skill then runs `approve-spec --void` and the spec returns to spec
   review.
 - Readiness questions ("what would a builder still ask?") are findings of the `readiness`
-  reviewer: a blocking question is `high`. There is no second loop and no second cap.
+  reviewer: a blocking question is `high`. Readiness and proportion are an adversarial pair: a
+  conflict between them is resolved in favour of the shorter form that keeps the test honest, and
+  the elephant records that disposition. There is no second loop and no second cap.
 
 ## 10. File (phase 4)
 
@@ -1132,18 +1168,19 @@ stubs), so later units modify and never create skill folders, adapters or person
 | U01 | Skeleton and absorption, packer-test-driven: the kept files of superpowers 7.0.0 and EGM 9bc49d4 brought in under the §14 names, stubs for every new skill, adapter and persona, the helper renamed and its tests kept green under EGM's forms, every persona's output section re-worded to §8's findings line; the Codex host, visual companion, synthesizer, bootstrap and retired skills not kept; licences and notices; manifests; packer; CI workflow; the test amendments the host and name changes need; CI green | — | L |
 | U02 | The hook and effects: `using-superegm`, `hooks/`, role silence, manifest hash; `test_effects.py` and the packer's effects checks; the frontmatter, harness line and phase sentence of every SKILL.md; the §14 Change-column edits of the superpowers skills, `draft` and `drift-report`; `finishing-a-development-branch` without merge | U01 | M |
 | U03 | Store, run cards, helper package: `superegm/__init__.py` and `body.py` as §15 says (the four body parsers, `fill_numbers`, `normalise`, the markers, `DECISION_HEADING`); each absorbed subcommand in its own module; `init`; the writer partition; `runcard open\|close` with child cards, the artifact rule and the card writers; effect gating in every absorbed writing subcommand; `require_frozen_units` replacing EGM's whole-plan checks in `status`, `launch` and `prepare` (§7); `state.json.plan` as the outside path; config and label renames with their tests in `test_helper.py`; the `approvals/` schema with `handoff_id`; the `foreman/<unit>.json` schema; the fake `gh` harness; `defer` and `--published` removed | U01 | L |
-| U04 | The review loop and spec review: `review open\|record\|settle\|status\|rule`, `references/review_loop.md`, the cap and stall predicates, cycles, sha per round, the derived `what_ran` and the round's `runcard`, regression marking, the `foreman` and `set` reviewers in `review record`, the findings-file grammar, `--kind integrate`, `converged_round`, `review settle`'s head `outcome` write, the Astra review lane, the `review-spec` skill body, `approve-spec` with `--void`, `--amend-units`, the `Units` check and `handoff_id` | U02, U03 | L |
-| U05 | Plan: the unit schema, the Interfaces grammar in `scan.py` over `body.py`'s parsers, the body template with EGM's placeholders and the new markers, `graph --plan` and `scan` rules incl. decision options, Step paths under Scope paths, frozen units and one handoff per store, body hashing as EGM does it, `decide`, the `plan` skill body | U02, U03 | L |
-| U06 | Plan review: the `review-plan` skill body, the `set` reviewer and its inputs, per-unit reviews keyed `plan-<unit>-c<n>`, which units a round dispatches (stalled units excluded), handoff standard questions 8–10, `fix-design` to `approve-spec --void` | U04, U05 | M |
+| U04 | The review loop and spec review: `review open\|record\|settle\|status\|rule`, `references/review_loop.md`, the cap and stall predicates, cycles, sha per round, the derived `what_ran` and the round's `runcard`, regression marking, the `foreman` and `set` reviewers in `review record`, the plan panel preset `readiness,proportion,set` (`PANEL_OF["plan"]`), the findings-file grammar, `--kind integrate`, `converged_round`, `review settle`'s head `outcome` write, the Astra review lane, the `review-spec` skill body, `approve-spec` with `--void`, `--amend-units`, the `Units` check and `handoff_id` | U02, U03 | L |
+| U05 | Plan: the unit schema, the Interfaces grammar in `scan.py` over `body.py`'s parsers, the body template with EGM's placeholders and the new markers, `graph --plan` and `scan` rules incl. decision options, Step paths under Scope paths, frozen units and one handoff per store, body hashing as EGM does it, `decide`, the `plan` skill body; the Step defaults of §9.1 derived in `skills/plan/scripts/superegm/body.py` (modify; shared file, after U03), the `scan` numbers and warnings with `plan/scan/<unit>.json`, and the drafting rules of §9.1 (what the fence carries, the one-sentence `Implement` line, one parametrized Step per rule family, tables as test data) written into `skills/plan/SKILL.md` and `skills/plan/references/writing_plans.md` (modify) | U02, U03 | L |
+| U06 | Plan review: the `review-plan` skill body, the `set` reviewer and its inputs, the `proportion` reviewer (the zoom-out persona with the plan brief `skills/review-plan/references/proportion.md`, create) and its inputs, the panel order `readiness,proportion,set`, per-unit reviews keyed `plan-<unit>-c<n>`, which units a round dispatches (stalled units excluded), handoff standard questions 8–11 with the `medium`-at-most proportion finding, the readiness/proportion adversarial pair and its recorded disposition, `fix-design` to `approve-spec --void` | U04, U05 | M |
 | U07 | File: `gate`/`dry-run`/`apply`/`verify` on the confirmed write list, `filings[]` (appended before the first write), `verify`'s obsolete-link pass over the union, the tracking issue in the latest list (rewritten by `apply`, an issue edit, a new write), `gate --accept` removed, marker recovery on the new markers, `base_at_start`, the labels incl. `superegm:stopped` and the 6-hex handoff label, leavemealone "Create", the `file` skill body | U04, U05 | M |
 | U08 | Judges: the `judges` skill body, `judge` adapter and persona, the question-file grammar with several questions, `judges open\|diff\|record\|verdict` with per-question convergence, child card, Astra judge lane with degradation, `min_vendors` | U02, U03 | M |
-| U09 | Builders: `launch` with every §11 precondition (the protection, the `pull_request` workflow, the token, the in-flight count, `--idle`), `launch-builder` with its refusals, a fresh worktree per launch after detaching the earlier one, the launched command's environment, the prompt file and the allow-list, `builder_orders.md` incl. the PR body's DoD-results form, `launches/` with the exit file, `record-launch [--exit]`, `interrupt`, `clean` | U02, U03 | L |
+| U09 | Builders: `launch` with every §11 precondition (the protection, the `pull_request` workflow, the token, the in-flight count, `--idle`), `launch-builder` with its refusals, a fresh worktree per launch after detaching the earlier one, the launched command's environment, the prompt file and the allow-list, `builder_orders.md` incl. the PR body's DoD-results form and the Step defaults of §9.1 (the command a builder runs and the commit subjects it writes when a Step's `Run` and closing lines are absent), `launches/` with the exit file, `record-launch [--exit]`, `interrupt`, `clean` | U02, U03 | L |
 | U09b | Events: `status --wait` returning every unreported event, the six event kinds (`closed` with its actor) and the line form, the exit-and-status folding | U09 | M |
 | U10 | Foreman: `foreman` adapter and brief, `foreman dispatch` with the dispatch-predicate refusal, the round entry's `runcard` and `launch`, and the recovery of a `collected` round already on the PR, `prepare --dispatch` with the fetched tip as `head`, the `<base>` refusal, `pr_body.md`, `comments.md` (after `posted_at`, plus the aged comments) and the last round's findings, `collect` with the foreman findings (incl. scope paths) and the contested reads and `--not-run`, `tdd-order`, `review post` with `posted_at`, the `outcome` write, its exit 3 and the `awaiting merge` journal fact, the return word | U04, U09 | L |
 | U10b | The driver: the `wave` skill body with the loop's invariants as tests through `foreman dispatch`'s refusal, the batch order, the resume derivation incl. pending decisions, `report` after every batch, the end condition incl. idle and pending units, what the elephant does with each word, `decision open\|rule` at every point, the by-hand ruling of a BLOCKED comment | U09b, U10 | M |
 | U11 | leavemealone routing and finish: `judges question` and its forms, the §13.2 wiring at points 1–3 in `review-spec`, `review-plan`, `plan`, `wave`, the interface-deviation fan-out; `integrate` with `--close`, `close` and `closed_at`; docs and the README (install notes, the builder account and profile, the protection, the Licence paragraph); release 1.0.0 packed by `prepare_release.py` | U06, U07, U08, U10b | M |
 
-Shared files: `test_helper.py` is U03's alone. Each workflow SKILL.md stub U01 creates is filled
+Shared files: `test_helper.py` is U03's alone. `body.py` is U03's and then U05's (the derived Step
+defaults), which U03 blocks. Each workflow SKILL.md stub U01 creates is filled
 by the unit that owns its section after U02 has set its frontmatter and lines, and edited again
 only by U11; U02 is a blocker of every one of them. `README.md` is U01's (skeleton) and U11's
 only. The `status`, `launch` and `prepare` modules are edited by U03 and then by U09b, U09 and
