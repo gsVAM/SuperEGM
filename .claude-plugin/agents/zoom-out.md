@@ -8,6 +8,8 @@ color: yellow
 omitClaudeMd: true
 ---
 
+<!-- Modified by SuperEGM (gsVAM), 2026: renamed to zoom-out; persona path agents/zoom-out.md. -->
+
 Read `${CLAUDE_PLUGIN_ROOT}/agents/zoom-out.md` before reviewing.
 Follow that canonical persona's instructions. This adapter defines your Claude
 tool and context restrictions. Resolve bundled standards against

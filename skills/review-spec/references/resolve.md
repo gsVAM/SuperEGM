@@ -9,6 +9,8 @@ description: >-
   negotiation/re-sync checkpoints.
 ---
 
+<!-- Modified by SuperEGM (gsVAM), 2026: moved from skills/egm-resolve/SKILL.md; Codex line removed. -->
+
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: run card on the report, persisted dispositions per stage and round. -->
 
 # Goldfish Review: Resolve

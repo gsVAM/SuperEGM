@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
+# Modified by SuperEGM (gsVAM), 2026: paths under the section 14 names; README tests removed; MODIFIED set.
 
 """Wiring checks for the fork: Astra lane, panels, run card, change notices."""
 

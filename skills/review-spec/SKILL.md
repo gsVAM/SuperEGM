@@ -9,6 +9,8 @@ description: >-
   Zoom Out Review, and Implementation Readiness.
 ---
 
+<!-- Modified by SuperEGM (gsVAM), 2026: renamed to review-spec; Codex line removed; persona path agents/zoom-out.md. -->
+
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: run card, panel presets, Astra lane. -->
 
 # Review, Validation & Automated Remediation

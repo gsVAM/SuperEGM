@@ -1,4 +1,5 @@
 # Copyright 2026 Google LLC. SPDX-License-Identifier: Apache-2.0
+# Modified by SuperEGM (gsVAM), 2026: one archive named superegm.
 """Version agreement, release identities, and archive checksum contracts."""
 
 import hashlib

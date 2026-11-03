@@ -8,6 +8,8 @@ color: yellow
 omitClaudeMd: true
 ---
 
+<!-- Modified by SuperEGM (gsVAM), 2026: renamed to change-review; persona path agents/change-review.md. -->
+
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026. -->
 
 Read `${CLAUDE_PLUGIN_ROOT}/agents/change-review.md` before reviewing.

@@ -9,6 +9,8 @@ description: >-
   or READMEs in a directory.
 ---
 
+<!-- Modified by SuperEGM (gsVAM), 2026: renamed to drift-report; Codex line removed. -->
+
 # Detect Drift In Designs and Code
 
 In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.

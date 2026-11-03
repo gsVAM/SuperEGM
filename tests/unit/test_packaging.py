@@ -1,5 +1,6 @@
 # Copyright 2026 Google LLC.
 # SPDX-License-Identifier: Apache-2.0
+# Modified by SuperEGM (gsVAM), 2026: one host; the bundle test, palettes and required files of section 15.
 
 """Exercise distributable contents, unsafe paths, and reproducible output."""
 

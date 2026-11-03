@@ -1,5 +1,6 @@
 # Copyright 2026 Google LLC.
 # SPDX-License-Identifier: Apache-2.0
+# Modified by SuperEGM (gsVAM), 2026: one host, the allow-list of section 15 and the three-file hook rule.
 
 """Build the runtime folder and a reproducible ZIP without development files."""
 

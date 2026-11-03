@@ -3,6 +3,8 @@ name: using-superegm
 description: Use when starting any conversation - establishes how to find and use skills, requiring skill invocation before ANY response including clarifying questions
 ---
 
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: renamed to using-superegm; the Claude Code reference only. -->
+
 <SUBAGENT-STOP>
 If you were dispatched as a subagent to execute a specific task, ignore this skill.
 </SUBAGENT-STOP>

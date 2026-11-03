@@ -1,5 +1,7 @@
 # EGM Setup & Workflow Guide
 
+<!-- Modified by SuperEGM (gsVAM), 2026: the Harnesses reference removed. -->
+
 ## Background
 
 The **Elephant-Goldfish Model (EGM)** is an implementation of Spec-Driven

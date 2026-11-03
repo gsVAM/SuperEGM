@@ -11,6 +11,8 @@ description: >-
   and tone.
 ---
 
+<!-- Modified by SuperEGM (gsVAM), 2026: moved from skills/egm-review-loop/SKILL.md; Codex line removed. -->
+
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: Astra lane, per-reviewer model and effort, persisted dispositions. -->
 
 # Goldfish Review: Loop (Orchestration Driver)

@@ -11,6 +11,8 @@ description: >-
   Claude Code only.
 ---
 
+<!-- Modified by SuperEGM (gsVAM), 2026: renamed to wave; Codex line removed; helper and plan reference paths under skills/plan. -->
+
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the wave skill. Not part of google/elephant-goldfish-model. -->
 
 # Wave: launch, review and land a handoff's units

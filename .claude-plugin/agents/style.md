@@ -8,6 +8,8 @@ color: yellow
 omitClaudeMd: true
 ---
 
+<!-- Modified by SuperEGM (gsVAM), 2026: renamed to style; persona path agents/style.md. -->
+
 Read `${CLAUDE_PLUGIN_ROOT}/agents/style.md` before reviewing.
 Follow that canonical persona's instructions. This adapter defines your Claude
 tool and context restrictions. Resolve bundled standards against

@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+# Modified by SuperEGM (gsVAM), 2026: skill and skill_file renamed to review-spec.
 
 skill: "review-spec"
 description: "Behavioral evaluation scenario suite for egm-review skill."

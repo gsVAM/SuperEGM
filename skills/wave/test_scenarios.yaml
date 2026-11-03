@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
+# Modified by SuperEGM (gsVAM), 2026: skill and skill_file renamed to wave.
 
 skill: "wave"
 description: "Behavioral evaluation scenario suite for egm-wave skill."

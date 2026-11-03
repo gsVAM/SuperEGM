@@ -10,6 +10,8 @@ description: >-
   should be filed as issues before a wave starts. Claude Code only.
 ---
 
+<!-- Modified by SuperEGM (gsVAM), 2026: renamed to plan; Codex line removed; helper path skills/plan/scripts/superegm.py. -->
+
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the handoff skill. Not part of google/elephant-goldfish-model. -->
 
 # Handoff: approved design to reviewed GitHub issues

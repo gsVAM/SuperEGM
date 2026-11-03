@@ -8,6 +8,8 @@ color: yellow
 omitClaudeMd: true
 ---
 
+<!-- Modified by SuperEGM (gsVAM), 2026: renamed to structural; persona path agents/structural.md. -->
+
 Read `${CLAUDE_PLUGIN_ROOT}/agents/structural.md` before reviewing.
 Follow that canonical persona's instructions. This adapter defines your Claude
 tool and context restrictions. Resolve bundled standards against

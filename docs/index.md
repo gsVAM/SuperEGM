@@ -1,5 +1,7 @@
 # Elephant-Goldfish Model (EGM)
 
+<!-- Modified by SuperEGM (gsVAM), 2026: one host, Claude; the Codex and Harnesses entries removed. -->
+
 ## Find the right document
 
 | Location | Purpose |

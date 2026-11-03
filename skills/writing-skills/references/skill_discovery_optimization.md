@@ -1,3 +1,5 @@
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: moved verbatim from SKILL.md's Skill Discovery Optimization section. -->
+
 ## Skill Discovery Optimization (SDO)
 
 **Critical for discovery:** Future agents need to FIND your skill

@@ -9,6 +9,8 @@ description: >-
   requirements + solution.
 ---
 
+<!-- Modified by SuperEGM (gsVAM), 2026: renamed to draft; Codex line removed. -->
+
 # Design Drafting (Document Construction)
 
 In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.

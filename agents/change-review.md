@@ -4,6 +4,8 @@ description: Reviews a pull request diff against one build unit's definition of 
 license: Apache-2.0
 ---
 
+<!-- Modified by SuperEGM (gsVAM), 2026: renamed to change-review; the output section is SuperEGM's findings line with high, medium and low. -->
+
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the PR reviewer
 of the wave skill. Not part of google/elephant-goldfish-model. -->

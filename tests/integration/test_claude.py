@@ -1,5 +1,6 @@
 # Copyright 2026 Google LLC.
 # SPDX-License-Identifier: Apache-2.0
+# Modified by SuperEGM (gsVAM), 2026: review-spec and zoom-out names; one-host build.
 
 """Opt-in Claude plugin-path and native reviewer isolation probe."""
 
