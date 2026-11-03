@@ -158,6 +158,24 @@ def test_exit_and_status_fold(world, monkeypatch, tmp_path, case, launch_status,
   assert code == 0 and out.splitlines() == lines2, out
 
 
+def test_reported_once_and_a_base_move_is_not_an_event(world, monkeypatch):
+  gh, st, card = seed(world, monkeypatch, {"U01": 2, "U02": 3})
+  pr(gh, "green")
+  pr(gh, number=71, sha="b" * 40, issue=3)
+  code, out = world.run(*WAIT, card)
+  assert out.splitlines() == [HEAD + "green", f"U02 head pr=71 sha={'b' * 40} ci=pending"], out
+  saved = json.loads(st.path("state").read_text(encoding="utf-8"))["status"]["units"]
+  assert world.run(*WAIT, card)[1] == "deadline\n"
+  gh.prs[70]["baseRefOid"], gh.prs[70]["baseRefName"] = "f" * 40, "release-1"
+  assert world.run(*WAIT, card)[1] == "deadline\n"
+  pr(gh, "green", number=71, sha="b" * 40, issue=3)
+  assert world.run("status", "--runcard", card)[0] == 0  # a plain status in between reports nothing
+  code, out = world.run(*WAIT, card)
+  assert out.splitlines() == [f"U02 head pr=71 sha={'b' * 40} ci=green"], out
+  after = json.loads(st.path("state").read_text(encoding="utf-8"))["status"]["units"]
+  assert after["U01"] == saved["U01"] and after["U02"] != saved["U02"]
+
+
 def test_status_landed_ready_decisions_and_shared_edges(world):
   gh = applied(world)
   code, out = world.run("status", "--plan", world.plan)
@@ -244,12 +262,11 @@ def test_a_landed_confirmation_lapses_when_the_issue_reopens(world):
   """R2-11: the override is for a completed issue with no watched PR."""
   gh = applied(world)
   close_as_completed(gh, 2)
-  assert world.run("status", "--plan", world.plan, "--confirm-landed", "U01")[0] == 0
-  assert "U01" in state_of(world)["status"]["landed"]
+  code, out = world.run("status", "--plan", world.plan, "--confirm-landed", "U01")
+  assert code == 0 and "landed: U01" in out, out
   gh.issues[2]["state"], gh.issues[2]["state_reason"] = "open", None
   code, out = world.run("status", "--plan", world.plan)
-  assert "landed confirmation no longer applies" in out
-  assert "U01" not in state_of(world)["status"]["landed"]
+  assert "landed confirmation no longer applies" in out and "landed: none" in out, out
 
 
 def test_confirm_landed_refuses_when_a_pr_is_watched(world):
@@ -380,26 +397,11 @@ def test_ci_reads_every_page_of_status_contexts(world):
   assert "waiting-for-ci" in out, out
   assert "ci green" not in out and "ci red" not in out, out
   # The page-2 context must actually have been collected: without pagination
-  # the first page is all green and the aggregate is failure, so the verdict
-  # would be "ci red", not waiting.
-  ci = state_of(world)["units"]["U01"]["pr"].get("ci") or {}
-  contexts = {c["context"] for c in (ci.get("contexts") or [])} if ci else set()
-  record_ci = (state_of(world).get("status") or {}).get("units", {}).get("U01", {})
-  assert "e2e" in contexts or "waiting-for-ci" in record_ci.get("status", ""), (ci, record_ci)
-
-
-def test_a_retargeted_pr_is_a_new_review_target(world):
-  """R8-03: same head, same CI, different base branch -> different merge base
-  and diff. The watcher must report it as a change."""
-  gh = applied(world)
-  make_pr(gh, 70, "a" * 40, closes=[(REPO, 2)])
-  assert world.run("status", "--plan", world.plan, "--watch", "U01=70")[0] == 0
-  assert world.run("status", "--plan", world.plan)[0] == 0
-  gh.prs[70]["baseRefName"], gh.prs[70]["baseRefOid"] = "release-1", "f" * 40
+  # the first page is all green and the aggregate is failure, so the word on
+  # the head line and in the saved fingerprint would be red, not pending.
   code, out = world.run("status", "--plan", world.plan, "--wait", 30)
-  assert code == 0 and "changed: U01" in out, out
-  unit = state_of(world)["status"]["units"]["U01"]
-  assert unit["base_ref"] == "release-1" and unit["base_sha"] == "f" * 40
+  assert code == 0 and out == f"U01 head pr=70 sha={head} ci=pending\n", out
+  assert state_of(world)["status"]["units"]["U01"]["ci"] == "pending"
 
 
 def test_pr_discovery_matches_a_differently_cased_repository(world):
