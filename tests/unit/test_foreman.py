@@ -347,3 +347,20 @@ def test_collect_records_foreman_findings(world, tmp_path, monkeypatch, name):
   assert rnd["builder_contested"] == ([{"fid": f"foreman-{r}-1", "reason": "the test covers it"}] if name == "contested" else [])
   assert rnd["what_ran"].startswith("not run")
   assert json.loads(w.st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][-1]["phase"] == "collected"
+
+
+@pytest.mark.parametrize("phase, outcome, ok", [
+    ("fetched", None, True), ("prepared", None, True), ("collected", None, True),
+    ("posted", "revise", False), ("collected", "not run (superseded)", False)])
+def test_collect_not_run_accepts_any_non_terminal_round(world, phase, outcome, ok):
+  entry = {"round": 1, "runcard": "w", "launch": 1, "head": None, "phase": phase, "dispatch_id": "d1",
+           **({"outcome": outcome} if outcome else {})}
+  st, card, _ = seed(world, rounds=[entry])
+  child = world.run("runcard", "open", "--skill", "wave", "--artifact", UNIT, "--parent", card)[1].strip()
+  code, out = world.run("collect", "--unit", UNIT, "--dispatch", "d1", "--runcard", child, "--not-run", "fetch failed")
+  saved = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][0]
+  if ok:
+    assert (code, out.strip()) == (0, "U01 round 1: collected (not run (fetch failed))"), out
+    assert saved == {**entry, "phase": "collected", "outcome": "not run (fetch failed)"}
+  else:
+    assert code == 1 and f"U01 round 1 is terminal (`{phase}`)" in out and saved == entry
