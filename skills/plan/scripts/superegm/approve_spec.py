@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 
 import superegm as core
-from superegm.review import evaluate, latest_cycle, review_id
+from superegm.review import evaluate, findings_of, latest_cycle, load_review, load_round, review_id, round_numbers
 
 WRITES = frozenset(["approvals"])  # the store kinds this subcommand writes
 SKILLS = frozenset(["review-spec", "review-plan", "integrate"])  # the skills whose card this subcommand accepts
@@ -62,6 +62,8 @@ def run(args):
   root = core.git_toplevel(spec)
   st = core.store(root)
   slug = core.spec_slug(spec)
+  if args.void:
+    return void_approval(args, st, spec)
   review, _ = latest_cycle(st, "spec", str(spec))
   if review is None:
     raise core.HandoffError(f"approve-spec: no spec review for {slug}")
@@ -88,4 +90,23 @@ def run(args):
   core.atomic_write(path, record)
   core.journal(st, f"approve-spec {handoff_id} sha256 {sha[:12]} at review {rid} commit {commit[:12]} under {args.runcard}")
   print(f"approval recorded in {path}")
+  return 0
+
+
+def void_approval(args, st: core.Store, spec: Path) -> int:
+  """`--void --review <id>`: the approval is void once that review records a `fix-design` finding."""
+  if not args.review:
+    raise core.HandoffError("approve-spec: --void requires --review")
+  slug, rid = core.spec_slug(spec), args.review
+  approval = core.load_approval(st, spec)
+  if approval is None:
+    raise core.HandoffError(f"approve-spec: no approval for {slug}")
+  if load_review(st, rid) is None:
+    raise core.HandoffError(f"approve-spec: review {rid}: not opened")
+  if not any(f["disposition"] == "fix-design" for n in round_numbers(st, rid) for f in findings_of(load_round(st, rid, n))):
+    raise core.HandoffError(f"approve-spec: review {rid} has no fix-design finding")
+  approval["voided_by"] = rid
+  core.atomic_write(st.path("approvals", slug), approval)
+  core.journal(st, f"approve-spec void {slug} by review {rid} under {args.runcard}")
+  print(f"approval of {slug} voided by review {rid}")
   return 0
