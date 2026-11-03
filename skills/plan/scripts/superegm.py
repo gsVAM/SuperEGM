@@ -2486,7 +2486,7 @@ def cmd_prepare(args):
 
 
 def build_parser():
-  parser = argparse.ArgumentParser(prog="egm_handoff.py", description=__doc__.splitlines()[0])
+  parser = argparse.ArgumentParser(prog="superegm.py", description=__doc__.splitlines()[0])
   sub = parser.add_subparsers(dest="command", required=True)
 
   def add(name, help_text, needs_plan=True):
