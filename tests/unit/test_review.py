@@ -508,3 +508,22 @@ def test_review_loop_and_resolve_references():
                  "A contest must be checkable", "Do not contest a comprehension gap", "Do not change a severity"):
     assert phrase in resolve, phrase
   assert len(loop.encode()) < 24_000 and len(resolve.encode()) < 12_000
+
+
+# ---------------------------------------------------------------- S18: the skill body
+
+SKILL = ROOT / "skills" / "review-spec" / "SKILL.md"
+
+def test_review_spec_skill_body():
+  text = SKILL.read_text(encoding="utf-8")
+  assert text.startswith("---\nname: review-spec\n")
+  front, body = text.split("\n---\n", 1)
+  assert len(body.encode()) <= 24_000
+  assert "In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first." in body
+  for phrase in ("<spec-path> [--reviewers design,zoom-out,…] [--astra on|off] [--leavemealone]", "superegm init",
+                 "superegm runcard open --skill review-spec", "superegm review open --kind spec", "config.reviewers.spec",
+                 "`design` is first", "references/review_loop.md", "references/resolve.md", "superegm review status",
+                 "superegm approve-spec", "--leavemealone", "approve-spec --void", "origin/<base>", "superegm runcard close"):
+    assert phrase in body, phrase
+  for ref in set(re.findall(r"`(references/[^`]+)`", body)):
+    assert (SKILL.parent / ref).is_file(), ref
