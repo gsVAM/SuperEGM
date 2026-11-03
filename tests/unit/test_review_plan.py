@@ -152,3 +152,24 @@ def test_set_file_splits_per_unit_and_reopens_a_converged_unit(planned):
     listing = due(w)
     assert listing["U01"][:3] == ["due", r1, "2"]       # round 1 completed and not clean
     assert listing["U02"][:3] == ["due", r2, "3"]       # round 2 holds the set's record only
+
+
+def test_fix_design_voids_the_approval(planned):
+    w = planned
+    approval = write(w.store.path("approvals", "sample"), json.dumps(
+        {"path": str(w.spec), "sha256": hashlib.sha256(SPEC.encode("utf-8")).hexdigest(),
+         "commit": "abc1234", "runcard": "rc-spec", "review": "spec-sample-c1",
+         "approved_at": "2026-11-03T00:00:00Z", "amended": [], "handoff_id": HANDOFF}))
+    rid = open_review(w, "U01")
+    record(w, rid, 1, "readiness", ["readiness-1-1 | high | U01 Design range | regression: no | "
+                                     "the spec gives no exit code for this refusal"], SHA["U01"])
+    record(w, rid, 1, "set", [], SHA["U01"])
+    code, out = w.run("review", "settle", "--review", rid, "--finding", "readiness-1-1",
+                      "--disposition", "fix-design", "--runcard", w.review_card)
+    assert code == 0, out
+    assert status(w, rid) == 4
+    assert due(w)["U01"] == ["fix-design", rid, "-", SHA["U01"]]
+    # `approve-spec` requires `--spec` (U04's form): the void names the spec whose approval it voids.
+    code, out = w.run("approve-spec", "--void", "--review", rid, "--spec", str(w.spec), "--runcard", w.review_card)
+    assert code == 0, out
+    assert json.loads(approval.read_text(encoding="utf-8"))["voided_by"] == rid
