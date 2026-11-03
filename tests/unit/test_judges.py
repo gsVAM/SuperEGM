@@ -253,3 +253,30 @@ def test_record_astra_result(world, result, expect):
   else:
     assert entry == {"not_run": expect[len("not run ("):-1], "recorded_at": entry["recorded_at"]}
     assert f"judges {pid}: round 1 astra not run ({entry['not_run']})" in journal(world)
+
+
+def test_diff_writes_neutral_list_and_next_brief(world):
+  pid, card, _ = open_panel(world)
+  for judge, q2 in (("fable", "a"), ("opus", "b"), ("astra", "b")):
+    assert record(world, pid, card, 1, judge, {"Q1": "a", "Q2": q2})[0] == 0
+  code, out = world.run("judges", "diff", "--panel", pid, "--round", 1, "--runcard", card)
+  store = world.artifacts / "judges" / pid
+  assert (code, out.strip()) == (0, str(store / "round-1/diff.md")), out
+  diff = (store / "round-1/diff.md").read_text(encoding="utf-8")
+  assert diff == (f"# Panel {pid}, round 1: where positions differ\n"
+                  "## Q1: converged on (a)\n"
+                  "## Q2\n- (a): fable\n- (b): opus, astra\n")
+  brief = (store / "round-2/brief.md").read_text(encoding="utf-8")
+  assert brief.startswith(f"JUDGE BRIEF, panel {pid}, round 2.")
+  assert "Questions still open: Q2\n" in brief and "no one adds arguments between rounds" in brief
+  for judge in ("fable", "opus", "astra"):
+    assert f"### Round 1, {judge}\n" + (store / f"round-1/{judge}.md").read_text(encoding="utf-8") in brief
+  assert diff in brief
+  assert f"judges {pid}: round 1 diff written, open Q2" in journal(world)
+
+
+def test_diff_refuses_an_unrecorded_judge(world):
+  pid, card, _ = open_panel(world)
+  assert record(world, pid, card, 1, "fable", {"Q1": "a", "Q2": "a"})[0] == 0
+  code, out = world.run("judges", "diff", "--panel", pid, "--round", 1, "--runcard", card)
+  assert code == 1 and "judges: round 1: opus not recorded" in out, out
