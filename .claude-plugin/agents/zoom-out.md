@@ -1,5 +1,5 @@
 ---
-name: egm-zoom-out
+name: zoom-out
 description: Simplicity and scope reviewer.
 license: Apache-2.0
 tools: [Read, Grep, Glob]
@@ -8,7 +8,7 @@ color: yellow
 omitClaudeMd: true
 ---
 
-Read `${CLAUDE_PLUGIN_ROOT}/agents/zoom_out.md` before reviewing.
+Read `${CLAUDE_PLUGIN_ROOT}/agents/zoom-out.md` before reviewing.
 Follow that canonical persona's instructions. This adapter defines your Claude
 tool and context restrictions. Resolve bundled standards against
 `${CLAUDE_PLUGIN_ROOT}`. Remain read-only and use only the task and explicitly

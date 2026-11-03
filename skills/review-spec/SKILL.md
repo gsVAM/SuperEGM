@@ -1,5 +1,5 @@
 ---
-name: egm-review
+name: review-spec
 license: Apache-2.0
 disable-model-invocation: true
 description: >-

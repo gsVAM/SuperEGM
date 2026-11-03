@@ -1,5 +1,5 @@
 ---
-name: egm-draft
+name: draft
 license: Apache-2.0
 disable-model-invocation: true
 description: >-

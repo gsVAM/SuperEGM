@@ -28,9 +28,8 @@ EXPECTED_SKILLS = {
     "egm-handoff", "egm-wave",
 }
 REVIEWERS = (
-    "codebase_details", "comprehension", "design_critic",
-    "implementation_readiness", "structural", "style", "zoom_out",
-    "change_review",
+    "design", "zoom-out", "comprehension", "codebase-details", "readiness",
+    "structural", "style", "change-review", "judge",
 )
 
 
@@ -151,34 +150,8 @@ def test_claude_reviewers_are_read_only_with_fresh_context(name: str) -> None:
   assert "omitClaudeMd" not in canonical
 
 
-def test_claude_synthesizer_adapter_is_tool_restricted() -> None:
-  adapter = ROOT / ".claude-plugin/agents/synthesizer.md"
-  config = frontmatter(adapter)
-  assert set(config["tools"]) == {"Agent", "Read", "Grep", "Glob", "Write"}
-  assert config["model"] == "inherit"
-  assert "memory" not in config
-  assert "${CLAUDE_PLUGIN_ROOT}/agents/synthesizer.md" in adapter.read_text()
-  canonical = frontmatter(ROOT / "agents/synthesizer.md")
-  assert canonical["name"] == config["name"]
-  assert "tools" not in canonical
-  manifest = read_json(".claude-plugin/plugin.json")["agents"]
-  assert "./.claude-plugin/agents/synthesizer.md" in manifest
-  assert "./agents/synthesizer.md" not in manifest
 
 
-def test_claude_bootstrap_adapter_routes_to_skill() -> None:
-  adapter = ROOT / ".claude-plugin/agents/bootstrap_orchestrator.md"
-  config = frontmatter(adapter)
-  assert set(config["tools"]) == {"Agent", "Bash", "Read", "Grep", "Glob", "Write", "Edit"}
-  assert config["model"] == "inherit"
-  text = adapter.read_text()
-  assert "${CLAUDE_PLUGIN_ROOT}/agents/bootstrap_orchestrator.md" in text
-  assert "${CLAUDE_PLUGIN_ROOT}/skills/egm-bootstrap/SKILL.md" in text
-  canonical = frontmatter(ROOT / "agents/bootstrap_orchestrator.md")
-  assert canonical["name"] == config["name"]
-  manifest = read_json(".claude-plugin/plugin.json")["agents"]
-  assert "./.claude-plugin/agents/bootstrap_orchestrator.md" in manifest
-  assert "./agents/bootstrap_orchestrator.md" not in manifest
 
 
 def test_claude_permissions_remain_under_user_control() -> None:

@@ -1,5 +1,5 @@
 ---
-name: egm-comprehension
+name: comprehension
 description: Naive reader and comprehension reviewer.
 license: Apache-2.0
 tools: [Read, Grep, Glob]

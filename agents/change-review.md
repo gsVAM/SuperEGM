@@ -1,5 +1,5 @@
 ---
-name: egm-change-review
+name: change-review
 description: Reviews a pull request diff against one build unit's definition of done and scope paths, with CI results as evidence, and reports met and unmet items, out-of-scope changes and untested behaviour.
 license: Apache-2.0
 ---

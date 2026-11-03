@@ -1,5 +1,5 @@
 ---
-name: egm-drift-report
+name: drift-report
 license: Apache-2.0
 disable-model-invocation: true
 description: >-

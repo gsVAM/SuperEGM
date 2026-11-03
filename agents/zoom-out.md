@@ -1,5 +1,5 @@
 ---
-name: egm-zoom-out
+name: zoom-out
 description: Skeptical Architect persona focused on high-altitude simplicity, minimalism, YAGNI, and codebase reuse.
 license: Apache-2.0
 ---

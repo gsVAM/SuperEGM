@@ -1,5 +1,5 @@
 ---
-name: egm-handoff
+name: plan
 license: Apache-2.0
 disable-model-invocation: true
 description: >-
