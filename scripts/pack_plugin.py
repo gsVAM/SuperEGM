@@ -1,6 +1,7 @@
 # Copyright 2026 Google LLC.
 # SPDX-License-Identifier: Apache-2.0
-# Modified by SuperEGM (gsVAM), 2026: one host, the allow-list of section 15 and the three-file hook rule.
+# Modified by SuperEGM (gsVAM), 2026: one host, the allow-list of section 15 and the three-file hook rule;
+# three-file hook rule, hook hash, effects checks.
 
 """Build the runtime folder and a reproducible ZIP without development files."""
 
@@ -9,8 +10,10 @@
 # persona and the handoff standard.
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
+import re
 import tempfile
 import zipfile
 
@@ -42,6 +45,7 @@ IDS = (
 )
 REQUIRED_SHARED = (
     "plugin.json", "LICENSE", "LICENSE-MIT", "README.md", MANIFEST,
+    "hooks/hooks.json", "hooks/run-hook.cmd", "hooks/session-start",
     "docs/index.md", "docs/getting_started.md", "docs/claude.md", "docs/faq.md",
     "docs/privacy.md", "docs/releases.md",
     "resources/README.md", "resources/execution_instructions.md",
@@ -70,6 +74,76 @@ REQUIRED_SHARED = (
 )
 
 
+FRONTMATTER_KEY = re.compile(r"^([A-Za-z_-]+):\s?(.*)$")
+EFFECT_KINDS = ("github-write", "remote-branch", "start-session", "state-store", "destructive-local")
+TYPED_SKILLS = frozenset((  # section 14: every external skill, the two gates, draft, drift-report
+    "review-spec", "plan", "review-plan", "file", "wave", "interrupt", "clean",
+    "finishing-a-development-branch", "integrate", "judges", "draft", "drift-report",
+))
+
+
+def read_frontmatter(path: Path) -> dict[str, str]:
+  """Return the top-level frontmatter keys of a SKILL.md in file order."""
+  text = path.read_text(encoding="utf-8")
+  if not text.startswith("---\n"):
+    raise ValueError(f"Frontmatter must open {path}")
+  fields: dict[str, str] = {}
+  key = None
+  for line in text.split("\n")[1:]:
+    if line == "---":
+      break
+    match = FRONTMATTER_KEY.match(line)
+    if match:
+      key, fields[key] = match.group(1), match.group(2)
+    elif key and line.startswith(" "):
+      fields[key] = f"{fields[key]} {line.strip()}".strip()
+  return fields
+
+
+def check_effects(root: Path) -> None:
+  """Refuse a SKILL.md whose effects frontmatter breaks section 6."""
+  for path in sorted(root.glob("skills/*/SKILL.md")):
+    name, fm = path.parent.name, read_frontmatter(path)
+    effects = fm.get("effects")
+    kinds = fm.get("effect_kinds", "").strip("[]").replace(",", " ").split()
+    unknown = [kind for kind in kinds if kind not in EFFECT_KINDS]
+    typed = fm.get("disable-model-invocation") == "true"
+    if effects is None:
+      reason = "effects missing"
+    elif effects not in ("none", "working-tree", "external"):
+      reason = f"unknown effects {effects}"
+    elif effects == "external" and not kinds:
+      reason = "effect_kinds missing"
+    elif unknown:
+      reason = f"unknown effect kind {unknown[0]}"
+    elif effects == "external" and not typed:
+      reason = "external but not disable-model-invocation: true"
+    elif name in TYPED_SKILLS and not typed:
+      reason = "typed but not disable-model-invocation: true"
+    else:
+      continue
+    raise ValueError(f"Effects: {name}: {reason}")
+
+
+def check_hooks(root: Path, manifest: dict) -> None:
+  """Refuse a fourth hook file, a stale or missing hash, or a second hook entry."""
+  for path in sorted(root.glob("hooks/**/*")):
+    relative = path.relative_to(root).as_posix()
+    if path.is_file() and relative not in HOOK_FILES:
+      raise ValueError(f"Hooks: {relative} is not one of the three hook files")
+  if "hook_sha256" not in manifest.get("superegm", {}):
+    raise ValueError(f"Hooks: hook_sha256 missing from {MANIFEST}")
+  digest = hashlib.sha256((root / "hooks/session-start").read_bytes()).hexdigest()
+  if manifest["superegm"]["hook_sha256"] != digest:
+    raise ValueError("Hooks: hook_sha256 does not match hooks/session-start")
+  hooks = json.loads((root / "hooks/hooks.json").read_text(encoding="utf-8")).get("hooks", {})
+  entries = hooks.get("SessionStart") or [{}]
+  commands = entries[0].get("hooks") or [{}]
+  if (list(hooks), len(entries), len(commands), commands[0].get("type")) != (
+      ["SessionStart"], 1, 1, "command"):
+    raise ValueError("Hooks: hooks.json must declare one SessionStart command hook")
+
+
 def build(root: Path, output: Path) -> tuple[Path, Path]:
   """Write a new runtime folder and ZIP; refuse unsafe inputs or overwrites."""
   root = root.resolve()
@@ -79,9 +153,6 @@ def build(root: Path, output: Path) -> tuple[Path, Path]:
     raise ValueError("Output folder or ZIP already exists")
   if folder == root or root.is_relative_to(folder):
     raise ValueError("Output must not contain the source tree")
-  for path in (root / "hooks").rglob("*"):
-    if path.is_file() and path.relative_to(root).as_posix() not in HOOK_FILES:
-      raise ValueError("hooks/ may hold only hooks.json, run-hook.cmd and session-start")
   files = set()
   for pattern in SHARED:
     for path in root.glob(pattern):
@@ -96,7 +167,9 @@ def build(root: Path, output: Path) -> tuple[Path, Path]:
   for name in REQUIRED_SHARED:
     if Path(name) not in files:
       raise ValueError(f"Missing required file: {name}")
+  check_effects(root)
   manifest = json.loads((root / MANIFEST).read_text())
+  check_hooks(root, manifest)
   portable = json.loads((root / "plugin.json").read_text())
   if manifest.get("hooks") or portable.get("hooks"):
     raise ValueError("Directory packages cannot contain hooks")

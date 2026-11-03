@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Modified by SuperEGM (gsVAM), 2026: Python 3.11, one host.
+# Modified by SuperEGM (gsVAM), 2026: Python 3.11, one host, Ubuntu only (plan U01 D2 (b): two EGM-inherited tests shell out in ways Windows runners lack).
 
 # Run the offline unit tests; no API keys or model dependencies.
 name: Tests
@@ -29,7 +29,7 @@ jobs:
   unit:
     strategy:
       matrix:
-        os: [ubuntu-24.04, windows-2025]
+        os: [ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
