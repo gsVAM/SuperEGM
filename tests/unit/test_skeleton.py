@@ -147,3 +147,13 @@ def test_adapter_and_persona_carry_the_section_14_id(id_: str) -> None:
   assert sorted(meta["tools"]) == sorted(expected)
   assert f"${{CLAUDE_PLUGIN_ROOT}}/agents/{id_}.md" in adapter.read_text(encoding="utf-8")
   assert sorted(p.stem for p in ROOT.glob(".claude-plugin/agents/*.md")) == sorted(IDS)
+
+
+FINDINGS_LINE = "<reviewer>-<round>-<n> | high|medium|low | <location> | regression: yes|no | <claim>"
+
+
+@pytest.mark.parametrize("id_", IDS[:8])
+def test_persona_output_section_is_the_findings_line(id_: str) -> None:
+  text = (ROOT / "agents" / f"{id_}.md").read_text(encoding="utf-8")
+  assert FINDINGS_LINE in text.split("# Output Format", 1)[1]
+  assert not re.search(r"Blocker|Major|Nit|🔴|🟡|🟢", text), id_
