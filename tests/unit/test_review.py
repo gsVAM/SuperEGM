@@ -466,3 +466,24 @@ def test_approve_spec_void(world):
   assert approve(world, spec, pcid, "--void", "--review", prid)[0] == 0 and approval(world)["voided_by"] == prid
   store(world.repo).path("approvals", SLUG).unlink()
   assert f"approve-spec: no approval for {SLUG}" in approve(world, spec, pcid, "--void", "--review", prid)[1]
+
+
+# ---------------------------------------------------------------- S16: `approve-spec --amend-units`
+
+def test_approve_spec_amend_units(world):
+  spec, cid, rid = converged_spec(world)
+  assert approve(world, spec, cid, "--yes")[0] == 0
+  first = approval(world)
+  icid = card(world, spec, "integrate")
+  spec.write_text(SPEC + "| U02 | more (from integrate, review spec-x-integrate-c1) | U01 | S |\n", encoding="utf-8")
+  code, out = approve(world, spec, icid, "--amend-units")
+  assert code == 0, out
+  rec = approval(world)
+  assert rec["handoff_id"] == first["handoff_id"] and rec["sha256"] == hashlib.sha256(spec.read_bytes()).hexdigest() != first["sha256"]
+  assert rec["commit"] == git(world, "rev-parse", "HEAD") != first["commit"] and [a["sha256"] for a in rec["amended"]] == [rec["sha256"]]
+  assert git(world, "log", "-1", "--format=%s") == f"superegm: approve {SLUG} at review {rid}"
+  spec.write_text(spec.read_text(encoding="utf-8").replace("Text.", "Changed."), encoding="utf-8")
+  code, out = approve(world, spec, icid, "--amend-units")
+  assert code == 1 and "approve-spec: a line outside ## Units changed" in out and approval(world) == rec
+  store(world.repo).path("approvals", SLUG).unlink()
+  assert "approve-spec: no approval to amend" in approve(world, spec, icid, "--amend-units")[1]
