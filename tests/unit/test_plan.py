@@ -550,3 +550,15 @@ def test_scan_numbers_and_warnings(world, old, new, key, limit):
   numbers = json.loads(find(world, "U02.json").read_text(encoding="utf-8"))
   assert code == 0 and out.rstrip().endswith("scan: clean") and numbers[key] > float(limit.replace(",", "")), out
   assert numbers["warnings"] == [f"{key} {numbers[key]:,} > {limit}"]
+
+
+RULES = ("the test's signature", "its assertions with the spec's exact values",
+         "a full test body appears only for an algorithm or data the assertions do not determine",
+         "one sentence", "never restates what the test asserts", "one parametrized Step, never one Step per rule",
+         "the test is the table", "make the table hold",
+         "pytest <test path>::<test name> -q", "pytest <test path> -k <test name> -q", "test(S<n>): <test name>")
+
+
+@pytest.mark.parametrize("path,needle", [(p, n) for p in ("skills/plan/SKILL.md", "skills/plan/references/writing_plans.md") for n in RULES])
+def test_drafting_rules_in_the_plan_skill_and_writing_plans(path, needle):
+  assert needle in (ROOT / path).read_text(encoding="utf-8"), f"{path} lacks {needle!r}"
