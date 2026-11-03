@@ -77,6 +77,20 @@ def run(args):
           "status": status_review, "rule": rule_review}[args.action](args)
 
 
+class Refusal(core.HandoffError):
+  """A refusal the subcommand prints as is: one line on stdout, exit 1."""
+
+
+def require_dispatch(unit: str, data: dict, dispatch_id: str) -> dict:
+  """The round entry of the unit's current dispatch; a stale or unknown id is refused."""
+  if dispatch_id != data.get("dispatch_id"):
+    raise Refusal(f"dispatch: {dispatch_id} is not {unit}'s current dispatch ({data.get('dispatch_id')})")
+  entry = next((e for e in reversed(data["rounds"]) if e.get("dispatch_id") == dispatch_id), None)
+  if entry is None:
+    raise Refusal(f"dispatch: {unit} has no round for {dispatch_id}")
+  return entry
+
+
 # ---------------------------------------------------------------- the findings line
 
 
