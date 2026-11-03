@@ -9,7 +9,7 @@ from pathlib import Path
 
 import superegm as core
 from superegm import body
-from superegm.launch import builder_login
+from superegm.launch import builder_login, load_launches, terminal
 
 WRITES = frozenset(["launches"])  # the store kinds this subcommand writes
 SKILLS = frozenset(["wave"])  # the skills whose card this subcommand accepts
@@ -38,6 +38,9 @@ def prepare(args, card):
   state, config, unit, rnd = handoff.state, handoff.config, args.unit, args.round
   repo, builder_config = config["repo"], config["builder"]
   builder = builder_login(config, os.environ.get(builder_config["gh_token_env"]))
+  problem = refusal(st, state, config, unit, rnd, builder)
+  if problem:
+    raise core.HandoffError(problem)
   record = state["units"][unit]
   branch, number = handoff.branch(unit), record["number"]
   issue_body = filed_body(state, unit)
@@ -53,6 +56,41 @@ def prepare(args, card):
   core.journal(st, f"{unit} launch {rnd} prepared")
   print(command_line(config, worktree, prompt, st.path("launches", f"{unit}_r{rnd}_result.json"), args.runcard, tools))
   return 0
+
+
+def refusal(store, state, config, unit, rnd, builder):
+  """The first precondition of spec section 11 this launch fails, or None; evaluated before any
+  git or file write."""
+  record = (state.get("units") or {}).get(unit) or {}
+  if not record.get("launched"):
+    return f"{unit} is not marked by launch"
+  launches = load_launches(store, unit)
+  for entry in launches:
+    if not terminal(entry):
+      return f"{unit} launch {entry['round']} is not terminal"
+  if rnd != len(launches) + 1:
+    return f"--round {rnd} is not the next launch count ({len(launches) + 1})"
+  problem = profile_problem(Path(config["builder"]["profile_dir"]).expanduser())
+  if problem:
+    return problem
+  issue = core.gh_json(["api", f"repos/{config['repo']}/issues/{record['number']}"]) or {}
+  if body.normalise(filed_body(state, unit)) != body.normalise(issue.get("body") or ""):
+    return f"issue #{record['number']} body differs from the filed body"
+  if rnd >= 2 and not (record.get("pr") or {}).get("number"):
+    return f"{unit} round {rnd} has no recorded PR: run status first"
+  return None
+
+
+def profile_problem(profile_dir):
+  """Spec section 4: the builder profile exists, holds no CLAUDE.md and no plugins."""
+  plugins = profile_dir / "plugins"
+  if not profile_dir.is_dir():
+    return f"builder profile {profile_dir} does not exist"
+  if (profile_dir / "CLAUDE.md").exists():
+    return f"builder profile {profile_dir} holds CLAUDE.md"
+  if plugins.is_dir() and any(plugins.iterdir()):
+    return f"builder profile {profile_dir} holds plugins"
+  return None
 
 
 def filed_body(state, unit):

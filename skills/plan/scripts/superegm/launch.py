@@ -89,6 +89,11 @@ def load_launches(store, unit):
   return json.loads(core.read_text(path))["launches"] if path.is_file() else []
 
 
+def terminal(entry):
+  """Spec section 4: a launch is terminal only with its exit file or the owner's typed `interrupted`."""
+  return entry.get("status") == "interrupted" or Path(entry["result_file"] + ".exit").is_file()
+
+
 def builder_login(config, token_env_value):
   """The builder account's login under its token, refused when the token is unset or is the elephant's own."""
   env = config["builder"]["gh_token_env"]
