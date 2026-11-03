@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_apply`, `Budget`, `apply_writes`, `create_issue` and `post_link` as the apply module.
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_apply`, `Budget`, `apply_writes`, `create_issue` and `post_link` on the confirmed write list of unfiled units; `filings[]` and `base_at_start` before the first write; the labels of spec section 10.
 
 """superegm apply: create labels, issues and links (needs --yes)."""
 
@@ -8,9 +8,11 @@ import os
 import tempfile
 import time
 import urllib.parse
+from pathlib import Path
 
 import superegm.verify
 import superegm as core
+from superegm import gate, scan
 
 WRITES = frozenset(['file', 'state'])  # the store kinds this subcommand writes
 SKILLS = frozenset(['file'])  # the skills whose card this subcommand accepts
@@ -18,6 +20,7 @@ SKILLS = frozenset(['file'])  # the skills whose card this subcommand accepts
 
 def register(subparsers):
   p = core.add_parser(subparsers, "apply", "create labels, issues and links (needs --yes)")
+  p.add_argument("--spec", dest="design", required=True, help="the approved spec the filing is for")
   p.add_argument("--yes", action="store_true")
   p.add_argument("--max-writes", type=int)
   p.set_defaults(run=run, writes=WRITES)
@@ -60,29 +63,37 @@ class Budget:
 
 def run(args):
   card = core.require_runcard(args, SKILLS)
-  plan, st = core.locate(args)
-  handoff = core.Handoff(plan, st)
-  state = handoff.state
+  handoff = gate.open_handoff(Path(args.design))
+  state, st = handoff.state, handoff.store
   repo = handoff.config["repo"]
   if not args.yes:
-    raise core.HandoffError("apply writes to GitHub: run it with --yes only after the user confirmed the dry run")
-  if not state.get("confirmed_sha256"):
-    raise core.HandoffError("no confirmed_sha256 in the state: run dry-run and ask the user first")
+    raise core.HandoffError("apply writes to GitHub: run it with --yes only after the owner chose Create (or in leavemealone-mode)")
+  confirmed = state.get("confirmed") or {}
+  if not confirmed.get("sha256"):
+    raise core.HandoffError("no confirmed write list in the state: run dry-run first")
   if (state.get("repo") or "").lower() != repo.lower():
     raise core.HandoffError(f"config repo {repo} differs from the state's {state.get('repo')}: run dry-run again")
-  # Before any write: the canonical list carries the gate hashes as values, so
-  # an edit the rendered bodies do not show leaves it identical while still
-  # reaching the builder through unit_<id>.md.
-  core.require_reviewed_pair(handoff)
-  writes = handoff.writes()
-  if core.sha256_text(core.canonical(writes)) != state["confirmed_sha256"]:
+  gate.require_gate(handoff)
+  # The unit set is the dry run's, so a resumed apply recomputes the same list.
+  units = {w[1] for w in confirmed["writes"] if w[0] == "issue" and w[1] != "tracking"}
+  writes = gate.pending_writes(handoff, units)
+  if core.sha256_text(core.canonical(writes)) != confirmed["sha256"] \
+      or core.canonical(writes) != core.canonical(confirmed["writes"]):
     raise core.HandoffError("the write list changed since the dry run (plan, config, template or repo): run dry-run again")
   # A banned_terms or mention rule added after the dry run leaves the write list
   # unchanged, so the hash above cannot catch it. Scan the outgoing text itself.
-  problems = core.scan_handoff(handoff)
+  problems = scan.scan_handoff(handoff)
   if problems:
     raise core.HandoffError("the current scan refuses the text that would be written:\n  "
-                       + "\n  ".join(problems))
+                            + "\n  ".join(problems))
+  sha = confirmed["sha256"]
+  if not any(f.get("sha256") == sha for f in state.get("filings") or []):
+    # Once per write-list hash, before the first write: the list a resumed or
+    # later filing is verified against, and the base the integrate diff starts from.
+    state.setdefault("filings", []).append({"sha256": sha, "writes": confirmed["writes"], "at": core.now_iso()})
+    state.setdefault("base_at_start", core.run_git(["rev-parse", handoff.config["base"]], handoff.repo_root).strip())
+    core.journal(st, f"filing {sha[:12]}: {len(units)} units ({', '.join(sorted(units))})")
+    core.save_state(handoff.artifact_dir, state)
   state.setdefault("confirmed_at", core.now_iso())
   budget = Budget(args.max_writes)
   save = lambda: core.save_state(handoff.artifact_dir, state)
