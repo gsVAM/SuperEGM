@@ -419,3 +419,23 @@ def test_scan_rules(world, rule, old, new):
   assert graph(world, plan, card)[0] == 0
   code, out = world.run("scan")
   assert code == 0 and out.rstrip().endswith("scan: clean"), out
+
+
+D1_YES = D1.replace("blocking: no", "blocking: yes")
+BLOCKED = (UNITS[0], section("U02", "Worker", "U01", ["u01_fn(x: int) -> int (U01)"], D1_YES), UNITS[2])
+
+
+def test_decide_rewrites_the_plan_line_and_rerenders(world):
+  spec, sha, plan, card = planned(world, BLOCKED)
+  assert graph(world, plan, card)[0] == 0
+  code, out = world.run("scan")
+  assert code == 1 and "decision-blocking: U02" in out
+  before = state(world)["units"]["U02"]["body_sha256"]
+  code, out = world.run("decide", "--unit", "U02", "--decision", "D1", "--answer", "(b)", "--runcard", card)
+  assert code == 0 and "recorded U02/D1 (b); re-rendered unit_U02.md" in out, out
+  assert D1_YES + "; answer: (b)" in plan.read_text(encoding="utf-8")
+  assert D1_YES + "; answer: (b)" in body_of(world, "U02") and state(world)["units"]["U02"]["body_sha256"] != before
+  d = state(world)["decisions"]["U02/D1"]
+  assert d["answer"] == "(b)" and d["by"] == "owner" and d["decided_at"] and "published" not in d
+  assert not list(store_root(world).rglob("decision_comment_U02_D1.md"))
+  assert world.run("scan")[0] == 0
