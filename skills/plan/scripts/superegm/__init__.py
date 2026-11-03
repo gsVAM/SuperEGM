@@ -155,7 +155,7 @@ def atomic_write(path: Path, obj) -> None:
   path = Path(path)
   if CURRENT_WRITES is not None and STORE is not None and STORE.holds(path):
     kind = STORE.kind_of(path)
-    if kind not in CURRENT_WRITES:
+    if kind not in {Store.ALIASES.get(k, k) for k in CURRENT_WRITES}:
       raise HandoffError(f"{CURRENT_SUBCOMMAND} may not write {kind} ({path})")
   path.parent.mkdir(parents=True, exist_ok=True)
   tmp = path.with_name(path.name + f".tmp{os.getpid()}")
@@ -178,6 +178,8 @@ class Store:
 
   FILES = {"state": "state.json", "journal": "journal.md", "plan": "handoff_plan.md",
            "units": "handoff_units.json", "bodies": "handoff_bodies.md"}
+  # The Interfaces block's longer names for the same kinds.
+  ALIASES = {"handoff_plan": "plan", "handoff_units": "units", "handoff_bodies": "bodies", "wave_report": "report"}
   KEYED = ("unit", "foreman", "launches", "worktrees", "review")
 
   def __init__(self, root: Path, handoff_id: str | None = None, config: dict | None = None):
@@ -186,14 +188,14 @@ class Store:
     self.config = config
 
   def path(self, kind, *parts) -> Path:
-    parts = [str(p) for p in parts]
+    kind, parts = self.ALIASES.get(kind, kind), [str(p) for p in parts]
     if kind in self.FILES:
       return self.root / self.FILES[kind]
     if kind == "report":
       return self.root / f"wave_{parts[0]}_report.md"
     if kind in ("approvals", "runcards"):
-      return self.root / kind / f"{parts[0]}.json"
-    if kind in ("reviews", "judges", "file"):
+      return self.root / kind / (parts[0] if parts[0].endswith(".json") else f"{parts[0]}.json")
+    if kind in ("reviews", "judges", "questions", "file"):
       return self.root.joinpath(*([kind] if kind != "file" else []), *parts)
     if kind not in self.KEYED:
       raise HandoffError(f"unknown store kind {kind}")
@@ -222,7 +224,7 @@ class Store:
       if parts[0] in names:
         return names[parts[0]]
       return "report" if re.fullmatch(r"wave_\d+_report\.md", parts[0]) else "file"
-    if parts[0] in ("approvals", "runcards", "reviews", "judges"):
+    if parts[0] in ("approvals", "runcards", "reviews", "judges", "questions"):
       return parts[0]
     if re.fullmatch(r"[0-9a-f]{6}", parts[0]):
       if len(parts) == 2 and re.fullmatch(r"unit_.+\.md", parts[1]):
