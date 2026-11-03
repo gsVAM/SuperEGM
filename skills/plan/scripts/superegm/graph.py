@@ -189,9 +189,20 @@ class Handoff(core.Handoff):
     core.save_state(self.artifact_dir, self.state)
 
 
+def load(store: core.Store, plan) -> Handoff:
+  """The handoff of `--plan`, or of the plan `state.json` recorded."""
+  if plan is None:
+    plan = core.load_state(store.root).get("plan")
+    if not plan:
+      raise core.HandoffError("graph: no plan recorded: pass --plan on the first graph")
+  plan = Path(plan).expanduser().resolve()
+  if not plan.is_file():
+    raise core.HandoffError(f"graph: plan {plan} does not exist")
+  return Handoff(plan, store, core.load_state(store.root))
+
+
 def run(args):
-  plan, st = core.locate(args)
-  handoff = Handoff(plan, st, core.load_state(st.root))
+  handoff = load(core.store(core.git_toplevel(Path.cwd())), args.plan)
   # The card is on the spec the plan names: `require_runcard` reads it from `design`.
   args.design = str(handoff.design_path)
   core.require_runcard(args, SKILLS)

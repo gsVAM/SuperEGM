@@ -59,8 +59,7 @@ def scan_handoff(handoff: graph.Handoff) -> list:
 
 
 def run(args):
-  plan, st = core.locate(args)
-  handoff = graph.Handoff(plan, st, core.load_state(st.root))
+  handoff = graph.load(core.store(core.git_toplevel(Path.cwd())), args.plan)
   if args.comment:
     path = Path(args.comment).expanduser().resolve()
     problems = scan_text(core.read_text(path), handoff.config, "comment", label=path.name)
