@@ -123,6 +123,9 @@ def register(subparsers):
   d.add_argument("--panel", required=True)
   d.add_argument("--round", required=True, type=int)
   d.add_argument("--runcard", required=True, help="the panel's judges card, or its parent")
+  v = action.add_parser("verdict", help="compute per-question convergence, write verdict.json and print it")
+  v.add_argument("--panel", required=True)
+  v.add_argument("--runcard", required=True, help="the panel's judges card, or its parent")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -403,4 +406,33 @@ def cmd_diff(args, store) -> int:
   return 0
 
 
-COMMANDS = {"open": cmd_open, "record": cmd_record, "diff": cmd_diff}
+def cmd_verdict(args, store) -> int:
+  panel = load_panel(store, args.panel)
+  panel_card(args, store, panel)
+  pid = panel["id"]
+  if not panel["rounds"]:
+    raise core.HandoffError("judges: no round recorded")
+  latest = max(panel["rounds"], key=int)
+  for judge in panel["judges"]:
+    if judge not in panel["rounds"][latest]:
+      raise core.HandoffError(f"judges: round {latest}: {judge} not recorded")
+  folder = store.path("judges", pid)
+  questions = parse_questions(core.read_text(folder / "question.md"))
+  path = folder / "verdict.json"
+  previous = json.loads(core.read_text(path))["questions"] if path.is_file() else {}
+  verdict = {"panel": pid, "question_sha256": panel["question_sha256"], "runcard": panel["runcard"],
+             "min_vendors": panel["min_vendors"], "judges": panel["judges"], "rounds": panel["rounds"],
+             "computed_at": core.now_iso(), **compute_verdict(panel, questions)}
+  write_json(path, verdict)
+  for qid, question in verdict["questions"].items():
+    if question["converged"] and not previous.get(qid, {}).get("converged"):
+      core.journal(store, f"judges {pid}: {qid} converged ({question['option']}) round {question['round']}")
+  line = "verdict converged" if verdict["converged"] else f"verdict not converged: {', '.join(verdict['open'])}"
+  line += " (cap reached)" if verdict["cap_reached"] else ""
+  line += " (degraded)" if verdict["degraded"] else ""
+  core.journal(store, f"judges {pid}: {line}")
+  print(json.dumps(verdict, indent=2))
+  return 0 if verdict["converged"] else 2
+
+
+COMMANDS = {"open": cmd_open, "record": cmd_record, "diff": cmd_diff, "verdict": cmd_verdict}
