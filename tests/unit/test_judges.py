@@ -360,3 +360,23 @@ def test_judge_adapter_and_persona():
                  "no findings", "option id", "saw:", "never spawn"):
     assert phrase in persona, phrase
   assert "Severity" not in persona and "Mode:" not in persona
+
+
+def test_judges_skill_body():
+  text = (ROOT / "skills/judges/SKILL.md").read_text(encoding="utf-8")
+  assert len(text.split("---", 2)[2].encode("utf-8")) <= 24_000
+  assert "In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first." in text
+  for phrase in ("superegm runcard open --skill judges", "superegm judges open", "superegm judges record",
+                 "superegm judges diff", "superegm judges verdict", "superegm runcard close", "superegm:judge",
+                 "run_in_background", "SUPEREGM_ROLE=goldfish", "no one adds arguments between rounds",
+                 "advisory", "references/astra_judge.md", "concurrently", "degraded", "round-<n>/brief.md",
+                 "--isolation", "saw:", "cap of 5"):
+    assert phrase in text, phrase
+  assert "--judges 1" not in text and "--cap" not in text
+  ref = (ROOT / "skills/judges/references/astra_judge.md").read_text(encoding="utf-8")
+  for phrase in ("Modified by SuperEGM (gsVAM), 2026", "review --host claude", "--plan '<QUESTION_FILE>'",
+                 "--feedback", "--timeout 1800", "result.json", "--result", "not run (", "fresh session"):
+    assert phrase in ref, phrase
+  scenarios = yaml.safe_load((ROOT / "skills/judges/test_scenarios.yaml").read_text(encoding="utf-8"))
+  assert scenarios["skill"] == "judges"
+  assert {s["scenario_id"] for s in scenarios["scenarios"]} >= {"advisory_never_applies", "astra_down_runs_claude_only"}
