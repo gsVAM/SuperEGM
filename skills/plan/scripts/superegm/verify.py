@@ -6,10 +6,12 @@
 
 import superegm as core
 
+WRITES = frozenset(['state'])  # the store kinds this subcommand writes
+
 
 def register(subparsers):
   p = core.add_parser(subparsers, "verify", "read every write back and record the receipt")
-  p.set_defaults(run=run)
+  p.set_defaults(run=run, writes=WRITES)
 
 
 def run_verify(handoff: core.Handoff, writes=None):

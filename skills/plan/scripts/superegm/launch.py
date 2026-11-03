@@ -6,12 +6,14 @@
 
 import superegm as core
 
+WRITES = frozenset(['state'])  # the store kinds this subcommand writes
+
 
 def register(subparsers):
   p = core.add_parser(subparsers, "launch", "record the units launched in a wave")
   p.add_argument("--wave", type=int, required=True)
   p.add_argument("--units", nargs="+", required=True)
-  p.set_defaults(run=run)
+  p.set_defaults(run=run, writes=WRITES)
 
 
 def run(args):

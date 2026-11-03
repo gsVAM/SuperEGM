@@ -10,13 +10,15 @@ from pathlib import Path
 
 import superegm as core
 
+WRITES = frozenset(['approvals', 'state'])  # the store kinds this subcommand writes
+
 
 def register(subparsers):
   p = core.add_parser(subparsers, "approve-spec", "check the design and record the user's approval")
   p.add_argument("--design", required=True)
   p.add_argument("--evidence")
   p.add_argument("--yes", action="store_true", help="the user answered Approve")
-  p.set_defaults(run=run)
+  p.set_defaults(run=run, writes=WRITES)
 
 
 def run(args):

@@ -6,13 +6,15 @@
 
 import superegm as core
 
+WRITES = frozenset(['state'])  # the store kinds this subcommand writes
+
 
 def register(subparsers):
   p = core.add_parser(subparsers, "status", "landed and ready sets, PRs, CI; refuses without a complete receipt")
   p.add_argument("--wait", type=int, help="seconds; exit when a unit changes or the deadline passes")
   p.add_argument("--watch", action="append", help="U03=412 records that PR for the unit")
   p.add_argument("--confirm-landed", action="append", help="unit the user confirmed landed")
-  p.set_defaults(run=run)
+  p.set_defaults(run=run, writes=WRITES)
 
 
 def run(args):

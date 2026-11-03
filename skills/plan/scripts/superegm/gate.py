@@ -8,6 +8,8 @@ import difflib
 
 import superegm as core
 
+WRITES = frozenset(['bodies', 'file', 'plan', 'state', 'unit', 'units'])  # the store kinds this subcommand writes
+
 
 def register(subparsers):
   p = core.add_parser(subparsers, "gate", "record the reviewed pair, pass or accept the gate, record readiness")
@@ -17,7 +19,7 @@ def register(subparsers):
   p.add_argument("--accept", action="store_true")
   p.add_argument("--readiness")
   p.add_argument("--what-ran", action="append")
-  p.set_defaults(run=run)
+  p.set_defaults(run=run, writes=WRITES)
 
 
 def run(args):

@@ -12,12 +12,14 @@ import urllib.parse
 import superegm.verify
 import superegm as core
 
+WRITES = frozenset(['file', 'state'])  # the store kinds this subcommand writes
+
 
 def register(subparsers):
   p = core.add_parser(subparsers, "apply", "create labels, issues and links (needs --yes)")
   p.add_argument("--yes", action="store_true")
   p.add_argument("--max-writes", type=int)
-  p.set_defaults(run=run)
+  p.set_defaults(run=run, writes=WRITES)
 
 
 class Budget:

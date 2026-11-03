@@ -5,9 +5,11 @@
 
 import sys
 
+WRITES = frozenset()  # the store kinds this subcommand writes
+
 
 def register(subparsers):
-  subparsers.add_parser("tdd-order", help="check that each Step's test commit precedes its implementation").set_defaults(run=run)
+  subparsers.add_parser("tdd-order", help="check that each Step's test commit precedes its implementation").set_defaults(run=run, writes=WRITES)
 
 
 def run(args):

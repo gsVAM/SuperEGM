@@ -11,6 +11,8 @@ from pathlib import Path
 
 import superegm as core
 
+WRITES = frozenset(['foreman'])  # the store kinds this subcommand writes
+
 
 def register(subparsers):
   p = core.add_parser(subparsers, "collect", "record a round as collected once its run folder has finished")
@@ -18,7 +20,7 @@ def register(subparsers):
   p.add_argument("--round", type=int, default=1)
   p.add_argument("--verdict", help="clean | revise, as the round report concluded")
   p.add_argument("--not-run", dest="not_run", help="the lane did not run, with this reason")
-  p.set_defaults(run=run)
+  p.set_defaults(run=run, writes=WRITES)
 
 
 def run(args):

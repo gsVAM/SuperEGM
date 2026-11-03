@@ -5,9 +5,11 @@
 
 import sys
 
+WRITES = frozenset()  # the store kinds this subcommand writes
+
 
 def register(subparsers):
-  subparsers.add_parser("init", help="write .superegm/config.json and print the owner's by-hand steps").set_defaults(run=run)
+  subparsers.add_parser("init", help="write .superegm/config.json and print the owner's by-hand steps").set_defaults(run=run, writes=WRITES)
 
 
 def run(args):

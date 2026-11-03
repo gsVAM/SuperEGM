@@ -11,7 +11,7 @@ import superegm
 
 def main(argv=None):
   args = superegm.build_parser().parse_args(argv)
-  superegm.CURRENT_WRITES, superegm.CURRENT_SUBCOMMAND = getattr(args, "writes", None), args.command
+  superegm.CURRENT_WRITES, superegm.CURRENT_SUBCOMMAND = args.writes, args.command
   try:
     return args.run(args)
   except superegm.HandoffError as error:

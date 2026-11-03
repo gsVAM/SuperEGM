@@ -5,9 +5,11 @@
 
 import sys
 
+WRITES = frozenset()  # the store kinds this subcommand writes
+
 
 def register(subparsers):
-  subparsers.add_parser("foreman", help="foreman dispatch").set_defaults(run=run)
+  subparsers.add_parser("foreman", help="foreman dispatch").set_defaults(run=run, writes=WRITES)
 
 
 def run(args):

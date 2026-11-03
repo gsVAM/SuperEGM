@@ -6,6 +6,8 @@
 
 import superegm as core
 
+WRITES = frozenset(['file', 'state', 'unit'])  # the store kinds this subcommand writes
+
 
 def register(subparsers):
   p = core.add_parser(subparsers, "decide", "record the user's answer to a decide-before-build item")
@@ -13,7 +15,7 @@ def register(subparsers):
   p.add_argument("--unit", required=True)
   p.add_argument("--decision", required=True)
   p.add_argument("--answer")
-  p.set_defaults(run=run)
+  p.set_defaults(run=run, writes=WRITES)
 
 
 def run(args):

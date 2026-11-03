@@ -10,6 +10,8 @@ from pathlib import Path
 
 import superegm as core
 
+WRITES = frozenset(['file', 'foreman'])  # the store kinds this subcommand writes
+
 
 def register(subparsers):
   p = core.add_parser(subparsers, "prepare", "fetch the PR into refs/egm, add a worktree, write the diff and CI file")
@@ -21,7 +23,7 @@ def register(subparsers):
   p.add_argument("--effort")
   p.add_argument("--clean", action="store_true",
                  help="at landing only: remove the round's worktree, its refs, and prune")
-  p.set_defaults(run=run)
+  p.set_defaults(run=run, writes=WRITES)
 
 
 def run(args):

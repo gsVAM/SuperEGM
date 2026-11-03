@@ -6,10 +6,12 @@
 
 import superegm as core
 
+WRITES = frozenset(['bodies', 'file', 'plan', 'state', 'unit', 'units'])  # the store kinds this subcommand writes
+
 
 def register(subparsers):
   p = core.add_parser(subparsers, "dry-run", "preflight reads and handoff_dryrun.md; records confirmed_sha256")
-  p.set_defaults(run=run)
+  p.set_defaults(run=run, writes=WRITES)
 
 
 def run(args):

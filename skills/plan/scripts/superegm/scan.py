@@ -8,11 +8,13 @@ from pathlib import Path
 
 import superegm as core
 
+WRITES = frozenset()  # the store kinds this subcommand writes
+
 
 def register(subparsers):
   p = core.add_parser(subparsers, "scan", "banned terms, bare mentions, merge markers, size, DoD presence")
   p.add_argument("--comment", help="scan this comment file instead of the bodies")
-  p.set_defaults(run=run)
+  p.set_defaults(run=run, writes=WRITES)
 
 
 def run(args):
