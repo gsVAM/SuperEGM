@@ -187,11 +187,11 @@ def test_dry_run_writes_file_and_calls_only_three_reads(world):
   assert "3 issues" in out.replace("4 issues", "3 units") or True
   text = (world.artifacts / "handoff_dryrun.md").read_text(encoding="utf-8")
   assert "4 issues (1 tracking, 3 units), 3 sub-issue links, 2 blocked-by links" in text
-  assert "- `egm:unit`: create" in text and "- `egm:wave-1`: create" in text
+  assert "- `superegm:unit`: create" in text and "- `superegm:wave-1`: create" in text
   assert "Confirmed write list sha256" in text and "astra: not run (test)" in text
   state = state_of(world)
   assert re.fullmatch(r"[0-9a-f]{64}", state["confirmed_sha256"])
-  assert state["labels"]["egm:unit"] == "missing"
+  assert state["labels"]["superegm:unit"] == "missing"
   kinds = [c[:2] for c in world.gh.calls]
   assert kinds == [["auth", "status"], ["api", f"repos/{REPO}"], ["api", f"repos/{REPO}/labels"]]
   writes = world.ns["Handoff"](world.plan, world.ns["store"](world.repo)).writes()
@@ -227,7 +227,7 @@ def test_dry_run_refuses_101_units_missing_extra_and_warns_above_450(world):
   code, out = world.run("dry-run", "--plan", world.plan)
   assert code == 0 and "4 issues" in out
   dryrun = (world.artifacts / "handoff_dryrun.md").read_text(encoding="utf-8")
-  assert "Labels: egm:handoff-" in dryrun and "needs-triage" in dryrun
+  assert "Labels: superegm:handoff-" in dryrun and "needs-triage" in dryrun
   big = []
   for n in range(1, 102):
     big.append(textwrap.dedent(f"""\
@@ -297,8 +297,8 @@ def test_apply_creates_in_order_and_rerun_writes_nothing(world):
   assert code == 0, out
   gh = world.gh
   labels = [c[2] for c in gh.calls if c[0] == "label"]
-  assert labels == ["egm:unit", "egm:tracking", "egm:handoff-" + state_of(world)["handoff_id"],
-                    "egm:wave-1", "egm:wave-2", "egm:wave-3"]
+  assert labels == ["superegm:unit", "superegm:tracking", "superegm:handoff-" + state_of(world)["handoff_id"],
+                    "superegm:wave-1", "superegm:wave-2", "superegm:wave-3"]
   assert "bug" in gh.labels and all("--force" not in c for c in gh.calls)
   creates = [c for c in gh.calls if c[:2] == ["issue", "create"]]
   titles = [c[c.index("--title") + 1] for c in creates]
@@ -309,7 +309,7 @@ def test_apply_creates_in_order_and_rerun_writes_nothing(world):
   assert gh.issues[3]["body"].count("#1") >= 1 and "**Blocked by.** #2" in gh.issues[3]["body"]
   assert "after #2, before U03 (Admin endpoint)" in gh.issues[3]["body"]
   assert "**Blocked by.** #3" in gh.issues[4]["body"]
-  assert gh.issues[2]["labels"] == ["egm:handoff-" + state_of(world)["handoff_id"], "egm:unit", "egm:wave-1"]
+  assert gh.issues[2]["labels"] == ["superegm:handoff-" + state_of(world)["handoff_id"], "superegm:unit", "superegm:wave-1"]
   assert world.sleeps.count(1) >= 4
   assert gh.sub_issues[1] == [gh.issues[2]["id"], gh.issues[3]["id"], gh.issues[4]["id"]]
   assert gh.blocked_by == {3: [gh.issues[2]["id"]], 4: [gh.issues[3]["id"]]}
@@ -348,7 +348,7 @@ def test_apply_rate_limit_exhaustion_exits_nonzero_with_resume_message(world):
   assert code == 1 and "rate limited: resume with `apply --yes` after" in out
   assert world.sleeps.count(60) == 3
   state = state_of(world)
-  assert state["labels"]["egm:unit"] == "done" and not state.get("tracking", {}).get("number")
+  assert state["labels"]["superegm:unit"] == "done" and not state.get("tracking", {}).get("number")
 
 
 def test_apply_max_writes_resumes_in_bounded_calls(world):
@@ -357,7 +357,7 @@ def test_apply_max_writes_resumes_in_bounded_calls(world):
   assert code == 0 and "stopped after 2 writes" in out
   state = state_of(world)
   assert state["verify"]["complete"] is False
-  assert sorted(n for n, s in state["labels"].items() if s == "done") == ["egm:tracking", "egm:unit"]
+  assert sorted(n for n, s in state["labels"].items() if s == "done") == ["superegm:tracking", "superegm:unit"]
   code, out = world.run("apply", "--plan", world.plan, "--yes", "--max-writes", 2)
   assert code == 0 and "stopped after 2 writes" in out
   state = state_of(world)
@@ -372,12 +372,12 @@ def test_verify_records_mismatches(world):
   dry_run(world)
   assert world.run("apply", "--plan", world.plan, "--yes")[0] == 0
   world.gh.issues[3]["body"] += "\nedited by hand"
-  world.gh.issues[2]["labels"].remove("egm:unit")
+  world.gh.issues[2]["labels"].remove("superegm:unit")
   code, out = world.run("verify", "--plan", world.plan)
   assert code == 1
   state = state_of(world)
   problems = state["verify"]["problems"]
-  assert any("body of #3" in p for p in problems) and any("labels of #2" in p and "egm:unit" in p for p in problems)
+  assert any("body of #3" in p for p in problems) and any("labels of #2" in p and "superegm:unit" in p for p in problems)
   assert state["verify"]["complete"] is True
   code, out = world.run("status", "--plan", world.plan)
   assert code == 1 and "not fully created and verified" in out
@@ -422,11 +422,11 @@ def test_status_pr_matching_rules(world):
   gh = applied(world)
   assert world.run("launch", "--plan", world.plan, "--wave", 1, "--units", "U01")[0] == 0
   # A closing reference naming another repository with the same number does not match.
-  make_pr(gh, 50, "c" * 40, closes=[("other/repo", 2)], branch="egm/U01-old")
+  make_pr(gh, 50, "c" * 40, closes=[("other/repo", 2)], branch="superegm/U01-old")
   code, out = world.run("status", "--plan", world.plan)
   assert "U01 #2 launched wave 1: no pr; waiting-for-pr" in out, out
   # The exact branch of this handoff is a candidate, watched only after --watch.
-  make_pr(gh, 51, "d" * 40, branch=f"egm/{state_of(world)['handoff_id']}/U01")
+  make_pr(gh, 51, "d" * 40, branch=f"superegm/{state_of(world)['handoff_id']}/U01")
   code, out = world.run("status", "--plan", world.plan)
   assert "candidate: PRs #51" in out
   assert not state_of(world)["units"]["U01"].get("pr")
@@ -1499,3 +1499,28 @@ def test_atomic_write_enforces_each_modules_writes(world, monkeypatch, name, kin
     superegm.atomic_write(st.path("judges", "q1", "verdict.json"), {})
   superegm.atomic_write(world.plan, world.plan.read_text(encoding="utf-8"))  # outside the store: unchecked
   assert not list(world.artifacts.rglob("*.tmp*"))
+
+
+@pytest.mark.parametrize("where, expected", [
+  ("labels.unit", "superegm:unit"), ("labels.wave_prefix", "superegm:wave-"),
+  ("labels.handoff_prefix", "superegm:handoff-"), ("labels.tracking", "superegm:tracking"),
+  ("labels.stopped", "superegm:stopped"), ("BRANCH_PREFIX", "superegm"),
+  ("error prefix", "superegm: "), ("state file", "state.json"),
+])
+def test_config_and_label_renames(world, where, expected):
+  import superegm
+  config = superegm.load_config(world.repo)
+  if where.startswith("labels."):
+    assert config["labels"][where[7:]] == expected
+    assert set(superegm.DEFAULT_CONFIG["labels"]) == {"unit", "wave_prefix", "handoff_prefix", "tracking", "stopped", "extra"}
+  elif where == "BRANCH_PREFIX":
+    assert superegm.BRANCH_PREFIX == expected
+    assert world.run("graph", "--plan", world.plan)[0] == 0
+    body = (world.artifacts / "handoff_bodies.md").read_text(encoding="utf-8")
+    assert f"Branch: `superegm/{state_of(world)['handoff_id']}/U01`" in body
+  elif where == "error prefix":
+    code, out = world.run("graph", "--plan", world.repo / "missing.md")
+    assert code == 1 and out.startswith(expected) and "egm_handoff" not in out
+  else:
+    assert world.run("graph", "--plan", world.plan)[0] == 0
+    assert (world.artifacts / expected).is_file() and not (world.artifacts / "handoff_state.json").exists()
