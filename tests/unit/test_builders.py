@@ -452,3 +452,16 @@ def test_builder_orders_carry_the_discipline_and_the_dod_results_form():
   sample = f"U07\n\n### DoD 1\n{F}\nchecked by superegm tdd-order\n{F}\n\n### DoD 2\n{F}\n$ pytest tests/unit/test_worker.py -q\n1 passed\n{F}\n\nCloses #7\n"
   assert [(m.group(1), m.group(2).splitlines()[-1]) for m in DOD_RESULT_RE.finditer(sample)] == [("1", "checked by superegm tdd-order"), ("2", "1 passed")]
   assert sample.splitlines()[0] == "U07" and sample.rstrip().splitlines()[-1] == "Closes #7"
+
+
+@pytest.mark.parametrize("skill, line, sentence", [
+  ("interrupt", "superegm interrupt --unit <unit> (--launch <n> | --round <n>) --runcard <id>", "an owner's decision is not a guess"),
+  ("clean", "superegm clean --unit <unit> --runcard <id>", "refuses while any launch or round of the unit is not terminal, and keeps what it cannot prove"),
+])
+def test_interrupt_and_clean_skill_bodies(skill, line, sentence):
+  text = (ROOT / f"skills/{skill}/SKILL.md").read_text(encoding="utf-8")
+  body = text.split("---", 2)[2]
+  assert len(body.encode("utf-8")) <= 24_000 and "stub" not in body.lower()
+  assert "In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first." in body
+  assert f"superegm runcard open --skill {skill} --artifact <unit>" in body and line in body and "superegm runcard close <id>" in body
+  assert sentence in body and "every effect refuses without an open run card" in body
