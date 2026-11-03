@@ -15,16 +15,16 @@ account before accessing the builder. This prototype accepts IAM user profiles;
 Identity Center/assumed-role owner mapping is not implemented.
 
 ```sh
-python3 tools/livebuilders/lb.py --config /path/to/builders.json run \
-  --source tools/livebuilders/demo --brief tools/livebuilders/demo/task.md \
+python3 livebuilders/lb.py --config /path/to/builders.json run \
+  --source livebuilders/demo --brief livebuilders/demo/task.md \
   --timeout 180 -- python3 -u job.py
 
-python3 tools/livebuilders/lb.py --config /path/to/builders.json watch RUN_ID
-python3 tools/livebuilders/lb.py --config /path/to/builders.json send RUN_ID \
+python3 livebuilders/lb.py --config /path/to/builders.json watch RUN_ID
+python3 livebuilders/lb.py --config /path/to/builders.json send RUN_ID \
   'Use the greeting: Hello from the laptop' --request-id A_UUID
-python3 tools/livebuilders/lb.py --config /path/to/builders.json fetch RUN_ID \
+python3 livebuilders/lb.py --config /path/to/builders.json fetch RUN_ID \
   --destination /path/to/new-output-directory
-python3 tools/livebuilders/lb.py --config /path/to/builders.json cleanup RUN_ID
+python3 livebuilders/lb.py --config /path/to/builders.json cleanup RUN_ID
 ```
 
 `run` returns after starting the remote worker. It prints the run ID before its first S3 upload, so an ambiguous connection failure can be retried with `resume RUN_ID`.
@@ -131,14 +131,14 @@ Offline protocol tests use real temporary files and subprocesses, not live AWS:
 
 ```sh
 python3 -W error::ResourceWarning -m unittest discover \
-  -s tools/livebuilders -p 'test_*.py' -v
+  -s livebuilders -p 'test_*.py' -v
 ```
 
 Opt-in acceptance uses real S3 and one real AgentCore session, incurs compute/S3
 charges, and requests session deletion afterward:
 
 ```sh
-python3 tools/livebuilders/acceptance_aws.py \
+python3 livebuilders/acceptance_aws.py \
   --config /path/to/builders.json --evidence /path/to/new-evidence-directory
 ```
 
