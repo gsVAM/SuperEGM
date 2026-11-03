@@ -313,11 +313,10 @@ def test_foreman_is_named_a_per_unit_elephant() -> None:
 
 
 def test_launch_lines_agree_with_the_helper_and_the_wave_skill() -> None:
-  """The lane, the helper that writes the line and the skill that runs it must
-  name the same runner timeout and the same Bash timeout in milliseconds."""
-  helper = read("skills/plan/scripts/superegm/prepare.py")
+  """The lane and the skill that runs it must name the same runner timeout and the same Bash
+  timeout in milliseconds (SuperEGM: the helper no longer writes the line; the Astra lane never
+  runs on a head, spec section 14)."""
   wave = read("skills/wave/SKILL.md")
-  assert "--timeout 3600" in helper and "3900000" in helper
   assert "3,900,000 ms" in wave
   launch = re.search(r"^    python3 '<RUNNER>' inspect .*$", LANE, re.MULTILINE).group(0)
   assert "--builder" not in launch

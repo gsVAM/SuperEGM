@@ -233,7 +233,7 @@ WRITES = {"approve_spec": {"approvals"}, "graph": {"state", "plan", "units", "un
           "scan": {"file"}, "gate": {"state", "file", "plan", "units", "unit", "bodies"},
           "dry_run": {"state", "file", "plan", "units", "unit", "bodies"}, "apply": {"state", "file"},
           "verify": {"state"}, "status": {"state"}, "launch": {"state", "runcards"}, "decide": {"state", "plan", "units", "unit", "bodies", "file"},
-          "record_launch": {"launches"}, "collect": {"foreman"}, "prepare": {"foreman", "file"},
+          "record_launch": {"launches"}, "collect": {"foreman"}, "prepare": {"foreman", "review"},
           "launch_builder": {"launches"}, "interrupt": {"launches", "foreman"}, "clean": set(),
           "runcard": {"runcards"}, "init": set()}
 
@@ -426,7 +426,7 @@ GATED = [(("approve-spec", "--spec", "SPEC", "--yes"), "review-spec"), (("graph"
          (("verify",), "file"), (("status",), "wave"), (("launch",), "wave"),
          (("decide", "--unit", "U03", "--decision", "D2", "--answer", "25"), "plan"),
          (("record-launch", "--unit", "U01"), "wave"),
-         (("collect", "--unit", "U01", "--round", "1"), "wave"), (("prepare", "--unit", "U01", "--round", "1"), "wave")]
+         (("collect", "--unit", "U01", "--round", "1"), "wave"), (("prepare", "--unit", "U01", "--dispatch", "d1"), "wave")]
 
 
 @pytest.mark.parametrize("argv, skill", GATED)
@@ -499,7 +499,7 @@ def test_require_frozen_units_refuses_a_filed_units_drift(world):
   assert world.run("status")[0] == 0
   text = world.plan.read_text(encoding="utf-8")
   world.plan.write_text(text.replace("An in-memory queue with enqueue and dequeue exists.", "A queue exists."), encoding="utf-8")
-  for argv in (("status",), ("launch",), ("prepare", "--unit", "U01")):
+  for argv in (("status",), ("launch",), ("prepare", "--unit", "U01", "--dispatch", "d1")):
     world.gh.calls.clear()
     code, out = world.run(*argv)
     assert code == 1 and "U01 is filed and frozen: its section in handoff_plan.md differs from the stored one" in out, (argv, out)

@@ -228,3 +228,49 @@ def test_dispatch_recovers_a_collected_round_already_on_the_pr(world, on_pr):
   else:
     assert (code, out.strip()) == (1, "dispatch refused: ci pending")
     assert saved == entry
+
+
+def pr_repo(world, tmp_path, monkeypatch, commits=(("test(S1): hook", "tests/unit/test_hooks.py"), ("feat(S1): hook", "src/hooks.py"))):
+  """A remote with `main` and `refs/pull/70/head`; world.repo's `origin` points at it."""
+  target = tmp_path / "target"
+  def g(*a, cwd=target):
+    return subprocess.run(["git", "-C", str(cwd), *a], check=True, capture_output=True, text=True).stdout.strip()
+  target.mkdir(); g("init", "-q", "-b", "main"); g("config", "user.email", "t@example.invalid"); g("config", "user.name", "T")
+  (target / "README.md").write_text("base\n", encoding="utf-8"); g("add", "-A"); g("commit", "-qm", "base")
+  base = g("rev-parse", "HEAD"); g("checkout", "-qb", "superegm/sample-42aff4/U01")
+  for subject, path in commits:
+    (target / path).parent.mkdir(parents=True, exist_ok=True); (target / path).write_text(subject + "\n", encoding="utf-8")
+    g("add", "-A"); g("commit", "-qm", subject)
+  head = g("rev-parse", "HEAD"); g("update-ref", f"refs/pull/{PR}/head", head); g("checkout", "-q", "main")
+  g("remote", "set-url", "origin", str(target), cwd=world.repo)
+  monkeypatch.setattr(core, "parse_remote_url", lambda url: REPO)  # prepare reads core.parse_remote_url at call time; a local path is not a GitHub URL
+  return target, base, head, g
+
+
+def prepared(world, tmp_path, monkeypatch, commits=None, **kw):
+  target, base, head, g = pr_repo(world, tmp_path, monkeypatch, **({"commits": commits} if commits else {}))
+  st, card, child, did, posted = dispatched(world, head=head, **kw)
+  code, out = world.run("prepare", "--unit", UNIT, "--dispatch", did, "--runcard", child)
+  assert code == 0, out
+  return SimpleNamespace(st=st, card=card, child=child, did=did, posted=posted, head=head, base=base, g=g,
+                         target=target, rid=head_rid(st), dir=st.path("review", UNIT, f"pr{PR}"))
+
+
+def test_prepare_reviews_the_tip_it_fetches(world, tmp_path, monkeypatch):
+  target, base, head, g = pr_repo(world, tmp_path, monkeypatch)
+  st, card, child, did, _ = dispatched(world, head="0" * 40)  # status recorded an older tip: no head-moved exit
+  world.gh.check_runs[head], world.gh.combined[head] = world.gh.check_runs["0" * 40], world.gh.combined["0" * 40]  # CI on the fetched tip too
+  code, out = world.run("prepare", "--unit", UNIT, "--dispatch", "d9", "--runcard", child)
+  assert (code, out.strip()) == (1, "dispatch: d9 is not U01's current dispatch (d1)")
+  code, out = world.run("prepare", "--unit", UNIT, "--dispatch", did, "--runcard", child)
+  assert (code, out.strip()) == (0, f"prepared: head {head[:7]} merge-base {base[:7]} ci green previous -"), out
+  entry = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][0]
+  assert entry["phase"] == "prepared" and entry["head"] == head and entry["merge_base"] == base
+  d = st.path("review", UNIT, f"pr{PR}")
+  assert g("rev-parse", "HEAD", cwd=d / "worktree") == head and (d / "worktree/src/hooks.py").is_file()
+  assert b"+feat(S1): hook" in (d / "r1/diff").read_bytes()
+  assert json.loads((d / "r1/ci.json").read_text(encoding="utf-8"))["verdict"] == "ci green"
+  assert (d / "r1/pr_body.md").read_text(encoding="utf-8") == PR_BODY
+  assert (d / "r1/comments.md").read_text(encoding="utf-8").startswith("builder: builder-bot\n")
+  assert g("rev-parse", f"refs/superegm/pr/{PR}", cwd=world.repo) == head
+  assert g("rev-parse", f"refs/superegm/base/{PR}", cwd=world.repo) == base
