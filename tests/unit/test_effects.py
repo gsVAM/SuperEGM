@@ -196,3 +196,17 @@ def test_using_superegm_dispatcher_text() -> None:
   reference = (folder / "references/claude-code-tools.md").read_text(encoding="utf-8")
   assert "subagent-driven-development" not in reference
   assert "SessionStart hooks run for sessions, not for Agent-tool subagents" in reference
+
+
+def test_brainstorming_path_gate_and_removals() -> None:
+  folder = ROOT / "skills/brainstorming"
+  text = skill_text("brainstorming")
+  for needle in ("`docs/specs/YYYY-MM-DD-<topic>-design.md`", "`## Units`",
+                 "/superegm:review-spec", "the last H2"):
+    assert needle in text, needle
+  for banned in ("docs/superpowers", "Builder check", "builder-check-prompt", "Visual Companion",
+                 "visual-companion", "visual companion", "writing-plans", "subagent",
+                 "browser tab", "throwaway prototypes"):
+    assert banned not in text, banned
+  for name in ("builder-check-prompt.md", "visual-companion.md", "scripts"):
+    assert not (folder / name).exists(), name
