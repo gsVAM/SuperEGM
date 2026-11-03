@@ -10,13 +10,15 @@ from pathlib import Path
 import superegm as core
 from superegm.launch import load_launches
 
-WRITES = frozenset({"report"})  # the store kinds this subcommand writes
+WRITES = frozenset({"report", "runcards"})  # the store kinds this subcommand writes
 SKILLS = frozenset({"wave"})  # the skills whose card this subcommand accepts
 TERMINAL = ("landed", "stopped", "pending", "idle", "clean")  # every state the loop never dispatches
 
 
 def register(subparsers):
   p = core.add_parser(subparsers, "report", "rewrite the wave report; print the idle, pending and loop lines")
+  p.add_argument("--idle", action="append", default=[], metavar="U=<reason>",
+                 help="name a unit idle for this invocation (it holds no slot), with why")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -27,10 +29,17 @@ def run(args):
   units = state.get("units") or {}
   views = {uid: unit_view(state, uid) for uid in units}
   launched = [uid for uid in units if units[uid].get("launched")]
+  for item in args.idle:
+    uid, _, reason = item.partition("=")
+    if uid not in units:
+      raise core.HandoffError(f"report: --idle names no unit of this handoff: {uid}")
+    core.card_add(st, args.runcard, "idle", {"unit": uid, "reason": reason, "at": core.now_iso()})
+  card = record_heads(st, args.runcard, {uid: views[uid] for uid in launched}, now)
   foremen = {uid: core.load_foreman(st, uid) for uid in launched}
   states = {uid: unit_state(uid, views[uid], foremen[uid], card, config, now) for uid in launched}
   free = config["max_in_flight"] - sum(states[uid] in ("active", "pending") for uid in launched)
-  ready = [uid for uid in (state.get("status") or {}).get("ready") or [] if uid not in launched]
+  named_idle = {entry["unit"] for entry in card.get("idle") or []}  # holds no slot, launched or not
+  ready = [uid for uid in (state.get("status") or {}).get("ready") or [] if uid not in launched and uid not in named_idle]
   ended, why = loop_ended(states, ready, free)
   n = wave_number(st, args.runcard, card)
   path = st.path("wave_report", n)
@@ -39,7 +48,7 @@ def run(args):
   for uid in units:
     lines.append(unit_line(uid, units[uid], views[uid], states.get(uid, "unlaunched"), foremen.get(uid, {}),
                            load_launches(st, uid)))
-  idle = [uid for uid in launched if states[uid] == "idle"]
+  idle = [uid for uid in units if uid in named_idle or states.get(uid) == "idle"]
   lines += section("Non-terminal launches", [f"{uid} launch {e['round']} {e['status']}" for uid in launched
                                               for e in load_launches(st, uid) if not e["status"].startswith("exited")
                                               and e["status"] != "interrupted"])
@@ -55,6 +64,17 @@ def run(args):
   print("pending: none")
   print(f"loop: {'ended' if ended else 'continuing'} ({why})")
   return 0
+
+
+def record_heads(store, card_id: str, views: dict, now: float) -> dict:
+  """Append `{unit, head, seen_at}` to the card's `heads` for every launched unit whose head differs from the
+  card's last entry for it (the CI-wait clock starts at the first report that saw the head); the card after."""
+  card = core.load_card(store, card_id)
+  for uid, view in views.items():
+    last = next((h for h in reversed(card.get("heads") or []) if h["unit"] == uid), None)
+    if view["head"] and (last is None or last["head"] != view["head"]):
+      core.card_add(store, card_id, "heads", {"unit": uid, "head": view["head"], "seen_at": now})
+  return core.load_card(store, card_id)
 
 
 def unit_view(state: dict, uid: str) -> dict:
@@ -89,7 +109,7 @@ def section(title: str, items: list) -> list:
 
 def idle_reasons(card: dict, states: dict, views: dict, config: dict, now: float) -> list:
   """`(unit, reason)` per idle unit: the card's `idle[]` reasons, then the CI bound with its minutes."""
-  reasons = [(entry["unit"], entry["reason"]) for entry in card.get("idle") or [] if entry["unit"] in states]
+  reasons = [(entry["unit"], entry["reason"]) for entry in card.get("idle") or [] if entry["unit"] in views]
   for uid, state in states.items():
     seen = ci_seen_at(uid, views[uid], card)
     if state == "idle" and seen is not None and not any(u == uid for u, _ in reasons):
