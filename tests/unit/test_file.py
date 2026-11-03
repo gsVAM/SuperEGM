@@ -228,39 +228,32 @@ def test_removed_forms_are_gone_from_the_filing_files(world, path):
   assert stop.value.code == 2
 
 
-def test_dry_run_writes_file_and_calls_only_three_reads(world):
-  out = dry_run(world)
-  assert "3 issues" in out.replace("4 issues", "3 units") or True
+def test_dry_run_records_the_confirmed_list_of_unfiled_units_with_three_reads(world):
+  spec, plan, handoff_id, card = gated(world)
+  repo = world.gh.repo
+  world.gh.calls.clear()
+  code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
+  assert code == 0, out
   text = (world.artifacts / "handoff_dryrun.md").read_text(encoding="utf-8")
-  assert "4 issues (1 tracking, 3 units), 3 sub-issue links, 2 blocked-by links" in text
-  assert "- `superegm:unit`: create" in text and "- `superegm:wave-1`: create" in text
-  assert "Confirmed write list sha256" in text and "astra: not run (test)" in text
+  assert "3 issues (1 tracking, 2 units), 2 sub-issue links, 1 blocked-by links" in text
+  for label in ("superegm:unit", "superegm:tracking", "superegm:stopped", "superegm:wave-1", "superegm:wave-2",
+                f"superegm:handoff-{handoff_id[-6:]}"):
+    assert f"- `{label}`: create" in text, label
+  assert "Confirmed write list sha256" in text
+  assert [c[:2] for c in world.gh.calls] == [["auth", "status"], ["api", f"repos/{repo}"], ["api", f"repos/{repo}/labels"]]
   state = state_of(world)
-  assert re.fullmatch(r"[0-9a-f]{64}", state["confirmed_sha256"])
-  assert state["labels"]["superegm:unit"] == "missing"
-  kinds = [c[:2] for c in world.gh.calls]
-  assert kinds == [["auth", "status"], ["api", f"repos/{REPO}"], ["api", f"repos/{REPO}/labels"]]
-  writes = world.ns["Handoff"](world.plan, world.ns["store"](world.repo)).writes()
-  assert writes[0] == ["repo", REPO] and writes[1][0] == "gate" and writes[1][1] == state["gate_plan_sha256"]
-
-
-def test_dry_run_refuses_without_gate_or_after_plan_or_template_change(world):
-  assert world.run("graph", "--plan", world.plan)[0] == 0
-  code, out = world.run("dry-run", "--plan", world.plan)
-  assert code == 1 and "gate has not passed" in out
-  dry_run(world)
-  text = world.plan.read_text(encoding="utf-8")
-  world.plan.write_text(text.replace("low: new module", "low: a new module"), encoding="utf-8")
-  code, out = world.run("dry-run", "--plan", world.plan)
-  assert code == 1 and "changed after the gate" in out
-  world.plan.write_text(text, encoding="utf-8")
-  assert world.run("dry-run", "--plan", world.plan)[0] == 0
-  template = world.repo / ".superegm/template.md"
-  template.write_text("<!-- superegm:handoff={{handoff_id}} unit={{unit_id}} spec={{spec_sha256}} -->\n{{objective}}\n{{scope}}\n{{dod}}\n"
-                      "{{blocked_by}} #{{tracking}} `{{branch}}`\n", encoding="utf-8")
-  set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"], issue_template=".superegm/template.md")
-  code, out = world.run("dry-run", "--plan", world.plan)
-  assert code == 1 and "changed after the gate" in out
+  assert state["confirmed"]["sha256"] == state["confirmed_sha256"] and "filings" not in state
+  writes = state["confirmed"]["writes"]
+  assert writes[0] == ["repo", repo] and writes[1] == ["gate", state["gate_plan_sha256"], state["gate_bodies_sha256"]]
+  assert [w[1] for w in writes if w[0] == "issue"] == ["tracking", "U01", "U02"]
+  u02 = next(w for w in writes if w[:2] == ["issue", "U02"])
+  assert u02[4].startswith(f"<!-- superegm:handoff={handoff_id} unit=U02 spec=")
+  assert "#<U01>" in u02[4] and "#<tracking>" in u02[4]
+  # refused after a change to the store's plan copy: the gate must run again
+  copy = world.artifacts / "handoff_plan.md"
+  copy.write_text(copy.read_text(encoding="utf-8").replace("low: new module", "low: a new module", 1), encoding="utf-8")
+  code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
+  assert code == 1 and "changed after the gate" in out, out
 
 
 def test_dry_run_refuses_101_units_missing_extra_and_warns_above_450(world):
