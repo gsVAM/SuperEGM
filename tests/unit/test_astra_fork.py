@@ -33,9 +33,9 @@ def test_resource_files_are_linked() -> None:
     assert "`resources/astra_lane.md`" in skill
   index = read("resources/README.md")
   assert "(review_panels.md)" in index and "(astra_lane.md)" in index
-  resolve = read("skills/review-spec/references/resolve.md")
-  assert "goldfish_dispositions_s[Stage]_r[Round].md" in resolve
-  assert "never from the AI\n    suggestion" in resolve
+  resolve = " ".join(read("skills/review-spec/references/resolve.md").split())
+  assert "`<artifacts_dir>/reviews/<id>/round-<n>.json`, holds every reviewer's findings with their ids" in resolve
+  assert "overruled by nobody but the owner or the judges" in resolve
   assert "goldfish_dispositions_s<stage>_r<n-1>.md" in LANE
 
 
@@ -90,7 +90,8 @@ def test_step_answers_only_the_mode_question() -> None:
 
 def test_combined_prompt_replaces_the_preset_gate() -> None:
   review = " ".join(read("skills/review-spec/SKILL.md").split())
-  assert "It replaces item 1's gate (mode asked once)" in review
+  assert "`--mode leavemealone` when the invocation said `--leavemealone`" in review
+  assert "In normal mode, ask the owner once whether to start; in leavemealone-mode, start." in review
   flat = " ".join(PANELS.split())
   assert ("this prompt replaces the Curated Pipeline Presets gate of `egm-review` "
           "Step 2 item 1: the mode is asked exactly once, here.") in flat
@@ -142,11 +143,13 @@ def test_inherit_is_never_passed_per_call() -> None:
   assert "pass no other model or effort parameter" in flat
 
 
-def test_dispositions_are_keyed_by_stage_and_round() -> None:
-  resolve = read("skills/review-spec/references/resolve.md")
-  assert "goldfish_dispositions_s[Stage]_r[Round].md" in resolve
-  assert "# Goldfish dispositions, stage [Stage], round [Round]" in resolve
-  assert "goldfish_dispositions_s<Stage>_r<n>.md" in read("skills/review-spec/references/review_loop.md")
+def test_dispositions_are_keyed_by_review_and_round() -> None:
+  resolve = " ".join(read("skills/review-spec/references/resolve.md").split())
+  assert ("`<artifacts_dir>/reviews/<id>/round-<n>.json`, holds every reviewer's findings with their "
+          "ids; nothing is written anywhere else: no report file, no dispositions file.") in resolve
+  loop = " ".join(read("skills/review-spec/references/review_loop.md").split())
+  assert ("rendered by you from `reviews/<id>/round-<n-1>.json` as findings lines followed by "
+          "`-> <disposition>`") in loop
   flat = " ".join(LANE.split())
   assert ("`goldfish_dispositions_s<stage>_r<n-1>.md` exists and its first "
           "lines name stage <stage>, round <n-1> and this `TargetFile`") in flat
@@ -155,7 +158,8 @@ def test_dispositions_are_keyed_by_stage_and_round() -> None:
       assert "dispositions_round" not in file.read_text(encoding="utf-8"), file
   assert "dispositions_round" not in read("README.md")
   review = " ".join(read("skills/review-spec/SKILL.md").split())
-  assert "`Stage`, `Round` (the loop's last round + 1) and `RunCard`" in review
+  assert "Findings live in the store, dispositions in the round files." in review
+  assert "every writing subcommand takes `--runcard <id>`" in review
 
 
 def test_run_card_reaches_every_report() -> None:
@@ -181,12 +185,12 @@ def test_astra_feedback_carries_only_astra_rows() -> None:
     assert "it can read them like any other file in the folder" in text
     assert "Write artifacts outside the repository" in text
   assert "keeps both ids (for example `design-2-1 + astra-2-3 (F4)`)" in flat
+  loop = " ".join(read("skills/review-spec/references/review_loop.md").split())
+  assert ("from round 2 it ends with the `astra-*` lines of round n-1 and their dispositions, "
+          "rendered from `round-<n-1>.json`, and no other reviewer's.") in loop
   resolve = " ".join(read("skills/review-spec/references/resolve.md").split())
-  assert "A `Reason` names no other reviewer's finding" in resolve
-  assert "one row per finding id, from the user's final decision" in resolve
-  assert ("gets one row per id, each naming only its own reviewer, with the "
-          "same Final and Changed lines and a Reason written for that row "
-          "alone") in resolve
+  assert "Give each finding exactly one disposition" in resolve
+  assert "stores it on the finding with who ruled (`owner`, `judges:<id>`, or nothing)" in resolve
 
 
 def test_lane_launch_and_safety_rules() -> None:
@@ -277,11 +281,14 @@ def test_panels_gain_the_handoff_gate_and_pr_review_rows() -> None:
   assert "| Builder | local: whoever picks up the issue on this machine;" in flat
 
 
-def test_stage_10_reaches_the_loop_and_resolve_skills() -> None:
+def test_every_kind_reaches_the_loop_and_resolve_references() -> None:
   loop = " ".join(read("skills/review-spec/references/review_loop.md").split())
-  assert "`Stage` (`7`, `9` or `10`, for the Astra brief)" in loop
+  assert ("The one loop for every review kind: `spec` (this skill), `plan` (`review-plan`, one review "
+          "per unit), `head` (the foreman, one review per pull request) and `integrate`.") in loop
+  assert "`<artifacts_dir>/reviews/<id>/astra_brief_r<n>.md`" in loop
   resolve = " ".join(read("skills/review-spec/references/resolve.md").split())
-  assert "the review stage, `7`, `9` or `10` (the handoff gate)" in resolve
+  assert ("On a head, a builder's `contested` reply reaches the same gate through `collect`'s "
+          "`builder_contested[]`") in resolve
 
 
 @pytest.mark.parametrize("path", [
