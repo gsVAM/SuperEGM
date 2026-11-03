@@ -130,3 +130,20 @@ def test_every_section_14_skill_folder_is_complete(skill: str) -> None:
     assert meta["name"] == skill and meta["license"] == "Apache-2.0"
     assert meta["effects"] == "external" and meta["effect_kinds"] == STUBS[skill]
     assert meta["disable-model-invocation"] is True and meta["description"].strip()
+
+
+@pytest.mark.parametrize("skill", SKILLS)
+def test_skill_name_is_its_folder_name(skill: str) -> None:
+  assert frontmatter(ROOT / "skills" / skill / "SKILL.md")["name"] == skill
+
+
+@pytest.mark.parametrize("id_", IDS)
+def test_adapter_and_persona_carry_the_section_14_id(id_: str) -> None:
+  adapter = ROOT / ".claude-plugin/agents" / f"{id_}.md"
+  meta = frontmatter(adapter)
+  assert meta["name"] == id_ == frontmatter(ROOT / "agents" / f"{id_}.md")["name"]
+  assert meta["omitClaudeMd"] is True and meta["model"] == "inherit" and "memory" not in meta
+  expected = ["Agent", "Bash", "Read", "Grep", "Glob"] if id_ == "foreman" else ["Read", "Grep", "Glob"]
+  assert sorted(meta["tools"]) == sorted(expected)
+  assert f"${{CLAUDE_PLUGIN_ROOT}}/agents/{id_}.md" in adapter.read_text(encoding="utf-8")
+  assert sorted(p.stem for p in ROOT.glob(".claude-plugin/agents/*.md")) == sorted(IDS)
