@@ -336,6 +336,12 @@ def card_add(store: Store, id: str, key: str, item) -> None:
   atomic_write(store.path("runcards", id), card)
 
 
+def load_approval(store: Store, spec: Path):
+  """The `approvals/<spec-slug>.json` record of this spec, or None."""
+  path = store.path("approvals", spec_slug(spec))
+  return json.loads(read_text(path)) if path.is_file() else None
+
+
 def journal(store: Store, line: str) -> None:
   """Append one fact; `O_APPEND` keeps concurrent lines whole."""
   path = store.path("journal")
@@ -873,16 +879,17 @@ class Handoff:
     self.repo_root = git_toplevel(design)
     # An unrelated commit after approval must not change a single rendered
     # body: the gate hashes, a bounded resume and verify all depend on them.
-    recorded = ((state if state is not None else load_state(self.artifact_dir))
-                .get("approval") or {}).get("commit")
-    self.design_commit = recorded or run_git(
+    approval = load_approval(store, design)
+    if approval and approval["sha256"] != self.design_sha:
+      raise HandoffError("spec changed since the approval: run approve-spec again")
+    self.design_commit = (approval or {}).get("commit") or run_git(
         ["rev-parse", "--short", "HEAD"], self.repo_root).strip()
     self.design_title = next((l[2:].strip() for l in read_text(design).splitlines()
                               if l.startswith("# ")), design.stem)
     self.config = load_config(self.repo_root)
     self.graph = Graph(self.plan)
     slug = re.sub(r"[^a-z0-9]+", "-", design.stem.lower()).strip("-")[:20].rstrip("-")
-    self.handoff_id = f"{slug}-{self.design_sha[:6]}"
+    self.handoff_id = (approval or {}).get("handoff_id") or f"{slug}-{self.design_sha[:6]}"
     store.handoff_id = self.handoff_id
     require_binding(self.artifact_dir, self.handoff_id, self.config["repo"])
     self.state = state if state is not None else load_state(self.artifact_dir)
@@ -894,8 +901,6 @@ class Handoff:
                       or self.state.get("repo"))
     if confirmed_repo and confirmed_repo.lower() == self.config["repo"].lower():
       self.config["repo"] = confirmed_repo
-    if self.state.get("approval") and self.state["approval"].get("design_sha256") != self.design_sha:
-      raise HandoffError("design changed since the handoff started: re-run the gate")
     self.check_labels()
 
   # labels
