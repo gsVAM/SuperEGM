@@ -527,3 +527,23 @@ def test_review_spec_skill_body():
     assert phrase in body, phrase
   for ref in set(re.findall(r"`(references/[^`]+)`", body)):
     assert (SKILL.parent / ref).is_file(), ref
+
+
+# ---------------------------------------------------------------- S19: the sweep for removed mechanisms
+
+STALE = ["egm-review-loop", "egm-resolve", "synthesizer", "Stage 7", "Stage 9", "re-audit", "two consecutive clean",
+         "Blocker", "Major", "Nit", "goldfish_dispositions", "goldfish_review_report", "EGM_ASTRA", "EGM_GOLDFISH",
+         "Codex integration", "Antigravity", "spawn_agent", "What ran", "Churn", "--what-ran"]
+
+@pytest.mark.parametrize("rel,phrases", [
+  ("skills/review-spec/SKILL.md", STALE),
+  ("skills/review-spec/references/review_loop.md", STALE),
+  ("skills/review-spec/references/resolve.md", STALE),
+  ("resources/review_panels.md", ["two consecutive clean rounds", "handoff gate may also require"]),
+])
+def test_no_removed_mechanism_named(rel, phrases):
+  path = ROOT / rel
+  if rel.startswith("resources/") and not path.exists():
+    pytest.skip("D1 (b): resources/review_panels.md was not kept by U01")
+  text = path.read_text(encoding="utf-8")
+  assert [p for p in phrases if re.search(rf"(?<!SUPER){re.escape(p)}", text)] == []   # SUPEREGM_GOLDFISH_* is not EGM_GOLDFISH
