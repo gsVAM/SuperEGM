@@ -314,3 +314,34 @@ def test_verdict_convergence(world, case, votes, min_vendors, code, converged, d
     assert verdict["rounds"]["1"]["astra"]["not_run"] == "no claudex-loop runner"
   assert verdict["judges"]["astra"]["vendor"] == "openai" and verdict["rounds"]["1"]["fable"]["isolation"] == "clean"
   assert (f"judges {pid}: Q1 converged (a) round 1" in journal(world)) is converged
+
+
+def test_converged_answers_stay_converged_across_rounds(world):
+  pid, card, _ = open_panel(world)
+  for judge, q2 in (("fable", "a"), ("opus", "b"), ("astra", "b")):
+    assert record(world, pid, card, 1, judge, {"Q1": "a", "Q2": q2})[0] == 0
+  code, out = world.run("judges", "verdict", "--panel", pid, "--runcard", card)
+  assert code == 2 and json.loads(out)["questions"]["Q1"]["converged"] is True, out
+  assert world.run("judges", "diff", "--panel", pid, "--round", 1, "--runcard", card)[0] == 0
+  for judge in ("fable", "opus", "astra"):
+    assert record(world, pid, card, 2, judge, {"Q2": "b"})[0] == 0
+  code, out = world.run("judges", "verdict", "--panel", pid, "--runcard", card)
+  assert code == 0, out
+  questions = json.loads(out)["questions"]
+  assert {q: (v["option"], v["round"]) for q, v in questions.items()} == {"Q1": ("a", 1), "Q2": ("b", 2)}
+  assert journal(world).count(f"judges {pid}: Q1 converged (a) round 1") == 1
+  assert f"judges {pid}: Q2 converged (b) round 2" in journal(world)
+
+
+def test_cap_of_five_rounds(world):
+  pid, card, _ = open_panel(world, text=ONE)
+  for rnd in range(1, 6):
+    for judge, option in (("fable", "a"), ("opus", "b"), ("astra", "a")):
+      assert record(world, pid, card, rnd, judge, {"Q1": option})[0] == 0
+    assert world.run("judges", "diff", "--panel", pid, "--round", rnd, "--runcard", card)[0] == 0
+  assert not (world.artifacts / "judges" / pid / "round-6").exists()
+  code, out = world.run("judges", "verdict", "--panel", pid, "--runcard", card)
+  assert code == 2 and json.loads(out)["cap_reached"] is True, out
+  code, out = record(world, pid, card, 6, "fable", {"Q1": "a"})
+  assert code == 1 and "judges: cap of 5 rounds reached" in out, out
+  assert f"judges {pid}: verdict not converged: Q1 (cap reached)" in journal(world)
