@@ -379,3 +379,43 @@ def test_graph_refuses_an_edited_filed_section(world):
 def test_interface_names(item, names):
   from superegm.scan import names_of
   assert names_of(item) == names
+
+
+U02_DOD2 = "tests/test_u02.py -q` — the module's cases pass"
+CLOSE = "Commit `test(S1): u02 empty` then `feat(S1): u02 empty`.\n"
+SCAN = [
+  pytest.param("body-size", "| Objective | Worker exists. |", "| Objective | Worker " + "x" * 49_152 + " exists. |", id="body-size"),
+  pytest.param("checkbox", CLOSE, CLOSE + "   - [ ] later\n", id="checkbox"),
+  pytest.param("placeholder", U02_DOD2, "tests/test_u02.py -q` — TBD", id="placeholder-tbd"),
+  pytest.param("placeholder", U02_DOD2, "tests/test_u02.py -q` — handle edge cases", id="placeholder-edge"),
+  pytest.param("placeholder", U02_DOD2, "tests/test_u02.py -q` — add appropriate validation", id="placeholder-validation"),
+  pytest.param("placeholder", U02_DOD2, "tests/test_u02.py -q` — write tests for the above", id="placeholder-tests"),
+  pytest.param("consumes-undefined", "- Consumes: u01_fn(x: int) -> int (U01)\n- Produces: u02_fn",
+               "- Consumes: nothing_fn(x: int) -> int (U01)\n- Produces: u02_fn", id="consumes-undefined"),
+  pytest.param("consumes-producer", "- Consumes: u01_fn(x: int) -> int (U01)\n- Produces: u02_fn",
+               "- Consumes: u03_fn(x: int) -> int (U03)\n- Produces: u02_fn", id="consumes-producer"),
+  pytest.param("global-constraints", "- Python 3.11, standard library only\n", "", id="global-constraints"),
+  pytest.param("review-focus", "- U02: an empty input — returns 0; pinned by `test_u02_empty`\n", "", id="review-focus"),
+  pytest.param("review-focus-test", "pinned by `test_u02_empty`", "pinned by `test_u02_other`", id="review-focus-test"),
+  pytest.param("step-group", "   Implement `u02_fn(x: int) -> int` in `src/u02.ts`.\n", "", id="step-group"),
+  pytest.param("step-scope", "`test_u02_empty` in `tests/test_u02.py`", "`test_u02_empty` in `tests/other/test_u02.py`", id="step-scope"),
+  pytest.param("decision-blocking", "default: (a); blocking: no", "default: (a); blocking: yes", id="decision-blocking"),
+  pytest.param("mention", "| Objective | Worker exists. |", "| Objective | Worker exists, ask @alice. |", id="mention"),
+]
+
+
+@pytest.mark.parametrize("rule,old,new", SCAN)
+def test_scan_rules(world, rule, old, new):
+  spec, sha, plan, card = planned(world)
+  text = plan_text(spec)
+  assert old in text
+  plan.write_text(text.replace(old, new, 1), encoding="utf-8")
+  assert graph(world, plan, card)[0] == 0
+  code, out = world.run("scan")
+  assert code == 1 and f"{rule}: U02" in out and out.rstrip().endswith("problem(s)"), out
+  if rule == "body-size":
+    assert "exceeds 49,152: split it" in out
+  plan.write_text(text, encoding="utf-8")
+  assert graph(world, plan, card)[0] == 0
+  code, out = world.run("scan")
+  assert code == 0 and out.rstrip().endswith("scan: clean"), out
