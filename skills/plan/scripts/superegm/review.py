@@ -517,6 +517,13 @@ def post(args) -> int:
   problems = core.scan_text(body, config, "comment", label="comment")
   if problems:
     raise Refusal(problems[0])
+  root = core.git_toplevel(Path.cwd())
+  if merge_base_moved(root, core.load_state(st.root).get("remote") or config["remote"], config["base"], number, entry):
+    entry.update({"phase": "collected", "outcome": "not run (target-moved)"})
+    core.save_foreman(st, unit, data)
+    core.journal(st, f"{unit} round {n} collected (not run (target-moved)) under {runcard}")
+    print("target-moved")
+    return 3
   core.atomic_write(folder / "comment.md", body)
   _, text = core.gh_post(f"repos/{repo}/pulls/{number}/reviews",
                          {"commit_id": head, "event": "COMMENT", "body": f"@{folder / 'comment.md'}"})
@@ -561,6 +568,14 @@ def count_posted(st: core.Store, unit: str, entry: dict, posted_at: str, review_
   if word == "clean":
     core.journal(st, f"{unit} awaiting merge under {runcard}")
   return word
+
+
+def merge_base_moved(root: Path, remote: str, base: str, pr: int, entry: dict) -> bool:
+  """Fetch the base tip and compare the merge base of the fetched refs, at the repository root (never
+  inside the worktree), with the one `prepare` recorded: an unrelated base commit leaves it unchanged."""
+  core.run_git(["fetch", "--no-write-fetch-head", remote, f"+refs/heads/{base}:refs/superegm/base/{pr}"], root)
+  now = core.run_git(["merge-base", f"refs/superegm/base/{pr}", f"refs/superegm/pr/{pr}"], root).strip()
+  return now != entry.get("merge_base")
 
 
 def status_code(review_id: str, runcard: str) -> int:
