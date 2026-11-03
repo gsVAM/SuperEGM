@@ -503,6 +503,13 @@ def post(args) -> int:
   config, head = st.config, entry["head"]
   repo, number = config["repo"], core.load_state(st.root)["units"][unit]["pr"]["number"]
   runcard = card.get("parent") or args.runcard
+  present = next((r for r in core.gh_pages(f"repos/{repo}/pulls/{number}/reviews")
+                  if (r.get("body") or "").startswith(header(n, head))), None)
+  if present:  # never posted twice: counted when bound to the reviewed sha, refused otherwise
+    if present.get("commit_id") != head:
+      raise Refusal(f"header present on {(present.get('commit_id') or '')[:7]}")
+    print(f"posted {count_posted(st, unit, entry, present['submitted_at'], rid, runcard)} (already on the PR)")
+    return 0
   folder = st.path("review", unit, f"pr{number}") / f"r{n}"
   verdict = json.loads(core.read_text(folder / "ci.json"))["verdict"]
   rnd = load_round(st, rid, n) or {"round": n, "reviewers": {}, "builder_contested": []}
@@ -514,6 +521,8 @@ def post(args) -> int:
   _, text = core.gh_post(f"repos/{repo}/pulls/{number}/reviews",
                          {"commit_id": head, "event": "COMMENT", "body": f"@{folder / 'comment.md'}"})
   response = json.loads(text) if text.strip() else {}
+  if response.get("commit_id") != head:
+    raise Refusal(f"posted on {(response.get('commit_id') or '')[:7]}, not {head[:7]}: round {n} not counted")
   word = count_posted(st, unit, entry, response.get("submitted_at") or core.now_iso(), rid, runcard)
   print(f"posted {word}")
   return 0
