@@ -5,6 +5,8 @@ effects: working-tree
 description: Use when about to claim work is complete, fixed, or passing, before committing or creating PRs - requires running verification commands and confirming output before making any success claims; evidence before assertions always. Only for a filed unit on its branch or for an owner-requested fix on a branch; never during brainstorm, spec or plan.
 ---
 
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: phase sentence, the snapshot rule. -->
+
 # Verification Before Completion
 
 In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.

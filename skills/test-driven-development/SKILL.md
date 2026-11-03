@@ -5,6 +5,8 @@ effects: working-tree
 description: Use when implementing any feature or bugfix, before writing implementation code. Only for a filed unit on its branch or for an owner-requested fix on a branch; never during brainstorm, spec or plan.
 ---
 
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: phase sentence. -->
+
 # Test-Driven Development (TDD)
 
 In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.
