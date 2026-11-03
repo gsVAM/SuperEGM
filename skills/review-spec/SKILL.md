@@ -11,416 +11,149 @@ description: >-
   Zoom Out Review, and Implementation Readiness.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: renamed to review-spec; Codex line removed; persona path agents/zoom-out.md. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: renamed to review-spec; the body is spec section 8's one review loop over the helper (the stages, presets, semantic split, checkpoint gates and report files are gone); persona path agents/zoom-out.md. -->
 
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: run card, panel presets, Astra lane. -->
 
-# Review, Validation & Automated Remediation
+# Spec review (phase 1)
 
 In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.
 
-Reviews and validates a design document through specialized reviewer personas.
+    /superegm:review-spec <spec-path> [--reviewers design,zoom-out,…] [--astra on|off] [--leavemealone]
+
+Reviews a spec through fresh-context goldfish reviewers until it converges, then records the
+owner's approval, which freezes the spec at its sha256 for the plan. One loop, one convergence
+rule, one cap: the helper judges, you dispatch. The helper is
+`python3 '${CLAUDE_PLUGIN_ROOT}/skills/plan/scripts/superegm.py'`, run from the target
+repository; every writing subcommand takes `--runcard <id>`.
 
 ## Delegation
 
-A Goldfish runs in a fresh context with no conversation history. Spawn each
-subagent with your harness's subagent tool (Antigravity: `invoke_subagent`; Claude Code: `Agent`; Codex: `spawn_agent`). Each subagent is defined in `agents/<file>.md`, and its
-frontmatter `name` (for example `egm-zoom-out`) is the subagent type to request
-where your harness registers named subagents. Otherwise spawn a general-purpose
-subagent and tell it to read that persona file first. Pass the prompt verbatim
-and wait for the report. If your harness cannot nest subagents,
-use direct dispatch instead of the synthesizer. See `docs/harnesses.md`.
-If your harness has no subagent tool, stop and tell the user: a review in the same context is not a Goldfish review.
+A goldfish runs in a fresh context with no conversation history. Dispatch each reviewer with
+the Agent tool through its own adapter, `superegm:<id>` (`.claude-plugin/agents/<id>.md`, which
+sets `omitClaudeMd: true` and the read-only tools; the persona is `agents/<id>.md`, for example
+`agents/design.md` and `agents/zoom-out.md`). Pass the brief verbatim and wait for the report.
+A reviewer spawned any other way is not a goldfish. If your harness has no subagent tool, stop
+and tell the owner: a review in the same context is not a goldfish review.
 
-## Execution Constraints (CRITICAL)
+## Constraints
 
-1.  **Artifact-First Delivery (MANDATORY)**: You are **STRICTLY FORBIDDEN** from
-    presenting large proposals, drafts, summaries, or plans directly in the chat
-    pane. You **MUST** write them to the working directory (or your harness's
-    artifact directory, if it has one) using your file-writing tool and then
-    tell the user in chat the file path and ask for review. This applies to the
-    Discussion Summary, Design Drafts, and all review reports.
-2.  **Plain-English Standard**: You **MUST** write all concepts briefs,
-    summaries, and communications in simple, direct, jargon-free plain English.
-    Explain technical mechanisms directly. Do not summarize away substance or
-    rely on buzzwords. Do not use ungrounded promotional adjectives (e.g.,
-    *seamless*, *robust*, *blazingly fast*) or decorative adverbs (e.g.,
-    *seamlessly*, *effortlessly*, *literally*, *drastically*, *obviously*).
-3.  **Default to Stress-Testing**: Never agree by default. Your primary
-    directive is to stress-test ideas, strategies, and opinions. Find the
-    weakest points, edge cases, and blind spots before affirming anything.
-4.  **No Glazing**: Eliminate sycophancy. Do not call ideas "great,"
-    "brilliant," or "smart." Compliments without substance are noise.
-5.  **Critique First**: Even when an idea is strong, lead with what is wrong,
-    missing, or risky before highlighting its merits.
-6.  **Reject Echo-Chamber Framing**: Never parrot framing back to the user. If a
-    conclusion is asserted, do not validate it reflexively.
-7.  **Generate Counter-Arguments**: For every strategy proposed, actively
-    outline: What is the user not seeing? What is the strongest
-    counter-argument? Is the opposing view justified?
-8.  **Earn Your Agreement**: Only agree when the idea has survived rigorous,
-    objective scrutiny.
-9.  **Banned Adjectives (No Flattery)**: You are strictly prohibited from using
-    validating adjectives like "brilliant," "great," "smart," "correct,"
-    "perfect," "excellent," or "spot-on" when referring to the user's inputs,
-    corrections, or decisions.
-10. **Banned Apologies**: You MUST NOT output polite apologies (e.g., "I
-    apologize," "I am sorry," "Forgive me") when challenged or corrected.
-    Instead, outline the corrected technical logic or trade-offs directly.
-11. **Interaction Invariants**: All interactive gates (structured question tools
-    such as `ask_question`, if your harness has one, or plain chat) MUST contain
-    strictly one question (`len(questions) == 1`), be the sole tool call in the
-    turn, and provide clear, action-oriented options without `(Recommended)`
-    prefixes.
-
-## Inputs
-
-*   **`TargetFile`**: Absolute or relative path to the design document.
-*   **`GoldfishContext`** (Optional): Reading list to establish the system
-    baseline. If omitted, the system defaults to no additional context (but
-    always automatically reads files linked or referenced in the design doc).
-*   **`Step` (Optional)**: Specific pipeline preset or stage to run (e.g.
-    `interactive`, `uninterrupted`, `feature_spec`, `implementation`, or an
-    individual stage `5`, `6`, `7`, `8`, `9`). If omitted, the user is prompted.
+1. **Artifact-first.** Findings live in the store, dispositions in the round files. Do not
+   paste reports into chat; name the review id and the `superegm review status` line.
+2. **One question per turn.** Every gate (a structured question tool when the harness has one,
+   else plain chat) carries exactly one question, is the sole tool call of its turn, and offers
+   plain options without a `(Recommended)` prefix.
+3. **Plain English, no flattery, no apologies.** Lead with what is wrong. The owner's spec is
+   under test; agreement is earned by a clean round, not given.
+4. **Never dispatch the goldfish yourself as reviewers of your own fixes in the same turn** you
+   made them: record, settle, ask `review status`, then the next round.
 
 ## Workflow
 
-### Step 1: Intake & Setup
+### 1. Preflight
 
-1.  Verify if `TargetFile` is provided. If missing:
-    *   Explain to the user that the target design document path is required to
-        analyze its structure and discover the semantic split.
-    *   Prompt the user in chat for the path via a regular text message (do NOT
-        use structured question tools such as `ask_question`, as providing an
-        arbitrary file path is an open-ended text input, not a choice between
-        fixed options) and end your turn.
-2.  Once `TargetFile` is provided, verify if `GoldfishContext` is provided (or
-    if the user explicitly stated in their prompt to proceed with no additional
-    context). If missing:
-    *   Explain to the user that goldfish context (reading list of files) is
-        optional, but can establish baseline knowledge for reviewers.
-    *   Clarify that reviewers **always automatically read** files explicitly
-        mentioned or linked in the target design document itself.
-    *   Prompt the user in chat via regular text if they wish to provide
-        additional context files. Do NOT use structured question tools for
-        open-ended file paths.
+1. `TargetFile` is `<spec-path>`, a committed or uncommitted spec under `docs/specs/` whose
+   last H2 (after any numeric prefix) is `Units`. If it is missing, ask for the path in plain
+   chat (an open-ended input, not a choice) and end the turn.
+2. If `.superegm/config.json` is missing, run `superegm init` first: it writes the config with
+   every key and prints the owner's by-hand steps (the builder account and profile, the branch
+   protection). Do them later; the review does not need them.
+3. Open the run card: `superegm runcard open --skill review-spec --artifact <spec-path>`, with
+   `--mode leavemealone` when the invocation said `--leavemealone`. The id goes on every helper
+   call below; a card of an earlier invocation on the same spec is marked interrupted.
+4. The panel is `config.reviewers.spec` unless the invocation gave `--reviewers`;
+   `design` is first, one to six ids. The Astra lane runs when `config.astra.enabled` is true (or
+   `--astra on`) and the preflight of `resources/astra_lane.md` section 1 passes; otherwise
+   `--astra off`, said in one line.
+5. Show the run card (`references/review_loop.md` section 7): model and effort per role,
+   requested and effective, the panel, and whether the Astra lane runs. In normal mode, ask the
+   owner once whether to start; in leavemealone-mode, start.
 
-### Step 2: Curated Pipeline Preset Selection
+### 2. Open
 
-0.  **Run card & panel (fork)**: Claude Code only. Follow
-    `resources/review_panels.md`: configuration, Astra preflight, run card,
-    one mode-and-panel prompt. It replaces item 1's gate (mode asked once)
-    and is the one exception to the single-question rule (constraint 11,
-    invariants below).
-1.  **Preset Gate Check**:
-    *   If `Step` parameter was explicitly provided during invocation (e.g.
-        `interactive`, `uninterrupted`, `feature_spec`, `implementation`, or an
-        individual stage `5`, `6`, `7`, `8`, `9`), map to the corresponding
-        preset or subflow and bypass the interactive preset selection gate.
-    *   Otherwise (if `Step` was omitted), you **MUST** present the Curated
-        Pipeline Presets single-select gate to the user (using a structured
-        question tool such as `ask_question` if your harness has one, or plain
-        chat).
-2.  **Modal Invariants & Wire Payload**:
+    superegm review open --kind spec --artifact <spec-path> --reviewers <panel> [--astra on|off] --runcard <id>
 
-    *   The question payload **MUST** contain strictly one question object
-        (`len(questions) == 1`). Multi-question payloads are strictly forbidden.
-    *   The question tool **MUST** be the sole tool call in this turn payload.
-        You **MUST** yield execution immediately upon invocation.
-    *   `is_multi_select` **MUST** be `false`. Combinatorial multi-select
-        checklists are strictly prohibited to protect topological dependencies
-        (5 → 6 → 7 → 8 → 9).
-    *   Option 0 **MUST** be the primary default action (without a
-        `(Recommended)` prefix).
-    *   Payload specification:
+The id is `spec-<spec-slug>-c<n>`. A cycle still open from an earlier invocation is resumed
+with its stored panel; a closed one (`accept`, `stop`, or the spec changed after convergence)
+starts the next cycle with a fresh cap.
 
-        ```json
-        {
-          "questions": [
-            {
-              "question": "Select the review execution mode for this document:",
-              "options": [
-                "Interactive review with all review rubrics (step-by-step, check in after each review)",
-                "Consolidated report with all review rubrics (runs full flow without stopping)",
-                "Feature spec only (evaluate design without considering implementation)",
-                "Implementation plan only (evaluate design for implementation readiness)"
-              ],
-              "is_multi_select": false
-            }
-          ]
-        }
-        ```
+### 3. The loop
 
-3.  **Action Dispatch Based on Preset**:
+Run the loop exactly as `references/review_loop.md` says: each round the whole panel
+concurrently through the adapters, the Astra lane alongside when it is on, every reviewer
+recorded with `superegm review record` (an empty file is a record; one retry, then
+`--not-run`), then `references/resolve.md` between rounds: fix the spec, write every disposition
+with `superegm review settle`, and put every high or medium you contest or decline to the owner
+in one question (normal mode) or to the judges (leavemealone-mode). Then:
 
-    *   **Preset 0: `Interactive review with all review rubrics`**: Proceed to
-        Step 3 to discover the semantic split, then execute Stages 5, 6, 7, 8,
-        and 9 sequentially with interactive checkpoint gates between stages.
-    *   **Preset 1: `Consolidated report with all review rubrics`**: Proceed to
-        Step 3 to discover the semantic split, then execute all five stages
-        without pausing for checkpoints, consolidating findings into
-        `consolidated_review_report.md`.
-    *   **Preset 2: `Feature spec only`**: **Bypass Step 3 semantic split
-        discovery entirely**. Set `FeatureRange = 1..End`, set `DetailedRange =
-        N/A`, and execute Stages 5, 6, 7, and 8 with checkpoints. Cleanly halt
-        review after Stage 8 before Stage 9.
-    *   **Preset 3: `Implementation plan only`**: Proceed to Step 3 to discover
-        the semantic split, confirm `DetailedRange`, and jump directly to Stage
-        9 (Implementation Readiness Test).
+    superegm review status --review <id> --runcard <id>
 
-### Step 3: Semantic Split Discovery
+Act on the exit code and nothing else:
 
-1.  **Split Bypass Check**: If Preset 2 (`Feature spec only`) was selected,
-    **skip this step completely**. Set `FeatureRange` to cover the entire
-    document (lines 1 through End) and proceed directly to Step 4.
-2.  **Inspect Document**: Read `TargetFile` to inspect its structure and line
-    count.
-3.  **Discover Split Boundary**: Scan for the primary dividing header `##
-    Detailed Implementation Plan` (or standard synonyms: `## Implementation
-    Plan`, `## Work Breakdown`, `## Implementation Steps`).
-    *   **Standard Layout Detected**: If the boundary header is unambiguously
-        identified at line $L$:
-        *   Automatically assign `FeatureRange = 1..(L-1)`.
-        *   Automatically assign `DetailedRange = L..End`.
-        *   Output a concise confirmation message to the user in chat:
-            `"Discovered semantic boundary at line L. FeatureRange: 1..(L-1),
-            DetailedRange: L..End."`
-        *   Proceed directly to Step 4 without presenting a confirmation modal.
-    *   **Ambiguous Boundary / Multiple Candidate Headers**: If multiple
-        conflicting headers or non-standard structures exist:
-        *   Present a single-select gate (using a structured question tool such
-            as `ask_question` with `len(questions) == 1`, or plain chat)
-            proposing the most likely split line as Option 0, with Option 1
-            allowing custom line ranges via write-in.
-    *   **No Implementation Plan Found**: If the document contains only a
-        high-level feature specification:
-        *   Notify the user in chat that no implementation plan was detected.
-        *   Assign `FeatureRange = 1..End` and `DetailedRange = N/A`.
-        *   Offer to execute Stages 5–8 (Feature Spec gates) and proceed.
+| Exit | Then |
+| --- | --- |
+| 0 | converged: step 4 |
+| 3 | open: the next round (from round 2, each goldfish also receives the prior round's findings with their dispositions) |
+| 2 | at the cap: step 5 |
+| 4 | a `fix-design` finding: `superegm approve-spec --void --review <id> --spec <spec-path>` voids the earlier approval (when there is none the defect is this spec's own: settle it `fixed` instead); fix the spec, then the next round |
+| 5 | stalled: step 6 |
 
-### Step 4: Staging Strategy
+Doctrine between rounds (`resources/review_panels.md` section 7): change the thing, not the
+round. When two consecutive rounds regress on the same area, delete the capability, narrow the
+contract or shrink the surface, and say in the journal what was removed.
 
-Once the semantic split and execution preset are confirmed:
+### 4. Approve (exit 0)
 
-1.  **Confirm Review Target**: Verify that `FeatureRange` and `DetailedRange`
-    are bound.
-2.  **Dispatch Execution Pipeline**:
-    *   **Interactive review with all review rubrics**: Execute Stage 5 → Stage
-        6 → Stage 7 → Stage 8 → Stage 9 sequentially.
-    *   **Consolidated report with all review rubrics**: Run Subflow:
-        Uninterrupted Full Flow.
-    *   **Feature spec only**: Execute Stage 5 → Stage 6 → Stage 7 → Stage 8,
-        then cleanly halt.
-    *   **Implementation plan only**: Jump directly to Stage 9 (Implementation
-        Readiness Test).
-    *   **Panel (fork)**: When the panel is not Full, follow the routing table
-        in `resources/review_panels.md` instead of the sequences above. In
-        every panel, at Stages 7 and 9 pass `egm-review-loop` the panel's
-        Claude reviewers (its section 4) plus `AstraLane`, `Stage`, `RunCard`,
-        `GoldfishModel` and `GoldfishEffort`.
+    superegm approve-spec --spec <spec-path> --runcard <id>
 
---------------------------------------------------------------------------------
+The helper checks that the working-tree bytes hash to the converged round's sha256 and that the
+last H2 is `Units`, then prints the one question. **Normal mode**: ask the owner that question
+with the options `Approve | Stop` (one question, sole tool call); on `Approve`, run it again
+with `--yes`; on `Stop`, go to step 7 with the record. **Leavemealone-mode**: run it with
+`--leavemealone`; the converged record is the approval. The helper then adds and commits the
+spec and `.superegm/config.json` by path on the owner's current branch, ignoring other changes
+in the tree, with the message `superegm: approve <spec-slug> at review <id>`, and writes
+`approvals/<spec-slug>.json` (`commit`, `sha256`, `handoff_id`).
 
-## Subflows
+Tell the owner, in one line: push the approval commit to `origin/<base>` (only the owner updates
+the base branch; `launch` refuses the first wave until the spec there hashes to the approval),
+then type `/superegm:plan <spec-path>`. Nothing chains.
 
-### Subflow Checkpoint Gates & Pause/Resume Protocol
+### 5. At the cap (exit 2)
 
-All interactive review stages conclude with an explicit single-select gate
-(using a structured question tool such as `ask_question` with
-`len(questions) == 1`, `is_multi_select: false`, sole tool call in turn, or
-plain chat):
+No further round starts. Request the ruling of spec section 13.2 point 2 as one question:
+`continue one bounded round` (once per cycle), `accept the remainder`, or `stop`; in
+leavemealone-mode, `superegm judges question --review <id> --cap` and the `judges` skill. Record
+it:
 
-1.  **Stage Checkpoint Patterns**:
-    *   **Stages 5, 6, 8 (Altitude & Comprehension Checkpoints)**:
-        *   Option 0: `Proceed to next stage: Stage [N+1] ([Next Stage Name])`
-            (or `Conclude review and begin detailed implementation planning` for
-            Stage 8 terminal).
-        *   Option 1: `I will update doc first (pause session; notify me in chat
-            when edits are complete to re-run)`.
-        *   Option 2: `Pause Review (save progress and exit)`.
-    *   **Stages 7, 9 (Remediation & Readiness Checkpoints)**:
-        *   Option 0: `Proceed to next stage: Stage [N+1] ([Next Stage Name])`
-            (or `Conclude review and finalize document` for Stage 9 terminal).
-        *   Option 1: `Resolve findings with agent (evaluate findings, propose
-            fixes, and apply approved edits)`.
-        *   Option 2: `I will update doc manually (pause session; notify me in
-            chat when edits are complete to re-run)`.
-        *   Option 3: `Pause Review (save progress and exit)`.
-2.  **Resolution Semantics (Option 1 for Stages 7 and 9)**:
-    *   **Hand-off to Resolver**: The agent invokes `egm-resolve` in the primary
-        Elephant context window on the target range (`FeatureRange` or
-        `DetailedRange`), passing the parsed findings from `critic_report.md` or
-        `implementation_readiness_report.md`, with `Stage`, `Round` (the loop's
-        last round + 1) and `RunCard` (fork).
-    *   **Resolution Workflow**: The Elephant classifies each finding (`PROPOSE
-        FIX` vs `CONTEST`), writes `goldfish_review_report.md`, and executes
-        approved edits on `TargetFile` via file editing tools.
-    *   **Convergence**: After applying fixes, re-read `TargetFile` to
-        recalculate line bounds, and either advance to the next stage or re-run
-        the stage audit (enforcing max 1 re-audit limit).
-3.  **Pause & Resume Semantics (Manual Doc Updates)**:
-    *   **Turn Yield**: The agent confirms in chat that the review is paused for
-        manual document edits, and yields execution immediately.
-    *   **Resume Notification**: When the author replies in chat indicating
-        edits are complete:
-        *   Re-read `TargetFile` to recalculate line shifts.
-        *   Re-run the current stage subflow.
-        *   **1-Audit Convergence Cap**: Each stage allows a maximum of 1
-            re-audit. If manual doc updates are requested again after a
-            re-audit, inform the author that the cap is reached, document
-            residual findings as accepted trade-offs, auto-bind Option 0, and
-            advance to the next stage.
-4.  **Graceful Halt Semantics (`Pause Review`)**:
-    *   Halt execution immediately with zero tools, preserving all report
-        artifacts.
+    superegm review rule --review <id> --ruling continue|accept|stop (--owner | --judges <judges-id>) --runcard <id>
 
-### Subflow: Uninterrupted Full Flow
+`continue` raises the cap by one: the next round. `accept` converges the spec: step 4. `stop`
+ends the cycle at its cap: step 7 with the record; the next invocation opens cycle n+1.
 
-1.  **Uninterrupted Stage Execution**: Execute all five review stages in
-    sequence without interactive checkpoint pauses between steps. For each
-    stage, write the individual report file to the working directory (or your
-    harness's artifact directory, if it has one):
-    *   **Astra lane (fork)**: Start one full-file run before the first step
-        that runs, as `resources/astra_lane.md` says; wait for it in item 2.
-    *   **Step 5 (Initial Zoom Out)**: Spawn `egm-synthesizer` (or direct
-        subagent) with `Reviewers: [egm-zoom-out]` on `full file` → write
-        `zoom_out_report.md`.
-    *   **Step 6 (Comprehension Test)**: Spawn the `egm-comprehension`
-        subagent directly (not the synthesizer) on `FeatureRange` &
-        `DetailedRange` → write its complete result to
-        `comprehension_report.md`.
-    *   **Step 7 (Critic Review)**: Spawn `egm-synthesizer` (or direct
-        subagents) with `Reviewers: [egm-design, egm-structural, egm-style]` on
-        `FeatureRange` → write `critic_report.md`. (fork) Use the panel's
-        reviewers from `resources/review_panels.md` section 4.
-    *   **Step 8 (Intermediate Zoom Out)**: Spawn `egm-synthesizer` (or direct
-        subagent) with `Reviewers: [egm-zoom-out]` on `full file` → write
-        `intermediate_zoom_out_report.md`.
-    *   **Step 9 (Implementation Readiness Test)**: Spawn `egm-synthesizer` (or
-        direct subagents) with `Reviewers: [egm-implementation-readiness,
-        egm-codebase-details, egm-style]` on `DetailedRange` → write
-        `implementation_readiness_report.md`. (fork) Use the panel's reviewers
-        from `resources/review_panels.md` section 4.
-2.  **Cross-Stage Synthesis & Deduplication**:
-    *   Collect all findings across the stage reports that ran, plus the Astra
-        result or its `not run` reason (fork); name the stages the panel
-        skipped and put the run card at the top of the report.
-    *   Consolidate observations into actionable tasks by priority (🔴 Blocker, 🟡
-        Major, 🟢 Nit).
-    *   Build a Traceability Matrix mapping raw findings to consolidated action
-        items.
-3.  **Deliverable Delivery**: Write to `consolidated_review_report.md` using
-    your file-writing tool.
-4.  **Notify User**: Output a concise chat notification pointing to
-    `consolidated_review_report.md` (give its path).
+### 6. Stalled (exit 5)
 
-### Subflow: Zoom Out Review
+The two latest rounds did not complete under this run card. End this invocation with the
+record: name the review id, the reviewer and the reason from the round file, and close the card
+(step 7). A re-typed `/superegm:review-spec` opens a new run card and resumes the same cycle.
 
-1.  **Delegate to Synthesizer Subagent**: Spawn `egm-synthesizer` (or the
-    specialized `egm-zoom-out` subagent at `agents/zoom-out.md`) on `full file`
-    applying `resources/document_standards/zoom-out-standard.md`. When running
-    as Step 8 (Intermediate Zoom Out), include `zoom_out_report.md` path in
-    context and focus on additions/mitigations from Comprehension and Critic
-    stages.
-2.  **Delivery**: Write findings to `zoom_out_report.md` (Stage 5) or
-    `intermediate_zoom_out_report.md` (Stage 8) using your file-writing tool.
-3.  **Notify User (No Chat Dumps)**: Notify user that findings are written to
-    the report file (give its path).
-4.  **Checkpoint Gate**: Present the tri-state gate following the Checkpoint
-    Gate Protocol:
-    *   **Stage 5**: Question: `"Stage 5 (Initial Zoom Out Review) completed.
-        Findings written to zoom_out_report.md. How would you like to
-        proceed?"`, Option 0: `"Proceed to next stage: Stage 6 (Comprehension
-        Test)"`.
-    *   **Stage 8 (Feature Spec Gates Only)**: Question: `"Stage 8 (Intermediate
-        Zoom Out) completed. High-level architecture verified. How would you
-        like to proceed?"`, Option 0: `"Conclude review and begin detailed
-        implementation planning"`.
-    *   **Stage 8 (Interactive Full Flow)**: Question: `"Stage 8 (Intermediate
-        Zoom Out) completed. Findings written to
-        intermediate_zoom_out_report.md. How would you like to proceed?"`,
-        Option 0: `"Proceed to next stage: Stage 9 (Implementation Readiness
-        Test)"`.
-    *   All cases provide Option 1: `"I will update doc first (pause session;
-        notify me in chat when edits are complete to re-run)"` and Option 2:
-        `"Pause Review (save progress and exit)"`.
+### 7. Close
 
-### Subflow: Comprehension Test
+`superegm runcard close <id>` is the last action of every path, including a stop or an error
+you cannot recover from. State the review id, the last `review status` line and, after an
+approval, the commit to push.
 
-1.  **Spawn the Reviewer Directly**: Spawn the `egm-comprehension` subagent
-    at `agents/comprehension.md` on `FeatureRange` & `DetailedRange` with no
-    document standard. Do not use the synthesizer: its report keeps only
-    findings, and the author must see the paraphrase. The test is self-containment,
-    not detail. Do not apply `re-implementation-standard.md`: it asks for
-    code-level detail, which the Zoom Out standard forbids in `FeatureRange`.
-2.  **Delivery**: Write the complete reviewer result to
-    `comprehension_report.md` using your file-writing tool. Start with the two
-    paraphrase headings verbatim, then the findings. Keep the paraphrase when
-    there are no findings.
-3.  **Notify User (No Chat Dumps)**: Notify user that findings are written to
-    `comprehension_report.md` (give its path).
-4.  **Checkpoint Gate**: Present the Stage 6 tri-state gate:
-    *   Question: `"Stage 6 (Comprehension Test) completed. Findings written to
-        comprehension_report.md. How would you like to proceed?"`
-    *   Option 0: `"Proceed to next stage: Stage 7 (Critic Review)"`
-    *   Option 1: `"I will update doc first (pause session; notify me in chat
-        when edits are complete to re-run)"`
-    *   Option 2: `"Pause Review (save progress and exit)"`
+## A fix-design finding later
 
-### Subflow: Critic Review
+When plan review or integrate finds the defect to be in the frozen spec, that skill runs
+`superegm approve-spec --void --review <id> --spec <spec-path>`: the approval is void, `graph`
+refuses it, and the owner types `/superegm:review-spec <spec-path>` again. The review opens as
+the next cycle; a re-approval while any unit is filed keeps the handoff id.
 
-1.  **Invoke Antagonistic Review Loop**: Invoke `egm-review-loop` in-thread on
-    `FeatureRange` with reviewers `[egm-design, egm-structural, egm-style]` and
-    standards `{"egm-design": "feature-spec-standard", "egm-structural":
-    "feature-spec-standard"}`. (fork) Use the panel's reviewers from
-    `resources/review_panels.md` section 4.
-2.  **Notify User (No Chat Dumps)**: Notify user that findings are written to
-    `critic_report.md` (give its path).
-3.  **Checkpoint Gate**: Present the Stage 7 gate:
-    *   Question: `"Stage 7 (Critic Review) completed. Findings written to
-        critic_report.md. How would you like to proceed?"`
-    *   Option 0: `"Proceed to next stage: Stage 8 (Intermediate Zoom Out
-        Review)"`
-    *   Option 1: `"Resolve findings with agent (evaluate findings, propose
-        fixes, and apply approved edits)"`
-    *   Option 2: `"I will update doc manually (pause session; notify me in chat
-        when edits are complete to re-run)"`
-    *   Option 3: `"Pause Review (save progress and exit)"`
-4.  **Remediation & Resolution (Option 1)**:
-    *   Invoke `egm-resolve` in the primary Elephant context on `FeatureRange`,
-        passing findings from `critic_report.md` (or
-        `goldfish_review_report.md`).
-    *   Execute approved fixes directly on `TargetFile` using file editing
-        tools.
-    *   After fixes are applied, re-read `TargetFile` to recalculate line
-        bounds, and advance to Stage 8 (or re-run Stage 7, max 1 re-audit).
+## Data notice
 
-### Subflow: Implementation Readiness Test
-
-1.  **Invoke Antagonistic Review Loop**: Invoke `egm-review-loop` in-thread on
-    `DetailedRange` with reviewers `[egm-implementation-readiness,
-    egm-codebase-details, egm-style]` and standards
-    `{"egm-implementation-readiness": "implementation-readiness-standard",
-    "egm-codebase-details": "implementation-readiness-standard"}`. (fork) Use
-    the panel's reviewers from `resources/review_panels.md` section 4.
-2.  **Notify User (No Chat Dumps)**: Notify user that findings are written to
-    `implementation_readiness_report.md` (give its path).
-3.  **Terminal Checkpoint Gate**: Present the Stage 9 terminal gate:
-    *   Question: `"Stage 9 (Implementation Readiness Test) completed. Report
-        written to implementation_readiness_report.md. How would you like to
-        proceed?"`
-    *   Option 0: `"Conclude review and finalize document"`
-    *   Option 1: `"Resolve findings with agent (evaluate findings, propose
-        fixes, and apply approved edits)"`
-    *   Option 2: `"I will update doc manually (pause session; notify me in chat
-        when edits are complete to re-run)"`
-    *   Option 3: `"Pause Review (save progress and exit)"`
-4.  **Remediation & Resolution (Option 1)**:
-    *   Invoke `egm-resolve` in the primary Elephant context on `DetailedRange`,
-        passing findings from `implementation_readiness_report.md` (or
-        `goldfish_review_report.md`).
-    *   Execute approved fixes directly on `TargetFile` using file editing
-        tools.
-    *   After fixes are applied, re-read `TargetFile` to recalculate line
-        bounds, and conclude the review session (or re-run Stage 9, max 1
-        re-audit).
+When the Astra lane runs, the whole spec, the brief (on a resumed round, with your dispositions
+on Astra's own earlier findings) and any file your OS account can read that Astra opens go to
+OpenAI under the account `codex login status` reports. Say so in one line the first time the
+lane starts in a session; `skip astra` stops waiting for it in this review, and
+`config.astra.enabled: false` turns it off.
