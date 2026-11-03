@@ -105,7 +105,8 @@ def ci_word(verdict: str):
 def builder_facts(st, uid: str, comments: list) -> tuple:
   """From the latest launch by `round`: `[round, <text of its exit file>]` when that file exists,
   and `[id, word, login]` of the last `**Builder status:**` comment created at or after its
-  `started_at` (every such comment when nothing was launched)."""
+  `started_at` (every such comment when nothing was launched). The word is masked (None) while
+  the launch is not terminal (spec section 4), so it folds into the exit line it belongs to."""
   latest = max(load_launches(st, uid), key=lambda entry: entry["round"], default=None)
   exit = None
   if latest:
@@ -117,7 +118,7 @@ def builder_facts(st, uid: str, comments: list) -> tuple:
     match = STATUS_RE.match(comment.get("body") or "")
     if match and (comment.get("created_at") or "") >= since:
       status = [comment["id"], match.group(1), (comment.get("user") or {}).get("login")]
-  return exit, status
+  return exit, None if latest and not terminal(latest) else status
 
 
 def closed_facts(repo: str, issue: dict, pr, landed: bool) -> list:
