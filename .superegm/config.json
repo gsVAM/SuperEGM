@@ -1,0 +1,80 @@
+{
+  "repo": "gsVAM/superegm",
+  "base": "main",
+  "artifacts_dir": "/Users/g.singhal/.cache/choreograph-audit/superegm/build",
+  "mode": "leavemealone",
+  "max_in_flight": 5,
+  "labels": {
+    "unit": "superegm:unit",
+    "wave": "superegm:wave-",
+    "handoff": "superegm:handoff-",
+    "tracking": "superegm:tracking",
+    "stopped": "superegm:stopped"
+  },
+  "issue_template": "superegm-body-v1",
+  "tracking_issue_title": "SuperEGM 1.0.0 handoff: 2026-11-03-superegm-design",
+  "banned_terms": [],
+  "fix_request_mention": "",
+  "allowed_mentions": [],
+  "reviewers": {
+    "spec": [
+      "design",
+      "zoom-out",
+      "comprehension",
+      "readiness",
+      "structural",
+      "codebase-details"
+    ],
+    "plan": [
+      "readiness",
+      "set",
+      "structural"
+    ],
+    "head": [
+      "change-review",
+      "codebase-details"
+    ],
+    "integrate": [
+      "design",
+      "zoom-out"
+    ]
+  },
+  "astra": {
+    "enabled": true,
+    "model": "gpt-6-astra",
+    "effort": "xhigh"
+  },
+  "judges": {
+    "min_vendors": 1,
+    "members": [
+      "fable",
+      "opus",
+      "astra"
+    ]
+  },
+  "builder": {
+    "profile_dir": "/Users/g.singhal/.claude-superegm-builder",
+    "model": "claude-sonnet-5-5",
+    "permission_mode": "acceptEdits",
+    "gh_token_env": "SUPEREGM_BUILDER_TOKEN",
+    "allowed_tools": [
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git mv:*)",
+      "Bash(git rm:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr edit:*)",
+      "Bash(gh pr comment:*)",
+      "Bash(gh issue comment:*)"
+    ]
+  },
+  "ci_wait_minutes": 30
+}
