@@ -16,6 +16,10 @@ SKILLS = frozenset(['plan'])  # the skills whose card this subcommand accepts
 DECIDE_RE = re.compile(r"^- (D\d+) (.+?) options: (.+?); owner: (.+?); default: \((\w)\); blocking: (yes|no)"
                        r"(?:; answer: \((\w)\))?$")
 GLOBAL_RE = re.compile(r"^## Global constraints[ \t]*\n(.*?)(?=^## |\Z)", re.S | re.M)
+INTERFACE_RE = re.compile(r"^- (?:Consumes: .+ \(U\d{2,}\)|Produces: .+)$")
+FIXED_DOD_1 = "The test for each Step was committed before its implementation (checked by superegm tdd-order)"
+DOD_ITEM_RE = re.compile(r"^(?:Run `[^`]+` — .+|Exists `[^`]+`|CI green on the head)$")
+OPTION_RE = re.compile(r"^\((\w)\) .+$")
 
 
 def register(subparsers):
@@ -77,14 +81,23 @@ class Plan(core.Plan):
     self._parse_fields(unit, fields)
     i = self._heading(lines, i, uid, "Interfaces")
     while i < len(lines) and lines[i].startswith("- "):
+      if not INTERFACE_RE.match(lines[i].rstrip()):
+        self._fail(i, f"{uid}: interfaces line must read `- Consumes: <name> (U<nn>)` or `- Produces: <name>`")
       unit.interfaces.append(lines[i].rstrip())
       i += 1
     i = self._heading(lines, i, uid, "Definition of done")
     while i < len(lines) and core.DOD_RE.match(lines[i]):
-      unit.dod.append(core.DOD_RE.match(lines[i]).group(2).strip())
+      number, item = int(core.DOD_RE.match(lines[i]).group(1)), core.DOD_RE.match(lines[i]).group(2).strip()
+      if number != len(unit.dod) + 1:
+        self._fail(i, f"{uid}: definition-of-done items must be numbered 1, 2, …")
+      if number == 1 and item != FIXED_DOD_1:
+        self._fail(i, f"{uid}: definition-of-done item 1 must read `{FIXED_DOD_1}`")
+      if number > 1 and not DOD_ITEM_RE.match(item):
+        self._fail(i, f"{uid}: definition-of-done item {number} is not `Run `, `Exists ` or `CI green on the head`")
+      unit.dod.append(item)
       i += 1
-    if not unit.dod:
-      self._fail(i, f"{uid}: empty definition of done")
+    if len(unit.dod) < 2:
+      self._fail(i, f"{uid}: definition of done needs item 1 and a `Run`, `Exists` or CI item")
     i = self._heading(lines, i, uid, "Review focus (this unit)")
     while i < len(lines) and lines[i].startswith("- "):
       unit.review_focus.append(lines[i].rstrip())
@@ -105,8 +118,17 @@ class Plan(core.Plan):
         if not decide:
           self._fail(i, f"{uid}: decide-before-build item must read `- D<n> <question> options: (a) <option>; "
                         "(b) <option>[; …]; owner: <owner>; default: (a); blocking: yes|no`")
-        unit.decisions.append({"id": decide.group(1), "question": decide.group(2),
-                               "options": decide.group(3).split("; "), "owner": decide.group(4),
+        did, options, default, answer = decide.group(1), decide.group(3).split("; "), decide.group(5), decide.group(7)
+        ids = [OPTION_RE.match(o).group(1) if OPTION_RE.match(o) else
+               self._fail(i, f"{uid}: decide-before-build item {did} option `{o}` must read `(a) <option>`")
+               for o in options]
+        if len(options) < 2:
+          self._fail(i, f"{uid}: decide-before-build item {did} needs two or more options")
+        if default not in ids:
+          self._fail(i, f"{uid}: decide-before-build item {did} default ({default}) is not one of its options")
+        if answer and answer not in ids:
+          self._fail(i, f"{uid}: decide-before-build item {did} answer ({answer}) is not one of its options")
+        unit.decisions.append({"id": did, "question": decide.group(2), "options": options, "owner": decide.group(4),
                                "default": f"({decide.group(5)})", "blocking": decide.group(6) == "yes",
                                "answer": f"({decide.group(7)})" if decide.group(7) else None, "line": i + 1})
       i += 1
