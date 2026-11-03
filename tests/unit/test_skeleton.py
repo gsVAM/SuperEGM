@@ -157,3 +157,24 @@ def test_persona_output_section_is_the_findings_line(id_: str) -> None:
   text = (ROOT / "agents" / f"{id_}.md").read_text(encoding="utf-8")
   assert FINDINGS_LINE in text.split("# Output Format", 1)[1]
   assert not re.search(r"Blocker|Major|Nit|🔴|🟡|🟢", text), id_
+
+
+def read_json(path: str) -> dict:
+  return json.loads((ROOT / path).read_text(encoding="utf-8"))
+
+
+def test_manifests_name_superegm_1_0_0() -> None:
+  portable, manifest = read_json("plugin.json"), read_json(".claude-plugin/plugin.json")
+  assert (portable["name"], portable["version"], portable["license"]) == ("superegm", "1.0.0", "Apache-2.0")
+  assert "extensions" not in portable and "hooks" not in manifest
+  for key in ("name", "version", "description", "author", "homepage", "repository", "license"):
+    assert manifest[key] == portable[key], key
+  assert portable["repository"] == "https://github.com/gsVAM/superegm"
+  assert manifest["icon"] == "./.claude-plugin/icon.png"
+  assert sorted(manifest["agents"]) == sorted(f"./.claude-plugin/agents/{i}.md" for i in IDS)
+  market = read_json(".claude-plugin/marketplace.json")
+  assert market["name"] == "superegm" and [p["name"] for p in market["plugins"]] == ["superegm"]
+  assert market["plugins"][0]["source"] == "./"
+  for path in ("plugin.json", ".claude-plugin/plugin.json", ".claude-plugin/marketplace.json"):
+    text = (ROOT / path).read_text(encoding="utf-8").lower()
+    assert not any(w in text for w in ("bootstrap", "synthesizer", "openai", "codex")), path
