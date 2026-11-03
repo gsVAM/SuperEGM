@@ -160,3 +160,15 @@ def test_session_start_injects_using_superegm() -> None:
 def test_session_start_silent_under_role(role: str) -> None:
   result = run_hook(SUPEREGM_ROLE=role)
   assert (result.returncode, result.stdout, result.stderr) == (0, b"", b"")
+
+
+def test_manifest_hook_hash_matches_script() -> None:
+  manifest = json.loads((ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
+  digest = hashlib.sha256((ROOT / "hooks/session-start").read_bytes()).hexdigest()
+  assert manifest["superegm"] == {"hook_sha256": digest}
+  assert "hooks" not in manifest
+
+
+def test_hooks_directory_is_exactly_three_files() -> None:
+  names = sorted(p.name for p in (ROOT / "hooks").iterdir())
+  assert names == ["hooks.json", "run-hook.cmd", "session-start"]
