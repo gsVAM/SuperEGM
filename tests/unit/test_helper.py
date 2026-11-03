@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from conftest import (ROOT, SCRIPTS, HELPER, REPO, DESIGN, Harness, make_world, make_repo, make_plan, make_pr,
-                      set_config, applied, pass_gate, dry_run, result_for, state_of, unit_path, foreman_path,
+                      set_config, applied, pass_gate, dry_run, result_for, state_of, unit_path, foreman_path, round_of,
                       close_as_completed, git)
 
 
@@ -551,7 +551,7 @@ def test_prepare_fetches_from_the_recorded_remote_into_private_refs(tmp_path, ca
   line = [l for l in launch.splitlines() if "inspect" in l][0]
   assert f"--base '{base_sha}'" in line and "--resume" not in line and not re.search(r"\$EGM_|&&|\||;|\s>", line)
   foreman = json.loads((artifacts / hexd / "foreman/U01.json").read_text(encoding="utf-8"))
-  assert foreman["phase"] == "prepared" and foreman["rounds"]["1"]["merge_base"] == base_sha
+  assert round_of(foreman, 1)["phase"] == "prepared" and round_of(foreman, 1)["merge_base"] == base_sha
   # A leftover clean worktree is removed on the next call; a dirty one is refused.
   code, out = harness.run("prepare", "--plan", plan, "--unit", "U01", "--round", 2)
   assert code == 0, out
@@ -789,14 +789,14 @@ def test_record_launch_persists_the_run_folder_before_the_wait(world):
   assert world.run("record-launch", "--plan", world.plan, "--unit", "U01",
                    "--round", 2, "--run-folder", "/tmp/egm-astra/claudex-abc")[0] == 0
   data = json.loads(foreman_path(world, "U01").read_text(encoding="utf-8"))
-  assert data["rounds"]["2"]["phase"] == "launched"
-  assert data["rounds"]["2"]["run_folder"].endswith("claudex-abc")
-  assert data["rounds"]["2"]["status"] == "running"
+  assert round_of(data, 2)["phase"] == "launched"
+  assert round_of(data, 2)["run_folder"].endswith("claudex-abc")
+  assert round_of(data, 2)["status"] == "running"
   assert world.run("record-launch", "--plan", world.plan, "--unit", "U01",
                    "--round", 3, "--not-run", "denied")[0] == 0
   data = json.loads(foreman_path(world, "U01").read_text(encoding="utf-8"))
-  assert data["rounds"]["3"]["status"] == "not run (denied)"
-  assert data["rounds"]["2"]["run_folder"], "an earlier round must survive"
+  assert round_of(data, 3)["status"] == "not run (denied)"
+  assert round_of(data, 2)["run_folder"], "an earlier round must survive"
 
 
 def test_a_different_design_may_not_reuse_a_directory_that_created_issues(world):
@@ -1028,8 +1028,8 @@ def test_collect_records_a_round_and_guards_cleanup(world, tmp_path):
                         "--round", 1, "--verdict", "clean")
   assert code == 0 and "collected" in out, out
   data = json.loads(foreman_path(world, "U01").read_text(encoding="utf-8"))
-  assert data["rounds"]["1"]["phase"] == "collected"
-  assert data["rounds"]["1"]["run_status"] == "completed"
+  assert round_of(data, 1)["phase"] == "collected"
+  assert round_of(data, 1)["run_status"] == "completed"
 
 
 def test_an_edit_the_bodies_do_not_show_still_blocks(world):
@@ -1141,8 +1141,8 @@ def test_collect_accepts_a_round_whose_lane_never_launched(world):
   """R6-05: with the lane off, nothing records a launch, so the round stays
   `prepared` and the documented collect-before-remove sequence could not run."""
   applied(world)
-  data = {"unit": "U01", "rounds": {"1": {"phase": "prepared", "pr": 70,
-                                          "worktree": "/tmp/egm-wave/x"}}}
+  data = {"dispatch_id": None, "decisions": [], "rulings": [],
+          "rounds": [{"round": 1, "phase": "prepared", "pr": 70, "worktree": "/tmp/egm-wave/x"}]}
   foreman_path(world, "U01").parent.mkdir(parents=True)
   foreman_path(world, "U01").write_text(json.dumps(data), encoding="utf-8")
   code, out = world.run("collect", "--plan", world.plan, "--unit", "U01", "--round", 1)
@@ -1151,8 +1151,8 @@ def test_collect_accepts_a_round_whose_lane_never_launched(world):
                         "--round", 1, "--not-run", "lane off")
   assert code == 0, out
   saved = json.loads(foreman_path(world, "U01").read_text(encoding="utf-8"))
-  assert saved["rounds"]["1"]["phase"] == "collected"
-  assert "not run (lane off)" in saved["rounds"]["1"]["run_status"]
+  assert round_of(saved, 1)["phase"] == "collected"
+  assert "not run (lane off)" in round_of(saved, 1)["run_status"]
 
 
 # ------------------------------------------------ 0.2.1: the scan is raw text
@@ -1249,8 +1249,8 @@ def test_record_launch_not_run_cannot_erase_a_recorded_launch(world, tmp_path):
                         "--round", 1, "--not-run", "skipped")
   assert code == 1 and "already recorded a launch" in out, out
   data = json.loads(foreman_path(world, "U01").read_text(encoding="utf-8"))
-  assert data["rounds"]["1"]["run_folder"].endswith("run"), "the folder must survive"
-  assert data["rounds"]["1"]["run_status"] == "running"
+  assert round_of(data, 1)["run_folder"].endswith("run"), "the folder must survive"
+  assert round_of(data, 1)["run_status"] == "running"
   # a round that never launched may still be recorded not run
   assert world.run("record-launch", "--plan", world.plan, "--unit", "U01",
                    "--round", 2, "--not-run", "lane off")[0] == 0
@@ -1293,7 +1293,7 @@ def test_record_launch_is_immutable_per_round(world, tmp_path):
                         "--round", 1, "--run-folder", str(b))
   assert code == 1 and "a new round" in out, out
   data = json.loads(foreman_path(world, "U01").read_text(encoding="utf-8"))
-  assert data["rounds"]["1"]["run_folder"] == str(a)
+  assert round_of(data, 1)["run_folder"] == str(a)
 
 
 def test_collect_refuses_a_result_from_a_different_review(world, tmp_path):
@@ -1371,7 +1371,7 @@ def test_an_interrupted_round_is_collected_but_its_worktree_is_never_removed(wor
                    "--round", 1, "--run-folder", str(folder))[0] == 0
   path = foreman_path(world, "U01")
   data = json.loads(path.read_text(encoding="utf-8"))
-  data["rounds"]["1"].update({"pr": 70, "worktree": str(tree)})
+  round_of(data, 1).update({"pr": 70, "worktree": str(tree)})
   path.write_text(json.dumps(data), encoding="utf-8")
   (folder / "result.json").write_text(json.dumps({"status": "running"}), encoding="utf-8")
   # stop waiting: accepted, folder kept, nothing invented
@@ -1379,7 +1379,7 @@ def test_an_interrupted_round_is_collected_but_its_worktree_is_never_removed(wor
                         "--not-run", "runner killed")
   assert code == 0 and "not run (interrupted: runner killed)" in out, out
   data = json.loads(path.read_text(encoding="utf-8"))
-  assert data["rounds"]["1"]["run_folder"] == str(folder) and data["rounds"]["1"]["phase"] == "collected"
+  assert round_of(data, 1)["run_folder"] == str(folder) and round_of(data, 1)["phase"] == "collected"
   # removal: NOT performed, even though the round is administratively
   # "collected" and even though the files are old - inactivity is never
   # evidence. Landing still completes (exit 0) and says what it kept.
@@ -1710,3 +1710,20 @@ def test_approve_spec_writes_the_approvals_record_with_handoff_id(world):
   git(["commit", "-qam", "edit"], world.repo)
   code, out = world.run("graph", "--plan", world.plan)
   assert code == 1 and "spec changed since the approval: run approve-spec again" in out
+
+
+def test_foreman_file_schema_and_round_entries(world):
+  import superegm
+  assert world.run("graph", "--plan", world.plan)[0] == 0
+  st = superegm.store(world.repo)
+  assert superegm.load_foreman(st, "U01") == {"dispatch_id": None, "rounds": [], "decisions": [], "rulings": []}
+  assert world.run("record-launch", "--unit", "U01", "--round", "2", "--run-folder", str(world.artifacts / "run"))[0] == 0
+  path = world.artifacts / state_of(world)["handoff_id"][-6:] / "foreman/U01.json"
+  data = json.loads(path.read_text(encoding="utf-8"))
+  assert set(data) == {"dispatch_id", "rounds", "decisions", "rulings"} and len(data["rounds"]) == 1
+  entry = data["rounds"][0]
+  assert entry["round"] == 2 and entry["runcard"] == world.card("wave")
+  assert {"round", "runcard", "launch", "head", "phase", "dispatch_id", "outcome", "posted_at"} <= set(entry)
+  assert superegm.round_entry(data, 2) is data["rounds"][0]
+  assert superegm.round_entry(data, 3)["round"] == 3 and [r["round"] for r in data["rounds"]] == [2, 3]
+  assert not list(world.artifacts.glob("foreman_*_state.json"))

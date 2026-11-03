@@ -458,12 +458,17 @@ def foreman_path(world, uid):
   return world.artifacts / state_of(world)["handoff_id"][-6:] / "foreman" / f"{uid}.json"
 
 
+def round_of(data, n):
+  """The `rounds[]` entry of round `n` in a foreman file, or {}."""
+  return next((r for r in data.get("rounds") or [] if r.get("round") == n), {})
+
+
 def result_for(world, uid, rnd):
   """An inspect result that is attributable to this round: full identity."""
   unit_file = unit_path(world, uid)
   data = json.loads(foreman_path(world, uid).read_text(encoding="utf-8")) \
       if foreman_path(world, uid).is_file() else {}
-  record = (data.get("rounds") or {}).get(str(rnd)) or {}
+  record = round_of(data, rnd)
   return {"status": "completed", "plan": str(unit_file),
           "plan_sha256": hashlib.sha256(unit_file.read_bytes()).hexdigest(),
           "base": record.get("merge_base"), "repo": record.get("worktree"),
