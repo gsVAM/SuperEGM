@@ -25,6 +25,14 @@ def register(subparsers):
   p.set_defaults(run=run, writes=WRITES)
 
 
+def answer_for(decision: dict, answer, default: bool) -> str:
+  """The chosen option id, `(x)`, among the item's own options."""
+  chosen = decision["default"] if default else answer
+  if chosen not in [o.split(" ", 1)[0] for o in decision["options"]]:
+    raise core.HandoffError(f"decide: {chosen} is not an option of {decision['unit']}/{decision['id']}")
+  return chosen
+
+
 def run(args):
   st = core.store(core.git_toplevel(Path.cwd()))
   handoff = graph.load(st, args.plan)
@@ -36,7 +44,7 @@ def run(args):
   decision = next((d for d in unit.decisions if d["id"] == did), None)
   if not decision:
     raise core.HandoffError(f"decide: {uid} has no decision {did}")
-  answer = decision["default"] if args.default else args.answer
+  answer = answer_for({**decision, "unit": uid}, args.answer, args.default)
   by = f"judges:{args.judges}" if args.judges else "owner"
   lines = core.read_text(handoff.plan_path).split("\n")
   index = decision["line"] - 1
