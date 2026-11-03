@@ -471,3 +471,18 @@ def test_foreman_adapter_frontmatter_and_tools():
 ])
 def test_foreman_brief_carries_the_round(line):
   assert line in (ROOT / "skills/wave/references/foreman_brief.md").read_text(encoding="utf-8"), line
+
+
+FILES = [".claude-plugin/agents/foreman.md", "skills/wave/references/foreman_brief.md",
+         "skills/plan/scripts/superegm/foreman.py", "skills/plan/scripts/superegm/prepare.py",
+         "skills/plan/scripts/superegm/collect.py"]
+TERMS = ["head-moved", "astra", "Astra", "run folder", "run_folder", "`launched`", "inspect", "Blocker", "Major",
+         "wave_round_", "pr_comment_", "wave_dispositions", "egm-change-review", "refs/egm/", "foreman_<unit-id>_state.json",
+         "--verdict", ".egm/handoff.json", "handoff_state.json", "new triple", "require_reviewed_pair", "unit_file_text",
+         "record-launch", "SendMessage"]
+
+
+@pytest.mark.parametrize("term", TERMS)
+@pytest.mark.parametrize("file", FILES)
+def test_removed_mechanisms_are_not_named(file, term):
+  assert term not in (ROOT / file).read_text(encoding="utf-8"), (file, term)
