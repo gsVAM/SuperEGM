@@ -1,33 +1,53 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `run_verify` and `cmd_verify` as the verify module.
+# Modified by SuperEGM (gsVAM), 2026: EGM's `run_verify` and `cmd_verify` over the union of every filing's list, the receipt keyed to the latest.
 
-"""superegm verify: read every write back and record the receipt."""
+"""superegm verify: read every write of every filing back and record the receipt."""
+
+from pathlib import Path
 
 import superegm as core
+from superegm import gate
 
-WRITES = frozenset(['state'])  # the store kinds this subcommand writes
-SKILLS = frozenset(['file'])  # the skills whose card this subcommand accepts
+WRITES = frozenset(["state"])  # the store kinds this subcommand writes
+SKILLS = frozenset(["file"])  # the skills whose card this subcommand accepts
 
 
 def register(subparsers):
-  p = core.add_parser(subparsers, "verify", "read every write back and record the receipt")
+  p = core.add_parser(subparsers, "verify", "read every write of every filing back and record the receipt")
+  p.add_argument("--spec", dest="design", required=True, help="the approved spec the filing is for")
   p.set_defaults(run=run, writes=WRITES)
 
 
-def run_verify(handoff: core.Handoff, writes=None):
+def checkable_union(state, writes) -> list:
+  """The latest list first, then from every other filing its unit issues and links, de-duplicated
+  by (kind, unit, blocker); `repo` and `gate` items dropped. Earlier filings are compared on their
+  unit issues: the tracking issue belongs to the latest list (spec section 7)."""
+  latest = state["confirmed"]["sha256"]
+  earlier = [w for f in state.get("filings") or [] if f.get("sha256") != latest
+             for w in f["writes"] if w[0] in ("issue", "sub_issue", "blocked_by") and w[1] != "tracking"]
+  seen, union = set(), []
+  for item in [w for w in writes if w[0] not in ("repo", "gate")] + earlier:
+    key = (item[0], item[1], item[2] if item[0] == "blocked_by" else None)
+    if key not in seen:
+      seen.add(key)
+      union.append(item)
+  return union
+
+
+def run_verify(handoff, writes=None):
   state, repo = handoff.state, core.require_repo(handoff)
   confirmed = state.get("confirmed") or {}
-  stored = confirmed.get("writes")
-  if writes is None and stored:
-    # Verify what the user confirmed, not what the plan says now: an edited
+  if not confirmed.get("sha256"):
+    raise core.HandoffError("no confirmed write list in the state: run dry-run first")
+  if writes is None:
+    # Verify what the owner confirmed, not what the plan says now: an edited
     # local plan must not be able to make a stale receipt look clean.
-    writes = [tuple(w) for w in stored]
-  writes = writes or handoff.writes()
-  if stored and core.sha256_text(core.canonical([list(w) for w in writes])) != confirmed.get("sha256"):
+    writes = confirmed.get("writes") or []
+  if core.sha256_text(core.canonical(writes)) != confirmed["sha256"]:
     raise core.HandoffError("the write list no longer matches the confirmed snapshot: "
-                       "run dry-run again and re-confirm before verifying")
-  checkable = [w for w in writes if w[0] not in ("repo", "gate")]
+                            "run dry-run again and re-confirm before verifying")
+  checkable = checkable_union(state, writes)
   problems, checked = [], 0
   units, tracking = state.get("units", {}), state.get("tracking", {})
   existing_labels = None
@@ -115,7 +135,5 @@ def run_verify(handoff: core.Handoff, writes=None):
 
 
 def run(args):
-  card = core.require_runcard(args, SKILLS)
-  plan, st = core.locate(args)
-  handoff = core.Handoff(plan, st)
-  return run_verify(handoff)
+  core.require_runcard(args, SKILLS)
+  return run_verify(gate.open_handoff(Path(args.design)))

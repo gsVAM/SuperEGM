@@ -180,7 +180,6 @@ def test_status_landed_ready_decisions_and_shared_edges(world):
   gh = applied(world)
   code, out = world.run("status", "--plan", world.plan)
   assert code == 0 and "ready: U01" in out and "landed: none" in out
-  assert "open blocking decision U03/D2" in out
   close_as_completed(gh, 2)
   code, out = world.run("status", "--plan", world.plan)
   assert "closed (no watched PR)" in out and "ready: U01" in out
@@ -191,7 +190,7 @@ def test_status_landed_ready_decisions_and_shared_edges(world):
   make_pr(gh, 41, "a" * 40, merged="2026-11-02T10:00:00Z", closes=[(REPO, 3)])
   gh.graphql[3] = [{**gh.prs[41], "repository": {"nameWithOwner": REPO}}]
   code, out = world.run("status", "--plan", world.plan)
-  assert "landed: U01, U02" in out and "ready: none" in out, out
+  assert "landed: U01, U02" in out and "ready: U03" in out, out
   assert world.run("decide", "--plan", world.plan, "--unit", "U03", "--decision", "D2", "--answer", "(b)")[0] == 0
   code, out = world.run("status", "--plan", world.plan)
   assert "ready: U03" in out

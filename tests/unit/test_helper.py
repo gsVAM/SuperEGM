@@ -64,7 +64,7 @@ def test_state_is_written_atomically_and_a_poll_keeps_other_writers_fields(world
   """R01: a watcher that saves its whole in-memory copy erases a decision or a
   launch the main conversation recorded while it slept."""
   gh = applied(world)
-  assert world.run("verify", "--plan", world.plan)[0] == 0
+  assert world.run("verify", "--spec", world.spec)[0] == 0
   # another writer records a decision while a poll is in flight
   assert world.run("decide", "--plan", world.plan, "--unit", "U03",
                    "--decision", "D2", "--answer", "(a)")[0] == 0
@@ -81,7 +81,7 @@ def test_state_is_written_atomically_and_a_poll_keeps_other_writers_fields(world
 def test_operations_refuse_a_repository_the_numbers_do_not_belong_to(world):
   """R02: issue numbers are not portable; only apply checked the destination."""
   applied(world)
-  assert world.run("verify", "--plan", world.plan)[0] == 0
+  assert world.run("verify", "--spec", world.spec)[0] == 0
   set_config(world, repo="other/elsewhere", banned_terms=["(?i)secret-codename"])
   git(["remote", "set-url", "origin", "https://github.com/other/elsewhere.git"], world.repo)
   code, out = world.run("status", "--plan", world.plan)
@@ -122,7 +122,7 @@ def test_a_completed_label_write_binds_the_destination(world):
   """R3-03: created_anything ignored labels, so a bounded apply that only made
   labels left the destination free to move."""
   dry_run(world)
-  assert world.run("apply", "--plan", world.plan, "--yes", "--max-writes", 2)[0] == 0
+  assert world.run("apply", "--spec", world.spec, "--yes", "--max-writes", 2)[0] == 0
   state = state_of(world)
   assert not any(u.get("number") for u in state["units"].values()), "this bounded apply must not reach an issue"
   assert "done" in state["labels"].values()
@@ -231,8 +231,8 @@ def test_store_paths_are_prefixed_by_the_handoff_hex(world):
 
 
 WRITES = {"approve_spec": {"approvals"}, "graph": {"state", "plan", "units", "unit", "bodies"},
-          "scan": {"file"}, "gate": {"state", "file", "plan", "units", "unit", "bodies"},
-          "dry_run": {"state", "file", "plan", "units", "unit", "bodies"}, "apply": {"state", "file"},
+          "scan": {"file"}, "gate": {"state"},
+          "dry_run": {"file", "state"}, "apply": {"state", "file"},
           "verify": {"state"}, "status": {"state"}, "launch": {"state", "runcards"}, "decide": {"state", "plan", "units", "unit", "bodies", "file"},
           "record_launch": {"launches"}, "collect": {"foreman", "review", "reviews"}, "prepare": {"foreman", "review"},
           "launch_builder": {"launches"}, "interrupt": {"launches", "foreman"}, "clean": set(),
@@ -423,8 +423,8 @@ def test_runcard_refusals(world, setup, unit, reason):
 
 
 GATED = [(("approve-spec", "--spec", "SPEC", "--yes"), "review-spec"), (("graph",), "plan"),
-         (("gate", "--reviewed", "--round", "1"), "file"), (("dry-run",), "file"), (("apply", "--yes"), "file"),
-         (("verify",), "file"), (("status",), "wave"), (("launch",), "wave"),
+         (("gate", "--pass", "--spec", "SPEC"), "file"), (("dry-run", "--spec", "SPEC"), "file"), (("apply", "--yes", "--spec", "SPEC"), "file"),
+         (("verify", "--spec", "SPEC"), "file"), (("status",), "wave"), (("launch",), "wave"),
          (("decide", "--unit", "U03", "--decision", "D2", "--answer", "25"), "plan"),
          (("record-launch", "--unit", "U01"), "wave"),
          (("collect", "--unit", "U01", "--dispatch", "d1"), "wave"), (("prepare", "--unit", "U01", "--dispatch", "d1"), "wave")]
@@ -513,7 +513,7 @@ def test_require_frozen_units_refuses_a_filed_units_drift(world):
   unit_file = world.artifacts / state["handoff_id"][-6:] / "unit_U01.md"
   unit_file.write_text(unit_file.read_text(encoding="utf-8") + "\n## Decisions answered since the issue was posted\n\n- none\n", encoding="utf-8")
   assert world.run("status")[0] == 0, "text outside the fence is not the body"
-  unit_file.write_text(unit_file.read_text(encoding="utf-8").replace("**Objective.** An in-memory queue", "**Objective.** A queue"), encoding="utf-8")
+  unit_file.write_text(unit_file.read_text(encoding="utf-8").replace("## Objective\nAn in-memory queue", "## Objective\nA queue"), encoding="utf-8")
   code, out = world.run("status")
   assert code == 1 and "U01 is filed and frozen: unit_U01.md no longer carries the filed body" in out
   for name in ("status", "launch", "prepare"):
@@ -528,7 +528,7 @@ def test_defer_and_published_are_gone(world):
   assert "defer" not in subs
   assert "--published" not in {f for a in subs["decide"]._actions for f in a.option_strings}
   gh = applied(world)
-  assert "open blocking decision U03/D2" in world.run("status")[1]
+  assert state_of(world)["decisions"]["U03/D2"]["answer"] == "(a)"  # answered before the filing (spec section 9.1)
   code, out = world.run("decide", "--unit", "U03", "--decision", "D2", "--answer", "(b)")
   assert code == 0 and "PUBLISHED" not in out
   code, out = world.run("status")
@@ -560,9 +560,9 @@ def test_removed_mechanisms_are_not_named(path, pattern):
 
 
 MOVED = [("test_plan.py", "test_scan_banned_terms_mentions_and_size"),
-         ("test_file.py", "test_apply_creates_in_order_and_rerun_writes_nothing"),
+         ("test_file.py", "test_apply_creates_labels_issues_and_links_in_order_and_a_rerun_writes_nothing"),
          ("test_file.py", "test_subprocess_command_shape_with_fake_gh_on_path"),
-         ("test_file.py", "test_marker_recovery_finds_issues_created_before_a_crash"),
+         ("test_file.py", "test_apply_recovers_issues_by_the_new_marker_after_a_crash"),
          ("test_builders.py", "test_launch_refuses_each_precondition"),
          ("test_builders.py", "test_record_launch_appends_running_then_records_the_exit"),
          ("test_events.py", "test_wait_prints_deadline_only_and_saves_once"),

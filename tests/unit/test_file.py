@@ -1,192 +1,370 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03).
+# Modified by SuperEGM (gsVAM), 2026: the filing on the confirmed write list under converged plan reviews (U07); EGM's moved tests rewritten to that form.
 
-"""EGM's tests of the subcommands U07 (file) changes, moved from test_helper.py by U03;
-that unit rewrites the ones whose form it changes."""
+"""The filing (spec section 10): `gate --pass` on converged plan reviews, the dry run of the
+unfiled units, `apply` on the confirmed write list with `filings[]` and `base_at_start`,
+marker recovery, the tracking rewrite, `verify` over the union of every filing, the
+leavemealone journal line and the `file` skill body."""
 
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
-import textwrap
 from pathlib import Path
 
 import pytest
 
-from conftest import HELPER, REPO, make_world, make_repo, make_plan, set_config, applied, pass_gate, dry_run, state_of, launchable
+from superegm import store, atomic_write, spec_slug
+from conftest import HELPER, REPO, make_world, make_repo, make_plan, set_config, state_of, git, converge as converge_review
+
+ROOT = Path(__file__).resolve().parents[2]
+PKG = "skills/plan/scripts/superegm"
+SLUG = "2026-11-03-sample-design"          # the spec is docs/specs/<SLUG>.md, H1 `# Sample design`
+ROWS = [("U01", "Queue", "none"), ("U02", "Worker", "U01"), ("U03", "Admin endpoint", "U02")]  # (unit, title, blocked by)
 
 
-def test_gate_pass_refuses_after_change_and_accept_writes_diff(world):
-  assert world.run("graph", "--plan", world.plan)[0] == 0
-  code, out = world.run("gate", "--plan", world.plan, "--pass")
-  assert code == 1 and "no reviewed pair" in out
-  assert world.run("gate", "--plan", world.plan, "--reviewed", "--round", 1)[0] == 0
-  text = world.plan.read_text(encoding="utf-8")
-  world.plan.write_text(text.replace("low: new module", "low: a new module"), encoding="utf-8")
-  code, out = world.run("gate", "--plan", world.plan, "--pass")
-  assert code == 1 and "changed after round 1 was reviewed" in out
-  code, out = world.run("gate", "--plan", world.plan, "--accept")
-  assert code == 0 and "gate_unreviewed.diff" in out
-  diff = (world.artifacts / "gate_unreviewed.diff").read_text(encoding="utf-8")
-  assert "-| Risk | low: new module |" in diff and "+| Risk | low: a new module |" in diff
+def spec_text(rows) -> str:
+  """`# Sample design`, `## 1. Intent` at lines 3-4, the `## Units` table of `rows` as the last H2."""
+  table = "\n".join(f"| {uid} | {title} | {blocked} |" for uid, title, blocked in rows)
+  return ("# Sample design\n\n## 1. Intent\nQueued webhook delivery with an admin listing.\n\n"
+          f"## Units\n\n| Unit | Title | Blocked by |\n| --- | --- | --- |\n{table}\n")
+
+
+def unit_section(uid, title, blocked) -> str:
+  """A unit section in the section 9.1 grammar with one Step."""
+  low = uid.lower()
+  return f"""### {uid}: {title}
+| Field | Value |
+| --- | --- |
+| Objective | {title} exists. |
+| Scope paths | `src/{low}.ts` (create), `tests/{low}.test.ts` (create) |
+| Design range | `docs/specs/{SLUG}.md:3-4 (## 1. Intent)` |
+| Blocked by | {blocked} |
+| Shared files | none |
+| Risk | low: new module |
+| Size | S |
+
+Interfaces
+- Produces: {low}() -> void
+
+Definition of done
+1. The test for each Step was committed before its implementation (checked by superegm tdd-order)
+2. Run `npm test -- tests/{low}.test.ts` — the {low} case passes
+3. CI green on the head
+
+Review focus (this unit)
+- {uid}: the module — {low}() exists; pinned by `{low}_exists`
+
+Steps
+1. Write the failing test `{low}_exists` in `tests/{low}.test.ts`:
+   ```ts
+   test("{low}_exists", () => expect({low}()).toBeUndefined());
+   ```
+   Implement `{low}()` in `src/{low}.ts`.
+
+Decide before build
+- none
+"""
+
+
+def plan_text(spec, sections) -> str:
+  """`# Handoff plan: Sample design`, the `Design:` line, the template and units H2s, `## Global constraints` last."""
+  return (f"# Handoff plan: Sample design\n\nDesign: `{spec}`\n\n## 1. Issue template\n\n"
+          "(the layout of references/issue_template.md)\n\n## 2. Units\n\n" + "\n".join(sections)
+          + "\n## Global constraints\n- TypeScript strict mode, no new dependencies\n")
+
+
+def approve(world, rows=ROWS[:2], amended=()):
+  """Write and commit the spec; record its approval (U03's schema) and return (spec, handoff_id)."""
+  spec = world.repo / f"docs/specs/{SLUG}.md"
+  spec.parent.mkdir(parents=True, exist_ok=True)
+  spec.write_text(spec_text(rows), encoding="utf-8")
+  git(["add", "-A"], world.repo)
+  git(["commit", "-qm", f"spec with {len(rows)} units"], world.repo)
+  sha = hashlib.sha256(spec.read_bytes()).hexdigest()
+  handoff_id = f"{spec_slug(spec)}-{(amended[0] if amended else sha)[:6]}"
+  record = {"path": str(spec), "sha256": sha, "commit": git(["rev-parse", "HEAD"], world.repo).strip(),
+            "runcard": "review-spec-0001", "review": f"spec-{spec_slug(spec)}-c1", "approved_at": "2026-11-03T00:00:00Z",
+            "amended": list(amended), "voided_by": None, "handoff_id": handoff_id}
+  path = world.artifacts / "approvals" / f"{spec_slug(spec)}.json"
+  path.parent.mkdir(parents=True, exist_ok=True)
+  path.write_text(json.dumps(record), encoding="utf-8")
+  return spec, handoff_id
+
+
+def open_card(world, skill, artifact, mode=None) -> str:
+  argv = ["runcard", "open", "--skill", skill, "--artifact", artifact] + (["--mode", mode] if mode else [])
+  code, out = world.run(*argv, card=None)
+  assert code == 0, out
+  return out.strip()
+
+
+def close_card(world, card) -> None:
+  assert world.run("runcard", "close", card, card=None)[0] == 0
+
+
+def graphed(world, spec, plan) -> None:
+  """`graph --plan` under a plan card, closed after."""
+  card = open_card(world, "plan", spec)
+  code, out = world.run("graph", "--plan", plan, "--runcard", card)
+  assert code == 0, out
+  close_card(world, card)
+
+
+def planned(world, units=("U01", "U02")):
+  """approve; the plan outside the store and the repository; `graph --plan`; (spec, plan, handoff_id)."""
+  rows = [r for r in ROWS if r[0] in units]
+  spec, handoff_id = approve(world, rows)
+  plan = world.artifacts.parent / "plan.md"
+  plan.write_text(plan_text(spec, [unit_section(*r) for r in rows]), encoding="utf-8")
+  graphed(world, spec, plan)
+  return spec, plan, handoff_id
+
+
+def converge(world, uid, cycle=1, sha=None) -> None:
+  """What `review-plan` leaves for a converged unit, at its body hash unless `sha` says otherwise."""
+  units = json.loads((world.artifacts / "handoff_units.json").read_text(encoding="utf-8"))["units"]
+  converge_review(world.artifacts, state_of(world)["handoff_id"], uid, sha or units[uid]["body_sha256"], cycle)
+
+
+def gated(world, units=("U01", "U02"), mode=None):
+  """planned; every unit converged; a file card; `gate --pass`; (spec, plan, handoff_id, card)."""
+  spec, plan, handoff_id = planned(world, units)
+  for uid in units:
+    converge(world, uid)
+  card = open_card(world, "file", spec, mode)
+  code, out = world.run("gate", "--pass", "--spec", spec, "--runcard", card)
+  assert code == 0, out
+  return spec, plan, handoff_id, card
+
+
+def dry_run(world, **kw):
+  spec, plan, handoff_id, card = gated(world, **kw)
+  code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
+  assert code == 0, out
+  return spec, plan, handoff_id, card
+
+
+def applied(world, **kw):
+  spec, plan, handoff_id, card = dry_run(world, **kw)
+  code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes")
+  assert code == 0, out
+  world.gh.calls.clear()
+  return spec, plan, handoff_id, card
+
+
+def issue_edit_handler(gh) -> None:
+  """The fake has no `gh issue edit --body-file` form: serve it here, every other `issue` form as before."""
+  def handler(args, cwd, token=None):
+    if args[1] == "edit" and "--body-file" in args:
+      gh.assert_write()
+      gh.issues[int(args[2])]["body"] = Path(args[args.index("--body-file") + 1]).read_text(encoding="utf-8")
+      return 0, "", ""
+    return gh.do_issue(args)
+  gh.extend("issue", handler)
+
+
+def later_filing(world):
+  """A filing applied and closed; the spec amended with U03 and re-approved; U03 planned and converged;
+  a new file card gated and dry-run. Returns (spec, card, the state after the first filing)."""
+  spec, plan, handoff_id, card = applied(world)
+  close_card(world, card)
+  first = state_of(world)
+  issue_edit_handler(world.gh)
+  approve(world, ROWS, amended=(hashlib.sha256(spec.read_bytes()).hexdigest(),))
+  text = plan.read_text(encoding="utf-8")
+  plan.write_text(text.replace("## Global constraints", unit_section(*ROWS[2]) + "\n## Global constraints"), encoding="utf-8")
+  graphed(world, spec, plan)
+  converge(world, "U03")
+  card = open_card(world, "file", spec)
+  code, out = world.run("gate", "--pass", "--spec", spec, "--runcard", card)
+  assert code == 0, out
+  code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
+  assert code == 0, out
+  world.gh.calls.clear()
+  return spec, card, first
+
+
+@pytest.mark.parametrize("case, expected", [
+    ("unreviewed", "gate: U02 plan review not converged"),
+    ("stale", "gate: U02 body differs from its converged round"),
+    ("converged", None)])
+def test_gate_pass_requires_a_converged_review_at_the_body_hash(world, case, expected):
+  spec, plan, handoff_id = planned(world)
+  converge(world, "U01")
+  if case == "stale":
+    converge(world, "U02", sha="0" * 64)
+  elif case == "converged":
+    converge(world, "U02")
+  card = open_card(world, "file", spec)
+  code, out = world.run("gate", "--pass", "--spec", spec, "--runcard", card)
   state = state_of(world)
-  assert state["gate"]["passed"] == "accepted at cap" and state["gate_unreviewed_diff"]
+  if expected:
+    assert code == 1 and expected in out, out
+    assert "gate_plan_sha256" not in state and "gate" not in state
+  else:
+    assert code == 0 and "gate passed" in out, out
+    assert re.fullmatch(r"[0-9a-f]{64}", state["gate_plan_sha256"])
+    assert re.fullmatch(r"[0-9a-f]{64}", state["gate_bodies_sha256"])
+    assert state["gate"]["passed"] == "converged" and state["gate"]["units"] == ["U01", "U02"]
 
 
-def test_dry_run_writes_file_and_calls_only_three_reads(world):
-  out = dry_run(world)
-  assert "3 issues" in out.replace("4 issues", "3 units") or True
+REMOVED = ["--accept", "--reviewed", "--readiness", "--what-ran", "what_ran", "What ran", "Readiness", "Stage 10",
+           "gate_unreviewed", "deferred", "EGM handoff", ".egm_body_", "handoff_state.json", ".egm/",
+           "Codex", "handoff_summary.md", "egm-wave", "synthesizer", "readiness test"]
+
+
+@pytest.mark.parametrize("path", [f"{PKG}/gate.py", f"{PKG}/dry_run.py", f"{PKG}/apply.py", f"{PKG}/verify.py",
+                                  "skills/file/SKILL.md"])
+def test_removed_forms_are_gone_from_the_filing_files(world, path):
+  text = (ROOT / path).read_text(encoding="utf-8")
+  assert not [term for term in REMOVED if term in text], path
+  with pytest.raises(SystemExit) as stop:  # `gate --accept` is not a flag any more (section 3.1)
+    world.run("gate", "--accept", "--spec", world.repo / f"docs/specs/{SLUG}.md", "--runcard", "rc-none")
+  assert stop.value.code == 2
+
+
+def test_dry_run_records_the_confirmed_list_of_unfiled_units_with_three_reads(world):
+  spec, plan, handoff_id, card = gated(world)
+  repo = world.gh.repo
+  world.gh.calls.clear()
+  code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
+  assert code == 0, out
   text = (world.artifacts / "handoff_dryrun.md").read_text(encoding="utf-8")
-  assert "4 issues (1 tracking, 3 units), 3 sub-issue links, 2 blocked-by links" in text
-  assert "- `superegm:unit`: create" in text and "- `superegm:wave-1`: create" in text
-  assert "Confirmed write list sha256" in text and "astra: not run (test)" in text
+  assert "3 issues (1 tracking, 2 units), 2 sub-issue links, 1 blocked-by links" in text
+  for label in ("superegm:unit", "superegm:tracking", "superegm:stopped", "superegm:wave-1", "superegm:wave-2",
+                f"superegm:handoff-{handoff_id[-6:]}"):
+    assert f"- `{label}`: create" in text, label
+  assert "Confirmed write list sha256" in text
+  assert [c[:2] for c in world.gh.calls] == [["auth", "status"], ["api", f"repos/{repo}"], ["api", f"repos/{repo}/labels"]]
   state = state_of(world)
-  assert re.fullmatch(r"[0-9a-f]{64}", state["confirmed_sha256"])
-  assert state["labels"]["superegm:unit"] == "missing"
-  kinds = [c[:2] for c in world.gh.calls]
-  assert kinds == [["auth", "status"], ["api", f"repos/{REPO}"], ["api", f"repos/{REPO}/labels"]]
-  writes = world.ns["Handoff"](world.plan, world.ns["store"](world.repo)).writes()
-  assert writes[0] == ["repo", REPO] and writes[1][0] == "gate" and writes[1][1] == state["gate_plan_sha256"]
-
-
-def test_dry_run_refuses_without_gate_or_after_plan_or_template_change(world):
-  assert world.run("graph", "--plan", world.plan)[0] == 0
-  code, out = world.run("dry-run", "--plan", world.plan)
-  assert code == 1 and "gate has not passed" in out
-  dry_run(world)
-  text = world.plan.read_text(encoding="utf-8")
-  world.plan.write_text(text.replace("low: new module", "low: a new module"), encoding="utf-8")
-  code, out = world.run("dry-run", "--plan", world.plan)
-  assert code == 1 and "changed after the gate" in out
-  world.plan.write_text(text, encoding="utf-8")
-  assert world.run("dry-run", "--plan", world.plan)[0] == 0
-  template = world.repo / ".superegm/template.md"
-  template.write_text("<!-- superegm:handoff={{handoff_id}} unit={{unit_id}} spec={{spec_sha256}} -->\n{{objective}}\n{{scope}}\n{{dod}}\n"
-                      "{{blocked_by}} #{{tracking}} `{{branch}}`\n", encoding="utf-8")
-  set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"], issue_template=".superegm/template.md")
-  code, out = world.run("dry-run", "--plan", world.plan)
-  assert code == 1 and "changed after the gate" in out
+  assert state["confirmed"]["sha256"] == state["confirmed_sha256"] and "filings" not in state
+  writes = state["confirmed"]["writes"]
+  assert writes[0] == ["repo", repo] and writes[1] == ["gate", state["gate_plan_sha256"], state["gate_bodies_sha256"]]
+  assert [w[1] for w in writes if w[0] == "issue"] == ["tracking", "U01", "U02"]
+  u02 = next(w for w in writes if w[:2] == ["issue", "U02"])
+  assert u02[4].startswith(f"<!-- superegm:handoff={handoff_id} unit=U02 spec=")
+  assert "#<U01>" in u02[4] and "#<tracking>" in u02[4]
+  # refused after a change to the store's plan copy: the gate must run again
+  copy = world.artifacts / "handoff_plan.md"
+  copy.write_text(copy.read_text(encoding="utf-8").replace("low: new module", "low: a new module", 1), encoding="utf-8")
+  code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
+  assert code == 1 and "changed after the gate" in out, out
 
 
 def test_dry_run_refuses_101_units_missing_extra_and_warns_above_450(world):
-  pass_gate(world)
+  spec, plan, handoff_id, card = gated(world)
   set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"], labels={"extra": ["needs-triage"]})
-  pass_gate(world)
-  code, out = world.run("dry-run", "--plan", world.plan)
+  assert world.run("gate", "--pass", "--spec", spec, "--runcard", card)[0] == 0  # the labels are in the bodies' pair
+  code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
   assert code == 1 and "create the label `needs-triage`" in out
   world.gh.labels["needs-triage"] = {"name": "needs-triage"}
-  code, out = world.run("dry-run", "--plan", world.plan)
-  assert code == 0 and "4 issues" in out
+  code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
+  assert code == 0 and "3 issues" in out
   dryrun = (world.artifacts / "handoff_dryrun.md").read_text(encoding="utf-8")
   assert "Labels: superegm:handoff-" in dryrun and "needs-triage" in dryrun
-  big = []
-  for n in range(1, 102):
-    big.append(textwrap.dedent(f"""\
-        ### U{n:02d}: Unit {n}
-        | Field | Value |
-        | --- | --- |
-        | Objective | Unit {n} exists. |
-        | Scope paths | `src/u{n}.ts` (create), `src/u{n}.test.ts` (create) |
-        | Design range | `docs/designs/sample.md:13-15 (#### 1. src/webhooks/queue.ts)` |
-        | Blocked by | {"none" if n == 1 else f"U{n - 1:02d}" if n == 2 else f"U{n - 1:02d}, U{n - 2:02d}"} |
-        | Shared files | none |
-        | Risk | low: small |
-        | Size | S |
+  big = [unit_section(f"U{n:02d}", f"Unit {n}",
+                      "none" if n == 1 else f"U{n - 1:02d}" if n == 2 else f"U{n - 1:02d}, U{n - 2:02d}")
+         for n in range(1, 102)]
 
-        Interfaces
-        - Produces: u{n}() -> void
-
-        Definition of done
-        1. The test for each Step was committed before its implementation (checked by superegm tdd-order)
-        2. Run `npm test -- src/u{n}.test.ts` — passes
-
-        Review focus (this unit)
-        - U{n:02d}: the unit — exists; pinned by `u{n}_exists`
-
-        Steps
-        1. Write the failing test `u{n}_exists` in `src/u{n}.test.ts`:
-           Implement `u{n}()` in `src/u{n}.ts`.
-
-        Decide before build
-        - none
-        """))
-  world.plan.write_text(f"# Big\n\nDesign: `{world.repo / 'docs/designs/sample.md'}`\n\n## Global constraints\n- none\n\n## 2. Units\n\n" + "\n".join(big), encoding="utf-8")
-  pass_gate(world)
-  code, out = world.run("dry-run", "--plan", world.plan)
+  def gate_big(sections):
+    plan.write_text(plan_text(spec, sections), encoding="utf-8")
+    graphed(world, spec, plan)
+    for n in range(1, len(sections) + 1):
+      converge(world, f"U{n:02d}")
+    code, out = world.run("gate", "--pass", "--spec", spec, "--runcard", card)
+    assert code == 0, out
+  gate_big(big)
+  code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
   assert code == 1 and "split the handoff" in out
-  world.plan.write_text(f"# Big\n\nDesign: `{world.repo / 'docs/designs/sample.md'}`\n\n## Global constraints\n- none\n\n## 2. Units\n\n" + "\n".join(big[:100]), encoding="utf-8")
-  pass_gate(world)
-  code, out = world.run("dry-run", "--plan", world.plan)
+  gate_big(big[:100])
+  code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
   assert code == 0, out
   text = (world.artifacts / "handoff_dryrun.md").read_text(encoding="utf-8")
   assert "WARNING" in text and "--max-writes" in text
 
 
-def test_apply_refusals(world):
-  dry_run(world)
-  code, out = world.run("apply", "--plan", world.plan)
-  assert code == 1 and "--yes" in out
+def test_apply_appends_the_filing_and_base_at_start_before_its_first_write(world):
+  spec, plan, handoff_id, card = dry_run(world)
+  world.gh.read_only = True  # the fake raises on the first write
+  with pytest.raises(AssertionError, match="write in a read-only run"):
+    world.run("apply", "--spec", spec, "--runcard", card, "--yes")
   state = state_of(world)
-  confirmed = state.pop("confirmed_sha256")
-  (world.artifacts / "state.json").write_text(json.dumps(state), encoding="utf-8")
-  code, out = world.run("apply", "--plan", world.plan, "--yes")
-  assert code == 1 and "no confirmed_sha256" in out
-  state["confirmed_sha256"] = confirmed
-  state["repo"] = "someone/else"
-  (world.artifacts / "state.json").write_text(json.dumps(state), encoding="utf-8")
-  code, out = world.run("apply", "--plan", world.plan, "--yes")
-  assert code == 1 and "differs from the state's" in out
-  state["repo"] = REPO
-  (world.artifacts / "state.json").write_text(json.dumps(state), encoding="utf-8")
-  text = world.plan.read_text(encoding="utf-8")
-  world.plan.write_text(text.replace("low: new module", "low: a new module"), encoding="utf-8")
-  code, out = world.run("apply", "--plan", world.plan, "--yes")
-  # The reviewed-pair check is stricter and fires first (R6-02): a plan edited
-  # after the gate is refused before the write list is even compared.
-  assert code == 1, out
-  assert ("changed since the dry run" in out
-          or "differ from the pair the gate reviewed" in out), out
+  assert [f["sha256"] for f in state["filings"]] == [state["confirmed_sha256"]]
+  assert state["filings"][0]["writes"] == state["confirmed"]["writes"]
+  assert state["base_at_start"] == git(["rev-parse", "main"], world.repo).strip()  # the config's default `base`
+  assert not world.gh.issues and all(s != "done" for s in state["labels"].values())
+  journal = (world.artifacts / "journal.md").read_text(encoding="utf-8")
+  assert f"filing {state['confirmed_sha256'][:12]}: 2 units (U01, U02)" in journal
+  assert "Create: automatic" not in journal
+
+
+@pytest.mark.parametrize("case, expected", [
+    ("no-yes", "--yes"),
+    ("stale-review", "apply: U02 body differs from its converged round"),
+    ("plan-drift", "changed after the gate"),
+    ("list-drift", "the write list changed since the dry run")])
+def test_apply_refusals(world, case, expected):
+  spec, plan, handoff_id, card = dry_run(world)
+  argv = ["apply", "--spec", spec, "--runcard", card] + ([] if case == "no-yes" else ["--yes"])
+  if case == "stale-review":
+    converge(world, "U02", sha="0" * 64)
+  if case == "plan-drift":
+    copy = world.artifacts / "handoff_plan.md"
+    copy.write_text(copy.read_text(encoding="utf-8").replace("low: new module", "low: a new module", 1), encoding="utf-8")
+  if case == "list-drift":
+    state = state_of(world)
+    state["confirmed"]["writes"][0] = ["repo", "someone/else"]
+    atomic_write(world.artifacts / "state.json", state)
+  code, out = world.run(*argv)
+  assert code == 1 and expected in out, out
   assert not any(c[0] in ("label", "issue") for c in world.gh.calls)
+  assert "filings" not in state_of(world) and "base_at_start" not in state_of(world)
 
 
-def test_apply_creates_in_order_and_rerun_writes_nothing(world):
-  dry_run(world)
+def test_apply_creates_labels_issues_and_links_in_order_and_a_rerun_writes_nothing(world):
+  spec, plan, handoff_id, card = dry_run(world)
   world.gh.calls.clear()
-  code, out = world.run("apply", "--plan", world.plan, "--yes")
+  code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes")
   assert code == 0, out
-  gh = world.gh
-  labels = [c[2] for c in gh.calls if c[0] == "label"]
-  assert labels == ["superegm:unit", "superegm:tracking", "superegm:handoff-" + state_of(world)["handoff_id"],
-                    "superegm:wave-1", "superegm:wave-2", "superegm:wave-3"]
+  gh, six = world.gh, handoff_id[-6:]
+  assert [c[2] for c in gh.calls if c[0] == "label"] == [
+      "superegm:unit", "superegm:tracking", f"superegm:handoff-{six}", "superegm:stopped", "superegm:wave-1", "superegm:wave-2"]
   assert "bug" in gh.labels and all("--force" not in c for c in gh.calls)
-  creates = [c for c in gh.calls if c[:2] == ["issue", "create"]]
-  titles = [c[c.index("--title") + 1] for c in creates]
-  assert titles == ["Build: Webhook delivery", "U01: Webhook queue", "U02: Delivery worker", "U03: Admin endpoint"]
-  first_label_or_issue = next(i for i, c in enumerate(gh.calls) if c[0] in ("label", "issue"))
-  first_issue = next(i for i, c in enumerate(gh.calls) if c[:2] == ["issue", "create"])
-  assert first_label_or_issue < first_issue
-  assert gh.issues[3]["body"].count("#1") >= 1 and "**Blocked by.** #2" in gh.issues[3]["body"]
-  assert "after #2, before U03 (Admin endpoint)" in gh.issues[3]["body"]
-  assert "**Blocked by.** #3" in gh.issues[4]["body"]
-  assert gh.issues[2]["labels"] == ["superegm:handoff-" + state_of(world)["handoff_id"], "superegm:unit", "superegm:wave-1"]
-  assert world.sleeps.count(1) >= 4
-  assert gh.sub_issues[1] == [gh.issues[2]["id"], gh.issues[3]["id"], gh.issues[4]["id"]]
-  assert gh.blocked_by == {3: [gh.issues[2]["id"]], 4: [gh.issues[3]["id"]]}
+  titles = [c[c.index("--title") + 1] for c in gh.calls if c[:2] == ["issue", "create"]]
+  assert titles == ["Build: Sample design", "U01: Queue", "U02: Worker"]
+  assert gh.issues[1]["labels"] == [f"superegm:handoff-{six}", "superegm:tracking"]
+  assert gh.issues[2]["labels"] == [f"superegm:handoff-{six}", "superegm:unit", "superegm:wave-1"]
+  assert gh.issues[1]["body"].startswith(f"<!-- superegm:handoff={handoff_id} unit=tracking spec=")
+  body = gh.issues[3]["body"]
+  assert body.startswith(f"<!-- superegm:handoff={handoff_id} unit=U02 spec=")
+  assert "#2" in body and "Part of #1" in body and "#<" not in body
+  assert gh.sub_issues[1] == [gh.issues[2]["id"], gh.issues[3]["id"]] and gh.blocked_by == {3: [gh.issues[2]["id"]]}
   state = state_of(world)
-  assert state["units"]["U02"]["number"] == 3 and state["tracking"]["number"] == 1
-  assert state["links"]["blocked:U03<-U02"] == "done" and state["verify"]["complete"] is True
-  assert state["verify"]["problems"] == [] and state["verify"]["sha256"] == state["confirmed_sha256"]
-  assert state["verify"]["checked"] == "15 of 15"
+  assert state["tracking"]["number"] == 1 and state["tracking"]["filing"] == state["confirmed_sha256"]
+  assert state["units"]["U02"]["number"] == 3 and state["links"]["blocked:U02<-U01"] == "done"
+  assert state["verify"]["complete"] is True and state["verify"]["problems"] == []
+  assert state["verify"]["checked"] == "12 of 12" and state["verify"]["sha256"] == state["confirmed_sha256"]
   gh.calls.clear()
-  code, out = world.run("apply", "--plan", world.plan, "--yes")
-  assert code == 0, out
-  assert not any(c[0] == "label" or c[:2] == ["issue", "create"] or "POST" in c for c in gh.calls)
+  assert world.run("apply", "--spec", spec, "--runcard", card, "--yes")[0] == 0
+  assert not any(c[0] == "label" or c[:2] in (["issue", "create"], ["issue", "edit"]) or "POST" in c for c in gh.calls)
+  assert len(state_of(world)["filings"]) == 1
+
+
+@pytest.mark.parametrize("mode, journaled", [("leavemealone", True), (None, False)])
+def test_apply_journals_the_automatic_create_in_leavemealone_mode(world, mode, journaled):
+  spec, plan, handoff_id, card = applied(world, mode=mode)
+  journal = (world.artifacts / "journal.md").read_text(encoding="utf-8")
+  assert (journal.count("Create: automatic (leavemealone)") == 1) is journaled, journal
+  assert world.run("apply", "--spec", spec, "--runcard", card, "--yes")[0] == 0  # a resume journals nothing again
+  assert (world.artifacts / "journal.md").read_text(encoding="utf-8").count("Create: automatic (leavemealone)") == int(journaled)
 
 
 def test_apply_state_saved_after_each_write_and_422_link_reread(world):
-  dry_run(world)
+  spec, plan, handoff_id, card = dry_run(world)
   world.gh.link_422_once.add(("sub", 1))
   saves = []
   original = world.ns["save_state"]
@@ -195,7 +373,7 @@ def test_apply_state_saved_after_each_write_and_422_link_reread(world):
     saves.append(json.dumps(state, sort_keys=True))
     original(folder, state)
   world.ns["save_state"] = spy
-  code, out = world.run("apply", "--plan", world.plan, "--yes")
+  code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes")
   assert code == 0, out
   assert len(saves) >= 13
   state = state_of(world)
@@ -203,9 +381,9 @@ def test_apply_state_saved_after_each_write_and_422_link_reread(world):
 
 
 def test_apply_rate_limit_exhaustion_exits_nonzero_with_resume_message(world):
-  dry_run(world)
+  spec, plan, handoff_id, card = dry_run(world)
   world.gh.rate_limit_hits = 5
-  code, out = world.run("apply", "--plan", world.plan, "--yes")
+  code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes")
   assert code == 1 and "rate limited: resume with `apply --yes` after" in out
   assert world.sleeps.count(60) == 3
   state = state_of(world)
@@ -213,35 +391,60 @@ def test_apply_rate_limit_exhaustion_exits_nonzero_with_resume_message(world):
 
 
 def test_apply_max_writes_resumes_in_bounded_calls(world):
-  dry_run(world)
-  code, out = world.run("apply", "--plan", world.plan, "--yes", "--max-writes", 2)
+  spec, plan, handoff_id, card = dry_run(world)
+  code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes", "--max-writes", 2)
   assert code == 0 and "stopped after 2 writes" in out
   state = state_of(world)
   assert state["verify"]["complete"] is False
   assert sorted(n for n, s in state["labels"].items() if s == "done") == ["superegm:tracking", "superegm:unit"]
-  code, out = world.run("apply", "--plan", world.plan, "--yes", "--max-writes", 2)
+  code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes", "--max-writes", 2)
   assert code == 0 and "stopped after 2 writes" in out
   state = state_of(world)
   assert sum(1 for s in state["labels"].values() if s == "done") == 4
-  code, out = world.run("status", "--plan", world.plan)
+  code, out = world.run("status", "--plan", plan, "--runcard", open_card(world, "wave", spec))
   assert code == 1 and "not fully created and verified" in out
-  code, out = world.run("apply", "--plan", world.plan, "--yes", "--max-writes", 50)
+  code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes", "--max-writes", 50)
   assert code == 0 and state_of(world)["verify"]["complete"] is True
 
 
-def test_verify_records_mismatches(world):
-  dry_run(world)
-  assert world.run("apply", "--plan", world.plan, "--yes")[0] == 0
-  world.gh.issues[3]["body"] += "\nedited by hand"
-  world.gh.issues[2]["labels"].remove("superegm:unit")
-  code, out = world.run("verify", "--plan", world.plan)
-  assert code == 1
+def test_a_later_filing_rewrites_the_tracking_issue_and_verify_checks_the_union(world):
+  spec, card, first = later_filing(world)
+  gh = world.gh
+  dryrun = (world.artifacts / "handoff_dryrun.md").read_text(encoding="utf-8")
+  assert "### issue U03" in dryrun and "### issue tracking" in dryrun and "### issue U01" not in dryrun
+  assert "Tracking issue #1 will be rewritten" in dryrun
+  before = {n: dict(i) for n, i in gh.issues.items()}
+  assert "U03" not in before[1]["body"]
+  code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes")
+  assert code == 0, out
+  assert [c[2] for c in gh.calls if c[0] == "label"] == ["superegm:wave-3"]
+  assert [c[c.index("--title") + 1] for c in gh.calls if c[:2] == ["issue", "create"]] == ["U03: Admin endpoint"]
+  assert [c[2] for c in gh.calls if c[:2] == ["issue", "edit"]] == ["1"]
+  assert "U03" in gh.issues[1]["body"] and "Admin endpoint" in gh.issues[1]["body"]
+  assert gh.issues[2] == before[2] and gh.issues[3] == before[3]  # filed units are frozen: never touched
   state = state_of(world)
-  problems = state["verify"]["problems"]
-  assert any("body of #3" in p for p in problems) and any("labels of #2" in p and "superegm:unit" in p for p in problems)
-  assert state["verify"]["complete"] is True
-  code, out = world.run("status", "--plan", world.plan)
-  assert code == 1 and "not fully created and verified" in out
+  u01, u03 = state["units"]["U01"], state["units"]["U03"]
+  assert u03["number"] == 4 and gh.blocked_by[4] == [gh.issues[3]["id"]] and gh.sub_issues[1][-1] == gh.issues[4]["id"]
+  assert gh.issues[4]["body"].startswith(f"<!-- superegm:handoff={first['handoff_id']} unit=U03 spec=")
+  assert len(state["filings"]) == 2 and state["filings"][1]["sha256"] == state["confirmed_sha256"]
+  assert {w[1] for w in state["filings"][1]["writes"] if w[0] == "issue"} == {"tracking", "U03"}
+  assert state["filings"][0] == first["filings"][0] and state["base_at_start"] == first["base_at_start"]
+  assert state["tracking"]["filing"] == state["confirmed_sha256"]
+  assert state["verify"]["complete"] is True and state["verify"]["problems"] == [] and state["verify"]["checked"] == "16 of 16"
+  code, out = world.run("verify", "--spec", spec, "--runcard", card)
+  assert code == 0 and "MISMATCH" not in out and "16 of 16" in out, out
+  gh.issues[u01["number"]]["body"] += "\nedited by hand"          # filed by the first list
+  gh.issues[u01["number"]]["labels"].remove("superegm:unit")
+  gh.blocked_by.setdefault(u01["number"], []).append(u03["id"])   # a link no filing names
+  code, out = world.run("verify", "--spec", spec, "--runcard", card)
+  assert code == 1, out
+  problems = state_of(world)["verify"]["problems"]
+  assert any(f"body of #{u01['number']} (U01)" in p for p in problems)
+  assert any(f"labels of #{u01['number']} (U01)" in p and "superegm:unit" in p for p in problems)
+  assert any(f"obsolete blocked-by link on #{u01['number']} (U01)" in p for p in problems)
+  assert not any("obsolete sub-issue" in p for p in problems)      # the union keeps the first filing's sub-issue links
+  assert not any("tracking" in p for p in problems)
+  assert state_of(world)["verify"]["complete"] is True and state_of(world)["verify"]["sha256"] == state["confirmed_sha256"]
 
 
 FAKE_GH = '''#!/usr/bin/env python3
@@ -286,8 +489,9 @@ sys.exit("unexpected: " + " ".join(args))
 
 @pytest.mark.skipif(os.name == "nt", reason="a fake gh script on PATH needs a POSIX shell-free exec")
 def test_subprocess_command_shape_with_fake_gh_on_path(tmp_path, capsys, monkeypatch):
-  repo = make_repo(tmp_path / "repo", config={"repo": REPO})
+  repo = make_repo(tmp_path / "repo", config={"repo": REPO})  # `make_repo` records the sample spec's approval
   plan = make_plan(tmp_path / "plans", repo)
+  spec, artifacts = repo / "docs/designs/sample.md", tmp_path / "artifacts"
   bin_dir = tmp_path / "bin"
   bin_dir.mkdir()
   script = bin_dir / "gh"
@@ -300,18 +504,22 @@ def test_subprocess_command_shape_with_fake_gh_on_path(tmp_path, capsys, monkeyp
                           cwd=str(repo), capture_output=True, text=True)
   cards = {}
   for skill in ("plan", "file"):
-    opened = run("runcard", "open", "--skill", skill, "--artifact", repo / "docs/designs/sample.md")
+    opened = run("runcard", "open", "--skill", skill, "--artifact", spec)
     assert opened.returncode == 0, opened.stderr
     cards[skill] = opened.stdout.strip()
   assert run("graph", "--plan", plan, "--runcard", cards["plan"]).returncode == 0
-  assert run("gate", "--plan", plan, "--reviewed", "--round", 1, "--runcard", cards["file"]).returncode == 0
-  assert run("gate", "--plan", plan, "--pass", "--runcard", cards["file"]).returncode == 0
-  result = run("dry-run", "--plan", plan, "--runcard", cards["file"])
+  assert run("decide", "--unit", "U03", "--decision", "D2", "--default", "--runcard", cards["plan"]).returncode == 0
+  units = json.loads((artifacts / "handoff_units.json").read_text(encoding="utf-8"))
+  for uid, unit in units["units"].items():  # as `gated` writes them
+    converge_review(artifacts, units["handoff_id"], uid, unit["body_sha256"])
+  result = run("gate", "--pass", "--spec", spec, "--runcard", cards["file"])
+  assert result.returncode == 0, result.stderr
+  result = run("dry-run", "--spec", spec, "--runcard", cards["file"])
   assert result.returncode == 0, result.stderr
   log = [json.loads(l) for l in (bin_dir / "gh.log").read_text(encoding="utf-8").splitlines()]
   assert [l[:2] for l in log] == [["auth", "status"], ["api", f"repos/{REPO}"], ["api", f"repos/{REPO}/labels"]]
   assert "--paginate" in log[2]
-  result = run("apply", "--plan", plan, "--yes", "--runcard", cards["file"])
+  result = run("apply", "--spec", spec, "--yes", "--runcard", cards["file"])
   assert result.returncode == 0, result.stdout + result.stderr
   log = [json.loads(l) for l in (bin_dir / "gh.log").read_text(encoding="utf-8").splitlines()]
   posts = [l for l in log if "POST" in l]
@@ -321,93 +529,61 @@ def test_subprocess_command_shape_with_fake_gh_on_path(tmp_path, capsys, monkeyp
   assert all("--paginate" in l for l in log if l[0] == "api" and l[1].endswith(("/labels", "/sub_issues", "/blocked_by")) and "POST" not in l)
 
 
-def test_verify_refuses_a_plan_edited_since_the_confirmation(world):
-  """R08: a receipt must describe what the user confirmed, not a plan since
-  edited, or removing a blocker locally would make a unit look ready."""
-  applied(world)
-  launchable(world)
-  assert world.run("verify", "--plan", world.plan)[0] == 0
-  world.plan.write_text(world.plan.read_text(encoding="utf-8")
-                        .replace("| Blocked by | U01 |", "| Blocked by | none |"), encoding="utf-8")
-  # verify reports on what was confirmed, so it stays clean...
-  code, out = world.run("verify", "--plan", world.plan)
-  assert code == 0 and "MISMATCH" not in out, out
-  # ...and readiness, which the edit would have changed, is refused outright
-  for argv in (("status", "--plan", world.plan),
-               ("launch", "--plan", world.plan)):
-    code, out = world.run(*argv)
-    assert code == 1 and "is filed and frozen" in out, argv
-
-
 def test_apply_scans_again_with_the_current_rules(world):
   """R11: a banned_terms rule added after the dry run leaves the write list,
   and therefore its hash, untouched."""
-  dry_run(world)
-  set_config(world, repo=REPO, banned_terms=["(?i)webhook"])
-  code, out = world.run("apply", "--plan", world.plan, "--yes")
+  spec, plan, handoff_id, card = dry_run(world)
+  set_config(world, repo=REPO, banned_terms=["(?i)queue"])
+  code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes")
   assert code == 1 and "the current scan refuses" in out
   assert not any(c[:2] == ["issue", "create"] for c in world.gh.calls)
 
 
-def test_marker_recovery_finds_issues_created_before_a_crash(world):
-  """R2-13/R13: the recovery listing is the only way home after a crash between
-  the create call and the state write, and its label is URL-encoded."""
-  dry_run(world)
-  gh = world.gh
-  # a crash after creating the tracking issue and U01, before either was saved
-  assert world.run("apply", "--plan", world.plan, "--yes", "--max-writes", 8)[0] == 0
+def test_apply_recovers_issues_by_the_new_marker_after_a_crash(world):
+  spec, plan, handoff_id, card = dry_run(world)
+  issue_edit_handler(world.gh)
+  # 6 labels + the tracking issue + U01 = 8 writes; then a crash before the state was saved
+  assert world.run("apply", "--spec", spec, "--runcard", card, "--yes", "--max-writes", 8)[0] == 0
   state = state_of(world)
-  created = {u: d["number"] for u, d in (state.get("units") or {}).items() if d.get("number")}
-  assert created, "the bounded apply must have created something"
-  # erase every local trace of those writes, as an interrupted save would
-  for unit in (state.get("units") or {}).values():
-    unit.pop("number", None), unit.pop("id", None), unit.pop("done", None)
-  for key in ("number", "id", "done"):
-    (state.get("tracking") or {}).pop(key, None)
-  (world.artifacts / "state.json").write_text(json.dumps(state), encoding="utf-8")
-  before = len([c for c in gh.calls if c[:2] == ["issue", "create"]])
-  assert world.run("apply", "--plan", world.plan, "--yes")[0] == 0
+  assert state["tracking"]["number"] == 1 and state["units"]["U01"]["number"] == 2 and "number" not in state["units"].get("U02", {})
+  for record in (state["tracking"], *state["units"].values()):
+    for key in ("number", "id", "done", "filing"):
+      record.pop(key, None)
+  atomic_write(world.artifacts / "state.json", state)
+  gh = world.gh
+  gh.calls.clear()
+  assert world.run("apply", "--spec", spec, "--runcard", card, "--yes")[0] == 0
+  listing = [c for c in gh.calls if c[0] == "api" and "/issues?" in c[1]]
+  assert listing and f"superegm%3Ahandoff-{handoff_id[-6:]}" in listing[0][1], listing
   after = state_of(world)
-  for uid, number in created.items():
-    assert after["units"][uid]["number"] == number, "recovery must reuse the issue"
-    assert after["units"][uid]["id"], "recovery must backfill the database id"
-  assert len(gh.issues) == 4, f"no duplicate issues: {sorted(gh.issues)}"
+  assert after["tracking"]["number"] == 1 and after["units"]["U01"] | {"number": 2} == after["units"]["U01"]
+  assert after["units"]["U01"]["id"] == gh.issues[2]["id"] and after["units"]["U02"]["number"] == 3
+  assert len(gh.issues) == 3, f"no duplicate issues: {sorted(gh.issues)}"
+  assert [c[2] for c in gh.calls if c[:2] == ["issue", "edit"]] == ["1"]  # the recovered tracking body is re-asserted once
+  assert after["tracking"]["filing"] == after["confirmed_sha256"] and len(after["filings"]) == 1
 
 
 def test_a_label_prefix_with_reserved_url_characters_still_recovers(tmp_path, capsys, monkeypatch):
   """R13: a permitted prefix such as `egm:handoff+` must survive the query."""
   w = make_world(tmp_path, capsys, monkeypatch, config={"repo": REPO, "labels": {"handoff_prefix": "egm:handoff+"}})
-  dry_run(w)
-  assert w.run("apply", "--plan", w.plan, "--yes")[0] == 0
+  spec, plan, handoff_id, card = dry_run(w)
+  assert w.run("apply", "--spec", spec, "--runcard", card, "--yes")[0] == 0
   listing = [c for c in w.gh.calls if c[0] == "api" and "/issues?" in c[1]]
   assert listing and "%2B" in listing[0][1], listing
-  assert w.run("verify", "--plan", w.plan)[0] == 0
+  assert w.run("verify", "--spec", spec, "--runcard", card)[0] == 0
 
 
-def test_verify_reports_a_link_the_handoff_no_longer_wants(world):
-  """R3-06: checking only that expected links exist cannot see an obsolete one
-  left behind by an amendment."""
-  gh = applied(world)
-  assert world.run("verify", "--plan", world.plan)[0] == 0
-  state = state_of(world)
-  # U01 is blocked by nothing; an amendment that removed a blocker would leave
-  # exactly this: a live dependency the confirmed write list no longer names.
-  stale = state["units"]["U03"]["id"]
-  gh.blocked_by.setdefault(state["units"]["U01"]["number"], []).append(stale)
-  code, out = world.run("verify", "--plan", world.plan)
-  assert code == 1 and "obsolete blocked-by link" in out, out
-
-
-def test_apply_refuses_a_body_invisible_plan_edit(world):
-  """R6-02: the guard was added next to a scan_handoff call that lives in
-  cmd_dry_run, so apply - where the writes happen - never had it."""
-  dry_run(world)
-  text = world.plan.read_text(encoding="utf-8")
-  marker = "Decide before build\n- none"
-  assert marker in text
-  world.plan.write_text(
-      text.replace(marker, marker + "\n\nBuild note: use the legacy client.", 1),
-      encoding="utf-8")
-  code, out = world.run("apply", "--plan", world.plan, "--yes")
-  assert code == 1 and "differ from the pair the gate reviewed" in out, out
-  assert not any(c[:2] == ["issue", "create"] for c in world.gh.calls)
+def test_the_file_skill_body_runs_the_filing_in_order_and_asks_one_question():
+  body = (ROOT / "skills/file/SKILL.md").read_text(encoding="utf-8").split("---", 2)[2]
+  assert len(body.encode("utf-8")) <= 24_000
+  assert "In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first." in body
+  order = ["runcard open --skill file", "gate --pass", "dry-run", "Create these <n> issues and <m> links on OWNER/NAME as handoff_dryrun.md shows?",
+           "apply --yes", "verify", "runcard close"]
+  positions = [body.index(s) for s in order]
+  assert positions == sorted(positions), order
+  assert "Create, Change the plan, Stop" in body
+  assert "Create: automatic (leavemealone)" in body
+  assert "A filed issue body is never edited; a deviation during the build is a comment on the issue (§10)." in body
+  assert "filings[]" in body and "base_at_start" in body and "/superegm:wave" in body
+  for helper_call in re.findall(r"<HELPER>'\s+([a-z-]+)((?:\s+--[a-z-]+(?:\s+'[^']*'|\s+<[^>]*>)?)*)", body):
+    assert helper_call[0] in ("runcard", "gate", "dry-run", "apply", "verify"), helper_call
