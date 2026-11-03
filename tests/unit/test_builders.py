@@ -26,7 +26,12 @@ BODY = (f"<!-- superegm:handoff=HID unit=UID spec=SHA -->\n# UID — Worker\n\n#
         f"Branch: `superegm/HID/UID` · Part of #<tracking>\n")
 SECTION = ("### UID: Worker\n| Field | Value |\n| --- | --- |\n| Objective | A worker exists. |\n| Scope paths | `src/worker.py` (create) |\n"
            "| Design range | `SPEC:1-2 (# title)` |\n| Blocked by | none |\n| Shared files | none |\n| Risk | low: new |\n| Size | S |\n\n"
-           "Definition of done\n1. `pytest tests/unit/test_worker.py -q` passes.\n2. CI green.\n\nDecide before build\n- none\n")
+           "Interfaces\n- Produces: w() -> None\n\n"
+           "Definition of done\n1. The test for each Step was committed before its implementation (checked by superegm tdd-order)\n"
+           "2. Run `pytest tests/unit/test_worker.py -q` — the worker's cases pass\n3. Exists `src/worker.py`\n4. CI green on the head\n\n"
+           "Review focus (this unit)\n- UID: an empty run — nothing happens; pinned by `test_w`\n\n"
+           f"Steps\n1. Write the failing test `test_w` in `tests/unit/test_worker.py`:\n   {F}python\n   def test_w(): ...\n   {F}\n"
+           "   Implement `w() -> None` in `src/worker.py`.\n\nDecide before build\n- none\n")
 RULESET = {"id": 1, "name": "base", "enforcement": "active", "target": "branch",
            "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}}, "rules": [{"type": "update"}],
            "bypass_actors": [{"actor_type": "RepositoryRole", "actor_id": 5, "bypass_mode": "always"}]}
@@ -91,7 +96,7 @@ def seed(world, units=(UNIT,), max_in_flight=5, workflow="on: [push, pull_reques
   world.ns["find_remote"] = lambda root, repo: "origin"  # `remote -v` shows that path, not GitHub
   sections = "\n".join(SECTION.replace("UID", u).replace("SPEC", str(spec)) for u in units)
   plan = repo.parent / "plan.md"
-  plan_text = f"# Handoff plan: Worker\n\nDesign: `{spec}`\n\n## 1. Issue template\n\n## 2. Units\n\n{sections}"
+  plan_text = f"# Handoff plan: Worker\n\nDesign: `{spec}`\n\n## 1. Issue template\n\n## Global constraints\n- none\n\n## 2. Units\n\n{sections}"
   plan.write_text(plan_text, encoding="utf-8"); put(s.path("plan"), plan_text)
   writes = [["issue", "tracking", "Build", ["superegm:tracking"], "Tracking"]]
   world.gh.issues[TRACKING] = {"number": TRACKING, "id": 1000, "body": "Tracking", "labels": ["superegm:tracking"], "state": "open", "state_reason": None}

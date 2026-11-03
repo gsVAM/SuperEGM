@@ -285,7 +285,7 @@ def test_stage_10_reaches_the_loop_and_resolve_skills() -> None:
 
 
 @pytest.mark.parametrize("path", [
-    "docs/claude.md", "skills/plan/SKILL.md", "skills/wave/SKILL.md",
+    "docs/claude.md", "skills/wave/SKILL.md",
     "skills/review-spec/references/review_loop.md",
 ])
 def test_reviewer_isolation_rule_is_stated(path: str) -> None:
@@ -320,8 +320,9 @@ def test_launch_lines_agree_with_the_helper_and_the_wave_skill() -> None:
 def test_handoff_gate_panel_matches_the_handoff_skill() -> None:
   flat = " ".join(PANELS.split())
   skill = " ".join(read("skills/plan/SKILL.md").split())
-  assert "| Focused (default) | `egm-implementation-readiness` |" in skill
-  assert "Focused plus `egm-codebase-details`" in skill
+  # SuperEGM section 9.2: the plan skill hands the bodies to review-plan; EGM's goldfish panel table left it.
+  assert "`/superegm:review-plan` reviews the bodies" in skill
+  assert "egm-implementation-readiness" not in skill and "Focused" not in skill
   assert ("| Handoff gate (the handoff plan, before any GitHub write) | 10 | Astra lane "
           "| `egm-implementation-readiness` + Astra lane | "
           "`egm-implementation-readiness`, `egm-codebase-details` + Astra lane |") in flat
@@ -364,16 +365,16 @@ def test_convergence_rule_is_stated_once_and_referenced() -> None:
                "Cap: 5 rounds, then pause",
                "Never start round 6 without their answer"):
     assert text in flat, text
-  for skill in ("skills/wave/SKILL.md", "skills/plan/SKILL.md"):
+  for skill in ("skills/wave/SKILL.md",):
     body = " ".join(read(skill).split())
     assert "review_panels.md` section 7" in body, skill
     assert "regression: yes|no" in body, skill
   wave = " ".join(read("skills/wave/SKILL.md").split())
   assert "Cap: 5 rounds, then PAUSE" in wave
   assert "Cap 3 rounds" not in wave, "the fixed cap must be gone"
-  gate = " ".join(read("skills/plan/SKILL.md").split())
-  assert "Cap 5 rounds, then pause" in gate
-  assert "round 6 never starts without their answer" in gate
+  # SuperEGM section 9.2: the plan review's rounds run through the judge panel, which stops at the cap.
+  judges = " ".join(read("skills/judges/SKILL.md").split())
+  assert "the cap of 5 rounds is reached" in judges and "cap_reached" in judges
 
 
 
@@ -404,7 +405,7 @@ def test_the_real_background_rule_is_stated() -> None:
 
 def test_reviewer_isolation_names_the_adapter_not_the_name() -> None:
   for path in ("docs/claude.md", "skills/wave/SKILL.md",
-               "skills/plan/SKILL.md", "skills/review-spec/references/review_loop.md"):
+               "skills/judges/SKILL.md", "skills/review-spec/references/review_loop.md"):
     flat = " ".join(read(path).split())
     assert "adapter" in flat, path
     assert "omitClaudeMd" in flat, path

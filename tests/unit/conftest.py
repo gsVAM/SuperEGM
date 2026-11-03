@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's test world (the fake gh, the harness, the sample repository and plan) moved out of test_helper.py so every unit's tests share it.
+# Modified by SuperEGM (gsVAM), 2026: EGM's test world (the fake gh, the harness, the sample repository and plan) moved out of test_helper.py so every unit's tests share it; the sample plan in the section 9.1 grammar under an approval record (U05).
 
 """The test world: a temporary repository, a store, the fake `gh` and the harness.
 
@@ -75,9 +75,24 @@ UNITS = """### U01: Webhook queue
 | Risk | low: new module |
 | Size | S |
 
+Interfaces
+- Produces: enqueue(event) -> void
+- Produces: dequeue() -> Job | undefined
+
 Definition of done
-1. `npm test -- src/webhooks/queue.test.ts` passes with enqueue and dequeue order cases.
-2. CI (typecheck, lint, tests) is green on the PR head.
+1. The test for each Step was committed before its implementation (checked by superegm tdd-order)
+2. Run `npm test -- src/webhooks/queue.test.ts` — the enqueue and dequeue order cases pass
+3. CI green on the head
+
+Review focus (this unit)
+- U01: an empty queue — dequeue returns undefined; pinned by `dequeue_empty`
+
+Steps
+1. Write the failing test `dequeue_empty` in `src/webhooks/queue.test.ts`:
+   ```ts
+   test("dequeue_empty", () => expect(dequeue()).toBeUndefined());
+   ```
+   Implement `enqueue(event)` and `dequeue()` in `src/webhooks/queue.ts`.
 
 Decide before build
 - none
@@ -93,12 +108,27 @@ Decide before build
 | Risk | medium: touches the request path |
 | Size | S |
 
+Interfaces
+- Consumes: dequeue() (U01)
+- Produces: deliver(job) -> Promise<void>
+
 Definition of done
-1. `npm test -- src/webhooks/deliver.test.ts` passes with cases A, B, C.
-2. CI (typecheck, lint, tests) is green on the PR head.
+1. The test for each Step was committed before its implementation (checked by superegm tdd-order)
+2. Run `npm test -- src/webhooks/deliver.test.ts` — cases A, B, C pass
+3. CI green on the head
+
+Review focus (this unit)
+- U02: a failed post — the job is requeued with a delay; pinned by `deliver_requeues`
+
+Steps
+1. Write the failing test `deliver_requeues` in `src/webhooks/deliver.test.ts`:
+   ```ts
+   test("deliver_requeues", async () => expect(await deliver(failing)).toBe("requeued"));
+   ```
+   Implement `deliver(job)` and `requeue(job, delay)` in `src/webhooks/deliver.ts`.
 
 Decide before build
-- D1 Retry ceiling (5 or 10 attempts)? owner: the design author; default: 5; blocking: no
+- D1 Retry ceiling (5 or 10 attempts)? options: (a) 5 attempts; (b) 10 attempts; owner: the design author; default: (a); blocking: no
 
 ### U03: Admin endpoint
 | Field | Value |
@@ -111,12 +141,27 @@ Decide before build
 | Risk | low: read-only endpoint |
 | Size | S |
 
+Interfaces
+- Consumes: dequeue() (U01)
+- Produces: listJobs() -> Job[]
+
 Definition of done
-1. `npm test -- src/webhooks/admin.test.ts` passes with the listing case.
-2. CI (typecheck, lint, tests) is green on the PR head.
+1. The test for each Step was committed before its implementation (checked by superegm tdd-order)
+2. Run `npm test -- src/webhooks/admin.test.ts` — the listing case passes
+3. CI green on the head
+
+Review focus (this unit)
+- U03: an empty queue — the listing is empty; pinned by `admin_lists_empty`
+
+Steps
+1. Write the failing test `admin_lists_empty` in `src/webhooks/admin.test.ts`:
+   ```ts
+   test("admin_lists_empty", async () => expect(await listJobs()).toEqual([]));
+   ```
+   Implement `listJobs()` in `src/webhooks/admin.ts`.
 
 Decide before build
-- D2 Page size for the listing? owner: the user; default: 50; blocking: yes
+- D2 Page size for the listing? options: (a) 50; (b) 25; owner: the user; default: (a); blocking: yes
 """
 
 
@@ -143,6 +188,8 @@ def make_repo(path: Path, origin_url=f"https://github.com/{REPO}.git", config=No
   git(["add", "-A"], path)
   git(["commit", "-qm", "Sample design"], path)
   git(["remote", "add", "origin", origin_url], path)
+  if config is not None:
+    approve(path, path.parent / "artifacts")
   return path
 
 
@@ -150,8 +197,23 @@ def make_plan(folder: Path, repo: Path, units=UNITS) -> Path:
   folder.mkdir(parents=True, exist_ok=True)
   plan = folder / "handoff_plan.md"
   plan.write_text(f"# Handoff plan: Webhook delivery\n\nDesign: `{repo / 'docs/designs/sample.md'}`\n\n"
-                  f"## Units\n\n{units}", encoding="utf-8")
+                  f"## 1. Issue template\n\n(the layout of references/issue_template.md)\n\n"
+                  f"## Global constraints\n- TypeScript strict mode, no new dependencies\n\n## 2. Units\n\n{units}",
+                  encoding="utf-8")
   return plan
+
+
+def approve(repo: Path, artifacts: Path) -> dict:
+  """The record `approve-spec --yes` writes for the sample spec, so `graph` runs under an approval."""
+  spec = repo / "docs/designs/sample.md"
+  sha = hashlib.sha256(spec.read_bytes()).hexdigest()
+  record = {"path": str(spec), "sha256": sha, "commit": git(["rev-parse", "--short", "HEAD"], repo).strip(),
+            "runcard": None, "review": None, "approved_at": "2026-11-03T00:00:00Z", "amended": [], "voided_by": None,
+            "handoff_id": f"sample-{sha[:6]}"}
+  path = artifacts / "approvals" / "sample.json"
+  path.parent.mkdir(parents=True, exist_ok=True)
+  path.write_text(json.dumps(record), encoding="utf-8")
+  return record
 
 
 class FakeGitHub:

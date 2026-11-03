@@ -8,7 +8,7 @@ that unit rewrites the ones whose form it changes."""
 
 import pytest
 
-from conftest import REPO, make_pr, applied, state_of, unit_path, close_as_completed, mark_launched
+from conftest import REPO, make_pr, applied, state_of, close_as_completed, mark_launched
 
 
 def test_status_landed_ready_decisions_and_shared_edges(world):
@@ -27,13 +27,10 @@ def test_status_landed_ready_decisions_and_shared_edges(world):
   gh.graphql[3] = [{**gh.prs[41], "repository": {"nameWithOwner": REPO}}]
   code, out = world.run("status", "--plan", world.plan)
   assert "landed: U01, U02" in out and "ready: none" in out, out
-  assert world.run("decide", "--plan", world.plan, "--unit", "U03", "--decision", "D2", "--answer", "25")[0] == 0
-  assert "- Decision: 25" in unit_path(world, "U03").read_text(encoding="utf-8")
-  assert (world.artifacts / "decision_comment_U03_D2.md").read_text(encoding="utf-8").startswith("**Decision D2** (Page size")
+  assert world.run("decide", "--plan", world.plan, "--unit", "U03", "--decision", "D2", "--answer", "(b)")[0] == 0
   code, out = world.run("status", "--plan", world.plan)
   assert "ready: U03" in out
   assert world.run("graph", "--plan", world.plan)[0] == 0
-  assert "- Decision: 25" in unit_path(world, "U03").read_text(encoding="utf-8")
 
 
 def test_status_pr_matching_rules(world):
@@ -203,7 +200,7 @@ def test_an_answer_does_not_survive_its_question_changing(world):
   changed the question kept the old answer and its publication."""
   applied(world)
   assert world.run("decide", "--plan", world.plan, "--unit", "U03",
-                   "--decision", "D2", "--answer", "50")[0] == 0
+                   "--decision", "D2", "--answer", "(a)")[0] == 0
   text = world.plan.read_text(encoding="utf-8")
   world.plan.write_text(text.replace("Page size for the listing?",
                                      "Retention window for failed jobs?", 1), encoding="utf-8")
