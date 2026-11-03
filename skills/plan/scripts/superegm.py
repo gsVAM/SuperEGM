@@ -15,6 +15,12 @@ import sys
 import superegm
 
 
+# One command at a time. `superegm.py` is a single-writer tool: run one command,
+# let it finish, run the next. Nothing here coordinates concurrent writers, and
+# nothing needs to - every command is short except `status --wait`, which only
+# reads while it waits and saves once when it returns.
+
+
 def main(argv=None):
   args = superegm.build_parser().parse_args(argv)
   superegm.CURRENT_WRITES, superegm.CURRENT_SUBCOMMAND = args.writes, args.command
