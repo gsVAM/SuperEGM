@@ -53,7 +53,7 @@ BODY_LIMIT = 65_000
 MAX_UNITS = 100
 WRITE_WARN = 450
 LABEL_COLOR = "1b6ef3"
-BRANCH_PREFIX = "egm"
+BRANCH_PREFIX = "superegm"
 WAITING_STATES = {"queued", "in_progress", "waiting", "requested", "pending"}
 GREEN_CONCLUSIONS = {"success", "neutral", "skipped"}
 NO_CI_SECONDS = 30 * 60
@@ -64,9 +64,9 @@ MODEL_RE = re.compile(r"^[a-z0-9][a-z0-9.\-]{1,63}$")
 DEFAULT_CONFIG = {
     "repo": None,
     "artifacts_dir": None,
-    "labels": {"unit": "egm:unit", "wave_prefix": "egm:wave-",
-               "handoff_prefix": "egm:handoff-", "tracking": "egm:tracking",
-               "extra": []},
+    "labels": {"unit": "superegm:unit", "wave_prefix": "superegm:wave-",
+               "handoff_prefix": "superegm:handoff-", "tracking": "superegm:tracking",
+               "stopped": "superegm:stopped", "extra": []},
     "issue_template": None,
     "tracking_issue_title": "Build: <design title>",
     "banned_terms": [],
@@ -403,7 +403,7 @@ def load_config(repo_root: Path) -> dict:
     config["repo"] = parse_remote_url(origin)
     if not config["repo"]:
       raise HandoffError(f"cannot parse OWNER/NAME from origin `{origin.strip()}`: "
-                         "set `repo` in .egm/handoff.json")
+                         "set `repo` in .superegm/config.json")
   if not REPO_RE.match(config["repo"]):
     raise HandoffError(f"invalid repo `{config['repo']}` in {path}")
   artifacts = config["artifacts_dir"]
@@ -412,7 +412,7 @@ def load_config(repo_root: Path) -> dict:
     raise HandoffError(f"{path}: artifacts_dir must be an absolute path outside the working tree "
                        f"(run `superegm init`)")
   labels = config["labels"]
-  for name in (labels["unit"], labels["tracking"], *labels["extra"]):
+  for name in (labels["unit"], labels["tracking"], labels["stopped"], *labels["extra"]):
     if not LABEL_RE.match(name):
       raise HandoffError(f"invalid label `{name}` (must match {LABEL_RE.pattern})")
   for prefix in (labels["wave_prefix"], labels["handoff_prefix"]):
@@ -460,7 +460,7 @@ def find_remote(repo_root: Path, repo: str) -> str:
     if len(parts) >= 2 and (parse_remote_url(parts[1]) or "").lower() == repo.lower():
       return parts[0]
   raise HandoffError(f"no remote for {repo} in {repo_root}: add one or fix "
-                     "`repo` in `.egm/handoff.json`")
+                     "`repo` in `.superegm/config.json`")
 
 
 # ---------------------------------------------------------------- plan parse
@@ -1078,7 +1078,7 @@ def scan_text(text: str, config: dict, kind: str, dod=None, label="body"):
       if kind == "comment" and number == 1 and mention and found == mention:
         continue
       problems.append(f"{label}:{number}: bare mention {found} (it would notify that user; "
-                      f"reword it, or list it in `allowed_mentions` in .egm/handoff.json)")
+                      f"reword it, or list it in `allowed_mentions` in .superegm/config.json)")
     if re.match(r"^(<<<<<<<|=======|>>>>>>>)( |$)", line):
       problems.append(f"{label}:{number}: merge marker")
   for item in dod or []:
@@ -1150,7 +1150,7 @@ def require_repo(handoff) -> str:
     raise HandoffError(
         f"this handoff was created on {frozen} but the configuration now names "
         f"{repo}: issue and PR numbers are not portable between repositories. "
-        f"Restore `repo` in .egm/handoff.json or start a handoff in a new "
+        f"Restore `repo` in .superegm/config.json or start a handoff in a new "
         f"artifact directory.")
   host = (handoff.state.get("confirmed") or {}).get("host")
   if host and host != GH_HOSTNAME:
@@ -1191,7 +1191,7 @@ def require_binding(artifact_dir: Path, handoff_id=None, repo=None) -> None:
     raise HandoffError(
         f"{artifact_dir} already created issues on {bound_repo}; the "
         f"configuration now names {repo}. The creation destination is frozen "
-        f"once anything exists: restore `repo` in .egm/handoff.json, or use a "
+        f"once anything exists: restore `repo` in .superegm/config.json, or use a "
         f"new artifact directory. Nothing was changed.")
 
 
