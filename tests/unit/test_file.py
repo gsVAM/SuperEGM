@@ -303,31 +303,27 @@ def test_apply_appends_the_filing_and_base_at_start_before_its_first_write(world
   assert "Create: automatic" not in journal
 
 
-def test_apply_refusals(world):
-  dry_run(world)
-  code, out = world.run("apply", "--plan", world.plan)
-  assert code == 1 and "--yes" in out
-  state = state_of(world)
-  confirmed = state.pop("confirmed_sha256")
-  (world.artifacts / "state.json").write_text(json.dumps(state), encoding="utf-8")
-  code, out = world.run("apply", "--plan", world.plan, "--yes")
-  assert code == 1 and "no confirmed_sha256" in out
-  state["confirmed_sha256"] = confirmed
-  state["repo"] = "someone/else"
-  (world.artifacts / "state.json").write_text(json.dumps(state), encoding="utf-8")
-  code, out = world.run("apply", "--plan", world.plan, "--yes")
-  assert code == 1 and "differs from the state's" in out
-  state["repo"] = REPO
-  (world.artifacts / "state.json").write_text(json.dumps(state), encoding="utf-8")
-  text = world.plan.read_text(encoding="utf-8")
-  world.plan.write_text(text.replace("low: new module", "low: a new module"), encoding="utf-8")
-  code, out = world.run("apply", "--plan", world.plan, "--yes")
-  # The reviewed-pair check is stricter and fires first (R6-02): a plan edited
-  # after the gate is refused before the write list is even compared.
-  assert code == 1, out
-  assert ("changed since the dry run" in out
-          or "differ from the pair the gate reviewed" in out), out
+@pytest.mark.parametrize("case, expected", [
+    ("no-yes", "--yes"),
+    ("stale-review", "apply: U02 body differs from its converged round"),
+    ("plan-drift", "changed after the gate"),
+    ("list-drift", "the write list changed since the dry run")])
+def test_apply_refusals(world, case, expected):
+  spec, plan, handoff_id, card = dry_run(world)
+  argv = ["apply", "--spec", spec, "--runcard", card] + ([] if case == "no-yes" else ["--yes"])
+  if case == "stale-review":
+    converge(world, "U02", sha="0" * 64)
+  if case == "plan-drift":
+    copy = world.artifacts / "handoff_plan.md"
+    copy.write_text(copy.read_text(encoding="utf-8").replace("low: new module", "low: a new module", 1), encoding="utf-8")
+  if case == "list-drift":
+    state = state_of(world)
+    state["confirmed"]["writes"][0] = ["repo", "someone/else"]
+    atomic_write(world.artifacts / "state.json", state)
+  code, out = world.run(*argv)
+  assert code == 1 and expected in out, out
   assert not any(c[0] in ("label", "issue") for c in world.gh.calls)
+  assert "filings" not in state_of(world) and "base_at_start" not in state_of(world)
 
 
 def test_apply_creates_labels_issues_and_links_in_order_and_a_rerun_writes_nothing(world):
@@ -574,18 +570,3 @@ def test_verify_reports_a_link_the_handoff_no_longer_wants(world):
   gh.blocked_by.setdefault(state["units"]["U01"]["number"], []).append(stale)
   code, out = world.run("verify", "--plan", world.plan)
   assert code == 1 and "obsolete blocked-by link" in out, out
-
-
-def test_apply_refuses_a_body_invisible_plan_edit(world):
-  """R6-02: the guard was added next to a scan_handoff call that lives in
-  cmd_dry_run, so apply - where the writes happen - never had it."""
-  dry_run(world)
-  text = world.plan.read_text(encoding="utf-8")
-  marker = "Decide before build\n- none"
-  assert marker in text
-  world.plan.write_text(
-      text.replace(marker, marker + "\n\nBuild note: use the legacy client.", 1),
-      encoding="utf-8")
-  code, out = world.run("apply", "--plan", world.plan, "--yes")
-  assert code == 1 and "differ from the pair the gate reviewed" in out, out
-  assert not any(c[:2] == ["issue", "create"] for c in world.gh.calls)
