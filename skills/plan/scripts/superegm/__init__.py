@@ -63,7 +63,10 @@ MODEL_RE = re.compile(r"^[a-z0-9][a-z0-9.\-]{1,63}$")
 
 DEFAULT_CONFIG = {
     "repo": None,
+    "base": "main",
     "artifacts_dir": None,
+    "mode": "normal",
+    "max_in_flight": 5,
     "labels": {"unit": "superegm:unit", "wave_prefix": "superegm:wave-",
                "handoff_prefix": "superegm:handoff-", "tracking": "superegm:tracking",
                "stopped": "superegm:stopped", "extra": []},
@@ -72,6 +75,18 @@ DEFAULT_CONFIG = {
     "banned_terms": [],
     "fix_request_mention": None,
     "allowed_mentions": [],
+    "reviewers": {"spec": [], "plan": [], "head": [], "integrate": []},
+    "astra": {"enabled": False, "model": "gpt-6-astra", "effort": "xhigh"},
+    "judges": {"min_vendors": 1,
+               "members": [{"name": "fable", "via": "adapter", "effort": "max"},
+                           {"name": "opus", "via": "adapter", "effort": "max"},
+                           {"name": "astra", "via": "runner"}]},
+    "builder": {"profile_dir": "~/.superegm/builder-profile", "model": "claude-fable-5-1",
+                "permission_mode": "acceptEdits", "gh_token_env": "SUPEREGM_BUILDER_TOKEN",
+                "allowed_tools": ["Read", "Edit", "Write", "Grep", "Glob", "git add", "git commit",
+                                  "git status", "git diff", "git log", "git mv", "git rm",
+                                  "gh pr create", "gh pr edit", "gh pr comment", "gh issue comment"]},
+    "ci_wait_minutes": 30,
 }
 
 DEFAULT_TEMPLATE = """<!-- egm:handoff={{handoff_id}} unit={{unit_id}} -->
@@ -411,6 +426,15 @@ def load_config(repo_root: Path) -> dict:
       or Path(artifacts).resolve().is_relative_to(repo_root.resolve()):
     raise HandoffError(f"{path}: artifacts_dir must be an absolute path outside the working tree "
                        f"(run `superegm init`)")
+  if not isinstance(config["base"], str) or not config["base"]:
+    raise HandoffError(f"{path}: base must name the default branch")
+  if config["mode"] not in ("normal", "leavemealone"):
+    raise HandoffError(f"{path}: mode must be `normal` or `leavemealone`")
+  for key in ("max_in_flight", "ci_wait_minutes"):
+    if isinstance(config[key], bool) or not isinstance(config[key], int) or config[key] < 1:
+      raise HandoffError(f"{path}: {key} must be a positive integer")
+  # shortcut: the nested keys of reviewers/astra/judges/builder are not validated here, the unit
+  # that reads each validates
   labels = config["labels"]
   for name in (labels["unit"], labels["tracking"], labels["stopped"], *labels["extra"]):
     if not LABEL_RE.match(name):
