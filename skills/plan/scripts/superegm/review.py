@@ -68,7 +68,7 @@ def run(args):
   if args.action == "post":
     print("superegm: review post is not built yet", file=sys.stderr)
     return 1
-  return {"open": open_review}[args.action](args)
+  return {"open": open_review, "record": record_round}[args.action](args)
 
 
 # ---------------------------------------------------------------- the findings line
@@ -98,6 +98,31 @@ def parse_findings(text: str, reviewer: str, rnd: int) -> list[dict]:
   return findings
 
 
+def derive_what_ran(review: dict, rnd: dict, entry: dict | None) -> str:
+  """`completed` when every panel reviewer has a record for the round (an empty findings file counts;
+  the Astra lane's `--not-run` counts, and the lane is excused after two incomplete runs) and, on a
+  head, the unit's `rounds[]` entry is `posted`; else `not run (<reason>)`, the reason being the
+  entry's own `not run` reason, its phase, or the first reviewer without a record."""
+  if entry is not None:
+    outcome = entry.get("outcome") or ""
+    if outcome.startswith("not run"):
+      return outcome
+    if entry.get("phase") != "posted":
+      return f"not run (phase {entry.get('phase')})"
+  records = rnd.get("reviewers") or {}
+  for reviewer in review["reviewers"]:
+    record = records.get(reviewer)
+    if reviewer == "astra":
+      if record is None and review.get("astra_incomplete", 0) < 2:
+        return "not run (astra: no record)"
+      continue
+    if record is None:
+      return f"not run ({reviewer}: no record)"
+    if record.get("not_run"):
+      return f"not run ({reviewer}: {record['not_run']})"
+  return "completed"
+
+
 # ---------------------------------------------------------------- the store
 
 
@@ -122,6 +147,16 @@ def save_review(st: core.Store, rid: str, review: dict) -> None:
 def load_round(st: core.Store, rid: str, n: int):
   path = st.path("reviews", rid, f"round-{n}.json")
   return json.loads(core.read_text(path)) if path.is_file() else None
+
+
+def round_numbers(st: core.Store, rid: str) -> list[int]:
+  return sorted(int(m.group(1)) for p in st.path("reviews", rid).glob("round-*.json")
+                if (m := re.fullmatch(r"round-(\d+)\.json", p.name)))
+
+
+def head_entry(st: core.Store, unit: str, n: int):
+  """The unit's `rounds[]` entry of round `n`, or None."""
+  return next((e for e in core.load_foreman(st, unit)["rounds"] if e.get("round") == n), None)
 
 
 def latest_cycle(st: core.Store, kind: str, artifact: str) -> tuple[dict | None, bool]:
@@ -188,4 +223,43 @@ def open_review(args) -> int:
   core.card_add(st, args.runcard, "produced", rid)
   core.journal(st, f"review open {rid} panel {','.join(review['reviewers'])} under {args.runcard}")
   print(rid)
+  return 0
+
+
+# ---------------------------------------------------------------- record
+
+
+def record_round(args) -> int:
+  st = core.store(core.git_toplevel(Path.cwd()))
+  rid, n, reviewer = args.review, args.round, args.reviewer
+  review = load_review(st, rid)
+  if review is None:
+    raise core.HandoffError(f"review {rid}: not opened")
+  card = bind(args, review)
+  kind, existing = review["kind"], load_round(st, rid, n)
+  if kind in ("spec", "integrate"):
+    sha = core.sha256_file(Path(review["artifact"]))
+  else:
+    sha = args.sha256 or (existing["artifact_sha256"] if existing else review["artifact_sha256"] if n == 1 else None)
+  entry = head_entry(st, review["artifact"], n) if kind == "head" else None
+  if args.not_run:
+    record = {"findings": [], "not_run": args.not_run, "isolation": None, "model": None, "effort": None}
+  else:
+    path = Path(args.findings)
+    try:
+      findings = parse_findings(core.read_text(path), reviewer, n)
+    except ValueError as error:
+      raise core.HandoffError(f"review record: {path}:{error}")
+    record = {"findings": findings, "not_run": None, "isolation": args.isolation, "model": args.model,
+              "effort": args.effort}
+  rnd = existing or {"round": n, "runcard": card.get("parent") or args.runcard, "artifact_sha256": sha,
+                     "builder_contested": [], "reviewers": {}}
+  rnd["reviewers"][reviewer] = record
+  if reviewer == "astra" and args.not_run:
+    review["astra_incomplete"] += 1
+  rnd["what_ran"] = derive_what_ran(review, rnd, entry)
+  core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
+  save_review(st, rid, review)
+  core.journal(st, f"review record {rid} round {n} {reviewer} what_ran {rnd['what_ran']} under {args.runcard}")
+  print(f"round {n} {reviewer} recorded, what_ran {rnd['what_ran']}")
   return 0
