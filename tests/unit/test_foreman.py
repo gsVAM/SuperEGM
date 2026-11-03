@@ -444,3 +444,13 @@ def test_review_post_target_moved(world, tmp_path, monkeypatch, merge_pr):
     (0, [], "clean"), (2, [], "cap-reached"), (3, [], "revise"), (5, [], "revise")])
 def test_outcome_word_order(status_exit, contested, word):
   assert review_mod.outcome_word(status_exit, contested) == word
+
+
+def test_foreman_adapter_frontmatter_and_tools():
+  text = (ROOT / ".claude-plugin/agents/foreman.md").read_text(encoding="utf-8")
+  assert text.startswith("---\nname: foreman\n")
+  fm = text.split("---\n")[1]
+  for line in ("tools: [Agent, Bash, Read, Grep, Glob]", "model: inherit", "omitClaudeMd: true"):
+    assert line in fm.splitlines(), line
+  assert "memory" not in fm and "${CLAUDE_PLUGIN_ROOT}/skills/wave/references/foreman_brief.md" in text
+  assert "Modified by SuperEGM (gsVAM), 2026" in text or "Added by SuperEGM (gsVAM), 2026" in text
