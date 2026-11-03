@@ -72,7 +72,11 @@ def test_runtime_bundle_ships_exactly_the_kept_files(source: Path, tmp_path: Pat
                  "skills/writing-skills/references/skill_discovery_optimization.md",
                  "resources/document_standards/handoff-standard.md", "docs/claude.md"):
       assert name in names, name
-    assert [p for p in names if p.endswith(".py")] == ["skills/plan/scripts/superegm.py"]
+    package = ("__init__", "apply", "approve_spec", "body", "clean", "close", "collect", "decide", "decision",
+               "dry_run", "foreman", "gate", "graph", "init", "interrupt", "judges", "launch", "launch_builder",
+               "prepare", "record_launch", "report", "review", "runcard", "scan", "status", "tdd_order", "verify")
+    assert sorted(p for p in names if p.endswith(".py")) == sorted(
+        ["skills/plan/scripts/superegm.py", *(f"skills/plan/scripts/superegm/{m}.py" for m in package)])
     assert not any(p.startswith(("tests/", ".github/", ".agents/", "docs/designs/"))
                    or p.endswith(("test_scenarios.yaml", "marketplace.json", "pyproject.toml"))
                    for p in names)
