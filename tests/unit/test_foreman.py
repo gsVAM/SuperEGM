@@ -283,3 +283,20 @@ def test_prepare_refuses_a_pr_whose_base_is_not_base(world, tmp_path, monkeypatc
   assert (code, out.strip()) == (1, "base: PR #70 targets release, not main")
   assert subprocess.run(["git", "-C", str(world.repo), "rev-parse", f"refs/superegm/pr/{PR}"], capture_output=True).returncode != 0
   assert json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][0]["phase"] == "fetched"
+
+
+@pytest.mark.parametrize("body, aged, kept", [
+    ("**Deviation (dod):** item 3 cannot be met\n- (a) drop it\n- (b) keep it\n**Builder status:** BLOCKED", True, True),
+    ("**Decision D1:** (a) by default", True, True),
+    ("**Ruling:** change-review-1-1 finding upheld (fix it)", True, True),
+    ("**Reply change-review-1-1:** fixed", True, False),
+    ("**Reply change-review-1-1:** fixed", False, True),
+])
+def test_prepare_writes_comments_after_posted_at_plus_the_aged_kinds(world, tmp_path, monkeypatch, body, aged, kept):
+  at = "2026-11-01T12:00:00Z" if aged else "2026-11-02T13:00:00Z"   # POSTED_R1.posted_at is 2026-11-02T12:00:00Z
+  comments = {70: [c(12, "builder-bot", body, at)], 2: [c(13, "owner", "looks fine", "2026-11-02T14:00:00Z")]}
+  w = prepared(world, tmp_path, monkeypatch, rounds=[POSTED_R1], launches=TWO_LAUNCHES, comments=comments)
+  text = (w.dir / "r2/comments.md").read_text(encoding="utf-8")
+  assert text.startswith("builder: builder-bot\n")
+  assert "### issue #2 comment 13 by owner at 2026-11-02T14:00:00Z\nlooks fine\n" in text
+  assert (f"### pr #70 comment 12 by builder-bot at {at}\n{body}\n" in text) is kept
