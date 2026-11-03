@@ -100,3 +100,18 @@ def test_verdict_file_parses_reason_and_change():
       judges.parse_questions(QUESTIONS))
   assert answers == {"Q1": {"option": "b", "reason": "the fix is in the spec", "would_change": "a test that fails"},
                      "Q2": {"option": "c", "reason": None, "would_change": None}}
+
+
+@pytest.mark.parametrize("members", [
+    {"fable": {"via": "adapter", "effort": "max"}, "opus": {"via": "adapter", "effort": "max"}, "astra": {"via": "runner"}},
+    [{"id": "fable", "via": "adapter"}, {"id": "opus", "via": "adapter"}, {"id": "astra", "via": "runner"}],
+    ["fable", "opus", "astra"],
+])
+def test_judge_members_forms(members):
+  config = {"judges": {"min_vendors": 1, "members": members},
+            "astra": {"enabled": True, "model": "gpt-6-astra", "effort": "xhigh"}}
+  got = judges.judge_members(config)
+  assert list(got) == ["fable", "opus", "astra"]
+  assert got["fable"] == {"via": "adapter", "vendor": "anthropic", "model": "fable", "effort": "max"}
+  assert got["astra"] == {"via": "runner", "vendor": "openai", "model": "gpt-6-astra", "effort": "xhigh"}
+  assert judges.judge_members({})["opus"] == {"via": "adapter", "vendor": "anthropic", "model": "opus", "effort": "max"}
