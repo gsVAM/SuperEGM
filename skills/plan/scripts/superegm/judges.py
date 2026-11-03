@@ -3,10 +3,16 @@
 
 """superegm judges open|record|diff|verdict: the judge panel over a question file."""
 
+import json
 import re
-import sys
+from pathlib import Path
 
-WRITES = frozenset()  # the store kinds this subcommand writes
+import superegm as core
+
+WRITES = frozenset(["judges", "runcards"])  # the store kinds this subcommand writes
+SKILLS = frozenset(["judges"])  # the skills whose card this subcommand accepts
+PARENT_SKILLS = ("review-spec", "review-plan", "plan", "wave", "integrate")
+CAP = 5  # rounds per panel
 
 QUESTION_RE = re.compile(r"^## Q(\d+) (.+)$")
 OPTION_RE = re.compile(r"^- \(([a-z])\) (.+)$")
@@ -92,9 +98,100 @@ def judge_members(config: dict) -> dict[str, dict]:
 
 
 def register(subparsers):
-  subparsers.add_parser("judges", help="the judge panel").set_defaults(run=run, writes=WRITES)
+  p = core.add_parser(subparsers, "judges", "the judge panel: open, record, diff, verdict", runcard=False)
+  action = p.add_subparsers(dest="action", required=True)
+  o = action.add_parser("open", help="open a panel on a question file and print its id")
+  o.add_argument("--question", required=True, help="the question file (`## Q<n>` and `- (<id>)` lines)")
+  o.add_argument("--evidence", action="append", default=[], help="a file the judges may read; repeatable")
+  card = o.add_mutually_exclusive_group(required=True)
+  card.add_argument("--runcard", help="the open judges card on the question file")
+  card.add_argument("--parent", help="the open review-spec, review-plan, plan, wave or integrate card to open a child card under")
+  p.set_defaults(run=run, writes=WRITES)
 
 
 def run(args):
-  print("superegm: judges is not built yet", file=sys.stderr)
-  return 1
+  st = core.store(core.git_toplevel(Path.cwd()))
+  return COMMANDS[args.action](args, st)
+
+
+def require_card(args, artifact: str) -> dict:
+  # U03's require_runcard reads the subcommand's artifact from args.design; a judges card's is the question file.
+  args.design = artifact
+  return core.require_runcard(args, SKILLS)
+
+
+def write_json(path: Path, obj) -> None:
+  # atomic_write sorts keys; the panel's judge order is the config's, so serialise first
+  core.atomic_write(path, json.dumps(obj, indent=2) + "\n")
+
+
+def panel_id(question: Path) -> str:
+  return f"{question.stem}-{core.sha256_file(question)[:6]}"
+
+
+def render_brief(panel: dict, questions: list[dict], round_no: int, open_ids: list[str],
+                 prior: list[tuple[int, str, str]], diffs: list[str]) -> str:
+  lines = [f"JUDGE BRIEF, panel {panel['id']}, round {round_no}.",
+           "You are one judge of a panel. Answer each question below by option id, one line per question:",
+           "`Q<n>: (<id>)`",
+           "After an answer you may add one `reason: <sentence>` line and one `would change my mind: <what>` line.",
+           "Close with one line `saw: <none | CLAUDE.md | memory index | hook output | ...>` naming anything",
+           "that reached you besides this brief, the question file and the evidence.",
+           "Report no findings. Read only the question file and the evidence listed.",
+           f"Question file: {panel['question']} (sha256 {panel['question_sha256']})",
+           "Evidence: " + (", ".join(e["path"] for e in panel["evidence"]) or "none")]
+  if round_no > 1:
+    lines += ["", f"Questions still open: {', '.join(open_ids)}",
+              "Answer only those. Every prior verdict and every diff follow verbatim; no one adds arguments between rounds:",
+              "weigh them and change position only for a reason you can name."]
+    for rnd, judge, text in prior:
+      lines += ["", f"### Round {rnd}, {judge}", text.rstrip("\n")]
+    for diff in diffs:
+      lines += ["", diff.rstrip("\n")]
+  return "\n".join(lines) + "\n"
+
+
+def cmd_open(args, store) -> int:
+  question = Path(args.question).expanduser().resolve()
+  parent = None
+  if args.runcard:
+    require_card(args, str(question))
+  else:
+    parent = core.load_card(store, args.parent)
+    if parent["skill"] not in PARENT_SKILLS:
+      raise core.HandoffError("runcard: parent must be a review-spec, review-plan, plan, wave or integrate card")
+    if parent["closed_at"]:
+      raise core.HandoffError(f"runcard: parent {args.parent} is closed")
+  if not question.is_file():
+    raise core.HandoffError(f"judges: question file {question} does not exist")
+  try:
+    questions = parse_questions(core.read_text(question))
+  except ValueError as error:
+    raise core.HandoffError(f"judges: question file: {error}")
+  evidence = []
+  for item in args.evidence:
+    path = Path(item).expanduser().resolve()
+    if not path.is_file():
+      raise core.HandoffError(f"judges: evidence {path} does not exist")
+    evidence.append({"path": str(path), "sha256": core.sha256_file(path)})
+  pid = panel_id(question)
+  folder = store.path("judges", pid)
+  if folder.exists():
+    raise core.HandoffError(f"judges: panel {pid} exists")
+  config = store.config or {}
+  members = judge_members(config)
+  min_vendors = (config.get("judges") or {}).get("min_vendors", 1)
+  rid = args.runcard or core.open_runcard(store, "judges", str(question), parent=args.parent)
+  panel = {"id": pid, "question": str(question), "question_sha256": core.sha256_file(question),
+           "evidence": evidence, "judges": members, "min_vendors": min_vendors, "runcard": rid,
+           "parent": args.parent, "opened_at": core.now_iso(), "rounds": {}}
+  core.atomic_write(folder / "question.md", question.read_bytes())
+  write_json(folder / "panel.json", panel)
+  core.atomic_write(folder / "round-1" / "brief.md",
+                    render_brief(panel, questions, 1, [q["id"] for q in questions], [], []))
+  core.journal(store, f"judges {pid}: opened ({', '.join(members)}; min_vendors {min_vendors})")
+  print(pid)
+  return 0
+
+
+COMMANDS = {"open": cmd_open}
