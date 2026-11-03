@@ -167,7 +167,8 @@ def test_helper_runs_under_its_new_name(world):
 
 MODULES = ("init", "runcard", "approve_spec", "graph", "scan", "review", "gate", "dry_run", "apply",
            "verify", "status", "launch", "launch_builder", "record_launch", "foreman", "prepare",
-           "collect", "tdd_order", "decide", "decision", "interrupt", "clean", "report", "close", "judges")
+           "collect", "tdd_order", "decide", "decision", "interrupt", "clean", "report", "close", "judges",
+           "review_plan")
 
 
 @pytest.mark.parametrize("name", MODULES)
@@ -564,7 +565,7 @@ MOVED = [("test_plan.py", "test_scan_banned_terms_mentions_and_size"),
          ("test_file.py", "test_apply_recovers_issues_by_the_new_marker_after_a_crash"),
          ("test_builders.py", "test_launch_refuses_each_precondition"),
          ("test_builders.py", "test_record_launch_appends_running_then_records_the_exit"),
-         ("test_events.py", "test_status_wait_returns_on_change_or_deadline"),
+         ("test_events.py", "test_wait_prints_deadline_only_and_saves_once"),
          ("test_events.py", "test_status_pr_matching_rules"),
          ("test_events.py", "test_the_helper_is_single_writer_by_design"),
          ("test_foreman.py", "test_prepare_fetches_from_the_recorded_remote_into_private_refs"),

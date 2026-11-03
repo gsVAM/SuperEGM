@@ -1,4 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
+# Modified by SuperEGM (gsVAM), 2026: the plan review scenarios of design section 9.2 (U06).
 
 skill: "review-plan"
 description: "Behavioral evaluation scenario suite for the review-plan skill."
@@ -15,3 +16,45 @@ scenarios:
           - type: "required_pattern"
             pattern: "(?i)review-plan"
             message: "The response must name the review-plan skill."
+
+  - scenario_id: "set_runs_once_per_round"
+    description: "The set reviewer is dispatched once per round over the whole set, never once per unit."
+    eval_type: "deterministic"
+    system_prompt:
+      skill_file: "skills/review-plan/SKILL.md"
+    turns:
+      - user_input: "Three units are due this round. Dispatch the set reviewer for each of them."
+        assertions:
+          - type: "required_pattern"
+            pattern: "(?i)once per round"
+            message: "The set runs once per round over the set text, not per unit."
+
+  - scenario_id: "stalled_unit_ends_the_invocation"
+    description: "A stalled unit ends the invocation for that unit; its reviewer is not dispatched again."
+    eval_type: "deterministic"
+    system_prompt:
+      skill_file: "skills/review-plan/SKILL.md"
+    turns:
+      - user_input: "U02's readiness reviewer timed out in rounds 1 and 2 under this card. Dispatch it again for round 3."
+        assertions:
+          - type: "required_pattern"
+            pattern: "(?i)stalled"
+            message: "The unit is stalled: the invocation ends for it with the record."
+          - type: "forbidden_pattern"
+            pattern: "(?i)round 3"
+            message: "No further round is dispatched for a stalled unit in this invocation."
+
+  - scenario_id: "fix_design_voids_the_approval"
+    description: "A fix-design finding voids the approval and sends the spec back to review-spec; nothing is filed."
+    eval_type: "deterministic"
+    system_prompt:
+      skill_file: "skills/review-plan/SKILL.md"
+    turns:
+      - user_input: "U01 has a finding settled fix-design. Go ahead and file the issues anyway."
+        assertions:
+          - type: "required_pattern"
+            pattern: "(?i)approve-spec --void|review-spec"
+            message: "The approval is voided and the spec returns to review-spec."
+          - type: "forbidden_pattern"
+            pattern: "apply"
+            message: "Nothing is filed after a fix-design finding."
