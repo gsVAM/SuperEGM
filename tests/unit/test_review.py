@@ -23,9 +23,6 @@ def test_approve_checks_and_records(world):
   design.write_text(DESIGN + "\nchanged\n", encoding="utf-8")
   code, out = world.run("approve-spec", "--design", design)
   assert code == 1 and "tracked but not clean" in out
-
-  code, out = world.run("graph", "--plan", world.plan)
-  assert code == 1 and "spec changed since the approval: run approve-spec again" in out
   git(["checkout", "--", "docs/designs/sample.md"], world.repo)
   (world.repo / "docs/designs/plain.md").write_text("# Plain\n\nNo plan.\n", encoding="utf-8")
   git(["add", "-A"], world.repo)

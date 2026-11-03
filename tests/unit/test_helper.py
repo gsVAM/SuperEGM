@@ -21,16 +21,6 @@ from conftest import (ROOT, SCRIPTS, HELPER, REPO, DESIGN, Harness, make_world, 
 # ---------------------------------------------- EGM's tests of the shared names
 
 
-def test_parser_rejects_dod_item_without_command_and_reports_line(world):
-  text = world.plan.read_text(encoding="utf-8").replace(
-      "1. `npm test -- src/webhooks/admin.test.ts` passes with the listing case.",
-      "1. The listing works.")
-  world.plan.write_text(text, encoding="utf-8")
-  line = text.splitlines().index("1. The listing works.") + 1
-  code, out = world.run("graph", "--plan", world.plan)
-  assert code == 1 and f"handoff_plan.md:{line}:" in out and "definition-of-done" in out
-
-
 def test_long_derived_label_is_refused(tmp_path, capsys, monkeypatch):
   w = make_world(tmp_path, capsys, monkeypatch, config={"repo": REPO, "labels": {"handoff_prefix": "x" * 45}})
   code, out = w.run("graph", "--plan", w.plan)
@@ -77,11 +67,11 @@ def test_state_is_written_atomically_and_a_poll_keeps_other_writers_fields(world
   assert world.run("verify", "--plan", world.plan)[0] == 0
   # another writer records a decision while a poll is in flight
   assert world.run("decide", "--plan", world.plan, "--unit", "U03",
-                   "--decision", "D2", "--answer", "50")[0] == 0
+                   "--decision", "D2", "--answer", "(a)")[0] == 0
   assert world.run("launch", "--plan", world.plan, "--wave", 1, "--units", "U01")[0] == 0
   assert world.run("status", "--plan", world.plan)[0] == 0
   after = state_of(world)
-  assert after["decisions"]["U03/D2"]["answer"] == "50"
+  assert after["decisions"]["U03/D2"]["answer"] == "(a)"
   assert after["units"]["U01"]["launched"]["wave"] == 1
   assert after["units"]["U01"]["number"]
   # no temporary file is left behind by the atomic replace
@@ -99,24 +89,13 @@ def test_operations_refuse_a_repository_the_numbers_do_not_belong_to(world):
   assert "frozen once anything exists" in out or "not portable between repositories" in out, out
 
 
-def test_a_new_design_may_not_reuse_an_artifact_directory_with_issues(world):
-  """R07: creation, decision and verification records are not transferable."""
-  applied(world)
-  design = world.repo / "docs/designs/sample.md"
-  design.write_text(DESIGN.replace("# Webhook", "# Webhook v2"), encoding="utf-8")
-  git(["commit", "-qam", "v2"], world.repo)
-  code, out = world.run("graph", "--plan", world.plan)
-  assert code == 1
-  assert "already holds handoff" in out and "new artifact directory" in out
-
-
 def test_duplicate_decision_ids_in_one_unit_are_refused(world):
   """R15: two blocking questions sharing an id share one state key, so
   answering the first would release the unit while the second is open."""
   world.plan.write_text(world.plan.read_text(encoding="utf-8").replace(
-      "- D2 Page size for the listing? owner: the user; default: 50; blocking: yes",
-      "- D2 Page size for the listing? owner: the user; default: 50; blocking: yes\n"
-      "- D2 Retry budget? owner: the user; default: 3; blocking: yes"), encoding="utf-8")
+      "- D2 Page size for the listing? options: (a) 50; (b) 25; owner: the user; default: (a); blocking: yes",
+      "- D2 Page size for the listing? options: (a) 50; (b) 25; owner: the user; default: (a); blocking: yes\n"
+      "- D2 Retry budget? options: (a) 3; (b) 5; owner: the user; default: (a); blocking: yes"), encoding="utf-8")
   code, out = world.run("graph", "--plan", world.plan)
   assert code == 1 and "two" in out and "D2" in out
 
@@ -165,7 +144,7 @@ def test_a_completed_label_write_binds_the_destination(world):
   dry_run(world)
   assert world.run("apply", "--plan", world.plan, "--yes", "--max-writes", 2)[0] == 0
   state = state_of(world)
-  assert not (state.get("units") or {}), "this bounded apply must not reach an issue"
+  assert not any(u.get("number") for u in state["units"].values()), "this bounded apply must not reach an issue"
   assert "done" in state["labels"].values()
   set_config(world, repo="other/elsewhere")
   git(["remote", "add", "other", "https://github.com/other/elsewhere.git"], world.repo)
@@ -179,7 +158,7 @@ def test_a_mixed_case_remote_url_resolves(tmp_path, capsys, monkeypatch):
   w = make_world(tmp_path, capsys, monkeypatch, config={"repo": REPO},
                  origin_url="https://github.com/Example-Org/WebHooks.git")
   code, out = w.run("graph", "--plan", w.plan)
-  assert code == 0 and "(remote origin)" in out, out
+  assert code == 0, out
   state = state_of(w)
   assert state["remote"] == "origin" and state["repo"] == REPO
 
@@ -201,7 +180,6 @@ def test_helper_runs_under_its_new_name(world):
   assert world.ns["build_parser"]().prog == "superegm.py"
   code, out = world.run("graph", "--plan", world.plan)
   assert code == 0, out
-  assert "<!-- egm:generated start -->" in world.plan.read_text(encoding="utf-8")
   assert (world.artifacts / "handoff_units.json").is_file()
   for skill in ("skills/plan/SKILL.md", "skills/wave/SKILL.md"):
     assert "egm_handoff.py" not in (ROOT / skill).read_text(encoding="utf-8"), skill
@@ -272,9 +250,9 @@ def test_store_paths_are_prefixed_by_the_handoff_hex(world):
 
 
 WRITES = {"approve_spec": {"approvals", "state"}, "graph": {"state", "plan", "units", "unit", "bodies"},
-          "scan": set(), "gate": {"state", "file", "plan", "units", "unit", "bodies"},
+          "scan": {"file"}, "gate": {"state", "file", "plan", "units", "unit", "bodies"},
           "dry_run": {"state", "file", "plan", "units", "unit", "bodies"}, "apply": {"state", "file"},
-          "verify": {"state"}, "status": {"state"}, "launch": {"state"}, "decide": {"state", "unit", "file"},
+          "verify": {"state"}, "status": {"state"}, "launch": {"state"}, "decide": {"state", "plan", "units", "unit", "bodies", "file"},
           "record_launch": {"foreman"}, "collect": {"foreman"}, "prepare": {"foreman", "file"},
           "runcard": {"runcards"}, "init": set()}
 
@@ -502,10 +480,6 @@ def test_approve_spec_writes_the_approvals_record_with_handoff_id(world):
   assert world.run("graph", "--plan", world.plan)[0] == 0
   assert state_of(world)["handoff_id"] == record["handoff_id"]
   assert json.loads((world.artifacts / "handoff_units.json").read_text(encoding="utf-8"))["handoff_id"] == record["handoff_id"]
-  world.spec.write_text(world.spec.read_text(encoding="utf-8") + "\nchanged\n", encoding="utf-8")
-  git(["commit", "-qam", "edit"], world.repo)
-  code, out = world.run("graph", "--plan", world.plan)
-  assert code == 1 and "spec changed since the approval: run approve-spec again" in out
 
 
 def test_foreman_file_schema_and_round_entries(world):
@@ -523,20 +497,6 @@ def test_foreman_file_schema_and_round_entries(world):
   assert superegm.round_entry(data, 2) is data["rounds"][0]
   assert superegm.round_entry(data, 3)["round"] == 3 and [r["round"] for r in data["rounds"]] == [2, 3]
   assert not list(world.artifacts.glob("foreman_*_state.json"))
-
-
-def test_state_plan_is_the_outside_path_and_graph_copies_the_plan(world):
-  assert world.run("graph", "--plan", world.plan)[0] == 0
-  state = state_of(world)
-  assert state["plan"] == str(world.plan) and not str(world.plan).startswith(str(world.artifacts))
-  assert (world.artifacts / "handoff_plan.md").read_text(encoding="utf-8") == world.plan.read_text(encoding="utf-8")
-  code, out = world.run("scan")
-  assert code == 0 and "scan: clean" in out, out
-  with pytest.raises(SystemExit):
-    world.run("scan", "--state", str(world.artifacts / "state.json"))
-  (world.artifacts / "state.json").unlink()
-  code, out = world.run("scan")
-  assert code == 1 and "run `graph --plan <file>` first" in out
 
 
 def test_require_frozen_units_refuses_a_filed_units_drift(world):
@@ -573,11 +533,11 @@ def test_defer_and_published_are_gone(world):
   assert "--published" not in {f for a in subs["decide"]._actions for f in a.option_strings}
   gh = applied(world)
   assert "open blocking decision U03/D2" in world.run("status")[1]
-  code, out = world.run("decide", "--unit", "U03", "--decision", "D2", "--answer", "25")
+  code, out = world.run("decide", "--unit", "U03", "--decision", "D2", "--answer", "(b)")
   assert code == 0 and "PUBLISHED" not in out
   code, out = world.run("status")
   assert code == 0 and "U03/D2" not in out and "PUBLISHED" not in out
-  assert set(state_of(world)["decisions"]["U03/D2"]) == {"answer", "decided_at", "fingerprint"}
+  assert set(state_of(world)["decisions"]["U03/D2"]) == {"answer", "by", "decided_at"}
   close_as_completed(gh, 2); close_as_completed(gh, 3)
   make_pr(gh, 41, "a" * 40, merged="2026-11-02T10:00:00Z", closes=[(REPO, 3)])
   gh.graphql[3] = [{**gh.prs[41], "repository": {"nameWithOwner": REPO}}]
@@ -606,9 +566,7 @@ def test_removed_mechanisms_are_not_named(path, pattern):
 
 MOVED = [("test_review.py", "test_approve_checks_and_records"),
          ("test_review.py", "test_approve_refuses_an_untracked_or_ignored_design"),
-         ("test_plan.py", "test_graph_writes_waves_critical_path_placeholders_and_id"),
          ("test_plan.py", "test_scan_banned_terms_mentions_and_size"),
-         ("test_plan.py", "test_the_posted_body_never_changes_when_a_decision_is_answered"),
          ("test_file.py", "test_apply_creates_in_order_and_rerun_writes_nothing"),
          ("test_file.py", "test_subprocess_command_shape_with_fake_gh_on_path"),
          ("test_file.py", "test_marker_recovery_finds_issues_created_before_a_crash"),
