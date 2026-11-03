@@ -51,7 +51,7 @@ def run(args):
   if rid is None:
     with contextlib.redirect_stdout(io.StringIO()):
       code = review.run(argparse.Namespace(action="open", kind="head", artifact=unit, sha256=None,
-                                           reviewers=",".join(st.config["reviewers"]["head"]), astra=None,
+                                           reviewers=",".join(st.config["reviewers"]["head"]),
                                            runcard=args.runcard, unit=None, design=None, plan=None))
     if code != 0:
       raise core.HandoffError("review open failed")

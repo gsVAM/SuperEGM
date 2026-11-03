@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
+# From the elephant-goldfish-model (gsVAM), 2026.
 # Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_prepare` as the prepare module, keyed by the dispatch id; the fetched tip is the round's head; `pr_body.md` and `comments.md` beside the diff and the CI file.
 
 """superegm prepare: fetch the PR into refs/superegm, add the review worktree, write the diff, CI, PR body and comments."""

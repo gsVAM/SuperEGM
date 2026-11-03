@@ -249,7 +249,7 @@ def open_review(args) -> int:
     return 0
   cycle = latest["cycle"] + 1 if latest else 1
   rid = review_id(st, kind, artifact, cycle)
-  astra = args.astra or ("on" if (st.config.get("astra") or {}).get("enabled") else "off")
+  astra = getattr(args, "astra", None) or ("on" if (st.config.get("astra") or {}).get("enabled") else "off")
   review = {"kind": kind, "artifact": artifact, "cycle": cycle,
             "reviewers": reviewers + (["astra"] if astra == "on" and kind in LANE_KINDS else []),
             "runcard": args.runcard, "artifact_sha256": args.sha256, "astra_incomplete": 0,

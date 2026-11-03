@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
+# From the elephant-goldfish-model (gsVAM), 2026.
 # Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11).
 
 """superegm collect: the foreman's findings of a round through one `review record --reviewer foreman`, or a
