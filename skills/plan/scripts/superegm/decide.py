@@ -46,13 +46,26 @@ def run(args):
     raise core.HandoffError(f"decide: {uid} has no decision {did}")
   answer = answer_for({**decision, "unit": uid}, args.answer, args.default)
   by = f"judges:{args.judges}" if args.judges else "owner"
-  lines = core.read_text(handoff.plan_path).split("\n")
-  index = decision["line"] - 1
-  lines[index] = re.sub(r"; answer: \(\w\)$", "", lines[index]) + f"; answer: {answer}"
-  core.atomic_write(handoff.plan_path, "\n".join(lines))
-  handoff = graph.load(st, handoff.plan_path)
-  handoff.state.setdefault("decisions", {})[f"{uid}/{did}"] = {"answer": answer, "by": by, "decided_at": core.now_iso()}
-  handoff.write_graph_files()
+  record = {"answer": answer, "by": by, "decided_at": core.now_iso()}
+  number = handoff.filed(uid)
+  if number is None:
+    lines = core.read_text(handoff.plan_path).split("\n")
+    index = decision["line"] - 1
+    lines[index] = re.sub(r"; answer: \(\w\)$", "", lines[index]) + f"; answer: {answer}"
+    core.atomic_write(handoff.plan_path, "\n".join(lines))
+    handoff = graph.load(st, handoff.plan_path)
+    handoff.state.setdefault("decisions", {})[f"{uid}/{did}"] = record
+    handoff.write_graph_files()
+    done = f"re-rendered unit_{uid}.md"
+  else:
+    # Filed: the plan line, the body and unit_<id>.md stay as filed; the answer travels as a comment.
+    name = f"decision_comment_{uid}_{did}.md"
+    option = next(o for o in decision["options"] if o.startswith(answer))
+    core.atomic_write(handoff.unit_file(uid).parent / name,
+                      f"{core.body.DECISION_HEADING.format(id=did)} {option}\n\n{decision['question']}\nDecided by {by}.\n")
+    handoff.state.setdefault("decisions", {})[f"{uid}/{did}"] = record
+    core.save_state(handoff.artifact_dir, handoff.state)
+    done = f"post {name} on #{number} under a github-write card"
   core.journal(st, f"decide {uid}/{did} {answer} by {by}")
-  print(f"recorded {uid}/{did} {answer}; re-rendered unit_{uid}.md")
+  print(f"recorded {uid}/{did} {answer}; {done}")
   return 0
