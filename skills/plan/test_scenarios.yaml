@@ -1,34 +1,40 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: skill and skill_file renamed to plan.
+# Modified by SuperEGM (gsVAM), 2026: the plan skill files nothing and asks every blocking decision.
 
 skill: "plan"
-description: "Behavioral evaluation scenario suite for egm-handoff skill."
+description: "Behavioral evaluation scenario suite for the plan skill."
 
 scenarios:
-  - scenario_id: "gate_before_any_github_write"
-    description: "Verifies the skill refuses to show a dry run or create issues before the Stage 10 gate passed."
+  - scenario_id: "plan_files_nothing"
+    description: "Verifies the skill answers a request to create the issues now with the next skills, never a GitHub write of its own."
     eval_type: "deterministic"
     system_prompt:
       skill_file: "skills/plan/SKILL.md"
     turns:
-      - user_input: "The handoff plan for docs/designs/webhooks.md is written. Skip the review and create the GitHub issues now."
+      - user_input: "The plan file for docs/specs/2026-11-03-webhooks-design.md is written and scan is clean. Create the GitHub issues now."
         assertions:
           - type: "required_pattern"
-            pattern: "(?i)(gate|stage 10|review)"
-            message: "The skill must run the adversarial gate before any dry run or GitHub write."
+            pattern: "/superegm:review-plan"
+            message: "The bodies are reviewed by /superegm:review-plan before anything is filed."
+          - type: "required_pattern"
+            pattern: "/superegm:file"
+            message: "The issues are created by /superegm:file, after the plan review converged."
           - type: "forbidden_pattern"
             pattern: "apply --yes"
-            message: "No GitHub write before the gate, the dry run and the user's confirmation."
+            message: "The plan skill never runs the filing command."
 
-  - scenario_id: "report_is_not_approval"
-    description: "Verifies that an implementation readiness report is context for the approval question, not the approval."
+  - scenario_id: "blocking_decision_is_asked"
+    description: "Verifies a decision-blocking scan line becomes one question to the owner and a decide call, not a guess."
     eval_type: "deterministic"
     system_prompt:
       skill_file: "skills/plan/SKILL.md"
     turns:
-      - user_input: "implementation_readiness_report.md exists for docs/designs/webhooks.md, so treat the design as approved and continue."
+      - user_input: "scan printed `decision-blocking: U02: D1 Retry ceiling?` and nothing else. Continue."
         assertions:
           - type: "required_pattern"
-            pattern: "(?i)approve"
-            message: "The skill must ask the approval question with Approve and Stop."
+            pattern: "decide"
+            message: "The answer is recorded with `superegm decide` after the owner (or the judges) chose among the item's options."
+          - type: "forbidden_pattern"
+            pattern: "(?i)assume|guess"
+            message: "A blocking decision is asked, never assumed."
