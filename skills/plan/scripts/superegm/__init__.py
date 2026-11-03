@@ -59,7 +59,6 @@ LABEL_COLOR = "1b6ef3"
 BRANCH_PREFIX = "superegm"
 WAITING_STATES = {"queued", "in_progress", "waiting", "requested", "pending"}
 GREEN_CONCLUSIONS = {"success", "neutral", "skipped"}
-NO_CI_SECONDS = 30 * 60
 WAIT_INTERVAL = 90
 EFFORTS = ("low", "medium", "high", "xhigh")
 MODEL_RE = re.compile(r"^[a-z0-9][a-z0-9.\-]{1,63}$")
@@ -1507,81 +1506,6 @@ def ci_verdict(ci):
   return "ci green" if not red else "ci red (" + ", ".join(str(n) for n in red) + ")"
 
 
-def unit_view(handoff: Handoff, uid):
-  repo, state = handoff.config["repo"], handoff.state
-  record = state["units"].get(uid, {})
-  number = record.get("number")
-  issue = gh_json(["api", f"repos/{repo}/issues/{number}"]) or {}
-  view = {"unit": uid, "number": number, "issue_state": issue.get("state"),
-          "state_reason": issue.get("state_reason"), "launched": record.get("launched"),
-          "pr": None, "head": None, "ci": None, "status": "waiting-for-pr", "landed": False,
-          "candidates": []}
-  chosen = (record.get("watch") or {}).get("number") or (record.get("pr") or {}).get("number")
-  if chosen:
-    pr = read_pr(repo, chosen)
-  else:
-    matches, candidates = discover_pr(handoff, uid, number)
-    pr = None
-    if len(matches) == 1:
-      pr = matches[0]
-    elif len(matches) > 1:
-      view["status"] = "ambiguous: PRs " + ", ".join(f"#{m['number']}" for m in matches) + " (choose with --watch)"
-    view["candidates"] = [c["number"] for c in candidates]
-  if pr:
-    if record.get("pr", {}).get("head") != pr["head"]:
-      pr["head_seen_at"] = NOW()
-    else:
-      pr["head_seen_at"] = record["pr"].get("head_seen_at", NOW())
-    record["pr"] = pr
-    view["pr"], view["head"] = pr["number"], pr["head"]
-    view["pr_state"] = "MERGED" if pr.get("merged_at") else (pr.get("state") or "OPEN").upper()
-    # A retarget (main -> an older release branch) changes the merge base and
-    # the diff while head and CI stay the same: it is a new review target.
-    view["base_ref"], view["base_sha"] = pr.get("base_ref"), pr.get("base_sha")
-    if pr["merged_at"]:
-      view["status"] = "merged"
-    else:
-      ci = read_ci(repo, pr["head"])
-      view["ci"] = ci
-      verdict = ci_verdict(ci)
-      if verdict == "waiting-for-ci" and not ci["check_runs"] and not ci["statuses"] \
-          and NOW() - pr["head_seen_at"] >= NO_CI_SECONDS:
-        verdict = "no-ci"
-      view["status"] = verdict
-  closed_done = issue.get("state") == "closed" and issue.get("state_reason") == "completed"
-  if pr and not pr.get("merged_at") and (pr.get("state") or "").upper() == "CLOSED":
-    # Terminal: the builder abandoned this PR. Never rediscover silently; the
-    # user picks the replacement with --watch.
-    view["status"] = f"pr #{pr['number']} closed unmerged (choose a replacement with --watch)"
-  override = record.get("landed_confirmed")
-  if override and record.get("landed_confirmation_void"):
-    override = None
-  if override and not closed_done:
-    # The exception is for an issue closed as completed with no watched PR; it
-    # lapses the moment either of those stops being true.
-    view["status"] = (f"landed confirmation no longer applies (issue is "
-                      f"{issue.get('state')}/{issue.get('state_reason')}): "
-                      f"re-confirm or watch a PR")
-    # Persist it: closing the issue as completed again must not silently
-    # revive a confirmation the user gave for an earlier state.
-    record["landed_confirmation_void"] = now_iso()
-    override = None
-  if override and pr:
-    view["status"] = (f"landed confirmation no longer applies (pr #{pr['number']} "
-                      f"is now visible): re-confirm or let it merge")
-    record["landed_confirmation_void"] = now_iso()
-    override = None
-  if override or (closed_done and pr and pr.get("merged_at")):
-    view["landed"], view["status"] = True, "landed"
-  elif closed_done and not pr:
-    view["status"] = "closed (no watched PR)"
-  elif view["candidates"] and view["status"] == "waiting-for-pr":
-    view["status"] = "candidate: PRs " + ", ".join(f"#{c}" for c in view["candidates"]) + " (confirm with --watch)"
-  record["status"] = view["status"]
-  state["units"][uid] = record
-  return view
-
-
 def issue_closed_completed(handoff: Handoff, uid) -> bool:
   record = handoff.state.get("units", {}).get(uid, {})
   issue = gh_json(["api", f"repos/{handoff.config['repo']}/issues/{record.get('number')}"]) or {}
@@ -1589,9 +1513,10 @@ def issue_closed_completed(handoff: Handoff, uid) -> bool:
 
 
 def status_pass(handoff: Handoff, save=True):
+  from superegm import status as events  # the unit view lives with the event lines it feeds (U09b)
   state = handoff.state
   state.setdefault("units", {})
-  views = {uid: unit_view(handoff, uid) for uid in handoff.graph.order}
+  views = {uid: events.unit_view(handoff, uid) for uid in handoff.graph.order}
   landed = {u for u, v in views.items() if v["landed"]}
   decisions = state.get("decisions", {})
   open_blocking = {}
@@ -1612,13 +1537,8 @@ def status_pass(handoff: Handoff, save=True):
                     and u not in landed]
   summary = {"landed": sorted(landed), "ready": ready, "in_flight": in_flight,
              "unlaunched_with_pr": unlaunched_prs, "open_blocking": {u: [d["id"] for d in ds] for u, ds in open_blocking.items()},
-             "units": {u: {"pr": v["pr"], "head": v["head"], "status": v["status"],
-                           "landed": v["landed"], "issue_state": v.get("issue_state"),
-                           "pr_state": v.get("pr_state"), "base_ref": v.get("base_ref"),
-                           "base_sha": v.get("base_sha"),
-                           "candidates": v["candidates"]} for u, v in views.items()},
+             "units": {u: {**events.fingerprint(v), "status": v["status"]} for u, v in views.items()},
              "at": now_iso()}
-  state["status"] = summary
   if save:
     save_state(handoff.artifact_dir, state)
   return summary, open_blocking
@@ -1633,7 +1553,7 @@ def print_status(handoff: Handoff, summary, open_blocking):
   for uid in handoff.graph.order:
     v = summary["units"][uid]
     record = state["units"].get(uid, {})
-    launched = " launched" if record.get("launched") else ""  # shortcut: the mark is {at, runcard} since U09; U09b rewrites status
+    launched = " launched" if record.get("launched") else ""
     pr = f"pr #{v['pr']} head {v['head'][:7]}" if v["pr"] else "no pr"
     print(f"{uid} #{record.get('number')}{launched}: {pr}; {v['status']}")
   for uid, ds in open_blocking.items():

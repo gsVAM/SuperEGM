@@ -384,6 +384,10 @@ class FakeGitHub:
     if match:
       issue = self.issues[int(match.group(1))]
       return self.ok({**issue, "labels": [{"name": l} for l in issue["labels"]]})
+    match = re.fullmatch(r"/issues/(\d+)/comments", rest)
+    if match:
+      assert paginate, args
+      return self.ok([self.comments.get(int(match.group(1)), [])])
     match = re.fullmatch(r"/issues/(\d+)/sub_issues", rest)
     if match:
       assert paginate, args
