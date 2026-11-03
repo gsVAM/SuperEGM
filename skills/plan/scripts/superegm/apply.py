@@ -139,9 +139,11 @@ def apply_writes(handoff: core.Handoff, writes, budget: Budget, save):
     save()
   units = state.setdefault("units", {})
   tracking = state.setdefault("tracking", {})
+  # Marker recovery: the issues this handoff created before a crash lost the
+  # state write, found by the 6-hex label and the section 9.1 marker line.
   listing = core.gh_pages(f"repos/{repo}/issues?labels="
-                     f"{urllib.parse.quote(handoff.handoff_label(), safe='')}"
-                     f"&state=all&per_page=100")
+                          f"{urllib.parse.quote(handoff_label(handoff), safe='')}"
+                          f"&state=all&per_page=100")
   for issue in listing:
     if "pull_request" in issue:
       continue
