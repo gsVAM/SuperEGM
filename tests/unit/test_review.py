@@ -431,3 +431,22 @@ def test_approve_spec_refusals(world, scenario, expect):
   code, out = approve(world, spec, cid, "--yes")
   assert code == 1 and expect in out and git(world, "rev-parse", "HEAD") == head, out
   assert not store(world.repo).path("approvals", SLUG).exists()
+
+
+# ---------------------------------------------------------------- S14: the handoff id
+
+@pytest.mark.parametrize("carried,extra,keeps", [
+  (True, {}, True),
+  (True, {"closed_at": "2026-11-03T00:00:00Z"}, False),
+  (False, {}, False),
+])
+def test_handoff_id_copy_rule(world, carried, extra, keeps):
+  spec, cid, rid = converged_spec(world)
+  assert approve(world, spec, cid, "--yes")[0] == 0
+  first = approval(world)["handoff_id"]
+  atomic_write(store(world.repo).path("state"), ({"handoff_id": first} if carried else {}) | extra)
+  spec2, cid2, rid2 = converged_spec(world, SPEC.replace("Text.", "Changed."))
+  assert rid2.endswith("-c2") and approve(world, spec2, cid2, "--yes")[0] == 0
+  second = approval(world)["handoff_id"]
+  assert (second == first) is keeps
+  assert second.endswith(hashlib.sha256(spec2.read_bytes()).hexdigest()[:6]) is not keeps
