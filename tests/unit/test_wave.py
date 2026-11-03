@@ -186,3 +186,43 @@ def test_report_rewrites_the_wave_report_and_prints_the_end_line(world):
   assert world.run("report", "--runcard", card2)[0] == 0 and s.path("wave_report", 2).is_file()
   code, out = world.run("report", "--runcard", "no-such-card")
   assert code == 1 and out.startswith("superegm: runcard: ")  # U03's main prefixes every HandoffError
+
+
+# ---------------------------------------------------------------- S3: the CI-wait bound and `--idle`
+
+
+@pytest.mark.parametrize("minutes,idle_at_31", [(None, True), (45, False)])
+def test_ci_wait_minutes_bounds_the_wait_in_time(world, minutes, idle_at_31):
+  cfg = world.repo / ".superegm/config.json"
+  if minutes:
+    cfg.write_text(json.dumps({**json.loads(cfg.read_text(encoding="utf-8")), "ci_wait_minutes": minutes}), encoding="utf-8")
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "pending"},
+                 U02={"pr": 71, "head": "b" * 40, "ci": "green", **CLEAN})
+  assert "idle: none" in world.run("report", "--runcard", card)[1]
+  card_json = json.loads(s.path("runcards", card).read_text(encoding="utf-8"))
+  assert [(h["unit"], h["head"][:7]) for h in card_json["heads"]] == [("U01", "aaaaaaa"), ("U02", "bbbbbbb")]
+  world.advance(29 * 60)
+  assert "idle: none" in world.run("report", "--runcard", card)[1]
+  world.advance(2 * 60)
+  code, out = world.run("report", "--runcard", card)
+  assert ("idle: U01" in out) is idle_at_31, out
+  if idle_at_31:
+    assert "## Idle\n- U01: ci pending for 31 min (ci_wait_minutes 30)" in s.path("wave_report", 1).read_text(encoding="utf-8")
+    assert "loop: ended" in out
+  # A new head restarts the clock; the first report of a new card starts it afresh.
+  state = json.loads(s.path("state").read_text(encoding="utf-8"))
+  state["status"]["units"]["U01"]["head"] = "c" * 40
+  atomic_write(s.path("state"), state)
+  assert "idle: none" in world.run("report", "--runcard", card)[1]
+
+
+def test_report_idle_names_a_launch_builder_refusal(world):
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", **CLEAN}, U02={"launched": False, "ready": True})
+  code, out = world.run("report", "--runcard", card, "--idle", "U02=launch-builder: the builder profile has plugins")
+  assert code == 0 and "idle: U02" in out and "loop: ended" in out, out
+  assert "## Idle\n- U02: launch-builder: the builder profile has plugins" in s.path("wave_report", 1).read_text(encoding="utf-8")
+  assert "idle: U02" in world.run("report", "--runcard", card)[1], "idle persists for the invocation"
+  assert "idle: none" in world.run("report", "--runcard", open_wave_card(world))[1], "and not beyond it"
+  assert world.run("report", "--runcard", card, "--idle", "U09=stalled")[0] == 1, "an unknown unit"
