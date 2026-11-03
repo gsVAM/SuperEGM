@@ -36,8 +36,8 @@ class Budget:
 
 
 def run(args):
-  plan = core.locate(args)
-  handoff = core.Handoff(plan)
+  plan, st = core.locate(args)
+  handoff = core.Handoff(plan, st)
   state = handoff.state
   repo = handoff.config["repo"]
   if not args.yes:

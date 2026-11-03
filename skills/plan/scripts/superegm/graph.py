@@ -13,8 +13,8 @@ def register(subparsers):
 
 
 def run(args):
-  plan = core.locate(args)
-  handoff = core.Handoff(plan)
+  plan, st = core.locate(args)
+  handoff = core.Handoff(plan, st)
   handoff.write_graph_files()
   g = handoff.graph
   print(f"handoff {handoff.handoff_id} on {handoff.config['repo']} (remote {handoff.config['remote']}): "

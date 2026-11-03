@@ -21,8 +21,8 @@ def register(subparsers):
 
 
 def run(args):
-  plan = core.locate(args)
-  handoff = core.Handoff(plan)
+  plan, st = core.locate(args)
+  handoff = core.Handoff(plan, st)
   handoff.write_graph_files()
   state = handoff.state
   plan_sha, bodies_sha = core.gate_hashes(handoff)
@@ -35,8 +35,8 @@ def run(args):
     print("readiness recorded")
     return 0
   if args.reviewed:
-    core.write_text(handoff.artifact_dir / "gate_reviewed_plan.md", core.read_text(handoff.plan_path))
-    core.write_text(handoff.artifact_dir / "gate_reviewed_bodies.md", handoff.bodies_text())
+    core.atomic_write(handoff.artifact_dir / "gate_reviewed_plan.md", core.read_text(handoff.plan_path))
+    core.atomic_write(handoff.artifact_dir / "gate_reviewed_bodies.md", handoff.bodies_text())
     gate["reviewed"] = {"round": args.round, "plan_sha256": plan_sha, "bodies_sha256": bodies_sha}
     core.save_state(handoff.artifact_dir, state)
     print(f"round {args.round}: reviewed pair recorded ({plan_sha[:12]}, {bodies_sha[:12]})")
@@ -66,7 +66,7 @@ def run(args):
         old = core.read_text(handoff.artifact_dir / f"gate_reviewed_{name.split('_')[1]}")
         diff += difflib.unified_diff(old.splitlines(True), current.splitlines(True),
                                      f"reviewed/{name}", f"current/{name}")
-      core.write_text(handoff.artifact_dir / "gate_unreviewed.diff", "".join(diff))
+      core.atomic_write(handoff.artifact_dir / "gate_unreviewed.diff", "".join(diff))
       state["gate_unreviewed_diff"] = "gate_unreviewed.diff"
     core.save_state(handoff.artifact_dir, state)
     print("gate accepted at the cap" + (": unreviewed changes in gate_unreviewed.diff" if changed else ""))

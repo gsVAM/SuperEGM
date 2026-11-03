@@ -15,8 +15,8 @@ def register(subparsers):
 
 
 def run(args):
-  plan = core.locate(args)
-  handoff = core.Handoff(plan)
+  plan, st = core.locate(args)
+  handoff = core.Handoff(plan, st)
   state = handoff.state
   core.require_receipt(state)
   core.require_repo(handoff)

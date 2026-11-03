@@ -27,9 +27,9 @@ def run(args):
   Cleanup guards read the saved round state, not the run folder, so a round
   that is reported in chat but never recorded stays `launched` and blocks
   `prepare --remove` for ever."""
-  plan = core.locate(args)
-  handoff = core.Handoff(plan)
-  data = core.load_foreman(handoff.artifact_dir, args.unit)
+  plan, st = core.locate(args)
+  handoff = core.Handoff(plan, st)
+  data = core.load_foreman(handoff.store, args.unit)
   record = (data.get("rounds") or {}).get(str(args.round))
   if not record:
     raise core.HandoffError(f"{args.unit} has no round {args.round} to collect")
@@ -57,7 +57,7 @@ def run(args):
       record["run_status"] = f"not run (interrupted: {args.not_run})"
       record.update({"phase": "collected", "collected_at": core.now_iso(), "verdict": None})
       data["phase"] = "collected"
-      core.save_foreman(handoff.artifact_dir, args.unit, data)
+      core.save_foreman(handoff.store, args.unit, data)
       print(f"{args.unit} round {args.round}: collected ({record['run_status']}; run folder "
             f"kept; the worktree stays until a human removes it or the unit lands)")
       return 0
@@ -100,7 +100,7 @@ def run(args):
   record.update({"phase": "collected", "collected_at": core.now_iso(),
                  "verdict": args.verdict, "head": record.get("head")})
   data["phase"] = "collected"
-  core.save_foreman(handoff.artifact_dir, args.unit, data)
+  core.save_foreman(handoff.store, args.unit, data)
   print(f"{args.unit} round {args.round}: collected ({record['run_status']}"
         + (f", verdict {args.verdict}" if args.verdict else "") + ")")
   return 0

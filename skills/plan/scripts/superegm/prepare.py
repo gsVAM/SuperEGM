@@ -25,8 +25,8 @@ def register(subparsers):
 
 
 def run(args):
-  plan = core.locate(args)
-  handoff = core.Handoff(plan)
+  plan, st = core.locate(args)
+  handoff = core.Handoff(plan, st)
   state = handoff.state
   root = Path(state.get("repo_root") or handoff.repo_root)
   remote, repo = state.get("remote") or handoff.config["remote"], handoff.config["repo"]
@@ -55,7 +55,7 @@ def run(args):
         f"{args.unit} watches PR #{selected} but the recorded observation "
         f"describes #{pr['number']}: run `status` again before preparing")
   number = pr["number"]
-  foreman = core.load_foreman(handoff.artifact_dir, args.unit)
+  foreman = core.load_foreman(handoff.store, args.unit)
   rounds = foreman.setdefault("rounds", {})
   running = [r for r, v in rounds.items()
              if v.get("phase") == "launched"
@@ -96,7 +96,7 @@ def run(args):
       # say so, and finish. Removal is a human's option, never an agent's
       # inference (panel, cap decision, Q2).
       rounds.setdefault(str(args.round), {})["phase"] = "kept"
-      core.save_foreman(handoff.artifact_dir, args.unit, foreman)
+      core.save_foreman(handoff.store, args.unit, foreman)
       print(f"kept {tree}: round {unresolved[0]} of {args.unit} recorded a launch with no "
             f"terminal result, so this helper cannot know its runner has stopped reading "
             f"the worktree. Landing is complete; the worktree and refs stay. A human may "
@@ -110,7 +110,7 @@ def run(args):
       core.run_git(["worktree", "prune"], root)
     foreman["phase"] = "cleaned"
     rounds.setdefault(str(args.round), {})["phase"] = "cleaned"
-    core.save_foreman(handoff.artifact_dir, args.unit, foreman)
+    core.save_foreman(handoff.store, args.unit, foreman)
     print(f"cleaned {tree}")
     return 0
   tree = core.worktree_path(handoff.handoff_id, args.unit, number)
@@ -129,8 +129,8 @@ def run(args):
   foreman.update({"pr": number, "phase": "fetched", "round": args.round})
   rounds.setdefault(str(args.round), {}).update(
       {"pr": number, "phase": "fetched", "worktree": str(tree)})
-  core.save_foreman(handoff.artifact_dir, args.unit, foreman)
-  core.save_foreman(handoff.artifact_dir, args.unit, foreman)
+  core.save_foreman(handoff.store, args.unit, foreman)
+  core.save_foreman(handoff.store, args.unit, foreman)
   fetched = core.run_git(["rev-parse", f"refs/egm/pr/{number}"], root).strip()
   if fetched != pr["head"]:
     print(f"head-moved: refs/egm/pr/{number} is {fetched[:7]}, status recorded {pr['head'][:7]}; run status again")
@@ -157,11 +157,11 @@ def run(args):
   diff = subprocess.run(["git", "-C", str(tree), "diff", "--no-ext-diff", "--no-textconv", "--binary",
                          merge_base, "--"], capture_output=True, check=True).stdout
   diff_path = handoff.artifact_dir / f"pr_{number}_r{args.round}.diff"
-  diff_path.write_bytes(diff)
+  core.atomic_write(diff_path, diff)
   ci = core.read_ci(repo, pr["head"])
   ci["verdict"] = core.ci_verdict(ci)
   ci_path = handoff.artifact_dir / f"ci_{number}_r{args.round}.json"
-  core.write_text(ci_path, json.dumps(ci, indent=2) + "\n")
+  core.atomic_write(ci_path, json.dumps(ci, indent=2) + "\n")
   round_record = {"pr": number, "phase": "prepared", "worktree": str(tree), "head": pr["head"],
                   "base_ref": pr["base_ref"], "base_sha": pr["base_sha"], "merge_base": merge_base,
                   "diff": str(diff_path), "ci": str(ci_path), "ci_verdict": ci["verdict"]}
@@ -169,7 +169,7 @@ def run(args):
   # `--clean` resolve from, and a later round may watch a different PR.
   foreman.setdefault("rounds", {}).setdefault(str(args.round), {}).update(round_record)
   foreman.update({"phase": "prepared", "worktree": str(tree), "head": pr["head"], "merge_base": merge_base})
-  core.save_foreman(handoff.artifact_dir, args.unit, foreman)
+  core.save_foreman(handoff.store, args.unit, foreman)
   if args.runner:
     if not core.MODEL_RE.match(args.model or "") or args.effort not in core.EFFORTS:
       raise core.HandoffError("--runner needs --model matching the allowlist and --effort in low|medium|high|xhigh")
@@ -182,7 +182,7 @@ def run(args):
             f"--base '{merge_base}' --feedback '{brief}' --model {args.model} --effort {args.effort} "
             f"--timeout 3600 --artifacts \"${{TMPDIR:-/tmp}}/egm-astra\"")
     launch = handoff.artifact_dir / f"foreman_{args.unit}_r{args.round}_launch.md"
-    core.write_text(launch, f"Bash timeout: 3900000 ms (run_in_background: true, from the main conversation)\n\n    {line}\n")
+    core.atomic_write(launch, f"Bash timeout: 3900000 ms (run_in_background: true, from the main conversation)\n\n    {line}\n")
     print(f"launch line in {launch}")
   print(f"prepared: worktree {tree} at {pr['head'][:7]}, merge base {merge_base[:7]}, "
         f"diff {diff_path.name}, {ci['verdict']} ({ci_path.name})")

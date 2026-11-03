@@ -13,8 +13,8 @@ def register(subparsers):
 
 
 def run(args):
-  plan = core.locate(args)
-  handoff = core.Handoff(plan)
+  plan, st = core.locate(args)
+  handoff = core.Handoff(plan, st)
   state = handoff.state
   if not state.get("gate_plan_sha256") or not state.get("gate_bodies_sha256"):
     raise core.HandoffError("the gate has not passed: no gate_plan_sha256 / gate_bodies_sha256 in the state")
@@ -68,7 +68,7 @@ def run(args):
                 "```markdown", item[4].rstrip("\n"), "```", ""]
   lines += [f"- sub-issue: {w[1]} under the tracking issue" for w in subs]
   lines += [f"- blocked-by: {w[1]} blocked by {w[2]}" for w in blocked]
-  core.write_text(handoff.artifact_dir / "handoff_dryrun.md", "\n".join(lines) + "\n")
+  core.atomic_write(handoff.artifact_dir / "handoff_dryrun.md", "\n".join(lines) + "\n")
   state["labels"] = labels
   state["confirmed_sha256"] = confirmed
   # The confirmed snapshot is the contract the user approved. Keep the write

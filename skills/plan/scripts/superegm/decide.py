@@ -17,8 +17,8 @@ def register(subparsers):
 
 
 def run(args):
-  plan = core.locate(args)
-  handoff = core.Handoff(plan)
+  plan, st = core.locate(args)
+  handoff = core.Handoff(plan, st)
   unit = handoff.plan.units.get(args.unit)
   if not unit:
     raise core.HandoffError(f"unknown unit {args.unit}")
@@ -47,9 +47,9 @@ def run(args):
                                                     "fingerprint": fingerprint,
                                                     "published": None}
   core.save_state(handoff.artifact_dir, handoff.state)
-  core.write_text(handoff.unit_file(args.unit), handoff.unit_file_text(args.unit))
+  core.atomic_write(handoff.unit_file(args.unit), handoff.unit_file_text(args.unit))
   comment = handoff.artifact_dir / f"decision_comment_{args.unit}_{args.decision}.md"
-  core.write_text(comment, f"**Decision {args.decision}** ({decision['question']}): {args.answer}\n")
+  core.atomic_write(comment, f"**Decision {args.decision}** ({decision['question']}): {args.answer}\n")
   print(f"recorded {key}; re-rendered {handoff.unit_file(args.unit).name}; comment in {comment.name}")
   print(f"NOT YET PUBLISHED: post {comment.name} on the issue, then run "
         f"`decide --state '{core.state_path(handoff.artifact_dir)}' --unit {args.unit} "

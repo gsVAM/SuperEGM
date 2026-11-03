@@ -14,7 +14,6 @@ import superegm as core
 def register(subparsers):
   p = core.add_parser(subparsers, "approve-spec", "check the design and record the user's approval")
   p.add_argument("--design", required=True)
-  p.add_argument("--artifacts", required=True, help="the artifact directory")
   p.add_argument("--evidence")
   p.add_argument("--yes", action="store_true", help="the user answered Approve")
   p.set_defaults(run=run)
@@ -22,12 +21,11 @@ def register(subparsers):
 
 def run(args):
   design = Path(args.design).expanduser().resolve()
-  artifacts = Path(args.artifacts).expanduser().resolve()
-  artifacts.mkdir(parents=True, exist_ok=True)
-  core.ARTIFACT_DIR = artifacts
   if not design.is_file():
     raise core.HandoffError(f"design {design} does not exist")
   root = core.git_toplevel(design)
+  artifacts = core.store(root).root
+  artifacts.mkdir(parents=True, exist_ok=True)
   if not core.run_git(["ls-files", "--error-unmatch", "--", str(design)], root, check=False).strip():
     raise core.HandoffError(f"{design} is not tracked by git (an ignored or untracked "
                        f"file passes a clean `status`): commit it first (Phase 4)")

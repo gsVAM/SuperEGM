@@ -16,8 +16,8 @@ def register(subparsers):
 
 
 def run(args):
-  plan = core.locate(args)
-  handoff = core.Handoff(plan)
+  plan, st = core.locate(args)
+  handoff = core.Handoff(plan, st)
   if args.comment:
     path = Path(args.comment).expanduser().resolve()
     problems = core.scan_text(core.read_text(path), handoff.config, "comment", label=path.name)

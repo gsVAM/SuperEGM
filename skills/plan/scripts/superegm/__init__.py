@@ -63,6 +63,7 @@ MODEL_RE = re.compile(r"^[a-z0-9][a-z0-9.\-]{1,63}$")
 
 DEFAULT_CONFIG = {
     "repo": None,
+    "artifacts_dir": None,
     "labels": {"unit": "egm:unit", "wave_prefix": "egm:wave-",
                "handoff_prefix": "egm:handoff-", "tracking": "egm:tracking",
                "extra": []},
@@ -129,8 +130,109 @@ def read_text(path: Path) -> str:
   return path.read_text(encoding="utf-8")
 
 
-def write_text(path: Path, text: str) -> None:
-  path.write_text(text, encoding="utf-8")
+def atomic_write(path: Path, obj) -> None:
+  """Write `obj` (text, bytes, or anything else as JSON) through a temp file
+  and `os.replace`, creating parents. Inside the store, only a kind the
+  running subcommand declared in its `WRITES` may be written."""
+  path = Path(path)
+  if CURRENT_WRITES is not None and STORE is not None and STORE.holds(path):
+    kind = STORE.kind_of(path)
+    if kind not in CURRENT_WRITES:
+      raise HandoffError(f"{CURRENT_SUBCOMMAND} may not write {kind} ({path})")
+  path.parent.mkdir(parents=True, exist_ok=True)
+  tmp = path.with_name(path.name + f".tmp{os.getpid()}")
+  if isinstance(obj, bytes):
+    tmp.write_bytes(obj)
+  elif isinstance(obj, str):
+    tmp.write_text(obj, encoding="utf-8")
+  else:
+    tmp.write_text(json.dumps(obj, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+  os.replace(tmp, path)
+
+
+def spec_slug(path) -> str:
+  return Path(path).stem
+
+
+class Store:
+  """The files under `artifacts_dir`; every unit-keyed kind lives under the
+  handoff's 6-hex prefix so two handoffs share one store."""
+
+  FILES = {"state": "state.json", "journal": "journal.md", "plan": "handoff_plan.md",
+           "units": "handoff_units.json", "bodies": "handoff_bodies.md"}
+  KEYED = ("unit", "foreman", "launches", "worktrees", "review")
+
+  def __init__(self, root: Path, handoff_id: str | None = None):
+    self.root = Path(root)
+    self.handoff_id = handoff_id
+
+  def path(self, kind, *parts) -> Path:
+    parts = [str(p) for p in parts]
+    if kind in self.FILES:
+      return self.root / self.FILES[kind]
+    if kind == "report":
+      return self.root / f"wave_{parts[0]}_report.md"
+    if kind in ("approvals", "runcards"):
+      return self.root / kind / f"{parts[0]}.json"
+    if kind in ("reviews", "judges", "file"):
+      return self.root.joinpath(*([kind] if kind != "file" else []), *parts)
+    if kind not in self.KEYED:
+      raise HandoffError(f"unknown store kind {kind}")
+    if not self.handoff_id:
+      raise HandoffError("no handoff in this store: run approve-spec and graph first")
+    base = self.root / self.handoff_id[-6:]
+    if kind == "unit":
+      return base / f"unit_{parts[0]}.md"
+    if kind == "foreman":
+      return base / "foreman" / f"{parts[0]}.json"
+    if kind == "launches":
+      name = parts[0] if "." in parts[0] else f"{parts[0]}.json"
+      return base.joinpath("launches", name, *parts[1:])
+    if kind == "review":
+      number = parts[1] if parts[1].startswith("pr") else f"pr{parts[1]}"
+      return base.joinpath("review", parts[0], number, *parts[2:])
+    return base.joinpath(kind, *parts)
+
+  def holds(self, path: Path) -> bool:
+    return Path(path).resolve().is_relative_to(self.root.resolve())
+
+  def kind_of(self, path: Path) -> str:
+    parts = Path(path).resolve().relative_to(self.root.resolve()).parts
+    names = {v: k for k, v in self.FILES.items()}
+    if len(parts) == 1:
+      if parts[0] in names:
+        return names[parts[0]]
+      return "report" if re.fullmatch(r"wave_\d+_report\.md", parts[0]) else "file"
+    if parts[0] in ("approvals", "runcards", "reviews", "judges"):
+      return parts[0]
+    if re.fullmatch(r"[0-9a-f]{6}", parts[0]):
+      if len(parts) == 2 and re.fullmatch(r"unit_.+\.md", parts[1]):
+        return "unit"
+      if parts[1] in self.KEYED:
+        return parts[1]
+    return "file"
+
+
+STORE = None
+
+
+def store(repo_root: Path) -> Store:
+  """The store `.superegm/config.json` names, with the handoff `state.json` records."""
+  global STORE
+  root = Path(load_config(repo_root)["artifacts_dir"])
+  STORE = Store(root, handoff_id=load_state(root).get("handoff_id"))
+  return STORE
+
+
+def journal(store: Store, line: str) -> None:
+  """Append one fact; `O_APPEND` keeps concurrent lines whole."""
+  path = store.path("journal")
+  path.parent.mkdir(parents=True, exist_ok=True)
+  fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+  try:
+    os.write(fd, f"{now_iso()} {line}\n".encode("utf-8"))
+  finally:
+    os.close(fd)
 
 
 def now_iso() -> str:
@@ -209,15 +311,14 @@ def _subprocess_gh(args, cwd, token=None):
 GH = _subprocess_gh
 SLEEP = time.sleep
 NOW = time.time
-ARTIFACT_DIR = Path.cwd()
 
 
 def gh(args, *, token=None) -> str:
-  """Run `gh <args>` with cwd = the artifact directory; raise GhError on failure.
+  """Run `gh <args>` with cwd = the store; raise GhError on failure.
 
   `token`, when given, is the account the call runs as (GH_TOKEN)."""
   args = [str(a) for a in args]
-  code, out, err = GH(args, ARTIFACT_DIR, token=token)
+  code, out, err = GH(args, STORE.root if STORE else Path.cwd(), token=token)
   if code != 0:
     raise GhError(args, code, out, err)
   return out
@@ -280,10 +381,10 @@ def parse_remote_url(url: str):
 
 
 def load_config(repo_root: Path) -> dict:
-  """Read `.egm/handoff.json`; defaults when missing; unknown keys stop."""
+  """Read `.superegm/config.json`; defaults when missing; unknown keys stop."""
   config = json.loads(json.dumps(DEFAULT_CONFIG))
-  path = repo_root / ".egm" / "handoff.json"
-  config["_source"] = str(path) if path.is_file() else "defaults (no .egm/handoff.json)"
+  path = repo_root / ".superegm" / "config.json"
+  config["_source"] = str(path) if path.is_file() else "defaults (no .superegm/config.json)"
   if path.is_file():
     data = json.loads(read_text(path))
     unknown = set(data) - set(DEFAULT_CONFIG)
@@ -305,6 +406,11 @@ def load_config(repo_root: Path) -> dict:
                          "set `repo` in .egm/handoff.json")
   if not REPO_RE.match(config["repo"]):
     raise HandoffError(f"invalid repo `{config['repo']}` in {path}")
+  artifacts = config["artifacts_dir"]
+  if not artifacts or not Path(artifacts).is_absolute() \
+      or Path(artifacts).resolve().is_relative_to(repo_root.resolve()):
+    raise HandoffError(f"{path}: artifacts_dir must be an absolute path outside the working tree "
+                       f"(run `superegm init`)")
   labels = config["labels"]
   for name in (labels["unit"], labels["tracking"], *labels["extra"]):
     if not LABEL_RE.match(name):
@@ -630,13 +736,14 @@ def topo_order(preds):
 class Handoff:
   """A parsed plan, its graph, config, design facts and rendered bodies."""
 
-  def __init__(self, plan_path: Path, state=None):
+  def __init__(self, plan_path: Path, store: Store, state=None):
     self.plan_path = plan_path.resolve()
-    self.artifact_dir = self.plan_path.parent
+    self.store = store
+    self.artifact_dir = store.root
     self.plan = Plan(self.plan_path)
     design = Path(self.plan.design).expanduser()
     if not design.is_absolute():
-      design = (self.artifact_dir / design).resolve()
+      design = (self.plan_path.parent / design).resolve()
     if not design.is_file():
       raise HandoffError(f"design file {design} does not exist")
     design = design.resolve()
@@ -655,6 +762,7 @@ class Handoff:
     self.graph = Graph(self.plan)
     slug = re.sub(r"[^a-z0-9]+", "-", design.stem.lower()).strip("-")[:20].rstrip("-")
     self.handoff_id = f"{slug}-{self.design_sha[:6]}"
+    store.handoff_id = self.handoff_id
     require_binding(self.artifact_dir, self.handoff_id, self.config["repo"])
     self.state = state if state is not None else load_state(self.artifact_dir)
     # Repository identity folds case (GitHub does), but the canonical write
@@ -811,7 +919,7 @@ class Handoff:
     return "# Rendered issue bodies (creation order)\n\n" + "\n".join(parts)
 
   def unit_file(self, uid):
-    return self.artifact_dir / f"unit_{uid}.md"
+    return self.store.path("unit", uid)
 
   def unit_file_text(self, uid):
     unit = self.plan.units[uid]
@@ -854,7 +962,7 @@ class Handoff:
     else:
       new_text = text.rstrip("\n") + "\n\n" + section
     if new_text != text:
-      write_text(self.plan_path, new_text)
+      atomic_write(self.plan_path, new_text)
       self.plan = Plan(self.plan_path)
     units = {u: self.plan.units[u].to_json(self.graph.wave[u], self.graph.preds[u])
              for u in self.graph.order}
@@ -865,10 +973,10 @@ class Handoff:
             "critical_path": self.graph.critical_path,
             "edges": [{"from": a, "to": b, "kind": k} for a, b, k in self.graph.edges],
             "units": units}
-    write_text(self.artifact_dir / "handoff_units.json", json.dumps(data, indent=2) + "\n")
+    atomic_write(self.store.path("units"), data)
     for uid in self.graph.order:
-      write_text(self.unit_file(uid), self.unit_file_text(uid))
-    write_text(self.artifact_dir / "handoff_bodies.md", self.bodies_text())
+      atomic_write(self.unit_file(uid), self.unit_file_text(uid))
+    atomic_write(self.store.path("bodies"), self.bodies_text())
     previous = self.state.get("handoff_id")
     if previous and previous != self.handoff_id:
       # Nothing was created (require_binding would have refused otherwise), so
@@ -917,7 +1025,7 @@ def fill_numbers(body: str, numbers: dict, tracking=None) -> str:
 
 
 def state_path(artifact_dir: Path) -> Path:
-  return artifact_dir / "handoff_state.json"
+  return Path(artifact_dir) / "state.json"
 
 
 def load_state(artifact_dir: Path) -> dict:
@@ -928,10 +1036,7 @@ def load_state(artifact_dir: Path) -> dict:
 def save_state(artifact_dir: Path, state: dict) -> None:
   """Replace the state file atomically: a truncating write interrupted here
   leaves invalid JSON and no handoff can be resumed from it."""
-  path = state_path(artifact_dir)
-  tmp = path.with_name(path.name + f".tmp{os.getpid()}")
-  tmp.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-  os.replace(tmp, path)
+  atomic_write(state_path(artifact_dir), state)
 
 
 def normalise(body: str) -> str:
@@ -1003,15 +1108,14 @@ CURRENT_SUBCOMMAND = None
 
 
 def locate(args):
-  """Resolve the plan path from --plan and set ARTIFACT_DIR."""
-  global ARTIFACT_DIR
+  """The store of the repository the working directory is in, and the plan."""
+  st = store(git_toplevel(Path.cwd()))
   if not getattr(args, "plan", None):
     raise HandoffError("state holds no plan path: run `graph --plan <file>` first")
   plan = Path(args.plan).expanduser().resolve()
   if not plan.is_file():
     raise HandoffError(f"plan {plan} does not exist")
-  ARTIFACT_DIR = plan.parent
-  return plan
+  return plan, st
 
 
 def gate_hashes(handoff: Handoff):
@@ -1390,22 +1494,15 @@ def print_status(handoff: Handoff, summary, open_blocking):
 # ---------------------------------------------------------------- prepare
 
 
-def foreman_state_path(artifact_dir: Path, uid):
-  return artifact_dir / f"foreman_{uid}_state.json"
-
-
-def load_foreman(artifact_dir, uid):
-  path = foreman_state_path(artifact_dir, uid)
+def load_foreman(store: Store, uid):
+  path = store.path("foreman", uid)
   return json.loads(read_text(path)) if path.is_file() else {"unit": uid, "rounds": {}}
 
 
-def save_foreman(artifact_dir, uid, data):
+def save_foreman(store: Store, uid, data):
   """Atomic, like the handoff state: a partial write here loses the run folder
   that the next session needs to resume collection."""
-  path = foreman_state_path(artifact_dir, uid)
-  tmp = path.with_name(path.name + f".tmp{os.getpid()}")
-  tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-  os.replace(tmp, path)
+  atomic_write(store.path("foreman", uid), data)
 
 
 def worktree_path(handoff_id, uid, pr):

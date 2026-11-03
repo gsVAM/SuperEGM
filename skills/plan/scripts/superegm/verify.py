@@ -118,6 +118,6 @@ def run_verify(handoff: core.Handoff, writes=None):
 
 
 def run(args):
-  plan = core.locate(args)
-  handoff = core.Handoff(plan)
+  plan, st = core.locate(args)
+  handoff = core.Handoff(plan, st)
   return run_verify(handoff)

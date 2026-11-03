@@ -131,13 +131,13 @@ def test_scan_command_over_rendered_bodies(world):
 
 def test_approve_checks_and_records(world):
   design = world.repo / "docs/designs/sample.md"
-  code, out = world.run("approve-spec", "--design", design, "--artifacts", world.artifacts)
+  code, out = world.run("approve-spec", "--design", design)
   assert code == 0 and "Approve `" in out and "Options: Approve | Stop" in out
-  code, out = world.run("approve-spec", "--design", design, "--artifacts", world.artifacts, "--yes")
+  code, out = world.run("approve-spec", "--design", design, "--yes")
   assert code == 0
   assert state_of(world)["approval"]["answer"] == "Approve"
   design.write_text(DESIGN + "\nchanged\n", encoding="utf-8")
-  code, out = world.run("approve-spec", "--design", design, "--artifacts", world.artifacts)
+  code, out = world.run("approve-spec", "--design", design)
   assert code == 1 and "tracked but not clean" in out
 
   code, out = world.run("graph", "--plan", world.plan)
@@ -146,7 +146,7 @@ def test_approve_checks_and_records(world):
   (world.repo / "docs/designs/plain.md").write_text("# Plain\n\nNo plan.\n", encoding="utf-8")
   git(["add", "-A"], world.repo)
   git(["commit", "-qm", "plain"], world.repo)
-  code, out = world.run("approve-spec", "--design", world.repo / "docs/designs/plain.md", "--artifacts", world.artifacts)
+  code, out = world.run("approve-spec", "--design", world.repo / "docs/designs/plain.md")
   assert code == 1 and "Detailed Implementation Plan" in out and "egm-draft" in out
 
 
@@ -155,7 +155,7 @@ def test_approve_refuses_an_untracked_or_ignored_design(world):
   design = world.repo / "docs/designs/ignored.md"
   design.write_text(DESIGN, encoding="utf-8")
   (world.repo / ".gitignore").write_text("docs/designs/ignored.md\n", encoding="utf-8")
-  code, out = world.run("approve-spec", "--design", design, "--artifacts", world.artifacts)
+  code, out = world.run("approve-spec", "--design", design)
   assert code == 1 and "not tracked by git" in out
 
 
@@ -800,7 +800,7 @@ def test_a_different_design_may_not_reuse_a_directory_that_created_issues(world)
   other.write_text(DESIGN.replace("# Webhook", "# Other"), encoding="utf-8")
   git(["add", "-A"], world.repo)
   git(["commit", "-qm", "other"], world.repo)
-  code, out = world.run("approve-spec", "--design", other, "--artifacts", world.artifacts, "--yes")
+  code, out = world.run("approve-spec", "--design", other, "--yes")
   assert code == 1 and "new artifact directory" in out and "Nothing was changed" in out
   state = state_of(world)
   assert state["design"]["path"].endswith("sample.md")
@@ -811,10 +811,10 @@ def test_a_different_design_may_not_reuse_a_directory_that_created_issues(world)
 def test_approval_binds_to_the_design_it_displayed(world):
   """R2-06: the question shows a hash; --yes must not silently approve another."""
   design = world.repo / "docs/designs/sample.md"
-  assert world.run("approve-spec", "--design", design, "--artifacts", world.artifacts)[0] == 0
+  assert world.run("approve-spec", "--design", design)[0] == 0
   design.write_text(DESIGN + "\nlater edit\n", encoding="utf-8")
   git(["commit", "-qam", "later"], world.repo)
-  code, out = world.run("approve-spec", "--design", design, "--artifacts", world.artifacts, "--yes")
+  code, out = world.run("approve-spec", "--design", design, "--yes")
   assert code == 1 and "changed since the question was asked" in out
   assert "approval" not in state_of(world)
 
@@ -1145,6 +1145,7 @@ def test_collect_accepts_a_round_whose_lane_never_launched(world):
   applied(world)
   data = {"unit": "U01", "rounds": {"1": {"phase": "prepared", "pr": 70,
                                           "worktree": "/tmp/egm-wave/x"}}}
+  foreman_path(world, "U01").parent.mkdir(parents=True)
   foreman_path(world, "U01").write_text(json.dumps(data), encoding="utf-8")
   code, out = world.run("collect", "--plan", world.plan, "--unit", "U01", "--round", 1)
   assert code == 1 and "--not-run" in out, out

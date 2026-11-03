@@ -26,9 +26,9 @@ def run(args):
   the prepare subagent has already returned and the collect subagent is not
   spawned until the run completes, so a session that ends in between restarts
   the round and abandons a finished Astra run."""
-  plan = core.locate(args)
-  handoff = core.Handoff(plan)
-  data = core.load_foreman(handoff.artifact_dir, args.unit)
+  plan, st = core.locate(args)
+  handoff = core.Handoff(plan, st)
+  data = core.load_foreman(handoff.store, args.unit)
   rounds = data.setdefault("rounds", {})
   record = rounds.setdefault(str(args.round), {})
   if args.not_run:
@@ -61,7 +61,7 @@ def run(args):
       return 0
     record.update({"phase": "launched", "run_folder": str(folder),
                    "status": "running", "run_status": "running", "at": core.now_iso()})
-  core.save_foreman(handoff.artifact_dir, args.unit, data)
+  core.save_foreman(handoff.store, args.unit, data)
   print(f"{args.unit} round {args.round}: {record['status']} "
         f"({record['run_folder'] or 'no run folder'})")
   return 0
