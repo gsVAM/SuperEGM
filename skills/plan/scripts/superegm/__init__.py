@@ -1627,7 +1627,7 @@ def print_status(handoff: Handoff, summary, open_blocking):
   for uid in handoff.graph.order:
     v = summary["units"][uid]
     record = state["units"].get(uid, {})
-    launched = f" launched wave {record['launched']['wave']}" if record.get("launched") else ""
+    launched = " launched" if record.get("launched") else ""  # shortcut: the mark is {at, runcard} since U09; U09b rewrites status
     pr = f"pr #{v['pr']} head {v['head'][:7]}" if v["pr"] else "no pr"
     print(f"{uid} #{record.get('number')}{launched}: {pr}; {v['status']}")
   for uid, ds in open_blocking.items():
