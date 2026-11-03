@@ -6,15 +6,16 @@
   "max_in_flight": 5,
   "labels": {
     "unit": "superegm:unit",
-    "wave": "superegm:wave-",
-    "handoff": "superegm:handoff-",
+    "wave_prefix": "superegm:wave-",
+    "handoff_prefix": "superegm:handoff-",
     "tracking": "superegm:tracking",
-    "stopped": "superegm:stopped"
+    "stopped": "superegm:stopped",
+    "extra": []
   },
-  "issue_template": "superegm-body-v1",
+  "issue_template": null,
   "tracking_issue_title": "SuperEGM 1.0.0 handoff: 2026-11-03-superegm-design",
   "banned_terms": [],
-  "fix_request_mention": "",
+  "fix_request_mention": null,
   "allowed_mentions": [],
   "reviewers": {
     "spec": [
@@ -47,9 +48,20 @@
   "judges": {
     "min_vendors": 1,
     "members": [
-      "fable",
-      "opus",
-      "astra"
+      {
+        "name": "fable",
+        "via": "adapter",
+        "effort": "max"
+      },
+      {
+        "name": "opus",
+        "via": "adapter",
+        "effort": "max"
+      },
+      {
+        "name": "astra",
+        "via": "runner"
+      }
     ]
   },
   "builder": {
