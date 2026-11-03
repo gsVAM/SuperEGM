@@ -355,6 +355,15 @@ def test_apply_creates_labels_issues_and_links_in_order_and_a_rerun_writes_nothi
   assert len(state_of(world)["filings"]) == 1
 
 
+@pytest.mark.parametrize("mode, journaled", [("leavemealone", True), (None, False)])
+def test_apply_journals_the_automatic_create_in_leavemealone_mode(world, mode, journaled):
+  spec, plan, handoff_id, card = applied(world, mode=mode)
+  journal = (world.artifacts / "journal.md").read_text(encoding="utf-8")
+  assert (journal.count("Create: automatic (leavemealone)") == 1) is journaled, journal
+  assert world.run("apply", "--spec", spec, "--runcard", card, "--yes")[0] == 0  # a resume journals nothing again
+  assert (world.artifacts / "journal.md").read_text(encoding="utf-8").count("Create: automatic (leavemealone)") == int(journaled)
+
+
 def test_apply_state_saved_after_each_write_and_422_link_reread(world):
   spec, plan, handoff_id, card = dry_run(world)
   world.gh.link_422_once.add(("sub", 1))
