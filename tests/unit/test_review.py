@@ -199,3 +199,18 @@ def test_review_open_ids_panel_and_lane(world, kind, reviewers, astra, expect):
   assert (review["kind"], review["cycle"], review["runcard"], review["artifact"]) == (kind, 1, cid, artifact)
   assert review["reviewers"] == reviewers.split(",") + (["astra"] if lane else [])
   assert review["converged"] == "no" and review["converged_round"] is None and review["rulings"] == []
+
+
+# ---------------------------------------------------------------- S3: cycles
+
+def test_review_open_cycles(world):
+  _, _, rid = opened(world)
+  spec, cid, again = opened(world, reviewers="design")      # a re-typed skill resumes the open cycle
+  assert again == rid and rjson(world, rid)["reviewers"] == ["design", "zoom-out"]   # the panel cannot change
+  rounds(world, rid, cid, [HIGH(n) for n in range(1, 6)])
+  assert status(world, rid, cid)[0] == 2 and rule(world, rid, "stop", cid)[0] == 0
+  _, cid, rid2 = opened(world)
+  assert rid2 == f"spec-{SLUG}-c2" and rjson(world, rid2)["cycle"] == 2                 # stop closed c1
+  rounds(world, rid2, cid, [[]])
+  assert status(world, rid2, cid)[0] == 0 and opened(world)[2] == rid2                # converged, same bytes: same cycle
+  assert opened(world, text=SPEC.replace("Text.", "Changed."))[2] == f"spec-{SLUG}-c3"   # a spec change after convergence
