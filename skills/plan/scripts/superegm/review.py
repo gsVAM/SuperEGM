@@ -68,7 +68,7 @@ def run(args):
   if args.action == "post":
     print("superegm: review post is not built yet", file=sys.stderr)
     return 1
-  return {"open": open_review, "record": record_round}[args.action](args)
+  return {"open": open_review, "record": record_round, "settle": settle_finding}[args.action](args)
 
 
 # ---------------------------------------------------------------- the findings line
@@ -284,4 +284,47 @@ def record_round(args) -> int:
   save_review(st, rid, review)
   core.journal(st, f"review record {rid} round {n} {reviewer} what_ran {rnd['what_ran']} under {args.runcard}")
   print(f"round {n} {reviewer} recorded, what_ran {rnd['what_ran']}")
+  return 0
+
+
+# ---------------------------------------------------------------- settle
+
+
+def blocking(finding: dict) -> bool:
+  return finding["severity"] in ("high", "medium")
+
+
+def locate_finding(st: core.Store, rid: str, fid: str):
+  """`(round number, round, reviewer, finding)` of `fid` in any recorded round, completed or not."""
+  for n in round_numbers(st, rid):
+    rnd = load_round(st, rid, n)
+    for reviewer, record in rnd["reviewers"].items():
+      for finding in record["findings"]:
+        if finding["id"] == fid:
+          return n, rnd, reviewer, finding
+  raise core.HandoffError(f"review settle: no finding {fid}")
+
+
+def settle_finding(args) -> int:
+  st = core.store(core.git_toplevel(Path.cwd()))
+  rid, fid, disposition = args.review, args.finding, args.disposition
+  review = load_review(st, rid)
+  if review is None:
+    raise core.HandoffError(f"review {rid}: not opened")
+  card = bind(args, review)
+  n, rnd, reviewer, finding = locate_finding(st, rid, fid)
+  if review["kind"] == "head" and disposition == "fix-design":
+    raise core.HandoffError("review settle: fix-design is refused on a head")
+  if reviewer == "foreman" and finding["location"] == "ci":  # D2 (a): `collect` records it afresh each round
+    raise core.HandoffError("review settle: the CI finding is settled by no one")
+  if blocking(finding) and disposition in ("contested", "declined"):
+    if card["mode"] == "leavemealone" and not args.judges:
+      raise core.HandoffError(f"review settle: {fid} is {finding['severity']}: --judges required in leavemealone-mode")
+    if card["mode"] != "leavemealone" and not args.owner:
+      raise core.HandoffError(f"review settle: {fid} is {finding['severity']}: --owner required in normal mode")
+  finding["disposition"] = disposition
+  finding["ruling"] = "owner" if args.owner else f"judges:{args.judges}" if args.judges else None
+  core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
+  core.journal(st, f"review settle {rid} {fid} {disposition} by {finding['ruling'] or 'the elephant'} under {args.runcard}")
+  print(f"{fid} {disposition}")
   return 0
