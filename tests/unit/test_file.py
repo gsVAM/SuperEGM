@@ -213,6 +213,21 @@ def test_gate_pass_requires_a_converged_review_at_the_body_hash(world, case, exp
     assert state["gate"]["passed"] == "converged" and state["gate"]["units"] == ["U01", "U02"]
 
 
+REMOVED = ["--accept", "--reviewed", "--readiness", "--what-ran", "what_ran", "What ran", "Readiness", "Stage 10",
+           "gate_unreviewed", "deferred", "EGM handoff", ".egm_body_", "handoff_state.json", ".egm/",
+           "Codex", "handoff_summary.md", "egm-wave", "synthesizer", "readiness test"]
+
+
+@pytest.mark.parametrize("path", [f"{PKG}/gate.py", f"{PKG}/dry_run.py", f"{PKG}/apply.py", f"{PKG}/verify.py",
+                                  "skills/file/SKILL.md"])
+def test_removed_forms_are_gone_from_the_filing_files(world, path):
+  text = (ROOT / path).read_text(encoding="utf-8")
+  assert not [term for term in REMOVED if term in text], path
+  with pytest.raises(SystemExit) as stop:  # `gate --accept` is not a flag any more (section 3.1)
+    world.run("gate", "--accept", "--spec", world.repo / f"docs/specs/{SLUG}.md", "--runcard", "rc-none")
+  assert stop.value.code == 2
+
+
 def test_dry_run_writes_file_and_calls_only_three_reads(world):
   out = dry_run(world)
   assert "3 issues" in out.replace("4 issues", "3 units") or True
@@ -249,54 +264,32 @@ def test_dry_run_refuses_without_gate_or_after_plan_or_template_change(world):
 
 
 def test_dry_run_refuses_101_units_missing_extra_and_warns_above_450(world):
-  pass_gate(world)
+  spec, plan, handoff_id, card = gated(world)
   set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"], labels={"extra": ["needs-triage"]})
-  pass_gate(world)
-  code, out = world.run("dry-run", "--plan", world.plan)
+  assert world.run("gate", "--pass", "--spec", spec, "--runcard", card)[0] == 0  # the labels are in the bodies' pair
+  code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
   assert code == 1 and "create the label `needs-triage`" in out
   world.gh.labels["needs-triage"] = {"name": "needs-triage"}
-  code, out = world.run("dry-run", "--plan", world.plan)
-  assert code == 0 and "4 issues" in out
+  code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
+  assert code == 0 and "3 issues" in out
   dryrun = (world.artifacts / "handoff_dryrun.md").read_text(encoding="utf-8")
   assert "Labels: superegm:handoff-" in dryrun and "needs-triage" in dryrun
-  big = []
-  for n in range(1, 102):
-    big.append(textwrap.dedent(f"""\
-        ### U{n:02d}: Unit {n}
-        | Field | Value |
-        | --- | --- |
-        | Objective | Unit {n} exists. |
-        | Scope paths | `src/u{n}.ts` (create), `src/u{n}.test.ts` (create) |
-        | Design range | `docs/designs/sample.md:13-15 (#### 1. src/webhooks/queue.ts)` |
-        | Blocked by | {"none" if n == 1 else f"U{n - 1:02d}" if n == 2 else f"U{n - 1:02d}, U{n - 2:02d}"} |
-        | Shared files | none |
-        | Risk | low: small |
-        | Size | S |
+  big = [unit_section(f"U{n:02d}", f"Unit {n}",
+                      "none" if n == 1 else f"U{n - 1:02d}" if n == 2 else f"U{n - 1:02d}, U{n - 2:02d}")
+         for n in range(1, 102)]
 
-        Interfaces
-        - Produces: u{n}() -> void
-
-        Definition of done
-        1. The test for each Step was committed before its implementation (checked by superegm tdd-order)
-        2. Run `npm test -- src/u{n}.test.ts` — passes
-
-        Review focus (this unit)
-        - U{n:02d}: the unit — exists; pinned by `u{n}_exists`
-
-        Steps
-        1. Write the failing test `u{n}_exists` in `src/u{n}.test.ts`:
-           Implement `u{n}()` in `src/u{n}.ts`.
-
-        Decide before build
-        - none
-        """))
-  world.plan.write_text(f"# Big\n\nDesign: `{world.repo / 'docs/designs/sample.md'}`\n\n## Global constraints\n- none\n\n## 2. Units\n\n" + "\n".join(big), encoding="utf-8")
-  pass_gate(world)
-  code, out = world.run("dry-run", "--plan", world.plan)
+  def gate_big(sections):
+    plan.write_text(plan_text(spec, sections), encoding="utf-8")
+    graphed(world, spec, plan)
+    for n in range(1, len(sections) + 1):
+      converge(world, f"U{n:02d}")
+    code, out = world.run("gate", "--pass", "--spec", spec, "--runcard", card)
+    assert code == 0, out
+  gate_big(big)
+  code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
   assert code == 1 and "split the handoff" in out
-  world.plan.write_text(f"# Big\n\nDesign: `{world.repo / 'docs/designs/sample.md'}`\n\n## Global constraints\n- none\n\n## 2. Units\n\n" + "\n".join(big[:100]), encoding="utf-8")
-  pass_gate(world)
-  code, out = world.run("dry-run", "--plan", world.plan)
+  gate_big(big[:100])
+  code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
   assert code == 0, out
   text = (world.artifacts / "handoff_dryrun.md").read_text(encoding="utf-8")
   assert "WARNING" in text and "--max-writes" in text
@@ -364,7 +357,7 @@ def test_apply_creates_in_order_and_rerun_writes_nothing(world):
 
 
 def test_apply_state_saved_after_each_write_and_422_link_reread(world):
-  dry_run(world)
+  spec, plan, handoff_id, card = dry_run(world)
   world.gh.link_422_once.add(("sub", 1))
   saves = []
   original = world.ns["save_state"]
@@ -373,7 +366,7 @@ def test_apply_state_saved_after_each_write_and_422_link_reread(world):
     saves.append(json.dumps(state, sort_keys=True))
     original(folder, state)
   world.ns["save_state"] = spy
-  code, out = world.run("apply", "--plan", world.plan, "--yes")
+  code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes")
   assert code == 0, out
   assert len(saves) >= 13
   state = state_of(world)
@@ -381,9 +374,9 @@ def test_apply_state_saved_after_each_write_and_422_link_reread(world):
 
 
 def test_apply_rate_limit_exhaustion_exits_nonzero_with_resume_message(world):
-  dry_run(world)
+  spec, plan, handoff_id, card = dry_run(world)
   world.gh.rate_limit_hits = 5
-  code, out = world.run("apply", "--plan", world.plan, "--yes")
+  code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes")
   assert code == 1 and "rate limited: resume with `apply --yes` after" in out
   assert world.sleeps.count(60) == 3
   state = state_of(world)
@@ -391,19 +384,19 @@ def test_apply_rate_limit_exhaustion_exits_nonzero_with_resume_message(world):
 
 
 def test_apply_max_writes_resumes_in_bounded_calls(world):
-  dry_run(world)
-  code, out = world.run("apply", "--plan", world.plan, "--yes", "--max-writes", 2)
+  spec, plan, handoff_id, card = dry_run(world)
+  code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes", "--max-writes", 2)
   assert code == 0 and "stopped after 2 writes" in out
   state = state_of(world)
   assert state["verify"]["complete"] is False
   assert sorted(n for n, s in state["labels"].items() if s == "done") == ["superegm:tracking", "superegm:unit"]
-  code, out = world.run("apply", "--plan", world.plan, "--yes", "--max-writes", 2)
+  code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes", "--max-writes", 2)
   assert code == 0 and "stopped after 2 writes" in out
   state = state_of(world)
   assert sum(1 for s in state["labels"].values() if s == "done") == 4
-  code, out = world.run("status", "--plan", world.plan)
+  code, out = world.run("status", "--plan", plan, "--runcard", open_card(world, "wave", spec))
   assert code == 1 and "not fully created and verified" in out
-  code, out = world.run("apply", "--plan", world.plan, "--yes", "--max-writes", 50)
+  code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes", "--max-writes", 50)
   assert code == 0 and state_of(world)["verify"]["complete"] is True
 
 
@@ -464,8 +457,9 @@ sys.exit("unexpected: " + " ".join(args))
 
 @pytest.mark.skipif(os.name == "nt", reason="a fake gh script on PATH needs a POSIX shell-free exec")
 def test_subprocess_command_shape_with_fake_gh_on_path(tmp_path, capsys, monkeypatch):
-  repo = make_repo(tmp_path / "repo", config={"repo": REPO})
+  repo = make_repo(tmp_path / "repo", config={"repo": REPO})  # `make_repo` records the sample spec's approval
   plan = make_plan(tmp_path / "plans", repo)
+  spec, artifacts = repo / "docs/designs/sample.md", tmp_path / "artifacts"
   bin_dir = tmp_path / "bin"
   bin_dir.mkdir()
   script = bin_dir / "gh"
@@ -478,18 +472,22 @@ def test_subprocess_command_shape_with_fake_gh_on_path(tmp_path, capsys, monkeyp
                           cwd=str(repo), capture_output=True, text=True)
   cards = {}
   for skill in ("plan", "file"):
-    opened = run("runcard", "open", "--skill", skill, "--artifact", repo / "docs/designs/sample.md")
+    opened = run("runcard", "open", "--skill", skill, "--artifact", spec)
     assert opened.returncode == 0, opened.stderr
     cards[skill] = opened.stdout.strip()
   assert run("graph", "--plan", plan, "--runcard", cards["plan"]).returncode == 0
-  assert run("gate", "--plan", plan, "--reviewed", "--round", 1, "--runcard", cards["file"]).returncode == 0
-  assert run("gate", "--plan", plan, "--pass", "--runcard", cards["file"]).returncode == 0
-  result = run("dry-run", "--plan", plan, "--runcard", cards["file"])
+  assert run("decide", "--unit", "U03", "--decision", "D2", "--default", "--runcard", cards["plan"]).returncode == 0
+  units = json.loads((artifacts / "handoff_units.json").read_text(encoding="utf-8"))
+  for uid, unit in units["units"].items():  # as `gated` writes them
+    converge_review(artifacts, units["handoff_id"], uid, unit["body_sha256"])
+  result = run("gate", "--pass", "--spec", spec, "--runcard", cards["file"])
+  assert result.returncode == 0, result.stderr
+  result = run("dry-run", "--spec", spec, "--runcard", cards["file"])
   assert result.returncode == 0, result.stderr
   log = [json.loads(l) for l in (bin_dir / "gh.log").read_text(encoding="utf-8").splitlines()]
   assert [l[:2] for l in log] == [["auth", "status"], ["api", f"repos/{REPO}"], ["api", f"repos/{REPO}/labels"]]
   assert "--paginate" in log[2]
-  result = run("apply", "--plan", plan, "--yes", "--runcard", cards["file"])
+  result = run("apply", "--spec", spec, "--yes", "--runcard", cards["file"])
   assert result.returncode == 0, result.stdout + result.stderr
   log = [json.loads(l) for l in (bin_dir / "gh.log").read_text(encoding="utf-8").splitlines()]
   posts = [l for l in log if "POST" in l]
@@ -520,9 +518,9 @@ def test_verify_refuses_a_plan_edited_since_the_confirmation(world):
 def test_apply_scans_again_with_the_current_rules(world):
   """R11: a banned_terms rule added after the dry run leaves the write list,
   and therefore its hash, untouched."""
-  dry_run(world)
-  set_config(world, repo=REPO, banned_terms=["(?i)webhook"])
-  code, out = world.run("apply", "--plan", world.plan, "--yes")
+  spec, plan, handoff_id, card = dry_run(world)
+  set_config(world, repo=REPO, banned_terms=["(?i)queue"])
+  code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes")
   assert code == 1 and "the current scan refuses" in out
   assert not any(c[:2] == ["issue", "create"] for c in world.gh.calls)
 
@@ -555,11 +553,11 @@ def test_marker_recovery_finds_issues_created_before_a_crash(world):
 def test_a_label_prefix_with_reserved_url_characters_still_recovers(tmp_path, capsys, monkeypatch):
   """R13: a permitted prefix such as `egm:handoff+` must survive the query."""
   w = make_world(tmp_path, capsys, monkeypatch, config={"repo": REPO, "labels": {"handoff_prefix": "egm:handoff+"}})
-  dry_run(w)
-  assert w.run("apply", "--plan", w.plan, "--yes")[0] == 0
+  spec, plan, handoff_id, card = dry_run(w)
+  assert w.run("apply", "--spec", spec, "--runcard", card, "--yes")[0] == 0
   listing = [c for c in w.gh.calls if c[0] == "api" and "/issues?" in c[1]]
   assert listing and "%2B" in listing[0][1], listing
-  assert w.run("verify", "--plan", w.plan)[0] == 0
+  assert w.run("verify", "--spec", spec, "--runcard", card)[0] == 0
 
 
 def test_verify_reports_a_link_the_handoff_no_longer_wants(world):
