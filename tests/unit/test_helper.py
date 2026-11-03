@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import (ROOT, SCRIPTS, HELPER, REPO, DESIGN, Harness, make_world, make_repo, make_pr, set_config, applied, dry_run, state_of, unit_path, close_as_completed, git)
+from conftest import (ROOT, SCRIPTS, HELPER, REPO, DESIGN, Harness, make_world, make_repo, make_pr, set_config, applied, dry_run, state_of, unit_path, close_as_completed, git, mark_launched, launchable)
 
 
 # ---------------------------------------------- EGM's tests of the shared names
@@ -78,11 +78,11 @@ def test_state_is_written_atomically_and_a_poll_keeps_other_writers_fields(world
   # another writer records a decision while a poll is in flight
   assert world.run("decide", "--plan", world.plan, "--unit", "U03",
                    "--decision", "D2", "--answer", "50")[0] == 0
-  assert world.run("launch", "--plan", world.plan, "--wave", 1, "--units", "U01")[0] == 0
+  mark_launched(world, "U01")
   assert world.run("status", "--plan", world.plan)[0] == 0
   after = state_of(world)
   assert after["decisions"]["U03/D2"]["answer"] == "50"
-  assert after["units"]["U01"]["launched"]["wave"] == 1
+  assert after["units"]["U01"]["launched"]["runcard"] == world.card("wave")
   assert after["units"]["U01"]["number"]
   # no temporary file is left behind by the atomic replace
   assert not list(world.artifacts.glob("state.json.tmp*"))
@@ -274,8 +274,9 @@ def test_store_paths_are_prefixed_by_the_handoff_hex(world):
 WRITES = {"approve_spec": {"approvals", "state"}, "graph": {"state", "plan", "units", "unit", "bodies"},
           "scan": set(), "gate": {"state", "file", "plan", "units", "unit", "bodies"},
           "dry_run": {"state", "file", "plan", "units", "unit", "bodies"}, "apply": {"state", "file"},
-          "verify": {"state"}, "status": {"state"}, "launch": {"state"}, "decide": {"state", "unit", "file"},
-          "record_launch": {"foreman"}, "collect": {"foreman"}, "prepare": {"foreman", "file"},
+          "verify": {"state"}, "status": {"state"}, "launch": {"state", "runcards"}, "decide": {"state", "unit", "file"},
+          "record_launch": {"launches"}, "collect": {"foreman"}, "prepare": {"foreman", "file"},
+          "launch_builder": {"launches"}, "interrupt": {"launches", "foreman"}, "clean": set(),
           "runcard": {"runcards"}, "init": set()}
 
 
@@ -464,9 +465,9 @@ def test_runcard_refusals(world, setup, unit, reason):
 
 GATED = [(("approve-spec", "--design", "SPEC", "--yes"), "review-spec"), (("graph",), "plan"),
          (("gate", "--reviewed", "--round", "1"), "file"), (("dry-run",), "file"), (("apply", "--yes"), "file"),
-         (("verify",), "file"), (("status",), "wave"), (("launch", "--wave", "1", "--units", "U01"), "wave"),
+         (("verify",), "file"), (("status",), "wave"), (("launch",), "wave"),
          (("decide", "--unit", "U03", "--decision", "D2", "--answer", "25"), "plan"),
-         (("record-launch", "--unit", "U01", "--round", "1", "--run-folder", "/tmp/r"), "wave"),
+         (("record-launch", "--unit", "U01"), "wave"),
          (("collect", "--unit", "U01", "--round", "1"), "wave"), (("prepare", "--unit", "U01", "--round", "1"), "wave")]
 
 
@@ -481,6 +482,8 @@ def test_every_absorbed_writing_subcommand_is_gated(world, argv, skill):
   code, out = world.run(*argv, "--plan", world.plan, "--runcard", other, card=None)
   assert code == 1 and f"runcard: {other} belongs to brainstorming" in out, out
   assert snapshot() == before and not world.gh.calls, "refused before any store write or GitHub read"
+  if argv[0] == "launch":
+    launchable(world)  # past its card, launch fetches origin first: never GitHub from a test
   code, out = world.run(*argv, "--plan", world.plan, "--runcard", world.card(skill), card=None)
   assert "runcard:" not in out, out
   assert "scan" not in {a for a, _ in GATED} and "--runcard" not in world.run("scan", "--help", card=None)[1]
@@ -513,7 +516,9 @@ def test_foreman_file_schema_and_round_entries(world):
   assert world.run("graph", "--plan", world.plan)[0] == 0
   st = superegm.store(world.repo)
   assert superegm.load_foreman(st, "U01") == {"dispatch_id": None, "rounds": [], "decisions": [], "rulings": []}
-  assert world.run("record-launch", "--unit", "U01", "--round", "2", "--run-folder", str(world.artifacts / "run"))[0] == 0
+  data = superegm.load_foreman(st, "U01")
+  superegm.round_entry(data, 2)["runcard"] = world.card("wave")  # as a foreman subcommand records a round
+  superegm.save_foreman(st, "U01", data)
   path = world.artifacts / state_of(world)["handoff_id"][-6:] / "foreman/U01.json"
   data = json.loads(path.read_text(encoding="utf-8"))
   assert set(data) == {"dispatch_id", "rounds", "decisions", "rulings"} and len(data["rounds"]) == 1
@@ -541,10 +546,11 @@ def test_state_plan_is_the_outside_path_and_graph_copies_the_plan(world):
 
 def test_require_frozen_units_refuses_a_filed_units_drift(world):
   applied(world)
+  launchable(world)
   assert world.run("status")[0] == 0
   text = world.plan.read_text(encoding="utf-8")
   world.plan.write_text(text.replace("An in-memory queue with enqueue and dequeue exists.", "A queue exists."), encoding="utf-8")
-  for argv in (("status",), ("launch", "--wave", "1", "--units", "U01"), ("prepare", "--unit", "U01")):
+  for argv in (("status",), ("launch",), ("prepare", "--unit", "U01")):
     world.gh.calls.clear()
     code, out = world.run(*argv)
     assert code == 1 and "U01 is filed and frozen: its section in handoff_plan.md differs from the stored one" in out, (argv, out)
@@ -582,8 +588,7 @@ def test_defer_and_published_are_gone(world):
   make_pr(gh, 41, "a" * 40, merged="2026-11-02T10:00:00Z", closes=[(REPO, 3)])
   gh.graphql[3] = [{**gh.prs[41], "repository": {"nameWithOwner": REPO}}]
   assert world.run("status", "--confirm-landed", "U01")[0] == 0
-  code, out = world.run("launch", "--wave", "3", "--units", "U03")
-  assert code == 0 and "launched in wave 3: U03" in out, out
+  assert "ready: U03" in world.run("status")[1]  # released; `launch` marks the ready units (test_builders.py)
   for name in ("apply", "verify", "launch", "status"):
     assert "deferred" not in (SCRIPTS / f"superegm/{name}.py").read_text(encoding="utf-8")
 
@@ -612,8 +617,8 @@ MOVED = [("test_review.py", "test_approve_checks_and_records"),
          ("test_file.py", "test_apply_creates_in_order_and_rerun_writes_nothing"),
          ("test_file.py", "test_subprocess_command_shape_with_fake_gh_on_path"),
          ("test_file.py", "test_marker_recovery_finds_issues_created_before_a_crash"),
-         ("test_builders.py", "test_launch_refuses_a_unit_that_is_not_ready"),
-         ("test_builders.py", "test_record_launch_is_immutable_per_round"),
+         ("test_builders.py", "test_launch_refuses_each_precondition"),
+         ("test_builders.py", "test_record_launch_appends_running_then_records_the_exit"),
          ("test_events.py", "test_status_wait_returns_on_change_or_deadline"),
          ("test_events.py", "test_status_pr_matching_rules"),
          ("test_events.py", "test_the_helper_is_single_writer_by_design"),

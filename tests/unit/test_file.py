@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import HELPER, REPO, make_world, make_repo, make_plan, set_config, applied, pass_gate, dry_run, state_of
+from conftest import HELPER, REPO, make_world, make_repo, make_plan, set_config, applied, pass_gate, dry_run, state_of, launchable
 
 
 def test_gate_pass_refuses_after_change_and_accept_writes_diff(world):
@@ -314,6 +314,7 @@ def test_verify_refuses_a_plan_edited_since_the_confirmation(world):
   """R08: a receipt must describe what the user confirmed, not a plan since
   edited, or removing a blocker locally would make a unit look ready."""
   applied(world)
+  launchable(world)
   assert world.run("verify", "--plan", world.plan)[0] == 0
   world.plan.write_text(world.plan.read_text(encoding="utf-8")
                         .replace("| Blocked by | U01 |", "| Blocked by | none |"), encoding="utf-8")
@@ -322,7 +323,7 @@ def test_verify_refuses_a_plan_edited_since_the_confirmation(world):
   assert code == 0 and "MISMATCH" not in out, out
   # ...and readiness, which the edit would have changed, is refused outright
   for argv in (("status", "--plan", world.plan),
-               ("launch", "--plan", world.plan, "--wave", 1, "--units", "U03")):
+               ("launch", "--plan", world.plan)):
     code, out = world.run(*argv)
     assert code == 1 and "is filed and frozen" in out, argv
 
