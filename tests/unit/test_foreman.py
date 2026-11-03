@@ -378,3 +378,20 @@ def test_tdd_order(world, tmp_path, monkeypatch, commits, failures):
   code, out = world.run("tdd-order", "--unit", UNIT, "--dispatch", w.did)
   assert (code, out.strip().splitlines()) == ((1, failures) if failures else (0, ["tdd-order: ok"]))
   assert tdd_order.check(BODY, [(s, [p]) for s, p in commits]) == failures
+
+
+@pytest.mark.parametrize("findings, word", [("", "clean"), ("change-review-1-1 | high | src/hooks.py:1 | regression: no | no hook\n", "revise")])
+def test_review_post_binds_the_review_to_the_reviewed_commit(world, tmp_path, monkeypatch, findings, word):
+  w = prepared(world, tmp_path, monkeypatch)
+  assert world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)[0] == 0
+  record(world, w.st, w.rid, 1, w.head, w.child, {"change-review": findings})
+  code, out = world.run("review", "post", "--unit", UNIT, "--round", 1, "--dispatch", w.did, "--runcard", w.child)
+  assert (code, out.strip()) == (0, f"posted {word}"), out
+  assert len(w.posted) == 1 and w.posted[0]["commit_id"] == w.head and w.posted[0]["event"] == "COMMENT"
+  assert w.posted[0]["body"].startswith(f"**SuperEGM review round 1 (head {w.head[:7]})**\n")
+  assert findings.strip() in w.posted[0]["body"] and "CI: ci green" in w.posted[0]["body"]
+  assert not any(c[:2] == ["pr", "review"] for c in world.gh.calls)
+  entry = json.loads(w.st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][0]
+  assert entry["phase"] == "posted" and entry["outcome"] == word and entry["posted_at"] == "2026-11-03T10:00:00Z"
+  assert json.loads((w.st.path("reviews", w.rid) / "round-1.json").read_text(encoding="utf-8"))["what_ran"] == "completed"
+  assert (f"{UNIT} awaiting merge" in w.st.path("journal").read_text(encoding="utf-8")) is (word == "clean")
