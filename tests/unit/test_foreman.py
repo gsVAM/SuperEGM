@@ -395,3 +395,27 @@ def test_review_post_binds_the_review_to_the_reviewed_commit(world, tmp_path, mo
   assert entry["phase"] == "posted" and entry["outcome"] == word and entry["posted_at"] == "2026-11-03T10:00:00Z"
   assert json.loads((w.st.path("reviews", w.rid) / "round-1.json").read_text(encoding="utf-8"))["what_ran"] == "completed"
   assert (f"{UNIT} awaiting merge" in w.st.path("journal").read_text(encoding="utf-8")) is (word == "clean")
+
+
+@pytest.mark.parametrize("case", ["header-present", "stale-dispatch", "mention", "commit-differs"])
+def test_review_post_guards(world, tmp_path, monkeypatch, case):
+  w = prepared(world, tmp_path, monkeypatch)
+  assert world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)[0] == 0
+  claim = "ping @alice" if case == "mention" else "no hook"
+  record(world, w.st, w.rid, 1, w.head, w.child, {"change-review": f"change-review-1-1 | high | src/hooks.py:1 | regression: no | {claim}\n"})
+  if case == "header-present":
+    world.gh.reviews.append({"id": 5, "commit_id": w.head, "submitted_at": "2026-11-03T09:00:00Z",
+                             "body": f"**SuperEGM review round 1 (head {w.head[:7]})**\n\nx"})
+  if case == "commit-differs":
+    world.gh.reply_commit = "f" * 40
+  did = "d9" if case == "stale-dispatch" else w.did
+  code, out = world.run("review", "post", "--unit", UNIT, "--round", 1, "--dispatch", did, "--runcard", w.child)
+  entry = json.loads(w.st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][0]
+  expected = {"header-present": (0, "posted revise (already on the PR)", "posted", 0),
+              "stale-dispatch": (1, "dispatch: d9 is not U01's current dispatch (d1)", "collected", 0),
+              "mention": (1, "comment:3: bare mention @alice", "collected", 0),
+              "commit-differs": (1, f"posted on {'f' * 7}, not {w.head[:7]}: round 1 not counted", "collected", 1)}[case]
+  assert (code, entry["phase"], len(w.posted)) == (expected[0], expected[2], expected[3]), out
+  assert out.strip().splitlines()[0].startswith(expected[1]), out
+  if case == "header-present":
+    assert entry["posted_at"] == "2026-11-03T09:00:00Z"
