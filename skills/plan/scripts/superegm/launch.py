@@ -5,6 +5,7 @@
 """superegm launch: check what the launch needs, then mark the ready units up to `max_in_flight`."""
 
 import hashlib
+import json
 import os
 import re
 import subprocess
@@ -80,6 +81,12 @@ def in_flight(store, uid, view, idle):
     return False
   latest = max(core.load_foreman(store, uid)["rounds"], key=lambda r: r.get("round") or 0, default={})
   return not (latest.get("phase") == "posted" and latest.get("outcome") == "clean")
+
+
+def load_launches(store, unit):
+  """`launches/<unit>.json`'s `launches[]` (spec section 7); [] before the first record."""
+  path = store.path("launches", unit)
+  return json.loads(core.read_text(path))["launches"] if path.is_file() else []
 
 
 def builder_login(config, token_env_value):
