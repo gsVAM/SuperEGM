@@ -115,3 +115,59 @@ def test_judge_members_forms(members):
   assert got["fable"] == {"via": "adapter", "vendor": "anthropic", "model": "fable", "effort": "max"}
   assert got["astra"] == {"via": "runner", "vendor": "openai", "model": "gpt-6-astra", "effort": "xhigh"}
   assert judges.judge_members({})["opus"] == {"via": "adapter", "vendor": "anthropic", "model": "opus", "effort": "max"}
+
+
+def test_open_records_panel_and_round_one_brief(world):
+  evidence = world.repo / "evidence.md"
+  evidence.write_text("the finding's location\n", encoding="utf-8")
+  question = world.repo.parent / "q-test.md"
+  question.write_text(QUESTIONS, encoding="utf-8")
+  card = open_card(world, "judges", question)
+  code, out = world.run("judges", "open", "--question", question, "--evidence", evidence, "--runcard", card)
+  assert code == 0, out
+  sha = hashlib.sha256(QUESTIONS.encode("utf-8")).hexdigest()
+  pid = out.strip()
+  assert pid == f"q-test-{sha[:6]}"
+  panel = panel_json(world, pid)
+  assert (panel["question"], panel["question_sha256"], panel["runcard"], panel["parent"]) == (str(question), sha, card, None)
+  assert panel["evidence"] == [{"path": str(evidence), "sha256": hashlib.sha256(evidence.read_bytes()).hexdigest()}]
+  assert list(panel["judges"]) == ["fable", "opus", "astra"] and panel["min_vendors"] == 1 and panel["rounds"] == {}
+  store = world.artifacts / "judges" / pid
+  assert (store / "question.md").read_text(encoding="utf-8") == QUESTIONS
+  brief = (store / "round-1/brief.md").read_text(encoding="utf-8")
+  assert brief.startswith(f"JUDGE BRIEF, panel {pid}, round 1.")
+  assert f"Question file: {question} (sha256 {sha})" in brief and f"Evidence: {evidence}" in brief
+  assert "Q<n>: (<id>)" in brief and "Questions still open" not in brief
+  assert f"judges {pid}: opened (fable, opus, astra; min_vendors 1)" in journal(world)
+
+
+def test_open_with_parent_opens_a_child_card(world):
+  (world.repo / "spec.md").write_text("# spec\n\n## Units\n", encoding="utf-8")
+  wave = open_card(world, "wave", world.repo / "spec.md")
+  pid, _, question = open_panel(world, parent=wave)
+  panel = panel_json(world, pid)
+  assert panel["parent"] == wave and panel["runcard"] != wave
+  child = json.loads((world.artifacts / "runcards" / f"{panel['runcard']}.json").read_text(encoding="utf-8"))
+  assert (child["skill"], child["artifact"], child["parent"]) == ("judges", str(question), wave)
+
+
+@pytest.mark.parametrize("setup, reason", [
+    ("missing-question", "judges: question file"),
+    ("grammar", "judges: question file: Q1: fewer than two options"),
+    ("missing-evidence", "judges: evidence"),
+    ("exists", "judges: panel"),
+])
+def test_open_refusals(world, setup, reason):
+  question = world.repo.parent / "q-test.md"
+  question.write_text("## Q1 Upheld?\n- (a) yes\n" if setup == "grammar" else QUESTIONS, encoding="utf-8")
+  argv = ["judges", "open", "--question", question, "--runcard", open_card(world, "judges", question)]
+  if setup == "missing-question":
+    question.unlink()
+  if setup == "missing-evidence":
+    argv += ["--evidence", world.repo / "none.md"]
+  if setup == "exists":
+    assert world.run(*argv)[0] == 0
+  code, out = world.run(*argv)
+  assert code == 1 and reason in out, out
+  if setup != "exists":
+    assert not (world.artifacts / "judges").exists()
