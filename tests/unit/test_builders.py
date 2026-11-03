@@ -135,3 +135,57 @@ def test_launch_marks_ready_units_and_records_the_builder_login(world, monkeypat
   assert git(["rev-parse", "refs/superegm/base"], world.repo).strip() == git(["rev-parse", "HEAD"], world.repo).strip()
   assert "ghp_builder" not in out and not any("ghp_builder" in " ".join(c) for c in world.gh.calls)
   assert "U07 marked for launch" in s.path("journal").read_text(encoding="utf-8")
+
+
+def push_to_origin(world, rel, text):
+  path = world.repo / rel
+  path.parent.mkdir(parents=True, exist_ok=True); path.write_text(text, encoding="utf-8")
+  git(["add", "-A"], world.repo); git(["commit", "-qm", "edit"], world.repo); git(["push", "-q", "origin", BASE], world.repo)
+
+
+@pytest.mark.parametrize("case, reason", [
+  ("classic", None),
+  ("spec", "spec at origin/main is not the approved bytes"),
+  ("config", ".superegm/config.json is absent at origin/main"),
+  ("workflow", "origin/main carries no workflow triggered on pull_request"),
+  ("no-token", "SUPEREGM_BUILDER_TOKEN is not set"),
+  ("own-login", "the builder token is the elephant's own login (owner)"),
+  ("no-restriction", "base branch main: updates are not restricted to the owner (no classic restrictions, no active ruleset update rule)"),
+  ("role-bypass", "base branch main: ruleset base lets the builder's role (write) bypass"),
+  ("team-bypass", "base branch main: ruleset base lets a team bypass"),
+  ("no-force-push", "superegm/**: no active ruleset forbids force-push (non_fast_forward)"),
+  ("no-deletion", "superegm/**: no active ruleset forbids deletion"),
+])
+def test_launch_refuses_each_precondition(world, monkeypatch, case, reason):
+  s, card, hid, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  spec = next(world.repo.glob("docs/**/*.md"))
+  bypass = lambda actor: [{**RULESET, "bypass_actors": [actor]}]
+  if case == "classic":
+    github(world, rulesets=[], classic={"restrictions": {"users": [{"login": "owner"}], "teams": [], "apps": []}})
+  if case == "spec":
+    push_to_origin(world, spec.relative_to(world.repo), spec.read_text(encoding="utf-8") + "\nedited\n")
+  if case == "config":
+    git(["rm", "-q", "--cached", ".superegm/config.json"], world.repo); git(["commit", "-qm", "x"], world.repo); git(["push", "-q", "origin", BASE], world.repo)
+  if case == "workflow":
+    push_to_origin(world, ".github/workflows/tests.yml", "on: [push]\n")
+  if case == "no-token":
+    monkeypatch.delenv("SUPEREGM_BUILDER_TOKEN")
+  if case == "own-login":
+    github(world, builder="owner")
+  if case == "no-restriction":
+    github(world, rulesets=[])
+  if case == "role-bypass":
+    github(world, rulesets=bypass({"actor_type": "RepositoryRole", "actor_id": 4, "bypass_mode": "always"}))
+  if case == "team-bypass":
+    github(world, rulesets=bypass({"actor_type": "Team", "actor_id": 9, "bypass_mode": "always"}))
+  if case == "no-force-push":
+    github(world, branch_rules=[{"type": "deletion"}])
+  if case == "no-deletion":
+    github(world, branch_rules=[{"type": "non_fast_forward"}])
+  code, out = world.run("launch", "--runcard", card)
+  if reason is None:
+    assert code == 0 and "marked: U07" in out, out
+    return
+  assert code == 1 and f"launch: {reason}" in out, out
+  assert "launched" not in state_of(s)["units"][UNIT]
