@@ -81,3 +81,22 @@ def test_parse_questions_several():
   assert [q["id"] for q in parsed] == ["Q1", "Q2"]
   assert parsed[0]["text"] == "Is finding design-2-1 upheld?"
   assert parsed[1]["options"] == {"a": "continue one bounded round", "b": "accept the remainder", "c": "stop"}
+
+
+@pytest.mark.parametrize("text, reason", [
+    ("Q1: (z)\nQ2: (a)\n", "Q1: unknown option (z)"),
+    ("Q1: (a)\nQ3: (a)\n", "unknown question Q3"),
+    ("Q1: a\n", "line 1: expected `Q<n>: (<id>)`"),
+    ("Q1: (a)\nQ1: (b)\n", "duplicate answer Q1"),
+])
+def test_verdict_file_refusals(text, reason):
+  with pytest.raises(ValueError, match=re.escape(reason)):
+    judges.parse_verdict(text, judges.parse_questions(QUESTIONS))
+
+
+def test_verdict_file_parses_reason_and_change():
+  answers = judges.parse_verdict(
+      "Q1: (b)\nreason: the fix is in the spec\nwould change my mind: a test that fails\nQ2: (c)\n",
+      judges.parse_questions(QUESTIONS))
+  assert answers == {"Q1": {"option": "b", "reason": "the fix is in the spec", "would_change": "a test that fails"},
+                     "Q2": {"option": "c", "reason": None, "would_change": None}}
