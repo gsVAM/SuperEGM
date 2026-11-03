@@ -330,3 +330,49 @@ def test_settle_and_its_refusals(world, kind, mode, reviewer, sev, loc, fid, dis
   else:
     assert (code, out.strip()) == (0, expect) and finding["disposition"] == disposition
     assert finding["ruling"] == (None if not extra else "owner" if extra == ("--owner",) else f"judges:{extra[1]}")
+
+
+# ---------------------------------------------------------------- S9: `review status`
+
+def s_unopened(w, c, r): return f"spec-{SLUG}-c9"
+def s_open_only(w, c, r): return r
+def s_clean(w, c, r): rounds(w, r, c, [[]]); return r
+def s_low_only(w, c, r): rounds(w, r, c, [[F("design", 1, 1, "low")]]); return r
+def s_unsettled_high(w, c, r): rounds(w, r, c, [HIGH(1)]); return r
+def s_settled(w, c, r): rounds(w, r, c, [HIGH(1)]); assert settle(w, r, "design-1-1", "fixed", c)[0] == 0; return r
+def s_regression(w, c, r):
+  rounds(w, r, c, [HIGH(1), [F("design", 2, 1, reg="yes")]]); assert settle(w, r, "design-2-1", "fixed", c)[0] == 0; return r
+def s_fix_design(w, c, r): rounds(w, r, c, [HIGH(1)]); assert settle(w, r, "design-1-1", "fix-design", c)[0] == 0; return r
+def s_cap(w, c, r): rounds(w, r, c, [HIGH(n) for n in range(1, 6)]); return r
+def s_cap_short(w, c, r): rounds(w, r, c, [HIGH(n) for n in range(1, 5)] + [None]); return r
+def s_continue(w, c, r): s_cap(w, c, r); assert rule(w, r, "continue", c)[0] == 0; return r
+def s_accept(w, c, r): s_cap(w, c, r); assert rule(w, r, "accept", c)[0] == 0; return r
+def s_stop(w, c, r): s_cap(w, c, r); assert rule(w, r, "stop", c)[0] == 0; return r
+def s_stalled(w, c, r): rounds(w, r, c, [HIGH(1), None, None]); return r
+
+@pytest.mark.parametrize("scenario,new_card,code,fragment", [
+  (s_unopened, False, 3, f"review spec-{SLUG}-c9: not opened"),
+  (s_open_only, False, 3, "round 0: not clean, regressions 0, converged no, cap no, stalled no, sha256 none"),
+  (s_clean, False, 0, "round 1: clean, regressions 0, converged yes, cap no, stalled no, sha256 "),
+  (s_low_only, False, 0, "converged yes"),
+  (s_unsettled_high, False, 3, "round 1: not clean, regressions 0, converged no"),
+  (s_settled, False, 0, "round 1: clean, regressions 0, converged yes"),
+  (s_regression, False, 3, "round 2: clean, regressions 1, converged no"),
+  (s_fix_design, False, 4, "converged no"),
+  (s_cap, False, 2, "round 5: not clean, regressions 0, converged no, cap yes, stalled no"),
+  (s_cap_short, False, 3, "converged no, cap no, stalled no"),
+  (s_continue, False, 3, "cap no"),
+  (s_accept, False, 0, "converged by ruling R1, cap yes"),
+  (s_stop, False, 2, "converged no, cap yes"),
+  (s_stalled, False, 5, "stalled yes"),
+  (s_stalled, True, 3, "stalled no"),
+])
+def test_status_exit_codes(world, scenario, new_card, code, fragment):
+  spec, cid, rid = opened(world)
+  rid = scenario(world, cid, rid)
+  if new_card:
+    cid = card(world, spec)          # a re-typed skill: the two not-run rounds carry the old card
+  got, out = status(world, rid, cid)
+  assert (got, fragment in out) == (code, True), out
+  if scenario is s_regression:
+    assert "rounds: 1 -> 1 (regressions 0, 1)" in out
