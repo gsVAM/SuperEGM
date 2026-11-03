@@ -49,6 +49,13 @@ def collect(args, card):
   data = core.load_foreman(st, unit)
   entry = review.require_dispatch(unit, data, args.dispatch)
   n = entry["round"]
+  if args.not_run:
+    require_non_terminal(unit, entry)
+    entry.update({"phase": "collected", "outcome": f"not run ({args.not_run})"})
+    core.save_foreman(st, unit, data)
+    core.journal(st, f"{unit} round {n} collected (not run ({args.not_run})) under {args.runcard}")
+    print(f"{unit} round {n}: collected (not run ({args.not_run}))")
+    return 0
   if entry.get("phase") != "prepared":
     raise core.HandoffError(f"{unit} round {n} is `{entry.get('phase')}`, not `prepared`")
   number = handoff.state["units"][unit]["pr"]["number"]
@@ -86,6 +93,13 @@ def collect(args, card):
   core.journal(st, f"{unit} round {n} collected: {len(lines)} foreman findings under {args.runcard}")
   print(f"collected: {len(lines)} foreman findings")
   return 0
+
+
+def require_non_terminal(unit: str, entry: dict) -> None:
+  """A round is terminal in phase `posted`, or `collected` with a `not run` outcome (spec section 7)."""
+  phase = entry.get("phase")
+  if phase == "posted" or (phase == "collected" and (entry.get("outcome") or "").startswith("not run")):
+    raise core.HandoffError(f"{unit} round {entry['round']} is terminal (`{phase}`)")
 
 
 def prior_foreman_findings(st, rid, prior) -> list:
