@@ -207,3 +207,24 @@ def test_dispatch_predicate_refuses(world, setup, reason):
   code, out = world.run("foreman", "dispatch", "--unit", UNIT, "--runcard", card)
   assert (code, out.strip()) == (1, f"dispatch refused: {reason}"), out
   assert st.path("foreman", UNIT).read_text(encoding="utf-8") == before
+
+
+@pytest.mark.parametrize("on_pr", [True, False])
+def test_dispatch_recovers_a_collected_round_already_on_the_pr(world, on_pr):
+  """design-c2r5-1, readiness-c2r5-1: the recovery runs before the predicate (CI is pending here)."""
+  head = "a" * 40
+  entry = {"round": 1, "runcard": "w", "launch": 1, "head": head, "phase": "collected", "dispatch_id": "d1"}
+  finding = "change-review-1-1 | high | src/hooks.py:1 | regression: no | no hook\n"
+  on_pr_review = {"id": 5, "commit_id": head, "submitted_at": "2026-11-03T09:00:00Z",
+                  "body": f"**SuperEGM review round 1 (head {head[:7]})**\n\n{finding}"}
+  st, card, _ = seed(world, ci="pending", rounds=[entry], reviews=[on_pr_review] if on_pr else [])
+  rid = open_head_review(world, st, card, head, {"change-review": finding, "foreman": ""})
+  code, out = world.run("foreman", "dispatch", "--unit", UNIT, "--runcard", card)
+  saved = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][0]
+  if on_pr:
+    assert (code, out.strip()) == (1, "recovered revise"), out
+    assert saved["phase"] == "posted" and saved["posted_at"] == "2026-11-03T09:00:00Z" and saved["outcome"] == "revise"
+    assert json.loads((st.path("reviews", rid) / "round-1.json").read_text(encoding="utf-8"))["what_ran"] == "completed"
+  else:
+    assert (code, out.strip()) == (1, "dispatch refused: ci pending")
+    assert saved == entry
