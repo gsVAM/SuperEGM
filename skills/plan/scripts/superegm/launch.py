@@ -39,7 +39,7 @@ def run(args):
       problems.append(f"{uid} is already launched")
     elif uid in open_blocking:
       ids = ", ".join(d["id"] for d in open_blocking[uid])
-      problems.append(f"{uid} has an unanswered or unpublished blocking decision ({ids})")
+      problems.append(f"{uid} has an unanswered blocking decision ({ids})")
     elif uid not in summary["ready"]:
       waiting = sorted(handoff.graph.preds[uid] - set(summary["landed"]))
       problems.append(f"{uid} is not ready: waiting on {', '.join(waiting) or 'its predecessors'}")

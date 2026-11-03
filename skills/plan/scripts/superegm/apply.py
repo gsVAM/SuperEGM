@@ -131,7 +131,7 @@ def apply_writes(handoff: core.Handoff, writes, budget: Budget, save):
       continue
     kind, title, label_set, body = item[1], item[2], item[3], item[4]
     target = tracking if kind == "tracking" else units.setdefault(kind, {})
-    if kind != "tracking" and not target.get("deferred"):
+    if kind != "tracking":
       target["wave"] = handoff.graph.wave[kind]
     if target.get("done"):
       continue

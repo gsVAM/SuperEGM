@@ -52,12 +52,6 @@ def run_verify(handoff: core.Handoff, writes=None):
           problems.append(f"MISMATCH body of #{target['number']} ({item[1]}) differs from the rendered body")
         live_labels = {l["name"] for l in live.get("labels", [])}
         expected_labels = set(item[3])
-        deferred = target.get("deferred")
-        if deferred:
-          # `defer` is an authorised, recorded label change: the confirmed write
-          # list still names the wave the graph produced.
-          expected_labels.discard(deferred["from"])
-          expected_labels.add(deferred["to"])
         if not expected_labels <= live_labels:
           problems.append(f"MISMATCH labels of #{target['number']} ({item[1]}): missing {sorted(expected_labels - live_labels)}")
         checked += 1

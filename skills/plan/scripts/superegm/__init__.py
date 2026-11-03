@@ -1593,9 +1593,7 @@ def status_pass(handoff: Handoff, save=True):
                                        d["blocking"]]))[:16]):
         # The question changed under the answer: ids are reused, answers are not.
         answer = None
-      # An answer the builder cannot see is not an answer: the comment may have
-      # failed the scan, failed to post, or the session may have ended first.
-      if d["blocking"] and not (answer and answer.get("published")):
+      if d["blocking"] and not answer:
         open_blocking.setdefault(unit.id, []).append(d)
   ready = [u for u in handoff.graph.order if u not in landed and not views[u]["launched"]
            and handoff.graph.preds[u] <= landed and u not in open_blocking]
@@ -1630,9 +1628,7 @@ def print_status(handoff: Handoff, summary, open_blocking):
     print(f"{uid} #{record.get('number')}{launched}: {pr}; {v['status']}")
   for uid, ds in open_blocking.items():
     for d in ds:
-      answered = (handoff.state.get("decisions") or {}).get(f"{uid}/{d['id']}")
-      note = " [answered, NOT PUBLISHED]" if answered else ""
-      print(f"open blocking decision {uid}/{d['id']}{note}: {d['question']} "
+      print(f"open blocking decision {uid}/{d['id']}: {d['question']} "
             f"(owner: {d['owner']}; default: {d['default']})")
   if summary["unlaunched_with_pr"]:
     print("open PRs for units not launched: " + ", ".join(f"{u} #{summary['units'][u]['pr']}" for u in summary["unlaunched_with_pr"]))
