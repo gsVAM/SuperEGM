@@ -406,3 +406,28 @@ def test_approve_spec_asks_then_commits_by_path(world):
   assert f"docs/specs/{SLUG}.md" in names and "notes.txt" not in names and "?? notes.txt" in git(world, "status", "--porcelain")
   code, out = approve(world, spec, cid, "--leavemealone")
   assert code == 0 and "approval recorded" in out and "Approve `" not in out
+
+
+# ---------------------------------------------------------------- S13: approve-spec refusals
+
+def a_bytes_differ(w):
+  spec, cid, rid = converged_spec(w); spec.write_text(SPEC + "\nmore\n", encoding="utf-8"); return spec, cid
+def a_not_converged(w):
+  spec, cid, rid = opened(w); rounds(w, rid, cid, [HIGH(1)]); return spec, cid
+def a_units_not_last(w):
+  return converged_spec(w, SPEC + "\n## 3. Appendix\n\nText.\n")[:2]
+def a_no_review(w):
+  spec = spec_file(w); return spec, card(w, spec)
+
+@pytest.mark.parametrize("scenario,expect", [
+  (a_bytes_differ, "approve-spec: spec bytes differ from the converged round's"),
+  (a_not_converged, f"approve-spec: review spec-{SLUG}-c1 is not converged (review status exit 3)"),
+  (a_units_not_last, "approve-spec: last H2 must be `Units`"),
+  (a_no_review, f"approve-spec: no spec review for {SLUG}"),
+])
+def test_approve_spec_refusals(world, scenario, expect):
+  spec, cid = scenario(world)
+  head = git(world, "rev-parse", "HEAD")
+  code, out = approve(world, spec, cid, "--yes")
+  assert code == 1 and expect in out and git(world, "rev-parse", "HEAD") == head, out
+  assert not store(world.repo).path("approvals", SLUG).exists()
