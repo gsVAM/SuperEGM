@@ -249,3 +249,50 @@ def test_draft_and_drift_report_edits() -> None:
   assert "{YYYY-MM-DD}_DRIFT_REPORT.md" in drift
   assert "after `/superegm:integrate`" in drift
   assert "Codex" not in drift
+
+
+SWEEP = {
+    "skills/test-driven-development/SKILL.md": ("superpowers:",),
+    "skills/systematic-debugging/SKILL.md": ("superpowers:",),
+    "skills/verification-before-completion/SKILL.md": ("superpowers:",),
+    "skills/writing-skills/SKILL.md": ("superpowers:", "codex-tools", "gemini-tools", "Codex",
+                                       "Copilot", "Gemini", "~/.agents/skills/"),
+    "skills/using-superegm/SKILL.md": ("superpowers:", "distributions/claude"),
+    "skills/brainstorming/SKILL.md": ("superpowers:",),
+    "skills/finishing-a-development-branch/SKILL.md": ("superpowers:", "Superpowers created"),
+    "skills/draft/SKILL.md": ("[Codex integration]", "egm-"),
+    "skills/drift-report/SKILL.md": ("[Codex integration]", "egm-"),
+    "hooks/session-start": ("CURSOR_PLUGIN_ROOT", "COPILOT_CLI", "MUSE_PLUGIN_ROOT",
+                            "additional_context", "using-superpowers"),
+}
+NOTICE_MIT = "From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: "
+NOTICE_APACHE = "Modified by SuperEGM (gsVAM), 2026: "
+
+
+@pytest.mark.parametrize("path,banned", sorted(SWEEP.items()))
+def test_no_removed_mechanism_named(path: str, banned: tuple) -> None:
+  text = (ROOT / path).read_text(encoding="utf-8")
+  for term in banned:
+    assert term not in text.replace("superegm-", ""), f"{path}: {term}"
+
+
+@pytest.mark.parametrize("path", [
+    "hooks/session-start", "skills/using-superegm/SKILL.md",
+    "skills/using-superegm/references/claude-code-tools.md", "skills/brainstorming/SKILL.md",
+    "skills/finishing-a-development-branch/SKILL.md", "skills/test-driven-development/SKILL.md",
+    "skills/systematic-debugging/SKILL.md", "skills/verification-before-completion/SKILL.md",
+    "skills/writing-skills/SKILL.md",
+])
+def test_changed_superpowers_files_carry_notice(path: str) -> None:
+  text = (ROOT / path).read_text(encoding="utf-8")
+  assert NOTICE_MIT in text, path
+  if path.endswith(".md"):
+    assert "<!-- " + NOTICE_MIT in text and text.startswith("---\n")
+
+
+@pytest.mark.parametrize("path", [
+    "scripts/pack_plugin.py", "skills/draft/SKILL.md", "skills/draft/references/design_doc.md",
+    "skills/drift-report/SKILL.md", "tests/unit/test_packaging.py", "tests/unit/test_harnesses.py",
+])
+def test_changed_apache_files_carry_notice(path: str) -> None:
+  assert NOTICE_APACHE in (ROOT / path).read_text(encoding="utf-8"), path
