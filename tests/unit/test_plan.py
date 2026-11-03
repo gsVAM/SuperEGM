@@ -327,3 +327,19 @@ def test_body_layout_markers_and_placeholders(world):
   bodies = find(world, "handoff_bodies.md").read_text(encoding="utf-8")
   assert f"<!-- superegm:handoff=2026-11-03-webhooks-{sha[:6]} unit=tracking spec={sha} -->" in bodies
   assert "Blocked by: none ·" in body_of(world, "U01")
+
+
+def test_graph_hashes_unfiled_bodies(world):
+  spec, sha, plan, card = planned(world)
+  assert graph(world, plan, card)[0] == 0
+  units = json.loads(find(world, "handoff_units.json").read_text(encoding="utf-8"))
+  for uid in ("U01", "U02", "U03"):
+    digest = hashlib.sha256(body_of(world, uid).encode("utf-8")).hexdigest()
+    assert units["units"][uid]["body_sha256"] == digest == state(world)["units"][uid]["body_sha256"]
+  assert units["handoff_id"] == f"2026-11-03-webhooks-{sha[:6]}" and units["waves"] == {"1": ["U01"], "2": ["U02"], "3": ["U03"]}
+  assert units["units"]["U02"]["blockers"] == ["U01"] and units["order"] == ["U01", "U02", "U03"]
+  assert units["units"]["U02"]["interfaces"] == ["- Consumes: u01_fn(x: int) -> int (U01)", "- Produces: u02_fn(x: int) -> int"]
+  assert units["units"]["U02"]["decisions"][0]["options"] == ["(a) 5 attempts", "(b) 10 attempts"]
+  before = find(world, "handoff_units.json").read_bytes()
+  assert graph(world, plan, card)[0] == 0 and find(world, "handoff_units.json").read_bytes() == before
+  assert "unit_U02.md" in find(world, "unit_U02.md").name and find(world, "handoff_bodies.md").is_file()
