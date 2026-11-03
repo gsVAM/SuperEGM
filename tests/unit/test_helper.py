@@ -135,13 +135,14 @@ def test_approve_checks_and_records(world):
   assert code == 0 and "Approve `" in out and "Options: Approve | Stop" in out
   code, out = world.run("approve-spec", "--design", design, "--yes")
   assert code == 0
-  assert state_of(world)["approval"]["answer"] == "Approve"
+  record = json.loads((world.artifacts / "approvals/sample.json").read_text(encoding="utf-8"))
+  assert record["path"] == str(design) and record["handoff_id"].startswith("sample-")
   design.write_text(DESIGN + "\nchanged\n", encoding="utf-8")
   code, out = world.run("approve-spec", "--design", design)
   assert code == 1 and "tracked but not clean" in out
 
   code, out = world.run("graph", "--plan", world.plan)
-  assert code == 1 and "design changed since the handoff started: re-run the gate" in out
+  assert code == 1 and "spec changed since the approval: run approve-spec again" in out
   git(["checkout", "--", "docs/designs/sample.md"], world.repo)
   (world.repo / "docs/designs/plain.md").write_text("# Plain\n\nNo plan.\n", encoding="utf-8")
   git(["add", "-A"], world.repo)
@@ -814,16 +815,6 @@ def test_a_different_design_may_not_reuse_a_directory_that_created_issues(world)
   assert state["units"]["U01"]["number"], "the existing handoff must be untouched"
   assert unit_path(world, "U01").read_text(encoding="utf-8") == before
 
-
-def test_approval_binds_to_the_design_it_displayed(world):
-  """R2-06: the question shows a hash; --yes must not silently approve another."""
-  design = world.repo / "docs/designs/sample.md"
-  assert world.run("approve-spec", "--design", design)[0] == 0
-  design.write_text(DESIGN + "\nlater edit\n", encoding="utf-8")
-  git(["commit", "-qam", "later"], world.repo)
-  code, out = world.run("approve-spec", "--design", design, "--yes")
-  assert code == 1 and "changed since the question was asked" in out
-  assert "approval" not in state_of(world)
 
 
 def test_a_landed_confirmation_lapses_when_the_issue_reopens(world):
@@ -1697,3 +1688,25 @@ def test_every_absorbed_writing_subcommand_is_gated(world, argv, skill):
   code, out = world.run(*argv, "--plan", world.plan, "--runcard", world.card(skill), card=None)
   assert "runcard:" not in out, out
   assert "scan" not in {a for a, _ in GATED} and "--runcard" not in world.run("scan", "--help", card=None)[1]
+
+
+def test_approve_spec_writes_the_approvals_record_with_handoff_id(world):
+  code, out = world.run("approve-spec", "--design", world.spec)
+  assert code == 0 and "Approve | Stop" in out and not (world.artifacts / "state.json").exists()
+  code, out = world.run("approve-spec", "--design", world.spec, "--yes")
+  assert code == 0, out
+  record = json.loads((world.artifacts / "approvals/sample.json").read_text(encoding="utf-8"))
+  sha = hashlib.sha256(world.spec.read_bytes()).hexdigest()
+  assert set(record) == {"path", "sha256", "commit", "runcard", "review", "approved_at", "amended", "voided_by", "handoff_id"}
+  assert record["path"] == str(world.spec) and record["sha256"] == sha and record["handoff_id"] == f"sample-{sha[:6]}"
+  assert record["runcard"] == world.card("review-spec") and record["review"] is None and record["amended"] == [] and record["voided_by"] is None
+  assert len(record["commit"]) >= 7 and git(["rev-parse", "--short", "HEAD"], world.repo).strip().startswith(record["commit"])
+  state = state_of(world)
+  assert "approval" not in state and "pending_approval" not in state and state["design"]["sha256"] == sha
+  assert world.run("graph", "--plan", world.plan)[0] == 0
+  assert state_of(world)["handoff_id"] == record["handoff_id"]
+  assert json.loads((world.artifacts / "handoff_units.json").read_text(encoding="utf-8"))["handoff_id"] == record["handoff_id"]
+  world.spec.write_text(world.spec.read_text(encoding="utf-8") + "\nchanged\n", encoding="utf-8")
+  git(["commit", "-qam", "edit"], world.repo)
+  code, out = world.run("graph", "--plan", world.plan)
+  assert code == 1 and "spec changed since the approval: run approve-spec again" in out
