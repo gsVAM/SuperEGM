@@ -1,0 +1,17 @@
+# Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
+
+skill: "clean"
+description: "Behavioral evaluation scenario suite for the clean skill."
+
+scenarios:
+  - scenario_id: "clean_reads_its_skill"
+    description: "The agent follows the clean skill when asked."
+    eval_type: "deterministic"
+    system_prompt:
+      skill_file: "skills/clean/SKILL.md"
+    turns:
+      - user_input: "Clean up what the wave left behind."
+        assertions:
+          - type: "required_pattern"
+            pattern: "(?i)clean"
+            message: "The response must name the clean skill."

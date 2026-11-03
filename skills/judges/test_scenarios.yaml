@@ -1,0 +1,17 @@
+# Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
+
+skill: "judges"
+description: "Behavioral evaluation scenario suite for the judges skill."
+
+scenarios:
+  - scenario_id: "judges_reads_its_skill"
+    description: "The agent follows the judges skill when asked."
+    eval_type: "deterministic"
+    system_prompt:
+      skill_file: "skills/judges/SKILL.md"
+    turns:
+      - user_input: "Run the judges on round 2."
+        assertions:
+          - type: "required_pattern"
+            pattern: "(?i)judges"
+            message: "The response must name the judges skill."

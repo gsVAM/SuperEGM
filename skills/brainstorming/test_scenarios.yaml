@@ -1,0 +1,17 @@
+# Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
+
+skill: "brainstorming"
+description: "Behavioral evaluation scenario suite for the brainstorming skill."
+
+scenarios:
+  - scenario_id: "brainstorming_reads_its_skill"
+    description: "The agent follows the brainstorming skill when asked."
+    eval_type: "deterministic"
+    system_prompt:
+      skill_file: "skills/brainstorming/SKILL.md"
+    turns:
+      - user_input: "Let's build a rate limiter for the ingress API."
+        assertions:
+          - type: "required_pattern"
+            pattern: "(?i)brainstorming"
+            message: "The response must name the brainstorming skill."

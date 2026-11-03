@@ -1,0 +1,17 @@
+# Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
+
+skill: "test-driven-development"
+description: "Behavioral evaluation scenario suite for the test-driven-development skill."
+
+scenarios:
+  - scenario_id: "test_driven_development_reads_its_skill"
+    description: "The agent follows the test-driven-development skill when asked."
+    eval_type: "deterministic"
+    system_prompt:
+      skill_file: "skills/test-driven-development/SKILL.md"
+    turns:
+      - user_input: "Add a retry to the webhook sender."
+        assertions:
+          - type: "required_pattern"
+            pattern: "(?i)test-driven-development"
+            message: "The response must name the test-driven-development skill."

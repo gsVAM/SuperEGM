@@ -1,0 +1,17 @@
+# Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
+
+skill: "verification-before-completion"
+description: "Behavioral evaluation scenario suite for the verification-before-completion skill."
+
+scenarios:
+  - scenario_id: "verification_before_completion_reads_its_skill"
+    description: "The agent follows the verification-before-completion skill when asked."
+    eval_type: "deterministic"
+    system_prompt:
+      skill_file: "skills/verification-before-completion/SKILL.md"
+    turns:
+      - user_input: "I think the fix is in; shall I say it is done?"
+        assertions:
+          - type: "required_pattern"
+            pattern: "(?i)verification-before-completion"
+            message: "The response must name the verification-before-completion skill."

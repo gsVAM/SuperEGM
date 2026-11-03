@@ -1,0 +1,17 @@
+# Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
+
+skill: "systematic-debugging"
+description: "Behavioral evaluation scenario suite for the systematic-debugging skill."
+
+scenarios:
+  - scenario_id: "systematic_debugging_reads_its_skill"
+    description: "The agent follows the systematic-debugging skill when asked."
+    eval_type: "deterministic"
+    system_prompt:
+      skill_file: "skills/systematic-debugging/SKILL.md"
+    turns:
+      - user_input: "The nightly job fails with a timeout about one run in five."
+        assertions:
+          - type: "required_pattern"
+            pattern: "(?i)systematic-debugging"
+            message: "The response must name the systematic-debugging skill."

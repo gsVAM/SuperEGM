@@ -1,0 +1,17 @@
+# Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
+
+skill: "file"
+description: "Behavioral evaluation scenario suite for the file skill."
+
+scenarios:
+  - scenario_id: "file_reads_its_skill"
+    description: "The agent follows the file skill when asked."
+    eval_type: "deterministic"
+    system_prompt:
+      skill_file: "skills/file/SKILL.md"
+    turns:
+      - user_input: "File the confirmed plan as issues."
+        assertions:
+          - type: "required_pattern"
+            pattern: "(?i)file"
+            message: "The response must name the file skill."

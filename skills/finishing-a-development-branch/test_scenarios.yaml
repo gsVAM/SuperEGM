@@ -1,0 +1,17 @@
+# Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
+
+skill: "finishing-a-development-branch"
+description: "Behavioral evaluation scenario suite for the finishing-a-development-branch skill."
+
+scenarios:
+  - scenario_id: "finishing_a_development_branch_reads_its_skill"
+    description: "The agent follows the finishing-a-development-branch skill when asked."
+    eval_type: "deterministic"
+    system_prompt:
+      skill_file: "skills/finishing-a-development-branch/SKILL.md"
+    turns:
+      - user_input: "The implementation is done and the tests pass. What now?"
+        assertions:
+          - type: "required_pattern"
+            pattern: "(?i)finishing-a-development-branch"
+            message: "The response must name the finishing-a-development-branch skill."

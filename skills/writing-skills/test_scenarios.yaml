@@ -1,0 +1,17 @@
+# Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
+
+skill: "writing-skills"
+description: "Behavioral evaluation scenario suite for the writing-skills skill."
+
+scenarios:
+  - scenario_id: "writing_skills_reads_its_skill"
+    description: "The agent follows the writing-skills skill when asked."
+    eval_type: "deterministic"
+    system_prompt:
+      skill_file: "skills/writing-skills/SKILL.md"
+    turns:
+      - user_input: "Write a skill for our release checklist."
+        assertions:
+          - type: "required_pattern"
+            pattern: "(?i)writing-skills"
+            message: "The response must name the writing-skills skill."

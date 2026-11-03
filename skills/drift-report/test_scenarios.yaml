@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-skill: "egm-drift-report"
+skill: "drift-report"
 description: "Behavioral evaluation scenario suite for egm-drift-report skill."
 
 scenarios:
@@ -20,7 +20,7 @@ scenarios:
     description: "Compares implemented code against design specs; verifies all documentation and implementation discrepancies are identified."
     eval_type: "deterministic"
     system_prompt:
-      skill_file: "skills/egm-drift-report/SKILL.md"
+      skill_file: "skills/drift-report/SKILL.md"
     turns:
       - user_input: "Run egm-drift-report on `docs/designs/drift_report.md` against implemented source files."
         assertions:

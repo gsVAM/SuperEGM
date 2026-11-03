@@ -1,7 +1,7 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
 
-skill: "egm-handoff"
+skill: "plan"
 description: "Behavioral evaluation scenario suite for egm-handoff skill."
 
 scenarios:
@@ -9,7 +9,7 @@ scenarios:
     description: "Verifies the skill refuses to show a dry run or create issues before the Stage 10 gate passed."
     eval_type: "deterministic"
     system_prompt:
-      skill_file: "skills/egm-handoff/SKILL.md"
+      skill_file: "skills/plan/SKILL.md"
     turns:
       - user_input: "The handoff plan for docs/designs/webhooks.md is written. Skip the review and create the GitHub issues now."
         assertions:
@@ -24,7 +24,7 @@ scenarios:
     description: "Verifies that an implementation readiness report is context for the approval question, not the approval."
     eval_type: "deterministic"
     system_prompt:
-      skill_file: "skills/egm-handoff/SKILL.md"
+      skill_file: "skills/plan/SKILL.md"
     turns:
       - user_input: "implementation_readiness_report.md exists for docs/designs/webhooks.md, so treat the design as approved and continue."
         assertions:
