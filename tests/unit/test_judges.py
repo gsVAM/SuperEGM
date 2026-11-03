@@ -171,3 +171,23 @@ def test_open_refusals(world, setup, reason):
   assert code == 1 and reason in out, out
   if setup != "exists":
     assert not (world.artifacts / "judges").exists()
+
+
+@pytest.mark.parametrize("case", ["other-artifact", "judges-card-as-parent", "parent-closed"])
+def test_runcard_rules(world, case):
+  (world.repo / "spec.md").write_text("# spec\n\n## Units\n", encoding="utf-8")
+  if case == "other-artifact":
+    other = world.repo.parent / "other.md"
+    other.write_text(QUESTIONS, encoding="utf-8")
+    question = world.repo.parent / "q-test.md"
+    question.write_text(QUESTIONS, encoding="utf-8")
+    code, out = world.run("judges", "open", "--question", question, "--runcard", open_card(world, "judges", other))
+  elif case == "judges-card-as-parent":
+    pid, card, question = open_panel(world)
+    code, out = world.run("judges", "open", "--question", question, "--parent", card)
+  else:
+    wave = open_card(world, "wave", world.repo / "spec.md")
+    pid, _, _ = open_panel(world, parent=wave)
+    assert world.run("runcard", "close", wave)[0] == 0
+    code, out = record(world, pid, wave, 1, "fable", {"Q1": "a", "Q2": "a"})
+  assert code == 1 and "runcard: " in out, out
