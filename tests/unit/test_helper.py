@@ -1748,3 +1748,19 @@ def test_defer_and_published_are_gone(world):
   assert code == 0 and "launched in wave 3: U03" in out, out
   for name in ("apply", "verify", "launch", "status"):
     assert "deferred" not in (SCRIPTS / f"superegm/{name}.py").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("path, pattern", [
+  ("skills/plan/scripts/superegm.py", r"defer|egm-handoff|egm-wave|egm_handoff"),
+  ("skills/plan/scripts/superegm/__init__.py", r"\.egm/handoff\.json|handoff_state\.json|egm_handoff|re-run the gate|(?<!super)egm:(?!generated)|unpublished|NOT PUBLISHED"),
+  ("skills/plan/scripts/superegm/decide.py", r"PUBLISHED|--published|stays blocked until"),
+  ("skills/plan/scripts/superegm/launch.py", r"unpublished"),
+  ("skills/plan/scripts/superegm/status.py", r"PUBLISHED"),
+  ("skills/plan/scripts/superegm/verify.py", r"defer"),
+  ("skills/plan/scripts/superegm/apply.py", r"defer"),
+  ("skills/plan/scripts/superegm/prepare.py", r"reviewed plan renders|the gate"),
+  ("tests/unit/conftest.py", r"\.egm/|handoff_state\.json|(?<!super)egm:|egm_handoff"),
+])
+def test_removed_mechanisms_are_not_named(path, pattern):
+  hits = [l for l in (ROOT / path).read_text(encoding="utf-8").splitlines() if re.search(pattern, l)]
+  assert not hits, hits
