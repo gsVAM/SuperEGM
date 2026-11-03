@@ -71,7 +71,7 @@ def run(args):
     print("superegm: review post is not built yet", file=sys.stderr)
     return 1
   return {"open": open_review, "record": record_round, "settle": settle_finding,
-          "status": status_review}[args.action](args)
+          "status": status_review, "rule": rule_review}[args.action](args)
 
 
 # ---------------------------------------------------------------- the findings line
@@ -265,6 +265,9 @@ def record_round(args) -> int:
       raise core.HandoffError(f"review record: no rounds[] entry for round {n}")
   elif not existing and n != (nxt := max(round_numbers(st, rid), default=0) + 1):
     raise core.HandoffError(f"review record: round {nxt} is next")
+  if not existing and evaluate(st, review, card.get("parent") or args.runcard).code == 2:
+    print("review record: review at its cap: rule first", file=sys.stderr)
+    return 2
   if args.not_run:
     record = {"findings": [], "not_run": args.not_run, "isolation": None, "model": None, "effort": None}
   else:
@@ -419,3 +422,34 @@ def status_review(args) -> int:
   print(status.line)
   print(status.trend)
   return status.code
+
+
+# ---------------------------------------------------------------- rule
+
+
+def rule_review(args) -> int:
+  st = core.store(core.git_toplevel(Path.cwd()))
+  rid = args.review
+  review = load_review(st, rid)
+  if review is None:
+    raise core.HandoffError(f"review {rid}: not opened")
+  card = bind(args, review)
+  rulings = [r["ruling"] for r in review["rulings"]]
+  if "stop" in rulings:
+    raise core.HandoffError("review rule: cycle stopped")
+  if args.ruling == "continue" and "continue" in rulings:
+    raise core.HandoffError("review rule: continue already ruled this cycle")
+  if args.ruling == "accept" and review["kind"] == "head":
+    raise core.HandoffError("review rule: accept is refused on a head")
+  if evaluate(st, review, card.get("parent") or args.runcard).code != 2:
+    raise core.HandoffError("review rule: not at the cap")
+  by = "owner" if args.owner else f"judges:{args.judges}"
+  ruling = {"id": f"R{len(rulings) + 1}", "ruling": args.ruling, "by": by, "at": core.now_iso()}
+  review["rulings"].append(ruling)
+  if args.ruling == "accept":
+    completed = [r for r in rounds_of(st, rid, review) if r["what_ran"] == "completed"]
+    review["converged"], review["converged_round"] = f"by ruling {ruling['id']}", completed[-1]["round"]
+  save_review(st, rid, review)
+  core.journal(st, f"review rule {rid} {ruling['id']} {args.ruling} by {by} under {args.runcard}")
+  print(f"ruling {ruling['id']} {args.ruling}")
+  return 0
