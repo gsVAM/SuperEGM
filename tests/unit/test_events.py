@@ -119,6 +119,45 @@ def test_six_event_kinds(world, monkeypatch, tmp_path, kind, arrange, lines):
   assert not world.sleeps
 
 
+def exit_file(tmp, code):
+  (tmp / "r1.json.exit").write_text(f"{code}\n", encoding="utf-8")
+
+
+FOLD = [
+  ("comment then exit, polls apart", "running",
+   [lambda gh, st, tmp: comment(gh, "**Builder status:** BLOCKED\n- (a) keep the old API")], ["deadline"],
+   [lambda gh, st, tmp: exit_file(tmp, 0)],
+   ["U01 exit code=0 pr=none status=BLOCKED comment=500 by=builder-bot"]),
+  ("comment and exit in one poll", "running",
+   [lambda gh, st, tmp: (comment(gh, "**Builder status:** DONE"), exit_file(tmp, 0))],
+   ["U01 exit code=0 pr=none status=DONE comment=500 by=builder-bot"], [], ["deadline"]),
+  ("exit first, comment later", "running",
+   [lambda gh, st, tmp: exit_file(tmp, 1)], ["U01 exit code=1 pr=none status=none"],
+   [lambda gh, st, tmp: comment(gh, "**Builder status:** DONE_WITH_CONCERNS")],
+   ["U01 status word=DONE_WITH_CONCERNS comment=500 by=builder-bot"]),
+  ("interrupted launch, then a comment", "interrupted",
+   [lambda gh, st, tmp: comment(gh, "**Builder status:** BLOCKED")],
+   ["U01 status word=BLOCKED comment=500 by=builder-bot"], [], ["deadline"]),
+  ("a comment older than the launch", "running",
+   [lambda gh, st, tmp: (comment(gh, "**Builder status:** DONE", at="2026-11-03T09:00:00Z"), exit_file(tmp, 0))],
+   ["U01 exit code=0 pr=none status=none"], [], ["deadline"]),
+]
+
+
+@pytest.mark.parametrize("case,launch_status,first,lines1,then,lines2", FOLD, ids=[f[0] for f in FOLD])
+def test_exit_and_status_fold(world, monkeypatch, tmp_path, case, launch_status, first, lines1, then, lines2):
+  gh, st, card = seed(world, monkeypatch)
+  launch(st, tmp_path / "r1.json", status=launch_status)
+  for arrange in first:
+    arrange(gh, st, tmp_path)
+  code, out = world.run(*WAIT, card)
+  assert code == 0 and out.splitlines() == lines1, out
+  for arrange in then:
+    arrange(gh, st, tmp_path)
+  code, out = world.run(*WAIT, card)
+  assert code == 0 and out.splitlines() == lines2, out
+
+
 def test_status_landed_ready_decisions_and_shared_edges(world):
   gh = applied(world)
   code, out = world.run("status", "--plan", world.plan)
