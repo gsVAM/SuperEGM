@@ -164,12 +164,22 @@ def apply_writes(handoff: core.Handoff, writes, budget: Budget, save):
     target = tracking if kind == "tracking" else units.setdefault(kind, {})
     if kind != "tracking":
       target["wave"] = handoff.graph.wave[kind]
+    numbers = {u: d["number"] for u, d in units.items() if d.get("number")}
+    text = core.body.fill_numbers(body, numbers, tracking.get("number"))
+    if kind == "tracking" and target.get("number"):
+      # The tracking issue belongs to the latest filing: a later filing (or a
+      # recovered issue with no `filing`) re-asserts its body once, an edit.
+      if target.get("filing") != state["confirmed_sha256"]:
+        budget.spend()
+        edit_issue(repo, target["number"], text, handoff.artifact_dir)
+        target["filing"] = state["confirmed_sha256"]
+        save()
+        core.SLEEP(1)
+      continue
     if target.get("done"):
       continue
     if kind != "tracking" and not tracking.get("number"):
       raise core.HandoffError("tracking issue missing: it is created first")
-    numbers = {u: d["number"] for u, d in units.items() if d.get("number")}
-    text = core.body.fill_numbers(body, numbers, tracking.get("number"))
     budget.spend()
     number = create_issue(repo, title, text, label_set, handoff.artifact_dir)
     # Record the number before the id read: a failure between them must leave a
@@ -178,6 +188,8 @@ def apply_writes(handoff: core.Handoff, writes, budget: Budget, save):
     save()
     target["id"] = core.gh_json(["api", f"repos/{repo}/issues/{number}"])["id"]
     target["done"] = True
+    if kind == "tracking":
+      target["filing"] = state["confirmed_sha256"]
     save()
     core.SLEEP(1)
   links = state.setdefault("links", {})
@@ -221,24 +233,29 @@ def apply_writes(handoff: core.Handoff, writes, budget: Budget, save):
     core.SLEEP(1)
 
 
-def create_issue(repo, title, body, labels, artifact_dir):
+def body_file(body, artifact_dir) -> str:
+  """The body in a temp file beside the store for `--body-file`; the caller unlinks it."""
   with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".md", prefix=".superegm_body_",
                                    dir=str(artifact_dir), delete=False) as handle:
     handle.write(body)
-    path = handle.name
+    return handle.name
+
+
+def edit_issue(repo, number, body, artifact_dir) -> None:
+  path = body_file(body, artifact_dir)
+  try:
+    core.gh_retry(["issue", "edit", str(number), "-R", repo, "--body-file", path])
+  finally:
+    os.unlink(path)
+
+
+def create_issue(repo, title, body, labels, artifact_dir):
+  path = body_file(body, artifact_dir)
   try:
     args = ["issue", "create", "-R", repo, "--title", title, "--body-file", path]
     for label in labels:
       args += ["--label", label]
-    for attempt in range(4):
-      try:
-        url = core.gh(args).strip().splitlines()[-1]
-        break
-      except core.GhError as error:
-        if error.rate_limited and attempt < 3:
-          core.SLEEP(error.retry_after or 60)
-          continue
-        raise
+    url = core.gh_retry(args).strip().splitlines()[-1]
   finally:
     os.unlink(path)
   number = url.rstrip("/").split("/")[-1]
