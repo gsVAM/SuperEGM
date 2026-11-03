@@ -365,3 +365,17 @@ def test_graph_refuses_an_edited_filed_section(world):
   assert graph(world, plan, card)[0] == 0
   assert body_of(world, "U01") == filed_body and state(world)["units"]["U01"]["body_sha256"] == filed_hash
   assert "A worker exists." in body_of(world, "U02")
+
+
+@pytest.mark.parametrize("item,names", [
+  ("require_runcard(args, skills) -> dict", ["require_runcard"]),
+  ("MARKER_RE", ["MARKER_RE"]),
+  ("superegm runcard open --skill <s> --artifact <a> [--parent <id>] → <id>", ["superegm runcard open"]),
+  ("superegm scan [--plan <file>] → `scan: clean`; exit 0 / 1", ["superegm scan"]),
+  ("handoff_units.json key units[<id>].body_sha256", ["units[<id>].body_sha256"]),
+  ("approvals/<spec-slug>.json key path, sha256, amended[], voided_by", ["path", "sha256", "amended[]", "voided_by"]),
+  ("state.json key closed_at (written by U11's `close`, absent until then)", ["closed_at"]),
+])
+def test_interface_names(item, names):
+  from superegm.scan import names_of
+  assert names_of(item) == names
