@@ -128,3 +128,27 @@ def test_set_input_carries_the_units_table_and_each_unfiled_body_interfaces_only
     assert "## U03" not in out and "u03_fn" not in out                 # filed: not in the set
     assert "## Steps" not in out and "test_x" not in out and "Definition of done" not in out
     assert out.index("| U01 | the queue") < out.index("## U01") < out.index("## U02")
+
+
+def round_text(w, rid, rnd):
+    return w.store.path("reviews", rid, f"round-{rnd}.json").read_text(encoding="utf-8")
+
+
+def test_set_file_splits_per_unit_and_reopens_a_converged_unit(planned):
+    w = planned
+    r1, r2 = open_review(w, "U01"), open_review(w, "U02")
+    record(w, r2, 1, "readiness", [], SHA["U02"])
+    record(w, r2, 1, "set", [], SHA["U02"])
+    assert due(w)["U02"][0] == "converged"
+    the_set = ["set-2-1 | high | U01 Interfaces | regression: no | Produces u01_fn has no consumer",
+               "set-2-2 | medium | U02 Consumes | regression: no | u01_fn (U01) consumed with another arity",
+               "set-2-3 | high | the cut | regression: no | U03's scope belongs in U02"]
+    record(w, r1, 1, "readiness", [], SHA["U01"])
+    record(w, r1, 1, "set", the_set, SHA["U01"])        # U01's open round keeps 1 and 3
+    record(w, r2, 2, "set", the_set, SHA["U02"])        # U02 converged: the set reopens it
+    kept = {rid: {fid for fid in ("set-2-1", "set-2-2", "set-2-3") if fid in round_text(w, rid, n)}
+            for rid, n in ((r1, 1), (r2, 2))}
+    assert kept == {r1: {"set-2-1", "set-2-3"}, r2: {"set-2-2", "set-2-3"}}
+    listing = due(w)
+    assert listing["U01"][:3] == ["due", r1, "2"]       # round 1 completed and not clean
+    assert listing["U02"][:3] == ["due", r2, "3"]       # round 2 holds the set's record only
