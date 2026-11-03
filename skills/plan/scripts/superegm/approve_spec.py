@@ -1,64 +1,68 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_approve` as the approve-spec module; the approval is `approvals/<spec-slug>.json`, not state.
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_approve` as the approve-spec module (U03); the section 8 form: a converged
+# review, the `Units` check, the commit by path, `--void` and `--amend-units` (U04).
 
-"""superegm approve-spec: check the spec and record the owner's approval."""
+"""superegm approve-spec: record the owner's approval of a converged spec (spec section 8)."""
 
-import re
 from pathlib import Path
+import re
 
 import superegm as core
+from superegm.review import evaluate, latest_cycle, review_id
 
-WRITES = frozenset(['approvals', 'state'])  # the store kinds this subcommand writes
-SKILLS = frozenset(['review-spec'])  # the skills whose card this subcommand accepts
+WRITES = frozenset(["approvals"])  # the store kinds this subcommand writes
+SKILLS = frozenset(["review-spec", "review-plan", "integrate"])  # the skills whose card this subcommand accepts
+CONFIG = ".superegm/config.json"
 
 
 def register(subparsers):
-  p = core.add_parser(subparsers, "approve-spec", "check the spec and record the owner's approval")
-  p.add_argument("--design", required=True)
+  p = core.add_parser(subparsers, "approve-spec", "record the owner's approval of a converged spec")
+  p.add_argument("--spec", dest="design", required=True)
   p.add_argument("--yes", action="store_true", help="the owner answered Approve")
+  p.add_argument("--leavemealone", action="store_true", help="the converged record is the approval")
+  p.add_argument("--void", action="store_true", help="void the approval after a fix-design finding")
+  p.add_argument("--review", help="with --void: the review holding the fix-design finding")
+  p.add_argument("--amend-units", dest="amend_units", action="store_true",
+                 help="re-approve rows appended to ## Units without a review round")
   p.set_defaults(run=run, writes=WRITES)
+
+
+def handoff_slug(stem: str) -> str:
+  return re.sub(r"[^a-z0-9]+", "-", stem.lower()).strip("-")[:20].rstrip("-")
+
+
+def commit_by_path(repo_root: Path, paths: list[str], message: str) -> str:
+  """Add and commit `paths` alone, ignoring other changes in the tree; the commit may be empty."""
+  core.run_git(["add", "--", *paths], repo_root)
+  core.run_git(["commit", "--allow-empty", "-q", "-m", message, "--", *paths], repo_root)
+  return core.run_git(["rev-parse", "HEAD"], repo_root).strip()
 
 
 def run(args):
   card = core.require_runcard(args, SKILLS)
-  design = Path(args.design).expanduser().resolve()
-  if not design.is_file():
-    raise core.HandoffError(f"design {design} does not exist")
-  root = core.git_toplevel(design)
+  spec = Path(args.design).expanduser().resolve()
+  if not spec.is_file():
+    raise core.HandoffError(f"approve-spec: spec {spec} does not exist")
+  root = core.git_toplevel(spec)
   st = core.store(root)
-  if not core.run_git(["ls-files", "--error-unmatch", "--", str(design)], root, check=False).strip():
-    raise core.HandoffError(f"{design} is not tracked by git (an ignored or untracked "
-                            f"file passes a clean `status`): commit it first (Phase 4)")
-  if core.run_git(["status", "--porcelain", "--", str(design)], root).strip():
-    raise core.HandoffError(f"{design} is tracked but not clean: commit it first (Phase 4)")
-  text = core.read_text(design)
-  for heading in ("## Detailed Implementation Plan", "### Target Files to Create/Modify",
-                  "### Verification Plan"):
-    if heading not in text:
-      raise core.HandoffError(f"{design} has no `{heading}`: run egm-draft and egm-review "
-                              "(Stage 9) first; a design without an implementation plan "
-                              "cannot be handed off")
-  sha = core.sha256_file(design)
-  commit = core.run_git(["rev-parse", "--short", "HEAD"], root).strip()
-  rel = design.relative_to(root).as_posix()
-  if not core.run_git(["cat-file", "-t", f"{commit}:{rel}"], root, check=False).strip():
-    raise core.HandoffError(f"{rel} does not exist at commit {commit}: commit it first (Phase 4)")
-  if not args.yes:
-    print(f"Approve `{design}` (sha256 `{sha[:12]}`, commit `{commit}`) for handoff?")
-    print("Options: Approve | Stop. Run again with --yes after the user chose Approve.")
+  slug = core.spec_slug(spec)
+  review, _ = latest_cycle(st, "spec", str(spec))
+  if review is None:
+    raise core.HandoffError(f"approve-spec: no spec review for {slug}")
+  rid = review_id(st, "spec", str(spec), review["cycle"])
+  status = evaluate(st, review, card.get("parent") or args.runcard)
+  sha = core.sha256_file(spec)
+  if not (args.yes or args.leavemealone or card["mode"] == "leavemealone"):
+    print(f"Approve `{spec}` (sha256 `{sha[:12]}`) at review {rid}?")
+    print("Options: Approve | Stop. Run again with --yes after the owner chose Approve.")
     return 0
-  slug = re.sub(r"[^a-z0-9]+", "-", design.stem.lower()).strip("-")[:20].rstrip("-")
-  handoff_id = f"{slug}-{sha[:6]}"
-  core.require_binding(st.root, handoff_id)
-  record = {"path": str(design), "sha256": sha, "commit": commit, "runcard": args.runcard,
-            "review": None, "approved_at": core.now_iso(), "amended": [], "voided_by": None,
-            "handoff_id": handoff_id}
-  path = st.path("approvals", core.spec_slug(design))
+  handoff_id = f"{handoff_slug(spec.stem)}-{sha[:6]}"
+  commit = commit_by_path(root, [spec.relative_to(root).as_posix(), CONFIG], f"superegm: approve {slug} at review {rid}")
+  record = {"path": str(spec), "sha256": sha, "commit": commit, "runcard": args.runcard, "review": rid,
+            "approved_at": core.now_iso(), "amended": [], "voided_by": None, "handoff_id": handoff_id}
+  path = st.path("approvals", slug)
   core.atomic_write(path, record)
-  state = core.load_state(st.root)
-  state["design"] = {"path": str(design), "sha256": sha, "commit": commit}
-  core.save_state(st.root, state)
-  core.journal(st, f"approve-spec {handoff_id} sha256 {sha[:12]} under {args.runcard}")
+  core.journal(st, f"approve-spec {handoff_id} sha256 {sha[:12]} at review {rid} commit {commit[:12]} under {args.runcard}")
   print(f"approval recorded in {path}")
   return 0
