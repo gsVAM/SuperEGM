@@ -432,3 +432,23 @@ def test_clean_refuses_until_terminal_then_removes_what_it_can_prove(world, monk
   assert subprocess.run(["git", "-C", str(world.repo), "rev-parse", "--verify", "-q", f"refs/superegm/pr/{PR}"], capture_output=True).returncode != 0
   assert "worktrees" not in git(["worktree", "list", "--porcelain"], world.repo).replace(str(stray), "")
   assert "U07 cleaned" in s.path("journal").read_text(encoding="utf-8")
+
+
+from superegm.launch_builder import DOD_RESULT_RE
+
+def test_builder_orders_carry_the_discipline_and_the_dod_results_form():
+  text = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8")
+  assert text.startswith("<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the implementer prompt, receiving-code-review and test-driven-development absorbed into the builder orders. -->\n")
+  for form in ("follow the Steps in order", "test first", "one `test(S<n>)` commit then one `feat(S<n>)` commit per Step",
+               "paste each item's output in the PR body under its item number", "`git push origin <branch>`", "never to any other branch",
+               "**draft** pull request", "`Closes #<issue>`", "never retarget or close it", "**Deviation (<kind>):**", "interface | dod | test | other",
+               "verify each review finding against the code before changing anything", "**Reply <fid>:** fixed | contested — <reason>",
+               "finding upheld", "finding overruled", "**Builder status:** DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT",
+               "- (a) <option>", "the first the builder's own proposal", "never spawn", "never touches files outside its scope paths", "never merges",
+               "### DoD <n>", "pytest <test path>::<test name> -q", "pytest <test path> -k <test name> -q",
+               "test(S<n>): <test name>", "feat(S<n>): <test name>"):
+    assert form in text, form
+  assert "ask your human partner" not in text and "You're absolutely right" not in text
+  sample = f"U07\n\n### DoD 1\n{F}\nchecked by superegm tdd-order\n{F}\n\n### DoD 2\n{F}\n$ pytest tests/unit/test_worker.py -q\n1 passed\n{F}\n\nCloses #7\n"
+  assert [(m.group(1), m.group(2).splitlines()[-1]) for m in DOD_RESULT_RE.finditer(sample)] == [("1", "checked by superegm tdd-order"), ("2", "1 passed")]
+  assert sample.splitlines()[0] == "U07" and sample.rstrip().splitlines()[-1] == "Closes #7"
