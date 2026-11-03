@@ -215,3 +215,41 @@ def test_skill_body_form_and_helper_calls():
                    "references/proportion.md", "proportion-input", "plan/scan/<unit>.json", "question 11"):
         assert needle in body, needle
     assert "merge" not in body.lower() and "gh issue create" not in body
+
+
+Q11 = ("Is the body no longer than the decisions the builder cannot make alone: no fenced test the signature and "
+       "assertions already determine, no Implement line that restates the test, no Step a parametrized sibling "
+       "covers, no prose table that should be test data?")
+PAIR = "resolved in favour of the shorter form that keeps the test honest"
+CASES = [
+    (STANDARD, "Modified by SuperEGM (gsVAM), 2026: questions 8–11, severities high|medium|low, the fix-design path.", True),
+    (STANDARD, "The Eleven Questions", True),
+    (STANDARD, "8.  **Interfaces present and consistent.**", True),
+    (STANDARD, "9.  **Steps complete, DoD item 1 present.**", True),
+    (STANDARD, "10. **Global constraints and review focus present.**", True),
+    (STANDARD, "11. **Proportion.** " + Q11, True),
+    (STANDARD, "high: the body cannot be filed as written", True),
+    (STANDARD, "`approve-spec --void`", True),
+    (STANDARD, "returns to `review-spec`", True),
+    (STANDARD, "the spec's `## Units`", True),
+    (STANDARD, PAIR, True),
+    (STANDARD, "Stage 10", False), (STANDARD, "Stage 9", False), (STANDARD, "egm-review", False),
+    (STANDARD, "egm-handoff", False), (STANDARD, "Blocker", False), (STANDARD, "Major", False),
+    (STANDARD, "Nit", False), (STANDARD, "Detailed Implementation Plan", False),
+    (SKILL, "readiness test", False), (SKILL, "gate --accept", False), (SKILL, "Stage 10", False),
+    (SKILL, "two consecutive clean", False), (SKILL, "synthesizer", False), (SKILL, "Codex", False),
+    (SKILL, "egm-review-loop", False), (SKILL, "egm-resolve", False), (SKILL, "Blocker", False),
+    (SCENARIOS, 'skill: "review-plan"', True),
+    (SCENARIOS, 'scenario_id: "set_runs_once_per_round"', True),
+    (SCENARIOS, 'scenario_id: "stalled_unit_ends_the_invocation"', True),
+    (SCENARIOS, 'scenario_id: "fix_design_voids_the_approval"', True),
+    (SCENARIOS, "Stage 10", False),
+    (PROPORTION, Q11, True), (PROPORTION, "plan/scan/<unit>.json", True),
+    (PROPORTION, "names the Step and the bytes it would remove", True),
+    (PROPORTION, "`medium` at most", True), (PROPORTION, "never block alone", True), (PROPORTION, PAIR, True),
+]
+
+
+@pytest.mark.parametrize("path,needle,present", CASES, ids=[f"{p.name}:{n[:40]}" for p, n, _ in CASES])
+def test_files_name_the_new_forms_and_not_the_retired_ones(path, needle, present):
+    assert (needle in path.read_text(encoding="utf-8")) is present, needle
