@@ -1,249 +1,182 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03).
+# Added by SuperEGM (gsVAM), 2026: U10's tests of the foreman's helper subcommands.
 
-"""EGM's tests of the subcommands U10 (foreman) changes, moved from test_helper.py by U03;
-that unit rewrites the ones whose form it changes."""
-
-import json
-import os
-import re
-import subprocess
-import time
+"""U10: foreman dispatch, prepare, collect, tdd-order, review post. This file replaces U03's nine moved
+prepare/collect tests (they pin `--round`, `--run-folder`, `--verdict`, `head-moved`, `launched` and `--remove`:
+forms S4, S7 and S16 remove). Fixtures: conftest's `world` and `make_pr` (U03)."""
+import json, re, subprocess
 from pathlib import Path
-
+from types import SimpleNamespace
 import pytest
+from conftest import make_pr, set_config
+import superegm as core
+from superegm import store, atomic_write, sha256_file
+from superegm import review as review_mod, tdd_order
 
-from conftest import REPO, Harness, make_repo, make_plan, make_pr, applied, result_for, foreman_path, round_of, git
+ROOT = Path(__file__).resolve().parents[2]
+REPO, UNIT, PR = "example-org/webhooks", "U01", 70
+# The section carries the section 9.1 blocks `graph.Plan` (U05) requires: Interfaces, Review focus, Steps.
+SECTION = """### U01: Hooks
+| Field | Value |
+| --- | --- |
+| Objective | The hook exists. |
+| Scope paths | `src/hooks.py` (create), `tests/unit/test_hooks.py` (create) |
+| Design range | `docs/designs/sample.md:13-15 (#### 1. src/webhooks/queue.ts)` |
+| Blocked by | none |
+| Shared files | none |
+| Risk | low: small |
+| Size | S |
+
+Interfaces
+- Produces: hook() -> None
+
+Definition of done
+1. The test for each Step was committed before its implementation (checked by superegm tdd-order)
+2. Run `pytest tests/unit/test_hooks.py -q` — passes
+3. Exists `src/hooks.py`
+4. CI green on the head
+
+Review focus (this unit)
+- U01: the hook exists; pinned by `test_hook`
+
+Steps
+1. Write the failing test `test_hook` in `tests/unit/test_hooks.py`:
+   ```python
+   def test_hook(): ...
+   ```
+   Implement `hook() -> None` in `src/hooks.py`.
+
+Decide before build
+- none
+"""
+DOD = SECTION.split("Definition of done\n")[1].split("\nReview focus")[0]
+BODY = ("# U01 — Hooks\n\n## Definition of done\n" + DOD + "\n## Steps\n"
+        "1. Write the failing test `test_hook` in `tests/unit/test_hooks.py`:\n   ```python\n   def test_hook(): ...\n   ```\n"
+        "   Run `pytest tests/unit/test_hooks.py::test_hook -q`; expected: FAIL (`ImportError`).\n"
+        "   Implement `hook() -> None` in `src/hooks.py`.\n"
+        "   Run the same command; expected: PASS. Commit `test(S1): hook` then `feat(S1): hook`.\n")
+PR_BODY = "U01\n\n### DoD 2\n```\n$ pytest tests/unit/test_hooks.py -q\n1 passed\n```\n\nCloses #2\n"  # U09's DoD-results form
+POSTED_R1 = {"round": 1, "runcard": "w", "launch": 1, "head": "0" * 40, "phase": "posted",
+             "dispatch_id": "d1", "outcome": "revise", "posted_at": "2026-11-02T12:00:00Z"}
+TWO_LAUNCHES = [{"round": 1, "status": "exited 0"}, {"round": 2, "status": "exited 0"}]
 
 
-def launched(world, unit, rnd, folder):
-  """A round as EGM's `record-launch --run-folder` left it: `launched` with its run folder (U09
-  removed that form; `collect` and `prepare` still read the phase until U10 rewrites them)."""
-  import superegm
-  st = superegm.store(world.repo)
-  data = superegm.load_foreman(st, unit)
-  superegm.round_entry(data, rnd).update({"runcard": world.card("wave"), "phase": "launched", "run_folder": str(folder),
-                                          "status": "running", "run_status": "running", "at": superegm.now_iso()})
-  superegm.save_foreman(st, unit, data)
+def c(cid, login, body, at="2026-11-02T13:00:00Z"):
+  return {"id": cid, "user": {"login": login}, "created_at": at, "body": body}
 
 
-def test_prepare_fetches_from_the_recorded_remote_into_private_refs(tmp_path, capsys, monkeypatch):
-  target = make_repo(tmp_path / "target", config={"repo": REPO})
-  (target / "src").mkdir()
-  (target / "src/a.txt").write_text("base\n", encoding="utf-8")
-  git(["add", "-A"], target)
-  git(["commit", "-qm", "base"], target)
-  base_sha = git(["rev-parse", "HEAD"], target).strip()
-  git(["checkout", "-qb", "feature"], target)
-  (target / "src/a.txt").write_text("base\nchanged\n", encoding="utf-8")
-  git(["commit", "-qam", "change"], target)
-  head = git(["rev-parse", "HEAD"], target).strip()
-  git(["update-ref", "refs/pull/7/head", head], target)
-  git(["checkout", "-q", "main"], target)
-  elsewhere = tmp_path / "elsewhere"
-  git(["clone", "-q", str(target), str(elsewhere)], tmp_path)
-  checkout = tmp_path / "checkout"
-  git(["clone", "-q", "-o", "origin", str(elsewhere), str(checkout)], tmp_path)
-  git(["remote", "set-url", "origin", "https://github.com/fork-user/webhooks.git"], checkout)
-  git(["remote", "add", "upstream", str(target)], checkout)
-  git(["config", "user.email", "egm@example.invalid"], checkout)
-  git(["config", "user.name", "EGM"], checkout)
-  plan = make_plan(tmp_path / "plans", checkout)
-  artifacts = tmp_path / "artifacts"
-  monkeypatch.chdir(checkout)
-  harness = Harness(capsys)
-  harness.spec = checkout / "docs/designs/sample.md"
-  harness.ns["find_remote"] = lambda root, repo: "upstream"
-  assert harness.run("graph", "--plan", plan)[0] == 0
-  state = json.loads((artifacts / "state.json").read_text(encoding="utf-8"))
-  hexd = state["handoff_id"][-6:]
-  state.update({"remote": "upstream", "confirmed_sha256": "x", "verify": {"complete": True, "sha256": "x", "problems": []},
-                "units": {"U01": {"number": 2, "pr": {"number": 7, "head": head, "base_ref": "main", "base_sha": base_sha}}}})
-  (artifacts / "state.json").write_text(json.dumps(state), encoding="utf-8")
-  harness.ns["parse_remote_url"] = lambda url: REPO if url.strip() == str(target) else None
-  harness.gh.check_runs[head] = [{"name": "tests", "status": "completed", "conclusion": "success"}]
-  harness.gh.combined[head] = {"state": "success", "statuses": []}
-  fetch_head = checkout / ".git/FETCH_HEAD"
-  before = fetch_head.read_bytes() if fetch_head.exists() else None
-  code, out = harness.run("prepare", "--plan", plan, "--unit", "U01", "--round", 1,
-                          "--runner", "/tmp/runner.py", "--model", "gpt-6-astra", "--effort", "xhigh")
+def install_pr_api(world, *, reviews, comments, login) -> list:
+  """`world.gh.extend("api", handler)` under U03's contract `handler(args, cwd, token=None) -> (code, out, err)`;
+  it replaces `do_api`, so anything it does not answer falls through to `world.gh.do_api(args)`. Answers, through
+  `world.gh.ok`: `api user` → `{"login": login}`; `repos/{REPO}/pulls/{PR}/reviews` → the one page `[reviews]`;
+  its `-X POST` (`-F key=value` fields, `body=@<path>` read from that file) appends `{"id", "commit_id":
+  world.gh.reply_commit or the field, "body", "event", "submitted_at": "2026-11-03T10:00:00Z"}` to `reviews` and
+  to the returned `posted` list and echoes `"HTTP/2.0 200 OK\n\n" + json.dumps(it)`;
+  `repos/{REPO}/issues/<n>/comments` → `[comments.get(n, [])]`. Sets `world.gh.reviews = reviews` (the list S11 appends to)."""
+  posted = []
+
+  def handler(args, cwd, token=None):
+    endpoint = world.gh.endpoint_of(args)
+    if endpoint == "user":  # `-q .login` renders the field as gh does
+      return world.gh.ok(text=login if "-q" in args else json.dumps({"login": login}))
+    if endpoint == f"repos/{REPO}/pulls/{PR}/reviews":
+      if "-X" in args and args[args.index("-X") + 1] == "POST":
+        fields = dict(a.split("=", 1) for a in args[args.index("-F") + 1::2])
+        body = fields["body"]
+        body = Path(body[1:]).read_text(encoding="utf-8") if body.startswith("@") else body
+        it = {"id": 100 + len(reviews), "commit_id": world.gh.reply_commit or fields["commit_id"], "body": body,
+              "event": fields["event"], "submitted_at": "2026-11-03T10:00:00Z"}
+        reviews.append(it); posted.append(it)
+        return world.gh.ok(text="HTTP/2.0 200 OK\n\n" + json.dumps(it))
+      return world.gh.ok([reviews])
+    match = re.fullmatch(rf"repos/{REPO}/issues/(\d+)/comments", endpoint)
+    if match:
+      return world.gh.ok([comments.get(int(match.group(1)), [])])
+    return world.gh.do_api(args)
+
+  world.gh.reviews, world.gh.reply_commit = reviews, None
+  world.gh.extend("api", handler)
+  return posted
+
+
+def seed(world, *, head="a" * 40, ci="success", launches=({"round": 1, "status": "exited 0"},),
+         rounds=(), base_ref="main", comments=None, reviews=(), login="builder-bot", pr_body=PR_BODY):
+  """Through U03's `store`, `Store.path` and `atomic_write`, what `locate`, `Handoff` and `require_frozen_units`
+  read: the plan (conftest's heading, a `Design:` line naming `world.spec` in backticks, `## Global constraints`,
+  `## Units`, SECTION) written to `world.plan` and
+  byte-identical to the store's `handoff_plan`; `state` = `{"plan": str(world.plan), "repo": REPO, "handoff_id":
+  f"sample-{sha256_file(world.spec)[:6]}"` (what `Handoff` derives without an approval, so `require_binding` holds)
+  `, "design": {"path": <the spec>}` (what `require_runcard` reads for a wave card, as U09's seed found)
+  `, "units": {UNIT: {"number": 2, "pr": {"number": PR, "head": head, "base_ref": base_ref, "base_sha": "b" * 40}}}}`;
+  `unit UNIT` = SECTION, a blank line, `## Issue body as posted`, a blank line, BODY in a markdown fence; `config.reviewers.head =
+  ["change-review"]`; `make_pr(world.gh, PR, head, closes=[(REPO, 2)])` updated with `baseRefName: base_ref` and
+  `body: pr_body`; CI on `head`: `check_runs[head]` one `tests` run, `in_progress` when `ci == "pending"`,
+  `completed` with `conclusion: ci` otherwise, none when `ci` is None, and `combined[head] = {"state": "success" if
+  ci not in (None, "pending") else "pending", "statuses": []}`; `launches UNIT` = `{"launches": list(launches)}` when
+  launches; `foreman UNIT` = `{"dispatch_id": f"d{len(rounds)}" if rounds else None, "rounds": list(rounds),
+  "decisions": [], "rulings": []}`; `posted = install_pr_api(world, reviews=list(reviews), comments=comments or {},
+  login=login)`. Returns `(st, card, posted)` with `card = world.open_card("wave", str(world.spec))`."""
+  spec = world.spec.resolve()
+  set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"],
+             reviewers={"spec": [], "plan": [], "head": ["change-review"], "integrate": []})
+  plan = (f"# Handoff plan: Webhook delivery\n\nDesign: `{spec}`\n\n## Global constraints\n- none\n\n"
+          f"## Units\n\n{SECTION}")
+  world.plan.write_text(plan, encoding="utf-8")
+  st = store(world.repo)
+  st.handoff_id = f"sample-{sha256_file(spec)[:6]}"
+  atomic_write(st.path("handoff_plan"), plan)
+  atomic_write(st.path("state"), {"plan": str(world.plan), "repo": REPO, "handoff_id": st.handoff_id,
+                                  "design": {"path": str(spec)},
+                                  "units": {UNIT: {"number": 2, "pr": {"number": PR, "head": head, "base_ref": base_ref,
+                                                                       "base_sha": "b" * 40}}}})
+  atomic_write(st.path("unit", UNIT), f"{SECTION}\n## Issue body as posted\n\n```markdown\n{BODY}```\n")
+  make_pr(world.gh, PR, head, closes=[(REPO, 2)]).update({"baseRefName": base_ref, "body": pr_body})
+  if ci is not None:
+    world.gh.check_runs[head] = [{"name": "tests", "status": "in_progress" if ci == "pending" else "completed",
+                                  "conclusion": None if ci == "pending" else ci}]
+  world.gh.combined[head] = {"state": "success" if ci not in (None, "pending") else "pending", "statuses": []}
+  if launches:
+    atomic_write(st.path("launches", UNIT), {"launches": list(launches)})
+  atomic_write(st.path("foreman", UNIT), {"dispatch_id": f"d{len(rounds)}" if rounds else None, "rounds": list(rounds),
+                                          "decisions": [], "rulings": []})
+  posted = install_pr_api(world, reviews=list(reviews), comments=comments or {}, login=login)
+  return st, world.open_card("wave", str(spec)), posted
+
+
+def head_rid(st):
+  return next(p.name for p in st.path("reviews").iterdir() if re.search(rf"(^|-)head-{UNIT}-c\d+$", p.name))
+
+
+def record(world, st, rid, rnd, head, card, findings):
+  for reviewer, text in findings.items():
+    path = st.path("review", UNIT, f"pr{PR}") / f"r{rnd}/{reviewer}.findings"
+    path.parent.mkdir(parents=True, exist_ok=True); path.write_text(text, encoding="utf-8")
+    code, out = world.run("review", "record", "--review", rid, "--round", rnd, "--sha256", head, "--reviewer", reviewer,
+                          "--findings", str(path), "--isolation", "clean", "--model", "m:m", "--effort", "e:e", "--runcard", card)
+    assert code == 0, out
+
+
+def open_head_review(world, st, card, head, findings):
+  assert world.run("review", "open", "--kind", "head", "--artifact", UNIT, "--reviewers", "change-review", "--runcard", card)[0] == 0
+  rid = head_rid(st); record(world, st, rid, 1, head, card, findings); return rid
+
+
+def dispatched(world, **kw):
+  st, card, posted = seed(world, **kw)
+  code, out = world.run("foreman", "dispatch", "--unit", UNIT, "--runcard", card)
   assert code == 0, out
-  assert git(["rev-parse", "refs/egm/pr/7"], checkout).strip() == head
-  assert git(["rev-parse", "refs/egm/base/7"], checkout).strip() == base_sha
-  assert (fetch_head.read_bytes() if fetch_head.exists() else None) == before
-  tree = Path(re.search(r"worktree (\S+) at", out).group(1))
-  assert tree.is_dir() and "egm-wave" in str(tree)
-  diff = (artifacts / "pr_7_r1.diff").read_bytes()
-  expected = subprocess.run(["git", "-C", str(tree), "diff", "--no-ext-diff", "--no-textconv", "--binary",
-                             base_sha, "--"], capture_output=True, check=True).stdout
-  assert diff == expected and b"+changed" in diff
-  ci = json.loads((artifacts / "ci_7_r1.json").read_text(encoding="utf-8"))
-  assert ci["verdict"] == "ci green"
-  launch = (artifacts / "foreman_U01_r1_launch.md").read_text(encoding="utf-8")
-  line = [l for l in launch.splitlines() if "inspect" in l][0]
-  assert f"--base '{base_sha}'" in line and "--resume" not in line and not re.search(r"\$EGM_|&&|\||;|\s>", line)
-  foreman = json.loads((artifacts / hexd / "foreman/U01.json").read_text(encoding="utf-8"))
-  assert round_of(foreman, 1)["phase"] == "prepared" and round_of(foreman, 1)["merge_base"] == base_sha
-  # A leftover clean worktree is removed on the next call; a dirty one is refused.
-  code, out = harness.run("prepare", "--plan", plan, "--unit", "U01", "--round", 2)
-  assert code == 0, out
-  (tree / "src/a.txt").write_text("dirty\n", encoding="utf-8")
-  code, out = harness.run("prepare", "--plan", plan, "--unit", "U01", "--round", 3)
-  assert code == 1 and "has changes: remove it by hand" in out
-  (tree / "src/a.txt").write_text("base\nchanged\n", encoding="utf-8")
-  code, out = harness.run("prepare", "--plan", plan, "--unit", "U01", "--round", 3)
-  assert code == 0 and tree.exists(), out  # the worktree lives until the unit lands
-  # A moved head stops the round.
-  state["units"]["U01"]["pr"]["head"] = "0" * 40
-  (artifacts / "state.json").write_text(json.dumps(state), encoding="utf-8")
-  code, out = harness.run("prepare", "--plan", plan, "--unit", "U01", "--round", 4)
-  assert code == 3 and "head-moved" in out
-  # A remote that no longer names the repository is refused.
-  harness.ns["parse_remote_url"] = lambda url: None
-  code, out = harness.run("prepare", "--plan", plan, "--unit", "U01", "--round", 4)
-  assert code == 1 and "no longer names" in out
-  harness.ns["parse_remote_url"] = lambda url: REPO if url.strip() == str(target) else None
-  code, out = harness.run("prepare", "--plan", plan, "--unit", "U01", "--clean")
-  assert code == 0, out
-  assert subprocess.run(["git", "-C", str(checkout), "rev-parse", "refs/egm/pr/7"], capture_output=True).returncode != 0
+  did, child = out.split()
+  return st, card, child, did, posted
 
 
-def test_prepare_refuses_a_selection_its_observation_contradicts(world):
-  gh = applied(world)
-  make_pr(gh, 70, "a" * 40, closes=[(REPO, 2)])
-  assert world.run("status", "--plan", world.plan, "--watch", "U01=70")[0] == 0
-  path = world.artifacts / "state.json"
-  state = json.loads(path.read_text(encoding="utf-8"))
-  state["units"]["U01"]["watch"]["number"] = 71
-  path.write_text(json.dumps(state), encoding="utf-8")
-  code, out = world.run("prepare", "--plan", world.plan, "--unit", "U01")
-  assert code == 1 and "watches PR #71" in out and "describes #70" in out
-
-
-def test_collect_records_a_round_and_guards_cleanup(world, tmp_path):
-  """R4-04: nothing recorded `collected`, so the cleanup guard saw a round that
-  was still `launched` for ever."""
-  applied(world)
-  folder = tmp_path / "run"; folder.mkdir()
-  launched(world, "U01", 1, folder)
-  code, out = world.run("collect", "--plan", world.plan, "--unit", "U01", "--round", 1)
-  assert code == 1 and "does not exist" in out
-  (folder / "result.json").write_text(json.dumps({"status": "running"}), encoding="utf-8")
-  code, out = world.run("collect", "--plan", world.plan, "--unit", "U01", "--round", 1)
-  assert code == 1 and "not `completed`" in out
-  (folder / "result.json").write_text(json.dumps(result_for(world, "U01", 1)), encoding="utf-8")
-  code, out = world.run("collect", "--plan", world.plan, "--unit", "U01",
-                        "--round", 1, "--verdict", "clean")
-  assert code == 0 and "collected" in out, out
-  data = json.loads(foreman_path(world, "U01").read_text(encoding="utf-8"))
-  assert round_of(data, 1)["phase"] == "collected"
-  assert round_of(data, 1)["run_status"] == "completed"
-
-
-def test_collect_accepts_a_round_whose_lane_never_launched(world):
-  """R6-05: with the lane off, nothing records a launch, so the round stays
-  `prepared` and the documented collect-before-remove sequence could not run."""
-  applied(world)
-  data = {"dispatch_id": None, "decisions": [], "rulings": [],
-          "rounds": [{"round": 1, "phase": "prepared", "pr": 70, "worktree": "/tmp/egm-wave/x"}]}
-  foreman_path(world, "U01").parent.mkdir(parents=True)
-  foreman_path(world, "U01").write_text(json.dumps(data), encoding="utf-8")
-  code, out = world.run("collect", "--plan", world.plan, "--unit", "U01", "--round", 1)
-  assert code == 1 and "--not-run" in out, out
-  code, out = world.run("collect", "--plan", world.plan, "--unit", "U01",
-                        "--round", 1, "--not-run", "lane off")
-  assert code == 0, out
-  saved = json.loads(foreman_path(world, "U01").read_text(encoding="utf-8"))
-  assert round_of(saved, 1)["phase"] == "collected"
-  assert "not run (lane off)" in round_of(saved, 1)["run_status"]
-
-
-def test_there_is_no_mid_round_worktree_removal(world):
-  """Rounds 9, 10 and 11 each found a door to "cleanup removes a worktree a
-  runner still reads". The capability is gone: a review worktree lives until
-  the unit lands, and `--remove` is not a flag."""
-  with pytest.raises(SystemExit) as caught:
-    world.run("prepare", "--plan", world.plan, "--unit", "U01", "--round", 1, "--remove")
-  assert caught.value.code == 2  # argparse: unrecognized arguments: --remove
-
-
-def test_collect_refuses_a_result_from_a_different_review(world, tmp_path):
-  """R11-02: a completed result is accepted only if it reviewed this round's
-  unit file against this round's merge base."""
-  applied(world)
-  folder = tmp_path / "run"; folder.mkdir()
-  launched(world, "U01", 1, folder)
-  bad = dict(result_for(world, "U01", 1), plan="/elsewhere/unit_U09.md")
-  (folder / "result.json").write_text(json.dumps(bad), encoding="utf-8")
-  code, out = world.run("collect", "--plan", world.plan, "--unit", "U01", "--round", 1)
-  assert code == 1 and "different review" in out, out
-  # R12-02: identity is required, and an older run is refused
-  (folder / "result.json").write_text(json.dumps({"status": "completed"}), encoding="utf-8")
-  code, out = world.run("collect", "--plan", world.plan, "--unit", "U01", "--round", 1)
-  assert code == 1 and "lacks" in out, out
-  stale = dict(result_for(world, "U01", 1), started_at=1_600_000_000.0)
-  (folder / "result.json").write_text(json.dumps(stale), encoding="utf-8")
-  code, out = world.run("collect", "--plan", world.plan, "--unit", "U01", "--round", 1)
-  assert code == 1 and "older run" in out, out
-
-
-def test_a_launched_round_is_never_re_prepared(world, tmp_path):
-  """R12-03: re-preparing kept the old run folder, so the replacement launch
-  was refused and left unrecorded."""
-  gh = applied(world)
-  make_pr(gh, 70, "a" * 40, closes=[(REPO, 2)])
-  assert world.run("status", "--plan", world.plan, "--watch", "U01=70")[0] == 0
-  folder = tmp_path / "run"; folder.mkdir()
-  launched(world, "U01", 1, folder)
-  code, out = world.run("prepare", "--plan", world.plan, "--unit", "U01", "--round", 1)
-  assert code == 1 and "prepare round 2" in out, out
-
-
-def test_collect_without_not_run_still_requires_a_completed_result(world, tmp_path):
-  applied(world)
-  folder = tmp_path / "run"; folder.mkdir()
-  launched(world, "U01", 1, folder)
-  code, out = world.run("collect", "--plan", world.plan, "--unit", "U01", "--round", 1)
-  assert code == 1 and "does not exist" in out, out
-  (folder / "result.json").write_text(json.dumps({"status": "running"}), encoding="utf-8")
-  code, out = world.run("collect", "--plan", world.plan, "--unit", "U01", "--round", 1)
-  assert code == 1 and "not `completed`" in out, out
-
-
-def test_an_interrupted_round_is_collected_but_its_worktree_is_never_removed(world, tmp_path):
-  """R12-01 (panel, Q2): the non-destructive decision - stop waiting - may be
-  taken on a non-terminal result; the destructive one - remove the worktree -
-  needs a terminal result or a human. File inactivity is never evidence, so
-  there is no backdating trick that makes this pass."""
-  gh = applied(world)
-  make_pr(gh, 70, "a" * 40, closes=[(REPO, 2)])
-  assert world.run("status", "--plan", world.plan, "--watch", "U01=70")[0] == 0
-  folder = tmp_path / "run"; folder.mkdir()
-  tree = tmp_path / "wt-u01"; tree.mkdir()
-  launched(world, "U01", 1, folder)
-  path = foreman_path(world, "U01")
-  data = json.loads(path.read_text(encoding="utf-8"))
-  round_of(data, 1).update({"pr": 70, "worktree": str(tree)})
-  path.write_text(json.dumps(data), encoding="utf-8")
-  (folder / "result.json").write_text(json.dumps({"status": "running"}), encoding="utf-8")
-  # stop waiting: accepted, folder kept, nothing invented
-  code, out = world.run("collect", "--plan", world.plan, "--unit", "U01", "--round", 1,
-                        "--not-run", "runner killed")
-  assert code == 0 and "not run (interrupted: runner killed)" in out, out
-  data = json.loads(path.read_text(encoding="utf-8"))
-  assert round_of(data, 1)["run_folder"] == str(folder) and round_of(data, 1)["phase"] == "collected"
-  # removal: NOT performed, even though the round is administratively
-  # "collected" and even though the files are old - inactivity is never
-  # evidence. Landing still completes (exit 0) and says what it kept.
-  old = time.time() - 7200
-  for p in (folder, folder / "result.json"):
-    os.utime(p, (old, old))
-  code, out = world.run("prepare", "--plan", world.plan, "--unit", "U01", "--round", 1, "--clean")
-  assert code == 0 and "kept" in out and "cannot know its runner has stopped reading" in out, out
-  assert "if you know the runner is dead" not in out
-  assert tree.exists()
-  # a terminal result is the only evidence that unlocks it
-  (folder / "result.json").write_text(json.dumps({"status": "failed"}), encoding="utf-8")
-  code, out = world.run("prepare", "--plan", world.plan, "--unit", "U01", "--round", 1, "--clean")
-  assert code == 0 and "cleaned" in out, out
+def test_dispatch_writes_the_round_and_opens_the_head_review(world):
+  stale = {"round": 1, "runcard": "old", "launch": 1, "head": None, "phase": "prepared", "dispatch_id": "d1"}
+  st, card, child, did, _ = dispatched(world, rounds=[stale])
+  data = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))
+  assert did == "d2" and data["dispatch_id"] == "d2" and child != card
+  assert data["rounds"][0] == {**stale, "phase": "collected", "outcome": "not run (superseded)"}
+  assert data["rounds"][1] == {"round": 2, "runcard": card, "launch": 1, "head": None, "phase": "fetched", "dispatch_id": "d2"}
+  review = json.loads((st.path("reviews", head_rid(st)) / "review.json").read_text(encoding="utf-8"))
+  assert review["kind"] == "head" and review["reviewers"][0] == "change-review"
+  child_card = json.loads(st.path("runcards", child).read_text(encoding="utf-8"))
+  assert child_card["parent"] == card and child_card["skill"] == "wave" and child_card["artifact"] == UNIT

@@ -567,8 +567,8 @@ MOVED = [("test_plan.py", "test_scan_banned_terms_mentions_and_size"),
          ("test_events.py", "test_status_wait_returns_on_change_or_deadline"),
          ("test_events.py", "test_status_pr_matching_rules"),
          ("test_events.py", "test_the_helper_is_single_writer_by_design"),
-         ("test_foreman.py", "test_prepare_fetches_from_the_recorded_remote_into_private_refs"),
-         ("test_foreman.py", "test_collect_records_a_round_and_guards_cleanup")]
+         ("test_foreman.py", "test_prepare_reviews_the_tip_it_fetches"),
+         ("test_foreman.py", "test_collect_records_foreman_findings")]
 DELETED = ("test_every_helper_command_the_skills_document_exists", "test_the_command_reference_documents_only_real_flags",
            "test_defer_edits_one_label_and_verifies", "test_defer_refuses_a_wave_label_the_repository_does_not_have",
            "test_repeated_deferrals_verify_against_the_current_wave", "test_an_unpublished_decision_does_not_release_the_unit",
