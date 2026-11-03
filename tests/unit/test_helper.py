@@ -1634,3 +1634,34 @@ def test_runcard_open_close_child_and_interrupt(world):
   assert code == 1 and f"runcard: {second} is closed" in out
   lines = (world.artifacts / "journal.md").read_text(encoding="utf-8")
   assert f"runcard open {first} plan" in lines and f"runcard interrupted {first}" in lines and f"runcard close {second}" in lines
+
+
+def _closed(w):
+  rid = w.open_card("wave", w.spec); assert w.run("runcard", "close", rid)[0] == 0; return rid
+def _interrupted(w):
+  rid = w.open_card("wave", w.spec); w.open_card("wave", w.spec); return rid
+def _child_of_interrupted(w):
+  parent = _interrupted(w); return w.run("runcard", "open", "--skill", "foreman", "--artifact", "U01", "--parent", parent)[1].strip()
+
+
+@pytest.mark.parametrize("setup, unit, reason", [
+  (lambda w: None, "U01", r"--runcard is required"),
+  (lambda w: "plan-9999", "U01", r"plan-9999 not found"),
+  (_closed, "U01", r"wave-\d+ is closed"),
+  (_interrupted, "U01", r"wave-\d+ is interrupted"),
+  (lambda w: w.card("plan"), "U01", r"plan-\d+ belongs to plan, not foreman\|wave"),
+  (lambda w: w.open_card("wave", "U02"), "U01", r"wave-\d+ is for U02, not U01"),
+  (lambda w: w.open_card("wave", "U02"), None, r"wave-\d+ is for U02, not .*sample\.md"),
+  (lambda w: w.card("wave"), "U01", None),
+  (lambda w: w.open_card("wave", "U01"), "U01", None),
+  (_child_of_interrupted, "U01", None),
+])
+def test_runcard_refusals(world, setup, unit, reason):
+  import superegm
+  assert world.run("graph", "--plan", world.plan)[0] == 0
+  args = argparse.Namespace(runcard=setup(world), unit=unit)
+  if reason is None:
+    assert superegm.require_runcard(args, {"wave", "foreman"})["skill"] in ("wave", "foreman")
+  else:
+    with pytest.raises(superegm.HandoffError, match="^runcard: " + reason):
+      superegm.require_runcard(args, {"wave", "foreman"})
