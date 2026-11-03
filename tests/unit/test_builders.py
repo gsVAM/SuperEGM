@@ -353,3 +353,23 @@ def test_launch_builder_round_2_detaches_the_earlier_worktree_and_carries_the_re
   prompt = s.path("launches", f"{UNIT}_r2_prompt.md").read_text(encoding="utf-8")
   assert f"\n\n---\n\n# Review comments on PR #{PR}\n\n## owner · review 9 on {head[:7]}\n**Review round 1" in prompt and "self review" not in prompt
   assert out.strip().splitlines()[-1].startswith(f"cd '{r2}' && env ")
+
+
+from superegm import HandoffError
+from superegm.launch_builder import allowed_tools
+
+@pytest.mark.parametrize("configured, expect", [
+  (["Read", "Edit", "Bash(git add:*)"], ["Read", "Edit", "Bash(git add:*)", "Bash(git push origin superegm/h/U07:*)", "Bash(pytest:*)"]),
+  (["Bash(pytest:*)", "Read"], ["Bash(pytest:*)", "Read", "Bash(git push origin superegm/h/U07:*)"]),
+  (["Read", "Agent"], "Agent"),
+  (["Read", "Skill"], "Skill"),
+  (["Read", "Bash"], "Bash"),
+  (["Read", "Bash(*)"], "Bash(*)"),
+])
+def test_allowed_tools_composition(configured, expect):
+  body = BODY.replace("HID", "h").replace("UID", "U07")
+  if isinstance(expect, str):
+    with pytest.raises(HandoffError, match=re.escape(f"allowed_tools carries {expect}: a builder never spawns, never invokes skills, never runs unrestricted Bash")):
+      allowed_tools(configured, "superegm/h/U07", body)
+  else:
+    assert allowed_tools(configured, "superegm/h/U07", body) == expect
