@@ -301,3 +301,32 @@ def test_record_refusals(world, kind, prior, call, expect):
   assert code == 1 and expect in out, out
   if not prior:
     assert not rpath(world, rid, f"round-{call['n']}.json").exists()
+
+
+# ---------------------------------------------------------------- S8: `review settle`
+
+@pytest.mark.parametrize("kind,mode,reviewer,sev,loc,fid,disposition,extra,expect", [
+  ("spec", None, "design", "high", "§1", "design-1-1", "contested", (), "review settle: design-1-1 is high: --owner required in normal mode"),
+  ("spec", None, "design", "medium", "§1", "design-1-1", "declined", ("--owner",), "design-1-1 declined"),
+  ("spec", "leavemealone", "design", "high", "§1", "design-1-1", "contested", ("--owner",), "review settle: design-1-1 is high: --judges required in leavemealone-mode"),
+  ("spec", "leavemealone", "design", "medium", "§1", "design-1-1", "declined", ("--judges", "j1"), "design-1-1 declined"),
+  ("spec", None, "design", "low", "§1", "design-1-1", "contested", (), "design-1-1 contested"),
+  ("spec", None, "design", "high", "§1", "design-1-1", "fixed", (), "design-1-1 fixed"),
+  ("spec", None, "design", "high", "§1", "design-1-1", "escalated", (), "design-1-1 escalated"),
+  ("spec", None, "design", "high", "§1", "design-1-1", "fix-design", (), "design-1-1 fix-design"),
+  ("head", None, "change-review", "high", "src/x.py", "change-review-1-1", "fix-design", (), "review settle: fix-design is refused on a head"),
+  ("head", None, "foreman", "high", "ci", "foreman-1-1", "fixed", (), "review settle: the CI finding is settled by no one"),
+  ("spec", None, "design", "high", "§1", "design-1-9", "fixed", (), "review settle: no finding design-1-9"),
+])
+def test_settle_and_its_refusals(world, kind, mode, reviewer, sev, loc, fid, disposition, extra, expect):
+  spec, cid, rid = opened(world, kind, mode=mode)
+  if kind == "head":
+    head_round(world, 1, "posted", cid, "revise")
+  assert record(world, rid, 1, reviewer, [F(reviewer, 1, 1, sev, loc=loc)], cid, sha=A if kind == "head" else None)[0] == 0
+  code, out = settle(world, rid, fid, disposition, cid, *extra)
+  finding = rjson(world, rid, "round-1.json")["reviewers"][reviewer]["findings"][0]
+  if expect.startswith("review settle:"):
+    assert code == 1 and expect in out and finding["disposition"] is None, out
+  else:
+    assert (code, out.strip()) == (0, expect) and finding["disposition"] == disposition
+    assert finding["ruling"] == (None if not extra else "owner" if extra == ("--owner",) else f"judges:{extra[1]}")
