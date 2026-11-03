@@ -11,7 +11,7 @@ from pathlib import Path
 import superegm as core
 
 WRITES = frozenset(['bodies', 'plan', 'state', 'unit', 'units'])  # the store kinds this subcommand writes
-SKILLS = frozenset(['plan'])  # the skills whose card this subcommand accepts
+SKILLS = frozenset(['plan', 'review-plan'])  # the skills whose card this subcommand accepts (D1 (a): a re-render between review-plan rounds)
 
 DECIDE_RE = re.compile(r"^- (D\d+) (.+?) options: (.+?); owner: (.+?); default: \((\w)\); blocking: (yes|no)"
                        r"(?:; answer: \((\w)\))?$")
