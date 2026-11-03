@@ -236,3 +236,21 @@ def test_review_record_writes_the_round(world):
   assert record(world, rid, 1, "design", [F("design", 1, 1)], cid)[0] == 0                     # a retry's record replaces the first
   assert len(rjson(world, rid, "round-1.json")["reviewers"]["design"]["findings"]) == 1
   assert rjson(world, rid)["astra_incomplete"] == 1
+
+
+# ---------------------------------------------------------------- S5: the set and foreman reviewers
+
+def test_record_set_and_foreman_reviewers(world):
+  spec, cid, rid = opened(world, "plan")
+  lines = [F("set", 2, 1, loc="U07 Interfaces"), F("set", 2, 2, loc="U08 Interfaces"), F("set", 2, 3, loc="the cut")]   # the set's round 2 into the unit's round 1
+  for reviewer, found in (("readiness", []), ("proportion", []), ("set", lines)):
+    assert record(world, rid, 1, reviewer, found, cid, sha=A)[0] == 0
+  assert [f["id"] for f in rjson(world, rid, "round-1.json")["reviewers"]["set"]["findings"]] == ["set-2-1", "set-2-3"]
+  assert rjson(world, rid, "round-1.json")["what_ran"] == "completed"
+  assert "review record: foreman is accepted on a head only" in record(world, rid, 1, "foreman", [F("foreman", 1, 1)], cid, sha=A)[1]
+  _, wcid, hid = opened(world, "head")
+  head_round(world, 1, "posted", wcid, "revise")
+  assert record(world, hid, 1, "foreman", [F("foreman", 1, 1)], wcid, sha=A)[0] == 0
+  assert rjson(world, hid, "round-1.json")["what_ran"] == "not run (change-review: no record)"   # foreman never counts
+  assert record(world, hid, 1, "change-review", [], wcid, sha=A)[0] == 0
+  assert rjson(world, hid, "round-1.json")["what_ran"] == "completed"
