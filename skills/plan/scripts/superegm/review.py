@@ -331,10 +331,25 @@ def settle_finding(args) -> int:
   finding["disposition"] = disposition
   finding["ruling"] = "owner" if args.owner else f"judges:{args.judges}" if args.judges else None
   core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
-  store_verdict(st, rid, review, card.get("parent") or args.runcard)
+  status = store_verdict(st, rid, review, card.get("parent") or args.runcard)
+  if review["kind"] == "head" and status.code == 0:
+    write_head_outcome(st, review, card.get("parent") or args.runcard)
   core.journal(st, f"review settle {rid} {fid} {disposition} by {finding['ruling'] or 'the elephant'} under {args.runcard}")
   print(f"{fid} {disposition}")
   return 0
+
+
+def write_head_outcome(st: core.Store, review: dict, runcard: str) -> None:
+  """`outcome: clean` on the unit's latest posted round and `<unit> awaiting merge` in the journal:
+  whichever of `review post` (U10) and `review settle` leaves `review status` at 0 writes it."""
+  unit = review["artifact"]
+  data = core.load_foreman(st, unit)
+  posted = sorted((e for e in data["rounds"] if e.get("phase") == "posted"), key=lambda e: e["round"])
+  if not posted:
+    return
+  posted[-1]["outcome"] = "clean"
+  core.save_foreman(st, unit, data)
+  core.journal(st, f"{unit} awaiting merge under {runcard}")
 
 
 # ---------------------------------------------------------------- status: the predicates live here alone
