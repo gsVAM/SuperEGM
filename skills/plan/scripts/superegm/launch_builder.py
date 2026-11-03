@@ -48,9 +48,11 @@ def prepare(args, card):
   for command in body.run_commands(issue_body):
     if f"Bash({command.split()[0]}:*)" not in tools:
       tools.append(f"Bash({command.split()[0]}:*)")
+  pr = (record.get("pr") or {}).get("number") if rnd >= 2 else None
   comments = core.gh_pages(f"repos/{repo}/issues/{number}/comments")
-  text = prompt_text(number, unit, issue_body, core.read_text(ORDERS), comments, [], None, builder)
-  worktree = add_worktree(handoff.repo_root, st, unit, rnd, branch, None)
+  reviews = core.gh_pages(f"repos/{repo}/pulls/{pr}/reviews") if pr else []
+  text = prompt_text(number, unit, issue_body, core.read_text(ORDERS), comments, reviews, pr, builder)
+  worktree = add_worktree(handoff.repo_root, st, unit, rnd, branch, pr)
   prompt = st.path("launches", f"{unit}_r{rnd}_prompt.md")
   core.atomic_write(prompt, text)
   core.journal(st, f"{unit} launch {rnd} prepared")
@@ -116,10 +118,21 @@ def prompt_text(issue_number, unit, body, orders, comments, reviews, pr, builder
 
 
 def add_worktree(repo_root, store, unit, rnd, branch, pr):
-  """A fresh worktree for the launch on the unit's branch: round 1 from `refs/superegm/base`."""
+  """A fresh worktree for the launch on the unit's branch: round 1 from `refs/superegm/base`,
+  later rounds at the PR tip after detaching the earlier launches' worktrees (nothing in them
+  is removed; that is `clean`'s)."""
   path = store.path("worktrees", unit, f"r{rnd}")
   path.parent.mkdir(parents=True, exist_ok=True)
-  core.run_git(["worktree", "add", "-b", branch, str(path), "refs/superegm/base"], repo_root)
+  if rnd == 1:
+    core.run_git(["worktree", "add", "-b", branch, str(path), "refs/superegm/base"], repo_root)
+    return path
+  core.run_git(["fetch", "--no-write-fetch-head", store.config["remote"], f"+refs/pull/{pr}/head:refs/superegm/pr/{pr}"], repo_root)
+  for earlier in core.registered_worktrees(repo_root):
+    if earlier.is_relative_to(path.parent.resolve()) and earlier.is_dir():
+      core.run_git(["switch", "--detach"], earlier)
+  core.run_git(["worktree", "prune"], repo_root, check=False)
+  core.run_git(["branch", "-f", branch, f"refs/superegm/pr/{pr}"], repo_root)
+  core.run_git(["worktree", "add", str(path), branch], repo_root)
   return path
 
 
