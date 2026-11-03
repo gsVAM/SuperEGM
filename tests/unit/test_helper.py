@@ -630,15 +630,20 @@ def test_subprocess_command_shape_with_fake_gh_on_path(tmp_path, capsys, monkeyp
   def run(*argv):
     return subprocess.run([sys.executable, str(HELPER), *[str(a) for a in argv]], env=env,
                           cwd=str(repo), capture_output=True, text=True)
-  assert run("graph", "--plan", plan).returncode == 0
-  assert run("gate", "--plan", plan, "--reviewed", "--round", 1).returncode == 0
-  assert run("gate", "--plan", plan, "--pass").returncode == 0
-  result = run("dry-run", "--plan", plan)
+  cards = {}
+  for skill in ("plan", "file"):
+    opened = run("runcard", "open", "--skill", skill, "--artifact", repo / "docs/designs/sample.md")
+    assert opened.returncode == 0, opened.stderr
+    cards[skill] = opened.stdout.strip()
+  assert run("graph", "--plan", plan, "--runcard", cards["plan"]).returncode == 0
+  assert run("gate", "--plan", plan, "--reviewed", "--round", 1, "--runcard", cards["file"]).returncode == 0
+  assert run("gate", "--plan", plan, "--pass", "--runcard", cards["file"]).returncode == 0
+  result = run("dry-run", "--plan", plan, "--runcard", cards["file"])
   assert result.returncode == 0, result.stderr
   log = [json.loads(l) for l in (bin_dir / "gh.log").read_text(encoding="utf-8").splitlines()]
   assert [l[:2] for l in log] == [["auth", "status"], ["api", f"repos/{REPO}"], ["api", f"repos/{REPO}/labels"]]
   assert "--paginate" in log[2]
-  result = run("apply", "--plan", plan, "--yes")
+  result = run("apply", "--plan", plan, "--yes", "--runcard", cards["file"])
   assert result.returncode == 0, result.stdout + result.stderr
   log = [json.loads(l) for l in (bin_dir / "gh.log").read_text(encoding="utf-8").splitlines()]
   posts = [l for l in log if "POST" in l]
@@ -1665,3 +1670,27 @@ def test_runcard_refusals(world, setup, unit, reason):
   else:
     with pytest.raises(superegm.HandoffError, match="^runcard: " + reason):
       superegm.require_runcard(args, {"wave", "foreman"})
+
+
+GATED = [(("approve-spec", "--design", "SPEC", "--yes"), "review-spec"), (("graph",), "plan"),
+         (("gate", "--reviewed", "--round", "1"), "file"), (("dry-run",), "file"), (("apply", "--yes"), "file"),
+         (("verify",), "file"), (("status",), "wave"), (("launch", "--wave", "1", "--units", "U01"), "wave"),
+         (("decide", "--unit", "U03", "--decision", "D2", "--answer", "25"), "plan"),
+         (("record-launch", "--unit", "U01", "--round", "1", "--run-folder", "/tmp/r"), "wave"),
+         (("collect", "--unit", "U01", "--round", "1"), "wave"), (("prepare", "--unit", "U01", "--round", "1"), "wave")]
+
+
+@pytest.mark.parametrize("argv, skill", GATED)
+def test_every_absorbed_writing_subcommand_is_gated(world, argv, skill):
+  argv = [str(world.spec) if a == "SPEC" else a for a in argv]
+  other = world.open_card("brainstorming", world.spec)
+  snapshot = lambda: sorted(str(p) for p in world.artifacts.rglob("*") if p.name != "journal.md")
+  before = snapshot()
+  code, out = world.run(*argv, "--plan", world.plan, card=None)
+  assert code == 1 and "runcard: --runcard is required" in out, out
+  code, out = world.run(*argv, "--plan", world.plan, "--runcard", other, card=None)
+  assert code == 1 and f"runcard: {other} belongs to brainstorming" in out, out
+  assert snapshot() == before and not world.gh.calls, "refused before any store write or GitHub read"
+  code, out = world.run(*argv, "--plan", world.plan, "--runcard", world.card(skill), card=None)
+  assert "runcard:" not in out, out
+  assert "scan" not in {a for a, _ in GATED} and "--runcard" not in world.run("scan", "--help", card=None)[1]

@@ -357,8 +357,17 @@ class FakeGitHub:
     return next(i["number"] for i in self.issues.values() if i["id"] == issue_id)
 
 
+# The skill whose card `Harness.run` opens for each gated subcommand (spec section 6).
+SKILL_OF = {"approve-spec": "review-spec", "graph": "plan", "decide": "plan",
+            "gate": "file", "dry-run": "file", "apply": "file", "verify": "file",
+            "status": "wave", "launch": "wave", "record-launch": "wave", "collect": "wave", "prepare": "wave"}
+
+
 class Harness:
-  """The package with the fake injected; `run` returns (code, stdout + stderr)."""
+  """The package with the fake injected; `run` returns (code, stdout + stderr).
+
+  `run(*argv)` appends `--runcard <an open card of the serving skill>` to a
+  gated subcommand; `card=None` sends the argv as written."""
 
   def __init__(self, capsys, now=1_700_000_000.0):
     import superegm
@@ -388,7 +397,15 @@ class Harness:
     self.clock += seconds
 
   def run(self, *argv, card="auto"):
-    code = self.main([str(a) for a in argv])
+    argv = [str(a) for a in argv]
+    if card == "auto" and argv and argv[0] in SKILL_OF and "--runcard" not in argv and "--help" not in argv:
+      argv += ["--runcard", self.card(SKILL_OF[argv[0]])]
+    try:
+      code = self.main(argv)
+    except SystemExit as stop:  # `--help` exits 0 after printing; argparse errors propagate
+      if stop.code != 0:
+        raise
+      code = 0
     captured = self.capsys.readouterr()
     return code, captured.out + captured.err
 
