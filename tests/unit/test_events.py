@@ -255,7 +255,7 @@ def test_status_ci_states(world):
   gh.combined["a" * 40] = {"state": "pending", "statuses": []}
   world.advance(31 * 60)
   code, out = world.run("status", "--plan", world.plan)
-  assert "no-ci" in out
+  assert "waiting-for-ci" in out
 
 
 def test_a_landed_confirmation_lapses_when_the_issue_reopens(world):
@@ -412,3 +412,13 @@ def test_pr_discovery_matches_a_differently_cased_repository(world):
   gh.graphql[2] = [{**gh.prs[70], "repository": {"nameWithOwner": REPO.upper()}}]
   code, out = world.run("status", "--plan", world.plan)
   assert code == 0 and "U01 #2: pr #70" in out, out
+
+
+PACKAGE = Path(__file__).resolve().parents[2] / "skills/plan/scripts/superegm"
+
+
+@pytest.mark.parametrize("needle", ["NO_CI_SECONDS", "head_seen_at", '"no-ci"', "deadline: no change",
+                                    '"changed: "', "A retarget", "exit when a unit changes"])
+def test_no_removed_mechanism_named(needle):
+  hits = [p.name for p in PACKAGE.glob("*.py") if needle in p.read_text(encoding="utf-8")]
+  assert not hits, (needle, hits)
