@@ -180,3 +180,30 @@ def test_dispatch_writes_the_round_and_opens_the_head_review(world):
   assert review["kind"] == "head" and review["reviewers"][0] == "change-review"
   child_card = json.loads(st.path("runcards", child).read_text(encoding="utf-8"))
   assert child_card["parent"] == card and child_card["skill"] == "wave" and child_card["artifact"] == UNIT
+
+
+@pytest.mark.parametrize("setup, reason", [
+    ({"ci": "pending"}, "ci pending"),
+    ({"ci": None}, "ci absent"),
+    ({"launches": None}, "no launch"),
+    ({"launches": [{"round": 1, "status": "running"}]}, "launch 1 not terminal"),
+    ({"rounds": [{**POSTED_R1, "head": "a" * 40}]}, "round 1 posted since launch 1"),
+    ({"decision": True}, "decision p3-1 pending"),
+    ({"stalled": True}, "review stalled"),
+])
+def test_dispatch_predicate_refuses(world, setup, reason):
+  setup = dict(setup); decision, stalled = setup.pop("decision", False), setup.pop("stalled", False)
+  st, card, _ = seed(world, **setup)
+  data = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))
+  if decision:
+    data["decisions"] = [{"id": "p3-1", "point": 3, "question": "q", "asked_at": "t"}]
+  if stalled:  # on a head the review's rounds are these entries: two latest not completed under this card
+    assert world.run("review", "open", "--kind", "head", "--artifact", UNIT, "--reviewers", "change-review", "--runcard", card)[0] == 0
+    data["rounds"] = [{"round": n, "runcard": card, "launch": 1, "head": None, "phase": "collected",
+                       "dispatch_id": f"d{n}", "outcome": "not run (fetch failed)"} for n in (1, 2)]
+    data["dispatch_id"] = "d2"
+  atomic_write(st.path("foreman", UNIT), data)
+  before = st.path("foreman", UNIT).read_text(encoding="utf-8")
+  code, out = world.run("foreman", "dispatch", "--unit", UNIT, "--runcard", card)
+  assert (code, out.strip()) == (1, f"dispatch refused: {reason}"), out
+  assert st.path("foreman", UNIT).read_text(encoding="utf-8") == before
