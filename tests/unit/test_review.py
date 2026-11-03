@@ -376,3 +376,29 @@ def test_status_exit_codes(world, scenario, new_card, code, fragment):
   assert (got, fragment in out) == (code, True), out
   if scenario is s_regression:
     assert "rounds: 1 -> 1 (regressions 0, 1)" in out
+
+
+# ---------------------------------------------------------------- S10: `review rule`
+
+def test_review_rule(world):
+  spec, cid, rid = opened(world)
+  assert "review rule: not at the cap" in rule(world, rid, "continue", cid)[1]
+  rounds(world, rid, cid, [HIGH(n) for n in range(1, 6)])
+  code, out = rule(world, rid, "continue", cid, ("--judges", "j1"))
+  assert (code, out.strip()) == (0, "ruling R1 continue") and status(world, rid, cid)[0] == 3
+  assert "review rule: continue already ruled this cycle" in rule(world, rid, "continue", cid)[1]
+  rounds(world, rid, cid, [HIGH(6)], start=6)
+  assert status(world, rid, cid)[0] == 2 and rule(world, rid, "accept", cid)[0] == 0
+  review = rjson(world, rid)
+  assert (review["converged"], review["converged_round"]) == ("by ruling R2", 6)
+  assert [(r["id"], r["ruling"], r["by"]) for r in review["rulings"]] == [("R1", "continue", "judges:j1"), ("R2", "accept", "owner")]
+  _, cid2, rid2 = opened(world)                                            # accept closed c1
+  rounds(world, rid2, cid2, [HIGH(n) for n in range(1, 6)])
+  assert rule(world, rid2, "stop", cid2)[0] == 0 and status(world, rid2, cid2)[0] == 2
+  assert "review rule: cycle stopped" in rule(world, rid2, "accept", cid2)[1]
+  assert "review record: review at its cap" in record(world, rid2, 6, "design", [], cid2)[1]
+  _, wcid, hid = opened(world, "head")
+  for n in range(1, 6):
+    head_round(world, n, "posted", wcid, "revise")
+    assert record(world, hid, n, "change-review", [F("change-review", n, 1)], wcid, sha=A)[0] == 0
+  assert "review rule: accept is refused on a head" in rule(world, hid, "accept", wcid)[1]
