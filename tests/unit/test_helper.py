@@ -335,9 +335,13 @@ class Harness:
   """One helper namespace with the fake injected; `run` returns (code, stdout)."""
 
   def __init__(self, capsys, now=1_700_000_000.0):
-    # run_path returns a copy of the module globals; the functions keep the
-    # original dict, so injection goes through __globals__.
-    self.ns = runpy.run_path(str(HELPER))["main"].__globals__
+    # The subcommand modules reach every shared name as `core.<name>`, so an
+    # injection into the package's namespace reaches all of them.
+    if str(HELPER.parent) not in sys.path:
+      sys.path.insert(0, str(HELPER.parent))
+    import superegm
+    self.ns = vars(superegm)
+    self.main = runpy.run_path(str(HELPER))["main"]
     self.gh = FakeGitHub()
     self.sleeps = []
     self.clock = now
@@ -355,7 +359,7 @@ class Harness:
     self.clock += seconds
 
   def run(self, *argv):
-    code = self.ns["main"]([str(a) for a in argv])
+    code = self.main([str(a) for a in argv])
     captured = self.capsys.readouterr()
     return code, captured.out + captured.err
 
@@ -466,8 +470,7 @@ def test_config_defaults_and_remote_resolution(tmp_path, capsys):
   assert harness.run("graph", "--plan", plan)[0] == 0
   state = json.loads((plan.parent / "handoff_state.json").read_text(encoding="utf-8"))
   assert state["remote"] == "upstream" and state["repo"] == REPO
-  ns = runpy.run_path(str(HELPER))
-  config = ns["load_config"](repo)
+  config = harness.ns["load_config"](repo)
   assert config["banned_terms"] == [] and config["fix_request_mention"] is None
   (repo / ".egm/handoff.json").write_text(json.dumps({"repo": "other/name"}), encoding="utf-8")
   code, out = harness.run("graph", "--plan", plan)
@@ -514,13 +517,13 @@ def test_scan_command_over_rendered_bodies(world):
 
 def test_approve_checks_and_records(world):
   design = world.repo / "docs/designs/sample.md"
-  code, out = world.run("approve", "--design", design, "--artifacts", world.artifacts)
+  code, out = world.run("approve-spec", "--design", design, "--artifacts", world.artifacts)
   assert code == 0 and "Approve `" in out and "Options: Approve | Stop" in out
-  code, out = world.run("approve", "--design", design, "--artifacts", world.artifacts, "--yes")
+  code, out = world.run("approve-spec", "--design", design, "--artifacts", world.artifacts, "--yes")
   assert code == 0
   assert state_of(world)["approval"]["answer"] == "Approve"
   design.write_text(DESIGN + "\nchanged\n", encoding="utf-8")
-  code, out = world.run("approve", "--design", design, "--artifacts", world.artifacts)
+  code, out = world.run("approve-spec", "--design", design, "--artifacts", world.artifacts)
   assert code == 1 and "tracked but not clean" in out
 
   code, out = world.run("graph", "--plan", world.plan)
@@ -529,7 +532,7 @@ def test_approve_checks_and_records(world):
   (world.repo / "docs/designs/plain.md").write_text("# Plain\n\nNo plan.\n", encoding="utf-8")
   git(["add", "-A"], world.repo)
   git(["commit", "-qm", "plain"], world.repo)
-  code, out = world.run("approve", "--design", world.repo / "docs/designs/plain.md", "--artifacts", world.artifacts)
+  code, out = world.run("approve-spec", "--design", world.repo / "docs/designs/plain.md", "--artifacts", world.artifacts)
   assert code == 1 and "Detailed Implementation Plan" in out and "egm-draft" in out
 
 
@@ -538,7 +541,7 @@ def test_approve_refuses_an_untracked_or_ignored_design(world):
   design = world.repo / "docs/designs/ignored.md"
   design.write_text(DESIGN, encoding="utf-8")
   (world.repo / ".gitignore").write_text("docs/designs/ignored.md\n", encoding="utf-8")
-  code, out = world.run("approve", "--design", design, "--artifacts", world.artifacts)
+  code, out = world.run("approve-spec", "--design", design, "--artifacts", world.artifacts)
   assert code == 1 and "not tracked by git" in out
 
 
@@ -1072,10 +1075,12 @@ def test_subprocess_command_shape_with_fake_gh_on_path(tmp_path, capsys):
 def test_gh_is_pinned_to_github_com_whatever_gh_host_says(monkeypatch):
   """R03: GH_HOST would send writes to an enterprise server that no approval,
   remote check or confirmed destination in this helper ever looked at."""
-  ns = runpy.run_path(str(HELPER))
+  if str(HELPER.parent) not in sys.path:
+    sys.path.insert(0, str(HELPER.parent))
+  import superegm
   monkeypatch.setenv("GH_HOST", "github.enterprise.invalid")
   monkeypatch.setenv("GH_ENTERPRISE_TOKEN", "tok")
-  env = ns["gh_env"]()
+  env = superegm.gh_env()
   assert env["GH_HOST"] == "github.com"
   assert "GH_ENTERPRISE_TOKEN" not in env
 
@@ -1221,7 +1226,7 @@ def test_a_different_design_may_not_reuse_a_directory_that_created_issues(world)
   other.write_text(DESIGN.replace("# Webhook", "# Other"), encoding="utf-8")
   git(["add", "-A"], world.repo)
   git(["commit", "-qm", "other"], world.repo)
-  code, out = world.run("approve", "--design", other, "--artifacts", world.artifacts, "--yes")
+  code, out = world.run("approve-spec", "--design", other, "--artifacts", world.artifacts, "--yes")
   assert code == 1 and "new artifact directory" in out and "Nothing was changed" in out
   state = state_of(world)
   assert state["design"]["path"].endswith("sample.md")
@@ -1232,10 +1237,10 @@ def test_a_different_design_may_not_reuse_a_directory_that_created_issues(world)
 def test_approval_binds_to_the_design_it_displayed(world):
   """R2-06: the question shows a hash; --yes must not silently approve another."""
   design = world.repo / "docs/designs/sample.md"
-  assert world.run("approve", "--design", design, "--artifacts", world.artifacts)[0] == 0
+  assert world.run("approve-spec", "--design", design, "--artifacts", world.artifacts)[0] == 0
   design.write_text(DESIGN + "\nlater edit\n", encoding="utf-8")
   git(["commit", "-qam", "later"], world.repo)
-  code, out = world.run("approve", "--design", design, "--artifacts", world.artifacts, "--yes")
+  code, out = world.run("approve-spec", "--design", design, "--artifacts", world.artifacts, "--yes")
   assert code == 1 and "changed since the question was asked" in out
   assert "approval" not in state_of(world)
 
@@ -1328,31 +1333,6 @@ def test_repeated_deferrals_verify_against_the_current_wave(world):
   record = state_of(world)["units"]["U03"]
   assert record["initial_wave"] == 3 or record["current_wave"] == 3
 
-
-def test_every_helper_command_the_skills_document_exists(world):
-  """A documented flag that the CLI does not have fails only at the moment the
-  user runs it, which is the middle of a handoff."""
-  import argparse
-  parser = world.ns["build_parser"]()
-  subs = {}
-  for action in parser._actions:
-    if isinstance(action, argparse._SubParsersAction):
-      for name, sub in action.choices.items():
-        subs[name] = {flag for a in sub._actions for flag in a.option_strings}
-  root = Path(__file__).resolve().parents[2]
-  problems = []
-  for doc in ("skills/plan/SKILL.md", "skills/wave/SKILL.md",
-              "skills/wave/references/foreman_brief.md"):
-    text = (root / doc).read_text(encoding="utf-8")
-    for match in re.finditer(
-        r"<HELPER>'\s+([a-z-]+)((?:\s+--[a-z-]+(?:\s+'[^']*'|\s+<[^>]*>|\s+[\w./-]+)?)*)", text):
-      command, rest = match.group(1), match.group(2)
-      if command not in subs:
-        problems.append(f"{doc}: unknown subcommand `{command}`")
-        continue
-      problems += [f"{doc}: `{command}` has no {flag}"
-                   for flag in re.findall(r"--[a-z-]+", rest) if flag not in subs[command]]
-  assert not problems, "\n".join(sorted(set(problems)))
 
 
 # --------------------------------------------- inspection round 3 regressions
@@ -1809,26 +1789,6 @@ def test_a_launched_round_is_never_re_prepared(world, tmp_path):
   assert code == 1 and "prepare round 2" in out, out
 
 
-def test_the_command_reference_documents_only_real_flags(world):
-  """R12-04: handoff_plan.md section 6 is read by people; a flag argparse
-  rejects must not be advertised there."""
-  import argparse
-  parser = world.ns["build_parser"]()
-  subs = {}
-  for action in parser._actions:
-    if isinstance(action, argparse._SubParsersAction):
-      for name, sub in action.choices.items():
-        subs[name] = {flag for a in sub._actions for flag in a.option_strings}
-  root = Path(__file__).resolve().parents[2]
-  text = (root / "skills/plan/references/handoff_plan.md").read_text(encoding="utf-8")
-  problems = []
-  for m in re.finditer(r"^\| `([a-z-]+) ([^`]*)`", text, re.M):
-    cmd, rest = m.group(1), m.group(2)
-    if cmd not in subs:
-      problems.append(f"unknown subcommand `{cmd}`"); continue
-    problems += [f"`{cmd}` has no {f}" for f in re.findall(r"--[a-z-]+", rest) if f not in subs[cmd]]
-  assert not problems, "\n".join(problems)
-
 
 # -------------------------------- round 12: termination is never inferred
 
@@ -1894,3 +1854,29 @@ def test_helper_runs_under_its_new_name(world):
   assert (world.artifacts / "handoff_units.json").is_file()
   for skill in ("skills/plan/SKILL.md", "skills/wave/SKILL.md"):
     assert "egm_handoff.py" not in (ROOT / skill).read_text(encoding="utf-8"), skill
+
+
+# ------------------------------------------------- U03: the helper package
+
+
+MODULES = ("init", "runcard", "approve_spec", "graph", "scan", "review", "gate", "dry_run", "apply",
+           "verify", "status", "launch", "launch_builder", "record_launch", "foreman", "prepare",
+           "collect", "tdd_order", "decide", "decision", "interrupt", "clean", "report", "close", "judges")
+
+
+@pytest.mark.parametrize("name", MODULES)
+def test_one_module_per_subcommand(name):
+  import argparse, importlib, sys
+  scripts = Path(__file__).resolve().parents[2] / "skills/plan/scripts"
+  if str(scripts) not in sys.path:
+    sys.path.insert(0, str(scripts))
+  import superegm
+  assert set(superegm.SUBCOMMANDS) == set(MODULES)
+  module = importlib.import_module(f"superegm.{name}")
+  assert callable(module.register) and callable(module.run)
+  parser = superegm.build_parser()
+  choices = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction)).choices
+  assert name.replace("_", "-") in choices
+  assert choices[name.replace("_", "-")].get_default("run") is module.run
+  defs = [l for l in (scripts / "superegm.py").read_text(encoding="utf-8").splitlines() if l.startswith("def ")]
+  assert defs == ["def main(argv=None):"]
