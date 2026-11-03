@@ -251,3 +251,17 @@ def test_graph_keeps_the_handoff_id_across_a_reapproval(world):
   atomic_write(store_root(world) / "state.json", s)
   assert graph(world, plan3, card3)[0] == 0
   assert state(world)["handoff_id"] == "2026-11-04-payments-abcdef" and "closed_at" not in state(world)
+
+
+def test_graph_records_the_plan_path_and_copies_the_plan(world):
+  spec, sha, plan, card = planned(world)
+  code, out = world.run("graph", "--runcard", card)
+  assert code == 1 and "graph: no plan recorded: pass --plan on the first graph" in out
+  assert graph(world, plan, card)[0] == 0
+  assert state(world)["plan"] == str(plan)
+  assert find(world, "handoff_plan.md").read_text(encoding="utf-8") == plan.read_text(encoding="utf-8")
+  plan.write_text(plan.read_text(encoding="utf-8").replace("Worker exists.", "A worker exists."), encoding="utf-8")
+  assert world.run("graph", "--runcard", card)[0] == 0
+  assert "A worker exists." in find(world, "handoff_plan.md").read_text(encoding="utf-8")
+  assert plan.read_text(encoding="utf-8") == plan_text(spec).replace("Worker exists.", "A worker exists.")
+  assert world.run("scan")[0] == 0
