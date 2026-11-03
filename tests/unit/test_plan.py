@@ -467,3 +467,22 @@ def test_decide_on_a_filed_unit_leaves_the_body_as_filed(world):
   comment = find(world, "decision_comment_U02_D1.md").read_text(encoding="utf-8")
   assert comment.startswith("**Decision D1:** (b) 10 attempts\n") and "Retry ceiling?" in comment
   assert state(world)["decisions"]["U02/D1"]["answer"] == "(b)"
+
+
+def test_plan_skill_body_names_the_phase_2_commands():
+  body = (ROOT / "skills/plan/SKILL.md").read_text(encoding="utf-8").split("---", 2)[2]
+  assert len(body.encode("utf-8")) <= 24_000
+  for needle in ("In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.",
+                 "runcard open --skill plan --artifact", "graph --plan", "superegm scan", "decide --unit",
+                 "--default", "decision-blocking", "runcard close", "/superegm:review-plan", "## Units",
+                 "references/handoff_plan.md", "references/issue_template.md", "handoff_units.json", "49,152"):
+    assert needle in body, needle
+  ref = (ROOT / "skills/plan/references/handoff_plan.md").read_text(encoding="utf-8")
+  for needle in ("Interfaces", "Review focus (this unit)", "Steps", "options: (a)", "; answer: (",
+                 "checked by superegm tdd-order", "Global constraints", "decision_comment_"):
+    assert needle in ref, needle
+  template = (ROOT / "skills/plan/references/issue_template.md").read_text(encoding="utf-8")
+  assert "<!-- superegm:handoff={{handoff_id}} unit={{unit_id}} spec={{spec_sha256}} -->" in template
+  assert "## Scope, order and risk" in template and "#<tracking>" in template
+  scenarios = (ROOT / "skills/plan/test_scenarios.yaml").read_text(encoding="utf-8")
+  assert 'skill: "plan"' in scenarios and "review-plan" in scenarios
