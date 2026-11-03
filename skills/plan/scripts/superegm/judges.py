@@ -119,6 +119,10 @@ def register(subparsers):
   r.add_argument("--model", help="<requested>:<effective>; default the configured model twice")
   r.add_argument("--effort", help="<requested>:<effective>; default the configured effort twice")
   r.add_argument("--runcard", required=True, help="the panel's judges card, or its parent")
+  d = action.add_parser("diff", help="write the neutral list of where a round's positions differ and the next brief")
+  d.add_argument("--panel", required=True)
+  d.add_argument("--round", required=True, type=int)
+  d.add_argument("--runcard", required=True, help="the panel's judges card, or its parent")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -353,4 +357,50 @@ def cmd_record(args, store) -> int:
   return 0
 
 
-COMMANDS = {"open": cmd_open, "record": cmd_record}
+def neutral_diff(pid: str, round_no: int, questions: list[dict], entries: dict[str, dict],
+                 open_ids: list[str]) -> str:
+  """Option ids and judge ids only: per open question, who chose what."""
+  lines = [f"# Panel {pid}, round {round_no}: where positions differ"]
+  for qid in open_ids:
+    positions = {}
+    for judge, entry in entries.items():
+      option = entry.get("options", {}).get(qid)
+      if option:
+        positions.setdefault(option, []).append(judge)
+    if len(positions) == 1:
+      lines.append(f"## {qid}: converged on ({next(iter(positions))})")
+      continue
+    lines.append(f"## {qid}")
+    lines += [f"- ({option}): {', '.join(positions[option])}" for option in sorted(positions)]
+  lines += [f"Not run: {judge} ({entry['not_run']})" for judge, entry in entries.items() if "not_run" in entry]
+  return "\n".join(lines) + "\n"
+
+
+def cmd_diff(args, store) -> int:
+  panel = load_panel(store, args.panel)
+  panel_card(args, store, panel)
+  pid, n = panel["id"], args.round
+  if not 1 <= n <= CAP:
+    raise core.HandoffError(f"judges: round must be 1..{CAP}")
+  entries = panel["rounds"].get(str(n), {})
+  for judge in panel["judges"]:
+    if judge not in entries:
+      raise core.HandoffError(f"judges: round {n}: {judge} not recorded")
+  folder = store.path("judges", pid)
+  questions = parse_questions(core.read_text(folder / "question.md"))
+  diff = neutral_diff(pid, n, questions, entries, open_questions(panel, questions, n))
+  core.atomic_write(folder / f"round-{n}" / "diff.md", diff)
+  still_open = open_questions(panel, questions, n + 1)
+  if still_open and n < CAP:
+    prior = [(k, judge, core.read_text(folder / f"round-{k}" / f"{judge}.md"))
+             for k in range(1, n + 1) for judge in panel["judges"]
+             if "options" in panel["rounds"][str(k)].get(judge, {})]
+    diffs = [core.read_text(folder / f"round-{k}" / "diff.md") for k in range(1, n + 1)]
+    core.atomic_write(folder / f"round-{n + 1}" / "brief.md",
+                      render_brief(panel, questions, n + 1, still_open, prior, diffs))
+  core.journal(store, f"judges {pid}: round {n} diff written, open {', '.join(still_open) or 'none'}")
+  print(folder / f"round-{n}" / "diff.md")
+  return 0
+
+
+COMMANDS = {"open": cmd_open, "record": cmd_record, "diff": cmd_diff}
