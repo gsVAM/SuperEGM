@@ -106,6 +106,18 @@ def register(subparsers):
   card = o.add_mutually_exclusive_group(required=True)
   card.add_argument("--runcard", help="the open judges card on the question file")
   card.add_argument("--parent", help="the open review-spec, review-plan, plan, wave or integrate card to open a child card under")
+  r = action.add_parser("record", help="record one judge's verdict, Astra result or not-run reason for a round")
+  r.add_argument("--panel", required=True)
+  r.add_argument("--round", required=True, type=int)
+  r.add_argument("--judge", required=True)
+  form = r.add_mutually_exclusive_group(required=True)
+  form.add_argument("--verdict", help="a Claude judge's reply in the verdict-file grammar")
+  form.add_argument("--result", help="the Astra lane's result.json")
+  form.add_argument("--not-run", dest="not_run", help="the reason the judge did not run")
+  r.add_argument("--isolation", help="clean | exposed:<what>, from the judge's `saw:` line (with --verdict)")
+  r.add_argument("--model", help="<requested>:<effective>; default the configured model twice")
+  r.add_argument("--effort", help="<requested>:<effective>; default the configured effort twice")
+  r.add_argument("--runcard", required=True, help="the panel's judges card, or its parent")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -118,6 +130,21 @@ def require_card(args, artifact: str) -> dict:
   # U03's require_runcard reads the subcommand's artifact from args.design; a judges card's is the question file.
   args.design = artifact
   return core.require_runcard(args, SKILLS)
+
+
+def load_panel(store, pid: str) -> dict:
+  path = store.path("judges", pid, "panel.json")
+  if not path.is_file():
+    raise core.HandoffError(f"judges: panel {pid} not found")
+  return json.loads(core.read_text(path))
+
+
+def panel_card(args, store, panel: dict) -> dict:
+  """The panel's card: `--runcard` may name the child or its parent; U03 accepts
+  the child while the parent is open or interrupted."""
+  if args.runcard == panel["parent"]:
+    args.runcard = panel["runcard"]
+  return require_card(args, panel["question"])
 
 
 def write_json(path: Path, obj) -> None:
@@ -194,4 +221,10 @@ def cmd_open(args, store) -> int:
   return 0
 
 
-COMMANDS = {"open": cmd_open}
+def cmd_record(args, store) -> int:
+  panel = load_panel(store, args.panel)
+  panel_card(args, store, panel)
+  raise core.HandoffError("judges: record is not built yet")
+
+
+COMMANDS = {"open": cmd_open, "record": cmd_record}
