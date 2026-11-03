@@ -1,6 +1,8 @@
 ---
 name: plan
 license: Apache-2.0
+effects: external
+effect_kinds: [state-store, start-session, github-write]
 disable-model-invocation: true
 description: >-
   Turns an approved EGM design into build units, a dependency graph with

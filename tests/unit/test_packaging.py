@@ -1,6 +1,7 @@
 # Copyright 2026 Google LLC.
 # SPDX-License-Identifier: Apache-2.0
-# Modified by SuperEGM (gsVAM), 2026: one host; the bundle test, palettes and required files of section 15.
+# Modified by SuperEGM (gsVAM), 2026: one host; the bundle test, palettes and required files of section 15;
+# three-file hook rule, hook hash, effects checks.
 
 """Exercise distributable contents, unsafe paths, and reproducible output."""
 
@@ -39,7 +40,7 @@ def source(tmp_path: Path) -> Path:
   root.mkdir()
   for name in ("plugin.json", "LICENSE", "LICENSE-MIT", "README.md", "pyproject.toml"):
     shutil.copyfile(ROOT / name, root / name)
-  for name in ("skills", "agents", "resources", "docs", ".claude-plugin"):
+  for name in ("skills", "agents", "resources", "docs", ".claude-plugin", "hooks"):
     shutil.copytree(ROOT / name, root / name)
   return root
 
@@ -277,3 +278,53 @@ def test_archive_claimed_after_preflight_is_not_overwritten(
   else:
     assert archive.read_bytes() == b"another build owns this file"
   assert not list(output.glob(".superegm-*"))
+
+
+HOOK_FILES = {"hooks/hooks.json", "hooks/run-hook.cmd", "hooks/session-start"}
+
+
+def test_bundle_ships_exactly_the_three_hook_files(source: Path, tmp_path: Path) -> None:
+  _, archive = build(source, tmp_path / "out")
+  with zipfile.ZipFile(archive) as bundle:
+    names = set(bundle.namelist())
+  assert {n for n in names if n.startswith("hooks/")} == HOOK_FILES
+
+
+@pytest.mark.parametrize("damage,message", [
+    ("extra", "Hooks: hooks/hooks-cursor.json is not one of the three hook files"),
+    ("hash", "Hooks: hook_sha256 does not match hooks/session-start"),
+    ("missing", "Hooks: hook_sha256 missing from .claude-plugin/plugin.json"),
+    ("entries", "Hooks: hooks.json must declare one SessionStart command hook"),
+])
+def test_build_refuses_hook_violations(
+    source: Path, tmp_path: Path, damage: str, message: str,
+) -> None:
+  if damage == "extra":
+    (source / "hooks/hooks-cursor.json").write_text("{}")
+  elif damage == "hash":
+    (source / "hooks/session-start").write_text("#!/usr/bin/env bash\nexit 0\n")
+  elif damage == "missing":
+    path = source / ".claude-plugin/plugin.json"
+    manifest = json.loads(path.read_text())
+    del manifest["superegm"]
+    path.write_text(json.dumps(manifest))
+  else:
+    path = source / "hooks/hooks.json"
+    hooks = json.loads(path.read_text())
+    hooks["hooks"]["PreToolUse"] = []
+    path.write_text(json.dumps(hooks))
+  output = tmp_path / "out"
+  with pytest.raises(ValueError) as error:
+    build(source, output)
+  assert str(error.value) == message
+  assert not output.exists()
+
+
+def test_build_refuses_effects_violation(source: Path, tmp_path: Path) -> None:
+  path = source / "skills/clean/SKILL.md"
+  path.write_text(path.read_text().replace("disable-model-invocation: true\n", "", 1))
+  output = tmp_path / "out"
+  with pytest.raises(ValueError) as error:
+    build(source, output)
+  assert str(error.value) == "Effects: clean: external but not disable-model-invocation: true"
+  assert not output.exists()

@@ -1,6 +1,8 @@
 ---
 name: wave
 license: Apache-2.0
+effects: external
+effect_kinds: [start-session, github-write, remote-branch, state-store]
 disable-model-invocation: true
 description: >-
   Launches the next wave of a handoff's GitHub issues, watches each in-flight

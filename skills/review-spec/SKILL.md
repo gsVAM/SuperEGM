@@ -1,6 +1,8 @@
 ---
 name: review-spec
 license: Apache-2.0
+effects: external
+effect_kinds: [state-store, start-session]
 disable-model-invocation: true
 description: >-
   Orchestrates the EGM Goldfish Review Protocol. Used as part of the EGM
