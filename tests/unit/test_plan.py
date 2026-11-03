@@ -439,3 +439,16 @@ def test_decide_rewrites_the_plan_line_and_rerenders(world):
   assert d["answer"] == "(b)" and d["by"] == "owner" and d["decided_at"] and "published" not in d
   assert not list(store_root(world).rglob("decision_comment_U02_D1.md"))
   assert world.run("scan")[0] == 0
+
+
+def test_decide_refuses_an_answer_outside_the_options(world):
+  spec, sha, plan, card = planned(world, BLOCKED)
+  assert graph(world, plan, card)[0] == 0
+  code, out = world.run("decide", "--unit", "U02", "--decision", "D1", "--answer", "(c)", "--runcard", card)
+  assert code == 1 and "decide: (c) is not an option of U02/D1" in out
+  assert "answer:" not in plan.read_text(encoding="utf-8") and "decisions" not in state(world)
+  code, out = world.run("decide", "--unit", "U02", "--decision", "D9", "--default", "--runcard", card)
+  assert code == 1 and "decide: U02 has no decision D9" in out
+  code, out = world.run("decide", "--unit", "U02", "--decision", "D1", "--default", "--judges", "judges-7", "--runcard", card)
+  assert code == 0 and D1_YES + "; answer: (a)" in plan.read_text(encoding="utf-8")
+  assert state(world)["decisions"]["U02/D1"]["by"] == "judges:judges-7"
