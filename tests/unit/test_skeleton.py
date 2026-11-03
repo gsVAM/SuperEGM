@@ -104,3 +104,29 @@ def test_superpowers_files_are_kept_under_the_section_14_names() -> None:
   assert "## Skill Discovery Optimization (SDO)" not in writing
   assert "references/skill_discovery_optimization.md" in writing
   assert len(writing.split("---", 2)[2].strip().encode("utf-8")) <= 24_000
+
+
+STUBS = {  # §14 effects of the new typed skills
+    "review-plan": ["state-store", "start-session"], "file": ["github-write", "state-store"],
+    "interrupt": ["state-store"], "clean": ["destructive-local", "state-store"],
+    "integrate": ["state-store", "start-session"],
+    "judges": ["start-session", "state-store", "github-write"],
+}
+HARNESS = "In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first."
+
+
+@pytest.mark.parametrize("skill", SKILLS)
+def test_every_section_14_skill_folder_is_complete(skill: str) -> None:
+  folder = ROOT / "skills" / skill
+  assert (folder / "SKILL.md").is_file() and (folder / "test_scenarios.yaml").is_file()
+  svg = ElementTree.parse(folder / "assets/icon.svg").getroot()
+  assert svg.get("viewBox") == "0 0 24 24" and svg.findtext("{http://www.w3.org/2000/svg}title")
+  if skill in STUBS:
+    text = (folder / "SKILL.md").read_text(encoding="utf-8")
+    meta = frontmatter(folder / "SKILL.md")
+    assert text.startswith("---\n") and HARNESS in text
+    assert list(meta) == ["name", "license", "effects", "effect_kinds",
+                          "disable-model-invocation", "description"]
+    assert meta["name"] == skill and meta["license"] == "Apache-2.0"
+    assert meta["effects"] == "external" and meta["effect_kinds"] == STUBS[skill]
+    assert meta["disable-model-invocation"] is True and meta["description"].strip()
