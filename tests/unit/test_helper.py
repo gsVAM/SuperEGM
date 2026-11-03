@@ -1852,3 +1852,15 @@ def test_one_module_per_subcommand(name):
   assert choices[name.replace("_", "-")].get_default("run") is module.run
   defs = [l for l in (scripts / "superegm.py").read_text(encoding="utf-8").splitlines() if l.startswith("def ")]
   assert defs == ["def main(argv=None):"]
+
+
+def test_world_fixture_lives_in_conftest_and_injects_the_package(world):
+  import conftest, superegm
+  assert callable(conftest.make_pr) and "def world(" not in Path(__file__).read_text(encoding="utf-8")
+  assert world.ns is vars(superegm) and superegm.GH is world.gh and superegm.NOW() == world.clock
+  world.gh.extend("widget", lambda args, cwd, token=None: (0, json.dumps({"args": args[1:], "token": token}), ""))
+  seen = json.loads(superegm.gh(["widget", "list"], token="t0k"))
+  assert seen == {"args": ["list"], "token": "t0k"} and world.gh.calls[-1] == ["widget", "list"]
+  with pytest.raises(superegm.GhError):
+    superegm.gh(["nope"])
+  assert world.spec == world.repo / "docs/designs/sample.md" and Path.cwd() == world.repo
