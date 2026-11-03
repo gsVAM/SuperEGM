@@ -477,3 +477,20 @@ REMOVED = re.compile(r"run_folder|run-folder|--not-run|--wave\b|\begm[-/_]|forem
 def test_no_removed_mechanism_is_named_in_this_units_files(path):
   hits = [l for l in (ROOT / path).read_text(encoding="utf-8").splitlines() if REMOVED.search(l)]
   assert hits == [], hits
+
+
+@pytest.mark.parametrize("argv", [
+  ["launch"], ["launch-builder", "--unit", UNIT, "--round", "1"], ["record-launch", "--unit", UNIT],
+  ["interrupt", "--unit", UNIT, "--launch", "1"], ["clean", "--unit", UNIT],
+])
+def test_every_writing_subcommand_refuses_without_its_card(world, monkeypatch, argv):
+  s, card, hid, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  launched(s, UNIT, "running")
+  code, out = world.run("runcard", "open", "--skill", "plan", "--artifact", str(next(world.repo.glob("docs/**/*.md"))))
+  other = out.split()[-1]
+  code, out = world.run(*argv, "--runcard", other)
+  assert code == 1 and out.startswith("superegm: runcard: "), out
+  code, out = world.run(*argv, "--runcard", "c-missing")
+  assert code == 1 and out.startswith("superegm: runcard: "), out
+  assert launches_of(s)[0]["status"] == "running" and "launched" not in state_of(s)["units"][UNIT]
