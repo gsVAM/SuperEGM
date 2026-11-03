@@ -234,7 +234,7 @@ WRITES = {"approve_spec": {"approvals"}, "graph": {"state", "plan", "units", "un
           "scan": {"file"}, "gate": {"state"},
           "dry_run": {"file", "state"}, "apply": {"state", "file"},
           "verify": {"state"}, "status": {"state"}, "launch": {"state", "runcards"}, "decide": {"state", "plan", "units", "unit", "bodies", "file"},
-          "record_launch": {"launches"}, "collect": {"foreman"}, "prepare": {"foreman", "file"},
+          "record_launch": {"launches"}, "collect": {"foreman", "review", "reviews"}, "prepare": {"foreman", "review"},
           "launch_builder": {"launches"}, "interrupt": {"launches", "foreman"}, "clean": set(),
           "runcard": {"runcards"}, "init": set()}
 
@@ -427,7 +427,7 @@ GATED = [(("approve-spec", "--spec", "SPEC", "--yes"), "review-spec"), (("graph"
          (("verify", "--spec", "SPEC"), "file"), (("status",), "wave"), (("launch",), "wave"),
          (("decide", "--unit", "U03", "--decision", "D2", "--answer", "25"), "plan"),
          (("record-launch", "--unit", "U01"), "wave"),
-         (("collect", "--unit", "U01", "--round", "1"), "wave"), (("prepare", "--unit", "U01", "--round", "1"), "wave")]
+         (("collect", "--unit", "U01", "--dispatch", "d1"), "wave"), (("prepare", "--unit", "U01", "--dispatch", "d1"), "wave")]
 
 
 @pytest.mark.parametrize("argv, skill", GATED)
@@ -500,7 +500,7 @@ def test_require_frozen_units_refuses_a_filed_units_drift(world):
   assert world.run("status")[0] == 0
   text = world.plan.read_text(encoding="utf-8")
   world.plan.write_text(text.replace("An in-memory queue with enqueue and dequeue exists.", "A queue exists."), encoding="utf-8")
-  for argv in (("status",), ("launch",), ("prepare", "--unit", "U01")):
+  for argv in (("status",), ("launch",), ("prepare", "--unit", "U01", "--dispatch", "d1")):
     world.gh.calls.clear()
     code, out = world.run(*argv)
     assert code == 1 and "U01 is filed and frozen: its section in handoff_plan.md differs from the stored one" in out, (argv, out)
@@ -568,8 +568,8 @@ MOVED = [("test_plan.py", "test_scan_banned_terms_mentions_and_size"),
          ("test_events.py", "test_wait_prints_deadline_only_and_saves_once"),
          ("test_events.py", "test_status_pr_matching_rules"),
          ("test_events.py", "test_the_helper_is_single_writer_by_design"),
-         ("test_foreman.py", "test_prepare_fetches_from_the_recorded_remote_into_private_refs"),
-         ("test_foreman.py", "test_collect_records_a_round_and_guards_cleanup")]
+         ("test_foreman.py", "test_prepare_reviews_the_tip_it_fetches"),
+         ("test_foreman.py", "test_collect_records_foreman_findings")]
 DELETED = ("test_every_helper_command_the_skills_document_exists", "test_the_command_reference_documents_only_real_flags",
            "test_defer_edits_one_label_and_verifies", "test_defer_refuses_a_wave_label_the_repository_does_not_have",
            "test_repeated_deferrals_verify_against_the_current_wave", "test_an_unpublished_decision_does_not_release_the_unit",
