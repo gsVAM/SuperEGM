@@ -228,3 +228,26 @@ def test_fix_request_mention_still_passes_only_on_a_comment_first_line():
   assert scan_text("@devin please fix\n", config, "comment") == []
   assert scan_text("note\n@devin please fix\n", config, "comment") != []
   assert scan_text("@devin please fix\n", config, "body") != []
+
+
+def test_graph_keeps_the_handoff_id_across_a_reapproval(world):
+  spec, sha, plan, card = planned(world)
+  assert graph(world, plan, card)[0] == 0
+  hid = f"2026-11-03-webhooks-{sha[:6]}"
+  # comprehension-c2r5-1: a fix-design re-approval with nothing filed keeps the id though the bytes changed
+  spec2, sha2 = approve(world, SPEC.replace("Delivery.", "Delivery, retried."), handoff_id=hid)
+  assert sha2 != sha and graph(world, plan, card)[0] == 0
+  assert state(world)["handoff_id"] == hid and f"spec={sha2} -->" in body_of(world, "U01")
+  # one handoff per store: another id is refused until closed_at is written
+  spec3, sha3 = approve(world, SPEC.replace("Webhooks", "Payments"), handoff_id="2026-11-04-payments-abcdef",
+                        name="2026-11-04-payments-design.md")
+  plan3 = world.repo.parent / "plan3.md"
+  plan3.write_text(plan_text(spec3), encoding="utf-8")
+  card3 = open_runcard(store(world.repo), "plan", str(spec3))
+  code, out = graph(world, plan3, card3)
+  assert code == 1 and f"graph: the store holds handoff {hid}, not closed" in out and "integrate --close" in out
+  s = state(world)
+  s["closed_at"] = "2026-11-04T00:00:00Z"
+  atomic_write(store_root(world) / "state.json", s)
+  assert graph(world, plan3, card3)[0] == 0
+  assert state(world)["handoff_id"] == "2026-11-04-payments-abcdef" and "closed_at" not in state(world)
