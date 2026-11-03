@@ -104,3 +104,17 @@ def test_check_effects_accepts_the_tree_and_pins_the_typed_set() -> None:
   assert PACKER["TYPED_SKILLS"] == frozenset(TYPED)
   assert PACKER["EFFECT_KINDS"] == ("github-write", "remote-branch", "start-session",
                                    "state-store", "destructive-local")
+
+
+@pytest.mark.parametrize("skill", ["test-driven-development", "systematic-debugging",
+                                   "verification-before-completion"])
+def test_phase_sentence_verbatim(skill: str) -> None:
+  fm = PACKER["read_frontmatter"](ROOT / "skills" / skill / "SKILL.md")
+  assert PHASE_SENTENCE in fm["description"], skill
+  assert "disable-model-invocation" not in fm
+  assert fm["effects"] == "working-tree"
+
+
+def test_verification_never_updates_snapshots_or_fixtures() -> None:
+  text = skill_text("verification-before-completion")
+  assert "never updates snapshots or fixtures" in text
