@@ -274,3 +274,12 @@ def test_prepare_reviews_the_tip_it_fetches(world, tmp_path, monkeypatch):
   assert (d / "r1/comments.md").read_text(encoding="utf-8").startswith("builder: builder-bot\n")
   assert g("rev-parse", f"refs/superegm/pr/{PR}", cwd=world.repo) == head
   assert g("rev-parse", f"refs/superegm/base/{PR}", cwd=world.repo) == base
+
+
+def test_prepare_refuses_a_pr_whose_base_is_not_base(world, tmp_path, monkeypatch):
+  target, base, head, g = pr_repo(world, tmp_path, monkeypatch)
+  st, card, child, did, _ = dispatched(world, head=head, base_ref="release")
+  code, out = world.run("prepare", "--unit", UNIT, "--dispatch", did, "--runcard", child)
+  assert (code, out.strip()) == (1, "base: PR #70 targets release, not main")
+  assert subprocess.run(["git", "-C", str(world.repo), "rev-parse", f"refs/superegm/pr/{PR}"], capture_output=True).returncode != 0
+  assert json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][0]["phase"] == "fetched"
