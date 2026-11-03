@@ -20,11 +20,51 @@ INTERFACE_RE = re.compile(r"^- (?:Consumes: .+ \(U\d{2,}\)|Produces: .+)$")
 FIXED_DOD_1 = "The test for each Step was committed before its implementation (checked by superegm tdd-order)"
 DOD_ITEM_RE = re.compile(r"^(?:Run `[^`]+` — .+|Exists `[^`]+`|CI green on the head)$")
 OPTION_RE = re.compile(r"^\((\w)\) .+$")
+MARKER_LINE = "<!-- superegm:handoff={{handoff_id}} unit={{unit_id}} spec={{spec_sha256}} -->"
+BODY_TEMPLATE = MARKER_LINE + """
+# {{unit_id}} — {{title}}
+Spec: `{{spec}}` @ {{sha7}} · `{{design}}`
+
+## Objective
+{{objective}}
+
+## Interfaces
+{{interfaces}}
+
+## Definition of done
+{{dod}}
+
+## Global constraints
+{{global_constraints}}
+
+## Review focus (this unit)
+{{review_focus}}
+
+## Steps
+{{steps}}
+
+## Decide before build
+{{decisions}}
+
+## Scope, order and risk
+Scope: {{scope}} · Blocked by: {{blocked_by}} · Shared files: {{shared}} · Risk: {{risk}} · Size: {{size}}
+Branch: `{{branch}}` · Part of #{{tracking}}
+"""
+PLACEHOLDERS = sorted(set(re.findall(r"\{\{\w+\}\}", BODY_TEMPLATE)))
 
 
 def register(subparsers):
   p = core.add_parser(subparsers, "graph", "parse the plan under its approval; write the store's plan copy, units and bodies")
   p.set_defaults(run=run, writes=WRITES)
+
+
+def check_template(template: str) -> None:
+  """A body template starts with the marker line and uses every placeholder."""
+  if (template.splitlines() or [""])[0] != MARKER_LINE:
+    raise core.HandoffError(f"issue template must start with the marker line `{MARKER_LINE}`")
+  missing = [name for name in PLACEHOLDERS if name not in template]
+  if missing:
+    raise core.HandoffError(f"issue template lacks {', '.join(missing)}")
 
 
 class Unit(core.Unit):
@@ -174,10 +214,30 @@ class Handoff(core.Handoff):
     self.design_title = next((l[2:].strip() for l in core.read_text(self.design_path).splitlines()
                               if l.startswith("# ")), self.design_path.stem)
     self.config = core.load_config(self.repo_root)
+    self.template = self.config["_template"] if self.config["issue_template"] else BODY_TEMPLATE
+    check_template(self.template)
     self.graph = core.Graph(self.plan)
     self.state = require_free_store(state, self.handoff_id)
     store.handoff_id = self.handoff_id
     self.check_labels()
+
+  def render_unit(self, uid: str) -> str:
+    unit = self.plan.units[uid]
+    shared = "; ".join(f"`{path}`: " + ", ".join(f"after {self.ref(o)}" if k == "after" else f"before {self.forward_ref(o)}"
+                                                 for k, o in orders) for path, orders in unit.shared)
+    values = {
+        "handoff_id": self.handoff_id, "unit_id": uid, "title": unit.title, "spec_sha256": self.spec_sha,
+        "sha7": self.spec_sha[:7], "spec": self.design_path.relative_to(self.repo_root).as_posix(),
+        "design": f"{unit.design_range[0]}:{unit.design_range[1]}-{unit.design_range[2]} ({unit.design_range[3]})",
+        "objective": unit.objective, "interfaces": "\n".join(unit.interfaces) or "- none",
+        "dod": "\n".join(f"{n}. {item}" for n, item in enumerate(unit.dod, 1)),
+        "global_constraints": "\n".join(self.plan.global_constraints),
+        "review_focus": "\n".join(unit.review_focus), "steps": unit.steps, "decisions": "\n".join(unit.decide),
+        "scope": ", ".join(f"`{p}` ({a})" for p, a in unit.scope),
+        "blocked_by": ", ".join(self.ref(b) for b in unit.blockers) or "none", "shared": shared or "none",
+        "risk": f"{unit.risk[0]}: {unit.risk[1]}", "size": unit.size, "branch": self.branch(uid), "tracking": "<tracking>",
+    }
+    return core.substitute(self.template, values)
 
   def bodies_text(self):
     parts = [f"## {item[1]}\n\nTitle: {item[2]}\nLabels: {', '.join(item[3])}\n\n````markdown\n{item[4]}````\n"
