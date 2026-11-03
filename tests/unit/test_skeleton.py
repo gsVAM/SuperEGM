@@ -197,3 +197,26 @@ def test_readme_skeleton_names_the_install_and_the_sections_u11_fills() -> None:
                "## Install", "## Before the first run", "## Skills", "## Licence"):
     assert line in text, line
   assert "<!-- superegm:u11 -->" in text
+
+
+APACHE_NOTICE = "Modified by SuperEGM (gsVAM), 2026:"
+MIT_NOTICE = "From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026:"
+APACHE_CHANGED = (
+    "skills/draft/SKILL.md", "skills/drift-report/SKILL.md", "skills/review-spec/SKILL.md",
+    "skills/review-spec/references/review_loop.md", "skills/review-spec/references/resolve.md",
+    "skills/plan/SKILL.md", "skills/plan/scripts/superegm.py", "skills/plan/references/handoff_plan.md",
+    "skills/plan/references/issue_template.md", "skills/wave/SKILL.md",
+    "docs/index.md", "docs/getting_started.md", "scripts/pack_plugin.py", "scripts/prepare_release.py",
+    ".github/workflows/tests.yml", "tests/unit/test_helper.py", "tests/unit/test_astra_fork.py",
+    "tests/unit/test_harnesses.py", "tests/unit/test_packaging.py", "tests/unit/test_releases.py",
+    "tests/integration/test_claude.py",
+) + tuple(f"skills/{s}/test_scenarios.yaml" for s in ("draft", "drift-report", "review-spec", "plan", "wave")
+) + tuple(f"{d}/{i}.md" for d in ("agents", ".claude-plugin/agents") for i in IDS[:8])
+SP_CHANGED = ("skills/using-superegm/SKILL.md", "skills/writing-skills/SKILL.md",
+              "skills/writing-skills/references/skill_discovery_optimization.md")
+
+
+@pytest.mark.parametrize("path,notice", [(p, APACHE_NOTICE) for p in APACHE_CHANGED]
+                         + [(p, MIT_NOTICE) for p in SP_CHANGED])
+def test_changed_file_carries_its_notice(path: str, notice: str) -> None:
+  assert notice in (ROOT / path).read_text(encoding="utf-8"), path
