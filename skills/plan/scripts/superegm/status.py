@@ -85,8 +85,9 @@ def wait_events(handoff, seconds: int) -> list:
     if lines or core.NOW() >= deadline:
       break
     core.SLEEP(min(core.WAIT_INTERVAL, max(1, deadline - core.NOW())))
-  # One write, when the wait is over: while it waits it only reads, so no
-  # other command can be overwritten by a sleeping watcher.
+  # One write, when the wait is over, the only writer of `status.units`: while it waits it only
+  # reads, so no other command can be overwritten by a sleeping watcher.
+  state["status"] = {**summary, "units": {uid: fingerprint(unit) for uid, unit in summary["units"].items()}}
   core.save_state(handoff.artifact_dir, state)
   return lines or ["deadline"]
 
@@ -190,9 +191,6 @@ def unit_view(handoff, uid):
     record["pr"] = pr
     view["pr"], view["head"] = pr["number"], pr["head"]
     view["pr_state"] = "MERGED" if pr.get("merged_at") else (pr.get("state") or "OPEN").upper()
-    # A retarget (main -> an older release branch) changes the merge base and
-    # the diff while head and CI stay the same: it is a new review target.
-    view["base_ref"], view["base_sha"] = pr.get("base_ref"), pr.get("base_sha")
     if pr["merged_at"]:
       view["status"] = "merged"
     else:

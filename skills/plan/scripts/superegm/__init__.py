@@ -1538,10 +1538,8 @@ def status_pass(handoff: Handoff, save=True):
                     and u not in landed]
   summary = {"landed": sorted(landed), "ready": ready, "in_flight": in_flight,
              "unlaunched_with_pr": unlaunched_prs, "open_blocking": {u: [d["id"] for d in ds] for u, ds in open_blocking.items()},
-             "units": {u: {**events.fingerprint(v), "status": v["status"], "base_ref": v.get("base_ref"),
-                           "base_sha": v.get("base_sha")} for u, v in views.items()},
+             "units": {u: {**events.fingerprint(v), "status": v["status"]} for u, v in views.items()},
              "at": now_iso()}
-  state["status"] = summary
   if save:
     save_state(handoff.artifact_dir, state)
   return summary, open_blocking
