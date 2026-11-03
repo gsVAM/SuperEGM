@@ -64,7 +64,7 @@ def test_state_is_written_atomically_and_a_poll_keeps_other_writers_fields(world
   """R01: a watcher that saves its whole in-memory copy erases a decision or a
   launch the main conversation recorded while it slept."""
   gh = applied(world)
-  assert world.run("verify", "--plan", world.plan)[0] == 0
+  assert world.run("verify", "--spec", world.spec)[0] == 0
   # another writer records a decision while a poll is in flight
   assert world.run("decide", "--plan", world.plan, "--unit", "U03",
                    "--decision", "D2", "--answer", "(a)")[0] == 0
@@ -81,7 +81,7 @@ def test_state_is_written_atomically_and_a_poll_keeps_other_writers_fields(world
 def test_operations_refuse_a_repository_the_numbers_do_not_belong_to(world):
   """R02: issue numbers are not portable; only apply checked the destination."""
   applied(world)
-  assert world.run("verify", "--plan", world.plan)[0] == 0
+  assert world.run("verify", "--spec", world.spec)[0] == 0
   set_config(world, repo="other/elsewhere", banned_terms=["(?i)secret-codename"])
   git(["remote", "set-url", "origin", "https://github.com/other/elsewhere.git"], world.repo)
   code, out = world.run("status", "--plan", world.plan)
@@ -423,7 +423,7 @@ def test_runcard_refusals(world, setup, unit, reason):
 
 GATED = [(("approve-spec", "--spec", "SPEC", "--yes"), "review-spec"), (("graph",), "plan"),
          (("gate", "--pass", "--spec", "SPEC"), "file"), (("dry-run", "--spec", "SPEC"), "file"), (("apply", "--yes", "--spec", "SPEC"), "file"),
-         (("verify",), "file"), (("status",), "wave"), (("launch",), "wave"),
+         (("verify", "--spec", "SPEC"), "file"), (("status",), "wave"), (("launch",), "wave"),
          (("decide", "--unit", "U03", "--decision", "D2", "--answer", "25"), "plan"),
          (("record-launch", "--unit", "U01"), "wave"),
          (("collect", "--unit", "U01", "--round", "1"), "wave"), (("prepare", "--unit", "U01", "--round", "1"), "wave")]

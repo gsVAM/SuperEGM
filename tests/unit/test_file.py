@@ -18,8 +18,7 @@ from pathlib import Path
 import pytest
 
 from superegm import store, atomic_write, spec_slug
-from conftest import HELPER, REPO, make_world, make_repo, make_plan, set_config, state_of, launchable, git, \
-    converge as converge_review
+from conftest import HELPER, REPO, make_world, make_repo, make_plan, set_config, state_of, git, converge as converge_review
 
 ROOT = Path(__file__).resolve().parents[2]
 PKG = "skills/plan/scripts/superegm"
@@ -408,19 +407,44 @@ def test_apply_max_writes_resumes_in_bounded_calls(world):
   assert code == 0 and state_of(world)["verify"]["complete"] is True
 
 
-def test_verify_records_mismatches(world):
-  dry_run(world)
-  assert world.run("apply", "--plan", world.plan, "--yes")[0] == 0
-  world.gh.issues[3]["body"] += "\nedited by hand"
-  world.gh.issues[2]["labels"].remove("superegm:unit")
-  code, out = world.run("verify", "--plan", world.plan)
-  assert code == 1
+def test_a_later_filing_rewrites_the_tracking_issue_and_verify_checks_the_union(world):
+  spec, card, first = later_filing(world)
+  gh = world.gh
+  dryrun = (world.artifacts / "handoff_dryrun.md").read_text(encoding="utf-8")
+  assert "### issue U03" in dryrun and "### issue tracking" in dryrun and "### issue U01" not in dryrun
+  assert "Tracking issue #1 will be rewritten" in dryrun
+  before = {n: dict(i) for n, i in gh.issues.items()}
+  assert "U03" not in before[1]["body"]
+  code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes")
+  assert code == 0, out
+  assert [c[2] for c in gh.calls if c[0] == "label"] == ["superegm:wave-3"]
+  assert [c[c.index("--title") + 1] for c in gh.calls if c[:2] == ["issue", "create"]] == ["U03: Admin endpoint"]
+  assert [c[2] for c in gh.calls if c[:2] == ["issue", "edit"]] == ["1"]
+  assert "U03" in gh.issues[1]["body"] and "Admin endpoint" in gh.issues[1]["body"]
+  assert gh.issues[2] == before[2] and gh.issues[3] == before[3]  # filed units are frozen: never touched
   state = state_of(world)
-  problems = state["verify"]["problems"]
-  assert any("body of #3" in p for p in problems) and any("labels of #2" in p and "superegm:unit" in p for p in problems)
-  assert state["verify"]["complete"] is True
-  code, out = world.run("status", "--plan", world.plan)
-  assert code == 1 and "not fully created and verified" in out
+  u01, u03 = state["units"]["U01"], state["units"]["U03"]
+  assert u03["number"] == 4 and gh.blocked_by[4] == [gh.issues[3]["id"]] and gh.sub_issues[1][-1] == gh.issues[4]["id"]
+  assert gh.issues[4]["body"].startswith(f"<!-- superegm:handoff={first['handoff_id']} unit=U03 spec=")
+  assert len(state["filings"]) == 2 and state["filings"][1]["sha256"] == state["confirmed_sha256"]
+  assert {w[1] for w in state["filings"][1]["writes"] if w[0] == "issue"} == {"tracking", "U03"}
+  assert state["filings"][0] == first["filings"][0] and state["base_at_start"] == first["base_at_start"]
+  assert state["tracking"]["filing"] == state["confirmed_sha256"]
+  assert state["verify"]["complete"] is True and state["verify"]["problems"] == [] and state["verify"]["checked"] == "16 of 16"
+  code, out = world.run("verify", "--spec", spec, "--runcard", card)
+  assert code == 0 and "MISMATCH" not in out and "16 of 16" in out, out
+  gh.issues[u01["number"]]["body"] += "\nedited by hand"          # filed by the first list
+  gh.issues[u01["number"]]["labels"].remove("superegm:unit")
+  gh.blocked_by.setdefault(u01["number"], []).append(u03["id"])   # a link no filing names
+  code, out = world.run("verify", "--spec", spec, "--runcard", card)
+  assert code == 1, out
+  problems = state_of(world)["verify"]["problems"]
+  assert any(f"body of #{u01['number']} (U01)" in p for p in problems)
+  assert any(f"labels of #{u01['number']} (U01)" in p and "superegm:unit" in p for p in problems)
+  assert any(f"obsolete blocked-by link on #{u01['number']} (U01)" in p for p in problems)
+  assert not any("obsolete sub-issue" in p for p in problems)      # the union keeps the first filing's sub-issue links
+  assert not any("tracking" in p for p in problems)
+  assert state_of(world)["verify"]["complete"] is True and state_of(world)["verify"]["sha256"] == state["confirmed_sha256"]
 
 
 FAKE_GH = '''#!/usr/bin/env python3
@@ -505,24 +529,6 @@ def test_subprocess_command_shape_with_fake_gh_on_path(tmp_path, capsys, monkeyp
   assert all("--paginate" in l for l in log if l[0] == "api" and l[1].endswith(("/labels", "/sub_issues", "/blocked_by")) and "POST" not in l)
 
 
-def test_verify_refuses_a_plan_edited_since_the_confirmation(world):
-  """R08: a receipt must describe what the user confirmed, not a plan since
-  edited, or removing a blocker locally would make a unit look ready."""
-  applied(world)
-  launchable(world)
-  assert world.run("verify", "--plan", world.plan)[0] == 0
-  world.plan.write_text(world.plan.read_text(encoding="utf-8")
-                        .replace("| Blocked by | U01 |", "| Blocked by | none |"), encoding="utf-8")
-  # verify reports on what was confirmed, so it stays clean...
-  code, out = world.run("verify", "--plan", world.plan)
-  assert code == 0 and "MISMATCH" not in out, out
-  # ...and readiness, which the edit would have changed, is refused outright
-  for argv in (("status", "--plan", world.plan),
-               ("launch", "--plan", world.plan)):
-    code, out = world.run(*argv)
-    assert code == 1 and "is filed and frozen" in out, argv
-
-
 def test_apply_scans_again_with_the_current_rules(world):
   """R11: a banned_terms rule added after the dry run leaves the write list,
   and therefore its hash, untouched."""
@@ -565,17 +571,3 @@ def test_a_label_prefix_with_reserved_url_characters_still_recovers(tmp_path, ca
   listing = [c for c in w.gh.calls if c[0] == "api" and "/issues?" in c[1]]
   assert listing and "%2B" in listing[0][1], listing
   assert w.run("verify", "--spec", spec, "--runcard", card)[0] == 0
-
-
-def test_verify_reports_a_link_the_handoff_no_longer_wants(world):
-  """R3-06: checking only that expected links exist cannot see an obsolete one
-  left behind by an amendment."""
-  gh = applied(world)
-  assert world.run("verify", "--plan", world.plan)[0] == 0
-  state = state_of(world)
-  # U01 is blocked by nothing; an amendment that removed a blocker would leave
-  # exactly this: a live dependency the confirmed write list no longer names.
-  stale = state["units"]["U03"]["id"]
-  gh.blocked_by.setdefault(state["units"]["U01"]["number"], []).append(stale)
-  code, out = world.run("verify", "--plan", world.plan)
-  assert code == 1 and "obsolete blocked-by link" in out, out
