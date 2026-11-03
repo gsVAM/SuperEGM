@@ -230,7 +230,7 @@ def test_store_paths_are_prefixed_by_the_handoff_hex(world):
 
 
 WRITES = {"approve_spec": {"approvals"}, "graph": {"state", "plan", "units", "unit", "bodies"},
-          "scan": {"file"}, "gate": {"state", "file", "plan", "units", "unit", "bodies"},
+          "scan": {"file"}, "gate": {"state"},
           "dry_run": {"state", "file", "plan", "units", "unit", "bodies"}, "apply": {"state", "file"},
           "verify": {"state"}, "status": {"state"}, "launch": {"state", "runcards"}, "decide": {"state", "plan", "units", "unit", "bodies", "file"},
           "record_launch": {"launches"}, "collect": {"foreman"}, "prepare": {"foreman", "file"},
@@ -422,7 +422,7 @@ def test_runcard_refusals(world, setup, unit, reason):
 
 
 GATED = [(("approve-spec", "--spec", "SPEC", "--yes"), "review-spec"), (("graph",), "plan"),
-         (("gate", "--reviewed", "--round", "1"), "file"), (("dry-run",), "file"), (("apply", "--yes"), "file"),
+         (("gate", "--pass", "--spec", "SPEC"), "file"), (("dry-run",), "file"), (("apply", "--yes"), "file"),
          (("verify",), "file"), (("status",), "wave"), (("launch",), "wave"),
          (("decide", "--unit", "U03", "--decision", "D2", "--answer", "25"), "plan"),
          (("record-launch", "--unit", "U01"), "wave"),

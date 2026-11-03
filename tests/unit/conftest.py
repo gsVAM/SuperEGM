@@ -537,23 +537,45 @@ def result_for(world, uid, rnd):
           "started_at": world.clock}
 
 
+def converge(artifacts: Path, handoff_id: str, uid: str, sha: str, cycle: int = 1) -> None:
+  """What `review-plan` leaves for a converged unit (U04's files, U04's review id): `review.json`
+  and its converged round at the body hash."""
+  folder = artifacts / "reviews" / f"{handoff_id[-6:]}-plan-{uid}-c{cycle}"
+  folder.mkdir(parents=True, exist_ok=True)
+  (folder / "review.json").write_text(json.dumps({"kind": "plan", "artifact": uid, "cycle": cycle, "reviewers": ["readiness"],
+                                                  "runcard": "rc-plan", "converged": "yes", "converged_round": 1, "rulings": []}),
+                                      encoding="utf-8")
+  (folder / "round-1.json").write_text(json.dumps({"runcard": "rc-plan", "artifact_sha256": sha, "findings": {},
+                                                   "what_ran": "completed"}), encoding="utf-8")
+
+
 def pass_gate(world):
+  """`graph`; every blocking decision answered by its default (a blocking item must be answered before
+  the body can pass `scan`, spec section 9.1); every unit's plan review converged at its body hash;
+  `gate --pass` on the spec."""
   assert world.run("graph", "--plan", world.plan)[0] == 0
-  assert world.run("gate", "--plan", world.plan, "--reviewed", "--round", 1)[0] == 0
-  code, out = world.run("gate", "--plan", world.plan, "--pass", "--what-ran", "astra: not run (test)")
+  units = lambda: json.loads((world.artifacts / "handoff_units.json").read_text(encoding="utf-8"))["units"]
+  for uid, unit in units().items():
+    for decision in unit["decisions"]:
+      if decision["blocking"] and not decision.get("answer"):
+        assert world.run("decide", "--unit", uid, "--decision", decision["id"], "--default")[0] == 0
+  handoff_id = state_of(world)["handoff_id"]
+  for uid, unit in units().items():
+    converge(world.artifacts, handoff_id, uid, unit["body_sha256"])
+  code, out = world.run("gate", "--pass", "--spec", world.spec)
   assert code == 0, out
 
 
 def dry_run(world):
   pass_gate(world)
-  code, out = world.run("dry-run", "--plan", world.plan)
+  code, out = world.run("dry-run", "--spec", world.spec)
   assert code == 0, out
   return out
 
 
 def applied(world):
   dry_run(world)
-  assert world.run("apply", "--plan", world.plan, "--yes")[0] == 0
+  assert world.run("apply", "--spec", world.spec, "--yes")[0] == 0
   world.gh.calls.clear()
   return world.gh
 

@@ -1,38 +1,216 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03).
+# Modified by SuperEGM (gsVAM), 2026: the filing on the confirmed write list under converged plan reviews (U07); EGM's moved tests rewritten to that form.
 
-"""EGM's tests of the subcommands U07 (file) changes, moved from test_helper.py by U03;
-that unit rewrites the ones whose form it changes."""
+"""The filing (spec section 10): `gate --pass` on converged plan reviews, the dry run of the
+unfiled units, `apply` on the confirmed write list with `filings[]` and `base_at_start`,
+marker recovery, the tracking rewrite, `verify` over the union of every filing, the
+leavemealone journal line and the `file` skill body."""
 
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
-import textwrap
 from pathlib import Path
 
 import pytest
 
-from conftest import HELPER, REPO, make_world, make_repo, make_plan, set_config, applied, pass_gate, dry_run, state_of, launchable
+from superegm import store, atomic_write, spec_slug
+from conftest import HELPER, REPO, make_world, make_repo, make_plan, set_config, state_of, launchable, git, \
+    converge as converge_review
+
+ROOT = Path(__file__).resolve().parents[2]
+PKG = "skills/plan/scripts/superegm"
+SLUG = "2026-11-03-sample-design"          # the spec is docs/specs/<SLUG>.md, H1 `# Sample design`
+ROWS = [("U01", "Queue", "none"), ("U02", "Worker", "U01"), ("U03", "Admin endpoint", "U02")]  # (unit, title, blocked by)
 
 
-def test_gate_pass_refuses_after_change_and_accept_writes_diff(world):
-  assert world.run("graph", "--plan", world.plan)[0] == 0
-  code, out = world.run("gate", "--plan", world.plan, "--pass")
-  assert code == 1 and "no reviewed pair" in out
-  assert world.run("gate", "--plan", world.plan, "--reviewed", "--round", 1)[0] == 0
-  text = world.plan.read_text(encoding="utf-8")
-  world.plan.write_text(text.replace("low: new module", "low: a new module"), encoding="utf-8")
-  code, out = world.run("gate", "--plan", world.plan, "--pass")
-  assert code == 1 and "changed after round 1 was reviewed" in out
-  code, out = world.run("gate", "--plan", world.plan, "--accept")
-  assert code == 0 and "gate_unreviewed.diff" in out
-  diff = (world.artifacts / "gate_unreviewed.diff").read_text(encoding="utf-8")
-  assert "-| Risk | low: new module |" in diff and "+| Risk | low: a new module |" in diff
+def spec_text(rows) -> str:
+  """`# Sample design`, `## 1. Intent` at lines 3-4, the `## Units` table of `rows` as the last H2."""
+  table = "\n".join(f"| {uid} | {title} | {blocked} |" for uid, title, blocked in rows)
+  return ("# Sample design\n\n## 1. Intent\nQueued webhook delivery with an admin listing.\n\n"
+          f"## Units\n\n| Unit | Title | Blocked by |\n| --- | --- | --- |\n{table}\n")
+
+
+def unit_section(uid, title, blocked) -> str:
+  """A unit section in the section 9.1 grammar with one Step."""
+  low = uid.lower()
+  return f"""### {uid}: {title}
+| Field | Value |
+| --- | --- |
+| Objective | {title} exists. |
+| Scope paths | `src/{low}.ts` (create), `tests/{low}.test.ts` (create) |
+| Design range | `docs/specs/{SLUG}.md:3-4 (## 1. Intent)` |
+| Blocked by | {blocked} |
+| Shared files | none |
+| Risk | low: new module |
+| Size | S |
+
+Interfaces
+- Produces: {low}() -> void
+
+Definition of done
+1. The test for each Step was committed before its implementation (checked by superegm tdd-order)
+2. Run `npm test -- tests/{low}.test.ts` — the {low} case passes
+3. CI green on the head
+
+Review focus (this unit)
+- {uid}: the module — {low}() exists; pinned by `{low}_exists`
+
+Steps
+1. Write the failing test `{low}_exists` in `tests/{low}.test.ts`:
+   ```ts
+   test("{low}_exists", () => expect({low}()).toBeUndefined());
+   ```
+   Implement `{low}()` in `src/{low}.ts`.
+
+Decide before build
+- none
+"""
+
+
+def plan_text(spec, sections) -> str:
+  """`# Handoff plan: Sample design`, the `Design:` line, the template and units H2s, `## Global constraints` last."""
+  return (f"# Handoff plan: Sample design\n\nDesign: `{spec}`\n\n## 1. Issue template\n\n"
+          "(the layout of references/issue_template.md)\n\n## 2. Units\n\n" + "\n".join(sections)
+          + "\n## Global constraints\n- TypeScript strict mode, no new dependencies\n")
+
+
+def approve(world, rows=ROWS[:2], amended=()):
+  """Write and commit the spec; record its approval (U03's schema) and return (spec, handoff_id)."""
+  spec = world.repo / f"docs/specs/{SLUG}.md"
+  spec.parent.mkdir(parents=True, exist_ok=True)
+  spec.write_text(spec_text(rows), encoding="utf-8")
+  git(["add", "-A"], world.repo)
+  git(["commit", "-qm", f"spec with {len(rows)} units"], world.repo)
+  sha = hashlib.sha256(spec.read_bytes()).hexdigest()
+  handoff_id = f"{spec_slug(spec)}-{(amended[0] if amended else sha)[:6]}"
+  record = {"path": str(spec), "sha256": sha, "commit": git(["rev-parse", "HEAD"], world.repo).strip(),
+            "runcard": "review-spec-0001", "review": f"spec-{spec_slug(spec)}-c1", "approved_at": "2026-11-03T00:00:00Z",
+            "amended": list(amended), "voided_by": None, "handoff_id": handoff_id}
+  path = world.artifacts / "approvals" / f"{spec_slug(spec)}.json"
+  path.parent.mkdir(parents=True, exist_ok=True)
+  path.write_text(json.dumps(record), encoding="utf-8")
+  return spec, handoff_id
+
+
+def open_card(world, skill, artifact, mode=None) -> str:
+  argv = ["runcard", "open", "--skill", skill, "--artifact", artifact] + (["--mode", mode] if mode else [])
+  code, out = world.run(*argv, card=None)
+  assert code == 0, out
+  return out.strip()
+
+
+def close_card(world, card) -> None:
+  assert world.run("runcard", "close", card, card=None)[0] == 0
+
+
+def graphed(world, spec, plan) -> None:
+  """`graph --plan` under a plan card, closed after."""
+  card = open_card(world, "plan", spec)
+  code, out = world.run("graph", "--plan", plan, "--runcard", card)
+  assert code == 0, out
+  close_card(world, card)
+
+
+def planned(world, units=("U01", "U02")):
+  """approve; the plan outside the store and the repository; `graph --plan`; (spec, plan, handoff_id)."""
+  rows = [r for r in ROWS if r[0] in units]
+  spec, handoff_id = approve(world, rows)
+  plan = world.artifacts.parent / "plan.md"
+  plan.write_text(plan_text(spec, [unit_section(*r) for r in rows]), encoding="utf-8")
+  graphed(world, spec, plan)
+  return spec, plan, handoff_id
+
+
+def converge(world, uid, cycle=1, sha=None) -> None:
+  """What `review-plan` leaves for a converged unit, at its body hash unless `sha` says otherwise."""
+  units = json.loads((world.artifacts / "handoff_units.json").read_text(encoding="utf-8"))["units"]
+  converge_review(world.artifacts, state_of(world)["handoff_id"], uid, sha or units[uid]["body_sha256"], cycle)
+
+
+def gated(world, units=("U01", "U02"), mode=None):
+  """planned; every unit converged; a file card; `gate --pass`; (spec, plan, handoff_id, card)."""
+  spec, plan, handoff_id = planned(world, units)
+  for uid in units:
+    converge(world, uid)
+  card = open_card(world, "file", spec, mode)
+  code, out = world.run("gate", "--pass", "--spec", spec, "--runcard", card)
+  assert code == 0, out
+  return spec, plan, handoff_id, card
+
+
+def dry_run(world, **kw):
+  spec, plan, handoff_id, card = gated(world, **kw)
+  code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
+  assert code == 0, out
+  return spec, plan, handoff_id, card
+
+
+def applied(world, **kw):
+  spec, plan, handoff_id, card = dry_run(world, **kw)
+  code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes")
+  assert code == 0, out
+  world.gh.calls.clear()
+  return spec, plan, handoff_id, card
+
+
+def issue_edit_handler(gh) -> None:
+  """The fake has no `gh issue edit --body-file` form: serve it here, every other `issue` form as before."""
+  def handler(args, cwd, token=None):
+    if args[1] == "edit" and "--body-file" in args:
+      gh.assert_write()
+      gh.issues[int(args[2])]["body"] = Path(args[args.index("--body-file") + 1]).read_text(encoding="utf-8")
+      return 0, "", ""
+    return gh.do_issue(args)
+  gh.extend("issue", handler)
+
+
+def later_filing(world):
+  """A filing applied and closed; the spec amended with U03 and re-approved; U03 planned and converged;
+  a new file card gated and dry-run. Returns (spec, card, the state after the first filing)."""
+  spec, plan, handoff_id, card = applied(world)
+  close_card(world, card)
+  first = state_of(world)
+  issue_edit_handler(world.gh)
+  approve(world, ROWS, amended=(hashlib.sha256(spec.read_bytes()).hexdigest(),))
+  text = plan.read_text(encoding="utf-8")
+  plan.write_text(text.replace("## Global constraints", unit_section(*ROWS[2]) + "\n## Global constraints"), encoding="utf-8")
+  graphed(world, spec, plan)
+  converge(world, "U03")
+  card = open_card(world, "file", spec)
+  code, out = world.run("gate", "--pass", "--spec", spec, "--runcard", card)
+  assert code == 0, out
+  code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
+  assert code == 0, out
+  world.gh.calls.clear()
+  return spec, card, first
+
+
+@pytest.mark.parametrize("case, expected", [
+    ("unreviewed", "gate: U02 plan review not converged"),
+    ("stale", "gate: U02 body differs from its converged round"),
+    ("converged", None)])
+def test_gate_pass_requires_a_converged_review_at_the_body_hash(world, case, expected):
+  spec, plan, handoff_id = planned(world)
+  converge(world, "U01")
+  if case == "stale":
+    converge(world, "U02", sha="0" * 64)
+  elif case == "converged":
+    converge(world, "U02")
+  card = open_card(world, "file", spec)
+  code, out = world.run("gate", "--pass", "--spec", spec, "--runcard", card)
   state = state_of(world)
-  assert state["gate"]["passed"] == "accepted at cap" and state["gate_unreviewed_diff"]
+  if expected:
+    assert code == 1 and expected in out, out
+    assert "gate_plan_sha256" not in state and "gate" not in state
+  else:
+    assert code == 0 and "gate passed" in out, out
+    assert re.fullmatch(r"[0-9a-f]{64}", state["gate_plan_sha256"])
+    assert re.fullmatch(r"[0-9a-f]{64}", state["gate_bodies_sha256"])
+    assert state["gate"]["passed"] == "converged" and state["gate"]["units"] == ["U01", "U02"]
 
 
 def test_dry_run_writes_file_and_calls_only_three_reads(world):
