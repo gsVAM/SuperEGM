@@ -500,3 +500,22 @@ FORMS = [(p, f) for p in PROSE for f in REMOVED_PROSE] + [(p, f) for p in CODE f
 @pytest.mark.parametrize("path,form", FORMS, ids=[f"{p.rsplit('/', 1)[1]}-{f}" for p, f in FORMS])
 def test_no_removed_form_in_u05_files(path, form):
   assert form not in (ROOT / path).read_text(encoding="utf-8"), f"{path} still names {form!r}"
+
+
+from superegm.body import run_commands, step_paths
+
+SHORT = ("## Definition of done\n1. The test for each Step was committed before its implementation (checked by superegm tdd-order)\n"
+         "2. Run `pytest tests/unit/test_x.py -q` — all pass\n\n## Steps\n"
+         f"1. Write the failing test `test_a` in `tests/unit/test_x.py`:\n   {FENCE}python\n   def test_a(): assert a() == 1\n   {FENCE}\n"
+         "   Implement `a() -> int` in `src/x.py`.\n"
+         f"2. Write the failing test `test_b` in `tests/unit/test_x.py`:\n   {FENCE}python\n   @pytest.mark.parametrize(\"v\", [1, 2])\n"
+         f"   def test_b(v): assert b(v) == v\n   {FENCE}\n   Implement `b(v: int) -> int` in `src/x.py`.\n"
+         f"3. Write the failing test `test_c` in `tests/unit/test_x.py`:\n   {FENCE}python\n   def test_c(): assert c() == 3\n   {FENCE}\n"
+         "   Run `pytest tests/unit/test_x.py -k test_c -q`; expected: FAIL.\n   Implement `c() -> int` in `src/x.py`.\n"
+         "   Run the same command; expected: PASS. Commit `test(S3): c` then `feat(S3): c`.\n\n## Decide before build\n- none\n")
+
+
+def test_step_defaults_derived_from_the_write_line():
+  assert run_commands(SHORT) == ["pytest tests/unit/test_x.py -q", "pytest tests/unit/test_x.py::test_a -q",
+                                 "pytest tests/unit/test_x.py -k test_b -q", "pytest tests/unit/test_x.py -k test_c -q"]
+  assert step_paths(SHORT) == [(1, "tests/unit/test_x.py", "src/x.py"), (2, "tests/unit/test_x.py", "src/x.py"), (3, "tests/unit/test_x.py", "src/x.py")]
