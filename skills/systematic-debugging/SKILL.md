@@ -2,7 +2,7 @@
 name: systematic-debugging
 license: MIT
 effects: working-tree
-description: Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes
+description: Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes. Only for a filed unit on its branch or for an owner-requested fix on a branch; never during brainstorm, spec or plan.
 ---
 
 # Systematic Debugging

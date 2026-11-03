@@ -2,7 +2,7 @@
 name: test-driven-development
 license: MIT
 effects: working-tree
-description: Use when implementing any feature or bugfix, before writing implementation code
+description: Use when implementing any feature or bugfix, before writing implementation code. Only for a filed unit on its branch or for an owner-requested fix on a branch; never during brainstorm, spec or plan.
 ---
 
 # Test-Driven Development (TDD)
