@@ -402,3 +402,20 @@ def test_review_rule(world):
     head_round(world, n, "posted", wcid, "revise")
     assert record(world, hid, n, "change-review", [F("change-review", n, 1)], wcid, sha=A)[0] == 0
   assert "review rule: accept is refused on a head" in rule(world, hid, "accept", wcid)[1]
+
+
+# ---------------------------------------------------------------- S11: a head's outcome
+
+def test_settle_writes_head_outcome(world):
+  spec, wcid, hid = opened(world, "head")
+  head_round(world, 1, "posted", wcid, "revise")
+  assert record(world, hid, 1, "change-review", [F("change-review", 1, 1)], wcid, sha=A)[0] == 0
+  assert status(world, hid, wcid)[0] == 3
+  assert settle(world, hid, "change-review-1-1", "contested", wcid, "--owner")[0] == 0
+  entry = json.loads(store(world.repo).path("foreman", "U07").read_text(encoding="utf-8"))["rounds"][0]
+  assert entry["outcome"] == "clean" and status(world, hid, wcid)[0] == 0
+  assert "U07 awaiting merge" in store(world.repo).path("journal").read_text(encoding="utf-8")
+  child = card(world, spec, "wave", parent=wcid)                           # a foreman dispatch's child card
+  head_round(world, 2, "posted", wcid, "revise")
+  assert record(world, hid, 2, "change-review", [], child, sha=A)[0] == 0
+  assert rjson(world, hid, "round-2.json")["runcard"] == wcid              # the round carries the top-level card
