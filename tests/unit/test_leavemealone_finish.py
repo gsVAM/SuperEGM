@@ -109,3 +109,34 @@ def test_judges_question_forms(world, tmp_path, form):
   assert code == 0, out
   code, out = world.run("judges", "question", *args, card=None)
   assert code == 1 and "runcard: --runcard is required" in out, out
+
+
+@pytest.mark.parametrize("case, args, message", [
+    ("ci", ["--review", "{review}", "--round", "1", "--reason", "foreman-1-1=flaky"],
+     "question: foreman-1-1 is the CI finding"),
+    ("low", ["--review", "{review}", "--round", "1", "--reason", "change-review-1-2=cosmetic"],
+     "question: change-review-1-2 is low"),
+    ("unknown", ["--review", "{review}", "--round", "1", "--reason", "design-1-9=x"],
+     "question: design-1-9 is not in round 1"),
+    ("continue-used", ["--review", "{review}", "--cap"],
+     "question: continue already ruled on {review}; stop is the only option"),
+    ("relaunch-used", ["--unit", "U07", "--blocked", "launch", "1"],
+     "question: relaunch already used on U07"),
+])
+def test_judges_question_refusals(world, tmp_path, case, args, message):
+  seed(world)
+  runcard = world.card("wave")
+  review = head_review(world, runcard, tmp_path)
+  put(world, {"launches": [{"round": 1, "status": "exited 1"}]}, "launches", "U07")
+  if case == "continue-used":
+    # `review rule` refuses `not at the cap` after one round: the ruling it would write is seeded.
+    record = json.loads(store(world.repo).path("reviews", review, "review.json").read_text(encoding="utf-8"))
+    record["rulings"].append({"id": "R1", "ruling": "continue", "by": "owner", "at": "2026-11-03T00:00:00Z"})
+    put(world, record, "reviews", review, "review.json")
+  if case == "relaunch-used":
+    put(world, {"dispatch_id": None, "rounds": [], "decisions": [{"id": "d1", "point": 3}],
+                "rulings": [{"decision": "d1", "ruling": "relaunch", "by": "judges:p1"}]}, "foreman", "U07")
+  before = sorted(str(p) for p in world.artifacts.rglob("*.md"))
+  code, out = world.run("judges", "question", *[a.format(review=review) for a in args], "--runcard", runcard)
+  assert code == 1 and message.format(review=review) in out, out
+  assert sorted(str(p) for p in world.artifacts.rglob("*.md")) == before
