@@ -151,3 +151,38 @@ def test_interface_deviation_fan_out(world):
   assert code == 0 and out.splitlines()[1] == "consumers: #412", out
   code, out = world.run("judges", "question", "--unit", "U07", "--blocked", "124", "--runcard", runcard)
   assert code == 0 and len(out.splitlines()) == 1, out
+
+
+REFERENCE = ROOT / "skills/judges/references/leavemealone.md"
+ROWS = [
+    ("--review <id> --round <n>", "finding upheld",
+     'superegm decision rule --unit <U> --decision <did> --ruling "<fid> finding upheld" --by judges:<panel> --runcard <card>'),
+    ("--review <id> --round <n>", "finding overruled",
+     "superegm review settle --review <id> --finding <fid> --disposition contested --judges <panel> --runcard <card>"),
+    ("--review <id> --cap", "continue one bounded round",
+     "superegm review rule --review <id> --ruling continue --judges <panel> --runcard <card>"),
+    ("--review <id> --cap", "one more round",
+     "superegm review rule --review <id> --ruling continue --judges <panel> --runcard <card>"),
+    ("--review <id> --cap", "accept the remainder",
+     "superegm review rule --review <id> --ruling accept --judges <panel> --runcard <card>"),
+    ("--review <id> --cap", "stop",
+     "superegm review rule --review <id> --ruling stop --judges <panel> --runcard <card>"),
+    ("--unit <U> --decision D<n>", "(x)",
+     'superegm decide --unit <U> --decision D<n> --answer "(x)" --judges <panel> --runcard <card>'),
+    ("--unit <U> --blocked", "<option>",
+     'superegm decision rule --unit <U> --decision <did> --ruling "<option>" --by judges:<panel> --runcard <card>'),
+]
+
+
+@pytest.mark.parametrize("form, option, command", ROWS)
+def test_routing_table_row(world, form, option, command):
+  rows = [l for l in REFERENCE.read_text(encoding="utf-8").splitlines() if l.startswith("| `")]
+  row = next(l for l in rows if l.startswith(f"| `{form}` | `{option}` |"))
+  assert f"`{command}`" in row
+  assert not re.search(r"--approve|--request-changes|gh pr merge|merge locally", REFERENCE.read_text(encoding="utf-8"))
+  tokens = command.split()[1:]
+  sub = [t for t in tokens[:2] if not t.startswith("-")]
+  code, usage = world.run(*sub, "--help")  # the harness returns `--help`'s exit 0 and its text
+  assert code == 0
+  missing = [f for f in tokens if f.startswith("--") and f not in usage]
+  assert not missing, (sub, missing)
