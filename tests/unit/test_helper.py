@@ -296,7 +296,9 @@ def test_init_writes_the_config_with_every_key_and_refuses_another_base(tmp_path
   assert config["labels"]["stopped"] == "superegm:stopped" and config["reviewers"] == {"spec": [], "plan": [], "head": [], "integrate": []}
   assert config["judges"]["min_vendors"] == 1 and [m["name"] for m in config["judges"]["members"]] == ["fable", "opus", "astra"]
   assert config["builder"]["permission_mode"] == "acceptEdits" and config["builder"]["gh_token_env"] == "SUPEREGM_BUILDER_TOKEN"
-  assert "gh pr create" in config["builder"]["allowed_tools"] and "git push" not in config["builder"]["allowed_tools"]
+  pinned = json.loads((ROOT / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]["allowed_tools"]
+  assert config["builder"]["allowed_tools"] == pinned and "Bash(gh pr create:*)" in pinned  # I-1: the spec's prefix forms
+  assert not any("git push" in tool for tool in pinned)
   assert git(["status", "--porcelain"], repo).strip().startswith("??"), "init writes; approve-spec commits (§7)"
   import superegm
   assert superegm.load_config(repo)["ci_wait_minutes"] == 30
