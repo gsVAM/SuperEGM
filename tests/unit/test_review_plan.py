@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from superegm import store
-from superegm import approve_spec, graph, init, review, review_plan, runcard, scan
+from superegm import approve_spec, graph, init, judges, review, review_plan, runcard, scan
 
 ROOT = Path(__file__).resolve().parents[2]
 SKILL = ROOT / "skills/review-plan/SKILL.md"
@@ -182,7 +182,7 @@ HELPER_CALL = re.compile(r"<HELPER>' ([a-z][a-z0-9-]*)(?: ([a-z][a-z0-9-]*))?"
 def flags_of(sub, verb):
     parser = argparse.ArgumentParser()
     subs = parser.add_subparsers(dest="sub")
-    for module in (approve_spec, graph, init, review, review_plan, runcard, scan):
+    for module in (approve_spec, graph, init, judges, review, review_plan, runcard, scan):  # judges: U11's wiring
         module.register(subs)
     target = subs.choices[sub]
     if verb:

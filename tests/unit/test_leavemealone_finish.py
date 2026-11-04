@@ -186,3 +186,36 @@ def test_routing_table_row(world, form, option, command):
   assert code == 0
   missing = [f for f in tokens if f.startswith("--") and f not in usage]
   assert not missing, (sub, missing)
+
+
+WIRING = {
+    "review-spec": ["judges question --review <id> --round <n> --reason <fid>=<text> --runcard <card>",
+                    "judges question --review <id> --cap --runcard <card>"],
+    "review-plan": ["judges question --review <id> --round <n> --reason <fid>=<text> --runcard <card>",
+                    "judges question --review <id> --cap --runcard <card>"],
+    "plan": ["judges question --unit <U> --decision D<n> --runcard <card>",
+             'decide --unit <U> --decision D<n> --answer "(<id>)" --judges <panel> --runcard <card>'],
+    "wave": ["judges question --review <id> --round <n> --runcard <card>",
+             "judges question --review <id> --cap --runcard <card>",
+             "judges question --unit <U> --blocked <comment-id> --runcard <card>",
+             "judges question --unit <U> --blocked launch <n> --runcard <card>",
+             "judges question --unit <U> --blocked closed <n> --runcard <card>",
+             "decision open --unit <U> --point <1|2|3> --question <path> --source <source> --runcard <card>",
+             "consumers:"],
+}
+# `judges open` takes `--runcard | --parent` as an exclusive pair (U08); under a skill's card the panel opens with `--parent`.
+COMMON = ["judges open --question <path> --evidence <paths> --parent <card>",
+          "judges verdict --panel <id>", "${CLAUDE_PLUGIN_ROOT}/skills/judges/references/leavemealone.md",
+          "`--leavemealone`", "`config.mode`", "unconverged"]
+
+
+@pytest.mark.parametrize("skill", sorted(WIRING))
+def test_leavemealone_wiring(skill):
+  text = (ROOT / f"skills/{skill}/SKILL.md").read_text(encoding="utf-8")
+  body = text.split("---", 2)[2]
+  section = body[body.index("## Leavemealone-mode"):]
+  for snippet in WIRING[skill] + COMMON:
+    assert snippet in section, (skill, snippet)
+  assert "merge" not in section.lower().replace("awaiting merge", "")
+  assert "In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first." in body
+  assert len(body.encode("utf-8")) <= 24_000
