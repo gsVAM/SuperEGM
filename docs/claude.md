@@ -56,14 +56,21 @@ foreman prepares, this session runs.
   `SUPEREGM_RUNCARD` to the run card they run under; the session hook prints nothing for those
   roles.
 - The builder profile (`config.builder.profile_dir`) is created empty by the owner, with no
-  plugins and no `CLAUDE.md`; `launch-builder` refuses otherwise. The builder's allow-list is
+  plugins, no `CLAUDE.md` and no hooks (a `settings.json` with a `hooks` key); `launch-builder`
+  and `superegm doctor` refuse otherwise. The builder's allow-list is
   `config.builder.allowed_tools`; `Agent`, `Skill` and a bare `Bash` are refused.
 - `gh` acts as the account whose token `GH_TOKEN` holds; `git push` does so only over an HTTPS
   remote with `gh` as the credential helper, which `launch-builder` passes in the launched
-  command's environment (`SUPEREGM_BUILDER_TOKEN`), never written to the shared git config. Every
+  command's environment (`SUPEREGM_BUILDER_TOKEN`, the builder account's token made as the
+  README's "Before the first run" step 1 says), never written to the shared git config. Every
   `gh` command a skill runs is prefixed `GH_HOST=github.com`, and the helper pins the same host on
   its own calls: an inherited `GH_HOST` would otherwise send a comment or a review to an
   enterprise server nothing approved.
+- `config.owners` lists the logins that may update the base branch (`launch` refuses an empty
+  list, a classic restriction naming a login outside it, and a builder token whose login is in
+  it); `config.owner_team` (`<org>/<slug>`) is the one team a ruleset's bypass may name, the
+  builder account outside it; `config.pr_block_file` names the file whose text every builder PR
+  body carries, read from the launch's ref into the prompt under `# PR block`.
 - `git worktree add` refuses a branch another worktree has checked out: `launch-builder` detaches
   the earlier launch's worktree before adding a fresh one, and `clean` removes a unit's worktrees
   only once every launch and round of it is terminal.
