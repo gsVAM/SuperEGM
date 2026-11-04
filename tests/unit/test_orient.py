@@ -63,3 +63,14 @@ def test_unit_text_on_the_fixture_tree(scope, expected):
   if scope[0][0] == "src/":
     assert [l for l in text.splitlines() if l.startswith("## ")] == ["## src/AGENTS.md (modify)", "## src/__init__.py (modify)", "## src/queue.py (modify)", "## src/worker.py (modify)", "## Read first"]
   assert text == orient.unit_text(TREE, scope, None, T, "not installed")
+
+
+def test_map_text_on_the_fixture_tree():
+  from superegm import orient
+  text = orient.map_text(TREE, None, T, "not installed")
+  assert text == (f"orient: tree {T} · graphify: not installed · trimmed: nothing\n## Map\n"
+                  ". | 10 files | .py | - | README.md: Demo; CLAUDE.md: Rules\n"
+                  "notes | 1 files | .txt | - | -\n"
+                  "src | 4 files | .py | __init__.py | AGENTS.md: src\n"
+                  "tests | 2 files | .py | - | -\n"
+                  "web | 1 files | .ts | index.ts | -\n")
