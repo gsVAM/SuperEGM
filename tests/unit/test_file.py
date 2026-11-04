@@ -707,3 +707,16 @@ def test_dry_run_refuses_an_issue_it_cannot_adopt(world, case, expected):
     return
   assert code == 1 and expected in out, out
   assert "confirmed" not in state_of(world) and not (world.artifacts / "handoff_dryrun.md").exists()
+
+
+def test_apply_refuses_an_adopted_body_changed_since_the_dry_run(world):
+  spec, plan, handoff_id, card = adopt_dry_run(world)
+  world.gh.issues[7]["body"] = "old body, edited\n"
+  code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes")
+  assert code == 1 and "adopt: #7 body changed since the dry run" in out, out
+  assert not any(c[0] in ("label", "issue") or "POST" in c for c in world.gh.calls)
+  assert "filings" not in state_of(world) and "base_at_start" not in state_of(world)
+  assert world.gh.issues[7]["labels"] == ["bug"] and "units" not in state_of(world).get("tracking", {})
+  del world.gh.issues[7]
+  code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes")
+  assert code == 1 and f"adopt: #7 not in {REPO}" in out, out
