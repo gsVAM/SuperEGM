@@ -661,3 +661,49 @@ def test_pending_writes_carries_the_adopted_number_and_old_body_sha(world):
   assert [w[5:] for w in adopted if w[0] == "issue"] == [[], [], [7, OLD], []]
   assert [w[:5] for w in adopted] == plain
   assert gate.pending_writes(handoff, units={"U01", "U02", "U03"}, adopted={"U02": (7, OLD)}) == adopted
+
+
+COMMENTS = {"ruling": "**Ruling:** (c1) (a) — keep it", "decision": "**Decision D1:** (a) 5 attempts",
+            "deviation": "**Deviation (dod):** item 2 cannot pass\n**Builder status:** BLOCKED"}
+
+
+@pytest.mark.parametrize("case, expected", [
+  ("ok", None),
+  ("closed", "adopt: #7 is closed"),
+  ("not-in-repo", f"adopt: #7 not in {REPO}"),
+  ("pull-request", "adopt: #7 is a pull request"),
+  ("parent", "adopt: #7 has a parent"),
+  ("dependencies", "adopt: #7 has dependencies"),
+  ("superegm-label", "adopt: #7 carries superegm labels"),
+  ("comment-ruling", "adopt: #7 carries a ruling comment"),
+  ("comment-decision", "adopt: #7 carries a ruling comment"),
+  ("comment-deviation", "adopt: #7 carries a ruling comment"),
+])
+def test_dry_run_refuses_an_issue_it_cannot_adopt(world, case, expected):
+  spec, plan, handoff_id, card = adopt_gated(world)
+  gh = world.gh
+  if case == "closed": gh.issues[7]["state"] = "closed"
+  if case == "not-in-repo": del gh.issues[7]
+  if case == "pull-request": gh.issues[7]["pull_request"] = {"url": f"https://api.github.com/repos/{REPO}/pulls/7"}
+  if case == "parent": seed_issue(gh, 8); gh.sub_issues[8] = [gh.issues[7]["id"]]
+  if case == "dependencies": seed_issue(gh, 8); gh.blocked_by[7] = [gh.issues[8]["id"]]
+  if case == "superegm-label": gh.issues[7]["labels"].append("superegm:stopped")
+  if case.startswith("comment-"): gh.comments[7] = [{"id": 1, "body": COMMENTS[case[8:]], "user": {"login": "owner"}}]
+  gh.calls.clear()
+  code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
+  if expected is None:
+    assert code == 0, out
+    text = (world.artifacts / "handoff_dryrun.md").read_text(encoding="utf-8")
+    assert f"### edit #7 U02 (old body sha256 {OLD})" in text and "### issue U02" not in text
+    assert "### issue U01" in text and "### issue U03" in text
+    assert "4 issues (1 tracking, 3 units), 3 sub-issue links, 2 blocked-by links" in text
+    assert [c[:2] for c in gh.calls] == [
+        ["auth", "status"], ["api", f"repos/{REPO}"], ["api", f"repos/{REPO}/labels"],
+        ["api", f"repos/{REPO}/issues/7"], ["api", f"repos/{REPO}/issues/7/parent"],
+        ["api", f"repos/{REPO}/issues/7/dependencies/blocked_by"], ["api", f"repos/{REPO}/issues/7/comments"]]
+    writes = state_of(world)["confirmed"]["writes"]
+    assert [w[5:] for w in writes if w[0] == "issue"] == [[], [], [7, OLD], []]
+    assert state_of(world)["confirmed"]["sha256"] == hashlib.sha256(world.ns["canonical"](writes).encode("utf-8")).hexdigest()
+    return
+  assert code == 1 and expected in out, out
+  assert "confirmed" not in state_of(world) and not (world.artifacts / "handoff_dryrun.md").exists()
