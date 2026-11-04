@@ -12,6 +12,7 @@ become tests; the self-build's plumbing belongs to the U01/U03 plans. The spec s
 plans say how.
 
 Amendment 1 (2026-11-03): §9.1 plan-grammar simplification, §9.2 proportion angle, §17 rows U04/U05/U06/U09; owner-approved by text.
+Amendment 2 (2026-11-04): §11.1 Orient (graphify-backed), §9.1/§10 adopted issues, §11 owners set and PR block, §17 units U12–U14; owner-approved by text.
 
 ## 1. Intent
 
@@ -323,6 +324,9 @@ One human step sits between phases 1 and 5: the owner pushes the approval commit
 the protection of §11 lets only the owner update the base branch, so this is one push. `launch`
 refuses the first wave until the spec at `origin/<base>` hashes to the approval's `sha256`. The
 same step follows every `--amend-units`, and the owner then types the next phase; nothing chains.
+On an existing repository the elephant types `/superegm:orient` (§11.1) before phase 2, and from
+then on `plan`, `launch-builder`, `review-plan` and `foreman dispatch` regenerate or read its two
+store files, so no phase reads a stale map.
 
 Rules that span phases:
 - **The spec is frozen** by the approval record at its sha256. Every issue body cites the spec
@@ -422,6 +426,7 @@ has exactly one writing invocation at a time:
 | `worktrees/<unit>/` | the elephant (`launch-builder`, `/superegm:clean`) |
 | `foreman/<unit>.json`, `review/<unit>/pr<n>/` | the foreman dispatch whose `dispatch_id` the round records (`prepare --dispatch`, `collect`, `review post`); between dispatches `foreman dispatch`, `interrupt --round`, `/superegm:clean`, `review settle` (a head's `outcome`, §11) and `decision open\|rule` (`decisions[]`, `rulings[]`) |
 | `wave_<n>_report.md` | `wave` (`superegm report`, after every batch) |
+| `orient/map.md`, `orient/<unit>.md`, `orient/graphify-out/` | `orient` (`superegm orient`, typed, and run by `plan` and `launch-builder`; §11.1) |
 | `journal.md` | append-only, `O_APPEND`, one line per fact, written by the subcommand that wrote the fact |
 
 All writes go through a temp file and `os.replace`. No lock file.
@@ -439,7 +444,10 @@ All writes go through a temp file and `os.replace`. No lock file.
   (`profile_dir`, `model`, `permission_mode` = `acceptEdits`, `gh_token_env` =
   `SUPEREGM_BUILDER_TOKEN`, `allowed_tools`: the read/edit tools, `git add|commit|status|diff|log|
   mv|rm`, `gh pr create|edit|comment`, `gh issue comment`, each as a prefix pattern; the push
-  prefix for the unit's own branch is added per launch). Unknown keys stop.
+  prefix for the unit's own branch is added per launch), `owners` (the GitHub logins that may
+  update `<base>`; `init` writes the login `gh api user` returns), `owner_team` (optional: the
+  team a ruleset's bypass actors name) and `pr_block_file` (optional: a path in the repository
+  whose text every builder PR body carries) (§11). Unknown keys stop.
 - Under `artifacts_dir`, never committed:
   - `state.json` — EGM's handoff state with EGM's keys, minus `approval`, `pending_approval`,
     `gate_unreviewed_diff` and `decisions[…].published`, plus `plan` (the path of the elephant's
@@ -617,6 +625,7 @@ Each unit section carries EGM's fields and the superpowers additions:
 | Shared files | `none` or `` `path`: after U01, before U05 `` items |
 | Risk | `low\|medium\|high: reason` |
 | Size | `S\|M\|L` by scope-path count (`L` is about twenty Step groups, the most a 48 KB body holds) |
+| Issue | optional; `#<n>`, an open issue in `config.repo` that `file` adopts instead of creating one (§10); the spec's `## Units` table carries it as an optional `issue` column |
 | **Interfaces** | `Consumes:` and `Produces:` lines, one item per line (grammar below) |
 | Definition of done | numbered items; item 1 is always `The test for each Step was committed before its implementation (checked by superegm tdd-order)`; every other item is one of ``Run `<command>` — <what passing means>``, ``Exists `<path>` ``, or `CI green on the head`; only `Run` items are commands |
 | **Steps** | numbered groups, each: a `Write` line, a fence carrying the test's signature and assertions (a full body only for an algorithm or data the assertions do not determine), and a one-sentence `Implement` line that never restates what the test asserts (grammar below); the `Run` line expecting FAIL and the closing line that runs the same command, expects PASS and commits are optional and default from the `Write` line; a rule family is one Step whose test is parametrized, never one Step per rule |
@@ -783,6 +792,14 @@ rules; there is no third checker):
 - Idempotent filing with marker recovery stays, re-pointed at the new markers. Labels are
   `superegm:unit`, `superegm:wave-<n>`, `superegm:handoff-<6 hex>`, `superegm:tracking`,
   `superegm:stopped`.
+- A unit whose section carries `Issue: #<n>` is adopted, not created: `dry-run` lists `edit #<n>`
+  with the old body's sha256 in place of `create`, the write list hashing an `edit` entry by number
+  and body sha256; `apply` rewrites that issue's body to the rendered unit body (the byte-identical
+  rule unchanged), adds the `superegm:unit` and wave labels, keeps its existing labels, title and
+  comments, and sets the blocked-by relationships; `verify` reads it back like a created one, and
+  `#<U04>` placeholders resolve to adopted numbers too. `scan` refuses an `Issue` that is closed
+  (`adopt: #<n> is closed`) or not in `config.repo` (`adopt: #<n> not in <repo>`). Nothing else
+  about filing changes.
 - Deviations during the build go in **comments** on the issue, never edits to the body. The
   builder posts `**Deviation (<kind>):** <text>` with kind `interface | dod | test | other`; when
   the kind is not `other` the same comment ends with `**Builder status:** BLOCKED` and its option
@@ -806,7 +823,14 @@ workflow triggered on `pull_request`; the builder token is set, is not the eleph
 and is recorded with that login in the card; and the base branch carries an active protection,
 in classic or ruleset form, that restricts updates to `<base>` to the owner with no bypass for
 the builder account's role (a ruleset's restrict-updates or classic restrict-who-can-push, which
-covers merging a pull request) and forbids force-push and deletion on `superegm/**`. Under that
+covers merging a pull request) and forbids force-push and deletion on `superegm/**`. The owner is
+the set `config.owners` (GitHub logins; `init` writes the login `gh api user` returns): the check
+accepts a classic restriction whose users are a subset of `owners` without the builder account, or
+a ruleset whose bypass actors are the team `config.owner_team` and no role, and its refusal names
+the missing login or team. When `config.pr_block_file` names a file in the repository,
+`launch-builder` appends that file's text verbatim to the PR body template in the builder orders
+and the orders say so, so a repository that requires a block in every PR (a `coord/v1` block, a
+review-evidence block) gets it from every builder. Under that
 protection the builder account can open PRs and never merge them; the owner, who alone updates
 `<base>`, merges by hand; the plugin ships no approve or merge path, and the elephant and the
 foreman hold no GitHub write but the review comment, the ruling and decision comments, and the
@@ -987,6 +1011,66 @@ refuses while any launch or round is not terminal, and keeps what it cannot prov
 `interrupted` on a launch, or marks a prepared round `collected (not run (interrupted: owner))`;
 an owner's decision is not a guess.
 
+### 11.1 Orient
+
+`/superegm:orient <spec-path> [--unit U<id>]` (amendment 2). SuperEGM goes into existing
+repositories whose orientation lives in `CLAUDE.md` or `AGENTS.md` files the goldfish never see
+(`omitClaudeMd`) and in planning logs that are elephant memory; `orient` copies what a builder or
+reviewer needs into the store. It is an **extractor, never a summarizer**: a deterministic script
+with no model call that copies what exists and invents nothing; the same tree at the same sha
+gives byte-identical output (a test pins it). When `graphify` is installed (the binary on PATH,
+`~/.local/bin/graphify` on the owner's machine, or `graphify-out/.graphify_python`) it is the
+engine: `orient` builds or updates a knowledge graph of the repository and projects it per unit;
+without it the extractor runs alone and the record says `graphify: not installed`. Both paths
+write the same two files.
+
+**Effect and command.** The skill declares `external: state-store` and refuses without an open
+run card (`require_runcard(args, ["orient", "plan", "wave"])`). The helper subcommand is `superegm
+orient --spec <path> [--unit U<id>...] --runcard <id> → one line per file written: <store path>
+<bytes>; exit 0, or 1 with the refusal`; a unit whose section is not yet in the plan file is
+refused (`run graph --plan first`). Every read is best-effort (`errors="replace"`), files over
+1 MB are skipped and symlinks are not followed.
+
+**The two files** (store kind `orient`; `Store.path("orient", "map.md")` and
+`Store.path("orient", <unit>)` → `orient/map.md`, `orient/<unit>.md`; never under the working
+tree, never committed; graphify's output under `orient/graphify-out/`, never the working tree):
+
+| File | Contents, in order | Cap and trimming |
+| --- | --- | --- |
+| `orient/map.md` | with graphify: its `## Summary` line (nodes, edges, communities, EXTRACTED/INFERRED share) and the 40 largest community hubs, each with its label and top files; then the repository map at the base sha: one line per directory to depth 4, skipping what `.gitignore` ignores plus `.git`, `node_modules`, `dist`, `build`, `__pycache__`, `.venv`, `venv`, `.pytest_cache`, `scratchpad`, `vendor`, `target`; each line the path, file count, dominant extension, entry points (`__init__.py`, `main.*`, `index.*`, `mod.rs`, `__main__.py`) and the first heading or first sentence of any `README.md`, `AGENTS.md`, `CLAUDE.md` or `context.md` there (one line, ≤160 chars) | 24,576 bytes: the depth is reduced until it fits and the first line says so |
+| `orient/<unit>.md` | for every Scope path of the unit: an existing file's module docstring (first paragraph), its public signatures (`def`/`class` lines not starting with `_` for Python; exported `function`/`class`/`export` lines for JS/TS; the first 40 lines otherwise), the tests under `tests/` that import or name it, and the nearest contract doc excerpt (the heading-delimited section of the closest `README.md`/`AGENTS.md`/`CLAUDE.md`/`context.md`, walking up to the repo root, whose heading or body names the path or the module name); for a path to be created, the sibling files' public signatures; with graphify, a `## Graph` section per Scope path: the nodes whose `source_file` is the path (or under it), every EXTRACTED edge touching them with the neighbour's `source_file` and `source_location` (callers and callees, one hop), the INFERRED edges apart with their confidence score, and each node's community label; then `## Read first`: every heading-delimited section of the root (and nearest) `CLAUDE.md` and `AGENTS.md` that names a Scope path, module name or directory of the unit, verbatim; then `## Graph context`: `graphify query "<unit objective> <Scope module names>" --budget 1500` and `graphify explain <entity>` for each Scope file's main entity, verbatim | 16,384 bytes: trimmed in the order tests list, sibling signatures, contract excerpts, read-first; the unit's own Scope signatures never, and the EXTRACTED edges of its own Scope files last; the file says what was trimmed |
+
+**graphify.** Once per repository `graphify <repo> --directed --no-viz`, run from the store's
+`orient/` directory or with `graphify-out/` copied there (the unit decides which graphify
+supports; the repository stays clean). Part A (AST) extracts code deterministically with no
+model; Part B (semantic) runs once over `docs/`, `AGENTS.md`, `CLAUDE.md` and `README.md` files
+and is skipped when none exist. Every caller run then does `--update` (changed files only), so
+the graph follows the base sha cheaply. The record carries `graph.json`'s `built_at_commit` and
+sha256.
+
+**Consumers**, each a one-line change in an existing module:
+
+| Caller | What it does |
+| --- | --- |
+| `plan` | runs `orient` for the map before drafting and after every `graph --plan` it runs (`graph` itself is untouched); the elephant reads `orient/map.md` |
+| `launch-builder` | runs `orient --unit U<id>` at the head's base sha and copies `orient/<unit>.md` next to the prompt file; `builder_orders.md` says "read `orient.md` before Step 1" |
+| `review-plan`, `foreman dispatch` | pass `orient/<unit>.md` to the `readiness` and `codebase-details` reviewers as an input |
+| every dispatch record | names the orient file's sha256 (what the goldfish saw) |
+
+When the file is absent (an older store) a consumer proceeds without it and says so in the
+record. Freshness is the callers': regenerated at every run, the files never go stale; `orient`
+typed by hand is for the elephant's own reading.
+
+**Determinism and the honesty trail.** The projection into the two files is a pure function of
+`graph.json` and the plan file; a test pins it on a fixture graph
+(`tests/unit/fixtures/orient/graph.json`). graphify's semantic edges are not deterministic, which
+is why every INFERRED edge is marked and the record names the graph's commit and hash. The
+byte-identity test covers the fallback extractor and the projection, not graphify's build.
+
+**Cost.** On a large repository (the Stirlingshire platform) Part A is free; Part B over the docs
+is a one-time token cost, then incremental. `orient` prints graphify's cost line from `cost.json`
+after a build.
+
 ## 12. Merge and integration (phases 6–7)
 
 - **Merge is human.** The absorbed `finishing-a-development-branch` offers two options: push and
@@ -1081,6 +1165,7 @@ Naming: adapter file `.claude-plugin/agents/<id>.md`, frontmatter `name: <id>`, 
 | brainstorming (sp) | `brainstorming` | working-tree | auto | owner, phase 0 | writes `docs/specs/YYYY-MM-DD-<topic>-design.md` (path changed from `docs/superpowers/specs/`) ending in `## Units`; the gate's next step is `/superegm:review-spec`; the builder check and the visual companion removed |
 | egm-draft (egm) | `draft` | working-tree | typed | owner, phase 0 | "draft a spec from a brief when brainstorming was skipped"; template ends in `## Units` |
 | egm-review + egm-review-loop + egm-resolve (egm) | `review-spec` (+ `references/review_loop.md`, `references/resolve.md`) | external: state-store, start-session | typed | owner, phase 1 | §8; the stage skills become references; "max 1 re-audit" goes; owns the Astra review lane |
+| new | `orient` | external: state-store | typed (and run by `plan`, `launch-builder`, `review-plan`, `foreman dispatch`) | elephant, before planning on an existing repository; every builder and reviewer through its callers | §11.1; `orient/map.md`, `orient/<unit>.md` in the store |
 | egm-handoff planning half + writing-plans (sp) | `plan` | external: state-store, start-session, github-write | typed | owner, phase 2 | §9.1; `github-write` for the decision comment on a filed unit |
 | new | `review-plan` | external: state-store, start-session | typed | owner, phase 3 | §9.2 |
 | egm-handoff filing half | `file` | external: github-write, state-store | typed | owner, phase 4 | §10 |
@@ -1144,7 +1229,7 @@ Grep, Glob]`, `omitClaudeMd: true`); and `foreman` (tools `[Agent, Bash, Read, G
 ## 16. What is left to the builder
 
 - The helper's argparse surface beyond the names and contracts in §17: `init`, `runcard
-  open|close`, `approve-spec [--amend-units | --void | --leavemealone]`, `graph`, `scan`,
+  open|close`, `approve-spec [--amend-units | --void | --leavemealone]`, `graph`, `scan`, `orient`,
   `review open|record|settle|status|rule|post`, `gate`, `dry-run`, `apply`, `verify`, `status
   [--wait]`, `launch [--idle]`, `launch-builder`, `record-launch [--exit]`, `foreman dispatch`,
   `collect [--not-run]`, `prepare`, `tdd-order`, `decide`, `decision open|rule`, `interrupt`,
@@ -1158,7 +1243,7 @@ Grep, Glob]`, `omitClaudeMd: true`); and `foreman` (tools `[Agent, Bash, Read, G
 
 ## 17. Units
 
-The unit graph for building SuperEGM 1.0.0 (thirteen units). Each unit's plan must fit 48 KB.
+The unit graph for building SuperEGM 1.0.0 (thirteen units) and, from amendment 2, 1.1.0 (U12–U14). Each unit's plan must fit 48 KB.
 Interfaces are subcommand contracts and file keys unless marked `py`. A Consumes producer may be
 a transitive blocker. After U01 every §14 skill folder and adapter exists (the new ones as
 stubs), so later units modify and never create skill folders, adapters or personas.
@@ -1178,6 +1263,9 @@ stubs), so later units modify and never create skill folders, adapters or person
 | U10 | Foreman: `foreman` adapter and brief, `foreman dispatch` with the dispatch-predicate refusal, the round entry's `runcard` and `launch`, and the recovery of a `collected` round already on the PR, `prepare --dispatch` with the fetched tip as `head`, the `<base>` refusal, `pr_body.md`, `comments.md` (after `posted_at`, plus the aged comments) and the last round's findings, `collect` with the foreman findings (incl. scope paths) and the contested reads and `--not-run`, `tdd-order`, `review post` with `posted_at`, the `outcome` write, its exit 3 and the `awaiting merge` journal fact, the return word | U04, U09 | L |
 | U10b | The driver: the `wave` skill body with the loop's invariants as tests through `foreman dispatch`'s refusal, the batch order, the resume derivation incl. pending decisions, `report` after every batch, the end condition incl. idle and pending units, what the elephant does with each word, `decision open\|rule` at every point, the by-hand ruling of a BLOCKED comment | U09b, U10 | M |
 | U11 | leavemealone routing and finish: `judges question` and its forms, the §13.2 wiring at points 1–3 in `review-spec`, `review-plan`, `plan`, `wave`, the interface-deviation fan-out; `integrate` with `--close`, `close` and `closed_at`; docs and the README (install notes, the builder account and profile, the protection, the Licence paragraph); release 1.0.0 packed by `prepare_release.py` | U06, U07, U08, U10b | M |
+| U12 | Orient (§11.1): `skills/orient/SKILL.md` (create, with `assets/icon.svg` and `test_scenarios.yaml`), `skills/orient/references/graphify.md` (create: how orient drives graphify, the flags, the fallback), `skills/plan/scripts/superegm/orient.py` (create), `skills/plan/scripts/superegm/__init__.py` (modify: the `orient` store kind, `SUBCOMMANDS`, the skills' effects table if it lives there), `skills/plan/scripts/superegm/launch_builder.py`, `review_plan.py`, `foreman.py` (modify), `skills/wave/references/builder_orders.md` (modify), `skills/plan/SKILL.md` (modify: one sentence), `tests/unit/test_orient.py` (create), `tests/unit/fixtures/orient/graph.json` (create: a small hand-written graph) | none | M |
+| U13 | File adopts existing issues (§9.1, §10): `skills/plan/scripts/superegm/graph.py` (modify: the `Issue` field), `scan.py` (modify: the two refusals), `dry_run.py`, `apply.py`, `verify.py` (modify), `skills/file/SKILL.md` and `skills/plan/references/handoff_plan.md` (modify: the field and the dry-run line), `tests/unit/test_file.py`, `tests/unit/test_plan.py` (modify) | none | M |
+| U14 | Launch policy: owners set and PR block (§11): `skills/plan/scripts/superegm/launch.py`, `launch_builder.py`, `__init__.py` (modify: `DEFAULT_CONFIG` keys, `init`), `skills/wave/references/builder_orders.md` (modify), `docs/claude.md` (modify: the two keys), `tests/unit/test_builders.py`, `tests/unit/test_helper.py` (modify) | none | S |
 
 Shared files: `test_helper.py` is U03's alone. `body.py` is U03's and then U05's (the derived Step
 defaults), which U03 blocks. Each workflow SKILL.md stub U01 creates is filled
@@ -1187,6 +1275,16 @@ only. The `status`, `launch` and `prepare` modules are edited by U03 and then by
 U10 respectively, which U03 blocks; the `review` modules by U04 and then U10; the `foreman`
 file's writers are U03 (schema), U04 (`review settle`), U10 and U10b, each behind its blockers.
 No other file is edited by two units their blockers do not order.
+
+Amendment 2 units (1.1.0): U12 and U14 share `launch_builder.py`, `builder_orders.md` and
+`__init__.py`, U14 after U12 (U12 adds the orient copy and the orders line); U13's `graph.py` and
+`scan.py` are its alone (U12's map runs from `plan`'s skill body, not from `graph`). Risk: U12
+medium (extraction over arbitrary trees: encoding errors, huge files, symlink loops; §11.1's
+best-effort reads); U13 medium (an adopted issue's body is replaced wholesale; the dry run shows
+the old body's sha256 so the owner sees what is overwritten); U14 low. Review focus for U12's
+plan: a repository with no docs at all (the map still written; the unit file holds signatures
+only); a Scope path that does not exist yet; a `CLAUDE.md` over the cap; a non-Python repository;
+a unit whose section is not yet in the plan file (refusal: `run graph --plan first`).
 
 Interfaces (the names the plans will carry):
 - U01 → all: the absorbed `state.json` keys and subcommands with EGM's contracts until a later
@@ -1237,4 +1335,6 @@ Interfaces (the names the plans will carry):
   `decision rule --unit <U> --decision <id> --ruling <text> --by <login | judges:<panel-id>>`;
   the `wave` skill's decision-point hooks.
 
-Waves: {U01} → {U02, U03} → {U04, U05, U08, U09} → {U06, U07, U09b, U10} → {U10b} → {U11}.
+Waves: {U01} → {U02, U03} → {U04, U05, U08, U09} → {U06, U07, U09b, U10} → {U10b} → {U11}; then,
+as a second handoff (`2026-11-04-superegm-1.1`), {U12, U13} → {U14}, and version 1.1.0 after all
+three merge.
