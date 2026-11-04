@@ -140,3 +140,14 @@ def test_judges_question_refusals(world, tmp_path, case, args, message):
   code, out = world.run("judges", "question", *[a.format(review=review) for a in args], "--runcard", runcard)
   assert code == 1 and message.format(review=review) in out, out
   assert sorted(str(p) for p in world.artifacts.rglob("*.md")) == before
+
+
+def test_interface_deviation_fan_out(world):
+  seed(world)
+  runcard = world.card("wave")
+  comment(world, 123, INTERFACE_COMMENT)
+  comment(world, 124, "**Deviation (dod):** item 2 cannot run offline\n**Builder status:** BLOCKED\n- (a) mark item 2 CI-only\n")
+  code, out = world.run("judges", "question", "--unit", "U07", "--blocked", "123", "--runcard", runcard)
+  assert code == 0 and out.splitlines()[1] == "consumers: #412", out
+  code, out = world.run("judges", "question", "--unit", "U07", "--blocked", "124", "--runcard", runcard)
+  assert code == 0 and len(out.splitlines()) == 1, out
