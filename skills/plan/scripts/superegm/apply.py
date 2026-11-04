@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_apply`, `Budget`, `apply_writes`, `create_issue` and `post_link` on the confirmed write list of unfiled units; `filings[]` and `base_at_start` before the first write; the labels of spec section 10.
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_apply`, `Budget`, `apply_writes`, `create_issue` and `post_link` on the confirmed write list of unfiled units; `filings[]` and `base_at_start` before the first write; the labels of spec section 10; an adopted issue re-read before any write (U13).
 
 """superegm apply: create labels, issues and links (needs --yes)."""
 
@@ -74,9 +74,11 @@ def run(args):
   if (state.get("repo") or "").lower() != repo.lower():
     raise core.HandoffError(f"config repo {repo} differs from the state's {state.get('repo')}: run dry-run again")
   gate.require_gate(handoff)
-  # The unit set is the dry run's, so a resumed apply recomputes the same list.
+  # The unit set is the dry run's, so a resumed apply recomputes the same list; an adopted
+  # unit's number and old body sha256 come from that list too (the dry run's read, spec section 10).
   units = {w[1] for w in confirmed["writes"] if w[0] == "issue" and w[1] != "tracking"}
-  writes = gate.pending_writes(handoff, units)
+  adopted = {w[1]: (w[5], w[6]) for w in confirmed["writes"] if w[0] == "issue" and len(w) == 7}
+  writes = gate.pending_writes(handoff, units, adopted)
   if core.sha256_text(core.canonical(writes)) != confirmed["sha256"] \
       or core.canonical(writes) != core.canonical(confirmed["writes"]):
     raise core.HandoffError("the write list changed since the dry run (plan, config, template or repo): run dry-run again")
@@ -91,6 +93,7 @@ def run(args):
   if problems:
     raise core.HandoffError("the current scan refuses the text that would be written:\n  "
                             + "\n  ".join(problems))
+  check_adopted(handoff, writes)
   sha = confirmed["sha256"]
   if not any(f.get("sha256") == sha for f in state.get("filings") or []):
     # Once per write-list hash, before the first write: the list a resumed or
@@ -121,6 +124,24 @@ def run(args):
     raise core.HandoffError(str(error)) from error
   save()
   return core.verify.run_verify(handoff, writes)
+
+
+def check_adopted(handoff, writes) -> None:
+  """Before the first write, re-read every adopted issue not yet done and refuse one whose body
+  no longer hashes to the dry run's old body sha256, or that is gone (spec section 10)."""
+  repo, units = handoff.config["repo"], handoff.state.setdefault("units", {})
+  for item in writes:
+    if item[0] != "issue" or len(item) != 7 or units.get(item[1], {}).get("done"):
+      continue
+    number, old_sha = item[5], item[6]
+    try:
+      issue = core.gh_json(["api", f"repos/{repo}/issues/{number}"])
+    except core.GhError as error:
+      if error.http_status == 404:
+        raise core.HandoffError(f"adopt: #{number} not in {repo}") from error
+      raise core.HandoffError(str(error)) from error
+    if core.sha256_text(issue.get("body") or "") != old_sha:
+      raise core.HandoffError(f"adopt: #{number} body changed since the dry run")
 
 
 def apply_writes(handoff: core.Handoff, writes, budget: Budget, save):
