@@ -293,7 +293,9 @@ def test_init_writes_the_config_with_every_key_and_refuses_another_base(tmp_path
                          "reviewers", "astra", "judges", "builder", "ci_wait_minutes"}
   assert config["repo"] == REPO and config["base"] == "main" and config["artifacts_dir"] == str(tmp_path / "store")
   assert config["mode"] == "normal" and config["max_in_flight"] == 5 and config["ci_wait_minutes"] == 30
-  assert config["labels"]["stopped"] == "superegm:stopped" and config["reviewers"] == {"spec": [], "plan": [], "head": [], "integrate": []}
+  assert config["labels"]["stopped"] == "superegm:stopped"
+  assert config["reviewers"] == {"spec": ["design", "zoom-out"], "plan": ["readiness", "proportion", "set"],
+                                 "head": ["change-review"], "integrate": ["design"]}  # I-2: the spec's panels
   assert config["judges"]["min_vendors"] == 1 and [m["name"] for m in config["judges"]["members"]] == ["fable", "opus", "astra"]
   assert config["builder"]["permission_mode"] == "acceptEdits" and config["builder"]["gh_token_env"] == "SUPEREGM_BUILDER_TOKEN"
   pinned = json.loads((ROOT / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]["allowed_tools"]
