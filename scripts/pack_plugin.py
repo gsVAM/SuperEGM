@@ -37,7 +37,7 @@ SKILLS = (
     "brainstorming", "draft", "review-spec", "plan", "review-plan", "file", "wave",
     "interrupt", "clean", "finishing-a-development-branch", "integrate", "judges",
     "test-driven-development", "systematic-debugging", "verification-before-completion",
-    "writing-skills", "using-superegm", "drift-report",
+    "writing-skills", "using-superegm", "drift-report", "orient",
 )
 IDS = (
     "design", "zoom-out", "comprehension", "codebase-details", "readiness",
@@ -78,7 +78,7 @@ FRONTMATTER_KEY = re.compile(r"^([A-Za-z_-]+):\s?(.*)$")
 EFFECT_KINDS = ("github-write", "remote-branch", "start-session", "state-store", "destructive-local")
 TYPED_SKILLS = frozenset((  # section 14: every external skill, the two gates, draft, drift-report
     "review-spec", "plan", "review-plan", "file", "wave", "interrupt", "clean",
-    "finishing-a-development-branch", "integrate", "judges", "draft", "drift-report",
+    "finishing-a-development-branch", "integrate", "judges", "draft", "drift-report", "orient",
 ))
 
 
