@@ -28,6 +28,7 @@
     ],
     "plan": [
       "readiness",
+      "proportion",
       "set",
       "structural"
     ],
