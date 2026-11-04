@@ -27,10 +27,9 @@ every writing call carries `--runcard`.
 
 1. `superegm runcard open --skill integrate --artifact <spec-path>` prints `<card>`; a card still
    open on this spec is marked interrupted by it.
-2. The landed set `close` reads is the snapshot `status --wait` saves, and `status` serves a
-   wave card alone: `superegm runcard open --skill wave --artifact <spec-path>` prints
-   `<wave-card>`; `superegm status --wait 1 --runcard <wave-card>` reads GitHub once and saves
-   every unit's `landed` and `closed` facts; `superegm runcard close <wave-card>`.
+2. The landed set `close` reads is the snapshot `status --wait` saves:
+   `superegm status --wait 1 --runcard <card>` reads GitHub once and saves every unit's `landed`
+   and `closed` facts.
 3. From `state.json`'s `status.units`, list every unit that is neither `landed` nor closed by a
    non-builder login (`closed`'s issue entry). Without `--close`, one such unit ends the
    invocation here: print the list, say that the owner merges, closes or re-types

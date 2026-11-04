@@ -12,7 +12,7 @@ import superegm as core
 from superegm.launch import load_launches, terminal
 
 WRITES = frozenset(['state'])  # the store kinds this subcommand writes
-SKILLS = frozenset(['wave'])  # the skills whose card this subcommand accepts
+SKILLS = frozenset(['wave', 'integrate'])  # the skills whose card this subcommand accepts
 STATUS_RE = re.compile(r"^\*\*Builder status:\*\*\s*(DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT)\b")
 # The saved fingerprint of a unit (spec section 11): every `--wait` reports the keys that differ from it.
 EMPTY = {"pr": None, "head": None, "ci": None, "exit": None, "builder_status": None, "landed": False,
