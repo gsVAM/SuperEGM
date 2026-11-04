@@ -331,6 +331,7 @@ def test_record_launch_appends_running_then_records_the_exit(world, monkeypatch)
   ("profile-missing", "builder profile"),
   ("profile-claude-md", "holds CLAUDE.md"),
   ("profile-plugins", "holds plugins"),
+  ("profile-hooks", "holds hooks"),
   ("body", "issue #7 body differs from the filed body"),
   ("no-pr", "U07 round 2 has no recorded PR: run status first"),
 ])
@@ -353,6 +354,8 @@ def test_launch_builder_refuses_each_precondition(world, monkeypatch, case, reas
     (profile / "CLAUDE.md").write_text("x\n", encoding="utf-8")
   if case == "profile-plugins":
     (profile / "plugins").mkdir(); (profile / "plugins/installed_plugins.json").write_text("{}", encoding="utf-8")
+  if case == "profile-hooks":
+    (profile / "settings.json").write_text('{"hooks": {"SessionStart": []}}', encoding="utf-8")
   if case == "body":
     world.gh.issues[ISSUE]["body"] += "\nedited by hand\n"
   code, out = world.run("launch-builder", "--unit", UNIT, "--round", rnd, "--runcard", card)
