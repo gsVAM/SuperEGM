@@ -1,7 +1,9 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the judges subcommand (spec section 13.1).
+# Added by SuperEGM (gsVAM), 2026: the judges subcommand (spec section 13.1) and `judges question`, the
+# leavemealone-mode question renderer of section 13.2 (U11).
 
-"""superegm judges open|record|diff|verdict: the judge panel over a question file."""
+"""superegm judges open|record|diff|verdict|question: the judge panel over a question file, and the
+question file rendered from the record at a decision point."""
 
 import json
 import re
@@ -9,9 +11,12 @@ from pathlib import Path
 
 import superegm as core
 
-WRITES = frozenset(["judges", "runcards"])  # the store kinds this subcommand writes
+WRITES = frozenset(["judges", "runcards", "questions"])  # the store kinds this subcommand writes
 SKILLS = frozenset(["judges"])  # the skills whose card this subcommand accepts
 PARENT_SKILLS = ("review-spec", "review-plan", "plan", "wave", "integrate")
+QUESTION_SKILLS = frozenset(["review-spec", "review-plan", "plan", "wave"])  # the cards `judges question` accepts
+CAP_OPTIONS = {"head": ["one more round", "stop"], "other": ["continue one bounded round", "accept the remainder", "stop"]}
+RELAUNCH = ["relaunch", "stop the unit"]
 CAP = 5  # rounds per panel
 ISOLATION_RE = re.compile(r"^(clean|exposed:.+)$")
 
@@ -126,6 +131,15 @@ def register(subparsers):
   v = action.add_parser("verdict", help="compute per-question convergence, write verdict.json and print it")
   v.add_argument("--panel", required=True)
   v.add_argument("--runcard", required=True, help="the panel's judges card, or its parent")
+  q = action.add_parser("question", help="render a section 13.2 question file from the record and print its path")
+  q.add_argument("--review", help="the review id (with --round or --cap)")
+  q.add_argument("--round", type=int, help="the round whose findings are questioned")
+  q.add_argument("--reason", action="append", default=[], metavar="FID=TEXT", help="a contested or declined finding and the overrule text")
+  q.add_argument("--cap", action="store_true", help="the review is at its cap")
+  q.add_argument("--unit", help="the unit (with --decision or --blocked)")
+  q.add_argument("--decision", help="a `blocking: yes` item, D<n>")
+  q.add_argument("--blocked", nargs="+", metavar="WHAT", help="<comment-id> | launch <n> | closed <n>")
+  q.add_argument("--runcard", help="the open review-spec, review-plan, plan or wave card")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -435,4 +449,114 @@ def cmd_verdict(args, store) -> int:
   return 0 if verdict["converged"] else 2
 
 
-COMMANDS = {"open": cmd_open, "record": cmd_record, "diff": cmd_diff, "verdict": cmd_verdict}
+# ---------------------------------------------------------------- question: section 13.2's points 1-3 rendered
+
+
+def question(args, st) -> int:
+  from superegm import review as reviews
+  if args.review:  # the card rule reads the review's artifact from args, as review.py's `bind` does
+    found = reviews.load_review(st, args.review)
+    if found is None:
+      raise core.HandoffError(f"question: review {args.review} not opened")
+    if found["kind"] in ("spec", "integrate"):
+      args.design = found["artifact"]
+    else:
+      args.unit = found["artifact"]
+  core.require_runcard(args, QUESTION_SKILLS)
+  text, consumers = render(st, args)
+  path = st.path("questions", question_name(args))
+  core.atomic_write(path, text)
+  core.journal(st, f"question rendered: {path}")
+  print(path)
+  if consumers:
+    print("consumers: " + " ".join(f"#{n}" for n in consumers))
+  return 0
+
+
+def question_name(args) -> str:
+  if args.review:
+    return f"{args.review}-cap.md" if args.cap else f"{args.review}-r{args.round}.md"
+  if args.decision:
+    return f"{args.unit}-{args.decision}.md"
+  return f"{args.unit}-blocked-{'-'.join(args.blocked)}.md"
+
+
+def render(st, args) -> tuple[str, list[int]]:
+  """The question text of one section 13.2 point and, for an `interface` deviation, the consumers to post on."""
+  if args.review and args.cap:
+    return cap_question(st, args.review), []
+  if args.review and args.round:
+    return round_questions(st, args.review, args.round, args.reason), []
+  if args.unit and args.decision:
+    return decision_question(st, args.unit, args.decision), []
+  if args.unit and args.blocked:
+    return blocked_question(st, args.unit, args.blocked)
+  raise core.HandoffError("question: --review <id> (--round <n> | --cap) or --unit <U> (--decision D<n> | --blocked ...)")
+
+
+def options_text(options: list) -> str:
+  return "".join(f"- ({chr(ord('a') + i)}) {option}\n" for i, option in enumerate(options))
+
+
+def round_questions(st, rid: str, n: int, reasons: list) -> str:
+  from superegm import review as reviews
+  rnd = reviews.load_round(st, rid, n)
+  if rnd is None:
+    raise core.HandoffError(f"question: {rid} has no round {n}")
+  findings = {f["id"]: f for record in rnd["reviewers"].values() for f in record["findings"]}
+  asked = []
+  for item in reasons:
+    fid, sep, text = item.partition("=")
+    if not sep:
+      raise core.HandoffError(f"question: --reason takes <fid>=<text>, got {item}")
+    asked.append((fid, text))
+  asked += [(entry["fid"], entry["reason"]) for entry in rnd.get("builder_contested") or []]
+  lines = []
+  for k, (fid, text) in enumerate(asked, start=1):
+    if fid not in findings:
+      raise core.HandoffError(f"question: {fid} is not in round {n}")
+    finding = findings[fid]
+    lines.append(f"## Q{k} {fid} ({finding['severity']}, {finding['location']}): {finding['claim']}\n"
+                 + options_text(["finding upheld", f"finding overruled — {text}"]))
+  if not lines:
+    raise core.HandoffError(f"question: nothing to ask in round {n} of {rid}")
+  return "".join(lines)
+
+
+def cap_question(st, rid: str) -> str:
+  from superegm import review as reviews
+  review = reviews.load_review(st, rid)
+  options = list(CAP_OPTIONS["head" if review["kind"] == "head" else "other"])
+  return f"## Q1 {rid} is at its cap\n" + options_text(options)
+
+
+def decision_question(st, unit: str, did: str) -> str:
+  units = json.loads(core.read_text(st.path("units"))).get("units") or {}
+  decision = next((d for d in units.get(unit, {}).get("decisions") or [] if d["id"] == did), None)
+  if decision is None:
+    raise core.HandoffError(f"question: {unit} has no decision {did}")
+  return f"## Q1 {unit} {did}: {decision['question']}\n" + "".join(f"- {o}\n" for o in decision["options"])
+
+
+def blocked_question(st, unit: str, what: list) -> tuple[str, list[int]]:
+  from superegm.launch import load_launches
+  if len(what) == 1 and what[0].isdigit():
+    body = (core.gh_json(["api", f"repos/{st.config['repo']}/issues/comments/{what[0]}"]) or {}).get("body") or ""
+    heading, *rest = body.splitlines() or [""]
+    options = [line[2:].strip() for line in rest if line.startswith("- (")]
+    options = [o.partition(" ")[2] for o in options] + ["stop the unit"]
+    return f"## Q1 {unit} BLOCKED (comment {what[0]}): {heading.strip()}\n" + options_text(options), []
+  if len(what) == 2 and what[0] == "launch" and what[1].isdigit():
+    launches = load_launches(st, unit)
+    n = int(what[1])
+    if not 1 <= n <= len(launches):
+      raise core.HandoffError(f"question: {unit} has no launch {n}")
+    heading = f"{unit} launch {n} ({launches[n - 1]['status']}) ended with no pull request"
+  elif len(what) == 2 and what[0] == "closed" and what[1].isdigit():
+    heading = f"{unit}: #{what[1]} was closed by the builder account"
+  else:
+    raise core.HandoffError("question: --blocked takes <comment-id> | launch <n> | closed <n>")
+  return f"## Q1 {heading}\n" + options_text(RELAUNCH), []
+
+
+COMMANDS = {"open": cmd_open, "record": cmd_record, "diff": cmd_diff, "verdict": cmd_verdict, "question": question}
