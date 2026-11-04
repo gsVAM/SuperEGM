@@ -8,15 +8,20 @@ public signatures, tests and documentation sections are copied per Scope path, g
 `graph.json` is projected in when the CLI is on `PATH`, and each file is capped."""
 
 import ast
+import hashlib
+import json
 import os
 import re
 import shutil
+import subprocess
 import tarfile
 from pathlib import Path, PurePosixPath
 
 import superegm as core
 
 CAP_UNIT, CAP_MAP, MAP_DEPTH = 16_384, 24_576, 4
+GRAPHIFY = "graphify"  # the command looked up on PATH; tests point it at a fake
+TIMEOUT = 600  # seconds for one graphify build
 DOCS = ("README.md", "AGENTS.md", "CLAUDE.md", "context.md")
 SKIPPED = {"dist", "build", "vendor", "target", "scratchpad"}
 JS = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
@@ -131,6 +136,33 @@ def siblings(export: Path, rel: str) -> list[str]:
 
 
 # ---------------------------------------------------------------- graphify's graph.json
+
+
+def build_graph(export: Path, out: Path):
+  """graphify's headless `update` over the export with `GRAPHIFY_OUT` naming `out`, any
+  earlier `graph.json` removed first (so its shrink check never trips and `--force` is not
+  needed); (the graph, its sha256), or (None, `not installed` | `failed: <reason>`)."""
+  out = Path(out)
+  out.mkdir(parents=True, exist_ok=True)
+  (out / "graph.json").unlink(missing_ok=True)
+  exe = shutil.which(GRAPHIFY)
+  if not exe:
+    return None, "not installed"
+  try:
+    run = subprocess.run([exe, "update", str(Path(export).resolve())], cwd=export, env={**os.environ, "GRAPHIFY_OUT": str(out)},
+                         capture_output=True, text=True, timeout=TIMEOUT)
+  except subprocess.TimeoutExpired:
+    return None, "failed: timeout"
+  if run.returncode != 0:
+    last = (run.stderr.strip().splitlines() or [""])[-1]
+    return None, f"failed: {last or f'exit {run.returncode}'}"
+  if not (out / "graph.json").is_file():
+    return None, "failed: no graph.json written"
+  try:
+    graph = json.loads((out / "graph.json").read_text(encoding="utf-8", errors="replace"))
+  except ValueError:
+    return None, "failed: graph.json is not JSON"
+  return graph, hashlib.sha256((out / "graph.json").read_bytes()).hexdigest()
 
 
 def nodes_of(graph: dict, export: Path) -> dict:
