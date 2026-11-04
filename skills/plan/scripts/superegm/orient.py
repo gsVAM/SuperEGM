@@ -110,6 +110,74 @@ def siblings(export: Path, rel: str) -> list[str]:
                 for f in os.listdir(folder) if PurePosixPath(f).suffix == p.suffix and (folder / f).is_file() and not (folder / f).is_symlink())
 
 
+# ---------------------------------------------------------------- graphify's graph.json
+
+
+def nodes_of(graph: dict, export: Path) -> dict:
+  """id -> node with `source_file` relative to the export (graphify writes the path it walked)."""
+  root = str(Path(export).resolve()) + "/"
+  nodes = {}
+  for node in graph.get("nodes") or []:
+    file = str(node.get("source_file") or "")
+    file = file[len(root):] if file.startswith(root) else file.removeprefix("./")
+    nodes[node.get("id")] = {**node, "source_file": file}
+  return nodes
+
+
+def edges_of(graph: dict, nodes: dict) -> list:
+  """`links` (`edges` when absent) in order, ends read from `source` and `target`; an edge
+  whose end no node carries is dropped."""
+  links = graph.get("links") if "links" in graph else graph.get("edges")
+  return [e for e in links or [] if e.get("source") in nodes and e.get("target") in nodes]
+
+
+def end(node: dict) -> str:
+  loc = node.get("source_location")
+  return f"{node.get('label')} ({node['source_file']}:{loc})" if loc else f"{node.get('label')} ({node['source_file']})"
+
+
+def under(file: str, path: str) -> bool:
+  rel = path.rstrip("/")
+  return file == rel or file.startswith(rel + "/")
+
+
+def graph_section(path: str, scope, nodes: dict, edges: list) -> list:
+  """`## Graph: <path>`: its nodes, then the EXTRACTED edges touching them, then the other
+  edges with their confidence; edges whose `source` is in the section first, then `target`."""
+  mine = {i: n for i, n in nodes.items() if under(n["source_file"], path)}
+  order = sorted(mine, key=lambda i: (mine[i]["source_file"], int((re.search(r"\d+", str(mine[i].get("source_location") or "")) or [10**9])[0]) if mine[i].get("source_location") else 10**9, str(i)))
+  lines = [(None, f"## Graph: {path}")]
+  if not mine:
+    return lines + [(None, "none")]
+  lines += [("graph-nodes", f"node {end(mine[i])} community {mine[i].get('community')}") for i in order]
+  for extracted in (True, False):
+    for key in ("source", "target"):
+      for e in edges:
+        if ((e.get("confidence") or "EXTRACTED") == "EXTRACTED") != extracted or e[key] not in mine or (key == "target" and e["source"] in mine):
+          continue
+        src, tgt = nodes[e["source"]], nodes[e["target"]]
+        inside = all(any(under(n["source_file"], p) for p, _ in scope) for n in (src, tgt))
+        head = f"edge {e.get('relation')}" if extracted else f"other {e.get('confidence')} {e.get('confidence_score')} {e.get('relation')}"
+        lines.append(("graph-inside" if inside else "graph-outside", f"{head} {end(src)} -> {end(tgt)}"))
+  return lines
+
+
+def graph_summary(nodes: dict, edges: list, limit: int) -> list[str]:
+  """`## Graph`: the counts and the `limit` largest communities by node count (ties by id),
+  each with up to five files holding most of its nodes (ties by path)."""
+  by_community = {}
+  for node in nodes.values():
+    if node.get("community") is not None:
+      by_community.setdefault(node["community"], []).append(node["source_file"])
+  extracted = sum((e.get("confidence") or "EXTRACTED") == "EXTRACTED" for e in edges)
+  lines = [f"nodes {len(nodes)} · edges {len(edges)} · communities {len(by_community)} · extracted {extracted}/{len(edges)}"]
+  for cid in sorted(by_community, key=lambda c: (-len(by_community[c]), str(c)))[:limit]:
+    files = by_community[cid]
+    top = sorted(set(files), key=lambda f: (-files.count(f), f))[:5]
+    lines.append(f"community {cid}: {len(files)} nodes · {', '.join(top)}")
+  return lines
+
+
 # ---------------------------------------------------------------- the unit file
 
 
@@ -192,6 +260,10 @@ def unit_text(export: Path, scope: list[tuple[str, str]], graph, tree: str, toke
   export = Path(export)
   tests = {f: read(export / f) or "" for f in walk(export, skip=True) if f.startswith("tests/")}
   lines = [l for path, action in scope for l in path_section(export, path, action, tests)]
+  if graph is not None:
+    nodes = nodes_of(graph, export)
+    edges = edges_of(graph, nodes)
+    lines += [l for path, _ in scope for l in graph_section(path, scope, nodes, edges)]
   lines += read_first(export, scope)
   return render(lines, tree, token, [], set())
 
@@ -233,4 +305,8 @@ def map_text(export: Path, graph, tree: str, token: str) -> str:
   """`orient/map.md`: the graph's summary when there is one, then the repository map."""
   export = Path(export)
   first = f"orient: tree {tree} · graphify: {token} · trimmed: nothing"
-  return "\n".join([first, "## Map", *map_lines(export, MAP_DEPTH)]) + "\n"
+  head = []
+  if graph is not None:
+    nodes = nodes_of(graph, export)
+    head = ["## Graph", *graph_summary(nodes, edges_of(graph, nodes), 40)]
+  return "\n".join([first, *head, "## Map", *map_lines(export, MAP_DEPTH)]) + "\n"
