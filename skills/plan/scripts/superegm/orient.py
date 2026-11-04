@@ -411,6 +411,9 @@ def stored_plan(store):
 
 
 def scope_of(plan, unit: str):
+  """The unit's Scope paths; the refusal when its section is not in the stored plan."""
+  if plan is None or unit not in plan.units:
+    raise core.HandoffError(f"orient: {unit} is not in the plan: run graph --plan first")
   return plan.units[unit].scope
 
 
