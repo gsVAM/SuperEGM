@@ -247,8 +247,8 @@ def test_integrate_skill_body():
   assert "disable-model-invocation: true" in front and "effect_kinds: [state-store, start-session]" in front
   for snippet in [
       "runcard open --skill integrate --artifact <spec-path>",
-      # `status` serves a wave card alone (U09b): the landed snapshot `close` reads is refreshed under one.
-      "status --wait 1 --runcard <wave-card>",
+      # `status` serves the integrate card (I-4): no wave card, so `wave_number` never counts one.
+      "status --wait 1 --runcard <card>",
       "review open --kind integrate --artifact <spec-path> --reviewers <config.reviewers.integrate> --runcard <card>",
       "git diff <base_at_start>..<base>",
       "review record --review <id> --round 1",
