@@ -1,11 +1,12 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the PR block read from the launch's ref and the profile's hooks check (U14).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch."""
 
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
 
 import superegm as core
@@ -49,9 +50,14 @@ def prepare(args, card):
   issue_body = filed_body(state, unit)
   tools = allowed_tools(builder_config["allowed_tools"], branch, issue_body)
   pr = (record.get("pr") or {}).get("number") if rnd >= 2 else None
+  ref = "refs/superegm/base"  # the launch's ref: origin/<base> as `launch` fetched it, the PR tip from round 2
+  if pr:
+    ref = f"refs/superegm/pr/{pr}"
+    core.run_git(["fetch", "--no-write-fetch-head", st.config["remote"], f"+refs/pull/{pr}/head:{ref}"], handoff.repo_root)
+  pr_block = pr_block_text(handoff.repo_root, ref, config["pr_block_file"]) if config["pr_block_file"] else None
   comments = core.gh_pages(f"repos/{repo}/issues/{number}/comments")
   reviews = core.gh_pages(f"repos/{repo}/pulls/{pr}/reviews") if pr else []
-  text = prompt_text(number, unit, issue_body, core.read_text(ORDERS), comments, reviews, pr, builder)
+  text = prompt_text(number, unit, issue_body, core.read_text(ORDERS), comments, reviews, pr, builder, pr_block)
   worktree = add_worktree(handoff.repo_root, st, unit, rnd, branch, pr)
   prompt = st.path("launches", f"{unit}_r{rnd}_prompt.md")
   core.atomic_write(prompt, text)
@@ -103,6 +109,14 @@ def profile_problem(profile_dir):
   return None
 
 
+def pr_block_text(repo_root, ref, path):
+  """`config.pr_block_file`'s bytes at the launch's ref, verbatim (spec section 11); absent, the launch is refused."""
+  result = subprocess.run(["git", "cat-file", "-p", f"{ref}:{path}"], cwd=str(repo_root), capture_output=True)
+  if result.returncode:
+    raise core.HandoffError(f"pr_block_file {path} is absent at {ref}")
+  return result.stdout.decode("utf-8")
+
+
 def allowed_tools(configured, branch, body_text):
   """The configured allow-list plus a push prefix for the unit's own branch and `Bash(<first
   word>:*)` for every command the body runs; `Agent`, `Skill` and unrestricted Bash are refused."""
@@ -123,14 +137,16 @@ def filed_body(state, unit):
   return body.fill_numbers(filed, numbers, (state.get("tracking") or {}).get("number"))
 
 
-def prompt_text(issue_number, unit, body, orders, comments, reviews, pr, builder):
-  """Exactly what spec section 3's anti-goal 3 allows: the issue body, the orders, every
-  Deviation comment, every Decision and Ruling comment not by the builder account, and from
-  round 2 the foreman's reviews on the PR."""
+def prompt_text(issue_number, unit, body, orders, comments, reviews, pr, builder, pr_block=None):
+  """Exactly what spec section 3's anti-goal 3 allows: the issue body, the orders, the repository's
+  PR block when `pr_block_file` is set, every Deviation comment, every Decision and Ruling comment
+  not by the builder account, and from round 2 the foreman's reviews on the PR."""
   kept = [c for c in comments if PROMPT_COMMENT_RE.match(c["body"])
           and (c["body"].startswith("**Deviation") or c["user"]["login"] != builder)]
-  parts = [f"# Issue #{issue_number} — {unit}\n\n{body}", f"# Builder orders\n\n{orders}",
-           f"# Comments on issue #{issue_number}\n\n" + "\n".join(f"## {c['user']['login']} · comment {c['id']}\n{c['body']}\n" for c in kept)]
+  parts = [f"# Issue #{issue_number} — {unit}\n\n{body}", f"# Builder orders\n\n{orders}"]
+  if pr_block is not None:
+    parts.append(f"# PR block\n\n{pr_block}")
+  parts.append(f"# Comments on issue #{issue_number}\n\n" + "\n".join(f"## {c['user']['login']} · comment {c['id']}\n{c['body']}\n" for c in kept))
   if pr:
     kept = [r for r in reviews if r.get("body") and r["user"]["login"] != builder]
     parts.append(f"# Review comments on PR #{pr}\n\n" + "\n".join(
@@ -140,14 +156,13 @@ def prompt_text(issue_number, unit, body, orders, comments, reviews, pr, builder
 
 def add_worktree(repo_root, store, unit, rnd, branch, pr):
   """A fresh worktree for the launch on the unit's branch: round 1 from `refs/superegm/base`,
-  later rounds at the PR tip after detaching the earlier launches' worktrees (nothing in them
-  is removed; that is `clean`'s)."""
+  later rounds at the PR tip (`refs/superegm/pr/<n>`, fetched by `prepare`) after detaching the
+  earlier launches' worktrees (nothing in them is removed; that is `clean`'s)."""
   path = store.path("worktrees", unit, f"r{rnd}")
   path.parent.mkdir(parents=True, exist_ok=True)
   if rnd == 1:
     core.run_git(["worktree", "add", "-b", branch, str(path), "refs/superegm/base"], repo_root)
     return path
-  core.run_git(["fetch", "--no-write-fetch-head", store.config["remote"], f"+refs/pull/{pr}/head:refs/superegm/pr/{pr}"], repo_root)
   for earlier in core.registered_worktrees(repo_root):
     if earlier.is_relative_to(path.parent.resolve()) and earlier.is_dir():
       core.run_git(["switch", "--detach"], earlier)
