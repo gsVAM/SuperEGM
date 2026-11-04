@@ -33,9 +33,10 @@ def spec_text(rows) -> str:
           f"## Units\n\n| Unit | Title | Blocked by |\n| --- | --- | --- |\n{table}\n")
 
 
-def unit_section(uid, title, blocked) -> str:
-  """A unit section in the section 9.1 grammar with one Step."""
+def unit_section(uid, title, blocked, issue=None) -> str:
+  """A unit section in the section 9.1 grammar with one Step; `issue` adds the optional `Issue` row."""
   low = uid.lower()
+  issue_row = f"\n| Issue | #{issue} |" if issue is not None else ""
   return f"""### {uid}: {title}
 | Field | Value |
 | --- | --- |
@@ -45,7 +46,7 @@ def unit_section(uid, title, blocked) -> str:
 | Blocked by | {blocked} |
 | Shared files | none |
 | Risk | low: new module |
-| Size | S |
+| Size | S |{issue_row}
 
 Interfaces
 - Produces: {low}() -> void
@@ -587,3 +588,187 @@ def test_the_file_skill_body_runs_the_filing_in_order_and_asks_one_question():
   assert "filings[]" in body and "base_at_start" in body and "/superegm:wave" in body
   for helper_call in re.findall(r"<HELPER>'\s+([a-z-]+)((?:\s+--[a-z-]+(?:\s+'[^']*'|\s+<[^>]*>)?)*)", body):
     assert helper_call[0] in ("runcard", "gate", "dry-run", "apply", "verify"), helper_call
+
+
+# ---------------------------------------------------------------- adoption (spec section 10, U13)
+
+ADOPT_ROWS = [ROWS[0], ("U02", "Worker (adopts #7)", "U01"), ROWS[2]]   # the spec's `## Units` table names #7
+OLD = hashlib.sha256(b"old body\n").hexdigest()
+
+
+def seed_issue(gh, number) -> None:
+  gh.issues[number] = {"number": number, "id": 1000 + number, "title": f"Old #{number}", "body": "old body\n",
+                       "labels": ["bug"], "state": "open", "state_reason": None}
+
+
+def adopt_gh(gh) -> None:
+  def issue(args, cwd, token=None):
+    if args[1] == "edit" and "--add-label" in args and "--remove-label" not in args:
+      gh.assert_write()
+      names, record = args[args.index("--add-label") + 1].split(","), gh.issues[int(args[2])]
+      record["labels"] += [n for n in names if n not in record["labels"]]
+      return 0, "", ""
+    if args[1] == "edit" and "--body-file" in args:
+      gh.assert_write()
+      gh.issues[int(args[2])]["body"] = Path(args[args.index("--body-file") + 1]).read_text(encoding="utf-8")
+      return 0, "", ""
+    return gh.do_issue(args)
+  def api(args, cwd, token=None):
+    match = re.fullmatch(rf"repos/{gh.repo}/issues/(\d+)/parent", gh.endpoint_of(args))
+    if not match:
+      try:
+        return gh.do_api(args)
+      except KeyError:
+        return 1, "", "gh: Not Found (HTTP 404)"
+    child = gh.issues[int(match.group(1))]["id"]
+    parent = next((n for n, ids in gh.sub_issues.items() if child in ids), None)
+    return gh.ok(gh.issues[parent]) if parent else (1, "", "gh: Not Found (HTTP 404)")
+  gh.extend("issue", issue)
+  gh.extend("api", api)
+
+
+def adopt_gated(world):
+  adopt_gh(world.gh)
+  seed_issue(world.gh, 7)
+  spec, handoff_id = approve(world, ADOPT_ROWS)
+  plan = world.artifacts.parent / "plan.md"
+  plan.write_text(plan_text(spec, [unit_section(*ADOPT_ROWS[0]), unit_section(*ADOPT_ROWS[1], issue=7),
+                                   unit_section(*ADOPT_ROWS[2])]), encoding="utf-8")
+  graphed(world, spec, plan)
+  for uid in ("U01", "U02", "U03"):
+    converge(world, uid)
+  card = open_card(world, "file", spec)
+  code, out = world.run("gate", "--pass", "--spec", spec, "--runcard", card)
+  assert code == 0, out
+  return spec, plan, handoff_id, card
+
+
+def adopt_dry_run(world):
+  spec, plan, handoff_id, card = adopt_gated(world)
+  code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
+  assert code == 0, out
+  world.gh.calls.clear()
+  return spec, plan, handoff_id, card
+
+
+def test_pending_writes_carries_the_adopted_number_and_old_body_sha(world):
+  from superegm import gate
+  spec, plan, handoff_id, card = adopt_gated(world)
+  handoff = gate.open_handoff(spec)
+  plain = gate.pending_writes(handoff)
+  adopted = gate.pending_writes(handoff, adopted={"U02": (7, OLD)})
+  assert [len(w) for w in plain if w[0] == "issue"] == [5, 5, 5, 5]
+  assert [w[5:] for w in adopted if w[0] == "issue"] == [[], [], [7, OLD], []]
+  assert [w[:5] for w in adopted] == plain
+  assert gate.pending_writes(handoff, units={"U01", "U02", "U03"}, adopted={"U02": (7, OLD)}) == adopted
+
+
+COMMENTS = {"ruling": "**Ruling:** (c1) (a) — keep it", "decision": "**Decision D1:** (a) 5 attempts",
+            "deviation": "**Deviation (dod):** item 2 cannot pass\n**Builder status:** BLOCKED"}
+
+
+@pytest.mark.parametrize("case, expected", [
+  ("ok", None),
+  ("closed", "adopt: #7 is closed"),
+  ("not-in-repo", f"adopt: #7 not in {REPO}"),
+  ("pull-request", "adopt: #7 is a pull request"),
+  ("parent", "adopt: #7 has a parent"),
+  ("dependencies", "adopt: #7 has dependencies"),
+  ("superegm-label", "adopt: #7 carries superegm labels"),
+  ("comment-ruling", "adopt: #7 carries a ruling comment"),
+  ("comment-decision", "adopt: #7 carries a ruling comment"),
+  ("comment-deviation", "adopt: #7 carries a ruling comment"),
+])
+def test_dry_run_refuses_an_issue_it_cannot_adopt(world, case, expected):
+  spec, plan, handoff_id, card = adopt_gated(world)
+  gh = world.gh
+  if case == "closed": gh.issues[7]["state"] = "closed"
+  if case == "not-in-repo": del gh.issues[7]
+  if case == "pull-request": gh.issues[7]["pull_request"] = {"url": f"https://api.github.com/repos/{REPO}/pulls/7"}
+  if case == "parent": seed_issue(gh, 8); gh.sub_issues[8] = [gh.issues[7]["id"]]
+  if case == "dependencies": seed_issue(gh, 8); gh.blocked_by[7] = [gh.issues[8]["id"]]
+  if case == "superegm-label": gh.issues[7]["labels"].append("superegm:stopped")
+  if case.startswith("comment-"): gh.comments[7] = [{"id": 1, "body": COMMENTS[case[8:]], "user": {"login": "owner"}}]
+  gh.calls.clear()
+  code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
+  if expected is None:
+    assert code == 0, out
+    text = (world.artifacts / "handoff_dryrun.md").read_text(encoding="utf-8")
+    assert f"### edit #7 U02 (old body sha256 {OLD})" in text and "### issue U02" not in text
+    assert "### issue U01" in text and "### issue U03" in text
+    assert "4 issues (1 tracking, 3 units), 3 sub-issue links, 2 blocked-by links" in text
+    assert [c[:2] for c in gh.calls] == [
+        ["auth", "status"], ["api", f"repos/{REPO}"], ["api", f"repos/{REPO}/labels"],
+        ["api", f"repos/{REPO}/issues/7"], ["api", f"repos/{REPO}/issues/7/parent"],
+        ["api", f"repos/{REPO}/issues/7/dependencies/blocked_by"], ["api", f"repos/{REPO}/issues/7/comments"]]
+    writes = state_of(world)["confirmed"]["writes"]
+    assert [w[5:] for w in writes if w[0] == "issue"] == [[], [], [7, OLD], []]
+    assert state_of(world)["confirmed"]["sha256"] == hashlib.sha256(world.ns["canonical"](writes).encode("utf-8")).hexdigest()
+    return
+  assert code == 1 and expected in out, out
+  assert "confirmed" not in state_of(world) and not (world.artifacts / "handoff_dryrun.md").exists()
+
+
+def test_apply_refuses_an_adopted_body_changed_since_the_dry_run(world):
+  spec, plan, handoff_id, card = adopt_dry_run(world)
+  world.gh.issues[7]["body"] = "old body, edited\n"
+  code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes")
+  assert code == 1 and "adopt: #7 body changed since the dry run" in out, out
+  assert not any(c[0] in ("label", "issue") or "POST" in c for c in world.gh.calls)
+  assert "filings" not in state_of(world) and "base_at_start" not in state_of(world)
+  assert world.gh.issues[7]["labels"] == ["bug"] and "units" not in state_of(world).get("tracking", {})
+  del world.gh.issues[7]
+  code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes")
+  assert code == 1 and f"adopt: #7 not in {REPO}" in out, out
+
+
+def test_apply_adopts_the_issue_labels_first_then_the_body_and_links_it(world):
+  from superegm.launch_builder import filed_body
+  spec, plan, handoff_id, card = adopt_dry_run(world)
+  gh, six = world.gh, handoff_id[-6:]
+  gh.comments[7] = [{"id": 1, "body": "an ordinary comment", "user": {"login": "someone"}}]
+  code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes")
+  assert code == 0, out
+  assert [c[c.index("--title") + 1] for c in gh.calls if c[:2] == ["issue", "create"]] == ["Build: Sample design", "U01: Queue", "U03: Admin endpoint"]
+  edits = [c for c in gh.calls if c[:2] == ["issue", "edit"] and c[2] == "7"]
+  assert [("--add-label" in c, "--body-file" in c, "--title" in c) for c in edits] == [(True, False, False), (False, True, False)]
+  assert edits[0][edits[0].index("--add-label") + 1] == f"superegm:handoff-{six},superegm:unit,superegm:wave-2"
+  issue = gh.issues[7]
+  assert issue["title"] == "Old #7" and issue["labels"] == ["bug", f"superegm:handoff-{six}", "superegm:unit", "superegm:wave-2"]
+  assert issue["body"].startswith(f"<!-- superegm:handoff={handoff_id} unit=U02 spec=") and "Blocked by: #2 ·" in issue["body"]
+  assert "Part of #1" in issue["body"] and "#<" not in issue["body"] and gh.comments[7][0]["body"] == "an ordinary comment"
+  assert "Blocked by: #7 ·" in gh.issues[3]["body"]                                  # U03's placeholder resolves to the adopted number
+  assert gh.sub_issues[1] == [gh.issues[2]["id"], issue["id"], gh.issues[3]["id"]]
+  assert gh.blocked_by == {7: [gh.issues[2]["id"]], 3: [issue["id"]]}
+  state = state_of(world)
+  assert state["units"]["U02"] | {"number": 7, "id": issue["id"], "done": True, "wave": 2} == state["units"]["U02"]
+  assert state["verify"]["complete"] is True and state["verify"]["problems"] == [] and state["verify"]["checked"] == "16 of 16"
+  assert filed_body(state, "U02") == issue["body"]                                   # the fixed-field reader is unchanged
+  gh.calls.clear()
+  assert world.run("apply", "--spec", spec, "--runcard", card, "--yes")[0] == 0
+  assert not any(c[0] == "label" or c[:2] in (["issue", "create"], ["issue", "edit"]) or "POST" in c for c in gh.calls)
+  issue["body"] += "edited by hand\n"
+  code, out = world.run("verify", "--spec", spec, "--runcard", card)
+  assert code == 1 and "MISMATCH body of #7 (U02)" in out, out
+
+
+def test_apply_resumes_an_adopted_unit_after_a_crash_past_the_edit(world):
+  spec, plan, handoff_id, card = adopt_dry_run(world)
+  gh = world.gh
+  # 7 labels + the tracking issue + U01 + the adoption of #7 = 10 writes; then every record is lost before U03
+  assert world.run("apply", "--spec", spec, "--runcard", card, "--yes", "--max-writes", 10)[0] == 0
+  edited = gh.issues[7]["body"]
+  assert edited.startswith(f"<!-- superegm:handoff={handoff_id} unit=U02 spec=") and "number" not in state_of(world)["units"].get("U03", {})
+  state = state_of(world)
+  for record in (state["tracking"], *state["units"].values()):
+    for key in ("number", "id", "done", "filing"):
+      record.pop(key, None)
+  atomic_write(world.artifacts / "state.json", state)
+  gh.calls.clear()
+  assert world.run("apply", "--spec", spec, "--runcard", card, "--yes")[0] == 0
+  assert gh.issues[7]["body"] == edited and [c[2] for c in gh.calls if c[:2] == ["issue", "edit"]] == ["1"]
+  after = state_of(world)
+  assert after["units"]["U02"] | {"number": 7, "id": gh.issues[7]["id"], "done": True} == after["units"]["U02"]
+  assert after["units"]["U03"]["number"] == 3 and len(gh.issues) == 4 and "Blocked by: #7 ·" in gh.issues[3]["body"]
+  assert gh.sub_issues[1] == [gh.issues[2]["id"], gh.issues[7]["id"], gh.issues[3]["id"]] and len(after["filings"]) == 1
+  assert after["verify"]["complete"] is True and after["verify"]["problems"] == []
