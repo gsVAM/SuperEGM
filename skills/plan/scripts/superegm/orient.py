@@ -19,6 +19,8 @@ from pathlib import Path, PurePosixPath
 
 import superegm as core
 
+WRITES = frozenset(["orient", "orient_unit"])  # the store kinds this subcommand writes
+SKILLS = frozenset(["orient", "plan", "review-plan", "wave"])  # the skills whose card this subcommand accepts
 CAP_UNIT, CAP_MAP, MAP_DEPTH = 16_384, 24_576, 4
 GRAPHIFY = "graphify"  # the command looked up on PATH; tests point it at a fake
 TIMEOUT = 600  # seconds for one graphify build
@@ -390,3 +392,49 @@ def map_text(export: Path, graph, tree: str, token: str) -> str:
     rows = map_lines(export, depth)
     text = build()
   return text
+
+
+# ---------------------------------------------------------------- the subcommand
+
+
+def register(subparsers):
+  p = core.add_parser(subparsers, "orient", "copy what the repository says about the units into the store")
+  p.add_argument("--spec", dest="design", required=True, help="the approved spec whose handoff the units belong to")
+  p.add_argument("--unit", dest="units", action="append", default=[], help="write this unit's file only (repeatable)")
+  p.add_argument("--ref", default="HEAD", help="the tree to read (default HEAD)")
+  p.set_defaults(run=run, writes=WRITES)
+
+
+def stored_plan(store):
+  """The store's `handoff_plan.md` parsed; None without a handoff or the file."""
+  return core.parse_plan(store.path("plan")) if store.handoff_id and store.path("plan").is_file() else None
+
+
+def scope_of(plan, unit: str):
+  return plan.units[unit].scope
+
+
+def run(args) -> int:
+  core.require_runcard(args, SKILLS)
+  repo_root = core.git_toplevel(Path.cwd())
+  st = core.store(repo_root)
+  state = core.load_state(st.root)
+  plan = stored_plan(st)
+  units = list(args.units)
+  if not units and plan is not None and not state.get("closed_at"):
+    units = [u for u in plan.order if not (state.get("units") or {}).get(u, {}).get("number")]
+  scopes = {u: scope_of(plan, u) for u in units}  # every refusal before the export
+  tree = export_tree(repo_root, args.ref, st)
+  export = st.path("orient", "export")
+  graph, token = build_graph(export, st.path("orient", "graphify-out"))
+  written = [] if args.units else [st.path("orient", "map.md")]
+  for path in written:
+    core.atomic_write(path, map_text(export, graph, tree, token))
+  for unit, scope in scopes.items():
+    path = st.path("orient_unit", f"{unit}.md")
+    core.atomic_write(path, unit_text(export, scope, graph, tree, token))
+    written.append(path)
+  core.journal(st, f"orient {args.ref} tree {tree} graphify {token}: {len(written)} files")
+  for path in written:
+    print(f"{path} {path.stat().st_size}")
+  return 0

@@ -11,7 +11,7 @@ import superegm as core
 from superegm import body
 from superegm.launch import builder_login, load_launches, terminal
 
-WRITES = frozenset(["launches"])  # the store kinds this subcommand writes
+WRITES = frozenset(["launches", "orient_unit"])  # the store kinds this subcommand writes
 SKILLS = frozenset(["wave"])  # the skills whose card this subcommand accepts
 PROMPT_COMMENT_RE = re.compile(r"^\*\*(Deviation \([a-z]+\)|Decision D\d+|Ruling):\*\*")
 # The PR body's DoD-results form (the orders): `### DoD <n>` then one fenced block per item.
