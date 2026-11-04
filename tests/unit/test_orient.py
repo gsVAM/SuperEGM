@@ -119,3 +119,22 @@ def test_trimming_sequence(tmp_path, case, trimmed):
     assert "def f1999(): pass" not in text and ("def work(job: str) -> int:" in text) == (case == "docs") and "def enqueue(job: str) -> None:" in text
   cap = 24_576 if case == "map-depth" else 16_384
   assert len(text.encode("utf-8")) <= cap and text.splitlines()[0].endswith(f" · trimmed: {trimmed}")
+
+
+def test_export_tree_is_the_tracked_files_at_the_ref(world):
+  import superegm
+  from superegm import orient, store
+  st = store(world.repo)
+  (world.repo / ".gitignore").write_text("ignored.py\n", encoding="utf-8"); os.symlink("docs", world.repo / "link")
+  git(["add", ".gitignore", "link"], world.repo); git(["commit", "-qm", "link"], world.repo)
+  (world.repo / "untracked.py").write_text("x\n", encoding="utf-8"); (world.repo / "ignored.py").write_text("x\n", encoding="utf-8")
+  (world.repo / "docs/designs/sample.md").write_text("edited\n", encoding="utf-8")
+  export = st.path("orient", "export")
+  assert orient.export_tree(world.repo, "HEAD", st) == git(["rev-parse", "HEAD^{tree}"], world.repo).strip()
+  assert sorted(p.relative_to(export).as_posix() for p in export.rglob("*") if p.is_file()) == [".gitignore", ".superegm/config.json", "docs/designs/sample.md"]
+  assert (export / "docs/designs/sample.md").read_text(encoding="utf-8") == DESIGN and not (export / "link").exists()
+  (export / "stale.txt").write_text("x\n", encoding="utf-8")
+  assert orient.export_tree(world.repo, "HEAD~1", st) == git(["rev-parse", "HEAD~1^{tree}"], world.repo).strip()
+  assert not (export / "stale.txt").exists() and not (export / ".gitignore").exists() and not st.path("orient", "export.tar").exists()
+  with pytest.raises(superegm.HandoffError, match="orient: ref nope is not in this repository"):
+    orient.export_tree(world.repo, "nope", st)
