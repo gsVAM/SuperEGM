@@ -265,3 +265,25 @@ def test_integrate_skill_body():
     assert snippet in body, snippet
   assert not re.search(r"--approve|--request-changes|gh pr merge|merge locally", body)
   assert len(body.encode("utf-8")) <= 24_000
+
+
+DOCS = {
+    "docs/index.md": ["SuperEGM", "](getting_started.md)", "](claude.md)", "](faq.md)", "](privacy.md)", "](releases.md)"],
+    "docs/getting_started.md": ["/superegm:brainstorming", "/superegm:review-spec", "/superegm:plan", "/superegm:review-plan",
+                                "/superegm:file", "/superegm:wave", "/superegm:integrate", "/superegm:judges",
+                                ".superegm/config.json", "--leavemealone", "merge", "builder account"],
+    "docs/claude.md": ["omitClaudeMd", "SubagentStart", "SUPEREGM_ROLE", "SUPEREGM_GOLDFISH_MODEL", "claude -p",
+                       "config.builder.profile_dir", "GH_TOKEN", "superegm:judge", "superegm:foreman", "git worktree add"],
+    "docs/faq.md": ["leavemealone-mode", "builder account", "Nothing is merged by a machine"],
+    "docs/privacy.md": ["claudex-loop", "question file", "SUPEREGM_BUILDER_TOKEN", "config.astra", "artifacts_dir", "banned_terms"],
+    "docs/releases.md": ["python3 scripts/prepare_release.py --tag v1.0.0", "superegm-1.0.0.zip", "SHA256SUMS",
+                         "`plugin.json`", "`.claude-plugin/plugin.json`"],
+}
+
+
+@pytest.mark.parametrize("path", sorted(DOCS))
+def test_docs_content(path):
+  text = (ROOT / path).read_text(encoding="utf-8")
+  for snippet in DOCS[path]:
+    assert snippet in text, (path, snippet)
+  assert re.search(r"Modified by SuperEGM \(gsVAM\), 2026: ", text), path
