@@ -24,3 +24,15 @@ def test_store_orient_kinds(world):
   assert a.kind_of(root / "111111/orient/U12.md") == "orient_unit"
   with pytest.raises(superegm.HandoffError, match="no handoff in this store"):
     superegm.Store(root).path("orient_unit", "U12.md")
+
+
+@pytest.mark.parametrize("path, tokens", [
+  ("src/worker.py", ["src/worker.py", "worker.py", "src", "src.worker"]),
+  ("skills/plan/scripts/superegm/__init__.py", ["skills/plan/scripts/superegm/__init__.py", "__init__.py", "skills/plan/scripts/superegm", "superegm"]),
+  ("web/index.ts", ["web/index.ts", "index.ts", "web"]),
+  ("tests/fixtures/orient/", ["tests/fixtures/orient", "orient", "tests/fixtures"]),
+  ("setup.py", ["setup.py", "setup"]),
+])
+def test_names_rule(path, tokens):
+  from superegm import orient
+  assert orient.names(path) == tokens
