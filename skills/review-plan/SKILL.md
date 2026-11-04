@@ -110,7 +110,8 @@ this invocation's round count, 1 at its first Step 2.
    its findings are `medium` at most and name the Step and the bytes they would remove.
 4. One `set` dispatch through `superegm:readiness` with the set text and the standard;
    questions 1 to 4 and 8 are its lens (coverage of the spec's `## Units`, contradictions,
-   blockers, shared-file order, interfaces). Its ids are `set-<k>-<n>`; each location names the
+   blockers, shared-file order, interfaces; a row the section's `Landed:` line names counts as covered).
+   Its ids are `set-<k>-<n>`; each location names the
    unit or units it concerns, or none; its one findings file is `<card>_set_r<k>.txt` beside the
    set text.
 5. The Astra lane per due unit as review_loop.md section 2 says, when the review opened with it.
