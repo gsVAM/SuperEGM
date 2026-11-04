@@ -12,7 +12,7 @@ become tests; the self-build's plumbing belongs to the U01/U03 plans. The spec s
 plans say how.
 
 Amendment 1 (2026-11-03): §9.1 plan-grammar simplification, §9.2 proportion angle, §17 rows U04/U05/U06/U09; owner-approved by text.
-Amendment 2 (2026-11-04): §11.1 Orient (graphify-backed), §9.1/§10 adopted issues, §11 owners set and PR block, §17 units U12–U14; owner-approved by text.
+Amendment 2 (2026-11-04): §11.1 Orient (graphify-backed), §9.1/§10 adopted issues, §11 owners set and PR block, the builder-token recipe and `doctor`, §17 units U12–U14; owner-approved by text.
 
 ## 1. Intent
 
@@ -830,7 +830,17 @@ a ruleset whose bypass actors are the team `config.owner_team` and no role, and 
 the missing login or team. When `config.pr_block_file` names a file in the repository,
 `launch-builder` appends that file's text verbatim to the PR body template in the builder orders
 and the orders say so, so a repository that requires a block in every PR (a `coord/v1` block, a
-review-evidence block) gets it from every builder. Under that
+review-evidence block) gets it from every builder. The builder account is a second GitHub login, a
+machine account the owner controls (one is allowed per person), added to the repository as a
+collaborator with Write; on that account the owner creates a fine-grained personal access token
+with resource owner the builder account, repository access limited to this repository,
+permissions Contents read and write, Pull requests read and write, Issues read, Metadata read and
+no Workflows permission (so a builder push that touches `.github/workflows` is refused by GitHub
+itself), expiration 90 days, and puts it in `SUPEREGM_BUILDER_TOKEN` (the variable
+`builder.gh_token_env` names) in the shell that runs the wave, never in the repository or the
+config. The README's "Before the first run" step 1 and `init`'s printed STEPS line 1 say exactly
+this, and the README names the token's purpose in one sentence: builders push and open draft pull
+requests as that account and can never update the base branch. Under that
 protection the builder account can open PRs and never merge them; the owner, who alone updates
 `<base>`, merges by hand; the plugin ships no approve or merge path, and the elephant and the
 foreman hold no GitHub write but the review comment, the ruling and decision comments, and the
@@ -838,6 +848,18 @@ foreman hold no GitHub write but the review comment, the ruling and decision com
 unit in flight from its first launch until its latest round's `outcome` is `clean`, it has
 landed, it carries that label, or the elephant names it idle (`launch --idle U07,U08`: the units
 this invocation found stalled or CI-waiting hold no slot).
+
+**`superegm doctor [--repo <owner/name>]`** is read-only and needs no run card: one line per
+prerequisite with `ok` or the refusal text `launch`/`launch-builder` would give, and exit 1 when
+any fails. It checks that the config loads; the `gh auth` login is an owner in `config.owners`;
+`SUPEREGM_BUILDER_TOKEN` is set; the token's login (`gh api user` with the token) is not an owner
+and has Write on the repository (`repos/<repo>/collaborators/<login>/permission`); the token's
+permissions (the `X-OAuth-Scopes`/fine-grained header or a `GET repos/<repo>` probe: contents and
+pull requests writable, workflows absent); the builder profile exists and is empty of hooks,
+plugins and `CLAUDE.md`; the protection check of `launch` (the owners set, the `superegm/**`
+ruleset); a `pull_request` workflow on `<base>`; and, informationally and never a failure, that
+`graphify` is installed. The `wave` skill's Step 0 runs `doctor` and stops on exit 1, printing its
+lines; `init` ends by saying "then run `superegm doctor`".
 
 **The driver loop** runs in the main conversation, is the only long-lived actor, and is
 event-driven: `superegm launch` marks the ready units up to `max_in_flight`; the elephant launches
@@ -1229,7 +1251,7 @@ Grep, Glob]`, `omitClaudeMd: true`); and `foreman` (tools `[Agent, Bash, Read, G
 ## 16. What is left to the builder
 
 - The helper's argparse surface beyond the names and contracts in §17: `init`, `runcard
-  open|close`, `approve-spec [--amend-units | --void | --leavemealone]`, `graph`, `scan`, `orient`,
+  open|close`, `approve-spec [--amend-units | --void | --leavemealone]`, `graph`, `scan`, `orient`, `doctor`,
   `review open|record|settle|status|rule|post`, `gate`, `dry-run`, `apply`, `verify`, `status
   [--wait]`, `launch [--idle]`, `launch-builder`, `record-launch [--exit]`, `foreman dispatch`,
   `collect [--not-run]`, `prepare`, `tdd-order`, `decide`, `decision open|rule`, `interrupt`,
@@ -1265,7 +1287,7 @@ stubs), so later units modify and never create skill folders, adapters or person
 | U11 | leavemealone routing and finish: `judges question` and its forms, the §13.2 wiring at points 1–3 in `review-spec`, `review-plan`, `plan`, `wave`, the interface-deviation fan-out; `integrate` with `--close`, `close` and `closed_at`; docs and the README (install notes, the builder account and profile, the protection, the Licence paragraph); release 1.0.0 packed by `prepare_release.py` | U06, U07, U08, U10b | M |
 | U12 | Orient (§11.1): `skills/orient/SKILL.md` (create, with `assets/icon.svg` and `test_scenarios.yaml`), `skills/orient/references/graphify.md` (create: how orient drives graphify, the flags, the fallback), `skills/plan/scripts/superegm/orient.py` (create), `skills/plan/scripts/superegm/__init__.py` (modify: the `orient` store kind, `SUBCOMMANDS`, the skills' effects table if it lives there), `skills/plan/scripts/superegm/launch_builder.py`, `review_plan.py`, `foreman.py` (modify), `skills/wave/references/builder_orders.md` (modify), `skills/plan/SKILL.md` (modify: one sentence), `tests/unit/test_orient.py` (create), `tests/unit/fixtures/orient/graph.json` (create: a small hand-written graph) | none | M |
 | U13 | File adopts existing issues (§9.1, §10): `skills/plan/scripts/superegm/graph.py` (modify: the `Issue` field), `scan.py` (modify: the two refusals), `dry_run.py`, `apply.py`, `verify.py` (modify), `skills/file/SKILL.md` and `skills/plan/references/handoff_plan.md` (modify: the field and the dry-run line), `tests/unit/test_file.py`, `tests/unit/test_plan.py` (modify) | none | M |
-| U14 | Launch policy: owners set and PR block (§11): `skills/plan/scripts/superegm/launch.py`, `launch_builder.py`, `__init__.py` (modify: `DEFAULT_CONFIG` keys, `init`), `skills/wave/references/builder_orders.md` (modify), `docs/claude.md` (modify: the two keys), `tests/unit/test_builders.py`, `tests/unit/test_helper.py` (modify) | none | S |
+| U14 | Launch policy: owners set, PR block, the builder-token recipe and `doctor` (§11): `skills/plan/scripts/superegm/launch.py`, `launch_builder.py`, `__init__.py` (modify: `DEFAULT_CONFIG` keys, `init`), `doctor.py` (create), `init.py` (modify: the STEPS text), `skills/wave/references/builder_orders.md` (modify), `skills/wave/SKILL.md` (modify: Step 0 runs `doctor`), `README.md` (modify: step 1 and one sentence naming `doctor`), `docs/claude.md` (modify: the two keys; the token recipe once, linked from the README), `tests/unit/test_builders.py`, `tests/unit/test_helper.py`, `tests/unit/test_leavemealone_finish.py` (modify: the README pins follow the new step 1) | none | M |
 
 Shared files: `test_helper.py` is U03's alone. `body.py` is U03's and then U05's (the derived Step
 defaults), which U03 blocks. Each workflow SKILL.md stub U01 creates is filled
@@ -1278,7 +1300,8 @@ No other file is edited by two units their blockers do not order.
 
 Amendment 2 units (1.1.0): U12 and U14 share `launch_builder.py`, `builder_orders.md` and
 `__init__.py`, U14 after U12 (U12 adds the orient copy and the orders line); U13's `graph.py` and
-`scan.py` are its alone (U12's map runs from `plan`'s skill body, not from `graph`). Risk: U12
+`scan.py` are its alone (U12's map runs from `plan`'s skill body, not from `graph`); U14's
+`skills/wave/SKILL.md` and `README.md` come after U10b and U11 (both merged). Risk: U12
 medium (extraction over arbitrary trees: encoding errors, huge files, symlink loops; §11.1's
 best-effort reads); U13 medium (an adopted issue's body is replaced wholesale; the dry run shows
 the old body's sha256 so the owner sees what is overwritten); U14 low. Review focus for U12's
