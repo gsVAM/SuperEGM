@@ -165,12 +165,16 @@ One skill per phase, nothing chains; the owner pushes the approval commit betwee
 - `/superegm:using-superegm`: the dispatcher every session reads first
 - `/superegm:drift-report`: check the code against the designs after `integrate`
 
-## What SuperEGM absorbs
+## Credits and lineage
 
-| Source | Version | Licence | What it brings |
-| --- | --- | --- | --- |
-| EGM | 0.2.1 | Apache-2.0 | the orchestration: isolated reviewers, the adversarial gate, waves, the foreman, the human merge |
-| superpowers | 7.0.0 | MIT | brainstorming, test-driven development, systematic debugging, verification before completion, writing skills |
+SuperEGM is built on four projects.
+
+- Google's [Elephant-and-Goldfish Model](https://github.com/google/elephant-goldfish-model) (Apache-2.0) gives the orchestration: deep-context elephants draft and zero-context goldfish stress-test. The adversarial gate before any code, the handoff into issues, the waves and the foreman all come from it.
+- gsVAM's [EGM Astra fork](https://github.com/gsVAM/elephant-goldfish-model) 0.2.1, built on the upstream, gives the Astra lane and the panel presets SuperEGM inherits.
+- Jesse Vincent's [superpowers](https://github.com/obra/superpowers) 7.0.0 (MIT) gives the unit of work: brainstorming, test-driven development, systematic debugging, verification before completion and writing skills.
+- chaseai-yt's [claudex-loop](https://github.com/chaseai-yt/claudex-loop) gives the cross-provider lane: it runs GPT-model reviewers and judges headlessly, which SuperEGM uses for Astra reviews and the judge panel.
+
+SuperEGM aims to unite these workflows under one plugin with cross-provider adversarial review: EGM's gates around superpowers' unit of work, and every review and judge panel able to seat reviewers from more than one model vendor through claudex-loop, so a converged verdict is not one vendor agreeing with itself. When the cross-provider lane is absent the panel degrades to Claude-only judges and says so in the record.
 
 SuperEGM runs in Claude Code only; there is no Codex host.
 
