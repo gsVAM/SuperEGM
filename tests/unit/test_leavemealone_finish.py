@@ -320,3 +320,23 @@ def test_readme_install_and_licence():
   # shortcut: tests/ are compared by existence only, since test files quote the notice text; drop the exclusion
   # when the notice tests stop quoting it
   assert {p for p in listed if not p.startswith("tests/")} == carrying, sorted(listed ^ carrying)
+
+
+REMOVED = ["egm-bootstrap", "synthesizer", "bootstrap_orchestrator", "distributions/claude", "EGM_PANEL", "EGM_ASTRA",
+           "EGM_GOLDFISH", ".egm/handoff.json", "egm-review-loop", "egm-resolve", "egm-handoff", "egm-wave",
+           "egm_handoff.py", "handoff_state.json", "--published", "gate --accept", "merge locally", "Merge back locally",
+           "visual companion", "/egm:", "codex plugin", "docs/codex.md", "docs/harnesses.md", "ChatGPT", "Antigravity",
+           ".codex-plugin", "egm-openai", "egm-claude", "attestation", "foreman_<unit-id>_state.json", "--defer", "defer ",
+           "head-moved", "rebase-only", "concepts_brief.md", "design_draft.md", "Stage 7", "Stage 9"]
+MINE = ["README.md", "docs/index.md", "docs/getting_started.md", "docs/claude.md", "docs/faq.md", "docs/privacy.md",
+        "docs/releases.md", "scripts/prepare_release.py", "tests/unit/test_releases.py", "skills/review-spec/SKILL.md",
+        "skills/review-plan/SKILL.md", "skills/plan/SKILL.md", "skills/wave/SKILL.md", "skills/integrate/SKILL.md",
+        "skills/judges/references/leavemealone.md", "skills/plan/scripts/superegm/judges.py",
+        "skills/plan/scripts/superegm/close.py"]
+
+
+@pytest.mark.parametrize("path", MINE)
+def test_no_removed_mechanism_named(path):
+  text = (ROOT / path).read_text(encoding="utf-8")
+  hits = [term for term in REMOVED if re.search(r"(?<!SUPER)" + re.escape(term), text)]  # SUPEREGM_* stays
+  assert not hits, (path, hits)
