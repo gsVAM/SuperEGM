@@ -750,3 +750,25 @@ def test_apply_adopts_the_issue_labels_first_then_the_body_and_links_it(world):
   issue["body"] += "edited by hand\n"
   code, out = world.run("verify", "--spec", spec, "--runcard", card)
   assert code == 1 and "MISMATCH body of #7 (U02)" in out, out
+
+
+def test_apply_resumes_an_adopted_unit_after_a_crash_past_the_edit(world):
+  spec, plan, handoff_id, card = adopt_dry_run(world)
+  gh = world.gh
+  # 7 labels + the tracking issue + U01 + the adoption of #7 = 10 writes; then every record is lost before U03
+  assert world.run("apply", "--spec", spec, "--runcard", card, "--yes", "--max-writes", 10)[0] == 0
+  edited = gh.issues[7]["body"]
+  assert edited.startswith(f"<!-- superegm:handoff={handoff_id} unit=U02 spec=") and "number" not in state_of(world)["units"].get("U03", {})
+  state = state_of(world)
+  for record in (state["tracking"], *state["units"].values()):
+    for key in ("number", "id", "done", "filing"):
+      record.pop(key, None)
+  atomic_write(world.artifacts / "state.json", state)
+  gh.calls.clear()
+  assert world.run("apply", "--spec", spec, "--runcard", card, "--yes")[0] == 0
+  assert gh.issues[7]["body"] == edited and [c[2] for c in gh.calls if c[:2] == ["issue", "edit"]] == ["1"]
+  after = state_of(world)
+  assert after["units"]["U02"] | {"number": 7, "id": gh.issues[7]["id"], "done": True} == after["units"]["U02"]
+  assert after["units"]["U03"]["number"] == 3 and len(gh.issues) == 4 and "Blocked by: #7 ·" in gh.issues[3]["body"]
+  assert gh.sub_issues[1] == [gh.issues[2]["id"], gh.issues[7]["id"], gh.issues[3]["id"]] and len(after["filings"]) == 1
+  assert after["verify"]["complete"] is True and after["verify"]["problems"] == []
