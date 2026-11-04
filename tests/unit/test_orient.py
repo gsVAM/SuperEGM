@@ -74,3 +74,21 @@ def test_map_text_on_the_fixture_tree():
                   "src | 4 files | .py | __init__.py | AGENTS.md: src\n"
                   "tests | 2 files | .py | - | -\n"
                   "web | 1 files | .ts | index.ts | -\n")
+
+
+GRAPH = ROOT / "tests/fixtures/orient/graph.json"
+
+
+def test_graph_projection_on_the_fixture_graph():
+  from superegm import orient
+  graph = json.loads(GRAPH.read_text(encoding="utf-8"))
+  unit = orient.unit_text(TREE, [("src/worker.py", "modify"), ("lib/x.py", "create")], graph, T, "a" * 64)
+  assert unit.startswith(f"orient: tree {T} · graphify: {'a' * 64} · trimmed: nothing\n")
+  assert ("## Graph: src/worker.py\nnode work (src/worker.py:L6) community 0\nnode Worker (src/worker.py:L15) community 0\nnode worker.py (src/worker.py) community 0\n"
+          "edge calls Worker (src/worker.py:L15) -> work (src/worker.py:L6)\nedge calls enqueue (src/queue.py:L3) -> work (src/worker.py:L6)\n"
+          "other INFERRED 0.5 uses work (src/worker.py:L6) -> render (web/index.ts:L1)\n"
+          "other AMBIGUOUS 0.2 calls test_work (tests/check_worker.py:L1) -> work (src/worker.py:L6)\n## Graph: lib/x.py\nnone\n## Read first\n") in unit
+  assert unit.index("## Graph: src/worker.py") > unit.index("## lib/x.py (create)")
+  head = orient.map_text(TREE, graph, T, "a" * 64).split("## Map\n")[0]
+  assert head.endswith("## Graph\nnodes 6 · edges 4 · communities 2 · extracted 2/4\n"
+                       "community 0: 4 nodes · src/worker.py, tests/check_worker.py\ncommunity 1: 2 nodes · src/queue.py, web/index.ts\n")
