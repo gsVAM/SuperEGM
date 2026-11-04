@@ -219,3 +219,28 @@ def test_orient_refusals(world, no_graphify, case, reason):
     argv += ["--ref", "nope"]
   code, out = world.run(*argv)
   assert code == 1 and out.strip() == f"superegm: {reason}" and not st.path("orient").exists(), out
+
+
+def test_callers_skill_and_reference_texts():
+  plan = (ROOT / "skills/plan/SKILL.md").read_text(encoding="utf-8").split("---", 2)[2]
+  rp = (ROOT / "skills/review-plan/SKILL.md").read_text(encoding="utf-8").split("---", 2)[2]
+  skill = (ROOT / "skills/orient/SKILL.md").read_text(encoding="utf-8")
+  ref = (ROOT / "skills/orient/references/graphify.md").read_text(encoding="utf-8")
+  step2 = plan.split("## Step 2", 1)[1].split("## Step 3", 1)[0]
+  assert "python3 '<HELPER>' orient --spec '<SpecPath>' --runcard '<CARD>'" in step2
+  for needle in ("before drafting", "after every `graph`", "orient/map.md", "stop on its exit 1 with its line"):
+    assert needle in plan, needle
+  assert "superegm orient --spec '<spec>' --runcard '<card>'" in rp and "<HELPER>' orient" not in rp
+  for needle in ("<6 hex>/orient/<unit>.md", "exposed:orient <tree sha>", "no orient file", "after every `graph`",
+                 "superegm orient --spec '<spec>' --unit U<id> --runcard '<card>'"):  # the last: owner ruling zoom-out-1-4
+    assert needle in rp, needle
+  harness = "In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first."
+  assert harness in skill and skill.split(harness, 1)[1].lstrip().startswith("/superegm:orient <spec-path> [--unit U<id>]...")
+  for needle in ("superegm runcard open --skill orient --artifact '<spec>'", "superegm orient --spec '<spec>' [--unit U<id>]... [--ref <ref>] --runcard '<id>'",
+                 "superegm runcard close '<id>'", "extractor, never a summarizer", "references/graphify.md", "every effect refuses without an open run card"):
+    assert needle in skill, needle
+  for needle in ("graphify update", "GRAPHIFY_OUT", "600", "graph.json", "not installed", "failed:", '"links"', "confidence_score", "EXTRACTED", "`--force`", "pipx install graphifyy"):
+    assert needle in ref, needle
+  for body in (plan, rp, skill.split("---", 2)[2]):
+    assert len(body.encode("utf-8")) <= 24_000
+  assert "- `/superegm:orient`: " in (ROOT / "README.md").read_text(encoding="utf-8")
