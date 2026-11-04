@@ -36,3 +36,30 @@ def test_store_orient_kinds(world):
 def test_names_rule(path, tokens):
   from superegm import orient
   assert orient.names(path) == tokens
+
+
+TREE = ROOT / "tests/fixtures/orient/tree"
+T = "t" * 40
+
+
+@pytest.mark.parametrize("scope, expected", [
+  ([("src/worker.py", "modify")], "## src/worker.py (modify)\nThe worker.\ndef work(job: str) -> int:\nclass Worker:\n  def run(self) -> None:\ntests: tests/check_worker.py\n"),
+  ([("src/worker.py", "modify")], "## Read first\n### README.md · src/worker.py\nThe worker, read first.\n### CLAUDE.md · src\nThe src package holds the worker.\n### src/AGENTS.md · src\nThe src package.\n### src/AGENTS.md · worker.py\nStart with worker.py.\n"),
+  ([("src/new.py", "create")], "## src/new.py (create)\nsiblings: src/__init__.py, src/queue.py, src/worker.py\n### src/__init__.py\n### src/queue.py\ndef enqueue(job: str) -> None:\n### src/worker.py\ndef work(job: str) -> int:\nclass Worker:\n  def run(self) -> None:\ntests: none\n"),
+  ([("lib/x.py", "create")], "## lib/x.py (create)\nsiblings: none\ntests: none\n"),
+  ([("web/index.ts", "modify")], "## web/index.ts (modify)\nexport function render(): void {}\nexport class View {}\ntests: none\n"),
+  ([("notes/plain.txt", "modify")], "## notes/plain.txt (modify)\n" + "".join(f"line {i}\n" for i in range(1, 41)) + "tests: none\n"),
+  ([("src/", "modify")], "## src/AGENTS.md (modify)\n"),
+])
+def test_unit_text_on_the_fixture_tree(scope, expected):
+  from superegm import orient
+  text = orient.unit_text(TREE, scope, None, T, "not installed")
+  assert text.startswith(f"orient: tree {T} · graphify: not installed · trimmed: nothing\n")
+  assert expected in text and "## Graph" not in text and "_hidden" not in text
+  if expected.startswith("## Read first"):
+    assert text.endswith(expected) and text.count("Start with worker.py.") == 1
+  if scope[0][0] == "web/index.ts":
+    assert "## Read first" not in text
+  if scope[0][0] == "src/":
+    assert [l for l in text.splitlines() if l.startswith("## ")] == ["## src/AGENTS.md (modify)", "## src/__init__.py (modify)", "## src/queue.py (modify)", "## src/worker.py (modify)", "## Read first"]
+  assert text == orient.unit_text(TREE, scope, None, T, "not installed")
