@@ -12,7 +12,6 @@ from superegm.launch import load_launches
 
 WRITES = frozenset({"report", "runcards"})  # the store kinds this subcommand writes
 SKILLS = frozenset({"wave"})  # the skills whose card this subcommand accepts
-TERMINAL = ("landed", "stopped", "pending", "idle", "clean")  # every state the loop never dispatches
 
 
 def register(subparsers):
@@ -119,7 +118,6 @@ def idle_reasons(card: dict, states: dict, views: dict, config: dict, now: float
       reasons.append((uid, f"ci {views[uid]['ci'] or 'absent'} for {int((now - seen) // 60)} min "
                            f"(ci_wait_minutes {config.get('ci_wait_minutes', 30)})"))
   return reasons
-
 
 
 def question_line(question: str) -> str:

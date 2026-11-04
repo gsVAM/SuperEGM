@@ -305,6 +305,8 @@ def test_decision_rule_records_posts_and_journals(world, point, source, ruling, 
                  "--runcard", card)[1].splitlines()[0]
   code, out = world.run("decision", "rule", "--unit", "U01", "--decision", q2, "--ruling", "(z) nonsense", "--by", "owner", "--runcard", card)
   assert code == 1 and out.startswith("decision: ruling is none of the options:")
+  assert world.run("decision", "rule", "--unit", "U01", "--decision", q2, "--ruling", "f-2-1", "--by", "owner", "--runcard", card)[0] == 1, \
+      "a finding id alone names no option"
   assert world.run("decision", "rule", "--unit", "U01", "--decision", q2, "--ruling", ruling, "--by", "judges:j-1", "--runcard", card)[0] == 0
   assert f"Ruling (judges j-1, leavemealone): U01 {q2} {ruling}" in s.path("journal").read_text(encoding="utf-8")
 

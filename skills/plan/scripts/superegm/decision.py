@@ -153,7 +153,7 @@ def check_ruling(point: int, options: list, ruling: str) -> str:
   fid, _, text = ruling.partition(" ") if point == 1 else ("", "", ruling)
   for option in options:
     letter, _, rest = option.partition(" ") if option.startswith("(") else ("", "", option)
-    if text in (option, letter, rest) and (point != 1 or fid):
+    if text and text in (option, letter, rest) and (point != 1 or fid):
       return f"{fid} {rest}" if point == 1 else rest
   raise Refusal("decision: ruling is none of the options: " + "; ".join(options))
 
