@@ -393,3 +393,35 @@ def test_a_retyped_wave_raises_every_pending_decision_before_its_first_batch(wor
   assert "pending: none" in out and "loop: continuing (in flight: U01, U02)" in out
   assert world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", "(a)", "--by", "owner", "--runcard", card2)[0] == 1
   assert world.run("report", "--runcard", card1)[0] == 1, "an interrupted card is not open"
+
+
+# ---------------------------------------------------------------- S9: the skill body
+
+
+def test_the_wave_skill_body_is_the_driver_loop(world):
+  text = SKILL.read_text(encoding="utf-8")
+  body = text.split("---", 2)[2]
+  assert len(body.encode("utf-8")) <= 24_000
+  assert "In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first." in body
+  for heading in ("## Entry: resume from the store", "## A batch", "## The word table", "### Decision point 1",
+                  "### Decision point 2", "### Decision point 3", "## Stops and by-hand rulings", "## Retries", "## The end"):
+    assert heading in body, heading
+  assert body.count("Leavemealone-mode: U11 wires §13.2 here.") == 3
+  for order in ("1. `landed`", "2. `closed`", "3. `exit` and `status`", "4. `superegm foreman dispatch`", "5. `superegm launch`",
+                "6. `superegm report`"):
+    assert order in body, order
+  for cited in ("unit_state", "loop_ended", "word_action", "recovered", "ci_wait_minutes", "--idle", "--posted closed:",
+                "status --wait", "launch-builder", "record-launch", "review settle", "review rule", "review status",
+                "runcard open --skill wave", "runcard close", "decision open", "decision rule", "in one message"):
+    assert cited in body, cited
+  for sub in ("report", "decision", "status", "launch", "launch-builder", "record-launch", "foreman", "review", "runcard"):
+    assert world.run(sub, "--help")[0] == 0, sub
+
+
+@pytest.mark.parametrize("removed", [
+  "Codex", "ChatGPT", "Astra `inspect`", "claudex", "defer", "--published", "--watch", "--confirm-landed", "Candidate PR",
+  "wave_<n>_plan.md", "foreman_<id>_state.json", "egm-handoff", "**`Panel`**", "astra_lane", "review_panels",
+  "marking a PR ready", "head-moved", "merge locally", "egm/<handoff-id>", "`--wait 1500`", "two consecutive `deadline`s",
+  "--not-run <reason>", "ask the user whether to re-review", "max 1 re-audit", "Blocker or Major"])
+def test_the_wave_skill_names_no_removed_mechanism(removed):
+  assert removed not in SKILL.read_text(encoding="utf-8"), removed

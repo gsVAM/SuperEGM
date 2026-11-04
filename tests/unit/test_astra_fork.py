@@ -313,11 +313,9 @@ def test_foreman_is_named_a_per_unit_elephant() -> None:
 
 
 def test_launch_lines_agree_with_the_helper_and_the_wave_skill() -> None:
-  """The lane and the skill that runs it must name the same runner timeout and the same Bash
-  timeout in milliseconds (SuperEGM: the helper no longer writes the line; the Astra lane never
-  runs on a head, spec section 14)."""
-  wave = read("skills/wave/SKILL.md")
-  assert "3,900,000 ms" in wave
+  """The lane names the runner timeout and the Bash timeout in milliseconds (SuperEGM: the helper no
+  longer writes the line; the Astra lane never runs on a head, spec section 14, so the wave skill no
+  longer launches it, U10b)."""
   launch = re.search(r"^    python3 '<RUNNER>' inspect .*$", LANE, re.MULTILINE).group(0)
   assert "--builder" not in launch
   assert '--artifacts "${TMPDIR:-/tmp}/egm-astra"' in launch
@@ -354,11 +352,11 @@ def test_every_gh_command_in_the_skills_is_pinned_to_github_com() -> None:
 
 def test_the_amendment_path_requires_reconfirmation() -> None:
   """R2-09: after the confirmed-snapshot check, editing the plan and the issue
-  by hand is not enough; status and launch refuse until the plan is re-confirmed."""
-  wave = " ".join(read("skills/wave/SKILL.md").split())
-  assert "re-confirmed" in wave
-  assert "`gate`, `dry-run` and `apply --yes` again" in wave
-  assert "require_confirmed_plan" in wave
+  by hand is not enough; status and launch refuse until the plan is re-confirmed
+  (SuperEGM: the helper's `require_frozen_units`; the wave skill body is section 11's
+  driver loop and carries no such prose, U10b)."""
+  for path in ("skills/plan/scripts/superegm/status.py", "skills/plan/scripts/superegm/launch.py"):
+    assert "require_frozen_units" in read(path), path
 
 
 def test_convergence_rule_is_stated_once_and_referenced() -> None:
@@ -371,10 +369,8 @@ def test_convergence_rule_is_stated_once_and_referenced() -> None:
                "Cap: 5 rounds, then pause",
                "Never start round 6 without their answer"):
     assert text in flat, text
-  for skill in ("skills/wave/SKILL.md",):
-    body = " ".join(read(skill).split())
-    assert "review_panels.md` section 7" in body, skill
-    assert "regression: yes|no" in body, skill
+  # SuperEGM section 11: the wave skill pauses at the cap (decision point 2); the convergence doctrine
+  # lives in review_loop.md, which the wave skill no longer references (U10b).
   wave = " ".join(read("skills/wave/SKILL.md").split())
   assert "Cap: 5 rounds, then PAUSE" in wave
   assert "Cap 3 rounds" not in wave, "the fixed cap must be gone"
@@ -438,13 +434,3 @@ def test_the_helper_declares_itself_single_writer() -> None:
                "skills/plan/references/handoff_config.md"):
     flat = " ".join(read(path).split())
     assert "single-writer" in flat or "One command at a time" in flat, path
-
-
-def test_clean_but_not_converged_has_a_transition() -> None:
-  """R5-05: a clean round whose only finding came from the last round's fixes
-  has nothing for the builder to fix, so waiting for a new PR head deadlocks."""
-  wave = " ".join(read("skills/wave/SKILL.md").split())
-  assert "Clean but not converged" in wave
-  assert "same, unchanged head" in wave
-  assert "no fix request posted" in wave
-  assert "counts towards the cap" in wave
