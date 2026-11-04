@@ -138,3 +138,29 @@ def test_export_tree_is_the_tracked_files_at_the_ref(world):
   assert not (export / "stale.txt").exists() and not (export / ".gitignore").exists() and not st.path("orient", "export.tar").exists()
   with pytest.raises(superegm.HandoffError, match="orient: ref nope is not in this repository"):
     orient.export_tree(world.repo, "nope", st)
+
+
+@pytest.mark.parametrize("case, token", [
+  ("absent", "not installed"),
+  ("ok", hashlib.sha256(GRAPH.read_bytes()).hexdigest()),
+  ("fails", "failed: boom: no graph"),
+  ("exit", "failed: exit 3"),
+  ("silent", "failed: no graph.json written"),
+  ("not-json", "failed: graph.json is not JSON"),
+  ("timeout", "failed: timeout"),
+])
+def test_build_graph_absent_present_failing_timeout(tmp_path, monkeypatch, case, token):
+  from superegm import orient
+  export, out, log = tmp_path / "export", tmp_path / "graphify-out", tmp_path / "log"
+  export.mkdir(); out.mkdir(); (out / "graph.json").write_text("stale\n", encoding="utf-8")
+  fake = tmp_path / "graphify"
+  fake.write_text(f"#!/bin/sh\necho \"$* $GRAPHIFY_OUT\" > '{log}'\n" + {
+    "ok": f"mkdir -p \"$GRAPHIFY_OUT\" && cp '{GRAPH}' \"$GRAPHIFY_OUT/graph.json\"\n",
+    "fails": "echo 'warning: x' >&2; echo 'boom: no graph' >&2; exit 1\n", "exit": "exit 3\n",
+    "silent": "exit 0\n", "not-json": "echo '{' > \"$GRAPHIFY_OUT/graph.json\"\n", "timeout": "sleep 5\n"}.get(case, ""), encoding="utf-8")
+  fake.chmod(0o755)
+  monkeypatch.setattr(orient, "GRAPHIFY", "superegm-no-such-tool" if case == "absent" else str(fake))
+  monkeypatch.setattr(orient, "TIMEOUT", 1 if case == "timeout" else 600)
+  graph, got = orient.build_graph(export, out)
+  assert got == token and (graph is None) == (case != "ok") and (out / "graph.json").exists() == (case in ("ok", "not-json"))
+  assert (not log.exists()) if case == "absent" else log.read_text(encoding="utf-8").strip() == f"update {export.resolve()} {out}"
