@@ -329,3 +329,46 @@ def test_a_stop_ruling_labels_the_issue_and_the_report_lists_unlanded_dependants
   assert "loop: ended" in out and "pending: none" in out
   assert "## Stopped\n- U01 (owner: stop the unit): unlanded dependants U02, U03" in s.path("wave_report", 1).read_text(encoding="utf-8")
   assert "- U01 #2: stopped ·" in s.path("wave_report", 1).read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------- S7: the by-hand ruling and the owner's close
+
+
+def test_a_by_hand_ruling_naming_the_blocked_comment_rules_its_decision(world, monkeypatch):
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "builder-token")  # config.builder.gh_token_env, U03's default
+  fake_gh(world, {"user": {"login": BUILDER}, **{f"repos/{REPO}/issues/comments/{cid}": {"id": cid, "user": {"login": login}, "body": body}
+                  for cid, login, body in ((78, "owner", "**Ruling:** (77) (b) use Redis — fine\n"),
+                                           (79, BUILDER, "**Ruling:** (77) (a) — I decided\n"),
+                                           (80, "owner", "**Ruling:** (12) (a) — another comment\n"))}})
+  qid = world.run("decision", "open", "--unit", "U01", "--point", 3, "--question", question(world), "--source", "comment 77",
+                  "--runcard", card)[1].splitlines()[0]
+  rule = lambda posted, by="owner": world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", "(b)",
+                                              "--by", by, "--posted", posted, "--runcard", card)
+  code, out = rule("79", BUILDER)
+  assert code == 1 and out == "decision: comment 79 was written by the builder account builder-bot and is not honoured\n"
+  code, out = rule("80")
+  assert code == 1 and out == "decision: comment 80 does not name comment 77\n"
+  code, out = rule("78", "someone")
+  assert code == 1 and out == "decision: comment 78 was written by owner, not someone\n"
+  assert foreman_of(s, "U01")["rulings"] == []
+  code, out = rule("78")
+  assert code == 0 and out.strip() == "recorded (comment 78)"
+  r = foreman_of(s, "U01")["rulings"][-1]
+  assert (r["decision"], r["ruling"], r["by"], r["posted"]) == (qid, "(b)", "owner", "comment 78")
+  assert 2 not in world.gh.comments, "nothing is posted for a by-hand ruling"
+  assert "pending: none" in world.run("report", "--runcard", card)[1]
+
+
+def test_the_owners_close_is_stop_without_a_question(world):
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})
+  code, out = world.run("decision", "rule", "--unit", "U01", "--ruling", "stop the unit", "--by", "owner", "--posted", "closed:70", "--runcard", card)
+  assert code == 0 and out.strip() == "recorded (closed #70)", out
+  f = foreman_of(s, "U01")
+  assert f["decisions"] == [] and f["rulings"] == [] and f["stopped"]["reason"] == "closed #70 by owner"
+  assert "superegm:stopped" in world.gh.issues[2]["labels"] and 2 not in world.gh.comments
+  assert "- U01 (owner: closed #70 by owner): unlanded dependants" in (world.run("report", "--runcard", card), s.path("wave_report", 1).read_text(encoding="utf-8"))[1]
+  code, out = world.run("decision", "rule", "--unit", "U01", "--ruling", "stop the unit", "--by", "owner", "--runcard", card)
+  assert code == 1 and out == "decision: --decision is required unless --posted closed:<n>\n"
