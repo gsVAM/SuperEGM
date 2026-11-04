@@ -178,3 +178,24 @@ of every path, including an error you cannot recover from. The next phase is `/s
   no body.
 - Findings live in the store and dispositions in the round files: name the review id and the
   `review status` line in chat, never paste a report.
+
+## Leavemealone-mode
+
+In leavemealone-mode (`--leavemealone` on the invocation, or `config.mode`) the pause of Step 0
+item 4 is replaced by the judge panel at decision points 1 and 2, and what each converged answer
+applies is the one routing table `${CLAUDE_PLUGIN_ROOT}/skills/judges/references/leavemealone.md`
+(this skill carries none of its own). At the point, render the question from the record:
+
+- point 1, every high or medium you contest or decline in a unit's round (Step 3), one panel per
+  round: `python3 '<HELPER>' judges question --review <id> --round <n> --reason <fid>=<text> --runcard <card>`,
+  one `--reason` per finding, your reason verbatim as the overrule option's text;
+- point 2, a `cap` row of Step 1: `python3 '<HELPER>' judges question --review <id> --cap --runcard <card>`.
+
+Then the panel sequence of the reference: `python3 '<HELPER>' judges open --question <path> --evidence <paths> --parent <card>`
+(the unit's body and the spec are the evidence; the panel's child card hangs under this card), the
+dispatch of the `judges` skill (Astra through the runner, the Claude judges through
+`superegm:judge`, `judges record`, `judges diff`, round by round), and
+`python3 '<HELPER>' judges verdict --panel <id> --runcard <card>`. Apply each converged answer
+through its row as it converges (`review settle … --judges '<panel>'`, `review rule … --judges '<panel>'`);
+the verdict's `open[]` are the unconverged questions: end the invocation for that unit naming
+them and `judges/<id>/verdict.json`, the other units continue, and the owner rules by hand.

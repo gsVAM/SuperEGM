@@ -1,5 +1,5 @@
 # Copyright 2026 Google LLC. SPDX-License-Identifier: Apache-2.0
-# Modified by SuperEGM (gsVAM), 2026: one archive named superegm.
+# Modified by SuperEGM (gsVAM), 2026: one archive named superegm; the notes carry the install commands and no verification-workflow paragraph.
 """Version agreement, release identities, and archive checksum contracts."""
 
 import hashlib
@@ -53,10 +53,15 @@ def test_prepare_one_superegm_archive(release: dict, tmp_path: Path) -> None:
     with zipfile.ZipFile(archive) as bundle:
         assert bundle.testzip() is None
         assert json.loads(bundle.read("plugin.json"))["version"] == version
+        assert {"skills/plan/scripts/superegm/__init__.py", "LICENSE-MIT"} <= set(bundle.namelist())
     notes = (destination / "RELEASE_NOTES.md").read_text()
-    assert notes.startswith("# SuperEGM 1.0.0") and "gsVAM/superegm" in notes
-    # The other host's name is assembled so the packaging scan of this file stays clean.
+    assert notes.startswith("# SuperEGM 1.0.0\n") and "gsVAM/superegm" in notes
+    assert f"Declared source: `{'a' * 40}`" in notes
+    assert "Local source identity is caller-supplied and is not verified by this script." in notes
+    assert "claude plugin marketplace add gsVAM/superegm" in notes and "claude plugin install superegm@superegm" in notes
+    # Assembled so U01's packaging scan of this file and U11's removed-term scan stay clean.
     assert "elephant-goldfish-model" not in notes and "Open" + "AI" not in notes
+    assert "attest" + "ation" not in notes and "release.yml" not in notes
     with pytest.raises(FileExistsError):
         release["prepare"](ROOT, f"v{version}", destination, "a" * 40)
 

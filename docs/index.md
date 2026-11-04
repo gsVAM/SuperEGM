@@ -1,107 +1,37 @@
-# Elephant-Goldfish Model (EGM)
+# SuperEGM
 
-<!-- Modified by SuperEGM (gsVAM), 2026: one host, Claude; the Codex and Harnesses entries removed. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: EGM's index rewritten for SuperEGM: the intent of design section 1 and the five documents; the Codex and Harnesses entries removed. -->
+
+SuperEGM is one Claude Code plugin that is the owner's entire software workflow, from an idea to a
+merged pull request, run as one skillset. It absorbs two toolkits that each owned half of that
+workflow:
+
+- **superpowers 7.0.0** (MIT) owns the unit of work: brainstorming that ends in a written design;
+  plans made of red → green → commit steps with the actual test code; exact interfaces between
+  units; global constraints copied verbatim; a review focus; no placeholders.
+- **EGM 0.2.1** (Apache-2.0) owns orchestration and verification: goldfish isolation enforced by
+  adapters; an adversarial gate before anything is written anywhere; a second vendor's model as
+  reviewer; a dependency graph cut into waves; idempotent, crash-recoverable GitHub filing; a
+  foreman per unit reviewing every PR head against the unit's definition of done with CI as
+  evidence; convergence with regression marking and a pausing cap; a merge that stays human.
+
+The one distinction EGM never had: **the spec is not the plan.** The spec is the design document,
+frozen at a sha256 by its approval. The plan belongs to the GitHub issue, one per unit, and is
+TDD-shaped from its first line. The owner types one skill per phase; a phase typed in
+leavemealone-mode runs to its gate without the owner, the judge panel ruling where the owner
+would have, and the owner wakes to merge-ready draft pull requests or to the short list of
+questions the judges could not settle. Nothing is merged by a machine.
 
 ## Find the right document
 
-| Location | Purpose |
+| Document | Purpose |
 | --- | --- |
-| [Getting started](getting_started.md) and [FAQ](faq.md) | Installation and everyday use. |
-| [Claude](claude.md) | Host-specific installation and execution. |
-| [Design documents](https://github.com/google/elephant-goldfish-model/blob/main/docs/designs/README.md) | Architecture, workflow rationale, and implementation plans. |
-| [Shared runtime resources](../resources/README.md) | Authoritative execution rules and review standards. |
-| [Testing playbook](https://github.com/google/elephant-goldfish-model/blob/main/TESTING.md) | Commands and evidence requirements. |
-| [PR #103 verification reports](https://github.com/google/elephant-goldfish-model/pull/103) | Detailed harness results and known verification gaps. |
+| [Getting started](getting_started.md) | Install, the by-hand setup `superegm init` prints, the eight phases in order. |
+| [Claude Code](claude.md) | The platform facts the plugin relies on: adapters, hooks, headless builders, tokens, worktrees. |
+| [FAQ](faq.md) | Modes, the builder account, the judges, what stays human. |
+| [Privacy](privacy.md) | What leaves the machine, to GitHub and to OpenAI, and the knobs that stop it. |
+| [Releases](releases.md) | Versioning, `prepare_release.py`, the archive and its checksum. |
+| [Shared runtime resources](../resources/README.md) | The review standards and execution rules the runtime reads. |
 
-`docs/` explains the system to contributors and users. `resources/` contains
-rules that the runtime reads. Link to those rules when explaining them here;
-keep requirements in their canonical resource files.
-
-AI has changed software development. Everything is different now and we all know
-it.
-
-The **Elephant-Goldfish Model** (EGM) is one way teams are adapting to the
-change. It is a protocol for shipping high quality software quickly, wrapped in
-a metaphor to make it easy to remember. Dave Rensin's article,
-[Elephants, Goldfish, and the New Golden Age of Software Engineering](https://medium.com/@drensin/elephants-goldfish-and-the-new-golden-age-of-software-engineering-c33641a48874),
-goes into this in depth. If you haven't read that, start there!
-
-## Elephant-Goldfish Philosophy
-
-### The Elephant
-
-The **Elephant** remembers everything.
-
-Sometimes we want LLMs to know all about our systems. Their history, the user
-journeys, the logical components, and so on. And we want to be able to discuss
-how all this fits together naturally.
-
-That isn't possible by looking at code alone. We need to make all of this
-information available to LLMs in a way they can navigate cheaply. When we do,
-we can ask questions, challenge assumptions, and force ourselves to justify
-decisions fast, which makes changing the system that much easier.
-
-When we give LLMs access to a context-rich description of our systems and ask
-them to explore our problems, we call that an **Elephant**.
-
-### The Goldfish
-
-**Goldfish** have three-second memories [^not-really].
-
-LLMs are not deterministic. Sometimes they hallucinate, resulting in plans or
-code that is obviously broken. Trusting LLMs to build our systems without
-checking for hallucinations is a recipe for a bad time.
-
-Naively, we could have humans review every change. It works, but it is
-expensive and quickly becomes a bottleneck. Another way is to have one LLM
-review another. If we ask LLMs to review plans, code, or other artifacts
-*without* access to how those things were generated, we reduce hallucinations.
-
-When we ask LLMs to review output this way, limiting the context they have
-access to, we call that a **Goldfish**.
-
-### The Humans
-
-Imagine you have to say this to your manager: *"Sorry! My AI tool just pushed
-broken code to production..."*. It's not the tool that did that, it was you that
-did that.
-
-Or maybe a different scenario: *"The AI did my project! Promote me!"*. This is
-just as silly.
-
-AI is a tool, not a decision-maker. Developers must actively guide design
-discussions, challenge suggestions, and make decisions rather than letting AI
-drive.
-
-EGM leans into this: **Humans** own the outcomes.
-
-### Benefits
-
-EGM emphasizes learning how to use LLMs as a tool and explains how to navigate
-their strengths and weaknesses.
-
-*   **Velocity Gains:** Features ship faster. Front-loading alignment into design
-    specifications significantly reduces downstream rework and review comment
-    loops.
-*   **Accuracy:** Investment in front-loaded design discussions creates deep,
-    verified guidelines that reduce LLM hallucinations. Being specific and
-    detailed about exactly what we want to be implemented gives AI an explicit
-    reference to check against.
-*   **Team Benefits:** Project handoffs, onboarding, issue triage, and all the
-    other human processes that may require a whiteboard get easier. When LLMs
-    know where features are, how they're built, and the intent behind them,
-    humans can learn about and contribute to systems quickly.
-
-## Documentation & Guides
-
-*   [Getting Started](getting_started.md): Installation and core workflow.
-*   [Claude Code](claude.md): Plugin resources and isolated reviewers.
-*   [Frequently Asked Questions (FAQ)](faq.md): Common questions and answers.
-*   [Framework Architecture](https://github.com/google/elephant-goldfish-model/blob/main/docs/designs/architecture.md): Detailed component
-    design and lifecycle.
-*   [Contributing Guidelines](https://github.com/google/elephant-goldfish-model/blob/main/CONTRIBUTING.md): How to contribute new skills,
-    personas, and standards.
-
-[^not-really]: It's a
-    [myth](https://www.biology.ox.ac.uk/article/goldfish-show-a-keen-ability-to-estimate-distances)
-    that Goldfish have three-second memories. But that would ruin the metaphor!
+`docs/` explains the system to the owner. `resources/` and each skill's `references/` hold the
+rules the runtime reads; link to them rather than restating them here.

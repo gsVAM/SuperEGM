@@ -1,5 +1,6 @@
 # Copyright 2026 Google LLC. SPDX-License-Identifier: Apache-2.0
-# Modified by SuperEGM (gsVAM), 2026: one archive named superegm; notes name gsVAM/superegm.
+# Modified by SuperEGM (gsVAM), 2026: one archive named superegm; the notes name gsVAM/superegm and the two
+# install commands, and lose the verification-workflow paragraph (the repository's one workflow is tests.yml).
 """Build the versioned runtime archive and a checksum manifest for a draft release."""
 
 import argparse
@@ -61,18 +62,13 @@ def prepare(root: Path, tag: str, output: Path, commit: str) -> None:
     (output / "RELEASE_NOTES.md").write_text(
         f"# SuperEGM {version}\n\nDeclared source: `{commit}`\nTag: `{tag}`\n\n"
         "Local source identity is caller-supplied and is not verified by this script. "
-        "Publish only workflow-built candidates after exact-artifact checks.\n\n"
+        "Publish only after `pytest tests/unit` is green on the tagged commit.\n\n"
         "Runtime archive: Claude Code. Verify the download with "
-        "`sha256sum -c SHA256SUMS`.\n\n"
-        "For CI-built candidates, verify the ZIP with "
-        "`gh attestation verify FILE --repo gsVAM/superegm "
-        "--signer-workflow gsVAM/superegm/.github/workflows/release.yml "
-        "--source-ref refs/heads/main`. "
-        "Provenance identifies the main-branch workflow run; the tagged source "
-        "commit is recorded above. Local builds have no attestation.\n\n"
+        "`sha256sum -c SHA256SUMS`, then install from the marketplace:\n\n"
+        "```sh\nclaude plugin marketplace add gsVAM/superegm\nclaude plugin install superegm@superegm\n```\n\n"
         "## Changes\n\nMaintainer: summarize changes and migration steps before publishing.\n\n"
-        "## Verification\n\nOffline unit tests and runtime packaging are checked by CI. "
-        "Live installation, workflow execution, reviewer isolation, directory approval, "
+        "## Verification\n\nOffline unit tests and runtime packaging are checked by CI "
+        "(`.github/workflows/tests.yml`). Live installation, workflow execution, reviewer isolation "
         "and cloud-host support are not established by this build. "
         "Maintainer: attach exact-bundle host evidence and limitations before publishing.\n",
         encoding="utf-8",
