@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: `gate --pass` on converged plan reviews at the body hash over the store's plan copy; the unfiled write list; the reviewed pair, accept and readiness forms removed.
+# Modified by SuperEGM (gsVAM), 2026: `gate --pass` on converged plan reviews at the body hash over the store's plan copy; the unfiled write list; the reviewed pair, accept and readiness forms removed; an adopted unit's two trailing fields (U13).
 
 """superegm gate: pass the gate when every unfiled unit's plan review converged at its body hash."""
 
@@ -56,10 +56,12 @@ def body_hashes(handoff) -> dict:
           for uid, unit in json.loads(core.read_text(handoff.store.path("units")))["units"].items()}
 
 
-def pending_writes(handoff, units=None) -> list:
+def pending_writes(handoff, units=None, adopted=None) -> list:
   """EGM's canonical write list with every issue and link of a filed unit removed: filed is a
   number in `state.units` when `units` is None, else not in `units` (a resumed `apply` keeps the
-  dry run's set). `repo`, `gate`, every label and the tracking issue always stay."""
+  dry run's set). `repo`, `gate`, every label and the tracking issue always stay. An adopted
+  unit (`adopted[uid] = (number, old body sha256)`) keeps the five fixed `issue` fields and
+  carries those two after them (spec section 10)."""
   import superegm.apply as apply  # at call time: apply imports this module
   state = handoff.state
   pending = [uid for uid in handoff.graph.order
@@ -68,7 +70,8 @@ def pending_writes(handoff, units=None) -> list:
            ["gate", state.get("gate_plan_sha256"), state.get("gate_bodies_sha256")]]
   items += [["label", name] for name in apply.derived_labels(handoff)]
   items.append(["issue", "tracking", handoff.tracking_title(), apply.tracking_labels(handoff), handoff.render_tracking()])
-  items += [["issue", uid, handoff.unit_title(uid), apply.unit_labels(handoff, uid), handoff.render_unit(uid)]
+  items += [["issue", uid, handoff.unit_title(uid), apply.unit_labels(handoff, uid), handoff.render_unit(uid),
+             *(adopted or {}).get(uid, ())]
             for uid in pending]
   items += [["sub_issue", uid] for uid in pending]
   items += [["blocked_by", uid, b] for uid in pending for b in sorted(handoff.plan.units[uid].blockers)]

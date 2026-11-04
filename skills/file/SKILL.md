@@ -75,13 +75,24 @@ hashes the rest of the filing is checked against, and prints
 
 Run `python3 '<HELPER>' dry-run --spec '<SpecPath>' --runcard '<CARD>'`. It
 scans the bodies with the current rules, reads GitHub three times (login,
-push access, the labels) and writes nothing there. It writes
+push access, the labels) and, per adopted issue, four more (the issue, its parent, its dependencies, its comments),
+and writes nothing there. It writes
 `handoff_dryrun.md` in the store: the labels it will create, every issue
 with its title, labels and body, every link, the `Writes:` line with the
 counts, and the `Confirmed write list sha256`. On a later filing it names
 the tracking issue it will rewrite. The refusals (`changed after the gate`,
 `split the handoff`, `scan failed`, a missing `extra` label, no push access)
 end the skill with the line shown.
+
+A unit whose section carries `Issue: #<n>` is adopted, not created: the dry
+run reads that issue and refuses one it cannot adopt (`adopt: #<n> is
+closed`, `not in <repo>`, `is a pull request`, `has a parent`, `has
+dependencies`, `carries superegm labels`, `carries a ruling comment`), each
+ending the skill with the line shown. `handoff_dryrun.md` heads such a unit
+`### edit #<n> <unit> (old body sha256 <hex>)` where a created unit reads
+`### issue <unit>`: Step 4 adds the unit labels to that issue and replaces
+its body with the rendered one, keeping its title, other labels and
+comments.
 
 Then the one question, as the sole tool call of its turn, with the numbers
 from the `Writes:` line and the repository from the config, and no
@@ -121,6 +132,10 @@ and reads everything back (Step 5's check, run once by `apply` itself).
 *   For a large filing (the dry run warned above 450 writes) run it as
     `python3 '<HELPER>' apply --yes --spec '<SpecPath>' --runcard '<CARD>' --max-writes <N>`
     in several calls, until it no longer prints `stopped after`.
+*   `adopt: #<n> body changed since the dry run` (or `adopt: #<n> not in
+    <repo>`): the adopted issue changed, or went, between the dry run and
+    the writes; nothing was written. The owner re-runs the dry run (Step 3)
+    and answers the question again.
 *   A filed issue body is never edited; a deviation during the build is a comment on the issue (§10).
 
 ## Step 5: The read-back

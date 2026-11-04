@@ -3,7 +3,7 @@
 Date: 2026-11-03. Status: 1.0.0 released from review cycle 2 (round 5, the cap; cycle 1 ended at
 round 6 by the judges' ruling `q-close`: a new approach, not another patch; those cycles are
 records outside the store); amendment 2 is under its own spec review for 1.1.0 in the store's
-own numbering (cycle `spec-2026-11-03-superegm-design-c2`). Owner: gsVAM.
+own numbering (cycle `spec-2026-11-03-superegm-design-c2`; owner rulings 2026-11-04 on zoom-out-1-4 and 1-7 (orient re-run on re-render; `--unit` writes unit files only)). Owner: gsVAM.
 Inputs: the brainstorm brief (stream 4); the SuperEGM judge-panel verdict (converged, round 2 of
 5); the cap-panel verdict on EGM 0.2.1; superpowers 7.0.0 and the EGM Astra fork at commit
 9bc49d4, both surveyed file by file; six goldfish rounds of cycle 1 (75, 75, 74, 61, 53, 65
@@ -831,7 +831,9 @@ is run in at `--ref` (default `HEAD`), exported with `git archive <ref>` into th
 call), so an uncommitted edit, an untracked or an ignored file never reaches it or graphify.
 Every call exports and, with graphify, builds afresh. Without `--unit` it writes `orient/map.md`
 and, when a handoff is open in the store (a `handoff_id` in `state.json` with no `closed_at`),
-every unfiled unit's file; with `--unit` it writes the named units' files only. A unit whose
+every unfiled unit's file; with `--unit` it writes the named units' files only. With `--unit`,
+`orient` writes the unit files only and leaves `orient/map.md` untouched; the map is written by
+a run without `--unit`. A unit whose
 section is not in the store's `handoff_plan.md` is refused (`orient: U12 is not in the plan: run
 graph --plan first`). It prints one line per file written, `<store path> <bytes>`, and exits 0,
 or 1 with `orient: <reason>`. Every read is best-effort (`errors="replace"`), files over 1 MB are
@@ -875,7 +877,7 @@ reads the files:
 | Caller | What it does |
 | --- | --- |
 | `plan` | runs `orient --spec <path>` under its card before drafting and after every `graph --plan` (the map, and every unfiled unit's file once a handoff is open); the elephant reads `orient/map.md` before drafting |
-| `review-plan` | runs `orient --spec <path>` under its card when it starts and after every `graph --plan` it runs (a fix re-rendered the bodies), names `<6 hex>/orient/<unit>.md` in the `readiness` goldfish's brief (`skills/review-plan/SKILL.md` Step 2) and records that dispatch `--isolation exposed:orient <tree sha>` (with whatever else the goldfish reports); when the file is absent the brief says so |
+| `review-plan` | runs `orient --spec <path>` under its card when it starts and after every `graph --plan` it runs (a fix re-rendered the bodies), names `<6 hex>/orient/<unit>.md` in the `readiness` goldfish's brief (`skills/review-plan/SKILL.md` Step 2) and records that dispatch `--isolation exposed:orient <tree sha>` (with whatever else the goldfish reports); when the file is absent the brief says so; `review-plan` reruns `orient --unit U<id>` after each `graph --plan` re-render of a unit, so a round reads a fresh unit file |
 | `launch-builder` | fetches the launch's ref (`refs/superegm/base`, `launch`'s fetch of `origin/<base>`, in round 1; `refs/superegm/pr/<n>`, the PR tip, after: the tree the builder gets, §11), then, before it adds the worktree, calls `orient` in process with `--unit U<id> --ref <ref>` and refuses the launch with `orient`'s line when it fails, an ordinary precondition that leaves no worktree or branch behind; then writes the file's text into the prompt file under a `# Orient` heading, so `prompt_sha256` covers it; `builder_orders.md` says "read the `# Orient` section before Step 1" |
 
 **Determinism.** The extractor is a function of the exported tree; the projection into
