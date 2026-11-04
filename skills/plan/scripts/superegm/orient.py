@@ -417,6 +417,19 @@ def scope_of(plan, unit: str):
   return plan.units[unit].scope
 
 
+def orient_unit(store, repo_root: Path, ref: str, unit: str) -> Path:
+  """One unit's file, written in process for `launch-builder`: the plan check, then the export
+  (its ref check first), then the graph build, so a refusal leaves no fresh export and runs no
+  graphify; returns the file's path."""
+  scope = scope_of(stored_plan(store), unit)
+  tree = export_tree(repo_root, ref, store)
+  export = store.path("orient", "export")
+  graph, token = build_graph(export, store.path("orient", "graphify-out"))
+  path = store.path("orient_unit", f"{unit}.md")
+  core.atomic_write(path, unit_text(export, scope, graph, tree, token))
+  return path
+
+
 def run(args) -> int:
   core.require_runcard(args, SKILLS)
   repo_root = core.git_toplevel(Path.cwd())
