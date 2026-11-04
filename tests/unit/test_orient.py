@@ -92,3 +92,30 @@ def test_graph_projection_on_the_fixture_graph():
   head = orient.map_text(TREE, graph, T, "a" * 64).split("## Map\n")[0]
   assert head.endswith("## Graph\nnodes 6 · edges 4 · communities 2 · extracted 2/4\n"
                        "community 0: 4 nodes · src/worker.py, tests/check_worker.py\ncommunity 1: 2 nodes · src/queue.py, web/index.ts\n")
+
+
+@pytest.mark.parametrize("case, trimmed", [
+  ("docs", "tests, read-first"),
+  ("signatures", "tests, read-first, graph-outside, graph-inside, graph-nodes, signatures:src/worker.py"),
+  ("map-depth", "depth 1"),
+])
+def test_trimming_sequence(tmp_path, case, trimmed):
+  from superegm import orient
+  tree = tmp_path / "tree"
+  if case == "map-depth":
+    for i in range(600):
+      (tree / f"d{i:03d}/e/f/g").mkdir(parents=True); (tree / f"d{i:03d}/e/f/g/x.py").write_text("x = 1\n", encoding="utf-8")
+    text = orient.map_text(tree, None, T, "not installed")
+    assert len(text.splitlines()) == 603 and "d000/e" not in text
+  else:
+    shutil.copytree(TREE, tree)
+    graph = json.loads(GRAPH.read_text(encoding="utf-8"))
+    if case == "docs":
+      (tree / "CLAUDE.md").write_text("## src/worker.py\n\n" + "x " * 9_000 + "\n", encoding="utf-8")
+    else:
+      (tree / "src/worker.py").write_text("".join(f"def f{i}(): pass\n" for i in range(2_000)), encoding="utf-8")
+    text = orient.unit_text(tree, [("src/worker.py", "modify"), ("src/queue.py", "modify")], None if case == "docs" else graph, T, "not installed")
+    assert "## Read first" not in text and "tests:" not in text and "## src/worker.py (modify)" in text
+    assert "def f1999(): pass" not in text and ("def work(job: str) -> int:" in text) == (case == "docs") and "def enqueue(job: str) -> None:" in text
+  cap = 24_576 if case == "map-depth" else 16_384
+  assert len(text.encode("utf-8")) <= cap and text.splitlines()[0].endswith(f" · trimmed: {trimmed}")
