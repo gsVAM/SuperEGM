@@ -1,7 +1,7 @@
 {
   "repo": "gsVAM/superegm",
   "base": "main",
-  "artifacts_dir": "~/.cache/superegm/build",
+  "artifacts_dir": "/Users/g.singhal/.cache/superegm/build",
   "mode": "leavemealone",
   "max_in_flight": 5,
   "labels": {
@@ -13,10 +13,12 @@
     "extra": []
   },
   "issue_template": null,
-  "tracking_issue_title": "SuperEGM 1.0.0 handoff: 2026-11-03-superegm-design",
+  "tracking_issue_title": "SuperEGM 1.1.0 handoff: 2026-11-03-superegm-design (U12-U14)",
   "banned_terms": [],
   "fix_request_mention": null,
-  "allowed_mentions": [],
+  "allowed_mentions": [
+    "@pytest"
+  ],
   "reviewers": {
     "spec": [
       "design",
