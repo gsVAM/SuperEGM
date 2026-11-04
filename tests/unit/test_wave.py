@@ -372,3 +372,24 @@ def test_the_owners_close_is_stop_without_a_question(world):
   assert "- U01 (owner: closed #70 by owner): unlanded dependants" in (world.run("report", "--runcard", card), s.path("wave_report", 1).read_text(encoding="utf-8"))[1]
   code, out = world.run("decision", "rule", "--unit", "U01", "--ruling", "stop the unit", "--by", "owner", "--runcard", card)
   assert code == 1 and out == "decision: --decision is required unless --posted closed:<n>\n"
+
+
+# ---------------------------------------------------------------- S8: a re-typed wave resumes from the store
+
+
+def test_a_retyped_wave_raises_every_pending_decision_before_its_first_batch(world):
+  card1 = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"},
+                 U02={"pr": 71, "head": "b" * 40, "ci": "green", "launches": [{"round": 1, "status": "exited 0"}],
+                      "rounds": [{"round": 1, "phase": "collected", "outcome": "not run (error: fetch failed)", "launch": 1, "head": "b" * 40}]})
+  qid = world.run("decision", "open", "--unit", "U01", "--point", 3, "--question", question(world), "--source", "comment 77",
+                  "--runcard", card1)[1].splitlines()[0]
+  card2 = open_wave_card(world)  # the re-typed wave; card1 is interrupted (section 6)
+  code, out = world.run("report", "--runcard", card2)
+  assert code == 0 and f"pending: U01 {qid} (point 3, comment 77)" in out and "loop: continuing (in flight: U02)" in out, out
+  assert f"## Pending decisions\n- U01 {qid} (point 3, comment 77): Which queue?" in s.path("wave_report", 2).read_text(encoding="utf-8")
+  assert world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", "(a)", "--by", "owner", "--runcard", card2)[0] == 0
+  code, out = world.run("report", "--runcard", card2)
+  assert "pending: none" in out and "loop: continuing (in flight: U01, U02)" in out
+  assert world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", "(a)", "--by", "owner", "--runcard", card2)[0] == 1
+  assert world.run("report", "--runcard", card1)[0] == 1, "an interrupted card is not open"
