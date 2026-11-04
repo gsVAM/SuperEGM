@@ -108,13 +108,15 @@ def builder_login(config, token_env_value):
   return builder
 
 
-def origin_problems(repo_root, base, approval):
-  """What `refs/superegm/base` (origin/<base>, just fetched) lacks for a launch (spec section 11)."""
+def origin_problems(repo_root, base, approval=None):
+  """What `refs/superegm/base` (origin/<base>, just fetched) lacks for a launch (spec section 11);
+  without an approval (`doctor`) the spec-hash line is skipped."""
   ref, problems = "refs/superegm/base", []
-  rel = Path(approval["path"]).resolve().relative_to(repo_root.resolve()).as_posix()
-  blob = subprocess.run(["git", "cat-file", "-p", f"{ref}:{rel}"], cwd=str(repo_root), capture_output=True).stdout
-  if hashlib.sha256(blob).hexdigest() != approval["sha256"]:
-    problems.append(f"spec at origin/{base} is not the approved bytes")
+  if approval:
+    rel = Path(approval["path"]).resolve().relative_to(repo_root.resolve()).as_posix()
+    blob = subprocess.run(["git", "cat-file", "-p", f"{ref}:{rel}"], cwd=str(repo_root), capture_output=True).stdout
+    if hashlib.sha256(blob).hexdigest() != approval["sha256"]:
+      problems.append(f"spec at origin/{base} is not the approved bytes")
   if subprocess.run(["git", "cat-file", "-e", f"{ref}:.superegm/config.json"], cwd=str(repo_root), capture_output=True).returncode:
     problems.append(f".superegm/config.json is absent at origin/{base}")
   names = core.run_git(["ls-tree", "--name-only", f"{ref}:.github/workflows"], repo_root, check=False).split()
