@@ -720,3 +720,33 @@ def test_apply_refuses_an_adopted_body_changed_since_the_dry_run(world):
   del world.gh.issues[7]
   code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes")
   assert code == 1 and f"adopt: #7 not in {REPO}" in out, out
+
+
+def test_apply_adopts_the_issue_labels_first_then_the_body_and_links_it(world):
+  from superegm.launch_builder import filed_body
+  spec, plan, handoff_id, card = adopt_dry_run(world)
+  gh, six = world.gh, handoff_id[-6:]
+  gh.comments[7] = [{"id": 1, "body": "an ordinary comment", "user": {"login": "someone"}}]
+  code, out = world.run("apply", "--spec", spec, "--runcard", card, "--yes")
+  assert code == 0, out
+  assert [c[c.index("--title") + 1] for c in gh.calls if c[:2] == ["issue", "create"]] == ["Build: Sample design", "U01: Queue", "U03: Admin endpoint"]
+  edits = [c for c in gh.calls if c[:2] == ["issue", "edit"] and c[2] == "7"]
+  assert [("--add-label" in c, "--body-file" in c, "--title" in c) for c in edits] == [(True, False, False), (False, True, False)]
+  assert edits[0][edits[0].index("--add-label") + 1] == f"superegm:handoff-{six},superegm:unit,superegm:wave-2"
+  issue = gh.issues[7]
+  assert issue["title"] == "Old #7" and issue["labels"] == ["bug", f"superegm:handoff-{six}", "superegm:unit", "superegm:wave-2"]
+  assert issue["body"].startswith(f"<!-- superegm:handoff={handoff_id} unit=U02 spec=") and "Blocked by: #2 ·" in issue["body"]
+  assert "Part of #1" in issue["body"] and "#<" not in issue["body"] and gh.comments[7][0]["body"] == "an ordinary comment"
+  assert "Blocked by: #7 ·" in gh.issues[3]["body"]                                  # U03's placeholder resolves to the adopted number
+  assert gh.sub_issues[1] == [gh.issues[2]["id"], issue["id"], gh.issues[3]["id"]]
+  assert gh.blocked_by == {7: [gh.issues[2]["id"]], 3: [issue["id"]]}
+  state = state_of(world)
+  assert state["units"]["U02"] | {"number": 7, "id": issue["id"], "done": True, "wave": 2} == state["units"]["U02"]
+  assert state["verify"]["complete"] is True and state["verify"]["problems"] == [] and state["verify"]["checked"] == "16 of 16"
+  assert filed_body(state, "U02") == issue["body"]                                   # the fixed-field reader is unchanged
+  gh.calls.clear()
+  assert world.run("apply", "--spec", spec, "--runcard", card, "--yes")[0] == 0
+  assert not any(c[0] == "label" or c[:2] in (["issue", "create"], ["issue", "edit"]) or "POST" in c for c in gh.calls)
+  issue["body"] += "edited by hand\n"
+  code, out = world.run("verify", "--spec", spec, "--runcard", card)
+  assert code == 1 and "MISMATCH body of #7 (U02)" in out, out
