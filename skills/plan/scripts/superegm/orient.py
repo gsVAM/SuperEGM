@@ -265,7 +265,16 @@ def unit_text(export: Path, scope: list[tuple[str, str]], graph, tree: str, toke
     edges = edges_of(graph, nodes)
     lines += [l for path, _ in scope for l in graph_section(path, scope, nodes, edges)]
   lines += read_first(export, scope)
-  return render(lines, tree, token, [], set())
+  levels = ["tests", "siblings", "read-first", "graph-outside", "graph-inside", "graph-nodes", *(f"signatures:{p}" for p, _ in scope)]
+  present, dropped = {level for level, _ in lines}, []
+  text = render(lines, tree, token, dropped, set())
+  for level in levels:  # the trimming sequence, a level recorded only when it removed something
+    if len(text.encode("utf-8")) <= CAP_UNIT:
+      break
+    if level in present:
+      dropped.append(level)
+      text = render(lines, tree, token, dropped, set(dropped))
+  return text
 
 
 # ---------------------------------------------------------------- the map
@@ -283,30 +292,49 @@ def doc_summary(text: str) -> str:
 def map_lines(export: Path, depth: int) -> list[str]:
   """One line per directory to `depth` over the tracked files: path, file count, dominant
   extension (ties by name), entry points, the documentation files' summaries (≤ 160 chars)."""
-  files = walk(export, skip=True)
-  folders = sorted({".", *(str(a) for f in files for a in PurePosixPath(f).parents if str(a) != ".")})
+  stats = {".": {"count": 0, "exts": {}, "own": []}}
+  for f in walk(export, skip=True):
+    p = PurePosixPath(f)
+    for folder in (".", *(a.as_posix() for a in reversed(p.parents) if a.as_posix() != ".")):
+      if folder != "." and folder.count("/") + 1 > depth:
+        break
+      st = stats.setdefault(folder, {"count": 0, "exts": {}, "own": []})
+      st["count"] += 1
+      st["exts"][p.suffix] = st["exts"].get(p.suffix, 0) + 1
+      if folder == str(p.parent):
+        st["own"].append(p.name)
   lines = []
-  for folder in folders:
-    if folder != "." and folder.count("/") + 1 > depth:
-      continue
-    under = files if folder == "." else [f for f in files if f.startswith(folder + "/")]
-    exts = {}
-    for f in under:
-      exts[PurePosixPath(f).suffix] = exts.get(PurePosixPath(f).suffix, 0) + 1
-    dominant = min(exts, key=lambda e: (-exts[e], e)) if exts else ""
-    own = [PurePosixPath(f).name for f in under if str(PurePosixPath(f).parent) == folder]
-    entries = [n for n in sorted(own) if ENTRY_RE.match(n)]
-    docs = "; ".join(f"{n}: {doc_summary(read(export / folder / n) or '')}" for n in DOCS if n in own)[:160]
-    lines.append(f"{folder} | {len(under)} files | {dominant or '-'} | {', '.join(entries) or '-'} | {docs or '-'}")
+  for folder, st in sorted(stats.items()):
+    dominant = min(st["exts"], key=lambda e: (-st["exts"][e], e)) if st["exts"] else ""
+    entries = [n for n in sorted(st["own"]) if ENTRY_RE.match(n)]
+    docs = "; ".join(f"{n}: {doc_summary(read(export / folder / n) or '')}" for n in DOCS if n in st["own"])[:160]
+    lines.append(f"{folder} | {st['count']} files | {dominant or '-'} | {', '.join(entries) or '-'} | {docs or '-'}")
   return lines
 
 
 def map_text(export: Path, graph, tree: str, token: str) -> str:
-  """`orient/map.md`: the graph's summary when there is one, then the repository map."""
+  """`orient/map.md`: the graph's summary when there is one, then the repository map; the
+  community list is cut to what fits beside the map, then the depth is reduced until it fits."""
   export = Path(export)
-  first = f"orient: tree {tree} · graphify: {token} · trimmed: nothing"
-  head = []
+  counts, communities = [], []
   if graph is not None:
     nodes = nodes_of(graph, export)
-    head = ["## Graph", *graph_summary(nodes, edges_of(graph, nodes), 40)]
-  return "\n".join([first, *head, "## Map", *map_lines(export, MAP_DEPTH)]) + "\n"
+    counts, *communities = graph_summary(nodes, edges_of(graph, nodes), 40)
+  kept, depth = len(communities), MAP_DEPTH
+
+  def build():
+    cut = ([f"communities {kept}"] if kept < len(communities) else []) + ([f"depth {depth}"] if depth < MAP_DEPTH or kept < len(communities) else [])
+    first = f"orient: tree {tree} · graphify: {token} · trimmed: {', '.join(cut) or 'nothing'}"
+    head = ["## Graph", counts, *communities[:kept]] if graph is not None else []
+    return "\n".join([first, *head, "## Map", *rows]) + "\n"
+
+  rows = map_lines(export, depth)
+  text = build()
+  while len(text.encode("utf-8")) > CAP_MAP and kept > 0:
+    kept -= 1
+    text = build()
+  while len(text.encode("utf-8")) > CAP_MAP and depth > 0:
+    depth -= 1
+    rows = map_lines(export, depth)
+    text = build()
+  return text
