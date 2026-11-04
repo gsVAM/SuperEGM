@@ -3,6 +3,7 @@
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch."""
 
+import json
 import os
 import re
 from pathlib import Path
@@ -83,14 +84,22 @@ def refusal(store, state, config, unit, rnd, builder):
 
 
 def profile_problem(profile_dir):
-  """Spec section 4: the builder profile exists, holds no CLAUDE.md and no plugins."""
-  plugins = profile_dir / "plugins"
+  """Spec sections 4 and 11: the builder profile exists, holds no CLAUDE.md, no plugins and no hooks
+  (a `settings.json` with a `hooks` key)."""
+  plugins, settings = profile_dir / "plugins", profile_dir / "settings.json"
   if not profile_dir.is_dir():
     return f"builder profile {profile_dir} does not exist"
   if (profile_dir / "CLAUDE.md").exists():
     return f"builder profile {profile_dir} holds CLAUDE.md"
   if plugins.is_dir() and any(plugins.iterdir()):
     return f"builder profile {profile_dir} holds plugins"
+  if settings.is_file():
+    try:
+      data = json.loads(settings.read_text(encoding="utf-8"))
+    except ValueError:  # not JSON: no hooks key to find
+      data = None
+    if isinstance(data, dict) and "hooks" in data:
+      return f"builder profile {profile_dir} holds hooks"
   return None
 
 
