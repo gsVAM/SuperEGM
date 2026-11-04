@@ -195,3 +195,25 @@ def test_orient_writes_the_map_and_every_unfiled_unit(world, no_graphify):
   assert st.path("orient_unit", "U02.md").read_text(encoding="utf-8") == u02 and "README.md" not in st.path("orient", "map.md").read_text(encoding="utf-8")
   assert world.run("orient", "--spec", world.spec, "--runcard", world.card("review-plan"))[0] == 0
   assert "README.md: Hooks" in st.path("orient", "map.md").read_text(encoding="utf-8") and st.path("orient_unit", "U02.md").read_text(encoding="utf-8").splitlines()[0] == first("HEAD")
+
+
+@pytest.mark.parametrize("case, reason", [
+  ("no-card", "runcard: --runcard is required"),
+  ("file-card", "runcard: file-0001 belongs to file, not orient|plan|review-plan|wave"),
+  ("no-plan", "orient: U01 is not in the plan: run graph --plan first"),
+  ("not-in-plan", "orient: U09 is not in the plan: run graph --plan first"),
+  ("bad-ref", "orient: ref nope is not in this repository"),
+])
+def test_orient_refusals(world, no_graphify, case, reason):
+  from superegm import store
+  st, argv = store(world.repo), ["orient", "--spec", world.spec]
+  if case != "no-card":
+    argv += ["--runcard", world.card("file" if case == "file-card" else "plan")]
+  if case == "no-plan":
+    argv += ["--unit", "U01"]
+  if case == "not-in-plan":
+    assert world.run("graph", "--plan", world.plan)[0] == 0; argv += ["--unit", "U09"]
+  if case == "bad-ref":
+    argv += ["--ref", "nope"]
+  code, out = world.run(*argv)
+  assert code == 1 and out.strip() == f"superegm: {reason}" and not st.path("orient").exists(), out
