@@ -1,7 +1,7 @@
 {
   "repo": "gsVAM/superegm",
   "base": "main",
-  "artifacts_dir": "/Users/g.singhal/.cache/choreograph-audit/superegm/build",
+  "artifacts_dir": "~/.cache/superegm/build",
   "mode": "leavemealone",
   "max_in_flight": 5,
   "labels": {
@@ -66,7 +66,7 @@
     ]
   },
   "builder": {
-    "profile_dir": "/Users/g.singhal/.claude-superegm-builder",
+    "profile_dir": "~/.claude-superegm-builder",
     "model": "claude-sonnet-5-5",
     "permission_mode": "acceptEdits",
     "gh_token_env": "SUPEREGM_BUILDER_TOKEN",

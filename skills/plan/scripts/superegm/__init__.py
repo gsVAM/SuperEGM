@@ -528,6 +528,11 @@ def load_config(repo_root: Path) -> dict:
                          "set `repo` in .superegm/config.json")
   if not REPO_RE.match(config["repo"]):
     raise HandoffError(f"invalid repo `{config['repo']}` in {path}")
+  if config["artifacts_dir"]:
+    config["artifacts_dir"] = str(Path(config["artifacts_dir"]).expanduser())
+  builder = config["builder"]
+  if isinstance(builder, dict) and isinstance(builder.get("profile_dir"), str):
+    builder["profile_dir"] = str(Path(builder["profile_dir"]).expanduser())
   artifacts = config["artifacts_dir"]
   if not artifacts or not Path(artifacts).is_absolute() \
       or Path(artifacts).resolve().is_relative_to(repo_root.resolve()):
