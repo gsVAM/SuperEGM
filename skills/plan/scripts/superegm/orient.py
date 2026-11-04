@@ -10,7 +10,11 @@ public signatures, tests and documentation sections are copied per Scope path, g
 import ast
 import os
 import re
+import shutil
+import tarfile
 from pathlib import Path, PurePosixPath
+
+import superegm as core
 
 CAP_UNIT, CAP_MAP, MAP_DEPTH = 16_384, 24_576, 4
 DOCS = ("README.md", "AGENTS.md", "CLAUDE.md", "context.md")
@@ -43,6 +47,22 @@ def named(text: str, tokens: list[str]) -> bool:
 
 
 # ---------------------------------------------------------------- the export
+
+
+def export_tree(repo_root: Path, ref: str, store) -> str:
+  """The tracked files at `ref` into the store's `orient/export/` (emptied first) through one
+  `git archive`, regular files and directories only; returns the tree's sha."""
+  tree = core.run_git(["rev-parse", "--verify", f"{ref}^{{tree}}"], repo_root, check=False).strip()
+  if not tree:
+    raise core.HandoffError(f"orient: ref {ref} is not in this repository")
+  export, tar = store.path("orient", "export"), store.path("orient", "export.tar")
+  shutil.rmtree(export, ignore_errors=True)
+  export.mkdir(parents=True)
+  core.run_git(["archive", "--format=tar", "-o", str(tar), ref], repo_root)
+  with tarfile.open(tar) as archive:
+    archive.extractall(export, members=[m for m in archive.getmembers() if m.isfile() or m.isdir()], filter="data")
+  tar.unlink()
+  return tree
 
 
 def walk(root: Path, skip=False) -> list[str]:
