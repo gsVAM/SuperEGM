@@ -44,6 +44,27 @@ def test_config_defaults_and_remote_resolution(tmp_path, capsys, monkeypatch):
   assert code == 1 and "unknown keys" in out
 
 
+def test_artifacts_dir_and_profile_dir_expand_tilde(tmp_path, capsys, monkeypatch):
+  """A committed config names no local username: `~` expands before the
+  absolute-outside-the-tree check, and the expanded path is what the store uses."""
+  w = make_world(tmp_path, capsys, monkeypatch)
+  monkeypatch.setenv("HOME", str(tmp_path))
+  path = w.repo / ".superegm/config.json"
+
+  def load(artifacts):
+    builder = {**w.ns["DEFAULT_CONFIG"]["builder"], "profile_dir": "~/builder"}
+    path.write_text(json.dumps({"repo": REPO, "artifacts_dir": artifacts, "builder": builder}), encoding="utf-8")
+    return w.ns["load_config"](w.repo)
+
+  config = load("~/.cache/superegm/build")
+  assert config["artifacts_dir"] == str(tmp_path / ".cache/superegm/build")
+  assert config["builder"]["profile_dir"] == str(tmp_path / "builder")
+  assert w.ns["store"](w.repo).root == tmp_path / ".cache/superegm/build"
+  for refused in ("build/store", "~/repo/store"):
+    with pytest.raises(w.ns["HandoffError"], match="absolute path outside the working tree"):
+      load(refused)
+
+
 
 
 
