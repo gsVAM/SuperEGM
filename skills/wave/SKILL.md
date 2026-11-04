@@ -13,7 +13,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: renamed to wave; Codex line removed; helper and plan reference paths under skills/plan. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11. -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the wave skill. Not part of google/elephant-goldfish-model. -->
 
@@ -22,314 +22,212 @@ description: >-
 In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.
 
 This skill runs in Claude Code only. In any other host reply with one line,
-`egm-wave runs in Claude Code only`, and stop.
+`wave runs in Claude Code only`, and stop.
 
 ## What it does
 
-A handoff filed by `/egm:egm-handoff` has issues on GitHub and a state file.
-This skill launches the units whose incoming edges have landed, assigns a
-**foreman** to each in-flight issue, and runs one review per PR head: the
-Astra `inspect` lane through the claudex-loop runner plus the panel's Claude
-goldfish (`egm-change-review`, and `egm-codebase-details` in the Full panel)
-on the PR diff, with the CI results as evidence. Findings go to the PR as
-one review comment per round after the user confirms it; the builder fixes;
-the next head starts the next round; the review ends on the first converged
-round (`resources/review_panels.md` section 7), cap 5 then pause. A unit lands when its issue is closed as completed and its
-watched PR is merged.
+A filed handoff's units are built by builders and reviewed by foremen while
+you, the elephant, drive one loop from this conversation (design section 11).
+`superegm launch` marks the ready units up to `max_in_flight`; you launch one
+builder per marked unit as the builder account (`launch-builder` writes the
+prompt file and the command line, `record-launch` records the launch and,
+later, its exit); the builder pushes its unit branch and opens a draft pull
+request it can never merge. Every head with concluded CI gets one review
+round from a **foreman**: a per-unit elephant dispatched through its own
+adapter (`superegm:foreman`, `omitClaudeMd: true`), which dispatches the
+head's goldfish panel (zero-context, read-only, each through its own
+adapter), records the findings, posts one review comment bound to the
+reviewed commit, and returns one word. You handle the word (the table
+below); the builder answers the review in its next launch.
 
-**Builder backend: local only.** The issues are built on the user's own machine, by whoever picks
-them up: an agent fleet, a coding-agent service, a person. Dispatch of
-builders to cloud sandboxes is planned and not in this release; if the
-user asks the skill to dispatch a builder, say so in one line and continue
-with local builders. **What stays human**: marking a PR ready, approving,
-merging, closing issues, deleting branches, editing issues after creation
-(except the wave label on deferral). The foreman and the elephant never push
-to a PR branch and never use `--approve` or `--request-changes`.
+Your only GitHub writes are the `**Ruling:**` comment `decision rule` posts
+and the `superegm:stopped` label a stop adds. Merge is human: the owner
+alone updates `<base>`; nothing here approves, merges, closes an issue or
+pushes to a builder's branch. One command at a time: the helper is
+single-writer. `<HELPER>` = `${CLAUDE_PLUGIN_ROOT}/skills/plan/scripts/superegm.py`;
+run every helper call as one Bash call, `python3 '<HELPER>' <subcommand> …`,
+absolute paths in single quotes, no chaining; `superegm <subcommand>` below
+stands for that. Every writing call carries `--runcard '<CARD>'`; a refusal
+is one `superegm: <reason>` line, exit 1.
 
-## Inputs
+## Entry: resume from the store
 
-*   **`HandoffState`**: path of `handoff_state.json`.
-*   **`Wave`** (optional): a number; default the next wave with ready units.
-*   **`Panel`** (optional): `astra | focused | full` (`resources/review_panels.md`).
+1. Run `python3 '<HELPER>' runcard open --skill wave --artifact '<spec>'`
+   (`<spec>` is the approved spec the invocation named), adding
+   `--mode leavemealone` when the invocation said `--leavemealone` or the
+   config's `mode` is `leavemealone`: the mode is recorded on the card and
+   acted on by the leavemealone wiring. The printed id is `<CARD>`; a card
+   still open on this spec is marked interrupted by the new one.
+2. Run `python3 '<HELPER>' report --runcard '<CARD>'`. Everything is derived
+   from the store: pending decisions from `decisions[]` minus `rulings[]`,
+   launches in flight from `launches[].status`, rounds from `rounds[]`, idle
+   units from this card alone (idle never carries over). Its lines: the
+   report path, `idle:`, `pending:`, `loop:`.
+3. Rule every `pending:` item first, through its decision point below (the
+   source names the point: `comment <id>`, `launch <n>` and `closed <n>` are
+   point 3; `review <id> round <n>` is point 1; `review <id> cap` is point
+   2). Before asking a point-3 question, read the issue's comments (the
+   by-hand rulings section): a `**Ruling:**` already posted rules it.
+4. Run `report` again. `loop: ended` → The end. Otherwise run batches.
 
-`<HELPER>` = `${CLAUDE_PLUGIN_ROOT}/skills/plan/scripts/superegm.py`;
-`<STATE>` = `HandoffState`. One command per Bash call, absolute paths in
-single quotes, no chaining. The helper's commands are listed in
-`skills/plan/references/handoff_plan.md` section 6.
+Builders a previous invocation left running report through `status --wait`'s
+`exit` lines. Nothing recorded is launched, ruled or reviewed twice: `launch`,
+`launch-builder`, `decision rule` and `foreman dispatch` refuse, and you take
+a refusal as the fact it states, never as an error to retry.
 
-## Entry: one status pass
+## A batch
 
-1.  Read `resources/review_panels.md` section 1 (the `printenv` command now
-    also reads `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`), the allowlists, the
-    Astra preflight and the run card. The card gets the two rows of
-    `resources/review_panels.md` section 2 for this skill (Builder,
-    Foreman) and the readiness line.
-2.  Run `python3 '<HELPER>' status --state '<STATE>'`. It refuses unless the
-    state holds a verify receipt that is `complete: true`, bound to the
-    current `confirmed_sha256`, with an empty problem list: `the handoff is
-    not fully created and verified: run apply --yes, then verify`. Tell the
-    user that line and stop; a partial handoff is never launched.
-3.  The pass reports, over all units: landed and ready sets, each launched
-    unit's PR, head, CI and landed state, candidate PRs, open blocking
-    decisions, and open PRs that close issues of units not yet launched (the
-    user can launch those units now or ignore them). **Ready** = every
-    incoming graph edge has landed (blockers and shared-file `after`
-    predecessors, the edges `graph` used for the waves) and no `decide
-    before build` item with `blocking: yes` is open. Waves are the plan;
-    readiness is the live rule, so a later unit whose edges landed early may
-    start when the user agrees.
-4.  **Landed** = the issue is closed with `state_reason: completed` and the
-    recorded PR has `mergedAt`. An issue closed without a watched PR shows
-    `closed (no watched PR)` and lands only when the user confirms it at the
-    wave gate (`status --confirm-landed U03`).
-5.  **Re-entry** (a later session): the skill is re-entrant from
-    `handoff_state.json`, `wave_<n>_plan.md` and `foreman_<id>_state.json`
-    alone. Re-read the foreman files, mark a run folder left `running` as
-    `not run (killed)`, respawn a foreman per unit still in flight, and
-    continue.
+Run `python3 '<HELPER>' status --wait 1500 --runcard '<CARD>'` from this
+main conversation with `run_in_background: true` (Bash timeout 1,800,000
+ms). It returns every unreported event since its last save, one line each
+(`head`, `exit`, `status`, `landed`, `closed`), or `deadline`. Handle every
+line before calling it again, in this order; lines for a stopped unit are
+ignored except `landed`:
 
-## The wave gate
+1. `landed` lines: the unit is done; its dependants become ready (`launch`
+   sees them at step 5).
+2. `closed` lines: a non-builder actor closed the PR unmerged or the issue
+   → the owner has ruled; run
+   `python3 '<HELPER>' decision rule --unit <U> --ruling 'stop the unit' --by <login> --posted closed:<n> --runcard '<CARD>'`.
+   The builder account closed it → Decision point 3 (source `closed <n>`).
+3. `exit` and `status` lines, one folded decision per unit. First record the
+   exit: `python3 '<HELPER>' record-launch --unit <U> --exit <code> --runcard '<CARD>'`.
+   Then: `DONE` and `DONE_WITH_CONCERNS` need nothing (the head is reviewed
+   at step 4); `BLOCKED` or `NEEDS_CONTEXT`, an exit with no PR
+   (`pr=none`), or an interrupted launch → Decision point 3.
+4. `superegm foreman dispatch` for every active unit with a head, `deadline`
+   included: `python3 '<HELPER>' foreman dispatch --unit <U> --runcard '<CARD>'`.
+   It prints `<dispatch-id> <child-card>` when section 11's predicate holds
+   (CI concluded, the latest launch terminal, no round posted since it, no
+   decision pending, the review not stalled) and refuses otherwise: skip a
+   refused unit, except exit 1 `recovered <word>`, which is the foreman's
+   word for a round the PR already carries. Dispatch every accepted unit's
+   foreman **in one message**, each through the `superegm:foreman` adapter,
+   named `foreman-<U>-<dispatch-id>`, in the foreground, with the brief of
+   `references/foreman_brief.md` filled in. Then `word_action` per returned
+   word (the table below).
+5. `superegm launch`:
+   `python3 '<HELPER>' launch --idle <the report's idle list> --runcard '<CARD>'`
+   (omit `--idle` when the list is `none`) marks the ready units up to the
+   free slots and prints `in flight:` and `marked:`. Per marked unit:
+   `python3 '<HELPER>' launch-builder --unit <U> --round <n> --runcard '<CARD>'`
+   (`<n>` is the launch count; its last line is the command: run it with
+   `run_in_background: true`), then
+   `python3 '<HELPER>' record-launch --unit <U> --runcard '<CARD>'`. A
+   `launch-builder` refusal makes the unit idle for this invocation:
+   `python3 '<HELPER>' report --idle '<U>=launch-builder: <reason>' --runcard '<CARD>'`.
+6. `superegm report`: `python3 '<HELPER>' report --runcard '<CARD>'`. If a
+   decision was opened this batch, pause: ask the owner at its decision
+   point and run `report` again once ruled. Else `loop: ended` → The end;
+   otherwise the next batch.
 
-1.  Write `wave_<n>_plan.md`: the run card, the ready units (critical-path
-    units first) each with its issue URL, its branch
-    `egm/<handoff-id>/<unit-id>` and its foreman arrangement, the open
-    blocking decisions with owner and default, the candidates, and the
-    in-flight units' state.
-2.  Ask one question: launch, change the set (exclude or defer a unit, which
-    also defers its dependents), answer an open blocking decision, or stop.
-    *   **Defer**: `python3 '<HELPER>' defer --state '<STATE>' --unit U05
-        --to-wave <n+1> --yes` (one `gh issue edit` of the wave label,
-        verified; the issue is kept). Listed in the plan before it runs.
-    *   **Decide**: the user answers in chat; run `python3 '<HELPER>' decide
-        --state '<STATE>' --unit U03 --decision D1 --answer '<text>'`. It
-        records the answer, re-renders `unit_U03.md` and writes
-        `decision_comment_U03_D1.md`. Run `scan --state '<STATE>' --comment
-        '<that file>'`, then, with the user's confirmation in the same gate,
-        post it once: `GH_HOST=github.com gh issue comment <n> -R O/R --body-file
-        '<path>'`, and then **record the publication**: `python3 '<HELPER>'
-        decide --state '<STATE>' --unit U03 --decision D1 --published '<comment
-        url>'`. The unit stays blocked until that runs: an answer the builder
-        cannot see is not an answer, and `status` shows it as
-        `[answered, NOT PUBLISHED]`. If the post fails or the session ends
-        first, re-run the post (a
-        comment with the same first line is not posted twice). An answer
-        that changes scope paths or the definition of done is a plan change,
-        not a decision: the user edits `handoff_plan.md` and the issue by
-        hand, `graph` re-renders, one readiness goldfish (as in `egm-handoff`
-        step 4) re-reads that unit, and the plan is **re-confirmed**: `gate`,
-        `dry-run` and `apply --yes` again (apply makes no write for an issue
-        that already exists, and the new confirmed snapshot is what `verify`,
-        `status` and `launch` then compare against). Without that,
-        `require_confirmed_plan` refuses `status` and `launch`, because the
-        issues on GitHub were created from the snapshot the user confirmed.
-    *   **Candidate PR** (a head branch of this handoff with no closing
-        reference): watched only after the user confirms it, `status
-        --watch U03=412`.
-3.  On launch run `python3 '<HELPER>' launch --state '<STATE>' --wave <n>
-    --units U03 U04`, then spawn one foreman per launched unit (below).
+`report` derives each launched unit's state with `unit_state`, one of six:
+`landed`, `stopped`, `pending`, `idle`, `clean`, else `active`; only an
+active unit is dispatched. `loop_ended` is the end condition: no active
+unit, and no ready unit unlaunched while a slot is free. A head whose CI is
+pending or absent for `ci_wait_minutes` (default 30) since this card first
+saw it is idle and holds no slot; a new head restarts the clock.
 
-## The foreman
+## The word table
 
-In the model's own terms the foreman is a **per-unit elephant**: it carries
-context across rounds for one build unit, holds that context in
-`foreman_<id>_state.json`, and delegates to goldfish. It is not a goldfish and
-must never be given a goldfish's lens. The **builder is local** in this
-release and is not an EGM agent; the unit issue is nevertheless written to be
-executed with no conversational history, which is why `egm-handoff` renders a
-self-contained body. Goldfish stay what they are: zero-context, read-only
-reviewers.
+`word_action(word, review_exit)`, where `review_exit` is the exit code of
+`python3 '<HELPER>' review status --review <head-review-id> --runcard '<CARD>'`
+(the unit's `head-<U>-c<n>` review under `reviews/`, opened by its first
+dispatch):
 
-Read `references/foreman_brief.md` and pass its brief verbatim with the
-values filled in. One foreman per in-flight issue, at most 5 at once.
+- `clean` → await-merge: nothing runs; the unit awaits the owner's merge and
+  its slot is free.
+- `revise` → `launch-builder` and `record-launch` for the next round (the
+  prompt carries the review).
+- `contested: <ids>` → Decision point 1.
+- `cap-reached` → Decision point 2.
+- `error`, `target-moved`, or a return that is none of the six words →
+  redispatch: nothing runs now; the head is reviewed again at the next
+  batch's step 4, unless `review status` exits 5 (stalled) →
+  `python3 '<HELPER>' report --idle '<U>=review stalled' --runcard '<CARD>'`.
+- `blocked` (step 2's builder close, step 3's cases) → Decision point 3.
+- `recovered <word>` from `foreman dispatch` → the row of `<word>`.
 
-*   **Named foreman** (the default when the Agent tool accepts `name`):
-    spawn it with `name: foreman-<unit-id>`. `name` makes the foreman
-    addressable with `SendMessage` and resumable from its transcript; it does
-    not create a different kind of agent (`ListAgents` reports a named agent
-    as an ordinary subagent, and `team_name` is deprecated and ignored). It
-    shares this checkout and files, and `foreman_<id>_state.json` is what
-    carries a round across a respawn.
-*   **Unnamed foreman** (the Agent tool has no `name`, or a `-p` session):
-    each foreman step is a fresh subagent with the same brief and
-    the unit's `foreman_<id>_state.json` as its memory. Step 1 (`prepare`)
-    returns the launch line; step 2 (collect, goldfish, report) returns the
-    one-line status. Subagents may nest to spawn their goldfish.
-*   **Reviewer isolation**: always spawn a goldfish through its own adapter.
-    The adapter sets `omitClaudeMd: true` and the read-only `Read, Grep,
-    Glob` tools, and that is what keeps a goldfish's context fresh; it holds
-    whether or not the spawn is named. What breaks isolation is reviewing
-    with a general-purpose agent instead of the adapter: such an agent loads
-    CLAUDE.md.
-*   **The foreman never launches the claudex runner** (step 3 below is this
-    session's). Not because it is forbidden to run background commands - it
-    can - but because a background command dies with the agent that started
-    it: a subagent's is killed when that subagent gives its final response,
-    while one started from the main conversation keeps running across turns.
-    A foreman that launched and then reported back would kill the run.
-*   The foreman never writes to GitHub,
-    never edits the user's working tree, and writes only its own state file
-    and round files. It reports one line: `foreman U03: pr #412 head
-    3e1f2a7 round 2 status <state> verdict <verdict> run <folder or ->
-    report <path>`.
+### Decision point 1
 
-## A round
+The builder contested findings. Write them (ids, claims, the builder's
+reasons from the round's `comments.md`) to a question file and run
+`python3 '<HELPER>' decision open --unit <U> --point 1 --question '<file>' --source 'review <head-review-id> round <n>' --runcard '<CARD>'`
+(options `finding upheld; finding overruled`). In normal mode ask the owner,
+one question per finding, the builder's reason verbatim as the overrule
+option's text. Apply each ruling: per overruled finding
+`python3 '<HELPER>' review settle --review <head-review-id> --finding <fid> --disposition contested --owner --runcard '<CARD>'`,
+then `review status`; record it with
+`python3 '<HELPER>' decision rule --unit <U> --decision <qid> --ruling '<fid> finding upheld' --by <login> --runcard '<CARD>'`
+or `--ruling '<fid> finding overruled — <reason>'`, which posts the
+`**Ruling:**` comment on the issue. Then by `review status`: 0 → the unit
+awaits merge; 2 → Decision point 2; else `launch-builder`.
+Leavemealone-mode: U11 wires §13.2 here.
 
-1.  **A new head.** `status` reports, for an in-flight unit, a PR head whose
-    CI is concluded: every check run `completed` and the combined status not
-    `pending`; `ci green` when every conclusion is `success`, `neutral` or
-    `skipped` and the combined state is `success` (or no statuses), else
-    `ci red (<names>)`. The review runs on a concluded head either way, with
-    the result as evidence. Zero check runs and zero statuses is
-    `waiting-for-ci`; 30 minutes without any, `no-ci`: ask the user to wait
-    or to review without CI (a workflow on a coding agent's push may need a
-    person's approval first).
-2.  **Prepare.** Message the foreman (or spawn step 1). It runs `prepare`
-    (fetch from the recorded remote into `refs/egm/pr/<n>` and
-    `refs/egm/base/<n>`, the head checked against `status` or `head-moved`,
-    a worktree under `${TMPDIR:-/tmp}/egm-wave/<handoff-id>/<unit-id>/pr<n>/`,
-    the diff from the merge base saved as `pr_<n>_r<r>.diff`, the CI read
-    saved as `ci_<n>_r<r>.json`), writes the brief and the launch line, and
-    reports `prepared`. **A review worktree lives until the unit lands.**
-    There is no mid-round removal: rounds 9, 10 and 11 of this release's
-    own review each found a way for cleanup to remove a worktree a runner
-    was still reading, so the capability was deleted rather than guarded. A
-    leftover worktree of the same PR from an interrupted round is reused
-    when it is clean and its runner has gone quiet (no file under its run
-    folder changed for 10 minutes); a dirty one stops with `remove it by
-    hand`.
-`status --wait` only reads while it waits and records what it saw once, when
-it returns; it refuses `--watch` and `--confirm-landed`. Record a choice with
-its own `status` call first. The helper is single-writer: never run two
-helper commands at once.
+### Decision point 2
 
-3.  **Launch** (the elephant, from this main conversation, never a
-    subagent). Read `foreman_<id>_r<r>_launch.md`; check the line against
-    `resources/astra_lane.md` section 3b (single quotes, no chaining,
-    validated literals, `--base` present, no `--resume`); run it with
-    `run_in_background: true` and the Bash `timeout` 3,900,000 ms; record
-    the run folder from the first JSON line; send it to the foreman. The
-    runner fails a run whose tree changed: nothing touches the worktree
-    while it runs. When the lane is not available (`astra_lane.md` section
-    8) skip this step and tell the foreman `not run (<reason>)`; no launch is
-    recorded, so the foreman collects that round with `collect ... --not-run
-    <reason>`, which is accepted straight from `prepared`.
-4.  **Collect.** When the completion notice arrives, message the foreman (or
-    spawn step 2). It reads `result.json`, maps the findings
-    (`astra_lane.md` sections 5 and 6), spawns the panel's goldfish in the
-    foreground (Astra only: none; Focused: `egm-change-review` on
-    `unit_<id>.md` with the worktree, the diff and the CI file; Full: plus
-    `egm-codebase-details` in REVIEW mode on the design range with the
-    worktree as the codebase), writes `wave_round_u<id>_r<r>.md` with the
-    run card and the `What ran` lines, and reports (the worktree stays until
-    the unit lands).
-    A lane that did not complete is `not run` with the reason and the round
-    is judged on the Claude goldfish (Astra only: not clean).
-5.  **Findings to the PR.** Write `pr_comment_<n>_r<r>.md`: the configured
-    `fix_request_mention` on the first line when the repository has one,
-    then `**EGM review round <r> (head <sha7>)**`, the findings table
-    (severity, path:line, evidence, fix), the definition-of-done checklist
-    (met or not, evidence) and the CI summary; no run card, no model names.
-    Run `scan --state '<STATE>' --comment '<path>'`. List the PR's reviews
-    first (`GH_HOST=github.com gh api repos/O/R/pulls/<n>/reviews --paginate
-    --slurp`) so a
-    comment with the same header is not posted twice. Ask one question
-    (post, edit, skip). **Immediately before posting, re-read the review
-    target**: `GH_HOST=github.com gh pr view <n> -R O/R --json
-    headRefOid,baseRefName,baseRefOid`. The target is the triple the round's
-    record in `foreman_<id>_state.json` holds (`head`, `base_ref`,
-    `base_sha`); a retarget from `main` to a release branch keeps the head
-    and changes the diff, so the head alone is not the identity. If the
-    head or the base *branch* differs from the reviewed triple, do not post:
-    findings, CI and DoD evidence from the old target would land on a
-    different change. If only the base *sha* moved (an unrelated commit
-    landed on the base branch, the common case), the review is still valid
-    whenever the effective diff is unchanged: fetch the new base tip into
-    `refs/egm/base/<n>` (`git -C <repo root> fetch <remote>
-    +<baseRefOid>:refs/egm/base/<n>`), run `git -C <repo root> merge-base
-    refs/egm/base/<n> refs/egm/pr/<n>` - at the repository root, from the
-    refs `prepare` fetched, never inside the review worktree - and compare it
-    with the round's recorded `merge_base`. Equal means the same diff was reviewed: post.
-    Different means the base change reaches the reviewed code: do not post.
-    In either do-not-post case say so in one line, record the round as
-    `target-moved` with the new triple and merge base, and start the next
-    round against the current target - a new round on an unchanged head is
-    permitted and expected then, and ordinary merges to the base branch must
-    never consume a cap round on their own. Only when the head, the base
-    branch and the merge base are unchanged, post
-    through the API with the review bound to the reviewed commit:
-    `GH_HOST=github.com gh api repos/O/R/pulls/<n>/reviews -f
-    commit_id='<full reviewed sha>' -f event=COMMENT -F body=@'<path>'`, one
-    Bash approval. `gh pr review` cannot do this: it submits no commit id, and
-    GitHub then attaches the review to whatever the latest commit is - so a
-    push between the head check and the post would land findings from one
-    head on another. Read `commit_id` from the response and refuse to count
-    the round posted unless it equals the reviewed sha. The comment's header
-    names the reviewed head as well. Record the user's dispositions in
-    `wave_dispositions_u<id>_r<r>.md` with the five columns of
-    `egm-resolve`'s table (from the user's decision, never the AI
-    suggestion); the next round's brief carries the `astra-*` rows.
-6.  **Stop rule: convergence, not a round count** (`resources/review_panels.md` section 7). A round is *clean* when
-    no Blocker or Major is unsettled (settled = contested or declined by the
-    user). A round is *converged* when it is clean **and** no finding in it is
-    attributable to the previous round's fixes. Both conditions must hold:
-    a clean round that only became clean because the last round's fix moved
-    the defect has not converged.
+The head review is at its cap. Cap: 5 rounds, then PAUSE for the owner.
+Write the `review status` trend line to a question file and run
+`python3 '<HELPER>' decision open --unit <U> --point 2 --question '<file>' --source 'review <head-review-id> cap' --runcard '<CARD>'`
+(options `one more round; stop`). `one more round` (once per unit):
+`python3 '<HELPER>' review rule --review <head-review-id> --ruling continue --owner --runcard '<CARD>'`,
+then `decision rule … --ruling 'one more round'`, then `launch-builder`.
+`stop`: `review rule … --ruling stop --owner`, then
+`decision rule … --ruling stop`, which labels and stops the unit.
+Leavemealone-mode: U11 wires §13.2 here.
 
-    Mark every finding `regression: yes|no` when you record it: `yes` when it
-    is in code the previous round's fix touched, or when it is the same defect
-    in another place. Report the per-round counts on one line so the trend is
-    visible, for example `rounds: 19 -> 14 -> 9 (regressions 7, 2)`. A count
-    that is not falling, or regressions that are not falling, is the signal to
-    change approach rather than spend another round.
+### Decision point 3
 
-    **Clean but not converged.** A round can be clean while a finding in it is
-    attributable to the previous round's fixes - a declined Nit, say. There is
-    then nothing for the builder to fix, so no new head will arrive and
-    waiting for one deadlocks the unit. Treat it as a round that may be
-    re-reviewed on the **same, unchanged head**: say so in one line, ask the
-    user whether to re-review, accept, or stop, and if they re-review, run the
-    next round against that head with no fix request posted. It counts towards
-    the cap like any other round.
+A builder is blocked, or its launch ended without a head. Write the
+builder's comment (or the exit, interrupt or close facts) to a question file
+and run
+`python3 '<HELPER>' decision open --unit <U> --point 3 --question '<file>' --source '<comment <id> | launch <n> | closed <n>>' --runcard '<CARD>'`.
+Its second line is the options: the comment's own `- (a)` lines plus
+`stop the unit`; `relaunch; stop the unit` for an exit with no PR, an
+interrupted launch, a builder's close, or a third blocked comment on one
+head; or `ruled: stop the unit (relaunch already used)`, already applied.
+Ask the owner, then
+`python3 '<HELPER>' decision rule --unit <U> --decision <qid> --ruling '(<letter>) — <reason>' --by <login> --runcard '<CARD>'`
+(it posts `**Ruling:** (<comment-id>) <option> — <reason>` quoting the
+question; the next launch's prompt carries it). `relaunch` →
+`launch-builder` now; `stop the unit` → the unit is labelled and never
+relaunched.
+Leavemealone-mode: U11 wires §13.2 here.
 
-    **Cap: 5 rounds, then PAUSE.** At round 5 stop and put the decision to the
-    user in one line with the trend and the open findings: continue, accept
-    the remainder, or stop the unit. Do not start round 6 without their
-    answer. Each round costs an inspect run and a round of builder time, so
-    the cap is a cost guard, not a quality bar; converging at round 2 is the
-    normal case. The comment is the fix request; the next round starts when
-    `status` reports a new head with CI concluded.
-7.  **Landed.** When the unit lands, shut the foreman down by name (or stop
-    spawning steps) and clean up **each round that was prepared, by number**:
-    `prepare --state '<STATE>' --unit U03 --round <r> --clean` for every `r`
-    in that unit's `foreman_U03_state.json` `rounds` (refs deleted, worktree
-    list pruned). `--round` defaults to 1, so cleaning without it would delete
-    round 1's refs and leave a later round's behind when a replacement PR was
-    reviewed. Skip a round that recorded no worktree. Record it in the wave
-    report.
+## Stops and by-hand rulings
 
-## Advancing the wave
+- The owner's close (step 2) is `stop` without a question:
+  `decision rule --posted closed:<n>` records nothing but the stop.
+- A `**Ruling:**` the owner posted by hand on the issue, naming the BLOCKED
+  comment's id as `(<comment-id>)`, rules that pending decision. When
+  raising a pending point-3 decision, read the comments with
+  `GH_HOST=github.com gh api repos/O/R/issues/<n>/comments --paginate` and,
+  for such a comment, run
+  `python3 '<HELPER>' decision rule --unit <U> --decision <qid> --ruling '<its option>' --by <author> --posted <comment-id> --runcard '<CARD>'`:
+  nothing is posted; a comment by the builder account, one naming another
+  id, or an author other than `--by` is refused and nothing is recorded.
+- A stopped unit keeps its branch and its open issue, is never dispatched or
+  launched again, and is listed in the report with its unlanded dependants
+  for the owner (design section 12).
 
-GitHub does not call back and a build takes hours or days. In an
-interactive session run `python3 '<HELPER>' status --state '<STATE>'
---wait 1500` with `run_in_background: true` from this main conversation: it
-repeats the same reads every 90 seconds and exits, printing the changed unit
-ids, when any in-flight unit's PR, head, CI or landed state changes or the
-deadline passes; relaunch it until the wave ends and act only on the units
-it names. The alternative, and the path in a later session, is to re-run
-`/egm:egm-wave` (or `/loop 30m /egm:egm-wave`): each run does one status
-pass and acts on what changed. In a `-p` run background commands stop after
-30 minutes (10 when the prompt is passed as text), so `--wait` is at most
-1500 there. The wave ends when every launched unit has landed or been
-deferred; write `wave_<n>_report.md` (rounds, findings, dispositions, what
-stayed open, the `What ran` lines) and offer the next wave.
+## Retries
 
-## Run card rows and the Astra lane
+- `error` and `target-moved`: the next batch's `foreman dispatch` for every
+  active unit with a head, `deadline` included, until `review status` exits
+  5, which makes the unit idle. A foreman that returns no word is `error`.
+- A `launch-builder` refusal is idle for the invocation; no retry.
+- `status --wait` exiting non-zero: run it once more; if it fails again, run
+  `report`, say so in chat, and end this invocation.
+- A `decision rule` whose post fails records nothing: run it again.
+- Never evaluate the dispatch predicate yourself: `foreman dispatch` is its
+  one place, and the batch order above is how a refusal is handled.
 
-The card of `resources/review_panels.md` section 2 plus `Builder | local:
-whoever picks up #<n>; model unknown | - | -` and `Foreman | subagent
-foreman-<id> (or: fresh subagents per step); issue, PR diff, CI results, no
-conversation | <session or CLAUDE_CODE_SUBAGENT_MODEL> -> effective | session
-setting`. The inspect launch, its Bash timeout, the data notice (the PR diff
-and every changed file go to OpenAI) and the time line are in
-`resources/astra_lane.md` section 3b. The card is in `wave_<n>_plan.md` and
-at the top of every foreman report; never in GitHub text.
+## The end
+
+`loop: ended` → run `python3 '<HELPER>' runcard close '<CARD>'`. Then
+report in chat from `wave_<n>_report.md`: per unit its state, head and
+rounds; the non-terminal launches (builders still running report to the
+next `wave`); the heads with pending or absent CI; the idle units and why;
+the ready units without a slot; the pending decisions; the stopped units
+with their unlanded dependants. That is what stayed open, for the owner to
+merge, close, or re-type `/superegm:wave`.
