@@ -553,7 +553,8 @@ def blocked_question(st, unit: str, what: list) -> tuple[str, list[int]]:
     heading, *rest = body.splitlines() or [""]
     options = [line[2:].strip() for line in rest if line.startswith("- (")]
     options = [o.partition(" ")[2] for o in options] + ["stop the unit"]
-    return f"## Q1 {unit} BLOCKED (comment {what[0]}): {heading.strip()}\n" + options_text(options), []
+    consumers = fan_out(st, unit) if heading.startswith("**Deviation (interface):**") else []
+    return f"## Q1 {unit} BLOCKED (comment {what[0]}): {heading.strip()}\n" + options_text(options), consumers
   if len(what) == 2 and what[0] == "launch" and what[1].isdigit():
     launches = load_launches(st, unit)
     n = int(what[1])
@@ -567,6 +568,19 @@ def blocked_question(st, unit: str, what: list) -> tuple[str, list[int]]:
   if any(r["ruling"].partition(" — ")[0].strip() == "relaunch" for r in core.load_foreman(st, unit)["rulings"]):
     raise core.HandoffError(f"question: relaunch already used on {unit}")  # section 11: offered once per unit
   return f"## Q1 {heading}\n" + options_text(RELAUNCH), []
+
+
+def fan_out(st, unit: str) -> list[int]:
+  """The issue numbers of every other filed unit whose unit file consumes a name of `unit` (section 13.2)."""
+  # shortcut: the fan-out targets every filed consumer of any name the unit produces, since the deviation text is
+  # free prose; narrow it when the Deviation comment gains a name field
+  numbers = []
+  for other, record in (core.load_state(st.root).get("units") or {}).items():
+    path = st.path("unit", other)
+    if other != unit and record.get("number") and path.is_file() \
+        and any(producer == unit for _, producer in core.body.consumes(core.read_text(path))):
+      numbers.append(record["number"])
+  return sorted(numbers)
 
 
 COMMANDS = {"open": cmd_open, "record": cmd_record, "diff": cmd_diff, "verdict": cmd_verdict, "question": question}
