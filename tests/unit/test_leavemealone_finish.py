@@ -219,3 +219,23 @@ def test_leavemealone_wiring(skill):
   assert "merge" not in section.lower().replace("awaiting merge", "")
   assert "In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first." in body
   assert len(body.encode("utf-8")) <= 24_000
+
+
+def test_close_writes_closed_at_and_journals_unlanded(world):
+  seed(world)
+  state = json.loads(store(world.repo).path("state").read_text(encoding="utf-8"))
+  state["status"] = {"units": {"U07": {"landed": True}, "U08": {"landed": False}, "U09": {"landed": False}}}
+  put(world, state, "state")
+  assert world.run("close", "--runcard", world.card("wave"))[0] == 1
+  runcard = world.card("integrate")
+  code, out = world.run("close", "--runcard", runcard)
+  assert code == 0 and out.strip() == "closed sample-design-abc123; unlanded: U08, U09", out
+  state = json.loads(store(world.repo).path("state").read_text(encoding="utf-8"))
+  closed_at = state["closed_at"]
+  assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)", closed_at)
+  journal = (world.artifacts / "journal.md").read_text(encoding="utf-8")
+  assert "close: U08 unlanded\n" in journal and "close: U09 unlanded\n" in journal
+  assert f"closed sample-design-abc123 at {closed_at}\n" in journal
+  code, out = world.run("close", "--runcard", runcard)
+  assert code == 1 and f"close: already closed at {closed_at}" in out
+  assert json.loads(store(world.repo).path("state").read_text(encoding="utf-8"))["closed_at"] == closed_at
