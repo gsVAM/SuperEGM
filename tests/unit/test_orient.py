@@ -164,3 +164,34 @@ def test_build_graph_absent_present_failing_timeout(tmp_path, monkeypatch, case,
   graph, got = orient.build_graph(export, out)
   assert got == token and (graph is None) == (case != "ok") and (out / "graph.json").exists() == (case in ("ok", "not-json"))
   assert (not log.exists()) if case == "absent" else log.read_text(encoding="utf-8").strip() == f"update {export.resolve()} {out}"
+
+
+@pytest.fixture
+def no_graphify(monkeypatch):
+  from superegm import orient
+  monkeypatch.setattr(orient, "GRAPHIFY", "superegm-no-such-tool")
+
+
+def test_orient_writes_the_map_and_every_unfiled_unit(world, no_graphify):
+  from superegm import store
+  st, card = store(world.repo), world.card("plan")
+  first = lambda ref: f"orient: tree {git(['rev-parse', ref + '^{tree}'], world.repo).strip()} · graphify: not installed · trimmed: nothing"
+  line = lambda p: f"{p} {p.stat().st_size}"
+  code, out = world.run("orient", "--spec", world.spec, "--runcard", card)
+  assert code == 0 and out.splitlines() == [line(st.path("orient", "map.md"))], out
+  text = st.path("orient", "map.md").read_text(encoding="utf-8")
+  assert text.splitlines()[0] == first("HEAD") and ". | 2 files | .json | - | -" in text and not list(st.root.glob("*/orient"))
+  assert world.run("graph", "--plan", world.plan)[0] == 0
+  st = store(world.repo)
+  code, out = world.run("orient", "--spec", world.spec, "--runcard", card)
+  files = [st.path("orient", "map.md")] + [st.path("orient_unit", f"{u}.md") for u in ("U01", "U02", "U03")]
+  assert code == 0 and out.splitlines() == [line(p) for p in files], out
+  u02 = st.path("orient_unit", "U02.md").read_text(encoding="utf-8")
+  assert u02.startswith(first("HEAD") + "\n## src/webhooks/deliver.ts (create)\nsiblings: none\ntests: none\n") and "## Read first" not in u02
+  assert "## src/webhooks/queue.ts (modify)\nsiblings: none\ntests: none\n" in u02 and "## Graph" not in u02
+  (world.repo / "README.md").write_text("# Hooks\n", encoding="utf-8"); git(["add", "README.md"], world.repo); git(["commit", "-qm", "readme"], world.repo)
+  code, out = world.run("orient", "--spec", world.spec, "--unit", "U02", "--ref", "HEAD~1", "--runcard", card)
+  assert code == 0 and out.splitlines() == [line(st.path("orient_unit", "U02.md"))], out
+  assert st.path("orient_unit", "U02.md").read_text(encoding="utf-8") == u02 and "README.md" not in st.path("orient", "map.md").read_text(encoding="utf-8")
+  assert world.run("orient", "--spec", world.spec, "--runcard", world.card("review-plan"))[0] == 0
+  assert "README.md: Hooks" in st.path("orient", "map.md").read_text(encoding="utf-8") and st.path("orient_unit", "U02.md").read_text(encoding="utf-8").splitlines()[0] == first("HEAD")
