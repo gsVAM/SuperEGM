@@ -211,7 +211,13 @@ def apply_writes(handoff: core.Handoff, writes, budget: Budget, save):
     if kind != "tracking" and not tracking.get("number"):
       raise core.HandoffError("tracking issue missing: it is created first")
     budget.spend()
-    number = create_issue(repo, title, text, label_set, handoff.artifact_dir)
+    if len(item) == 7:
+      # An adopted issue (spec section 10): the unit labels first, then the body, one write.
+      number = item[5]
+      core.gh_retry(["issue", "edit", str(number), "-R", repo, "--add-label", ",".join(label_set)])
+      edit_issue(repo, number, text, handoff.artifact_dir)
+    else:
+      number = create_issue(repo, title, text, label_set, handoff.artifact_dir)
     # Record the number before the id read: a failure between them must leave a
     # resumable state, not an issue that later stages treat as complete.
     target["number"] = number
