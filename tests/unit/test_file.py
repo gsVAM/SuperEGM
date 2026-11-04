@@ -33,9 +33,10 @@ def spec_text(rows) -> str:
           f"## Units\n\n| Unit | Title | Blocked by |\n| --- | --- | --- |\n{table}\n")
 
 
-def unit_section(uid, title, blocked) -> str:
-  """A unit section in the section 9.1 grammar with one Step."""
+def unit_section(uid, title, blocked, issue=None) -> str:
+  """A unit section in the section 9.1 grammar with one Step; `issue` adds the optional `Issue` row."""
   low = uid.lower()
+  issue_row = f"\n| Issue | #{issue} |" if issue is not None else ""
   return f"""### {uid}: {title}
 | Field | Value |
 | --- | --- |
@@ -45,7 +46,7 @@ def unit_section(uid, title, blocked) -> str:
 | Blocked by | {blocked} |
 | Shared files | none |
 | Risk | low: new module |
-| Size | S |
+| Size | S |{issue_row}
 
 Interfaces
 - Produces: {low}() -> void
@@ -587,3 +588,76 @@ def test_the_file_skill_body_runs_the_filing_in_order_and_asks_one_question():
   assert "filings[]" in body and "base_at_start" in body and "/superegm:wave" in body
   for helper_call in re.findall(r"<HELPER>'\s+([a-z-]+)((?:\s+--[a-z-]+(?:\s+'[^']*'|\s+<[^>]*>)?)*)", body):
     assert helper_call[0] in ("runcard", "gate", "dry-run", "apply", "verify"), helper_call
+
+
+# ---------------------------------------------------------------- adoption (spec section 10, U13)
+
+ADOPT_ROWS = [ROWS[0], ("U02", "Worker (adopts #7)", "U01"), ROWS[2]]   # the spec's `## Units` table names #7
+OLD = hashlib.sha256(b"old body\n").hexdigest()
+
+
+def seed_issue(gh, number) -> None:
+  gh.issues[number] = {"number": number, "id": 1000 + number, "title": f"Old #{number}", "body": "old body\n",
+                       "labels": ["bug"], "state": "open", "state_reason": None}
+
+
+def adopt_gh(gh) -> None:
+  def issue(args, cwd, token=None):
+    if args[1] == "edit" and "--add-label" in args and "--remove-label" not in args:
+      gh.assert_write()
+      names, record = args[args.index("--add-label") + 1].split(","), gh.issues[int(args[2])]
+      record["labels"] += [n for n in names if n not in record["labels"]]
+      return 0, "", ""
+    if args[1] == "edit" and "--body-file" in args:
+      gh.assert_write()
+      gh.issues[int(args[2])]["body"] = Path(args[args.index("--body-file") + 1]).read_text(encoding="utf-8")
+      return 0, "", ""
+    return gh.do_issue(args)
+  def api(args, cwd, token=None):
+    match = re.fullmatch(rf"repos/{gh.repo}/issues/(\d+)/parent", gh.endpoint_of(args))
+    if not match:
+      try:
+        return gh.do_api(args)
+      except KeyError:
+        return 1, "", "gh: Not Found (HTTP 404)"
+    child = gh.issues[int(match.group(1))]["id"]
+    parent = next((n for n, ids in gh.sub_issues.items() if child in ids), None)
+    return gh.ok(gh.issues[parent]) if parent else (1, "", "gh: Not Found (HTTP 404)")
+  gh.extend("issue", issue)
+  gh.extend("api", api)
+
+
+def adopt_gated(world):
+  adopt_gh(world.gh)
+  seed_issue(world.gh, 7)
+  spec, handoff_id = approve(world, ADOPT_ROWS)
+  plan = world.artifacts.parent / "plan.md"
+  plan.write_text(plan_text(spec, [unit_section(*ADOPT_ROWS[0]), unit_section(*ADOPT_ROWS[1], issue=7),
+                                   unit_section(*ADOPT_ROWS[2])]), encoding="utf-8")
+  graphed(world, spec, plan)
+  for uid in ("U01", "U02", "U03"):
+    converge(world, uid)
+  card = open_card(world, "file", spec)
+  code, out = world.run("gate", "--pass", "--spec", spec, "--runcard", card)
+  assert code == 0, out
+  return spec, plan, handoff_id, card
+
+
+def adopt_dry_run(world):
+  spec, plan, handoff_id, card = adopt_gated(world)
+  code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
+  assert code == 0, out
+  world.gh.calls.clear()
+  return spec, plan, handoff_id, card
+
+
+def test_pending_writes_carries_the_adopted_number_and_old_body_sha(world):
+  from superegm import gate
+  spec, plan, handoff_id, card = adopt_gated(world)
+  handoff = gate.open_handoff(spec)
+  plain = gate.pending_writes(handoff)
+  adopted = gate.pending_writes(handoff, adopted={"U02": (7, OLD)})
+  assert [len(w) for w in plain if w[0] == "issue"] == [5, 5, 5, 5]
+  assert [w[5:] for w in adopted if w[0] == "issue"] == [[], [], [7, OLD], []]
+  assert [w[:5] for w in adopted] == plain
+  assert gate.pending_writes(handoff, units={"U01", "U02", "U03"}, adopted={"U02": (7, OLD)}) == adopted
