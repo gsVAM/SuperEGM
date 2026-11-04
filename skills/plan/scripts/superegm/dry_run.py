@@ -1,22 +1,63 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_dry_run` over the unfiled units of the store's plan copy, under the converged gate; the tracking rewrite announced on a later filing.
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_dry_run` over the unfiled units of the store's plan copy, under the converged gate; the tracking rewrite announced on a later filing; the four reads of an adopted issue and its `### edit` heading (U13).
 
 """superegm dry-run: preflight reads and handoff_dryrun.md over the unfiled units; records the confirmed write list."""
 
 from pathlib import Path
+import re
 
 import superegm as core
 from superegm import apply, gate, scan
 
 WRITES = frozenset(["file", "state"])  # the store kinds this subcommand writes
 SKILLS = frozenset(["file"])  # the skills whose card this subcommand accepts
+RULING_COMMENT_RE = re.compile(r"^\*\*(Ruling:|Decision D\d+:|Deviation)")  # a comment that would rule the unit (spec section 10)
 
 
 def register(subparsers):
   p = core.add_parser(subparsers, "dry-run", "preflight reads and handoff_dryrun.md over the unfiled units; records the confirmed write list")
   p.add_argument("--spec", dest="design", required=True, help="the approved spec the filing is for")
   p.set_defaults(run=run, writes=WRITES)
+
+
+def adopted_issues(handoff) -> dict:
+  """`{unit: (number, old body sha256)}` for every unfiled unit with an `Issue` row, in graph order:
+  four reads per issue (the issue, its parent, its blocked-by links, its comments), the first
+  failing check refusing `adopt: #<n> …` (spec section 10)."""
+  repo, adopted = handoff.config["repo"], {}
+  for uid in handoff.graph.order:
+    number = handoff.plan.units[uid].issue
+    if number is None or handoff.filed(uid) is not None:
+      continue
+    try:
+      issue = core.gh_json(["api", f"repos/{repo}/issues/{number}"])
+    except core.GhError as error:
+      if error.http_status == 404:
+        raise core.HandoffError(f"adopt: #{number} not in {repo}") from error
+      raise core.HandoffError(str(error)) from error
+    if issue.get("state") == "closed":
+      raise core.HandoffError(f"adopt: #{number} is closed")
+    if "pull_request" in issue:
+      raise core.HandoffError(f"adopt: #{number} is a pull request")
+    if any(label["name"].startswith("superegm:") for label in issue.get("labels") or []):
+      raise core.HandoffError(f"adopt: #{number} carries superegm labels")
+    try:
+      core.gh_json(["api", f"repos/{repo}/issues/{number}/parent"])
+      raise core.HandoffError(f"adopt: #{number} has a parent")
+    except core.GhError as error:
+      if error.http_status != 404:  # D1 (a): a 404 is no parent
+        raise core.HandoffError(str(error)) from error
+    try:
+      if core.gh_pages(f"repos/{repo}/issues/{number}/dependencies/blocked_by"):
+        raise core.HandoffError(f"adopt: #{number} has dependencies")
+      comments = core.gh_pages(f"repos/{repo}/issues/{number}/comments")
+    except core.GhError as error:
+      raise core.HandoffError(str(error)) from error
+    if any(RULING_COMMENT_RE.match((c.get("body") or "").lstrip()) for c in comments):
+      raise core.HandoffError(f"adopt: #{number} carries a ruling comment")
+    adopted[uid] = (number, core.sha256_text(issue.get("body") or ""))
+  return adopted
 
 
 def run(args):
@@ -38,7 +79,7 @@ def run(args):
   for name in apply.derived_labels(handoff):
     labels[name] = state.get("labels", {}).get(name) if state.get("labels", {}).get(name) == "done" \
         else ("exists" if name in checks["labels"] else "missing")
-  writes = gate.pending_writes(handoff)
+  writes = gate.pending_writes(handoff, adopted=adopted_issues(handoff))
   to_create = [n for n, s in labels.items() if s == "missing"]
   issues = [w for w in writes if w[0] == "issue"]
   subs = [w for w in writes if w[0] == "sub_issue"]
@@ -63,7 +104,8 @@ def run(args):
   lines += [f"- `{n}`: extra (exists)" for n in handoff.labels["extra"]]
   lines += ["", "## Writes in order", ""]
   for item in issues:
-    lines += [f"### issue {item[1]}", "", f"Title: {item[2]}", f"Labels: {', '.join(item[3])}", "",
+    heading = f"### edit #{item[5]} {item[1]} (old body sha256 {item[6]})" if len(item) == 7 else f"### issue {item[1]}"
+    lines += [heading, "", f"Title: {item[2]}", f"Labels: {', '.join(item[3])}", "",
               "```markdown", item[4].rstrip("\n"), "```", ""]
   lines += [f"- sub-issue: {w[1]} under the tracking issue" for w in subs]
   lines += [f"- blocked-by: {w[1]} blocked by {w[2]}" for w in blocked]
