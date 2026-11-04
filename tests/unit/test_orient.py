@@ -190,9 +190,11 @@ def test_orient_writes_the_map_and_every_unfiled_unit(world, no_graphify):
   assert u02.startswith(first("HEAD") + "\n## src/webhooks/deliver.ts (create)\nsiblings: none\ntests: none\n") and "## Read first" not in u02
   assert "## src/webhooks/queue.ts (modify)\nsiblings: none\ntests: none\n" in u02 and "## Graph" not in u02
   (world.repo / "README.md").write_text("# Hooks\n", encoding="utf-8"); git(["add", "README.md"], world.repo); git(["commit", "-qm", "readme"], world.repo)
+  stamp = st.path("orient", "map.md").stat().st_mtime_ns  # owner ruling zoom-out-1-7: `--unit` never rewrites the map
   code, out = world.run("orient", "--spec", world.spec, "--unit", "U02", "--ref", "HEAD~1", "--runcard", card)
   assert code == 0 and out.splitlines() == [line(st.path("orient_unit", "U02.md"))], out
   assert st.path("orient_unit", "U02.md").read_text(encoding="utf-8") == u02 and "README.md" not in st.path("orient", "map.md").read_text(encoding="utf-8")
+  assert st.path("orient", "map.md").stat().st_mtime_ns == stamp
   assert world.run("orient", "--spec", world.spec, "--runcard", world.card("review-plan"))[0] == 0
   assert "README.md: Hooks" in st.path("orient", "map.md").read_text(encoding="utf-8") and st.path("orient_unit", "U02.md").read_text(encoding="utf-8").splitlines()[0] == first("HEAD")
 
