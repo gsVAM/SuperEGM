@@ -12,12 +12,13 @@ import os
 import re
 from pathlib import Path, PurePosixPath
 
-CAP_UNIT = 16_384
+CAP_UNIT, CAP_MAP, MAP_DEPTH = 16_384, 24_576, 4
 DOCS = ("README.md", "AGENTS.md", "CLAUDE.md", "context.md")
 SKIPPED = {"dist", "build", "vendor", "target", "scratchpad"}
 JS = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
 MAX_BYTES = 1 << 20
 HEADING_RE = re.compile(r"^#{1,6} +(.*?)\s*$")
+ENTRY_RE = re.compile(r"^(__init__\.py|__main__\.py|main\..+|index\..+|mod\.rs)$")
 
 
 def tokens(path: str):
@@ -193,3 +194,43 @@ def unit_text(export: Path, scope: list[tuple[str, str]], graph, tree: str, toke
   lines = [l for path, action in scope for l in path_section(export, path, action, tests)]
   lines += read_first(export, scope)
   return render(lines, tree, token, [], set())
+
+
+# ---------------------------------------------------------------- the map
+
+
+def doc_summary(text: str) -> str:
+  """The first heading text, else the first non-blank line up to its first `. `, or the whole line."""
+  for line in text.splitlines():
+    match = HEADING_RE.match(line)
+    if match:
+      return match.group(1)
+  return next((l.strip().split(". ")[0] for l in text.splitlines() if l.strip()), "")
+
+
+def map_lines(export: Path, depth: int) -> list[str]:
+  """One line per directory to `depth` over the tracked files: path, file count, dominant
+  extension (ties by name), entry points, the documentation files' summaries (≤ 160 chars)."""
+  files = walk(export, skip=True)
+  folders = sorted({".", *(str(a) for f in files for a in PurePosixPath(f).parents if str(a) != ".")})
+  lines = []
+  for folder in folders:
+    if folder != "." and folder.count("/") + 1 > depth:
+      continue
+    under = files if folder == "." else [f for f in files if f.startswith(folder + "/")]
+    exts = {}
+    for f in under:
+      exts[PurePosixPath(f).suffix] = exts.get(PurePosixPath(f).suffix, 0) + 1
+    dominant = min(exts, key=lambda e: (-exts[e], e)) if exts else ""
+    own = [PurePosixPath(f).name for f in under if str(PurePosixPath(f).parent) == folder]
+    entries = [n for n in sorted(own) if ENTRY_RE.match(n)]
+    docs = "; ".join(f"{n}: {doc_summary(read(export / folder / n) or '')}" for n in DOCS if n in own)[:160]
+    lines.append(f"{folder} | {len(under)} files | {dominant or '-'} | {', '.join(entries) or '-'} | {docs or '-'}")
+  return lines
+
+
+def map_text(export: Path, graph, tree: str, token: str) -> str:
+  """`orient/map.md`: the graph's summary when there is one, then the repository map."""
+  export = Path(export)
+  first = f"orient: tree {tree} · graphify: {token} · trimmed: nothing"
+  return "\n".join([first, "## Map", *map_lines(export, MAP_DEPTH)]) + "\n"
