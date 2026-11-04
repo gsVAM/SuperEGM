@@ -299,7 +299,7 @@ def test_readme_install_and_licence():
       "claude plugin disable egm@egm-astra", "claude plugin disable superpowers@claude-plugins-official",
       "```sh\nclaude plugin marketplace add gsVAM/superegm\nclaude plugin install superegm@superegm\n```",
       "builder account", "SUPEREGM_BUILDER_TOKEN", "config.builder.profile_dir", "no plugins and no `CLAUDE.md`",
-      "restrict", "`superegm/**`", "force-push", "`pull_request`", "SubagentStart", "`LICENSE-MIT`",
+      "restrict", "repository ruleset", "`superegm/**`", "force-push", "`pull_request`",  # I-5: `launch` reads rulesets "SubagentStart", "`LICENSE-MIT`",
   ]:
     assert snippet in readme, snippet
   paragraph = next(p for p in readme.split("\n\n") if p.startswith("**Licence.**"))
