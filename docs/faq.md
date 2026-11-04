@@ -1,62 +1,50 @@
 # FAQ
 
-#### Q: Are there alternatives?
+<!-- Modified by SuperEGM (gsVAM), 2026: EGM's philosophy questions replaced by SuperEGM's: modes, the builder account, the judges, what stays human. -->
 
-**A**: Yes. Many.
+#### Q: What does the owner actually do?
 
-EGM is one of the ways teams are making LLMs work better. It is not *the* way.
-There are others with different trade-offs. Regardless of the tool you choose,
-please remember: *You own the outcomes.*
+**A**: Type one skill per phase, answer the questions the skills pause on, push the approval
+commit, and merge. The elephant drafts, dispatches goldfish, files issues and drives the wave;
+builders write code in headless sessions; foremen review every pull request head; the owner owns
+the outcomes.
 
-#### Q: What concrete artifacts does the EGM process produce?
+#### Q: What is leavemealone-mode?
 
-**A**: EGM produces three core deliverables:
+**A**: `--leavemealone` on an invocation, or `"mode": "leavemealone"` in `.superegm/config.json`.
+At every decision point of design section 13.2 (a contested or declined high or medium finding, a
+review at its cap, a blocking decision, a blocked builder) the skill renders the question from the
+record, convenes the judge panel (two Claude judges and GPT-6 Astra, two vendors) and applies
+each converged answer, journaled as `Ruling (judges <id>, leavemealone): …` so the owner can read
+and overturn it. An unconverged question waits for the owner. The panel is never convened by a
+foreman, only by the elephant.
 
-*   **Design Document**: A peer-reviewed technical specification that captures
-    intent, system invariants, and strategic direction.
-*   **Implementation checklist**: Identifies the files to create or modify,
-    the planned changes, and how to verify them.
-*   **Enriched Context Loops**: Colocated Markdown documentation (such as README
-    hierarchies) that provides high-quality context for future development
-    loops.
+#### Q: Who merges?
 
-#### Q: Will SWEs become obsolete under EGM?
+**A**: The owner. Nothing is merged by a machine, in any mode. Builders open draft pull requests
+they cannot merge; the branch protection lets only the owner update the base branch; the wave
+ends with merge-ready drafts and a report, and `integrate` runs after the owner has merged.
 
-**A**: In our opinion? No. However, code generation will be increasingly
-delegated to automated agents, shifting human engineering focus toward governing
-intent and reviewing architectural decisions captured in design documents.
+#### Q: What is the builder account?
 
-#### Q: Will the increased volume of design documentation create a human review bottleneck?
+**A**: A second GitHub login, with its token in `SUPEREGM_BUILDER_TOKEN`, under which every
+builder session pushes its unit branch and opens its draft pull request. Its comments on an
+issue are never taken for the owner's: a `**Ruling:**` written by the builder account rules
+nothing, and a close by the builder account is a decision point, not a stop.
 
-**A**: It can. Reviewing designs adds work, and excessive documentation can
-become a bottleneck. The aim is to catch important problems before implementation;
-whether that saves time depends on the change and the quality of the review.
+#### Q: Why a fresh session for every builder launch?
 
-We recommend putting an emphasis on prioritization, at least for now. Use EGM
-for "What's important now?", instead of everything, to avoid overloading your
-reviewing and release pipelines.
+**A**: A builder's brief is the issue body, the builder orders, the rulings on its issue and,
+from round 2, the foreman's reviews of its own branch: never the planning elephant's context.
+The empty builder profile (no plugins, no `CLAUDE.md`) keeps it that way.
 
-#### Q: Does this workflow degrade developer velocity?
+#### Q: What if a review never converges?
 
-**A**: It depends. Design and review take time and may not pay off for a small,
-well-understood change. For uncertain or consequential changes, they may reduce
-rework by exposing missing decisions earlier.
-
-Compare total time, useful findings, and rework on your own tasks. Completing
-the EGM workflow alone does not demonstrate a productivity improvement.
-
-#### Q: Is expecting design documentation to be complete enough for a zero-context agent realistic?
-
-**A**: Sometimes, but not always. EGM's approach captures strategy and an
-execution plan, with Goldfish agents improving the quality, but LLMs are still
-non-deterministic.
-
-You need to use your judgment the same way you would for coaching a new software
-engineer. If it is making a minor mistake, adjust it. If it is wildly off base,
-maybe you need to go back to the drawing board and correct your design. This is
-part of the process and gets easier the more you use it.
+**A**: Change the thing, not the round. A review at its cap of five rounds pauses for a ruling:
+one bounded round more (once), accept the remainder, or stop. Two rounds that regress on the same
+area mean the capability should be deleted, the contract narrowed or the surface shrunk.
 
 #### Q: Should I open big pull requests?
 
-**A**: No. Generally, the answer for this (and many other questions) is "The
-answer is the same as when you built things without AI."
+**A**: No. The answer is the same as when you built things without AI: one unit, one branch, one
+pull request.
