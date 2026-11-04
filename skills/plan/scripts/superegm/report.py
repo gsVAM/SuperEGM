@@ -57,7 +57,8 @@ def run(args):
   lines += section("Idle", [f"{uid}: {reason}" for uid, reason in idle_reasons(card, states, views, config, now)])
   lines += section("Ready, unlaunched", [f"{uid} ({'slot free' if free > 0 else 'no free slot'})" for uid in ready])
   lines += section("Pending decisions", [])
-  lines += section("Stopped", [])
+  lines += section("Stopped", [stopped_line(st, uid, foremen[uid]["stopped"], views) for uid in launched
+                               if states[uid] == "stopped"])
   core.atomic_write(path, "\n".join(lines) + "\n")
   print(path)
   print("idle: " + (",".join(idle) or "none"))
@@ -117,6 +118,23 @@ def idle_reasons(card: dict, states: dict, views: dict, config: dict, now: float
                            f"(ci_wait_minutes {config.get('ci_wait_minutes', 30)})"))
   return reasons
 
+
+
+def dependants(units_json, uid: str) -> list:
+  """The transitive closure of the units whose `blockers` name `uid`, sorted; `[]` when the file is absent."""
+  found, frontier = set(), {uid}
+  while frontier and units_json:
+    frontier = {u for u, unit in units_json["units"].items() if set(unit.get("blockers") or []) & frontier} - found
+    found |= frontier
+  return sorted(found)
+
+
+def stopped_line(st, uid: str, stopped: dict, views: dict) -> str:
+  path = st.path("handoff_units")
+  units_json = json.loads(core.read_text(path)) if path.is_file() else None
+  unlanded = [u for u in dependants(units_json, uid) if not views.get(u, {}).get("landed")]
+  note = " (handoff_units.json absent)" if units_json is None else ""
+  return f"{uid} ({stopped['by']}: {stopped['reason']}): unlanded dependants {', '.join(unlanded) or 'none'}{note}"
 
 
 def unit_state(uid: str, view: dict, foreman: dict, card: dict, config: dict, now: float) -> str:
