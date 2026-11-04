@@ -55,12 +55,14 @@ The workflow is in [docs/getting_started.md](docs/getting_started.md); the platf
 
 Six things need a human once, before the first wave. `superegm init` (run by the first typed skill when `.superegm/config.json` is missing) writes the config and prints these by-hand steps:
 
-1. Create the **builder account**: its own GitHub login with write access to the repository, and put a token for it in `SUPEREGM_BUILDER_TOKEN` (config key `builder.gh_token_env`). Builders push and open draft pull requests as that account and never merge.
+1. Create the **builder account**: a second GitHub login, a machine account the owner controls (one is allowed per person), added to the repository as a collaborator with Write. Its token is a fine-grained personal access token when the repository belongs to an organization the builder account is a member of (resource owner that organization, repository access limited to this repository, permissions Contents read and write, Pull requests read and write, Issues read and write, Metadata read, no Workflows permission, expiration 90 days), and otherwise a classic token (a fine-grained token's resource owner is the holder's own account or an organization it belongs to, so a collaborator on a personal account's repository has no such token) with the `repo` scope and without `workflow`; either way a builder push that touches `.github/workflows` is refused by GitHub itself, and an organization's token policies may block either kind, which the owner checks. Put the token in `SUPEREGM_BUILDER_TOKEN` (config key `builder.gh_token_env`) in the shell that runs the wave, never in the repository or the config. Builders push and open draft pull requests as that account and can never update the base branch.
 2. Create the builder's empty profile at `config.builder.profile_dir`: no hooks, no plugins and no `CLAUDE.md`, only the login; `launch-builder` refuses anything else.
-3. Set the branch protection of design section 11 on the base branch: restrict updates to the owner with no bypass for the builder account's role (classic or ruleset); block force-push and deletion on `superegm/**` with a repository ruleset, the only form `launch` reads for that pattern. `launch` reads the protection and refuses the first wave without it.
+3. Set the branch protection of design section 11 on the base branch: restrict updates to the owner, the logins in `config.owners` (`init` writes your own): a classic restriction naming a non-empty subset of them, or a ruleset whose bypass names neither the builder account's role nor a team other than `config.owner_team`, which the builder account is outside; block force-push and deletion on `superegm/**` with a repository ruleset, the only form `launch` reads for that pattern. `launch` reads the protection and refuses the first wave without it.
 4. Add a workflow triggered on `pull_request`, so every builder head gets CI: CI is the foreman's evidence.
 5. Commit `.superegm/config.json`; `approve-spec` commits it with the spec.
 6. Run reviews from a profile without SubagentStart hooks: such hooks in the owner's own profile reach adapter subagents, and every dispatch record carries what the goldfish reported seeing.
+
+Then run `superegm doctor` before the first wave: one line per prerequisite, `ok` or the refusal `launch` would give, and no run card.
 
 ## Your first project
 
