@@ -4,6 +4,7 @@
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
+import json
 import os
 from pathlib import Path
 
@@ -166,3 +167,25 @@ def ruling_comment(point: int, source: str, ruling: str, question: str) -> str:
     line = f"({source.removeprefix('comment ') if point == 3 else 'cap'}) {ruling}"
   quoted = "\n".join("> " + l for l in question.rstrip("\n").splitlines())
   return f"**Ruling:** {line}\n\n{quoted}\n"
+
+
+def builder_login(config) -> str:
+  """The builder account's login under its token (read from GitHub, not from the wave card)."""
+  env = config["builder"]["gh_token_env"]
+  if not os.environ.get(env):
+    raise Refusal(f"decision: {env} is not set")
+  return json.loads(core.gh(["api", "user"], token=os.environ[env]))["login"]
+
+
+def verify_posted(store, config, decision: dict, comment_id: str, by: str) -> None:
+  """A by-hand `**Ruling:**` is honoured only from a non-builder author who is `--by`, and only when it
+  names the BLOCKED comment the decision came from (anti-goal 10)."""
+  comment = core.gh_json(["api", f"repos/{config['repo']}/issues/comments/{comment_id}"]) or {}
+  author = (comment.get("user") or {}).get("login")
+  if author == builder_login(config):
+    raise Refusal(f"decision: comment {comment_id} was written by the builder account {author} and is not honoured")
+  source = decision["source"]
+  if source.startswith("comment ") and f"({source.split()[1]})" not in (comment.get("body") or ""):
+    raise Refusal(f"decision: comment {comment_id} does not name {source}")
+  if author != by:
+    raise Refusal(f"decision: comment {comment_id} was written by {author}, not {by}")
