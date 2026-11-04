@@ -307,3 +307,25 @@ def test_decision_rule_records_posts_and_journals(world, point, source, ruling, 
   assert code == 1 and out.startswith("decision: ruling is none of the options:")
   assert world.run("decision", "rule", "--unit", "U01", "--decision", q2, "--ruling", ruling, "--by", "judges:j-1", "--runcard", card)[0] == 0
   assert f"Ruling (judges j-1, leavemealone): U01 {q2} {ruling}" in s.path("journal").read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------- S6: a stop ruling and the report's stopped line
+
+
+def test_a_stop_ruling_labels_the_issue_and_the_report_lists_unlanded_dependants(world):
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"}, U02={"launched": False}, U03={"launched": False})
+  atomic_write(s.path("handoff_units"), {"order": ["U01", "U02", "U03"], "units": {
+      "U01": {"blockers": []}, "U02": {"blockers": ["U01"]}, "U03": {"blockers": ["U02"]}}})
+  qid = world.run("decision", "open", "--unit", "U01", "--point", 3, "--question", question(world), "--source", "launch 1",
+                  "--runcard", card)[1].splitlines()[0]
+  code, out = world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", "stop the unit", "--by", "owner", "--runcard", card)
+  assert code == 0, out
+  f = foreman_of(s, "U01")
+  assert f["stopped"] == {"by": "owner", "reason": "stop the unit", "at": f["rulings"][-1]["posted_at"]}
+  assert "superegm:stopped" in world.gh.issues[2]["labels"]
+  assert world.gh.comments[2][-1]["body"].startswith("**Ruling:** (launch 1) stop the unit\n")
+  code, out = world.run("report", "--runcard", card)
+  assert "loop: ended" in out and "pending: none" in out
+  assert "## Stopped\n- U01 (owner: stop the unit): unlanded dependants U02, U03" in s.path("wave_report", 1).read_text(encoding="utf-8")
+  assert "- U01 #2: stopped ·" in s.path("wave_report", 1).read_text(encoding="utf-8")
