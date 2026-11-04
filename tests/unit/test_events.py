@@ -54,6 +54,16 @@ def test_wait_prints_deadline_only_and_saves_once(world, monkeypatch):
   assert "units" in json.loads(st.path("state").read_text(encoding="utf-8"))["status"]
 
 
+def test_wait_serves_an_integrate_card(world, monkeypatch):
+  """I-4: `integrate` refreshes the landed snapshot under its own card, so it opens no wave card
+  and `wave_number` never counts it."""
+  gh, st, _ = seed(world, monkeypatch)
+  card = world.open_card("integrate", str(world.spec))
+  code, out = world.run("status", "--wait", 1, "--runcard", card)
+  assert code == 0 and out == "deadline\n", out
+  assert "units" in json.loads(st.path("state").read_text(encoding="utf-8"))["status"]
+
+
 def put(path, text):
   path.parent.mkdir(parents=True, exist_ok=True); path.write_text(text, encoding="utf-8")
 

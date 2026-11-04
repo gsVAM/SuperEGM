@@ -77,7 +77,7 @@ DEFAULT_CONFIG = {
     "banned_terms": [],
     "fix_request_mention": None,
     "allowed_mentions": [],
-    "reviewers": {"spec": [], "plan": [], "head": [], "integrate": []},
+    "reviewers": None,  # the spec's panels, from review.PANEL_OF at the end of this module
     "astra": {"enabled": False, "model": "gpt-6-astra", "effort": "xhigh"},
     "judges": {"min_vendors": 1,
                "members": [{"name": "fable", "via": "adapter", "effort": "max"},
@@ -85,9 +85,10 @@ DEFAULT_CONFIG = {
                            {"name": "astra", "via": "runner"}]},
     "builder": {"profile_dir": "~/.superegm/builder-profile", "model": "claude-fable-5-1",
                 "permission_mode": "acceptEdits", "gh_token_env": "SUPEREGM_BUILDER_TOKEN",
-                "allowed_tools": ["Read", "Edit", "Write", "Grep", "Glob", "git add", "git commit",
-                                  "git status", "git diff", "git log", "git mv", "git rm",
-                                  "gh pr create", "gh pr edit", "gh pr comment", "gh issue comment"]},
+                "allowed_tools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git add:*)", "Bash(git commit:*)",
+                                  "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git mv:*)",
+                                  "Bash(git rm:*)", "Bash(gh pr create:*)", "Bash(gh pr edit:*)",
+                                  "Bash(gh pr comment:*)", "Bash(gh issue comment:*)"]},
     "ci_wait_minutes": 30,
 }
 
@@ -1667,3 +1668,7 @@ def build_parser():
   for name in SUBCOMMANDS:
     importlib.import_module(f"superegm.{name}").register(sub)
   return parser
+
+
+from .review import PANEL_OF  # noqa: E402  review.py imports this package, so it loads after the names it uses
+DEFAULT_CONFIG["reviewers"] = {kind: panel.split(",") for kind, panel in PANEL_OF.items()}  # one source: the spec's panels

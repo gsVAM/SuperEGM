@@ -28,7 +28,7 @@ The workflow is in [docs/getting_started.md](docs/getting_started.md); the platf
 
 1. Create the **builder account**: its own GitHub login with write access to the repository, and put a token for it in `SUPEREGM_BUILDER_TOKEN` (config key `builder.gh_token_env`). Builders push and open draft pull requests as that account and never merge.
 2. Create the builder's empty profile at `config.builder.profile_dir`: no hooks, no plugins and no `CLAUDE.md`, only the login; `launch-builder` refuses anything else.
-3. Set the branch protection of design section 11 on the base branch: restrict updates to the owner with no bypass for the builder account's role; protect `superegm/**` from force-push and deletion. `launch` reads the protection and refuses the first wave without it.
+3. Set the branch protection of design section 11 on the base branch: restrict updates to the owner with no bypass for the builder account's role (classic or ruleset); block force-push and deletion on `superegm/**` with a repository ruleset, the only form `launch` reads for that pattern. `launch` reads the protection and refuses the first wave without it.
 4. Add a workflow triggered on `pull_request`, so every builder head gets CI: CI is the foreman's evidence.
 5. Commit `.superegm/config.json`; `approve-spec` commits it with the spec.
 6. Run reviews from a profile without SubagentStart hooks: such hooks in the owner's own profile reach adapter subagents, and every dispatch record carries what the goldfish reported seeing.
