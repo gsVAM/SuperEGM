@@ -41,6 +41,14 @@ def test_findings_line_grammar(line, error):
 # ---------------------------------------------------------------- S2: the shared fixtures and `review open`
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_repo_config_panels_start_with_panel_of():
+  """I-3: every panel in the repository's own config opens with the spec's fixed reviewers, so a
+  dispatch of each (`proportion` on plan) records on the panel."""
+  reviewers = json.loads((ROOT / ".superegm/config.json").read_text(encoding="utf-8"))["reviewers"]
+  for kind, panel in PANEL_OF.items():
+    assert reviewers[kind][:len(panel.split(","))] == panel.split(","), kind
 SPEC = ("# Sample\n\n## 1. Intent\n\nText.\n\n## 2. Units\n\n| Unit | Scope | Blocked by | Size |\n"
         "| --- | --- | --- | --- |\n| U01 | a thing | — | S |\n")
 SLUG, HID, A = "2026-11-03-sample-design", "sample-abc123", "a" * 64
