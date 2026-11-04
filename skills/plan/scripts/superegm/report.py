@@ -49,6 +49,7 @@ def run(args):
     lines.append(unit_line(uid, units[uid], views[uid], states.get(uid, "unlaunched"), foremen.get(uid, {}),
                            load_launches(st, uid)))
   idle = [uid for uid in units if uid in named_idle or states.get(uid) == "idle"]
+  pending = [(uid, d) for uid in launched for d in pending_decisions(foremen[uid])]
   lines += section("Non-terminal launches", [f"{uid} launch {e['round']} {e['status']}" for uid in launched
                                               for e in load_launches(st, uid) if not e["status"].startswith("exited")
                                               and e["status"] != "interrupted"])
@@ -56,13 +57,14 @@ def run(args):
                                                        if views[uid]["head"] and views[uid]["ci"] in (None, "pending")])
   lines += section("Idle", [f"{uid}: {reason}" for uid, reason in idle_reasons(card, states, views, config, now)])
   lines += section("Ready, unlaunched", [f"{uid} ({'slot free' if free > 0 else 'no free slot'})" for uid in ready])
-  lines += section("Pending decisions", [])
+  lines += section("Pending decisions", [f"{uid} {d['id']} (point {d['point']}, {d['source']}): {question_line(d['question'])}"
+                                         for uid, d in pending])
   lines += section("Stopped", [stopped_line(st, uid, foremen[uid]["stopped"], views) for uid in launched
                                if states[uid] == "stopped"])
   core.atomic_write(path, "\n".join(lines) + "\n")
   print(path)
   print("idle: " + (",".join(idle) or "none"))
-  print("pending: none")
+  print("pending: " + ("; ".join(f"{uid} {d['id']} (point {d['point']}, {d['source']})" for uid, d in pending) or "none"))
   print(f"loop: {'ended' if ended else 'continuing'} ({why})")
   return 0
 
@@ -118,6 +120,12 @@ def idle_reasons(card: dict, states: dict, views: dict, config: dict, now: float
                            f"(ci_wait_minutes {config.get('ci_wait_minutes', 30)})"))
   return reasons
 
+
+
+def question_line(question: str) -> str:
+  """The first line of a question that is not blank, not a `**…**` heading and not a `- (` option."""
+  return next((line for line in question.splitlines()
+               if line.strip() and not line.startswith("**") and not line.startswith("- (")), "")
 
 
 def dependants(units_json, uid: str) -> list:
