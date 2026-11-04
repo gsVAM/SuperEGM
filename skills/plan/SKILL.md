@@ -156,3 +156,26 @@ line per wave, the critical path and what it wrote.
 2.  Run `python3 '<HELPER>' runcard close '<CARD>'`.
 3.  Next: `/superegm:review-plan '<SpecPath>'` reviews every unfiled body;
     `/superegm:file` creates the issues once that review converged.
+
+## Leavemealone-mode
+
+In leavemealone-mode (`--leavemealone` on the invocation, or `config.mode`) a
+`decision-blocking` line of Step 4 (decision point 3, a `blocking: yes` item)
+goes to the judge panel instead of the owner, and what the converged answer
+applies is the one routing table
+`${CLAUDE_PLUGIN_ROOT}/skills/judges/references/leavemealone.md` (this skill
+carries none of its own). Render the item's question from the record:
+`python3 '<HELPER>' judges question --unit <U> --decision D<n> --runcard <card>`
+(its options are the item's own `(a) …; (b) …` lines). Then the panel sequence
+of the reference: `python3 '<HELPER>' judges open --question <path> --evidence <paths> --parent <card>`
+(the spec is the evidence; the panel's child card hangs under this card), the
+dispatch of the `judges` skill (Astra through the runner, the Claude judges
+through `superegm:judge`, `judges record`, `judges diff`, round by round), and
+`python3 '<HELPER>' judges verdict --panel <id> --runcard <card>`. A converged
+`(<id>)` is applied with
+`python3 '<HELPER>' decide --unit <U> --decision D<n> --answer "(<id>)" --judges <panel> --runcard <card>`,
+which rewrites the plan line of an unfiled unit (`; answer: (<id>)`) and
+re-renders its body, so `graph` and `scan` again; a filed unit gets the comment
+file of Step 4 item 3. An unconverged question stays open: end the invocation
+naming it and `judges/<id>/verdict.json`, close the card, and the owner answers
+it with `decide` by hand.

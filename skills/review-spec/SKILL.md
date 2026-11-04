@@ -157,3 +157,24 @@ on Astra's own earlier findings) and any file your OS account can read that Astr
 OpenAI under the account `codex login status` reports. Say so in one line the first time the
 lane starts in a session; `skip astra` stops waiting for it in this review, and
 `config.astra.enabled: false` turns it off.
+
+## Leavemealone-mode
+
+In leavemealone-mode (`--leavemealone` on the invocation, or `config.mode`) decision points 1 and 2
+go to the judge panel instead of the owner, and what each converged answer applies is the one
+routing table `${CLAUDE_PLUGIN_ROOT}/skills/judges/references/leavemealone.md` (this skill carries
+none of its own). At the point, render the question from the record:
+
+- point 1, every high or medium you contest or decline in a round (step 3), one panel per round:
+  `superegm judges question --review <id> --round <n> --reason <fid>=<text> --runcard <card>`,
+  one `--reason` per finding, your reason verbatim as the overrule option's text;
+- point 2, the cap (step 5): `superegm judges question --review <id> --cap --runcard <card>`.
+
+Then the panel sequence of the reference: `superegm judges open --question <path> --evidence <paths> --parent <card>`
+(the spec is the evidence; the panel's child card hangs under this card), the dispatch of the
+`judges` skill (Astra through the runner, the Claude judges through `superegm:judge`, `judges record`,
+`judges diff`, round by round), and `superegm judges verdict --panel <id> --runcard <card>`. Apply
+each converged answer through its row as it converges (`review settle … --judges <panel>`,
+`review rule … --judges <panel>`); the verdict's `open[]` are the unconverged questions: end the
+invocation naming them and `judges/<id>/verdict.json`, close the card, and the owner rules by hand.
+Point 4 is mechanical here: `approve-spec --leavemealone` (step 4).
