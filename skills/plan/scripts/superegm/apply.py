@@ -127,8 +127,10 @@ def run(args):
 
 
 def check_adopted(handoff, writes) -> None:
-  """Before the first write, re-read every adopted issue not yet done and refuse one whose body
-  no longer hashes to the dry run's old body sha256, or that is gone (spec section 10)."""
+  """Before the first write, re-read every adopted issue not yet done: one whose body already
+  carries this handoff's marker for the unit is done (a crash past the edit resumes); otherwise
+  refuse one whose body no longer hashes to the dry run's old body sha256, or that is gone
+  (spec section 10)."""
   repo, units = handoff.config["repo"], handoff.state.setdefault("units", {})
   for item in writes:
     if item[0] != "issue" or len(item) != 7 or units.get(item[1], {}).get("done"):
@@ -140,7 +142,10 @@ def check_adopted(handoff, writes) -> None:
       if error.http_status == 404:
         raise core.HandoffError(f"adopt: #{number} not in {repo}") from error
       raise core.HandoffError(str(error)) from error
-    if core.sha256_text(issue.get("body") or "") != old_sha:
+    match = core.body.MARKER_RE.match((issue.get("body") or "").lstrip())
+    if match and match.groups()[:2] == (handoff.handoff_id, item[1]):
+      units.setdefault(item[1], {}).update({"number": number, "id": issue["id"], "done": True})
+    elif core.sha256_text(issue.get("body") or "") != old_sha:
       raise core.HandoffError(f"adopt: #{number} body changed since the dry run")
 
 
