@@ -81,6 +81,13 @@ naming the spec, `## 1. Issue template` (naming
 `## Global constraints` (one line each, exact values copied from the spec)
 and `## 2. Units`.
 
+Run `python3 '<HELPER>' orient --spec '<SpecPath>' --runcard '<CARD>'` before drafting
+and again after every `graph` of Step 3 that exits 0; stop on its exit 1 with its line.
+It writes `orient/map.md` (the repository map, with graphify's communities when that CLI
+is installed) and, once a handoff is open, every unfiled unit's `<6 hex>/orient/<unit>.md`,
+copied from the repository's own files and never summarized. Read `orient/map.md` before
+drafting.
+
 1.  Read the spec's `## Units` table. For every row not yet in the plan
     file add one `### U<nn>: <title>` section by section 2's schema, its
     Steps by section 3's rules. Keep every section already there; a filed

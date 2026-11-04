@@ -48,6 +48,12 @@ dispatch.
    pause.
 5. Show the run card line of review_loop.md section 7 once; in normal mode ask the owner once
    whether to start, in leavemealone-mode start.
+6. Run `superegm orient --spec '<spec>' --runcard '<card>'` through the helper (the `orient`
+   subcommand of the same `python3 '<HELPER>'` Bash call as every command below) when the skill
+   starts, and `superegm orient --spec '<spec>' --unit U<id> --runcard '<card>'` for each unit
+   after every `graph` it runs that re-rendered that unit's body, so the next round's
+   `readiness` goldfish reads a fresh unit file (the map is `plan`'s, written without `--unit`);
+   stop on its exit 1 with its line.
 
 ## Step 1: the dispatch set
 
@@ -100,7 +106,10 @@ this invocation's round count, 1 at its first Step 2.
    per finding, written to `<artifacts_dir>/reviews/<id>/round-<n>-<reviewer>.txt`, an empty
    file when it found nothing. The `readiness` goldfish also receives the standard's readiness
    sentence: a question a builder would have to ask before building is a finding, a blocking
-   one is `high`.
+   one is `high`; and, by absolute path, the unit's `<6 hex>/orient/<unit>.md` when the store
+   holds it (the brief says `no orient file` when it is absent); that dispatch is recorded with
+   `--isolation 'exposed:orient <tree sha>'`, the tree its first line names, joined with
+   whatever else the goldfish reports.
 3. Per due unit, one `proportion` dispatch through `superegm:zoom-out` with
    `${CLAUDE_PLUGIN_ROOT}/skills/review-plan/references/proportion.md` and, in place of the set
    text, the text `python3 '<HELPER>' review-plan proportion-input --unit '<unit>' --spec '<spec>'`
