@@ -516,6 +516,10 @@ def round_questions(st, rid: str, n: int, reasons: list) -> str:
     if fid not in findings:
       raise core.HandoffError(f"question: {fid} is not in round {n}")
     finding = findings[fid]
+    if finding["location"] == "ci" or finding["claim"].startswith("CI not green"):  # section 8: settled by no one
+      raise core.HandoffError(f"question: {fid} is the CI finding")
+    if finding["severity"] == "low":
+      raise core.HandoffError(f"question: {fid} is low")
     lines.append(f"## Q{k} {fid} ({finding['severity']}, {finding['location']}): {finding['claim']}\n"
                  + options_text(["finding upheld", f"finding overruled — {text}"]))
   if not lines:
@@ -527,6 +531,10 @@ def cap_question(st, rid: str) -> str:
   from superegm import review as reviews
   review = reviews.load_review(st, rid)
   options = list(CAP_OPTIONS["head" if review["kind"] == "head" else "other"])
+  if any(r["ruling"] == "continue" for r in review["rulings"]):  # section 5: continue is ruled at most once
+    options.pop(0)
+    if len(options) < 2:
+      raise core.HandoffError(f"question: continue already ruled on {rid}; {options[0]} is the only option")
   return f"## Q1 {rid} is at its cap\n" + options_text(options)
 
 
@@ -556,6 +564,8 @@ def blocked_question(st, unit: str, what: list) -> tuple[str, list[int]]:
     heading = f"{unit}: #{what[1]} was closed by the builder account"
   else:
     raise core.HandoffError("question: --blocked takes <comment-id> | launch <n> | closed <n>")
+  if any(r["ruling"].partition(" — ")[0].strip() == "relaunch" for r in core.load_foreman(st, unit)["rulings"]):
+    raise core.HandoffError(f"question: relaunch already used on {unit}")  # section 11: offered once per unit
   return f"## Q1 {heading}\n" + options_text(RELAUNCH), []
 
 
