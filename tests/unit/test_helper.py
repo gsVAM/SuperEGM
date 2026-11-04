@@ -311,7 +311,7 @@ def test_init_writes_the_config_with_every_key_and_refuses_another_base(tmp_path
   config = json.loads((repo / ".superegm/config.json").read_text(encoding="utf-8"))
   assert set(config) == {"repo", "base", "artifacts_dir", "mode", "max_in_flight", "labels", "issue_template",
                          "tracking_issue_title", "banned_terms", "fix_request_mention", "allowed_mentions",
-                         "reviewers", "astra", "judges", "builder", "ci_wait_minutes"}
+                         "reviewers", "astra", "judges", "builder", "ci_wait_minutes", "owners", "owner_team", "pr_block_file"}
   assert config["repo"] == REPO and config["base"] == "main" and config["artifacts_dir"] == str(tmp_path / "store")
   assert config["mode"] == "normal" and config["max_in_flight"] == 5 and config["ci_wait_minutes"] == 30
   assert config["labels"]["stopped"] == "superegm:stopped"
@@ -332,6 +332,20 @@ def test_init_writes_the_config_with_every_key_and_refuses_another_base(tmp_path
   assert code == 1 and "default branch" in out
   code, out = harness.run("init", "--artifacts-dir", str(repo / "inside"))
   assert code == 1 and "outside the working tree" in out
+
+
+@pytest.mark.parametrize("key, value, message", [
+  ("owners", "gsVAM", "owners must be a list of GitHub logins"),
+  ("owner_team", "owners", "owner_team must be `<org>/<slug>` or null"),
+  ("pr_block_file", ["x"], "pr_block_file must be a path relative to the repository root or null"),
+])
+def test_launch_policy_keys_default_and_validate(world, key, value, message):
+  import superegm
+  assert [superegm.DEFAULT_CONFIG[k] for k in ("owners", "owner_team", "pr_block_file")] == [[], None, None]
+  assert superegm.load_config(world.repo)["owners"] == []            # the world's config has no `owners` key
+  set_config(world, repo=REPO, **{key: value})
+  with pytest.raises(superegm.HandoffError, match=re.escape(message)):
+    superegm.load_config(world.repo)
 
 
 F = chr(96) * 3
