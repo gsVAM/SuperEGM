@@ -287,3 +287,36 @@ def test_docs_content(path):
   for snippet in DOCS[path]:
     assert snippet in text, (path, snippet)
   assert re.search(r"Modified by SuperEGM \(gsVAM\), 2026: ", text), path
+
+
+NOTICE = re.compile(r"Modified by SuperEGM \(gsVAM\), 2026: |From superpowers 7\.0\.0 \(MIT\); modified by SuperEGM \(gsVAM\), 2026: ")
+SKIP = (".git", ".pytest_cache", "__pycache__", "tests")
+
+
+def test_readme_install_and_licence():
+  readme = (ROOT / "README.md").read_text(encoding="utf-8")
+  for snippet in [
+      "claude plugin disable egm@egm-astra", "claude plugin disable superpowers@claude-plugins-official",
+      "```sh\nclaude plugin marketplace add gsVAM/superegm\nclaude plugin install superegm@superegm\n```",
+      "builder account", "SUPEREGM_BUILDER_TOKEN", "config.builder.profile_dir", "no plugins and no `CLAUDE.md`",
+      "restrict", "`superegm/**`", "force-push", "`pull_request`", "SubagentStart", "`LICENSE-MIT`",
+  ]:
+    assert snippet in readme, snippet
+  paragraph = next(p for p in readme.split("\n\n") if p.startswith("**Licence.**"))
+  listed = set(re.findall(r"`([^`]+)`", paragraph)) - {"LICENSE", "LICENSE-MIT"}
+  assert all((ROOT / p).is_file() for p in listed), sorted(p for p in listed if not (ROOT / p).is_file())
+  carrying = set()
+  for path in ROOT.rglob("*"):
+    rel = path.relative_to(ROOT)
+    if not path.is_file() or any(part in SKIP for part in rel.parts) or rel.parts[:2] == ("docs", "specs"):
+      continue  # docs/specs quotes the notice form
+    try:
+      text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+      continue
+    if NOTICE.search(text):
+      carrying.add(rel.as_posix())
+  assert "README.md" in carrying
+  # shortcut: tests/ are compared by existence only, since test files quote the notice text; drop the exclusion
+  # when the notice tests stop quoting it
+  assert {p for p in listed if not p.startswith("tests/")} == carrying, sorted(listed ^ carrying)
