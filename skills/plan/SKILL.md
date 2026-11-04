@@ -83,9 +83,9 @@ and `## 2. Units`.
 
 1.  Read the spec's `## Units` table. For every row not yet in the plan
     file add one `### U<nn>: <title>` section by section 2's schema, its
-    Steps by section 3's rules. Keep every section already there; a filed
-    unit's section (one with an issue number in `state.json`) is frozen and
-    stays byte-identical.
+    Steps by section 3's rules. A row the section's `Landed:` line names (a unit that landed in an earlier handoff) gets no section.
+    Keep every section already there; a filed unit's section (one with an
+    issue number in `state.json`) is frozen and stays byte-identical.
 2.  Nothing is committed under the repository's docs: the plan file stays
     outside the tree, and the store keeps its copy.
 

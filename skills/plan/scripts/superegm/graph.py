@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema and issue body; the handoff id comes from the approval record; the plan is copied into the store.
+# Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema and issue body; the handoff id comes from the approval record; the plan is copied into the store; the optional `Issue` field checked against the spec's `## Units` section (U13).
 
 """superegm graph: parse the plan under its approval; write the store's plan copy,
 units, unit files and bodies."""
@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 
 import superegm as core
+from superegm.approve_spec import UNITS_H2
 
 WRITES = frozenset(['bodies', 'plan', 'state', 'unit', 'units'])  # the store kinds this subcommand writes
 SKILLS = frozenset(['plan', 'review-plan'])  # the skills whose card this subcommand accepts (D1 (a): a re-render between review-plan rounds)
@@ -118,7 +119,7 @@ class Plan(core.Plan):
     for name in core.FIELDS:
       if name not in fields:
         self._fail(unit.line - 1, f"{uid}: missing field `{name}`")
-    unknown = set(fields) - set(core.FIELDS)
+    unknown = set(fields) - set(core.FIELDS) - set(core.OPTIONAL_FIELDS)
     if unknown:
       self._fail(unit.line - 1, f"{uid}: unknown fields {sorted(unknown)}")
     self._parse_fields(unit, fields)
@@ -181,6 +182,13 @@ class Plan(core.Plan):
     return i
 
 
+def units_section(text: str) -> str:
+  """The spec from its last `## Units` heading to the end; empty without one."""
+  lines = text.splitlines(keepends=True)
+  starts = [i for i, line in enumerate(lines) if UNITS_H2.match(line)]
+  return "".join(lines[starts[-1]:]) if starts else ""
+
+
 def require_free_store(state: dict, handoff_id: str) -> dict:
   """One handoff per store: the state as it is, a fresh one once the held handoff
   is closed, or a refusal while another handoff is open."""
@@ -214,8 +222,12 @@ class Handoff(core.Handoff):
                               f"{self.design_sha[:12]}: run /superegm:review-spec (approve-spec) first")
     self.handoff_id, self.spec_sha = approval["handoff_id"], approval["sha256"]
     self.design_commit = approval.get("commit") or ""
-    self.design_title = next((l[2:].strip() for l in core.read_text(self.design_path).splitlines()
-                              if l.startswith("# ")), self.design_path.stem)
+    spec_text = core.read_text(self.design_path)
+    named = units_section(spec_text)
+    for uid, unit in self.plan.units.items():
+      if unit.issue is not None and not re.search(rf"#{unit.issue}(?!\d)", named):
+        raise core.HandoffError(f"graph: {uid}: Issue #{unit.issue} is not named in the spec's `## Units` section")
+    self.design_title = next((l[2:].strip() for l in spec_text.splitlines() if l.startswith("# ")), self.design_path.stem)
     self.config = core.load_config(self.repo_root)
     self.template = self.config["_template"] if self.config["issue_template"] else BODY_TEMPLATE
     check_template(self.template)

@@ -51,6 +51,7 @@ DECIDE_RE = re.compile(
 GEN_START, GEN_END = "<!-- egm:generated start -->", "<!-- egm:generated end -->"
 FIELDS = ("Objective", "Scope paths", "Design range", "Blocked by",
           "Shared files", "Risk", "Size")
+OPTIONAL_FIELDS = ("Issue",)  # `#<n>`: an open issue `file` adopts instead of creating one (spec section 10)
 SIZE_LIMIT = {"S": 3, "M": 8, "L": 10**6}
 BODY_LIMIT = 65_000
 MAX_UNITS = 100
@@ -613,6 +614,7 @@ class Unit:
     self.shared = []       # [(path, [(after|before, uid)])]
     self.risk = None       # (level, reason)
     self.size = None
+    self.issue = None      # the adopted issue number, an int once parsed
     self.dod = []
     self.decisions = []    # [{id, question, owner, default, blocking}]
 
@@ -626,7 +628,7 @@ class Unit:
         "shared": [{"path": p, "order": [{"kind": k, "unit": u} for k, u in o]}
                    for p, o in self.shared],
         "risk": {"level": self.risk[0], "reason": self.risk[1]},
-        "size": self.size, "dod": self.dod,
+        "size": self.size, "issue": self.issue, "dod": self.dod,
         "decisions": [{k: v for k, v in d.items() if k != "line"} for d in self.decisions],
         "wave": wave, "predecessors": sorted(preds),
     }
@@ -693,7 +695,7 @@ class Plan:
     for name in FIELDS:
       if name not in fields:
         self._fail(unit.line - 1, f"{uid}: missing field `{name}`")
-    unknown = set(fields) - set(FIELDS)
+    unknown = set(fields) - set(FIELDS) - set(OPTIONAL_FIELDS)
     if unknown:
       self._fail(unit.line - 1, f"{uid}: unknown fields {sorted(unknown)}")
     self._parse_fields(unit, fields)
@@ -777,6 +779,12 @@ class Plan:
     if len(unit.scope) > SIZE_LIMIT[value]:
       self._fail(line, f"{unit.id}: size {value} allows at most {SIZE_LIMIT[value]} scope paths")
     unit.size = value
+    if "Issue" in fields:
+      value, line = fields["Issue"]
+      match = re.match(r"^#(\d+)$", value)
+      if not match:
+        self._fail(line, f"{unit.id}: Issue must read `#<n>`")
+      unit.issue = int(match.group(1))
 
   def _check_decision_ids(self, unit):
     seen = {}
