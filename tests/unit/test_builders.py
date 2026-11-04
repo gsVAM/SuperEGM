@@ -363,6 +363,29 @@ def test_launch_builder_refuses_each_precondition(world, monkeypatch, case, reas
   assert not s.path("worktrees", UNIT).exists() and not s.path("launches", f"{UNIT}_r{rnd}_prompt.md").exists()
 
 
+@pytest.mark.parametrize("key, present", [(".github/PR_BLOCK.md", True), (".github/PR_BLOCK.md", False), (None, False)])
+def test_launch_builder_appends_the_pr_block(world, monkeypatch, key, present):
+  if present:
+    (world.repo / ".github").mkdir(exist_ok=True); (world.repo / ".github/PR_BLOCK.md").write_text("<!-- coord/v1 task=7 -->\n", encoding="utf-8")
+  s, card, hid, _ = seed(world)                       # commits the tree and clones origin from it
+  configure(world, pr_block_file=key)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)
+  if key and not present:
+    assert code == 1 and "launch-builder: pr_block_file .github/PR_BLOCK.md is absent at refs/superegm/base" in out, out
+    assert not s.path("worktrees", UNIT).exists() and not s.path("launches", f"{UNIT}_r1_prompt.md").exists()
+    return
+  assert code == 0, out
+  orders = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8")
+  prompt = s.path("launches", f"{UNIT}_r1_prompt.md").read_text(encoding="utf-8")
+  if key:
+    assert f"\n\n---\n\n# Builder orders\n\n{orders}\n\n---\n\n# PR block\n\n<!-- coord/v1 task=7 -->\n\n\n---\n\n# " in prompt
+  else:
+    assert "\n\n---\n\n# PR block\n\n" not in prompt
+  assert "paste the `# PR block` section into the PR body right after the unit id line, before the DoD results" in orders
+
+
 def test_launch_builder_round_2_detaches_the_earlier_worktree_and_carries_the_review(world, monkeypatch):
   s, card, hid, _ = seed(world)
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
