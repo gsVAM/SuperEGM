@@ -239,3 +239,29 @@ def test_close_writes_closed_at_and_journals_unlanded(world):
   code, out = world.run("close", "--runcard", runcard)
   assert code == 1 and f"close: already closed at {closed_at}" in out
   assert json.loads(store(world.repo).path("state").read_text(encoding="utf-8"))["closed_at"] == closed_at
+
+
+def test_integrate_skill_body():
+  text = (ROOT / "skills/integrate/SKILL.md").read_text(encoding="utf-8")
+  front, body = text.split("---", 2)[1:]
+  assert "disable-model-invocation: true" in front and "effect_kinds: [state-store, start-session]" in front
+  for snippet in [
+      "runcard open --skill integrate --artifact <spec-path>",
+      # `status` serves a wave card alone (U09b): the landed snapshot `close` reads is refreshed under one.
+      "status --wait 1 --runcard <wave-card>",
+      "review open --kind integrate --artifact <spec-path> --reviewers <config.reviewers.integrate> --runcard <card>",
+      "git diff <base_at_start>..<base>",
+      "review record --review <id> --round 1",
+      "review status --review <id> --runcard <card>",
+      "review settle --review <id> --finding <fid> --disposition escalated --runcard <card>",
+      "(from integrate, review <id>)",
+      "approve-spec --spec <spec-path> --amend-units --runcard <card>",
+      "close --runcard <card>",
+      "runcard close <card>",
+      "`--close`", "nothing to escalate", "every unlanded unit",
+      "`plan` → `review-plan` → `file` → `wave`",
+      "In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.",
+  ]:
+    assert snippet in body, snippet
+  assert not re.search(r"--approve|--request-changes|gh pr merge|merge locally", body)
+  assert len(body.encode("utf-8")) <= 24_000
