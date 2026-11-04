@@ -271,9 +271,15 @@ DOCS = {
     "docs/index.md": ["SuperEGM", "](getting_started.md)", "](claude.md)", "](faq.md)", "](privacy.md)", "](releases.md)"],
     "docs/getting_started.md": ["/superegm:brainstorming", "/superegm:review-spec", "/superegm:plan", "/superegm:review-plan",
                                 "/superegm:file", "/superegm:wave", "/superegm:integrate", "/superegm:judges",
-                                ".superegm/config.json", "--leavemealone", "merge", "builder account"],
+                                ".superegm/config.json", "--leavemealone", "merge", "builder account",
+                                '"Before the first run" step 1', "`owners`", "`owner_team`", "`<org>/<slug>`", "`pr_block_file`", "`superegm doctor`"],
     "docs/claude.md": ["omitClaudeMd", "SubagentStart", "SUPEREGM_ROLE", "SUPEREGM_GOLDFISH_MODEL", "claude -p",
-                       "config.builder.profile_dir", "GH_TOKEN", "superegm:judge", "superegm:foreman", "git worktree add"],
+                       "config.builder.profile_dir", "GH_TOKEN", "superegm:judge", "superegm:foreman", "git worktree add",
+                       '"Before the first run" step 1', "config.owners", "config.owner_team", "config.pr_block_file", "no hooks", "`superegm doctor`"],
+    "skills/plan/references/handoff_config.md": ["`.superegm/config.json`", "superegm:unit", *(
+        f"| `{key}` |" for key in ("repo", "base", "artifacts_dir", "mode", "max_in_flight", "labels.stopped", "issue_template", "tracking_issue_title",
+                                   "banned_terms", "fix_request_mention", "allowed_mentions", "reviewers", "astra", "judges", "builder", "ci_wait_minutes",
+                                   "owners", "owner_team", "pr_block_file"))],
     "docs/faq.md": ["leavemealone-mode", "builder account", "Nothing is merged by a machine"],
     "docs/privacy.md": ["claudex-loop", "question file", "SUPEREGM_BUILDER_TOKEN", "config.astra", "artifacts_dir", "banned_terms"],
     "docs/releases.md": ["python3 scripts/prepare_release.py --tag v1.0.0", "superegm-1.0.0.zip", "SHA256SUMS",
@@ -342,7 +348,7 @@ MINE = ["README.md", "docs/index.md", "docs/getting_started.md", "docs/claude.md
         "docs/releases.md", "scripts/prepare_release.py", "tests/unit/test_releases.py", "skills/review-spec/SKILL.md",
         "skills/review-plan/SKILL.md", "skills/plan/SKILL.md", "skills/wave/SKILL.md", "skills/integrate/SKILL.md",
         "skills/judges/references/leavemealone.md", "skills/plan/scripts/superegm/judges.py",
-        "skills/plan/scripts/superegm/close.py"]
+        "skills/plan/scripts/superegm/close.py", "skills/plan/references/handoff_config.md"]
 
 
 @pytest.mark.parametrize("path", MINE)
