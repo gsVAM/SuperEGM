@@ -269,3 +269,41 @@ def test_decision_open_records_the_question_and_prints_its_options(world, point,
     code, out = world.run(*argv)
     assert code == 1 and out == f"decision: U01 has a pending decision {qid}\n"
   assert f"Decision {qid} (point {point}, {source}): U01" in s.path("journal").read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------- S5: decision rule
+
+
+@pytest.mark.parametrize("point,source,ruling,posted", [
+  (1, "review head-U01-c1 round 2", "f-2-1 finding overruled — the test already covers it",
+   "**Ruling:** f-2-1 finding overruled — the test already covers it"),
+  (1, "review head-U01-c1 round 2", "f-2-1 finding upheld", "**Ruling:** f-2-1 finding upheld (fix it)"),
+  (2, "review head-U01-c1 cap", "one more round", "**Ruling:** (cap) one more round"),
+  (3, "comment 77", "(b) — Redis is already a dependency", "**Ruling:** (77) use Redis — Redis is already a dependency"),
+])
+def test_decision_rule_records_posts_and_journals(world, point, source, ruling, posted):
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})
+  q = question(world)
+  qid = world.run("decision", "open", "--unit", "U01", "--point", point, "--question", q, "--source", source,
+                  "--runcard", card)[1].splitlines()[0]
+  rule = lambda *extra: world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", ruling,
+                                  "--by", "owner", "--runcard", card, *extra)
+  code, out = rule()
+  assert code == 0 and out.strip() == f"https://github.com/{REPO}/issues/2#issuecomment-1", out
+  comment = world.gh.comments[2][-1]
+  assert comment["body"].startswith(posted + "\n") and (point != 3 or "Which queue?" in comment["body"])
+  r = foreman_of(s, "U01")["rulings"][-1]
+  assert (r["decision"], r["ruling"], r["by"], r["posted"]) == (qid, ruling, "owner", "comment 1") and r["posted_at"]
+  assert f"Ruling (owner): U01 {qid} {ruling}" in s.path("journal").read_text(encoding="utf-8")
+  code, out = rule()
+  assert code == 1 and out == f"decision: {qid} already ruled\n"
+  assert len(world.gh.comments[2]) == 1, "a refusal posts nothing"
+  code, out = world.run("decision", "rule", "--unit", "U01", "--decision", "q9", "--ruling", ruling, "--by", "owner", "--runcard", card)
+  assert code == 1 and out == "decision: U01 has no decision q9\n"
+  q2 = world.run("decision", "open", "--unit", "U01", "--point", point, "--question", q, "--source", source,
+                 "--runcard", card)[1].splitlines()[0]
+  code, out = world.run("decision", "rule", "--unit", "U01", "--decision", q2, "--ruling", "(z) nonsense", "--by", "owner", "--runcard", card)
+  assert code == 1 and out.startswith("decision: ruling is none of the options:")
+  assert world.run("decision", "rule", "--unit", "U01", "--decision", q2, "--ruling", ruling, "--by", "judges:j-1", "--runcard", card)[0] == 0
+  assert f"Ruling (judges j-1, leavemealone): U01 {q2} {ruling}" in s.path("journal").read_text(encoding="utf-8")
