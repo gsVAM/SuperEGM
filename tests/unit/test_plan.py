@@ -582,3 +582,21 @@ def test_graph_parses_the_optional_issue_field_against_the_spec(world, issue, na
   assert parsed["U02"]["issue"] == 7 and parsed["U01"]["issue"] is None
   assert "| Issue |" not in body_of(world, "U02") and "#7" not in body_of(world, "U02")
   assert "Issue" not in world.ns["FIELDS"] and world.ns["OPTIONAL_FIELDS"] == ("Issue",)
+
+
+PROSE_ROWS = [
+  ("skills/plan/SKILL.md", "A row the section's `Landed:` line names (a unit that landed in an earlier handoff) gets no section."),
+  ("skills/review-plan/SKILL.md", "a row the section's `Landed:` line names counts as covered"),
+  ("skills/plan/references/handoff_plan.md", "| Issue | Optional; `#<n>`, an open issue in `config.repo` that `file` adopts instead of creating one"),
+  ("skills/plan/references/handoff_plan.md", "`graph` refuses a `#<n>` the spec's `## Units` section does not name"),
+  ("skills/plan/references/handoff_plan.md", "the dry run heads such a unit `### edit #<n> <unit> (old body sha256 <hex>)` where a created unit reads `### issue <unit>`"),
+  ("skills/file/SKILL.md", "A unit whose section carries `Issue: #<n>` is adopted, not created"),
+  ("skills/file/SKILL.md", "### edit #<n> <unit> (old body sha256 <hex>)"),
+  ("skills/file/SKILL.md", "`adopt: #<n> body changed since the dry run`"),
+  ("skills/file/SKILL.md", "and, per adopted issue, four more (the issue, its parent, its dependencies, its comments)"),
+]
+
+
+@pytest.mark.parametrize("path, needle", PROSE_ROWS)
+def test_landed_rows_and_the_issue_field_in_the_plan_prose(path, needle):
+  assert needle in (ROOT / path).read_text(encoding="utf-8"), f"{path} lacks {needle!r}"
