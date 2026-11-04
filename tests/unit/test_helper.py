@@ -306,12 +306,16 @@ def test_init_writes_the_config_with_every_key_and_refuses_another_base(tmp_path
   repo = make_repo(tmp_path / "fresh")
   monkeypatch.chdir(repo)
   harness = Harness(capsys)
+  harness.gh.extend("api", lambda args, cwd, token=None: (0, "octocat\n", "") if args[1:] == ["user", "-q", ".login"] else (1, "", "unexpected"))
   code, out = harness.run("init", "--artifacts-dir", str(tmp_path / "store"))
-  assert code == 0 and "branch protection" in out and "builder account" in out and "SUPEREGM_BUILDER_TOKEN" in out
+  assert code == 0 and '1. Create the builder account and its token as README.md, "Before the first run" step 1 says' in out
+  assert "SUPEREGM_BUILDER_TOKEN" in out and "fine-grained" not in out and "Contents read" not in out
+  assert "branch protection" in out and "config.owners" in out and out.rstrip().splitlines()[-1] == "then run `superegm doctor`"
   config = json.loads((repo / ".superegm/config.json").read_text(encoding="utf-8"))
   assert set(config) == {"repo", "base", "artifacts_dir", "mode", "max_in_flight", "labels", "issue_template",
                          "tracking_issue_title", "banned_terms", "fix_request_mention", "allowed_mentions",
                          "reviewers", "astra", "judges", "builder", "ci_wait_minutes", "owners", "owner_team", "pr_block_file"}
+  assert config["owners"] == ["octocat"] and config["owner_team"] is None and config["pr_block_file"] is None
   assert config["repo"] == REPO and config["base"] == "main" and config["artifacts_dir"] == str(tmp_path / "store")
   assert config["mode"] == "normal" and config["max_in_flight"] == 5 and config["ci_wait_minutes"] == 30
   assert config["labels"]["stopped"] == "superegm:stopped"
@@ -332,6 +336,9 @@ def test_init_writes_the_config_with_every_key_and_refuses_another_base(tmp_path
   assert code == 1 and "default branch" in out
   code, out = harness.run("init", "--artifacts-dir", str(repo / "inside"))
   assert code == 1 and "outside the working tree" in out
+  harness.gh.extend("api", lambda args, cwd, token=None: (1, "", "gh: not logged in"))
+  code, out = harness.run("init", "--artifacts-dir", str(tmp_path / "store"))
+  assert code == 1 and "gh api user" in out and not (repo / ".superegm/config.json").exists()
 
 
 @pytest.mark.parametrize("key, value, message", [
