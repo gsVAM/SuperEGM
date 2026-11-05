@@ -651,3 +651,27 @@ def test_store_kinds_answer_to_the_interfaces_names(world):
       superegm.atomic_write(a.path("handoff_plan"), "")
   finally:
     superegm.STORE = superegm.CURRENT_WRITES = superegm.CURRENT_SUBCOMMAND = None
+
+
+# ---------------------------------------------- U15: builder.app and the per-launch bin directory
+
+APP = {"app_id": 12345, "slug": "superegm-builder", "private_key_env": "SUPEREGM_APP_KEY"}
+BAD = "builder.app must be null or {app_id: <int>, slug: <slug>, private_key_env: <name>}"
+
+
+@pytest.mark.parametrize("value, message", [({"app_id": 12345, "slug": "superegm-builder"}, None), ({"app_id": "12345", "slug": "superegm-builder"}, BAD),
+                                            ({**APP, "private_key": "-----BEGIN"}, BAD)])
+def test_builder_app_key_and_the_bin_kind(world, value, message):
+  import superegm
+  assert superegm.DEFAULT_CONFIG["builder"]["app"] is None
+  set_config(world, repo=REPO, builder={**superegm.DEFAULT_CONFIG["builder"], "app": value})
+  if message:
+    with pytest.raises(superegm.HandoffError, match=re.escape(message)):
+      superegm.load_config(world.repo)
+    return
+  assert superegm.load_config(world.repo)["builder"]["app"] == APP
+  set_config(world, repo=REPO, builder={k: v for k, v in superegm.DEFAULT_CONFIG["builder"].items() if k != "app"})
+  assert superegm.load_config(world.repo)["builder"]["app"] is None
+  a = superegm.Store(world.artifacts, handoff_id="sample-111111")
+  p = a.path("launches", "U07_r1_bin", "gh")
+  assert p == world.artifacts / "111111/launches/U07_r1_bin/gh" and a.kind_of(p) == "launches"
