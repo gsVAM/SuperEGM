@@ -1671,7 +1671,9 @@ and returns one word plus one line:
   test delta**: for every test file the head changes (a Step's named test path or a file the §9.3
   test-file name rule names), it compares the assertions between the file at the PR range's base when it
   exists there (a base file's assertions are the baseline, whatever commit removes them), else at its
-  first appearance in the range (the commit that creates it, whatever its subject), and at the head (lines starting `assert`, `pytest.raises`, and
+  first appearance in the range (the commit that creates it, whatever its subject), and at the head,
+  where a file absent at the head (deleted, renamed, or created then deleted in the range) reads as
+  zero assertions, so every baseline assertion counts as removed (lines starting `assert`, `pytest.raises`, and
   `parametrize` rows); every removed or loosened assertion (removed; an `==`, `in` or `raises`
   turned into something weaker; a parametrize row dropped) is a `foreman` high `test-delta:
   <file>:<line> removed | weakened`, recorded in the round's `test_delta` (§7) and re-derived
