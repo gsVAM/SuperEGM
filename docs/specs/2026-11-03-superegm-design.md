@@ -3,7 +3,7 @@
 Date: 2026-11-03. Status: 1.0.0 released from review cycle 2 (round 5, the cap; cycle 1 ended at
 round 6 by the judges' ruling `q-close`: a new approach, not another patch; those cycles are
 records outside the store); amendment 2 is under its own spec review for 1.1.0 in the store's
-own numbering (cycle `spec-2026-11-03-superegm-design-c2`; owner rulings 2026-11-04 on zoom-out-1-4 and 1-7 (orient re-run on re-render; `--unit` writes unit files only); owner ruling 2026-11-04: the audit-trail line). Owner: gsVAM.
+own numbering (cycle `spec-2026-11-03-superegm-design-c2`; owner rulings 2026-11-04 on zoom-out-1-4 and 1-7 (orient re-run on re-render; `--unit` writes unit files only); owner ruling 2026-11-04: the audit-trail line; fixes 2026-11-05: pr-base ref, colocated tests). Owner: gsVAM.
 Inputs: the brainstorm brief (stream 4); the SuperEGM judge-panel verdict (converged, round 2 of
 5); the cap-panel verdict on EGM 0.2.1; superpowers 7.0.0 and the EGM Astra fork at commit
 9bc49d4, both surveyed file by file; six goldfish rounds of cycle 1 (75, 75, 74, 61, 53, 65

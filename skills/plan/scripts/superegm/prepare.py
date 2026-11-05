@@ -53,7 +53,7 @@ def prepare(args, card):
   if args.clean:
     if tree.exists():
       core.remove_worktree(root, tree)
-    for ref in (f"refs/superegm/pr/{number}", f"refs/superegm/base/{number}"):
+    for ref in (f"refs/superegm/pr/{number}", f"refs/superegm/pr-base/{number}"):
       subprocess.run(["git", "-C", str(root), "update-ref", "-d", ref], capture_output=True)
     core.run_git(["worktree", "prune"], root, check=False)
     entry["phase"] = "cleaned"
@@ -66,9 +66,9 @@ def prepare(args, card):
   if (core.parse_remote_url(url) or "").lower() != repo.lower():
     raise core.HandoffError(f"remote {remote} no longer names {repo} ({url.strip()}): refusing to fetch")
   core.run_git(["fetch", "--no-write-fetch-head", remote, f"+refs/pull/{number}/head:refs/superegm/pr/{number}",
-                f"+refs/heads/{base}:refs/superegm/base/{number}"], root)
+                f"+refs/heads/{base}:refs/superegm/pr-base/{number}"], root)
   head = core.run_git(["rev-parse", f"refs/superegm/pr/{number}"], root).strip()
-  merge_base = core.run_git(["merge-base", f"refs/superegm/base/{number}", f"refs/superegm/pr/{number}"], root).strip()
+  merge_base = core.run_git(["merge-base", f"refs/superegm/pr-base/{number}", f"refs/superegm/pr/{number}"], root).strip()
   if tree.exists():
     if tree.resolve() not in core.registered_worktrees(root):
       raise core.HandoffError(f"{tree} exists but is not a registered worktree: remove it by hand")
