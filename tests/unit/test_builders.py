@@ -224,10 +224,17 @@ def push_to_origin(world, rel, text):
   ("team-other", "base branch main: ruleset base lets team #8 bypass, not config.owner_team (example-org/owners)"),
   ("team-missing", "config.owner_team example-org/owners does not exist"),
   ("team-member", "base branch main: ruleset base lets example-org/owners bypass, and builder-bot is a member"),
+  ("app-admin-bypass", None), ("app-rulesets", None),       # the admin-role bypass; then beside SUPEREGM_RULESET
+  ("app-both-set", "builder.app is set (SUPEREGM_APP_KEY) and SUPEREGM_BUILDER_TOKEN is also set: one identity per repository"),
+  ("app-no-openssl", "openssl is not on this machine's PATH"),
+  ("app-bypass", "base branch main: ruleset base lets the App (#12345) bypass"), ("app-classic", "base branch main: classic restriction lets app superegm-builder push"),
 ])
-def test_launch_refuses_each_precondition(world, monkeypatch, case, reason):
-  s, card, hid, _ = seed(world)
-  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+def test_launch_refuses_each_precondition(world, monkeypatch, key, tmp_path, case, reason):
+  if case.startswith("app-"):
+    s, card, hid, _, _ = app_seed(world, monkeypatch, key, tmp_path, rulesets=[RULESET, SUPEREGM_RULESET] if case == "app-rulesets" else (RULESET,))
+  else:
+    s, card, hid, _ = seed(world)
+    monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
   spec = next(world.repo.glob("docs/**/*.md"))
   bypass = lambda actor: [{**RULESET, "bypass_actors": [actor]}]
   if case == "classic":
@@ -262,6 +269,14 @@ def test_launch_refuses_each_precondition(world, monkeypatch, case, reason):
     configure(world, owner_team="example-org/owners")
     github(world, rulesets=bypass({"actor_type": "Team", "actor_id": 8 if case == "team-other" else 9, "bypass_mode": "always"}),
            team_id=None if case == "team-missing" else 9, member=case == "team-member")
+  if case == "app-both-set":
+    monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  if case == "app-no-openssl":
+    monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: None)
+  if case == "app-bypass":
+    github(world, rulesets=bypass({"actor_type": "Integration", "actor_id": 12345, "bypass_mode": "always"}))
+  if case == "app-classic":
+    github(world, rulesets=[], classic={"restrictions": {"users": [{"login": "owner"}], "teams": [], "apps": [{"slug": "superegm-builder"}]}})
   code, out = world.run("launch", "--runcard", card)
   if reason is None:
     assert code == 0 and "marked: U07" in out, out
