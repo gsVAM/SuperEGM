@@ -331,7 +331,7 @@ isolation recorded.
 | graphify's output reaching goldfish and builders as evidence | a wrong edge misleads a reviewer or a builder | the graph is built from an export of the ref `orient` was given, with no model; `orient` projects EXTRACTED edges inline and lists any other edge apart with its confidence; the file's first line names the graph's sha256 | U12 |
 | An adopted issue's body overwritten wholesale | a person's text lost | the dry run shows the old body's sha256, `apply` refuses when the body changed since, comments and title are kept | U13 |
 | A PR block appended verbatim; a token recipe that does not fit the repository's owner kind | a builder PR the repository's CI rejects; a token with no access | the block is the repository's own text and its CI checks it; the recipe names the fine-grained form for an organization's repository and the classic form for a personal one, and `doctor` reports the token's kind | U14 |
-| The App's private key readable by the builder session (it mints in the builder's environment) | a misbehaving builder mints tokens for every repository the App is installed on | the key is a file the path names, never PEM text in the environment; the App is installed on the repositories builders may write and no other; the key is rotated when a builder misbehaves; the elephant minting at launch was rejected (§3.1: a round outlives an hour) | U15 |
+| The App's private key readable by the builder session (it mints in the builder's environment) | a misbehaving builder mints tokens for every repository the App is installed on | the key is a file the path names, never PEM text in the environment; the installation is `selected`, this repository alone (a `doctor` line reads `repository_selection` from `GET /repos/<repo>/installation` and refuses `all`); the key is rotated when a builder misbehaves; the elephant minting at launch was rejected (§3.1: a round outlives an hour) | U15 |
 
 **Cost and timeline (estimate, not a promise).** One leavemealone phase: spec review 2–3 rounds
 × 6 goldfish; plan review 2 rounds × 13 units × 3 goldfish; a wave of 5 builders × 2 rounds with 2
@@ -398,7 +398,7 @@ Rules that span phases:
   consumed by the other two: a round is **clean** when no high or medium finding is unsettled;
   the artifact is **converged** when a round is `completed` (§8) AND clean AND no high or medium
   finding in it is a regression of a prior round's fix AND the round's `artifact_sha256` equals
-  the artifact's current bytes (§8 says whose bytes per kind). Lows never block. A review is **at its
+  the artifact's current bytes where the kind has a byte test (§8: a head has none). Lows never block. A review is **at its
   cap** when its counted rounds ≥ 5 + its `continue` rulings; at the cap a ruling is required
   (§13.2) before any further round; `accept` makes the artifact converged (`converged: by ruling
   <id>`); `continue` may be ruled at most once per review cycle; after `stop` no ruling is
@@ -491,9 +491,10 @@ excepted (§9.3). No lock file.
   `astra` (`enabled`, `model`, `effort`), `judges` (`min_vendors` 1; `members`: `fable` and
   `opus` through the adapter at max effort, `astra` through the runner), `builder`
   (`profile_dir`, `model`, `permission_mode` = `acceptEdits`, `gh_token_env` =
-  `SUPEREGM_BUILDER_TOKEN`, `allowed_tools`: the read/edit tools, `git add|commit|status|diff|log|
+  `SUPEREGM_BUILDER_TOKEN`, `app` = `null` (or `app_id`, `slug`, `private_key_env`, §11),
+  `allowed_tools`: the read/edit tools, `git add|commit|status|diff|log|
   mv|rm`, `gh pr create|edit|comment`, `gh issue comment`, each as a prefix pattern; the push
-  prefix for the unit's own branch is added per launch), `ci_wait_minutes` (30), `owners` (the
+  prefix for the unit's own branch is added per launch), `ci_wait_minutes` (30), `commit_trailer` (the empty string, §8), `owners` (the
   GitHub logins that may update `<base>`; `init` writes the login `gh api user` returns; a config
   without the key loads as `[]`, and `launch` and `doctor` refuse naming the key), `owner_team`
   (optional, `<org>/<slug>`: the team a ruleset's bypass actors may name) and `pr_block_file`
@@ -635,7 +636,10 @@ by the foreman. The helper records and judges; the dispatching session dispatche
   cap in that state it exits 2 as every cap does, and the rulings are `continue` (one round on
   the current bytes) or `stop` (the next cycle): `review rule` refuses `accept` while the latest
   completed round's bytes moved (`review rule: the reviewed bytes moved: continue or stop`), and
-  `judges question --cap` offers only those two then. The cap and stall
+  `judges question --cap` offers only those two then; once `continue` is spent, `stop` is the one
+  option left: `judges question --cap` says so (`question: one option: stop`) and `review rule
+  --ruling stop` is accepted with no ruler in that state (journaled `stop: the one option`), so
+  the cycle ends and the next opens on the fixed bytes with no pause (anti-goal 7). The cap and stall
   predicates live here alone; every other subcommand and every skill asks `review status`.
 - Between rounds the elephant fixes the artifact. Doctrine: change the thing, not the round. If
   two consecutive rounds regress on the same area, the next fix is a deletion, a narrowed contract
@@ -1050,8 +1054,8 @@ builders push and open draft pull requests as that account and can never update 
 branch; `init`'s printed STEPS line 1, `docs/claude.md` and `docs/getting_started.md` point to
 that step. README step 1 and `init`'s STEPS carry the App alternative (the registration
 settings: name, no webhook, the four permissions at the levels `doctor` checks, install on the
-repository, note the App ID and slug, generate the key and keep its file at the path
-`SUPEREGM_APP_KEY` names) as the recommended path for an organisation, the machine account as the
+repository, note the App ID and slug, generate the key and keep its file at the path the
+variable `private_key_env` names (`SUPEREGM_APP_KEY` by default)) as the recommended path for an organisation, the machine account as the
 quick path for a personal repository. Under that
 protection the builder account can open PRs and never merge them; the owner, who alone updates
 `<base>`, merges by hand; the plugin ships no approve or merge path, and the elephant and the
@@ -1073,26 +1077,38 @@ dependency: a JWT (RS256; `iat` now − 60 s, `exp` now + 9 min, `iss` the app i
 `openssl dgst -sha256 -sign <key path>` (`openssl` is on macOS and Linux; `doctor` checks it);
 `GET /repos/<repo>/installation` with the JWT gives the installation id, resolved on every mint
 (nothing is cached); `POST /app/installations/<id>/access_tokens` gives a one-hour token with
-the installed permissions. `superegm builder-token [--repo <owner/name>]` prints that token on
-stdout, exit 0, or exit 1 with the refusal; it is read-only: it writes nothing to the store and
-takes no run card. The builder session never holds a static token: `launch-builder` writes,
-per launch and outside the repository, `launches/<unit>_r<n>_bin/` (§7) holding
-`superegm-token` (runs `superegm builder-token` through the `python3` and plugin root the
-launching helper runs under, prints a fresh token on stdout, its one protocol) and a `gh` shim
-that sets `GH_TOKEN` from it and execs the real `gh`; the launched command puts that directory
-first on `PATH`, so the orders say `gh …` as before, the allow-list prefixes are unchanged, and
-git's credential helper stays 1.0.0's `!gh auth git-credential` (§4), which now resolves to the
-shim and mints on demand; the `GIT_CONFIG_KEY_n` pairs of the launched command's environment
-gain `user.name` and `user.email` in the identity below, and no git config file is written (§4).
-On this path `launch` and `launch-builder` replace the token predicates (the token set, its
-login not an owner, the collaborator role) with `doctor`'s App lines below. Tokens expire
-hourly and the helper mints on demand, so a builder that runs for hours never fails on expiry. The exposure this buys: the
-builder session can read the key file the path names (it mints in the builder's environment),
-so the App is installed on the repositories builders may write and no other, the key is rotated
-when a builder misbehaves, and §4.1 and the U15 row say so. Identity: the builder login is
-`<slug>[bot]` (`GET /app` with the JWT confirms the configured slug and id); commits are
-authored `"<slug>[bot]" <<app id>+<slug>[bot]@users.noreply.github.com>`; `launch` records
-`builder_login` in the slug form; the audit-trail line is unchanged (it names the human launcher).
+the installed permissions. `superegm builder-token [--repo <owner/name>] [--app-id <int>
+--key-env <name>]` prints that token on stdout, exit 0, or exit 1 with the refusal; the flags
+default to the config and the per-launch script below passes all three, so no config is read at
+mint time (the worktree's config is the ref's, not the owner's). A mint is a read in §2's sense
+(it creates no GitHub resource a person can see or delete and writes nothing to the store), so
+`builder-token` and `doctor` take no run card. The builder session never holds a static token:
+`launch-builder` writes, per launch and outside the repository, `launches/<unit>_r<n>_bin/` (§7)
+holding `superegm-token` (runs `superegm builder-token` through the `python3` and plugin root
+the launching helper runs under, with the repo, app id and key variable baked in, and prints a
+fresh token on stdout, its one protocol) and a `gh` shim that sets `GH_TOKEN` from it and execs
+the real `gh`, and fails closed: when the mint fails it exits 1 with the refusal and execs
+nothing. The launched command puts that directory first on `PATH` (the one platform fact this
+path adds, which `doctor` probes on the launching machine: a login shell of `$SHELL` keeps a
+prepended entry first), sets `GH_CONFIG_DIR` to an empty directory beside it and no `GH_TOKEN`,
+so a real `gh` reached past the shim holds no credential at all, the owner's `gh auth` login
+included, and fails closed; the orders say `gh …` as before and the allow-list prefixes are
+unchanged. Git's credential helper is 1.0.0's `gh auth git-credential` with the shim named by
+its absolute path (`!<bin>/gh auth git-credential`), so a push never depends on `PATH` order;
+the `GIT_CONFIG_KEY_n` pairs of the launched command's environment gain `user.name` and
+`user.email` in the identity below, and no git config file is written (§4). On this path
+`launch` and `launch-builder` replace the token predicates (the token set, its login not an
+owner, the collaborator role) with `doctor`'s App lines below. Tokens expire hourly and the
+helper mints on demand, so a builder that runs for hours never fails on expiry. The exposure
+this buys: the builder session can read the key file the path names (it mints in the builder's
+environment), so the installation is `selected` for this repository alone (`doctor` refuses
+`all`), the key is rotated when a builder misbehaves, and §4.1 and the U15 row say so.
+Identity: the builder login is `<slug>[bot]` (`GET /app` with the JWT confirms the configured
+slug and id); commits are authored `"<slug>[bot]" <<app id>+<slug>[bot]@users.noreply.github.com>`;
+`launch` records `builder_login` in the slug form, and every reader of the builder login
+(`launch`, `launch-builder`, `prepare`'s `comments.md` line, `decision`) derives it from the
+config on this path (`<slug>[bot]`, no token needed) and from the token on the machine-account
+path as today; the audit-trail line is unchanged (it names the human launcher).
 
 **`superegm doctor`** is read-only and needs no run card: the owner's by-hand check before a
 wave, run as every helper command is (`python3 '<plugin root>/skills/plan/scripts/superegm.py'
@@ -1116,13 +1132,15 @@ with the token (a classic token must carry `repo` and not `workflow`; a fine-gra
 no scopes header and is reported `fine-grained: permissions not probed`); and, informationally
 and never a failure, that `graphify` is on `PATH`. On the App path (`builder.app` set) its
 lines are instead: the credential path in use (a refusal naming both variables when the
-machine account's is also set); `SUPEREGM_APP_KEY` set and the key file readable; `openssl`
-present; the JWT mints (`GET /app` answers with the configured slug and id); the App is
+machine account's is also set); the variable `private_key_env` names (`SUPEREGM_APP_KEY` by
+default) set and the key file readable; `openssl` present; a login shell of `$SHELL` keeps a
+prepended `PATH` entry first (the shim's one platform fact, probed here); the JWT mints (`GET /app` answers with the configured slug and id); the App is
 installed on the repository with permissions ⊇ {contents: write, pull_requests: write, issues:
 write, metadata: read} (the builder's status, deviation and reply comments need `issues:
 write`) and without `workflows`, read from the installation's own `permissions`
 (`GET /repos/<repo>/installation` with the JWT), never from the repository's `permissions`
-object, which answers `push: false` to an installation token; a token mints; the App's id is
+object, which answers `push: false` to an installation token, and whose
+`repository_selection` is `selected` (refused when `all`); a token mints; the App's id is
 not a bypass actor (the `bypass_actors` field the protection check reads).
 The machine-account path keeps the lines above.
 
@@ -1511,8 +1529,8 @@ Landed: U01, U02, U03, U04, U05, U06, U07, U08, U09, U09b, U10, U10b, U11 (1.0.0
 | U12 | Orient (§9.3): `skills/orient/SKILL.md` (create, with `assets/icon.svg` and `test_scenarios.yaml`), `skills/orient/references/graphify.md` (create: how orient drives graphify, the flags, the fallback), `skills/plan/scripts/superegm/orient.py` (create), `skills/plan/scripts/superegm/__init__.py` (modify: the `orient` and `orient_unit` store kinds, `SUBCOMMANDS`), `skills/plan/scripts/superegm/launch_builder.py` (modify: the in-process `orient` call on the launch's ref before `add_worktree`, its refusal, and the `# Orient` prompt section), `skills/wave/references/builder_orders.md` (modify: the orders line), `skills/plan/SKILL.md` and `skills/review-plan/SKILL.md` (modify: the orient sentence each), `skills/using-superegm/SKILL.md` (modify: the typed list), `scripts/pack_plugin.py`, `tests/unit/test_effects.py`, `tests/unit/test_skeleton.py`, `tests/unit/test_packaging.py`, `tests/unit/test_helper.py` (modify: the skill and module lists, `MODULES` included), `tests/unit/test_builders.py` (modify: the `orient` call and the refusal), `README.md` (modify: the Skills list), `tests/unit/test_orient.py` (create), `tests/fixtures/orient/` (create: a small hand-written graph and a fixture tree) | — | L |
 | U13 | File adopts existing issues (§9.1, §10): `skills/plan/scripts/superegm/__init__.py` (modify: `Issue` parsed as an optional field, not added to `FIELDS`), `graph.py` (modify: the `Issue` field's `#<n>` in the spec's `## Units` section), `dry_run.py` (modify: the refusals and the `### edit` heading), `gate.py` (modify: the entry's two trailing fields), `apply.py` (modify), `skills/file/SKILL.md` and `skills/plan/references/handoff_plan.md` (the plan skill's schema reference; modify: the field and the dry-run line), `skills/plan/SKILL.md` and `skills/review-plan/SKILL.md` (modify: the landed-row sentence each, §9.1), `tests/unit/test_file.py`, `tests/unit/test_plan.py` (modify) | U12 | L |
 | U14 | Launch policy: owners set, PR block, the builder-token recipe and `doctor` (§11): `skills/plan/scripts/superegm/launch.py`, `launch_builder.py` (modify: the owners, role and team checks, `profile_problem`'s hooks check, the PR block read from the ref), `__init__.py` (modify: `DEFAULT_CONFIG` keys, `SUBCOMMANDS`), `init.py` (modify: `owners` and the STEPS text), `doctor.py` (create), `skills/wave/references/builder_orders.md` (modify), `README.md` (modify: step 1 and one sentence naming `doctor`), `docs/claude.md` and `docs/getting_started.md` (modify: the three keys and step 1, pointing to README step 1), `skills/plan/references/handoff_config.md` (modify: brought to `.superegm/config.json`'s key set, the three keys included), `tests/unit/test_builders.py`, `tests/unit/test_helper.py`, `tests/unit/test_leavemealone_finish.py` (modify: the README pins follow the new step 1), `tests/unit/test_packaging.py` (modify), `tests/unit/test_doctor.py` (create) | U12, U13 | L |
-| U15 | The builder as a GitHub App (§11, §16; one identity per repository: `builder.app` null, the machine account; set, the App, with `launch` and `doctor` refusing when the machine account's variable is also set; the per-launch `<unit>_r<n>_bin/` with `superegm-token` and the `gh` shim first on the builder's `PATH`, the git identity through the launched command's environment, `builder_login` as `<slug>[bot]`, the App as a bypass actor refused, `doctor`'s App lines; the key read by path only, its exposure to the builder session named in §4.1): `skills/plan/scripts/superegm/builder_token.py` (create), `launch_builder.py`, `launch.py`, `doctor.py`, `init.py`, `__init__.py` (modify: `DEFAULT_CONFIG.builder.app`, `SUBCOMMANDS`), `README.md`, `docs/claude.md`, `skills/plan/references/handoff_config.md`, `skills/wave/references/builder_orders.md` (modify), `tests/unit/test_builder_token.py` (create), `tests/unit/test_builders.py`, `test_doctor.py`, `test_helper.py`, `test_leavemealone_finish.py`, `test_packaging.py` (modify); tests use conftest's fake `gh` and a test RSA key generated by `openssl genrsa` in a tmp dir (skipped with a reason when `openssl` is absent) | U14 | L |
-| U16 | The five 1.0.0 defects: the convergence rule with its byte predicate, `review status`'s `fixed:` line and the `review settle` and `review rule` refusals in that state, `approve-spec`'s `escalated[]` line and record and `config.commit_trailer` (§8), `scan_text` over fences and spans (§9.1), `judges record`'s `saw:` line (§13.1): `skills/plan/scripts/superegm/review.py`, `judges.py`, `approve_spec.py` (modify: the `escalated[]` line and record, the trailer in `commit_by_path`), `__init__.py` (modify: `scan_text`, `DEFAULT_CONFIG.commit_trailer`), `skills/review-spec/references/review_loop.md`, `skills/judges/SKILL.md`, `skills/plan/references/handoff_config.md` (modify: the wording, the key), `tests/unit/test_review.py`, `test_judges.py`, `test_plan.py`, `test_helper.py` (modify) | — | M |
+| U15 | The builder as a GitHub App (§11, §16; one identity per repository: `builder.app` null, the machine account; set, the App, with `launch` and `doctor` refusing when the machine account's variable is also set; the per-launch `<unit>_r<n>_bin/` with `superegm-token` and the `gh` shim first on the builder's `PATH`, the git identity through the launched command's environment, `builder_login` as `<slug>[bot]`, the App as a bypass actor refused, `doctor`'s App lines; the key read by path only, its exposure to the builder session named in §4.1): `skills/plan/scripts/superegm/builder_token.py` (create), `launch_builder.py`, `launch.py`, `prepare.py`, `decision.py`, `doctor.py`, `init.py`, `__init__.py` (modify: `DEFAULT_CONFIG.builder.app`, `SUBCOMMANDS`), `README.md`, `docs/claude.md`, `skills/plan/references/handoff_config.md`, `skills/wave/references/builder_orders.md` (modify), `tests/unit/test_builder_token.py` (create), `tests/unit/test_builders.py`, `test_doctor.py`, `test_foreman.py`, `test_wave.py`, `test_helper.py`, `test_leavemealone_finish.py`, `test_packaging.py` (modify); tests use conftest's fake `gh` and a test RSA key generated by `openssl genrsa` in a tmp dir (skipped with a reason when `openssl` is absent) | — (U14 landed) | L |
+| U16 | The five 1.0.0 defects: the convergence rule with its byte predicate, `review status`'s `fixed:` line and the `review settle` and `review rule` refusals in that state, `approve-spec`'s `escalated[]` line and record and `config.commit_trailer` (§8), `scan_text` over fences and spans (§9.1), `judges record`'s `saw:` line (§13.1): `skills/plan/scripts/superegm/review.py`, `judges.py`, `approve_spec.py` (modify: the `escalated[]` line and record, the trailer in `commit_by_path`), `__init__.py` (modify: `scan_text`, `DEFAULT_CONFIG.commit_trailer`), `skills/review-spec/references/review_loop.md`, `skills/review-spec/SKILL.md`, `skills/review-plan/SKILL.md`, `skills/judges/SKILL.md`, `skills/plan/references/handoff_config.md` (modify: the wording, the cap options, the key), `tests/unit/test_review.py`, `test_judges.py`, `test_plan.py`, `test_helper.py` (modify) | — | M |
 
 Shared files of the 1.0.0 build: `test_helper.py` is U03's alone. `body.py` is U03's and then U05's (the derived Step
 defaults), which U03 blocks. Each workflow SKILL.md stub U01 creates is filled
@@ -1552,7 +1570,8 @@ owner's by-hand steps after the three merge, as they were for 1.0.0.
 
 Amendment 3 units (1.1.1): U15 and U16 are filed from this spec as a third handoff,
 `2026-11-04-superegm-1.1.1`, under the same landed-row rule (a plan for it carries sections for
-U15 and U16 only). U15 is blocked by U14 (merged); U16 consumes nothing from U15 but edits two
+U15 and U16 only). U15 is blocked by nothing (U14, whose files it edits, landed; a landed row is
+no plan unit, so a `Blocked by` never names it); U16 consumes nothing from U15 but edits two
 files after it: `skills/plan/scripts/superegm/__init__.py` and `tests/unit/test_helper.py` are
 U15's, then U16's, so the shared-file chain puts U16 in the wave after U15 (§5's readiness
 rule; the regions are disjoint, which the helper does not know). Risk: U15 high (credentials:
