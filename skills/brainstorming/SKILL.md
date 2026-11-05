@@ -29,6 +29,13 @@ why?
   blue"). This is a quick, clear task. Do it, and say what you did.
 - **Something non-trivial is missing.** Start the conversation.
 
+## First: Is There a Brainstorm Brief?
+
+In a repository with `.superegm/config.json`, look before you ask anything. Read `artifacts_dir` from that file. Every handoff in that store whose `state.json` has no `closed_at` may hold `foreman/*.brainstorm.md` files: under the store's `<6 hex>/` layer in the flat store, or in the handoff's own directory once each handoff has one. Each is the brainstorm brief of a unit the owner stopped for redesign.
+For each brief, take the unit's issue number from that handoff's `state.json` and read the issue's `state` with `gh api repos/<repo>/issues/<n>`.
+For a brief of a unit stopped for redesign whose issue is still open, start from the brief: say so in one line, naming the handoff and the unit, and read what the owner asked, the findings and the deviations before your first question.
+A brief whose issue is closed is left in place and never offered. With no such brief, go on to "Your First Message".
+
 ## Your First Message
 
 Your first message is two things, in this order:
