@@ -407,6 +407,9 @@ class Status:
   converged: str
   converged_round: int | None
   sha: str | None
+  moved: bool = False          # the latest completed round's bytes are no longer the artifact's (never on a head)
+  latest_sha: str | None = None
+  fixed: bool = False          # that round would have converged but for the move: re-review on the current bytes
 
 
 def findings_of(rnd: dict) -> list[dict]:
@@ -443,12 +446,15 @@ def evaluate(st: core.Store, review: dict, runcard: str) -> Status:
   clean = latest is not None and not any(blocking(f) and f["disposition"] is None for f in findings_of(latest))
   regressions = regressions_of(latest) if latest else 0
   accept = next((r for r in review["rulings"] if r["ruling"] == "accept"), None)
+  latest_sha = latest["artifact_sha256"] if latest else None
+  moved = latest is not None and review["kind"] != "head" \
+      and latest_sha != current_sha(st, review["kind"], review["artifact"])
   converged, converged_round = "no", None
   if fix_design:
     pass
   elif accept:
     converged, converged_round = f"by ruling {accept['id']}", review["converged_round"]
-  elif clean and not regressions:
+  elif clean and not regressions and not moved:
     converged, converged_round = "yes", latest["round"]
   cap = "stop" in rulings or len(completed) >= CAP + rulings.count("continue")
   stalled = len(rounds) >= 2 and all(r["what_ran"] != "completed" and r.get("runcard") == runcard for r in rounds[-2:])
@@ -458,7 +464,8 @@ def evaluate(st: core.Store, review: dict, runcard: str) -> Status:
           f"converged {converged}, cap {'yes' if cap else 'no'}, stalled {'yes' if stalled else 'no'}, sha256 {sha or 'none'}")
   trend = (f"rounds: {' -> '.join(str(len(findings_of(r))) for r in rounds)} "
            f"(regressions {', '.join(str(regressions_of(r)) for r in rounds)})") if rounds else "rounds: none"
-  return Status(code, line, trend, converged, converged_round, sha)
+  fixed = moved and clean and not regressions and not (fix_design or accept)
+  return Status(code, line, trend, converged, converged_round, sha, moved, latest_sha, fixed)
 
 
 def store_verdict(st: core.Store, rid: str, review: dict, runcard: str) -> Status:
@@ -480,6 +487,8 @@ def status_review(args) -> int:
   status = evaluate(st, review, card.get("parent") or args.runcard)
   print(status.line)
   print(status.trend)
+  if status.fixed:
+    print("fixed: re-review on the current bytes")
   return status.code
 
 
