@@ -570,6 +570,24 @@ def test_approve_spec_refusals(world, scenario, expect):
   assert not store(world.repo).path("approvals", SLUG).exists()
 
 
+@pytest.mark.parametrize("named", [False, True])
+def test_approve_spec_records_the_escalated_pairs(world, named):
+  pair = f"spec-{SLUG}-c1:design-1-1"
+  text = SPEC + (f"Escalated: {pair} is U01's.\n" if named else "")
+  spec, cid, rid = opened(world, text=text)
+  rounds(world, rid, cid, [HIGH(n) for n in range(1, 6)])
+  assert settle(world, rid, "design-1-1", "escalated", cid)[0] == 0 and rule(world, rid, "stop", cid)[0] == 0
+  _, cid, rid2 = opened(world, text=text)
+  rounds(world, rid2, cid, [[]])
+  code, out = approve(world, spec, cid)
+  assert code == 0 and (f"approve-spec: 1 escalated finding(s) await the owner: {pair}" in out) is not named
+  assert approve(world, spec, cid, "--yes")[0] == 0 and approval(world)["escalated"] == ([] if named else [pair])
+  spec, cid, rid3 = opened(world, text=text.replace("Text.", "Changed."))
+  rounds(world, rid3, cid, [HIGH(1)])
+  assert settle(world, rid3, "design-1-1", "escalated", cid)[0] == 0 and approve(world, spec, cid, "--leavemealone")[0] == 0
+  assert (rid3, approval(world)["escalated"]) == (f"spec-{SLUG}-c3", [f"{rid3}:design-1-1"])
+
+
 # ---------------------------------------------------------------- S14: the handoff id
 
 @pytest.mark.parametrize("carried,extra,keeps", [
