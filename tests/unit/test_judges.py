@@ -22,6 +22,7 @@ QUESTIONS = """## Q1 Is finding design-2-1 upheld?
 - (c) stop
 """
 ONE = "## Q1 Is finding design-2-1 upheld?\n- (a) finding upheld\n- (b) finding overruled: reason\n"
+ANSWERS = "Q1: (a)\nreason: the evidence shows it\nQ2: (c)\n"
 
 
 def open_card(world, skill, artifact, parent=None):
@@ -206,6 +207,19 @@ def test_record_claude_verdict(world):
   opus = panel_json(world, pid)["rounds"]["1"]["opus"]
   assert (opus["isolation"], opus["model"], opus["effort"]) == ("exposed:SubagentStart hook", "opus:opus", "max:max")
   assert f"judges {pid}: round 1 fable recorded (clean)" in journal(world)
+
+
+@pytest.mark.parametrize("where, saw", [("first", "CLAUDE.md"), ("last", "none"), ("none", None)])
+def test_record_accepts_the_saw_line_first_or_last(world, where, saw):
+  pid, card, _ = open_panel(world)
+  text = {"first": f"saw: {saw}\n\n{ANSWERS}", "last": f"{ANSWERS}saw: {saw}\n", "none": ANSWERS}[where]
+  verdict = world.repo.parent / "verdict.md"
+  verdict.write_text(text)
+  isolation = "clean" if saw in (None, "none") else f"exposed:{saw}"
+  argv = ["judges", "record", "--panel", pid, "--round", 1, "--judge", "fable", "--verdict", verdict, "--isolation", isolation, "--runcard", card]
+  assert world.run(*argv)[0] == 0
+  entry = panel_json(world, pid)["rounds"]["1"]["fable"]
+  assert (entry["saw"], entry["isolation"], entry["options"]) == (saw, isolation, {"Q1": "a", "Q2": "c"})
 
 
 @pytest.mark.parametrize("judge, rnd, answers, isolation, reason", [
