@@ -123,8 +123,14 @@ def rule_step_scope(uid, body, handoff):
 
 def rule_decision_blocking(uid, body, handoff):
   answered = handoff.state.get("decisions") or {}
-  return [f"decision-blocking: {uid}: {d['id']} {d['question']}" for d in handoff.plan.units[uid].decisions
-          if d["blocking"] and not d.get("answer") and f"{uid}/{d['id']}" not in answered]
+  problems = [f"decision-blocking: {uid}: {d['id']} {d['question']}" for d in handoff.plan.units[uid].decisions
+              if d["blocking"] and not d.get("answer") and f"{uid}/{d['id']}" not in answered]
+  if handoff.config["mode"] == "leavemealone":  # an escalated pair's decision is the judges' (section 13.2)
+    for d in handoff.plan.units[uid].decisions:
+      by = (answered.get(f"{uid}/{d['id']}") or {}).get("by")
+      if by and not by.startswith("judges:") and any(pair in d["question"] for pair in handoff.escalated):
+        problems.append(f"decision-ruler: {uid}: {d['id']} answered by {by} in leavemealone-mode: decide --judges <panel>")
+  return problems
 
 
 # The code-aware body rules, one problem `<rule>: <unit>: <line or reason>` each;
