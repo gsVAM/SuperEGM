@@ -2,8 +2,9 @@
 # Added by SuperEGM (gsVAM), 2026: the tdd-order check of spec section 11.
 
 """superegm tdd-order: for each Step a `test(S<n>)` commit touching its test path precedes a `feat(S<n>)`
-commit touching its implementation path, and every `test(…)` commit touches only the test paths the Steps name."""
+commit touching its implementation path, and every `test(S<n>)` commit touches only the test paths the Steps name."""
 
+import re
 from pathlib import Path
 
 import superegm as core
@@ -57,6 +58,6 @@ def check(body: str, commits: list) -> list:
     elif test is not None and feat < test:
       failures.append(f"S{n}: feat(S{n}) precedes test(S{n})")
   for subject, paths in commits:
-    if subject.startswith("test("):
+    if re.match(r"test\(S\d+\):", subject):  # an adopted branch's own `test(…)` history enters `commits_of` in full and is not the builder's
       failures += [f"{subject.split(':', 1)[0]} touches {p}: not a test path the Steps name" for p in paths if p not in test_paths]
   return failures
