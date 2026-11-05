@@ -388,7 +388,7 @@ def test_collect_not_run_accepts_any_non_terminal_round(world, phase, outcome, o
     ([("test(S1): hook", "tests/unit/test_hooks.py"), ("feat(S1): hook", "src/hooks.py")], []),
     ([("feat(S1): hook", "src/hooks.py"), ("test(S1): hook", "tests/unit/test_hooks.py")], ["S1: feat(S1) precedes test(S1)"]),
     ([("test(S1): hook", "src/hooks.py"), ("feat(S1): hook", "src/hooks.py")],
-     ["S1: no test(S1) commit touches tests/unit/test_hooks.py", "test(S1) touches src/hooks.py: not a test path the Steps name"]),
+     ["S1: no test(S1) commit touches tests/unit/test_hooks.py", "test(S1) touches src/hooks.py: not a test path the Steps name nor a test file by name"]),
     ([("test(S1): hook", "tests/unit/test_hooks.py")], ["S1: no feat(S1) commit touches src/hooks.py"]),
 ])
 def test_tdd_order(world, tmp_path, monkeypatch, commits, failures):
@@ -399,11 +399,12 @@ def test_tdd_order(world, tmp_path, monkeypatch, commits, failures):
 
 
 def test_tdd_order_accepts_the_test_paths_the_steps_name():
-  """1.1.1 fix: a `test(S<n>)` commit may touch the test paths the Steps name, colocated or not, and nothing else."""
+  """1.1.1 fix: a `test(S<n>)` commit may touch the test paths the Steps name, colocated or not; since 1.1.3 also any
+  test file by name (§9.3), and nothing else."""
   body = BODY.replace("tests/unit/test_hooks.py", "src/x.spec.ts").replace("src/hooks.py", "src/x.ts")
   assert tdd_order.check(body, [("test(S1): x", ["src/x.spec.ts"]), ("feat(S1): x", ["src/x.ts"])]) == []
   assert tdd_order.check(body, [("test(S1): x", ["src/x.spec.ts", "src/x.ts"]), ("feat(S1): x", ["src/x.ts"])]) == [
-      "test(S1) touches src/x.ts: not a test path the Steps name"]
+      "test(S1) touches src/x.ts: not a test path the Steps name nor a test file by name"]
 
 
 def test_tdd_order_reads_test_sn_subjects_only():
@@ -411,8 +412,10 @@ def test_tdd_order_reads_test_sn_subjects_only():
   touching a non-Step path is not the builder's; the test-paths rule reads `test(S<n>)` subjects only."""
   legacy = ("test(legacy): old suite", ["src/old_test.py", "src/old.py"])
   assert tdd_order.check(BODY, [legacy, ("test(S1): hook", ["tests/unit/test_hooks.py"]), ("feat(S1): hook", ["src/hooks.py"])]) == []
+  fixtures = ["tests/unit/test_hooks.py", "tests/conftest.py", "tests/fixtures/orient/tree.json", "src/hooks_test.py"]  # test files by name (§9.3) ride along
+  assert tdd_order.check(BODY, [legacy, ("test(S1): hook", fixtures), ("feat(S1): hook", ["src/hooks.py"])]) == []
   assert tdd_order.check(BODY, [legacy, ("test(S1): hook", ["tests/unit/test_hooks.py", "src/hooks.py"]), ("feat(S1): hook", ["src/hooks.py"])]) == [
-      "test(S1) touches src/hooks.py: not a test path the Steps name"]
+      "test(S1) touches src/hooks.py: not a test path the Steps name nor a test file by name"]
 
 
 @pytest.mark.parametrize("findings, word", [("", "clean"), ("change-review-1-1 | high | src/hooks.py:1 | regression: no | no hook\n", "revise")])

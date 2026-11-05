@@ -3,7 +3,7 @@
 Date: 2026-11-03. Status: 1.0.0 released from review cycle 2 (round 5, the cap; cycle 1 ended at
 round 6 by the judges' ruling `q-close`: a new approach, not another patch; those cycles are
 records outside the store); amendment 2 is under its own spec review for 1.1.0 in the store's
-own numbering (cycle `spec-2026-11-03-superegm-design-c2`; owner rulings 2026-11-04 on zoom-out-1-4 and 1-7 (orient re-run on re-render; `--unit` writes unit files only); owner ruling 2026-11-04: the audit-trail line; fixes 2026-11-05: pr-base ref, colocated tests). Owner: gsVAM.
+own numbering (cycle `spec-2026-11-03-superegm-design-c2`; owner rulings 2026-11-04 on zoom-out-1-4 and 1-7 (orient re-run on re-render; `--unit` writes unit files only); owner ruling 2026-11-04: the audit-trail line). Fixes 2026-11-05, released as 1.1.2: the tdd-order rule reads `test(S<n>)` subjects only and takes any test file by name (§11.1); test files are found by name wherever they live (§9.3). Owner: gsVAM.
 Inputs: the brainstorm brief (stream 4); the SuperEGM judge-panel verdict (converged, round 2 of
 5); the cap-panel verdict on EGM 0.2.1; superpowers 7.0.0 and the EGM Astra fork at commit
 9bc49d4, both surveyed file by file; six goldfish rounds of cycle 1 (75, 75, 74, 61, 53, 65
@@ -1187,7 +1187,7 @@ sha>` (the callers table below), so the round record names what its reader saw.
 | File | Contents, in order | Cap and trimming |
 | --- | --- | --- |
 | `orient/map.md` | with graphify: `graph.json`'s summary (nodes, edges, communities, the EXTRACTED share) and the 40 largest communities by node count, each by its id with the five files holding most of its nodes; then the repository map: one line per directory to depth 4 over the tracked files, skipping `dist`, `build`, `vendor`, `target` and `scratchpad`; each line the path, file count, dominant extension, entry points (`__init__.py`, `main.*`, `index.*`, `mod.rs`, `__main__.py`) and the first heading or first sentence of any `README.md`, `AGENTS.md`, `CLAUDE.md` or `context.md` there (one line, ≤160 chars) | 24,576 bytes: the community list is cut to what fits beside the map, then the depth is reduced until the map fits; the first line says so |
-| `orient/<unit>.md` | for every Scope path of the unit (a directory path contributes each file under it): an existing file's module docstring (first paragraph), its public signatures (`def`/`class` lines not starting with `_` for Python; exported `function`/`class`/`export` lines for JS/TS; the first 40 lines otherwise) and the test files that name it, wherever they live (a test file by name: under a `test`, `tests` or `__tests__` directory, a `test_` prefix, or a `_test`, `.test`, `_spec` or `.spec` suffix); for a path to be created, the sibling files' public signatures; with graphify, a `## Graph` section per Scope path: the nodes whose `source_file` (relative to the export, compared with the Scope path relative to the repository root) is the path or under it, every EXTRACTED edge touching them with the neighbour's `source_file` and `source_location` (callers and callees, one hop), the other edges apart with their confidence, and each node's community id; then `## Read first`: every heading-delimited section of the `README.md`, `AGENTS.md`, `CLAUDE.md` and `context.md` files at the repository root and in the Scope paths' own directories (walking up to the root) that names the unit, verbatim, each section once. "Names" means, as whole words: a Scope path as written, its basename, its directory, or for Python its dotted module name | 16,384 bytes, trimmed in this sequence until it fits: (1) the tests lists, (2) the sibling signatures, (3) `## Read first`, (4) the `## Graph` edges whose neighbour is outside the Scope, (5) the `## Graph` edges between Scope files, (6) the `## Graph` node lines, (7) the docstrings and Scope signatures, path by path in Scope order; the first line says what was trimmed |
+| `orient/<unit>.md` | for every Scope path of the unit (a directory path contributes each file under it): an existing file's module docstring (first paragraph), its public signatures (`def`/`class` lines not starting with `_` for Python; exported `function`/`class`/`export` lines for JS/TS; the first 40 lines otherwise) and the test files that name it, wherever they live (the test-file name rule: under a `test`, `tests`, `__tests__` or `spec` directory, a `test_` prefix, or a `_test`, `.test`, `_spec` or `.spec` suffix, over the walk with the map's skips `dist`, `build`, `vendor`, `target` and `scratchpad`); for a path to be created, the sibling files' public signatures; with graphify, a `## Graph` section per Scope path: the nodes whose `source_file` (relative to the export, compared with the Scope path relative to the repository root) is the path or under it, every EXTRACTED edge touching them with the neighbour's `source_file` and `source_location` (callers and callees, one hop), the other edges apart with their confidence, and each node's community id; then `## Read first`: every heading-delimited section of the `README.md`, `AGENTS.md`, `CLAUDE.md` and `context.md` files at the repository root and in the Scope paths' own directories (walking up to the root) that names the unit, verbatim, each section once. "Names" means, as whole words: a Scope path as written, its basename, its directory, or for Python its dotted module name | 16,384 bytes, trimmed in this sequence until it fits: (1) the tests lists, (2) the sibling signatures, (3) `## Read first`, (4) the `## Graph` edges whose neighbour is outside the Scope, (5) the `## Graph` edges between Scope files, (6) the `## Graph` node lines, (7) the docstrings and Scope signatures, path by path in Scope order; the first line says what was trimmed |
 
 **Callers**, each a small change in an existing skill body or module; nothing else runs or
 reads the files:
@@ -1644,10 +1644,13 @@ and returns one word plus one line:
 - `collect --dispatch <id>` records, through one `review record --reviewer foreman` call, as
   high findings: CI not green on this head; an `Exists` DoD item whose path is absent, or a `Run`
   item without its fenced output in `pr_body.md` (`dod_items`); a changed path outside the unit's
-  Scope paths (read from the frozen section, §9.1); a `tdd-order` failure (over the PR's commits
-  in order, for each Step n a `test(S<n>)` commit touching that Step's test path precedes a
-  `feat(S<n>)` commit touching its implementation path, and every `test(S<n>)` commit touches only
-  the test paths the body's Steps name; an adopted branch's own `test(…)` history is not read) not overruled by a later `**Ruling:**` from a login in `config.owners`
+  Scope paths (read from the frozen section, §9.1); a `tdd-order` failure (over the PR's commits,
+  base to head with a merge's both parents, in order: for each Step n the first `test(S<n>)` commit
+  touching that Step's test path precedes the first `feat(S<n>)` commit touching its implementation
+  path, wherever in that range either sits; and every `test(S<n>)` commit touches only test files,
+  the test paths the body's Steps name or files the §9.3 test-file name rule names, fixtures and
+  `conftest.py` among them; a commit with any other subject, an adopted branch's own `test(…)`
+  history among them, is read by neither clause) not overruled by a later `**Ruling:**` from a login in `config.owners`
   (`ruling_of`, §11.2; amendment 5, which 1.0.0 read from any non-builder author); a deviation of
   kind `interface`, `dod` or `test` not yet ruled (ruled when such a `**Ruling:**` names its
   comment id, §10); and every finding of the last posted round the
@@ -1665,8 +1668,9 @@ and returns one word plus one line:
   is non-zero is a `foreman` high `dod-<n>: ran red (<line>)`, a timeout `dod-<n>: ran red
   (timeout)`, and an item whose summary line differs from the builder's paste in its pass or fail
   counts is a high `dod-<n>: paste differs from the run`; the fenced-output check stays. **The
-  test delta**: for every test file the head changes, it compares the assertions between the
-  file at its `test(S<n>)` commit and at the head (lines starting `assert`, `pytest.raises`, and
+  test delta**: for every test file the head changes (a Step's named test path or a file the §9.3
+  test-file name rule names), it compares the assertions between the file at the first `test(S<n>)`
+  commit of the PR's range touching it, or at the range's base when no such commit does, and at the head (lines starting `assert`, `pytest.raises`, and
   `parametrize` rows); every removed or loosened assertion (removed; an `==`, `in` or `raises`
   turned into something weaker; a parametrize row dropped) is a `foreman` high `test-delta:
   <file>:<line> removed | weakened`, recorded in the round's `test_delta` (§7) and re-derived

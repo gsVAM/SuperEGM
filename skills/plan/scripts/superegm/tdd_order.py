@@ -2,13 +2,15 @@
 # Added by SuperEGM (gsVAM), 2026: the tdd-order check of spec section 11.
 
 """superegm tdd-order: for each Step a `test(S<n>)` commit touching its test path precedes a `feat(S<n>)`
-commit touching its implementation path, and every `test(S<n>)` commit touches only the test paths the Steps name."""
+commit touching its implementation path, and every `test(S<n>)` commit touches only test files: the test paths the
+Steps name or files the §9.3 test-file name rule names (fixtures and `conftest.py` among them)."""
 
 import re
 from pathlib import Path
 
 import superegm as core
 from superegm import body as body_mod, review
+from superegm.orient import TEST_RE
 
 WRITES = frozenset()  # the store kinds this subcommand writes: none, it reads
 
@@ -59,5 +61,5 @@ def check(body: str, commits: list) -> list:
       failures.append(f"S{n}: feat(S{n}) precedes test(S{n})")
   for subject, paths in commits:
     if re.match(r"test\(S\d+\):", subject):  # an adopted branch's own `test(…)` history enters `commits_of` in full and is not the builder's
-      failures += [f"{subject.split(':', 1)[0]} touches {p}: not a test path the Steps name" for p in paths if p not in test_paths]
+      failures += [f"{subject.split(':', 1)[0]} touches {p}: not a test path the Steps name nor a test file by name" for p in paths if p not in test_paths and not TEST_RE.search(p)]
   return failures
