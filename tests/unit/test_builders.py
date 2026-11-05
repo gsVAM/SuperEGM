@@ -361,6 +361,26 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   assert "read the `# Orient` section before Step 1" in orders
 
 
+@pytest.mark.parametrize("case, reason", [("scripts", None), ("whitespace", "artifacts_dir {store} holds whitespace")])
+def test_launch_builder_writes_the_token_helper_and_the_gh_shim(world, monkeypatch, key, tmp_path, case, reason):
+  s, card, hid, _, _ = app_seed(world, monkeypatch, key, tmp_path)
+  assert world.run("launch", "--runcard", card)[0] == 0
+  if case == "whitespace": s.root.rename(tmp_path / "art ifacts"); configure(world, artifacts_dir=str(tmp_path / "art ifacts")); s = store(world.repo)
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)
+  shim = s.path("launches", f"{UNIT}_r1_bin", "gh")
+  if reason:
+    assert code == 1 and f"launch-builder: {reason.format(store=s.root)}" in out and not s.path("worktrees", UNIT).exists() and not shim.parent.exists(), out
+    return
+  helper, line = shim.parent / "superegm-token", out.strip().splitlines()[-1]
+  assert code == 0 and f" builder-token --repo '{REPO}' --app-id 12345 --key-env 'SUPEREGM_APP_KEY' --openssl '{OPENSSL}'" in helper.read_text(encoding="utf-8"), out
+  assert " GH_TOKEN=superegm-no-token " in line and f"'!{shim} auth git-credential'" in line
+  run = lambda *a: subprocess.run([str(shim), *a], capture_output=True, text=True, env={**os.environ, "GH_TOKEN": "superegm-no-token"})
+  helper.write_text("#!/bin/sh\nprintf ghs_minted\n", encoding="utf-8")
+  assert (run("pr", "create", "--draft").stdout, run("auth", "git-credential", "get").stdout) == ("ghs_minted pr create --draft\n", "ghs_minted auth git-credential get\n")
+  helper.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+  assert run("pr", "create").returncode == 1 and run("auth", "git-credential", "store").stdout == "superegm-no-token auth git-credential store\n"
+
+
 def test_record_launch_appends_running_then_records_the_exit(world, monkeypatch):
   s, card, hid, _ = seed(world)
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
