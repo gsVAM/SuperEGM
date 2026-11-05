@@ -64,3 +64,13 @@ def test_mint_walks_two_calls_over_urllib_and_reports_the_refusal_verbatim(key, 
   app_api(monkeypatch, {("POST", "/app/installations/777/access_tokens"): (403, "You have exceeded a secondary rate limit")})
   with pytest.raises(superegm.HandoffError, match=re.escape("POST /app/installations/777/access_tokens: HTTP 403: You have exceeded a secondary rate limit")):
     mint(REPO, 12345, key, OPENSSL)
+
+
+def test_builder_token_prints_the_token_or_the_refusal(world, monkeypatch, key):
+  app_api(monkeypatch)
+  monkeypatch.setenv("SUPEREGM_APP_KEY", str(key))
+  assert world.run("builder-token", "--repo", REPO, "--app-id", 12345, "--key-env", "SUPEREGM_APP_KEY", "--openssl", OPENSSL) == (0, "ghs_minted\n")
+  set_config(world, repo=REPO, builder={**DEFAULT_CONFIG["builder"], "app": APP})
+  assert world.run("builder-token") == (0, "ghs_minted\n") and world.gh.calls == []
+  monkeypatch.delenv("SUPEREGM_APP_KEY")
+  assert world.run("builder-token") == (1, "superegm: builder-token: SUPEREGM_APP_KEY is not set\n")

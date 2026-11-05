@@ -189,7 +189,7 @@ def test_helper_runs_under_its_new_name(world):
 MODULES = ("init", "runcard", "approve_spec", "graph", "scan", "review", "gate", "dry_run", "apply",
            "verify", "status", "launch", "launch_builder", "record_launch", "foreman", "prepare",
            "collect", "tdd_order", "decide", "decision", "interrupt", "clean", "report", "close", "judges",
-           "review_plan", "orient", "doctor")
+           "review_plan", "orient", "doctor", "builder_token")
 
 
 @pytest.mark.parametrize("name", MODULES)
@@ -258,7 +258,7 @@ WRITES = {"approve_spec": {"approvals"}, "graph": {"state", "plan", "units", "un
           "record_launch": {"launches"}, "collect": {"foreman", "review", "reviews"}, "prepare": {"foreman", "review"},
           "launch_builder": {"launches", "orient_unit"}, "interrupt": {"launches", "foreman"}, "clean": set(),
           "orient": {"orient", "orient_unit"},
-          "runcard": {"runcards"}, "init": set(), "doctor": set()}
+          "runcard": {"runcards"}, "init": set(), "doctor": set(), "builder_token": set()}
 
 
 @pytest.mark.parametrize("name, kinds", sorted(WRITES.items()))
