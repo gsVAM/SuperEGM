@@ -515,6 +515,7 @@ def round_questions(st, rid: str, n: int, reasons: list) -> str:
       raise core.HandoffError(f"question: --reason takes <fid>=<text>, got {item}")
     asked.append((fid, text))
   asked += [(entry["fid"], entry["reason"]) for entry in rnd.get("builder_contested") or []]
+  head = (reviews.load_review(st, rid) or {}).get("kind") == "head"
   lines = []
   for k, (fid, text) in enumerate(asked, start=1):
     if fid not in findings:
@@ -525,7 +526,8 @@ def round_questions(st, rid: str, n: int, reasons: list) -> str:
     if finding["severity"] == "low":
       raise core.HandoffError(f"question: {fid} is low")
     lines.append(f"## Q{k} {fid} ({finding['severity']}, {finding['location']}): {finding['claim']}\n"
-                 + options_text(["finding upheld", f"finding overruled — {text}"]))
+                 + options_text(["finding upheld", f"finding overruled — {text}"]
+                                + ([f"redesign — {finding['claim']}"] if head else [])))
   if not lines:
     raise core.HandoffError(f"question: nothing to ask in round {n} of {rid}")
   return "".join(lines)
@@ -534,7 +536,8 @@ def round_questions(st, rid: str, n: int, reasons: list) -> str:
 def cap_question(st, rid: str) -> str:
   from superegm import review as reviews
   review = reviews.load_review(st, rid)
-  options = list(CAP_OPTIONS["head" if review["kind"] == "head" else "other"])
+  head = review["kind"] == "head"
+  options = list(CAP_OPTIONS["head" if head else "other"])
   continued = any(r["ruling"] == "continue" for r in review["rulings"])  # section 5: continue is ruled at most once
   if reviews.evaluate(st, review, None).moved:  # accept is refused on bytes nobody reviewed (a head never moves)
     options.remove("accept the remainder")
@@ -542,9 +545,22 @@ def cap_question(st, rid: str) -> str:
       raise core.HandoffError("question: one option: stop")
   if continued:
     options.pop(0)
-    if len(options) < 2:
+    if len(options) < 2 and not head:
       raise core.HandoffError(f"question: continue already ruled on {rid}; {options[0]} is the only option")
+  if head:
+    options.append(redesign_option(st, rid))
   return f"## Q1 {rid} is at its cap\n" + options_text(options)
+
+
+def redesign_option(st, rid: str) -> str:
+  """`redesign — the head is at its cap after <n> rounds`, then `: <claims>` of the latest round's unsettled
+  high and medium findings; the CI finding is settled by no one, so it is never part of the sentence."""
+  from superegm import review as reviews
+  numbers = reviews.round_numbers(st, rid)
+  latest = reviews.load_round(st, rid, numbers[-1]) if numbers else None
+  claims = [f["claim"] for f in reviews.findings_of(latest) if reviews.blocking(f) and f["disposition"] is None
+            and f["location"] != "ci" and not f["claim"].startswith("CI not green")] if latest else []
+  return f"redesign — the head is at its cap after {len(numbers)} rounds" + (": " + "; ".join(claims) if claims else "")
 
 
 def decision_question(st, unit: str, did: str) -> str:
