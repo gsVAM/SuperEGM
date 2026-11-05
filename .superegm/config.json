@@ -95,6 +95,7 @@
     ],
     "app": {
       "app_id": 5621384,
+      "slug": "superegm-builder",
       "private_key_env": "SUPEREGM_APP_KEY"
     }
   },
