@@ -531,7 +531,12 @@ def cap_question(st, rid: str) -> str:
   from superegm import review as reviews
   review = reviews.load_review(st, rid)
   options = list(CAP_OPTIONS["head" if review["kind"] == "head" else "other"])
-  if any(r["ruling"] == "continue" for r in review["rulings"]):  # section 5: continue is ruled at most once
+  continued = any(r["ruling"] == "continue" for r in review["rulings"])  # section 5: continue is ruled at most once
+  if reviews.evaluate(st, review, None).moved:  # accept is refused on bytes nobody reviewed (a head never moves)
+    options.remove("accept the remainder")
+    if continued:
+      raise core.HandoffError("question: one option: stop")
+  if continued:
     options.pop(0)
     if len(options) < 2:
       raise core.HandoffError(f"question: continue already ruled on {rid}; {options[0]} is the only option")

@@ -58,7 +58,7 @@ def register(subparsers):
   u = core.add_parser(action, "rule", "record a ruling at the cap")
   u.add_argument("--review", required=True)
   u.add_argument("--ruling", choices=RULINGS, required=True)
-  by_whom(u, required=True)
+  by_whom(u, required=False)  # `stop` alone needs no ruler once `continue` is spent and the bytes moved
   v = core.add_parser(action, "post", "post a head round's review to its pull request, bound to the reviewed commit")
   v.add_argument("--unit", required=True)
   v.add_argument("--round", type=int, required=True)
@@ -630,15 +630,26 @@ def rule_review(args) -> int:
     raise core.HandoffError("review rule: continue already ruled this cycle")
   if args.ruling == "accept" and review["kind"] == "head":
     raise core.HandoffError("review rule: accept is refused on a head")
-  if evaluate(st, review, card.get("parent") or args.runcard).code != 2:
+  status = evaluate(st, review, card.get("parent") or args.runcard)
+  if status.code != 2:
     raise core.HandoffError("review rule: not at the cap")
-  by = "owner" if args.owner else f"judges:{args.judges}"
+  if args.ruling == "accept" and status.moved:
+    raise core.HandoffError("review rule: the reviewed bytes moved: continue or stop")
+  if args.owner:
+    by = "owner"
+  elif args.judges:
+    by = f"judges:{args.judges}"
+  elif args.ruling == "stop" and "continue" in rulings and status.moved:
+    by = "helper"
+  else:
+    raise core.HandoffError("review rule: --owner or --judges required")
   ruling = {"id": f"R{len(rulings) + 1}", "ruling": args.ruling, "by": by, "at": core.now_iso()}
   review["rulings"].append(ruling)
   if args.ruling == "accept":
     completed = [r for r in rounds_of(st, rid, review) if r["what_ran"] == "completed"]
     review["converged"], review["converged_round"] = f"by ruling {ruling['id']}", completed[-1]["round"]
   save_review(st, rid, review)
-  core.journal(st, f"review rule {rid} {ruling['id']} {args.ruling} by {by} under {args.runcard}")
+  core.journal(st, f"review rule {rid} {ruling['id']} stop: the one option under {args.runcard}" if by == "helper"
+               else f"review rule {rid} {ruling['id']} {args.ruling} by {by} under {args.runcard}")
   print(f"ruling {ruling['id']} {args.ruling}")
   return 0
