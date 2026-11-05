@@ -9,7 +9,7 @@ import pytest
 from conftest import REPO, set_config
 import superegm  # the harness reloads the package per test: read HandoffError at call time
 from superegm import DEFAULT_CONFIG, builder_token
-from superegm.builder_token import jwt
+from superegm.builder_token import jwt, mint
 
 OPENSSL = shutil.which("openssl")
 APP = {"app_id": 12345, "slug": "superegm-builder", "private_key_env": "SUPEREGM_APP_KEY"}
@@ -32,3 +32,35 @@ def test_jwt_is_rs256_over_the_app_id(key, tmp_path):
   subprocess.run([OPENSSL, "rsa", "-in", key, "-pubout", "-out", tmp_path / "pub.pem"], check=True, capture_output=True)
   (tmp_path / "sig").write_bytes(unb64(signature))
   assert subprocess.run([OPENSSL, "dgst", "-sha256", "-verify", tmp_path / "pub.pem", "-signature", tmp_path / "sig"], input=f"{head}.{payload}".encode(), capture_output=True).stdout.strip() == b"Verified OK"
+
+
+PERMISSIONS = {"contents": "write", "pull_requests": "write", "issues": "write", "metadata": "read"}
+ROUTES = {("GET", "/app"): {"id": 12345, "slug": "superegm-builder"}, ("GET", f"/repos/{REPO}/installation"): {"id": 777, "permissions": PERMISSIONS},
+          ("POST", "/app/installations/777/access_tokens"): {"token": "ghs_minted"}, ("GET", "/installation/repositories"): {"total_count": 1, "repositories": [{"full_name": REPO}]}}
+
+
+def app_api(monkeypatch, answers=None) -> list:
+  """`builder_token.urlopen` replaced by a function answering `ROUTES` then `answers` by `(method, path)` with
+  `io.BytesIO` of the JSON, or raising `urllib.error.HTTPError` with the body `{"message": …}` for a
+  `(status, message)` value; returns the `(method, path, authorization)` calls made."""
+  routes, calls = {**ROUTES, **(answers or {})}, []
+
+  def urlopen(request, timeout=None):
+    method, path = request.get_method(), request.full_url.removeprefix("https://api.github.com")
+    calls.append((method, path, request.get_header("Authorization")))
+    answer = routes.get((method, path), (404, "Not Found"))
+    if isinstance(answer, tuple):
+      raise urllib.error.HTTPError(request.full_url, answer[0], answer[1], {}, io.BytesIO(json.dumps({"message": answer[1]}).encode("utf-8")))
+    return io.BytesIO(json.dumps(answer).encode("utf-8"))
+
+  monkeypatch.setattr(builder_token, "urlopen", urlopen)
+  return calls
+
+
+def test_mint_walks_two_calls_over_urllib_and_reports_the_refusal_verbatim(key, monkeypatch):
+  calls = app_api(monkeypatch)
+  assert mint(REPO, 12345, key, OPENSSL) == "ghs_minted"
+  assert [c[:2] for c in calls] == [("GET", f"/repos/{REPO}/installation"), ("POST", "/app/installations/777/access_tokens")]
+  app_api(monkeypatch, {("POST", "/app/installations/777/access_tokens"): (403, "You have exceeded a secondary rate limit")})
+  with pytest.raises(superegm.HandoffError, match=re.escape("POST /app/installations/777/access_tokens: HTTP 403: You have exceeded a secondary rate limit")):
+    mint(REPO, 12345, key, OPENSSL)
