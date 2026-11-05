@@ -319,8 +319,10 @@ def test_launch_counts_in_flight_skips_stopped_and_frees_idle(world, monkeypatch
   assert "launched" not in state_of(s)["units"]["U09"]
 
 
-ENTRIES = [("credential.https://github.com.helper", ""), ("credential.https://github.com.helper", "!{gh} auth git-credential"), ("url.https://github.com/.pushInsteadOf", "git@github.com:"),
-           ("url.https://github.com/.pushInsteadOf", "ssh://git@github.com/"), ("core.askPass", ""), ("user.name", "{login}"), ("user.email", "{email}")]
+# `insteadOf`, not `pushInsteadOf`: git applies the latter only to a remote's `url` when it has no `pushurl`, so an explicit SSH push
+# URL (the one these tests set on origin) would stay SSH and fail closed under GIT_SSH_COMMAND=false; `insteadOf` rewrites both.
+ENTRIES = [("credential.https://github.com.helper", ""), ("credential.https://github.com.helper", "!{gh} auth git-credential"), ("url.https://github.com/.insteadOf", "git@github.com:"),
+           ("url.https://github.com/.insteadOf", "ssh://git@github.com/"), ("core.askPass", ""), ("user.name", "{login}"), ("user.email", "{email}")]
 PAIRS = [("GIT_CONFIG_GLOBAL", "/dev/null"), ("GIT_CONFIG_SYSTEM", "/dev/null"), ("GIT_SSH_COMMAND", "false"), ("GIT_TERMINAL_PROMPT", "0"), ("GIT_CONFIG_COUNT", "7"),
          *(p for i, (k, v) in enumerate(ENTRIES) for p in ((f"GIT_CONFIG_KEY_{i}", k), (f"GIT_CONFIG_VALUE_{i}", v)))]
 
