@@ -3,7 +3,7 @@
 Date: 2026-11-03. Status: 1.0.0 released from review cycle 2 (round 5, the cap; cycle 1 ended at
 round 6 by the judges' ruling `q-close`: a new approach, not another patch; those cycles are
 records outside the store); amendment 2 is under its own spec review for 1.1.0 in the store's
-own numbering (cycle `spec-2026-11-03-superegm-design-c2`; owner rulings 2026-11-04 on zoom-out-1-4 and 1-7 (orient re-run on re-render; `--unit` writes unit files only)). Owner: gsVAM.
+own numbering (cycle `spec-2026-11-03-superegm-design-c2`; owner rulings 2026-11-04 on zoom-out-1-4 and 1-7 (orient re-run on re-render; `--unit` writes unit files only); owner ruling 2026-11-04: the audit-trail line). Owner: gsVAM.
 Inputs: the brainstorm brief (stream 4); the SuperEGM judge-panel verdict (converged, round 2 of
 5); the cap-panel verdict on EGM 0.2.1; superpowers 7.0.0 and the EGM Astra fork at commit
 9bc49d4, both surveyed file by file; six goldfish rounds of cycle 1 (75, 75, 74, 61, 53, 65
@@ -1095,7 +1095,7 @@ Steps in order, test first, one `test(S<n>)` commit then one `feat(S<n>)` commit
 every DoD `Run` command and paste each item's output in the PR body under its item number as a
 fenced block; push with `git push origin <branch>` and never to any other branch; open a
 **draft** PR against `<base>` whose body is the unit id, the prompt's `# PR block` section when it has
-one (verbatim, right after the unit id), the DoD results in that form and
+one (verbatim, right after the audit-trail line), the DoD results in that form and
 `Closes #<issue>` (later rounds update the existing PR; never retarget or close it); when a Step
 cannot be done as written, post the `**Deviation (<kind>):**` comment of §10; from round 2,
 verify each review finding against the code before changing anything, reply on the PR `**Reply
@@ -1107,7 +1107,10 @@ DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT` on the issue; every builder commen
 question and ends with two or more `- (a) <option>` lines, the first the builder's own proposal.
 Wherever an absorbed skill says "ask your human partner", the builder writes the question in
 that comment with status BLOCKED and stops. A builder never spawns, never touches files outside
-its scope paths, never merges.
+its scope paths, never merges. The PR body's first line after the title block is `Launched by <owner
+login> · run card <id> · unit U<n> · handoff <handoff id>`: the login of the human whose session ran
+`launch` (what `gh api user` returns there), written without an `@` so it mentions nobody; the
+orders say the line is kept verbatim.
 
 **The foreman** is a named subagent (`name: foreman-U07-<dispatch_id>`) dispatched through the
 `superegm:foreman` adapter (`omitClaudeMd: true`; tools `[Agent, Bash, Read, Grep, Glob]`) in the

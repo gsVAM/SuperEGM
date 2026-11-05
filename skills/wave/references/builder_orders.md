@@ -12,7 +12,7 @@ A Step may omit its `Run` line and its closing line. Then its command is `pytest
 
 ## The Definition of done and the pull request body
 
-After the last Step, run every DoD `Run` command from the repository root and paste each item's output in the PR body under its item number. The PR body has this form and nothing else: line 1 is the unit id; when your prompt has a `# PR block` section, paste the `# PR block` section into the PR body right after the unit id line, before the DoD results, verbatim; then one `### DoD <n>` heading per item, in item order, each followed by one fenced block (a `Run` item's block holds the command and its output, item 1's holds `checked by superegm tdd-order`, an `Exists` item's holds `ls -l <path>`, a CI item's holds `checked by CI`); the last line is `Closes #<issue>`.
+After the last Step, run every DoD `Run` command from the repository root and paste each item's output in the PR body under its item number. The PR body has this form and nothing else: line 1 is the unit id; line 2 is the `Launched by` line of your prompt's `# Audit trail` section, kept verbatim (the owner whose session launched you, the run card, the unit and the handoff; it carries no `@` and mentions nobody); when your prompt has a `# PR block` section, paste the `# PR block` section into the PR body right after the audit-trail line, before the DoD results, verbatim; then one `### DoD <n>` heading per item, in item order, each followed by one fenced block (a `Run` item's block holds the command and its output, item 1's holds `checked by superegm tdd-order`, an `Exists` item's holds `ls -l <path>`, a CI item's holds `checked by CI`); the last line is `Closes #<issue>`.
 
 ## Push and the pull request
 

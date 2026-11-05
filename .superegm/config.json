@@ -91,5 +91,6 @@
       "Bash(gh issue comment:*)"
     ]
   },
-  "ci_wait_minutes": 30
+  "ci_wait_minutes": 30,
+  "owners": ["gsVAM"]
 }
