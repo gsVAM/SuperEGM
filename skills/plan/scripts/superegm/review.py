@@ -574,7 +574,7 @@ def post(args) -> int:
   body = render_comment(rnd, head, verdict, config.get("fix_request_mention") or None)
   problems = core.scan_text(body, config, "comment", label="comment")
   if problems:
-    raise Refusal(problems[0])
+    raise Refusal(problems[0].split(": ", 1)[1])  # from the label on: `comment:<line>: <reason>`
   root = core.git_toplevel(Path.cwd())
   if merge_base_moved(root, core.load_state(st.root).get("remote") or config["remote"], config["base"], number, entry):
     entry.update({"phase": "collected", "outcome": "not run (target-moved)"})
