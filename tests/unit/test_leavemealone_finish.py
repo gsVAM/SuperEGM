@@ -356,3 +356,20 @@ def test_no_removed_mechanism_named(path):
   text = (ROOT / path).read_text(encoding="utf-8")
   hits = [term for term in REMOVED if re.search(r"(?<!SUPER)" + re.escape(term), text)]  # SUPEREGM_* stays
   assert not hits, (path, hits)
+
+
+# ---------------------------------------------------------------- U15: the App path's prose
+
+PROSE_ROWS = [
+  ("README.md", "**GitHub App** instead", True), ("README.md", "visibility `Only on this account`", True),
+  ("README.md", "`contents: write`, `pull_requests: write`, `issues: write`, `metadata: read`", True), ("README.md", "`SUPEREGM_APP_KEY`", True),
+  ("skills/plan/scripts/superegm/init.py", "or register a GitHub App as that step says and set builder.app", True),
+  ("docs/claude.md", "`superegm-no-token`", True), ("docs/claude.md", "`{{gh}}`", True), ("docs/faq.md", "GitHub App", True), ("docs/privacy.md", "the builder session can read the key file", True),
+  ("skills/plan/references/handoff_config.md", '"app": null', True),
+  ("skills/wave/references/builder_orders.md", "`{{gh}} pr create --draft`", True), ("skills/wave/references/builder_orders.md", "`gh pr", False),
+]
+
+
+@pytest.mark.parametrize("path, needle, present", PROSE_ROWS)
+def test_the_app_path_prose(path, needle, present):
+  assert (needle in (ROOT / path).read_text(encoding="utf-8")) is present, (path, needle)
