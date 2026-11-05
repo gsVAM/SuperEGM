@@ -279,7 +279,19 @@ def test_prepare_reviews_the_tip_it_fetches(world, tmp_path, monkeypatch, app):
   assert (d / "r1/pr_body.md").read_text(encoding="utf-8") == PR_BODY
   assert (d / "r1/comments.md").read_text(encoding="utf-8").startswith("builder: superegm-builder[bot]\n" if app else "builder: builder-bot\n")
   assert g("rev-parse", f"refs/superegm/pr/{PR}", cwd=world.repo) == head
-  assert g("rev-parse", f"refs/superegm/base/{PR}", cwd=world.repo) == base
+  assert g("rev-parse", f"refs/superegm/pr-base/{PR}", cwd=world.repo) == base
+
+
+def test_prepare_after_launch_fetched_the_base_ref(world, tmp_path, monkeypatch):
+  """1.1.1 fix: `launch` fetches origin/<base> into `refs/superegm/base` and git refuses a ref nested under an
+  existing one, so the round's base ref is `refs/superegm/pr-base/<n>`: both live in one clone."""
+  target, base, head, g = pr_repo(world, tmp_path, monkeypatch)
+  g("fetch", "--no-write-fetch-head", "origin", "+refs/heads/main:refs/superegm/base", cwd=world.repo)  # launch.py's fetch
+  st, card, child, did, _ = dispatched(world, head=head)
+  code, out = world.run("prepare", "--unit", UNIT, "--dispatch", did, "--runcard", child)
+  assert code == 0, out
+  assert g("rev-parse", "refs/superegm/base", cwd=world.repo) == base
+  assert g("rev-parse", f"refs/superegm/pr-base/{PR}", cwd=world.repo) == base
 
 
 def test_prepare_refuses_a_pr_whose_base_is_not_base(world, tmp_path, monkeypatch):
@@ -376,7 +388,7 @@ def test_collect_not_run_accepts_any_non_terminal_round(world, phase, outcome, o
     ([("test(S1): hook", "tests/unit/test_hooks.py"), ("feat(S1): hook", "src/hooks.py")], []),
     ([("feat(S1): hook", "src/hooks.py"), ("test(S1): hook", "tests/unit/test_hooks.py")], ["S1: feat(S1) precedes test(S1)"]),
     ([("test(S1): hook", "src/hooks.py"), ("feat(S1): hook", "src/hooks.py")],
-     ["S1: no test(S1) commit touches tests/unit/test_hooks.py", "test(S1) touches src/hooks.py outside tests/"]),
+     ["S1: no test(S1) commit touches tests/unit/test_hooks.py", "test(S1) touches src/hooks.py: not a test path the Steps name"]),
     ([("test(S1): hook", "tests/unit/test_hooks.py")], ["S1: no feat(S1) commit touches src/hooks.py"]),
 ])
 def test_tdd_order(world, tmp_path, monkeypatch, commits, failures):
@@ -384,6 +396,14 @@ def test_tdd_order(world, tmp_path, monkeypatch, commits, failures):
   code, out = world.run("tdd-order", "--unit", UNIT, "--dispatch", w.did)
   assert (code, out.strip().splitlines()) == ((1, failures) if failures else (0, ["tdd-order: ok"]))
   assert tdd_order.check(BODY, [(s, [p]) for s, p in commits]) == failures
+
+
+def test_tdd_order_accepts_the_test_paths_the_steps_name():
+  """1.1.1 fix: a `test(S<n>)` commit may touch the test paths the Steps name, colocated or not, and nothing else."""
+  body = BODY.replace("tests/unit/test_hooks.py", "src/x.spec.ts").replace("src/hooks.py", "src/x.ts")
+  assert tdd_order.check(body, [("test(S1): x", ["src/x.spec.ts"]), ("feat(S1): x", ["src/x.ts"])]) == []
+  assert tdd_order.check(body, [("test(S1): x", ["src/x.spec.ts", "src/x.ts"]), ("feat(S1): x", ["src/x.ts"])]) == [
+      "test(S1) touches src/x.ts: not a test path the Steps name"]
 
 
 @pytest.mark.parametrize("findings, word", [("", "clean"), ("change-review-1-1 | high | src/hooks.py:1 | regression: no | no hook\n", "revise")])

@@ -150,13 +150,13 @@ def test_graph_unknown_reference_cycle_and_contradiction(world):
 
 def test_scan_banned_terms_mentions_and_size():
   config = {"banned_terms": ["(?i)secret-codename"], "fix_request_mention": "@copilot"}
-  # The scan is not code-aware (0.2.1): a banned term inside a code span is
+  # The banned-term rule is not code-aware: a banned term inside a code span is
   # still refused, and the author rewords.
   assert any("banned term" in p for p in scan_text("plain `secret-codename` in code", config, "body"))
   assert any("banned term" in p for p in scan_text("the secret-codename leaks", config, "body"))
   assert any("bare mention" in p for p in scan_text("ask @alice please", config, "body"))
   assert scan_text("email a@b.example only", config, "body") == []
-  assert any("bare mention" in p for p in scan_text("email a@b.example and `@alice`", config, "body"))
+  assert scan_text("email a@b.example and `@alice`", config, "body") == []
   assert scan_text("@copilot\n**EGM review round 1**", config, "comment") == []
   assert any("bare mention" in p for p in scan_text("hello\n@copilot", config, "comment"))
   assert any("bare mention" in p for p in scan_text("@copilot first", config, "body"))
@@ -178,22 +178,25 @@ def test_scan_command_over_rendered_bodies(world):
   assert code == 0 and "scan: clean" in out
 
 
-def test_scan_is_not_code_aware(world):
-  """Seven review rounds each found a defect in a Markdown-aware scanner; it
-  could both hide a mention behind a fence shape it misread and refuse an
-  ordinary comment. The code-awareness was deleted. Every line is scanned as
-  written, fences and spans included."""
-  config = {"banned_terms": ["(?i)secret-codename"], "fix_request_mention": None,
-            "allowed_mentions": []}
-  for body in ("```\n@alice secret-codename\n```\n",
-               "`@alice` and `secret-codename`\n",
-               "- ```\n  safe\n  ```\n\n@alice secret-codename\n```\n",
-               "<div></div>\n```\n\n@alice secret-codename\n\n```\n",
-               "    ```\n\n@alice secret-codename\n\n    ```\n"):
-    problems = scan_text(body, config, "comment")
-    assert any("bare mention @alice" in p for p in problems), (body, problems)
-    assert any("banned term" in p for p in problems), (body, problems)
-  assert "strip_code" not in world.ns and "FENCE_RE" not in world.ns
+CFG = {"banned_terms": ["(?i)secret-codename"], "fix_request_mention": None, "allowed_mentions": []}
+B = FENCE[0]
+SKIP = [
+  (f"{FENCE}\nask @alice\n{FENCE}\n", []), ("~~~\nask @alice\n~~~\n", []), (f"  {FENCE}py\n  ask @alice\n  {FENCE}\n", []),
+  (f"{FENCE}{B}\n{FENCE}\nask @alice\n{FENCE}\n{FENCE}{B}\n", []), (f"{FENCE}\nask @alice\n", []),
+  (f"{FENCE}sh @bob{FENCE}\nask @alice\n", ["@alice"]), (f"{FENCE}a {B}\nask @alice\n", ["@alice"]),
+  (f"{B}@alice{B} x\n", []), (f"{B}a{B} @alice {B}b{B}\n", ["@alice"]),
+  (f"{FENCE}\nsecret-codename\n{FENCE}\n", "banned"),
+]
+
+
+@pytest.mark.parametrize("text, expect", SKIP)
+def test_scan_text_skips_fences_and_spans(text, expect):
+  import superegm
+  from superegm import scan
+  assert scan.scan_text.__module__ == "superegm" and not hasattr(superegm, "scan_handoff")
+  problems = scan.scan_text(text, CFG, "body")
+  mentions = [p.split("bare mention ")[1].split(" ")[0] for p in problems if p.startswith("mention: body:")]
+  assert mentions == ([] if expect == "banned" else expect) and any("banned term" in p for p in problems) is (expect == "banned"), problems
 
 
 def test_an_ordinary_body_with_a_fence_and_no_mention_passes():
@@ -582,6 +585,64 @@ def test_graph_parses_the_optional_issue_field_against_the_spec(world, issue, na
   assert parsed["U02"]["issue"] == 7 and parsed["U01"]["issue"] is None
   assert "| Issue |" not in body_of(world, "U02") and "#7" not in body_of(world, "U02")
   assert "Issue" not in world.ns["FIELDS"] and world.ns["OPTIONAL_FIELDS"] == ("Issue",)
+
+
+PAIR, CLAIM = "spec-2026-11-03-webhooks-design-c1:design-1-2", "the cap is unstated"
+D_ESC = f"- D2 {PAIR}: {CLAIM} options: (a) cap at 5; (b) cap at 8; owner: the owner; default: (a); blocking: yes"
+MSG = f"graph: {PAIR} needs a `## Units` row or a `blocking: yes` D<n> line naming it with the finding's claim verbatim"
+
+
+def escalated(world, decide, text=SPEC):
+  """U02 planned with `decide`, the approval carrying `escalated: [PAIR]`, the finding seeded in its round file."""
+  units = (UNITS[0], section("U02", "Worker", "U01", ["u01_fn(x: int) -> int (U01)"], decide), UNITS[2])
+  spec, sha, plan, card = planned(world, units, text)
+  path = store_root(world) / "approvals" / f"{spec.stem}.json"
+  atomic_write(path, json.loads(path.read_text(encoding="utf-8")) | {"escalated": [PAIR]})
+  rid, fid = PAIR.split(":")
+  finding = {"id": fid, "severity": "high", "location": "§1", "regression": "no", "claim": CLAIM, "disposition": "escalated", "ruling": None}
+  atomic_write(store_root(world) / "reviews" / rid / "round-1.json", {"round": 1, "reviewers": {"design": {"findings": [finding]}}})
+  return plan, card
+
+
+@pytest.mark.parametrize("decide, text, message", [
+  (D_ESC, SPEC, None), (D1, SPEC + f"Escalated: {PAIR} is U02's.\n", None),
+  (D_ESC.replace("blocking: yes", "blocking: no"), SPEC, MSG), (D_ESC.replace(CLAIM, "the cap"), SPEC, MSG), (D1, SPEC, MSG),
+])
+def test_graph_requires_a_units_row_or_a_blocking_decision_per_escalated_pair(world, decide, text, message):
+  plan, card = escalated(world, decide, text)
+  code, out = graph(world, plan, card)
+  assert code == (1 if message else 0) and (message or "wrote handoff_plan.md") in out, out
+
+
+def test_scan_requires_the_judges_on_an_escalated_decision_in_leavemealone_mode(world):
+  plan, card = escalated(world, D_ESC)
+  set_config(world, repo=REPO, mode="leavemealone")
+  assert graph(world, plan, card)[0] == 0
+  assert world.run("decide", "--unit", "U02", "--decision", "D2", "--default", "--runcard", card)[0] == 0
+  assert "decision-ruler: U02: D2 answered by owner in leavemealone-mode: decide --judges <panel>" in world.run("scan", "--plan", plan)[1]
+  assert world.run("decide", "--unit", "U02", "--decision", "D2", "--default", "--judges", "q-1", "--runcard", card)[0] == 0
+  assert world.run("scan", "--plan", plan)[0] == 0
+
+
+LOOP, SPEC_SKILL, HC = "skills/review-spec/references/review_loop.md", "skills/review-spec/SKILL.md", "skills/plan/references/handoff_config.md"
+U16_PROSE = [
+  (LOOP, "equals the artifact's current bytes (a head has no byte test)"),
+  (LOOP, "`fixed: re-review on the current bytes`"),
+  (LOOP, "fixed needs changed bytes"),
+  (LOOP, "a spec edited after the approval that names it"),
+  (SPEC_SKILL, "`accept the remainder` (not while the reviewed bytes moved)"),
+  (SPEC_SKILL, "`stop` alone, ruled with no `--owner` or `--judges`"),
+  (SPEC_SKILL, "escalated finding(s) await the owner"),
+  ("skills/review-plan/SKILL.md", "review open --kind plan --artifact '<unit>' --reviewers '<panel>' --runcard '<card>'"),
+  ("skills/judges/SKILL.md", "the reply's `saw:` line, first or last"),
+  (HC, '"commit_trailer": "",'),
+  (HC, "inside a fenced code block or an inline code span is never a mention"),
+]
+
+
+@pytest.mark.parametrize("path, needle", U16_PROSE)
+def test_convergence_cap_saw_and_trailer_prose(path, needle):
+  assert needle in (ROOT / path).read_text(encoding="utf-8"), f"{path} lacks {needle!r}"
 
 
 PROSE_ROWS = [

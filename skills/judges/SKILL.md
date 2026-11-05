@@ -68,7 +68,8 @@ config's `artifacts_dir`.
         the store; the helper copies it in) and run `superegm judges record
         --panel <PANEL> --round <n> --judge <judge> --verdict '<that file>'
         --isolation <clean | exposed:<what>> --runcard <CARD>`. The isolation
-        comes from the reply's closing `saw:` line: `saw: none` is `clean`,
+        comes from the reply's `saw:` line, first or last (the helper stores its
+        text as the record's `saw`): `saw: none` is `clean`,
         anything else is `exposed:<what it saw>`. A reply with no `saw:` line
         is `exposed:no saw line`. The helper refuses a reply that does not
         parse or leaves an open question unanswered; dispatch that judge once

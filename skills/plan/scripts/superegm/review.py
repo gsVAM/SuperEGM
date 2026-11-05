@@ -58,7 +58,7 @@ def register(subparsers):
   u = core.add_parser(action, "rule", "record a ruling at the cap")
   u.add_argument("--review", required=True)
   u.add_argument("--ruling", choices=RULINGS, required=True)
-  by_whom(u, required=True)
+  by_whom(u, required=False)  # `stop` alone needs no ruler once `continue` is spent and the bytes moved
   v = core.add_parser(action, "post", "post a head round's review to its pull request, bound to the reviewed commit")
   v.add_argument("--unit", required=True)
   v.add_argument("--round", type=int, required=True)
@@ -196,18 +196,40 @@ def head_entry(st: core.Store, unit: str, n: int):
 
 def latest_cycle(st: core.Store, kind: str, artifact: str) -> tuple[dict | None, bool]:
   """The latest cycle's `review.json` of this artifact and whether that cycle is closed: by an
-  `accept` or `stop` ruling, or (a spec) by the artifact's bytes moving off the converged round's."""
+  `accept` or `stop` ruling; a spec's by the approval that names it, once the bytes moved off its
+  sha; an integrate's by the handoff closing or changing (D1 (a)), or by a `## Units` amendment
+  past the bytes its latest completed round reviewed (a cycle with no completed round stays)."""
   base = review_id(st, kind, artifact, 0)[:-3]
   cycles = [int(m.group(1)) for p in st.path("reviews").glob(f"{base}-c*")
             if (m := re.fullmatch(rf"{re.escape(base)}-c(\d+)", p.name)) and (p / "review.json").is_file()]
   if not cycles:
     return None, False
-  review = load_review(st, f"{base}-c{max(cycles)}")
+  rid = f"{base}-c{max(cycles)}"
+  review = load_review(st, rid)
   closed = any(r["ruling"] in ("accept", "stop") for r in review["rulings"])
-  if not closed and kind in ("spec", "integrate") and review["converged_round"]:
-    rnd = load_round(st, f"{base}-c{max(cycles)}", review["converged_round"])
-    closed = core.sha256_file(Path(artifact)) != rnd["artifact_sha256"]
+  if not closed and kind == "spec":
+    approval = core.load_approval(st, Path(artifact))
+    closed = bool(approval) and approval["review"] == rid and approval["sha256"] != current_sha(st, kind, artifact)
+  if not closed and kind == "integrate":
+    state = core.load_state(st.root)
+    amended = (core.load_approval(st, Path(artifact)) or {}).get("amended") or []
+    latest_sha = evaluate(st, review, None).latest_sha
+    closed = bool(state.get("closed_at")) or ("handoff_id" in review and state.get("handoff_id") != review["handoff_id"]) \
+        or bool(amended and latest_sha and amended[-1]["sha256"] != latest_sha)
   return review, closed
+
+
+def current_sha(st: core.Store, kind: str, artifact: str):
+  """The artifact's bytes now: a spec or integrate hashes the file, a plan its stored body (what
+  `handoff_units.json`'s `body_sha256` holds); a head has none."""
+  if kind in ("spec", "integrate"):
+    return core.sha256_file(Path(artifact))
+  if kind == "plan":
+    path = st.path("unit", artifact)
+    if not path.is_file():
+      raise core.HandoffError(f"review: no unit_{artifact}.md: run graph first")
+    return core.sha256_text(core.unit_file_body(path) + "\n")
+  return None
 
 
 def bind(args, review: dict) -> dict:
@@ -240,6 +262,8 @@ def open_review(args) -> int:
     raise core.HandoffError(f"review open: first reviewer must be {FIRST[kind]}")
   if kind in ("plan", "head") and not st.handoff_id:
     raise core.HandoffError("review open: no handoff_id in state.json")
+  if kind == "plan" and args.sha256:
+    raise core.HandoffError("review open: --sha256 is refused for kind plan")
   latest, closed = latest_cycle(st, kind, artifact)
   if latest and not closed:  # a re-typed skill resumes the open cycle; the panel cannot change
     rid = review_id(st, kind, artifact, latest["cycle"])
@@ -250,9 +274,10 @@ def open_review(args) -> int:
   cycle = latest["cycle"] + 1 if latest else 1
   rid = review_id(st, kind, artifact, cycle)
   astra = getattr(args, "astra", None) or ("on" if (st.config.get("astra") or {}).get("enabled") else "off")
-  review = {"kind": kind, "artifact": artifact, "cycle": cycle,
+  review = {"kind": kind, "artifact": artifact, "cycle": cycle, "handoff_id": st.handoff_id,
             "reviewers": reviewers + (["astra"] if astra == "on" and kind in LANE_KINDS else []),
-            "runcard": args.runcard, "artifact_sha256": args.sha256, "astra_incomplete": 0,
+            "runcard": args.runcard, "artifact_sha256": current_sha(st, kind, artifact) if kind == "plan" else args.sha256,
+            "astra_incomplete": 0,
             "converged": "no", "converged_round": None, "rulings": []}
   save_review(st, rid, review)
   core.card_add(st, args.runcard, "produced", rid)
@@ -277,9 +302,10 @@ def record_round(args) -> int:
       raise core.HandoffError("review record: foreman is accepted on a head only")
   elif reviewer not in review["reviewers"]:
     raise core.HandoffError(f"review record: {reviewer} is not on the panel")
-  if kind in ("spec", "integrate"):
-    sha = core.sha256_file(Path(review["artifact"]))
-  else:
+  if kind == "plan" and args.sha256:
+    raise core.HandoffError("review record: --sha256 is refused for kind plan")
+  sha = current_sha(st, kind, review["artifact"])
+  if kind == "head":
     sha = args.sha256 or (existing["artifact_sha256"] if existing else review["artifact_sha256"] if n == 1 else None)
     if not sha:
       raise core.HandoffError(f"review record: --sha256 required for kind {kind}")
@@ -350,6 +376,8 @@ def settle_finding(args) -> int:
     raise core.HandoffError("review settle: fix-design is refused on a head")
   if reviewer == "foreman" and finding["location"] == "ci":  # D2 (a): `collect` records it afresh each round
     raise core.HandoffError("review settle: the CI finding is settled by no one")
+  if disposition == "fixed" and rnd["artifact_sha256"] == current_sha(st, review["kind"], review["artifact"]):
+    raise core.HandoffError("review settle: fixed needs changed bytes")  # a head's current bytes are unknown: never
   if blocking(finding) and disposition in ("contested", "declined"):
     if card["mode"] == "leavemealone" and not args.judges:
       raise core.HandoffError(f"review settle: {fid} is {finding['severity']}: --judges required in leavemealone-mode")
@@ -358,12 +386,33 @@ def settle_finding(args) -> int:
   finding["disposition"] = disposition
   finding["ruling"] = "owner" if args.owner else f"judges:{args.judges}" if args.judges else None
   core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
+  copies = settle_set_copies(st, rnd, finding) if (review["kind"], reviewer, disposition) == ("plan", "set", "fixed") else []
   status = store_verdict(st, rid, review, card.get("parent") or args.runcard)
   if review["kind"] == "head" and status.code == 0:
     write_head_outcome(st, review, card.get("parent") or args.runcard)
-  core.journal(st, f"review settle {rid} {fid} {disposition} by {finding['ruling'] or 'the elephant'} under {args.runcard}")
+  core.journal(st, f"review settle {rid} {fid} {disposition} by {finding['ruling'] or 'the elephant'}"
+               + (f" copied to {', '.join(copies)}" if copies else "") + f" under {args.runcard}")
   print(f"{fid} {disposition}")
   return 0
+
+
+def settle_set_copies(st: core.Store, rnd: dict, finding: dict) -> list:
+  """A `set` finding settled `fixed` on one unit settles its copies: every other plan review's round
+  under the same run card whose `set` record holds the same id and claim takes the disposition and
+  ruling (one already holding them, the settled round included, is left alone); the review ids written."""
+  copies = []
+  for folder in st.path("reviews").glob(f"{st.handoff_id[-6:]}-plan-*-c*"):
+    for n in round_numbers(st, folder.name):
+      other = load_round(st, folder.name, n)
+      twins = [f for f in ((other["reviewers"].get("set") or {}).get("findings") or [])
+               if (f["id"], f["claim"]) == (finding["id"], finding["claim"])
+               and (f["disposition"], f["ruling"]) != (finding["disposition"], finding["ruling"])]
+      if other["runcard"] == rnd["runcard"] and twins:
+        for twin in twins:
+          twin["disposition"], twin["ruling"] = finding["disposition"], finding["ruling"]
+        core.atomic_write(folder / f"round-{n}.json", other)
+        copies.append(folder.name)
+  return copies
 
 
 def write_head_outcome(st: core.Store, review: dict, runcard: str) -> None:
@@ -390,6 +439,9 @@ class Status:
   converged: str
   converged_round: int | None
   sha: str | None
+  moved: bool = False          # the latest completed round's bytes are no longer the artifact's (never on a head)
+  latest_sha: str | None = None
+  fixed: bool = False          # that round would have converged but for the move: re-review on the current bytes
 
 
 def findings_of(rnd: dict) -> list[dict]:
@@ -426,12 +478,15 @@ def evaluate(st: core.Store, review: dict, runcard: str) -> Status:
   clean = latest is not None and not any(blocking(f) and f["disposition"] is None for f in findings_of(latest))
   regressions = regressions_of(latest) if latest else 0
   accept = next((r for r in review["rulings"] if r["ruling"] == "accept"), None)
+  latest_sha = latest["artifact_sha256"] if latest else None
+  moved = latest is not None and review["kind"] != "head" \
+      and latest_sha != current_sha(st, review["kind"], review["artifact"])
   converged, converged_round = "no", None
   if fix_design:
     pass
   elif accept:
     converged, converged_round = f"by ruling {accept['id']}", review["converged_round"]
-  elif clean and not regressions:
+  elif clean and not regressions and not moved:
     converged, converged_round = "yes", latest["round"]
   cap = "stop" in rulings or len(completed) >= CAP + rulings.count("continue")
   stalled = len(rounds) >= 2 and all(r["what_ran"] != "completed" and r.get("runcard") == runcard for r in rounds[-2:])
@@ -441,7 +496,8 @@ def evaluate(st: core.Store, review: dict, runcard: str) -> Status:
           f"converged {converged}, cap {'yes' if cap else 'no'}, stalled {'yes' if stalled else 'no'}, sha256 {sha or 'none'}")
   trend = (f"rounds: {' -> '.join(str(len(findings_of(r))) for r in rounds)} "
            f"(regressions {', '.join(str(regressions_of(r)) for r in rounds)})") if rounds else "rounds: none"
-  return Status(code, line, trend, converged, converged_round, sha)
+  fixed = moved and clean and not regressions and not (fix_design or accept)
+  return Status(code, line, trend, converged, converged_round, sha, moved, latest_sha, fixed)
 
 
 def store_verdict(st: core.Store, rid: str, review: dict, runcard: str) -> Status:
@@ -463,6 +519,8 @@ def status_review(args) -> int:
   status = evaluate(st, review, card.get("parent") or args.runcard)
   print(status.line)
   print(status.trend)
+  if status.fixed:
+    print("fixed: re-review on the current bytes")
   return status.code
 
 
@@ -516,7 +574,7 @@ def post(args) -> int:
   body = render_comment(rnd, head, verdict, config.get("fix_request_mention") or None)
   problems = core.scan_text(body, config, "comment", label="comment")
   if problems:
-    raise Refusal(problems[0])
+    raise Refusal(problems[0].split(": ", 1)[1])  # from the label on: `comment:<line>: <reason>`
   root = core.git_toplevel(Path.cwd())
   if merge_base_moved(root, core.load_state(st.root).get("remote") or config["remote"], config["base"], number, entry):
     entry.update({"phase": "collected", "outcome": "not run (target-moved)"})
@@ -573,8 +631,8 @@ def count_posted(st: core.Store, unit: str, entry: dict, posted_at: str, review_
 def merge_base_moved(root: Path, remote: str, base: str, pr: int, entry: dict) -> bool:
   """Fetch the base tip and compare the merge base of the fetched refs, at the repository root (never
   inside the worktree), with the one `prepare` recorded: an unrelated base commit leaves it unchanged."""
-  core.run_git(["fetch", "--no-write-fetch-head", remote, f"+refs/heads/{base}:refs/superegm/base/{pr}"], root)
-  now = core.run_git(["merge-base", f"refs/superegm/base/{pr}", f"refs/superegm/pr/{pr}"], root).strip()
+  core.run_git(["fetch", "--no-write-fetch-head", remote, f"+refs/heads/{base}:refs/superegm/pr-base/{pr}"], root)
+  now = core.run_git(["merge-base", f"refs/superegm/pr-base/{pr}", f"refs/superegm/pr/{pr}"], root).strip()
   return now != entry.get("merge_base")
 
 
@@ -602,15 +660,26 @@ def rule_review(args) -> int:
     raise core.HandoffError("review rule: continue already ruled this cycle")
   if args.ruling == "accept" and review["kind"] == "head":
     raise core.HandoffError("review rule: accept is refused on a head")
-  if evaluate(st, review, card.get("parent") or args.runcard).code != 2:
+  status = evaluate(st, review, card.get("parent") or args.runcard)
+  if status.code != 2:
     raise core.HandoffError("review rule: not at the cap")
-  by = "owner" if args.owner else f"judges:{args.judges}"
+  if args.ruling == "accept" and status.moved:
+    raise core.HandoffError("review rule: the reviewed bytes moved: continue or stop")
+  if args.owner:
+    by = "owner"
+  elif args.judges:
+    by = f"judges:{args.judges}"
+  elif args.ruling == "stop" and "continue" in rulings and status.moved:
+    by = "helper"
+  else:
+    raise core.HandoffError("review rule: --owner or --judges required")
   ruling = {"id": f"R{len(rulings) + 1}", "ruling": args.ruling, "by": by, "at": core.now_iso()}
   review["rulings"].append(ruling)
   if args.ruling == "accept":
     completed = [r for r in rounds_of(st, rid, review) if r["what_ran"] == "completed"]
     review["converged"], review["converged_round"] = f"by ruling {ruling['id']}", completed[-1]["round"]
   save_review(st, rid, review)
-  core.journal(st, f"review rule {rid} {ruling['id']} {args.ruling} by {by} under {args.runcard}")
+  core.journal(st, f"review rule {rid} {ruling['id']} stop: the one option under {args.runcard}" if by == "helper"
+               else f"review rule {rid} {ruling['id']} {args.ruling} by {by} under {args.runcard}")
   print(f"ruling {ruling['id']} {args.ruling}")
   return 0
