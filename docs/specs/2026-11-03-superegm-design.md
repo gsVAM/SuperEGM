@@ -1517,7 +1517,7 @@ and returns one word plus one line:
   Scope paths (read from the frozen section, §9.1); a `tdd-order` failure (over the PR's commits
   in order, for each Step n a `test(S<n>)` commit touching that Step's test path precedes a
   `feat(S<n>)` commit touching its implementation path, and every `test(…)` commit touches only
-  paths under `tests/`) not overruled by a later `**Ruling:**` from a login in `config.owners`
+  the test paths the body's Steps name) not overruled by a later `**Ruling:**` from a login in `config.owners`
   (`ruling_of`, §11.2; amendment 5, which 1.0.0 read from any non-builder author); a deviation of
   kind `interface`, `dod` or `test` not yet ruled (ruled when such a `**Ruling:**` names its
   comment id, §10); and every finding of the last posted round the
