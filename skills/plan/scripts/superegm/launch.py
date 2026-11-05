@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_launch` as the launch module; it marks the ready units up to `max_in_flight` after the protection checks of spec section 11, the owners set and the team bypass included.
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_launch` as the launch module; it marks the ready units up to `max_in_flight` after the protection checks of spec section 11, the owners set and the team bypass included; the builder as a GitHub App (U15).
 
 """superegm launch: check what the launch needs, then mark the ready units up to `max_in_flight`."""
 
@@ -13,6 +13,7 @@ import urllib.parse
 from pathlib import Path
 
 import superegm as core
+from superegm.builder_token import app_lines, key_path, tool
 
 WRITES = frozenset(["state", "runcards"])  # the store kinds this subcommand writes
 SKILLS = frozenset(["wave"])  # the skills whose card this subcommand accepts
@@ -51,11 +52,19 @@ def launch(args, card):
   state = handoff.state
   core.require_receipt(state)
   core.require_repo(handoff)
-  builder = builder_login(config, os.environ.get(token_env))
-  problems = protection_problems(config["repo"], base, builder, handoff.branch(handoff.graph.order[0]), config["owners"], config["owner_team"])
+  builder, app = builder_login(config, os.environ.get(token_env)), config["builder"]["app"]
+  if app:  # the App's reads that can change under a wave (spec section 11), repeated at every launch
+    openssl = tool("openssl")
+    key = key_path(app["private_key_env"])
+    for name, text in app_lines(app, config["repo"], key, openssl):
+      if not text.startswith("ok"):
+        raise core.HandoffError(f"{name}: {text}")
+  problems = protection_problems(config["repo"], base, builder, handoff.branch(handoff.graph.order[0]), config["owners"], config["owner_team"],
+                                 app_id=app["app_id"] if app else None)
   if problems:
     raise core.HandoffError(problems[0])
-  core.card_add(st, args.runcard, "builder", {"login": builder, "token_env": token_env})
+  core.card_add(st, args.runcard, "builder", {"login": builder, "email": builder_email(builder), "token_env": None if app else token_env,
+                                              "app_id": app["app_id"] if app else None})
   me = core.gh(["api", "user", "-q", ".login"]).strip()  # this session's login: the PR body's audit-trail line (spec section 11)
   summary, _ = core.status_pass(handoff, save=False)
   label = urllib.parse.quote(config["labels"]["stopped"], safe="")
@@ -95,9 +104,26 @@ def terminal(entry):
   return entry.get("status") == "interrupted" or Path(entry["result_file"] + ".exit").is_file()
 
 
+def app_login(config):
+  """`<slug>[bot]`, the builder's login on the App path (derived from the config, no token), or None."""
+  app = config["builder"]["app"]
+  return f"{app['slug']}[bot]" if app else None
+
+
+def builder_email(login: str) -> str:
+  """The commit identity's address, `<id>+<login>@users.noreply.github.com`, the id a public read."""
+  return f"{core.gh(['api', f'users/{login}', '-q', '.id']).strip()}+{login}@users.noreply.github.com"
+
+
 def builder_login(config, token_env_value):
-  """The builder account's login under its token, refused when the token is unset or is the elephant's own."""
-  env = config["builder"]["gh_token_env"]
+  """The builder's login: `<slug>[bot]` from the config on the App path (refused when the machine
+  account's variable is also set: one identity per repository), else the machine account's login
+  under its token, refused when the token is unset or is the elephant's own."""
+  env, app = config["builder"]["gh_token_env"], config["builder"]["app"]
+  if app:
+    if token_env_value:
+      raise core.HandoffError(f"builder.app is set ({app['private_key_env']}) and {env} is also set: one identity per repository")
+    return app_login(config)
   if not token_env_value:
     raise core.HandoffError(f"{env} is not set")
   builder = core.gh(["api", "user", "-q", ".login"], token=token_env_value).strip()
@@ -127,7 +153,7 @@ def origin_problems(repo_root, base, approval=None):
   return problems
 
 
-def protection_problems(repo, base, builder_login, branch, owners, owner_team=None):
+def protection_problems(repo, base, builder_login, branch, owners, owner_team=None, app_id=None):
   """What the repository's protection lacks (spec section 11): updates to <base> restricted to the
   owner (a classic restriction naming a non-empty subset of `owners`, or a ruleset whose bypass
   names neither the builder's role nor a team but `owner_team`, which the builder is outside),
