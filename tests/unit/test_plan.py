@@ -614,6 +614,16 @@ def test_graph_requires_a_units_row_or_a_blocking_decision_per_escalated_pair(wo
   assert code == (1 if message else 0) and (message or "wrote handoff_plan.md") in out, out
 
 
+def test_scan_requires_the_judges_on_an_escalated_decision_in_leavemealone_mode(world):
+  plan, card = escalated(world, D_ESC)
+  set_config(world, repo=REPO, mode="leavemealone")
+  assert graph(world, plan, card)[0] == 0
+  assert world.run("decide", "--unit", "U02", "--decision", "D2", "--default", "--runcard", card)[0] == 0
+  assert "decision-ruler: U02: D2 answered by owner in leavemealone-mode: decide --judges <panel>" in world.run("scan", "--plan", plan)[1]
+  assert world.run("decide", "--unit", "U02", "--decision", "D2", "--default", "--judges", "q-1", "--runcard", card)[0] == 0
+  assert world.run("scan", "--plan", plan)[0] == 0
+
+
 PROSE_ROWS = [
   ("skills/plan/SKILL.md", "A row the section's `Landed:` line names (a unit that landed in an earlier handoff) gets no section."),
   ("skills/review-plan/SKILL.md", "a row the section's `Landed:` line names counts as covered"),
