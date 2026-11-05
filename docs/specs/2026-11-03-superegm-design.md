@@ -388,7 +388,7 @@ isolation recorded.
 | An adopted issue's body overwritten wholesale | a person's text lost | the dry run shows the old body's sha256, `apply` refuses when the body changed since, comments and title are kept | U13 |
 | A PR block appended verbatim; a token recipe that does not fit the repository's owner kind | a builder PR the repository's CI rejects; a token with no access | the block is the repository's own text and its CI checks it; the recipe names the fine-grained form for an organization's repository and the classic form for a personal one, and `doctor` reports the token's kind | U14 |
 | The App's private key readable by the builder session (it mints in the builder's environment) | a misbehaving builder mints tokens for every repository the App is installed on | the key is a file the path names, never PEM text in the environment; the App's installations are the owner's choice (several accounts allowed, owner ruling 2026-11-05: a public App when several, which a stranger may install too), so a builder that mints reaches every repository every installation includes, an accepted residual of the ruling the owner bounds by reviewing the installations `doctor` lists (`GET /app/installations` with the JWT: account and repository count per installation, information only) and by installing narrowly; a `doctor` line reads `GET /repos/<repo>/installation` with the JWT and refuses unless an installation includes `config.repo`; a builder runs as the owner's OS user, so code it runs (a test, a DoD command) can reach what that user can on either path, the owner's SSH key and keyring included, and the protection does not fence the owner's own logins: an accepted residual of a local session on both paths, which no by-hand step of this plugin removes (§3.1 rejects the second OS user); a builder that commits a token is stopped by GitHub's push protection where it is enabled, and one that commits the key by its non-provider pattern scanning where that is enabled too (two fields `doctor` reports; free on a public repository), otherwise either is seen by the owner's eyes on the diff, after which the owner rotates the key or token; each minted token lives its hour unrevoked, a residual beside the key's; the elephant minting at launch was rejected (§3.1: a round outlives an hour) | U15 |
-| A timer that runs `wave` unattended with the owner's credentials (the `gh` login, the App key path, the profile) | a session acts as the owner while nobody watches; every PR and issue comment (`comments.md`, any author) and every ingested thread (§8) reaches that session's foreman as text | the driver types one phase, `wave --leavemealone`, and chains nothing; a tick launches only when the store has no open `wave`, `plan`, `file`, `integrate`, `review-plan` or `orient` card and no launch of its own without an exit file (a reboot proven by the boot time excepted), and `runcard open` refuses those six typed while a tick's launch has none; the session never asks, journals and ends; merge stays human (the driver never merges; the inbox lists merge-ready PRs); the owner's login never leaves the machine (a fleet box is not supported); the launchd agent runs only what the plugin root names; a ruling is parsed by `ruling_of` from owners only, never read as prose; accepted residual: the credentials are the owner's, unattended (`~/.superegm/env`, mode 0600: the same the owner's shell holds), in a session that never prompts (`bypassPermissions`, or an allow-list as wide: the U24 plan's); the machine stays awake and logged in (a `gui/<uid>` agent fires no tick in sleep, and a sleeping machine suspends the live session's builders: `pmset` or `caffeinate`, a by-hand step; `doctor`'s driver line reports the sleep setting as information); and prompt injection through comment text into the foreman's context, bounded by its brief and by merge staying human (§11.2) | U24 |
+| A timer that runs `wave` unattended with the owner's credentials (the `gh` login, the App key path, the profile) | a session acts as the owner while nobody watches; every PR and issue comment (`comments.md`, any author) and every ingested thread (§8) reaches that session's foreman as text | the driver types one phase, `wave --leavemealone`, and chains nothing; a tick launches only when the store has no open `wave` card or live launch of its own and the handoff no open typed phase card (a reboot proven by the boot time excepted), and `runcard open` refuses a typed `wave` store-wide and a typed `plan`, `file`, `integrate`, `review-plan` or `orient` on the handoff while a tick's launch has none; the session never asks, journals and ends; merge stays human (the driver never merges; the inbox lists merge-ready PRs); the owner's login never leaves the machine (a fleet box is not supported); the launchd agent runs only what the plugin root names; a ruling is parsed by `ruling_of` from owners only, never read as prose; accepted residual: the credentials are the owner's, unattended (`~/.superegm/env`, mode 0600: the same the owner's shell holds), in a session that never prompts (`bypassPermissions`, or an allow-list as wide: the U24 plan's); the machine stays awake and logged in (a `gui/<uid>` agent fires no tick in sleep, and a sleeping machine suspends the live session's builders: `pmset` or `caffeinate`, a by-hand step; `doctor`'s driver line reports the sleep setting as information); and prompt injection through comment text into the foreman's context, bounded by its brief and by merge staying human (§11.2) | U24 |
 | The head's code runs on the owner's machine (the foreman re-runs the DoD `Run` items) | a builder's test reaches what the owner's OS user can: the keyring, `~/.ssh`, the App key file, the store itself | the run's environment is the builder's shut-out one (§11: no owner git config, SSH or askpass; the sentinel `GH_TOKEN`; `SUPEREGM_APP_KEY` unset), which removes the variables and not the filesystem; `collect` reads every input it judges before the first `Run` item and writes the round's record and `foreman/<unit>.json` back whole after the last, so an edit a run makes to those two files is overwritten; the re-run is bounded by `config.foreman.run_timeout_minutes` and its process groups are killed at the bound; a `Run` line installs into the worktree, never globally; a service the worktree lacks reads `ran red`, the plan's defect; accepted residual: the head's code runs as the owner's OS user, exactly as the builder's own test run of the same code already did (§11: the builder is a session on this machine), and a run, or a process it leaves behind, can write every other file of the store (a forged exit file, `state.json`) and the checkout's shared `.git/` (a hook or a `core.hooksPath`: the helper's own git calls pass `-c core.hooksPath=<an empty directory> -c core.fsmonitor=false`, so `prepare`'s and `launch-builder`'s checkouts run none and the owner's next typed commit is the window; `doctor` reports the hooks directory's contents and a `core.hooksPath` as information), and the owner's files the next tick runs (`~/.superegm/notify`, `~/.superegm/env`, the plist, the installed plugin root; `doctor` reports the hook's sha as it reports the hooks directory) | U25 |
 
 **Cost and timeline (estimate, not a promise).** One leavemealone phase: spec review 2–5 rounds
@@ -824,7 +824,9 @@ by the foreman. The helper records and judges; the dispatching session dispatche
   no head is reviewed meanwhile): `**Ruling:** <fid> allowed — <reason>` settles it and the unit
   proceeds by `review status` as point 1 does; `**Ruling:** <fid> finding upheld` relaunches the
   builder with the review to restore the assertion (the `revise` path), and the next round
-  re-derives the delta; the cap is never spent on a finding the judges cannot settle. The owner
+  re-derives the delta; at the review's cap `cap-reached` is the word instead (§11) and the
+  upheld finding is fixed in the cap ruling's one more round or the unit stops; the cap is never
+  spent on a finding the judges cannot settle. The owner
   may write a point-1 ruling as a comment on the unit's issue in §13.2's form (`**Ruling:** <fid>
   finding upheld` | `**Ruling:** <fid> finding overruled — <reason>`): the wave reads it as a
   `ruling` event (§11) and applies it through `review settle --owner` and `decision rule --by
@@ -839,7 +841,7 @@ by the foreman. The helper records and judges; the dispatching session dispatche
   is not `APPROVED` (an approval's summary is not a finding), except a review whose body carries
   `review post`'s own header: that is the foreman's, never a thread, whatever login posted it (the
   elephant's token is the owner's, who also reviews by hand under it); it records every thread not yet ingested as one finding line,
-  `<reviewer>-<round>-<n> | <severity> | <file:line or PR> | regression: no | <the thread's first line, 200 chars, a `|` in it written `/` and a `@` written `@ `, so the mention scan passes>`,
+  `<reviewer>-<round>-<n> | <severity> | <file:line or PR> | regression: no | <the thread's first line, 200 chars, a `|` in it written `/`, a `@` written `@ ` and a `config.banned_terms` entry masked the same way, so the raw-text scan passes>`,
   through `review record --reviewer external:<login>` into the unit's latest posted round,
   `--sha256` the thread's commit; it prints `<n> ingested`, exit 0, and posts the ingested lines
   as one review comment in `review post`'s form (the record the next builder's prompt carries,
@@ -872,7 +874,8 @@ by the foreman. The helper records and judges; the dispatching session dispatche
   contested external high or medium is a point-1 question like any other); a thread's GitHub
   "resolved" state settles nothing. When an ingest leaves `review status` at exit 3 on a unit
   whose latest posted round's `outcome` is `clean`, `review ingest` rewrites that `outcome` to
-  `revise` (the mirror of the `clean` write above), and at exit 2 (a review at its cap, the usual
+  `revise` (the mirror of the `clean` write above; the unit is in flight again and its relaunch
+  waits for a slot as a ready unit does, §11), and at exit 2 (a review at its cap, the usual
   end of a contested unit) to `cap-reached`, which the wave routes to decision point 2 as a posted
   `cap-reached`; either journals `<unit> back in flight (external:<login>)`; §11 says what the
   wave does with it.
@@ -1577,7 +1580,8 @@ driving the loop through `foreman dispatch`'s refusal (below):
   journaled `Ruling (<login>, comment <id>): …`; an edited comment is re-read, a recorded ruling
   never changes (a later edit journals `ruling edited after record, ignored`), and a `ruling`
   whose decision is already ruled, or that names no open decision or finding, is journaled and
-  dropped (the `dod-<n>`, `test-delta`, deviation and `tdd-order` rulings reach `collect` from
+  dropped (the whole-file `test-delta <file> allowed` form names every open decision whose
+  `test_delta` entry is in that file, §13.2) (the `dod-<n>`, `test-delta`, deviation and `tdd-order` rulings reach `collect` from
   the comments whatever the event's fate). A re-typed `wave` reads them before
   its first batch, as it reads pending decisions.
 - A builder's `exit` and its `**Builder status:**` comment are one decision, never two.
@@ -1795,7 +1799,8 @@ and returns one word plus one line:
 - The return word is the round's `outcome` when the round is `posted`, `target-moved` when
   `review post` refused, and `error` otherwise (the round recorded by `collect --not-run`). A
   return that is none of those seven words (`owner: <ids>` included, written by `review post`
-  before `cap-reached` and `revise`, since the cap is never spent on it, §8) is read as the
+  before `revise` and, below the cap, before `cap-reached`, since the cap is never spent on it; at
+  the cap, `review status` exit 2, `cap-reached` comes first and the ruling precedes any round, §8) is read as the
   round's `outcome` when the round is
   `posted`, and as `error` otherwise; the elephant records nothing itself, and the next
   `foreman dispatch` supersedes a round left non-terminal.
@@ -1899,8 +1904,8 @@ findings), units stopped for redesign with their brief's path (§13.2's `redesig
 `**Ruling:** <fid> allowed — <reason>` form), a handoff whose last tick refused (§11.2: a repeating failure, a bad `root`; the action is
 `driver status`, for the owner's re-typed `wave` or `driver reset`), the
 owner-only findings a unit waits on (`owner: <ids>`, §8) and the driver's `stale` state
-(`doctor`'s line, §11.2). As information, never an action: an open `wave` card, typed or a tick's, and a tick launch
-without an exit file, each with its age (carried by `notify` once). Never:
+(`doctor`'s line, §11.2). As information, never an action and never sent by `notify`: an open `wave` card, typed or a
+tick's, and a tick launch without an exit file, each with its age (`driver status` shows them). Never:
 builders running, rounds in progress, heads waiting on CI, lows, or the judges' converged
 rulings, which stay in the journal and the posted `**Ruling:**` comments (§13.2); the feed
 carries the unconverged alone. One line per item, `<repo> <unit or review> | <kind> | <action>`,
@@ -1973,7 +1978,8 @@ first `status --wait` still reports every event; extended for the tick to count 
 §8; a thread on a later head waits for that head's round) and the CI state of each idle head,
 `status.py`) and, when the
 previous session ended with every unit clean, landed, stopped, idle or pending and nothing is newer
-than that session's last fingerprint, it journals `tick: idle (<handoff>)` and ends (a stalled unit
+than that session's last fingerprint, it records `last_idle_at` in `driver/<handoff>.json` (its own file: an idle tick opens no card
+and journals nothing, anti-goal 4; `driver status` shows it) and ends (a stalled unit
 is idle: the owner's re-typed `wave`, a new run card, is its one retry, §8); a tick that launches costs one
 session, one that finds nothing costs one read. The tick and `launch-builder --start` (below) are the two helper calls that start a session
 themselves, the tick having no elephant to hand the command line to;
@@ -1990,23 +1996,25 @@ asks: a decision the judges did not converge on is a journal line and an inbox l
 is `pending a decision` (no slot: from amendment 5 `launch` excludes a unit with a pending
 decision from the in-flight count, `launch.py`, U24's) while the batch goes on; the session ends on §11.1's condition
 alone, and the next tick resumes the rest. Liveness is never guessed (anti-goal 8): a tick
-launches a handoff only when no handoff of the store has an open `wave`, `plan`, `file`,
-`integrate`, `review-plan` or `orient` card (the typed side's own refusal list, below) or a
-launch of its own without an exit file; otherwise it skips, silently, as below. A `wave` card opened under
+launches a handoff only when no handoff of the store has an open `wave` card or a launch of its
+own without an exit file (the one `.git`, §9.3) and that handoff has no open `plan`, `file`,
+`integrate`, `review-plan` or `orient` card (its own `state.json`, §7; another handoff's typed
+phases run beside a tick's session, the parallel case §7's approval chain allows); otherwise it
+skips, silently, as below. A `wave` card opened under
 `SUPEREGM_ROLE=driver` records its driver card (`SUPEREGM_RUNCARD`, §4); a typed `wave`'s card,
 live or dead, is the owner's, shown by `driver status` and the inbox with its age (information,
-carried by `notify` once) and cleared by the owner's re-typed `wave`, by `driver reset`, or by the boot-time proof on its
+never sent by `notify`) and cleared by the owner's re-typed `wave`, by `driver reset`, or by the boot-time proof on its
 `opened_at` (below). A launch of its own
 whose exit file exists while its `wave` card is still open is a session that ended without
 closing its card (an API error, a turn limit): the exit file is the proof, and the tick marks
 that card, and no other, `interrupted` as the `wave` skill starting again would (§6) and
 launches. A launch of its own without an exit file is the normal state of a live overnight
 session and is never reasoned about: the tick skips it (no journal line), and `driver status`
-and the inbox show it as information with its age; a tick runs `notify` only when `notify`'s own predicate holds (a line
-neither `notified` set holds, above; each `notify` rewrites its caller's set as every current
-line's fingerprint, sent now or before, so a persistent line is never re-sent), under a
-`driver` card it opens for that alone (the line's fingerprint excludes the age, so the line is carried once), and so a
-launch the owner knows is dead reaches the hook without a card per tick. One proof is allowed,
+and the inbox show it as information with its age, never through `notify` (a line that changes
+with its age would be sent once, at the first tick, and say nothing later); a tick runs `notify`
+only when `notify`'s own predicate holds (a line neither `notified` set holds, above; each
+`notify` rewrites its caller's set as every current line's fingerprint, sent now or before, so a
+persistent line is never re-sent), under a `driver` card it opens for that alone. One proof is allowed,
 since no process survives a reboot: a launch whose `started_at` precedes the machine's boot time
 (`kern.boottime`; `/proc/stat` `btime`) is recorded `interrupted (reboot)`, journaled, its
 open `wave` card marked `interrupted` as the exit-file proof marks one (a typed `wave`'s card
@@ -2034,13 +2042,13 @@ refusal; the owner's typed `/superegm:driver reset` is the interrupt for a launc
 is dead (a reboot, a kill), never a timeout and never an inbox action: it records the launch
 `interrupted` and marks the handoff's open `wave` card
 `interrupted` (§7's writer row for `runcards/` names both). The same rule binds a typed `wave`:
-outside `SUPEREGM_ROLE=driver`, `runcard open` for `wave`, and for `plan`, `file`, `integrate` and
-`review-plan`, which write the handoff's `state.json` or fetch into the one `.git`'s
-`refs/superegm/base` (§7, §9.3; a typed `/superegm:orient` is refused the same way), refuses, before any card is marked,
+outside `SUPEREGM_ROLE=driver`, `runcard open` for `wave` refuses, before any card is marked,
 while any handoff of the store has a tick launch without an exit file in its
-`driver/<handoff>.json` (`driver: a tick's session may be live; /superegm:driver reset is the
-owner's interrupt`), so one store never has two elephants (§7's one writer of `state.json`;
-§9.3's one `refs/superegm/base`). A
+`driver/<handoff>.json` (the one `.git`'s `refs/superegm/base`, §9.3), and for `plan`, `file`,
+`integrate` and `review-plan` (a typed `/superegm:orient` the same way) while that handoff's own
+tick launch has none (its `state.json`, §7; another handoff's are free), with the one message
+`driver: a tick's session may be live; /superegm:driver reset is the owner's interrupt`, so a
+store never has two waves and a handoff never two writers. A
 tick runs `superegm notify --runcard <driver card>` itself when it has new lines (a refusal, a
 launch without an exit file, a stale root), so the inbox's driver line reaches the hook. Builders launched by a tick's session are started in their own session
 and process group: `launch-builder --start` (U24's flag on U09's interface) starts the printed
@@ -2175,8 +2183,9 @@ the id `decision open` printed, the one the inbox line carries, in the parenthes
 such a fid is read as `allowed`; the `dod-<n>` one keyed on
 the item number and the `test-delta` one on its entry, both persisting across rounds;
 `**Ruling:** test-delta <file> allowed — <reason>` for a whole file); the `redesign` ruling (amendment 4)
-`**Ruling:** redesign — <reason>`, which rules every open decision of the unit at once (the unit
-stops). A comment is a ruling only when its author's login is in
+`**Ruling:** redesign — <reason>`, read at a head's points 1 and 2 alone (§11: the brief needs
+the head's diff), where it rules every open decision of the unit at once (the unit stops); at
+point 3 it is text, and the inbox shows the decision still open. A comment is a ruling only when its author's login is in
 `config.owners` and its body matches one form exactly; a trailing word makes it text, so a typo
 is silence, which the inbox (§11.2) shows as the still-open decision. The wave applies it as the
 point's own subcommand says (§11) and the record is the one a ruling typed in the session
@@ -2437,7 +2446,7 @@ typed `wave`'s (`runcard open`'s refusal);
 the plist runs only what the plugin root names); U25 medium (the head's code runs on the owner's
 machine, §4.1). Plan-review focus: U21 a PR with 200 bot threads
 and one human medium, and a thread on a head not yet reviewed; U22 a comment one character off
-the form, and an owner's edit after the record; U23 a store with no open handoff; U24 a reboot
+the form, and an owner's edit after the record; U23 a store with no open handoff, and the inbox's `test-delta` and `owner: <ids>` kinds built against §7's schema with fixture data (U25 lands after U23); U24 a reboot
 mid-wave (no exit file), a session that exited without closing its card, a typed `wave` during a
 tick's session, a tick during a typed `wave`, a plugin update under an installed timer, and two
 worktrees registering one store; U25 a `Run` item that needs a service,
