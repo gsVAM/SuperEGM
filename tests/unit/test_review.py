@@ -312,7 +312,6 @@ def test_record_refusals(world, kind, prior, call, expect):
   ("spec", "leavemealone", "design", "high", "§1", "design-1-1", "contested", ("--owner",), "review settle: design-1-1 is high: --judges required in leavemealone-mode"),
   ("spec", "leavemealone", "design", "medium", "§1", "design-1-1", "declined", ("--judges", "j1"), "design-1-1 declined"),
   ("spec", None, "design", "low", "§1", "design-1-1", "contested", (), "design-1-1 contested"),
-  ("spec", None, "design", "high", "§1", "design-1-1", "fixed", (), "design-1-1 fixed"),
   ("spec", None, "design", "high", "§1", "design-1-1", "escalated", (), "design-1-1 escalated"),
   ("spec", None, "design", "high", "§1", "design-1-1", "fix-design", (), "design-1-1 fix-design"),
   ("head", None, "change-review", "high", "src/x.py", "change-review-1-1", "fix-design", (), "review settle: fix-design is refused on a head"),
@@ -340,9 +339,12 @@ def s_open_only(w, c, r): return r
 def s_clean(w, c, r): rounds(w, r, c, [[]]); return r
 def s_low_only(w, c, r): rounds(w, r, c, [[F("design", 1, 1, "low")]]); return r
 def s_unsettled_high(w, c, r): rounds(w, r, c, [HIGH(1)]); return r
-def s_settled(w, c, r): rounds(w, r, c, [HIGH(1)]); assert settle(w, r, "design-1-1", "fixed", c)[0] == 0; return r
+def s_settled(w, c, r):
+  rounds(w, r, c, [HIGH(1)]); move(w, "spec", spec_file(w)); assert settle(w, r, "design-1-1", "fixed", c)[0] == 0
+  rounds(w, r, c, [[]], start=2); return r
 def s_regression(w, c, r):
-  rounds(w, r, c, [HIGH(1), [F("design", 2, 1, reg="yes")]]); assert settle(w, r, "design-2-1", "fixed", c)[0] == 0; return r
+  rounds(w, r, c, [HIGH(1), [F("design", 2, 1, reg="yes")]]); move(w, "spec", spec_file(w))
+  assert settle(w, r, "design-2-1", "fixed", c)[0] == 0; return r
 def s_fix_design(w, c, r): rounds(w, r, c, [HIGH(1)]); assert settle(w, r, "design-1-1", "fix-design", c)[0] == 0; return r
 def s_cap(w, c, r): rounds(w, r, c, [HIGH(n) for n in range(1, 6)]); return r
 def s_cap_short(w, c, r): rounds(w, r, c, [HIGH(n) for n in range(1, 5)] + [None]); return r
@@ -357,7 +359,7 @@ def s_stalled(w, c, r): rounds(w, r, c, [HIGH(1), None, None]); return r
   (s_clean, False, 0, "round 1: clean, regressions 0, converged yes, cap no, stalled no, sha256 "),
   (s_low_only, False, 0, "converged yes"),
   (s_unsettled_high, False, 3, "round 1: not clean, regressions 0, converged no"),
-  (s_settled, False, 0, "round 1: clean, regressions 0, converged yes"),
+  (s_settled, False, 0, "round 2: clean, regressions 0, converged yes"),
   (s_regression, False, 3, "round 2: clean, regressions 1, converged no"),
   (s_fix_design, False, 4, "converged no"),
   (s_cap, False, 2, "round 5: not clean, regressions 0, converged no, cap yes, stalled no"),
@@ -377,6 +379,22 @@ def test_status_exit_codes(world, scenario, new_card, code, fragment):
   assert (got, fragment in out) == (code, True), out
   if scenario is s_regression:
     assert "rounds: 1 -> 1 (regressions 0, 1)" in out
+
+
+@pytest.mark.parametrize("kind", ["spec", "plan", "integrate", "head"])
+def test_settle_fixed_needs_changed_bytes(world, kind):
+  spec, cid, rid = opened(world, kind)
+  first = PANEL_OF[kind].split(",")[0]
+  if kind == "head":
+    head_round(world, 1, "posted", cid, "revise")
+  assert record(world, rid, 1, first, [F(first, 1, 1)], cid, sha=A if kind == "head" else None)[0] == 0
+  code, out = settle(world, rid, f"{first}-1-1", "fixed", cid)
+  if kind != "head":
+    assert code == 1 and "review settle: fixed needs changed bytes" in out
+    assert settle(world, rid, f"{first}-1-1", "escalated", cid)[0] == 0
+    move(world, kind, spec)
+    code, out = settle(world, rid, f"{first}-1-1", "fixed", cid)
+  assert code == 0, out
 
 
 @pytest.mark.parametrize("kind", ["spec", "plan", "integrate", "head"])
