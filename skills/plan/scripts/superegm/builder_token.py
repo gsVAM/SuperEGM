@@ -113,3 +113,54 @@ def mint(repo: str, app_id: int, key, openssl: str) -> str:
   token = jwt(app_id, key, openssl)
   installation = api("GET", f"/repos/{repo}/installation", token)
   return api("POST", f"/app/installations/{installation['id']}/access_tokens", token)["token"]
+
+
+FOUR = {"contents": "write", "issues": "write", "metadata": "read", "pull_requests": "write"}  # the installed permissions, exactly
+
+
+def permission_set(permissions: dict) -> str:
+  return "{" + ", ".join(f"{k}: {v}" for k, v in sorted(permissions.items())) + "}"
+
+
+def app_lines(app: dict, repo: str, key, openssl: str) -> list:
+  """`doctor`'s and `launch`'s App lines, in the order app, permissions, token, installation, each `ok…`
+  or the refusal (a HandoffError's text is its line); the first that is not `ok` ends the list. By the
+  owner's ruling of 2026-11-05 the App may be installed on several accounts: the installation that
+  includes `repo` is the one `GET /repos/<repo>/installation` answers with, read for the permissions
+  (never the repository's own) and on every mint, and the installation line reads only its repositories."""
+  found, lines = {}, []
+
+  def app_line():
+    found["jwt"] = jwt(app["app_id"], key, openssl)
+    data = api("GET", "/app", found["jwt"])
+    if (data.get("slug"), data.get("id")) != (app["slug"], app["app_id"]):
+      return f"GET /app answers {data.get('slug')} #{data.get('id')}, not builder.app ({app['slug']} #{app['app_id']})"
+    return f"ok ({app['slug']} #{app['app_id']})"
+
+  def permissions():
+    installation = api("GET", f"/repos/{repo}/installation", found["jwt"])
+    found["id"], installed = installation["id"], installation.get("permissions") or {}
+    if installed != FOUR:
+      return f"installed {permission_set(installed)}, not {permission_set(FOUR)}"
+    return f"ok ({permission_set(installed)[1:-1]})"
+
+  def token():
+    found["token"] = api("POST", f"/app/installations/{found['id']}/access_tokens", found["jwt"])["token"]
+    return "ok"
+
+  def installation():
+    data = api("GET", "/installation/repositories", found["token"])
+    if data.get("total_count") != 1:
+      return f"installed on {data.get('total_count')} repositories, not {repo} alone"
+    name = data["repositories"][0]["full_name"]
+    return f"ok ({repo})" if name.lower() == repo.lower() else f"installed on {name}, not {repo}"
+
+  for name, fn in (("app", app_line), ("permissions", permissions), ("token", token), ("installation", installation)):
+    try:
+      text = fn()
+    except core.HandoffError as error:
+      text = str(error)
+    lines.append((name, text))
+    if not text.startswith("ok"):
+      break
+  return lines
