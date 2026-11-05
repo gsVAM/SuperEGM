@@ -139,10 +139,11 @@ def refusal(store, state, config, unit, rnd, builder):
 
 
 def plugins_held(plugins):
-  """Claude Code writes `installed_plugins.json`, an empty `marketplaces/` and its own `store/` into a profile on
-  every start, and `syncClaudeAiPlugins: false` leaves `.trash/`: none of those is a plugin. A plugin is an
-  `installed_plugins.json` entry, a `synced/<bucket>/<name>` directory (the account's plugins, synced on sign-in
-  unless the profile's settings set `syncClaudeAiPlugins` false), or anything under `cache/` or `marketplaces/`."""
+  """Claude Code writes `installed_plugins.json`, `known_marketplaces.json`, clones of its default marketplaces
+  under `marketplaces/` (catalogs, not plugins) and its own `store/` into a profile on every start, and
+  `syncClaudeAiPlugins: false` leaves `.trash/`: none of those is a plugin. A plugin is an `installed_plugins.json`
+  entry, a `synced/<bucket>/<name>` directory (the account's plugins, synced on sign-in unless the profile's
+  settings set `syncClaudeAiPlugins` false), or anything under `cache/` (the installed copies)."""
   if not plugins.is_dir():
     return False
   installed = plugins / "installed_plugins.json"
@@ -153,7 +154,7 @@ def plugins_held(plugins):
       return True
     if isinstance(data, dict) and data.get("plugins"):
       return True
-  if any((plugins / sub).is_dir() and any((plugins / sub).iterdir()) for sub in ("cache", "marketplaces")):
+  if (plugins / "cache").is_dir() and any((plugins / "cache").iterdir()):
     return True
   synced = plugins / "synced"
   return synced.is_dir() and any(
