@@ -86,7 +86,7 @@ isolation recorded.
 | **effect** | anything that leaves the working tree: GitHub writes, remote branches, starting a session or worker, writing the store, destructive local operations. |
 | **leavemealone-mode** | the mode in which every decision point listed in §13.2 goes to the judge panel first; the owner is paused only with the questions the judges do not converge on within their cap. |
 | **graphify** | an external, optional CLI (the PyPI package `graphifyy`, so spelled; the command `graphify` on `PATH`) that extracts a code graph from a directory by AST with no model (its headless `update`; `GRAPHIFY_OUT` names where its `graphify-out/` goes) into `graph.json`: nodes with `source_file` (relative to the directory it scanned), `source_location` and an integer `community`; edges marked EXTRACTED, INFERRED or AMBIGUOUS with a confidence. `orient` (§9.3) reads that file and nothing else of graphify's; nothing requires it. |
-| **external reviewer** | a review thread on a unit's PR from any login but the builder account's, a person's or a bot's (Devin's), recorded by `review ingest` (§8, amendment 5) as findings of the reviewer id `external:<login>`: accepted on kinds `head`, `spec` and `plan` (the elephant's own PRs, amendment 6), outside the panel, never an adapter, never dispatched. |
+| **external reviewer** | a review thread on a unit's PR from any login but the builder account's, a person's or a bot's (Devin's), recorded by `review ingest` (§8, amendment 5) as findings of the reviewer id `external:<login>`: accepted on kinds `head` and `spec` (the spec PR, amendment 6), outside the panel, never an adapter, never dispatched. |
 | **registry** | `~/.superegm/registry.json`, outside every store: the list of the stores on this machine, written by `superegm register` alone and read by `inbox --all` and the driver (§11.2). It lists stores, not a graph; a store's own `handoffs/<id>.json` files index (§7) names that store's handoffs. |
 | **driver** | the owner's timer (a launchd agent; on Linux a systemd user timer) that runs `superegm driver tick` every `install --interval <minutes>` (15) in the environment of `~/.superegm/env`; a tick types `wave --leavemealone` for one open handoff of a registered store at a time (one session per store), chains nothing and merges nothing (§11.2). The session it launches runs with `SUPEREGM_ROLE=driver`. |
 
@@ -292,7 +292,8 @@ isolation recorded.
   PRs through U21's `--unit` path; an ingest at every `review-spec` round.** Rejected: by hand is
   the gap (the spec PR sat unread); a pseudo-unit would need a head, a foreman and a builder the
   elephant's PR has none of; an ingest per round reads nothing new between rounds, so once before
-  the approval or the filing is the one moment that matters (§8).
+  the approval is the one moment that matters, the draft PR open from the review's first round
+  (§8); a plan kind and a `file` step were cut in review: no plan PR exists and `file` opens none.
 
 ## 4. Constraints
 
@@ -592,7 +593,7 @@ at a time:
 | `handoffs/<id>.json` | that handoff's `approve-spec` (opened; `--void` closing an unfiled handoff) and `close` (its `closed_at`) |
 | `approvals/<spec-slug>.json` | `approve-spec` |
 | `handoff_plan.md`, `handoff_units.json`, `unit_<id>.md`, `handoff_bodies.md` | `plan` (`graph --plan <file>`; `decide` re-renders one unfiled unit and leaves a filed one as filed) |
-| `reviews/<review-id>/…` | the invocation that opened that review; on a head, also the foreman dispatch the round records (`review record`, `collect`, `review post`); `review ingest --pr` for `review.json`'s `ingested[]` and the `ingest-<n>` cycle it opens when no review of the kind is open (amendment 6, §8) |
+| `reviews/<review-id>/…` | the invocation that opened that review; on a head, also the foreman dispatch the round records (`review record`, `collect`, `review post`); `review ingest --pr` for `review.json`'s `ingested[]` (amendment 6, §8) |
 | `judges/<id>/…` | the invocation that opened that panel |
 | `runcards/<id>.json` | the skill that opened the card; `card_add` for later facts; a handoff's open `wave` card marked `interrupted` by `driver tick` (on its launch's exit file, or on the boot-id proof: a launch's or a typed card's recorded boot id that is not the machine's) or `driver reset` (§11.2) |
 | `launches/<unit>.json`, `launches/<unit>_r<n>_prompt.md`, `launches/<unit>_r<n>_bin/` | the elephant (`launch-builder`, `record-launch`, `interrupt --launch`); `driver tick`, `launch-builder` and `runcard open` for `interrupted (reboot)` alone (§11.2) |
@@ -768,8 +769,8 @@ by the foreman. The helper records and judges; the dispatching session dispatche
   keeps the findings whose `<location>` names the review's unit or no unit. On kind `head`,
   `--reviewer foreman` is accepted outside the panel for the helper's own findings (§11) and
   never counts toward every-reviewer-ran; so is `--reviewer external:<login>` (amendment 5), the
-  id `review ingest` records a PR review thread under, on kinds `head`, `spec` and `plan` (§8's
-  two ingest bullets). Every persona's output section is re-worded to the
+  id `review ingest` records a PR review thread under, on kinds `head` and `spec` (§8's two
+  ingest bullets; its location is the thread's own, outside the scope rule below). Every persona's output section is re-worded to the
   findings line below and its severity words (U01; each a changed Apache file). A round's
   `what_ran` is **derived** by the helper from the round's reviewer records and, on a head,
   from its `rounds[]` entry's `phase` and `outcome`; no caller sets it, and it is stored with
@@ -892,33 +893,27 @@ by the foreman. The helper records and judges; the dispatching session dispatche
   end of a contested unit) to `cap-reached`, which the wave routes to decision point 2 as a posted
   `cap-reached`; either journals `<unit> ready again (external:<login>)`; §11 says what the
   wave does with it.
-- **External review on the elephant's own PRs** (amendment 6, U26). The elephant's own PR is the
-  one the owner opens by hand on the elephant's branch (§12's `finishing-a-development-branch`:
-  a spec PR after `approve-spec`, an amendment PR; the plan is never committed and `file` opens
-  none, so there is no plan or file PR). `superegm review ingest --pr <n> --kind spec|plan
-  [--unit U<n>] --runcard <id>` reads that PR's review threads with U21's reader, severity map
-  and bot/human rules, and records them as `external:<login>` findings (`review record` accepts
-  the id on kinds `spec` and `plan` too) into the latest round of the open review of that kind
-  (the spec review's current cycle; kind `plan` names its unit, one call per unit, the thread's
-  file and line mapped to that unit's section), where an unsettled external high or medium
-  un-converges it by the one rule above and `review status` is the hold; the thread's root
-  comment id is kept in `review.json`'s `ingested[]`. When no review of that kind is open (a
-  thread on an approved spec), the ingest records into `ingest-<n>` (§7): a cycle with no panel
-  and no counted round, one round of `external:*` findings, never `latest_cycle`'s answer to
-  `review open` or `approve-spec`, closed when its findings are settled. The elephant settles
-  them through the existing paths: `fixed` by an edit (a spec whose review is open: the next
-  round reviews the new bytes, the cost of a fix; a plan before `file`), `fix-design` for a thread
-  on an approved spec (the void path above; a filed unit's body is frozen: `declined`, or
-  `escalated` to a new unit), `contested` as decision point 1 like any finding (the judges in
-  leavemealone-mode, else the owner by a typed `review settle --owner`, which the inbox lists
-  under its point-1 item, §11.2); `review ingest --pr` posts `**Reply <fid>:** fixed` on each
-  thread settled `fixed` since its last run, under the elephant's token (its own PR; a
-  `github-write` of `review-spec`, §14). `approve-spec` runs the ingest once, before it writes
-  the approval, on the open PR whose head is the current branch (`gh pr list --head`; none means
-  nothing to read), and refuses, exit 1 `approve-spec: external:<login> <fid> unsettled on PR
-  <n>`, while an external high or medium stands unsettled (in leavemealone-mode a contest goes to
-  the judges first, anti-goal 7); `file` does the same before `apply`'s first write; a thread's
-  GitHub "resolved" state settles nothing.
+- **External review on the elephant's own PR** (amendment 6, U26). The elephant's own PR is the
+  spec PR: the owner opens it as a draft on the elephant's branch before `review-spec`'s first
+  round (a by-hand step, §17, so a reviewer such as Devin reads every push), and merges it after
+  the approval (§12). No other PR of the elephant's exists: the plan is never committed and
+  `file` opens none. `superegm review ingest --pr <n> --runcard <id>` (kind `spec`) reads that
+  PR's review threads with U21's reader, severity map and bot/human rules, and records them as
+  `external:<login>` findings into the latest round of the spec review's open cycle (open: the
+  latest cycle while it is not closed by §7's rules and not yet named by an approval entry),
+  where an unsettled external high or medium un-converges it by the one rule above and `review
+  status` is the hold the landed helper already enforces (`approve-spec` refuses an unconverged
+  review); the thread's root comment id is kept in `review.json`'s `ingested[]`. The elephant
+  settles them through the existing paths: `fixed` by an edit (the next round reviews the new
+  bytes, the cost of a fix), `contested` as decision point 1 of the review like any finding (the
+  judges in leavemealone-mode, the owner in the session otherwise), `declined` or `escalated` as
+  §8 defines them; `review ingest --pr` posts `**Reply <fid>:** fixed` on each thread settled
+  `fixed` since its last run, under the elephant's token (its own PR; a `github-write` of
+  `review-spec`, §14). `approve-spec` runs the ingest once, before `evaluate`, on the open PR
+  whose head is the current branch (`gh pr list --head`; none means nothing to read; never under
+  `--amend-units`, which takes no review round); a thread that arrives after the approval is the
+  owner's to read before the merge, or the next `review-spec` cycle's first round ingests it; a
+  thread's GitHub "resolved" state settles nothing.
 - `superegm review status --review <id> --runcard <id>` prints `round <n>: <clean|not clean>,
   regressions <k>, converged <yes|no|by ruling>, cap <yes|no>, stalled <yes|no>, sha256 <hex of
   the converged round>` and the trend line; exits 0 when converged, 5 when stalled, 2 at the cap
@@ -1798,8 +1793,7 @@ and returns one word plus one line:
   an `insteadOf` a run wrote there), those three files, back whole from what it read, so an edit a run made to
   them is overwritten (two `collect` calls overlapping on one checkout can re-persist a run's
   `.git/config` edit between them, and an `insteadOf` or `include.path` no `-c` can unset: the
-  helper's own fetches name the URL `collect` read before the first `Run` item, and the overlap
-  is §4.1's residual beside the left-behind process); every other file of the store (`state.json`, `launches/`, a sibling's exit
+  overlap is §4.1's residual beside the left-behind process); every other file of the store (`state.json`, `launches/`, a sibling's exit
   file, the journal) stays as a run left it, §4.1's residual, with a process the run leaves
   behind. It records the
   exit code and the summary line under
@@ -1815,7 +1809,8 @@ and returns one word plus one line:
   owner's, which persists on the item number too: a line the worktree cannot run (a service, a
   suite longer than the bound) is ruled once, not once per round, and never spends the cap. **The test delta**: for every test file the head changes (a file the §9.3 test-file name rule
   names) that no `Write` line of the unit's own body names (a test the plan set out to rewrite is
-  the owner's approved change; the gate guards the files the unit did not plan to touch; paths
+  the owner's approved change; the gate guards the files the unit did not plan to touch, and a
+  named file's other assertions are the change-review goldfish's to see, a residual; paths
   paired by git's rename
   detection, so a renamed file compares with its old path and a split or merge compares each new
   file with the source of its rename pair), it compares the file at its base (the range's base for a file that exists there: a base
@@ -1963,9 +1958,8 @@ findings), units stopped for redesign with their brief's path (§13.2's `redesig
 `**Ruling:** <fid> allowed — <reason>` form), a handoff whose last tick refused (§11.2: a repeating failure, a bad `root`; the action is
 `driver status`, for the owner's re-typed `wave` or `driver reset`), the
 owner-only findings a unit waits on (`owner: <ids>`, §8) and the driver's `stale` state
-(`doctor`'s line, §11.2); a contested external finding on a PR of the elephant's own (amendment
-6, §8) is a point-1 item like any other, its action the typed `review settle --owner` (an
-unsettled one is the elephant's to fix, not listed). As information, never an action: an open `wave` card, typed or a tick's, and a tick launch
+(`doctor`'s line, §11.2); a finding on the spec PR (amendment 6, §8) is the spec review's own,
+settled in the session or by the judges, and never an inbox item. As information, never an action: an open `wave` card, typed or a tick's, and a tick launch
 without an exit file, each with its age (`driver status` shows them; `notify` sends each once,
 its fingerprint the card's or launch's id without the age, so a tick that crashed at the first
 tick of the night is seen and a healthy night costs one line per launch). Never:
@@ -2041,8 +2035,8 @@ and the wave it types opens its own. A tick launches nothing when there is nothi
 the launch it runs one read (`status`, no `--wait`, saving no fingerprint, so the next session's
 first `status --wait` still reports every event; extended for the tick to count the review threads not in
 `ingested[]` on the latest posted round's head of each open PR (the ones an ingest would record above `low`, by the
-same reader: an inline thread from a bot or from a login at `config.ingest.human_role` whose first
-line carries a severity or mapped word, §8; a thread on a later head waits for that
+same reader: an inline thread, or a review body from a login at `config.ingest.human_role`, whose
+first line carries a severity word or a mapped word other than one mapped to `low`, §8; a thread on a later head waits for that
 head's round, a stranger's buys no session) and the CI state of each idle head,
 `status.py`) and, when the
 previous session ended with every unit clean, landed, stopped, idle or pending and no event of the
@@ -2129,8 +2123,9 @@ store never has two waves and a handoff never two writers, but for the window be
 read and its write (no lock, §3.1): the tick records its launch before it reads for a card and
 `runcard open` writes its card before it reads for a launch, so a collision leaves each side's
 mark for the other to see at its next step, and the side that then finds the other's mark backs off: the tick marks its own launch
-`interrupted` and ends, `runcard open` marks its own card `interrupted` and refuses; the residual
-is one wasted session. A
+`interrupted` and ends, `runcard open` marks its own card `interrupted` and refuses (an
+`interrupted` launch or card is terminal for every predicate above, as §4 says of a builder's);
+the residual is one wasted session. A
 tick runs `superegm notify --runcard <driver card>` itself when it has new lines (a refusal, a
 launch without an exit file, a typed `wave` card, a stale root), so the inbox's driver line reaches the hook. Builders launched by a tick's session are started in their own session
 and process group: `launch-builder --start` (U24's flag on U09's interface) starts the printed
@@ -2412,7 +2407,7 @@ handoff is planned; the amendment-4 paragraph below); a later handoff on this sp
 | U23 | The inbox and the notify hook (§11.2): `inbox [--all] [--json] [--handoff]` and its line form, `notify --runcard <id>`, the `~/.superegm/notify` hook, `config.notify_timeout_seconds`, `state.json.notified`, the `inbox` skill: `skills/plan/scripts/superegm/inbox.py` (create: `inbox`, `notify`), `__init__.py` (modify: the two keys, `SUBCOMMANDS`), `init.py` (modify), `skills/inbox/SKILL.md` (create: `effects: none`, auto-invokable like `doctor`'s line in `using-superegm`, with `assets/icon.svg` and `test_scenarios.yaml`), `skills/wave/SKILL.md` (modify: the notify step), `skills/using-superegm/SKILL.md`, `docs/claude.md`, `README.md` (modify), `tests/unit/test_inbox.py` (create), `test_wave.py`, `test_helper.py`, `test_packaging.py`, `test_effects.py`, `test_skeleton.py` (modify) | U22 | M |
 | U24 | The headless driver and the registry (§11.2): `register [--remove]`, `~/.superegm/registry.json`, `driver tick\|install\|uninstall\|status\|reset`, the launchd agent with `AbandonProcessGroup` (on Linux a systemd user timer, `KillMode=process`), `install --interval`, `~/.superegm/env`, `driver/<handoff>.json`, `inbox --all`, `SUPEREGM_ROLE=driver`, the `driver` skill, `doctor`'s driver line, the typed `wave`'s refusal while a tick's launch has no exit file: `skills/plan/scripts/superegm/driver.py` (create), `inbox.py` (modify: `--all`; the driver items; `notify` under a `driver` card), `status.py` (modify: the tick's read), `review.py` (modify: the stall read across `wave` cards), `launch.py` (modify: a pending unit holds no slot), `launch_builder.py` (modify: `--start`, the wrapper as the detached process; the reboot proof in the terminal check), `__init__.py` (modify: `runcard open`'s refusal for `wave`, `plan`, `file`, `integrate`, `review-plan` and `orient`, its `driver_card` write and its reboot proof, the `driver` store kind, `SUBCOMMANDS`), `doctor.py` (modify: the `driver:`, `env:` and notify-hook-sha lines, information only), `skills/driver/SKILL.md` (create, with `assets/icon.svg` and `test_scenarios.yaml`), `skills/wave/SKILL.md` (modify: the `SUPEREGM_ROLE=driver` paragraph: never ask, journal and end), `skills/using-superegm/SKILL.md`, `docs/claude.md`, `README.md` (modify), `tests/unit/test_driver.py` (create), the `--start` test beside U09's launch tests, `test_inbox.py`, `test_doctor.py`, `test_helper.py`, `test_packaging.py`, `test_effects.py`, `test_skeleton.py` (modify) | U23; after U25 on shared files | L |
 | U25 | The foreman verifies (§11, §8): the DoD re-run gate and the test-delta gate in `collect`, `r<n>/dod/<item>.txt`, `rounds[].dod_runs`, `rounds[].test_delta`, the finding ids `dod-<n>` and `test-delta`, `config.foreman.run_timeout_minutes`, the `test-delta` settle rule and the `allowed` rulings of `test-delta` and `dod-<n>`, `doctor`'s `python3.12` line: `skills/plan/scripts/superegm/collect.py` (modify: both gates, inputs read before the first run), `review.py` (modify: the settle rule; `review post`'s `gates not run` refusal and `owner: <ids>` outcome), `prepare.py` (modify: the review worktree removed by force; the hook-free git calls), `launch_builder.py` (modify: the hook-free git calls), `doctor.py` (modify: the `python3.12` line, the hooks-directory and `core.hooksPath` lines), `__init__.py` (modify: `DEFAULT_CONFIG.foreman`), `init.py` (modify), `skills/wave/references/foreman_brief.md` (modify: the word is given only after both gates ran; the `owner` word), `skills/wave/SKILL.md` (modify: the `owner` word's row), `resources/review_panels.md` (modify: the foreman list gains both ids), `tests/unit/test_foreman.py`, `test_review.py`, `test_wave.py`, `test_doctor.py`, `test_helper.py` (modify) | U22 (`ruling_of`; U17 landed); after U21 and U23 on shared files | M |
-| U26 | External review on the elephant's own PRs (§8, §11.2): `review ingest --pr <n> --kind spec\|plan [--unit U<n>]`, U21's reader, severity map and bot/human rules reused, findings into the open review of that kind or a new bounded cycle `ingest-<n>`, `review.json`'s `ingested[]` and the `ingest-<n>` cycle, the `**Reply <fid>:** fixed` post on the thread under the elephant's token, `approve-spec`'s and `file`'s one ingest and refusal on an unsettled external high or medium, `review-spec`'s `github-write`: `skills/plan/scripts/superegm/review.py` (modify: `--pr --kind`, the review-level `ingested[]`, the hold check), `approve_spec.py`, `apply.py` (modify: the ingest and the hold), `inbox.py` (modify: the point-1 item's action), `skills/review-spec/SKILL.md`, `skills/file/SKILL.md` (modify: the ingest step), `docs/claude.md`, `README.md` (modify), `tests/unit/test_review.py`, `test_file.py`, `test_inbox.py`, `test_effects.py`, `test_helper.py` (modify) | U21, U23; after U24 on shared files | M |
+| U26 | External review on the elephant's own PR (§8): `review ingest --pr <n>` (kind `spec`), U21's reader, severity map and bot/human rules reused, findings into the spec review's open cycle, `review.json`'s `ingested[]`, the `**Reply <fid>:** fixed` post on the thread under the elephant's token, `approve-spec`'s one ingest before `evaluate` (the hold is the landed refusal of an unconverged review: no hold code), `review-spec`'s `github-write`, the draft-PR step in the skill: `skills/plan/scripts/superegm/review.py` (modify: `--pr`, the review-level `ingested[]`, the reply post), `approve_spec.py` (modify: the one ingest call), `skills/review-spec/SKILL.md` (modify: the draft PR before round 1; the frontmatter's `github-write`), `docs/claude.md`, `README.md` (modify), `tests/unit/test_review.py`, `test_effects.py`, `test_helper.py` (modify) | U21; after U24 on shared files | M |
 
 Shared files of the 1.0.0 build: `test_helper.py` is U03's alone. `body.py` is U03's and then U05's (the derived Step
 defaults), which U03 blocks. Each workflow SKILL.md stub U01 creates is filled
@@ -2503,23 +2498,23 @@ itself: the App builder, Astra on heads, `redesign` available), under the landed
 for it carries sections for U21–U26 only; U17–U20 landed, so no `Blocked by` names them). Once
 U21 lands and the plugin is updated from the tree, the next `wave`, typed in a new session (§5: a
 wave is one invocation, and an update takes a new session), ingests Devin's reviews of the later
-1.2 PRs, and the next PR of the elephant's own with a live review (the next amendment's spec PR) is the
-first `review ingest --pr` reads once U26 lands (amendment 6): the dogfood. The
+1.2 PRs, and the next amendment's spec PR, opened as a draft before its review, is the first
+`review ingest --pr` reads once U26 lands (amendment 6): the dogfood. The
 order is the panel's (`1.2-questions-e8857c`, two rounds, Claude-only, every question converged;
 the owner accepted every verdict and amended the test-suite non-goal on their own word): ingest
 and rulings first, then the inbox, then the driver; U25 sits where its shared files put it, and
-U26 (amendment 6) last, after U21 and U23 by its blockers and after U24 on `review.py` and
-`inbox.py`.
+U26 (amendment 6) last, after U21 by its blocker and after U24 on `review.py`.
 Shared files: `collect.py` is U21's, then U22's, then U25's; `review.py` U21's, then U25's, U24's, U26's;
 `skills/wave/SKILL.md` U21's, then U22's, U23's, U25's, U24's; `__init__.py` U21's, U23's, U25's and U24's, `init.py` U21's, U23's and U25's, and
 `test_helper.py` every unit's, one per wave (disjoint keys, but a wave has no order inside it,
 §9.1: so U25 follows U23 and U24 follows U25 on them); `inbox.py` and `test_inbox.py`
-U23's, then U24's, then U26's; `launch.py` U21's, then U24's; `doctor.py` and `test_doctor.py` U25's, then U24's; `launch_builder.py` U22's, then U25's, then U24's; `docs/claude.md` and `README.md` in
+U23's, then U24's; `launch.py` U21's, then U24's; `doctor.py` and `test_doctor.py` U25's, then U24's; `launch_builder.py` U22's, then U25's, then U24's; `docs/claude.md` and `README.md` in
 wave order. Waves: {U21} → {U22} →
 {U23} → {U25} → {U24} → {U26}; version 1.2.0 after all six merge (manifests, `docs/releases.md`, tag,
 release, plugin update: the owner's by-hand steps), after which `superegm driver install` (re-typed
-after every later update), `~/.superegm/env`, `register` from each handoff's worktree and a machine kept awake
-(`pmset`/`caffeinate`) are the owner's by-hand steps, as the App
+after every later update), `~/.superegm/env`, `register` from each handoff's worktree, a machine kept awake
+(`pmset`/`caffeinate`) and, from amendment 6, the spec PR opened as a draft before `review-spec`'s
+first round are the owner's by-hand steps, as the App
 registration was for 1.1.1. Risk: U21 medium (a human medium
 returns an awaiting-merge unit to flight, which is the owner's wish; a flood of bot lows never
 blocks; the elephant's token reads, and posts the one review comment); U22 medium (a compromised owner login is a
@@ -2643,9 +2638,9 @@ Interfaces (the names the plans will carry):
   paste_summary, timed_out}`; `rounds[].test_delta[].{file, line, base_line, kind, base_commit}`;
   `r<n>/dod/<item>.txt`; the config key `foreman.run_timeout_minutes`; the ruling form
   `**Ruling:** <fid> allowed — <reason>` for `test-delta` and `dod-<n>`.
-- U26 → the owner: `review ingest --pr <n> --kind spec|plan [--unit U<n>] --runcard <id> → <n>
-  ingested; exit 0`; `review.json`'s `ingested[]`; the cycle id `ingest-<n>`; the refusal
-  `approve-spec: external:<login> <fid> unsettled on PR <n>` (`file` the same), exit 1.
+- U26 → the owner: `review ingest --pr <n> --runcard <id> → <n> ingested; exit 0`; `review.json`'s
+  `ingested[]`; the `**Reply <fid>:** fixed` post; `approve-spec`'s refusal of an unconverged
+  review, unchanged, now reached by an unsettled external high or medium.
 
 Waves: {U01} → {U02, U03} → {U04, U05, U08, U09} → {U06, U07, U09b, U10} → {U10b} → {U11}; then,
 as a second handoff (`2026-11-03-superegm-<6 hex>`), {U12} → {U13} → {U14}, and version 1.1.0
