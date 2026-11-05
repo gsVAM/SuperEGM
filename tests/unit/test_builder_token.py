@@ -9,7 +9,7 @@ import pytest
 from conftest import REPO, set_config
 import superegm  # the harness reloads the package per test: read HandoffError at call time
 from superegm import DEFAULT_CONFIG, builder_token
-from superegm.builder_token import jwt, mint
+from superegm.builder_token import jwt, mint, app_lines
 
 OPENSSL = shutil.which("openssl")
 APP = {"app_id": 12345, "slug": "superegm-builder", "private_key_env": "SUPEREGM_APP_KEY"}
@@ -74,3 +74,18 @@ def test_builder_token_prints_the_token_or_the_refusal(world, monkeypatch, key):
   assert world.run("builder-token") == (0, "ghs_minted\n") and world.gh.calls == []
   monkeypatch.delenv("SUPEREGM_APP_KEY")
   assert world.run("builder-token") == (1, "superegm: builder-token: SUPEREGM_APP_KEY is not set\n")
+
+
+FOUR = "{contents: write, issues: write, metadata: read, pull_requests: write}"
+OK = [("app", "ok (superegm-builder #12345)"), ("permissions", f"ok ({FOUR[1:-1]})"), ("token", "ok"), ("installation", f"ok ({REPO})")]
+
+
+@pytest.mark.parametrize("answers, lines", [
+  ({}, OK),
+  ({("GET", f"/repos/{REPO}/installation"): {"id": 777, "permissions": {**PERMISSIONS, "administration": "write"}}},
+   OK[:1] + [("permissions", f"installed {{administration: write, contents: write, issues: write, metadata: read, pull_requests: write}}, not {FOUR}")]),
+  ({("GET", f"/repos/{REPO}/installation"): (404, "Not Found")}, OK[:1] + [("permissions", f"GET /repos/{REPO}/installation: HTTP 404: Not Found")]),
+])
+def test_app_lines_read_the_installation(key, monkeypatch, answers, lines):
+  calls = app_api(monkeypatch, {("GET", f"/repos/{REPO}"): {"permissions": {"push": False}}, ("GET", "/app/installations"): [{"id": 777}, {"id": 778}], **answers})
+  assert app_lines(APP, REPO, key, OPENSSL) == lines and not {("GET", f"/repos/{REPO}"), ("GET", "/app/installations")} & {c[:2] for c in calls}
