@@ -244,7 +244,8 @@ def command_line(config, worktree, prompt, result, runcard, tools, gh, login, em
   `GH_TOKEN` as the shell variable expands (never its value) or, on the App path, the sentinel the shim
   overrides, the role and card, the launched git pairs (`gh`, the shim on the App path, as the credential
   helper by absolute path; the identity `login` and `email` from the wave card), `claude -p` on the prompt
-  file, the result and exit files."""
+  file with `--setting-sources user` (the builder sits in the target repository, whose project settings
+  and SessionStart hooks it must not run: the profile's settings alone), the result and exit files."""
   b = config["builder"]
   pairs = launched_pairs(gh, login, email)
   for value in (worktree, prompt, result, b["profile_dir"], b["model"], b["permission_mode"], runcard, *tools, *(v for _, v in pairs)):
@@ -254,5 +255,5 @@ def command_line(config, worktree, prompt, result, runcard, tools, gh, login, em
   unset, env = " ".join(f"-u {k}" for k in UNSET), " ".join(f"{k}='{v}'" for k, v in pairs)
   return (f"cd '{worktree}' && env {unset} CLAUDE_CONFIG_DIR='{b['profile_dir']}' {token} "
           f"SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{runcard}' {env} "
-          f"claude -p \"$(cat '{prompt}')\" --model '{b['model']}' --permission-mode '{b['permission_mode']}' "
+          f"claude -p \"$(cat '{prompt}')\" --model '{b['model']}' --permission-mode '{b['permission_mode']}' --setting-sources user "
           f"--allowedTools '{','.join(tools)}' --output-format json > '{result}'; echo $? > '{result}.exit'")
