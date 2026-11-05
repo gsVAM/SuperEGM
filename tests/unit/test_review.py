@@ -222,6 +222,15 @@ def test_review_open_seats_the_lane_on_a_head_by_the_one_control(world, kind, as
   assert rjson(world, rid)["reviewers"] == panel.replace(",astra", "").split(",") + (["astra"] if lane else [])
 
 
+def test_a_not_installed_lane_record_is_not_an_incomplete_run(world):
+  set_config(world, repo=REPO, astra={"enabled": True})
+  spec, cid, rid = opened(world, "head", reviewers="change-review", astra=None)
+  for n, reason in ((1, "not installed"), (2, "timeout"), (3, "killed"), (4, "stopped: two incomplete runs")):
+    head_round(world, n, "posted", cid, "revise")
+    assert record(world, rid, n, "change-review", [], cid, sha=A)[0] == 0 and record(world, rid, n, "astra", cid=cid, sha=A, not_run=reason)[0] == 0
+    assert rjson(world, rid, f"round-{n}.json")["what_ran"] == "completed" and rjson(world, rid)["astra_incomplete"] == min(n - 1, 2)
+
+
 # ---------------------------------------------------------------- S3: cycles
 
 def test_review_open_cycles(world):
