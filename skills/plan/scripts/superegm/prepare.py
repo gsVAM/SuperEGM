@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # From the elephant-goldfish-model (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_prepare` as the prepare module, keyed by the dispatch id; the fetched tip is the round's head; `pr_body.md` and `comments.md` beside the diff and the CI file.
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_prepare` as the prepare module, keyed by the dispatch id; the fetched tip is the round's head; `pr_body.md` and `comments.md` beside the diff and the CI file; the App path's builder login (U15).
 
 """superegm prepare: fetch the PR into refs/superegm, add the review worktree, write the diff, CI, PR body and comments."""
 
@@ -12,6 +12,7 @@ from pathlib import Path
 
 import superegm as core
 from superegm import review
+from superegm.launch import app_login
 
 WRITES = frozenset(['foreman', 'review'])  # the store kinds this subcommand writes
 SKILLS = frozenset(['wave'])  # the skills whose card this subcommand accepts
@@ -85,7 +86,7 @@ def prepare(args, card):
   core.atomic_write(r / "ci.json", json.dumps(ci, indent=2) + "\n")
   core.atomic_write(r / "pr_body.md", pr.get("body") or "")
   env = config["builder"]["gh_token_env"]
-  login = core.gh(["api", "user", "-q", ".login"], token=os.environ.get(env) if env else None).strip()
+  login = app_login(config) or core.gh(["api", "user", "-q", ".login"], token=os.environ.get(env) if env else None).strip()
   issue = record["number"]
   since = max((e["posted_at"] for e in data["rounds"] if e.get("posted_at")), default=None)
   write_comments(r / "comments.md", (issue, core.gh_pages(f"repos/{repo}/issues/{issue}/comments")),

@@ -10,6 +10,7 @@ from pathlib import Path
 
 import superegm as core
 from superegm.apply import body_file
+from superegm.launch import app_login
 from superegm.report import pending_decisions, unit_view
 from superegm.review import Refusal
 
@@ -170,7 +171,10 @@ def ruling_comment(point: int, source: str, ruling: str, question: str) -> str:
 
 
 def builder_login(config) -> str:
-  """The builder account's login under its token (read from GitHub, not from the wave card)."""
+  """The builder's login: `<slug>[bot]` from the config on the App path, else the machine account's
+  under its token (read from GitHub, not from the wave card)."""
+  if app_login(config):
+    return app_login(config)
   env = config["builder"]["gh_token_env"]
   if not os.environ.get(env):
     raise Refusal(f"decision: {env} is not set")
