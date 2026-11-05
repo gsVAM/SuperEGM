@@ -624,6 +624,27 @@ def test_scan_requires_the_judges_on_an_escalated_decision_in_leavemealone_mode(
   assert world.run("scan", "--plan", plan)[0] == 0
 
 
+LOOP, SPEC_SKILL, HC = "skills/review-spec/references/review_loop.md", "skills/review-spec/SKILL.md", "skills/plan/references/handoff_config.md"
+U16_PROSE = [
+  (LOOP, "equals the artifact's current bytes (a head has no byte test)"),
+  (LOOP, "`fixed: re-review on the current bytes`"),
+  (LOOP, "fixed needs changed bytes"),
+  (LOOP, "a spec edited after the approval that names it"),
+  (SPEC_SKILL, "`accept the remainder` (not while the reviewed bytes moved)"),
+  (SPEC_SKILL, "`stop` alone, ruled with no `--owner` or `--judges`"),
+  (SPEC_SKILL, "escalated finding(s) await the owner"),
+  ("skills/review-plan/SKILL.md", "review open --kind plan --artifact '<unit>' --reviewers '<panel>' --runcard '<card>'"),
+  ("skills/judges/SKILL.md", "the reply's `saw:` line, first or last"),
+  (HC, '"commit_trailer": "",'),
+  (HC, "inside a fenced code block or an inline code span is never a mention"),
+]
+
+
+@pytest.mark.parametrize("path, needle", U16_PROSE)
+def test_convergence_cap_saw_and_trailer_prose(path, needle):
+  assert needle in (ROOT / path).read_text(encoding="utf-8"), f"{path} lacks {needle!r}"
+
+
 PROSE_ROWS = [
   ("skills/plan/SKILL.md", "A row the section's `Landed:` line names (a unit that landed in an earlier handoff) gets no section."),
   ("skills/review-plan/SKILL.md", "a row the section's `Landed:` line names counts as covered"),
