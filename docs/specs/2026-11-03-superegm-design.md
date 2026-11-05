@@ -1817,8 +1817,9 @@ and returns one word plus one line:
   green or a ruling names it: the owner's `**Ruling:** dod-<n> allowed — <reason>` (§13.2, as
   `test-delta`'s does), or a point-1 overrule of the builder's contest, the judges' or the
   owner's, which persists on the item number too: a line the worktree cannot run (a service, a
-  suite longer than the bound) is ruled once, not once per round, and never spends the cap. **The test delta**: for every test file the head changes (a file the §9.3 test-file name rule
-  names) that no `Write` line of the unit's own body names (a test the plan set out to rewrite is
+  suite longer than the bound) is ruled once, not once per round, and never spends the cap. **The test delta**: for every test file a commit of the PR's range touches (the commit walk of
+  the `tdd-order` rule above, so a file created then deleted in the range is among them; a file
+  the §9.3 test-file name rule names) that no `Write` line of the unit's own body names (a test the plan set out to rewrite is
   the owner's approved change; the gate guards the files the unit did not plan to touch, and a
   named file's other assertions are the change-review goldfish's to see, a residual; paths
   paired by git's rename
