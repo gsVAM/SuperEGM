@@ -458,3 +458,29 @@ def test_the_wave_entry_refreshes_the_snapshot_before_report():
   "--not-run <reason>", "ask the user whether to re-review", "max 1 re-audit", "Blocker or Major"])
 def test_the_wave_skill_names_no_removed_mechanism(removed):
   assert removed not in SKILL.read_text(encoding="utf-8"), removed
+
+
+# ---------------------------------------------------------------- U18: the redesign ruling
+
+FINDING = "change-review-1-1 | high | src/x.py:3 | regression: no | the retry loop never backs off"
+
+
+@pytest.mark.parametrize("point, source", [(1, "review head-U01-c1 round 1"), (2, "review head-U01-c1 cap")])
+def test_a_redesign_ruling_stops_the_unit_and_writes_the_brainstorm_brief(world, point, source):
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "rounds": [{"round": 1, "phase": "posted", "outcome": "revise", "launch": 1}]})
+  folder = s.path("review", "U01", 70) / "r1"
+  atomic_write(folder / "diff", b"diff --git a/src/x.py b/src/x.py\n" + (b"+" + b"x" * 200 + b"\n") * 300)
+  atomic_write(folder / "comments.md", "builder: builder-bot\n### issue #2 comment 5 by builder-bot at t\n**Deviation (other):** renamed a fixture\n\n")
+  qid = world.run("decision", "open", "--unit", "U01", "--point", point, "--question", question(world, FINDING + "\n"), "--source", source, "--runcard", card)[1].splitlines()[0]
+  rule = lambda text: world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", text, "--by", "owner", "--runcard", card)
+  assert rule("redesign") == (1, "decision: redesign needs — <one sentence why>\n") and rule("redesign — the retry design is wrong")[0] == 0
+  f, brief = foreman_of(s, "U01"), s.path("foreman", "U01").with_name(f"U01-{qid}.brainstorm.md")
+  assert f["stopped"] == {"by": "owner", "reason": "redesign — the retry design is wrong", "at": f["rulings"][-1]["posted_at"], "brief": str(brief)}
+  assert "superegm:stopped" in world.gh.issues[2]["labels"]
+  assert world.gh.comments[2][-1]["body"].startswith(f"**Ruling:** redesign — the retry design is wrong\n\nStopped for redesign; the brainstorm brief is `{brief}`.\n")
+  text = brief.read_text(encoding="utf-8")
+  assert [l for l in text.splitlines() if l.startswith("# ")] == ["# What the owner asked", "# Findings", "# Unit body", "# Diff", "# Deviations"]
+  assert "redesign — the retry design is wrong" in text and FINDING in text and "<!-- superegm:handoff=" in text
+  assert "src/x.py" in text and sum(l.startswith("+x") for l in text.splitlines()) == 199 and "**Deviation (other):** renamed a fixture" in text
+  assert not any(c[:2] == ["api", f"repos/{REPO}/pulls/70"] for c in world.gh.calls)
