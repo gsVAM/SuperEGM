@@ -224,10 +224,11 @@ def add_worktree(repo_root, store, unit, rnd, branch, pr):
 def launched_pairs(gh: str, name: str, email: str) -> list:
   """The launched environment's git pairs (spec section 11): the owner's global and system configuration
   shut out, every SSH transport failing closed, no prompt, and the `GIT_CONFIG_KEY_n` entries: the helper
-  reset then `gh` by absolute path as `gh auth setup-git` writes it, the HTTPS rewrites, no askPass, the
-  commit identity. No git config file is written."""
+  reset then `gh` by absolute path as `gh auth setup-git` writes it, the HTTPS `insteadOf` rewrites (which,
+  unlike `pushInsteadOf`, reach an explicit `remote.<name>.pushurl`), no askPass, the commit identity.
+  No git config file is written."""
   entries = [("credential.https://github.com.helper", ""), ("credential.https://github.com.helper", f"!{gh} auth git-credential"),
-             ("url.https://github.com/.pushInsteadOf", "git@github.com:"), ("url.https://github.com/.pushInsteadOf", "ssh://git@github.com/"),
+             ("url.https://github.com/.insteadOf", "git@github.com:"), ("url.https://github.com/.insteadOf", "ssh://git@github.com/"),
              ("core.askPass", ""), ("user.name", name), ("user.email", email)]
   pairs = [("GIT_CONFIG_GLOBAL", "/dev/null"), ("GIT_CONFIG_SYSTEM", "/dev/null"), ("GIT_SSH_COMMAND", "false"),
            ("GIT_TERMINAL_PROMPT", "0"), ("GIT_CONFIG_COUNT", str(len(entries)))]
