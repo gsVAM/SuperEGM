@@ -1814,8 +1814,9 @@ and returns one word plus one line:
   paired by git's rename
   detection, so a renamed file compares with its old path and a split or merge compares each new
   file with the source of its rename pair), it compares the file at its base (the range's base for a file that exists there: a base
-  file's assertions are the baseline, whatever commit removes them; the first `test(S<n>)` commit
-  of the range that creates it for a file the head created, else empty, so nothing reads removed;
+  file's assertions are the baseline, whatever commit removes them; its first appearance in the
+  range, the commit that creates it whatever its subject, for a file the head created, else empty,
+  so nothing reads removed;
   `base_commit` in the record) with the head: every removed or loosened assertion,
   assertions paired across the change as git pairs them (a removed line with the added line at
   its position in the same hunk, the rest unpaired) so a changed value (`== 3` to `== 4`, the
