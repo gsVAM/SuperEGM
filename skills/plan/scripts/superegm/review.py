@@ -386,12 +386,33 @@ def settle_finding(args) -> int:
   finding["disposition"] = disposition
   finding["ruling"] = "owner" if args.owner else f"judges:{args.judges}" if args.judges else None
   core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
+  copies = settle_set_copies(st, rnd, finding) if (review["kind"], reviewer, disposition) == ("plan", "set", "fixed") else []
   status = store_verdict(st, rid, review, card.get("parent") or args.runcard)
   if review["kind"] == "head" and status.code == 0:
     write_head_outcome(st, review, card.get("parent") or args.runcard)
-  core.journal(st, f"review settle {rid} {fid} {disposition} by {finding['ruling'] or 'the elephant'} under {args.runcard}")
+  core.journal(st, f"review settle {rid} {fid} {disposition} by {finding['ruling'] or 'the elephant'}"
+               + (f" copied to {', '.join(copies)}" if copies else "") + f" under {args.runcard}")
   print(f"{fid} {disposition}")
   return 0
+
+
+def settle_set_copies(st: core.Store, rnd: dict, finding: dict) -> list:
+  """A `set` finding settled `fixed` on one unit settles its copies: every other plan review's round
+  under the same run card whose `set` record holds the same id and claim takes the disposition and
+  ruling (one already holding them, the settled round included, is left alone); the review ids written."""
+  copies = []
+  for folder in st.path("reviews").glob(f"{st.handoff_id[-6:]}-plan-*-c*"):
+    for n in round_numbers(st, folder.name):
+      other = load_round(st, folder.name, n)
+      twins = [f for f in ((other["reviewers"].get("set") or {}).get("findings") or [])
+               if (f["id"], f["claim"]) == (finding["id"], finding["claim"])
+               and (f["disposition"], f["ruling"]) != (finding["disposition"], finding["ruling"])]
+      if other["runcard"] == rnd["runcard"] and twins:
+        for twin in twins:
+          twin["disposition"], twin["ruling"] = finding["disposition"], finding["ruling"]
+        core.atomic_write(folder / f"round-{n}.json", other)
+        copies.append(folder.name)
+  return copies
 
 
 def write_head_outcome(st: core.Store, review: dict, runcard: str) -> None:
