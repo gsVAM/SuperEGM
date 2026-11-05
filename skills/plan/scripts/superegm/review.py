@@ -196,17 +196,26 @@ def head_entry(st: core.Store, unit: str, n: int):
 
 def latest_cycle(st: core.Store, kind: str, artifact: str) -> tuple[dict | None, bool]:
   """The latest cycle's `review.json` of this artifact and whether that cycle is closed: by an
-  `accept` or `stop` ruling, or (a spec) by the artifact's bytes moving off the converged round's."""
+  `accept` or `stop` ruling; a spec's by the approval that names it, once the bytes moved off its
+  sha; an integrate's by the handoff closing or changing (D1 (a)), or by a `## Units` amendment
+  past the bytes its latest completed round reviewed (a cycle with no completed round stays)."""
   base = review_id(st, kind, artifact, 0)[:-3]
   cycles = [int(m.group(1)) for p in st.path("reviews").glob(f"{base}-c*")
             if (m := re.fullmatch(rf"{re.escape(base)}-c(\d+)", p.name)) and (p / "review.json").is_file()]
   if not cycles:
     return None, False
-  review = load_review(st, f"{base}-c{max(cycles)}")
+  rid = f"{base}-c{max(cycles)}"
+  review = load_review(st, rid)
   closed = any(r["ruling"] in ("accept", "stop") for r in review["rulings"])
-  if not closed and kind in ("spec", "integrate") and review["converged_round"]:
-    rnd = load_round(st, f"{base}-c{max(cycles)}", review["converged_round"])
-    closed = core.sha256_file(Path(artifact)) != rnd["artifact_sha256"]
+  if not closed and kind == "spec":
+    approval = core.load_approval(st, Path(artifact))
+    closed = bool(approval) and approval["review"] == rid and approval["sha256"] != current_sha(st, kind, artifact)
+  if not closed and kind == "integrate":
+    state = core.load_state(st.root)
+    amended = (core.load_approval(st, Path(artifact)) or {}).get("amended") or []
+    latest_sha = evaluate(st, review, None).latest_sha
+    closed = bool(state.get("closed_at")) or ("handoff_id" in review and state.get("handoff_id") != review["handoff_id"]) \
+        or bool(amended and latest_sha and amended[-1]["sha256"] != latest_sha)
   return review, closed
 
 
@@ -265,7 +274,7 @@ def open_review(args) -> int:
   cycle = latest["cycle"] + 1 if latest else 1
   rid = review_id(st, kind, artifact, cycle)
   astra = getattr(args, "astra", None) or ("on" if (st.config.get("astra") or {}).get("enabled") else "off")
-  review = {"kind": kind, "artifact": artifact, "cycle": cycle,
+  review = {"kind": kind, "artifact": artifact, "cycle": cycle, "handoff_id": st.handoff_id,
             "reviewers": reviewers + (["astra"] if astra == "on" and kind in LANE_KINDS else []),
             "runcard": args.runcard, "artifact_sha256": current_sha(st, kind, artifact) if kind == "plan" else args.sha256,
             "astra_incomplete": 0,
