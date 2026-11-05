@@ -138,15 +138,38 @@ def refusal(store, state, config, unit, rnd, builder):
   return None
 
 
+def plugins_held(plugins):
+  """Claude Code writes `installed_plugins.json`, an empty `marketplaces/` and its own `store/` into a profile on
+  every start, and `syncClaudeAiPlugins: false` leaves `.trash/`: none of those is a plugin. A plugin is an
+  `installed_plugins.json` entry, a `synced/<bucket>/<name>` directory (the account's plugins, synced on sign-in
+  unless the profile's settings set `syncClaudeAiPlugins` false), or anything under `cache/` or `marketplaces/`."""
+  if not plugins.is_dir():
+    return False
+  installed = plugins / "installed_plugins.json"
+  if installed.is_file():
+    try:
+      data = json.loads(installed.read_text(encoding="utf-8"))
+    except ValueError:
+      return True
+    if isinstance(data, dict) and data.get("plugins"):
+      return True
+  if any((plugins / sub).is_dir() and any((plugins / sub).iterdir()) for sub in ("cache", "marketplaces")):
+    return True
+  synced = plugins / "synced"
+  return synced.is_dir() and any(
+      bucket.is_dir() and not bucket.name.startswith(".") and any(p.is_dir() and not p.name.startswith(".") for p in bucket.iterdir())
+      for bucket in synced.iterdir())
+
+
 def profile_problem(profile_dir):
-  """Spec sections 4 and 11: the builder profile exists, holds no CLAUDE.md, no plugins and no hooks
-  (a `settings.json` with a `hooks` key)."""
+  """Spec sections 4 and 11: the builder profile exists, holds no CLAUDE.md, no plugins (`plugins_held`) and no
+  hooks (a `settings.json` with a `hooks` key)."""
   plugins, settings = profile_dir / "plugins", profile_dir / "settings.json"
   if not profile_dir.is_dir():
     return f"builder profile {profile_dir} does not exist"
   if (profile_dir / "CLAUDE.md").exists():
     return f"builder profile {profile_dir} holds CLAUDE.md"
-  if plugins.is_dir() and any(plugins.iterdir()):
+  if plugins_held(plugins):
     return f"builder profile {profile_dir} holds plugins"
   if settings.is_file():
     try:
