@@ -319,6 +319,12 @@ def test_launch_counts_in_flight_skips_stopped_and_frees_idle(world, monkeypatch
   assert "launched" not in state_of(s)["units"]["U09"]
 
 
+ENTRIES = [("credential.https://github.com.helper", ""), ("credential.https://github.com.helper", "!{gh} auth git-credential"), ("url.https://github.com/.pushInsteadOf", "git@github.com:"),
+           ("url.https://github.com/.pushInsteadOf", "ssh://git@github.com/"), ("core.askPass", ""), ("user.name", "{login}"), ("user.email", "{email}")]
+PAIRS = [("GIT_CONFIG_GLOBAL", "/dev/null"), ("GIT_CONFIG_SYSTEM", "/dev/null"), ("GIT_SSH_COMMAND", "false"), ("GIT_TERMINAL_PROMPT", "0"), ("GIT_CONFIG_COUNT", "7"),
+         *(p for i, (k, v) in enumerate(ENTRIES) for p in ((f"GIT_CONFIG_KEY_{i}", k), (f"GIT_CONFIG_VALUE_{i}", v)))]
+
+
 def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monkeypatch):
   s, card, hid, bodies = seed(world)
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
@@ -337,20 +343,18 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   assert git(["rev-parse", "HEAD"], wt).strip() == git(["rev-parse", "refs/superegm/base"], world.repo).strip()
   prompt_file = s.path("launches", f"{UNIT}_r1_prompt.md")
   prompt = prompt_file.read_text(encoding="utf-8")
-  orders = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8")
+  orders = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8").replace("{{gh}}", "/usr/local/bin/gh")
   assert prompt.startswith(f"# Issue #{ISSUE} — U07\n\n{world.gh.issues[ISSUE]['body']}")
   assert f"\n\n---\n\n# Builder orders\n\n{orders}" in prompt
   assert f"\n\n---\n\n# Comments on issue #{ISSUE}\n\n## owner · comment 1\n**Decision D1:** (a) five\n\n## builder-bot · comment 3\n**Deviation (other):** renamed a fixture\n\n## owner · comment 4\n**Ruling:** (3) (a) — proceed\n" in prompt
   assert "forged" not in prompt and "looks good" not in prompt and "# Review comments" not in prompt
   cfg = json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]
   result = s.path("launches", f"{UNIT}_r1_result.json")
-  assert line.startswith(f"cd '{wt}' && env CLAUDE_CONFIG_DIR='{cfg['profile_dir']}' GH_TOKEN=\"$SUPEREGM_BUILDER_TOKEN\" SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{card}' GIT_CONFIG_COUNT=3 "
-                        "GIT_CONFIG_KEY_0=credential.https://github.com.helper GIT_CONFIG_VALUE_0='!gh auth git-credential' "
-                        "GIT_CONFIG_KEY_1=url.https://github.com/.pushInsteadOf GIT_CONFIG_VALUE_1=git@github.com: "
-                        "GIT_CONFIG_KEY_2=url.https://github.com/.pushInsteadOf GIT_CONFIG_VALUE_2=ssh://git@github.com/ "
-                        f"claude -p \"$(cat '{prompt_file}')\" --model '{cfg['model']}' --permission-mode '{cfg['permission_mode']}' --allowedTools '"), line
+  pairs = " ".join(f"{k}='{v.format(gh='/usr/local/bin/gh', login='builder-bot', email='1001+builder-bot@users.noreply.github.com')}'" for k, v in PAIRS)
+  assert line.startswith(f"cd '{wt}' && env -u GIT_ASKPASS -u SSH_ASKPASS -u GITHUB_TOKEN CLAUDE_CONFIG_DIR='{cfg['profile_dir']}' GH_TOKEN=\"$SUPEREGM_BUILDER_TOKEN\" SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{card}' {pairs} claude -p "), line
+  assert f" claude -p \"$(cat '{prompt_file}')\" --model '{cfg['model']}' --permission-mode '{cfg['permission_mode']}' --allowedTools '" in line, line
   tools = line.split("--allowedTools '")[1].split("'")[0].split(",")
-  assert tools == cfg["allowed_tools"] + [f"Bash(git push origin {branch}:*)", "Bash(pytest:*)"]
+  assert tools == [t.replace("Bash(gh ", "Bash(/usr/local/bin/gh ") for t in cfg["allowed_tools"]] + [f"Bash(git push origin {branch}:*)", "Bash(pytest:*)"]
   assert line.endswith(f"' --output-format json > '{result}'; echo $? > '{result}.exit'")
   assert "ghp_builder" not in out
   assert not s.path("launches", f"{UNIT}.json").exists()           # the record is record-launch's
@@ -464,7 +468,7 @@ def test_launch_builder_appends_the_pr_block(world, monkeypatch, key, present):
     assert not s.path("worktrees", UNIT).exists() and not s.path("launches", f"{UNIT}_r1_prompt.md").exists()
     return
   assert code == 0, out
-  orders = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8")
+  orders = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8").replace("{{gh}}", "/usr/local/bin/gh")
   prompt = s.path("launches", f"{UNIT}_r1_prompt.md").read_text(encoding="utf-8")
   if key:
     assert f"\n\n---\n\n# Builder orders\n\n{orders}\n\n---\n\n# PR block\n\n<!-- coord/v1 task=7 -->\n\n\n---\n\n# " in prompt
@@ -552,9 +556,9 @@ def test_allowed_tools_composition(configured, expect):
   body = BODY.replace("HID", "h").replace("UID", "U07")
   if isinstance(expect, str):
     with pytest.raises(superegm.HandoffError, match=re.escape(f"allowed_tools carries {expect}: a builder never spawns, never invokes skills, never runs unrestricted Bash")):
-      allowed_tools(configured, "superegm/h/U07", body)
+      allowed_tools(configured, "superegm/h/U07", body, "/usr/local/bin/gh")
   else:
-    assert allowed_tools(configured, "superegm/h/U07", body) == expect
+    assert allowed_tools(configured, "superegm/h/U07", body, "/usr/local/bin/gh") == expect
 
 
 def test_interrupt_records_a_launch_or_marks_a_prepared_round(world):
