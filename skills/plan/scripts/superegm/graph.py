@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema and issue body; the handoff id comes from the approval record; the plan is copied into the store; the optional `Issue` field checked against the spec's `## Units` section (U13).
+# Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema and issue body; the handoff id comes from the approval record; the plan is copied into the store; the optional `Issue` field checked against the spec's `## Units` section (U13); every escalated pair needs a `## Units` row or a blocking decision (U16).
 
 """superegm graph: parse the plan under its approval; write the store's plan copy,
 units, unit files and bodies."""
@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 
 import superegm as core
+from superegm import review
 from superegm.approve_spec import units_section
 
 WRITES = frozenset(['bodies', 'plan', 'state', 'unit', 'units'])  # the store kinds this subcommand writes
@@ -220,6 +221,19 @@ class Handoff(core.Handoff):
     for uid, unit in self.plan.units.items():
       if unit.issue is not None and not re.search(rf"#{unit.issue}(?!\d)", named):
         raise core.HandoffError(f"graph: {uid}: Issue #{unit.issue} is not named in the spec's `## Units` section")
+    self.escalated = approval.get("escalated") or []  # the pairs `scan` holds to the judges in leavemealone-mode
+    for pair in self.escalated:
+      if pair in named:
+        continue
+      rid, fid = pair.split(":", 1)
+      claims = [f["claim"] for n in review.round_numbers(store, rid)
+                for f in review.findings_of(review.load_round(store, rid, n)) if f["id"] == fid]
+      if not claims:
+        raise core.HandoffError(f"graph: {pair}: no such finding in the store")
+      if not any(d["blocking"] and pair in d["question"] and claims[0] in d["question"]
+                 for unit in self.plan.units.values() for d in unit.decisions):
+        raise core.HandoffError(f"graph: {pair} needs a `## Units` row or a `blocking: yes` D<n> line naming it "
+                                "with the finding's claim verbatim")
     self.design_title = next((l[2:].strip() for l in spec_text.splitlines() if l.startswith("# ")), self.design_path.stem)
     self.config = core.load_config(self.repo_root)
     self.template = self.config["_template"] if self.config["issue_template"] else BODY_TEMPLATE
