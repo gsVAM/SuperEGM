@@ -346,7 +346,7 @@ isolation recorded.
 | graphify's output reaching goldfish and builders as evidence | a wrong edge misleads a reviewer or a builder | the graph is built from an export of the ref `orient` was given, with no model; `orient` projects EXTRACTED edges inline and lists any other edge apart with its confidence; the file's first line names the graph's sha256 | U12 |
 | An adopted issue's body overwritten wholesale | a person's text lost | the dry run shows the old body's sha256, `apply` refuses when the body changed since, comments and title are kept | U13 |
 | A PR block appended verbatim; a token recipe that does not fit the repository's owner kind | a builder PR the repository's CI rejects; a token with no access | the block is the repository's own text and its CI checks it; the recipe names the fine-grained form for an organization's repository and the classic form for a personal one, and `doctor` reports the token's kind | U14 |
-| The App's private key readable by the builder session (it mints in the builder's environment) | a misbehaving builder mints tokens for every repository the App is installed on | the key is a file the path names, never PEM text in the environment; the App reaches this repository alone (a `doctor` line reads `GET /app/installations` with the JWT and refuses unless exactly one installation exists, then that one's `GET /installation/repositories` with a minted token and refuses unless it lists `config.repo` and nothing else); a builder runs as the owner's OS user, so code it runs (a test, a DoD command) can reach what that user can on either path, the owner's SSH key and keyring included, and the protection does not fence the owner's own logins: an accepted residual of a local session on both paths, which no by-hand step of this plugin removes (§3.1 rejects the second OS user); a builder that commits the key or a token is stopped by GitHub's push protection where it is enabled (a `doctor` line says whether it is; free on a public repository) and otherwise seen by the owner's eyes on the diff, after which the owner rotates the key or token; each minted token lives its hour unrevoked, a residual beside the key's; the elephant minting at launch was rejected (§3.1: a round outlives an hour) | U15 |
+| The App's private key readable by the builder session (it mints in the builder's environment) | a misbehaving builder mints tokens for every repository the App is installed on | the key is a file the path names, never PEM text in the environment; the App reaches this repository alone (a `doctor` line reads `GET /app/installations` with the JWT and refuses unless exactly one installation exists, then that one's `GET /installation/repositories` with a minted token and refuses unless it lists `config.repo` and nothing else); a builder runs as the owner's OS user, so code it runs (a test, a DoD command) can reach what that user can on either path, the owner's SSH key and keyring included, and the protection does not fence the owner's own logins: an accepted residual of a local session on both paths, which no by-hand step of this plugin removes (§3.1 rejects the second OS user); a builder that commits a token is stopped by GitHub's push protection where it is enabled, and one that commits the key by its non-provider pattern scanning where that is enabled too (two fields `doctor` reports; free on a public repository), otherwise either is seen by the owner's eyes on the diff, after which the owner rotates the key or token; each minted token lives its hour unrevoked, a residual beside the key's; the elephant minting at launch was rejected (§3.1: a round outlives an hour) | U15 |
 
 **Cost and timeline (estimate, not a promise).** One leavemealone phase: spec review 2–5 rounds
 × 6 goldfish (two is the floor, the last one clean and its bytes left alone; this spec's own
@@ -558,7 +558,8 @@ excepted (§9.3). No lock file.
     `spec-<spec-slug>-c<n>`, `spec-<spec-slug>-integrate-c<n>`, `plan-<unit>-c<n>`,
     `head-<unit>-c<n>`; `review open` on an artifact whose latest cycle is closed (`accept`,
     `stop`, or a spec edit after the approval that names this cycle (`approvals/<slug>.json`'s
-    `review` equals the cycle's id and the bytes differ from its `sha256`), §5; never a clean
+    `review` equals the cycle's id and the bytes differ from its `sha256`), §5, and for an
+    integrate cycle also the `--amend-units` re-record that ends its pass; never a clean
     round whose bytes moved,
     which is the same cycle's `fixed:` state, §8) starts the next cycle, and "the review" of an
     artifact means its latest cycle; `latest_cycle` asks `evaluate` and reads `approvals/<slug>.json` for that, not a
@@ -625,7 +626,8 @@ by the foreman. The helper records and judges; the dispatching session dispatche
   changed bytes`): an unchanged artifact's honest dispositions are `escalated`, `declined` or
   `contested`, so no round converges on a fix no goldfish saw (anti-goal 6). The current bytes are, for kinds `spec` and
   `integrate`, the spec file's, hashed by `review status` itself; for kind `plan`, the unit's
-  `body_sha256` in `handoff_units.json` (a `set` finding that `review record --reviewer set` copied to several units is one finding:
+  stored body (`unit_<id>.md`'s fence, hashed by `review status` itself, so both sides of the
+  predicate are helper-read; `handoff_units.json`'s `body_sha256` is that hash) (a `set` finding that `review record --reviewer set` copied to several units is one finding:
   the one `review settle --disposition fixed` on the unit whose bytes moved writes `fixed` on
   every sibling copy, matched by id and claim among the copies recorded under the same
   `--runcard` round (the set file is recorded once per round under one card); a sibling's round
@@ -671,7 +673,10 @@ by the foreman. The helper records and judges; the dispatching session dispatche
   rule --ruling stop` is accepted with no ruler then (journaled `stop: the one option`), so
   the invocation ends with the record (a journaled ending, not a pause, anti-goal 7; §1.2 lists a
   review ended at its cap among what the owner wakes to) and the next typed invocation opens
-  cycle n+1 on the fixed bytes with a fresh cap, which bounds the night. The cap and stall
+  cycle n+1 on the fixed bytes with a fresh cap, which bounds the night; the elephant's other exit
+  is to restore the clean round's bytes (the predicate hashes the file), after which `review
+  status` exits 0 and `approve-spec` follows, and the ruler-free `stop` is written only by
+  `review rule`, never by `review status`. The cap and stall
   predicates live here alone; every other subcommand and every skill asks `review status`.
 - Between rounds the elephant fixes the artifact. Doctrine: change the thing, not the round. If
   two consecutive rounds regress on the same area, the next fix is a deletion, a narrowed contract
@@ -703,8 +708,10 @@ Spec review specifics:
   line, and no decision point
   is added to §13.2; `escalated[]` has one reader: `graph` refuses the plan unless every id in
   it appears in the spec's `## Units` section (a row that takes the finding and names the pair,
-  review id and finding id, since ids restart every cycle) or in a `blocking: yes` `D<n>` line of the plan file (so `decide` asks the owner or the judges
-  before the body passes `scan`), so an escalated finding is built or decided by a ruler, never
+  review id and finding id, since ids restart every cycle) or in a `blocking: yes` `D<n>` line of the plan file that names the same pair and carries the
+  finding's claim verbatim as its question (so `decide` asks the owner or the judges, on the
+  reviewer's words and not the elephant's, before the body passes `scan`; both branches match
+  on the pair), so an escalated finding is built or decided by a ruler, never
   frozen unseen (anti-goal 6). `approve-spec`
   then adds and commits the spec and
   `.superegm/config.json` by path, ignoring other changes in the tree, on the owner's current
@@ -1172,20 +1179,24 @@ machine-account path the token's login and `<id>+<login>@users.noreply.github.co
 `gh api user`, which `launch` reads once per wave beside `builder_login`), and no git config
 file is written (§4). `superegm-token` runs `openssl` by the absolute path
 `launch-builder` resolved (`shutil.which("openssl")`, refusing the launch when there is none),
-as the shim runs `gh`; `doctor` and `launch-builder` refuse an `artifacts_dir` with whitespace
-on this path (the paths are written unquoted into the orders, the prefixes and the helper
-line). On this path `launch` and `launch-builder` replace the token
+as the shim runs `gh`; the scripts quote every path they bake in (`python3`, the plugin root, the key, `openssl`,
+`gh`), and `doctor` and `launch-builder` refuse an `artifacts_dir` with whitespace on this path,
+the one path that reaches the unquotable allow-list prefix and the orders. On this path `launch` and `launch-builder` replace the token
 predicates (the token set, its login not an owner, the collaborator role) with `doctor`'s App
-lines below, the permissions and bypass reads repeated by `launch` at every wave. Tokens expire hourly and the helper mints on demand, so a builder that runs for
+lines below, of which `launch` repeats at every wave the reads that can change under it: the
+installed permissions, the one installation and its one repository, the `GET /app` slug and
+id, and the App as a bypass actor. Tokens expire hourly and the helper mints on demand, so a builder that runs for
 hours never fails on expiry. The exposure this buys: the builder session can read the key file
 the path names (it mints in the builder's environment), so the App must reach this
 repository alone (`doctor` reads `GET /app/installations` with the JWT and refuses unless
 exactly one installation exists, then its `GET /installation/repositories` with a minted token
-and refuses unless `total_count` is 1 and that one is `config.repo`), and a builder that commits the key
-or a token is stopped by GitHub's push protection where the repository has it (free on a public
-repository; `doctor` reports `secret_scanning_push_protection` from `GET /repos/<repo>`,
-informationally) and otherwise seen by the owner's eyes on the diff, after which the owner
-rotates the key or the token; the plugin scans no content itself (two rounds of this review
+and refuses unless `total_count` is 1 and that one is `config.repo`), and a builder that commits a token
+is stopped by GitHub's push protection where the repository has it, and one that commits the
+key by its non-provider pattern scanning where that is on as well (a private key is a generic
+pattern; `doctor` reports `secret_scanning_push_protection` and
+`secret_scanning_non_provider_patterns` from `GET /repos/<repo>`'s `security_and_analysis`,
+informationally; both free on a public repository), otherwise either is seen by the owner's
+eyes on the diff, after which the owner rotates the key or the token; the plugin scans no content itself (two rounds of this review
 showed a scanner of its own to be a surface of false stops and republished secrets); §4.1 and
 the U15 row say so. Identity: the builder login is
 `<slug>[bot]` (`GET /app` with the JWT confirms the configured slug and id); commits are
