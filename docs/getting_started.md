@@ -30,7 +30,10 @@ the first typed skill runs it when the file is missing. The steps:
    config. Builders push and open draft pull requests as that account and can never update
    `<base>`.
 2. Create the builder's empty profile at `config.builder.profile_dir`: no hooks, no plugins, no
-   `CLAUDE.md`, only the login. `launch-builder` refuses a profile with anything else in it.
+   `CLAUDE.md`, only the login (`CLAUDE_CONFIG_DIR=<profile_dir> claude`, `/login`, exit) and a
+   `settings.json` with `"syncClaudeAiPlugins": false`, written before the login so the account's
+   plugins are not synced into the profile (Claude Code 2.1.273 or later). `launch-builder` refuses a
+   profile with anything else in it; the files Claude Code writes on its own are not plugins.
 3. Set the branch protection of design section 11 on `<base>`: updates restricted to the owner
    (the logins in `owners`) with no bypass for the builder account's role and no team but
    `owner_team`; `superegm/**` protected from force-push and deletion by a ruleset whose
