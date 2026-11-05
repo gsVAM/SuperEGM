@@ -71,6 +71,8 @@ def prepare(args, card):
   if pr:
     ref = f"refs/superegm/pr/{pr}"
     core.run_git(["fetch", "--no-write-fetch-head", st.config["remote"], f"+refs/pull/{pr}/head:{ref}"], handoff.repo_root)
+  elif rnd >= 2:  # no PR yet (decision point 3's `relaunch`): the retained local branch is the tree the builder gets
+    ref = f"refs/heads/{branch}"
   pr_block = pr_block_text(handoff.repo_root, ref, config["pr_block_file"]) if config["pr_block_file"] else None
   # The launch's tree, before any worktree: an orient refusal is an ordinary precondition.
   orient_text = core.read_text(orient.orient_unit(st, handoff.repo_root, ref, unit))
@@ -131,8 +133,6 @@ def refusal(store, state, config, unit, rnd, builder):
   issue = core.gh_json(["api", f"repos/{config['repo']}/issues/{record['number']}"]) or {}
   if body.normalise(filed_body(state, unit)) != body.normalise(issue.get("body") or ""):
     return f"issue #{record['number']} body differs from the filed body"
-  if rnd >= 2 and not (record.get("pr") or {}).get("number"):
-    return f"{unit} round {rnd} has no recorded PR: run status first"
   return None
 
 
@@ -205,8 +205,9 @@ def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr,
 
 def add_worktree(repo_root, store, unit, rnd, branch, pr):
   """A fresh worktree for the launch on the unit's branch: round 1 from `refs/superegm/base`,
-  later rounds at the PR tip (`refs/superegm/pr/<n>`, fetched by `prepare`) after detaching the
-  earlier launches' worktrees (nothing in them is removed; that is `clean`'s)."""
+  later rounds at the PR tip (`refs/superegm/pr/<n>`, fetched by `prepare`) or, with no PR yet
+  (decision point 3's `relaunch` after an exit without one), at the retained local branch, after
+  detaching the earlier launches' worktrees (nothing in them is removed; that is `clean`'s)."""
   path = store.path("worktrees", unit, f"r{rnd}")
   path.parent.mkdir(parents=True, exist_ok=True)
   if rnd == 1:
@@ -216,7 +217,8 @@ def add_worktree(repo_root, store, unit, rnd, branch, pr):
     if earlier.is_relative_to(path.parent.resolve()) and earlier.is_dir():
       core.run_git(["switch", "--detach"], earlier)
   core.run_git(["worktree", "prune"], repo_root, check=False)
-  core.run_git(["branch", "-f", branch, f"refs/superegm/pr/{pr}"], repo_root)
+  if pr:
+    core.run_git(["branch", "-f", branch, f"refs/superegm/pr/{pr}"], repo_root)
   core.run_git(["worktree", "add", str(path), branch], repo_root)
   return path
 

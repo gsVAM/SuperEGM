@@ -423,7 +423,6 @@ def test_record_launch_appends_running_then_records_the_exit(world, monkeypatch)
   ("profile-plugins", "holds plugins"),
   ("profile-hooks", "holds hooks"),
   ("body", "issue #7 body differs from the filed body"),
-  ("no-pr", "U07 round 2 has no recorded PR: run status first"),
   ("orient", "orient: U07 is not in the plan: run graph --plan first"),
 ])
 def test_launch_builder_refuses_each_precondition(world, monkeypatch, case, reason):
@@ -435,8 +434,8 @@ def test_launch_builder_refuses_each_precondition(world, monkeypatch, case, reas
     assert world.run("launch", "--runcard", card)[0] == 0
   if case == "running":
     launched(s, UNIT, "running"); rnd = 2
-  if case in ("count", "no-pr"):
-    launched(s, UNIT, "exited 0"); rnd = 3 if case == "count" else 2
+  if case == "count":
+    launched(s, UNIT, "exited 0"); rnd = 3
   if case == "own-login":
     github(world, builder="owner")
   if case == "profile-missing":
