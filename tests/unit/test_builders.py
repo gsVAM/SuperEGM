@@ -397,7 +397,30 @@ def test_launch_builder_appends_the_pr_block(world, monkeypatch, key, present):
     assert f"\n\n---\n\n# Builder orders\n\n{orders}\n\n---\n\n# PR block\n\n<!-- coord/v1 task=7 -->\n\n\n---\n\n# " in prompt
   else:
     assert "\n\n---\n\n# PR block\n\n" not in prompt
-  assert "paste the `# PR block` section into the PR body right after the unit id line, before the DoD results" in orders
+  assert "paste the `# PR block` section into the PR body right after the audit-trail line, before the DoD results" in orders
+
+
+def test_launch_builder_carries_the_audit_trail_line(world, monkeypatch):
+  """Owner ruling 2026-11-04: the PR body's line after the unit id is `Launched by <owner login> · run card <id>
+  · unit U<n> · handoff <handoff id>`, the login of the session that ran `launch` (not the builder's), with no `@`
+  so it mentions nobody; the prompt carries it under `# Audit trail`, the orders keep it verbatim, the mention scan passes it."""
+  from superegm.launch_builder import AUDIT_LINE
+  from superegm.scan import scan_text
+  s, card, hid, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0
+  assert state_of(s)["units"][UNIT]["launched"]["by"] == "owner"       # `gh api user` in the launching session
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)
+  assert code == 0, out
+  assert AUDIT_LINE == "Launched by {owner} · run card {runcard} · unit {unit} · handoff {handoff}"
+  line = f"Launched by owner · run card {card} · unit U07 · handoff {hid}"
+  prompt = s.path("launches", f"{UNIT}_r1_prompt.md").read_text(encoding="utf-8")
+  assert f"\n\n---\n\n# Audit trail\n\n{line}\n\n---\n\n# Builder orders\n\n" in prompt
+  assert "@" not in line and "builder-bot" not in line
+  cfg = json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))
+  assert scan_text(line, cfg, "body") == []
+  orders = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8")
+  assert "line 2 is the `Launched by` line of your prompt's `# Audit trail` section, kept verbatim" in orders
 
 
 def test_launch_builder_round_2_detaches_the_earlier_worktree_and_carries_the_review(world, monkeypatch):
