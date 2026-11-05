@@ -13,7 +13,7 @@ from pathlib import Path
 import superegm as core
 from superegm import body, orient
 from superegm.builder_token import key_path, tool
-from superegm.launch import builder_login, load_launches, terminal
+from superegm.launch import builder_email, builder_login, load_launches, terminal
 
 WRITES = frozenset(["launches", "orient_unit"])  # the store kinds this subcommand writes
 SKILLS = frozenset(["wave"])  # the skills whose card this subcommand accepts
@@ -64,6 +64,8 @@ def prepare(args, card):
   launched_gh = str(st.path("launches", f"{unit}_r{rnd}_bin", "gh")) if app else gh  # the shim, or the real gh by absolute path
   tools = allowed_tools(builder_config["allowed_tools"], branch, issue_body, launched_gh)
   identity = (card.get("builder") or [None])[-1]
+  if not identity and app:  # a re-typed wave relaunching while launch is held off: every reader derives the App login (spec section 11)
+    identity = {"login": builder, "email": builder_email(builder)}  # `builder` is `app_login(config)`, `<slug>[bot]`, on this path
   if not identity:
     raise core.HandoffError("the wave card records no builder: run launch first")
   pr = (record.get("pr") or {}).get("number") if rnd >= 2 else None
