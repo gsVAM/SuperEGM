@@ -74,8 +74,8 @@ and tell the owner: a review in the same context is not a goldfish review.
     superegm review open --kind spec --artifact <spec-path> --reviewers <panel> [--astra on|off] --runcard <id>
 
 The id is `spec-<spec-slug>-c<n>`. A cycle still open from an earlier invocation is resumed
-with its stored panel; a closed one (`accept`, `stop`, or the spec changed after convergence)
-starts the next cycle with a fresh cap.
+with its stored panel; a closed one (`accept`, `stop`, or a spec edited after the approval that
+names it) starts the next cycle with a fresh cap.
 
 ### 3. The loop
 
@@ -112,8 +112,12 @@ with the options `Approve | Stop` (one question, sole tool call); on `Approve`, 
 with `--yes`; on `Stop`, go to step 7 with the record. **Leavemealone-mode**: run it with
 `--leavemealone`; the converged record is the approval. The helper then adds and commits the
 spec and `.superegm/config.json` by path on the owner's current branch, ignoring other changes
-in the tree, with the message `superegm: approve <spec-slug> at review <id>`, and writes
-`approvals/<spec-slug>.json` (`commit`, `sha256`, `handoff_id`).
+in the tree, with the message `superegm: approve <spec-slug> at review <id>` (`config.commit_trailer`
+after a blank line), and writes `approvals/<spec-slug>.json` (`commit`, `sha256`, `handoff_id`,
+`escalated[]`). Before its question the helper lists the pairs that record will carry as
+`approve-spec: <n> escalated finding(s) await the owner: <ids>`: every `escalated` finding of the
+cycles since the last approval that no `## Units` row names; each needs a row there or a
+`blocking: yes` decision in the plan before `graph` accepts the plan.
 
 Tell the owner, in one line: push the approval commit to `origin/<base>` (only the owner updates
 the base branch; `launch` refuses the first wave until the spec there hashes to the approval),
@@ -122,9 +126,10 @@ then type `/superegm:plan <spec-path>`. Nothing chains.
 ### 5. At the cap (exit 2)
 
 No further round starts. Request the ruling of spec section 13.2 point 2 as one question:
-`continue one bounded round` (once per cycle), `accept the remainder`, or `stop`; in
-leavemealone-mode, `superegm judges question --review <id> --cap` and the `judges` skill. Record
-it:
+`continue one bounded round` (once per cycle), `accept the remainder` (not while the reviewed bytes moved),
+or `stop`; in leavemealone-mode, `superegm judges question --review <id> --cap` and the `judges`
+skill. Once `continue` is spent and the bytes moved, the question has `stop` alone, ruled with no `--owner` or `--judges`.
+Record it:
 
     superegm review rule --review <id> --ruling continue|accept|stop (--owner | --judges <judges-id>) --runcard <id>
 
