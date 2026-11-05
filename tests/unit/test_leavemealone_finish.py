@@ -78,18 +78,26 @@ def head_review(world, runcard, tmp_path):
   return review
 
 
-@pytest.mark.parametrize("form", ["round", "cap", "decision", "blocked-comment", "blocked-launch", "blocked-closed"])
+@pytest.mark.parametrize("form", ["round", "cap", "cap-spent", "decision", "blocked-comment", "blocked-launch", "blocked-closed"])
 def test_judges_question_forms(world, tmp_path, form):
   seed(world)
   runcard = world.card("wave")
   review = head_review(world, runcard, tmp_path)
+  if form == "cap-spent":
+    path = store(world.repo).path("reviews", review, "review.json")
+    spent = json.loads(path.read_text(encoding="utf-8"))
+    spent["rulings"].append({"id": "R1", "ruling": "continue", "by": "owner", "at": "t"})
+    put(world, spent, "reviews", review, "review.json")
   comment(world, 123, INTERFACE_COMMENT)
   put(world, {"launches": [{"round": 1, "status": "exited 0"}]}, "launches", "U07")
   args, expected = {
       "round": (["--review", review, "--round", "1", "--reason", "change-review-1-1=the test covers it"],
                 "## Q1 change-review-1-1 (high, src/x.py:3): the retry loop never backs off\n"
-                "- (a) finding upheld\n- (b) finding overruled — the test covers it\n"),
-      "cap": (["--review", review, "--cap"], f"## Q1 {review} is at its cap\n- (a) one more round\n- (b) stop\n"),
+                "- (a) finding upheld\n- (b) finding overruled — the test covers it\n- (c) redesign — the retry loop never backs off\n"),
+      "cap": (["--review", review, "--cap"], f"## Q1 {review} is at its cap\n- (a) one more round\n- (b) stop\n"
+              "- (c) redesign — the head is at its cap after 1 rounds: the retry loop never backs off\n"),
+      "cap-spent": (["--review", review, "--cap"], f"## Q1 {review} is at its cap\n- (a) stop\n"
+                    "- (b) redesign — the head is at its cap after 1 rounds: the retry loop never backs off\n"),
       "decision": (["--unit", "U07", "--decision", "D1"],
                    "## Q1 U07 D1: Retry ceiling?\n- (a) 5 attempts\n- (b) 10 attempts\n"),
       "blocked-comment": (["--unit", "U07", "--blocked", "123"],
@@ -118,8 +126,6 @@ def test_judges_question_forms(world, tmp_path, form):
      "question: change-review-1-2 is low"),
     ("unknown", ["--review", "{review}", "--round", "1", "--reason", "design-1-9=x"],
      "question: design-1-9 is not in round 1"),
-    ("continue-used", ["--review", "{review}", "--cap"],
-     "question: continue already ruled on {review}; stop is the only option"),
     ("relaunch-used", ["--unit", "U07", "--blocked", "launch", "1"],
      "question: relaunch already used on U07"),
 ])
@@ -128,11 +134,6 @@ def test_judges_question_refusals(world, tmp_path, case, args, message):
   runcard = world.card("wave")
   review = head_review(world, runcard, tmp_path)
   put(world, {"launches": [{"round": 1, "status": "exited 1"}]}, "launches", "U07")
-  if case == "continue-used":
-    # `review rule` refuses `not at the cap` after one round: the ruling it would write is seeded.
-    record = json.loads(store(world.repo).path("reviews", review, "review.json").read_text(encoding="utf-8"))
-    record["rulings"].append({"id": "R1", "ruling": "continue", "by": "owner", "at": "2026-11-03T00:00:00Z"})
-    put(world, record, "reviews", review, "review.json")
   if case == "relaunch-used":
     put(world, {"dispatch_id": None, "rounds": [], "decisions": [{"id": "d1", "point": 3}],
                 "rulings": [{"decision": "d1", "ruling": "relaunch", "by": "judges:p1"}]}, "foreman", "U07")
