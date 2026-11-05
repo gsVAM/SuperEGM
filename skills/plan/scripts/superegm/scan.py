@@ -11,7 +11,7 @@ import superegm as core
 from superegm import graph
 
 WRITES = frozenset(['file'])  # the store kinds this subcommand writes: the derived `plan/scan/<unit>.json`
-BODY_LIMIT = 49_152
+scan_text, BODY_LIMIT = core.scan_text, core.BODY_LIMIT  # the one raw-text scan, the package's
 WARN = {"bytes": (32_768, "32,768"), "steps": (20, "20"), "fenced_share": (0.40, "0.40")}  # limit, as printed
 FENCE_LINE = re.compile(r"^\s*`{3,}")
 NAME_RE = re.compile(r"^[A-Za-z_][\w.]*")
@@ -41,34 +41,6 @@ def names_of(item: str) -> list:
     return [" ".join(words)]
   match = NAME_RE.match(item)
   return [match.group(0)] if match else []
-
-
-def scan_text(text: str, config: dict, kind: str, dod=None, label="body") -> list:
-  """EGM's raw, non-code-aware checks: every line as written, fences and spans
-  included (a legitimate `@scope/pkg` goes in `allowed_mentions`)."""
-  problems = []
-  size = len(text.encode("utf-8"))
-  if size > BODY_LIMIT:
-    problems.append(f"body-size: {label}: {size:,} bytes exceeds {BODY_LIMIT:,}: split it")
-  terms = [re.compile(t) for t in config["banned_terms"]]
-  mention = config.get("fix_request_mention")
-  allowed = set(config.get("allowed_mentions") or [])
-  for number, line in enumerate(text.splitlines(), start=1):
-    for term in terms:
-      if term.search(line):
-        problems.append(f"banned-term: {label}:{number}: banned term /{term.pattern}/")
-    for found in core.MENTION_RE.findall(line):
-      # Exact literal only: `@types` does not cover `@types/node`, `@acme` never the team `@acme/release`.
-      if found in allowed or (kind == "comment" and number == 1 and mention and found == mention):
-        continue
-      problems.append(f"mention: {label}:{number}: bare mention {found} (it would notify that user; "
-                      f"reword it, or list it in `allowed_mentions` in .superegm/config.json)")
-    if re.match(r"^(<<<<<<<|=======|>>>>>>>)( |$)", line):
-      problems.append(f"merge-marker: {label}:{number}: merge marker")
-  for item in dod or []:
-    if item not in text:
-      problems.append(f"dod-missing: {label}: definition-of-done item missing from the body: {item}")
-  return problems
 
 
 def produced(handoff) -> dict:
@@ -151,8 +123,14 @@ def rule_step_scope(uid, body, handoff):
 
 def rule_decision_blocking(uid, body, handoff):
   answered = handoff.state.get("decisions") or {}
-  return [f"decision-blocking: {uid}: {d['id']} {d['question']}" for d in handoff.plan.units[uid].decisions
-          if d["blocking"] and not d.get("answer") and f"{uid}/{d['id']}" not in answered]
+  problems = [f"decision-blocking: {uid}: {d['id']} {d['question']}" for d in handoff.plan.units[uid].decisions
+              if d["blocking"] and not d.get("answer") and f"{uid}/{d['id']}" not in answered]
+  if handoff.config["mode"] == "leavemealone":  # an escalated pair's decision is the judges' (section 13.2)
+    for d in handoff.plan.units[uid].decisions:
+      by = (answered.get(f"{uid}/{d['id']}") or {}).get("by")
+      if by and not by.startswith("judges:") and any(pair in d["question"] for pair in handoff.escalated):
+        problems.append(f"decision-ruler: {uid}: {d['id']} answered by {by} in leavemealone-mode: decide --judges <panel>")
+  return problems
 
 
 # The code-aware body rules, one problem `<rule>: <unit>: <line or reason>` each;

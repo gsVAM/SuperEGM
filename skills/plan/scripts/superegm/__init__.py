@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3).
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
@@ -36,6 +36,8 @@ MENTION_CONFIG_RE = re.compile(r"^@[A-Za-z0-9][A-Za-z0-9-]*(?:/[A-Za-z0-9][A-Za-
 # a team mention subscribes every member, so the slash segment is part of the
 # mention and must be matched and allow-listed as one literal (R8-01).
 MENTION_RE = re.compile(r"(?<![\w./-])@[A-Za-z0-9][A-Za-z0-9-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)?(?:\[bot\])?")
+FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")  # a fence line: the run, then the info string
+SPAN_RE = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")  # an inline code span: equal backtick runs
 REMOTE_URL_RE = re.compile(
     r"^(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)"
     r"([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$")
@@ -53,7 +55,7 @@ FIELDS = ("Objective", "Scope paths", "Design range", "Blocked by",
           "Shared files", "Risk", "Size")
 OPTIONAL_FIELDS = ("Issue",)  # `#<n>`: an open issue `file` adopts instead of creating one (spec section 10)
 SIZE_LIMIT = {"S": 3, "M": 8, "L": 10**6}
-BODY_LIMIT = 65_000
+BODY_LIMIT = 49_152
 MAX_UNITS = 100
 WRITE_WARN = 450
 LABEL_COLOR = "1b6ef3"
@@ -89,8 +91,10 @@ DEFAULT_CONFIG = {
                 "allowed_tools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git add:*)", "Bash(git commit:*)",
                                   "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git mv:*)",
                                   "Bash(git rm:*)", "Bash(gh pr create:*)", "Bash(gh pr edit:*)",
-                                  "Bash(gh pr comment:*)", "Bash(gh issue comment:*)"]},
+                                  "Bash(gh pr comment:*)", "Bash(gh issue comment:*)"],
+                "app": None},  # or {app_id, slug, private_key_env}: the builder as a GitHub App (spec section 11)
     "ci_wait_minutes": 30,
+    "commit_trailer": "",  # appended, after a blank line, to every commit the helper makes
     "owners": [],  # the GitHub logins that may update <base> (spec section 11); init writes `gh api user`'s
     "owner_team": None,  # `<org>/<slug>`: the one team a ruleset's bypass actors may name
     "pr_block_file": None,  # a path relative to the repository root whose text every builder PR body carries
@@ -212,8 +216,8 @@ class Store:
       return base / "foreman" / f"{parts[0]}.json"
     if kind == "orient_unit":
       return base.joinpath("orient", *parts)
-    if kind == "launches":
-      name = parts[0] if "." in parts[0] else f"{parts[0]}.json"
+    if kind == "launches":  # `<unit>.json`, a `<unit>_r<n>_<file>` or the `<unit>_r<n>_bin/` directory
+      name = parts[0] if "." in parts[0] or parts[0].endswith("_bin") else f"{parts[0]}.json"
       return base.joinpath("launches", name, *parts[1:])
     if kind == "review":
       number = parts[1] if parts[1].startswith("pr") else f"pr{parts[1]}"
@@ -541,6 +545,15 @@ def load_config(repo_root: Path) -> dict:
   builder = config["builder"]
   if isinstance(builder, dict) and isinstance(builder.get("profile_dir"), str):
     builder["profile_dir"] = str(Path(builder["profile_dir"]).expanduser())
+  app = builder.setdefault("app", None) if isinstance(builder, dict) else None
+  if app is not None:
+    app = {"private_key_env": "SUPEREGM_APP_KEY", **app} if isinstance(app, dict) else app
+    if not isinstance(app, dict) or set(app) != {"app_id", "slug", "private_key_env"} \
+        or isinstance(app["app_id"], bool) or not isinstance(app["app_id"], int) or app["app_id"] < 1 \
+        or not isinstance(app["slug"], str) or not re.fullmatch(r"[a-z0-9-]+", app["slug"]) \
+        or not isinstance(app["private_key_env"], str):
+      raise HandoffError(f"{path}: builder.app must be null or {{app_id: <int>, slug: <slug>, private_key_env: <name>}}")
+    builder["app"] = app
   artifacts = config["artifacts_dir"]
   if not artifacts or not Path(artifacts).is_absolute() \
       or Path(artifacts).resolve().is_relative_to(repo_root.resolve()):
@@ -553,6 +566,8 @@ def load_config(repo_root: Path) -> dict:
   for key in ("max_in_flight", "ci_wait_minutes"):
     if isinstance(config[key], bool) or not isinstance(config[key], int) or config[key] < 1:
       raise HandoffError(f"{path}: {key} must be a positive integer")
+  if not isinstance(config["commit_trailer"], str):
+    raise HandoffError(f"{path}: commit_trailer must be a string")
   # shortcut: the nested keys of reviewers/astra/judges/builder are not validated here, the unit
   # that reads each validates
   labels = config["labels"]
@@ -568,8 +583,7 @@ def load_config(repo_root: Path) -> dict:
   allowed = config["allowed_mentions"]
   if not isinstance(allowed, list) or not all(
       isinstance(a, str) and MENTION_CONFIG_RE.match(a) for a in allowed):
-    raise HandoffError("allowed_mentions must be a list of `@name` strings (the scan is not "
-                       "code-aware, so list the mentions that legitimately appear in text)")
+    raise HandoffError("allowed_mentions must be a list of `@name` strings")
   if not isinstance(config["banned_terms"], list):
     raise HandoffError("banned_terms must be a list of regular expressions")
   for term in config["banned_terms"]:
@@ -1201,54 +1215,40 @@ def save_state(artifact_dir: Path, state: dict) -> None:
 # ---------------------------------------------------------------- scan
 
 
-def scan_text(text: str, config: dict, kind: str, dod=None, label="body"):
-  """Refuse text that must not reach GitHub.
-
-  Deliberately NOT code-aware. Seven adversarial rounds each found a defect in
-  a Markdown-aware version (R12, R2-10, R3-08, R4-07, R5-02, R6-01, R7-01/02):
-  it could both hide a bare mention behind a fence shape it misread and refuse
-  an ordinary comment. GitHub does not notify for a mention inside code, so
-  code-awareness bought only false-positive avoidance - at the price of a
-  parser that was never right. Raw scan instead: every line, as written. A
-  legitimate `@scope/pkg` or `@decorator` goes in the repository's
-  `allowed_mentions`, which is explicit and reviewable; a refusal names the
-  line and the author rewords. That is the only safe direction to fail.
-  """
+def scan_text(text: str, config: dict, kind: str, dod=None, label="body") -> list:
+  """The raw text rules, one `<rule>: <label>[:<line>]: <reason>` per problem: `body-size`,
+  `banned-term`, `mention`, `merge-marker`, `dod-missing`. The mention rule alone skips a
+  fenced code block and an inline code span (GitHub notifies for neither); a banned term is
+  refused wherever it stands, and a legitimate `@scope/pkg` goes in `allowed_mentions`."""
   problems = []
   size = len(text.encode("utf-8"))
   if size > BODY_LIMIT:
-    problems.append(f"{label}: {size} bytes exceeds {BODY_LIMIT}: shorten or split the unit")
+    problems.append(f"body-size: {label}: {size:,} bytes exceeds {BODY_LIMIT:,}: split it")
   terms = [re.compile(t) for t in config["banned_terms"]]
   mention = config.get("fix_request_mention")
   allowed = set(config.get("allowed_mentions") or [])
+  fence = None  # the open fence's (character, run length): closed by a run of that character at least as long
   for number, line in enumerate(text.splitlines(), start=1):
     for term in terms:
       if term.search(line):
-        problems.append(f"{label}:{number}: banned term /{term.pattern}/")
-    for found in MENTION_RE.findall(line):
-      # Exact literal only: `@types` in the allowlist does not cover
-      # `@types/node`, and `@acme` never covers the team `@acme/release`.
-      if found in allowed:
-        continue
-      if kind == "comment" and number == 1 and mention and found == mention:
-        continue
-      problems.append(f"{label}:{number}: bare mention {found} (it would notify that user; "
-                      f"reword it, or list it in `allowed_mentions` in .superegm/config.json)")
+        problems.append(f"banned-term: {label}:{number}: banned term /{term.pattern}/")
+    if fence:
+      if re.match(rf"^ {{0,3}}{fence[0]}{{{fence[1]},}}\s*$", line):
+        fence = None
+    elif (opener := FENCE_RE.match(line)) and not (opener.group(1)[0] == "`" and "`" in opener.group(2)):
+      fence = (opener.group(1)[0], len(opener.group(1)))
+    else:
+      for found in MENTION_RE.findall(SPAN_RE.sub(" ", line)):
+        # Exact literal only: `@types` does not cover `@types/node`, `@acme` never the team `@acme/release`.
+        if found in allowed or (kind == "comment" and number == 1 and mention and found == mention):
+          continue
+        problems.append(f"mention: {label}:{number}: bare mention {found} (it would notify that user; "
+                        f"reword it, or list it in `allowed_mentions` in .superegm/config.json)")
     if re.match(r"^(<<<<<<<|=======|>>>>>>>)( |$)", line):
-      problems.append(f"{label}:{number}: merge marker")
+      problems.append(f"merge-marker: {label}:{number}: merge marker")
   for item in dod or []:
     if item not in text:
-      problems.append(f"{label}: definition-of-done item missing from the body: {item}")
-  return problems
-
-
-def scan_handoff(handoff: Handoff):
-  problems = []
-  for item in handoff.writes():
-    if item[0] == "issue":
-      dod = handoff.plan.units[item[1]].dod if item[1] != "tracking" else []
-      problems += scan_text(item[4], handoff.config, "body", dod, label=item[1])
-      problems += scan_text(item[2], handoff.config, "body", label=f"{item[1]} title")
+      problems.append(f"dod-missing: {label}: definition-of-done item missing from the body: {item}")
   return problems
 
 
@@ -1677,7 +1677,7 @@ def run_terminated(folder) -> bool:
 SUBCOMMANDS = ("init", "runcard", "approve_spec", "graph", "scan", "review", "gate", "dry_run", "apply",
                "verify", "status", "launch", "launch_builder", "record_launch", "foreman", "prepare",
                "collect", "tdd_order", "decide", "decision", "interrupt", "clean", "report", "close", "judges",
-               "review_plan", "orient", "doctor")
+               "review_plan", "orient", "doctor", "builder_token")
 
 
 def add_parser(subparsers, name, help_text, *, runcard=True):

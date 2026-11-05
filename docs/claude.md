@@ -66,6 +66,9 @@ foreman prepares, this session runs.
   `gh` command a skill runs is prefixed `GH_HOST=github.com`, and the helper pins the same host on
   its own calls: an inherited `GH_HOST` would otherwise send a comment or a review to an
   enterprise server nothing approved.
+- On the App path (`builder.app` set) the builder holds no token: `launch-builder` writes `launches/<unit>_r<n>_bin/` outside the repository, holding `superegm-token` (a fresh one-hour token on stdout, `superegm builder-token` with the repo, app id and key variable baked in) and a `gh` shim that mints per call and execs the real `gh` by the absolute path resolved at launch, failing closed when the mint fails.
+  The launched `GH_TOKEN` is the sentinel `superegm-no-token` (no token: the shim overrides it, and a real `gh` reached any other way fails with 401); the orders carry `{{gh}}` in every `gh` call, filled with the shim's path on the App path and the real `gh`'s on the machine-account path, and the allow-list's `gh` prefixes are rewritten to the same path, so a bare `gh` is refused on both.
+  On both paths the builder's git reads none of the owner's configuration: `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` at `/dev/null`, `GIT_SSH_COMMAND=false`, `GIT_ASKPASS` and `SSH_ASKPASS` unset, `GIT_TERMINAL_PROMPT=0`, and the `GIT_CONFIG_KEY_n` pairs carrying the helper reset, `gh auth git-credential` by absolute path, the HTTPS `insteadOf` rewrites and the commit identity; `superegm doctor`'s `environment` line checks exactly that.
 - `config.owners` lists the logins that may update the base branch (`launch` refuses an empty
   list, a classic restriction naming a login outside it, and a builder token whose login is in
   it); `config.owner_team` (`<org>/<slug>`) is the one team a ruleset's bypass may name, the

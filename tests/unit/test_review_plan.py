@@ -17,7 +17,6 @@ SCENARIOS = ROOT / "skills/review-plan/test_scenarios.yaml"
 STANDARD = ROOT / "resources/document_standards/handoff-standard.md"
 PROPORTION = ROOT / "skills/review-plan/references/proportion.md"
 HANDOFF = "sample-42aff4"
-SHA = {"U01": "1" * 64, "U02": "2" * 64, "U03": "3" * 64}
 SPEC = ("# Sample\n\n## 1. Intent\nOne line.\n\n## 2. Units\n\n"
         "| Unit | Scope | Blocked by | Size |\n| --- | --- | --- | --- |\n"
         "| U01 | the queue | — | S |\n| U02 | the worker | U01 | S |\n| U03 | the admin | U02 | S |\n")
@@ -43,6 +42,9 @@ def body(uid, blocked):
             f"Risk: low: new · Size: S\nBranch: `superegm/{HANDOFF}/{uid}` · Part of #<tracking>\n")
 
 
+SHA = {u: hashlib.sha256(body(u, b).encode("utf-8")).hexdigest() for u, b in (("U01", None), ("U02", "U01"), ("U03", "U02"))}
+
+
 @pytest.fixture
 def planned(world):
     """The store after U05's `graph --plan`: U01 and U02 unfiled, U03 filed as #7."""
@@ -62,20 +64,29 @@ def planned(world):
 
 
 def open_review(w, uid):
-    code, out = w.run("review", "open", "--kind", "plan", "--artifact", uid, "--sha256", SHA[uid],
+    code, out = w.run("review", "open", "--kind", "plan", "--artifact", uid,
                       "--reviewers", "readiness,set", "--runcard", w.review_card)
     assert code == 0, out
     return out.split()[-1]
 
 
-def record(w, rid, rnd, reviewer, lines, sha, not_run=None):
+def record(w, rid, rnd, reviewer, lines, not_run=None):
     findings = write(w.repo.parent / f"{rid}_{reviewer}_r{rnd}.txt", "".join(line + "\n" for line in lines))
-    argv = ["review", "record", "--review", rid, "--round", str(rnd), "--sha256", sha,
+    argv = ["review", "record", "--review", rid, "--round", str(rnd),
             "--reviewer", reviewer, "--isolation", "clean", "--model", "inherit:inherit",
             "--effort", "inherit:inherit", "--runcard", w.review_card]
     argv += ["--not-run", not_run] if not_run else ["--findings", str(findings)]
     code, out = w.run(*argv)
     assert code == 0, out
+
+
+def rerender(w, uid, text):
+    """The unit's body re-rendered: `unit_<id>.md` and `handoff_units.json`'s `body_sha256` take `text`; its hash."""
+    write(w.store.path("unit", uid), f"### {uid}: Title\n\n## Issue body as posted\n\n```markdown\n{text}```\n")
+    units = json.loads(w.store.path("units").read_text(encoding="utf-8"))
+    units["units"][uid]["body_sha256"] = sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    w.store.path("units").write_text(json.dumps(units), encoding="utf-8")
+    return sha
 
 
 def status(w, rid):
@@ -91,30 +102,28 @@ def due(w):
 def test_due_lists_the_units_a_round_dispatches(planned):
     w = planned
     r2 = open_review(w, "U02")                      # U02 converges on its current bytes
-    record(w, r2, 1, "readiness", [], SHA["U02"])
-    record(w, r2, 1, "set", [], SHA["U02"])
+    record(w, r2, 1, "readiness", [])
+    record(w, r2, 1, "set", [])
     assert status(w, r2) == 0
     assert due(w) == {"U01": ["due", "-", "1", SHA["U01"]],
                       "U02": ["converged", r2, "-", SHA["U02"]]}   # U03 is filed: absent
-    units = json.loads(w.store.path("units").read_text(encoding="utf-8"))
-    units["units"]["U02"]["body_sha256"] = "e" * 64             # re-rendered since it converged
-    w.store.path("units").write_text(json.dumps(units), encoding="utf-8")
-    assert due(w)["U02"] == ["due", r2, "2", "e" * 64]
+    moved = rerender(w, "U02", body("U02", "U01") + "re-rendered\n")   # re-rendered since it converged
+    assert due(w)["U02"] == ["due", r2, "2", moved]
     r1 = open_review(w, "U01")                      # two rounds not completed under this card
-    record(w, r1, 1, "readiness", [], SHA["U01"], not_run="timeout")
-    record(w, r1, 2, "readiness", [], SHA["U01"], not_run="timeout")
+    record(w, r1, 1, "readiness", [], not_run="timeout")
+    record(w, r1, 2, "readiness", [], not_run="timeout")
     assert status(w, r1) == 5
     assert due(w)["U01"] == ["stalled", r1, "-", SHA["U01"]]
     rc = r2                                        # U02 at its cap: five completed rounds, round 1 and four unclean
     for rnd in range(2, 6):
         record(w, rc, rnd, "readiness", [f"readiness-{rnd}-1 | high | U02 Steps | regression: no | "
-                                          "Step 1 names no command"], "e" * 64)
-        record(w, rc, rnd, "set", [], "e" * 64)
+                                          "Step 1 names no command"])
+        record(w, rc, rnd, "set", [])
     assert status(w, rc) == 2
-    assert due(w)["U02"] == ["cap", rc, "-", "e" * 64]
+    assert due(w)["U02"] == ["cap", rc, "-", moved]
     assert w.run("review", "rule", "--review", rc, "--ruling", "accept", "--owner",
                  "--runcard", w.review_card)[0] == 0
-    assert due(w)["U02"] == ["converged", rc, "-", "e" * 64]
+    assert due(w)["U02"] == ["converged", rc, "-", moved]
 
 
 def test_set_input_carries_the_units_table_and_each_unfiled_body_interfaces_only(planned):
@@ -137,15 +146,15 @@ def round_text(w, rid, rnd):
 def test_set_file_splits_per_unit_and_reopens_a_converged_unit(planned):
     w = planned
     r1, r2 = open_review(w, "U01"), open_review(w, "U02")
-    record(w, r2, 1, "readiness", [], SHA["U02"])
-    record(w, r2, 1, "set", [], SHA["U02"])
+    record(w, r2, 1, "readiness", [])
+    record(w, r2, 1, "set", [])
     assert due(w)["U02"][0] == "converged"
     the_set = ["set-2-1 | high | U01 Interfaces | regression: no | Produces u01_fn has no consumer",
                "set-2-2 | medium | U02 Consumes | regression: no | u01_fn (U01) consumed with another arity",
                "set-2-3 | high | the cut | regression: no | U03's scope belongs in U02"]
-    record(w, r1, 1, "readiness", [], SHA["U01"])
-    record(w, r1, 1, "set", the_set, SHA["U01"])        # U01's open round keeps 1 and 3
-    record(w, r2, 2, "set", the_set, SHA["U02"])        # U02 converged: the set reopens it
+    record(w, r1, 1, "readiness", [])
+    record(w, r1, 1, "set", the_set)        # U01's open round keeps 1 and 3
+    record(w, r2, 2, "set", the_set)        # U02 converged: the set reopens it
     kept = {rid: {fid for fid in ("set-2-1", "set-2-2", "set-2-3") if fid in round_text(w, rid, n)}
             for rid, n in ((r1, 1), (r2, 2))}
     assert kept == {r1: {"set-2-1", "set-2-3"}, r2: {"set-2-2", "set-2-3"}}
@@ -162,8 +171,8 @@ def test_fix_design_voids_the_approval(planned):
          "approved_at": "2026-11-03T00:00:00Z", "amended": [], "handoff_id": HANDOFF}))
     rid = open_review(w, "U01")
     record(w, rid, 1, "readiness", ["readiness-1-1 | high | U01 Design range | regression: no | "
-                                     "the spec gives no exit code for this refusal"], SHA["U01"])
-    record(w, rid, 1, "set", [], SHA["U01"])
+                                     "the spec gives no exit code for this refusal"])
+    record(w, rid, 1, "set", [])
     code, out = w.run("review", "settle", "--review", rid, "--finding", "readiness-1-1",
                       "--disposition", "fix-design", "--runcard", w.review_card)
     assert code == 0, out

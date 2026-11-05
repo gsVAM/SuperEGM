@@ -63,7 +63,7 @@ One line per unfiled unit: `<unit> <due|converged|stalled|cap|fix-design> <revie
 round|-> <body_sha256>`. Keep only the rows `--units` names when the invocation gave it (the
 command carries no flag), and drop the units this invocation already ended. Then, per row:
 
-- `due - 1`: `python3 '<HELPER>' review open --kind plan --artifact '<unit>' --sha256 '<body_sha256>' --reviewers '<panel>' --runcard '<card>'`
+- `due - 1`: `python3 '<HELPER>' review open --kind plan --artifact '<unit>' --reviewers '<panel>' --runcard '<card>'`
   prints `<id>` (a cycle still open from an earlier invocation is resumed with its stored
   panel); round 1.
 - `due <id> <n>`: round `n` of `<id>`. A body re-rendered since its last round, or a converged
@@ -75,7 +75,8 @@ command carries no flag), and drop the units this invocation already ended. Then
   `not run (<reviewer>: <reason>)`. A re-typed `/superegm:review-plan` opens a new card and
   resumes the same cycle.
 - `cap`: decision point 2 as one question (continue one bounded round, once per cycle; accept
-  the remainder; stop), recorded with
+  the remainder, not while the body moved since the round; stop, alone and ruled by no one once
+  continue is spent and the body moved), recorded with
   `python3 '<HELPER>' review rule --review '<id>' --ruling '<continue|accept|stop>' --owner --runcard '<card>'`
   (`--judges '<id>'` in leavemealone-mode). `continue` raises the cap by one and the next round
   follows; `accept` converges the unit; `stop` ends the invocation for that unit. When the
@@ -131,7 +132,7 @@ Model and effort per dispatch: review_loop.md section 2, with the run card line'
 
 Per due unit per panel reviewer, as each result arrives:
 
-    python3 '<HELPER>' review record --review '<id>' --round <n> --sha256 '<body_sha256>' --reviewer '<reviewer>' --findings '<file>' --isolation '<clean|exposed:what>' --model '<requested>:<effective>' --effort '<requested>:<effective>' --runcard '<card>'
+    python3 '<HELPER>' review record --review '<id>' --round <n> --reviewer '<reviewer>' --findings '<file>' --isolation '<clean|exposed:what>' --model '<requested>:<effective>' --effort '<requested>:<effective>' --runcard '<card>'
 
 A dispatch that times out, fails or returns no file is re-dispatched once within the round;
 when it fails again, `--not-run '<reason>'` replaces `--findings`. The set file goes to every

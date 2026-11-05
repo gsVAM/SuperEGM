@@ -7,10 +7,12 @@
 import hashlib, json, re, subprocess
 from pathlib import Path
 import pytest
-from superegm import store, atomic_write
+from superegm import store, atomic_write, sha256_text
 from superegm.review import parse_findings
 from superegm.review import derive_what_ran
 from superegm.review import PANEL_OF
+
+from conftest import REPO, set_config
 
 
 # ---------------------------------------------------------------- S1: the findings line
@@ -52,6 +54,7 @@ def test_repo_config_panels_start_with_panel_of():
 SPEC = ("# Sample\n\n## 1. Intent\n\nText.\n\n## 2. Units\n\n| Unit | Scope | Blocked by | Size |\n"
         "| --- | --- | --- | --- |\n| U01 | a thing | — | S |\n")
 SLUG, HID, A = "2026-11-03-sample-design", "sample-abc123", "a" * 64
+BODY = f"<!-- superegm:handoff={HID} unit=U07 spec={'f' * 64} -->\n# U07 — Title\n"
 SKILL_OF = {"spec": "review-spec", "integrate": "integrate", "plan": "review-plan", "head": "wave"}
 
 def git(world, *args):
@@ -67,6 +70,12 @@ def seed_handoff(world, spec, hid=HID, **extra):
   """state.json as approve-spec and graph leave it: the handoff id and the spec the plan and head cards are on."""
   state = {"units": {"U07": {}}, "design": {"path": str(spec)}, **extra}
   atomic_write(store(world.repo).path("state"), state | ({"handoff_id": hid} if hid else {}))
+  if hid:
+    seed_body(world, "U07")
+
+def seed_body(world, uid, text=BODY):
+  """`unit_<id>.md` as `graph`'s `unit_file_text` writes it: the section, then the body in its fence."""
+  atomic_write(store(world.repo).path("unit", uid), f"### {uid}: Title\n\n## Issue body as posted\n\n````markdown\n{text}````\n")
 
 def card(world, artifact, skill="review-spec", mode=None, parent=None):
   argv = ["runcard", "open", "--skill", skill, "--artifact", str(artifact)]
@@ -131,6 +140,32 @@ def settle(world, rid, fid, disposition, cid, *extra):
 def rule(world, rid, ruling, cid, by=("--owner",)):
   return world.run("review", "rule", "--review", rid, "--ruling", ruling, *by, "--runcard", cid)
 
+def move(world, kind, spec):
+  """The reviewed bytes move: a plan's body is re-seeded with a line appended, a spec gets one."""
+  if kind == "plan":
+    seed_body(world, "U07", BODY + "moved\n")
+  else:
+    spec.write_text(spec.read_text(encoding="utf-8") + "more\n", encoding="utf-8")
+
+def panel_round(world, kind, rid, n, cid):
+  """Every panel reviewer of the kind records round `n` with an empty file; a head's `rounds[]` entry first."""
+  if kind == "head":
+    head_round(world, n, "posted", cid, "revise")
+  for reviewer in PANEL_OF[kind].split(","):
+    assert record(world, rid, n, reviewer, [], cid, sha=A if kind == "head" else None)[0] == 0
+
+def cap_question(world, rid, cid):
+  """`judges question --cap`: the exit code with the rendered file's text, or the refusal."""
+  code, out = world.run("judges", "question", "--review", rid, "--cap", "--runcard", cid)
+  return code, Path(out.strip()).read_text(encoding="utf-8") if code == 0 else out
+
+def reopen(world, kind, cid):
+  """`review open` on the spec file with the kind's panel: the id it prints."""
+  spec = (world.repo / "docs" / "specs" / f"{SLUG}.md").resolve()
+  code, out = world.run("review", "open", "--kind", kind, "--artifact", str(spec), "--reviewers", PANEL_OF[kind], "--runcard", cid)
+  assert code == 0, out
+  return out.strip()
+
 def converged_spec(world, text=SPEC):
   spec, cid, rid = opened(world, text=text)
   rounds(world, rid, cid, [[]])
@@ -187,7 +222,31 @@ def test_review_open_cycles(world):
   assert rid2 == f"spec-{SLUG}-c2" and rjson(world, rid2)["cycle"] == 2                 # stop closed c1
   rounds(world, rid2, cid, [[]])
   assert status(world, rid2, cid)[0] == 0 and opened(world)[2] == rid2                # converged, same bytes: same cycle
-  assert opened(world, text=SPEC.replace("Text.", "Changed."))[2] == f"spec-{SLUG}-c3"   # a spec change after convergence
+
+
+def test_latest_cycle_closes_by_the_approval_the_handoff_and_the_rulings(world):
+  spec, cid, rid = converged_spec(world)
+  spec.write_text(SPEC + "\nmore\n")
+  assert reopen(world, "spec", cid) == rid
+  spec.write_text(SPEC)
+  assert approve(world, spec, cid, "--yes")[0] == 0 and reopen(world, "spec", cid) == rid
+  spec.write_text(SPEC + "\nmore\n")
+  assert reopen(world, "spec", cid) == f"spec-{SLUG}-c2"
+  seed_handoff(world, spec)
+  icid = card(world, spec, "integrate")
+  i1 = reopen(world, "integrate", icid)
+  assert rjson(world, i1)["handoff_id"] == HID and record(world, i1, 1, "design", [], icid)[0] == 0
+  spec.write_text(SPEC + "\nmore rows\n")
+  assert reopen(world, "integrate", icid) == i1
+  assert approve(world, spec, icid, "--amend-units")[0] == 0
+  i2 = reopen(world, "integrate", icid)
+  assert i2 == f"spec-{SLUG}-integrate-c2" and reopen(world, "integrate", icid) == i2
+  assert record(world, i2, 1, "design", [], icid)[0] == 0
+  spec.write_text(SPEC + "\nmore rows\nand more\n")
+  assert approve(world, spec, icid, "--amend-units")[0] == 0
+  assert reopen(world, "integrate", icid) == f"spec-{SLUG}-integrate-c3"
+  seed_handoff(world, spec, closed_at="2026-11-04")
+  assert reopen(world, "integrate", icid) == f"spec-{SLUG}-integrate-c4"
 
 
 # ---------------------------------------------------------------- S4: `review record`
@@ -218,16 +277,25 @@ def test_record_set_and_foreman_reviewers(world):
   spec, cid, rid = opened(world, "plan")
   lines = [F("set", 2, 1, loc="U07 Interfaces"), F("set", 2, 2, loc="U08 Interfaces"), F("set", 2, 3, loc="the cut")]   # the set's round 2 into the unit's round 1
   for reviewer, found in (("readiness", []), ("proportion", []), ("set", lines)):
-    assert record(world, rid, 1, reviewer, found, cid, sha=A)[0] == 0
+    assert record(world, rid, 1, reviewer, found, cid)[0] == 0
   assert [f["id"] for f in rjson(world, rid, "round-1.json")["reviewers"]["set"]["findings"]] == ["set-2-1", "set-2-3"]
   assert rjson(world, rid, "round-1.json")["what_ran"] == "completed"
-  assert "review record: foreman is accepted on a head only" in record(world, rid, 1, "foreman", [F("foreman", 1, 1)], cid, sha=A)[1]
+  assert "review record: foreman is accepted on a head only" in record(world, rid, 1, "foreman", [F("foreman", 1, 1)], cid)[1]
   _, wcid, hid = opened(world, "head")
   head_round(world, 1, "posted", wcid, "revise")
   assert record(world, hid, 1, "foreman", [F("foreman", 1, 1)], wcid, sha=A)[0] == 0
   assert rjson(world, hid, "round-1.json")["what_ran"] == "not run (change-review: no record)"   # foreman never counts
   assert record(world, hid, 1, "change-review", [], wcid, sha=A)[0] == 0
   assert rjson(world, hid, "round-1.json")["what_ran"] == "completed"
+
+
+def test_plan_reviews_hash_the_stored_body(world):
+  spec, cid, rid = opened(world, "plan")
+  assert rjson(world, rid)["artifact_sha256"] == sha256_text(BODY)
+  argv = ["review", "open", "--kind", "plan", "--artifact", "U07", "--sha256", A, "--reviewers", "readiness", "--runcard", cid]
+  assert "review open: --sha256 is refused for kind plan" in world.run(*argv)[1]
+  assert "review record: --sha256 is refused for kind plan" in record(world, rid, 1, "readiness", [], cid, sha=A)[1]
+  assert record(world, rid, 1, "readiness", [], cid)[0] == 0 and rjson(world, rid, "round-1.json")["artifact_sha256"] == sha256_text(BODY)
 
 
 # ---------------------------------------------------------------- S6: what_ran
@@ -257,8 +325,6 @@ def test_what_ran_derivation(review, recs, entry, expect):
 # ---------------------------------------------------------------- S7: record refusals
 
 @pytest.mark.parametrize("kind,prior,call,expect", [
-  ("plan", [], dict(n=1, reviewer="readiness"), "review record: --sha256 required for kind plan"),
-  ("plan", [dict(n=1, reviewer="readiness", sha=A)], dict(n=1, reviewer="set", sha="b" * 64), "review record: sha256 differs from the round's"),
   ("spec", [], dict(n=1, reviewer="comprehension"), "review record: comprehension is not on the panel"),
   ("spec", [], dict(n=1, reviewer="astra"), "review record: astra is not on the panel"),
   ("spec", [], dict(n=2, reviewer="design"), "review record: round 1 is next"),
@@ -284,7 +350,6 @@ def test_record_refusals(world, kind, prior, call, expect):
   ("spec", "leavemealone", "design", "high", "§1", "design-1-1", "contested", ("--owner",), "review settle: design-1-1 is high: --judges required in leavemealone-mode"),
   ("spec", "leavemealone", "design", "medium", "§1", "design-1-1", "declined", ("--judges", "j1"), "design-1-1 declined"),
   ("spec", None, "design", "low", "§1", "design-1-1", "contested", (), "design-1-1 contested"),
-  ("spec", None, "design", "high", "§1", "design-1-1", "fixed", (), "design-1-1 fixed"),
   ("spec", None, "design", "high", "§1", "design-1-1", "escalated", (), "design-1-1 escalated"),
   ("spec", None, "design", "high", "§1", "design-1-1", "fix-design", (), "design-1-1 fix-design"),
   ("head", None, "change-review", "high", "src/x.py", "change-review-1-1", "fix-design", (), "review settle: fix-design is refused on a head"),
@@ -312,9 +377,12 @@ def s_open_only(w, c, r): return r
 def s_clean(w, c, r): rounds(w, r, c, [[]]); return r
 def s_low_only(w, c, r): rounds(w, r, c, [[F("design", 1, 1, "low")]]); return r
 def s_unsettled_high(w, c, r): rounds(w, r, c, [HIGH(1)]); return r
-def s_settled(w, c, r): rounds(w, r, c, [HIGH(1)]); assert settle(w, r, "design-1-1", "fixed", c)[0] == 0; return r
+def s_settled(w, c, r):
+  rounds(w, r, c, [HIGH(1)]); move(w, "spec", spec_file(w)); assert settle(w, r, "design-1-1", "fixed", c)[0] == 0
+  rounds(w, r, c, [[]], start=2); return r
 def s_regression(w, c, r):
-  rounds(w, r, c, [HIGH(1), [F("design", 2, 1, reg="yes")]]); assert settle(w, r, "design-2-1", "fixed", c)[0] == 0; return r
+  rounds(w, r, c, [HIGH(1), [F("design", 2, 1, reg="yes")]]); move(w, "spec", spec_file(w))
+  assert settle(w, r, "design-2-1", "fixed", c)[0] == 0; return r
 def s_fix_design(w, c, r): rounds(w, r, c, [HIGH(1)]); assert settle(w, r, "design-1-1", "fix-design", c)[0] == 0; return r
 def s_cap(w, c, r): rounds(w, r, c, [HIGH(n) for n in range(1, 6)]); return r
 def s_cap_short(w, c, r): rounds(w, r, c, [HIGH(n) for n in range(1, 5)] + [None]); return r
@@ -329,7 +397,7 @@ def s_stalled(w, c, r): rounds(w, r, c, [HIGH(1), None, None]); return r
   (s_clean, False, 0, "round 1: clean, regressions 0, converged yes, cap no, stalled no, sha256 "),
   (s_low_only, False, 0, "converged yes"),
   (s_unsettled_high, False, 3, "round 1: not clean, regressions 0, converged no"),
-  (s_settled, False, 0, "round 1: clean, regressions 0, converged yes"),
+  (s_settled, False, 0, "round 2: clean, regressions 0, converged yes"),
   (s_regression, False, 3, "round 2: clean, regressions 1, converged no"),
   (s_fix_design, False, 4, "converged no"),
   (s_cap, False, 2, "round 5: not clean, regressions 0, converged no, cap yes, stalled no"),
@@ -349,6 +417,37 @@ def test_status_exit_codes(world, scenario, new_card, code, fragment):
   assert (got, fragment in out) == (code, True), out
   if scenario is s_regression:
     assert "rounds: 1 -> 1 (regressions 0, 1)" in out
+
+
+@pytest.mark.parametrize("kind", ["spec", "plan", "integrate", "head"])
+def test_settle_fixed_needs_changed_bytes(world, kind):
+  spec, cid, rid = opened(world, kind)
+  first = PANEL_OF[kind].split(",")[0]
+  if kind == "head":
+    head_round(world, 1, "posted", cid, "revise")
+  assert record(world, rid, 1, first, [F(first, 1, 1)], cid, sha=A if kind == "head" else None)[0] == 0
+  code, out = settle(world, rid, f"{first}-1-1", "fixed", cid)
+  if kind != "head":
+    assert code == 1 and "review settle: fixed needs changed bytes" in out
+    assert settle(world, rid, f"{first}-1-1", "escalated", cid)[0] == 0
+    move(world, kind, spec)
+    code, out = settle(world, rid, f"{first}-1-1", "fixed", cid)
+  assert code == 0, out
+
+
+@pytest.mark.parametrize("kind", ["spec", "plan", "integrate", "head"])
+def test_status_prints_fixed_on_clean_rounds_whose_bytes_moved(world, kind):
+  spec, cid, rid = opened(world, kind)
+  panel_round(world, kind, rid, 1, cid)
+  assert status(world, rid, cid)[0] == 0
+  move(world, kind, spec)
+  code, out = status(world, rid, cid)
+  if kind == "head":
+    assert code == 0 and "fixed:" not in out
+    return
+  assert code == 3 and "converged no" in out and out.splitlines()[2] == "fixed: re-review on the current bytes"
+  panel_round(world, kind, rid, 2, cid)
+  assert status(world, rid, cid)[0] == 0
 
 
 # ---------------------------------------------------------------- S10: `review rule`
@@ -375,6 +474,38 @@ def test_review_rule(world):
     head_round(world, n, "posted", wcid, "revise")
     assert record(world, hid, n, "change-review", [F("change-review", n, 1)], wcid, sha=A)[0] == 0
   assert "review rule: accept is refused on a head" in rule(world, hid, "accept", wcid)[1]
+
+
+def test_rule_refuses_accept_while_the_bytes_moved_and_stop_needs_no_ruler(world):
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [HIGH(n) for n in range(1, 6)])
+  spec.write_text(SPEC + "\nmore\n")
+  refusal = "review rule: the reviewed bytes moved: continue or stop"
+  assert status(world, rid, cid)[0] == 2 and refusal in rule(world, rid, "accept", cid)[1]
+  assert cap_question(world, rid, cid)[1].endswith("- (a) continue one bounded round\n- (b) stop\n")
+  assert "review rule: --owner or --judges required" in rule(world, rid, "stop", cid, by=())[1]
+  assert rule(world, rid, "continue", cid)[0] == 0
+  rounds(world, rid, cid, [HIGH(6)], start=6)
+  spec.write_text(SPEC + "\neven more\n")
+  code, out = cap_question(world, rid, cid)
+  assert code == 1 and "question: one option: stop" in out and refusal in rule(world, rid, "accept", cid)[1]
+  code, out = rule(world, rid, "stop", cid, by=())
+  assert (code, out.strip()) == (0, "ruling R2 stop") and rjson(world, rid)["rulings"][-1]["by"] == "helper"
+  assert opened(world)[2] == f"spec-{SLUG}-c2"
+
+
+def test_set_fixed_settles_every_copy(world):
+  spec, cid, r7 = opened(world, "plan")
+  seed_body(world, "U08", BODY.replace("U07", "U08"))
+  r8 = world.run("review", "open", "--kind", "plan", "--artifact", "U08", "--reviewers", PANEL_OF["plan"], "--runcard", cid)[1].strip()
+  for rid in (r7, r8):
+    for reviewer in ("readiness", "proportion", "set"):
+      assert record(world, rid, 1, reviewer, [F("set", 1, 1, loc="the cut")] if reviewer == "set" else [], cid)[0] == 0
+  seed_body(world, "U07", BODY + "fixed\n")
+  assert "review settle: fixed needs changed bytes" in settle(world, r8, "set-1-1", "fixed", cid)[1]
+  assert settle(world, r7, "set-1-1", "fixed", cid)[0] == 0
+  assert rjson(world, r8, "round-1.json")["reviewers"]["set"]["findings"][0]["disposition"] == "fixed"
+  assert status(world, r8, cid)[0] == 0 and status(world, r7, cid)[0] == 3
 
 
 # ---------------------------------------------------------------- S11: a head's outcome
@@ -419,7 +550,7 @@ def test_approve_spec_asks_then_commits_by_path(world):
 # ---------------------------------------------------------------- S13: approve-spec refusals
 
 def a_bytes_differ(w):
-  spec, cid, rid = converged_spec(w); spec.write_text(SPEC + "\nmore\n", encoding="utf-8"); return spec, cid
+  spec, cid, rid = opened(w); s_accept(w, cid, rid); spec.write_text(SPEC + "\nmore\n", encoding="utf-8"); return spec, cid
 def a_not_converged(w):
   spec, cid, rid = opened(w); rounds(w, rid, cid, [HIGH(1)]); return spec, cid
 def a_units_not_last(w):
@@ -439,6 +570,33 @@ def test_approve_spec_refusals(world, scenario, expect):
   code, out = approve(world, spec, cid, "--yes")
   assert code == 1 and expect in out and git(world, "rev-parse", "HEAD") == head, out
   assert not store(world.repo).path("approvals", SLUG).exists()
+
+
+@pytest.mark.parametrize("named", [False, True])
+def test_approve_spec_records_the_escalated_pairs(world, named):
+  pair = f"spec-{SLUG}-c1:design-1-1"
+  text = SPEC + (f"Escalated: {pair} is U01's.\n" if named else "")
+  spec, cid, rid = opened(world, text=text)
+  rounds(world, rid, cid, [HIGH(n) for n in range(1, 6)])
+  assert settle(world, rid, "design-1-1", "escalated", cid)[0] == 0 and rule(world, rid, "stop", cid)[0] == 0
+  _, cid, rid2 = opened(world, text=text)
+  rounds(world, rid2, cid, [[]])
+  code, out = approve(world, spec, cid)
+  assert code == 0 and (f"approve-spec: 1 escalated finding(s) await the owner: {pair}" in out) is not named
+  assert approve(world, spec, cid, "--yes")[0] == 0 and approval(world)["escalated"] == ([] if named else [pair])
+  spec, cid, rid3 = opened(world, text=text.replace("Text.", "Changed."))
+  rounds(world, rid3, cid, [HIGH(1)])
+  assert settle(world, rid3, "design-1-1", "escalated", cid)[0] == 0 and approve(world, spec, cid, "--leavemealone")[0] == 0
+  assert (rid3, approval(world)["escalated"]) == (f"spec-{SLUG}-c3", [f"{rid3}:design-1-1"])
+
+
+@pytest.mark.parametrize("trailer", ["", "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"])
+def test_approve_spec_appends_the_commit_trailer(world, trailer):
+  set_config(world, repo=REPO, commit_trailer=trailer)
+  spec, cid, rid = converged_spec(world)
+  assert approve(world, spec, cid, "--yes")[0] == 0
+  subject = f"superegm: approve {SLUG} at review {rid}"
+  assert git(world, "log", "-1", "--format=%B") == (f"{subject}\n\n{trailer}" if trailer else subject)
 
 
 # ---------------------------------------------------------------- S14: the handoff id
@@ -466,8 +624,8 @@ def test_approve_spec_void(world):
   spec, cid, rid = converged_spec(world)
   assert approve(world, spec, cid, "--yes")[0] == 0
   _, pcid, prid = opened(world, "plan")
-  assert record(world, prid, 1, "readiness", [F("readiness", 1, 1)], pcid, sha=A)[0] == 0
-  assert record(world, prid, 1, "proportion", [], pcid, sha=A)[0] == 0 and record(world, prid, 1, "set", [], pcid, sha=A)[0] == 0
+  assert record(world, prid, 1, "readiness", [F("readiness", 1, 1)], pcid)[0] == 0
+  assert record(world, prid, 1, "proportion", [], pcid)[0] == 0 and record(world, prid, 1, "set", [], pcid)[0] == 0
   code, out = approve(world, spec, pcid, "--void", "--review", prid)
   assert code == 1 and f"approve-spec: review {prid} has no fix-design finding" in out and approval(world)["voided_by"] is None
   assert settle(world, prid, "readiness-1-1", "fix-design", pcid)[0] == 0 and status(world, prid, pcid)[0] == 4

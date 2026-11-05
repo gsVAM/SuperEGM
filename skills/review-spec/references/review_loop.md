@@ -39,9 +39,10 @@ other grammar (`review record: <file>:<line>: <reason>`).
    (`spec-<slug>-c<n>`, `spec-<slug>-integrate-c<n>`, `<6 hex>-plan-<unit>-c<n>`,
    `<6 hex>-head-<unit>-c<n>`). An artifact whose latest cycle is still open resumes it: a
    re-typed skill continues where the last invocation stopped, with the stored panel. A closed
-   cycle (an `accept` or `stop` ruling, or a spec whose bytes moved after convergence) gets the
-   next number with a fresh cap. The helper hashes a spec itself; a plan body or a head passes
-   `--sha256`.
+   cycle (an `accept` or `stop` ruling, a spec edited after the approval that names it, or an
+   integrate review whose handoff closed or whose `## Units` were amended past the bytes it
+   reviewed) gets the next number with a fresh cap. The helper hashes a spec or a plan body (the
+   stored `unit_<id>.md`) itself; a head alone passes `--sha256`.
 
 ## 2. Round
 
@@ -141,8 +142,9 @@ Between rounds the elephant fixes the artifact and settles each finding of the r
 written with `superegm review settle`. A high or medium `contested` or `declined` is the owner's
 call in normal mode (`--owner`) and the judges' in leavemealone-mode (`--judges <id>`); the
 helper refuses it without. `fixed` changes the artifact, so its bytes differ from the round's
-sha: the next round reviews the new bytes, and a goldfish that finds the same defect at the same
-scope marks it `regression: yes`.
+sha (on a spec, plan or integrate round whose bytes are still the current ones the helper refuses
+`review settle: fixed needs changed bytes`): the next round reviews the new bytes, and a goldfish
+that finds the same defect at the same scope marks it `regression: yes`.
 
 ## 5. Status
 
@@ -153,12 +155,14 @@ Ask the helper after every settle and before every round:
 It prints one line, `round <n>: <clean|not clean>, regressions <k>, converged <yes|no|by ruling
 R<n>>, cap <yes|no>, stalled <yes|no>, sha256 <hex of the converged round|none>`, and the trend
 line `rounds: a -> b -> c (regressions x, y, z)`: the findings per round and the regressions
-among them. The exit code is the verdict, and the skill's next action follows from it alone:
+among them. A third line, `fixed: re-review on the current bytes`, follows when the latest completed
+round is clean but the artifact's bytes moved since it (exit 3, or 2 at the cap): the next round
+reviews the current bytes. The exit code is the verdict, and the skill's next action follows from it alone:
 
 | Exit | Meaning | The skill |
 | --- | --- | --- |
 | exit 0 | converged (section 6), or `accept` ruled | spec: `superegm approve-spec` (the SKILL.md); plan: the unit's body is reviewed at the printed sha; head: the helper wrote `clean` on the posted round and journaled `<unit> awaiting merge`; integrate: close the handoff when nothing was escalated |
-| exit 3 | open: not clean, a regression, or no completed round yet | fix and settle (section 4), then the next round; also `not opened` for an unknown id |
+| exit 3 | open: not clean, a regression, no completed round yet, or a clean round whose bytes moved since (the `fixed:` line) | fix and settle (section 4), then the next round; also `not opened` for an unknown id |
 | exit 2 | at the cap without an `accept`, or `stop` was ruled | no further round starts; request the ruling of spec section 13.2 point 2 (continue one bounded round, accept the remainder, stop; a head has no `accept`) and record it with `superegm review rule --review <id> --ruling continue|accept|stop (--owner | --judges <id>) --runcard <id>`; after `stop` the cycle stays at exit 2 and a new invocation starts the next cycle |
 | exit 4 | a `fix-design` finding in any round | the defect is in the frozen spec: `superegm approve-spec --spec <path> --void --review <id>`, then spec review reopens as a new cycle |
 | exit 5 | stalled: the two latest rounds are not `completed` and both ran under this run card | end this invocation for the artifact with the record (the round file names the reviewer and reason); a re-typed skill opens a new run card and resumes the same cycle |
@@ -175,14 +179,15 @@ Implemented once, in the helper, and consumed unchanged by spec review, plan rev
 foreman and integrate:
 
 - A round is **clean** when no high or medium finding in it is unsettled. Lows never block.
-- The artifact is **converged** when a round is `completed` and clean and no high or medium
-  finding in it is `regression: yes`:
-  one `completed`, clean, non-regressing round converges every kind.
+- The artifact is **converged** when a round is `completed` and clean, no high or medium
+  finding in it is `regression: yes`, and its sha256 equals the artifact's current bytes (a head has no byte test):
+  one `completed`, clean, non-regressing round converges every kind, on the bytes it reviewed.
   EGM's second consecutive clean round for document reviews is dropped; the regression mark
   carries what it guarded.
 - The review is **at its cap** when its `completed` rounds number 5 plus its `continue` rulings;
   `continue` may be ruled once per cycle, `accept` converges the artifact (`converged: by ruling
-  R<n>`, never on a head), and after `stop` no ruling is accepted and the cycle stays at its cap
+  R<n>`, never on a head, and never while the reviewed bytes moved: then `continue` or `stop`, and
+  `stop` alone, ruled by no one, once `continue` is spent), and after `stop` no ruling is accepted and the cycle stays at its cap
   until `superegm review open` starts the next one. No review has a second kind of cap.
 - A review may instead be **stalled** (section 5), which ends the invocation for that artifact
   and nothing else.

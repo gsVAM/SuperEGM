@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch."""
 
@@ -7,10 +7,12 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import superegm as core
 from superegm import body, orient
+from superegm.builder_token import key_path, tool
 from superegm.launch import builder_login, load_launches, terminal
 
 WRITES = frozenset(["launches", "orient_unit"])  # the store kinds this subcommand writes
@@ -19,6 +21,9 @@ PROMPT_COMMENT_RE = re.compile(r"^\*\*(Deviation \([a-z]+\)|Decision D\d+|Ruling
 # The PR body's DoD-results form (the orders): `### DoD <n>` then one fenced block per item.
 DOD_RESULT_RE = re.compile(r"^### DoD (\d+)\n```[^\n]*\n(.*?)\n```", re.M | re.S)
 ORDERS = Path(__file__).resolve().parents[4] / "skills/wave/references/builder_orders.md"
+HELPER = Path(__file__).resolve().parents[1] / "superegm.py"  # the plugin's own helper, run by `superegm-token`
+SENTINEL = "superegm-no-token"  # the launched `GH_TOKEN` on the App path: no token; the shim overrides it with the mint
+UNSET = ("GIT_ASKPASS", "SSH_ASKPASS", "GITHUB_TOKEN")  # the owner's prompts and token, unset in the launched environment
 # The PR body's line 2 (owner ruling 2026-11-04): the login of the session that ran `launch`, no `@`, so it mentions nobody.
 AUDIT_LINE = "Launched by {owner} · run card {runcard} · unit {unit} · handoff {handoff}"
 
@@ -47,10 +52,20 @@ def prepare(args, card):
   problem = refusal(st, state, config, unit, rnd, builder)
   if problem:
     raise core.HandoffError(problem)
+  gh, app = tool("gh"), builder_config["app"]
+  if app:  # the App path: the scripts bake openssl and the key variable; the bin directory reaches the unquotable allow-list
+    openssl = tool("openssl")
+    key_path(app["private_key_env"])
+    if re.search(r"\s", config["artifacts_dir"]):
+      raise core.HandoffError(f"artifacts_dir {config['artifacts_dir']} holds whitespace")
   record = state["units"][unit]
   branch, number = handoff.branch(unit), record["number"]
   issue_body = filed_body(state, unit)
-  tools = allowed_tools(builder_config["allowed_tools"], branch, issue_body)
+  launched_gh = str(st.path("launches", f"{unit}_r{rnd}_bin", "gh")) if app else gh  # the shim, or the real gh by absolute path
+  tools = allowed_tools(builder_config["allowed_tools"], branch, issue_body, launched_gh)
+  identity = (card.get("builder") or [None])[-1]
+  if not identity:
+    raise core.HandoffError("the wave card records no builder: run launch first")
   pr = (record.get("pr") or {}).get("number") if rnd >= 2 else None
   ref = "refs/superegm/base"  # the launch's ref: origin/<base> as `launch` fetched it, the PR tip from round 2
   if pr:
@@ -63,13 +78,39 @@ def prepare(args, card):
   reviews = core.gh_pages(f"repos/{repo}/pulls/{pr}/reviews") if pr else []
   audit = AUDIT_LINE.format(owner=record["launched"].get("by", "unknown"),  # a pre-upgrade mark records no login
                             runcard=args.runcard, unit=unit, handoff=st.handoff_id)
-  text = prompt_text(number, unit, issue_body, core.read_text(ORDERS), orient_text, comments, reviews, pr, builder, audit, pr_block)
+  text = prompt_text(number, unit, issue_body, core.read_text(ORDERS).replace("{{gh}}", launched_gh), orient_text, comments, reviews, pr, builder, audit, pr_block)
   worktree = add_worktree(handoff.repo_root, st, unit, rnd, branch, pr)
   prompt = st.path("launches", f"{unit}_r{rnd}_prompt.md")
   core.atomic_write(prompt, text)
+  if app:
+    write_bin(st, unit, rnd, config, openssl, gh)
   core.journal(st, f"{unit} launch {rnd} prepared")
-  print(command_line(config, worktree, prompt, st.path("launches", f"{unit}_r{rnd}_result.json"), args.runcard, tools))
+  print(command_line(config, worktree, prompt, st.path("launches", f"{unit}_r{rnd}_result.json"), args.runcard, tools, launched_gh,
+                     identity["login"], identity["email"]))
   return 0
+
+
+def write_bin(store, unit: str, rnd: int, config: dict, openssl: str, gh: str) -> Path:
+  """`launches/<unit>_r<n>_bin/` (spec section 11): `superegm-token` (a fresh App token on stdout, its one
+  protocol: `superegm builder-token` through this helper's own python3 and plugin root with the repo, app
+  id and key variable baked in) and the `gh` shim (`GH_TOKEN` from the mint, then the real `gh` by the
+  absolute path baked in; a failing or empty mint exits 1 and execs nothing; the credential helper's
+  `store` and `erase` pass the sentinel through). Each 0o700. Returns the shim's path."""
+  app, folder = config["builder"]["app"], store.path("launches", f"{unit}_r{rnd}_bin")
+  helper, shim = folder / "superegm-token", folder / "gh"
+  for value in (sys.executable, HELPER, config["repo"], app["private_key_env"], openssl, gh, helper):
+    if "'" in str(value):
+      raise core.HandoffError(f"{value} holds a quote and cannot go in a launched script")
+  q = lambda value: f"'{value}'"
+  core.atomic_write(helper, "#!/bin/sh\n# written by superegm launch-builder: a fresh token of the builder App on stdout, nothing else\n"
+                    f"exec {q(sys.executable)} {q(HELPER)} builder-token --repo {q(config['repo'])} --app-id {app['app_id']} "
+                    f"--key-env {q(app['private_key_env'])} --openssl {q(openssl)}\n")
+  core.atomic_write(shim, "#!/bin/sh\n# written by superegm launch-builder: gh as the builder App, a fresh token per call; store and erase pass the sentinel\n"
+                    f'case "$1 $2 $3" in\n  "auth git-credential store"|"auth git-credential erase") exec {q(gh)} "$@" ;;\nesac\n'
+                    f'token=$({q(helper)}) || exit 1\n[ -n "$token" ] || exit 1\nGH_TOKEN="$token" exec {q(gh)} "$@"\n')
+  helper.chmod(0o700)
+  shim.chmod(0o700)
+  return shim
 
 
 def refusal(store, state, config, unit, rnd, builder):
@@ -123,13 +164,14 @@ def pr_block_text(repo_root, ref, path):
   return result.stdout.decode("utf-8")
 
 
-def allowed_tools(configured, branch, body_text):
-  """The configured allow-list plus a push prefix for the unit's own branch and `Bash(<first
-  word>:*)` for every command the body runs; `Agent`, `Skill` and unrestricted Bash are refused."""
+def allowed_tools(configured, branch, body_text, gh):
+  """The configured allow-list with its `gh` prefixes rewritten to `gh`'s absolute path (a bare `gh …`
+  is refused, so no PATH order is assumed), plus a push prefix for the unit's own branch and
+  `Bash(<first word>:*)` for every command the body runs; `Agent`, `Skill` and unrestricted Bash are refused."""
   for entry in ("Agent", "Skill", "Bash", "Bash(*)"):
     if entry in configured:
       raise core.HandoffError(f"allowed_tools carries {entry}: a builder never spawns, never invokes skills, never runs unrestricted Bash")
-  tools = list(configured) + [f"Bash(git push origin {branch}:*)"]
+  tools = [f"Bash({gh} {t[8:]}" if t.startswith("Bash(gh ") else t for t in configured] + [f"Bash(git push origin {branch}:*)"]
   for command in body.run_commands(body_text):
     if f"Bash({command.split()[0]}:*)" not in tools:
       tools.append(f"Bash({command.split()[0]}:*)")
@@ -179,18 +221,36 @@ def add_worktree(repo_root, store, unit, rnd, branch, pr):
   return path
 
 
-def command_line(config, worktree, prompt, result, runcard, tools):
-  """The launched command (spec section 11): the builder profile, the token as the shell variable
-  `GH_TOKEN` expands (never its value), gh as git's credential helper with pushes rewritten to
-  HTTPS, the role and card, `claude -p` on the prompt file, the result and exit files."""
+def launched_pairs(gh: str, name: str, email: str) -> list:
+  """The launched environment's git pairs (spec section 11): the owner's global and system configuration
+  shut out, every SSH transport failing closed, no prompt, and the `GIT_CONFIG_KEY_n` entries: the helper
+  reset then `gh` by absolute path as `gh auth setup-git` writes it, the HTTPS `insteadOf` rewrites (which,
+  unlike `pushInsteadOf`, reach an explicit `remote.<name>.pushurl`), no askPass, the commit identity.
+  No git config file is written."""
+  entries = [("credential.https://github.com.helper", ""), ("credential.https://github.com.helper", f"!{gh} auth git-credential"),
+             ("url.https://github.com/.insteadOf", "git@github.com:"), ("url.https://github.com/.insteadOf", "ssh://git@github.com/"),
+             ("core.askPass", ""), ("user.name", name), ("user.email", email)]
+  pairs = [("GIT_CONFIG_GLOBAL", "/dev/null"), ("GIT_CONFIG_SYSTEM", "/dev/null"), ("GIT_SSH_COMMAND", "false"),
+           ("GIT_TERMINAL_PROMPT", "0"), ("GIT_CONFIG_COUNT", str(len(entries)))]
+  for i, (key, value) in enumerate(entries):
+    pairs += [(f"GIT_CONFIG_KEY_{i}", key), (f"GIT_CONFIG_VALUE_{i}", value)]
+  return pairs
+
+
+def command_line(config, worktree, prompt, result, runcard, tools, gh, login, email):
+  """The launched command (spec section 11): the owner's prompts and token unset, the builder profile,
+  `GH_TOKEN` as the shell variable expands (never its value) or, on the App path, the sentinel the shim
+  overrides, the role and card, the launched git pairs (`gh`, the shim on the App path, as the credential
+  helper by absolute path; the identity `login` and `email` from the wave card), `claude -p` on the prompt
+  file, the result and exit files."""
   b = config["builder"]
-  for value in (worktree, prompt, result, b["profile_dir"], b["model"], b["permission_mode"], runcard, *tools):
+  pairs = launched_pairs(gh, login, email)
+  for value in (worktree, prompt, result, b["profile_dir"], b["model"], b["permission_mode"], runcard, *tools, *(v for _, v in pairs)):
     if "'" in str(value):
       raise core.HandoffError(f"{value} holds a quote and cannot go on the command line")
-  return (f"cd '{worktree}' && env CLAUDE_CONFIG_DIR='{b['profile_dir']}' GH_TOKEN=\"${b['gh_token_env']}\" "
-          f"SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{runcard}' GIT_CONFIG_COUNT=3 "
-          "GIT_CONFIG_KEY_0=credential.https://github.com.helper GIT_CONFIG_VALUE_0='!gh auth git-credential' "
-          "GIT_CONFIG_KEY_1=url.https://github.com/.pushInsteadOf GIT_CONFIG_VALUE_1=git@github.com: "
-          "GIT_CONFIG_KEY_2=url.https://github.com/.pushInsteadOf GIT_CONFIG_VALUE_2=ssh://git@github.com/ "
+  token = f"GH_TOKEN={SENTINEL}" if b["app"] else f"GH_TOKEN=\"${b['gh_token_env']}\""
+  unset, env = " ".join(f"-u {k}" for k in UNSET), " ".join(f"{k}='{v}'" for k, v in pairs)
+  return (f"cd '{worktree}' && env {unset} CLAUDE_CONFIG_DIR='{b['profile_dir']}' {token} "
+          f"SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{runcard}' {env} "
           f"claude -p \"$(cat '{prompt}')\" --model '{b['model']}' --permission-mode '{b['permission_mode']}' "
           f"--allowedTools '{','.join(tools)}' --output-format json > '{result}'; echo $? > '{result}.exit'")

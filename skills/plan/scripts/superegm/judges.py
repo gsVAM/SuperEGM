@@ -23,6 +23,7 @@ ISOLATION_RE = re.compile(r"^(clean|exposed:.+)$")
 QUESTION_RE = re.compile(r"^## Q(\d+) (.+)$")
 OPTION_RE = re.compile(r"^- \(([a-z])\) (.+)$")
 ANSWER_RE = re.compile(r"^Q(\d+): \(([a-z])\)\s*$")
+SAW_RE = re.compile(r"^saw:\s*(.*)$")  # the judge's isolation report, first or last line of the reply
 NOTE_KEYS = {"reason": "reason", "would change my mind": "would_change"}
 DEFAULT_MEMBERS = {"fable": {"via": "adapter"}, "opus": {"via": "adapter"}, "astra": {"via": "runner"}}
 VENDOR_OF = {"adapter": "anthropic", "runner": "openai"}
@@ -64,7 +65,7 @@ def parse_verdict(text: str, questions: list[dict]) -> dict[str, dict]:
   answers = {}
   last = None
   for n, line in enumerate(text.splitlines(), start=1):
-    if not line.strip():
+    if not line.strip() or SAW_RE.match(line):
       continue
     if match := ANSWER_RE.match(line):
       qid, oid = f"Q{match.group(1)}", match.group(2)
@@ -321,7 +322,7 @@ def cmd_record(args, store) -> int:
     raise core.HandoffError(f"judges: round {n}: {judge} already recorded")
   questions = parse_questions(core.read_text(folder / "question.md"))
   member = panel["judges"][judge]
-  reason, text = None, None
+  reason, text, saw = None, None, None
   if args.verdict:
     if not args.isolation:
       raise core.HandoffError("judges: --isolation required with --verdict")
@@ -331,6 +332,7 @@ def cmd_record(args, store) -> int:
     if not path.is_file():
       raise core.HandoffError(f"judges: verdict file {path} does not exist")
     text = core.read_text(path)
+    saw = next((m.group(1).strip() for line in text.splitlines() if (m := SAW_RE.match(line))), None)
     try:
       answers = parse_verdict(text, questions)
       missing = [q for q in open_questions(panel, questions, n) if q not in answers]
@@ -368,6 +370,8 @@ def cmd_record(args, store) -> int:
     core.atomic_write(folder / f"round-{n}" / f"{judge}.md", text)
     rounds[judge] = {"isolation": isolation, "model": model, "effort": effort,
                      "options": {q: a["option"] for q, a in answers.items()}, "recorded_at": core.now_iso()}
+    if args.verdict:
+      rounds[judge]["saw"] = saw
     core.journal(store, f"judges {pid}: round {n} {judge} recorded ({isolation})")
     print("recorded")
   write_json(folder / "panel.json", panel)
@@ -531,7 +535,12 @@ def cap_question(st, rid: str) -> str:
   from superegm import review as reviews
   review = reviews.load_review(st, rid)
   options = list(CAP_OPTIONS["head" if review["kind"] == "head" else "other"])
-  if any(r["ruling"] == "continue" for r in review["rulings"]):  # section 5: continue is ruled at most once
+  continued = any(r["ruling"] == "continue" for r in review["rulings"])  # section 5: continue is ruled at most once
+  if reviews.evaluate(st, review, None).moved:  # accept is refused on bytes nobody reviewed (a head never moves)
+    options.remove("accept the remainder")
+    if continued:
+      raise core.HandoffError("question: one option: stop")
+  if continued:
     options.pop(0)
     if len(options) < 2:
       raise core.HandoffError(f"question: continue already ruled on {rid}; {options[0]} is the only option")
