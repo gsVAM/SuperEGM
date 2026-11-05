@@ -138,6 +138,20 @@ def settle(world, rid, fid, disposition, cid, *extra):
 def rule(world, rid, ruling, cid, by=("--owner",)):
   return world.run("review", "rule", "--review", rid, "--ruling", ruling, *by, "--runcard", cid)
 
+def move(world, kind, spec):
+  """The reviewed bytes move: a plan's body is re-seeded with a line appended, a spec gets one."""
+  if kind == "plan":
+    seed_body(world, "U07", BODY + "moved\n")
+  else:
+    spec.write_text(spec.read_text(encoding="utf-8") + "more\n", encoding="utf-8")
+
+def panel_round(world, kind, rid, n, cid):
+  """Every panel reviewer of the kind records round `n` with an empty file; a head's `rounds[]` entry first."""
+  if kind == "head":
+    head_round(world, n, "posted", cid, "revise")
+  for reviewer in PANEL_OF[kind].split(","):
+    assert record(world, rid, n, reviewer, [], cid, sha=A if kind == "head" else None)[0] == 0
+
 def converged_spec(world, text=SPEC):
   spec, cid, rid = opened(world, text=text)
   rounds(world, rid, cid, [[]])
@@ -365,6 +379,21 @@ def test_status_exit_codes(world, scenario, new_card, code, fragment):
     assert "rounds: 1 -> 1 (regressions 0, 1)" in out
 
 
+@pytest.mark.parametrize("kind", ["spec", "plan", "integrate", "head"])
+def test_status_prints_fixed_on_clean_rounds_whose_bytes_moved(world, kind):
+  spec, cid, rid = opened(world, kind)
+  panel_round(world, kind, rid, 1, cid)
+  assert status(world, rid, cid)[0] == 0
+  move(world, kind, spec)
+  code, out = status(world, rid, cid)
+  if kind == "head":
+    assert code == 0 and "fixed:" not in out
+    return
+  assert code == 3 and "converged no" in out and out.splitlines()[2] == "fixed: re-review on the current bytes"
+  panel_round(world, kind, rid, 2, cid)
+  assert status(world, rid, cid)[0] == 0
+
+
 # ---------------------------------------------------------------- S10: `review rule`
 
 def test_review_rule(world):
@@ -433,7 +462,7 @@ def test_approve_spec_asks_then_commits_by_path(world):
 # ---------------------------------------------------------------- S13: approve-spec refusals
 
 def a_bytes_differ(w):
-  spec, cid, rid = converged_spec(w); spec.write_text(SPEC + "\nmore\n", encoding="utf-8"); return spec, cid
+  spec, cid, rid = opened(w); s_accept(w, cid, rid); spec.write_text(SPEC + "\nmore\n", encoding="utf-8"); return spec, cid
 def a_not_converged(w):
   spec, cid, rid = opened(w); rounds(w, rid, cid, [HIGH(1)]); return spec, cid
 def a_units_not_last(w):
