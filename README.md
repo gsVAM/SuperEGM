@@ -2,9 +2,27 @@
 
 <!-- Modified by SuperEGM (gsVAM), 2026: U01's skeleton filled in by U11; U11's README restructured for the public with diagrams. -->
 
+<p align="center"><img src="docs/assets/logo.png" width="420" alt="SuperEGM: a caped elephant and a masked goldfish"></p>
+
+**The Super Elephant-Goldfish Model**
+
 SuperEGM is one Claude Code plugin that takes an idea to merged pull requests. It brainstorms the design with you, has isolated reviewers review that design before anything is planned, cuts the approved design into units, files one GitHub issue per unit, and launches a fresh, isolated builder per unit that commits test-first and opens a draft pull request. A foreman reviews every pull request head with CI as its evidence. The human approves the design, rules when a review asks, and merges. The spec is not the plan: the spec is the design document, and the plan belongs to the GitHub issue, one per unit.
 
 It is superpowers' unit of work (a brainstormed design, a TDD-shaped plan per unit) inside EGM's orchestration (isolated reviewers, an adversarial gate before anything is written, a dependency graph cut into waves, a foreman per unit reviewing every PR head with CI as evidence, a merge that stays human).
+
+## Elephants and goldfish
+
+The **elephant** is the long-memory session, yours. It brainstorms, drafts, plans, drives the waves and remembers everything. That is why it is biased toward its own intentions.
+
+The **goldfish** is the fresh, isolated, zero-context session: reviewer, judge, foreman, builder. It sees only the artifact and the evidence attached to its dispatch. So it finds what the elephant can no longer see.
+
+The philosophy:
+
+- Separate remembering from judging.
+- Attach evidence, never context.
+- Make "clean" a property of bytes at a commit.
+- Keep the human on every merge.
+- Converge across more than one model vendor, so a verdict is not one vendor agreeing with itself.
 
 ## Why
 
