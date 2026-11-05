@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_launch` as the launch module; it marks the ready units up to `max_in_flight` after the protection checks of spec section 11.
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_launch` as the launch module; it marks the ready units up to `max_in_flight` after the protection checks of spec section 11, the owners set and the team bypass included.
 
 """superegm launch: check what the launch needs, then mark the ready units up to `max_in_flight`."""
 
@@ -52,7 +52,7 @@ def launch(args, card):
   core.require_receipt(state)
   core.require_repo(handoff)
   builder = builder_login(config, os.environ.get(token_env))
-  problems = protection_problems(config["repo"], base, builder, handoff.branch(handoff.graph.order[0]))
+  problems = protection_problems(config["repo"], base, builder, handoff.branch(handoff.graph.order[0]), config["owners"], config["owner_team"])
   if problems:
     raise core.HandoffError(problems[0])
   core.card_add(st, args.runcard, "builder", {"login": builder, "token_env": token_env})
@@ -103,16 +103,20 @@ def builder_login(config, token_env_value):
   me = core.gh(["api", "user", "-q", ".login"]).strip()
   if builder == me:
     raise core.HandoffError(f"the builder token is the elephant's own login ({me})")
+  if builder in config["owners"]:
+    raise core.HandoffError(f"the builder token's login ({builder}) is in config.owners")
   return builder
 
 
-def origin_problems(repo_root, base, approval):
-  """What `refs/superegm/base` (origin/<base>, just fetched) lacks for a launch (spec section 11)."""
+def origin_problems(repo_root, base, approval=None):
+  """What `refs/superegm/base` (origin/<base>, just fetched) lacks for a launch (spec section 11);
+  without an approval (`doctor`) the spec-hash line is skipped."""
   ref, problems = "refs/superegm/base", []
-  rel = Path(approval["path"]).resolve().relative_to(repo_root.resolve()).as_posix()
-  blob = subprocess.run(["git", "cat-file", "-p", f"{ref}:{rel}"], cwd=str(repo_root), capture_output=True).stdout
-  if hashlib.sha256(blob).hexdigest() != approval["sha256"]:
-    problems.append(f"spec at origin/{base} is not the approved bytes")
+  if approval:
+    rel = Path(approval["path"]).resolve().relative_to(repo_root.resolve()).as_posix()
+    blob = subprocess.run(["git", "cat-file", "-p", f"{ref}:{rel}"], cwd=str(repo_root), capture_output=True).stdout
+    if hashlib.sha256(blob).hexdigest() != approval["sha256"]:
+      problems.append(f"spec at origin/{base} is not the approved bytes")
   if subprocess.run(["git", "cat-file", "-e", f"{ref}:.superegm/config.json"], cwd=str(repo_root), capture_output=True).returncode:
     problems.append(f".superegm/config.json is absent at origin/{base}")
   names = core.run_git(["ls-tree", "--name-only", f"{ref}:.github/workflows"], repo_root, check=False).split()
@@ -122,11 +126,12 @@ def origin_problems(repo_root, base, approval):
   return problems
 
 
-def protection_problems(repo, base, builder_login, branch):
+def protection_problems(repo, base, builder_login, branch, owners, owner_team=None):
   """What the repository's protection lacks (spec section 11): updates to <base> restricted to the
-  owner with no bypass for the builder's role, in classic or ruleset form, and a ruleset that
-  forbids force-push and deletion on the unit branches."""
-  problems = []
+  owner (a classic restriction naming a non-empty subset of `owners`, or a ruleset whose bypass
+  names neither the builder's role nor a team but `owner_team`, which the builder is outside),
+  and a ruleset that forbids force-push and deletion on the unit branches."""
+  problems = [] if owners else ["config.owners is empty: set the owner logins in .superegm/config.json"]
   role = (core.gh_json(["api", f"repos/{repo}/collaborators/{builder_login}/permission"]) or {}).get("role_name")
   try:
     classic = core.gh_json(["api", f"repos/{repo}/branches/{base}/protection"]) or {}
@@ -134,8 +139,10 @@ def protection_problems(repo, base, builder_login, branch):
     classic = {}
   restrictions = classic.get("restrictions") or {}
   users = [u.get("login") for u in restrictions.get("users") or []]
-  if not (users and builder_login not in users and not restrictions.get("teams") and not restrictions.get("apps")):
-    problem = f"base branch {base}: updates are not restricted to the owner (no classic restrictions, no active ruleset update rule)"
+  strangers = [u for u in users if u not in owners]
+  if not (users and not strangers and builder_login not in users and not restrictions.get("teams") and not restrictions.get("apps")):
+    problem = f"base branch {base}: classic restriction lets {strangers[0]} push: not in config.owners" if strangers else \
+        f"base branch {base}: updates are not restricted to the owner (no classic restrictions, no active ruleset update rule)"
     for summary in core.gh_pages(f"repos/{repo}/rulesets"):
       ruleset = core.gh_json(["api", f"repos/{repo}/rulesets/{summary['id']}"]) or {}
       include = ((ruleset.get("conditions") or {}).get("ref_name") or {}).get("include") or []
@@ -143,13 +150,12 @@ def protection_problems(repo, base, builder_login, branch):
           or not {f"refs/heads/{base}", "~DEFAULT_BRANCH"} & set(include) \
           or not any(rule.get("type") == "update" for rule in ruleset.get("rules") or []):
         continue
-      bypass = [a for a in ruleset.get("bypass_actors") or [] if a.get("actor_type") == "Team"
-                or (a.get("actor_type") == "RepositoryRole" and a.get("actor_id") == ROLE_IDS.get(role))]
-      if not bypass:
+      offences = [o for o in (bypass_offence(a, role, base, ruleset.get("name"), builder_login, owner_team)
+                              for a in ruleset.get("bypass_actors") or []) if o]
+      if not offences:
         problem = None
         break
-      problem = f"base branch {base}: ruleset {ruleset.get('name')} lets " + (
-          "a team bypass" if bypass[0]["actor_type"] == "Team" else f"the builder's role ({role}) bypass")
+      problem = offences[0]
     if problem:
       problems.append(problem)
   rules = {rule.get("type") for rule in core.gh_json(["api", f"repos/{repo}/rules/branches/{urllib.parse.quote(branch, safe='')}"]) or []}
@@ -158,3 +164,31 @@ def protection_problems(repo, base, builder_login, branch):
   if "deletion" not in rules:
     problems.append("superegm/**: no active ruleset forbids deletion")
   return problems
+
+
+def bypass_offence(actor, role, base, name, builder_login, owner_team):
+  """Why a ruleset's bypass actor fails spec section 11, or None: the builder's own repository role,
+  or a team that is not `config.owner_team`, that GitHub does not have, or that the builder belongs to."""
+  kind, actor_id = actor.get("actor_type"), actor.get("actor_id")
+  if kind == "RepositoryRole":
+    return f"base branch {base}: ruleset {name} lets the builder's role ({role}) bypass" if actor_id == ROLE_IDS.get(role) else None
+  if kind != "Team":
+    return None
+  if not owner_team:
+    return f"base branch {base}: ruleset {name} lets team #{actor_id} bypass, not config.owner_team (unset)"
+  org, slug = owner_team.split("/")
+  try:
+    team = core.gh_json(["api", f"orgs/{org}/teams/{slug}"]) or {}
+  except core.GhError as error:
+    if error.http_status != 404:
+      raise
+    return f"config.owner_team {owner_team} does not exist"
+  if team.get("id") != actor_id:
+    return f"base branch {base}: ruleset {name} lets team #{actor_id} bypass, not config.owner_team ({owner_team})"
+  try:
+    core.gh(["api", f"orgs/{org}/teams/{slug}/memberships/{builder_login}"])
+  except core.GhError as error:
+    if error.http_status != 404:
+      raise
+    return None
+  return f"base branch {base}: ruleset {name} lets {owner_team} bypass, and {builder_login} is a member"

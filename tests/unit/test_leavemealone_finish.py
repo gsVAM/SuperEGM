@@ -271,9 +271,15 @@ DOCS = {
     "docs/index.md": ["SuperEGM", "](getting_started.md)", "](claude.md)", "](faq.md)", "](privacy.md)", "](releases.md)"],
     "docs/getting_started.md": ["/superegm:brainstorming", "/superegm:review-spec", "/superegm:plan", "/superegm:review-plan",
                                 "/superegm:file", "/superegm:wave", "/superegm:integrate", "/superegm:judges",
-                                ".superegm/config.json", "--leavemealone", "merge", "builder account"],
+                                ".superegm/config.json", "--leavemealone", "merge", "builder account",
+                                '"Before the first run" step 1', "`owners`", "`owner_team`", "`<org>/<slug>`", "`pr_block_file`", "`superegm doctor`"],
     "docs/claude.md": ["omitClaudeMd", "SubagentStart", "SUPEREGM_ROLE", "SUPEREGM_GOLDFISH_MODEL", "claude -p",
-                       "config.builder.profile_dir", "GH_TOKEN", "superegm:judge", "superegm:foreman", "git worktree add"],
+                       "config.builder.profile_dir", "GH_TOKEN", "superegm:judge", "superegm:foreman", "git worktree add",
+                       '"Before the first run" step 1', "config.owners", "config.owner_team", "config.pr_block_file", "no hooks", "`superegm doctor`"],
+    "skills/plan/references/handoff_config.md": ["`.superegm/config.json`", "superegm:unit", *(
+        f"| `{key}` |" for key in ("repo", "base", "artifacts_dir", "mode", "max_in_flight", "labels.stopped", "issue_template", "tracking_issue_title",
+                                   "banned_terms", "fix_request_mention", "allowed_mentions", "reviewers", "astra", "judges", "builder", "ci_wait_minutes",
+                                   "owners", "owner_team", "pr_block_file"))],
     "docs/faq.md": ["leavemealone-mode", "builder account", "Nothing is merged by a machine"],
     "docs/privacy.md": ["claudex-loop", "question file", "SUPEREGM_BUILDER_TOKEN", "config.astra", "artifacts_dir", "banned_terms"],
     "docs/releases.md": ["python3 scripts/prepare_release.py --tag v1.0.0", "superegm-1.0.0.zip", "SHA256SUMS",
@@ -295,10 +301,20 @@ SKIP = (".git", ".pytest_cache", "__pycache__", "tests")
 
 def test_readme_install_and_licence():
   readme = (ROOT / "README.md").read_text(encoding="utf-8")
+  for snippet in ["1. Create the **builder account**", "a second GitHub login, a machine account the owner controls", "one is allowed per person",
+                  "collaborator with Write", "fine-grained personal access token when the repository belongs to an organization the builder account is a member of",
+                  "resource owner that organization", "limited to this repository", "Contents read and write", "Pull requests read and write",
+                  "Issues read and write", "Metadata read", "no Workflows permission", "90 days", "otherwise a classic token", "`repo` scope",
+                  "without `workflow`", "`.github/workflows`", "token policies", "`SUPEREGM_BUILDER_TOKEN`", "never in the repository or the config",
+                  "Builders push and open draft pull requests as that account and can never update the base branch.",
+                  "config.owners", "config.owner_team", "run `superegm doctor` before the first wave", "the refusal `launch` would give"]:
+    assert snippet in readme, snippet
+  for doc in ("docs/claude.md", "docs/getting_started.md"):
+    assert "Contents read and write" not in (ROOT / doc).read_text(encoding="utf-8"), doc
   for snippet in [
       "claude plugin disable egm@egm-astra", "claude plugin disable superpowers@claude-plugins-official",
       "```sh\nclaude plugin marketplace add gsVAM/superegm\nclaude plugin install superegm@superegm\n```",
-      "builder account", "SUPEREGM_BUILDER_TOKEN", "config.builder.profile_dir", "no plugins and no `CLAUDE.md`",
+      "config.builder.profile_dir", "no plugins and no `CLAUDE.md`",
       "restrict", "repository ruleset", "`superegm/**`", "force-push", "`pull_request`",  # I-5: `launch` reads rulesets "SubagentStart", "`LICENSE-MIT`",
   ]:
     assert snippet in readme, snippet
@@ -332,7 +348,7 @@ MINE = ["README.md", "docs/index.md", "docs/getting_started.md", "docs/claude.md
         "docs/releases.md", "scripts/prepare_release.py", "tests/unit/test_releases.py", "skills/review-spec/SKILL.md",
         "skills/review-plan/SKILL.md", "skills/plan/SKILL.md", "skills/wave/SKILL.md", "skills/integrate/SKILL.md",
         "skills/judges/references/leavemealone.md", "skills/plan/scripts/superegm/judges.py",
-        "skills/plan/scripts/superegm/close.py"]
+        "skills/plan/scripts/superegm/close.py", "skills/plan/references/handoff_config.md"]
 
 
 @pytest.mark.parametrize("path", MINE)

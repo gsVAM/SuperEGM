@@ -46,12 +46,22 @@ def put(path, text):
   path.parent.mkdir(parents=True, exist_ok=True); path.write_text(text, encoding="utf-8")
 
 
+def configure(world, **keys):
+  """Rewrite keys of the working tree's `.superegm/config.json` (`launch` reads the tree's; origin's copy stays)."""
+  path = world.repo / ".superegm/config.json"
+  cfg = json.loads(path.read_text(encoding="utf-8")); cfg.update(keys)
+  path.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
+
+
 def github(world, *, builder="builder-bot", me="owner", role="write", classic=None, rulesets=(RULESET,),
-           branch_rules=({"type": "non_fast_forward"}, {"type": "deletion"})):
+           branch_rules=({"type": "non_fast_forward"}, {"type": "deletion"}), team_id=9, member=False, scopes="repo, read:org"):
   """Routes on U03's fake gh (`extend("api", …)`, one handler per word): an endpoint handler takes
   (args, token, match) and returns the JSON (pages for --paginate --slurp) or (404, text); `-q .key`
-  prints that key, as gh does; everything else falls through to the built-in `do_api`."""
+  prints that key, as gh does; `-i` prints the status line and the `X-Oauth-Scopes` header (none for
+  `scopes=None`, a fine-grained token) before the JSON; everything else falls through to the built-in `do_api`."""
   h = {}
+  h[r"^orgs/[^/]+/teams/[^/]+$"] = lambda a, t, m: {"id": team_id} if team_id else (404, "Not Found")
+  h[r"^orgs/[^/]+/teams/[^/]+/memberships/[^/]+$"] = lambda a, t, m: {"state": "active"} if member else (404, "Not Found")
   h[r"^user$"] = lambda a, t, m: {"login": builder if t else me}
   h[rf"^repos/{REPO}/collaborators/[^/]+/permission$"] = lambda a, t, m: {"role_name": role}
   h[rf"^repos/{REPO}/branches/{BASE}/protection$"] = lambda a, t, m: classic if classic is not None else (404, "Branch not protected")
@@ -69,6 +79,8 @@ def github(world, *, builder="builder-bot", me="owner", role="write", classic=No
         data = handler(args, token, match)
         if isinstance(data, tuple):
           return 1, "", f"gh: {data[1]} (HTTP {data[0]})"
+        if "-i" in args:
+          return 0, "HTTP/2.0 200 OK\n" + (f"X-Oauth-Scopes: {scopes}\n" if scopes is not None else "") + "\n" + json.dumps(data), ""
         if "-q" in args:
           return 0, f"{data[args[args.index('-q') + 1].lstrip('.')]}\n", ""
         return world.gh.ok(data)
@@ -82,7 +94,7 @@ def seed(world, units=(UNIT,), max_in_flight=5, workflow="on: [push, pull_reques
   spec = next(repo.glob("docs/**/*.md")).resolve()
   profile = repo.parent / "profile"; profile.mkdir(exist_ok=True)
   cfg = json.loads((repo / ".superegm/config.json").read_text(encoding="utf-8"))
-  cfg["max_in_flight"], cfg["builder"] = max_in_flight, {**DEFAULT_CONFIG["builder"], "profile_dir": str(profile)}
+  cfg["max_in_flight"], cfg["builder"], cfg["owners"] = max_in_flight, {**DEFAULT_CONFIG["builder"], "profile_dir": str(profile)}, ["owner"]
   (repo / ".superegm/config.json").write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
   (repo / ".github/workflows").mkdir(parents=True, exist_ok=True)
   (repo / ".github/workflows/tests.yml").write_text(workflow, encoding="utf-8")
@@ -158,9 +170,16 @@ def push_to_origin(world, rel, text):
   ("own-login", "the builder token is the elephant's own login (owner)"),
   ("no-restriction", "base branch main: updates are not restricted to the owner (no classic restrictions, no active ruleset update rule)"),
   ("role-bypass", "base branch main: ruleset base lets the builder's role (write) bypass"),
-  ("team-bypass", "base branch main: ruleset base lets a team bypass"),
+  ("team-bypass", "base branch main: ruleset base lets team #9 bypass, not config.owner_team (unset)"),
   ("no-force-push", "superegm/**: no active ruleset forbids force-push (non_fast_forward)"),
   ("no-deletion", "superegm/**: no active ruleset forbids deletion"),
+  ("no-owners", "config.owners is empty: set the owner logins in .superegm/config.json"),
+  ("builder-owner", "the builder token's login (builder-bot) is in config.owners"),
+  ("classic-stranger", "base branch main: classic restriction lets stranger push: not in config.owners"),
+  ("team-owner", None),
+  ("team-other", "base branch main: ruleset base lets team #8 bypass, not config.owner_team (example-org/owners)"),
+  ("team-missing", "config.owner_team example-org/owners does not exist"),
+  ("team-member", "base branch main: ruleset base lets example-org/owners bypass, and builder-bot is a member"),
 ])
 def test_launch_refuses_each_precondition(world, monkeypatch, case, reason):
   s, card, hid, _ = seed(world)
@@ -189,6 +208,16 @@ def test_launch_refuses_each_precondition(world, monkeypatch, case, reason):
     github(world, branch_rules=[{"type": "deletion"}])
   if case == "no-deletion":
     github(world, branch_rules=[{"type": "non_fast_forward"}])
+  if case == "no-owners":
+    configure(world, owners=[])
+  if case == "builder-owner":
+    configure(world, owners=["owner", "builder-bot"])
+  if case == "classic-stranger":
+    github(world, rulesets=[], classic={"restrictions": {"users": [{"login": "owner"}, {"login": "stranger"}], "teams": [], "apps": []}})
+  if case in ("team-owner", "team-other", "team-missing", "team-member"):
+    configure(world, owner_team="example-org/owners")
+    github(world, rulesets=bypass({"actor_type": "Team", "actor_id": 8 if case == "team-other" else 9, "bypass_mode": "always"}),
+           team_id=None if case == "team-missing" else 9, member=case == "team-member")
   code, out = world.run("launch", "--runcard", card)
   if reason is None:
     assert code == 0 and "marked: U07" in out, out
@@ -302,6 +331,7 @@ def test_record_launch_appends_running_then_records_the_exit(world, monkeypatch)
   ("profile-missing", "builder profile"),
   ("profile-claude-md", "holds CLAUDE.md"),
   ("profile-plugins", "holds plugins"),
+  ("profile-hooks", "holds hooks"),
   ("body", "issue #7 body differs from the filed body"),
   ("no-pr", "U07 round 2 has no recorded PR: run status first"),
 ])
@@ -324,11 +354,36 @@ def test_launch_builder_refuses_each_precondition(world, monkeypatch, case, reas
     (profile / "CLAUDE.md").write_text("x\n", encoding="utf-8")
   if case == "profile-plugins":
     (profile / "plugins").mkdir(); (profile / "plugins/installed_plugins.json").write_text("{}", encoding="utf-8")
+  if case == "profile-hooks":
+    (profile / "settings.json").write_text('{"hooks": {"SessionStart": []}}', encoding="utf-8")
   if case == "body":
     world.gh.issues[ISSUE]["body"] += "\nedited by hand\n"
   code, out = world.run("launch-builder", "--unit", UNIT, "--round", rnd, "--runcard", card)
   assert code == 1 and "launch-builder: " in out and reason in out, out
   assert not s.path("worktrees", UNIT).exists() and not s.path("launches", f"{UNIT}_r{rnd}_prompt.md").exists()
+
+
+@pytest.mark.parametrize("key, present", [(".github/PR_BLOCK.md", True), (".github/PR_BLOCK.md", False), (None, False)])
+def test_launch_builder_appends_the_pr_block(world, monkeypatch, key, present):
+  if present:
+    (world.repo / ".github").mkdir(exist_ok=True); (world.repo / ".github/PR_BLOCK.md").write_text("<!-- coord/v1 task=7 -->\n", encoding="utf-8")
+  s, card, hid, _ = seed(world)                       # commits the tree and clones origin from it
+  configure(world, pr_block_file=key)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)
+  if key and not present:
+    assert code == 1 and "launch-builder: pr_block_file .github/PR_BLOCK.md is absent at refs/superegm/base" in out, out
+    assert not s.path("worktrees", UNIT).exists() and not s.path("launches", f"{UNIT}_r1_prompt.md").exists()
+    return
+  assert code == 0, out
+  orders = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8")
+  prompt = s.path("launches", f"{UNIT}_r1_prompt.md").read_text(encoding="utf-8")
+  if key:
+    assert f"\n\n---\n\n# Builder orders\n\n{orders}\n\n---\n\n# PR block\n\n<!-- coord/v1 task=7 -->\n\n\n---\n\n# " in prompt
+  else:
+    assert "\n\n---\n\n# PR block\n\n" not in prompt
+  assert "paste the `# PR block` section into the PR body right after the unit id line, before the DoD results" in orders
 
 
 def test_launch_builder_round_2_detaches_the_earlier_worktree_and_carries_the_review(world, monkeypatch):
