@@ -1822,7 +1822,9 @@ and returns one word plus one line:
   file's assertions are the baseline, whatever commit removes them; its first appearance in the
   range, the commit that creates it whatever its subject, for a file the head created, else empty,
   so nothing reads removed;
-  `base_commit` in the record) with the head: every removed or loosened assertion,
+  `base_commit` in the record) with the head, where a file absent at the head (deleted, or created
+  then deleted in the range; a rename is paired above) reads as zero assertions, so every baseline
+  assertion counts as removed: every removed or loosened assertion,
   assertions paired across the change as git pairs them (a removed line with the added line at
   its position in the same hunk, the rest unpaired) so a changed value (`== 3` to `== 4`, the
   usual review fix) is never flagged (an `assert`, `pytest.raises` or
