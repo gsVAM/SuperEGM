@@ -1,7 +1,7 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
 # Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_approve` as the approve-spec module (U03); the section 8 form: a converged
-# review, the `Units` check, the commit by path, `--void` and `--amend-units` (U04).
+# review, the `Units` check, the commit by path, `--void` and `--amend-units` (U04); the escalated pairs recorded (U16).
 
 """superegm approve-spec: record the owner's approval of a converged spec (spec section 8)."""
 
@@ -47,6 +47,24 @@ def handoff_id_for(st: core.Store, sha: str, stem: str) -> str:
   return f"{handoff_slug(stem)}-{sha[:6]}"
 
 
+def units_section(text: str) -> str:
+  """The spec from its last `## Units` heading to the end; empty without one."""
+  lines = text.splitlines(keepends=True)
+  starts = [i for i, line in enumerate(lines) if UNITS_H2.match(line)]
+  return "".join(lines[starts[-1]:]) if starts else ""
+
+
+def escalated_pairs(st: core.Store, spec: Path, since: int) -> list:
+  """Every `escalated` finding of the spec's review cycles above `since`, as `<review id>:<finding id>`
+  in round order, less the pairs the spec's `## Units` section names (D2 (a))."""
+  named, pairs, cycle = units_section(core.read_text(spec)), [], since + 1
+  while load_review(st, rid := review_id(st, "spec", str(spec), cycle)) is not None:
+    pairs += [f"{rid}:{f['id']}" for n in round_numbers(st, rid) for f in findings_of(load_round(st, rid, n))
+              if f["disposition"] == "escalated"]
+    cycle += 1
+  return [pair for pair in pairs if pair not in named]
+
+
 def before_units(text: str) -> str:
   """The text up to and including the last `## … Units` line (the whole text when there is none)."""
   lines = text.splitlines(keepends=True)
@@ -87,6 +105,10 @@ def run(args):
     raise core.HandoffError("approve-spec: last H2 must be `Units`")
   if not (root / CONFIG).is_file():
     raise core.HandoffError(f"approve-spec: {CONFIG} missing: run superegm init")
+  last = core.load_approval(st, spec)
+  escalated = escalated_pairs(st, spec, int(last["review"].rsplit("-c", 1)[1]) if last and last.get("review") else 0)
+  if escalated:
+    print(f"approve-spec: {len(escalated)} escalated finding(s) await the owner: {', '.join(escalated)}")
   if not (args.yes or args.leavemealone or card["mode"] == "leavemealone"):
     print(f"Approve `{spec}` (sha256 `{sha[:12]}`) at review {rid}?")
     print("Options: Approve | Stop. Run again with --yes after the owner chose Approve.")
@@ -94,7 +116,8 @@ def run(args):
   handoff_id = handoff_id_for(st, sha, spec.stem)
   commit = commit_by_path(root, [spec.relative_to(root).as_posix(), CONFIG], f"superegm: approve {slug} at review {rid}")
   record = {"path": str(spec), "sha256": sha, "commit": commit, "runcard": args.runcard, "review": rid,
-            "approved_at": core.now_iso(), "amended": [], "voided_by": None, "handoff_id": handoff_id}
+            "approved_at": core.now_iso(), "amended": [], "voided_by": None, "handoff_id": handoff_id,
+            "escalated": escalated}
   path = st.path("approvals", slug)
   core.atomic_write(path, record)
   core.journal(st, f"approve-spec {handoff_id} sha256 {sha[:12]} at review {rid} commit {commit[:12]} under {args.runcard}")

@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 import superegm as core
-from superegm.approve_spec import UNITS_H2
+from superegm.approve_spec import units_section
 
 WRITES = frozenset(['bodies', 'plan', 'state', 'unit', 'units'])  # the store kinds this subcommand writes
 SKILLS = frozenset(['plan', 'review-plan'])  # the skills whose card this subcommand accepts (D1 (a): a re-render between review-plan rounds)
@@ -180,13 +180,6 @@ class Plan(core.Plan):
     self.units[uid] = unit
     self.order.append(uid)
     return i
-
-
-def units_section(text: str) -> str:
-  """The spec from its last `## Units` heading to the end; empty without one."""
-  lines = text.splitlines(keepends=True)
-  starts = [i for i, line in enumerate(lines) if UNITS_H2.match(line)]
-  return "".join(lines[starts[-1]:]) if starts else ""
 
 
 def require_free_store(state: dict, handoff_id: str) -> dict:
