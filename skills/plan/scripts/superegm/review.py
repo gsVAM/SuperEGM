@@ -210,6 +210,19 @@ def latest_cycle(st: core.Store, kind: str, artifact: str) -> tuple[dict | None,
   return review, closed
 
 
+def current_sha(st: core.Store, kind: str, artifact: str):
+  """The artifact's bytes now: a spec or integrate hashes the file, a plan its stored body (what
+  `handoff_units.json`'s `body_sha256` holds); a head has none."""
+  if kind in ("spec", "integrate"):
+    return core.sha256_file(Path(artifact))
+  if kind == "plan":
+    path = st.path("unit", artifact)
+    if not path.is_file():
+      raise core.HandoffError(f"review: no unit_{artifact}.md: run graph first")
+    return core.sha256_text(core.unit_file_body(path) + "\n")
+  return None
+
+
 def bind(args, review: dict) -> dict:
   """A by-id subcommand acts on the review's artifact: the card rule reads it from `args`."""
   if review["kind"] in ("spec", "integrate"):
@@ -240,6 +253,8 @@ def open_review(args) -> int:
     raise core.HandoffError(f"review open: first reviewer must be {FIRST[kind]}")
   if kind in ("plan", "head") and not st.handoff_id:
     raise core.HandoffError("review open: no handoff_id in state.json")
+  if kind == "plan" and args.sha256:
+    raise core.HandoffError("review open: --sha256 is refused for kind plan")
   latest, closed = latest_cycle(st, kind, artifact)
   if latest and not closed:  # a re-typed skill resumes the open cycle; the panel cannot change
     rid = review_id(st, kind, artifact, latest["cycle"])
@@ -252,7 +267,8 @@ def open_review(args) -> int:
   astra = getattr(args, "astra", None) or ("on" if (st.config.get("astra") or {}).get("enabled") else "off")
   review = {"kind": kind, "artifact": artifact, "cycle": cycle,
             "reviewers": reviewers + (["astra"] if astra == "on" and kind in LANE_KINDS else []),
-            "runcard": args.runcard, "artifact_sha256": args.sha256, "astra_incomplete": 0,
+            "runcard": args.runcard, "artifact_sha256": current_sha(st, kind, artifact) if kind == "plan" else args.sha256,
+            "astra_incomplete": 0,
             "converged": "no", "converged_round": None, "rulings": []}
   save_review(st, rid, review)
   core.card_add(st, args.runcard, "produced", rid)
@@ -277,9 +293,10 @@ def record_round(args) -> int:
       raise core.HandoffError("review record: foreman is accepted on a head only")
   elif reviewer not in review["reviewers"]:
     raise core.HandoffError(f"review record: {reviewer} is not on the panel")
-  if kind in ("spec", "integrate"):
-    sha = core.sha256_file(Path(review["artifact"]))
-  else:
+  if kind == "plan" and args.sha256:
+    raise core.HandoffError("review record: --sha256 is refused for kind plan")
+  sha = current_sha(st, kind, review["artifact"])
+  if kind == "head":
     sha = args.sha256 or (existing["artifact_sha256"] if existing else review["artifact_sha256"] if n == 1 else None)
     if not sha:
       raise core.HandoffError(f"review record: --sha256 required for kind {kind}")
