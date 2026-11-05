@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 import superegm as core
-from superegm.launch import load_launches
+from superegm.launch import latest_clean, load_launches
 
 WRITES = frozenset({"report", "runcards"})  # the store kinds this subcommand writes
 SKILLS = frozenset({"wave"})  # the skills whose card this subcommand accepts
@@ -35,7 +35,7 @@ def run(args):
     core.card_add(st, args.runcard, "idle", {"unit": uid, "reason": reason, "at": core.now_iso()})
   card = record_heads(st, args.runcard, {uid: views[uid] for uid in launched}, now)
   foremen = {uid: core.load_foreman(st, uid) for uid in launched}
-  states = {uid: unit_state(uid, views[uid], foremen[uid], card, config, now) for uid in launched}
+  states = {uid: unit_state(uid, views[uid], foremen[uid], load_launches(st, uid), card, config, now) for uid in launched}
   free = config["max_in_flight"] - sum(states[uid] in ("active", "pending") for uid in launched)
   named_idle = {entry["unit"] for entry in card.get("idle") or []}  # holds no slot, launched or not
   ready = [uid for uid in (state.get("status") or {}).get("ready") or [] if uid not in launched and uid not in named_idle]
@@ -143,10 +143,10 @@ def stopped_line(st, uid: str, stopped: dict, views: dict) -> str:
   return f"{uid} ({stopped['by']}: {stopped['reason']}): unlanded dependants {', '.join(unlanded) or 'none'}{note}"
 
 
-def unit_state(uid: str, view: dict, foreman: dict, card: dict, config: dict, now: float) -> str:
+def unit_state(uid: str, view: dict, foreman: dict, launches: list, card: dict, config: dict, now: float) -> str:
   """One of six: `landed`, `stopped`, `pending` (a decision without its ruling), `idle` (named on the
   card, or a head whose CI is pending or absent for `ci_wait_minutes` since the card first saw it),
-  `clean` (the latest round posted clean), else `active`."""
+  `clean` (the latest round posted clean, no launch recorded after it), else `active`."""
   if view.get("landed"):
     return "landed"
   if foreman.get("stopped"):
@@ -158,10 +158,7 @@ def unit_state(uid: str, view: dict, foreman: dict, card: dict, config: dict, no
   seen = ci_seen_at(uid, view, card)
   if seen is not None and now - seen >= config.get("ci_wait_minutes", 30) * 60:
     return "idle"
-  latest = max(foreman.get("rounds") or [], key=lambda r: r.get("round") or 0, default={})
-  if latest.get("phase") == "posted" and latest.get("outcome") == "clean":
-    return "clean"
-  return "active"
+  return "clean" if latest_clean(foreman, launches) else "active"
 
 
 def pending_decisions(foreman: dict) -> list:

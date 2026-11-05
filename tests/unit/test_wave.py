@@ -101,7 +101,7 @@ CARD = {"opened_at": NOW, "idle": [], "heads": []}
   ({"ci": "green", "landed": False}, {"rounds": [{"phase": "posted", "outcome": "revise"}]}, CARD, "active"),
 ])
 def test_unit_state_names_one_of_six_states(view, foreman, card, expected):
-  assert unit_state("U01", view, foreman, card, {"ci_wait_minutes": 30}, NOW) == expected
+  assert unit_state("U01", view, foreman, [], card, {"ci_wait_minutes": 30}, NOW) == expected
 
 
 @pytest.mark.parametrize("states,ready,slots,expected", [
@@ -153,7 +153,7 @@ def test_the_loop_never_reviews_what_dispatch_refuses(world, unit, state, why):
   assert "dispatch refused: " in out, (why, out)
   card_json = json.loads(s.path("runcards", card).read_text(encoding="utf-8"))
   view = json.loads(s.path("state").read_text(encoding="utf-8"))["status"]["units"]["U01"]
-  assert unit_state("U01", view, foreman_of(s, "U01"), card_json, {}, NOW) == state
+  assert unit_state("U01", view, foreman_of(s, "U01"), launch.load_launches(s, "U01"), card_json, {}, NOW) == state
   assert foreman_of(s, "U01")["rounds"] == unit.get("rounds", []), "a refusal writes no round"
 
 
