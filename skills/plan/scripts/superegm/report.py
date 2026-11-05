@@ -140,7 +140,8 @@ def stopped_line(st, uid: str, stopped: dict, views: dict) -> str:
   units_json = json.loads(core.read_text(path)) if path.is_file() else None
   unlanded = [u for u in dependants(units_json, uid) if not views.get(u, {}).get("landed")]
   note = " (handoff_units.json absent)" if units_json is None else ""
-  return f"{uid} ({stopped['by']}: {stopped['reason']}): unlanded dependants {', '.join(unlanded) or 'none'}{note}"
+  brief = f"; brief {stopped['brief']}" if stopped.get("brief") else ""
+  return f"{uid} ({stopped['by']}: {stopped['reason']}): unlanded dependants {', '.join(unlanded) or 'none'}{note}{brief}"
 
 
 def unit_state(uid: str, view: dict, foreman: dict, launches: list, card: dict, config: dict, now: float) -> str:
