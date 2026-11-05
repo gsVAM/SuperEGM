@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: the tdd-order check of spec section 11.
 
 """superegm tdd-order: for each Step a `test(S<n>)` commit touching its test path precedes a `feat(S<n>)`
-commit touching its implementation path, and every `test(…)` commit touches only paths under `tests/`."""
+commit touching its implementation path, and every `test(…)` commit touches only the test paths the Steps name."""
 
 from pathlib import Path
 
@@ -44,9 +44,10 @@ def commits_of(worktree, merge_base: str) -> list:
 
 
 def check(body: str, commits: list) -> list:
-  """The failures, in Step order then the `tests/`-only rule; [] when the order holds."""
-  failures = []
-  for n, test_path, impl_path in body_mod.step_paths(body):
+  """The failures, in Step order then the test-paths-only rule; [] when the order holds."""
+  failures, steps = [], body_mod.step_paths(body)
+  test_paths = {test_path for _, test_path, _ in steps if test_path}  # colocated tests (`src/x.spec.ts`) count: the Steps decide, not a `tests/` prefix
+  for n, test_path, impl_path in steps:
     first = lambda kind, path: next((i for i, (s, paths) in enumerate(commits) if s.startswith(f"{kind}(S{n}):") and path in paths), None)
     test, feat = first("test", test_path), first("feat", impl_path)
     if test is None:
@@ -57,5 +58,5 @@ def check(body: str, commits: list) -> list:
       failures.append(f"S{n}: feat(S{n}) precedes test(S{n})")
   for subject, paths in commits:
     if subject.startswith("test("):
-      failures += [f"{subject.split(':', 1)[0]} touches {p} outside tests/" for p in paths if not p.startswith("tests/")]
+      failures += [f"{subject.split(':', 1)[0]} touches {p}: not a test path the Steps name" for p in paths if p not in test_paths]
   return failures

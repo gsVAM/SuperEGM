@@ -3,7 +3,7 @@
 Date: 2026-11-03. Status: 1.0.0 released from review cycle 2 (round 5, the cap; cycle 1 ended at
 round 6 by the judges' ruling `q-close`: a new approach, not another patch; those cycles are
 records outside the store); amendments 2–5 each reviewed in their own cycle in a store's
-own numbering (amendment 5: cycles `c1`–`c2` of the 1.2 store, 2026-11-05; owner rulings 2026-11-04 on zoom-out-1-4 and 1-7 (orient re-run on re-render; `--unit` writes unit files only); owner ruling 2026-11-04: the audit-trail line). Owner: gsVAM.
+own numbering (amendment 5: cycles `c1`–`c2` of the 1.2 store, 2026-11-05; owner rulings 2026-11-04 on zoom-out-1-4 and 1-7 (orient re-run on re-render; `--unit` writes unit files only); owner ruling 2026-11-04: the audit-trail line; fixes 2026-11-05: pr-base ref, colocated tests). Owner: gsVAM.
 Inputs: the brainstorm brief (stream 4); the SuperEGM judge-panel verdict (converged, round 2 of
 5); the cap-panel verdict on EGM 0.2.1; superpowers 7.0.0 and the EGM Astra fork at commit
 9bc49d4, both surveyed file by file; six goldfish rounds of cycle 1 (75, 75, 74, 61, 53, 65
@@ -1557,7 +1557,7 @@ and returns one word plus one line:
   Scope paths (read from the frozen section, §9.1); a `tdd-order` failure (over the PR's commits
   in order, for each Step n a `test(S<n>)` commit touching that Step's test path precedes a
   `feat(S<n>)` commit touching its implementation path, and every `test(…)` commit touches only
-  paths under `tests/`) not overruled by a later `**Ruling:**` from a login in `config.owners`
+  the test paths the body's Steps name) not overruled by a later `**Ruling:**` from a login in `config.owners`
   (`ruling_of`, §11.2; amendment 5, which 1.0.0 read from any non-builder author); a deviation of
   kind `interface`, `dod` or `test` not yet ruled (ruled when such a `**Ruling:**` names its
   comment id, §10); and every finding of the last posted round the
