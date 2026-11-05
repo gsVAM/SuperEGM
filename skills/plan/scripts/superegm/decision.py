@@ -6,6 +6,7 @@
 
 import json
 import os
+import re
 from pathlib import Path
 
 import superegm as core
@@ -93,11 +94,12 @@ def options_for(point: int, source: str, question: str, foreman: dict, head: str
   return list(RELAUNCH)
 
 
-def stop_unit(store, uid: str, by: str, reason: str, number: int, now_iso: str) -> None:
-  """Label the issue `superegm:stopped`, write `foreman["stopped"]`, journal (spec section 11)."""
+def stop_unit(store, uid: str, by: str, reason: str, number: int, now_iso: str, brief=None) -> None:
+  """Label the issue `superegm:stopped`, write `foreman["stopped"]` (with `brief`, the redesign brief's path,
+  when there is one), journal (spec section 11)."""
   core.gh(["issue", "edit", str(number), "-R", store.config["repo"], "--add-label", store.config["labels"]["stopped"]])
   data = core.load_foreman(store, uid)
-  data["stopped"] = {"by": by, "reason": reason, "at": now_iso}
+  data["stopped"] = {"by": by, "reason": reason, "at": now_iso} | ({"brief": str(brief)} if brief else {})
   core.save_foreman(store, uid, data)
   core.journal(store, f"{uid} stopped by {by}: {reason}")
 
@@ -123,14 +125,20 @@ def rule(args) -> int:
     raise Refusal(f"decision: {args.decision} already ruled")
   head, _, reason = args.ruling.partition(" — ")
   chosen = check_ruling(decision["point"], decision["options"], head.strip())
+  brief = None
+  if chosen == "redesign":
+    if not reason.strip():
+      raise Refusal("decision: redesign needs — <one sentence why>")
+    chosen = f"redesign — {reason.strip()}"
+    brief = brainstorm_brief(st, unit, args.decision, decision, chosen, (state["units"][unit].get("pr") or {}).get("number"))
   if closed:
     posted = f"closed #{closed}"
   elif args.posted:
     verify_posted(st, st.config, decision, args.posted, args.by)
     posted = f"comment {args.posted}"
   else:
-    body = ruling_comment(decision["point"], decision["source"], chosen + (f" — {reason}" if reason else ""),
-                          decision["question"])
+    body = ruling_comment(decision["point"], decision["source"], chosen + (f" — {reason}" if reason and not brief else ""),
+                          decision["question"], brief)
     path = body_file(body, st.root)
     try:
       url = core.gh(["issue", "comment", str(number), "-R", st.config["repo"], "--body-file", path]).strip()
@@ -142,8 +150,8 @@ def rule(args) -> int:
   core.save_foreman(st, unit, data)
   who = f"judges {args.by[7:]}, leavemealone" if args.by.startswith("judges:") else args.by
   core.journal(st, f"Ruling ({who}): {unit} {args.decision} {args.ruling}")
-  if chosen.startswith("stop"):
-    stop_unit(st, unit, args.by, chosen, number, now)
+  if chosen.startswith("stop") or brief:
+    stop_unit(st, unit, args.by, chosen, number, now, brief)
   print(url if posted.startswith("comment") and not args.posted else f"recorded ({posted})")
   return 0
 
@@ -151,6 +159,8 @@ def rule(args) -> int:
 def check_ruling(point: int, options: list, ruling: str) -> str:
   """The option `ruling` names (its letter, its text, or both; point 1 as `<fid> <option>`), resolved
   to the option's text; refused when it is none of them."""
+  if ruling == "redesign" and point in (1, 2):  # a head's third ruling: no letter, no finding id
+    return "redesign"
   fid, _, text = ruling.partition(" ") if point == 1 else ("", "", ruling)
   for option in options:
     letter, _, rest = option.partition(" ") if option.startswith("(") else ("", "", option)
@@ -159,15 +169,52 @@ def check_ruling(point: int, options: list, ruling: str) -> str:
   raise Refusal("decision: ruling is none of the options: " + "; ".join(options))
 
 
-def ruling_comment(point: int, source: str, ruling: str, question: str) -> str:
+def ruling_comment(point: int, source: str, ruling: str, question: str, brief=None) -> str:
   """Spec section 11's `**Ruling:**` line (point 1 `<fid> finding upheld (fix it) | finding overruled — <reason>`,
   point 2 `(cap) <option>`, point 3 `(<comment-id>) <option> — <reason>`), a blank line and the quoted question."""
+  quoted = "\n".join("> " + l for l in question.rstrip("\n").splitlines())
+  if brief:  # a redesign ruling: the unit is stopped, the brief named, the owner closes the issue by hand
+    return (f"**Ruling:** {ruling}\n\nStopped for redesign; the brainstorm brief is `{brief}`.\n"
+            f"Close this issue by hand once the re-planned unit is filed.\n\n{quoted}\n")
   if point == 1:
     line = ruling.replace("finding upheld", "finding upheld (fix it)", 1)
   else:
     line = f"({source.removeprefix('comment ') if point == 3 else 'cap'}) {ruling}"
-  quoted = "\n".join("> " + l for l in question.rstrip("\n").splitlines())
   return f"**Ruling:** {line}\n\n{quoted}\n"
+
+
+DIFF_WHOLE, DIFF_LINES = 40_000, 200  # a diff under 40 KB is copied whole, else its first 200 lines
+ENTRY_RE = re.compile(r"^### .+ comment \S+ by ")
+
+
+def brainstorm_brief(store, unit: str, qid: str, decision: dict, ruling: str, pr) -> Path:
+  """Write `foreman/<unit>-<qid>.brainstorm.md` (spec section 11): what the owner asked, the findings verbatim,
+  the unit body, the latest posted round's diff summary and its builder deviations. Store-only, never committed;
+  nothing is read from GitHub."""
+  posted = [r["round"] for r in core.load_foreman(store, unit)["rounds"] if r.get("phase") == "posted"]
+  folder = store.path("review", unit, pr) / f"r{max(posted)}" if posted and pr else None
+  diff = folder / "diff" if folder else None
+  text = diff.read_bytes().decode("utf-8", errors="replace") if diff and diff.is_file() else ""
+  lines = text.splitlines()
+  paths = [l.rpartition(" b/")[2] for l in lines if l.startswith("diff --git ")]
+  shown = lines if len(text.encode("utf-8")) < DIFF_WHOLE else lines[:DIFF_LINES]
+  comments = folder / "comments.md" if folder else None
+  entries, current = [], None
+  for line in core.read_text(comments).splitlines() if comments and comments.is_file() else []:
+    if ENTRY_RE.match(line):
+      current = [line]
+      entries.append(current)
+    elif current is not None:
+      current.append(line)
+  deviations = ["\n".join(e).rstrip("\n") for e in entries if len(e) > 1 and e[1].startswith("**Deviation")]
+  body = core.unit_file_body(store.path("unit", unit)).splitlines()
+  out = ["# What the owner asked", "", ruling, "", "# Findings", "", decision["question"].rstrip("\n"), "",
+         "# Unit body", ""] + [("  " + l).rstrip() for l in body] + ["", "# Diff", ""] + (paths or ["(none)"]) \
+      + ["", "```diff"] + shown + ["```", "", "# Deviations", "", "\n\n".join(deviations) or "(none)", ""]
+  path = store.path("foreman", unit).with_name(f"{unit}-{qid}.brainstorm.md")
+  core.atomic_write(path, "\n".join(out))
+  core.journal(store, f"Brainstorm brief: {path}")
+  return path
 
 
 def builder_login(config) -> str:
