@@ -367,6 +367,8 @@ def settle_finding(args) -> int:
     raise core.HandoffError("review settle: fix-design is refused on a head")
   if reviewer == "foreman" and finding["location"] == "ci":  # D2 (a): `collect` records it afresh each round
     raise core.HandoffError("review settle: the CI finding is settled by no one")
+  if disposition == "fixed" and rnd["artifact_sha256"] == current_sha(st, review["kind"], review["artifact"]):
+    raise core.HandoffError("review settle: fixed needs changed bytes")  # a head's current bytes are unknown: never
   if blocking(finding) and disposition in ("contested", "declined"):
     if card["mode"] == "leavemealone" and not args.judges:
       raise core.HandoffError(f"review settle: {fid} is {finding['severity']}: --judges required in leavemealone-mode")
