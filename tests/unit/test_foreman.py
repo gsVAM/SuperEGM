@@ -273,7 +273,19 @@ def test_prepare_reviews_the_tip_it_fetches(world, tmp_path, monkeypatch):
   assert (d / "r1/pr_body.md").read_text(encoding="utf-8") == PR_BODY
   assert (d / "r1/comments.md").read_text(encoding="utf-8").startswith("builder: builder-bot\n")
   assert g("rev-parse", f"refs/superegm/pr/{PR}", cwd=world.repo) == head
-  assert g("rev-parse", f"refs/superegm/base/{PR}", cwd=world.repo) == base
+  assert g("rev-parse", f"refs/superegm/pr-base/{PR}", cwd=world.repo) == base
+
+
+def test_prepare_after_launch_fetched_the_base_ref(world, tmp_path, monkeypatch):
+  """1.1.1 fix: `launch` fetches origin/<base> into `refs/superegm/base` and git refuses a ref nested under an
+  existing one, so the round's base ref is `refs/superegm/pr-base/<n>`: both live in one clone."""
+  target, base, head, g = pr_repo(world, tmp_path, monkeypatch)
+  g("fetch", "--no-write-fetch-head", "origin", "+refs/heads/main:refs/superegm/base", cwd=world.repo)  # launch.py's fetch
+  st, card, child, did, _ = dispatched(world, head=head)
+  code, out = world.run("prepare", "--unit", UNIT, "--dispatch", did, "--runcard", child)
+  assert code == 0, out
+  assert g("rev-parse", "refs/superegm/base", cwd=world.repo) == base
+  assert g("rev-parse", f"refs/superegm/pr-base/{PR}", cwd=world.repo) == base
 
 
 def test_prepare_refuses_a_pr_whose_base_is_not_base(world, tmp_path, monkeypatch):
