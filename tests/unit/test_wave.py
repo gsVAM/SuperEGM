@@ -6,8 +6,10 @@ Fixtures: conftest's `world`, `applied` and `make_pr` (U03/U07)."""
 import json
 from pathlib import Path
 import pytest
-from conftest import applied, make_pr
-from superegm import store, atomic_write
+from conftest import applied, make_pr, set_config
+import superegm  # the harness reloads the package per test: read load_config at call time
+from superegm import store, atomic_write, DEFAULT_CONFIG, decision, launch
+from test_builder_token import APP
 from superegm.report import unit_state, loop_ended, word_action
 
 REPO, BUILDER, NOW = "example-org/webhooks", "builder-bot", 1_700_000_000.0
@@ -336,20 +338,26 @@ def test_a_stop_ruling_labels_the_issue_and_the_report_lists_unlanded_dependants
 # ---------------------------------------------------------------- S7: the by-hand ruling and the owner's close
 
 
-def test_a_by_hand_ruling_naming_the_blocked_comment_rules_its_decision(world, monkeypatch):
+@pytest.mark.parametrize("app", [False, True])
+def test_a_by_hand_ruling_naming_the_blocked_comment_rules_its_decision(world, monkeypatch, app):
   card = open_wave_card(world)
+  if app:  # the App path: the login is derived from the config, no token, no `user` route
+    set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"], builder={**DEFAULT_CONFIG["builder"], "app": APP})
+    monkeypatch.delenv("SUPEREGM_BUILDER_TOKEN", raising=False)
   s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})
-  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "builder-token")  # config.builder.gh_token_env, U03's default
-  fake_gh(world, {"user": {"login": BUILDER}, **{f"repos/{REPO}/issues/comments/{cid}": {"id": cid, "user": {"login": login}, "body": body}
-                  for cid, login, body in ((78, "owner", "**Ruling:** (77) (b) use Redis — fine\n"),
-                                           (79, BUILDER, "**Ruling:** (77) (a) — I decided\n"),
-                                           (80, "owner", "**Ruling:** (12) (a) — another comment\n"))}})
+  login = "superegm-builder[bot]" if app else BUILDER
+  app or monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "builder-token")  # config.builder.gh_token_env, U03's default
+  fake_gh(world, {**({} if app else {"user": {"login": BUILDER}}), **{f"repos/{REPO}/issues/comments/{cid}": {"id": cid, "user": {"login": author}, "body": body}
+                  for cid, author, body in ((78, "owner", "**Ruling:** (77) (b) use Redis — fine\n"),
+                                            (79, login, "**Ruling:** (77) (a) — I decided\n"),
+                                            (80, "owner", "**Ruling:** (12) (a) — another comment\n"))}})
+  assert decision.builder_login(superegm.load_config(world.repo)) == login and launch.app_login(superegm.load_config(world.repo)) == (login if app else None)
   qid = world.run("decision", "open", "--unit", "U01", "--point", 3, "--question", question(world), "--source", "comment 77",
                   "--runcard", card)[1].splitlines()[0]
   rule = lambda posted, by="owner": world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", "(b)",
                                               "--by", by, "--posted", posted, "--runcard", card)
-  code, out = rule("79", BUILDER)
-  assert code == 1 and out == "decision: comment 79 was written by the builder account builder-bot and is not honoured\n"
+  code, out = rule("79", login)
+  assert code == 1 and out == f"decision: comment 79 was written by the builder account {login} and is not honoured\n"
   code, out = rule("80")
   assert code == 1 and out == "decision: comment 80 does not name comment 77\n"
   code, out = rule("78", "someone")

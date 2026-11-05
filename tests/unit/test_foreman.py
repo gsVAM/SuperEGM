@@ -10,8 +10,9 @@ from types import SimpleNamespace
 import pytest
 from conftest import make_pr, set_config
 import superegm as core
-from superegm import store, atomic_write, sha256_file
+from superegm import store, atomic_write, sha256_file, DEFAULT_CONFIG
 from superegm import review as review_mod, tdd_order
+from test_builder_token import APP
 
 ROOT = Path(__file__).resolve().parents[2]
 REPO, UNIT, PR = "example-org/webhooks", "U01", 70
@@ -77,7 +78,7 @@ def install_pr_api(world, *, reviews, comments, login) -> list:
 
   def handler(args, cwd, token=None):
     endpoint = world.gh.endpoint_of(args)
-    if endpoint == "user":  # `-q .login` renders the field as gh does
+    if endpoint == "user" and login is not None:  # `-q .login` renders the field as gh does; `login=None` leaves the route unanswered
       return world.gh.ok(text=login if "-q" in args else json.dumps({"login": login}))
     if endpoint == f"repos/{REPO}/pulls/{PR}/reviews":
       if "-X" in args and args[args.index("-X") + 1] == "POST":
@@ -100,7 +101,7 @@ def install_pr_api(world, *, reviews, comments, login) -> list:
 
 
 def seed(world, *, head="a" * 40, ci="success", launches=({"round": 1, "status": "exited 0"},),
-         rounds=(), base_ref="main", comments=None, reviews=(), login="builder-bot", pr_body=PR_BODY):
+         rounds=(), base_ref="main", comments=None, reviews=(), login="builder-bot", pr_body=PR_BODY, builder=None):
   """Through U03's `store`, `Store.path` and `atomic_write`, what `locate`, `Handoff` and `require_frozen_units`
   read: the plan (conftest's heading, a `Design:` line naming `world.spec` in backticks, `## Global constraints`,
   `## Units`, SECTION) written to `world.plan` and
@@ -115,10 +116,12 @@ def seed(world, *, head="a" * 40, ci="success", launches=({"round": 1, "status":
   ci not in (None, "pending") else "pending", "statuses": []}`; `launches UNIT` = `{"launches": list(launches)}` when
   launches; `foreman UNIT` = `{"dispatch_id": f"d{len(rounds)}" if rounds else None, "rounds": list(rounds),
   "decisions": [], "rulings": []}`; `posted = install_pr_api(world, reviews=list(reviews), comments=comments or {},
-  login=login)`. Returns `(st, card, posted)` with `card = world.open_card("wave", str(world.spec))`."""
+  login=login)`; `builder`, when given, is the config's `builder` key. Returns `(st, card, posted)` with
+  `card = world.open_card("wave", str(world.spec))`."""
   spec = world.spec.resolve()
   set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"],
-             reviewers={"spec": [], "plan": [], "head": ["change-review"], "integrate": []})
+             reviewers={"spec": [], "plan": [], "head": ["change-review"], "integrate": []},
+             **({"builder": builder} if builder else {}))
   plan = (f"# Handoff plan: Webhook delivery\n\nDesign: `{spec}`\n\n## Global constraints\n- none\n\n"
           f"## Units\n\n{SECTION}")
   world.plan.write_text(plan, encoding="utf-8")
@@ -256,9 +259,12 @@ def prepared(world, tmp_path, monkeypatch, commits=None, **kw):
                          target=target, rid=head_rid(st), dir=st.path("review", UNIT, f"pr{PR}"))
 
 
-def test_prepare_reviews_the_tip_it_fetches(world, tmp_path, monkeypatch):
+@pytest.mark.parametrize("app", [False, True])
+def test_prepare_reviews_the_tip_it_fetches(world, tmp_path, monkeypatch, app):
   target, base, head, g = pr_repo(world, tmp_path, monkeypatch)
-  st, card, child, did, _ = dispatched(world, head="0" * 40)  # status recorded an older tip: no head-moved exit
+  app and monkeypatch.delenv("SUPEREGM_BUILDER_TOKEN", raising=False)
+  st, card, child, did, _ = dispatched(world, head="0" * 40,  # status recorded an older tip: no head-moved exit
+                                       **({"builder": {**DEFAULT_CONFIG["builder"], "app": APP}, "login": None} if app else {}))
   world.gh.check_runs[head], world.gh.combined[head] = world.gh.check_runs["0" * 40], world.gh.combined["0" * 40]  # CI on the fetched tip too
   code, out = world.run("prepare", "--unit", UNIT, "--dispatch", "d9", "--runcard", child)
   assert (code, out.strip()) == (1, "dispatch: d9 is not U01's current dispatch (d1)")
@@ -271,7 +277,7 @@ def test_prepare_reviews_the_tip_it_fetches(world, tmp_path, monkeypatch):
   assert b"+feat(S1): hook" in (d / "r1/diff").read_bytes()
   assert json.loads((d / "r1/ci.json").read_text(encoding="utf-8"))["verdict"] == "ci green"
   assert (d / "r1/pr_body.md").read_text(encoding="utf-8") == PR_BODY
-  assert (d / "r1/comments.md").read_text(encoding="utf-8").startswith("builder: builder-bot\n")
+  assert (d / "r1/comments.md").read_text(encoding="utf-8").startswith("builder: superegm-builder[bot]\n" if app else "builder: builder-bot\n")
   assert g("rev-parse", f"refs/superegm/pr/{PR}", cwd=world.repo) == head
   assert g("rev-parse", f"refs/superegm/base/{PR}", cwd=world.repo) == base
 
