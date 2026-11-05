@@ -319,6 +319,18 @@ def test_launch_counts_in_flight_skips_stopped_and_frees_idle(world, monkeypatch
   assert "launched" not in state_of(s)["units"]["U09"]
 
 
+def test_launch_counts_a_launch_after_a_clean_round_in_flight(world, monkeypatch):
+  """Defect 2: the clean verdict belongs to launch 1 (§11.1's predicate names the launch count); launch 2 holds the slot."""
+  s, card, hid, _ = seed(world, units=("U07", "U08"), max_in_flight=1)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert "marked: U07" in world.run("launch", "--runcard", card)[1]
+  launched(s, "U07", "exited 0")
+  foreman(s, "U07", [{"round": 1, "runcard": card, "launch": 1, "head": "a" * 40, "phase": "posted", "dispatch_id": "d1", "outcome": "clean", "posted_at": "2026-11-03T01:00:00Z"}])
+  launched(s, "U07", "running", rnd=2)
+  code, out = world.run("launch", "--runcard", card)
+  assert "in flight: U07" in out and "marked: none" in out, out
+
+
 # `insteadOf`, not `pushInsteadOf`: git applies the latter only to a remote's `url` when it has no `pushurl`, so an explicit SSH push
 # URL (the one these tests set on origin) would stay SSH and fail closed under GIT_SSH_COMMAND=false; `insteadOf` rewrites both.
 ENTRIES = [("credential.https://github.com.helper", ""), ("credential.https://github.com.helper", "!{gh} auth git-credential"), ("url.https://github.com/.insteadOf", "git@github.com:"),
