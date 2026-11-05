@@ -91,6 +91,9 @@ DEFAULT_CONFIG = {
                                   "Bash(git rm:*)", "Bash(gh pr create:*)", "Bash(gh pr edit:*)",
                                   "Bash(gh pr comment:*)", "Bash(gh issue comment:*)"]},
     "ci_wait_minutes": 30,
+    "owners": [],  # the GitHub logins that may update <base> (spec section 11); init writes `gh api user`'s
+    "owner_team": None,  # `<org>/<slug>`: the one team a ruleset's bypass actors may name
+    "pr_block_file": None,  # a path relative to the repository root whose text every builder PR body carries
 }
 
 DEFAULT_TEMPLATE = """<!-- superegm:handoff={{handoff_id}} unit={{unit_id}} spec={{spec_sha256}} -->
@@ -571,6 +574,14 @@ def load_config(repo_root: Path) -> dict:
     raise HandoffError("banned_terms must be a list of regular expressions")
   for term in config["banned_terms"]:
     re.compile(term)
+  owners = config["owners"]
+  if not isinstance(owners, list) or not all(isinstance(o, str) for o in owners):
+    raise HandoffError(f"{path}: owners must be a list of GitHub logins")
+  team = config["owner_team"]
+  if team is not None and not (isinstance(team, str) and team.count("/") == 1 and all(team.split("/"))):
+    raise HandoffError(f"{path}: owner_team must be `<org>/<slug>` or null")
+  if config["pr_block_file"] is not None and not isinstance(config["pr_block_file"], str):
+    raise HandoffError(f"{path}: pr_block_file must be a path relative to the repository root or null")
   config["remote"] = find_remote(repo_root, config["repo"])
   if config["issue_template"]:
     template_path = repo_root / config["issue_template"]
@@ -1666,7 +1677,7 @@ def run_terminated(folder) -> bool:
 SUBCOMMANDS = ("init", "runcard", "approve_spec", "graph", "scan", "review", "gate", "dry_run", "apply",
                "verify", "status", "launch", "launch_builder", "record_launch", "foreman", "prepare",
                "collect", "tdd_order", "decide", "decision", "interrupt", "clean", "report", "close", "judges",
-               "review_plan", "orient")
+               "review_plan", "orient", "doctor")
 
 
 def add_parser(subparsers, name, help_text, *, runcard=True):

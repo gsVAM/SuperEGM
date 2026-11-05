@@ -21,17 +21,20 @@ a headless session SuperEGM starts itself (a builder, a goldfish) gets nothing f
 In the target repository, `python3 '<plugin root>/skills/plan/scripts/superegm.py' init` writes
 `.superegm/config.json` with every key's default (`repo`, `base`, `artifacts_dir`, `mode`,
 `max_in_flight`, `labels`, `reviewers`, `astra`, `judges`, `builder`, `ci_wait_minutes`,
-`banned_terms`, …) and prints the owner's by-hand steps; the first typed skill runs it when the
-file is missing. The steps:
+`banned_terms`, `owners`, `owner_team`, `pr_block_file`, …) and prints the owner's by-hand steps;
+the first typed skill runs it when the file is missing. The steps:
 
-1. Create the **builder account**: its own GitHub login with write access to the repository, and
-   put a token for it in `SUPEREGM_BUILDER_TOKEN` (config key `builder.gh_token_env`). Builders
-   push and open draft pull requests as that account and can never merge.
+1. Create the **builder account** and its token as the README's "Before the first run" step 1
+   says (the one place the token recipe is written), and put the token in
+   `SUPEREGM_BUILDER_TOKEN` (config key `builder.gh_token_env`), never in the repository or the
+   config. Builders push and open draft pull requests as that account and can never update
+   `<base>`.
 2. Create the builder's empty profile at `config.builder.profile_dir`: no hooks, no plugins, no
    `CLAUDE.md`, only the login. `launch-builder` refuses a profile with anything else in it.
 3. Set the branch protection of design section 11 on `<base>`: updates restricted to the owner
-   with no bypass for the builder account's role; `superegm/**` protected from force-push and
-   deletion. `launch` reads the protection and refuses the first wave without it.
+   (the logins in `owners`) with no bypass for the builder account's role and no team but
+   `owner_team`; `superegm/**` protected from force-push and deletion. `launch` reads the
+   protection and refuses the first wave without it.
 4. Add a workflow triggered on `pull_request`, so every builder head gets CI: CI is the
    foreman's evidence.
 5. Commit `.superegm/config.json`; `approve-spec` commits it with the spec.
@@ -39,6 +42,15 @@ file is missing. The steps:
    reach adapter subagents, and every dispatch record carries what the goldfish reported seeing.
 
 The store (`artifacts_dir`, outside the working tree) is never committed.
+
+Three keys carry the launch policy. `owners` is the list of GitHub logins that may update
+`<base>`; `init` writes the login `gh api user` returns, and `launch` refuses an empty list, a
+classic restriction naming a login outside it, and a builder token whose login is in it.
+`owner_team` (`<org>/<slug>`, null by default) is the one team a ruleset's bypass may name: it
+must exist and the builder account must not be a member. `pr_block_file` (null by default) is a
+path relative to the repository root whose text every builder PR body carries, read from the
+launch's ref into the prompt under `# PR block`. Then run `superegm doctor`: one line per
+prerequisite, `ok` or the refusal `launch` would give.
 
 ## The eight phases
 

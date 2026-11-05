@@ -1,10 +1,12 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch."""
 
+import json
 import os
 import re
+import subprocess
 from pathlib import Path
 
 import superegm as core
@@ -48,13 +50,16 @@ def prepare(args, card):
   issue_body = filed_body(state, unit)
   tools = allowed_tools(builder_config["allowed_tools"], branch, issue_body)
   pr = (record.get("pr") or {}).get("number") if rnd >= 2 else None
+  ref = "refs/superegm/base"  # the launch's ref: origin/<base> as `launch` fetched it, the PR tip from round 2
   if pr:
-    core.run_git(["fetch", "--no-write-fetch-head", st.config["remote"], f"+refs/pull/{pr}/head:refs/superegm/pr/{pr}"], handoff.repo_root)
+    ref = f"refs/superegm/pr/{pr}"
+    core.run_git(["fetch", "--no-write-fetch-head", st.config["remote"], f"+refs/pull/{pr}/head:{ref}"], handoff.repo_root)
+  pr_block = pr_block_text(handoff.repo_root, ref, config["pr_block_file"]) if config["pr_block_file"] else None
   # The launch's tree, before any worktree: an orient refusal is an ordinary precondition.
-  orient_text = core.read_text(orient.orient_unit(st, handoff.repo_root, "refs/superegm/base" if rnd == 1 else f"refs/superegm/pr/{pr}", unit))
+  orient_text = core.read_text(orient.orient_unit(st, handoff.repo_root, ref, unit))
   comments = core.gh_pages(f"repos/{repo}/issues/{number}/comments")
   reviews = core.gh_pages(f"repos/{repo}/pulls/{pr}/reviews") if pr else []
-  text = prompt_text(number, unit, issue_body, core.read_text(ORDERS), orient_text, comments, reviews, pr, builder)
+  text = prompt_text(number, unit, issue_body, core.read_text(ORDERS), orient_text, comments, reviews, pr, builder, pr_block)
   worktree = add_worktree(handoff.repo_root, st, unit, rnd, branch, pr)
   prompt = st.path("launches", f"{unit}_r{rnd}_prompt.md")
   core.atomic_write(prompt, text)
@@ -87,15 +92,31 @@ def refusal(store, state, config, unit, rnd, builder):
 
 
 def profile_problem(profile_dir):
-  """Spec section 4: the builder profile exists, holds no CLAUDE.md and no plugins."""
-  plugins = profile_dir / "plugins"
+  """Spec sections 4 and 11: the builder profile exists, holds no CLAUDE.md, no plugins and no hooks
+  (a `settings.json` with a `hooks` key)."""
+  plugins, settings = profile_dir / "plugins", profile_dir / "settings.json"
   if not profile_dir.is_dir():
     return f"builder profile {profile_dir} does not exist"
   if (profile_dir / "CLAUDE.md").exists():
     return f"builder profile {profile_dir} holds CLAUDE.md"
   if plugins.is_dir() and any(plugins.iterdir()):
     return f"builder profile {profile_dir} holds plugins"
+  if settings.is_file():
+    try:
+      data = json.loads(settings.read_text(encoding="utf-8"))
+    except ValueError:  # not JSON: no hooks key to find
+      data = None
+    if isinstance(data, dict) and "hooks" in data:
+      return f"builder profile {profile_dir} holds hooks"
   return None
+
+
+def pr_block_text(repo_root, ref, path):
+  """`config.pr_block_file`'s bytes at the launch's ref, verbatim (spec section 11); absent, the launch is refused."""
+  result = subprocess.run(["git", "cat-file", "-p", f"{ref}:{path}"], cwd=str(repo_root), capture_output=True)
+  if result.returncode:
+    raise core.HandoffError(f"pr_block_file {path} is absent at {ref}")
+  return result.stdout.decode("utf-8")
 
 
 def allowed_tools(configured, branch, body_text):
@@ -118,14 +139,17 @@ def filed_body(state, unit):
   return body.fill_numbers(filed, numbers, (state.get("tracking") or {}).get("number"))
 
 
-def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr, builder):
-  """Exactly what spec section 3's anti-goal 3 allows: the issue body, the orders, the unit's
-  orient file, every Deviation comment, every Decision and Ruling comment not by the builder
-  account, and from round 2 the foreman's reviews on the PR."""
+def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr, builder, pr_block=None):
+  """Exactly what spec section 3's anti-goal 3 allows: the issue body, the orders, the repository's
+  PR block when `pr_block_file` is set, the unit's orient file, every Deviation comment, every
+  Decision and Ruling comment not by the builder account, and from round 2 the foreman's reviews on the PR."""
   kept = [c for c in comments if PROMPT_COMMENT_RE.match(c["body"])
           and (c["body"].startswith("**Deviation") or c["user"]["login"] != builder)]
-  parts = [f"# Issue #{issue_number} — {unit}\n\n{body}", f"# Builder orders\n\n{orders}", f"# Orient\n\n{orient}",
-           f"# Comments on issue #{issue_number}\n\n" + "\n".join(f"## {c['user']['login']} · comment {c['id']}\n{c['body']}\n" for c in kept)]
+  parts = [f"# Issue #{issue_number} — {unit}\n\n{body}", f"# Builder orders\n\n{orders}"]
+  if pr_block is not None:
+    parts.append(f"# PR block\n\n{pr_block}")
+  parts.append(f"# Orient\n\n{orient}")
+  parts.append(f"# Comments on issue #{issue_number}\n\n" + "\n".join(f"## {c['user']['login']} · comment {c['id']}\n{c['body']}\n" for c in kept))
   if pr:
     kept = [r for r in reviews if r.get("body") and r["user"]["login"] != builder]
     parts.append(f"# Review comments on PR #{pr}\n\n" + "\n".join(

@@ -73,7 +73,7 @@ def test_runtime_bundle_ships_exactly_the_kept_files(source: Path, tmp_path: Pat
                  "resources/document_standards/handoff-standard.md", "docs/claude.md"):
       assert name in names, name
     package = ("__init__", "apply", "approve_spec", "body", "clean", "close", "collect", "decide", "decision",
-               "dry_run", "foreman", "gate", "graph", "init", "interrupt", "judges", "launch", "launch_builder",
+               "doctor", "dry_run", "foreman", "gate", "graph", "init", "interrupt", "judges", "launch", "launch_builder",
                "prepare", "record_launch", "report", "review", "review_plan", "runcard", "scan", "status", "tdd_order",
                "verify")
     package += ("orient",)

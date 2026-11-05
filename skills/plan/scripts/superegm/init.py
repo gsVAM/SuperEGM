@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the init subcommand.
+# Added by SuperEGM (gsVAM), 2026: the init subcommand; `owners` from `gh api user` and the pointer to the README's token recipe and to `doctor` (spec section 11).
 
 """superegm init: write .superegm/config.json with every key's default; print the owner's by-hand steps."""
 
@@ -12,15 +12,16 @@ WRITES = frozenset()  # the config is in the working tree, not the store
 
 STEPS = """wrote {path}
 By hand, before the first typed skill runs:
-1. Create the builder account (its own GitHub login with write access to {repo}) and put a
-   token for it in the environment variable SUPEREGM_BUILDER_TOKEN (config key builder.gh_token_env).
+1. Create the builder account and its token as README.md, "Before the first run" step 1 says; put the token in SUPEREGM_BUILDER_TOKEN (config key builder.gh_token_env), never in the repository or the config.
 2. Create the builder's empty profile at {profile_dir} (config key builder.profile_dir):
    no hooks, no plugins, only the login.
-3. Set the branch protection of spec section 11 on `{base}`: updates restricted to the owner with
-   no bypass for the builder account's role; `superegm/**` protected from force-push and deletion.
+3. Set the branch protection of spec section 11 on `{base}`: updates restricted to the logins in
+   config.owners (a classic restriction) or, by a ruleset, with no bypass for the builder account's
+   role and no team but config.owner_team; `superegm/**` protected from force-push and deletion.
 4. Add a workflow triggered on `pull_request` so every builder head gets CI.
 5. Commit {path}; approve-spec commits it with the spec.
-The store is {artifacts_dir} (config key artifacts_dir); it is never committed."""
+The store is {artifacts_dir} (config key artifacts_dir); it is never committed.
+then run `superegm doctor`"""
 
 
 def register(subparsers):
@@ -56,7 +57,11 @@ def run(args):
   if artifacts.is_relative_to(root.resolve()):
     raise core.HandoffError(f"artifacts_dir {artifacts} is inside the working tree {root}: "
                             f"the store lives outside the working tree")
-  config = {**core.DEFAULT_CONFIG, "repo": repo, "base": base, "artifacts_dir": str(artifacts)}
+  try:
+    owner = core.gh(["api", "user", "-q", ".login"]).strip()
+  except core.GhError as error:
+    raise core.HandoffError(f"owners: {error}") from None
+  config = {**core.DEFAULT_CONFIG, "repo": repo, "base": base, "artifacts_dir": str(artifacts), "owners": [owner]}
   core.atomic_write(path, json.dumps(config, indent=2) + "\n")
   print(STEPS.format(path=path, repo=repo, base=base, artifacts_dir=artifacts,
                      profile_dir=config["builder"]["profile_dir"]))
