@@ -92,7 +92,12 @@
       "Bash(gh pr edit:*)",
       "Bash(gh pr comment:*)",
       "Bash(gh issue comment:*)"
-    ]
+    ],
+    "app": {
+      "app_id": 5621384,
+      "slug": "superegm-builder",
+      "private_key_env": "SUPEREGM_APP_KEY"
+    }
   },
   "ci_wait_minutes": 30,
   "owners": [
