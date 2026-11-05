@@ -247,6 +247,18 @@ def test_close_writes_closed_at_and_journals_unlanded(world):
   assert json.loads(store(world.repo).path("state").read_text(encoding="utf-8"))["closed_at"] == closed_at
 
 
+@pytest.mark.parametrize("state, code, line", [
+  ("open", 1, "close: U07 is stopped for redesign and #410 is open: close it by hand once the re-planned unit is filed"),
+  ("closed", 0, "closed sample-design-abc123; unlanded: U07, U08, U09")])
+def test_close_refuses_while_a_redesign_units_issue_is_open(world, state, code, line):
+  seed(world)
+  put(world, {"dispatch_id": None, "rounds": [], "decisions": [], "rulings": [], "stopped": {"by": "owner", "reason": "redesign — why", "at": "t", "brief": "/b.md"}}, "foreman", "U07")
+  world.gh.issues[410] = {"number": 410, "id": 1, "body": "", "labels": [], "state": state, "state_reason": None}
+  got, out = world.run("close", "--runcard", world.card("integrate"))
+  assert (got, out.strip()) == (code, line), out
+  assert f"close: U07 stopped for redesign: #410 {state}" in (world.artifacts / "journal.md").read_text(encoding="utf-8")
+
+
 def test_integrate_skill_body():
   text = (ROOT / "skills/integrate/SKILL.md").read_text(encoding="utf-8")
   front, body = text.split("---", 2)[1:]
