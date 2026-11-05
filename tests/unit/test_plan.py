@@ -587,6 +587,33 @@ def test_graph_parses_the_optional_issue_field_against_the_spec(world, issue, na
   assert "Issue" not in world.ns["FIELDS"] and world.ns["OPTIONAL_FIELDS"] == ("Issue",)
 
 
+PAIR, CLAIM = "spec-2026-11-03-webhooks-design-c1:design-1-2", "the cap is unstated"
+D_ESC = f"- D2 {PAIR}: {CLAIM} options: (a) cap at 5; (b) cap at 8; owner: the owner; default: (a); blocking: yes"
+MSG = f"graph: {PAIR} needs a `## Units` row or a `blocking: yes` D<n> line naming it with the finding's claim verbatim"
+
+
+def escalated(world, decide, text=SPEC):
+  """U02 planned with `decide`, the approval carrying `escalated: [PAIR]`, the finding seeded in its round file."""
+  units = (UNITS[0], section("U02", "Worker", "U01", ["u01_fn(x: int) -> int (U01)"], decide), UNITS[2])
+  spec, sha, plan, card = planned(world, units, text)
+  path = store_root(world) / "approvals" / f"{spec.stem}.json"
+  atomic_write(path, json.loads(path.read_text(encoding="utf-8")) | {"escalated": [PAIR]})
+  rid, fid = PAIR.split(":")
+  finding = {"id": fid, "severity": "high", "location": "§1", "regression": "no", "claim": CLAIM, "disposition": "escalated", "ruling": None}
+  atomic_write(store_root(world) / "reviews" / rid / "round-1.json", {"round": 1, "reviewers": {"design": {"findings": [finding]}}})
+  return plan, card
+
+
+@pytest.mark.parametrize("decide, text, message", [
+  (D_ESC, SPEC, None), (D1, SPEC + f"Escalated: {PAIR} is U02's.\n", None),
+  (D_ESC.replace("blocking: yes", "blocking: no"), SPEC, MSG), (D_ESC.replace(CLAIM, "the cap"), SPEC, MSG), (D1, SPEC, MSG),
+])
+def test_graph_requires_a_units_row_or_a_blocking_decision_per_escalated_pair(world, decide, text, message):
+  plan, card = escalated(world, decide, text)
+  code, out = graph(world, plan, card)
+  assert code == (1 if message else 0) and (message or "wrote handoff_plan.md") in out, out
+
+
 PROSE_ROWS = [
   ("skills/plan/SKILL.md", "A row the section's `Landed:` line names (a unit that landed in an earlier handoff) gets no section."),
   ("skills/review-plan/SKILL.md", "a row the section's `Landed:` line names counts as covered"),
