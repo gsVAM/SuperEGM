@@ -573,8 +573,8 @@ def count_posted(st: core.Store, unit: str, entry: dict, posted_at: str, review_
 def merge_base_moved(root: Path, remote: str, base: str, pr: int, entry: dict) -> bool:
   """Fetch the base tip and compare the merge base of the fetched refs, at the repository root (never
   inside the worktree), with the one `prepare` recorded: an unrelated base commit leaves it unchanged."""
-  core.run_git(["fetch", "--no-write-fetch-head", remote, f"+refs/heads/{base}:refs/superegm/base/{pr}"], root)
-  now = core.run_git(["merge-base", f"refs/superegm/base/{pr}", f"refs/superegm/pr/{pr}"], root).strip()
+  core.run_git(["fetch", "--no-write-fetch-head", remote, f"+refs/heads/{base}:refs/superegm/pr-base/{pr}"], root)
+  now = core.run_git(["merge-base", f"refs/superegm/pr-base/{pr}", f"refs/superegm/pr/{pr}"], root).strip()
   return now != entry.get("merge_base")
 
 
