@@ -70,7 +70,7 @@ isolation recorded.
 | **builder account** | a second GitHub account with write access and no administrator or bypass role, whose token the elephant holds (`config.builder.gh_token_env`); or, on the App path (§11), the GitHub App installed on the repository, acting as `<slug>[bot]`. Every PR a wave opens is authored by it, and under §11's protection its credential cannot update the base branch, so nothing a wave runs can merge. |
 | **Astra lane** | an optional extra reviewer (of a spec, a plan or, from amendment 4, a PR head) or judge on a non-Claude model (GPT-6 Astra) driven by the external `claudex-loop` runner (a Python CLI over the Codex CLI). Launched by the elephant from the main conversation, or by the foreman on a head (§11), never through an adapter. Recorded `not run (<reason>)` when the runner is absent or its lane is down. |
 | **unit** | one buildable piece of a frozen spec: one issue, one branch, one PR. Ids `U01`, `U02`, … are stable for the life of a handoff. |
-| **handoff** | one run of plan → file → wave → integrate for one frozen spec. Its id (§7) names the branches, the issue marker lines and `state.json`, and never changes while any unit is filed. Its files live under `artifacts_dir/<handoff id>/` (§7); one handoff per approval, and a spec's handoffs run beside one another, each at its link of the approval chain (§8, §9.1); `close` ends it (§12). |
+| **handoff** | one run of plan → file → wave → integrate for one frozen spec. Its id (§7) names the branches, the issue marker lines and `state.json`, and never changes while any unit is filed. Its files live under `artifacts_dir/<handoff id>/` (§7); one handoff per opening approval, and a spec's handoffs run beside one another, each at its link of the approval chain (§7, §9.1); `close` ends it (§12). |
 | **wave** | the set of units whose blockers have all landed, launched together. At most `max_in_flight` units are in flight at once; a unit is in flight from its first launch until it lands, is stopped, its latest round's outcome is `clean` (§7), or the elephant names it idle (stalled or CI-waiting, §11), and a freed slot is refilled. |
 | **head** | the commit at the tip of a unit's PR branch when `prepare` fetches it (§11). |
 | **round** | one review of one artifact (a spec, a unit's plan body, or a PR head): dispatch, findings, verdict. Rounds are numbered per review; a round that is not `completed` (§8) does not count toward the cap. |
@@ -86,7 +86,7 @@ isolation recorded.
 | **leavemealone-mode** | the mode in which every decision point listed in §13.2 goes to the judge panel first; the owner is paused only with the questions the judges do not converge on within their cap. |
 | **graphify** | an external, optional CLI (the PyPI package `graphifyy`, so spelled; the command `graphify` on `PATH`) that extracts a code graph from a directory by AST with no model (its headless `update`; `GRAPHIFY_OUT` names where its `graphify-out/` goes) into `graph.json`: nodes with `source_file` (relative to the directory it scanned), `source_location` and an integer `community`; edges marked EXTRACTED, INFERRED or AMBIGUOUS with a confidence. `orient` (§9.3) reads that file and nothing else of graphify's; nothing requires it. |
 | **external reviewer** | a review thread on a unit's PR from any login but the builder account's, a person's or a bot's (Devin's), recorded by `review ingest` (§8, amendment 5) as findings of the reviewer id `external:<login>`: accepted on kind `head` only, outside the panel, never an adapter, never dispatched. |
-| **registry** | `~/.superegm/registry.json`, outside every store: the list of the stores on this machine, written by `superegm register` alone and read by `inbox --all` and the driver (§11.2). It lists stores, not a graph; a store's own `handoffs.json` index (§7) names that store's handoffs. |
+| **registry** | `~/.superegm/registry.json`, outside every store: the list of the stores on this machine, written by `superegm register` alone and read by `inbox --all` and the driver (§11.2). It lists stores, not a graph; a store's own `handoffs/<id>.json` files index (§7) names that store's handoffs. |
 | **driver** | the owner's timer (a launchd agent; on Linux a systemd user timer) that runs `superegm driver tick` every `config.driver.interval_minutes`; a tick types `wave --leavemealone` once per open handoff of each registered store, chains nothing and merges nothing (§11.2). The session it launches runs with `SUPEREGM_ROLE=driver`. |
 
 ## 3. Goals, non-goals, anti-goals
@@ -156,8 +156,9 @@ isolation recorded.
    reviewer and reason that did not run.)
 8. A guess about liveness. SuperEGM never infers that a runner, builder or session is dead from
    file silence. Termination is proved only by a terminal status in a result file, by an exit
-   file the launched command wrote, by the return of a bounded command the session itself ran
-   (the Bash tool's timeout ends the command and returns; a foreman's Astra lane, §11), or by
+   file the launched command wrote, by the end of a bounded command the session itself ran
+   (the Bash tool's timeout ends it and reports the end to the waiting session; a foreman's
+   Astra lane, §11), or by
    the owner's typed interrupt.
 9. A code-aware Markdown mention scanner. The scan is raw text plus an allow-list, with the
    one exception §9.1 states, in §9.1's smallest CommonMark grammar and no other: a fenced code
@@ -423,7 +424,9 @@ Rules that span phases:
   every unfiled plan stale; rows appended to `## Units` are
   re-approved by `approve-spec --amend-units` without a review round (§12). Filed units are
   unaffected, their bodies being frozen by hash already, and their handoff keeps its id; the new
-  approval opens a new handoff (§7), where the unfiled rows are planned (§9.1's drafting rule).
+  approval opens a new handoff (§7; a re-approval after a void keeps the handoff, §7's one rule),
+  where the unfiled rows are planned: an older handoff files nothing new (`gate` and `apply`
+  refuse it, §7), which is what "stale" means.
 - **Render → scan → review → dry run → file.** Review reads the bytes the owner confirms. Gates
   are mechanical: `graph` refuses without an approval record matching the spec; `apply` refuses a
   body whose hash is not the one its review's converged round recorded; `launch` refuses a unit
@@ -518,39 +521,41 @@ again is marked `interrupted`; cards of other skills are left alone.
 ## 7. The store
 
 One store per target repository, one directory per handoff inside it (U20). The store level
-holds what precedes or spans handoffs: `handoffs.json`, the index of every handoff (`id`, `spec`,
-`sha256`, the opening approval's, `amended[]`, every later sha the handoff was approved at,
-appended and never replaced, `amended_from`, `opened_at`, `closed_at`; a row matches a sha
-that is its `sha256` or in its `amended[]`, and a spec's approval chain is read from the rows);
-`approvals/<spec-slug>.json` (the latest approval, the head of the chain: the one `review-spec`,
-`latest_cycle`, `--amend-units` and `--void` act on); the spec reviews (`reviews/spec-<slug>-c<n>/`,
+holds what precedes or spans handoffs: `handoffs/<id>.json`, one file per handoff (`id`, `spec`,
+`opened_at`, `closed_at`; the index is the directory, so no two sessions share a write);
+`approvals/<spec-slug>.json`, the spec's approval history (below: its last entry is the latest
+approval, the one `review-spec`, `latest_cycle`, `--amend-units` and `--void` act on, and the
+chain is the list's order); the spec reviews (`reviews/spec-<slug>-c<n>/`,
 their run cards and judges panels, which precede the handoff they lead to; an integrate review,
 `spec-<slug>-integrate-c<n>`, is its handoff's and lives in its directory); `orient/map.md`,
 `orient/export/` and `orient/graphify-out/` (one export path, §9.3); and the store's own
 `journal.md`. `artifacts_dir/<handoff id>/` holds everything of a handoff from its approval on:
-`approval.json` (a copy of the approval that opened it, the record `graph`, `gate` and `launch`
-read for the handoff, re-written by `approve-spec` only while this handoff is the latest),
 `state.json`, `journal.md`, the plan files, the plan and head reviews, run cards, launches,
-worktrees, foreman, orient unit files, judges panels and brainstorm briefs, directly under it.
-The index is written by `approve-spec` (a handoff opened; `--amend-units` and a re-approval after
-a void append to its `amended[]`) and `close` (`closed_at`) and by nothing else: a flat 1.0/1.1 store is read in place as the
-handoffs its `state.json` and `<6 hex>/` prefixes name, each listed with `legacy: true` and
-resolving to the flat paths (`id` and `sha256` from `state.json` and the approval record where
-they agree, else null), a read-only subcommand deriving that list in memory, the first
-`approve-spec` or `close` there writing it, and nothing migrated. A subcommand that takes
-`--spec` or `--plan` takes `--handoff <id>` too and resolves its handoff from it, else from the
-spec's latest approval; one keyed by `--unit` or `--review` alone resolves it the same way, else from the one
-open handoff whose `state.json` lists the unit or whose directory holds the review (a spec
-review id resolves to the store level), refusing and naming both when two do; `status` and
-`report` show every handoff without it. The flag is parsed and resolved once, in `__init__.py`
-(`store()`, which every subcommand's `Store` comes from), so no subcommand module changes for
-it. The helper is the only program that writes it, and every file has exactly one writing
+worktrees, foreman, orient unit files, judges panels and brainstorm briefs, directly under it
+(the handoff's approved sha256 is its latest history entry's; no copy is kept there). A
+handoff's file is written by its own `approve-spec` (opened) and `close` (`closed_at`) and by
+nothing else: a flat 1.0/1.1 store is read in place, its `state.json` and `<6 hex>/` prefixes
+naming its handoffs as `legacy: true` rows every read derives in memory, resolving to the flat
+paths (`id` and `sha256` from `state.json` and the approval record where they agree, else
+null), a `handoffs/<id>.json` written for one the first time `approve-spec` or `close` touches
+it, and nothing migrated. Resolution, once, in `__init__.py` (`store()`, which every
+subcommand's `Store` comes from, so no subcommand module changes for it): `--handoff <id>` on
+every subcommand names the handoff; without it, a subcommand given `--runcard` or `--dispatch`
+takes the handoff the card recorded at `runcard open` (the typed spec-scoped skills take
+`[--handoff <id>]` after `<spec-path>` and pass it there); a `--spec` or `--plan` subcommand
+with no card takes the spec's latest approval's; a `--unit` subcommand with no card takes the
+one open handoff whose `state.json` lists the unit as filed, refusing and naming both when two
+do; a spec review id resolves to the store level, any other `--review` id through the card;
+`status` and `report` show every handoff without it. An older handoff files nothing new: `gate`
+and `apply` refuse a filing in a handoff whose latest entry is not the history's last
+(`<handoff>: not the latest approval: plan the rows in the latest handoff`); its filed units run
+on. The helper is the only program that writes it, and every file has exactly one writing
 invocation at a time:
 
 | File | Writer |
 | --- | --- |
 | `state.json` | the elephant's typed skills (`plan`, `file`, `wave`, `integrate`), one at a time; `notify` for `notified` alone (§11.2) |
-| `handoffs.json` | `approve-spec` (a handoff opened) and `close` (its `closed_at`) |
+| `handoffs/<id>.json` | that handoff's `approve-spec` (opened) and `close` (its `closed_at`) |
 | `approvals/<spec-slug>.json` | `approve-spec` |
 | `handoff_plan.md`, `handoff_units.json`, `unit_<id>.md`, `handoff_bodies.md` | `plan` (`graph --plan <file>`; `decide` re-renders one unfiled unit and leaves a filed one as filed) |
 | `reviews/<review-id>/…` | the invocation that opened that review; on a head, also the foreman dispatch the round records (`review record`, `collect`, `review post`) |
@@ -621,17 +626,20 @@ excepted (§9.3). No lock file.
     any difference refuses.
   - `runcards/<id>.json` — `skill, artifact, artifact_sha256, reviewers, tiering, mode, parent,
     opened_at, closed_at | interrupted_at, produced[]`.
-  - `approvals/<spec-slug>.json` (at the store level, above) — `path, sha256, commit, runcard, review, approved_at,
-    amended[], amended_from, voided_by, handoff_id, escalated[]` (the `<review id>:<finding id>`
-    pairs §8's approval records; `amended_from` is the previous approval's `sha256` when one
-    exists, the chain being the spec's approval history and the base of §8's scope rule). `<spec-slug>` is the spec file's stem. `handoff_id` is
+  - `approvals/<spec-slug>.json` (at the store level, above) — the spec's approval history:
+    `path` and `entries[]`, one per approval in order, each `sha256, commit, runcard, review,
+    approved_at, handoff_id, kind (opening | amend-units | after-void), voided_by, escalated[]`
+    (the `<review id>:<finding id>` pairs §8's approval records); entries are appended, never
+    rewritten (`voided_by` excepted); the last entry is the latest approval; a handoff's approved
+    sha256 is its latest entry's; the chain is the order: a later link is any later entry, and
+    §8's scope rule diffs against the last entry's `commit` (the 1.1 record's single approval
+    reads as a one-entry history). `<spec-slug>` is the spec file's stem. `handoff_id` is
     `<EGM's 20-character slug of the stem>-<first 6 hex of the opening approval's sha256>`, set by
-    the approval that opens the handoff and kept by `--amend-units` and by a re-approval after a
-    void while any unit is filed (each appends its sha to the row's `amended[]`, with
-    `amended_from` the sha it followed); any other later approval of the spec (an amendment, a
-    new review cycle) opens a new handoff with its own id beside the earlier ones, open or closed
-    (U20). The handoff label is `superegm:handoff-<6 hex>`; markers and branches carry the full
-    id.
+    the opening approval and kept by `--amend-units` and by a re-approval after a void of this
+    handoff's approval while any unit is filed (each a later entry with the same `handoff_id`, the
+    one rule, which §5 and §8 cite); any other approval of the spec (an amendment, a new review
+    cycle) opens a new handoff with its own id beside the earlier ones, open or closed (U20). The
+    handoff label is `superegm:handoff-<6 hex>`; markers and branches carry the full id.
   - `handoff_plan.md`, `handoff_units.json`, `unit_<id>.md`, `handoff_bodies.md` — EGM's files
     with the new sections; `handoff_units.json` carries `body_sha256` per unit.
   - `reviews/<review-id>/review.json` (`kind, artifact, cycle, reviewers, runcard, converged,
@@ -712,8 +720,9 @@ by the foreman. The helper records and judges; the dispatching session dispatche
   recorded `--not-run`; the Astra lane is never retried within a round and is stopped for the
   review after two incomplete runs (`not installed` is not one: on a head the lane stays seated
   and records `not run (not installed)` each round; a stopped lane records `not run (stopped:
-  two incomplete runs)` each later round, so `what_ran` completes on a panel that cannot
-  change). `--reviewer set` takes the `set` reviewer's whole file and
+  two incomplete runs)` each later round (on a head, `prepare --dispatch` prints `astra: stopped`
+  from the helper's count and the foreman skips the launch), so `what_ran` completes on a panel
+  that cannot change). `--reviewer set` takes the `set` reviewer's whole file and
   keeps the findings whose `<location>` names the review's unit or no unit. On kind `head`,
   `--reviewer foreman` is accepted outside the panel for the helper's own findings (§11) and
   never counts toward every-reviewer-ran; so is `--reviewer external:<login>` (amendment 5), the
@@ -854,7 +863,8 @@ Spec review specifics:
   before and after it (a changed H3: the sibling H3 before and after it, else its parent H2 and
   the next H2); with no previous approval the scope is the whole spec; `whole` forces a full
   review; a section list names headings verbatim and has no neighbours, the between-round diff
-  widening it as under `auto` (a section a fix touched joins). The round file stores
+  widening it as under `auto` (the previous round's `artifact_sha256` against the current bytes:
+  a section a fix touched joins). The round file stores
   the round's scope as headings with their line ranges at dispatch. The brief the skill
   dispatches names them and says: "findings only inside the changed sections and, on a
   neighbour, only on its fit with them; a finding on any other section is out of scope".
@@ -893,28 +903,30 @@ Spec review specifics:
   builders' commits carry the orders' subjects and no trailer, by intent) appended as the last
   paragraph by `approve_spec.commit_by_path`, the one place the helper commits, and
   writes the record
-  (`commit`, `sha256`, `handoff_id` and, on a later approval of the same spec, `amended_from`,
-  the previous approval's `sha256`: the chain is the spec's approval history, §7); the owner
+  (an entry appended to the spec's approval history, `commit`, `sha256`, `handoff_id`, `kind`:
+  the chain is the history's order, §7); the owner
   pushes it to the base branch (§5). `superegm
   approve-spec --void --review <id>` sets `voided_by` when a `fix-design` finding is recorded;
   `graph` refuses a voided approval; a re-approval after a void keeps the `handoff_id` whenever
-  `state.json` lists a filed unit. `approve-spec --amend-units` is §12's.
+  `state.json` lists a filed unit (§7's one rule). `approve-spec --amend-units` is §12's.
 
 ## 9. Plan (phase 2) and plan review (phase 3)
 
 ### 9.1 The plan is the issue body
-`/superegm:plan <spec-path>` opens a run card, then `superegm graph` refuses unless an approval
-record matches the spec's current sha256; the handoff it plans is that approval's
-(`handoffs.json`, §7): one handoff per approval, and a spec's handoffs, each at its link of the
-approval chain, run beside one another in their own directories, open or closed (U20). The
+`/superegm:plan <spec-path> [--handoff <id>]` opens a run card, then `superegm graph` refuses
+unless the resolved handoff's approved sha256 (§7: `--handoff`, else the spec's latest approval)
+matches the spec's current bytes: one handoff per opening approval, and a spec's handoffs, each
+at its link of the approval chain, run beside one another in their own directories, open or
+closed (U20). The
 elephant composes the plan text in a plan file outside the store, named by `--plan` on the first
 `graph` and by `state.json.plan` after (EGM's layout: title, `Design:` line, `## 1. Issue
 template`, `## 2. Units`), keeping every unit's section and adding one `### U<nn>: <title>`
 section per row of the spec's `## Units` not yet in it, except a row the section's `Landed:` line
 names (a unit that landed in an earlier handoff) or a row another handoff of this spec has
-filed, open or closed, stopped units included (their `state.json`, found through
-`handoffs.json`, §7; the `set` reviewer, which reads the section and the index, counts those
-rows covered), and runs `superegm graph --plan <file>`
+filed, open or closed, stopped units included (their `state.json`, found through `handoffs/`,
+§7: `graph` lists them in `handoff_units.json` as `filed_elsewhere[]` and refuses a section for
+one, and `review-plan` names them in the `set` reviewer's brief beside the `Landed:` rows, so it
+counts them covered), and runs `superegm graph --plan <file>`
 (copies the text into the store as `handoff_plan.md`, parses, derives waves, renders and hashes
 the **unfiled** bodies) then `superegm scan`. Filed units are frozen (§7): their sections in the
 plan file must equal the stored ones. Nothing is committed under `docs/…/plans`.
@@ -1113,8 +1125,8 @@ is run in at `--ref` (default `HEAD`), exported with `git archive <ref>` into th
 `orient/export/` (emptied first; one fixed path, so graphify's caches key the same files every
 call), so an uncommitted edit, an untracked or an ignored file never reaches it or graphify.
 Every call exports and, with graphify, builds afresh. Without `--unit` it writes `orient/map.md`
-and, when a handoff is open in the store (a `handoff_id` in `state.json` with no `closed_at`),
-every unfiled unit's file; with `--unit` it writes the named units' files only. With `--unit`,
+and, when the resolved handoff (§7) is open (its `state.json` has no `closed_at`), every unfiled
+unit's file; with `--unit` it writes the named units' files only. With `--unit`,
 `orient` writes the unit files only and leaves `orient/map.md` untouched; the map is written by
 a run without `--unit`. A unit whose
 section is not in the store's `handoff_plan.md` is refused (`orient: U12 is not in the plan: run
@@ -1241,14 +1253,14 @@ inbox, the notify hook, the registry and the driver.
 
 **The repository's protection (checked by `launch`, recorded in the wave card).** Before any
 builder is launched, `launch` fetches and refuses unless: the spec at `origin/<base>` hashes to
-the approval's `sha256`, or to a later approval of the same spec whose chain (`amended_from`,
-§7, §8) contains the handoff's approved sha256, and is refused when it is neither (owner ruling
+the handoff's approved `sha256` or to a later entry of the spec's approval history (the chain,
+§7), and is refused when it is neither (owner ruling
 2026-11-05: with one store per handoff several handoffs of one spec run in parallel and every
 amendment moves the spec's hash, so a handoff approved at an earlier link of the chain must
-still launch; U20), with the frozen range read from the approval, never the checkout:
-`launch-builder` copies the body's cited range from the approval commit (`git show
-<commit>:<path>`, `approval.json`'s `commit`, on `<base>`'s history) into the prompt file under a
-`# Spec range` heading, and `prepare --dispatch` writes it as `spec_range.md` beside the diff for
+still launch; U20), with the frozen range read at the sha the body cites, never from the checkout:
+`launch-builder` copies the body's cited range from the history entry whose `sha256` the body's
+marker names (`git show <that entry's commit>:<path>`, on `<base>`'s history) into the prompt
+file under a `# Spec range` heading, and `prepare --dispatch` writes it as `spec_range.md` beside the diff for
 the head's goldfish, so a later link's bytes in the base move nothing (U20), and
 `.superegm/config.json` exists there; `origin/<base>` carries a
 workflow triggered on `pull_request`; the builder token is set, its login is not an owner, and it
@@ -1294,8 +1306,11 @@ in the README's "Before the first run" step 1, with one sentence naming the toke
 builders push and open draft pull requests as that account and can never update the base
 branch; `init`'s printed STEPS line 1, `docs/claude.md` and `docs/getting_started.md` point to
 that step. README step 1 and `init`'s STEPS carry the App alternative (the registration
-settings: name, no webhook, visibility `Only on this account` (a public App is installable by
-anyone, and the key would mint for them), the four permissions `doctor` checks (Contents
+settings: name, no webhook, visibility `Only on this account` when the owner's installations are on that account alone,
+public when several accounts are to install it (a private App installs on its owner account
+only; a public one is installable by anyone and the key would mint for any installation, so the
+owner reviews the App's installations list by hand: `doctor` checks this repository's
+installation, not the others), the four permissions `doctor` checks (Contents
 write, Pull requests write, Issues write, Metadata read, no Workflows), install on the
 repository and on whatever other accounts the owner chooses (an installation that includes the
 repository is the requirement, owner ruling 2026-11-05: the App may be installed on several
@@ -1569,8 +1584,9 @@ and returns one word plus one line:
   without `name`, each goldfish receiving the unit file (its DoD is the head's standard), the
   frozen spec range, the diff, the CI file, `pr_body.md`, `comments.md`, the last posted round's
   findings with the builder's replies, and the worktree path, and records each with `review
-  record --sha256 <head>`. The Astra lane sits on the head's panel by default (`astra.enabled`
-  and `astra.heads`, both true from `init`; `astra.heads` false drops it; `reviewers.head`,
+  record --sha256 <head>`. The Astra lane sits on the head's panel by default (`astra.heads`, true
+  from `init`, with `astra.enabled`, which `init` writes false and the owner turns on once, for
+  every kind; `astra.heads` false drops it; `reviewers.head`,
   `change-review, astra` from `init`, lists it for the record and decides nothing, §8's append
   rule being the one control; the 1.0 ruling `q-wave` Q1 kept the lane to specs and plans, and
   the owner reversed it on 2026-11-04, U17): the foreman runs it as `review-spec` runs it on a
@@ -1583,8 +1599,10 @@ and returns one word plus one line:
   findings with the builder's replies and, on Astra's own, their dispositions), once per head
   per round, after CI concludes, concurrently with the Claude reviewers, fresh every round (no
   `--resume` on a head: the foreman keeps no session handle), started in the background from
-  the foreman's own Bash tool with the tool's timeout at the runner's `--timeout` (1800 s) plus
-  300 s and waited for before the foreman returns (the one session the foreman starts, §4; a
+  the foreman's own Bash tool (`run_in_background`: a foreground call is capped at 600 s) with
+  the tool's timeout at the runner's `--timeout` (1800 s) plus 300 s, its end re-invoking the
+  foreman, which holds its turn with a bounded wait and returns only after the lane recorded
+  (the one session the foreman starts, §4; a
   batch waits for its foremen, so the lane bounds a batch at that timeout and other units' events
   wait for the next batch), and
   records its `result.json` through the existing path (collected and mapped as `astra_lane.md`
@@ -1730,7 +1748,7 @@ The orders quote the forms a builder may see on its issue.
 **The inbox.** `superegm inbox [--all] [--json] [--handoff <id>]` is read-only and needs no run
 card, as `doctor` is; `skills/inbox/SKILL.md` (`effects: none`) is auto-invokable, with `doctor`'s
 line in `using-superegm`. Without `--all` it reads the current repository's store, every open
-handoff of its `handoffs.json` index (§7) unless `--handoff` names one; `--all` reads every store
+handoff of its `handoffs/` index (§7) unless `--handoff` names one; `--all` reads every store
 the registry lists (`registry: none`, and the one store, while nothing is registered). It lists
 only what needs the owner: open decision points (`decisions[]` without a `rulings[]` entry), cap
 rulings (`review status` exit 2), contested findings (point 1 pending), merge-ready PRs (the
@@ -2038,7 +2056,7 @@ amendment-4 paragraph below); a later handoff on this spec drafts no section for
 | U17 | Astra on every head review (§8, §11): `reviewers.head` default `change-review, astra` and `astra.heads`, both written by `init`; the astra-append rule for kind `head`; the foreman's Astra lane over the brief file `prepare --dispatch` writes (`r<n>/astra_brief.md`: what the Claude goldfish receive, the diff cut at 400 KB; its sha256 in the lane's record), a bounded background launch the foreman waits for, fresh every round, recorded through the existing path; the degrade to `astra: not run (<reason>)` (`not installed`, `failed`, `killed`, `timeout`) with the round completing on the Claude reviewers; `doctor`'s informational `astra:` line: `skills/plan/scripts/superegm/foreman.py`, `prepare.py`, `collect.py`, `review.py`, `doctor.py`, `init.py`, `__init__.py` (modify: `DEFAULT_CONFIG`, and the `brainstorm` store kind registered for U18, so U17 and U18 share no file), `skills/wave/references/foreman_brief.md`, `resources/astra_lane.md`, `resources/review_panels.md`, `docs/claude.md` (modify), `tests/unit/test_foreman.py`, `test_review.py`, `test_doctor.py`, `test_helper.py` (modify) | — (U15, U16 landed by then) | M |
 | U18 | The `redesign` ruling (§11, §12, §13.2): `decision rule … --ruling "redesign — <one sentence why>"` at a head's points 1 and 2, the judges' question file listing it, the stop through the `superegm:stopped` path, the store's `brainstorm/<unit>-<decision id>.md` (store-only, never committed; its kind registered by U17), the `**Ruling:**` comment naming the brief, `report`'s `## Stopped` with the brief's path, `close`'s refusal while such a unit's issue is open (one GitHub read), the brainstorming skill's brief-first paragraph: `skills/plan/scripts/superegm/decision.py`, `report.py`, `close.py` (modify), `skills/judges/references/leavemealone.md`, `skills/brainstorming/SKILL.md` (modify: the brief-first paragraph), `skills/wave/SKILL.md` (modify: the ruling's effect in Step 3), `skills/integrate/SKILL.md` (modify), `tests/unit/test_wave.py`, `test_leavemealone_finish.py` (modify) | — (U10b, U11 landed) | M |
 | U19 | Amendment-scoped spec review by default (§5, §8), batch dispositions and the four driving rules: `review open --kind spec --scope auto\|whole\|<sections>` (default `auto`: the sections changed since the last approval with their neighbours, re-derived every round from the current bytes; whole when none), the scope's form in the review record and the round's headings with line ranges, the brief wording, `review record`'s out-of-scope refusal and the round's `out_of_scope[]` lines, regressions and the cap over recorded findings, the cap question naming the scope; `review settle --file <dispositions>`; the four rules of §5 (a fresh session per phase, skills never switch branches, the admin-bypass merge line in `doctor`, `wave` and `integrate`, a new session after a plugin update): `skills/plan/scripts/superegm/review.py`, `doctor.py` (modify), `skills/review-spec/SKILL.md`, `skills/review-spec/references/review_loop.md` (modify: the scope rule and the brief wording), `skills/using-superegm/SKILL.md`, `skills/wave/SKILL.md`, `skills/integrate/SKILL.md` (modify), `tests/unit/test_review.py`, `test_doctor.py` (modify) | — (U16 landed by then) | M |
-| U20 | One store per handoff (§7, §8, §9.1, §11): `artifacts_dir/<handoff id>/` as the handoff's root for everything from its approval on (`state.json`, `journal.md`, the plan files, plan and head reviews, run cards, launches, worktrees, foreman, orient unit files, judges, brainstorm briefs, directly under it: no `<6 hex>/` layer inside a handoff directory), the store level keeping `handoffs.json`, `approvals/`, the spec reviews, `orient/` and its journal; the index (`id`, `spec`, `sha256`, `amended[]`, `amended_from`, `opened_at`, `closed_at`; written by `approve-spec` and `close` alone), the handoff's `approval.json`, `amended_from` in the approval record and the chain read from the index's rows; `--amend-units` and `--void` on the latest approval alone; one handoff per approval, a later approval of the amended spec opening a new one beside the earlier; `launch`'s chain check (the base spec at the approved bytes or at a later link of the chain, else refused; owner ruling 2026-11-05) with the cited range read from the approval commit (`launch-builder`'s `# Spec range`, `prepare`'s `spec_range.md`); `--handoff <id>` on every `--spec`, `--plan`, `--unit` or `--review` subcommand, resolved once in `__init__.py`'s `store()` with §7's defaults, `status` and `report` showing all without it; a flat 1.0/1.1 store read in place as the handoffs it names, `legacy: true`, no migration script: `skills/plan/scripts/superegm/__init__.py` (modify: `Store`), `approve_spec.py` (modify: `amended_from`, the index, `approval.json`), `launch.py` (modify: the chain check), `launch_builder.py`, `prepare.py` (modify: the range copy), `graph.py`, `gate.py`, `dry_run.py`, `apply.py`, `verify.py`, `status.py`, `report.py`, `close.py` (modify: path resolution), `docs/claude.md` (modify), `tests/unit/test_helper.py` and one test per touched module (modify) | — (U16 landed by then) | M |
+| U20 | One store per handoff (§7, §8, §9.1, §11): `artifacts_dir/<handoff id>/` as the handoff's root for everything from its approval on (`state.json`, `journal.md`, the plan files, plan and head reviews, run cards, launches, worktrees, foreman, orient unit files, judges, brainstorm briefs, directly under it: no `<6 hex>/` layer inside a handoff directory), the store level keeping `handoffs/<id>.json` (one file per handoff: `id`, `spec`, `opened_at`, `closed_at`, written by that handoff's `approve-spec` and `close`), `approvals/<slug>.json` as the append-only approval history (`entries[]` with `sha256`, `commit`, `handoff_id`, `kind`; the 1.1 single record read as one entry), the spec reviews, `orient/` and its journal; `--amend-units` and `--void` on the latest entry alone; one handoff per opening approval, a re-approval after a void keeping it, any other approval opening a new one beside the earlier; `launch`'s chain check (the base spec at the handoff's approved bytes or at a later entry, else refused; owner ruling 2026-11-05) with the cited range read at the entry the body's marker names (`launch-builder`'s `# Spec range`, `prepare`'s `spec_range.md`); `--handoff <id>` on every subcommand, resolved once in `__init__.py`'s `store()` with §7's defaults (the card's handoff, the latest approval's, the filed unit's), the typed spec-scoped skills passing `[--handoff <id>]`, `status` and `report` showing all without it; `gate` and `apply` refusing a filing in a handoff that is not the latest; `graph`'s `filed_elsewhere[]` and the `set` brief line; a flat 1.0/1.1 store read in place as the handoffs it names, `legacy: true`, no migration script: `skills/plan/scripts/superegm/__init__.py` (modify: `Store`, `store()`), `approve_spec.py` (modify: the history, the handoff file), `launch.py` (modify: the chain check), `launch_builder.py`, `prepare.py` (modify: the range copy), `graph.py`, `gate.py`, `dry_run.py`, `apply.py`, `verify.py`, `status.py`, `report.py`, `close.py` (modify: path resolution and the refusals), `skills/plan/SKILL.md`, `skills/review-plan/SKILL.md`, `skills/file/SKILL.md`, `skills/wave/SKILL.md`, `skills/integrate/SKILL.md` (modify: `[--handoff <id>]`; the `set` brief line), `docs/claude.md` (modify), `tests/unit/test_helper.py` and one test per touched module (modify) | — (U16 landed by then) | M |
 | U21 | External-review ingest (§8): `review ingest`, the `external:<login>` reviewer id in `review record`, `foreman/<unit>.json.ingested[]`, `config.ingest` (`severity_words`, `human_role`), the `clean` → `revise` rewrite and its journal line, the wave's batch step: `skills/plan/scripts/superegm/review.py` (modify: `review ingest`, the id, the rewrite), `collect.py` (modify: the held threads), `__init__.py` (modify: `DEFAULT_CONFIG.ingest`, `SUBCOMMANDS`), `init.py`, `skills/wave/SKILL.md` (modify: the batch step), `resources/review_panels.md`, `docs/claude.md` (modify), `tests/unit/test_review.py`, `test_foreman.py`, `test_wave.py`, `test_helper.py` (modify; conftest's fake `gh` gains the review-thread endpoints) | — (U17–U20 landed) | M |
 | U22 | Rulings by GitHub comment (§11.2, §13.2): the one grammar and its parser `ruling_of`, owners only, the seventh event kind `ruling` and its line, `decision rule --by <login>` from a comment, `collect`'s deviation and `tdd-order` reads through the parser: `skills/plan/scripts/superegm/decision.py` (modify: the parser, `--by` from a comment), `status.py` (modify: the `ruling` event), `collect.py` (modify), `skills/wave/SKILL.md`, `skills/wave/references/builder_orders.md` (modify: the orders quote the forms a builder may see), `docs/claude.md` (modify), `tests/unit/test_events.py`, `test_wave.py`, `test_foreman.py`, `test_helper.py` (modify) | U21 | M |
 | U23 | The inbox and the notify hook (§11.2): `inbox [--all] [--json] [--handoff]` and its line form, `notify --runcard <id>`, `config.notify`, `notify_timeout_seconds`, `state.json.notified`, the `inbox` skill: `skills/plan/scripts/superegm/inbox.py` (create: `inbox`, `notify`), `__init__.py` (modify: the two keys, `SUBCOMMANDS`), `init.py` (modify), `skills/inbox/SKILL.md` (create: `effects: none`, auto-invokable like `doctor`'s line in `using-superegm`, with `assets/icon.svg` and `test_scenarios.yaml`), `skills/wave/SKILL.md` (modify: the notify step), `skills/using-superegm/SKILL.md`, `docs/claude.md`, `README.md` (modify), `tests/unit/test_inbox.py` (create), `test_wave.py`, `test_helper.py`, `test_packaging.py`, `test_effects.py`, `test_skeleton.py` (modify) | U22 | M |
@@ -2104,13 +2122,17 @@ no file (U17 registers the `brainstorm` store kind U18 writes). U19 edits
 `skills/plan/scripts/superegm/review.py`, `doctor.py`, `tests/unit/test_review.py` and
 `test_doctor.py` after U17 and `skills/wave/SKILL.md` and `skills/integrate/SKILL.md` after U18;
 U20 edits `__init__.py`, `prepare.py`, `docs/claude.md`, `tests/unit/test_helper.py` and
-`test_foreman.py` after U17 and `report.py`, `close.py`, `tests/unit/test_wave.py` and
-`test_leavemealone_finish.py` after U18; U19 and U20 share no file with each other
-(`amended_from`, the chain and `approve_spec.py` are U20's; U19's four rules are stated in
-`using-superegm`, their one text, and the admin-bypass line in `doctor`, `wave` and `integrate`,
-none in `docs/claude.md`, §5), so the waves are {U17, U18} → {U19, U20}. This
+`test_foreman.py` after U17, `report.py`, `close.py`, `tests/unit/test_wave.py` and
+`test_leavemealone_finish.py` after U18, and `skills/wave/SKILL.md`, `skills/integrate/SKILL.md`
+and `tests/unit/test_review.py` (where `approve_spec.py`'s tests live) after U19, so the
+shared-file chain puts U20 in the wave after U19 (§5's readiness rule) and the waves are
+{U17, U18} → {U19} → {U20} (U19's four rules are stated in `using-superegm`, their one text, and
+the admin-bypass line in `doctor`, `wave` and `integrate`, none in `docs/claude.md`, §5). This
 amendment's own review runs on the installed 1.1.1 helper, which has no `--scope`: its scope is
-applied by hand through the brief, as the amendment-2 paragraph applied the landed-row rule. Risk: U17
+applied by hand through the brief, as the amendment-2 paragraph applied the landed-row rule, and
+in a store of its own (`artifacts_dir` set locally, uncommitted, in its worktree's config, as the
+1.1.1 and 1.2 handoffs do), since that helper's flat store holds one open handoff at a time
+(until U20). Risk: U17
 medium (the runner's `result.json` field names come from `astra_lane.md`, not a schema; a changed
 field degrades to `not run`, never to a wrong verdict); U18 medium (the brief copies a head's diff
 into the store, outside the repository and never committed; the plugin scans no content, §11, so
@@ -2226,10 +2248,12 @@ Interfaces (the names the plans will carry):
   `scope` and `round-<n>.json`'s `scope` and `out_of_scope[]`; `record: <fid> out of scope
   (<section>): not recorded`; `review settle --file <dispositions>`; `doctor`'s admin-bypass
   line.
-- U20 → the owner: `artifacts_dir/<handoff id>/` with `approval.json`; `handoffs.json` rows with
-  `amended[]` and `amended_from`; the approval key `amended_from`; `--handoff <id>` on every
-  `--spec`, `--plan`, `--unit` or `--review` subcommand; `launch`'s refusal of a base spec off
-  the handoff's approval chain; the prompt's `# Spec range` and `prepare`'s `spec_range.md`.
+- U20 → the owner: `artifacts_dir/<handoff id>/`; `handoffs/<id>.json`; `approvals/<slug>.json`'s
+  `entries[]` (`sha256`, `commit`, `handoff_id`, `kind`); `--handoff <id>` on every subcommand
+  and `[--handoff <id>]` on the typed spec-scoped skills; `launch`'s refusal of a base spec off
+  the handoff's approval chain; `gate` and `apply`'s refusal of a filing in a handoff that is not
+  the latest; `handoff_units.json`'s `filed_elsewhere[]`; the prompt's `# Spec range` and
+  `prepare`'s `spec_range.md`.
 - U21 → U22, U23: `review ingest --unit <U> --runcard <id> → <n> ingested; exit 0`; the reviewer
   id `external:<login>`; `foreman/<unit>.json.ingested[]`; the journal line `<unit> back in flight
   (external:<login>)`; the config key `ingest` (`severity_words`, `human_role`).
@@ -2252,6 +2276,6 @@ Waves: {U01} → {U02, U03} → {U04, U05, U08, U09} → {U06, U07, U09b, U10} �
 as a second handoff (`2026-11-03-superegm-<6 hex>`), {U12} → {U13} → {U14}, and version 1.1.0
 after all three merge; then, as a third handoff (`2026-11-03-superegm-<6 hex>`), {U15} → {U16}, and
 version 1.1.1 after both merge; then, as a fourth handoff (`2026-11-03-superegm-<6 hex>`, the
-owner's name `2026-11-05-superegm-1.1.2`), {U17, U18} → {U19, U20}, and version 1.1.2 after all
+owner's name `2026-11-05-superegm-1.1.2`), {U17, U18} → {U19} → {U20}, and version 1.1.2 after all
 four merge; then, as a fifth handoff (`2026-11-05-superegm-1.2`), {U21} → {U22} → {U23, U25} →
 {U24}, and version 1.2.0 after all five merge.
