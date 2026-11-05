@@ -33,7 +33,7 @@ Unknown keys stop.
   "reviewers": {"spec": ["design", "zoom-out"], "plan": ["readiness", "proportion", "set"], "head": ["change-review"], "integrate": ["design"]},
   "astra": {"enabled": false, "model": "gpt-6-astra", "effort": "xhigh"},
   "judges": {"min_vendors": 1, "members": [{"name": "fable", "via": "adapter", "effort": "max"}, {"name": "opus", "via": "adapter", "effort": "max"}, {"name": "astra", "via": "runner"}]},
-  "builder": {"profile_dir": "~/.superegm/builder-profile", "model": "claude-fable-5-1", "permission_mode": "acceptEdits", "gh_token_env": "SUPEREGM_BUILDER_TOKEN", "allowed_tools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git add:*)", "Bash(git commit:*)", "Bash(gh pr create:*)"]},
+  "builder": {"profile_dir": "~/.superegm/builder-profile", "model": "claude-fable-5-1", "permission_mode": "acceptEdits", "gh_token_env": "SUPEREGM_BUILDER_TOKEN", "allowed_tools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git add:*)", "Bash(git commit:*)", "Bash(gh pr create:*)"], "app": null},
   "ci_wait_minutes": 30,
   "owners": ["OWNER"],
   "owner_team": null,
@@ -62,7 +62,7 @@ Unknown keys stop.
 | `reviewers` | the spec's panels | One reviewer list per review kind (`spec`, `plan`, `head`, `integrate`); each name is an adapter in `.claude-plugin/agents/`. |
 | `astra` | disabled | `enabled`, `model`, `effort`: the Astra lane, GPT-model reviewers run headlessly through claudex-loop. |
 | `judges` | `min_vendors` 1; fable, opus (adapter, max), astra (runner) | The judge panel of leavemealone-mode: a converged verdict needs judges spanning `min_vendors` vendors; each member runs `via` an adapter or the runner. |
-| `builder` | see the example | `profile_dir` (the empty builder profile), `model`, `permission_mode` (`acceptEdits`), `gh_token_env` (`SUPEREGM_BUILDER_TOKEN`, the variable holding the builder account's token) and `allowed_tools` (tool names and `Bash(<prefix>:*)` patterns; `Agent`, `Skill` and a bare `Bash` are refused; the push prefix for the unit's own branch is added per launch). |
+| `builder` | see the example | `profile_dir` (the empty builder profile), `model`, `permission_mode` (`acceptEdits`), `gh_token_env` (`SUPEREGM_BUILDER_TOKEN`, the variable holding the builder account's token) and `allowed_tools` (tool names and `Bash(<prefix>:*)` patterns; `Agent`, `Skill` and a bare `Bash` are refused; the push prefix for the unit's own branch is added per launch) and `app` (`"app": null`, the machine account; or `{app_id, slug, private_key_env}`, the builder as a GitHub App: `<slug>[bot]` under one-hour tokens minted per call from the key file the variable `private_key_env` names, `SUPEREGM_APP_KEY` by default; with it set, `gh_token_env`'s variable must be unset). |
 | `ci_wait_minutes` | `30` | A positive integer: how long a head's CI may stay pending or absent before the wave reports it CI-waiting. |
 | `owners` | `[]` (`init` writes the login `gh api user` returns) | A list of GitHub logins: the owner, who alone may update `<base>`. `launch` and `doctor` refuse an empty list naming the key, a classic restriction naming a login outside it, and a builder token whose login is in it. |
 | `owner_team` | `null` | `<org>/<slug>` or null: the one team a ruleset's bypass actors may name. The team must exist and the builder account must not be a member; a bypass for any other team is refused. |

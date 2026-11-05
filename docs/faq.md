@@ -32,6 +32,12 @@ builder session pushes its unit branch and opens its draft pull request. Its com
 issue are never taken for the owner's: a `**Ruling:**` written by the builder account rules
 nothing, and a close by the builder account is a decision point, not a stop.
 
+#### Q: Can the builder be a GitHub App instead of a second login?
+
+**A**: Yes: set `builder.app` (README step 1 says how to register it) and leave `SUPEREGM_BUILDER_TOKEN` unset.
+The builder then acts as `<slug>[bot]` under one-hour installation tokens minted per `gh` call from the App's private key, which only the path in `SUPEREGM_APP_KEY` names; `superegm doctor` prints the App's lines.
+It is the recommended path for an organization; the machine account is the quick path for a personal repository.
+
 #### Q: Why a fresh session for every builder launch?
 
 **A**: A builder's brief is the issue body, the builder orders, the rulings on its issue and,
