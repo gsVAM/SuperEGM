@@ -1,17 +1,18 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the builders' tests (U09): launch, launch-builder, record-launch, interrupt, clean, the orders and the two skill bodies.
+# Modified by SuperEGM (gsVAM), 2026: the builders' tests (U09): launch, launch-builder, record-launch, interrupt, clean, the orders and the two skill bodies; the App path (U15).
 
 """The builders (spec section 11): `launch` and its preconditions, `launch-builder`'s worktree,
 prompt file and command line, `record-launch`, `interrupt`, `clean`, the builder orders and the
 `interrupt` and `clean` skill bodies."""
 
-import hashlib, json, re, subprocess
+import hashlib, json, os, re, shutil, subprocess
 from pathlib import Path
 import pytest
 from superegm import store, spec_slug, DEFAULT_CONFIG
 from superegm.body import fill_numbers, normalise
 from conftest import make_pr
+from test_builder_token import key, APP, OPENSSL, FOUR, app_api  # noqa: F401  the key fixture and the faked App API
 
 ROOT = Path(__file__).resolve().parents[2]
 REPO, BASE, UNIT, ISSUE, TRACKING, PR = "example-org/webhooks", "main", "U07", 7, 1, 70
@@ -35,6 +36,10 @@ SECTION = ("### UID: Worker\n| Field | Value |\n| --- | --- |\n| Objective | A w
 RULESET = {"id": 1, "name": "base", "enforcement": "active", "target": "branch",
            "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}}, "rules": [{"type": "update"}],
            "bypass_actors": [{"actor_type": "RepositoryRole", "actor_id": 5, "bypass_mode": "always"}]}
+SUPEREGM_RULESET = {"id": 2, "name": "superegm", "enforcement": "active", "target": "branch",
+                    "conditions": {"ref_name": {"include": ["refs/heads/superegm/**"], "exclude": []}},
+                    "rules": [{"type": "non_fast_forward"}, {"type": "deletion"}], "bypass_actors": []}
+BOT, EMAIL = "superegm-builder[bot]", "2002+superegm-builder[bot]@users.noreply.github.com"
 
 
 def git(args, cwd):
@@ -45,6 +50,12 @@ def git(args, cwd):
 def no_graphify(monkeypatch):
   from superegm import orient
   monkeypatch.setattr(orient, "GRAPHIFY", "superegm-no-such-tool")
+
+
+@pytest.fixture(autouse=True)
+def which(monkeypatch):
+  """The launching machine's tools: `gh` at a fixed path, the real `openssl`, nothing else."""
+  monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: {"gh": "/usr/local/bin/gh", "openssl": OPENSSL}.get(cmd))
 
 
 def put(path, text):
@@ -69,6 +80,9 @@ def github(world, *, builder="builder-bot", me="owner", role="write", classic=No
   h[r"^orgs/[^/]+/teams/[^/]+$"] = lambda a, t, m: {"id": team_id} if team_id else (404, "Not Found")
   h[r"^orgs/[^/]+/teams/[^/]+/memberships/[^/]+$"] = lambda a, t, m: {"state": "active"} if member else (404, "Not Found")
   h[r"^user$"] = lambda a, t, m: {"login": builder if t else me}
+  h[r"^users/([^/]+)$"] = lambda a, t, m: {"login": m.group(1), "id": {builder: 1001, BOT: 2002}.get(m.group(1), 1)}
+  h[rf"^repos/{REPO}$"] = lambda a, t, m: {"permissions": {"push": True, "pull": True}, "security_and_analysis": {
+      "secret_scanning_push_protection": {"status": "enabled"}, "secret_scanning_non_provider_patterns": {"status": "enabled"}}}
   h[rf"^repos/{REPO}/collaborators/[^/]+/permission$"] = lambda a, t, m: {"role_name": role}
   h[rf"^repos/{REPO}/branches/{BASE}/protection$"] = lambda a, t, m: classic if classic is not None else (404, "Branch not protected")
   h[rf"^repos/{REPO}/rulesets$"] = lambda a, t, m: [list(rulesets)]
@@ -88,7 +102,8 @@ def github(world, *, builder="builder-bot", me="owner", role="write", classic=No
         if "-i" in args:
           return 0, "HTTP/2.0 200 OK\n" + (f"X-Oauth-Scopes: {scopes}\n" if scopes is not None else "") + "\n" + json.dumps(data), ""
         if "-q" in args:
-          return 0, f"{data[args[args.index('-q') + 1].lstrip('.')]}\n", ""
+          value = data[args[args.index('-q') + 1].lstrip('.')]
+          return 0, (json.dumps(value) if isinstance(value, (dict, list)) else str(value)) + "\n", ""
         return world.gh.ok(data)
     return world.gh.do_api(args)
   world.gh.extend("api", api)
@@ -140,6 +155,27 @@ def seed(world, units=(UNIT,), max_in_flight=5, workflow="on: [push, pull_reques
   return s, out.split()[-1], hid, bodies
 
 
+def app_seed(world, monkeypatch, key, tmp_path, **gh):
+  """`seed(world)` then the App path: `builder.app` = `APP` in the tree's config, the token variable unset, `SUPEREGM_APP_KEY`
+  naming `key`, a fake real `gh` at `tmp_path/bin/gh` (prints `$GH_TOKEN`, then its arguments unless they are `auth token`),
+  `shutil.which` answering that path for `gh`, `OPENSSL` for `openssl` and None otherwise, `app_api(monkeypatch)`,
+  `github(world, **gh)` and origin's push URL in the SSH form. Returns `(s, card, hid, bodies, <the fake gh's path>)`."""
+  s, card, hid, bodies = seed(world)
+  cfg = json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))
+  configure(world, builder={**cfg["builder"], "app": APP})
+  monkeypatch.delenv("SUPEREGM_BUILDER_TOKEN", raising=False)
+  monkeypatch.setenv("SUPEREGM_APP_KEY", str(key))
+  real = tmp_path / "bin/gh"
+  real.parent.mkdir(exist_ok=True)
+  real.write_text('#!/bin/sh\nif [ "$1 $2" = "auth token" ]; then printf "%s\\n" "$GH_TOKEN"; else printf "%s %s\\n" "$GH_TOKEN" "$*"; fi\n', encoding="utf-8")
+  real.chmod(0o755)
+  monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: {"gh": str(real), "openssl": OPENSSL}.get(cmd))
+  app_api(monkeypatch)
+  github(world, **gh)
+  git(["remote", "set-url", "--push", "origin", f"git@github.com:{REPO}.git"], world.repo)
+  return s, card, hid, bodies, str(real)
+
+
 def state_of(s):
   return json.loads(s.path("state").read_text(encoding="utf-8"))
 
@@ -148,14 +184,16 @@ def launches_of(s, uid=UNIT):
   return json.loads(s.path("launches", f"{uid}.json").read_text(encoding="utf-8"))["launches"]
 
 
-def test_launch_marks_ready_units_and_records_the_builder_login(world, monkeypatch):
-  s, card, hid, _ = seed(world)
-  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+@pytest.mark.parametrize("path", ["account", "app"])
+def test_launch_marks_ready_units_and_records_the_builder_login(world, monkeypatch, key, tmp_path, path):
+  s, card, hid, _, _ = app_seed(world, monkeypatch, key, tmp_path) if path == "app" else (*seed(world), None)
+  path == "account" and monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
   code, out = world.run("launch", "--runcard", card)
   assert code == 0 and out.splitlines()[:2] == ["in flight: none", "marked: U07"], out
   assert state_of(s)["units"][UNIT]["launched"]["runcard"] == card
   rc = json.loads(s.path("runcards", f"{card}.json").read_text(encoding="utf-8"))
-  assert rc["builder"][-1] == {"login": "builder-bot", "token_env": "SUPEREGM_BUILDER_TOKEN"}
+  assert rc["builder"][-1] == ({"login": BOT, "email": EMAIL, "token_env": None, "app_id": 12345} if path == "app" else
+                               {"login": "builder-bot", "email": "1001+builder-bot@users.noreply.github.com", "token_env": "SUPEREGM_BUILDER_TOKEN", "app_id": None})
   assert git(["rev-parse", "refs/superegm/base"], world.repo).strip() == git(["rev-parse", "HEAD"], world.repo).strip()
   assert "ghp_builder" not in out and not any("ghp_builder" in " ".join(c) for c in world.gh.calls)
   assert "U07 marked for launch" in s.path("journal").read_text(encoding="utf-8")
@@ -186,10 +224,17 @@ def push_to_origin(world, rel, text):
   ("team-other", "base branch main: ruleset base lets team #8 bypass, not config.owner_team (example-org/owners)"),
   ("team-missing", "config.owner_team example-org/owners does not exist"),
   ("team-member", "base branch main: ruleset base lets example-org/owners bypass, and builder-bot is a member"),
+  ("app-admin-bypass", None), ("app-rulesets", None),       # the admin-role bypass; then beside SUPEREGM_RULESET
+  ("app-both-set", "builder.app is set (SUPEREGM_APP_KEY) and SUPEREGM_BUILDER_TOKEN is also set: one identity per repository"),
+  ("app-no-openssl", "openssl is not on this machine's PATH"),
+  ("app-bypass", "base branch main: ruleset base lets the App (#12345) bypass"), ("app-classic", "base branch main: classic restriction lets app superegm-builder push"),
 ])
-def test_launch_refuses_each_precondition(world, monkeypatch, case, reason):
-  s, card, hid, _ = seed(world)
-  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+def test_launch_refuses_each_precondition(world, monkeypatch, key, tmp_path, case, reason):
+  if case.startswith("app-"):
+    s, card, hid, _, _ = app_seed(world, monkeypatch, key, tmp_path, rulesets=[RULESET, SUPEREGM_RULESET] if case == "app-rulesets" else (RULESET,))
+  else:
+    s, card, hid, _ = seed(world)
+    monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
   spec = next(world.repo.glob("docs/**/*.md"))
   bypass = lambda actor: [{**RULESET, "bypass_actors": [actor]}]
   if case == "classic":
@@ -224,6 +269,14 @@ def test_launch_refuses_each_precondition(world, monkeypatch, case, reason):
     configure(world, owner_team="example-org/owners")
     github(world, rulesets=bypass({"actor_type": "Team", "actor_id": 8 if case == "team-other" else 9, "bypass_mode": "always"}),
            team_id=None if case == "team-missing" else 9, member=case == "team-member")
+  if case == "app-both-set":
+    monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  if case == "app-no-openssl":
+    monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: None)
+  if case == "app-bypass":
+    github(world, rulesets=bypass({"actor_type": "Integration", "actor_id": 12345, "bypass_mode": "always"}))
+  if case == "app-classic":
+    github(world, rulesets=[], classic={"restrictions": {"users": [{"login": "owner"}], "teams": [], "apps": [{"slug": "superegm-builder"}]}})
   code, out = world.run("launch", "--runcard", card)
   if reason is None:
     assert code == 0 and "marked: U07" in out, out
@@ -266,6 +319,14 @@ def test_launch_counts_in_flight_skips_stopped_and_frees_idle(world, monkeypatch
   assert "launched" not in state_of(s)["units"]["U09"]
 
 
+# `insteadOf`, not `pushInsteadOf`: git applies the latter only to a remote's `url` when it has no `pushurl`, so an explicit SSH push
+# URL (the one these tests set on origin) would stay SSH and fail closed under GIT_SSH_COMMAND=false; `insteadOf` rewrites both.
+ENTRIES = [("credential.https://github.com.helper", ""), ("credential.https://github.com.helper", "!{gh} auth git-credential"), ("url.https://github.com/.insteadOf", "git@github.com:"),
+           ("url.https://github.com/.insteadOf", "ssh://git@github.com/"), ("core.askPass", ""), ("user.name", "{login}"), ("user.email", "{email}")]
+PAIRS = [("GIT_CONFIG_GLOBAL", "/dev/null"), ("GIT_CONFIG_SYSTEM", "/dev/null"), ("GIT_SSH_COMMAND", "false"), ("GIT_TERMINAL_PROMPT", "0"), ("GIT_CONFIG_COUNT", "7"),
+         *(p for i, (k, v) in enumerate(ENTRIES) for p in ((f"GIT_CONFIG_KEY_{i}", k), (f"GIT_CONFIG_VALUE_{i}", v)))]
+
+
 def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monkeypatch):
   s, card, hid, bodies = seed(world)
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
@@ -284,20 +345,18 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   assert git(["rev-parse", "HEAD"], wt).strip() == git(["rev-parse", "refs/superegm/base"], world.repo).strip()
   prompt_file = s.path("launches", f"{UNIT}_r1_prompt.md")
   prompt = prompt_file.read_text(encoding="utf-8")
-  orders = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8")
+  orders = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8").replace("{{gh}}", "/usr/local/bin/gh")
   assert prompt.startswith(f"# Issue #{ISSUE} — U07\n\n{world.gh.issues[ISSUE]['body']}")
   assert f"\n\n---\n\n# Builder orders\n\n{orders}" in prompt
   assert f"\n\n---\n\n# Comments on issue #{ISSUE}\n\n## owner · comment 1\n**Decision D1:** (a) five\n\n## builder-bot · comment 3\n**Deviation (other):** renamed a fixture\n\n## owner · comment 4\n**Ruling:** (3) (a) — proceed\n" in prompt
   assert "forged" not in prompt and "looks good" not in prompt and "# Review comments" not in prompt
   cfg = json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]
   result = s.path("launches", f"{UNIT}_r1_result.json")
-  assert line.startswith(f"cd '{wt}' && env CLAUDE_CONFIG_DIR='{cfg['profile_dir']}' GH_TOKEN=\"$SUPEREGM_BUILDER_TOKEN\" SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{card}' GIT_CONFIG_COUNT=3 "
-                        "GIT_CONFIG_KEY_0=credential.https://github.com.helper GIT_CONFIG_VALUE_0='!gh auth git-credential' "
-                        "GIT_CONFIG_KEY_1=url.https://github.com/.pushInsteadOf GIT_CONFIG_VALUE_1=git@github.com: "
-                        "GIT_CONFIG_KEY_2=url.https://github.com/.pushInsteadOf GIT_CONFIG_VALUE_2=ssh://git@github.com/ "
-                        f"claude -p \"$(cat '{prompt_file}')\" --model '{cfg['model']}' --permission-mode '{cfg['permission_mode']}' --allowedTools '"), line
+  pairs = " ".join(f"{k}='{v.format(gh='/usr/local/bin/gh', login='builder-bot', email='1001+builder-bot@users.noreply.github.com')}'" for k, v in PAIRS)
+  assert line.startswith(f"cd '{wt}' && env -u GIT_ASKPASS -u SSH_ASKPASS -u GITHUB_TOKEN CLAUDE_CONFIG_DIR='{cfg['profile_dir']}' GH_TOKEN=\"$SUPEREGM_BUILDER_TOKEN\" SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{card}' {pairs} claude -p "), line
+  assert f" claude -p \"$(cat '{prompt_file}')\" --model '{cfg['model']}' --permission-mode '{cfg['permission_mode']}' --allowedTools '" in line, line
   tools = line.split("--allowedTools '")[1].split("'")[0].split(",")
-  assert tools == cfg["allowed_tools"] + [f"Bash(git push origin {branch}:*)", "Bash(pytest:*)"]
+  assert tools == [t.replace("Bash(gh ", "Bash(/usr/local/bin/gh ") for t in cfg["allowed_tools"]] + [f"Bash(git push origin {branch}:*)", "Bash(pytest:*)"]
   assert line.endswith(f"' --output-format json > '{result}'; echo $? > '{result}.exit'")
   assert "ghp_builder" not in out
   assert not s.path("launches", f"{UNIT}.json").exists()           # the record is record-launch's
@@ -306,6 +365,26 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   assert unit_file.startswith(f"orient: tree {tree} · graphify: not installed · trimmed: nothing\n## src/worker.py (create)\nsiblings: none\ntests: none\n")
   assert f"\n\n---\n\n# Builder orders\n\n{orders}\n\n---\n\n# Orient\n\n{unit_file}\n\n---\n\n# Comments on issue #{ISSUE}\n" in prompt
   assert "read the `# Orient` section before Step 1" in orders
+
+
+@pytest.mark.parametrize("case, reason", [("scripts", None), ("whitespace", "artifacts_dir {store} holds whitespace")])
+def test_launch_builder_writes_the_token_helper_and_the_gh_shim(world, monkeypatch, key, tmp_path, case, reason):
+  s, card, hid, _, _ = app_seed(world, monkeypatch, key, tmp_path)
+  assert world.run("launch", "--runcard", card)[0] == 0
+  if case == "whitespace": s.root.rename(tmp_path / "art ifacts"); configure(world, artifacts_dir=str(tmp_path / "art ifacts")); s = store(world.repo)
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)
+  shim = s.path("launches", f"{UNIT}_r1_bin", "gh")
+  if reason:
+    assert code == 1 and f"launch-builder: {reason.format(store=s.root)}" in out and not s.path("worktrees", UNIT).exists() and not shim.parent.exists(), out
+    return
+  helper, line = shim.parent / "superegm-token", out.strip().splitlines()[-1]
+  assert code == 0 and f" builder-token --repo '{REPO}' --app-id 12345 --key-env 'SUPEREGM_APP_KEY' --openssl '{OPENSSL}'" in helper.read_text(encoding="utf-8"), out
+  assert " GH_TOKEN=superegm-no-token " in line and f"'!{shim} auth git-credential'" in line
+  run = lambda *a: subprocess.run([str(shim), *a], capture_output=True, text=True, env={**os.environ, "GH_TOKEN": "superegm-no-token"})
+  helper.write_text("#!/bin/sh\nprintf ghs_minted\n", encoding="utf-8")
+  assert (run("pr", "create", "--draft").stdout, run("auth", "git-credential", "get").stdout) == ("ghs_minted pr create --draft\n", "ghs_minted auth git-credential get\n")
+  helper.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+  assert run("pr", "create").returncode == 1 and run("auth", "git-credential", "store").stdout == "superegm-no-token auth git-credential store\n"
 
 
 def test_record_launch_appends_running_then_records_the_exit(world, monkeypatch):
@@ -391,7 +470,7 @@ def test_launch_builder_appends_the_pr_block(world, monkeypatch, key, present):
     assert not s.path("worktrees", UNIT).exists() and not s.path("launches", f"{UNIT}_r1_prompt.md").exists()
     return
   assert code == 0, out
-  orders = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8")
+  orders = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8").replace("{{gh}}", "/usr/local/bin/gh")
   prompt = s.path("launches", f"{UNIT}_r1_prompt.md").read_text(encoding="utf-8")
   if key:
     assert f"\n\n---\n\n# Builder orders\n\n{orders}\n\n---\n\n# PR block\n\n<!-- coord/v1 task=7 -->\n\n\n---\n\n# " in prompt
@@ -479,9 +558,9 @@ def test_allowed_tools_composition(configured, expect):
   body = BODY.replace("HID", "h").replace("UID", "U07")
   if isinstance(expect, str):
     with pytest.raises(superegm.HandoffError, match=re.escape(f"allowed_tools carries {expect}: a builder never spawns, never invokes skills, never runs unrestricted Bash")):
-      allowed_tools(configured, "superegm/h/U07", body)
+      allowed_tools(configured, "superegm/h/U07", body, "/usr/local/bin/gh")
   else:
-    assert allowed_tools(configured, "superegm/h/U07", body) == expect
+    assert allowed_tools(configured, "superegm/h/U07", body, "/usr/local/bin/gh") == expect
 
 
 def test_interrupt_records_a_launch_or_marks_a_prepared_round(world):

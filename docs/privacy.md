@@ -23,7 +23,9 @@ them.
 Issue bodies, comments, pull request reviews and labels go to the repository `repo` names, with
 its visibility, under the owner's `gh` login; builders push and open draft pull requests under the
 builder account, whose token is `SUPEREGM_BUILDER_TOKEN` (config key `builder.gh_token_env`) and
-is passed to a launched builder's environment only. `banned_terms` in `.superegm/config.json` is
+is passed to a launched builder's environment only.
+On the App path (`builder.app`) no token is stored anywhere: `superegm builder-token` mints a one-hour installation token per call from the private key at the path `SUPEREGM_APP_KEY` names (config key `builder.app.private_key_env`), and the builder session can read the key file by that path, so the App must reach this repository alone; the plugin scans no content itself, and GitHub's push protection, where the repository has it, stops a committed token or key.
+`banned_terms` in `.superegm/config.json` is
 checked against every body and comment before it is written, and a dry run the owner confirms
 precedes the filing.
 

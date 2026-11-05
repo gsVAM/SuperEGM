@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3).
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
@@ -91,7 +91,8 @@ DEFAULT_CONFIG = {
                 "allowed_tools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git add:*)", "Bash(git commit:*)",
                                   "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git mv:*)",
                                   "Bash(git rm:*)", "Bash(gh pr create:*)", "Bash(gh pr edit:*)",
-                                  "Bash(gh pr comment:*)", "Bash(gh issue comment:*)"]},
+                                  "Bash(gh pr comment:*)", "Bash(gh issue comment:*)"],
+                "app": None},  # or {app_id, slug, private_key_env}: the builder as a GitHub App (spec section 11)
     "ci_wait_minutes": 30,
     "commit_trailer": "",  # appended, after a blank line, to every commit the helper makes
     "owners": [],  # the GitHub logins that may update <base> (spec section 11); init writes `gh api user`'s
@@ -215,8 +216,8 @@ class Store:
       return base / "foreman" / f"{parts[0]}.json"
     if kind == "orient_unit":
       return base.joinpath("orient", *parts)
-    if kind == "launches":
-      name = parts[0] if "." in parts[0] else f"{parts[0]}.json"
+    if kind == "launches":  # `<unit>.json`, a `<unit>_r<n>_<file>` or the `<unit>_r<n>_bin/` directory
+      name = parts[0] if "." in parts[0] or parts[0].endswith("_bin") else f"{parts[0]}.json"
       return base.joinpath("launches", name, *parts[1:])
     if kind == "review":
       number = parts[1] if parts[1].startswith("pr") else f"pr{parts[1]}"
@@ -544,6 +545,15 @@ def load_config(repo_root: Path) -> dict:
   builder = config["builder"]
   if isinstance(builder, dict) and isinstance(builder.get("profile_dir"), str):
     builder["profile_dir"] = str(Path(builder["profile_dir"]).expanduser())
+  app = builder.setdefault("app", None) if isinstance(builder, dict) else None
+  if app is not None:
+    app = {"private_key_env": "SUPEREGM_APP_KEY", **app} if isinstance(app, dict) else app
+    if not isinstance(app, dict) or set(app) != {"app_id", "slug", "private_key_env"} \
+        or isinstance(app["app_id"], bool) or not isinstance(app["app_id"], int) or app["app_id"] < 1 \
+        or not isinstance(app["slug"], str) or not re.fullmatch(r"[a-z0-9-]+", app["slug"]) \
+        or not isinstance(app["private_key_env"], str):
+      raise HandoffError(f"{path}: builder.app must be null or {{app_id: <int>, slug: <slug>, private_key_env: <name>}}")
+    builder["app"] = app
   artifacts = config["artifacts_dir"]
   if not artifacts or not Path(artifacts).is_absolute() \
       or Path(artifacts).resolve().is_relative_to(repo_root.resolve()):
@@ -1667,7 +1677,7 @@ def run_terminated(folder) -> bool:
 SUBCOMMANDS = ("init", "runcard", "approve_spec", "graph", "scan", "review", "gate", "dry_run", "apply",
                "verify", "status", "launch", "launch_builder", "record_launch", "foreman", "prepare",
                "collect", "tdd_order", "decide", "decision", "interrupt", "clean", "report", "close", "judges",
-               "review_plan", "orient", "doctor")
+               "review_plan", "orient", "doctor", "builder_token")
 
 
 def add_parser(subparsers, name, help_text, *, runcard=True):
