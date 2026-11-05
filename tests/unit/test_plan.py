@@ -150,13 +150,13 @@ def test_graph_unknown_reference_cycle_and_contradiction(world):
 
 def test_scan_banned_terms_mentions_and_size():
   config = {"banned_terms": ["(?i)secret-codename"], "fix_request_mention": "@copilot"}
-  # The scan is not code-aware (0.2.1): a banned term inside a code span is
+  # The banned-term rule is not code-aware: a banned term inside a code span is
   # still refused, and the author rewords.
   assert any("banned term" in p for p in scan_text("plain `secret-codename` in code", config, "body"))
   assert any("banned term" in p for p in scan_text("the secret-codename leaks", config, "body"))
   assert any("bare mention" in p for p in scan_text("ask @alice please", config, "body"))
   assert scan_text("email a@b.example only", config, "body") == []
-  assert any("bare mention" in p for p in scan_text("email a@b.example and `@alice`", config, "body"))
+  assert scan_text("email a@b.example and `@alice`", config, "body") == []
   assert scan_text("@copilot\n**EGM review round 1**", config, "comment") == []
   assert any("bare mention" in p for p in scan_text("hello\n@copilot", config, "comment"))
   assert any("bare mention" in p for p in scan_text("@copilot first", config, "body"))
@@ -178,22 +178,25 @@ def test_scan_command_over_rendered_bodies(world):
   assert code == 0 and "scan: clean" in out
 
 
-def test_scan_is_not_code_aware(world):
-  """Seven review rounds each found a defect in a Markdown-aware scanner; it
-  could both hide a mention behind a fence shape it misread and refuse an
-  ordinary comment. The code-awareness was deleted. Every line is scanned as
-  written, fences and spans included."""
-  config = {"banned_terms": ["(?i)secret-codename"], "fix_request_mention": None,
-            "allowed_mentions": []}
-  for body in ("```\n@alice secret-codename\n```\n",
-               "`@alice` and `secret-codename`\n",
-               "- ```\n  safe\n  ```\n\n@alice secret-codename\n```\n",
-               "<div></div>\n```\n\n@alice secret-codename\n\n```\n",
-               "    ```\n\n@alice secret-codename\n\n    ```\n"):
-    problems = scan_text(body, config, "comment")
-    assert any("bare mention @alice" in p for p in problems), (body, problems)
-    assert any("banned term" in p for p in problems), (body, problems)
-  assert "strip_code" not in world.ns and "FENCE_RE" not in world.ns
+CFG = {"banned_terms": ["(?i)secret-codename"], "fix_request_mention": None, "allowed_mentions": []}
+B = FENCE[0]
+SKIP = [
+  (f"{FENCE}\nask @alice\n{FENCE}\n", []), ("~~~\nask @alice\n~~~\n", []), (f"  {FENCE}py\n  ask @alice\n  {FENCE}\n", []),
+  (f"{FENCE}{B}\n{FENCE}\nask @alice\n{FENCE}\n{FENCE}{B}\n", []), (f"{FENCE}\nask @alice\n", []),
+  (f"{FENCE}sh @bob{FENCE}\nask @alice\n", ["@alice"]), (f"{FENCE}a {B}\nask @alice\n", ["@alice"]),
+  (f"{B}@alice{B} x\n", []), (f"{B}a{B} @alice {B}b{B}\n", ["@alice"]),
+  (f"{FENCE}\nsecret-codename\n{FENCE}\n", "banned"),
+]
+
+
+@pytest.mark.parametrize("text, expect", SKIP)
+def test_scan_text_skips_fences_and_spans(text, expect):
+  import superegm
+  from superegm import scan
+  assert scan.scan_text.__module__ == "superegm" and not hasattr(superegm, "scan_handoff")
+  problems = scan.scan_text(text, CFG, "body")
+  mentions = [p.split("bare mention ")[1].split(" ")[0] for p in problems if p.startswith("mention: body:")]
+  assert mentions == ([] if expect == "banned" else expect) and any("banned term" in p for p in problems) is (expect == "banned"), problems
 
 
 def test_an_ordinary_body_with_a_fence_and_no_mention_passes():
