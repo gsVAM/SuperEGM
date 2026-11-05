@@ -47,8 +47,8 @@ adversarial rounds on EGM 0.2.x proved the parts; what remains is the seam.
 The owner types one skill per phase. A phase typed in leavemealone-mode runs to its gate without
 the owner: a spec review converges or is ruled on, a plan review converges, a wave ends with one
 set of merge-ready draft PRs. The owner wakes to those PRs, or to a short list of questions the
-judges could not settle, or to a stalled review or a review ended at its cap, each named in the
-record (§8), merges, and types the next phase. Nothing is merged by a machine. Every review, verdict and launch is on disk with its
+judges could not settle, or to a stalled review, a review ended at its cap or an approval
+carrying `escalated[]`, each named in the record (§8), merges, and types the next phase. Nothing is merged by a machine. Every review, verdict and launch is on disk with its
 isolation recorded.
 
 ## 2. Vocabulary
@@ -334,7 +334,7 @@ isolation recorded.
 | graphify's output reaching goldfish and builders as evidence | a wrong edge misleads a reviewer or a builder | the graph is built from an export of the ref `orient` was given, with no model; `orient` projects EXTRACTED edges inline and lists any other edge apart with its confidence; the file's first line names the graph's sha256 | U12 |
 | An adopted issue's body overwritten wholesale | a person's text lost | the dry run shows the old body's sha256, `apply` refuses when the body changed since, comments and title are kept | U13 |
 | A PR block appended verbatim; a token recipe that does not fit the repository's owner kind | a builder PR the repository's CI rejects; a token with no access | the block is the repository's own text and its CI checks it; the recipe names the fine-grained form for an organization's repository and the classic form for a personal one, and `doctor` reports the token's kind | U14 |
-| The App's private key readable by the builder session (it mints in the builder's environment) | a misbehaving builder mints tokens for every repository the App is installed on | the key is a file the path names, never PEM text in the environment; the installation reaches this repository alone (a `doctor` line reads `GET /installation/repositories` with a minted token and refuses unless it lists `config.repo` and nothing else); the key is rotated when a builder misbehaves; the elephant minting at launch was rejected (§3.1: a round outlives an hour) | U15 |
+| The App's private key readable by the builder session (it mints in the builder's environment) | a misbehaving builder mints tokens for every repository the App is installed on | the key is a file the path names, never PEM text in the environment; the installation reaches this repository alone (a `doctor` line reads `GET /installation/repositories` with a minted token and refuses unless it lists `config.repo` and nothing else); a builder runs as the owner's OS user, so code it writes can reach what that user can on either path: the fence is the protection on `<base>` and the owner's eyes on the diff, and `collect` records a foreman high when a head's diff carries a PEM private-key block or a GitHub token form (`ghs_`, `ghp_`, `github_pat_`), after which the key is rotated; the elephant minting at launch was rejected (§3.1: a round outlives an hour) | U15 |
 
 **Cost and timeline (estimate, not a promise).** One leavemealone phase: spec review 2–3 rounds
 × 6 goldfish; plan review 2 rounds × 13 units × 3 goldfish; a wave of 5 builders × 2 rounds with 2
@@ -401,7 +401,10 @@ Rules that span phases:
   consumed by the other two: a round is **clean** when no high or medium finding is unsettled;
   the artifact is **converged** when a round is `completed` (§8) AND clean AND no high or medium
   finding in it is a regression of a prior round's fix AND the round's `artifact_sha256` equals
-  the artifact's current bytes where the kind has a byte test (§8: a head has none). Lows never block. A review is **at its
+  the artifact's current bytes where the kind has a byte test (§8: a head has none). Lows never
+  block, and after a clean round a low is fixed only while another counted round can run; at
+  the cap it is settled `declined` (or left: it never blocks), the approval's journal line names
+  it, and the artifact is approved at the clean round's bytes. A review is **at its
   cap** when its counted rounds ≥ 5 + its `continue` rulings; at the cap a ruling is required
   (§13.2) before any further round; `accept` makes the artifact converged (`converged: by ruling
   <id>`); `continue` may be ruled at most once per review cycle; after `stop` no ruling is
@@ -540,8 +543,10 @@ excepted (§9.3). No lock file.
     derived as §8 says and stored with the round). Review ids carry a cycle:
     `spec-<spec-slug>-c<n>`, `spec-<spec-slug>-integrate-c<n>`, `plan-<unit>-c<n>`,
     `head-<unit>-c<n>`; `review open` on an artifact whose latest cycle is closed (`accept`,
-    `stop`, or a spec change) starts the next cycle, and "the review" of an artifact means its
-    latest cycle.
+    `stop`, or a spec edit after an approval record, §5; never a clean round whose bytes moved,
+    which is the same cycle's `fixed:` state, §8) starts the next cycle, and "the review" of an
+    artifact means its latest cycle; `latest_cycle` asks `evaluate` for that, not a stored
+    field (U16).
   - `launches/<unit>.json` — `launches[]` with `round` (the launch count), `worktree`, `branch`,
     `started_at`, `status` ∈ `running | exited <code> | interrupted`, `result_file`,
     `prompt_sha256`.
@@ -673,7 +678,10 @@ Spec review specifics:
   finding(s) await the owner: <ids>` is printed with the one question and the owner's Approve
   (`--yes`) is the sight; in leavemealone-mode the converged record is the approval; in both
   modes the ids go into the record's `escalated[]` and the journal line, and no decision point
-  is added to §13.2. `approve-spec`
+  is added to §13.2; `escalated[]` has one reader: `graph` refuses the plan unless every id in
+  it appears in the spec's `## Units` section (a row that takes the finding, as §12's integrate
+  path writes one) or in a `D<n>` line of the plan file, so an escalated finding is built or
+  decided, never frozen unseen (anti-goal 6). `approve-spec`
   then adds and commits the spec and
   `.superegm/config.json` by path, ignoring other changes in the tree, on the owner's current
   branch with the message `superegm: approve <spec-slug> at review <id>`, with
@@ -829,7 +837,9 @@ rules; there is no third checker):
   rule and no other Markdown awareness (anti-goal 9): `scan_text` skips a fenced code block and
   an inline code span, so a `@` inside either (`@pytest.mark.parametrize`) is never a mention.
   The grammar is CommonMark's smallest: a fence opens at a line whose first non-blank text is
-  three or more backticks or tildes (any indent, so a fence under a Step's number counts) and
+  three or more backticks or tildes with, for backticks, no further backtick on that line (a
+  one-line span opened and closed by three backticks is no opener; the indent is not bounded,
+  since a Step's fence sits under its number and a body carries no indented code block) and
   closes at the next line of at least as many of the same character, so a nested shorter fence
   stays inside it, and an unclosed fence runs to the end; a span is the text between a backtick
   run and the next run of equal length on the same line, paired left to right and never
@@ -1104,23 +1114,33 @@ placeholder, `{{gh}}`, in every `gh` call; `launch-builder` fills it with the sh
 path on this path and with `gh` on the machine-account path, and the launched allow-list
 carries the `gh` prefixes of `config.builder.allowed_tools` rewritten to that path
 (`Bash(<bin>/gh pr create:*)`) and not the bare ones, so a bare `gh …` is refused by the
-allow-list and no `PATH` order is assumed (§4). The launched command also unsets `GH_TOKEN` and
-`GITHUB_TOKEN` (`env -u`) and sets `GH_CONFIG_DIR` to an empty directory beside the shim, so a
-real `gh` reached by any route holds no credential at all, the owner's `gh auth` login included,
-and fails closed. Git's credential helper is the shim's `gh auth git-credential` by absolute
-path behind the empty reset entry (`credential.https://github.com.helper=` then
-`!<bin>/gh auth git-credential`, the form `gh auth setup-git` writes), which clears the helpers
-the owner's system and global gitconfig name (`osxkeychain` on a Mac) so only the shim answers;
-the `GIT_CONFIG_KEY_n` pairs of the launched command's environment carry those two entries, the
+allow-list and no `PATH` order is assumed (§4). The launched command sets `GH_TOKEN` to a sentinel that is no token (`superegm-no-token`), as
+the machine-account path's `GH_TOKEN` masks the keyring today: the shim overrides it with the
+mint, and a real `gh` reached by any other route sends the sentinel and fails with 401 instead
+of the owner's keyring login (`GITHUB_TOKEN` unset). Git reads none of the owner's
+configuration: `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` at `/dev/null`,
+`GIT_SSH_COMMAND=false` (every SSH transport fails closed, an owner's `pushInsteadOf` to SSH
+included), `GIT_ASKPASS` and `SSH_ASKPASS` unset, `GIT_TERMINAL_PROMPT=0` and `core.askPass`
+empty (a failing helper ends the search); the credential helper is the shim's
+`gh auth git-credential` by absolute path behind the empty reset entry
+(`credential.https://github.com.helper=` then `!<bin>/gh auth git-credential`, the form
+`gh auth setup-git` writes), which clears a helper the repository's own `.git/config` names;
+the `GIT_CONFIG_KEY_n` pairs of the launched command's environment carry those entries, the
 HTTPS `insteadOf` rewrites, and `user.name` and `user.email` in the identity below, and no git
-config file is written (§4). On this path `launch` and `launch-builder` replace the token
+config file is written (§4). `superegm-token` runs `openssl` by the absolute path
+`launch-builder` resolved (`shutil.which("openssl")`, refusing the launch when there is none),
+as the shim runs `gh`; `doctor` and `launch-builder` refuse an `artifacts_dir` with whitespace
+on this path (the paths are written unquoted into the orders, the prefixes and the helper
+line). On this path `launch` and `launch-builder` replace the token
 predicates (the token set, its login not an owner, the collaborator role) with `doctor`'s App
 lines below. Tokens expire hourly and the helper mints on demand, so a builder that runs for
 hours never fails on expiry. The exposure this buys: the builder session can read the key file
 the path names (it mints in the builder's environment), so the installation must reach this
 repository alone (`doctor` reads `GET /installation/repositories` with a minted token and
-refuses unless `total_count` is 1 and that one is `config.repo`), the key is rotated when a
-builder misbehaves, and §4.1 and the U15 row say so. Identity: the builder login is
+refuses unless `total_count` is 1 and that one is `config.repo`), and a head whose diff carries
+a PEM private-key block or a GitHub token form (`ghs_`, `ghp_`, `github_pat_`) gets a `foreman`
+high from `collect` (the content check beside the scope-path check), after which the owner
+rotates the key; §4.1 and the U15 row say so. Identity: the builder login is
 `<slug>[bot]` (`GET /app` with the JWT confirms the configured slug and id); commits are
 authored `"<slug>[bot]" <<bot user id>+<slug>[bot]@users.noreply.github.com>`, the id being the
 bot user's (`GET /users/<slug>[bot]`, a public read `launch` makes once per wave and records
@@ -1153,10 +1173,11 @@ no scopes header and is reported `fine-grained: permissions not probed`); and, i
 and never a failure, that `graphify` is on `PATH`. On the App path (`builder.app` set) its
 lines are instead: the credential path in use (a refusal naming both variables when the
 machine account's is also set); the variable `private_key_env` names (`SUPEREGM_APP_KEY` by
-default) set and the key file readable, and neither `GH_TOKEN` nor `GITHUB_TOKEN` set in this
-shell; `openssl` present; `git credential fill` for `https://github.com` under the empty reset
-entry and a probe helper answers the probe's username (the owner's helpers cleared, as the
-launched pairs clear them); the JWT mints (`GET /app` answers with the configured slug and id); the App is
+default) set and the key file readable; `openssl` and `gh` resolve on this machine (the paths
+the launch bakes in); `artifacts_dir` holds no whitespace; under the launched environment minus
+the shim, `gh auth token` prints the sentinel, `git remote get-url --push origin` starts with
+`https://`, and `git credential fill` for `https://github.com` with a failing helper fails (no
+askpass, no terminal and no owner helper answers); the JWT mints (`GET /app` answers with the configured slug and id); the App is
 installed on the repository with permissions ⊇ {contents: write, pull_requests: write, issues:
 write, metadata: read} (the builder's status, deviation and reply comments need `issues:
 write`) and without `workflows`, read from the installation's own `permissions`
@@ -1225,8 +1246,8 @@ every `**Decision D<n>:**` and `**Ruling:**` issue comment **whose author is not
 account**, and from round 2 the foreman's review comments on the PR (the platform passes it as one
 argument, §4; a prompt past the platform's limit fails the launch, which `record-launch --exit`
 records). The launched command carries: the builder profile;
-`GH_TOKEN` from `builder.gh_token_env` (on the App path, `GH_TOKEN` and `GITHUB_TOKEN` unset, `GH_CONFIG_DIR`
-empty, the helper reset and `<bin>/gh auth git-credential` instead), with the HTTPS push rewrite and credential helper in its
+`GH_TOKEN` from `builder.gh_token_env` (on the App path, the sentinel `GH_TOKEN`, the owner's git configuration and
+SSH shut out, the helper reset and `<bin>/gh auth git-credential` instead), with the HTTPS push rewrite and credential helper in its
 environment; `SUPEREGM_ROLE=builder` and `SUPEREGM_RUNCARD`; `claude -p` with the prompt file's
 content, the configured model and permission mode; the allow-list plus a push prefix for the
 unit's own branch and `Bash(<first word>:*)` for every command `run_commands` returns from the
@@ -1554,8 +1575,8 @@ Landed: U01, U02, U03, U04, U05, U06, U07, U08, U09, U09b, U10, U10b, U11 (1.0.0
 | U12 | Orient (§9.3): `skills/orient/SKILL.md` (create, with `assets/icon.svg` and `test_scenarios.yaml`), `skills/orient/references/graphify.md` (create: how orient drives graphify, the flags, the fallback), `skills/plan/scripts/superegm/orient.py` (create), `skills/plan/scripts/superegm/__init__.py` (modify: the `orient` and `orient_unit` store kinds, `SUBCOMMANDS`), `skills/plan/scripts/superegm/launch_builder.py` (modify: the in-process `orient` call on the launch's ref before `add_worktree`, its refusal, and the `# Orient` prompt section), `skills/wave/references/builder_orders.md` (modify: the orders line), `skills/plan/SKILL.md` and `skills/review-plan/SKILL.md` (modify: the orient sentence each), `skills/using-superegm/SKILL.md` (modify: the typed list), `scripts/pack_plugin.py`, `tests/unit/test_effects.py`, `tests/unit/test_skeleton.py`, `tests/unit/test_packaging.py`, `tests/unit/test_helper.py` (modify: the skill and module lists, `MODULES` included), `tests/unit/test_builders.py` (modify: the `orient` call and the refusal), `README.md` (modify: the Skills list), `tests/unit/test_orient.py` (create), `tests/fixtures/orient/` (create: a small hand-written graph and a fixture tree) | — | L |
 | U13 | File adopts existing issues (§9.1, §10): `skills/plan/scripts/superegm/__init__.py` (modify: `Issue` parsed as an optional field, not added to `FIELDS`), `graph.py` (modify: the `Issue` field's `#<n>` in the spec's `## Units` section), `dry_run.py` (modify: the refusals and the `### edit` heading), `gate.py` (modify: the entry's two trailing fields), `apply.py` (modify), `skills/file/SKILL.md` and `skills/plan/references/handoff_plan.md` (the plan skill's schema reference; modify: the field and the dry-run line), `skills/plan/SKILL.md` and `skills/review-plan/SKILL.md` (modify: the landed-row sentence each, §9.1), `tests/unit/test_file.py`, `tests/unit/test_plan.py` (modify) | U12 | L |
 | U14 | Launch policy: owners set, PR block, the builder-token recipe and `doctor` (§11): `skills/plan/scripts/superegm/launch.py`, `launch_builder.py` (modify: the owners, role and team checks, `profile_problem`'s hooks check, the PR block read from the ref), `__init__.py` (modify: `DEFAULT_CONFIG` keys, `SUBCOMMANDS`), `init.py` (modify: `owners` and the STEPS text), `doctor.py` (create), `skills/wave/references/builder_orders.md` (modify), `README.md` (modify: step 1 and one sentence naming `doctor`), `docs/claude.md` and `docs/getting_started.md` (modify: the three keys and step 1, pointing to README step 1), `skills/plan/references/handoff_config.md` (modify: brought to `.superegm/config.json`'s key set, the three keys included), `tests/unit/test_builders.py`, `tests/unit/test_helper.py`, `tests/unit/test_leavemealone_finish.py` (modify: the README pins follow the new step 1), `tests/unit/test_packaging.py` (modify), `tests/unit/test_doctor.py` (create) | U12, U13 | L |
-| U15 | The builder as a GitHub App (§11, §16; one identity per repository: `builder.app` null, the machine account; set, the App, with `launch` and `doctor` refusing when the machine account's variable is also set; the per-launch `<unit>_r<n>_bin/` with `superegm-token` and the `gh` shim at an absolute path (the orders' `{{gh}}` placeholder, the rewritten allow-list prefixes, no `PATH`), the git identity and the credential-helper reset through the launched command's environment, the mint over `urllib`, `builder_login` as `<slug>[bot]`, the App as a bypass actor refused, `doctor`'s App lines; the key read by path only, its exposure to the builder session named in §4.1): `skills/plan/scripts/superegm/builder_token.py` (create), `launch_builder.py`, `launch.py`, `prepare.py`, `decision.py`, `doctor.py`, `init.py`, `__init__.py` (modify: `DEFAULT_CONFIG.builder.app`, `SUBCOMMANDS`), `README.md`, `docs/claude.md`, `docs/faq.md`, `docs/privacy.md`, `skills/plan/references/handoff_config.md`, `skills/wave/references/builder_orders.md` (modify), `tests/unit/test_builder_token.py` (create), `tests/unit/test_builders.py`, `test_doctor.py`, `test_foreman.py`, `test_wave.py`, `test_helper.py`, `test_leavemealone_finish.py`, `test_packaging.py` (modify); tests fake the mint's `urllib.request` transport and use conftest's fake `gh` for the rest, with a test RSA key generated by `openssl genrsa` in a tmp dir (skipped with a reason when `openssl` is absent) | — (U14 landed) | L |
-| U16 | The five 1.0.0 defects: the convergence rule with its byte predicate, `review status`'s `fixed:` line and the `review settle` and `review rule` refusals in that state, `approve-spec`'s `escalated[]` line and record and `config.commit_trailer` (§8), `scan_text` over fences and spans (§9.1), `judges record`'s `saw:` line (§13.1): `skills/plan/scripts/superegm/review.py`, `judges.py`, `approve_spec.py` (modify: the `escalated[]` line and record, the trailer in `commit_by_path`), `__init__.py` (modify: `scan_text`, `DEFAULT_CONFIG.commit_trailer`), `skills/review-spec/references/review_loop.md`, `skills/review-spec/SKILL.md`, `skills/review-plan/SKILL.md`, `skills/judges/SKILL.md`, `skills/plan/references/handoff_config.md` (modify: the wording, the cap options, the key), `tests/unit/test_review.py`, `test_judges.py`, `test_plan.py`, `test_helper.py` (modify) | — | M |
+| U15 | The builder as a GitHub App (§11, §16; one identity per repository: `builder.app` null, the machine account; set, the App, with `launch` and `doctor` refusing when the machine account's variable is also set; the per-launch `<unit>_r<n>_bin/` with `superegm-token` and the `gh` shim at an absolute path (the orders' `{{gh}}` placeholder, the rewritten allow-list prefixes, no `PATH`), the git identity and the credential-helper reset through the launched command's environment, the mint over `urllib`, `builder_login` as `<slug>[bot]`, the App as a bypass actor refused, `doctor`'s App lines; the key read by path only, its exposure to the builder session named in §4.1): `skills/plan/scripts/superegm/builder_token.py` (create), `launch_builder.py`, `launch.py`, `prepare.py`, `decision.py`, `doctor.py`, `init.py`, `collect.py`, `__init__.py` (modify: `DEFAULT_CONFIG.builder.app`, `SUBCOMMANDS`, the `launches` kind's directory form for `<unit>_r<n>_bin/` and `kind_of`'s inverse), `README.md`, `docs/claude.md`, `docs/faq.md`, `docs/privacy.md`, `skills/plan/references/handoff_config.md`, `skills/wave/references/builder_orders.md` (modify), `tests/unit/test_builder_token.py` (create), `tests/unit/test_builders.py`, `test_doctor.py`, `test_foreman.py`, `test_wave.py`, `test_helper.py`, `test_leavemealone_finish.py`, `test_packaging.py` (modify); tests fake the mint's `urllib.request` transport and use conftest's fake `gh` for the rest, with a test RSA key generated by `openssl genrsa` in a tmp dir (skipped with a reason when `openssl` is absent) | — (U14 landed) | L |
+| U16 | The five 1.0.0 defects: the convergence rule with its byte predicate, `review status`'s `fixed:` line and the `review settle` and `review rule` refusals in that state, `approve-spec`'s `escalated[]` line and record and `config.commit_trailer` (§8), `scan_text` over fences and spans (§9.1), `judges record`'s `saw:` line (§13.1): `skills/plan/scripts/superegm/review.py` (modify: the byte predicate, `latest_cycle` through `evaluate`, the two refusals), `judges.py`, `approve_spec.py` (modify: the `escalated[]` line and record, the trailer in `commit_by_path`), `graph.py` (modify: the `escalated[]` check), `__init__.py` (modify: `scan_text`, `DEFAULT_CONFIG.commit_trailer`), `skills/review-spec/references/review_loop.md`, `skills/review-spec/SKILL.md`, `skills/review-plan/SKILL.md`, `skills/judges/SKILL.md`, `skills/plan/references/handoff_config.md` (modify: the wording, the cap options, the key), `tests/unit/test_review.py`, `test_judges.py`, `test_plan.py`, `test_helper.py` (modify) | — | M |
 
 Shared files of the 1.0.0 build: `test_helper.py` is U03's alone. `body.py` is U03's and then U05's (the derived Step
 defaults), which U03 blocks. Each workflow SKILL.md stub U01 creates is filled
@@ -1593,8 +1614,10 @@ repository; a unit whose section is not yet in the store's `handoff_plan.md` (re
 manifests, `docs/releases.md`), the tag and the release packed by `prepare_release.py` are the
 owner's by-hand steps after the three merge, as they were for 1.0.0.
 
-Amendment 3 units (1.1.1): U15 and U16 are filed from this spec as a third handoff,
-`2026-11-04-superegm-1.1.1`, under the same landed-row rule (a plan for it carries sections for
+Amendment 3 units (1.1.1): U15 and U16 are filed from this spec as a third handoff
+(id `2026-11-03-superegm-<6 hex of its approval>`, the helper's one form; the owner's name for
+it, `2026-11-04-superegm-1.1.1`, is the tracking issue's title and nothing else), under the
+same landed-row rule (a plan for it carries sections for
 U15 and U16 only). U15 is blocked by nothing (U14, whose files it edits, landed; a landed row is
 no plan unit, so a `Blocked by` never names it); U16 consumes nothing from U15 but edits two
 files after it: `skills/plan/scripts/superegm/__init__.py` and `tests/unit/test_helper.py` are
@@ -1670,5 +1693,5 @@ Interfaces (the names the plans will carry):
 
 Waves: {U01} → {U02, U03} → {U04, U05, U08, U09} → {U06, U07, U09b, U10} → {U10b} → {U11}; then,
 as a second handoff (`2026-11-03-superegm-<6 hex>`), {U12} → {U13} → {U14}, and version 1.1.0
-after all three merge; then, as a third handoff (`2026-11-04-superegm-1.1.1`), {U15} → {U16}, and
+after all three merge; then, as a third handoff (`2026-11-03-superegm-<6 hex>`), {U15} → {U16}, and
 version 1.1.1 after both merge.
