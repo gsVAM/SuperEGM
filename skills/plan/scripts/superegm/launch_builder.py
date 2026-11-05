@@ -13,7 +13,7 @@ from pathlib import Path
 import superegm as core
 from superegm import body, orient
 from superegm.builder_token import key_path, tool
-from superegm.launch import builder_login, load_launches, terminal
+from superegm.launch import builder_email, builder_login, load_launches, terminal
 
 WRITES = frozenset(["launches", "orient_unit"])  # the store kinds this subcommand writes
 SKILLS = frozenset(["wave"])  # the skills whose card this subcommand accepts
@@ -64,6 +64,8 @@ def prepare(args, card):
   launched_gh = str(st.path("launches", f"{unit}_r{rnd}_bin", "gh")) if app else gh  # the shim, or the real gh by absolute path
   tools = allowed_tools(builder_config["allowed_tools"], branch, issue_body, launched_gh)
   identity = (card.get("builder") or [None])[-1]
+  if not identity and app:  # a re-typed wave relaunching while launch is held off: every reader derives the App login (spec section 11)
+    identity = {"login": builder, "email": builder_email(builder)}  # `builder` is `app_login(config)`, `<slug>[bot]`, on this path
   if not identity:
     raise core.HandoffError("the wave card records no builder: run launch first")
   pr = (record.get("pr") or {}).get("number") if rnd >= 2 else None
@@ -71,6 +73,8 @@ def prepare(args, card):
   if pr:
     ref = f"refs/superegm/pr/{pr}"
     core.run_git(["fetch", "--no-write-fetch-head", st.config["remote"], f"+refs/pull/{pr}/head:{ref}"], handoff.repo_root)
+  elif rnd >= 2:  # no PR yet (decision point 3's `relaunch`): the retained local branch is the tree the builder gets
+    ref = f"refs/heads/{branch}"
   pr_block = pr_block_text(handoff.repo_root, ref, config["pr_block_file"]) if config["pr_block_file"] else None
   # The launch's tree, before any worktree: an orient refusal is an ordinary precondition.
   orient_text = core.read_text(orient.orient_unit(st, handoff.repo_root, ref, unit))
@@ -131,8 +135,6 @@ def refusal(store, state, config, unit, rnd, builder):
   issue = core.gh_json(["api", f"repos/{config['repo']}/issues/{record['number']}"]) or {}
   if body.normalise(filed_body(state, unit)) != body.normalise(issue.get("body") or ""):
     return f"issue #{record['number']} body differs from the filed body"
-  if rnd >= 2 and not (record.get("pr") or {}).get("number"):
-    return f"{unit} round {rnd} has no recorded PR: run status first"
   return None
 
 
@@ -205,8 +207,9 @@ def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr,
 
 def add_worktree(repo_root, store, unit, rnd, branch, pr):
   """A fresh worktree for the launch on the unit's branch: round 1 from `refs/superegm/base`,
-  later rounds at the PR tip (`refs/superegm/pr/<n>`, fetched by `prepare`) after detaching the
-  earlier launches' worktrees (nothing in them is removed; that is `clean`'s)."""
+  later rounds at the PR tip (`refs/superegm/pr/<n>`, fetched by `prepare`) or, with no PR yet
+  (decision point 3's `relaunch` after an exit without one), at the retained local branch, after
+  detaching the earlier launches' worktrees (nothing in them is removed; that is `clean`'s)."""
   path = store.path("worktrees", unit, f"r{rnd}")
   path.parent.mkdir(parents=True, exist_ok=True)
   if rnd == 1:
@@ -216,7 +219,8 @@ def add_worktree(repo_root, store, unit, rnd, branch, pr):
     if earlier.is_relative_to(path.parent.resolve()) and earlier.is_dir():
       core.run_git(["switch", "--detach"], earlier)
   core.run_git(["worktree", "prune"], repo_root, check=False)
-  core.run_git(["branch", "-f", branch, f"refs/superegm/pr/{pr}"], repo_root)
+  if pr:
+    core.run_git(["branch", "-f", branch, f"refs/superegm/pr/{pr}"], repo_root)
   core.run_git(["worktree", "add", str(path), branch], repo_root)
   return path
 
@@ -242,7 +246,8 @@ def command_line(config, worktree, prompt, result, runcard, tools, gh, login, em
   `GH_TOKEN` as the shell variable expands (never its value) or, on the App path, the sentinel the shim
   overrides, the role and card, the launched git pairs (`gh`, the shim on the App path, as the credential
   helper by absolute path; the identity `login` and `email` from the wave card), `claude -p` on the prompt
-  file, the result and exit files."""
+  file with `--setting-sources user` (the builder sits in the target repository, whose project settings
+  and SessionStart hooks it must not run: the profile's settings alone), the result and exit files."""
   b = config["builder"]
   pairs = launched_pairs(gh, login, email)
   for value in (worktree, prompt, result, b["profile_dir"], b["model"], b["permission_mode"], runcard, *tools, *(v for _, v in pairs)):
@@ -252,5 +257,5 @@ def command_line(config, worktree, prompt, result, runcard, tools, gh, login, em
   unset, env = " ".join(f"-u {k}" for k in UNSET), " ".join(f"{k}='{v}'" for k, v in pairs)
   return (f"cd '{worktree}' && env {unset} CLAUDE_CONFIG_DIR='{b['profile_dir']}' {token} "
           f"SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{runcard}' {env} "
-          f"claude -p \"$(cat '{prompt}')\" --model '{b['model']}' --permission-mode '{b['permission_mode']}' "
+          f"claude -p \"$(cat '{prompt}')\" --model '{b['model']}' --permission-mode '{b['permission_mode']}' --setting-sources user "
           f"--allowedTools '{','.join(tools)}' --output-format json > '{result}'; echo $? > '{result}.exit'")
