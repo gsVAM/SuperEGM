@@ -1,6 +1,6 @@
 {
   "name": "superegm",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "One Claude Code plugin for the whole workflow: brainstorm, spec review, plan, plan review, file, wave, integrate.",
   "author": {
     "name": "gsVAM"

@@ -164,9 +164,9 @@ def read_json(path: str) -> dict:
   return json.loads((ROOT / path).read_text(encoding="utf-8"))
 
 
-def test_manifests_name_superegm_1_0_0() -> None:
+def test_manifests_name_superegm_1_1_0() -> None:
   portable, manifest = read_json("plugin.json"), read_json(".claude-plugin/plugin.json")
-  assert (portable["name"], portable["version"], portable["license"]) == ("superegm", "1.0.0", "Apache-2.0")
+  assert (portable["name"], portable["version"], portable["license"]) == ("superegm", "1.1.0", "Apache-2.0")
   assert "extensions" not in portable and "hooks" not in manifest
   for key in ("name", "version", "description", "author", "homepage", "repository", "license"):
     assert manifest[key] == portable[key], key
