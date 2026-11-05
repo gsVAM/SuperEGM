@@ -24,6 +24,7 @@ EXTERNAL = {
     "finishing-a-development-branch": ("github-write", "remote-branch", "state-store"),
     "integrate": ("state-store", "start-session"),
     "judges": ("start-session", "state-store", "github-write"),
+    "orient": ("state-store",),
 }
 WORKING_TREE = {"brainstorming", "draft", "drift-report", "test-driven-development",
                 "systematic-debugging", "verification-before-completion", "writing-skills"}

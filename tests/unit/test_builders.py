@@ -41,6 +41,12 @@ def git(args, cwd):
   return subprocess.run(["git", *args], cwd=str(cwd), check=True, capture_output=True, text=True).stdout
 
 
+@pytest.fixture(autouse=True)
+def no_graphify(monkeypatch):
+  from superegm import orient
+  monkeypatch.setattr(orient, "GRAPHIFY", "superegm-no-such-tool")
+
+
 def put(path, text):
   """A store file as a subcommand left it (the store's folders do not exist before the first write)."""
   path.parent.mkdir(parents=True, exist_ok=True); path.write_text(text, encoding="utf-8")
@@ -295,6 +301,11 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   assert line.endswith(f"' --output-format json > '{result}'; echo $? > '{result}.exit'")
   assert "ghp_builder" not in out
   assert not s.path("launches", f"{UNIT}.json").exists()           # the record is record-launch's
+  tree = git(["rev-parse", "refs/superegm/base^{tree}"], world.repo).strip()
+  unit_file = s.path("orient_unit", f"{UNIT}.md").read_text(encoding="utf-8")
+  assert unit_file.startswith(f"orient: tree {tree} · graphify: not installed · trimmed: nothing\n## src/worker.py (create)\nsiblings: none\ntests: none\n")
+  assert f"\n\n---\n\n# Builder orders\n\n{orders}\n\n---\n\n# Orient\n\n{unit_file}\n\n---\n\n# Comments on issue #{ISSUE}\n" in prompt
+  assert "read the `# Orient` section before Step 1" in orders
 
 
 def test_record_launch_appends_running_then_records_the_exit(world, monkeypatch):
@@ -334,6 +345,7 @@ def test_record_launch_appends_running_then_records_the_exit(world, monkeypatch)
   ("profile-hooks", "holds hooks"),
   ("body", "issue #7 body differs from the filed body"),
   ("no-pr", "U07 round 2 has no recorded PR: run status first"),
+  ("orient", "orient: U07 is not in the plan: run graph --plan first"),
 ])
 def test_launch_builder_refuses_each_precondition(world, monkeypatch, case, reason):
   s, card, hid, _ = seed(world)
@@ -358,6 +370,8 @@ def test_launch_builder_refuses_each_precondition(world, monkeypatch, case, reas
     (profile / "settings.json").write_text('{"hooks": {"SessionStart": []}}', encoding="utf-8")
   if case == "body":
     world.gh.issues[ISSUE]["body"] += "\nedited by hand\n"
+  if case == "orient":
+    s.path("plan").write_text(s.path("plan").read_text(encoding="utf-8").replace("### U07:", "### U99:"), encoding="utf-8")
   code, out = world.run("launch-builder", "--unit", UNIT, "--round", rnd, "--runcard", card)
   assert code == 1 and "launch-builder: " in out and reason in out, out
   assert not s.path("worktrees", UNIT).exists() and not s.path("launches", f"{UNIT}_r{rnd}_prompt.md").exists()
@@ -411,6 +425,8 @@ def test_launch_builder_round_2_detaches_the_earlier_worktree_and_carries_the_re
   r2 = s.path("worktrees", UNIT, "r2")
   assert git(["branch", "--show-current"], r2).strip() == branch and git(["rev-parse", "HEAD"], r2).strip() == head
   prompt = s.path("launches", f"{UNIT}_r2_prompt.md").read_text(encoding="utf-8")
+  unit_file = s.path("orient_unit", f"{UNIT}.md").read_text(encoding="utf-8")
+  assert unit_file.startswith(f"orient: tree {git(['rev-parse', head + '^{tree}'], world.repo).strip()}") and "## src/worker.py (create)\ndef w(): pass\ntests: none\n" in unit_file
   assert f"\n\n---\n\n# Review comments on PR #{PR}\n\n## owner · review 9 on {head[:7]}\n**Review round 1" in prompt and "self review" not in prompt
   assert out.strip().splitlines()[-1].startswith(f"cd '{r2}' && env ")
 

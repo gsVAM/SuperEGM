@@ -1,0 +1,18 @@
+# Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
+# Added by SuperEGM (gsVAM), 2026: the orient skill's scenario (spec section 9.3).
+
+skill: "orient"
+description: "Behavioral evaluation scenario suite for the orient skill."
+
+scenarios:
+  - scenario_id: "orient_reads_its_skill"
+    description: "The agent follows the orient skill when asked."
+    eval_type: "deterministic"
+    system_prompt:
+      skill_file: "skills/orient/SKILL.md"
+    turns:
+      - user_input: "Copy what the repository says about unit U12 into the store."
+        assertions:
+          - type: "required_pattern"
+            pattern: "(?i)orient"
+            message: "The response must name the orient skill."

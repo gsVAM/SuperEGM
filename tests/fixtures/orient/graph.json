@@ -1,0 +1,79 @@
+{
+  "directed": true,
+  "multigraph": false,
+  "graph": {},
+  "nodes": [
+    {
+      "id": "src/worker.py::work",
+      "label": "work",
+      "source_file": "src/worker.py",
+      "source_location": "L6",
+      "community": 0
+    },
+    {
+      "id": "src/worker.py::Worker",
+      "label": "Worker",
+      "source_file": "src/worker.py",
+      "source_location": "L15",
+      "community": 0
+    },
+    {
+      "id": "src/queue.py::enqueue",
+      "label": "enqueue",
+      "source_file": "src/queue.py",
+      "source_location": "L3",
+      "community": 1
+    },
+    {
+      "id": "web/index.ts::render",
+      "label": "render",
+      "source_file": "web/index.ts",
+      "source_location": "L1",
+      "community": 1
+    },
+    {
+      "id": "tests/check_worker.py::test_work",
+      "label": "test_work",
+      "source_file": "tests/check_worker.py",
+      "source_location": "L1",
+      "community": 0
+    },
+    {
+      "id": "src/worker.py",
+      "label": "worker.py",
+      "source_file": "src/worker.py",
+      "source_location": null,
+      "community": 0
+    }
+  ],
+  "links": [
+    {
+      "source": "src/queue.py::enqueue",
+      "target": "src/worker.py::work",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0
+    },
+    {
+      "source": "src/worker.py::Worker",
+      "target": "src/worker.py::work",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0
+    },
+    {
+      "source": "src/worker.py::work",
+      "target": "web/index.ts::render",
+      "relation": "uses",
+      "confidence": "INFERRED",
+      "confidence_score": 0.5
+    },
+    {
+      "source": "tests/check_worker.py::test_work",
+      "target": "src/worker.py::work",
+      "relation": "calls",
+      "confidence": "AMBIGUOUS",
+      "confidence_score": 0.2
+    }
+  ]
+}

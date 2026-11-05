@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand.
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
@@ -184,7 +184,7 @@ class Store:
            "units": "handoff_units.json", "bodies": "handoff_bodies.md"}
   # The Interfaces block's longer names for the same kinds.
   ALIASES = {"handoff_plan": "plan", "handoff_units": "units", "handoff_bodies": "bodies", "wave_report": "report"}
-  KEYED = ("unit", "foreman", "launches", "worktrees", "review")
+  KEYED = ("unit", "foreman", "launches", "worktrees", "review", "orient_unit")
 
   def __init__(self, root: Path, handoff_id: str | None = None, config: dict | None = None):
     self.root = Path(root)
@@ -199,7 +199,7 @@ class Store:
       return self.root / f"wave_{parts[0]}_report.md"
     if kind in ("approvals", "runcards"):
       return self.root / kind / (parts[0] if parts[0].endswith(".json") else f"{parts[0]}.json")
-    if kind in ("reviews", "judges", "questions", "file"):
+    if kind in ("reviews", "judges", "questions", "orient", "file"):
       return self.root.joinpath(*([kind] if kind != "file" else []), *parts)
     if kind not in self.KEYED:
       raise HandoffError(f"unknown store kind {kind}")
@@ -210,6 +210,8 @@ class Store:
       return base / f"unit_{parts[0]}.md"
     if kind == "foreman":
       return base / "foreman" / f"{parts[0]}.json"
+    if kind == "orient_unit":
+      return base.joinpath("orient", *parts)
     if kind == "launches":
       name = parts[0] if "." in parts[0] else f"{parts[0]}.json"
       return base.joinpath("launches", name, *parts[1:])
@@ -228,11 +230,13 @@ class Store:
       if parts[0] in names:
         return names[parts[0]]
       return "report" if re.fullmatch(r"wave_\d+_report\.md", parts[0]) else "file"
-    if parts[0] in ("approvals", "runcards", "reviews", "judges", "questions"):
+    if parts[0] in ("approvals", "runcards", "reviews", "judges", "questions", "orient"):
       return parts[0]
     if re.fullmatch(r"[0-9a-f]{6}", parts[0]):
       if len(parts) == 2 and re.fullmatch(r"unit_.+\.md", parts[1]):
         return "unit"
+      if parts[1] == "orient":
+        return "orient_unit"
       if parts[1] in self.KEYED:
         return parts[1]
     return "file"
@@ -1673,7 +1677,7 @@ def run_terminated(folder) -> bool:
 SUBCOMMANDS = ("init", "runcard", "approve_spec", "graph", "scan", "review", "gate", "dry_run", "apply",
                "verify", "status", "launch", "launch_builder", "record_launch", "foreman", "prepare",
                "collect", "tdd_order", "decide", "decision", "interrupt", "clean", "report", "close", "judges",
-               "review_plan", "doctor")
+               "review_plan", "orient", "doctor")
 
 
 def add_parser(subparsers, name, help_text, *, runcard=True):

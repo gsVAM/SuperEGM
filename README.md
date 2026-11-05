@@ -153,6 +153,7 @@ One skill per phase, nothing chains; the owner pushes the approval commit betwee
 - `/superegm:review-spec`: the adversarial spec review, run to convergence
 - `/superegm:plan`: cut the approved spec into TDD-shaped build units
 - `/superegm:review-plan`: review the plan against the spec before anything is filed
+- `/superegm:orient`: copy what the repository says about a unit into the store, an extractor that never summarizes
 - `/superegm:file`: file the confirmed plan as GitHub issues
 - `/superegm:wave`: launch, review and land a wave of units
 - `/superegm:interrupt`: pause a running wave at the next safe point
