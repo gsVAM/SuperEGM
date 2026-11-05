@@ -303,6 +303,14 @@ def test_config_and_label_renames(world, where, expected):
     assert (world.artifacts / expected).is_file() and not (world.artifacts / "handoff_state.json").exists()
 
 
+def test_commit_trailer_defaults_empty_and_must_be_a_string(world):
+  import superegm
+  assert superegm.DEFAULT_CONFIG["commit_trailer"] == "" and superegm.load_config(world.repo)["commit_trailer"] == ""
+  set_config(world, repo=REPO, commit_trailer=1)
+  with pytest.raises(superegm.HandoffError, match="commit_trailer must be a string"):
+    superegm.load_config(world.repo)
+
+
 def test_init_writes_the_config_with_every_key_and_refuses_another_base(tmp_path, capsys, monkeypatch):
   repo = make_repo(tmp_path / "fresh")
   monkeypatch.chdir(repo)
@@ -315,7 +323,8 @@ def test_init_writes_the_config_with_every_key_and_refuses_another_base(tmp_path
   config = json.loads((repo / ".superegm/config.json").read_text(encoding="utf-8"))
   assert set(config) == {"repo", "base", "artifacts_dir", "mode", "max_in_flight", "labels", "issue_template",
                          "tracking_issue_title", "banned_terms", "fix_request_mention", "allowed_mentions",
-                         "reviewers", "astra", "judges", "builder", "ci_wait_minutes", "owners", "owner_team", "pr_block_file"}
+                         "reviewers", "astra", "judges", "builder", "ci_wait_minutes", "commit_trailer", "owners", "owner_team",
+                         "pr_block_file"}
   assert config["owners"] == ["octocat"] and config["owner_team"] is None and config["pr_block_file"] is None
   assert config["repo"] == REPO and config["base"] == "main" and config["artifacts_dir"] == str(tmp_path / "store")
   assert config["mode"] == "normal" and config["max_in_flight"] == 5 and config["ci_wait_minutes"] == 30
