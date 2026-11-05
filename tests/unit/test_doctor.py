@@ -13,7 +13,7 @@ from test_builder_token import key, OPENSSL, FOUR  # noqa: F401  the key fixture
 
 OK = ["config: ok", "owner: ok (owner)", "origin: ok", "token: ok", "builder: ok (builder-bot)", "role: ok (write)",
       "scopes: ok (classic: repo, read:org)", "protection: ok", "profile: ok", "gh: ok (/usr/local/bin/gh)", "environment: ok",
-      "graphify: not on PATH (informational)"]
+      "graphify: not on PATH (informational)", "astra: not installed (heads will record not run)"]
 NAMES = [line.split(":")[0] for line in OK]
 
 
@@ -33,9 +33,15 @@ NAMES = [line.split(":")[0] for line in OK]
   ("profile", 1, ["profile: builder profile {profile} holds hooks"]),
   ("graphify", 0, ["graphify: ok (/usr/local/bin/graphify)"]),
   ("no-gh", 1, ["gh: gh is not on this machine's PATH"]),
+  ("astra", 0, ["astra: ok ({runner})"]),
 ])
-def test_doctor_lines(world, monkeypatch, case, code, expected):
+def test_doctor_lines(world, monkeypatch, tmp_path, case, code, expected):
   s, card, hid, _ = seed(world)
+  runner = tmp_path / "plugins/cache/claudex-loop/claudex-loop/1.0.0/skills/claudex-loop/scripts/runner.py"
+  if case == "astra":
+    runner.parent.mkdir(parents=True)
+    runner.write_text("", encoding="utf-8")
+  monkeypatch.setenv("CLAUDE_CODE_PLUGIN_CACHE_DIR", str(tmp_path / "plugins"))
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
   monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: {"graphify": "/usr/local/bin/graphify" if case == "graphify" else None,
                                                              "gh": None if case == "no-gh" else "/usr/local/bin/gh"}.get(cmd))
@@ -58,7 +64,7 @@ def test_doctor_lines(world, monkeypatch, case, code, expected):
   assert got == code, out
   lines = out.splitlines()
   for line in expected:
-    assert line.format(config=config, profile=profile) in lines, out
+    assert line.format(config=config, profile=profile, runner=runner) in lines, out
   skipped = {"config": set(NAMES) - {"config"}, "no-token": {"builder", "role", "scopes", "protection"}, "no-gh": {"environment"}}.get(case, set())
   assert [line.split(":")[0] for line in lines] == [name for name in NAMES if name not in skipped]
   assert "ghp_builder" not in out and not s.path("launches", f"{UNIT}.json").parent.exists()
@@ -66,7 +72,7 @@ def test_doctor_lines(world, monkeypatch, case, code, expected):
 
 OK_APP = ["config: ok", "owner: ok (owner)", "origin: ok", "credential: ok (app superegm-builder)", "key: ok ({key})", "openssl: ok ({openssl})", "artifacts_dir: ok",
           "app: ok (superegm-builder #12345)", f"permissions: ok ({FOUR[1:-1]})", "token: ok", "installation: ok (example-org/webhooks)",
-          "scanning: push protection enabled, non-provider patterns enabled", "protection: ok", "profile: ok", "gh: ok ({gh})", "environment: ok", "graphify: not on PATH (informational)"]
+          "scanning: push protection enabled, non-provider patterns enabled", "protection: ok", "profile: ok", "gh: ok ({gh})", "environment: ok", "graphify: not on PATH (informational)", "astra: not installed (heads will record not run)"]
 
 
 @pytest.mark.parametrize("case, code, expected, skipped", [
@@ -77,6 +83,7 @@ OK_APP = ["config: ok", "owner: ok (owner)", "origin: ok", "credential: ok (app 
 ])
 def test_doctor_app_lines(world, monkeypatch, key, tmp_path, case, code, expected, skipped):
   *_, gh = app_seed(world, monkeypatch, key, tmp_path, rulesets=[RULESET, SUPEREGM_RULESET])
+  monkeypatch.setenv("CLAUDE_CODE_PLUGIN_CACHE_DIR", str(tmp_path / "plugins"))
   if case == "both-set": monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
   if case == "no-key": monkeypatch.delenv("SUPEREGM_APP_KEY")
   if case == "push-url": git(["remote", "set-url", "--push", "origin", str(world.repo.parent / "origin.git")], world.repo)
@@ -88,3 +95,15 @@ def test_doctor_app_lines(world, monkeypatch, key, tmp_path, case, code, expecte
   got, out = world.run("doctor")
   assert got == code and all(l.format(key=key, openssl=OPENSSL, gh=gh, origin=world.repo.parent / "origin.git") in out.splitlines() for l in expected), out
   assert [l.split(":")[0] for l in out.splitlines()] == [l.split(":")[0] for l in OK_APP if l.split(":")[0] not in skipped]
+
+
+@pytest.mark.parametrize("versions, expect", [({"1.0.0": "live", "1.1.0": "orphaned", "1.2.0": "no-runner"}, "1.0.0"), ({}, None)])
+def test_runner_path_picks_the_highest_unorphaned_version(tmp_path, monkeypatch, versions, expect):
+  from superegm.foreman import runner_path
+  for version, state in versions.items():
+    scripts = tmp_path / "plugins/cache/claudex-loop/claudex-loop" / version / "skills/claudex-loop/scripts"
+    scripts.mkdir(parents=True)
+    state != "no-runner" and (scripts / "runner.py").write_text("", encoding="utf-8")
+    state == "orphaned" and (scripts.parents[2] / ".orphaned_at").write_text("", encoding="utf-8")
+  monkeypatch.setenv("CLAUDE_CODE_PLUGIN_CACHE_DIR", str(tmp_path / "plugins"))
+  assert runner_path() == (str(tmp_path / f"plugins/cache/claudex-loop/claudex-loop/{expect}/skills/claudex-loop/scripts/runner.py") if expect else None)
