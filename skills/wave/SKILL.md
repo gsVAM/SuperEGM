@@ -58,17 +58,26 @@ is one `superegm: <reason>` line, exit 1.
    config's `mode` is `leavemealone`: the mode is recorded on the card and
    acted on by the leavemealone wiring. The printed id is `<CARD>`; a card
    still open on this spec is marked interrupted by the new one.
-2. Run `python3 '<HELPER>' report --runcard '<CARD>'`. Everything is derived
+2. Run `python3 '<HELPER>' status --wait 1 --runcard '<CARD>'` as a batch
+   runs its wait (`run_in_background: true`, Bash timeout 1,800,000 ms: the
+   first pass reads every unit's issue, PR and checks). It reads GitHub
+   once, saves the snapshot `report` derives from (`report` reads the store
+   alone: on the previous invocation's snapshot it sees an empty ready set
+   and ends the loop before any batch) and returns every event since that
+   invocation's last save, or `deadline`. Handle every line as a batch's
+   steps 1–3 before going on.
+3. Run `python3 '<HELPER>' report --runcard '<CARD>'`. Everything is derived
    from the store: pending decisions from `decisions[]` minus `rulings[]`,
    launches in flight from `launches[].status`, rounds from `rounds[]`, idle
    units from this card alone (idle never carries over). Its lines: the
    report path, `idle:`, `pending:`, `loop:`.
-3. Rule every `pending:` item first, through its decision point below (the
+4. Rule every `pending:` item first, through its decision point below (the
    source names the point: `comment <id>`, `launch <n>` and `closed <n>` are
    point 3; `review <id> round <n>` is point 1; `review <id> cap` is point
    2). Before asking a point-3 question, read the issue's comments (the
    by-hand rulings section): a `**Ruling:**` already posted rules it.
-4. Run `report` again. `loop: ended` → The end. Otherwise run batches.
+5. Run `report` again. `loop: ended` → The end. Otherwise run batches, the
+   first from its step 4: step 2 was its wait, and its lines are handled.
 
 Builders a previous invocation left running report through `status --wait`'s
 `exit` lines. Nothing recorded is launched, ruled or reviewed twice: `launch`,
