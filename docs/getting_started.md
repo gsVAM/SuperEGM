@@ -33,8 +33,9 @@ the first typed skill runs it when the file is missing. The steps:
    `CLAUDE.md`, only the login. `launch-builder` refuses a profile with anything else in it.
 3. Set the branch protection of design section 11 on `<base>`: updates restricted to the owner
    (the logins in `owners`) with no bypass for the builder account's role and no team but
-   `owner_team`; `superegm/**` protected from force-push and deletion. `launch` reads the
-   protection and refuses the first wave without it.
+   `owner_team`; `superegm/**` protected from force-push and deletion by a ruleset whose
+   include pattern is exactly `refs/heads/superegm/**/*` (`refs/heads/superegm/**` matches no
+   branch on GitHub). `launch` reads the protection and refuses the first wave without it.
 4. Add a workflow triggered on `pull_request`, so every builder head gets CI: CI is the
    foreman's evidence.
 5. Commit `.superegm/config.json`; `approve-spec` commits it with the spec.
