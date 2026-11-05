@@ -157,6 +157,13 @@ def cap_question(world, rid, cid):
   code, out = world.run("judges", "question", "--review", rid, "--cap", "--runcard", cid)
   return code, Path(out.strip()).read_text(encoding="utf-8") if code == 0 else out
 
+def reopen(world, kind, cid):
+  """`review open` on the spec file with the kind's panel: the id it prints."""
+  spec = (world.repo / "docs" / "specs" / f"{SLUG}.md").resolve()
+  code, out = world.run("review", "open", "--kind", kind, "--artifact", str(spec), "--reviewers", PANEL_OF[kind], "--runcard", cid)
+  assert code == 0, out
+  return out.strip()
+
 def converged_spec(world, text=SPEC):
   spec, cid, rid = opened(world, text=text)
   rounds(world, rid, cid, [[]])
@@ -213,7 +220,31 @@ def test_review_open_cycles(world):
   assert rid2 == f"spec-{SLUG}-c2" and rjson(world, rid2)["cycle"] == 2                 # stop closed c1
   rounds(world, rid2, cid, [[]])
   assert status(world, rid2, cid)[0] == 0 and opened(world)[2] == rid2                # converged, same bytes: same cycle
-  assert opened(world, text=SPEC.replace("Text.", "Changed."))[2] == f"spec-{SLUG}-c3"   # a spec change after convergence
+
+
+def test_latest_cycle_closes_by_the_approval_the_handoff_and_the_rulings(world):
+  spec, cid, rid = converged_spec(world)
+  spec.write_text(SPEC + "\nmore\n")
+  assert reopen(world, "spec", cid) == rid
+  spec.write_text(SPEC)
+  assert approve(world, spec, cid, "--yes")[0] == 0 and reopen(world, "spec", cid) == rid
+  spec.write_text(SPEC + "\nmore\n")
+  assert reopen(world, "spec", cid) == f"spec-{SLUG}-c2"
+  seed_handoff(world, spec)
+  icid = card(world, spec, "integrate")
+  i1 = reopen(world, "integrate", icid)
+  assert rjson(world, i1)["handoff_id"] == HID and record(world, i1, 1, "design", [], icid)[0] == 0
+  spec.write_text(SPEC + "\nmore rows\n")
+  assert reopen(world, "integrate", icid) == i1
+  assert approve(world, spec, icid, "--amend-units")[0] == 0
+  i2 = reopen(world, "integrate", icid)
+  assert i2 == f"spec-{SLUG}-integrate-c2" and reopen(world, "integrate", icid) == i2
+  assert record(world, i2, 1, "design", [], icid)[0] == 0
+  spec.write_text(SPEC + "\nmore rows\nand more\n")
+  assert approve(world, spec, icid, "--amend-units")[0] == 0
+  assert reopen(world, "integrate", icid) == f"spec-{SLUG}-integrate-c3"
+  seed_handoff(world, spec, closed_at="2026-11-04")
+  assert reopen(world, "integrate", icid) == f"spec-{SLUG}-integrate-c4"
 
 
 # ---------------------------------------------------------------- S4: `review record`
