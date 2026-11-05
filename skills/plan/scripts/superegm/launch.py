@@ -157,9 +157,10 @@ def protection_problems(repo, base, builder_login, branch, owners, owner_team=No
   """What the repository's protection lacks (spec section 11): updates to <base> restricted to the
   owner (a classic restriction naming a non-empty subset of `owners`, or a ruleset whose bypass
   names neither the builder's role nor a team but `owner_team`, which the builder is outside),
-  and a ruleset that forbids force-push and deletion on the unit branches."""
+  and a ruleset that forbids force-push and deletion on the unit branches. With `app_id` (the App path)
+  the builder has no repository role: the App must be no bypass actor and no classic `apps` entry."""
   problems = [] if owners else ["config.owners is empty: set the owner logins in .superegm/config.json"]
-  role = (core.gh_json(["api", f"repos/{repo}/collaborators/{builder_login}/permission"]) or {}).get("role_name")
+  role = None if app_id else (core.gh_json(["api", f"repos/{repo}/collaborators/{builder_login}/permission"]) or {}).get("role_name")
   try:
     classic = core.gh_json(["api", f"repos/{repo}/branches/{base}/protection"]) or {}
   except core.GhError:  # 404: not protected in classic form
@@ -167,8 +168,10 @@ def protection_problems(repo, base, builder_login, branch, owners, owner_team=No
   restrictions = classic.get("restrictions") or {}
   users = [u.get("login") for u in restrictions.get("users") or []]
   strangers = [u for u in users if u not in owners]
-  if not (users and not strangers and builder_login not in users and not restrictions.get("teams") and not restrictions.get("apps")):
+  apps = [a.get("slug") for a in restrictions.get("apps") or []]
+  if not (users and not strangers and builder_login not in users and not restrictions.get("teams") and not apps):
     problem = f"base branch {base}: classic restriction lets {strangers[0]} push: not in config.owners" if strangers else \
+        f"base branch {base}: classic restriction lets app {builder_login.removesuffix('[bot]')} push" if app_id and builder_login.removesuffix("[bot]") in apps else \
         f"base branch {base}: updates are not restricted to the owner (no classic restrictions, no active ruleset update rule)"
     for summary in core.gh_pages(f"repos/{repo}/rulesets"):
       ruleset = core.gh_json(["api", f"repos/{repo}/rulesets/{summary['id']}"]) or {}
@@ -177,7 +180,7 @@ def protection_problems(repo, base, builder_login, branch, owners, owner_team=No
           or not {f"refs/heads/{base}", "~DEFAULT_BRANCH"} & set(include) \
           or not any(rule.get("type") == "update" for rule in ruleset.get("rules") or []):
         continue
-      offences = [o for o in (bypass_offence(a, role, base, ruleset.get("name"), builder_login, owner_team)
+      offences = [o for o in (bypass_offence(a, role, base, ruleset.get("name"), builder_login, owner_team, app_id)
                               for a in ruleset.get("bypass_actors") or []) if o]
       if not offences:
         problem = None
@@ -193,12 +196,15 @@ def protection_problems(repo, base, builder_login, branch, owners, owner_team=No
   return problems
 
 
-def bypass_offence(actor, role, base, name, builder_login, owner_team):
-  """Why a ruleset's bypass actor fails spec section 11, or None: the builder's own repository role,
-  or a team that is not `config.owner_team`, that GitHub does not have, or that the builder belongs to."""
+def bypass_offence(actor, role, base, name, builder_login, owner_team, app_id=None):
+  """Why a ruleset's bypass actor fails spec section 11, or None: the builder's own repository role, the
+  builder App itself, or a team that is not `config.owner_team`, that GitHub does not have, or that the
+  builder belongs to."""
   kind, actor_id = actor.get("actor_type"), actor.get("actor_id")
   if kind == "RepositoryRole":
-    return f"base branch {base}: ruleset {name} lets the builder's role ({role}) bypass" if actor_id == ROLE_IDS.get(role) else None
+    return f"base branch {base}: ruleset {name} lets the builder's role ({role}) bypass" if role and actor_id == ROLE_IDS.get(role) else None
+  if kind == "Integration":
+    return f"base branch {base}: ruleset {name} lets the App (#{actor_id}) bypass" if app_id and actor_id == app_id else None
   if kind != "Team":
     return None
   if not owner_team:
