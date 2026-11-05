@@ -492,6 +492,20 @@ def test_rule_refuses_accept_while_the_bytes_moved_and_stop_needs_no_ruler(world
   assert opened(world)[2] == f"spec-{SLUG}-c2"
 
 
+def test_set_fixed_settles_every_copy(world):
+  spec, cid, r7 = opened(world, "plan")
+  seed_body(world, "U08", BODY.replace("U07", "U08"))
+  r8 = world.run("review", "open", "--kind", "plan", "--artifact", "U08", "--reviewers", PANEL_OF["plan"], "--runcard", cid)[1].strip()
+  for rid in (r7, r8):
+    for reviewer in ("readiness", "proportion", "set"):
+      assert record(world, rid, 1, reviewer, [F("set", 1, 1, loc="the cut")] if reviewer == "set" else [], cid)[0] == 0
+  seed_body(world, "U07", BODY + "fixed\n")
+  assert "review settle: fixed needs changed bytes" in settle(world, r8, "set-1-1", "fixed", cid)[1]
+  assert settle(world, r7, "set-1-1", "fixed", cid)[0] == 0
+  assert rjson(world, r8, "round-1.json")["reviewers"]["set"]["findings"][0]["disposition"] == "fixed"
+  assert status(world, r8, cid)[0] == 0 and status(world, r7, cid)[0] == 3
+
+
 # ---------------------------------------------------------------- S11: a head's outcome
 
 def test_settle_writes_head_outcome(world):
