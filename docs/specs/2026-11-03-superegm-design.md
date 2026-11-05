@@ -71,7 +71,7 @@ isolation recorded.
 | **Astra lane** | an optional extra reviewer (of a spec, a plan or, from amendment 4, a PR head) or judge on a non-Claude model (GPT-6 Astra) driven by the external `claudex-loop` runner (a Python CLI over the Codex CLI). Launched by the elephant from the main conversation, or by the foreman on a head (§11), never through an adapter. Recorded `not run (<reason>)` when the runner is absent or its lane is down. |
 | **unit** | one buildable piece of a frozen spec: one issue, one branch, one PR. Ids `U01`, `U02`, … are stable for the life of a handoff. |
 | **handoff** | one run of plan → file → wave → integrate for one frozen spec. Its id (§7) names the branches, the issue marker lines and `state.json`, and never changes while any unit is filed. Its files live under `artifacts_dir/<handoff id>/` (§7); one open handoff per spec at a time (§9.1); `close` ends it (§12). |
-| **wave** | the set of units whose blockers have all landed, launched together. At most `max_in_flight` units are in flight at once; a unit is in flight from its first launch until it lands, is stopped, its latest round's outcome is `clean` (§7), or the elephant names it idle (stalled or CI-waiting, §11), and a freed slot is refilled. |
+| **wave** | the set of units whose blockers have all landed, launched together. At most `max_in_flight` units are in flight at once; a unit is in flight from its first launch until it lands, is stopped, its latest round's outcome is `clean` (§7), the elephant names it idle (stalled or CI-waiting, §11) or, from amendment 5, it is pending a decision (§11.2), and a freed slot is refilled. |
 | **head** | the commit at the tip of a unit's PR branch when `prepare` fetches it (§11). |
 | **round** | one review of one artifact (a spec, a unit's plan body, or a PR head): dispatch, findings, verdict. Rounds are numbered per review; a round that is not `completed` (§8) does not count toward the cap. |
 | **clean** | the verdict on a round with no unsettled high or medium finding (§5). The destructive skill is always written `/superegm:clean`. |
@@ -341,8 +341,8 @@ isolation recorded.
 **Liveness and destruction (EGM round-12 doctrine, binding)**
 - A builder launch is **terminal** when its exit file exists (the launched command writes
   `<result-file>.exit` on any exit), when the owner's typed `/superegm:interrupt` recorded
-  `interrupted`, or, from amendment 5, when `driver tick` recorded it `interrupted (reboot)` on
-  the one proof §11.2 adds (a `started_at` before the machine's boot time: no process survives a
+  `interrupted`, or, from amendment 5, when `driver tick`, `launch-builder`'s terminal check or
+  `runcard open` recorded it `interrupted (reboot)` on the one proof §11.2 adds (a `started_at` before the machine's boot time: no process survives a
   reboot). An Astra review run is terminal when its `result.json` says `completed` or
   `failed`. A round is terminal in phase `posted`, or `collected` with a `not run` reason.
   Nothing else is terminal; silence proves nothing.
@@ -533,8 +533,8 @@ has exactly one writing invocation at a time:
 | `handoff_plan.md`, `handoff_units.json`, `unit_<id>.md`, `handoff_bodies.md` | `plan` (`graph --plan <file>`; `decide` re-renders one unfiled unit and leaves a filed one as filed) |
 | `reviews/<review-id>/…` | the invocation that opened that review; on a head, also the foreman dispatch the round records (`review record`, `collect`, `review post`) |
 | `judges/<id>/…` | the invocation that opened that panel |
-| `runcards/<id>.json` | the skill that opened the card; `card_add` for later facts; a handoff's open `wave` card marked `interrupted` by `driver tick` (on its launch's exit file) or `driver reset` (§11.2) |
-| `launches/<unit>.json`, `launches/<unit>_r<n>_prompt.md`, `launches/<unit>_r<n>_bin/` | the elephant (`launch-builder`, `record-launch`, `interrupt --launch`); `driver tick` for `interrupted (reboot)` alone (§11.2) |
+| `runcards/<id>.json` | the skill that opened the card; `card_add` for later facts; a handoff's open `wave` card marked `interrupted` by `driver tick` (on its launch's exit file, or on the boot-time proof: a launch's `started_at` or a typed card's `opened_at` before the boot) or `driver reset` (§11.2) |
+| `launches/<unit>.json`, `launches/<unit>_r<n>_prompt.md`, `launches/<unit>_r<n>_bin/` | the elephant (`launch-builder`, `record-launch`, `interrupt --launch`); `driver tick`, `launch-builder` and `runcard open` for `interrupted (reboot)` alone (§11.2) |
 | `worktrees/<unit>/` | the elephant (`launch-builder`, `/superegm:clean`) |
 | `foreman/<unit>.json`, `review/<unit>/pr<n>/` | the foreman dispatch whose `dispatch_id` the round records (`prepare --dispatch`, `collect`, `review post`); between dispatches `foreman dispatch`, `interrupt --round`, `/superegm:clean`, `review settle` (a head's `outcome`, §11), `review ingest` (`ingested[]`, and a `clean` outcome rewritten `revise`, §8) and `decision open\|rule` (`decisions[]`, `rulings[]`); `r<n>/dod/<item>.txt` by `collect` (§11) |
 | `wave_<n>_report.md` | `wave` (`superegm report`, after every batch) |
@@ -584,7 +584,8 @@ excepted (§9.3). No lock file.
     copy), `base_at_start`, per unit `body_sha256`, `filings[]` (the confirmed write list of every
     filing that ran `apply`, appended by `apply` before its first write, once per write-list
     hash; EGM's `confirmed` is the pending one), `closed_at` (written by `close`) and `notified`
-    (the fingerprints of the inbox lines `notify` last sent, written by `notify` alone, §11.2). A unit
+    (the fingerprints of every inbox line current at `notify`'s last call, sent then or before,
+    written by `notify` alone, §11.2). A unit
     with a filed issue number is **frozen**: `graph` reads its section from the store
     (`handoff_plan.md`), never from the plan file, and refuses when the file's section differs;
     `graph` and `dry-run` re-render and re-hash unfiled units only; `apply` and `verify` act on
@@ -1285,8 +1286,9 @@ path, and the elephant and the
 foreman hold no GitHub write but the review comment, the ruling and decision comments, and the
 `superegm:stopped` label. `launch` also skips units labelled `superegm:stopped`, and counts a
 unit in flight from its first launch until its latest round's `outcome` is `clean`, it has
-landed, it carries that label, or the elephant names it idle (`launch --idle U07,U08`: the units
-this invocation found stalled or CI-waiting hold no slot).
+landed, it carries that label, the elephant names it idle (`launch --idle U07,U08`: the units
+this invocation found stalled or CI-waiting hold no slot) or, from amendment 5, it is pending a
+decision (§11.2, U24).
 
 **The builder as a GitHub App.** The builder's credential is one of two: the machine account
 above (`builder.gh_token_env`) or a GitHub App, `builder.app` = `{app_id: <int>, slug: <the
@@ -1448,7 +1450,7 @@ driving the loop through `foreman dispatch`'s refusal (below):
   predicate is evaluated.
 - When several heads are ready at once their foremen are dispatched in one message.
 - At every batch, before any `foreman dispatch`, the wave runs `review ingest` (§8) for every unit
-  with an open PR, awaiting-merge units included; a unit whose `clean` outcome the ingest
+  with an open PR, awaiting-merge units included and stopped units excluded; a unit whose `clean` outcome the ingest
   rewrote `revise` is handled as a `revise` word (the next builder is launched with the review).
   A thread that arrives after the loop ended is ingested by the next `wave`, typed or
   timer-typed.
@@ -1622,7 +1624,8 @@ and returns one word plus one line:
   detection, so a renamed file compares with its old path and a split or merge compares each new
   file with the source of its rename pair), it compares the file at its base (the merge base with
   `<base>` for a file the head did not create; the first `test(S<n>)` commit that touches it for
-  one it did; `base_commit` in the record) with the head: every removed or loosened assertion,
+  one it did, and empty when no such commit exists, so nothing reads removed; `base_commit` in
+  the record) with the head: every removed or loosened assertion,
   assertions paired across the change as git pairs them (a removed line with the added line at
   its position in the same hunk, the rest unpaired) so a changed value (`== 3` to `== 4`, the
   usual review fix) is never flagged (an `assert`, `pytest.raises` or
@@ -1735,7 +1738,9 @@ approves, merges or chains a phase (§3).
 
 **One ruling grammar.** `decision.ruling_of(comment, owners) -> Ruling | None` is the one parser
 (anti-goal 1), used by `status --wait` for the `ruling` event, by `collect` for deviations and
-`tdd-order`, and by `decision rule --by <login>` for the record. A comment is a ruling only when
+`tdd-order` (beside the `rulings[]` entries recorded `--by judges:<panel>`, which `collect`
+honours as it honours the owner's comment: the judges' posted copy carries the panel marker the
+parser skips, §13.2), and by `decision rule --by <login>` for the record. A comment is a ruling only when
 its author's login is in `config.owners` and its body matches one of §13.2's forms exactly;
 anything else is text. GitHub's author field is the authentication; there is no token in the
 comment (it would make a phone ruling harder and guard against little the login check misses).
@@ -1853,12 +1858,14 @@ that card, and no other, `interrupted` as the `wave` skill starting again would 
 launches. A launch of its own without an exit file is the normal state of a live overnight
 session and is never reasoned about: the tick skips it (no journal line), and `driver status`
 and the inbox show it as information with its age; a tick runs `notify` only when `notify`'s own predicate holds (a line
-neither `notified` set holds, above; each `notify` rewrites its caller's set whole), under a
+neither `notified` set holds, above; each `notify` rewrites its caller's set as every current
+line's fingerprint, sent now or before, so a persistent line is never re-sent), under a
 `driver` card it opens for that alone (the line's fingerprint excludes the age, so the line is carried once), and so a
 launch the owner knows is dead reaches the hook without a card per tick. One proof is allowed,
 since no process survives a reboot: a launch whose `started_at` precedes the machine's boot time
-(`kern.boottime`; `/proc/stat` `btime`) is recorded `interrupted (reboot)`, journaled, and the
-tick launches; the same proof, applied by the tick before it launches, and by `launch-builder`'s
+(`kern.boottime`; `/proc/stat` `btime`) is recorded `interrupted (reboot)`, journaled, its
+open `wave` card marked `interrupted` as the exit-file proof marks one (a typed `wave`'s card
+too, by its `opened_at` before the boot, §7), and the tick launches; the same proof, applied by the tick before it launches, and by `launch-builder`'s
 terminal check and `runcard open`'s refusal when the owner types `wave` first after a reboot
 (one `sysctl`, no by-hand interrupt), records the builders that session had in flight (`launches/<unit>.json`: no exit file, started before the boot)
 `interrupted (reboot)` too, so `launch-builder`'s terminal check passes and the new session
@@ -2006,7 +2013,8 @@ finding upheld` | `**Ruling:** <fid> finding overruled — <reason>`; point 2, a
 `test-delta` and `dod-<n>` `**Ruling:** <fid> allowed — <reason>` (the `dod-<n>` one keyed on
 the item number and the `test-delta` one on its entry, both persisting across rounds;
 `**Ruling:** test-delta <file> allowed — <reason>` for a whole file); the `redesign` ruling (amendment 4)
-`**Ruling:** redesign — <reason>`. A comment is a ruling only when its author's login is in
+`**Ruling:** redesign — <reason>`, which rules every open decision of the unit at once (the unit
+stops). A comment is a ruling only when its author's login is in
 `config.owners` and its body matches one form exactly; a trailing word makes it text, so a typo
 is silence, which the inbox (§11.2) shows as the still-open decision. The wave applies it as the
 point's own subcommand says (§11) and the record is the one a ruling typed in the session
