@@ -484,3 +484,13 @@ def test_a_redesign_ruling_stops_the_unit_and_writes_the_brainstorm_brief(world,
   assert "redesign — the retry design is wrong" in text and FINDING in text and "<!-- superegm:handoff=" in text
   assert "src/x.py" in text and sum(l.startswith("+x") for l in text.splitlines()) == 199 and "**Deviation (other):** renamed a fixture" in text
   assert not any(c[:2] == ["api", f"repos/{REPO}/pulls/70"] for c in world.gh.calls)
+
+
+def test_the_report_names_a_redesign_units_brief(world):
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"}, U02={"launched": False})
+  atomic_write(s.path("handoff_units"), {"order": ["U01", "U02"], "units": {"U01": {"blockers": []}, "U02": {"blockers": ["U01"]}}})
+  data = foreman_of(s, "U01"); data["stopped"] = {"by": "owner", "reason": "redesign — why", "at": "t", "brief": "/store/foreman/U01-q1.brainstorm.md"}
+  atomic_write(s.path("foreman", "U01"), data)
+  assert world.run("report", "--runcard", card)[0] == 0
+  assert "## Stopped\n- U01 (owner: redesign — why): unlanded dependants U02; brief /store/foreman/U01-q1.brainstorm.md" in s.path("wave_report", 1).read_text(encoding="utf-8")
