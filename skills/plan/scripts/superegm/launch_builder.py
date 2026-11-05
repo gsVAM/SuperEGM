@@ -19,6 +19,8 @@ PROMPT_COMMENT_RE = re.compile(r"^\*\*(Deviation \([a-z]+\)|Decision D\d+|Ruling
 # The PR body's DoD-results form (the orders): `### DoD <n>` then one fenced block per item.
 DOD_RESULT_RE = re.compile(r"^### DoD (\d+)\n```[^\n]*\n(.*?)\n```", re.M | re.S)
 ORDERS = Path(__file__).resolve().parents[4] / "skills/wave/references/builder_orders.md"
+# The PR body's line 2 (owner ruling 2026-11-04): the login of the session that ran `launch`, no `@`, so it mentions nobody.
+AUDIT_LINE = "Launched by {owner} · run card {runcard} · unit {unit} · handoff {handoff}"
 
 
 def register(subparsers):
@@ -59,7 +61,8 @@ def prepare(args, card):
   orient_text = core.read_text(orient.orient_unit(st, handoff.repo_root, ref, unit))
   comments = core.gh_pages(f"repos/{repo}/issues/{number}/comments")
   reviews = core.gh_pages(f"repos/{repo}/pulls/{pr}/reviews") if pr else []
-  text = prompt_text(number, unit, issue_body, core.read_text(ORDERS), orient_text, comments, reviews, pr, builder, pr_block)
+  audit = AUDIT_LINE.format(owner=record["launched"]["by"], runcard=args.runcard, unit=unit, handoff=st.handoff_id)
+  text = prompt_text(number, unit, issue_body, core.read_text(ORDERS), orient_text, comments, reviews, pr, builder, audit, pr_block)
   worktree = add_worktree(handoff.repo_root, st, unit, rnd, branch, pr)
   prompt = st.path("launches", f"{unit}_r{rnd}_prompt.md")
   core.atomic_write(prompt, text)
@@ -139,13 +142,13 @@ def filed_body(state, unit):
   return body.fill_numbers(filed, numbers, (state.get("tracking") or {}).get("number"))
 
 
-def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr, builder, pr_block=None):
-  """Exactly what spec section 3's anti-goal 3 allows: the issue body, the orders, the repository's
+def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr, builder, audit, pr_block=None):
+  """Exactly what spec section 3's anti-goal 3 allows: the issue body, the audit-trail line, the orders, the repository's
   PR block when `pr_block_file` is set, the unit's orient file, every Deviation comment, every
   Decision and Ruling comment not by the builder account, and from round 2 the foreman's reviews on the PR."""
   kept = [c for c in comments if PROMPT_COMMENT_RE.match(c["body"])
           and (c["body"].startswith("**Deviation") or c["user"]["login"] != builder)]
-  parts = [f"# Issue #{issue_number} — {unit}\n\n{body}", f"# Builder orders\n\n{orders}"]
+  parts = [f"# Issue #{issue_number} — {unit}\n\n{body}", f"# Audit trail\n\n{audit}", f"# Builder orders\n\n{orders}"]
   if pr_block is not None:
     parts.append(f"# PR block\n\n{pr_block}")
   parts.append(f"# Orient\n\n{orient}")

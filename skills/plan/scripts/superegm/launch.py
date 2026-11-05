@@ -56,6 +56,7 @@ def launch(args, card):
   if problems:
     raise core.HandoffError(problems[0])
   core.card_add(st, args.runcard, "builder", {"login": builder, "token_env": token_env})
+  me = core.gh(["api", "user", "-q", ".login"]).strip()  # this session's login: the PR body's audit-trail line (spec section 11)
   summary, _ = core.status_pass(handoff, save=False)
   label = urllib.parse.quote(config["labels"]["stopped"], safe="")
   stopped_numbers = {issue["number"] for issue in core.gh_pages(f"repos/{config['repo']}/issues?labels={label}&state=all&per_page=100")}
@@ -66,7 +67,7 @@ def launch(args, card):
   flying = [uid for uid in handoff.graph.order if in_flight(st, uid, views[uid], idle)]
   marked = [uid for uid in summary["ready"] if uid not in stopped][:max(0, config["max_in_flight"] - len(flying))]
   for uid in marked:
-    state["units"].setdefault(uid, {})["launched"] = {"at": core.now_iso(), "runcard": args.runcard}
+    state["units"].setdefault(uid, {})["launched"] = {"at": core.now_iso(), "runcard": args.runcard, "by": me}
     core.journal(st, f"{uid} marked for launch")
   core.save_state(handoff.artifact_dir, state)
   print("in flight: " + (", ".join(flying) or "none"))
