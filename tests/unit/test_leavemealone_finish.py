@@ -173,6 +173,11 @@ ROWS = [
     ("--unit <U> --blocked", "<option>",
      'superegm decision rule --unit <U> --decision <did> --ruling "<option>" --by judges:<panel> --runcard <card>'),
 ]
+ROWS += [
+  ("--review <id> --round <n>", "redesign — <why>",
+   'superegm decision rule --unit <U> --decision <did> --ruling "redesign — <why>" --by judges:<panel> --runcard <card>'),
+  ("--review <id> --cap", "redesign — <why>",
+   "superegm review rule --review <id> --ruling stop --judges <panel> --runcard <card>")]
 
 
 @pytest.mark.parametrize("form, option, command", ROWS)
