@@ -455,7 +455,7 @@ def test_launch_builder_refuses_each_precondition(world, monkeypatch, case, reas
   if case == "profile-claude-md":
     (profile / "CLAUDE.md").write_text("x\n", encoding="utf-8")
   if case == "profile-plugins":
-    (profile / "plugins").mkdir(); (profile / "plugins/installed_plugins.json").write_text("{}", encoding="utf-8")
+    (profile / "plugins/synced/bucket-1/pendo").mkdir(parents=True)  # an account plugin synced on sign-in
   if case == "profile-hooks":
     (profile / "settings.json").write_text('{"hooks": {"SessionStart": []}}', encoding="utf-8")
   if case == "body":
@@ -745,3 +745,28 @@ def test_every_writing_subcommand_refuses_without_its_card(world, monkeypatch, a
   code, out = world.run(*argv, "--runcard", "c-missing")
   assert code == 1 and out.startswith("superegm: runcard: "), out
   assert launches_of(s)[0]["status"] == "running" and "launched" not in state_of(s)["units"][UNIT]
+
+
+@pytest.mark.parametrize("layout, held", [
+    ("bare", False), ("installed-empty", False), ("installed-listed", True), ("synced", True), ("trash", False), ("marketplace", False), ("cache", True)])
+def test_plugins_held_reads_claude_code_s_own_files_as_no_plugin(tmp_path, layout, held):
+  """1.1.3 fix: Claude Code writes installed_plugins.json, known_marketplaces.json, its default marketplace clones and
+  store/ on every start (and .trash/ under syncClaudeAiPlugins: false); only an installed entry, a synced plugin
+  directory or an installed copy under cache/ is a plugin."""
+  from superegm import launch_builder
+  plugins = tmp_path / "plugins"
+  (plugins / "marketplaces").mkdir(parents=True); (plugins / "store").mkdir()
+  (plugins / "store/cc-plugin-agents-md_builtin-b049b47b3618.json").write_text("{}", encoding="utf-8")
+  entries = {"installed-empty": '{"version": 2, "plugins": {}}', "installed-listed": '{"version": 2, "plugins": {"x@m": [{}]}}'}
+  if layout in entries:
+    (plugins / "installed_plugins.json").write_text(entries[layout], encoding="utf-8")
+  if layout == "synced":
+    (plugins / "synced/bucket-1/pendo").mkdir(parents=True); (plugins / "synced/.bucket-1").mkdir()
+  if layout == "trash":
+    (plugins / ".trash/pendo").mkdir(parents=True); (plugins / "synced/.bucket-1").mkdir(parents=True)
+  if layout == "marketplace":  # a clone of a default marketplace, written on every start: a catalog, not a plugin
+    (plugins / "marketplaces/claude-plugins-official/.git").mkdir(parents=True); (plugins / "known_marketplaces.json").write_text("{}", encoding="utf-8")
+  if layout == "cache":
+    (plugins / "cache/m/x/1.0.0").mkdir(parents=True)
+  assert launch_builder.plugins_held(plugins) is held
+  assert (launch_builder.profile_problem(tmp_path) == f"builder profile {tmp_path} holds plugins") is held
