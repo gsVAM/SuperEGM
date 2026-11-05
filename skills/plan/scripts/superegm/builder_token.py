@@ -9,10 +9,13 @@ import base64
 import json
 import subprocess
 import time
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 import superegm as core
 
 WRITES = frozenset()  # builder-token writes nothing
+API = "https://api.github.com"
 
 
 def b64(data: bytes) -> str:
@@ -30,3 +33,30 @@ def jwt(app_id: int, key, openssl: str, now=None) -> str:
   if signed.returncode:
     raise core.HandoffError(f"openssl dgst -sign failed: {signed.stderr.decode('utf-8', 'replace').strip()}")
   return f"{head}.{payload}.{b64(signed.stdout)}"
+
+
+def api(method: str, path: str, auth: str):
+  """One request to the GitHub API as the JWT or the token `auth`; an HTTP refusal or a transport
+  error is a HandoffError naming the call."""
+  request = Request(API + path, method=method,
+                    headers={"Authorization": f"Bearer {auth}", "Accept": "application/vnd.github+json"})
+  try:
+    with urlopen(request, timeout=30) as response:
+      return json.loads(response.read() or b"null")
+  except HTTPError as error:
+    body = error.read()
+    try:
+      message = json.loads(body).get("message") or body.decode("utf-8", "replace").strip()
+    except ValueError:
+      message = body.decode("utf-8", "replace").strip()
+    raise core.HandoffError(f"{method} {path}: HTTP {error.code}: {message}") from None
+  except URLError as error:
+    raise core.HandoffError(f"{method} {path}: {error.reason}") from None
+
+
+def mint(repo: str, app_id: int, key, openssl: str) -> str:
+  """A one-hour installation token for `repo`: the installation that includes it, resolved on every
+  mint (nothing is cached), then its access token."""
+  token = jwt(app_id, key, openssl)
+  installation = api("GET", f"/repos/{repo}/installation", token)
+  return api("POST", f"/app/installations/{installation['id']}/access_tokens", token)["token"]
