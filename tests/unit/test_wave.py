@@ -157,6 +157,21 @@ def test_the_loop_never_reviews_what_dispatch_refuses(world, unit, state, why):
   assert foreman_of(s, "U01")["rounds"] == unit.get("rounds", []), "a refusal writes no round"
 
 
+def test_a_launch_after_a_clean_round_keeps_the_unit_active(world):
+  """Defect 2: a clean verdict is bound to its launch (§11.1's predicate names the launch count); a launch
+  recorded after it is in flight again, so the loop neither ends on the unit nor frees its slot."""
+  card = open_wave_card(world)
+  launches = [{"round": 1, "status": "exited 0"}, {"round": 2, "status": "running"}]
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "launches": launches,
+                             "rounds": [{"round": 1, "phase": "posted", "outcome": "clean", "launch": 1, "head": "a" * 40}]})
+  view = {"ci": "green", "landed": False}
+  assert unit_state("U01", view, foreman_of(s, "U01"), launches[:1], CARD, {}, NOW) == "clean"
+  assert unit_state("U01", view, foreman_of(s, "U01"), launches, CARD, {}, NOW) == "active"
+  code, out = world.run("report", "--runcard", card)
+  assert code == 0 and "loop: continuing (in flight: U01)" in out, out
+  assert "- U01 #2: active · pr #70 head aaaaaaa · ci green · rounds 1 (r1 posted clean) · launch 2 running" in s.path("wave_report", 1).read_text(encoding="utf-8")
+
+
 # ---------------------------------------------------------------- S2: the report file and the end line
 
 
@@ -426,6 +441,14 @@ def test_the_wave_skill_body_is_the_driver_loop(world):
     assert cited in body, cited
   for sub in ("report", "decision", "status", "launch", "launch-builder", "record-launch", "foreman", "review", "runcard"):
     assert world.run(sub, "--help")[0] == 0, sub
+
+
+def test_the_wave_entry_refreshes_the_snapshot_before_report():
+  """Defect 5: `report` reads the snapshot only `status --wait` saves (§11.1: a re-typed wave resumes from the
+  store); the entry refreshes it, with the batch's timeout, and handles its lines before `report`."""
+  entry = SKILL.read_text(encoding="utf-8").split("## Entry: resume from the store", 1)[1].split("## A batch", 1)[0]
+  assert entry.index("status --wait 1 --runcard '<CARD>'") < entry.index("report --runcard '<CARD>'")
+  assert "run_in_background: true" in entry and "1,800,000" in entry and "steps 1–3" in entry
 
 
 @pytest.mark.parametrize("removed", [
