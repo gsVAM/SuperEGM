@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17).
 
 """superegm review open|record|settle|status|rule: the one review loop (spec section 8)."""
 
@@ -21,7 +21,19 @@ REVIEWERS = ("design", "zoom-out", "comprehension", "readiness", "structural", "
              "codebase-details", "change-review", "set", "proportion")
 FIRST = {"spec": "design", "plan": "readiness", "head": "change-review"}  # the kind's fixed first reviewer (section 5)
 PANEL_OF = {"spec": "design,zoom-out", "integrate": "design", "plan": "readiness,proportion,set", "head": "change-review"}
-LANE_KINDS = ("spec", "plan", "integrate")  # the kinds the Astra lane joins
+LANE_KINDS = ("spec", "plan", "integrate", "head")  # the kinds the Astra lane joins
+
+
+def seat_lane(kind: str, flag: str | None, astra: dict) -> bool:
+  """Whether the Astra lane joins a review: `--astra on|off` decides; without it `astra.enabled`, and on a
+  head `astra.heads` too (`spec` and `integrate` as `plan`)."""
+  if kind not in LANE_KINDS:
+    return False
+  if flag is not None:
+    return flag == "on"
+  return bool(astra.get("enabled")) and (kind != "head" or bool(astra.get("heads", True)))
+
+
 SEVERITIES = ("high", "medium", "low")
 DISPOSITIONS = ("fixed", "contested", "declined", "escalated", "fix-design")
 RULINGS = ("continue", "accept", "stop")
@@ -246,7 +258,7 @@ def bind(args, review: dict) -> dict:
 
 def open_review(args) -> int:
   st = core.store(core.git_toplevel(Path.cwd()))
-  kind, reviewers = args.kind, args.reviewers.split(",")
+  kind, reviewers = args.kind, [r for r in args.reviewers.split(",") if r != "astra"]  # an `astra` entry is informational
   if kind in ("spec", "integrate"):
     args.design = args.artifact
     artifact = str(Path(args.artifact).expanduser().resolve())
@@ -273,9 +285,9 @@ def open_review(args) -> int:
     return 0
   cycle = latest["cycle"] + 1 if latest else 1
   rid = review_id(st, kind, artifact, cycle)
-  astra = getattr(args, "astra", None) or ("on" if (st.config.get("astra") or {}).get("enabled") else "off")
+  lane = seat_lane(kind, getattr(args, "astra", None), st.config.get("astra") or {})
   review = {"kind": kind, "artifact": artifact, "cycle": cycle, "handoff_id": st.handoff_id,
-            "reviewers": reviewers + (["astra"] if astra == "on" and kind in LANE_KINDS else []),
+            "reviewers": reviewers + (["astra"] if lane else []),
             "runcard": args.runcard, "artifact_sha256": current_sha(st, kind, artifact) if kind == "plan" else args.sha256,
             "astra_incomplete": 0,
             "converged": "no", "converged_round": None, "rulings": []}
