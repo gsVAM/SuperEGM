@@ -391,3 +391,14 @@ PROSE_ROWS = [
 @pytest.mark.parametrize("path, needle, present", PROSE_ROWS)
 def test_the_app_path_prose(path, needle, present):
   assert (needle in (ROOT / path).read_text(encoding="utf-8")) is present, (path, needle)
+
+
+REDESIGN_PROSE = [("skills/wave/SKILL.md", "redesign — <one sentence why>"), ("skills/wave/SKILL.md", ".brainstorm.md"), ("skills/wave/SKILL.md", "stopped for redesign"),
+                  ("skills/integrate/SKILL.md", "stopped for redesign"), ("skills/integrate/SKILL.md", "closes it by hand"),
+                  ("skills/brainstorming/SKILL.md", "brainstorm brief"), ("skills/brainstorming/SKILL.md", "whose issue is still open"),
+                  ("skills/brainstorming/SKILL.md", "naming the handoff"), ("skills/brainstorming/SKILL.md", "never offered")]
+
+
+@pytest.mark.parametrize("path, needle", REDESIGN_PROSE)
+def test_the_redesign_prose(path, needle):
+  assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
