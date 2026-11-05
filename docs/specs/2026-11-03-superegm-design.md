@@ -1668,8 +1668,9 @@ and returns one word plus one line:
   is non-zero is a `foreman` high `dod-<n>: ran red (<line>)`, a timeout `dod-<n>: ran red
   (timeout)`, and an item whose summary line differs from the builder's paste in its pass or fail
   counts is a high `dod-<n>: paste differs from the run`; the fenced-output check stays. **The
-  test delta**: for every test file the head changes (a Step's named test path or a file the §9.3
-  test-file name rule names), it compares the assertions between the file at the PR range's base when it
+  test delta**: for every test file a commit of the PR's range touches (the commit walk of the
+  `tdd-order` rule above, so a file created then deleted in the range is among them; a Step's named
+  test path or a file the §9.3 test-file name rule names), it compares the assertions between the file at the PR range's base when it
   exists there (a base file's assertions are the baseline, whatever commit removes them), else at its
   first appearance in the range (the commit that creates it, whatever its subject), and at the head,
   where a file absent at the head (deleted, renamed, or created then deleted in the range) reads as
