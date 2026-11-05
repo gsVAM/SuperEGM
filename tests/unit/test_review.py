@@ -7,7 +7,7 @@
 import hashlib, json, re, subprocess
 from pathlib import Path
 import pytest
-from superegm import store, atomic_write
+from superegm import store, atomic_write, sha256_text
 from superegm.review import parse_findings
 from superegm.review import derive_what_ran
 from superegm.review import PANEL_OF
@@ -52,6 +52,7 @@ def test_repo_config_panels_start_with_panel_of():
 SPEC = ("# Sample\n\n## 1. Intent\n\nText.\n\n## 2. Units\n\n| Unit | Scope | Blocked by | Size |\n"
         "| --- | --- | --- | --- |\n| U01 | a thing | — | S |\n")
 SLUG, HID, A = "2026-11-03-sample-design", "sample-abc123", "a" * 64
+BODY = f"<!-- superegm:handoff={HID} unit=U07 spec={'f' * 64} -->\n# U07 — Title\n"
 SKILL_OF = {"spec": "review-spec", "integrate": "integrate", "plan": "review-plan", "head": "wave"}
 
 def git(world, *args):
@@ -67,6 +68,12 @@ def seed_handoff(world, spec, hid=HID, **extra):
   """state.json as approve-spec and graph leave it: the handoff id and the spec the plan and head cards are on."""
   state = {"units": {"U07": {}}, "design": {"path": str(spec)}, **extra}
   atomic_write(store(world.repo).path("state"), state | ({"handoff_id": hid} if hid else {}))
+  if hid:
+    seed_body(world, "U07")
+
+def seed_body(world, uid, text=BODY):
+  """`unit_<id>.md` as `graph`'s `unit_file_text` writes it: the section, then the body in its fence."""
+  atomic_write(store(world.repo).path("unit", uid), f"### {uid}: Title\n\n## Issue body as posted\n\n````markdown\n{text}````\n")
 
 def card(world, artifact, skill="review-spec", mode=None, parent=None):
   argv = ["runcard", "open", "--skill", skill, "--artifact", str(artifact)]
@@ -218,16 +225,25 @@ def test_record_set_and_foreman_reviewers(world):
   spec, cid, rid = opened(world, "plan")
   lines = [F("set", 2, 1, loc="U07 Interfaces"), F("set", 2, 2, loc="U08 Interfaces"), F("set", 2, 3, loc="the cut")]   # the set's round 2 into the unit's round 1
   for reviewer, found in (("readiness", []), ("proportion", []), ("set", lines)):
-    assert record(world, rid, 1, reviewer, found, cid, sha=A)[0] == 0
+    assert record(world, rid, 1, reviewer, found, cid)[0] == 0
   assert [f["id"] for f in rjson(world, rid, "round-1.json")["reviewers"]["set"]["findings"]] == ["set-2-1", "set-2-3"]
   assert rjson(world, rid, "round-1.json")["what_ran"] == "completed"
-  assert "review record: foreman is accepted on a head only" in record(world, rid, 1, "foreman", [F("foreman", 1, 1)], cid, sha=A)[1]
+  assert "review record: foreman is accepted on a head only" in record(world, rid, 1, "foreman", [F("foreman", 1, 1)], cid)[1]
   _, wcid, hid = opened(world, "head")
   head_round(world, 1, "posted", wcid, "revise")
   assert record(world, hid, 1, "foreman", [F("foreman", 1, 1)], wcid, sha=A)[0] == 0
   assert rjson(world, hid, "round-1.json")["what_ran"] == "not run (change-review: no record)"   # foreman never counts
   assert record(world, hid, 1, "change-review", [], wcid, sha=A)[0] == 0
   assert rjson(world, hid, "round-1.json")["what_ran"] == "completed"
+
+
+def test_plan_reviews_hash_the_stored_body(world):
+  spec, cid, rid = opened(world, "plan")
+  assert rjson(world, rid)["artifact_sha256"] == sha256_text(BODY)
+  argv = ["review", "open", "--kind", "plan", "--artifact", "U07", "--sha256", A, "--reviewers", "readiness", "--runcard", cid]
+  assert "review open: --sha256 is refused for kind plan" in world.run(*argv)[1]
+  assert "review record: --sha256 is refused for kind plan" in record(world, rid, 1, "readiness", [], cid, sha=A)[1]
+  assert record(world, rid, 1, "readiness", [], cid)[0] == 0 and rjson(world, rid, "round-1.json")["artifact_sha256"] == sha256_text(BODY)
 
 
 # ---------------------------------------------------------------- S6: what_ran
@@ -257,8 +273,6 @@ def test_what_ran_derivation(review, recs, entry, expect):
 # ---------------------------------------------------------------- S7: record refusals
 
 @pytest.mark.parametrize("kind,prior,call,expect", [
-  ("plan", [], dict(n=1, reviewer="readiness"), "review record: --sha256 required for kind plan"),
-  ("plan", [dict(n=1, reviewer="readiness", sha=A)], dict(n=1, reviewer="set", sha="b" * 64), "review record: sha256 differs from the round's"),
   ("spec", [], dict(n=1, reviewer="comprehension"), "review record: comprehension is not on the panel"),
   ("spec", [], dict(n=1, reviewer="astra"), "review record: astra is not on the panel"),
   ("spec", [], dict(n=2, reviewer="design"), "review record: round 1 is next"),
@@ -466,8 +480,8 @@ def test_approve_spec_void(world):
   spec, cid, rid = converged_spec(world)
   assert approve(world, spec, cid, "--yes")[0] == 0
   _, pcid, prid = opened(world, "plan")
-  assert record(world, prid, 1, "readiness", [F("readiness", 1, 1)], pcid, sha=A)[0] == 0
-  assert record(world, prid, 1, "proportion", [], pcid, sha=A)[0] == 0 and record(world, prid, 1, "set", [], pcid, sha=A)[0] == 0
+  assert record(world, prid, 1, "readiness", [F("readiness", 1, 1)], pcid)[0] == 0
+  assert record(world, prid, 1, "proportion", [], pcid)[0] == 0 and record(world, prid, 1, "set", [], pcid)[0] == 0
   code, out = approve(world, spec, pcid, "--void", "--review", prid)
   assert code == 1 and f"approve-spec: review {prid} has no fix-design finding" in out and approval(world)["voided_by"] is None
   assert settle(world, prid, "readiness-1-1", "fix-design", pcid)[0] == 0 and status(world, prid, pcid)[0] == 4
