@@ -421,6 +421,16 @@ def test_launch_builder_carries_the_audit_trail_line(world, monkeypatch):
   assert scan_text(line, cfg, "body") == []
   orders = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8")
   assert "line 2 is the `Launched by` line of your prompt's `# Audit trail` section, kept verbatim" in orders
+  # A unit marked by a pre-upgrade `launch` (no `launched.by`): the line says `unknown`; launch-builder does not raise.
+  assert world.run("record-launch", "--unit", UNIT, "--runcard", card)[0] == 0
+  Path(launches_of(s)[0]["result_file"] + ".exit").write_text("0\n", encoding="utf-8")
+  head = git(["rev-parse", "refs/superegm/base"], world.repo).strip()
+  git(["update-ref", f"refs/pull/{PR}/head", head], world.repo.parent / "origin.git")
+  state = state_of(s); del state["units"][UNIT]["launched"]["by"]; state["units"][UNIT]["pr"] = {"number": PR, "head": head, "base_ref": BASE}
+  s.path("state").write_text(json.dumps(state), encoding="utf-8")
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", 2, "--runcard", card)
+  assert code == 0, out
+  assert f"# Audit trail\n\nLaunched by unknown · run card {card} · unit U07 · handoff {hid}\n" in s.path("launches", f"{UNIT}_r2_prompt.md").read_text(encoding="utf-8")
 
 
 def test_launch_builder_round_2_detaches_the_earlier_worktree_and_carries_the_review(world, monkeypatch):

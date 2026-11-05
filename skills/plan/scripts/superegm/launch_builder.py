@@ -61,7 +61,8 @@ def prepare(args, card):
   orient_text = core.read_text(orient.orient_unit(st, handoff.repo_root, ref, unit))
   comments = core.gh_pages(f"repos/{repo}/issues/{number}/comments")
   reviews = core.gh_pages(f"repos/{repo}/pulls/{pr}/reviews") if pr else []
-  audit = AUDIT_LINE.format(owner=record["launched"]["by"], runcard=args.runcard, unit=unit, handoff=st.handoff_id)
+  audit = AUDIT_LINE.format(owner=record["launched"].get("by", "unknown"),  # a pre-upgrade mark records no login
+                            runcard=args.runcard, unit=unit, handoff=st.handoff_id)
   text = prompt_text(number, unit, issue_body, core.read_text(ORDERS), orient_text, comments, reviews, pr, builder, audit, pr_block)
   worktree = add_worktree(handoff.repo_root, st, unit, rnd, branch, pr)
   prompt = st.path("launches", f"{unit}_r{rnd}_prompt.md")
