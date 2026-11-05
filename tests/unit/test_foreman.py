@@ -382,7 +382,7 @@ def test_collect_not_run_accepts_any_non_terminal_round(world, phase, outcome, o
     ([("test(S1): hook", "tests/unit/test_hooks.py"), ("feat(S1): hook", "src/hooks.py")], []),
     ([("feat(S1): hook", "src/hooks.py"), ("test(S1): hook", "tests/unit/test_hooks.py")], ["S1: feat(S1) precedes test(S1)"]),
     ([("test(S1): hook", "src/hooks.py"), ("feat(S1): hook", "src/hooks.py")],
-     ["S1: no test(S1) commit touches tests/unit/test_hooks.py", "test(S1) touches src/hooks.py outside tests/"]),
+     ["S1: no test(S1) commit touches tests/unit/test_hooks.py", "test(S1) touches src/hooks.py: not a test path the Steps name"]),
     ([("test(S1): hook", "tests/unit/test_hooks.py")], ["S1: no feat(S1) commit touches src/hooks.py"]),
 ])
 def test_tdd_order(world, tmp_path, monkeypatch, commits, failures):
@@ -390,6 +390,14 @@ def test_tdd_order(world, tmp_path, monkeypatch, commits, failures):
   code, out = world.run("tdd-order", "--unit", UNIT, "--dispatch", w.did)
   assert (code, out.strip().splitlines()) == ((1, failures) if failures else (0, ["tdd-order: ok"]))
   assert tdd_order.check(BODY, [(s, [p]) for s, p in commits]) == failures
+
+
+def test_tdd_order_accepts_the_test_paths_the_steps_name():
+  """1.1.1 fix: a `test(S<n>)` commit may touch the test paths the Steps name, colocated or not, and nothing else."""
+  body = BODY.replace("tests/unit/test_hooks.py", "src/x.spec.ts").replace("src/hooks.py", "src/x.ts")
+  assert tdd_order.check(body, [("test(S1): x", ["src/x.spec.ts"]), ("feat(S1): x", ["src/x.ts"])]) == []
+  assert tdd_order.check(body, [("test(S1): x", ["src/x.spec.ts", "src/x.ts"]), ("feat(S1): x", ["src/x.ts"])]) == [
+      "test(S1) touches src/x.ts: not a test path the Steps name"]
 
 
 @pytest.mark.parametrize("findings, word", [("", "clean"), ("change-review-1-1 | high | src/hooks.py:1 | regression: no | no hook\n", "revise")])
