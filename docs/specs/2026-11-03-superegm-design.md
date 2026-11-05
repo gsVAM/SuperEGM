@@ -897,14 +897,16 @@ by the foreman. The helper records and judges; the dispatching session dispatche
   wave does with it.
 - **External review on the elephant's own PR** (amendment 6, U26). The elephant's own PR is the
   spec PR: `review-spec`'s preflight refuses on `<base>` (start on a branch, §5), commits the spec
-  by path when uncommitted, pushes the branch, and opens the PR ready for review (a bot may skip
-  drafts) on the elephant's branch when `gh pr list --head` finds none (a `github-write`, §14, so
+  by path (an empty commit when nothing changed, so a commit ahead of `<base>` exists), pushes the
+  branch, and opens the PR ready for review (a bot may skip drafts) on the elephant's branch when
+  `gh pr list --head` finds none (a `github-write`, §14, so
   the ingest never reads nothing by forgetfulness),
   `review-spec` pushes the branch after each fix commit and after the approval commit (a
   `remote-branch` effect, §14; never `<base>`, §5) so a reviewer such as Devin reads every round's
   bytes and the PR's head is the approved commit, and the owner's one human step (§5's push of the
   approval to `<base>`) is what GitHub records as that PR's merge.
-  No other PR of the elephant's exists: the plan is never committed and `file` opens none.
+  No other PR of the review workflow's exists: the plan is never committed and `file` opens none
+  (the PR `finishing-a-development-branch` opens is the owner's to read by hand).
   `superegm review ingest --pr <n> --runcard <id>` (kind `spec`) reads that PR's review threads
   with U21's reader, severity map and bot/human rules, and records them as `external:<login>`
   findings into the latest round of the spec's latest cycle, the one `latest_cycle` returns,
@@ -912,8 +914,10 @@ by the foreman. The helper records and judges; the dispatching session dispatche
   cycle's `review.json.ingested[]`, and the reader skips every id in any cycle's list of the spec
   (the PR outlives a cycle), and carries every unsettled external high or medium of an earlier
   cycle of the spec forward into the latest round, as `collect` carries one on a head (§11), so the
-  next round marks it and no closed cycle's finding is settled unseen. An unsettled external high
-  or medium there refuses `approve-spec` (`approve-spec: external:<login> <fid> unsettled on PR
+  next round marks it and no closed cycle's finding is settled unseen; the carried copy and the
+  original are one finding, a disposition written on both (as a `set` copy's is), and the check
+  below reads the latest round alone. An unsettled external high or medium there refuses
+  `approve-spec` (`approve-spec: external:<login> <fid> unsettled on PR
   <n>`, exit 1; one check beside the landed refusal of an unconverged review, since `converged:
   by ruling` reads nothing settled and a `stop` opens the next cycle over the same PR).
   The elephant settles them through the existing paths: `fixed` by an edit alone (the next round
@@ -1831,8 +1835,7 @@ and returns one word plus one line:
   detection, so a renamed file compares with its old path and a split or merge compares each new
   file with the source of its rename pair), it compares the file at its base (the range's base for a file that exists there: a base
   file's assertions are the baseline, whatever commit removes them; its first appearance in the
-  range, the commit that creates it whatever its subject, for a file the head created, else empty,
-  so nothing reads removed;
+  range, the commit that creates it whatever its subject, for a file the range creates;
   `base_commit` in the record) with the head, where a file absent at the head (deleted, or created
   then deleted in the range; a rename is paired above) reads as zero assertions, so every baseline
   assertion counts as removed: every removed or loosened assertion,
@@ -2425,7 +2428,7 @@ handoff is planned; the amendment-4 paragraph below); a later handoff on this sp
 | U23 | The inbox and the notify hook (§11.2): `inbox [--all] [--json] [--handoff]` and its line form, `notify --runcard <id>`, the `~/.superegm/notify` hook, `config.notify_timeout_seconds`, `state.json.notified`, the `inbox` skill: `skills/plan/scripts/superegm/inbox.py` (create: `inbox`, `notify`), `__init__.py` (modify: the two keys, `SUBCOMMANDS`), `init.py` (modify), `skills/inbox/SKILL.md` (create: `effects: none`, auto-invokable like `doctor`'s line in `using-superegm`, with `assets/icon.svg` and `test_scenarios.yaml`), `skills/wave/SKILL.md` (modify: the notify step), `skills/using-superegm/SKILL.md`, `docs/claude.md`, `README.md` (modify), `tests/unit/test_inbox.py` (create), `test_wave.py`, `test_helper.py`, `test_packaging.py`, `test_effects.py`, `test_skeleton.py` (modify) | U22 | M |
 | U24 | The headless driver and the registry (§11.2): `register [--remove]`, `~/.superegm/registry.json`, `driver tick\|install\|uninstall\|status\|reset`, the launchd agent with `AbandonProcessGroup` (on Linux a systemd user timer, `KillMode=process`), `install --interval`, `~/.superegm/env`, `driver/<handoff>.json`, `inbox --all`, `SUPEREGM_ROLE=driver`, the `driver` skill, `doctor`'s driver line, the typed `wave`'s refusal while a tick's launch has no exit file: `skills/plan/scripts/superegm/driver.py` (create), `inbox.py` (modify: `--all`; the driver items; `notify` under a `driver` card), `status.py` (modify: the tick's read), `review.py` (modify: the stall read across `wave` cards), `launch.py` (modify: a pending unit holds no slot), `launch_builder.py` (modify: `--start`, the wrapper as the detached process; the reboot proof in the terminal check), `__init__.py` (modify: `runcard open`'s refusal for `wave`, `plan`, `file`, `integrate`, `review-plan` and `orient`, its `driver_card` write and its reboot proof, the `driver` store kind, `SUBCOMMANDS`), `doctor.py` (modify: the `driver:`, `env:` and notify-hook-sha lines, information only), `skills/driver/SKILL.md` (create, with `assets/icon.svg` and `test_scenarios.yaml`), `skills/wave/SKILL.md` (modify: the `SUPEREGM_ROLE=driver` paragraph: never ask, journal and end), `skills/using-superegm/SKILL.md`, `docs/claude.md`, `README.md` (modify), `tests/unit/test_driver.py` (create), the `--start` test beside U09's launch tests, `test_inbox.py`, `test_doctor.py`, `test_helper.py`, `test_packaging.py`, `test_effects.py`, `test_skeleton.py` (modify) | U23; after U25 on shared files | L |
 | U25 | The foreman verifies (§11, §8): the DoD re-run gate and the test-delta gate in `collect`, `r<n>/dod/<item>.txt`, `rounds[].dod_runs`, `rounds[].test_delta`, the finding ids `dod-<n>` and `test-delta`, `config.foreman.run_timeout_minutes`, the `test-delta` settle rule and the `allowed` rulings of `test-delta` and `dod-<n>`, `doctor`'s `python3.12` line: `skills/plan/scripts/superegm/collect.py` (modify: both gates, inputs read before the first run), `review.py` (modify: the settle rule; `review post`'s `gates not run` refusal and `owner: <ids>` outcome), `prepare.py` (modify: the review worktree removed by force; the hook-free git calls), `launch_builder.py` (modify: the hook-free git calls), `doctor.py` (modify: the `python3.12` line, the hooks-directory and `core.hooksPath` lines), `__init__.py` (modify: `DEFAULT_CONFIG.foreman`), `init.py` (modify), `skills/wave/references/foreman_brief.md` (modify: the word is given only after both gates ran; the `owner` word), `skills/wave/SKILL.md` (modify: the `owner` word's row), `resources/review_panels.md` (modify: the foreman list gains both ids), `tests/unit/test_foreman.py`, `test_review.py`, `test_wave.py`, `test_doctor.py`, `test_helper.py` (modify) | U22 (`ruling_of`; U17 landed); after U21 and U23 on shared files | M |
-| U26 | External review on the elephant's own PR (§8): `review ingest --pr <n>` (kind `spec`), U21's reader, severity map and bot/human rules reused, findings into the spec's latest cycle, closed by `accept` or not, `review.json`'s `ingested[]`, the `**Reply <fid>:** fixed` post on the thread under the elephant's token, `approve-spec`'s one ingest before its refusals and its one check (an unsettled external high or medium in any cycle of the spec refuses, `by ruling` or not), `review-spec`'s `github-write` and `remote-branch`, the PR opened by the skill's preflight (refusing on `<base>`, committing the spec by path, pushing first) and the push after each fix and the approval commit, step 4's path back to step 3 on the refusal: `skills/plan/scripts/superegm/review.py` (modify: `--pr`, the review-level `ingested[]`, the reply post), `approve_spec.py` (modify: the one ingest call and the one check), `skills/review-spec/SKILL.md` (modify: the preflight's PR, the push after each fix and the approval commit, step 4's path back to step 3 on the ingest's refusal; the frontmatter's `github-write` and `remote-branch`), `docs/claude.md`, `README.md` (modify), `tests/unit/test_review.py`, `test_effects.py`, `test_helper.py` (modify) | U21; after U24 on shared files | M |
+| U26 | External review on the elephant's own PR (§8): `review ingest --pr <n>` (kind `spec`), U21's reader, severity map and bot/human rules reused, findings into the spec's latest cycle, closed by `accept` or not, `review.json`'s `ingested[]`, the `**Reply <fid>:** fixed` post on the thread under the elephant's token, `approve-spec`'s one ingest before its refusals and its one check (an unsettled external high or medium in the latest round, after the carry-forward, refuses, `by ruling` or not), `review-spec`'s `github-write` and `remote-branch`, the PR opened by the skill's preflight (refusing on `<base>`, committing the spec by path, pushing first) and the push after each fix and the approval commit, step 4's path back to step 3 on the refusal: `skills/plan/scripts/superegm/review.py` (modify: `--pr`, the review-level `ingested[]`, the reply post), `approve_spec.py` (modify: the one ingest call and the one check), `skills/review-spec/SKILL.md` (modify: the preflight's PR, the per-round fix commit §5 assumes and the push after it and after the approval commit, step 4's path back to step 3 on the ingest's refusal; the frontmatter's `github-write` and `remote-branch`), `docs/claude.md`, `README.md` (modify), `tests/unit/test_review.py`, `test_effects.py`, `test_helper.py` (modify) | U21; after U24 on shared files | M |
 
 Shared files of the 1.0.0 build: `test_helper.py` is U03's alone. `body.py` is U03's and then U05's (the derived Step
 defaults), which U03 blocks. Each workflow SKILL.md stub U01 creates is filled
@@ -2518,8 +2521,9 @@ U21 lands and the plugin is updated from the tree, the next `wave`, typed in a n
 wave is one invocation, and an update takes a new session), ingests Devin's reviews of the later
 1.2 PRs, and the next amendment's spec PR, opened by the review's preflight, is the first
 `review ingest --pr` reads once U26 lands (amendment 6; this repository's handoffs amend the
-approval commit by hand to drop `artifacts_dir`, then push the branch again, so the PR's head is
-the commit `<base>` receives): the dogfood. The
+approval commit by hand to drop `artifacts_dir`, then push the branch again with `--force-with-lease`,
+the elephant's own branch being outside the `superegm/**` rule, so the PR's head is the commit
+`<base>` receives): the dogfood. The
 order is the panel's (`1.2-questions-e8857c`, two rounds, Claude-only, every question converged;
 the owner accepted every verdict and amended the test-suite non-goal on their own word): ingest
 and rulings first, then the inbox, then the driver; U25 sits where its shared files put it, and
