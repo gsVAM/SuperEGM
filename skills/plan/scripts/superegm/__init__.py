@@ -93,6 +93,7 @@ DEFAULT_CONFIG = {
                                   "Bash(git rm:*)", "Bash(gh pr create:*)", "Bash(gh pr edit:*)",
                                   "Bash(gh pr comment:*)", "Bash(gh issue comment:*)"]},
     "ci_wait_minutes": 30,
+    "commit_trailer": "",  # appended, after a blank line, to every commit the helper makes
     "owners": [],  # the GitHub logins that may update <base> (spec section 11); init writes `gh api user`'s
     "owner_team": None,  # `<org>/<slug>`: the one team a ruleset's bypass actors may name
     "pr_block_file": None,  # a path relative to the repository root whose text every builder PR body carries
@@ -555,6 +556,8 @@ def load_config(repo_root: Path) -> dict:
   for key in ("max_in_flight", "ci_wait_minutes"):
     if isinstance(config[key], bool) or not isinstance(config[key], int) or config[key] < 1:
       raise HandoffError(f"{path}: {key} must be a positive integer")
+  if not isinstance(config["commit_trailer"], str):
+    raise HandoffError(f"{path}: commit_trailer must be a string")
   # shortcut: the nested keys of reviewers/astra/judges/builder are not validated here, the unit
   # that reads each validates
   labels = config["labels"]
