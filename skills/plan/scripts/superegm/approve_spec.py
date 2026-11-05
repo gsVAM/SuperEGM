@@ -72,10 +72,11 @@ def before_units(text: str) -> str:
   return "".join(lines[:last + 1])
 
 
-def commit_by_path(repo_root: Path, paths: list[str], message: str) -> str:
-  """Add and commit `paths` alone, ignoring other changes in the tree; the commit may be empty."""
+def commit_by_path(repo_root: Path, paths: list[str], message: str, trailer: str) -> str:
+  """Add and commit `paths` alone, ignoring other changes in the tree, `trailer` (when set) after a
+  blank line; the commit may be empty."""
   core.run_git(["add", "--", *paths], repo_root)
-  core.run_git(["commit", "--allow-empty", "-q", "-m", message, "--", *paths], repo_root)
+  core.run_git(["commit", "--allow-empty", "-q", "-m", message, *(["-m", trailer] if trailer else []), "--", *paths], repo_root)
   return core.run_git(["rev-parse", "HEAD"], repo_root).strip()
 
 
@@ -114,7 +115,8 @@ def run(args):
     print("Options: Approve | Stop. Run again with --yes after the owner chose Approve.")
     return 0
   handoff_id = handoff_id_for(st, sha, spec.stem)
-  commit = commit_by_path(root, [spec.relative_to(root).as_posix(), CONFIG], f"superegm: approve {slug} at review {rid}")
+  commit = commit_by_path(root, [spec.relative_to(root).as_posix(), CONFIG], f"superegm: approve {slug} at review {rid}",
+                          st.config["commit_trailer"])
   record = {"path": str(spec), "sha256": sha, "commit": commit, "runcard": args.runcard, "review": rid,
             "approved_at": core.now_iso(), "amended": [], "voided_by": None, "handoff_id": handoff_id,
             "escalated": escalated}
@@ -156,7 +158,8 @@ def amend_units(args, st: core.Store, spec: Path, root: Path) -> int:
   if before_units(approved) != before_units(core.read_text(spec)):
     raise core.HandoffError("approve-spec: a line outside ## Units changed")
   sha = core.sha256_file(spec)
-  commit = commit_by_path(root, [rel, CONFIG], f"superegm: approve {slug} at review {approval['review']}")
+  commit = commit_by_path(root, [rel, CONFIG], f"superegm: approve {slug} at review {approval['review']}",
+                          st.config["commit_trailer"])
   approval.update({"sha256": sha, "commit": commit})
   approval["amended"].append({"sha256": sha, "commit": commit, "at": core.now_iso()})
   path = st.path("approvals", slug)
