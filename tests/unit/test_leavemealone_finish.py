@@ -282,7 +282,7 @@ DOCS = {
                                    "owners", "owner_team", "pr_block_file"))],
     "docs/faq.md": ["leavemealone-mode", "builder account", "Nothing is merged by a machine"],
     "docs/privacy.md": ["claudex-loop", "question file", "SUPEREGM_BUILDER_TOKEN", "config.astra", "artifacts_dir", "banned_terms"],
-    "docs/releases.md": ["python3 scripts/prepare_release.py --tag v1.1.1", "superegm-1.1.1.zip", "SHA256SUMS",
+    "docs/releases.md": ["python3 scripts/prepare_release.py --tag v1.1.2", "superegm-1.1.2.zip", "SHA256SUMS",
                          "`plugin.json`", "`.claude-plugin/plugin.json`"],
 }
 

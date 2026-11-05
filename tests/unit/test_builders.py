@@ -319,6 +319,18 @@ def test_launch_counts_in_flight_skips_stopped_and_frees_idle(world, monkeypatch
   assert "launched" not in state_of(s)["units"]["U09"]
 
 
+def test_launch_counts_a_launch_after_a_clean_round_in_flight(world, monkeypatch):
+  """Defect 2: the clean verdict belongs to launch 1 (§11.1's predicate names the launch count); launch 2 holds the slot."""
+  s, card, hid, _ = seed(world, units=("U07", "U08"), max_in_flight=1)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert "marked: U07" in world.run("launch", "--runcard", card)[1]
+  launched(s, "U07", "exited 0")
+  foreman(s, "U07", [{"round": 1, "runcard": card, "launch": 1, "head": "a" * 40, "phase": "posted", "dispatch_id": "d1", "outcome": "clean", "posted_at": "2026-11-03T01:00:00Z"}])
+  launched(s, "U07", "running", rnd=2)
+  code, out = world.run("launch", "--runcard", card)
+  assert "in flight: U07" in out and "marked: none" in out, out
+
+
 # `insteadOf`, not `pushInsteadOf`: git applies the latter only to a remote's `url` when it has no `pushurl`, so an explicit SSH push
 # URL (the one these tests set on origin) would stay SSH and fail closed under GIT_SSH_COMMAND=false; `insteadOf` rewrites both.
 ENTRIES = [("credential.https://github.com.helper", ""), ("credential.https://github.com.helper", "!{gh} auth git-credential"), ("url.https://github.com/.insteadOf", "git@github.com:"),
@@ -354,7 +366,7 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   result = s.path("launches", f"{UNIT}_r1_result.json")
   pairs = " ".join(f"{k}='{v.format(gh='/usr/local/bin/gh', login='builder-bot', email='1001+builder-bot@users.noreply.github.com')}'" for k, v in PAIRS)
   assert line.startswith(f"cd '{wt}' && env -u GIT_ASKPASS -u SSH_ASKPASS -u GITHUB_TOKEN CLAUDE_CONFIG_DIR='{cfg['profile_dir']}' GH_TOKEN=\"$SUPEREGM_BUILDER_TOKEN\" SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{card}' {pairs} claude -p "), line
-  assert f" claude -p \"$(cat '{prompt_file}')\" --model '{cfg['model']}' --permission-mode '{cfg['permission_mode']}' --allowedTools '" in line, line
+  assert f" claude -p \"$(cat '{prompt_file}')\" --model '{cfg['model']}' --permission-mode '{cfg['permission_mode']}' --setting-sources user --allowedTools '" in line, line
   tools = line.split("--allowedTools '")[1].split("'")[0].split(",")
   assert tools == [t.replace("Bash(gh ", "Bash(/usr/local/bin/gh ") for t in cfg["allowed_tools"]] + [f"Bash(git push origin {branch}:*)", "Bash(pytest:*)"]
   assert line.endswith(f"' --output-format json > '{result}'; echo $? > '{result}.exit'")
@@ -423,7 +435,6 @@ def test_record_launch_appends_running_then_records_the_exit(world, monkeypatch)
   ("profile-plugins", "holds plugins"),
   ("profile-hooks", "holds hooks"),
   ("body", "issue #7 body differs from the filed body"),
-  ("no-pr", "U07 round 2 has no recorded PR: run status first"),
   ("orient", "orient: U07 is not in the plan: run graph --plan first"),
 ])
 def test_launch_builder_refuses_each_precondition(world, monkeypatch, case, reason):
@@ -435,8 +446,8 @@ def test_launch_builder_refuses_each_precondition(world, monkeypatch, case, reas
     assert world.run("launch", "--runcard", card)[0] == 0
   if case == "running":
     launched(s, UNIT, "running"); rnd = 2
-  if case in ("count", "no-pr"):
-    launched(s, UNIT, "exited 0"); rnd = 3 if case == "count" else 2
+  if case == "count":
+    launched(s, UNIT, "exited 0"); rnd = 3
   if case == "own-login":
     github(world, builder="owner")
   if case == "profile-missing":
@@ -541,6 +552,58 @@ def test_launch_builder_round_2_detaches_the_earlier_worktree_and_carries_the_re
   assert unit_file.startswith(f"orient: tree {git(['rev-parse', head + '^{tree}'], world.repo).strip()}") and "## src/worker.py (create)\ndef w(): pass\ntests: none\n" in unit_file
   assert f"\n\n---\n\n# Review comments on PR #{PR}\n\n## owner · review 9 on {head[:7]}\n**Review round 1" in prompt and "self review" not in prompt
   assert out.strip().splitlines()[-1].startswith(f"cd '{r2}' && env ")
+
+
+def test_launch_builder_relaunches_from_the_local_branch_when_no_pr_is_recorded(world, monkeypatch):
+  """Decision point 3's `relaunch` after an exit with no PR (spec sections 11, 13.2): round 2 is accepted without a
+  recorded PR and starts from the retained local unit branch (the earlier worktree detached, nothing removed), the
+  orient covering that tree, so the new launch opens the first PR."""
+  s, card, hid, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0
+  assert world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)[0] == 0
+  assert world.run("record-launch", "--unit", UNIT, "--runcard", card)[0] == 0
+  r1, branch = s.path("worktrees", UNIT, "r1"), f"superegm/{hid}/U07"
+  (r1 / "src").mkdir(); (r1 / "src/worker.py").write_text("def w(): pass\n", encoding="utf-8")
+  git(["add", "-A"], r1); git(["commit", "-qm", "feat(S1): w"], r1)      # committed, never pushed: the builder exited before its PR
+  head = git(["rev-parse", "HEAD"], r1).strip()
+  Path(launches_of(s)[0]["result_file"] + ".exit").write_text("1\n", encoding="utf-8")
+  assert world.run("record-launch", "--unit", UNIT, "--exit", 1, "--runcard", card)[0] == 0
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", 2, "--runcard", card)
+  assert code == 0, out
+  assert git(["branch", "--show-current"], r1).strip() == "" and (r1 / "src/worker.py").is_file()   # detached, nothing removed
+  r2 = s.path("worktrees", UNIT, "r2")
+  assert git(["branch", "--show-current"], r2).strip() == branch and git(["rev-parse", "HEAD"], r2).strip() == head
+  assert "# Review comments" not in s.path("launches", f"{UNIT}_r2_prompt.md").read_text(encoding="utf-8")
+  assert "## src/worker.py (create)\ndef w(): pass\n" in s.path("orient_unit", f"{UNIT}.md").read_text(encoding="utf-8")
+
+
+def test_launch_builder_loads_the_builder_profile_settings_only():
+  """A builder is a session in the target repository, so `claude -p` would run that repository's project settings and
+  SessionStart hooks; the launched command carries `--setting-sources user`: the builder profile's settings alone (spec section 11)."""
+  from superegm.launch_builder import command_line
+  cfg = {"builder": {**DEFAULT_CONFIG["builder"], "profile_dir": "/p"}}
+  line = command_line(cfg, "/wt", "/prompt.md", "/result.json", "wave-0001", ["Read"], "/usr/local/bin/gh", "b", "b@x")
+  assert " --permission-mode 'acceptEdits' --setting-sources user --allowedTools 'Read' " in line, line
+
+
+@pytest.mark.parametrize("path", ["app", "account"])
+def test_launch_builder_derives_the_app_identity_on_a_fresh_card(world, monkeypatch, key, tmp_path, path):
+  """A re-typed `wave` relaunching while `launch` is held off (a capacity gate): its card has no `builder` entry. On the
+  App path the identity is derived from the config as every reader does (spec section 11): `<slug>[bot]` and the bot
+  user's noreply address; the token path still refuses, its login being read by `launch` alone."""
+  s, card, hid, _, _ = app_seed(world, monkeypatch, key, tmp_path) if path == "app" else (*seed(world), None)
+  path == "account" and monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0
+  code, out = world.run("runcard", "open", "--skill", "wave", "--artifact", str(next(world.repo.glob("docs/**/*.md"))))
+  fresh = out.split()[-1]
+  assert code == 0 and "builder" not in json.loads(s.path("runcards", f"{fresh}.json").read_text(encoding="utf-8")), out
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", fresh)
+  if path == "account":
+    assert code == 1 and "launch-builder: the wave card records no builder: run launch first" in out, out
+    return
+  assert code == 0, out
+  assert f"GIT_CONFIG_KEY_5='user.name' GIT_CONFIG_VALUE_5='{BOT}' GIT_CONFIG_KEY_6='user.email' GIT_CONFIG_VALUE_6='{EMAIL}'" in out.strip().splitlines()[-1], out
 
 
 import superegm  # the harness reloads the package per test: read HandoffError at call time

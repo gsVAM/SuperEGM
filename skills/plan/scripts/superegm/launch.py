@@ -86,11 +86,19 @@ def launch(args, card):
 
 def in_flight(store, uid, view, idle):
   """True from the unit's mark (the mark reserves the slot) until its latest round is posted
-  `clean`, it has landed, it carries the stopped label, or this invocation names it idle."""
+  `clean`, it has landed, it carries the stopped label, or this invocation names it idle; a
+  launch recorded after the clean round holds the slot again."""
   if not view.get("launched") or view.get("landed") or view.get("stopped") or uid in idle:
     return False
-  latest = max(core.load_foreman(store, uid)["rounds"], key=lambda r: r.get("round") or 0, default={})
-  return not (latest.get("phase") == "posted" and latest.get("outcome") == "clean")
+  return not latest_clean(core.load_foreman(store, uid), load_launches(store, uid))
+
+
+def latest_clean(foreman: dict, launches: list) -> bool:
+  """The latest round is posted `clean` and no launch was recorded after it: a verdict names its
+  launch (spec section 11's predicate), so a later launch is a builder the round never saw."""
+  latest = max(foreman.get("rounds") or [], key=lambda r: r.get("round") or 0, default={})
+  return (latest.get("phase") == "posted" and latest.get("outcome") == "clean"
+          and not (launches and launches[-1]["round"] > (latest.get("launch") or 0)))
 
 
 def load_launches(store, unit):

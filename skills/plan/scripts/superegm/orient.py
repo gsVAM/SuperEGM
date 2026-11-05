@@ -26,6 +26,7 @@ GRAPHIFY = "graphify"  # the command looked up on PATH; tests point it at a fake
 TIMEOUT = 600  # seconds for one graphify build
 DOCS = ("README.md", "AGENTS.md", "CLAUDE.md", "context.md")
 SKIPPED = {"dist", "build", "vendor", "target", "scratchpad"}
+TEST_RE = re.compile(r"(^|/)(tests?|__tests__)/|(^|/)test_[^/]+$|[_.](test|spec)\.[^/.]+$")  # a test file by name, wherever it lives
 JS = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
 MAX_BYTES = 1 << 20
 HEADING_RE = re.compile(r"^#{1,6} +(.*?)\s*$")
@@ -312,7 +313,7 @@ def unit_text(export: Path, scope: list[tuple[str, str]], graph, tree: str, toke
   """`<6 hex>/orient/<unit>.md`: one section per Scope path, the graph's projection per
   path, then `## Read first`; a function of the export, the graph and the scope."""
   export = Path(export)
-  tests = {f: read(export / f) or "" for f in walk(export, skip=True) if f.startswith("tests/")}
+  tests = {f: read(export / f) or "" for f in walk(export, skip=True) if TEST_RE.search(f)}
   lines = [l for path, action in scope for l in path_section(export, path, action, tests)]
   if graph is not None:
     nodes = nodes_of(graph, export)
