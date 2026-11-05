@@ -748,10 +748,11 @@ def test_every_writing_subcommand_refuses_without_its_card(world, monkeypatch, a
 
 
 @pytest.mark.parametrize("layout, held", [
-    ("bare", False), ("installed-empty", False), ("installed-listed", True), ("synced", True), ("trash", False), ("marketplace", True)])
+    ("bare", False), ("installed-empty", False), ("installed-listed", True), ("synced", True), ("trash", False), ("marketplace", False), ("cache", True)])
 def test_plugins_held_reads_claude_code_s_own_files_as_no_plugin(tmp_path, layout, held):
-  """1.1.3 fix: Claude Code writes installed_plugins.json, marketplaces/ and store/ on every start (and .trash/ under
-  syncClaudeAiPlugins: false); only an installed entry, a synced plugin directory or a marketplace is a plugin."""
+  """1.1.3 fix: Claude Code writes installed_plugins.json, known_marketplaces.json, its default marketplace clones and
+  store/ on every start (and .trash/ under syncClaudeAiPlugins: false); only an installed entry, a synced plugin
+  directory or an installed copy under cache/ is a plugin."""
   from superegm import launch_builder
   plugins = tmp_path / "plugins"
   (plugins / "marketplaces").mkdir(parents=True); (plugins / "store").mkdir()
@@ -763,7 +764,9 @@ def test_plugins_held_reads_claude_code_s_own_files_as_no_plugin(tmp_path, layou
     (plugins / "synced/bucket-1/pendo").mkdir(parents=True); (plugins / "synced/.bucket-1").mkdir()
   if layout == "trash":
     (plugins / ".trash/pendo").mkdir(parents=True); (plugins / "synced/.bucket-1").mkdir(parents=True)
-  if layout == "marketplace":
-    (plugins / "marketplaces/m").mkdir()
+  if layout == "marketplace":  # a clone of a default marketplace, written on every start: a catalog, not a plugin
+    (plugins / "marketplaces/claude-plugins-official/.git").mkdir(parents=True); (plugins / "known_marketplaces.json").write_text("{}", encoding="utf-8")
+  if layout == "cache":
+    (plugins / "cache/m/x/1.0.0").mkdir(parents=True)
   assert launch_builder.plugins_held(plugins) is held
   assert (launch_builder.profile_problem(tmp_path) == f"builder profile {tmp_path} holds plugins") is held
