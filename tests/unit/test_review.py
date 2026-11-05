@@ -12,6 +12,8 @@ from superegm.review import parse_findings
 from superegm.review import derive_what_ran
 from superegm.review import PANEL_OF
 
+from conftest import REPO, set_config
+
 
 # ---------------------------------------------------------------- S1: the findings line
 
@@ -586,6 +588,15 @@ def test_approve_spec_records_the_escalated_pairs(world, named):
   rounds(world, rid3, cid, [HIGH(1)])
   assert settle(world, rid3, "design-1-1", "escalated", cid)[0] == 0 and approve(world, spec, cid, "--leavemealone")[0] == 0
   assert (rid3, approval(world)["escalated"]) == (f"spec-{SLUG}-c3", [f"{rid3}:design-1-1"])
+
+
+@pytest.mark.parametrize("trailer", ["", "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"])
+def test_approve_spec_appends_the_commit_trailer(world, trailer):
+  set_config(world, repo=REPO, commit_trailer=trailer)
+  spec, cid, rid = converged_spec(world)
+  assert approve(world, spec, cid, "--yes")[0] == 0
+  subject = f"superegm: approve {SLUG} at review {rid}"
+  assert git(world, "log", "-1", "--format=%B") == (f"{subject}\n\n{trailer}" if trailer else subject)
 
 
 # ---------------------------------------------------------------- S14: the handoff id
