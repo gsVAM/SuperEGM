@@ -152,6 +152,11 @@ def panel_round(world, kind, rid, n, cid):
   for reviewer in PANEL_OF[kind].split(","):
     assert record(world, rid, n, reviewer, [], cid, sha=A if kind == "head" else None)[0] == 0
 
+def cap_question(world, rid, cid):
+  """`judges question --cap`: the exit code with the rendered file's text, or the refusal."""
+  code, out = world.run("judges", "question", "--review", rid, "--cap", "--runcard", cid)
+  return code, Path(out.strip()).read_text(encoding="utf-8") if code == 0 else out
+
 def converged_spec(world, text=SPEC):
   spec, cid, rid = opened(world, text=text)
   rounds(world, rid, cid, [[]])
@@ -436,6 +441,24 @@ def test_review_rule(world):
     head_round(world, n, "posted", wcid, "revise")
     assert record(world, hid, n, "change-review", [F("change-review", n, 1)], wcid, sha=A)[0] == 0
   assert "review rule: accept is refused on a head" in rule(world, hid, "accept", wcid)[1]
+
+
+def test_rule_refuses_accept_while_the_bytes_moved_and_stop_needs_no_ruler(world):
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [HIGH(n) for n in range(1, 6)])
+  spec.write_text(SPEC + "\nmore\n")
+  refusal = "review rule: the reviewed bytes moved: continue or stop"
+  assert status(world, rid, cid)[0] == 2 and refusal in rule(world, rid, "accept", cid)[1]
+  assert cap_question(world, rid, cid)[1].endswith("- (a) continue one bounded round\n- (b) stop\n")
+  assert "review rule: --owner or --judges required" in rule(world, rid, "stop", cid, by=())[1]
+  assert rule(world, rid, "continue", cid)[0] == 0
+  rounds(world, rid, cid, [HIGH(6)], start=6)
+  spec.write_text(SPEC + "\neven more\n")
+  code, out = cap_question(world, rid, cid)
+  assert code == 1 and "question: one option: stop" in out and refusal in rule(world, rid, "accept", cid)[1]
+  code, out = rule(world, rid, "stop", cid, by=())
+  assert (code, out.strip()) == (0, "ruling R2 stop") and rjson(world, rid)["rulings"][-1]["by"] == "helper"
+  assert opened(world)[2] == f"spec-{SLUG}-c2"
 
 
 # ---------------------------------------------------------------- S11: a head's outcome
