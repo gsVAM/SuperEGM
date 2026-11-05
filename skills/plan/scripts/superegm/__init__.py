@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15).
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
@@ -81,7 +81,7 @@ DEFAULT_CONFIG = {
     "fix_request_mention": None,
     "allowed_mentions": [],
     "reviewers": None,  # the spec's panels, from review.PANEL_OF at the end of this module
-    "astra": {"enabled": False, "model": "gpt-6-astra", "effort": "xhigh"},
+    "astra": {"enabled": False, "model": "gpt-6-astra", "effort": "xhigh", "heads": True},
     "judges": {"min_vendors": 1,
                "members": [{"name": "fable", "via": "adapter", "effort": "max"},
                            {"name": "opus", "via": "adapter", "effort": "max"},
@@ -530,8 +530,12 @@ def load_config(repo_root: Path) -> dict:
         if unknown:
           raise HandoffError(f"{path}: unknown label keys {sorted(unknown)}")
         config["labels"].update(value)
+      elif key == "astra" and isinstance(value, dict):
+        config["astra"] = {**config["astra"], **value}
       else:
         config[key] = value
+  if not isinstance(config["astra"], dict) or not isinstance(config["astra"].get("heads"), bool):
+    raise HandoffError("astra.heads must be true or false")
   if not config["repo"]:
     origin = run_git(["remote", "get-url", "origin"], repo_root)
     config["repo"] = parse_remote_url(origin)
@@ -1700,3 +1704,4 @@ def build_parser():
 
 from .review import PANEL_OF  # noqa: E402  review.py imports this package, so it loads after the names it uses
 DEFAULT_CONFIG["reviewers"] = {kind: panel.split(",") for kind, panel in PANEL_OF.items()}  # one source: the spec's panels
+DEFAULT_CONFIG["reviewers"]["head"].append("astra")  # informational: the lane is seated by astra.enabled and astra.heads
