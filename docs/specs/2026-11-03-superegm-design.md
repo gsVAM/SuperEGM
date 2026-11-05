@@ -371,7 +371,7 @@ isolation recorded.
 | A PR block appended verbatim; a token recipe that does not fit the repository's owner kind | a builder PR the repository's CI rejects; a token with no access | the block is the repository's own text and its CI checks it; the recipe names the fine-grained form for an organization's repository and the classic form for a personal one, and `doctor` reports the token's kind | U14 |
 | The App's private key readable by the builder session (it mints in the builder's environment) | a misbehaving builder mints tokens for every repository the App is installed on | the key is a file the path names, never PEM text in the environment; the App reaches this repository alone (a `doctor` line reads `GET /app/installations` with the JWT and refuses unless exactly one installation exists, then that one's `GET /installation/repositories` with a minted token and refuses unless it lists `config.repo` and nothing else); a builder runs as the owner's OS user, so code it runs (a test, a DoD command) can reach what that user can on either path, the owner's SSH key and keyring included, and the protection does not fence the owner's own logins: an accepted residual of a local session on both paths, which no by-hand step of this plugin removes (§3.1 rejects the second OS user); a builder that commits a token is stopped by GitHub's push protection where it is enabled, and one that commits the key by its non-provider pattern scanning where that is enabled too (two fields `doctor` reports; free on a public repository), otherwise either is seen by the owner's eyes on the diff, after which the owner rotates the key or token; each minted token lives its hour unrevoked, a residual beside the key's; the elephant minting at launch was rejected (§3.1: a round outlives an hour) | U15 |
 | A timer that runs `wave` unattended with the owner's credentials (the `gh` login, the App key path, the profile) | a session acts as the owner while nobody watches; every PR and issue comment (`comments.md`, any author) and every ingested thread (§8) reaches that session's foreman as text | the driver types one phase, `wave --leavemealone`, and chains nothing; a tick launches only when the previous launch's exit file exists, and a typed `wave` refuses while a tick's launch has none; the session never asks, journals and ends; merge stays human (the driver never merges; the inbox lists merge-ready PRs); the owner's login never leaves the machine (a fleet box is not supported); the launchd agent runs only what the plugin root names; a ruling is parsed by `ruling_of` from owners only, never read as prose; accepted residual: the credentials are the owner's, unattended (`~/.superegm/env`, mode 0600: the same the owner's shell holds); the machine stays awake and logged in (a `gui/<uid>` agent fires no tick in sleep, and a sleeping machine suspends the live session's builders: `pmset` or `caffeinate`, a by-hand step; `doctor`'s driver line reports the sleep setting as information); and prompt injection through comment text into the foreman's context, bounded by its brief and by merge staying human (§11.2) | U24 |
-| The head's code runs on the owner's machine (the foreman re-runs the DoD `Run` items) | a builder's test reaches what the owner's OS user can: the keyring, `~/.ssh`, the App key file, the store itself | the run's environment is the builder's shut-out one (§11: no owner git config, SSH or askpass; the sentinel `GH_TOKEN`; `SUPEREGM_APP_KEY` unset), which removes the variables and not the filesystem; `collect` reads every input it judges before the first `Run` item and writes the round's record and `foreman/<unit>.json` back whole after the last, so an edit a run makes to those two files is overwritten; the re-run is bounded by `config.foreman.run_timeout_minutes` and its process groups are killed at the bound; a `Run` line installs into the worktree, never globally; a service the worktree lacks reads `ran red`, the plan's defect; accepted residual: the head's code runs as the owner's OS user, exactly as the builder's own test run of the same code already did (§11: the builder is a session on this machine), and a run, or a process it leaves behind, can write every other file of the store (a forged exit file, `state.json`) | U25 |
+| The head's code runs on the owner's machine (the foreman re-runs the DoD `Run` items) | a builder's test reaches what the owner's OS user can: the keyring, `~/.ssh`, the App key file, the store itself | the run's environment is the builder's shut-out one (§11: no owner git config, SSH or askpass; the sentinel `GH_TOKEN`; `SUPEREGM_APP_KEY` unset), which removes the variables and not the filesystem; `collect` reads every input it judges before the first `Run` item and writes the round's record and `foreman/<unit>.json` back whole after the last, so an edit a run makes to those two files is overwritten; the re-run is bounded by `config.foreman.run_timeout_minutes` and its process groups are killed at the bound; a `Run` line installs into the worktree, never globally; a service the worktree lacks reads `ran red`, the plan's defect; accepted residual: the head's code runs as the owner's OS user, exactly as the builder's own test run of the same code already did (§11: the builder is a session on this machine), and a run, or a process it leaves behind, can write every other file of the store (a forged exit file, `state.json`) and the checkout's shared `.git/` (a hook or a `core.hooksPath` the owner's next commit would run; `doctor` reports the hooks directory's contents and a `core.hooksPath` as information) | U25 |
 
 **Cost and timeline (estimate, not a promise).** One leavemealone phase: spec review 2–5 rounds
 × 6 goldfish (two is the floor, the last one clean and its bytes left alone; this spec's own
@@ -536,7 +536,7 @@ has exactly one writing invocation at a time:
 | `foreman/<unit>.json`, `review/<unit>/pr<n>/` | the foreman dispatch whose `dispatch_id` the round records (`prepare --dispatch`, `collect`, `review post`); between dispatches `foreman dispatch`, `interrupt --round`, `/superegm:clean`, `review settle` (a head's `outcome`, §11), `review ingest` (`ingested[]`, and a `clean` outcome rewritten `revise`, §8) and `decision open\|rule` (`decisions[]`, `rulings[]`); `r<n>/dod/<item>.txt` by `collect` (§11) |
 | `wave_<n>_report.md` | `wave` (`superegm report`, after every batch) |
 | `brainstorm/<unit>-<decision id>.md` | `decision rule` on a `redesign` ruling (§11) |
-| `driver/<handoff>.json` | `driver tick` (`launches[]`; `notified` through a refused tick's `notify`) and `driver reset` (§11.2) |
+| `driver/<handoff>.json` | `driver tick` (`launches[]`; `notified` through a tick's `notify`) and `driver reset` (§11.2) |
 | `~/.superegm/registry.json` (the registry, outside every store) | `register [--remove]` alone; `inbox --all` and `driver tick` read it (§11.2) |
 | `orient/map.md`, `orient/export/`, `orient/graphify-out/`, `<6 hex>/orient/<unit>.md` | `orient` (`superegm orient`, typed, and run by `plan`, `review-plan` and `launch-builder`; §9.3); `orient/export/` and `graphify-out/` are written by `git archive` and graphify through `orient`, one invocation at a time, the two writes not made through `atomic_write` |
 | `journal.md` | append-only, `O_APPEND`, one line per fact, written by the subcommand that wrote the fact |
@@ -788,8 +788,10 @@ by the foreman. The helper records and judges; the dispatching session dispatche
   contested external high or medium is a point-1 question like any other); a thread's GitHub
   "resolved" state settles nothing. When an ingest leaves `review status` at exit 3 on a unit
   whose latest posted round's `outcome` is `clean`, `review ingest` rewrites that `outcome` to
-  `revise` (the mirror of the `clean` write above) and journals `<unit> back in flight
-  (external:<login>)`; §11 says what the wave does with it.
+  `revise` (the mirror of the `clean` write above), and at exit 2 (a review at its cap, the usual
+  end of a contested unit) to `cap-reached`, which the wave routes to decision point 2 as a posted
+  `cap-reached`; either journals `<unit> back in flight (external:<login>)`; §11 says what the
+  wave does with it.
 - `superegm review status --review <id> --runcard <id>` prints `round <n>: <clean|not clean>,
   regressions <k>, converged <yes|no|by ruling>, cap <yes|no>, stalled <yes|no>, sha256 <hex of
   the converged round>` and the trend line; exits 0 when converged, 5 when stalled, 2 at the cap
@@ -1571,12 +1573,16 @@ and returns one word plus one line:
   interpreter or runner; the builder's paste is compared, never run; `doctor`'s `python3.12` line
   is this repository's own prerequisite, not the gate's) in the review worktree at the head sha,
   the whole `collect` call bounded by `config.foreman.run_timeout_minutes` (8; at most 9, under the
-  Bash tool's 10-minute foreground cap it runs under, §4: the reads and the write-back come first
-  and last, the runs get what remains), each item started in its own process group and the group
+  Bash tool's 10-minute foreground cap it runs under, §4, which the foreman brief asks for on the
+  `collect` call, `timeout: 600000`, the tool's default being 2 minutes, pinned by a test of the
+  brief's text: the reads and the write-back come first and last, the runs get what remains), each item started in its own process group and the group
   killed at the bound, before the tool's, in a fixed environment (`PATH`, `HOME`, `LANG`, `TMPDIR`, the sentinel
   `GH_TOKEN`, and the builder's git shut-out carried over: `GIT_CONFIG_GLOBAL` and
   `GIT_CONFIG_SYSTEM` at `/dev/null`, `GIT_SSH_COMMAND=false`, `GIT_TERMINAL_PROMPT=0`, no
-  `GIT_ASKPASS` or `SSH_ASKPASS`; an allow-list, not the session's variables minus a deny-list,
+  `GIT_ASKPASS` or `SSH_ASKPASS`, the builder's `GIT_CONFIG_KEY_n` pairs that empty
+  `credential.helper` and `core.askPass` (the review worktree shares the checkout's `.git/config`),
+  and `PIP_REQUIRE_VIRTUALENV=1` with `npm_config_prefix` at the worktree, so a bare install
+  cannot land in the owner's prefix; an allow-list, not the session's variables minus a deny-list,
   so no `SUPEREGM_APP_KEY` or `SUPEREGM_BUILDER_TOKEN`; pinned by the builder's own test): the
   variables are gone, the filesystem is not (§4.1's residual). A `Run` line that needs
   dependencies installs them into the worktree (a venv or `node_modules` there, never a global
@@ -1601,8 +1607,9 @@ and returns one word plus one line:
   file with the source of its rename pair), it compares the file at its base (the merge base with
   `<base>` for a file the head did not create; the first `test(S<n>)` commit that touches it for
   one it did; `base_commit` in the record) with the head: every removed or loosened assertion,
-  assertions paired across the change by test function and position so a changed value (`== 3`
-  to `== 4`, the usual review fix) is never flagged (an `assert`, `pytest.raises` or
+  assertions paired across the change as git pairs them (a removed line with the added line at
+  its position in the same hunk, the rest unpaired) so a changed value (`== 3` to `== 4`, the
+  usual review fix) is never flagged (an `assert`, `pytest.raises` or
   `parametrize` row with no pair at the head; a pair whose `==`, `in` or `raises` turned into
   something weaker; a `def test_` deleted; a `skip` or `xfail` marker added) is a `foreman`
   high `test-delta: <file>:<line> removed | weakened`, recorded in the round's `test_delta` (§7)
@@ -1634,7 +1641,9 @@ and returns one word plus one line:
   merge`.
 - The return word is the round's `outcome` when the round is `posted`, `target-moved` when
   `review post` refused, and `error` otherwise (the round recorded by `collect --not-run`). A
-  return that is none of those six words is read as the round's `outcome` when the round is
+  return that is none of those seven words (`owner: <ids>` included, written by `review post`
+  before `cap-reached` and `revise`, since the cap is never spent on it, §8) is read as the
+  round's `outcome` when the round is
   `posted`, and as `error` otherwise; the elephant records nothing itself, and the next
   `foreman dispatch` supersedes a round left non-terminal.
 - It never merges, never approves, never edits the owner's working tree, never removes a
@@ -1691,7 +1700,8 @@ re-cut), and the wave relaunches.
 closed as completed, whoever closed it. Landing makes dependants ready. `/superegm:clean --unit
 U07` (EGM's `prepare --clean` looped over the unit's review rounds, plus the removal of every
 builder worktree whose launches are all terminal, dirty or not: the typed skill is the owner's
-decision, and EGM's dirty refusal applies to review worktrees) is typed, `destructive-local`,
+decision; from amendment 5 a review worktree whose rounds are all terminal is removed whatever
+its tree holds too, since a DoD `Run` line may install into it, §11) is typed, `destructive-local`,
 refuses while any launch or round is not terminal, and keeps what it cannot prove.
 `/superegm:interrupt --unit U07 (--launch <n> | --round <n>)` is typed and records
 `interrupted` on a launch, or marks a prepared round `collected (not run (interrupted: owner))`;
@@ -1726,7 +1736,7 @@ latest round's `outcome: clean`), stalled units (exit 5), escalations
 findings), units stopped for redesign with their brief's path (§13.2's `redesign` ruling),
 `test-delta` findings from the round that records them (the owner's alone, §8: the action is the
 `**Ruling:** <fid> allowed — <reason>` form), a handoff whose last tick refused (§11.2: a typed
-`wave`'s open card, a repeating failure, a bad `root`, a store's second handoff; the action is
+`wave`'s open card, a repeating failure, a bad `root`; the action is
 the card's id or `driver status`, for the owner's re-typed `wave` or `driver reset`), the
 owner-only findings a unit waits on (`owner: <ids>`, §8) and the driver's `stale` state
 (`doctor`'s line, §11.2). As information, never an action: a tick-launched session live without
@@ -1740,7 +1750,7 @@ issue's URL), the command to type, or the PR's URL to merge.
 **The notify hook.** `~/.superegm/notify`, an executable the owner writes outside every
 repository (absent means no hook; a command line in the committed config would let any commit
 that reaches `<base>` choose what runs as the owner), is run by `wave`, typed or timer-typed,
-after each batch's `report`, and by a tick that refuses (below), through `superegm notify
+after each batch's `report`, and by a tick with inbox lines new since its last (below), through `superegm notify
 --runcard <id>`: it computes the inbox lines new since the caller's `notified` (the line
 fingerprints: `state.json.notified` under a `wave` card, `driver/<handoff>.json.notified` under a
 `driver` card, so a refused tick never writes the file a live session may hold), writes them to
@@ -1779,8 +1789,9 @@ owner's shell holds today, `SUPEREGM_APP_KEY` (a path; the App is the driver's c
 choice) or `SUPEREGM_BUILDER_TOKEN` (a token there is §4.1's residual, the same the shell holds);
 the session and the notify hook run in that environment, and the plist carries no secret and no
 environment of its own. `uninstall` removes the agent; `doctor` prints `driver: installed
-(<interval>) at <root> | stale (<plist root>; this root <root>) | not installed` and `env: ok |
-missing <key> | readable by others` as information. A tick types one phase and chains nothing (§3): for each open handoff
+(<interval>) at <root> | stale (<plist root>; this root <root>) | not installed`, `sleep: <pmset
+setting>`, `root: ok | not a worktree of <repo>` and `env: ok | missing <key> | readable by
+others` as information. A tick types one phase and chains nothing (§3): for each open handoff
 of each registered store with a filed unit that is neither landed nor stopped (a handoff with no
 launch yet included), and whose previous tick launch has an exit file, it opens a `driver` card,
 records the launch in `driver/<handoff>.json` before starting it (`launches[]` with `started_at`,
@@ -1794,7 +1805,8 @@ tick skips and `driver status` shows, below), launches `claude -p` with
 `KillMode=process`, so the supervisor's reaping of the exited tick leaves the session alive; the
 U24 plan pins both keys by a test), and closes the card: the session is that card's one effect,
 and the wave it types opens its own. A tick launches nothing when there is nothing to do: before
-the launch it runs one read (`status`, no `--wait`, extended for the tick to count the open PRs'
+the launch it runs one read (`status`, no `--wait`, saving no fingerprint, so the next session's
+first `status --wait` still reports every event; extended for the tick to count the open PRs'
 review threads not in `ingested[]` and the CI state of each idle head, `status.py`) and, when the
 previous session ended with every unit clean, landed, stopped, idle or pending and nothing is newer
 than that session's last fingerprint, it journals `tick: idle (<handoff>)` and ends; a tick that launches costs one
@@ -1818,18 +1830,23 @@ closing its card (an API error, a turn limit): the exit file is the proof, and t
 that card, and no other, `interrupted` as the `wave` skill starting again would (§6) and
 launches. A launch of its own without an exit file is the normal state of a live overnight
 session and is never reasoned about: the tick skips it (no journal line), and `driver status`
-and the inbox show it as information with its age, which `notify` carries once, on the first
-tick that skips it, so a launch the owner knows is dead reaches the hook. One proof is allowed,
+and the inbox show it as information with its age; a tick runs `notify` only when the inbox
+lines new since `driver/<handoff>.json.notified` are not empty, under a `driver` card it opens
+for that alone (the line's fingerprint excludes the age, so the line is carried once), and so a
+launch the owner knows is dead reaches the hook without a card per tick. One proof is allowed,
 since no process survives a reboot: a launch whose `started_at` precedes the machine's boot time
 (`kern.boottime`; `/proc/stat` `btime`) is recorded `interrupted (reboot)`, journaled, and the
-tick launches. A card the tick had to mark `interrupted` on two consecutive launches of its own
-is a failure that repeats (an expired login, a spent quota, an outage): the tick refuses until
+tick launches. Two consecutive launches of its own that failed before the loop ran, read from
+`driver/<handoff>.json`'s own record (a non-zero exit, no `wave` card opened, or a card closed
+having produced nothing: an expired login, a spent quota, a `launch` refusal, an outage), or
+whose card the tick had to mark `interrupted`, are a failure that repeats: the tick refuses until
 the owner's re-typed `wave` or `driver reset`, so a night never pays 96 sessions to one failure.
 The refusal, journaled `tick: refused (<handoff>: <reason>)` and carried by `notify`, is for a
-typed `wave`'s open card, a repeating failure, a registered `root` that is not a worktree of the
-store's repository, and a second handoff of a store whose previous launch has no exit file (one
-session per store at a time: two waves would fetch into one `.git`'s `refs/superegm/base`,
-§9.3) alone. `driver status`
+typed `wave`'s open card, a repeating failure and a registered `root` that is not a worktree of
+the store's repository alone. A store runs one session at a time (two waves would fetch into
+one `.git`'s `refs/superegm/base`, §9.3): a second handoff waits its turn, a silent skip like
+the live launch above, never a refusal or an inbox action, and the next free tick serves the
+handoff that has waited longest. `driver status`
 prints, per handoff, the last launch, its
 `started_at`, whether its exit file exists, the open `wave` card's id and age, and the last
 refusal; the owner's typed `/superegm:driver reset` is the interrupt for a launch the owner knows
@@ -1837,11 +1854,12 @@ is dead (a reboot, a kill), never a timeout and never an inbox action: it record
 `interrupted` and marks the handoff's open `wave` card
 `interrupted` (§7's writer row for `runcards/` names both). The same rule binds a typed `wave`:
 outside `SUPEREGM_ROLE=driver`, `runcard open --skill wave` refuses, before any card is marked,
-while `driver/<handoff>.json` holds a launch without an exit file (`driver: a tick's session may
-be live; /superegm:driver reset is the owner's interrupt`), so one handoff never has two
-elephants (§7's one writer of `state.json`). A
-tick that refuses runs `superegm notify --runcard <driver card>` itself, so the inbox's driver
-line reaches the hook. Builders launched by a tick's session are started in their own session
+while any handoff of the store has a tick launch without an exit file in its
+`driver/<handoff>.json` (`driver: a tick's session may be live; /superegm:driver reset is the
+owner's interrupt`), so one store never has two elephants (§7's one writer of `state.json`;
+§9.3's one `refs/superegm/base`). A
+tick runs `superegm notify --runcard <driver card>` itself when it has new lines (a refusal, a
+launch without an exit file, a stale root), so the inbox's driver line reaches the hook. Builders launched by a tick's session are started in their own session
 and process group: `launch-builder --start` (U24's flag on U09's interface) starts the printed
 wrapper itself, detached (Python's `start_new_session=True`, never `setsid(1)`, which macOS
 lacks; stdin from `/dev/null`, stdout and stderr into the launch's log file, so the tool's pipe is
@@ -2303,8 +2321,9 @@ Interfaces (the names the plans will carry):
   artifacts_dir, base, mode`; `driver tick|install|uninstall|status|reset`; `driver/<handoff>.json`;
   the launchd label `com.superegm.driver`; `install --interval`; `~/.superegm/env`; `doctor`'s
   `driver:` and `env:` lines.
-- U25 → the owner: the finding ids `dod-<n>` (`ran red (<line>)` | `paste differs from the run`)
-  and `test-delta: <file>:<line> removed | weakened`; `rounds[].dod_runs.<item>.{exit, summary,
+- U25 → the owner: the `foreman-<round>-<n>` findings whose claims start `dod-<n>: ran red
+  (<line>) | paste differs from the run` and `test-delta: <file>:<line> removed | weakened`; the
+  three subjects the `allowed` ruling's parser matches: `<fid>`, `dod-<n>`, `test-delta <file>`; `rounds[].dod_runs.<item>.{exit, summary,
   paste_summary, timed_out}`; `rounds[].test_delta[].{file, line, base_line, kind, base_commit}`;
   `r<n>/dod/<item>.txt`; the config key `foreman.run_timeout_minutes`; the ruling form
   `**Ruling:** <fid> allowed — <reason>` for `test-delta` and `dod-<n>`.
