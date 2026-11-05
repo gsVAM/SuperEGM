@@ -50,8 +50,9 @@ foreman prepares, this session runs.
   writes one result object; `--permission-mode` takes `acceptEdits` or `bypassPermissions`;
   `--allowedTools` entries are tool names or the one prefix form `Bash(<prefix>:*)`, which
   matches on the command's text and cannot exclude a refspec; a headless session with no `Skill`
-  entry invokes no skill. `launch-builder` writes the whole command line; `record-launch` records
-  it and, later, its exit.
+  entry invokes no skill; `--setting-sources user` loads the builder profile's settings only, never
+  the target repository's project settings or its SessionStart hooks. `launch-builder` writes the
+  whole command line; `record-launch` records it and, later, its exit.
 - Headless sessions SuperEGM starts set `SUPEREGM_ROLE` to `builder` or `goldfish` and
   `SUPEREGM_RUNCARD` to the run card they run under; the session hook prints nothing for those
   roles.
