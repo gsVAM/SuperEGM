@@ -411,8 +411,10 @@ def test_tdd_order_reads_test_sn_subjects_only():
   touching a non-Step path is not the builder's; the test-paths rule reads `test(S<n>)` subjects only."""
   legacy = ("test(legacy): old suite", ["src/old_test.py", "src/old.py"])
   assert tdd_order.check(BODY, [legacy, ("test(S1): hook", ["tests/unit/test_hooks.py"]), ("feat(S1): hook", ["src/hooks.py"])]) == []
+  fixtures = ["tests/unit/test_hooks.py", "tests/conftest.py", "tests/fixtures/orient/tree.json", "src/hooks_test.py"]  # test files by name (§9.3) ride along
+  assert tdd_order.check(BODY, [legacy, ("test(S1): hook", fixtures), ("feat(S1): hook", ["src/hooks.py"])]) == []
   assert tdd_order.check(BODY, [legacy, ("test(S1): hook", ["tests/unit/test_hooks.py", "src/hooks.py"]), ("feat(S1): hook", ["src/hooks.py"])]) == [
-      "test(S1) touches src/hooks.py: not a test path the Steps name"]
+      "test(S1) touches src/hooks.py: not a test path the Steps name nor a test file by name"]
 
 
 @pytest.mark.parametrize("findings, word", [("", "clean"), ("change-review-1-1 | high | src/hooks.py:1 | regression: no | no hook\n", "revise")])

@@ -66,8 +66,9 @@ def test_unit_text_on_the_fixture_tree(scope, expected):
 
 
 def test_unit_text_lists_the_tests_wherever_they_live(tmp_path):
-  """1.1.2 fix: a test file is one by name (a `test`, `tests` or `__tests__` directory, a `test_` prefix, a `_test`,
-  `.test`, `_spec` or `.spec` suffix) wherever it lives, not one under `tests/`; a plain caller is not a test."""
+  """1.1.2 fix: a test file is one by name (a `test`, `tests`, `__tests__` or `spec` directory, a `test_` prefix, a
+  `_test`, `.test`, `_spec` or `.spec` suffix) wherever it lives under the map's skips, not one under `tests/`; a plain
+  caller is not a test."""
   from superegm import orient
   tree = tmp_path / "tree"
   shutil.copytree(TREE, tree)
@@ -76,8 +77,12 @@ def test_unit_text_lists_the_tests_wherever_they_live(tmp_path):
   (tree / "src/__tests__/w.py").write_text("import src.worker\n", encoding="utf-8")
   (tree / "apps/x/index.spec.ts").write_text('import { render } from "../../web/index.ts";\n', encoding="utf-8")
   (tree / "src/caller.py").write_text("from src.worker import work\n", encoding="utf-8")
+  (tree / "spec").mkdir(); (tree / "vendor/lib").mkdir(parents=True)  # a `spec` directory counts; the map's skips apply
+  (tree / "spec/worker.rb").write_text("require 'src/worker.py'\n", encoding="utf-8")
+  (tree / "vendor/lib/test_worker.py").write_text("from src.worker import work\n", encoding="utf-8")
   text = orient.unit_text(tree, [("src/worker.py", "modify"), ("web/index.ts", "modify")], None, T, "not installed")
-  assert "tests: src/__tests__/w.py, src/worker_test.py, tests/check_worker.py\n" in text and "caller" not in text
+  assert "tests: spec/worker.rb, src/__tests__/w.py, src/worker_test.py, tests/check_worker.py\n" in text and "caller" not in text
+  assert "vendor" not in text
   assert "## web/index.ts (modify)\nexport function render(): void {}\nexport class View {}\ntests: apps/x/index.spec.ts\n" in text
 
 
