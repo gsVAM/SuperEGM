@@ -17,7 +17,9 @@ By hand, before the first typed skill runs:
    no hooks, no plugins, only the login.
 3. Set the branch protection of spec section 11 on `{base}`: updates restricted to the logins in
    config.owners (a classic restriction) or, by a ruleset, with no bypass for the builder account's
-   role and no team but config.owner_team; `superegm/**` protected from force-push and deletion.
+   role and no team but config.owner_team; `superegm/**` protected from force-push and deletion by a
+   ruleset whose include pattern is exactly `refs/heads/superegm/**/*` (`refs/heads/superegm/**`
+   matches no branch on GitHub).
 4. Add a workflow triggered on `pull_request` so every builder head gets CI.
 5. Commit {path}; approve-spec commits it with the spec.
 The store is {artifacts_dir} (config key artifacts_dir); it is never committed.
