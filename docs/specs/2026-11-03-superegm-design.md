@@ -18,6 +18,7 @@ Amendment 2 (2026-11-04): §9.3 Orient (graphify-backed), §9.1/§10 adopted iss
 Amendment 3 (2026-11-04): the builder as a GitHub App (§11, §16), the convergence rule, the judges record, the mention scan, approve-spec with escalations, the commit trailer (§8, §9.1, §13.1), units U15–U16; owner-approved by text.
 Amendment 4 (2026-11-05): Astra on every head review (§8, §11), the redesign ruling (§11, §12, §13.2), units U17–U18, amendment-scoped review (§8), unit U19, one store per handoff (§7, §9.1), unit U20; three follow-ups (§3, §5, §7); owner-approved by text; owner ruling 2026-11-05: approval chain (§5, §11, U20); owner ruling 2026-11-05: App installation and permissions (§3.1, §4.1, §11).
 Amendment 5 (2026-11-05): the fleet layer (external-review ingest, rulings by comment, the inbox and notify hook, the headless driver and registry, the foreman verifies), units U21–U25; owner-approved by text.
+Amendment 6 (2026-11-05): external review on the elephant's own PRs (`review ingest --pr`, §8, §11.2), unit U26; owner-approved by text.
 
 ## 1. Intent
 
@@ -586,7 +587,7 @@ at a time:
 | `handoffs/<id>.json` | that handoff's `approve-spec` (opened; `--void` closing an unfiled handoff) and `close` (its `closed_at`) |
 | `approvals/<spec-slug>.json` | `approve-spec` |
 | `handoff_plan.md`, `handoff_units.json`, `unit_<id>.md`, `handoff_bodies.md` | `plan` (`graph --plan <file>`; `decide` re-renders one unfiled unit and leaves a filed one as filed) |
-| `reviews/<review-id>/…` | the invocation that opened that review; on a head, also the foreman dispatch the round records (`review record`, `collect`, `review post`) |
+| `reviews/<review-id>/…` | the invocation that opened that review; on a head, also the foreman dispatch the round records (`review record`, `collect`, `review post`); `review ingest --pr` for the review's `ingested[]` (amendment 6, §8) |
 | `judges/<id>/…` | the invocation that opened that panel |
 | `runcards/<id>.json` | the skill that opened the card; `card_add` for later facts; a handoff's open `wave` card marked `interrupted` by `driver tick` (on its launch's exit file, or on the boot-id proof: a launch's or a typed card's recorded boot id that is not the machine's) or `driver reset` (§11.2) |
 | `launches/<unit>.json`, `launches/<unit>_r<n>_prompt.md`, `launches/<unit>_r<n>_bin/` | the elephant (`launch-builder`, `record-launch`, `interrupt --launch`); `driver tick`, `launch-builder` and `runcard open` for `interrupted (reboot)` alone (§11.2) |
@@ -884,6 +885,19 @@ by the foreman. The helper records and judges; the dispatching session dispatche
   end of a contested unit) to `cap-reached`, which the wave routes to decision point 2 as a posted
   `cap-reached`; either journals `<unit> ready again (external:<login>)`; §11 says what the
   wave does with it.
+- **External review on the elephant's own PRs** (amendment 6, U26). `superegm review ingest --pr
+  <n> --kind spec|plan --runcard <id>` reads the review threads of a PR the elephant opened (the
+  spec PR `approve-spec` pushes, an amendment PR, the plan PR, the file PR) with U21's reader,
+  severity map and bot/human rules, and records them as `external:<login>` findings into the open
+  review of that kind (the spec review's current cycle; the unit's plan review), or into a new
+  bounded cycle `ingest-<n>` when none is open, keyed by the root comment id in
+  `reviews/<id>.json.ingested[]`; an ingest is never a counted round. The elephant settles them
+  through the existing paths: `fixed` (a `fix-design` on a spec, a plan edit on a plan) with
+  `**Reply <fid>:** fixed` posted on the thread under the elephant's token (its own PR, so the
+  post is allowed), `contested` as a point-1 question to the owner through the inbox (§11.2).
+  `approve-spec` and `file` run the ingest once before they push or merge and hold while an
+  unsettled external high or medium stands on that PR (`approve-spec: external:<login> <fid>
+  unsettled on PR <n>`; `file` the same); a thread's GitHub "resolved" state settles nothing.
 - `superegm review status --review <id> --runcard <id>` prints `round <n>: <clean|not clean>,
   regressions <k>, converged <yes|no|by ruling>, cap <yes|no>, stalled <yes|no>, sha256 <hex of
   the converged round>` and the trend line; exits 0 when converged, 5 when stalled, 2 at the cap
@@ -1920,7 +1934,9 @@ findings), units stopped for redesign with their brief's path (§13.2's `redesig
 `test-delta` findings from the round that records them (the owner's alone, §8: the action is the
 `**Ruling:** <fid> allowed — <reason>` form), a handoff whose last tick refused (§11.2: a repeating failure, a bad `root`; the action is
 `driver status`, for the owner's re-typed `wave` or `driver reset`), the
-owner-only findings a unit waits on (`owner: <ids>`, §8) and the driver's `stale` state
+owner-only findings a unit waits on (`owner: <ids>`, §8), an unsettled external high or medium
+on a PR of the elephant's own (amendment 6, §8: the action is the thread's URL, for a
+`fix-design`, a plan edit or a point-1 ruling) and the driver's `stale` state
 (`doctor`'s line, §11.2). As information, never an action: an open `wave` card, typed or a tick's, and a tick launch
 without an exit file, each with its age (`driver status` shows them; `notify` sends each once,
 its fingerprint the card's or launch's id without the age, so a tick that crashed at the first
@@ -2327,7 +2343,7 @@ Grep, Glob]`, `omitClaudeMd: true`); and `foreman` (tools `[Agent, Bash, Read, G
 
 ## 17. Units
 
-The unit graph for building SuperEGM 1.0.0 (thirteen units), from amendment 2, 1.1.0 (U12–U14) and, from amendment 3, 1.1.1 (U15–U16) and, from amendment 4, 1.1.2 (U17–U20) and, from amendment 5, 1.2 (U21–U25). Each unit's plan must fit 48 KB.
+The unit graph for building SuperEGM 1.0.0 (thirteen units), from amendment 2, 1.1.0 (U12–U14) and, from amendment 3, 1.1.1 (U15–U16) and, from amendment 4, 1.1.2 (U17–U20) and, from amendments 5 and 6, 1.2 (U21–U26). Each unit's plan must fit 48 KB.
 Interfaces are subcommand contracts and file keys unless marked `py`. A Consumes producer may be
 a transitive blocker. After U01 every 1.0.0 skill folder and adapter of §14 exists (the new ones
 as stubs), so the later 1.0.0 units modify and never create skill folders, adapters or personas;
@@ -2367,6 +2383,7 @@ handoff is planned; the amendment-4 paragraph below); a later handoff on this sp
 | U23 | The inbox and the notify hook (§11.2): `inbox [--all] [--json] [--handoff]` and its line form, `notify --runcard <id>`, the `~/.superegm/notify` hook, `config.notify_timeout_seconds`, `state.json.notified`, the `inbox` skill: `skills/plan/scripts/superegm/inbox.py` (create: `inbox`, `notify`), `__init__.py` (modify: the two keys, `SUBCOMMANDS`), `init.py` (modify), `skills/inbox/SKILL.md` (create: `effects: none`, auto-invokable like `doctor`'s line in `using-superegm`, with `assets/icon.svg` and `test_scenarios.yaml`), `skills/wave/SKILL.md` (modify: the notify step), `skills/using-superegm/SKILL.md`, `docs/claude.md`, `README.md` (modify), `tests/unit/test_inbox.py` (create), `test_wave.py`, `test_helper.py`, `test_packaging.py`, `test_effects.py`, `test_skeleton.py` (modify) | U22 | M |
 | U24 | The headless driver and the registry (§11.2): `register [--remove]`, `~/.superegm/registry.json`, `driver tick\|install\|uninstall\|status\|reset`, the launchd agent with `AbandonProcessGroup` (on Linux a systemd user timer, `KillMode=process`), `install --interval`, `~/.superegm/env`, `driver/<handoff>.json`, `inbox --all`, `SUPEREGM_ROLE=driver`, the `driver` skill, `doctor`'s driver line, the typed `wave`'s refusal while a tick's launch has no exit file: `skills/plan/scripts/superegm/driver.py` (create), `inbox.py` (modify: `--all`; the driver items; `notify` under a `driver` card), `status.py` (modify: the tick's read), `review.py` (modify: the stall read across `wave` cards), `launch.py` (modify: a pending unit holds no slot), `launch_builder.py` (modify: `--start`, the wrapper as the detached process; the reboot proof in the terminal check), `__init__.py` (modify: `runcard open`'s refusal for `wave`, `plan`, `file`, `integrate`, `review-plan` and `orient`, its `driver_card` write and its reboot proof, the `driver` store kind, `SUBCOMMANDS`), `doctor.py` (modify: the `driver:`, `env:` and notify-hook-sha lines, information only), `skills/driver/SKILL.md` (create, with `assets/icon.svg` and `test_scenarios.yaml`), `skills/wave/SKILL.md` (modify: the `SUPEREGM_ROLE=driver` paragraph: never ask, journal and end), `skills/using-superegm/SKILL.md`, `docs/claude.md`, `README.md` (modify), `tests/unit/test_driver.py` (create), the `--start` test beside U09's launch tests, `test_inbox.py`, `test_doctor.py`, `test_helper.py`, `test_packaging.py`, `test_effects.py`, `test_skeleton.py` (modify) | U23; after U25 on shared files | L |
 | U25 | The foreman verifies (§11, §8): the DoD re-run gate and the test-delta gate in `collect`, `r<n>/dod/<item>.txt`, `rounds[].dod_runs`, `rounds[].test_delta`, the finding ids `dod-<n>` and `test-delta`, `config.foreman.run_timeout_minutes`, the `test-delta` settle rule and the `allowed` rulings of `test-delta` and `dod-<n>`, `doctor`'s `python3.12` line: `skills/plan/scripts/superegm/collect.py` (modify: both gates, inputs read before the first run), `review.py` (modify: the settle rule; `review post`'s `gates not run` refusal and `owner: <ids>` outcome), `prepare.py` (modify: the review worktree removed by force; the hook-free git calls), `launch_builder.py` (modify: the hook-free git calls), `doctor.py` (modify: the `python3.12` line, the hooks-directory and `core.hooksPath` lines), `__init__.py` (modify: `DEFAULT_CONFIG.foreman`), `init.py` (modify), `skills/wave/references/foreman_brief.md` (modify: the word is given only after both gates ran; the `owner` word), `skills/wave/SKILL.md` (modify: the `owner` word's row), `resources/review_panels.md` (modify: the foreman list gains both ids), `tests/unit/test_foreman.py`, `test_review.py`, `test_wave.py`, `test_doctor.py`, `test_helper.py` (modify) | U22 (`ruling_of`; U17 landed); after U21 and U23 on shared files | M |
+| U26 | External review on the elephant's own PRs (§8, §11.2): `review ingest --pr <n> --kind spec\|plan`, U21's reader, severity map and bot/human rules reused, findings into the open review of that kind or a new bounded cycle `ingest-<n>`, `reviews/<id>.json.ingested[]`, the `**Reply <fid>:** fixed` post on the thread under the elephant's token, `approve-spec`'s and `file`'s one ingest and their hold on an unsettled external high or medium, the inbox item: `skills/plan/scripts/superegm/review.py` (modify: `--pr --kind`, the review-level `ingested[]`, the hold check), `approve_spec.py`, `apply.py` (modify: the ingest and the hold), `inbox.py` (modify: the item), `skills/review-spec/SKILL.md`, `skills/file/SKILL.md` (modify: the ingest step), `docs/claude.md`, `README.md` (modify), `tests/unit/test_review.py`, `test_file.py`, `test_inbox.py`, `test_helper.py` (modify) | U21, U23; after U24 on shared files | M |
 
 Shared files of the 1.0.0 build: `test_helper.py` is U03's alone. `body.py` is U03's and then U05's (the derived Step
 defaults), which U03 blocks. Each workflow SKILL.md stub U01 creates is filled
@@ -2449,25 +2466,28 @@ heading narrows or widens the scope; the tests pin the mapping on a fixture spec
 that a legacy flat store still reads and that `launch` refuses a base spec off the chain). The version bump to 1.1.2, the tag and the release are the
 owner's by-hand steps after all four merge, as before.
 
-Amendment 5 units (1.2): U21–U25 are filed from this spec as a fifth handoff (the helper's id
+Amendment 5 and 6 units (1.2): U21–U26 are filed from this spec as a fifth handoff (the helper's id
 form; the owner's name for it, `2026-11-05-superegm-1.2`, is the tracking issue's title and
 nothing else), through the installed 1.1.2 (`orient`, `review-spec --reviewers design`, approve,
 `plan`, `review-plan --reviewers readiness,proportion`, `file`, then `wave` through SuperEGM
 itself: the App builder, Astra on heads, `redesign` available), under the landed-row rule (a plan
-for it carries sections for U21–U25 only; U17–U20 landed, so no `Blocked by` names them). Once
+for it carries sections for U21–U26 only; U17–U20 landed, so no `Blocked by` names them). Once
 U21 lands and the plugin is updated from the tree, the next `wave`, typed in a new session (§5: a
 wave is one invocation, and an update takes a new session), ingests Devin's reviews of the later
-1.2 PRs: the dogfood. The
+1.2 PRs, and the 1.2 plan PR is the first PR of the elephant's own that `review ingest --pr`
+reads once U26 lands (amendment 6): the dogfood. The
 order is the panel's (`1.2-questions-e8857c`, two rounds, Claude-only, every question converged;
 the owner accepted every verdict and amended the test-suite non-goal on their own word): ingest
-and rulings first, then the inbox, then the driver; U25 sits where its shared files put it.
-Shared files: `collect.py` is U21's, then U22's, then U25's; `review.py` U21's, then U25's, then U24's;
+and rulings first, then the inbox, then the driver; U25 sits where its shared files put it, and
+U26 (amendment 6) last, after U21 and U23 by its blockers and after U24 on `review.py` and
+`inbox.py`.
+Shared files: `collect.py` is U21's, then U22's, then U25's; `review.py` U21's, then U25's, U24's, U26's;
 `skills/wave/SKILL.md` U21's, then U22's, U23's, U25's, U24's; `__init__.py` U21's, U23's, U25's and U24's, `init.py` U21's, U23's and U25's, and
 `test_helper.py` every unit's, one per wave (disjoint keys, but a wave has no order inside it,
 §9.1: so U25 follows U23 and U24 follows U25 on them); `inbox.py` and `test_inbox.py`
-U23's, then U24's; `launch.py` U21's, then U24's; `doctor.py` and `test_doctor.py` U25's, then U24's; `launch_builder.py` U22's, then U25's, then U24's; `docs/claude.md` and `README.md` in
+U23's, then U24's, then U26's; `launch.py` U21's, then U24's; `doctor.py` and `test_doctor.py` U25's, then U24's; `launch_builder.py` U22's, then U25's, then U24's; `docs/claude.md` and `README.md` in
 wave order. Waves: {U21} → {U22} →
-{U23} → {U25} → {U24}; version 1.2.0 after all five merge (manifests, `docs/releases.md`, tag,
+{U23} → {U25} → {U24} → {U26}; version 1.2.0 after all six merge (manifests, `docs/releases.md`, tag,
 release, plugin update: the owner's by-hand steps), after which `superegm driver install` (re-typed
 after every later update), `~/.superegm/env`, `register` from each handoff's worktree and a machine kept awake
 (`pmset`/`caffeinate`) are the owner's by-hand steps, as the App
@@ -2481,14 +2501,16 @@ inbox shows as the still-open decision); U23 low for `inbox` (reads) and medium 
 one handoff are prevented on both sides, the tick's (the exit file and the open `wave` card) and a
 typed `wave`'s (`runcard open`'s refusal);
 the plist runs only what the plugin root names); U25 medium (the head's code runs on the owner's
-machine, §4.1). Plan-review focus: U21 a PR with 200 bot threads
+machine, §4.1); U26 low (reads, and posts replies on the elephant's own PR under its token).
+Plan-review focus: U21 a PR with 200 bot threads
 and one human medium, and a thread on a head not yet reviewed; U22 a comment one character off
 the form, and an owner's edit after the record; U23 a store with no open handoff, and the inbox's `test-delta` and `owner: <ids>` kinds built against §7's schema with fixture data (U25 lands after U23); U24 a reboot
 mid-wave (no exit file), a session that exited without closing its card, a typed `wave` during a
 tick's session, a tick during a typed `wave`, a plugin update under an installed timer, and two
 worktrees registering one store; U25 a `Run` item that needs a service,
 a `Run` line that installs, a suite longer than the bound, and a parametrize row moved rather
-than dropped. Not in 1.2: cross-repository handoffs
+than dropped; U26 a thread on a PR with no open review of its kind, and a `fix-design` it
+forces. Not in 1.2: cross-repository handoffs
 (the lib-core and financial-twin inputs are one handoff per repository; the second spec states
 its prerequisite in prose and `Landed:` rows, §9.1, and the owner types its phases after the
 first lands; neither a `Repo:` field nor a cross-store `Blocked by` is built; the registry is a
@@ -2592,6 +2614,9 @@ Interfaces (the names the plans will carry):
   paste_summary, timed_out}`; `rounds[].test_delta[].{file, line, base_line, kind, base_commit}`;
   `r<n>/dod/<item>.txt`; the config key `foreman.run_timeout_minutes`; the ruling form
   `**Ruling:** <fid> allowed — <reason>` for `test-delta` and `dod-<n>`.
+- U26 → the owner: `review ingest --pr <n> --kind spec|plan --runcard <id> → <n> ingested; exit 0`;
+  `reviews/<id>.json.ingested[]`; the cycle id `ingest-<n>`; the refusal `external:<login> <fid>
+  unsettled on PR <n>` of `approve-spec` and `file`.
 
 Waves: {U01} → {U02, U03} → {U04, U05, U08, U09} → {U06, U07, U09b, U10} → {U10b} → {U11}; then,
 as a second handoff (`2026-11-03-superegm-<6 hex>`), {U12} → {U13} → {U14}, and version 1.1.0
@@ -2599,5 +2624,5 @@ after all three merge; then, as a third handoff (`2026-11-03-superegm-<6 hex>`),
 version 1.1.1 after both merge; then, as a fourth handoff (`2026-11-03-superegm-<6 hex>`, the
 owner's name `2026-11-05-superegm-1.1.2`), {U17, U18} → {U19} → {U20}, and version 1.1.2 after all
 four merge; then, as a fifth handoff (`2026-11-03-superegm-<6 hex>`, the owner's name
-`2026-11-05-superegm-1.2` on the tracking issue), {U21} → {U22} → {U23} → {U25} → {U24}, and
-version 1.2.0 after all five merge.
+`2026-11-05-superegm-1.2` on the tracking issue), {U21} → {U22} → {U23} → {U25} → {U24} → {U26}, and
+version 1.2.0 after all six merge.
