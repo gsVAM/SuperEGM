@@ -43,7 +43,7 @@ EGM_KEPT = (
 ) + tuple(f"{d}/{i}.md" for d in ("agents", ".claude-plugin/agents") for i in IDS[:8])
 NOT_KEPT = (
     "distributions", ".codex-plugin", ".agents", "site", "assets", "vendor", "docs/designs",
-    "docs/codex.md", "docs/harnesses.md", "docs/directory.md", "docs/assets", "TESTING.md",
+    "docs/codex.md", "docs/harnesses.md", "docs/directory.md", "TESTING.md",
     "CONTRIBUTING.md", "AI_POLICY.md", "AGENTS.md", "requirements-dev.txt",
     "agents/synthesizer.md", "agents/bootstrap_orchestrator.md",
     ".claude-plugin/agents/synthesizer.md", ".claude-plugin/agents/bootstrap_orchestrator.md",
