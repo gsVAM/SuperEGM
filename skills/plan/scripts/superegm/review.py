@@ -348,7 +348,7 @@ def record_round(args) -> int:
   rnd = existing or {"round": n, "runcard": card.get("parent") or args.runcard, "artifact_sha256": sha,
                      "builder_contested": [], "reviewers": {}}
   rnd["reviewers"][reviewer] = record
-  if reviewer == "astra" and args.not_run:
+  if reviewer == "astra" and args.not_run and not args.not_run.startswith(("not installed", "stopped")):
     review["astra_incomplete"] += 1
   rnd["what_ran"] = derive_what_ran(review, rnd, entry)
   core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
