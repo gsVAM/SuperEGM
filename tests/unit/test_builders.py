@@ -207,7 +207,7 @@ def push_to_origin(world, rel, text):
 
 @pytest.mark.parametrize("case, reason", [
   ("classic", None),
-  ("spec", "spec at origin/main is not the approved bytes"),
+  ("spec", "spec at origin/main is neither the approved bytes nor a later link of the approval chain"),
   ("config", ".superegm/config.json is absent at origin/main"),
   ("workflow", "origin/main carries no workflow triggered on pull_request"),
   ("no-token", "SUPEREGM_BUILDER_TOKEN is not set"),
@@ -283,6 +283,22 @@ def test_launch_refuses_each_precondition(world, monkeypatch, key, tmp_path, cas
     return
   assert code == 1 and f"launch: {reason}" in out, out
   assert "launched" not in state_of(s)["units"][UNIT]
+
+
+entry = lambda hid, sha: {"sha256": sha, "commit": "c", "runcard": "c0", "review": "r0", "approved_at": "t", "handoff_id": hid, "kind": "opening", "voided_by": None, "escalated": []}
+
+@pytest.mark.parametrize("at_origin, ok", [("approved", True), ("later", True), ("earlier", False), ("other", False)])
+def test_launch_accepts_the_approved_bytes_or_a_later_link(world, monkeypatch, at_origin, ok):
+  s, card, hid, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  spec = Path(state_of(s)["design"]["path"]); rel = spec.relative_to(world.repo).as_posix()
+  texts = {"earlier": "earlier\n", "approved": spec.read_text(encoding="utf-8"), "later": spec.read_text(encoding="utf-8") + "\nlater\n", "other": "other\n"}
+  entries = [entry(f"sample-{k}", hashlib.sha256(texts[k].encode()).hexdigest()) for k in ("earlier", "approved", "later")]
+  entries[1]["handoff_id"] = hid
+  put(s.path("approvals", "sample"), json.dumps({"path": str(spec), "entries": entries}))
+  at_origin != "approved" and push_to_origin(world, rel, texts[at_origin])
+  code, out = world.run("launch", "--runcard", card)
+  assert (code == 0) is ok and ("launch: spec at origin/main is neither the approved bytes nor a later link of the approval chain" in out) is not ok
 
 
 def launched(s, uid, status, rnd=1):
