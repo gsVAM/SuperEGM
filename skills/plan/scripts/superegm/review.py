@@ -220,6 +220,22 @@ def scope_sections(old: str, new: str) -> list[tuple[str, str, int, int]]:
           for i, (heading, start, end) in enumerate(spans) if i in changed or i in neighbours]
 
 
+def cited_line(location: str) -> int | None:
+  """The line a finding's location cites: the first integer after `line `, `lines `, `L` or `:`, else None."""
+  match = re.search(r"(?:\blines? |\bL|:)(\d+)", location)
+  return int(match.group(1)) if match else None
+
+
+def out_of_scope(rows: list, spans: list, location: str):
+  """The heading of the section a finding cites when no scope row holds its line, else None: a location
+  naming no line is kept (D1 (a): the goldfish was briefed to cite lines, and an unplaceable finding is not lost)."""
+  line = cited_line(location)
+  if line is None or any(start <= line <= end for _, _, start, end in rows):
+    return None
+  index = section_of(spans, line)
+  return spans[index][0] if index is not None else f"line {line} past the end"
+
+
 def approved_text(spec: Path, approval: dict):
   """The approved bytes as text: the spec at the approval's `commit` (voided or not), else at the first commit
   of the current branch's `git log -- <spec>` whose blob hashes to its `sha256`; None when no commit holds them."""
@@ -467,26 +483,43 @@ def record_round(args) -> int:
   if not existing and evaluate(st, review, card.get("parent") or args.runcard).code == 2:
     print("review record: review at its cap: rule first", file=sys.stderr)
     return 2
+  rnd = existing or {"round": n, "runcard": card.get("parent") or args.runcard, "artifact_sha256": sha,
+                     "builder_contested": [], "reviewers": {}}
+  if kind == "spec" and "scope" not in rnd:  # the round's scope, stored by its first record, checked by every later one
+    rows = [list(row) for row in scope_of(st, review, Path(review["artifact"]))]
+    rnd.update({"scope": rows, "out_of_scope": [],
+                "note": rows[0][1][1:-1] if rows and rows[0][0] == "whole" else None})
+  refused = []
   if args.not_run:
     record = {"findings": [], "not_run": args.not_run, "isolation": None, "model": None, "effort": None}
   else:
     path = Path(args.findings)
+    text = core.read_text(path)
     try:
-      findings = parse_findings(core.read_text(path), reviewer, n)
+      findings = parse_findings(text, reviewer, n)
     except ValueError as error:
       raise core.HandoffError(f"review record: {path}:{error}")
     if reviewer == "set":
       findings = keep_for_unit(findings, review["artifact"])
+    if kind == "spec":
+      spans = sections(core.read_text(Path(review["artifact"])))
+      raw = [line for line in text.splitlines() if line.strip()]  # one finding per non-blank line, in order
+      verdicts = [(finding, line, out_of_scope(rnd["scope"], spans, finding["location"])) for finding, line in zip(findings, raw)]
+      findings = [finding for finding, _, section in verdicts if section is None]
+      refused = [(finding["id"], line, section) for finding, line, section in verdicts if section is not None]
+      mine = lambda line: line.split(" | ", 1)[0].rsplit("-", 2)[0] == reviewer
+      rnd["out_of_scope"] = [line for line in rnd["out_of_scope"] if not mine(line)] + [line for _, line, _ in refused]
     record = {"findings": findings, "not_run": None, "isolation": args.isolation, "model": args.model,
               "effort": args.effort}
-  rnd = existing or {"round": n, "runcard": card.get("parent") or args.runcard, "artifact_sha256": sha,
-                     "builder_contested": [], "reviewers": {}}
   rnd["reviewers"][reviewer] = record
   if reviewer == "astra" and args.not_run and not args.not_run.startswith(("not installed", "stopped")):
     review["astra_incomplete"] += 1
   rnd["what_ran"] = derive_what_ran(review, rnd, entry)
   core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
   store_verdict(st, rid, review, rnd["runcard"])
+  for fid, _, section in refused:
+    core.journal(st, f"review record {rid} round {n} out of scope: {fid} ({section}) under {args.runcard}")
+    print(f"record: {fid} out of scope ({section}): not recorded")
   core.journal(st, f"review record {rid} round {n} {reviewer} what_ran {rnd['what_ran']} under {args.runcard}")
   print(f"round {n} {reviewer} recorded, what_ran {rnd['what_ran']}")
   return 0
