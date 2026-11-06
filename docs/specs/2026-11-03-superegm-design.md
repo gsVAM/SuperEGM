@@ -24,6 +24,7 @@ Amendment 8 (2026-11-06): the default models and efforts per role (`builder.mode
 Amendment 9 (2026-11-06): split units for parallel waves (the plan rules of §9.1, the proportion and set checks of §9.2, `graph --plan`'s `width:` line), unit U29; owner-approved by text.
 Amendment 10 (2026-11-06): the board and the watchdog (§3, §3.1, §4, §7, §11, §11.2, §13.2, §14), units U30–U31; owner-approved by text.
 Amendment 11 (2026-11-06): 1.1.3's integrate review carried mediums and the first wave's findings (scope additions to U22, U23, U27, U29 and U30; §7, §8, §9.1, §9.2, §11, §12, §13.2, §14), unit U32; owner-approved by text.
+Amendment 12 (2026-11-06): unit tiers (`Tier:` in §9.1's form, the proportion check in §9.2, `builder.tiers` in §7, the launch by tier in §11), unit U33; owner-approved by text.
 
 ## 1. Intent
 
@@ -324,6 +325,10 @@ isolation recorded.
   file the owner cannot see from the tracking issue, the one page GitHub shows them. The
   watchdog's kill is the owner's standing interrupt at a bound they set, the exit file the wrapper
   writes on the signal its proof (anti-goal 8 amended); the board is the tracking issue's page.
+- **Amendment 12: a team builder.** Dropped: Claude Code's agent teams need an interactive
+  session; a headless builder gets sequential subagents with no mailbox, which buys little over
+  a stronger model at higher effort. Revisit when teammates work under `-p`. Unit tiers (U33)
+  are what remains: the model and effort per unit, by its `Tier:`.
 
 ## 4. Constraints
 
@@ -680,7 +685,10 @@ excepted (§9.3). No lock file.
   `model`, when set, is the tool's alias too, a runner member's `astra.model`), `builder`
   (`profile_dir`, `model` = `claude-opus-5-5` and `effort` = `medium` from amendment 8 (a full
   model id, since `claude -p --model` takes one; the elephant is the session's model, never in
-  config); a config written before U28 reads the keys amendment 8 adds (`builder.effort`,
+  config); from amendment 12 `tiers` ({`difficult`, `doable`, `easy`}, each `model` and
+  `effort`; `init` writes `difficult` `claude-opus-5-5` / `high`, `doable` = `builder.model` /
+  `builder.effort`, `easy` `claude-sonnet-5-5` / `medium`; a missing row reads the doable row,
+  §11); a config written before U28 reads the keys amendment 8 adds (`builder.effort`,
   `reviewers.model`, `reviewers.effort`, `astra.heads_effort`) as `init`'s defaults, the loader
   filling a missing nested key from `DEFAULT_CONFIG` as it reads `astra.heads` (U28 extends the
   landed `astra` merge to `builder` and `reviewers`, which the loader replaces wholesale today); a member's
@@ -789,7 +797,7 @@ edits, `apply.py` beside `edit_issue` the natural one, called by `status`
   - `launches/<unit>.json` — `launches[]` with `round` (the launch count), `worktree`, `branch`,
     `started_at`, `boot_id` (amendment 5, written by `launch-builder` at the launch), `pid` (amendment 10: the wrapper's, the process-group leader `launch-builder` spawned, the watchdog's kill target, §11; from amendment 10 `launch-builder` writes the whole `running` entry once at the launch, every field of this list but the exit's, the command line it ran among them, and `record-launch` keeps `--exit` alone), `status` ∈ `running | exited <code> | exited (stalled) | interrupted | interrupted (reboot)` (the
     last amendment 5's, `exited (stalled)` amendment 10's; `last_commit_at`, the launch's own newest commit time (one newer than `started_at`) or none, written by every `--exit` from amendment 10, the carve-out's one field; both terminal for `launch-builder` and `clean` as `interrupted` is), `kill_failed` (amendment 10: its reason, `no exit file` when none followed the signal within 30 s, or `pid reused` when the guard, run before any signal, found the group's present leader another's, or `no process` when it found no member living, no signal sent; the launch stays `running` and is signalled no more, the unit idle and in the inbox for the owner's interrupt; a later exit file clears it, §11), `result_file`,
-    `prompt_sha256`, `command` (amendment 10: the launched command line, the record of what ran), and from amendment 8 `model` and `effort` (requested, written with
+    `prompt_sha256`, `command` (amendment 10: the launched command line, the record of what ran), from amendment 12 `tier` (the filed body's), and from amendment 8 `model` and `effort` (requested, written with
     the entry; the effective model and, from amendment 10, `total_cost_usd` (the board's cost) read by `record-launch
     --exit` from the result file's `modelUsage` and `total_cost_usd` keys, the field U28's one run confirms, every
     key when there are several, else `requested only`).
@@ -1178,6 +1186,7 @@ Each unit section carries EGM's fields and the superpowers additions:
 | Shared files | `none` or `` `path`: after U01, before U05 `` items |
 | Risk | `low\|medium\|high: reason` |
 | Size | `S\|M\|L` by scope-path count (`S` up to three paths, `M` up to eight; `L` the size the parser gives a Scope over eight paths, which the per-unit check reports as a split candidate, amendment 9) |
+| Tier | `difficult\|doable\|easy`, set by the author (amendment 12): `difficult` when the Steps leave a design choice open, the unit holds a novel algorithm or an unverified platform behaviour, or it consumes the interfaces of more than one subsystem; `easy` when the Steps are mechanical with pinned signatures and no open choice; else `doable`. A difficult unit satisfies the split rule hardest (§9.1, amendment 9): a small Scope, few Steps. The tier picks the builder's model and effort (`builder.tiers`, §7, §11) |
 | Issue | optional; `#<n>`, an open issue in `config.repo` that `file` adopts instead of creating one (§10); `graph` refuses an `Issue` whose `#<n>` does not appear in the frozen spec's `## Units` section, a text check with no table parser (the owner names the adoption there) |
 | **Interfaces** | `Consumes:` and `Produces:` lines, one item per line (grammar below) |
 | Definition of done | numbered items; item 1 is always `The test for each Step was committed before its implementation (checked by superegm tdd-order)`; every other item is one of ``Run `<command>` — <what passing means>``, ``Exists `<path>` ``, or `CI green on the head`; only `Run` items are commands |
@@ -1259,7 +1268,7 @@ Spec: `docs/specs/2026-11-03-superegm-design.md` @ <sha7> · `<path:start-end (h
 ## Steps
 ## Decide before build
 ## Scope, order and risk
-Scope: … · Blocked by: #<U04>, #<U06> · Shared files: … · Risk: … · Size: M
+Scope: … · Blocked by: #<U04>, #<U06> · Shared files: … · Risk: … · Size: M · Tier: doable
 Branch: `superegm/<handoff-id>/U07` · Part of #<tracking>
 ```
 
@@ -1285,7 +1294,8 @@ rule's splits, the registry edge gone. The plan is shaped for wave width: the
 author reads the `width:` line `graph --plan` prints and splits or re-scopes until every wave
 holds two or more units where the spec allows it, and the plan's header states the wave plan
 and why any wave is a singleton. The checkers: the per-unit split check (Steps, bytes, paths,
-subsystems) is the `proportion` reviewer's and the chain check the `set` reviewer's (§9.2); the
+subsystems) is the `proportion` reviewer's, with, from amendment 12, the `Tier:` against the body (a
+finding when the body's open choices contradict the tier, or a difficult unit is Size `L`), and the chain check the `set` reviewer's (§9.2); the
 header's wave plan and the singleton reasons are the author's alone (`set` reads them to grade a named chain `low`, amendment 11, and checks them not). Wave width is set by file
 overlap alone (1.1.3: U19 and U20 serialised behind each other on shared files, U20 at 15 Steps
 and 37 KB forcing a chain of its own).
@@ -1719,7 +1729,8 @@ installed `user`-scope entry in the elephant profile's `plugins/installed_plugin
 is none of the builder profile's managed plugins (it would load twice; `profile_problem`'s lines,
 so `launch-builder` refuses too), the set printed (`plugins: <id>
 <version> [<hook events>]... | none`, `mcp: <names> | none`); and, from amendment 8, the role
-table, one `model:` line per role, each value as configured (`model: builder <model> <effort>`,
+table, one `model:` line per role, each value as configured (`model: builder <tier> <model>
+<effort>`, one per tier row from amendment 12,
 `model: goldfish <alias> <effort>`, `model: astra lanes <model> <effort>`, `model: astra head
 lane <model> <heads_effort>`, `model: judge <member> <model> <effort>` per member; informational,
 as the `astra:` line is; the elephant is the session's, not printed). Its own lines, which `launch` does not check: `stall: <builder.stall_minutes> min` (amendment 10, informational); `gh` resolves on this machine
@@ -1808,7 +1819,7 @@ place, below), the idle reason's action for
 `ready`,
 none for `waiting`, `landed` and `stopped` · cost, the
 launches' `total_cost_usd` summed from the entries, where `record-launch --exit` writes it from
-the result file's read it makes for the model, none until then, U28; a killed launch's result file is partial: its entry records the cost as unrecorded and the cell marks the sum partial), one table in the report
+the result file's read it makes for the model, none until then, U28; a killed launch's result file is partial: its entry records the cost as unrecorded and the cell marks the sum partial · tier, amendment 12), one table in the report
 file, on stdout and in the issue, under a header line (the handoff id, `<base>`, the spec
 sha256's first 12 hex, the waves, the time of the last change, which `status` saves in
 `state.json` at the splice's write and `report` prints), written by `status` into the
@@ -1910,7 +1921,9 @@ managed plugins; the MCP file's server names) at the launch, §7;
 paths the owner's git configuration, SSH and askpass shut out and the helper reset, §11), with the HTTPS push rewrite and credential helper in its
 environment; `ENABLE_CLAUDEAI_MCP_SERVERS=false` (belt and braces over the profile's
 `disableClaudeAiConnectors`, §4); `SUPEREGM_ROLE=builder` and `SUPEREGM_RUNCARD`; `claude -p` with the prompt file's
-content, the configured model, effort (amendment 8: `--effort <builder.effort>`, the session
+content, the model and effort of the unit's tier row (amendment 12: the `Tier:` line read
+from the filed body, the row from `builder.tiers`, a missing row the doable row, the tier on
+the launch record and the board; amendment 8: `--effort <level>`, the session
 flag `-p` honours, U28's one-run case; `CLAUDE_CODE_EFFORT_LEVEL`, which would beat the flag, is
 unset in the launched environment beside the askpass and token names) and permission mode; the allow-list (its `Skill(...)` and `mcp__*` rules among them, amendment 7) plus a push prefix for the
 unit's own branch and `Bash(<first word>:*)` for every command `run_commands` returns from the
@@ -2671,7 +2684,7 @@ Grep, Glob]`, `omitClaudeMd: true`); and `foreman` (tools `[Agent, Bash, Read, G
 
 ## 17. Units
 
-The unit graph for building SuperEGM 1.0.0 (thirteen units), from amendment 2, 1.1.0 (U12–U14) and, from amendment 3, 1.1.1 (U15–U16) and, from amendment 4, 1.1.2 (U17–U20) and, from amendments 5–11, 1.2 (U21–U32). Each unit's plan must fit 48 KB.
+The unit graph for building SuperEGM 1.0.0 (thirteen units), from amendment 2, 1.1.0 (U12–U14) and, from amendment 3, 1.1.1 (U15–U16) and, from amendment 4, 1.1.2 (U17–U20) and, from amendments 5–12, 1.2 (U21–U33). Each unit's plan must fit 48 KB.
 Interfaces are subcommand contracts and file keys unless marked `py`. A Consumes producer may be
 a transitive blocker. After U01 every 1.0.0 skill folder and adapter of §14 exists (the new ones
 as stubs), so the later 1.0.0 units modify and never create skill folders, adapters or personas;
@@ -2714,10 +2727,11 @@ handoff is planned; the amendment-4 paragraph below); a later handoff on this sp
 | U26 | External review on the elephant's own PR (§8): `review ingest --pr <n>` (kind `spec`), U21's reader, severity map and bot/human rules reused, findings into the spec's latest cycle, closed by `accept` or not, `review.json`'s `ingested[]`, the `**Reply <fid>:** fixed` post on the thread under the elephant's token, `approve-spec`'s one ingest before its refusals and its one check (an unsettled external high or medium in the latest round, after the carry-forward, refuses, `by ruling` or not), `review-spec`'s `github-write` and `remote-branch`, the PR opened by the skill's preflight (refusing on `<base>`, committing the spec by path, pushing first) and the push after each fix and the approval commit, step 4's path back to step 3 on the refusal: `skills/plan/scripts/superegm/review.py` (modify: `--pr`, the review-level `ingested[]`, the reply post), `approve_spec.py` (modify: the one ingest call and the one check), `skills/review-spec/SKILL.md` (modify: the preflight's PR, the per-round fix commit §5 assumes and the push after it and after the approval commit, step 4's path back to step 3 on the ingest's refusal; the frontmatter's `github-write` and `remote-branch`), a `docs: see U29` Objective note, `tests/unit/test_review.py`, `test_effects.py` (modify), `test_u26.py` (create: its own keys) | U21; after U24 on shared files | M |
 | U27 | The builder's plugins and MCP servers, passed per launch (§4, §7, §11, §15): `config.builder.plugins` (`<name>@<marketplace>`; `init` writes `[]`), each resolved through the elephant profile's `plugins/installed_plugins.json` to `--plugin-dir <dir>`, and `config.builder.mcp` (`mcpServers` form; `init` writes `{}`), written to `launches/<unit>_r<n>_mcp.json` and passed with `--mcp-config --strict-mcp-config`; the per-launch record `launches/<unit>_r<n>_plugins.json` (id, version, directory, hook events per plugin; the managed plugins; the MCP server names; superseding `_managed.json`); `launch-builder`'s and `doctor`'s refusals (a listed plugin not installed or among the builder profile's managed plugins; a profile `skills/` or `commands/` directory or without `disableClaudeAiConnectors`, beside the landed login-only checks); `ENABLE_CLAUDEAI_MCP_SERVERS=false` in the launched environment; `doctor`'s `plugins:` and `mcp:` lines; `Skill(<name>)` / `Skill(<name> *)` and `mcp__<server>__<tool>` / `mcp__<server>__*` rules in `allowed_tools`; the skills named in the builder orders at the launch; from amendment 11 `gh pr view` and the test runner in `allowed_tools`' defaults and the orders' PR-body refresh line's `--body-file` form: `skills/plan/scripts/superegm/launch_builder.py` (modify: the flags, the MCP file, the record, the checks, the orders' skill line), `doctor.py` (modify: the two lines), `__init__.py` (modify: `DEFAULT_CONFIG.builder.plugins` and `.mcp`; `.allowed_tools`' two entries), `init.py` (modify), `skills/wave/references/builder_orders.md` (modify: the skills line; the refresh line's `--body-file` form, the push paragraph's after-push clause dropped), `skills/using-superegm/references/claude-code-tools.md` (modify: the `--allowedTools` sentence and the two flags), `docs/getting_started.md` (modify: the config's plugins and servers; the profile step), a `docs: see U29` Objective note, `tests/unit/test_builders.py`, `test_doctor.py` (modify), `test_u27.py` (create: its own keys) | — (U14, U15 landed); after U24 on `launch_builder.py` and `doctor.py` | M |
 | U28 | The default models and efforts per role (§7, §8, §11, §13): `builder.model` `claude-opus-5-5` (a full id) and `builder.effort` `medium`, passed to the launched `claude -p` as `--effort <level>` with `CLAUDE_CODE_EFFORT_LEVEL` unset, and written with the effective model into `launches/<unit>.json`; `reviewers.model` / `reviewers.effort` `opus` / `xhigh` (the Agent tool's alias and level), passed on every review goldfish dispatch as the adapter's override (the adapters stay `model: inherit`), the two session variables overriding them and `inherit` passing nothing; `astra.heads_effort` `high` for the foreman's lane; `judges.members` default `fable` (adapter, `xhigh`), `astra` (runner, `xhigh`, `not run` when absent), `opus` (adapter, `max`), an adapter member's `model` an alias; the elephant never in config; the four added keys read as `init`'s defaults in a pre-U28 config, the landed `builder.model` and member `effort` values standing; `doctor`'s role table: `skills/plan/scripts/superegm/__init__.py` (modify: `DEFAULT_CONFIG`, which `init` writes verbatim; the loader's `astra` merge extended to `builder` and `reviewers`, so a missing nested key reads from it), `launch_builder.py` (modify: `--effort`, the unset name, the entry's requested `model` and `effort`), `record_launch.py` (modify: the effective model from the result file's `modelUsage` and, amendment 10, `total_cost_usd` from the same read, the board's cost), `judges.py` (modify: the members' efforts; its `DEFAULT_MEMBERS` copy dropped for `DEFAULT_CONFIG.judges.members`, the one source), `doctor.py` (modify: the table, the members read through `judge_members`), `skills/review-spec/references/review_loop.md` (modify: the one rule), `skills/wave/references/foreman_brief.md` (modify: the placeholders filled from the config; step 2b's `astra.heads_effort` read and its `high` fallback), `skills/judges/SKILL.md` (modify: the override read per judge from the panel file; the effective pair by `review_loop.md`'s rule), `skills/judges/references/astra_judge.md` (modify: `<ASTRA_EFFORT>` from the panel file's member effort), `resources/review_panels.md` (modify: section 6 points at `review_loop.md`'s rule; section 1's table and `printenv` line untouched), a `docs: see U29` Objective note, `tests/unit/test_u28.py` (create: its own keys), `test_doctor.py`, `test_builders.py`, `test_judges.py`, `test_foreman.py`, `test_review.py` and `test_astra_fork.py` (modify: the pins on `review_loop.md` and `review_panels.md`) | — (landed units); after U27 and every earlier unit on the files its row shares | M |
-| U29 | Split units for parallel waves (§9.1, §9.2): the plan rules (a unit's Scope within one subsystem; a crossing unit written as two, a `Blocked by` edge only where one consumes the other's interface and the Shared files order for any file both edit; the cross-cutting rule for `README.md`, `docs/claude.md` and `test_helper.py`; Size `L` a split candidate; the plan shaped for wave width, its header stating the wave plan and why any wave is a singleton; a split's rows through `--amend-units`), `graph --plan`'s `width:` line derived from `handoff_units.json`, read by the plan skill before `scan`, `set-input` deriving the same line, the `set` reviewer's chain check (a chain longer than two units → its forcing edge, `medium`, once; from amendment 11 the header's wave plan and singleton reasons handed to `set`, the chains ending at one unit folded into one finding, a chain the header names `low`) and the `proportion` persona's per-unit split check (over 10 Steps, 24 KB or eight paths, or crossing subsystems → split candidate, `medium`), `scan`'s warnings at those values: `skills/plan/scripts/superegm/graph.py` (modify: the `width:` line), `review_plan.py` (modify: `set-input` derives it), `scan.py` (modify: the warning values), `skills/plan/SKILL.md` (modify: the rules; the `width:` read before `scan`; the header's wave plan), `skills/plan/references/handoff_plan.md` (modify: the Size row; the `graph` row's `width:` line), `skills/plan/references/issue_template.md` (modify: the limits paragraph at the amendment's values), `skills/review-plan/SKILL.md` (modify: the line handed to `set`), `skills/review-plan/references/proportion.md` (modify: the per-unit split check), `docs/claude.md`, `README.md` (modify: the 1.2 docs sweep, every unit's `docs: see U29` note resolved here), `tests/unit/test_plan.py`, `test_review_plan.py` (modify) | U28, U30, U31, U32 (the docs sweep after the rows it sweeps: their `docs: see U29` notes are its edges, §9.1's one exception; the other noted rows land before U32 by the chains and blockers) | S |
+| U29 | Split units for parallel waves (§9.1, §9.2): the plan rules (a unit's Scope within one subsystem; a crossing unit written as two, a `Blocked by` edge only where one consumes the other's interface and the Shared files order for any file both edit; the cross-cutting rule for `README.md`, `docs/claude.md` and `test_helper.py`; Size `L` a split candidate; the plan shaped for wave width, its header stating the wave plan and why any wave is a singleton; a split's rows through `--amend-units`), `graph --plan`'s `width:` line derived from `handoff_units.json`, read by the plan skill before `scan`, `set-input` deriving the same line, the `set` reviewer's chain check (a chain longer than two units → its forcing edge, `medium`, once; from amendment 11 the header's wave plan and singleton reasons handed to `set`, the chains ending at one unit folded into one finding, a chain the header names `low`) and the `proportion` persona's per-unit split check (over 10 Steps, 24 KB or eight paths, or crossing subsystems → split candidate, `medium`), `scan`'s warnings at those values: `skills/plan/scripts/superegm/graph.py` (modify: the `width:` line), `review_plan.py` (modify: `set-input` derives it), `scan.py` (modify: the warning values), `skills/plan/SKILL.md` (modify: the rules; the `width:` read before `scan`; the header's wave plan), `skills/plan/references/handoff_plan.md` (modify: the Size row; the `graph` row's `width:` line), `skills/plan/references/issue_template.md` (modify: the limits paragraph at the amendment's values), `skills/review-plan/SKILL.md` (modify: the line handed to `set`), `skills/review-plan/references/proportion.md` (modify: the per-unit split check), `docs/claude.md`, `README.md` (modify: the 1.2 docs sweep, every unit's `docs: see U29` note resolved here), `tests/unit/test_plan.py`, `test_review_plan.py` (modify) | U28, U30, U31, U32, U33 (the docs sweep after the rows it sweeps: their `docs: see U29` notes are its edges, §9.1's one exception; the other noted rows land before U32 by the chains and blockers) | S |
 | U30 | The board (§7, §11): every `status` pass of a `wave` session, `--wait` included, writes the report's `## Units` table, with the new columns (state word from `report.py`'s `unit_state` plus `ready` and `waiting`, derived once there · round · launch · head · PR · waits on · next action, `word_action`'s for a posted round, else by state · cost from `total_cost_usd`), under its header line (the time of the last change) into the tracking issue's body between `<!-- superegm:board -->` and `<!-- /superegm:board -->` through one splice function (replace between the markers, append once, write only on change; a module of the plan's choosing) and `apply.edit_issue`, one GitHub write per pass and none when the fresh rows match the block read back; one table in the file, on stdout and in the issue; `verify` compares the body outside the markers through the same splice; the inbox stays the action list; from amendment 11 U20's row's "showing all without `--handoff`" is corrected, not the helper: the inbox is the store-wide read (§11.2), `status` and `report` one handoff's, a carded call taking the card's handoff: `skills/plan/scripts/superegm/report.py` (modify: the words `ready` and `waiting`; the new columns of the `## Units` line), the splice's module (the plan's choice among modules no other 1.2 unit edits, `apply.py` beside `edit_issue` the natural one: the one function), `status.py` (modify: the one write through it), `verify.py` (modify: the comparison outside the markers through it), `skills/wave/SKILL.md` (modify: the status step names the board), a `docs: see U29` Objective note, `tests/unit/test_wave.py` (modify) | — (landed units); after U22 and U24 on `status.py`, U24 on `skills/wave/SKILL.md`, U25 on `test_wave.py` | S |
 | U31 | The watchdog (§4, §7, §11, §11.2): `config.builder.stall_minutes` (30); a `running` launch without the `kill_failed` mark, no exit file, whose branch shows no commit newer than its own newest commit (or its `started_at`) for that long is stalled; the launch `launch-builder` starts (U24's one behaviour, §11) carries the wrapper's trap; the `wave` session's `status` pass, a reader, reports `U<n> stalled (<minutes> min; last commit <time | none>) pr=<n or none> status=<word or none>`, and the skill's step 3 records it through `record-launch --exit stalled`, which signals the group, waits 30 s for the wrapper's exit file `stalled` (the one proof) and records `exited (stalled)` with `last_commit_at` (the launch's own newest commit or none, written on every `--exit` from amendment 10, the one field the carve-out reads for an exit or a stall) or `kill_failed` (the launch signalled no more, the unit idle by one clause of `unit_state` and in the inbox for the owner's interrupt; a later exit file clears it), journals it and routes the unit to point 3 with the stall facts, where a launch with no commit of its own spends no relaunch, exit or stall, and a second is `stop`; `doctor`'s `stall:` line; the wave skill's step 3 records the stalled line: `skills/plan/scripts/superegm/launch_builder.py` (modify: the wrapper's trap), `status.py` (modify: the check, the event line and the mask; the tick's read counting the predicate as a trigger), `record_launch.py` (modify: `--exit stalled`: the signal and the wait through U25's `kill_group`, the record or `kill_failed`; the entry re-read; `last_commit_at` on every `--exit`), `report.py` (modify: the `kill_failed` clause of `unit_state`), `inbox.py` (modify: the `kill_failed` kind), `decision.py` (modify: the carve-out), `judges.py` (modify: `question --unit <U> --blocked launch <n>` renders the options from the pending decision's record, where `decision open` applied the carve-out once, and the stall facts from the launch entry; its own `relaunch already used` refusal dropped, so leavemealone-mode gets the panel where normal mode gets the question), `doctor.py` (modify: the line), `__init__.py` (modify: `DEFAULT_CONFIG.builder.stall_minutes`), `skills/wave/SKILL.md` (modify: step 3's stalled line; the Entry's resume raising point 3 for an `interrupted` launch with no decision on it; the leavemealone paragraph's reading of a refused question dropped with the refusal; the frontmatter's `destructive-local` for the kill), a `docs: see U29` Objective note, `tests/unit/test_wave.py`, `test_doctor.py`, `test_builders.py`, `test_judges.py`, `test_effects.py` (modify), `test_u31.py` (create: its own keys) | U24, U25 (`kill_group`); after U30 on `status.py`, `report.py` and `skills/wave/SKILL.md`, after U28 on `__init__.py`, `doctor.py`, `launch_builder.py`, `record_launch.py` and `judges.py` (module files; the test files follow the Shared files chains below) | M |
 | U32 | 1.1.3's carried findings (§8, §11, §12): `close` closes the tracking issue and any merged unit's open issue as completed, `--note` on `close` and `runcard close`, the integrate skill's `--patch` closing without the integrate round on the owner's typed word, a `close --note`; `launch-builder`'s idempotent re-run and the orders' detached-`HEAD` stop; the by-hand `approve-spec --amend-units` card (`approve-spec-<6 hex>-<n>`, which §12 states and the landed helper lacks); a scoped finding with no line number out of scope by the landed path; the ruling's `review status` `rounds:` item moot (a head gains no second cycle: `foreman dispatch` opens a head review only when none exists and `stop` ends the unit), nothing to build; and a sweep of the accepted cleanups (the three copies of the spec-blob hash search and of the chain selection folded into one helper; the `STORE`/`CURRENT_ARGS` coupling; the stale one-handoff prose in `handoff_plan.md`, `orient`, `issue_template` and `review_loop.md`; the brainstorming brief lookup): `skills/plan/scripts/superegm/close.py` (modify: the issue closes, `--note`), `runcard.py` (modify: `--note`), `launch_builder.py` (modify: the idempotent re-run), `approve_spec.py` (modify: the by-hand card), `review.py` (modify: the lineless finding out of scope), `skills/plan/scripts/superegm/` as one directory path with `init.py` and `doctor.py` (modify: module self-registration, each subcommand module exposing its parser registration, its config defaults, its `init` step text and its `doctor` check, discovered by import, the registry lines `DEFAULT_CONFIG`, `SUBCOMMANDS`, `init`'s key text and `doctor`'s line gone; the sweep's one helper), `skills/wave/references/builder_orders.md` (modify: the detached-`HEAD` stop), `skills/integrate/SKILL.md` (modify: Step 1's gate admitting a unit whose PR merged with its issue open and Step 2's diff set every merged PR of the handoff, that unit's included; the `--patch` path; the frontmatter's `github-write`), `skills/review-spec/references/review_loop.md` (modify: the sweep's prose; section 5's lineless-location sentence, §8's path), `skills/plan/references/handoff_plan.md`, `skills/plan/references/issue_template.md`, `skills/orient/SKILL.md`, `skills/brainstorming/SKILL.md` (modify: the sweep's prose), a `docs: see U29` Objective note, `tests/unit/test_leavemealone_finish.py`, `test_review.py`, `test_builders.py`, `test_effects.py` (modify), `test_u32.py` (create: its own keys) | — (the ruling's: blocked by no 1.2 unit); after every unit on the package it rewrites, U31 the last of them | M |
+| U33 | Unit tiers (§7, §9.1, §9.2, §11): the `Tier: difficult \| doable \| easy` line in the unit form with its criteria, `graph` refusing a unit without one; `config.builder.tiers` (`init` writes `difficult` `claude-opus-5-5`/`high`, `doable` = `builder.model`/`builder.effort`, `easy` `claude-sonnet-5-5`/`medium`; a missing row reads the doable row); `launch-builder` picking the row by the filed body's tier, the launch record's `tier`, the board's tier column; the `proportion` persona's tier check; `doctor`'s three builder rows: `skills/plan/scripts/superegm/__init__.py` (modify: `DEFAULT_CONFIG.builder.tiers`), `graph.py` (modify: the `Tier` field), `launch_builder.py` (modify: the row by tier), `record_launch.py` (modify: `tier`), `status.py` (modify: the board's column), `doctor.py` (modify: the three rows), `skills/plan/SKILL.md`, `skills/plan/references/handoff_plan.md` (modify: the field and its criteria), `skills/review-plan/references/proportion.md` (modify: the tier check), a `docs: see U29` Objective note, `tests/unit/test_plan.py`, `test_review_plan.py`, `test_builders.py`, `test_doctor.py` (modify), `test_u33.py` (create: its own keys) | U28, U30; after U31 and U32 on `status.py`, `__init__.py` and `launch_builder.py` (U29, the docs sweep, after it on `graph.py` and `proportion.md`) | S |
 
 Shared files of the 1.0.0 build: `test_helper.py` is U03's alone. `body.py` is U03's and then U05's (the derived Step
 defaults), which U03 blocks. Each workflow SKILL.md stub U01 creates is filled
@@ -2800,12 +2814,12 @@ heading narrows or widens the scope; the tests pin the mapping on a fixture spec
 that a legacy flat store still reads and that `launch` refuses a base spec off the chain). The version bump to 1.1.2, the tag and the release are the
 owner's by-hand steps after all four merge, as before.
 
-Amendment 5–11 units (1.2): U21–U32 are filed from this spec as a fifth handoff (the helper's id
+Amendment 5–12 units (1.2): U21–U33 are filed from this spec as a fifth handoff (the helper's id
 form; the owner's name for it, `2026-11-05-superegm-1.2`, is the tracking issue's title and
 nothing else), through the installed 1.1.2 (`orient`, `review-spec --reviewers design`, approve,
 `plan`, `review-plan --reviewers readiness,proportion`, `file`, then `wave` through SuperEGM
 itself: the App builder, Astra on heads, `redesign` available), under the landed-row rule (a plan
-for it carries sections for U21–U32 only; U17–U20 landed, so no `Blocked by` names them; the
+for it carries sections for U21–U33 only; U17–U20 landed, so no `Blocked by` names them; the
 plan satisfies amendment 9's wave-width clause as far as 1.2 can: its header states the wave
 plan below, each wave but {U26, U27, U30} a singleton forced by a named `Blocked by` or module-file
 edge (`doctor.py`, `review.py`, `launch_builder.py`, the wave skill's steps, the shared tests;
@@ -2817,7 +2831,8 @@ U25 on `test_wave.py`, no file shared with them), U31 after U30 on `status.py`, 
 `skills/wave/SKILL.md` and U28 on `__init__.py`, `doctor.py`, `launch_builder.py`,
 `record_launch.py` and `judges.py`, by its blockers U24 and U25 (`kill_group`, landed four waves earlier), U32 after every unit on the package it rewrites, U31 the last of them (the ruling's placement,
 blocked by no 1.2 unit: the shared-file edges order it one wave after U31, as `Blocked by` would), and U29 last, the
-docs sweep, after U28, U30, U31 and U32, the rows it sweeps; the 1.2 rows are exempt from the split
+docs sweep, after U28, U30, U31, U32 and U33, the rows it sweeps, U33 (amendment 12) between U32 and U29, after U31 and U32 on `status.py`, `__init__.py` and `launch_builder.py` and before U29 on `graph.py` and `proportion.md`; from amendment 12 the
+plan tiers its own units, each section carrying the `Tier:` line its author sets; the 1.2 rows are exempt from the split
 checks as a set, reviewed under 1.1.2's `proportion.md`, which has none; their plan sections
 carry the size the path count gives, as the parser requires). Once
 U21 lands and the plugin is updated from the tree, the next `wave`, typed in a new session (§5: a
@@ -2836,7 +2851,8 @@ beside U26 and U27 (no file shared; U30 after U22 and U24 on `status.py` and
 `skills/wave/SKILL.md` and U25 on `test_wave.py`), U31 (amendment 10) after U30 on `status.py`, `report.py` and
 `skills/wave/SKILL.md` and after U28 on `__init__.py`, `doctor.py`, `launch_builder.py`,
 `record_launch.py` and `judges.py`, U32 (amendment 11) after every unit on the package it rewrites, U31 the last of them,
-blocked by no 1.2 unit, and U29 (amendment 9) last, the docs sweep, `Blocked by` U28, U30, U31 and U32
+blocked by no 1.2 unit, U33 (amendment 12) after U31 and U32 on `status.py`, `__init__.py` and
+`launch_builder.py` and before U29 on `graph.py` and `proportion.md`, and U29 (amendment 9) last, the docs sweep, `Blocked by` U28, U30, U31, U32 and U33
 (the rows it sweeps; §9.1's one exception).
 Shared files: `collect.py` is U21's, then U22's, then U25's; `review.py` U21's, then U25's, U24's, U26's, U32's;
 `skills/wave/SKILL.md` U21's, then U22's, U23's, U25's, U24's, U30's, U31's; `__init__.py` U21's, U23's, U25's, U24's, U27's, U28's, U31's and U32's, `init.py` U21's, U23's, U25's, U27's and U32's, and
@@ -2844,7 +2860,7 @@ Shared files: `collect.py` is U21's, then U22's, then U25's; `review.py` U21's, 
 on `skills/wave/SKILL.md` and U24 follows U25 on `doctor.py`); `inbox.py` U23's, U24's, then U31's; `test_inbox.py`
 U23's, then U24's; `launch.py` U21's, then U24's; `doctor.py` and `test_doctor.py` U25's, then U24's, U27's, U28's, U31's (`doctor.py` then U32's); `launch_builder.py` U22's, then U25's, U24's, U27's, U28's, U31's, U32's; `approve_spec.py` U26's, then U32's; `status.py` U22's, U24's, U30's, then U31's; `record_launch.py` U24's, U28's, then U31's; `judges.py` and `test_judges.py` U28's, then U31's; `test_effects.py` U23's, U24's, U26's, U31's, then U32's;  `decision.py` U22's, U23's, then U31's; `test_wave.py` U21's, U22's, U23's, U25's, U30's, then U31's; `report.py` U30's, then U31's; `test_builders.py` U24's, U27's, U28's, U31's, then U32's; `resources/review_panels.md` U21's, U25's, then U28's; `foreman_brief.md` U25's, then U28's; `test_foreman.py` U21's, U22's, U25's, then U28's; `test_review.py` U21's, U25's, U26's, U28's, then U32's; `skills/wave/references/builder_orders.md` U22's, U27's, then U32's; `skills/review-spec/references/review_loop.md` U28's, then U32's; `docs/claude.md` and `README.md` U29's alone, the 1.2 docs sweep
 (amendment 9: the units whose approved rows edited the docs carry a `docs: see U29` Objective note). Waves: {U21} → {U22} →
-{U23} → {U25} → {U24} → {U26, U27, U30} → {U28} → {U31} → {U32} → {U29}; version 1.2.0 after all twelve merge (manifests, `docs/releases.md`, tag,
+{U23} → {U25} → {U24} → {U26, U27, U30} → {U28} → {U31} → {U32} → {U33} → {U29}; version 1.2.0 after all thirteen merge (manifests, `docs/releases.md`, tag,
 release, plugin update: the owner's by-hand steps), after which `superegm driver install` (re-typed
 after every later update), `~/.superegm/env`, `register` from each handoff's worktree, a machine kept awake
 (`pmset`/`caffeinate`) and the builder's tooling configured (amendment 7, this repository's
@@ -2889,7 +2905,9 @@ an exit does); U32 medium (discovery by import replaces how every subcommand loa
 the config it writes: a module that fails to import or exposes no defaults breaks every command,
 and the import order sets the written config's key order; beside it a GitHub close of a merged unit's open issue
 whenever `close` runs and of the tracking issue when every unit then landed, a journal note, and `--patch` skipping a review on the
-owner's typed word; the plan's fit against the 48 KB bound is the stated risk, the self-registration one mechanical pattern per module).
+owner's typed word; the plan's fit against the 48 KB bound is the stated risk, the self-registration one mechanical pattern per module); U33 low (a tier the
+author sets picks a model and effort the config names; a wrong tier costs rounds, which the
+proportion check and the foreman's rounds surface).
 Plan-review focus: U21 a PR with 200 bot threads
 and one human medium, and a thread on a head not yet reviewed; U22 a comment one character off
 the form, and an owner's edit after the record; U23 a store with no open handoff, and the inbox's `test-delta` and `owner: <ids>` kinds built against §7's schema with fixture data (U25 lands after U23); U24 a reboot
@@ -2911,7 +2929,9 @@ wrapper's signal within the bound (a shell runs its trap after its foreground ch
 (journaled, its issue and the tracking issue left open), a unit whose PR merged with its issue open (admitted at Step 1, its PR in the round's diff, the issue closed), `--patch` journaled as the close's reason, a `launch-builder`
 re-run after a failure before the switch, a scoped finding with a bare path, a module without defaults, a
 module that fails to import, `init`'s written config key set equal before and after the
-self-registration (the order the discovery's). Not in 1.2: cross-repository handoffs
+self-registration (the order the discovery's); U33 a body without a
+`Tier:` line (refused by `graph`), a difficult unit at Size `L` (a proportion finding), and a
+config without the `easy` row (the doable row). Not in 1.2: cross-repository handoffs
 (the lib-core and financial-twin inputs are one handoff per repository; the second spec states
 its prerequisite in prose and `Landed:` rows, §9.1, and the owner types its phases after the
 first lands; neither a `Repo:` field nor a cross-store `Blocked by` is built; the registry is a
@@ -3050,6 +3070,10 @@ Interfaces (the names the plans will carry):
   the by-hand `approve-spec --amend-units` card
   `approve-spec-<6 hex>-<n>` (opened and closed by the command itself when no `--runcard` is given,
   skill `approve-spec`, §7's id form unchanged; effects `state-store`, the push the owner's, §5).
+- U33 → the owner: the unit form's `Tier:` line; the config key `builder.tiers`; `launches[]`'s
+  `tier`; the board's tier column; `doctor`'s three `model: builder <tier> …` lines; `graph`'s
+  refusal `U<n>: no Tier line`; the proportion finding forms `tier: <reason>` and `tier: difficult at
+  Size L`.
 
 Waves: {U01} → {U02, U03} → {U04, U05, U08, U09} → {U06, U07, U09b, U10} → {U10b} → {U11}; then,
 as a second handoff (`2026-11-03-superegm-<6 hex>`), {U12} → {U13} → {U14}, and version 1.1.0
@@ -3057,5 +3081,5 @@ after all three merge; then, as a third handoff (`2026-11-03-superegm-<6 hex>`),
 version 1.1.1 after both merge; then, as a fourth handoff (`2026-11-03-superegm-<6 hex>`, the
 owner's name `2026-11-05-superegm-1.1.2`), {U17, U18} → {U19} → {U20}, and version 1.1.2 after all
 four merge; then, as a fifth handoff (`2026-11-03-superegm-<6 hex>`, the owner's name
-`2026-11-05-superegm-1.2` on the tracking issue), {U21} → {U22} → {U23} → {U25} → {U24} → {U26, U27, U30} → {U28} → {U31} → {U32} → {U29}, and
-version 1.2.0 after all twelve merge.
+`2026-11-05-superegm-1.2` on the tracking issue), {U21} → {U22} → {U23} → {U25} → {U24} → {U26, U27, U30} → {U28} → {U31} → {U32} → {U33} → {U29}, and
+version 1.2.0 after all thirteen merge.
