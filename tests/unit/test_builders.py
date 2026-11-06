@@ -748,16 +748,17 @@ def test_every_writing_subcommand_refuses_without_its_card(world, monkeypatch, a
 
 
 @pytest.mark.parametrize("layout, held", [
-    ("bare", False), ("installed-empty", False), ("installed-listed", True), ("synced", True), ("trash", False), ("marketplace", False), ("cache", True)])
+    ("bare", False), ("installed-empty", False), ("installed-listed", True), ("installed-managed", False), ("synced", True), ("trash", False), ("marketplace", False), ("cache", False)])
 def test_plugins_held_reads_claude_code_s_own_files_as_no_plugin(tmp_path, layout, held):
   """1.1.3 fix: Claude Code writes installed_plugins.json, known_marketplaces.json, its default marketplace clones and
   store/ on every start (and .trash/ under syncClaudeAiPlugins: false); only an installed entry, a synced plugin
-  directory or an installed copy under cache/ is a plugin."""
+  directory is the owner's plugin; the organization's managed plugins and their cache copies are policy, recorded per launch."""
   from superegm import launch_builder
   plugins = tmp_path / "plugins"
   (plugins / "marketplaces").mkdir(parents=True); (plugins / "store").mkdir()
   (plugins / "store/cc-plugin-agents-md_builtin-b049b47b3618.json").write_text("{}", encoding="utf-8")
-  entries = {"installed-empty": '{"version": 2, "plugins": {}}', "installed-listed": '{"version": 2, "plugins": {"x@m": [{}]}}'}
+  entries = {"installed-empty": '{"version": 2, "plugins": {}}', "installed-listed": '{"version": 2, "plugins": {"x@m": [{"scope": "user"}]}}',
+             "installed-managed": '{"version": 2, "plugins": {"data@kw": [{"scope": "managed"}], "finance@kw": [{"scope": "managed"}]}}'}
   if layout in entries:
     (plugins / "installed_plugins.json").write_text(entries[layout], encoding="utf-8")
   if layout == "synced":
@@ -768,5 +769,8 @@ def test_plugins_held_reads_claude_code_s_own_files_as_no_plugin(tmp_path, layou
     (plugins / "marketplaces/claude-plugins-official/.git").mkdir(parents=True); (plugins / "known_marketplaces.json").write_text("{}", encoding="utf-8")
   if layout == "cache":
     (plugins / "cache/m/x/1.0.0").mkdir(parents=True)
+  if layout == "cache":
+    (plugins / "installed_plugins.json").write_text(entries["installed-managed"], encoding="utf-8")  # the managed copies
   assert launch_builder.plugins_held(plugins) is held
+  assert launch_builder.managed_plugins(plugins) == (["data@kw", "finance@kw"] if layout in ("installed-managed", "cache") else [])
   assert (launch_builder.profile_problem(tmp_path) == f"builder profile {tmp_path} holds plugins") is held
