@@ -105,7 +105,8 @@ def cut_diff(diff: bytes, limit: int = 400_000) -> str:
   """The diff as text (utf-8, undecodable bytes replaced), cut at `limit` bytes with a closing note."""
   if len(diff) <= limit:
     return diff.decode("utf-8", errors="replace")
-  return diff[:limit].decode("utf-8", errors="replace") + "\n(diff cut at 400 KB)\n"
+  size = f"{limit // 1000} KB" if limit % 1000 == 0 else f"{limit} bytes"
+  return diff[:limit].decode("utf-8", errors="replace") + f"\n(diff cut at {size})\n"
 
 
 def spec_range(st, root: Path, body: str) -> str:

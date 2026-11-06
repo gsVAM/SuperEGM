@@ -44,9 +44,9 @@ def checks(config, repo_root, token):
   path the order is owner, origin, token, builder, role, scopes, protection, profile, gh, environment,
   graphify, astra; the builder, role, scopes and protection lines need the token and are absent without it.
   On the App path: owner, origin, credential, key, openssl, artifacts_dir, app, permissions, token,
-  installation, scanning, protection, profile, gh, environment, graphify; the four App lines are absent
-  after a failing key or openssl. The environment line is absent after a failing gh line; graphify and
-  scanning are informational and never fail."""
+  installation, scanning, protection, profile, gh, environment, graphify, astra; the four App lines are absent
+  after a failing key or openssl. The environment line is absent after a failing gh line; graphify,
+  astra and scanning are informational and never fail."""
   repo, base, owners, team, app = config["repo"], config["base"], config["owners"], config["owner_team"], config["builder"]["app"]
   lines, found = [], {}
 

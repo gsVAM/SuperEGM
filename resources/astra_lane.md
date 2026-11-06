@@ -48,7 +48,7 @@ Record the lane as `not run` with the first reason that applies: `host` (not
 Claude Code, checked before any command), `no claudex-loop runner`, `codex not
 on PATH`, `codex not logged in`, `sandbox` (your Bash runs in Claude Code's
 sandbox without the exceptions in `docs/claude.md`), `subagent` (you are a
-subagent or a workflow agent, see section 3). Tell the user in one line and
+subagent or a workflow agent, see section 3; the head lane excepted, section 8). Tell the user in one line and
 continue with the Claude
 reviewers only. Do not run the preflight again in this review. Python and the
 Codex CLI version are not probed: the runner reports those failures (section 5).
@@ -110,6 +110,7 @@ Start the runner with the Bash tool, `run_in_background: true`, from this main
 conversation. Never start it from a subagent, the synthesizer or a workflow
 agent: a background command dies with the agent that started it. If you are a
 subagent or workflow agent, do not launch; record `astra: not run (subagent)`.
+This is the interactive flow only: a wave foreman runs the head lane as section 8 says (head lane excepted).
 Use one command. Put absolute paths in single quotes. Do not chain, pipe,
 redirect or add flags. Model and effort are the validated literals from
 `resources/review_panels.md` section 1, written by you, never `$EGM_...`.
@@ -157,8 +158,8 @@ apply — this main conversation only, `run_in_background: true`, one command,
 absolute paths in single quotes, no chaining, pipes, redirects or extra flags,
 validated literals never `$EGM_...`, and the Bash tool's `timeout` set to the
 runner's `--timeout` plus 300 seconds in milliseconds: `3900000` for the
-`--timeout 3600` inspect. The foreman prepares the brief and this line but
-never runs it: a background command dies with the agent that started it, so a
+`--timeout 3600` inspect. In the interactive flow only, the foreman prepares the brief and this line but
+never runs it (a head review's lane is run by the foreman, section 8): a background command dies with the agent that started it, so a
 foreman that launched and then reported back would kill the run. The helper's
 `prepare` writes the exact line and that Bash timeout into
 `foreman_<unit-id>_r<round>_launch.md`; check it against this section rather
@@ -289,8 +290,7 @@ not installed | stopped`. The foreman, never the main conversation, runs the run
 Claude panel as one foreground Bash call under a 600000 ms timeout with `--timeout 540`, in a fresh session,
 and records the result through `review record`. It is never a background command: the foreman waits for it.
 A lane that is `not installed`, `failed`, `killed` or `timeout` is recorded `not run (<reason>)` and never
-blocks the round; `not installed` and `stopped` count no incomplete run. The table below is the interactive
-flow's.
+blocks the round; `not installed` and `stopped` count no incomplete run. The table below is the interactive flow only.
 
 | Case | What the user sees | Review continues as |
 | --- | --- | --- |

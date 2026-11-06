@@ -534,7 +534,9 @@ def load_config(repo_root: Path) -> dict:
         config["astra"] = {**config["astra"], **value}
       else:
         config[key] = value
-  if not isinstance(config["astra"], dict) or not isinstance(config["astra"].get("heads"), bool):
+  if not isinstance(config["astra"], dict):
+    raise HandoffError("astra must be an object")
+  if not isinstance(config["astra"].get("heads"), bool):
     raise HandoffError("astra.heads must be true or false")
   if not config["repo"]:
     origin = run_git(["remote", "get-url", "origin"], repo_root)
