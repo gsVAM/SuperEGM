@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the judges subcommand (spec section 13.1) and `judges question`, the
-# leavemealone-mode question renderer of section 13.2 (U11).
+# leavemealone-mode question renderer of section 13.2 (U11); the cap question names a spec review's scope (U19).
 
 """superegm judges open|record|diff|verdict|question: the judge panel over a question file, and the
 question file rendered from the record at a decision point."""
@@ -547,7 +547,20 @@ def cap_question(st, rid: str) -> str:
     options.pop(0)
   if head:
     options.append(redesign_option(st, rid))
-  return f"## Q1 {rid} is at its cap\n" + options_text(options)
+  return f"## Q1 {rid} is at its cap{scope_suffix(st, rid, review)}\n" + options_text(options)
+
+
+def scope_suffix(st, rid: str, review: dict) -> str:
+  """On kind `spec`, ` (scope: <the latest round's headings in document order, or whole>)`; empty elsewhere
+  and before any round stored a scope."""
+  from superegm import review as reviews
+  if review["kind"] != "spec":
+    return ""
+  stored = [rnd["scope"] for n in reviews.round_numbers(st, rid) if "scope" in (rnd := reviews.load_round(st, rid, n))]
+  if not stored:
+    return ""
+  rows = sorted(stored[-1], key=lambda row: row[2])
+  return " (scope: " + ("whole" if any(row[0] == "whole" for row in rows) else ", ".join(row[1] for row in rows)) + ")"
 
 
 def redesign_option(st, rid: str) -> str:
