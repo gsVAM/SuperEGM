@@ -142,7 +142,12 @@ Record every reviewer of the round, the lane included, as its result arrives:
   `line `, `lines `, `L` or `:` in its location) falls outside every changed section and neighbour
   is refused, `record: <fid> out of scope (<section>): not recorded`, and kept verbatim in the round's
   `out_of_scope[]` with one journal line: no disposition, never counted, never a fix round. A
-  location citing no line is recorded. The record still succeeds for the reviewer's other lines.
+  location citing no line, or a line past the spec's end (another file's), is recorded. The record
+  still succeeds for the reviewer's other lines; a reviewer recorded again in the same round
+  replaces its own earlier `out_of_scope[]` lines. The round's `note` is the `whole` row's reason
+  (`whole`, `no approval`, `no change`, `no commit holds <sha7>`), else null. `review scope` writes
+  nothing, so the scope stored at the first record is the one the brief carried only while the spec
+  is not edited between the two: never edit the spec between `review scope` and the round's records.
 - The first record of a new round is refused with `review record: review at its cap: rule
   first` (exit 2) while the review is at its cap (section 6). A record with a grammar error
   writes nothing: fix the goldfish's file and record again.
@@ -161,7 +166,11 @@ that finds the same defect at the same scope marks it `regression: yes`.
 A round's dispositions may go in one call: `superegm review settle --review <id> --file <dispositions>
 [--owner | --judges <id>] --runcard <id>`, one `<fid> | <disposition> | <note>` per line. Every line is
 checked under the per-finding refusals first; one refused line is named
-(`review settle: <line>: <reason>: nothing written`) and nothing is written.
+(`review settle: <line>: <reason>: nothing written`) and nothing is written. Each settled
+finding stores its line's third field as `note`; the per-finding form writes no `note`. In
+leavemealone-mode `--owner --posted <comment>` verifies the one comment against each high or
+medium `contested` or `declined` line, and a comment rules one finding: a file holding two such
+findings is refused, so settle them per finding, each with its own `--posted`.
 
 ## 5. Status
 

@@ -1,7 +1,7 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19).
 
-"""superegm review open|record|settle|status|rule: the one review loop (spec section 8)."""
+"""superegm review open|record|settle|status|rule|scope|post: the one review loop (spec section 8)."""
 
 import argparse
 import contextlib
@@ -229,12 +229,13 @@ def cited_line(location: str) -> int | None:
 
 def out_of_scope(rows: list, spans: list, location: str):
   """The heading of the section a finding cites when no scope row holds its line, else None: a location
-  naming no line is kept (D1 (a): the goldfish was briefed to cite lines, and an unplaceable finding is not lost)."""
+  naming no line, or a line past the spec's end (another file's), is kept (D1 (a): the goldfish was briefed
+  to cite lines, and an unplaceable finding is not lost)."""
   line = cited_line(location)
-  if line is None or any(start <= line <= end for _, _, start, end in rows):
+  index = None if line is None else section_of(spans, line)
+  if index is None or any(start <= line <= end for _, _, start, end in rows):
     return None
-  index = section_of(spans, line)
-  return spans[index][0] if index is not None else f"line {line} past the end"
+  return spans[index][0]
 
 
 def approved_text(spec: Path, approval: dict):
@@ -243,8 +244,7 @@ def approved_text(spec: Path, approval: dict):
   root = core.git_toplevel(spec.parent)
   rel = spec.resolve().relative_to(root.resolve()).as_posix()
   show = lambda commit: subprocess.run(["git", "show", f"{commit}:{rel}"], cwd=str(root), capture_output=True)
-  at = show(approval.get("commit") or "")
-  if approval.get("commit") and at.returncode == 0:
+  if approval.get("commit") and (at := show(approval["commit"])).returncode == 0:
     return at.stdout.decode("utf-8")
   for commit in core.run_git(["log", "--format=%H", "--", rel], root, check=False).split():
     blob = show(commit)
@@ -500,12 +500,14 @@ def record_round(args) -> int:
       findings = parse_findings(text, reviewer, n)
     except ValueError as error:
       raise core.HandoffError(f"review record: {path}:{error}")
-    if reviewer == "set":
-      findings = keep_for_unit(findings, review["artifact"])
+    pairs = list(zip(findings, [line for line in text.splitlines() if line.strip()]))  # one finding per non-blank line
+    if reviewer == "set":  # the raw lines filtered alongside, so a kept line stays its own finding's
+      kept = [id(finding) for finding in keep_for_unit(findings, review["artifact"])]
+      pairs = [(finding, line) for finding, line in pairs if id(finding) in kept]
+    findings = [finding for finding, _ in pairs]
     if kind == "spec":
       spans = sections(core.read_text(Path(review["artifact"])))
-      raw = [line for line in text.splitlines() if line.strip()]  # one finding per non-blank line, in order
-      verdicts = [(finding, line, out_of_scope(rnd["scope"], spans, finding["location"])) for finding, line in zip(findings, raw)]
+      verdicts = [(finding, line, out_of_scope(rnd["scope"], spans, finding["location"])) for finding, line in pairs]
       findings = [finding for finding, _, section in verdicts if section is None]
       refused = [(finding["id"], line, section) for finding, line, section in verdicts if section is not None]
       mine = lambda line: line.split(" | ", 1)[0].rsplit("-", 2)[0] == reviewer

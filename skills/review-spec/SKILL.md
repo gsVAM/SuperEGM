@@ -84,8 +84,9 @@ approval that names it) starts the next cycle with a fresh cap.
 `--scope` is the invocation's, default `auto`: an amendment is reviewed in scope, the sections
 changed since the last approval and their neighbours, re-derived every round; with no approval
 the whole spec. `whole` forces a full review. A list names headings verbatim, separated by `;`,
-added to `auto`'s scope without neighbours, and is refused with no approval
-(`--scope <list>: no approval: use whole`).
+added to `auto`'s scope without neighbours (`(preamble)` names the text above the first `##`),
+and is refused with no approval (`--scope <list>: no approval: use whole`) or when a heading is
+not one of the spec's `##` or `###` headings now (`--scope: <heading> is not in the spec`).
 
 ### 3. The loop
 
