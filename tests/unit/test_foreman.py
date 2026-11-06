@@ -542,6 +542,17 @@ def test_foreman_brief_carries_the_round(line):
   assert line in (ROOT / "skills/wave/references/foreman_brief.md").read_text(encoding="utf-8"), line
 
 
+PROSE = [("skills/wave/references/foreman_brief.md", n) for n in ("Step 2b, the Astra lane", "--timeout 540", "600000", "astra_brief.md", "--not-run 'not installed'",
+                                                                   "stopped: two incomplete runs", "astra: ok <RUNNER>", "fresh every round")] + [
+         ("resources/astra_lane.md", "## 8. The head lane"), ("resources/astra_lane.md", "--timeout 540"), ("resources/astra_lane.md", "one foreground"),
+         ("resources/review_panels.md", "change-review, astra"), ("docs/claude.md", "one bounded foreground"), ("docs/claude.md", "astra.heads")]
+
+
+@pytest.mark.parametrize("path, needle", PROSE)
+def test_the_head_lane_prose(path, needle):
+  assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
+
+
 FILES = [".claude-plugin/agents/foreman.md", "skills/wave/references/foreman_brief.md",
          "skills/plan/scripts/superegm/foreman.py", "skills/plan/scripts/superegm/prepare.py",
          "skills/plan/scripts/superegm/collect.py"]
