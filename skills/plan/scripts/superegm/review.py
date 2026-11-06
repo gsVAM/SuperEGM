@@ -338,7 +338,8 @@ def latest_cycle(st: core.Store, kind: str, artifact: str) -> tuple[dict | None,
     closed = bool(approval) and approval["review"] == rid and approval["sha256"] != current_sha(st, kind, artifact)
   if not closed and kind == "integrate":
     state = core.load_state(st.root)
-    amended = (core.load_approval(st, Path(artifact)) or {}).get("amended") or []
+    amended = [e for e in core.load_approvals(st, Path(artifact))
+               if e.get("kind") == "amend-units" and e.get("handoff_id") == review.get("handoff_id")]
     latest_sha = evaluate(st, review, None).latest_sha
     closed = bool(state.get("closed_at")) or ("handoff_id" in review and state.get("handoff_id") != review["handoff_id"]) \
         or bool(amended and latest_sha and amended[-1]["sha256"] != latest_sha)

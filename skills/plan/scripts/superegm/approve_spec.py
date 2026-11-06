@@ -5,13 +5,14 @@
 
 """superegm approve-spec: record the owner's approval of a converged spec (spec section 8)."""
 
+import json
 from pathlib import Path
 import re
 
 import superegm as core
 from superegm.review import evaluate, findings_of, latest_cycle, load_review, load_round, review_id, round_numbers
 
-WRITES = frozenset(["approvals"])  # the store kinds this subcommand writes
+WRITES = frozenset(["approvals", "handoffs"])  # the store kinds this subcommand writes
 SKILLS = frozenset(["review-spec", "review-plan", "integrate"])  # the skills whose card this subcommand accepts
 CONFIG = ".superegm/config.json"
 UNITS_H2 = re.compile(r"^## (?:\d+\.?\s+)?Units\s*$")
@@ -39,12 +40,39 @@ def units_is_last_h2(text: str) -> bool:
   return bool(h2s) and bool(UNITS_H2.match(h2s[-1]))
 
 
-def handoff_id_for(st: core.Store, sha: str, stem: str) -> str:
-  """`state.json`'s id while the handoff is open (a `handoff_id` and no `closed_at`), else a fresh one."""
-  state = core.load_state(st.root)
-  if state.get("handoff_id") and not state.get("closed_at"):
-    return state["handoff_id"]
-  return f"{handoff_slug(stem)}-{sha[:6]}"
+def handoff_state(st: core.Store, hid: str) -> dict:
+  """The `state.json` of handoff `hid`: its directory's, or the flat one in a legacy store."""
+  path = core.Store(st.root, handoff_id=hid, legacy=st.legacy).path("state")
+  return json.loads(core.read_text(path)) if path.is_file() else {}
+
+
+def files_a_unit(state: dict) -> bool:
+  return any((record or {}).get("number") for record in (state.get("units") or {}).values())
+
+
+def handoff_id_for(st: core.Store, sha: str, stem: str, entries: list) -> tuple:
+  """(handoff id, kind) of a new approval (spec section 7): the last entry's id, `after-void`, when that
+  entry is voided and its handoff's `state.json` files a unit; else a fresh `opening`."""
+  last = entries[-1] if entries else None
+  if last and last.get("voided_by") and last.get("handoff_id") and files_a_unit(handoff_state(st, last["handoff_id"])):
+    return last["handoff_id"], "after-void"
+  return f"{handoff_slug(stem)}-{sha[:6]}", "opening"
+
+
+def append_entry(st: core.Store, spec: Path, entry: dict) -> Path:
+  """Append `entry` to the spec's approval history (a 1.1 record read as its first entry)."""
+  path = st.path("approvals", core.spec_slug(spec))
+  core.atomic_write(path, {"path": str(spec), "entries": core.load_approvals(st, spec) + [entry]})
+  return path
+
+
+def write_entries(st: core.Store, spec: Path, entries: list) -> None:
+  core.atomic_write(st.path("approvals", core.spec_slug(spec)), {"path": str(spec), "entries": entries})
+
+
+def entry_of(sha, commit, runcard, review, handoff_id, kind, escalated) -> dict:
+  return {"sha256": sha, "commit": commit, "runcard": runcard, "review": review, "approved_at": core.now_iso(),
+          "handoff_id": handoff_id, "kind": kind, "voided_by": None, "escalated": escalated}
 
 
 def units_section(text: str) -> str:
@@ -114,15 +142,15 @@ def run(args):
     print(f"Approve `{spec}` (sha256 `{sha[:12]}`) at review {rid}?")
     print("Options: Approve | Stop. Run again with --yes after the owner chose Approve.")
     return 0
-  handoff_id = handoff_id_for(st, sha, spec.stem)
+  handoff_id, kind = handoff_id_for(st, sha, spec.stem, core.load_approvals(st, spec))
   commit = commit_by_path(root, [spec.relative_to(root).as_posix(), CONFIG], f"superegm: approve {slug} at review {rid}",
                           st.config["commit_trailer"])
-  record = {"path": str(spec), "sha256": sha, "commit": commit, "runcard": args.runcard, "review": rid,
-            "approved_at": core.now_iso(), "amended": [], "voided_by": None, "handoff_id": handoff_id,
-            "escalated": escalated}
-  path = st.path("approvals", slug)
-  core.atomic_write(path, record)
-  core.journal(st, f"approve-spec {handoff_id} sha256 {sha[:12]} at review {rid} commit {commit[:12]} under {args.runcard}")
+  entry = entry_of(sha, commit, args.runcard, rid, handoff_id, kind, escalated)
+  path = append_entry(st, spec, entry)
+  handoff_file = st.path("handoffs", handoff_id)
+  if kind == "opening" and not handoff_file.is_file():
+    core.atomic_write(handoff_file, {"id": handoff_id, "spec": str(spec), "opened_at": entry["approved_at"], "closed_at": None})
+  core.journal(st, f"approve-spec {kind} {handoff_id} sha256 {sha[:12]} at review {rid} commit {commit[:12]} under {args.runcard}")
   print(f"approval recorded in {path}")
   return 0
 
