@@ -107,3 +107,18 @@ def test_runner_path_picks_the_highest_unorphaned_version(tmp_path, monkeypatch,
     state == "orphaned" and (scripts.parents[2] / ".orphaned_at").write_text("", encoding="utf-8")
   monkeypatch.setenv("CLAUDE_CODE_PLUGIN_CACHE_DIR", str(tmp_path / "plugins"))
   assert runner_path() == (str(tmp_path / f"plugins/cache/claudex-loop/claudex-loop/{expect}/skills/claudex-loop/scripts/runner.py") if expect else None)
+
+
+@pytest.mark.parametrize("env, base, names, expect", [
+  ("CLAUDE_CODE_PLUGIN_CACHE_DIR", "plugins", ["1.0.0", "latest", "2.0.0-rc1"], "1.0.0"),
+  ("CLAUDE_CONFIG_DIR", "config/plugins", ["0.9.0", "0.10.0"], "0.10.0")])
+def test_runner_path_skips_non_numeric_names_and_falls_back_to_the_config_dir(tmp_path, monkeypatch, env, base, names, expect):
+  from superegm.foreman import runner_path
+  for name in names:
+    scripts = tmp_path / base / "cache/claudex-loop/claudex-loop" / name / "skills/claudex-loop/scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "runner.py").write_text("", encoding="utf-8")
+  monkeypatch.delenv("CLAUDE_CODE_PLUGIN_CACHE_DIR", raising=False)
+  monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+  monkeypatch.setenv(env, str(tmp_path / ("plugins" if env == "CLAUDE_CODE_PLUGIN_CACHE_DIR" else "config")))
+  assert runner_path() == str(tmp_path / base / f"cache/claudex-loop/claudex-loop/{expect}/skills/claudex-loop/scripts/runner.py")

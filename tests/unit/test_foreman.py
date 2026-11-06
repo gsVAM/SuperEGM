@@ -577,8 +577,9 @@ def test_foreman_brief_carries_the_round(line):
 
 
 PROSE = [("skills/wave/references/foreman_brief.md", n) for n in ("Step 2b, the Astra lane", "--timeout 540", "600000", "astra_brief.md", "--not-run 'not installed'",
-                                                                   "stopped: two incomplete runs", "astra: ok <RUNNER>", "fresh every round", "every panel entry but `astra`", "(the head's Astra lane excepted: one bounded foreground runner call)", "record the lane once per round")] + [
+                                                                   "stopped: two incomplete runs", "astra: ok <RUNNER>", "fresh every round", "every panel entry but `astra`", "(the head's Astra lane excepted: one bounded foreground runner call)", "record the lane once per round", "a head's diff is small", "ends `astra: ok` or `astra: not installed`")] + [
          ("resources/astra_lane.md", "## 8. The head lane"), ("resources/astra_lane.md", "--timeout 540"), ("resources/astra_lane.md", "one foreground"), ("resources/astra_lane.md", "head lane excepted"), ("resources/astra_lane.md", "interactive flow only"),
+         ("resources/astra_lane.md", "The head review mapping"), ("resources/astra_lane.md", "the bare id `astra-<round>-<n>`"), ("resources/review_panels.md", "inspect launch is the interactive flow only"),
          ("resources/review_panels.md", "change-review, astra"), ("docs/claude.md", "one bounded foreground"), ("docs/claude.md", "astra.heads")]
 
 
