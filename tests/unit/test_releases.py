@@ -47,7 +47,7 @@ def test_prepare_one_superegm_archive(release: dict, tmp_path: Path) -> None:
     sums = (destination / "SHA256SUMS").read_text().splitlines()
     assert len(sums) == 1
     digest, name = sums[0].split("  ")
-    assert name == f"superegm-{version}.zip" == "superegm-1.1.2.zip"
+    assert name == f"superegm-{version}.zip" == "superegm-1.1.3.zip"
     archive = destination / name
     assert hashlib.sha256(archive.read_bytes()).hexdigest() == digest
     with zipfile.ZipFile(archive) as bundle:
@@ -55,7 +55,7 @@ def test_prepare_one_superegm_archive(release: dict, tmp_path: Path) -> None:
         assert json.loads(bundle.read("plugin.json"))["version"] == version
         assert {"skills/plan/scripts/superegm/__init__.py", "LICENSE-MIT"} <= set(bundle.namelist())
     notes = (destination / "RELEASE_NOTES.md").read_text()
-    assert notes.startswith("# SuperEGM 1.1.2\n") and "gsVAM/superegm" in notes
+    assert notes.startswith("# SuperEGM 1.1.3\n") and "gsVAM/superegm" in notes
     assert f"Declared source: `{'a' * 40}`" in notes
     assert "Local source identity is caller-supplied and is not verified by this script." in notes
     assert "claude plugin marketplace add gsVAM/superegm" in notes and "claude plugin install superegm@superegm" in notes
