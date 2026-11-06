@@ -181,35 +181,73 @@ def spec_slug(path) -> str:
 
 
 class Store:
-  """The files under `artifacts_dir`; every unit-keyed kind lives under the
-  handoff's 6-hex prefix so two handoffs share one store."""
+  """The files under `artifacts_dir` (spec section 7): the store level holds `handoffs/`,
+  `approvals/`, the spec reviews, their cards and judges and its own `journal.md`; everything
+  of a handoff lives under `<handoff id>/`. A flat 1.0/1.1 store (`legacy`) is read in place:
+  its files at the root, every unit-keyed kind under the handoff's 6-hex prefix."""
 
   FILES = {"state": "state.json", "journal": "journal.md", "plan": "handoff_plan.md",
            "units": "handoff_units.json", "bodies": "handoff_bodies.md"}
   # The Interfaces block's longer names for the same kinds.
   ALIASES = {"handoff_plan": "plan", "handoff_units": "units", "handoff_bodies": "bodies", "wave_report": "report"}
   KEYED = ("unit", "foreman", "launches", "worktrees", "review", "orient_unit")
+  LEVEL = ("approvals", "handoffs")  # always at the store level
+  SHARED = ("reviews", "judges", "questions")  # at the store level for a spec review's id, else the handoff's
 
-  def __init__(self, root: Path, handoff_id: str | None = None, config: dict | None = None):
+  def __init__(self, root: Path, handoff_id: str | None = None, config: dict | None = None, legacy: bool = False):
     self.root = Path(root)
     self.handoff_id = handoff_id
     self.config = config
+    self.legacy = legacy
+
+  @staticmethod
+  def card_segment(card_id: str):
+    """The hex segment of a `<skill>-<6 hex>-<n>` card id, or None for a `<skill>-<n>` one."""
+    parts = str(card_id).removesuffix(".json").rsplit("-", 2)
+    return parts[1] if len(parts) == 3 and parts[2].isdigit() else None
+
+  def card_dir(self, card_id: str) -> Path:
+    """`runcards/` of the handoff whose id ends with the card's segment, else the store's."""
+    seg = None if self.legacy else self.card_segment(card_id)
+    if seg:
+      if self.handoff_id and self.handoff_id.endswith(seg):
+        return self.root / self.handoff_id / "runcards"
+      for path in sorted((self.root / "handoffs").glob("*.json")):
+        if path.stem.endswith(seg):
+          return self.root / path.stem / "runcards"
+      for folder in sorted(self.root.glob(f"*{seg}/runcards")):
+        return folder
+    return self.root / "runcards"
+
+  def base(self, need=True) -> Path:
+    """The handoff's directory (`<6 hex>/` in a legacy store); the root when `need` is false and none resolved."""
+    if not self.handoff_id:
+      if need:
+        raise HandoffError("no handoff in this store: run approve-spec and graph first")
+      return self.root
+    return self.root / self.handoff_id[-6:] if self.legacy else self.root / self.handoff_id
 
   def path(self, kind, *parts) -> Path:
     kind, parts = self.ALIASES.get(kind, kind), [str(p) for p in parts]
+    home = self.root if self.legacy else self.base(need=False)
     if kind in self.FILES:
-      return self.root / self.FILES[kind]
+      return home / self.FILES[kind]
     if kind == "report":
-      return self.root / f"wave_{parts[0]}_report.md"
-    if kind in ("approvals", "runcards"):
+      return home / f"wave_{parts[0]}_report.md"
+    if kind == "file":
+      return home.joinpath(*parts)
+    if kind in self.LEVEL:
       return self.root / kind / (parts[0] if parts[0].endswith(".json") else f"{parts[0]}.json")
-    if kind in ("reviews", "judges", "questions", "orient", "file"):
-      return self.root.joinpath(*([kind] if kind != "file" else []), *parts)
+    if kind == "runcards":
+      return self.card_dir(parts[0]) / (parts[0] if parts[0].endswith(".json") else f"{parts[0]}.json")
+    if kind in self.SHARED:
+      spec_level = bool(parts) and parts[0].startswith("spec-") and "-integrate-" not in parts[0]
+      return (self.root if self.legacy or spec_level else home).joinpath(kind, *parts)
+    if kind == "orient":
+      return home.joinpath("orient", *parts)
     if kind not in self.KEYED:
       raise HandoffError(f"unknown store kind {kind}")
-    if not self.handoff_id:
-      raise HandoffError("no handoff in this store: run approve-spec and graph first")
-    base = self.root / self.handoff_id[-6:]
+    base = self.base()
     if kind == "unit":
       return base / f"unit_{parts[0]}.md"
     if kind == "foreman":
@@ -228,21 +266,32 @@ class Store:
     return Path(path).resolve().is_relative_to(self.root.resolve())
 
   def kind_of(self, path: Path) -> str:
+    """The kind `path` maps to, `path`'s inverse; a file beside `state.json` is `file`."""
     parts = Path(path).resolve().relative_to(self.root.resolve()).parts
     names = {v: k for k, v in self.FILES.items()}
+    level = lambda name: names.get(name) or ("report" if re.fullmatch(r"wave_\d+_report\.md", name) else "file")
     if len(parts) == 1:
-      if parts[0] in names:
-        return names[parts[0]]
-      return "report" if re.fullmatch(r"wave_\d+_report\.md", parts[0]) else "file"
-    if parts[0] in ("approvals", "runcards", "reviews", "judges", "questions", "orient"):
+      return level(parts[0])
+    if parts[0] in self.LEVEL + ("runcards",) + self.SHARED:
       return parts[0]
-    if re.fullmatch(r"[0-9a-f]{6}", parts[0]):
-      if len(parts) == 2 and re.fullmatch(r"unit_.+\.md", parts[1]):
-        return "unit"
-      if parts[1] == "orient":
-        return "orient_unit"
-      if parts[1] in self.KEYED:
-        return parts[1]
+    if self.legacy:
+      if parts[0] == "orient":
+        return "orient"
+      if re.fullmatch(r"[0-9a-f]{6}", parts[0]):
+        if len(parts) == 2 and re.fullmatch(r"unit_.+\.md", parts[1]):
+          return "unit"
+        if parts[1] == "orient":
+          return "orient_unit"
+        if parts[1] in self.KEYED:
+          return parts[1]
+      return "file"
+    rest = parts[1:]
+    if len(rest) == 1:
+      return "unit" if re.fullmatch(r"unit_.+\.md", rest[0]) else level(rest[0])
+    if rest[0] == "orient":
+      return "orient_unit" if re.fullmatch(r"U\d{2,}\b.*", rest[1]) else "orient"
+    if rest[0] in self.KEYED + ("runcards",) + self.SHARED:
+      return rest[0]
     return "file"
 
 
@@ -254,7 +303,9 @@ def store(repo_root: Path) -> Store:
   global STORE
   config = load_config(repo_root)
   root = Path(config["artifacts_dir"])
-  STORE = Store(root, handoff_id=load_state(root).get("handoff_id"), config=config)
+  flat = root / "state.json"
+  STORE = Store(root, handoff_id=json.loads(read_text(flat)).get("handoff_id") if flat.is_file() else None,
+                config=config, legacy=True)
   return STORE
 
 
@@ -1204,6 +1255,9 @@ def substitute(template: str, values: dict) -> str:
 
 
 def state_path(artifact_dir: Path) -> Path:
+  """The handoff's `state.json`: through `STORE` when `artifact_dir` is its root."""
+  if STORE is not None and Path(artifact_dir) == STORE.root:
+    return STORE.path("state")
   return Path(artifact_dir) / "state.json"
 
 
