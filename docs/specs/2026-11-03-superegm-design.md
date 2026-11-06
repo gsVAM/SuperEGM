@@ -1117,8 +1117,9 @@ filed, open or closed, stopped units included (their `state.json`, found through
 one, and `review-plan` names them in the `set` reviewer's brief beside the `Landed:` rows, so it
 counts them covered), and runs `superegm graph --plan <file>`
 (copies the text into the store as `handoff_plan.md`, parses, derives waves, prints the
-`wave <n>:` lines and, from amendment 9, a `width:` line (units per wave; each shared-file
-chain, its length and its forcing edge, the `after` item into its third unit), derived from
+`wave <n>:` lines and, from amendment 9, a `width:` line (the shared-file chains alone: each
+chain, its length and its forcing edge, the `after` item into its third unit; the units per wave
+stand in the `wave <n>:` lines), derived from
 `handoff_units.json`'s `waves` and `edges` as `set-input` derives the same line (§9.2), which
 the plan skill reads before `scan` and reshapes the plan on, splitting or
 re-scoping until every wave holds two or more units where the spec allows it (a split that needs
@@ -1141,7 +1142,7 @@ Each unit section carries EGM's fields and the superpowers additions:
 | Blocked by | `none` or unit ids |
 | Shared files | `none` or `` `path`: after U01, before U05 `` items |
 | Risk | `low\|medium\|high: reason` |
-| Size | `S\|M\|L` by scope-path count (`S` up to three paths, `M` up to eight; `L`, over eight paths, is a split candidate and not a size, amendment 9) |
+| Size | `S\|M\|L` by scope-path count (`S` up to three paths, `M` up to eight; `L` the size the parser gives a Scope over eight paths, which the per-unit check reports as a split candidate, amendment 9) |
 | Issue | optional; `#<n>`, an open issue in `config.repo` that `file` adopts instead of creating one (§10); `graph` refuses an `Issue` whose `#<n>` does not appear in the frozen spec's `## Units` section, a text check with no table parser (the owner names the adoption there) |
 | **Interfaces** | `Consumes:` and `Produces:` lines, one item per line (grammar below) |
 | Definition of done | numbered items; item 1 is always `The test for each Step was committed before its implementation (checked by superegm tdd-order)`; every other item is one of ``Run `<command>` — <what passing means>``, ``Exists `<path>` ``, or `CI green on the head`; only `Run` items are commands |
@@ -1237,14 +1238,16 @@ the other's interface and the Shared files order for any file both edit, or spli
 file is shared; the one exception is the release's closing sweep, `Blocked by` the release's
 last unit so that it closes the release. A cross-cutting file leaves the chains:
 `README.md` and `docs/claude.md` are edited by one closing unit per release (a docs sweep, or
-the wave's last unit) and never by the others, which carry a one-line `docs: see U<n>` note in
-their Objective instead (the DoD grammar is unchanged); shared test helpers are split per module
-(a unit adds its own test file, never a line in `test_helper.py` unless it owns it); and the
-helper's registry lines (`DEFAULT_CONFIG` and `SUBCOMMANDS` in `__init__.py`, the wave skill's
-command table) are cross-cutting too: module self-registration (each subcommand module exposes
-its parser registration and its config defaults, discovered by import, so a unit adds a module
-without editing the registry) removes them, a scope addition of the release's sweep unit, after
-which later releases get width. The plan is shaped for wave width: the
+the wave's last unit) and never by the others, which append a `docs: see U<n>` note to their
+Objective's one sentence instead (the DoD grammar is unchanged); shared test helpers are split
+per module (a unit adds its own test file, never a line in `test_helper.py` unless it owns it);
+and the helper's registry lines (`DEFAULT_CONFIG` and `SUBCOMMANDS` in `__init__.py`, `init`'s
+key text, `doctor`'s line) are cross-cutting too: module self-registration (each subcommand
+module exposes its parser registration, its config defaults, its `init` step text and its
+`doctor` check, discovered by import, so a unit adds a module without editing a registry)
+removes them, the release's sweep unit's work (not U29's); the wave skill is no registry, its
+per-unit steps an ordinary shared-file edge. Later releases' width comes from the subsystem
+rule's splits, the registry edge gone. The plan is shaped for wave width: the
 author reads the `width:` line `graph --plan` prints and splits or re-scopes until every wave
 holds two or more units where the spec allows it, and the plan's header states the wave plan
 and why any wave is a singleton. The checkers: the per-unit split check (Steps, bytes, paths,
@@ -2574,7 +2577,7 @@ handoff is planned; the amendment-4 paragraph below); a later handoff on this sp
 | U26 | External review on the elephant's own PR (§8): `review ingest --pr <n>` (kind `spec`), U21's reader, severity map and bot/human rules reused, findings into the spec's latest cycle, closed by `accept` or not, `review.json`'s `ingested[]`, the `**Reply <fid>:** fixed` post on the thread under the elephant's token, `approve-spec`'s one ingest before its refusals and its one check (an unsettled external high or medium in the latest round, after the carry-forward, refuses, `by ruling` or not), `review-spec`'s `github-write` and `remote-branch`, the PR opened by the skill's preflight (refusing on `<base>`, committing the spec by path, pushing first) and the push after each fix and the approval commit, step 4's path back to step 3 on the refusal: `skills/plan/scripts/superegm/review.py` (modify: `--pr`, the review-level `ingested[]`, the reply post), `approve_spec.py` (modify: the one ingest call and the one check), `skills/review-spec/SKILL.md` (modify: the preflight's PR, the per-round fix commit §5 assumes and the push after it and after the approval commit, step 4's path back to step 3 on the ingest's refusal; the frontmatter's `github-write` and `remote-branch`), a `docs: see U29` Objective note, `tests/unit/test_review.py`, `test_effects.py` (modify), `test_u26.py` (create: its own keys) | U21; after U24 on shared files | M |
 | U27 | The builder's plugins and MCP servers, passed per launch (§4, §7, §11, §15): `config.builder.plugins` (`<name>@<marketplace>`; `init` writes `[]`), each resolved through the elephant profile's `plugins/installed_plugins.json` to `--plugin-dir <dir>`, and `config.builder.mcp` (`mcpServers` form; `init` writes `{}`), written to `launches/<unit>_r<n>_mcp.json` and passed with `--mcp-config --strict-mcp-config`; the per-launch record `launches/<unit>_r<n>_plugins.json` (id, version, directory, hook events per plugin; the managed plugins; the MCP server names; superseding `_managed.json`); `launch-builder`'s and `doctor`'s refusals (a listed plugin not installed or among the builder profile's managed plugins; a profile `skills/` or `commands/` directory or without `disableClaudeAiConnectors`, beside the landed login-only checks); `ENABLE_CLAUDEAI_MCP_SERVERS=false` in the launched environment; `doctor`'s `plugins:` and `mcp:` lines; `Skill(<name>)` / `Skill(<name> *)` and `mcp__<server>__<tool>` / `mcp__<server>__*` rules in `allowed_tools`; the skills named in the builder orders at the launch: `skills/plan/scripts/superegm/launch_builder.py` (modify: the flags, the MCP file, the record, the checks, the orders' skill line), `doctor.py` (modify: the two lines), `__init__.py` (modify: `DEFAULT_CONFIG.builder.plugins` and `.mcp`), `init.py` (modify), `skills/wave/references/builder_orders.md` (modify: the skills line), `skills/using-superegm/references/claude-code-tools.md` (modify: the `--allowedTools` sentence and the two flags), `docs/getting_started.md` (modify: the config's plugins and servers; the profile step), a `docs: see U29` Objective note, `tests/unit/test_builders.py`, `test_doctor.py` (modify), `test_u27.py` (create: its own keys) | — (U14, U15 landed); after U24 on `launch_builder.py` and `doctor.py` | M |
 | U28 | The default models and efforts per role (§7, §8, §11, §13): `builder.model` `claude-opus-5-5` (a full id) and `builder.effort` `medium`, passed to the launched `claude -p` as `--effort <level>` with `CLAUDE_CODE_EFFORT_LEVEL` unset, and written with the effective model into `launches/<unit>.json`; `reviewers.model` / `reviewers.effort` `opus` / `xhigh` (the Agent tool's alias and level), passed on every review goldfish dispatch as the adapter's override (the adapters stay `model: inherit`), the two session variables overriding them and `inherit` passing nothing; `astra.heads_effort` `high` for the foreman's lane; `judges.members` default `fable` (adapter, `xhigh`), `astra` (runner, `xhigh`, `not run` when absent), `opus` (adapter, `max`), an adapter member's `model` an alias; the elephant never in config; the four added keys read as `init`'s defaults in a pre-U28 config, the landed `builder.model` and member `effort` values standing; `doctor`'s role table: `skills/plan/scripts/superegm/__init__.py` (modify: `DEFAULT_CONFIG`, which `init` writes verbatim; the loader's `astra` merge extended to `builder` and `reviewers`, so a missing nested key reads from it), `launch_builder.py` (modify: `--effort`, the unset name), `record_launch.py` (modify: the record's requested `model` and `effort`; the effective model from the result file's `modelUsage`), `judges.py` (modify: the members' efforts; its `DEFAULT_MEMBERS` copy dropped for `DEFAULT_CONFIG.judges.members`, the one source), `doctor.py` (modify: the table, the members read through `judge_members`), `skills/review-spec/references/review_loop.md` (modify: the one rule), `skills/wave/references/foreman_brief.md` (modify: the placeholders filled from the config; step 2b's `astra.heads_effort` read and its `high` fallback), `skills/judges/SKILL.md` (modify: the override read per judge from the panel file; the effective pair by `review_loop.md`'s rule), `skills/judges/references/astra_judge.md` (modify: `<ASTRA_EFFORT>` from the panel file's member effort), `resources/review_panels.md` (modify: section 6 points at `review_loop.md`'s rule; section 1's table and `printenv` line untouched), a `docs: see U29` Objective note, `tests/unit/test_u28.py` (create: its own keys), `test_doctor.py`, `test_builders.py`, `test_judges.py`, `test_foreman.py`, `test_review.py` and `test_astra_fork.py` (modify: the pins on `review_loop.md` and `review_panels.md`) | — (landed units); after U27 and every earlier unit on the files its row shares | M |
-| U29 | Split units for parallel waves (§9.1, §9.2): the plan rules (a unit's Scope within one subsystem; a crossing unit written as two, a `Blocked by` edge only where one consumes the other's interface and the Shared files order for any file both edit; the cross-cutting rule for `README.md`, `docs/claude.md` and `test_helper.py`; Size `L` a split candidate; the plan shaped for wave width, its header stating the wave plan and why any wave is a singleton; a split's rows through `--amend-units`), `graph --plan`'s `width:` line derived from `handoff_units.json`, read by the plan skill before `scan`, `set-input` and `proportion-input` deriving the same line, the `set` reviewer's chain check (a chain longer than two units → its forcing edge, `medium`, once) and the `proportion` persona's per-unit split check (over 10 Steps, 24 KB or eight paths, or crossing subsystems → split candidate, `medium`), `scan`'s warnings at those values: `skills/plan/scripts/superegm/graph.py` (modify: the `width:` line), `review_plan.py` (modify: `set-input` derives it), `scan.py` (modify: the warning values), `skills/plan/SKILL.md` (modify: the rules; the `width:` read before `scan`; the header's wave plan), `skills/review-plan/SKILL.md` (modify: the line handed to `set`), `skills/review-plan/references/proportion.md` (modify: the per-unit split check), `docs/claude.md`, `README.md` (modify: the 1.2 docs sweep, every unit's `docs: see U29` note resolved here), and, as the release's sweep unit, module self-registration (`skills/plan/scripts/superegm/__init__.py` (modify: `SUBCOMMANDS` and `DEFAULT_CONFIG` discovered by import), `skills/wave/SKILL.md` (modify: the command table from the modules)), `tests/unit/test_plan.py`, `test_review_plan.py` (modify) | U28 (the closing sweep's edge, §9.1's one exception); after U28 on `__init__.py` | S |
+| U29 | Split units for parallel waves (§9.1, §9.2): the plan rules (a unit's Scope within one subsystem; a crossing unit written as two, a `Blocked by` edge only where one consumes the other's interface and the Shared files order for any file both edit; the cross-cutting rule for `README.md`, `docs/claude.md` and `test_helper.py`; Size `L` a split candidate; the plan shaped for wave width, its header stating the wave plan and why any wave is a singleton; a split's rows through `--amend-units`), `graph --plan`'s `width:` line derived from `handoff_units.json`, read by the plan skill before `scan`, `set-input` deriving the same line, the `set` reviewer's chain check (a chain longer than two units → its forcing edge, `medium`, once) and the `proportion` persona's per-unit split check (over 10 Steps, 24 KB or eight paths, or crossing subsystems → split candidate, `medium`), `scan`'s warnings at those values: `skills/plan/scripts/superegm/graph.py` (modify: the `width:` line), `review_plan.py` (modify: `set-input` derives it), `scan.py` (modify: the warning values), `skills/plan/SKILL.md` (modify: the rules; the `width:` read before `scan`; the header's wave plan), `skills/review-plan/SKILL.md` (modify: the line handed to `set`), `skills/review-plan/references/proportion.md` (modify: the per-unit split check), `docs/claude.md`, `README.md` (modify: the 1.2 docs sweep, every unit's `docs: see U29` note resolved here), `tests/unit/test_plan.py`, `test_review_plan.py` (modify) | U28 (the closing sweep's edge, §9.1's one exception) | S |
 
 Shared files of the 1.0.0 build: `test_helper.py` is U03's alone. `body.py` is U03's and then U05's (the derived Step
 defaults), which U03 blocks. Each workflow SKILL.md stub U01 creates is filled
@@ -2664,12 +2667,14 @@ nothing else), through the installed 1.1.2 (`orient`, `review-spec --reviewers d
 itself: the App builder, Astra on heads, `redesign` available), under the landed-row rule (a plan
 for it carries sections for U21–U29 only; U17–U20 landed, so no `Blocked by` names them; the
 plan satisfies amendment 9's wave-width clause as far as 1.2 can: its header states the wave
-plan below, each wave but {U26, U27} a singleton forced by a named registry or helper-file edge (the docs and
-`test_helper.py` edges gone by amendment 9's cross-cutting rule; the registry lines
-`DEFAULT_CONFIG`, `SUBCOMMANDS` and the wave skill's command table still force them, accepted by
-the owner, and U29's self-registration removes the cause for later releases); the 1.2 rows are
-exempt from the split checks as a set, reviewed under 1.1.2's `proportion.md`, which has none;
-their plan sections carry the size the path count gives, as the parser requires). Once
+plan below, each wave but {U26, U27} a singleton forced by a named `Blocked by` or module-file
+edge (`doctor.py`, `review.py`, `launch_builder.py`, the wave skill's steps, the shared tests;
+the docs and `test_helper.py` edges gone by amendment 9's cross-cutting rule; the registry lines
+`DEFAULT_CONFIG`, `SUBCOMMANDS`, `init`'s key text and `doctor`'s line add one edge per unit,
+accepted by the owner, which the sweep unit's self-registration removes for later releases,
+whose width comes from the subsystem rule's splits); the 1.2 rows are exempt from the split
+checks as a set, reviewed under 1.1.2's `proportion.md`, which has none; their plan sections
+carry the size the path count gives, as the parser requires). Once
 U21 lands and the plugin is updated from the tree, the next `wave`, typed in a new session (§5: a
 wave is one invocation, and an update takes a new session), ingests Devin's reviews of the later
 1.2 PRs, and the next amendment's spec PR, opened by the review's preflight, is the first
@@ -2682,9 +2687,9 @@ the owner accepted every verdict and amended the test-suite non-goal on their ow
 and rulings first, then the inbox, then the driver; U25 sits where its shared files put it, and
 U26 (amendment 6) after U21 by its blocker and after U24 on `review.py`, U27 (amendment 7) beside U26, after U24 on `launch_builder.py` and `doctor.py`, and U28 (amendment 8) last, after
 U27 and every earlier unit on the files its row shares (the chains below), U29 (amendment 9)
-after it on `__init__.py` (the self-registration, the last edit of that registry).
+after it by the closing sweep's edge.
 Shared files: `collect.py` is U21's, then U22's, then U25's; `review.py` U21's, then U25's, U24's, U26's;
-`skills/wave/SKILL.md` U21's, then U22's, U23's, U25's, U24's; `__init__.py` U21's, U23's, U25's, U24's, U27's, U28's and U29's, `init.py` U21's, U23's, U25's and U27's, and
+`skills/wave/SKILL.md` U21's, then U22's, U23's, U25's, U24's; `__init__.py` U21's, U23's, U25's, U24's, U27's and U28's, `init.py` U21's, U23's, U25's and U27's, and
 `test_helper.py` no 1.2 unit's (amendment 9: each unit's own test file; U25 still follows U23
 on `skills/wave/SKILL.md` and U24 follows U25 on `doctor.py`); `inbox.py` and `test_inbox.py`
 U23's, then U24's; `launch.py` U21's, then U24's; `doctor.py` and `test_doctor.py` U25's, then U24's, U27's, U28's; `launch_builder.py` U22's, then U25's, U24's, U27's, U28's; `resources/review_panels.md` U21's, U25's, then U28's; `foreman_brief.md` U25's, then U28's; `test_builders.py` U27's, then U28's; `test_foreman.py` U21's, U22's, U25's, then U28's; `test_review.py` U21's, U25's, U26's, then U28's; `docs/claude.md` and `README.md` U29's alone,
@@ -2853,9 +2858,9 @@ Interfaces (the names the plans will carry):
   `doctor`'s `model:` lines, one per role; every dispatch record's `--model` and `--effort`
   requested → effective; `launches/<unit>.json`'s `model` and `effort` (requested; the effective
   model from the result file's `modelUsage`, else `requested only`).
-- U29 → the owner: `graph --plan`'s `width:` line (`width: waves <n>; units per wave <a>, <b>, …;
-  chains <path>: U<a> > U<b> > U<c> (after U<b>)…`, the forcing edge the `after` item into the
-  third unit), derived from `handoff_units.json`'s waves and edges as `set-input` derives it;
+- U29 → the owner: `graph --plan`'s `width:` line (`width: chains <path>: U<a> > U<b> > U<c>
+  (after U<b>)…`, the forcing edge the `after` item into the third unit; `none` when no chain
+  exceeds two), derived from `handoff_units.json`'s waves and edges as `set-input` derives it;
   the proportion finding form `split candidate: <Steps | bytes | paths | subsystems>`; the `set`
   finding form `chain: <path> U<a> > U<b> > U<c> (after U<b>)` at the location U<c>.
 
