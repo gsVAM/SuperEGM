@@ -6,7 +6,7 @@
 
 ## The invocation
 
-Probed against graphify 0.9.6 and pinned by `tests/unit/test_orient.py` against a fake CLI (no test runs graphify):
+Probed against graphify 0.9.6, re-probed against 0.9.103 (same invocation, same `graph.json` fields), and pinned by `tests/unit/test_orient.py` against a fake CLI (no test runs graphify):
 
     GRAPHIFY_OUT=<store>/orient/graphify-out graphify update <store>/orient/export
 
@@ -18,4 +18,4 @@ Probed against graphify 0.9.6 and pinned by `tests/unit/test_orient.py` against 
 
 ## What is read from graph.json
 
-NetworkX node-link JSON: `"nodes"`, each with `id`, `label`, `source_file` (the path graphify walked; `orient` makes it relative to the export), `source_location` (`L<line>`, `null` for a file node) and `community` (an integer id); and `"links"` (`"edges"` in older files), each with `source` and `target` (node ids), `relation`, `confidence` (`EXTRACTED`, `INFERRED` or `AMBIGUOUS`) and `confidence_score` (1.0, 0.5, 0.2). An edge whose end no node carries is dropped. The map lists the counts, the EXTRACTED share and the 40 largest communities with the five files holding most of their nodes; a unit file lists per Scope path its nodes with their communities, the EXTRACTED edges touching them (`edge`) and the other edges with their confidence (`other`). The first line names the graph by its sha256, since graphify's own build is not pinned.
+NetworkX node-link JSON: `"nodes"`, each with `id`, `label`, `source_file` (the path graphify walked, absolute or, from 0.9.103, already relative; `orient` makes it relative to the export; empty for a symbol defined outside the export, such as `Path`, which counts toward its community but names no file and reads as its label alone), `source_location` (`L<line>`, `null` for a file node) and `community` (an integer id); and `"links"` (`"edges"` in older files), each with `source` and `target` (node ids), `relation`, `confidence` (`EXTRACTED`, `INFERRED` or `AMBIGUOUS`) and `confidence_score` (1.0, 0.5, 0.2). An edge whose end no node carries is dropped. The map lists the counts, the EXTRACTED share and the 40 largest communities with the five files holding most of their nodes; a unit file lists per Scope path its nodes with their communities, the EXTRACTED edges touching them (`edge`) and the other edges with their confidence (`other`). The first line names the graph by its sha256, since graphify's own build is not pinned.

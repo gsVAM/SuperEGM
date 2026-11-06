@@ -187,7 +187,10 @@ def edges_of(graph: dict, nodes: dict) -> list:
 
 
 def end(node: dict) -> str:
+  """`label (file:loc)`; a node with no file (a symbol defined outside the export) is its label alone."""
   loc = node.get("source_location")
+  if not node["source_file"]:
+    return f"{node.get('label')}"
   return f"{node.get('label')} ({node['source_file']}:{loc})" if loc else f"{node.get('label')} ({node['source_file']})"
 
 
@@ -219,7 +222,8 @@ def graph_section(path: str, scope, nodes: dict, edges: list) -> list:
 
 def graph_summary(nodes: dict, edges: list, limit: int) -> list[str]:
   """`## Graph`: the counts and the `limit` largest communities by node count (ties by id),
-  each with up to five files holding most of its nodes (ties by path)."""
+  each with up to five files holding most of its nodes (ties by path); a node with no file counts
+  toward its community but names no file."""
   by_community = {}
   for node in nodes.values():
     if node.get("community") is not None:
@@ -228,7 +232,7 @@ def graph_summary(nodes: dict, edges: list, limit: int) -> list[str]:
   lines = [f"nodes {len(nodes)} · edges {len(edges)} · communities {len(by_community)} · extracted {extracted}/{len(edges)}"]
   for cid in sorted(by_community, key=lambda c: (-len(by_community[c]), str(c)))[:limit]:
     files = by_community[cid]
-    top = sorted(set(files), key=lambda f: (-files.count(f), f))[:5]
+    top = sorted({f for f in files if f}, key=lambda f: (-files.count(f), f))[:5]
     lines.append(f"community {cid}: {len(files)} nodes · {', '.join(top)}")
   return lines
 
