@@ -171,6 +171,14 @@ then `review status`; record it with
 or `--ruling '<fid> finding overruled — <reason>'`, which posts the
 `**Ruling:**` comment on the issue. Then by `review status`: 0 → the unit
 awaits merge; 2 → Decision point 2; else `launch-builder`.
+A third ruling, on a head, is `redesign — <one sentence why>` (the sentence the owner's, typed after the dash; a bare `redesign` is refused):
+`python3 '<HELPER>' decision rule --unit <U> --decision <qid> --ruling 'redesign — <one sentence why>' --by <login> --runcard '<CARD>'`.
+It stops the unit by `stop`'s own path (the issue labelled `superegm:stopped`, never relaunched) and writes the
+store-only brainstorm brief `foreman/<U>-<qid>.brainstorm.md`; the `**Ruling:**` comment says the unit is
+stopped for redesign and names the brief, and asks the owner to close the issue by hand once the re-planned unit is filed.
+A redesign ruled by hand with `--posted` (a `<comment-id>`) posts nothing: the brief is written and the unit stopped,
+but no comment names the brief, so the owner closes the issue by hand all the same.
+The road back is typed phases only: `/superegm:brainstorming` from the brief, the amended spec, `plan`, `review-plan`, `file`, then the wave again.
 Leavemealone-mode: U11 wires §13.2 here.
 
 ### Decision point 2
@@ -178,11 +186,15 @@ Leavemealone-mode: U11 wires §13.2 here.
 The head review is at its cap. Cap: 5 rounds, then PAUSE for the owner.
 Write the `review status` trend line to a question file and run
 `python3 '<HELPER>' decision open --unit <U> --point 2 --question '<file>' --source 'review <head-review-id> cap' --runcard '<CARD>'`
-(options `one more round; stop`). `one more round` (once per unit):
+(options `one more round; stop`, and on a head `redesign — <one sentence why>`; once `one more round` is spent,
+`judges question --review <head-review-id> --cap` asks `stop` and `redesign` alone). `one more round` (once per unit):
 `python3 '<HELPER>' review rule --review <head-review-id> --ruling continue --owner --runcard '<CARD>'`,
 then `decision rule … --ruling 'one more round'`, then `launch-builder`.
 `stop`: `review rule … --ruling stop --owner`, then
 `decision rule … --ruling stop`, which labels and stops the unit.
+`redesign — <one sentence why>`: `review rule … --ruling stop --owner`, then
+`decision rule … --ruling 'redesign — <one sentence why>' --by <login>`: the unit is stopped for redesign with its
+brainstorm brief, the comment names it, and the road back is Decision point 1's.
 Leavemealone-mode: U11 wires §13.2 here.
 
 ### Decision point 3

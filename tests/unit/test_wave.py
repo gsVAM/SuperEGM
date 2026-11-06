@@ -291,6 +291,22 @@ def test_decision_open_records_the_question_and_prints_its_options(world, point,
 # ---------------------------------------------------------------- S5: decision rule
 
 
+def test_point_1_takes_one_ruling_per_contested_finding(world):
+  """1.1.3 fix (wave-0021, U18 round 4): a point-1 decision carries every contested finding of the round, and the
+  leavemealone row rules them one call per finding; only a second ruling on the same finding is refused."""
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})
+  qid = world.run("decision", "open", "--unit", "U01", "--point", 1, "--question", question(world),
+                  "--source", "review head-U01-c1 round 4", "--runcard", card)[1].splitlines()[0]
+  rule = lambda ruling: world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", ruling, "--by", "judges:p-1", "--runcard", card)
+  assert rule("f-4-1 finding upheld")[0] == 0
+  assert rule("f-4-2 finding overruled — the plan says so")[0] == 0
+  assert rule("f-4-1 finding overruled — changed my mind") == (1, f"decision: {qid} already ruled\n")
+  rulings = foreman_of(s, "U01")["rulings"]
+  assert [r["ruling"] for r in rulings if r["decision"] == qid] == ["f-4-1 finding upheld", "f-4-2 finding overruled — the plan says so"]
+  assert len(world.gh.comments[2]) == 2, "one **Ruling:** comment per finding, none for the refusal"
+
+
 @pytest.mark.parametrize("point,source,ruling,posted", [
   (1, "review head-U01-c1 round 2", "f-2-1 finding overruled — the test already covers it",
    "**Ruling:** f-2-1 finding overruled — the test already covers it"),
@@ -322,6 +338,7 @@ def test_decision_rule_records_posts_and_journals(world, point, source, ruling, 
                  "--runcard", card)[1].splitlines()[0]
   code, out = world.run("decision", "rule", "--unit", "U01", "--decision", q2, "--ruling", "(z) nonsense", "--by", "owner", "--runcard", card)
   assert code == 1 and out.startswith("decision: ruling is none of the options:")
+  assert out.rstrip("\n").endswith("; redesign — <one sentence why>") == (point in (1, 2)), "a head's third ruling is named at points 1 and 2 only"
   assert world.run("decision", "rule", "--unit", "U01", "--decision", q2, "--ruling", "f-2-1", "--by", "owner", "--runcard", card)[0] == 1, \
       "a finding id alone names no option"
   assert world.run("decision", "rule", "--unit", "U01", "--decision", q2, "--ruling", ruling, "--by", "judges:j-1", "--runcard", card)[0] == 0
@@ -458,3 +475,86 @@ def test_the_wave_entry_refreshes_the_snapshot_before_report():
   "--not-run <reason>", "ask the user whether to re-review", "max 1 re-audit", "Blocker or Major"])
 def test_the_wave_skill_names_no_removed_mechanism(removed):
   assert removed not in SKILL.read_text(encoding="utf-8"), removed
+
+
+# ---------------------------------------------------------------- U18: the redesign ruling
+
+FINDING = "change-review-1-1 | high | src/x.py:3 | regression: no | the retry loop never backs off"
+
+
+@pytest.mark.parametrize("point, source", [(1, "review head-U01-c1 round 1"), (2, "review head-U01-c1 cap")])
+def test_a_redesign_ruling_stops_the_unit_and_writes_the_brainstorm_brief(world, point, source):
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "rounds": [{"round": 1, "phase": "posted", "outcome": "revise", "launch": 1}]})
+  folder = s.path("review", "U01", 70) / "r1"
+  atomic_write(folder / "diff", b"diff --git a/src/x.py b/src/x.py\n" + (b"+" + b"x" * 200 + b"\n") * 300)
+  atomic_write(folder / "comments.md", "builder: builder-bot\n### issue #2 comment 5 by builder-bot at t\n**Deviation (other):** renamed a fixture\n\n")
+  qid = world.run("decision", "open", "--unit", "U01", "--point", point, "--question", question(world, FINDING + "\n"), "--source", source, "--runcard", card)[1].splitlines()[0]
+  rule = lambda text: world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", text, "--by", "owner", "--runcard", card)
+  assert rule("redesign") == (1, "decision: redesign needs — <one sentence why>\n") and rule("redesign — the retry design is wrong")[0] == 0
+  f, brief = foreman_of(s, "U01"), s.path("foreman", "U01").with_name(f"U01-{qid}.brainstorm.md")
+  assert f["stopped"] == {"by": "owner", "reason": "redesign — the retry design is wrong", "at": f["rulings"][-1]["posted_at"], "brief": str(brief)}
+  assert "superegm:stopped" in world.gh.issues[2]["labels"]
+  assert world.gh.comments[2][-1]["body"].startswith(f"**Ruling:** redesign — the retry design is wrong\n\nStopped for redesign; the brainstorm brief is `{brief}`.\n")
+  assert world.gh.comments[2][-1]["body"].splitlines()[3:] == ["Close this issue by hand once the re-planned unit is filed.", "", "> " + FINDING]
+  text = brief.read_text(encoding="utf-8")
+  assert [l for l in text.splitlines() if l.startswith("# ")] == ["# What the owner asked", "# Findings", "# Unit body", "# Diff", "# Deviations"]
+  assert "redesign — the retry design is wrong" in text and FINDING in text and "<!-- superegm:handoff=" in text
+  assert "src/x.py" in text and sum(l.startswith("+x") for l in text.splitlines()) == 199 and "**Deviation (other):** renamed a fixture" in text
+  assert not any(c[:2] == ["api", f"repos/{REPO}/pulls/70"] for c in world.gh.calls)
+
+
+def test_the_report_names_a_redesign_units_brief(world):
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"}, U02={"launched": False})
+  atomic_write(s.path("handoff_units"), {"order": ["U01", "U02"], "units": {"U01": {"blockers": []}, "U02": {"blockers": ["U01"]}}})
+  data = foreman_of(s, "U01"); data["stopped"] = {"by": "owner", "reason": "redesign — why", "at": "t", "brief": "/store/foreman/U01-q1.brainstorm.md"}
+  atomic_write(s.path("foreman", "U01"), data)
+  assert world.run("report", "--runcard", card)[0] == 0
+  assert "## Stopped\n- U01 (owner: redesign — why): unlanded dependants U02; brief /store/foreman/U01-q1.brainstorm.md" in s.path("wave_report", 1).read_text(encoding="utf-8")
+
+
+def test_a_refused_redesign_ruling_leaves_no_brief_and_a_small_diff_is_copied_whole(world, monkeypatch):
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "builder-token")
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "rounds": [{"round": 1, "phase": "posted", "outcome": "revise", "launch": 1}]})
+  folder = s.path("review", "U01", 70) / "r1"
+  # 300 lines of invalid UTF-8: 13.5 KB on disk, 40.5 KB if re-encoded after `errors="replace"`: under 40 KB on disk, so copied whole
+  atomic_write(folder / "diff", b"diff --git a/src/x.py b/src/x.py\n" + (b"+" + b"\xff" * 45 + b"\n") * 300)
+  qid = world.run("decision", "open", "--unit", "U01", "--point", 2, "--question", question(world, FINDING + "\n"),
+                  "--source", "review head-U01-c1 cap", "--runcard", card)[1].splitlines()[0]
+  brief = s.path("foreman", "U01").with_name(f"U01-{qid}.brainstorm.md")
+  fake_gh(world, {"user": {"login": BUILDER}, f"repos/{REPO}/issues/comments/9": {"id": 9, "user": {"login": "someone"}, "body": "**Ruling:** (cap) redesign — why\n"}})
+  rule = lambda *more: world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", "redesign — why", "--by", "owner",
+                                 *more, "--runcard", card)
+  assert rule("--posted", "9") == (1, "decision: comment 9 was written by someone, not owner\n")
+  assert not brief.exists() and "stopped" not in foreman_of(s, "U01") and foreman_of(s, "U01")["rulings"] == []
+  assert "Brainstorm brief" not in (world.artifacts / "journal.md").read_text(encoding="utf-8")
+  assert rule()[0] == 0
+  text = brief.read_text(encoding="utf-8")
+  assert sum(l.startswith("+�") for l in text.splitlines()) == 300
+  assert text.split("# Deviations")[1].strip() == "(none)"  # no comments.md for the round
+
+
+def test_a_brief_with_no_posted_round_names_no_diff_and_no_deviations(world):
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})
+  qid = world.run("decision", "open", "--unit", "U01", "--point", 2, "--question", question(world, FINDING + "\n"),
+                  "--source", "review head-U01-c1 cap", "--runcard", card)[1].splitlines()[0]
+  assert world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", "redesign — why", "--by", "owner", "--runcard", card)[0] == 0
+  text = s.path("foreman", "U01").with_name(f"U01-{qid}.brainstorm.md").read_text(encoding="utf-8")
+  assert text.split("# Diff")[1].split("# Deviations")[0].split() == ["(none)", "```diff", "```"]
+  assert text.split("# Deviations")[1].strip() == "(none)"
+
+
+def test_a_by_hand_redesign_ruling_stops_the_unit_and_posts_nothing(world, monkeypatch):
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "builder-token")
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "rounds": [{"round": 1, "phase": "posted", "outcome": "revise", "launch": 1}]})
+  qid = world.run("decision", "open", "--unit", "U01", "--point", 2, "--question", question(world, FINDING + "\n"),
+                  "--source", "review head-U01-c1 cap", "--runcard", card)[1].splitlines()[0]
+  fake_gh(world, {"user": {"login": BUILDER}, f"repos/{REPO}/issues/comments/9": {"id": 9, "user": {"login": "owner"}, "body": "**Ruling:** (cap) redesign — why\n"}})
+  code, out = world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", "redesign — why", "--by", "owner", "--posted", "9", "--runcard", card)
+  brief = s.path("foreman", "U01").with_name(f"U01-{qid}.brainstorm.md")
+  assert (code, out) == (0, "recorded (comment 9)\n"), out
+  assert brief.is_file() and foreman_of(s, "U01")["stopped"]["brief"] == str(brief) and world.gh.comments.get(2, []) == []

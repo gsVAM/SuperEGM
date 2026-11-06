@@ -67,7 +67,14 @@ def collect(args, card):
   login, comments = parse_comments(core.read_text(r / "comments.md"))
   rid = head_review_id(st, unit)
   prior = max((e["round"] for e in data["rounds"] if e.get("phase") == "posted"), default=None)
-  prior_ci_fid, prior_tdd = None, []
+  prior_ci_fid, prior_tdd, prior_scope, contest_of = None, [], {}, {}
+  for e in data["rounds"]:  # every posted round: an overruled out-of-Scope finding widens the Scope for good;
+    if e.get("phase") == "posted":  # a contest finding names the goldfish finding a `fixed` reply may answer under
+      for f in prior_foreman_findings(st, rid, e["round"]):
+        if f["claim"] == "changed path outside Scope paths":
+          prior_scope[f["id"]] = f["location"]
+        if (m := re.match(r"contested (\S+):", f["claim"])):
+          contest_of[f["id"]] = m.group(1)
   for f in prior_foreman_findings(st, rid, prior):
     if f["location"] == "ci":
       prior_ci_fid = f["id"]
@@ -75,7 +82,7 @@ def collect(args, card):
       prior_tdd.append(f["id"])
   lines, contested = foreman_findings(n, json.loads(core.read_text(r / "ci.json"))["verdict"], text, scope, worktree, changed,
                                       core.read_text(r / "pr_body.md"), comments, login, prior, prior_ci_fid,
-                                      tdd_order.commits_of(worktree, entry["merge_base"]), prior_tdd)
+                                      tdd_order.commits_of(worktree, entry["merge_base"]), prior_tdd, prior_scope, contest_of)
   findings = r / "foreman.findings"
   core.atomic_write(findings, "".join(line + "\n" for line in lines))
   with contextlib.redirect_stdout(io.StringIO()):
@@ -129,7 +136,8 @@ def parse_comments(text: str) -> tuple:
 
 
 def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, worktree: Path, changed: list, pr_body: str,
-                     comments: list, login: str, prior_round, prior_ci_fid, commits: list = (), prior_tdd_fids: list = ()) -> tuple:
+                     comments: list, login: str, prior_round, prior_ci_fid, commits: list = (), prior_tdd_fids: list = (),
+                     prior_scope: dict = None, contest_of: dict = None) -> tuple:
   """The foreman's high findings of spec section 11 in this order: CI, the DoD items, scope, tdd-order,
   deviations, contested, upheld; and `builder_contested[]` for the contested ones. Rulings and replies
   count only from the right author: rulings from anyone but the builder, replies from the builder."""
@@ -142,10 +150,11 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
       found.append((text, f"Exists item {n}: path absent"))
     elif kind == "run" and n not in results:
       found.append(("pr_body.md", f"Run item {n}: no fenced output"))
-  found += [(path, "changed path outside Scope paths") for path in changed if path not in scope]
   others = [c for c in comments if c["login"] != login]
   rulings = [(c, m) for c in others if (m := RULING_RE.match(c["body"]))]
   overruled = {m.group(1) for _, m in rulings if m.group(2) == "overruled"}
+  widened = {path for fid, path in (prior_scope or {}).items() if fid in overruled}  # an owner's overrule widens the Scope
+  found += [(path, "changed path outside Scope paths") for path in changed if path not in scope and path not in widened]
   if not set(prior_tdd_fids) & overruled:
     tests = {n: t for n, t, _ in body_mod.step_paths(body)}
     for failure in tdd_order.check(body, list(commits)):
@@ -170,8 +179,9 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
       contested.append({"fid": f"foreman-{round_n}-{len(found)}", "reason": reason})
     for c, ruling in rulings:
       fid = ruling.group(1)
+      answers = {fid, (contest_of or {}).get(fid, fid)}  # the ruled contest finding, or the goldfish finding it names
       fixed = any(o["login"] == login and o["at"] > c["at"] and (m := REPLY_RE.match(o["body"]))
-                  and m.group(1) == fid and m.group(2) == "fixed" for o in comments)
+                  and m.group(1) in answers and m.group(2) == "fixed" for o in comments)
       if ruling.group(2) == "upheld" and not fixed:
         found.append((where(c), f"upheld {fid}: no `fixed` reply"))
   lines = [f"foreman-{round_n}-{i} | high | {location} | regression: no | {claim}" for i, (location, claim) in enumerate(found, 1)]
