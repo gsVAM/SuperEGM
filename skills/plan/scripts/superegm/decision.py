@@ -169,7 +169,8 @@ def check_ruling(point: int, options: list, ruling: str) -> str:
     letter, _, rest = option.partition(" ") if option.startswith("(") else ("", "", option)
     if text and text in (option, letter, rest) and (point != 1 or fid):
       return f"{fid} {rest}" if point == 1 else rest
-  raise Refusal("decision: ruling is none of the options: " + "; ".join(options))
+  extra = ["redesign — <one sentence why>"] if point in (1, 2) else []  # a head's third ruling, in no option list
+  raise Refusal("decision: ruling is none of the options: " + "; ".join(options + extra))
 
 
 def ruling_comment(point: int, source: str, ruling: str, question: str, brief=None) -> str:
