@@ -301,14 +301,17 @@ CURRENT_ARGS = None  # the running subcommand's arguments, recorded by `build_pa
 
 def handoffs(root: Path) -> list:
   """One row per handoff: `handoffs/<id>.json` with `legacy: false`; a flat 1.0/1.1 store
-  (`state.json` at the root) is one `legacy: true` row from that file whatever `handoffs/` holds."""
+  (`state.json` at the root) is one `legacy: true` row from that file, first, whatever `handoffs/`
+  holds for its id, the handoffs opened beside it later following as their files."""
   root = Path(root)
   flat = root / "state.json"
+  rows = [json.loads(read_text(p)) | {"legacy": False} for p in sorted((root / "handoffs").glob("*.json"))]
   if flat.is_file():
     state = json.loads(read_text(flat))
-    return [{"id": state.get("handoff_id"), "spec": (state.get("design") or {}).get("path"),
-             "opened_at": None, "closed_at": state.get("closed_at"), "legacy": True}]
-  return [json.loads(read_text(p)) | {"legacy": False} for p in sorted((root / "handoffs").glob("*.json"))]
+    hid = state.get("handoff_id")
+    return [{"id": hid, "spec": (state.get("design") or {}).get("path"),
+             "opened_at": None, "closed_at": state.get("closed_at"), "legacy": True}] + [r for r in rows if r["id"] != hid]
+  return rows
 
 
 def load_approvals(store: Store, spec) -> list:
@@ -373,7 +376,7 @@ def resolve_handoff(st: Store, args):
   if unit:
     filed = []
     for row in handoffs(st.root):
-      state = st.root / row["id"] / "state.json"
+      state = st.root / "state.json" if row["legacy"] else st.root / row["id"] / "state.json"
       units = json.loads(read_text(state)).get("units") or {} if state.is_file() else {}
       if not row.get("closed_at") and (units.get(unit) or {}).get("number"):
         filed.append(row["id"])
@@ -385,16 +388,19 @@ def resolve_handoff(st: Store, args):
 
 def store(repo_root: Path) -> Store:
   """The store `.superegm/config.json` names and the handoff, resolved once from `CURRENT_ARGS`;
-  a flat store (`state.json` at the root) is read in place as its one `legacy` handoff."""
+  a flat store (`state.json` at the root) is read in place as its one `legacy` handoff, unless the
+  resolution names a handoff opened beside it (one with its own `handoffs/<id>.json`)."""
   global STORE
   config = load_config(repo_root)
   root = Path(config["artifacts_dir"])
   flat = root / "state.json"
-  if flat.is_file():
-    STORE = Store(root, handoff_id=json.loads(read_text(flat)).get("handoff_id"), config=config, legacy=True)
-    return STORE
   st = Store(root, config=config)
-  st.handoff_id = resolve_handoff(st, CURRENT_ARGS)
+  hid = resolve_handoff(st, CURRENT_ARGS)
+  if flat.is_file():
+    flat_id = json.loads(read_text(flat)).get("handoff_id")
+    if not hid or hid == flat_id or not st.path("handoffs", hid).is_file():
+      hid, st.legacy = flat_id, True
+  st.handoff_id = hid
   STORE = st
   return STORE
 
