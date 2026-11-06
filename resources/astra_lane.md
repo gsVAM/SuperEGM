@@ -294,7 +294,8 @@ A lane that is `not installed`, `failed`, `killed` or `timeout` is recorded `not
 blocks the round; `not installed` and `stopped` count no incomplete run.
 
 **Data notice (head lane).** The brief sends to OpenAI, under the account `codex login status` reports, the unit body, the
-spec range, the diff (cut at 400 KB), the CI file, the PR body and the comments, and Astra may read the review worktree in
+spec range, the diff (cut at 400 KB), the CI file, the PR body, the comments and the `# Prior round` section (the last
+posted round's finding lines of every reviewer, the Claude reviewers' among them, Astra's with their dispositions), and Astra may read the review worktree in
 full. `"heads": false` under `astra` keeps heads Claude-only (`docs/privacy.md`).
 
 The head review mapping (section 6's table is the interactive flow's, and `review record` refuses its words): `severity`

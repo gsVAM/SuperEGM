@@ -168,7 +168,7 @@ Two reviews of the fork's handoff and wave skills reuse the same panels:
 | Review | Stage | Astra only | Focused (default) | Full |
 | --- | --- | --- | --- | --- |
 | Handoff gate (the handoff plan, before any GitHub write) | 10 | Astra lane | `egm-implementation-readiness` + Astra lane | `egm-implementation-readiness`, `egm-codebase-details` + Astra lane |
-| PR review (one pull request against one build unit) | - | Astra inspect | `egm-change-review` + Astra inspect | `egm-change-review`, `egm-codebase-details` + Astra inspect |
+| PR review (one pull request against one build unit) | - | Astra inspect (interactive flow only) | `egm-change-review` + Astra inspect (interactive flow only) | `egm-change-review`, `egm-codebase-details` + Astra inspect (interactive flow only) |
 
 A SuperEGM wave's head review panel is `change-review, astra`: the lane is seated by `astra.enabled` and `astra.heads`, and the foreman runs it once per round (`resources/astra_lane.md` section 8).
 
