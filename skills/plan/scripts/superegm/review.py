@@ -66,8 +66,9 @@ def register(subparsers):
   r.add_argument("--effort", help="<requested>:<effective>")
   s = core.add_parser(action, "settle", "write a finding's disposition")
   s.add_argument("--review", required=True)
-  s.add_argument("--finding", required=True)
-  s.add_argument("--disposition", choices=DISPOSITIONS, required=True)
+  s.add_argument("--finding")
+  s.add_argument("--disposition", choices=DISPOSITIONS)
+  s.add_argument("--file", help="one `<fid> | <disposition> | <note>` per line, settled all or nothing (in place of --finding)")
   by_whom(s, required=False)
   t = core.add_parser(action, "status", "the review's state; the exit code is the verdict")
   t.add_argument("--review", required=True)
@@ -544,12 +545,52 @@ def locate_finding(st: core.Store, rid: str, fid: str):
 
 
 def settle_finding(args) -> int:
+  """`--finding` with `--disposition`, or `--file`: every line checked under the per-finding refusals first,
+  and a refused line (named) writes nothing."""
   st = core.store(core.git_toplevel(Path.cwd()))
-  rid, fid, disposition = args.review, args.finding, args.disposition
+  rid = args.review
+  if bool(getattr(args, "file", None)) == bool(args.finding or args.disposition) or (args.finding is None) != (args.disposition is None):
+    raise core.HandoffError("review settle: --file, or --finding with --disposition")
   review = load_review(st, rid)
   if review is None:
     raise core.HandoffError(f"review {rid}: not opened")
   card = bind(args, review)
+  if not getattr(args, "file", None):
+    checked = [(args.finding, args.disposition, None, check_settle(st, rid, review, card, args, args.finding, args.disposition))]
+  else:
+    checked = []
+    for line in core.read_text(Path(args.file)).splitlines():
+      if not line.strip():
+        continue
+      fields = [f.strip() for f in line.split(" | ")]
+      if len(fields) != 3 or fields[1] not in DISPOSITIONS or not fields[0]:
+        raise core.HandoffError(f"review settle: {line}: not <fid> | <disposition> | <note>: nothing written")
+      try:
+        checked.append((fields[0], fields[1], fields[2], check_settle(st, rid, review, card, args, fields[0], fields[1])))
+      except core.HandoffError as error:
+        raise core.HandoffError(f"review settle: {line}: {str(error).removeprefix('review settle: ')}: nothing written")
+  runcard = card.get("parent") or args.runcard
+  for fid, disposition, note, n in checked:
+    rnd = load_round(st, rid, n)
+    reviewer, finding = next((r, f) for r, record in rnd["reviewers"].items() for f in record["findings"] if f["id"] == fid)
+    finding["disposition"] = disposition
+    finding["ruling"] = "owner" if args.owner else f"judges:{args.judges}" if args.judges else None
+    if note is not None:
+      finding["note"] = note
+    core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
+    copies = settle_set_copies(st, rnd, finding) if (review["kind"], reviewer, disposition) == ("plan", "set", "fixed") else []
+    core.journal(st, f"review settle {rid} {fid} {disposition} by {finding['ruling'] or 'the elephant'}"
+                 + (f" copied to {', '.join(copies)}" if copies else "") + f" under {args.runcard}")
+  status = store_verdict(st, rid, review, runcard)
+  if review["kind"] == "head" and status.code == 0:
+    write_head_outcome(st, review, runcard)
+  for fid, disposition, _, _ in checked:
+    print(f"{fid} {disposition}")
+  return 0
+
+
+def check_settle(st: core.Store, rid: str, review: dict, card: dict, args, fid: str, disposition: str) -> int:
+  """The per-finding refusals of `review settle`; the round number of `fid` when none applies."""
   n, rnd, reviewer, finding = locate_finding(st, rid, fid)
   if review["kind"] == "head" and disposition == "fix-design":
     raise core.HandoffError("review settle: fix-design is refused on a head")
@@ -564,17 +605,7 @@ def settle_finding(args) -> int:
       verify_owner_ruling(st.config, fid, args.posted)
     if card["mode"] != "leavemealone" and not args.owner:
       raise core.HandoffError(f"review settle: {fid} is {finding['severity']}: --owner required in normal mode")
-  finding["disposition"] = disposition
-  finding["ruling"] = "owner" if args.owner else f"judges:{args.judges}" if args.judges else None
-  core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
-  copies = settle_set_copies(st, rnd, finding) if (review["kind"], reviewer, disposition) == ("plan", "set", "fixed") else []
-  status = store_verdict(st, rid, review, card.get("parent") or args.runcard)
-  if review["kind"] == "head" and status.code == 0:
-    write_head_outcome(st, review, card.get("parent") or args.runcard)
-  core.journal(st, f"review settle {rid} {fid} {disposition} by {finding['ruling'] or 'the elephant'}"
-               + (f" copied to {', '.join(copies)}" if copies else "") + f" under {args.runcard}")
-  print(f"{fid} {disposition}")
-  return 0
+  return n
 
 
 def verify_owner_ruling(config: dict, fid: str, comment_id: str) -> None:
