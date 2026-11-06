@@ -176,6 +176,8 @@ A third ruling, on a head, is `redesign — <one sentence why>` (the sentence th
 It stops the unit by `stop`'s own path (the issue labelled `superegm:stopped`, never relaunched) and writes the
 store-only brainstorm brief `foreman/<U>-<qid>.brainstorm.md`; the `**Ruling:**` comment says the unit is
 stopped for redesign and names the brief, and asks the owner to close the issue by hand once the re-planned unit is filed.
+A redesign ruled by hand with `--posted` (a `<comment-id>`) posts nothing: the brief is written and the unit stopped,
+but no comment names the brief, so the owner closes the issue by hand all the same.
 The road back is typed phases only: `/superegm:brainstorming` from the brief, the amended spec, `plan`, `review-plan`, `file`, then the wave again.
 Leavemealone-mode: U11 wires §13.2 here.
 

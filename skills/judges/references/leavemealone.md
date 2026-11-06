@@ -39,12 +39,11 @@ dispatch in full.
    between rounds.
 4. `superegm judges verdict --panel <panel> --runcard <card>` exits 0 when every question
    converged, 2 otherwise. Apply each converged question's option through its row above as it
-   converges (`questions.Q<n>.converged`); a question still open at the cap of 5 rounds, or below
+   converges (`questions.Q<n>.converged`), except that every `decision rule` call on a point-1 `<did>` is held until the verdict (exit 0 or the cap), `review settle` calls excepted; a question still open at the cap of 5 rounds, or below
    `min_vendors`, stays with the owner: end the invocation naming the unconverged questions and
    `judges/<panel>/verdict.json`, and the owner rules by hand. A decision takes one ruling
    (`decision rule` refuses a second on one `<did>`), so a `redesign` converged on any question of a
-   point-1 panel is the one `decision rule` call on that `<did>`, with the first converged question's
-   sentence, made in place of the other converged questions' `decision rule` calls; their `review
+   point-1 panel is the one `decision rule` call on that `<did>`, with the sentence of the first question converged on `redesign`, made in place of the other converged questions' `decision rule` calls; their `review
    settle` calls still apply first. The unit is stopped, so no other ruling follows it.
 5. The record: `judges verdict` journals every converged question; `decision rule --by
    judges:<panel>` journals `Ruling (judges <panel>, leavemealone): …`, and `review settle`,

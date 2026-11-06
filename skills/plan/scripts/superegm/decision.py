@@ -33,7 +33,7 @@ def register(subparsers):
   r = core.add_parser(action, "rule", "record a ruling and post it as the `**Ruling:**` comment")
   r.add_argument("--unit", required=True)
   r.add_argument("--decision", help="the decision id `open` printed; required unless --posted closed:<n>")
-  r.add_argument("--ruling", required=True, help="an option's letter or text, optionally ` — <reason>`")
+  r.add_argument("--ruling", required=True, help="an option's letter or text, optionally ` — <reason>`; or on a head (points 1, 2) `redesign — <one sentence why>`")
   r.add_argument("--by", required=True, help="<login> | judges:<panel-id>")
   r.add_argument("--posted", help="<comment-id> of a by-hand **Ruling:** (nothing is posted) | closed:<n>")
   p.set_defaults(run=run, writes=WRITES)
@@ -161,7 +161,8 @@ def rule(args) -> int:
 
 def check_ruling(point: int, options: list, ruling: str) -> str:
   """The option `ruling` names (its letter, its text, or both; point 1 as `<fid> <option>`), resolved
-  to the option's text; refused when it is none of them."""
+  to the option's text; refused when it is none of them. At points 1 and 2 the bare word `redesign` (its ` — <why>`
+  is checked by `rule`; no letter, no finding id) is the third ruling, in no option list."""
   if ruling == "redesign" and point in (1, 2):  # a head's third ruling: no letter, no finding id
     return "redesign"
   fid, _, text = ruling.partition(" ") if point == 1 else ("", "", ruling)
@@ -175,7 +176,9 @@ def check_ruling(point: int, options: list, ruling: str) -> str:
 
 def ruling_comment(point: int, source: str, ruling: str, question: str, brief=None) -> str:
   """Spec section 11's `**Ruling:**` line (point 1 `<fid> finding upheld (fix it) | finding overruled — <reason>`,
-  point 2 `(cap) <option>`, point 3 `(<comment-id>) <option> — <reason>`), a blank line and the quoted question."""
+  point 2 `(cap) <option>`, point 3 `(<comment-id>) <option> — <reason>`), a blank line and the quoted question.
+  A redesign ruling (`brief` given) takes the form `**Ruling:** redesign — <why>`, the stopped-for-redesign line
+  naming the brief, the close-by-hand line, a blank line and the quoted question."""
   quoted = "\n".join("> " + l for l in question.rstrip("\n").splitlines())
   if brief:  # a redesign ruling: the unit is stopped, the brief named, the owner closes the issue by hand
     return (f"**Ruling:** {ruling}\n\nStopped for redesign; the brainstorm brief is `{brief}`.\n"
@@ -196,7 +199,7 @@ def brief_path(store, unit: str, qid: str) -> Path:
 
 
 def brainstorm_brief(store, unit: str, qid: str, decision: dict, ruling: str, pr) -> Path:
-  """Write `foreman/<unit>-<qid>.brainstorm.md` (spec section 11): what the owner asked, the findings verbatim,
+  """Write `foreman/<unit>-<qid>.brainstorm.md` (spec section 11): what the owner asked, the decision's question text verbatim (the findings at point 1),
   the unit body, the latest posted round's diff summary and its builder deviations. Store-only, never committed;
   nothing is read from GitHub."""
   posted = [r["round"] for r in core.load_foreman(store, unit)["rounds"] if r.get("phase") == "posted"]
