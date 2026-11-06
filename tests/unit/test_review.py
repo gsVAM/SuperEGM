@@ -4,7 +4,7 @@
 
 """U04: the review loop (`review open|record|settle|status|rule`) and `approve-spec` (spec section 8)."""
 
-import argparse, hashlib, json, re, subprocess
+import argparse, hashlib, json, re, shutil, subprocess
 from pathlib import Path
 import pytest
 import superegm
@@ -746,6 +746,32 @@ def test_amend_units_and_void_act_on_the_latest_entry_alone(world):
   assert f"approve-spec: {a}: not the latest approval: plan the rows in the latest handoff" in world.run("approve-spec", "--spec", str(spec), "--amend-units", "--handoff", a, "--runcard", icid)[1]
   assert approve(world, spec, icid, "--amend-units")[0] == 0
   assert [(e["kind"], e["handoff_id"]) for e in approval(world)["entries"]] == [("opening", a), ("opening", b), ("amend-units", b)]
+
+
+def test_amend_units_keeps_the_escalated_pairs_of_the_entry_it_amends(world):
+  spec, cid, rid = converged_spec(world); assert approve(world, spec, cid, "--yes")[0] == 0
+  record = approval(world); record["entries"][0]["escalated"] = [f"{rid}:design-1-1"]
+  atomic_write(store(world.repo).path("approvals", SLUG), record)
+  icid = card(world, spec, "integrate")
+  spec.write_text(spec.read_text(encoding="utf-8") + "| U02 | more (from integrate, review x) | U01 | S |\n", encoding="utf-8")
+  assert approve(world, spec, icid, "--amend-units")[0] == 0
+  assert [e["escalated"] for e in approval(world)["entries"]] == [[f"{rid}:design-1-1"]] * 2
+
+
+def test_approve_spec_writes_a_legacy_handoffs_file_the_first_time_it_touches_it(world):
+  spec, cid, rid = converged_spec(world); assert approve(world, spec, cid, "--yes")[0] == 0
+  first = approval(world)["entries"][0]
+  root = world.artifacts
+  shutil.rmtree(root / "handoffs"); shutil.rmtree(root / first["handoff_id"], ignore_errors=True)
+  record = {k: v for k, v in first.items() if k not in ("kind", "escalated")} | {"path": str(spec), "amended": []}
+  atomic_write(root / f"approvals/{SLUG}.json", record)
+  atomic_write(root / "state.json", {"handoff_id": first["handoff_id"], "units": {}, "design": {"path": str(spec)}})
+  assert store(world.repo).legacy
+  icid = card(world, spec, "integrate")
+  spec.write_text(spec.read_text(encoding="utf-8") + "| U02 | more (from integrate, review x) | U01 | S |\n", encoding="utf-8")
+  assert approve(world, spec, icid, "--amend-units")[0] == 0
+  assert json.loads((root / f"handoffs/{first['handoff_id']}.json").read_text(encoding="utf-8")) == \
+      {"id": first["handoff_id"], "spec": str(spec), "opened_at": None, "closed_at": None}
 
 
 def test_plan_and_head_review_ids_drop_the_hex_and_a_frozen_handoff_refuses_fix_design(world):
