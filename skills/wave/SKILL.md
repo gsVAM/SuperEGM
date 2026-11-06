@@ -13,7 +13,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the wave skill. Not part of google/elephant-goldfish-model. -->
 
@@ -52,6 +52,10 @@ is one `superegm: <reason>` line, exit 1.
 
 ## Entry: resume from the store
 
+0. The invocation is `/superegm:wave <spec> [--handoff <id>] [--leavemealone]`. With `--handoff`, pass
+   `--handoff '<id>'` to `runcard open` and to every helper call below (an older handoff's filed units
+   still run); without it the card carries the spec's latest approval's handoff. The foreman's brief
+   names the handoff id (`<handoff-id>`), and the foreman passes `--handoff` on every subcommand it runs.
 1. Run `python3 '<HELPER>' runcard open --skill wave --artifact '<spec>'`
    (`<spec>` is the approved spec the invocation named), adding
    `--mode leavemealone` when the invocation said `--leavemealone` or the

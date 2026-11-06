@@ -11,12 +11,14 @@ description: Merges the landed units of a wave into the base branch and closes t
 
 In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.
 
-    /superegm:integrate <spec-path> [--close]
+    /superegm:integrate <spec-path> [--handoff <id>] [--close]
 
 Runs after every unit has landed or been closed by the owner (who closes a stopped unit's
 unlanded dependants with it): one round of the review `spec-<spec-slug>-integrate-c<n>` of the
-frozen spec against everything merged, then `close`, which writes `closed_at` and frees the store
-for the next handoff. `--close` is the owner's typed close of a handoff they have given up on: it
+frozen spec against everything the handoff merged, then `close`, which writes `closed_at` into the handoff's
+`state.json` and `handoffs/<id>.json`. `--handoff <id>` names the handoff (by default the spec's latest
+approval's; an older handoff integrates and closes too); pass `--handoff '<id>'` to `runcard open` and to every
+call below. `--close` is the owner's typed close of a handoff they have given up on: it
 runs `close` without a review round, journaling every unlanded unit. No judge panel sits in this
 skill, in any mode (design anti-goal 6); nothing here approves, merges or pushes. `superegm`
 below stands for `python3 '${CLAUDE_PLUGIN_ROOT}/skills/plan/scripts/superegm.py'`, one Bash call
@@ -40,15 +42,16 @@ every writing call carries `--runcard`.
 
 1. `superegm review open --kind integrate --artifact <spec-path> --reviewers <config.reviewers.integrate> --runcard <card>`
    prints `<id>` (`design` is first; the Astra lane joins when `config.astra.enabled` is true).
-2. Write the diff outside the store: `git diff <base_at_start>..<base>` (`base_at_start` from
-   `state.json`, written by the first filing; `<base>` from the config) into
-   `${TMPDIR:-/tmp}/superegm-integrate/<card>.diff`, the file every reviewer reads.
+2. Write the diff outside the store: the handoff's own merged pull requests (`state.json`'s
+   `units[<U>].pr.number` of every landed unit), each `GH_HOST=github.com gh pr diff <n> -R OWNER/NAME` output
+   concatenated in unit order, into
+   `${TMPDIR:-/tmp}/superegm-integrate/<card>.diff`, the file every reviewer reads (another handoff's merges stay out of it).
 3. Dispatch every reviewer of the panel concurrently, in one message, each through its adapter
    `superegm:<id>` (`omitClaudeMd: true`, read-only tools), with the frozen spec's path and sha256
    (`approvals/<spec-slug>.json`), the diff file, the review id, round 1 and its own id, and the
    findings line of `${CLAUDE_PLUGIN_ROOT}/skills/review-spec/references/review_loop.md` section 2:
    `<reviewer>-1-<n> | high|medium|low | <location> | regression: no | <claim>`, written to
-   `<artifacts_dir>/reviews/<id>/round-1-<reviewer>.txt`, empty when it found nothing. The Astra
+   `<artifacts_dir>/<handoff id>/reviews/<id>/round-1-<reviewer>.txt`, empty when it found nothing. The Astra
    lane runs through the runner from this conversation, as `resources/astra_lane.md` says.
 4. Record each result as it arrives:
    `superegm review record --review <id> --round 1 --sha256 <spec sha256> --reviewer <reviewer> --findings <file> --isolation <clean|exposed:what> --model <requested>:<effective> --effort <requested>:<effective> --runcard <card>`
@@ -63,7 +66,11 @@ every writing call carries `--runcard`.
 
 ### Step 2a: escalate
 
-Per high or medium finding, in id order:
+A frozen handoff (an older one: a later approval opened another handoff of the spec) appends no row
+and runs no `--amend-units`, both refused; its spec's rows are planned in the latest handoff. Settle every
+high or medium of the round in one file, a line `<fid> | escalated | (to the latest handoff)` each:
+`superegm review settle --review <id> --file <path> --runcard <card>` (`fix-design` is refused there), then Step 3.
+Otherwise, per high or medium finding, in id order:
 
 1. Append one row to the spec's `## Units` table for the unit that fixes it, with the note
    `(from integrate, review <id>)` in its scope cell; the spec changes nowhere else.
@@ -78,14 +85,14 @@ handoff stays open; Step 4.
 ## Step 3: close
 
 `superegm close --runcard <card>` prints `closed <handoff-id>; unlanded: <ids | none>`, writes
-`closed_at` into `state.json` and journals `close: <U> unlanded` for every unlanded unit (with
+`closed_at` into `state.json` and `handoffs/<id>.json` and journals `close: <U> unlanded` for every unlanded unit (with
 `--close`, the units the owner gave up on; after a clean round, none). A second `close` is
 refused (`close: already closed at <ts>`). One `gh api repos/<repo>/issues/<n>` read per unit stopped for
 redesign (its `foreman/<U>.json` carries `stopped.brief`) comes first; while that issue is open `close` exits 1 with
 `close: <U> is stopped for redesign and #<n> is open: close it by hand once the re-planned unit is filed`, one line per
 such unit, each read journaled and `state.json` untouched: the owner closes it by hand, since the plugin edits no issue it did not file, and `close`
-runs again. The skill never closes it; it prints the refusal and ends at Step 4. The store is free for the next handoff: the next
-`graph` starts a fresh state.
+runs again. The skill never closes it; it prints the refusal and ends at Step 4. Other handoffs of the store
+are untouched: each has its own directory.
 
 ## Step 4: the end
 

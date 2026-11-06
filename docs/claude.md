@@ -3,7 +3,7 @@ Copyright 2026 Google LLC.
 SPDX-License-Identifier: Apache-2.0
 -->
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: fork install commands, Astra lane section, panel stage order. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: the platform facts of design section 4 in SuperEGM's names; EGM's install, stage, review-orchestrator and environment-variable text removed; the Astra head lane's foreground exception (U17). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the platform facts of design section 4 in SuperEGM's names; EGM's install, stage, review-orchestrator and environment-variable text removed; the Astra head lane's foreground exception (U17); the store layout of one directory per handoff (U20). -->
 
 # Claude Code: the platform facts
 
@@ -90,6 +90,13 @@ call (`--timeout 540` under a 600000 ms limit) and waits for it, so nothing outl
   issue bodies, reviews, launches and judge panels live there and are never committed. Briefs and
   drafts go to the working directory; EGM's `EGM artifact directory: <path>` line is not read by
   SuperEGM.
+- One store holds many handoffs. `artifacts_dir/<handoff id>/` holds everything of a handoff from its approval on
+  (`state.json`, `journal.md`, the plan files, the plan, head and integrate reviews, run cards, launches, worktrees,
+  foreman, `orient/`); the store level holds `handoffs/<id>.json` (`id`, `spec`, `opened_at`, `closed_at`), the
+  approval history `approvals/<spec-slug>.json` (`entries[]`, the last the latest approval), the spec reviews with
+  their cards and judges, and its own `journal.md`. Every subcommand takes `--handoff <id>`; without it the helper
+  resolves the handoff once: from the card, the spec's latest approval, or the one open handoff filing a `--unit`.
+  A flat 1.0/1.1 store (`state.json` at the root) is read in place as one `legacy` handoff, nothing migrated.
 - Review worktrees and builder worktrees live under `${TMPDIR:-/tmp}`, and the refs the foreman
   fetches live under `refs/superegm/`, never on a branch you work on.
 - Personas and standards live in the plugin cache. SuperEGM installs no permission-approval
