@@ -304,6 +304,28 @@ def test_store_resolves_the_handoff_once(world, monkeypatch, case, expect):
   assert superegm.handoffs(root) == rows
 
 
+@pytest.mark.parametrize("given, expect", [({}, ("sample-legacy", True)), (dict(handoff="sample-legacy"), ("sample-legacy", True)),
+                                           (dict(design="spec"), ("sample-222222", False)), (dict(handoff="sample-222222"), ("sample-222222", False)),
+                                           (dict(unit="U07"), ("sample-legacy", True))])
+def test_a_legacy_store_hosts_the_next_handoff_beside_it(world, monkeypatch, given, expect):
+  root = world.artifacts
+  atomic_write(root / "state.json", {"handoff_id": "sample-legacy", "units": {"U07": {"number": 1}}})
+  atomic_write(root / "approvals/sample.json", {"path": str(world.spec), "entries": [entry("sample-legacy"), entry("sample-222222")]})
+  new = {"id": "sample-222222", "spec": str(world.spec), "opened_at": "t", "closed_at": None}
+  atomic_write(root / "handoffs/sample-222222.json", new)
+  given = {k: str(world.spec) if v == "spec" else v for k, v in given.items()}
+  monkeypatch.setattr(superegm, "CURRENT_ARGS", argparse.Namespace(**{"handoff": None, "runcard": None, "design": None, "plan": None, "artifact": None, "unit": None, **given}))
+  st = superegm.store(world.repo)
+  assert (st.handoff_id, st.legacy) == expect
+  assert st.path("state") == (root / "state.json" if st.legacy else root / "sample-222222/state.json")
+  if st.legacy:
+    with pytest.raises(superegm.HandoffError, match="sample-legacy: not the latest approval"):
+      superegm.require_latest_handoff(st)
+  else:
+    superegm.require_latest_handoff(st)
+  assert superegm.handoffs(root) == [{"id": "sample-legacy", "spec": None, "opened_at": None, "closed_at": None, "legacy": True}, new | {"legacy": False}]
+
+
 def test_runcard_ids_carry_the_handoff_hex_and_the_card_records_it(world):
   root = world.artifacts
   atomic_write(root / "approvals/sample.json", {"path": str(world.spec), "entries": [entry("sample-111111"), entry("sample-222222")]})
