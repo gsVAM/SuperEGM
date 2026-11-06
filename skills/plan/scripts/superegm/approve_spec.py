@@ -5,9 +5,11 @@
 
 """superegm approve-spec: record the owner's approval of a converged spec (spec section 8)."""
 
+import hashlib
 import json
 from pathlib import Path
 import re
+import subprocess
 
 import superegm as core
 from superegm import close
@@ -101,6 +103,15 @@ def before_units(text: str) -> str:
   return "".join(lines[:last + 1])
 
 
+def branch_holds(repo_root: Path, rel: str, sha256: str) -> bool:
+  """Whether a commit of the current branch's `git log -- <rel>` holds a blob of `rel` hashing to `sha256`."""
+  for commit in core.run_git(["log", "--format=%H", "--", rel], repo_root, check=False).split():
+    blob = subprocess.run(["git", "show", f"{commit}:{rel}"], cwd=str(repo_root), capture_output=True)
+    if blob.returncode == 0 and hashlib.sha256(blob.stdout).hexdigest() == sha256:
+      return True
+  return False
+
+
 def commit_by_path(repo_root: Path, paths: list[str], message: str, trailer: str) -> str:
   """Add and commit `paths` alone, ignoring other changes in the tree, `trailer` (when set) after a
   blank line; the commit may be empty."""
@@ -141,7 +152,9 @@ def run(args):
   if not (root / CONFIG).is_file():
     raise core.HandoffError(f"approve-spec: {CONFIG} missing: run superegm init")
   last = core.load_approval(st, spec)
-  escalated = escalated_pairs(st, spec, int(last["review"].rsplit("-c", 1)[1]) if last and last.get("review") else 0)
+  if last and not branch_holds(root, spec.relative_to(root).as_posix(), last["sha256"]):
+    raise core.HandoffError(f"approve-spec: fold {st.config['base']} first: approval {last['sha256'][:7]} is not in this branch")
+  escalated =escalated_pairs(st, spec, int(last["review"].rsplit("-c", 1)[1]) if last and last.get("review") else 0)
   if escalated:
     print(f"approve-spec: {len(escalated)} escalated finding(s) await the owner: {', '.join(escalated)}")
   if not (args.yes or args.leavemealone or card["mode"] == "leavemealone"):
