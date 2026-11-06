@@ -7,10 +7,12 @@ import argparse
 import contextlib
 from dataclasses import dataclass
 import difflib
+import hashlib
 import io
 import json
 from pathlib import Path
 import re
+import subprocess
 import sys
 
 import superegm as core
@@ -69,6 +71,8 @@ def register(subparsers):
   by_whom(s, required=False)
   t = core.add_parser(action, "status", "the review's state; the exit code is the verdict")
   t.add_argument("--review", required=True)
+  c = core.add_parser(action, "scope", "a spec review's scope this round: one line per section, for the brief")
+  c.add_argument("--review", required=True)
   u = core.add_parser(action, "rule", "record a ruling at the cap")
   u.add_argument("--review", required=True)
   u.add_argument("--ruling", choices=RULINGS, required=True)
@@ -90,7 +94,7 @@ def by_whom(parser, required):
 def run(args):
   try:
     return {"open": open_review, "record": record_round, "settle": settle_finding,
-            "status": status_review, "rule": rule_review, "post": post}[args.action](args)
+            "status": status_review, "rule": rule_review, "post": post, "scope": scope_review}[args.action](args)
   except Refusal as refusal:
     print(refusal)
     return 1
@@ -214,6 +218,47 @@ def scope_sections(old: str, new: str) -> list[tuple[str, str, int, int]]:
   neighbours = {i + d for i in changed for d in (-1, 1)} - changed
   return [("changed" if i in changed else "neighbour", heading, start, end)
           for i, (heading, start, end) in enumerate(spans) if i in changed or i in neighbours]
+
+
+def approved_text(spec: Path, approval: dict):
+  """The approved bytes as text: the spec at the approval's `commit` (voided or not), else at the first commit
+  of the current branch's `git log -- <spec>` whose blob hashes to its `sha256`; None when no commit holds them."""
+  root = core.git_toplevel(spec.parent)
+  rel = spec.resolve().relative_to(root.resolve()).as_posix()
+  show = lambda commit: subprocess.run(["git", "show", f"{commit}:{rel}"], cwd=str(root), capture_output=True)
+  at = show(approval.get("commit") or "")
+  if approval.get("commit") and at.returncode == 0:
+    return at.stdout.decode("utf-8")
+  for commit in core.run_git(["log", "--format=%H", "--", rel], root, check=False).split():
+    blob = show(commit)
+    if blob.returncode == 0 and hashlib.sha256(blob.stdout).hexdigest() == approval["sha256"]:
+      return blob.stdout.decode("utf-8")
+  return None
+
+
+def scope_of(st: core.Store, review: dict, spec: Path) -> list:
+  """The round's scope rows, `(changed|neighbour|whole, heading, start, end)`, from the current bytes: under
+  `auto` (a review opened before U19 reads as `auto`) the sections `scope_sections` finds against the
+  approved bytes; a section list adds its headings as `changed`, without neighbours (a heading the bytes no
+  longer hold is dropped). One `whole` row otherwise, its heading field the reason: `(whole)`, `(no
+  approval)`, `(no commit holds <sha7>)`, or `(no change)` when nothing changed and no listed heading stands."""
+  text = core.read_text(spec)
+  whole = lambda reason: [("whole", f"({reason})", 1, len(text.splitlines()))]
+  form = review.get("scope") or "auto"
+  if form == "whole":
+    return whole("whole")
+  approval = core.load_approval(st, spec)
+  if not approval:
+    return whole("no approval")
+  old = approved_text(spec, approval)
+  if old is None:
+    return whole(f"no commit holds {approval['sha256'][:7]}")
+  rows = {row[2]: row for row in scope_sections(old, text)}  # by start line: two sections may share a heading
+  if isinstance(form, list):
+    for heading, start, end in sections(text):
+      if heading in form:
+        rows[start] = ("changed", heading, start, end)
+  return [rows[start] for start in sorted(rows)] or whole("no change")
 
 
 # ---------------------------------------------------------------- the store
@@ -368,6 +413,23 @@ def scope_form(st: core.Store, artifact: str, given) -> str | list:
   if missing or not headings:
     raise core.HandoffError(f"review open: --scope: {missing[0] if missing else given} is not in the spec")
   return headings
+
+
+# ---------------------------------------------------------------- scope
+
+
+def scope_review(args) -> int:
+  """Prints the round's scope, `<changed|neighbour|whole> <start>-<end> <heading>` per section; writes nothing."""
+  st = core.store(core.git_toplevel(Path.cwd()))
+  review = load_review(st, args.review)
+  if review is None:
+    raise core.HandoffError(f"review {args.review}: not opened")
+  if review["kind"] != "spec":
+    raise core.HandoffError(f"review scope: {args.review} is not a spec review")
+  bind(args, review)
+  for kind, heading, start, end in scope_of(st, review, Path(review["artifact"])):
+    print(f"{kind} {start}-{end} {heading}")
+  return 0
 
 
 # ---------------------------------------------------------------- record
