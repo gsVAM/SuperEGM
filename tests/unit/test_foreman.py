@@ -367,6 +367,22 @@ def test_collect_records_foreman_findings(world, tmp_path, monkeypatch, name):
   assert json.loads(w.st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][-1]["phase"] == "collected"
 
 
+def test_collect_takes_a_fixed_reply_under_the_goldfish_id_for_an_upheld_contest(world, tmp_path, monkeypatch):
+  """1.1.3 fix (wave-0021, U18 round 6): the judges rule the contest finding (`foreman-1-2`, "contested
+  change-review-1-1: …") upheld, and the builder replies `fixed` under the goldfish id it was shown; either id answers."""
+  comments = {2: [c(15, "owner", "**Ruling:** foreman-1-2 finding upheld (fix it)")],
+              70: [c(16, "builder-bot", "**Reply change-review-1-1:** fixed")]}
+  kw = dict(rounds=[POSTED_R1], launches=TWO_LAUNCHES, comments=comments)
+  st0, card0, _ = seed(world, **kw)
+  open_head_review(world, st0, card0, "0" * 40, {
+      "change-review": "change-review-1-1 | high | src/hooks.py:1 | regression: no | no hook\n",
+      "foreman": "foreman-1-1 | high | ci | regression: no | CI not green on this head: ci red (tests)\n"
+                 "foreman-1-2 | high | pr #70 comment 14 | regression: no | contested change-review-1-1: the test covers it\n"})
+  w = prepared(world, tmp_path, monkeypatch, **kw)
+  code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
+  assert (code, out.strip()) == (0, "collected: 0 foreman findings"), out
+
+
 def test_collect_carries_an_overruled_scope_finding_forward(world, tmp_path, monkeypatch):
   """1.1.3 fix (wave-0021, U17 round 5): an owner's `**Ruling:** <fid> finding overruled` on an earlier round's
   out-of-Scope finding widens the Scope for that path, so later rounds do not record it again."""
