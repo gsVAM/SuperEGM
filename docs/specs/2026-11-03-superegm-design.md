@@ -641,7 +641,7 @@ at a time:
 | `reviews/<review-id>/…` | the invocation that opened that review; on a head, also the foreman dispatch the round records (`review record`, `collect`, `review post`); `review ingest --pr` for `review.json`'s `ingested[]` (amendment 6, §8) |
 | `judges/<id>/…` | the invocation that opened that panel |
 | `runcards/<id>.json` | the skill that opened the card; `card_add` for later facts; a handoff's open `wave` card marked `interrupted` by `driver tick` (on its launch's exit file, or on the boot-id proof: a launch's or a typed card's recorded boot id that is not the machine's) or `driver reset` (§11.2) |
-| `launches/<unit>.json`, `launches/<unit>_r<n>_prompt.md`, `launches/<unit>_r<n>_bin/`, `launches/<unit>_r<n>_plugins.json` and `launches/<unit>_r<n>_mcp.json` (amendment 7: the plugins passed at the launch with their versions, directories and hook events, the profile's managed plugins, and the MCP file passed, superseding the `_managed.json` of 1.1.2's fix-k) | the elephant (`launch-builder`, `record-launch`, `interrupt --launch`); `driver tick`, `launch-builder` and `runcard open` for `interrupted (reboot)` alone (§11.2); `launch-builder --start` for the `running` entry and `record-launch --exit stalled` for `exited (stalled)` and `kill_failed` (amendment 10, §11; the entry re-read before the write, an `interrupted` it finds kept) |
+| `launches/<unit>.json`, `launches/<unit>_r<n>_prompt.md`, `launches/<unit>_r<n>_bin/`, `launches/<unit>_r<n>_plugins.json` and `launches/<unit>_r<n>_mcp.json` (amendment 7: the plugins passed at the launch with their versions, directories and hook events, the profile's managed plugins, and the MCP file passed, superseding the `_managed.json` of 1.1.2's fix-k) | the elephant (`launch-builder`, `record-launch`, `interrupt --launch`); `driver tick`, `launch-builder` and `runcard open` for `interrupted (reboot)` alone (§11.2); `launch-builder` for the `running` entry, once (amendment 10), and `record-launch --exit stalled` for `exited (stalled)` and `kill_failed` (amendment 10, §11; the entry re-read before the write, an `interrupted` it finds kept) |
 | `worktrees/<unit>/` | the elephant (`launch-builder`, `/superegm:clean`) |
 | `foreman/<unit>.json`, `review/<unit>/pr<n>/` | the foreman dispatch whose `dispatch_id` the round records (`prepare --dispatch`, `collect`, `review post`); between dispatches `foreman dispatch`, `interrupt --round`, `/superegm:clean`, `review settle` (a head's `outcome`, §11), `review ingest` (`ingested[]`, and a `clean` outcome rewritten `revise`, §8) and `decision open\|rule` (`decisions[]`, `rulings[]`); `r<n>/dod/<item>.txt` by `collect` (§11) |
 | `wave_<n>_report.md` | `wave` (`superegm report`, after every batch) |
@@ -729,11 +729,12 @@ excepted (§9.3). No lock file.
     only (a later filing rewrites its body, an issue edit EGM's `apply` never made; from
     amendment 10 the body also carries the board, U30, §11: `status` rewrites it between
     `<!-- superegm:board -->` and `<!-- /superegm:board -->` on every pass under a `wave` card
-    (`integrate`'s pass stays a read; a tick's session renders it at its first pass), through
-    `apply.edit_issue`, the text outside the markers never touched, the markers appended once to
-    a body without them, one GitHub write per pass and none when the fresh rows match the block
-    read back, whose header time is then kept; `verify` compares the body outside the markers),
-    earlier lists
+    (`integrate`'s pass stays a read; a tick's session renders it at its first pass), through one
+    splice function (replace the text between the markers, append the block once to a body
+    without them, write only on change: in a module of the plan's choosing, called by `status`
+    and by `verify`, which compares the body outside the markers) and `apply.edit_issue`, the body re-read just
+    before the write, one GitHub write per pass and none when the fresh rows match the block
+    read back, whose header time is then kept), earlier lists
     being compared on their unit issues. One check, `require_frozen_units(handoff)` in U03 (py),
     replaces EGM's whole-plan checks in `status`, `launch` and `prepare`: for every filed unit,
     the plan file's section equals the stored one and the body its filing's list in `filings[]`
@@ -779,10 +780,10 @@ excepted (§9.3). No lock file.
     artifact means its latest cycle; `latest_cycle` asks `evaluate` and reads `approvals/<slug>.json` for that, not a
     stored field (U16).
   - `launches/<unit>.json` — `launches[]` with `round` (the launch count), `worktree`, `branch`,
-    `started_at`, `boot_id` (amendment 5, written by `launch-builder` at the launch), `pid` (amendment 10: the wrapper's, the process-group leader `launch-builder --start` spawned on either path, written by `record-launch` at the launch, the watchdog's kill target, §11), `status` ∈ `running | exited <code> | exited (stalled) | interrupted | interrupted (reboot)` (the
-    last amendment 5's, `exited (stalled)` amendment 10's with `last_commit_at`, both terminal for `launch-builder` and `clean` as `interrupted` is), `kill_failed` (amendment 10: set when no exit file followed the signal within 30 s; the launch stays `running` and is signalled no more, the unit idle and in the inbox for the owner's interrupt; a later exit file clears it, §11), `result_file`,
-    `prompt_sha256`, and from amendment 8 `model` and `effort` (requested, written by
-    `record-launch` at the launch as the entry is; the effective model read by `record-launch
+    `started_at`, `boot_id` (amendment 5, written by `launch-builder` at the launch), `pid` (amendment 10: the wrapper's, the process-group leader `launch-builder` spawned, the watchdog's kill target, §11; from amendment 10 `launch-builder` writes the whole `running` entry once at the launch, every field of this list but the exit's, the command line it ran among them, and `record-launch` keeps `--exit` alone), `status` ∈ `running | exited <code> | exited (stalled) | interrupted | interrupted (reboot)` (the
+    last amendment 5's, `exited (stalled)` amendment 10's with `last_commit_at`, both terminal for `launch-builder` and `clean` as `interrupted` is), `kill_failed` (amendment 10: its reason, `no exit file` when none followed the signal within 30 s, or `pid reused` when the start-time guard, run before any signal, found the pid's process younger than the launch; the launch stays `running` and is signalled no more, the unit idle and in the inbox for the owner's interrupt; a later exit file clears it, §11), `result_file`,
+    `prompt_sha256`, `command` (amendment 10: the launched command line, the record of what ran), and from amendment 8 `model` and `effort` (requested, written with
+    the entry; the effective model read by `record-launch
     --exit` from the result file's `modelUsage` keys, the field U28's one run confirms, every
     key when there are several, else `requested only`).
   - `foreman/<unit>.json` — `dispatch_id`, `rounds[]` (`round` (the review's round number),
@@ -1759,11 +1760,12 @@ stalled (a launch's sense, amendment 10; §2's `stalled` is a review's); the pas
 reports it as the event line `U<n> stalled (<minutes> min; last commit <time | none>)` from a
 local read of the worktree `HEAD` and `started_at`, and the skill's step 3 records it through
 `record-launch --exit stalled`, which re-reads the entry (an `interrupted` it finds is kept),
-signals the process group through the `pid` the entry carries (the wrapper `launch-builder
---start` spawned as the group's leader on either path, below), waits for the wrapper's exit
+checks that the pid's process started before the launch (else `kill_failed (pid reused)`, no
+signal), signals the process group through the `pid` the entry carries (the wrapper `launch-builder`
+spawned as the group's leader, below), waits for the wrapper's exit
 file `stalled` (the wrapper traps the signal; the one proof, §4), records `exited (stalled)`
-with the last commit time and journals it, the unit going to decision point 3 with the stall
-facts (below); no exit file within 30 s is recorded `kill_failed` instead, the launch
+with the last commit time and journals it (the stalled line is that launch's exit line: no
+`exit` event follows), the unit going to decision point 3 with the stall facts (below); no exit file within 30 s is recorded `kill_failed` instead, the launch
 `running` and signalled no more, the unit idle with that reason and in the inbox for the
 owner's typed interrupt, and a later pass that finds its exit file reports the exit as for any
 launch, `exited (stalled)` recorded and the mark cleared. The session's pass is the one
@@ -1777,13 +1779,17 @@ decision; a `kill_failed` launch reads `idle` by one more clause of `unit_state`
 field) plus `ready` for a unit unlaunched with its blockers landed and `waiting` for one whose
 blockers have not (the point-3 word `blocked` is a case, not a state), derived once there ·
 round · launch · head, 7 hex · PR · waits on, the units or the decision it is blocked by · next
-action, `word_action`'s verb for a unit with a posted round, else `launch-builder` for `ready`,
-the interrupt for a `kill_failed` idle, none for `waiting`, `landed` and `stopped` · cost, the
+action, `word_action`'s verb for a posted round newer than the latest launch, none while a
+launch runs, `status --wait` for `active` with no posted round, the idle reason's action for
+`idle` (the interrupt for a `kill_failed` one), the decision for `pending`, `launch-builder` for
+`ready`,
+none for `waiting`, `landed` and `stopped` · cost, the
 launches' `total_cost_usd` when the result file carries it), one table in the report
 file, on stdout and in the issue, under a header line (the handoff id, `<base>`, the spec
 sha256's first 12 hex, the waves, the time of the last change), written by `status` into the
-tracking issue's body between its two markers (§7) through `apply.edit_issue`: a writing pass
-reads the block back, compares the fresh rows and keeps the header time when they match; the
+tracking issue's body between its two markers (§7) through the one splice function and
+`apply.edit_issue`: a writing pass reads the block back, compares the fresh rows, keeps the
+header time when they match and re-reads the body just before the write; the
 inbox stays the action list (§11.2); per-round history stays in the store; no unit issue is
 written. Invariants the U10b plan must pin,
 driving the loop through `foreman dispatch`'s refusal (below):
@@ -1878,12 +1884,14 @@ flag `-p` honours, U28's one-run case; `CLAUDE_CODE_EFFORT_LEVEL`, which would b
 unset in the launched environment beside the askpass and token names) and permission mode; the allow-list (its `Skill(...)` and `mcp__*` rules among them, amendment 7) plus a push prefix for the
 unit's own branch and `Bash(<first word>:*)` for every command `run_commands` returns from the
 body; `--output-format json` into the result file; and the exit file on exit. From amendment 10
-the launch is spawned by `launch-builder --start` on both paths (the typed wave skill calls it
-too and no longer runs the printed line through Bash; the printed line stays for the record), a
-Popen in a new session with the wrapper the process-group leader, and `--start` appends the
-`running` entry itself (the pid, `started_at`, the prompt hash), `record-launch` keeping its
-`--exit` role alone (`--exit stalled` the watchdog's: the signal, the 30 s wait and the record
-or `kill_failed`, §11). An
+starting the launch is `launch-builder`'s one behaviour (amendment 5's `--start` flag is gone;
+the typed wave skill and the tick both call it, and the command line it would have printed goes
+into the entry and the journal as the record), a Popen in a new session with the wrapper the
+process-group leader, and `launch-builder` appends the `running` entry itself, once, with its
+full field set (§7: `round`, `worktree`, `branch`, `started_at`, `boot_id`, `pid`, `command`,
+`prompt_sha256`, `result_file`, `model`, `effort`), `record-launch` keeping its `--exit` role
+alone (`--exit stalled` the watchdog's: the signal, the 30 s wait and the record or
+`kill_failed`, §11). An
 allow-list containing `Agent`, `Skill` or bare `Bash` is refused.
 
 **The builder orders** (`references/builder_orders.md`, absorbing superpowers' implementer prompt
@@ -2177,8 +2185,9 @@ the registry lists (`registry: none`, and the one store, while nothing is regist
 only what needs the owner: open decision points (`decisions[]` without a `rulings[]` entry), cap
 rulings (`review status` exit 2 with no `stop` ruled), contested findings (point 1 pending), merge-ready PRs (the
 latest round's `outcome: clean`), stalled units (exit 5), a launch recorded `kill_failed`
-(amendment 10, §11: the action is the owner's `/superegm:interrupt --unit <U> --launch <n>`
-line), escalations
+(amendment 10, §11: the line carries the recorded pid, as `driver status` prints a tick
+launch's, and the action is the owner's `/superegm:interrupt --unit <U> --launch <n>` once they
+have ended the process), escalations
 (`approvals/<slug>.json.escalated[]` awaiting the owner; an integrate round's `escalated`
 findings), units stopped for redesign with their brief's path (§13.2's `redesign` ruling),
 `test-delta` findings from the round that records them (the owner's alone, §8: the action is the
@@ -2275,7 +2284,7 @@ idleness from the last launch's exit file) and ends (a stalled unit
 is idle: the owner's re-typed `wave`, a new run card, is its one retry, §8; a tick's session is
 no such retry: its dispatch predicate reads the stall through `review status --runcard <id>` with the
 handoff's `wave` cards since the last posted round as the card set, U24's form in `review.py`); a tick that launches costs one
-session, one that finds nothing costs one read. The tick and `launch-builder --start` (below) are the two helper calls that start a session
+session, one that finds nothing costs one read. The tick and `launch-builder` (below) are the two helper calls that start a session
 themselves, the tick having no elephant to hand the command line to;
 the permission mode and allow-list it passes are the U24 plan's, pinned by a test that a tick's
 session never prompts; whether `claude -p` expands a prompt beginning `/superegm:wave` as the
@@ -2356,8 +2365,8 @@ mark for the other to see at its next step, and the side that then finds the oth
 the residual is one wasted session. A
 tick runs `superegm notify --runcard <driver card>` itself when it has new lines (a refusal, a
 launch without an exit file, a typed `wave` card, a stale root), so the inbox's driver line reaches the hook. Builders launched by a tick's session are started in their own session
-and process group: `launch-builder --start` (U24's flag on U09's interface) starts the printed
-wrapper itself, detached (Python's `start_new_session=True`, never `setsid(1)`, which macOS
+and process group: `launch-builder` (from amendment 10 its one behaviour; amendment 5's
+`--start` flag on U09's interface, since gone) starts the wrapper itself, detached (Python's `start_new_session=True`, never `setsid(1)`, which macOS
 lacks; stdin from `/dev/null`, stdout and stderr into the launch's log file, so the tool's pipe is
 not held open for the builder's hours), and returns at once, the session's Bash tool calling it
 in place of the wrapper; the detached
@@ -2653,8 +2662,8 @@ handoff is planned; the amendment-4 paragraph below); a later handoff on this sp
 | U27 | The builder's plugins and MCP servers, passed per launch (§4, §7, §11, §15): `config.builder.plugins` (`<name>@<marketplace>`; `init` writes `[]`), each resolved through the elephant profile's `plugins/installed_plugins.json` to `--plugin-dir <dir>`, and `config.builder.mcp` (`mcpServers` form; `init` writes `{}`), written to `launches/<unit>_r<n>_mcp.json` and passed with `--mcp-config --strict-mcp-config`; the per-launch record `launches/<unit>_r<n>_plugins.json` (id, version, directory, hook events per plugin; the managed plugins; the MCP server names; superseding `_managed.json`); `launch-builder`'s and `doctor`'s refusals (a listed plugin not installed or among the builder profile's managed plugins; a profile `skills/` or `commands/` directory or without `disableClaudeAiConnectors`, beside the landed login-only checks); `ENABLE_CLAUDEAI_MCP_SERVERS=false` in the launched environment; `doctor`'s `plugins:` and `mcp:` lines; `Skill(<name>)` / `Skill(<name> *)` and `mcp__<server>__<tool>` / `mcp__<server>__*` rules in `allowed_tools`; the skills named in the builder orders at the launch: `skills/plan/scripts/superegm/launch_builder.py` (modify: the flags, the MCP file, the record, the checks, the orders' skill line), `doctor.py` (modify: the two lines), `__init__.py` (modify: `DEFAULT_CONFIG.builder.plugins` and `.mcp`), `init.py` (modify), `skills/wave/references/builder_orders.md` (modify: the skills line), `skills/using-superegm/references/claude-code-tools.md` (modify: the `--allowedTools` sentence and the two flags), `docs/getting_started.md` (modify: the config's plugins and servers; the profile step), a `docs: see U29` Objective note, `tests/unit/test_builders.py`, `test_doctor.py` (modify), `test_u27.py` (create: its own keys) | — (U14, U15 landed); after U24 on `launch_builder.py` and `doctor.py` | M |
 | U28 | The default models and efforts per role (§7, §8, §11, §13): `builder.model` `claude-opus-5-5` (a full id) and `builder.effort` `medium`, passed to the launched `claude -p` as `--effort <level>` with `CLAUDE_CODE_EFFORT_LEVEL` unset, and written with the effective model into `launches/<unit>.json`; `reviewers.model` / `reviewers.effort` `opus` / `xhigh` (the Agent tool's alias and level), passed on every review goldfish dispatch as the adapter's override (the adapters stay `model: inherit`), the two session variables overriding them and `inherit` passing nothing; `astra.heads_effort` `high` for the foreman's lane; `judges.members` default `fable` (adapter, `xhigh`), `astra` (runner, `xhigh`, `not run` when absent), `opus` (adapter, `max`), an adapter member's `model` an alias; the elephant never in config; the four added keys read as `init`'s defaults in a pre-U28 config, the landed `builder.model` and member `effort` values standing; `doctor`'s role table: `skills/plan/scripts/superegm/__init__.py` (modify: `DEFAULT_CONFIG`, which `init` writes verbatim; the loader's `astra` merge extended to `builder` and `reviewers`, so a missing nested key reads from it), `launch_builder.py` (modify: `--effort`, the unset name), `record_launch.py` (modify: the record's requested `model` and `effort`; the effective model from the result file's `modelUsage`), `judges.py` (modify: the members' efforts; its `DEFAULT_MEMBERS` copy dropped for `DEFAULT_CONFIG.judges.members`, the one source), `doctor.py` (modify: the table, the members read through `judge_members`), `skills/review-spec/references/review_loop.md` (modify: the one rule), `skills/wave/references/foreman_brief.md` (modify: the placeholders filled from the config; step 2b's `astra.heads_effort` read and its `high` fallback), `skills/judges/SKILL.md` (modify: the override read per judge from the panel file; the effective pair by `review_loop.md`'s rule), `skills/judges/references/astra_judge.md` (modify: `<ASTRA_EFFORT>` from the panel file's member effort), `resources/review_panels.md` (modify: section 6 points at `review_loop.md`'s rule; section 1's table and `printenv` line untouched), a `docs: see U29` Objective note, `tests/unit/test_u28.py` (create: its own keys), `test_doctor.py`, `test_builders.py`, `test_judges.py`, `test_foreman.py`, `test_review.py` and `test_astra_fork.py` (modify: the pins on `review_loop.md` and `review_panels.md`) | — (landed units); after U27 and every earlier unit on the files its row shares | M |
 | U29 | Split units for parallel waves (§9.1, §9.2): the plan rules (a unit's Scope within one subsystem; a crossing unit written as two, a `Blocked by` edge only where one consumes the other's interface and the Shared files order for any file both edit; the cross-cutting rule for `README.md`, `docs/claude.md` and `test_helper.py`; Size `L` a split candidate; the plan shaped for wave width, its header stating the wave plan and why any wave is a singleton; a split's rows through `--amend-units`), `graph --plan`'s `width:` line derived from `handoff_units.json`, read by the plan skill before `scan`, `set-input` deriving the same line, the `set` reviewer's chain check (a chain longer than two units → its forcing edge, `medium`, once) and the `proportion` persona's per-unit split check (over 10 Steps, 24 KB or eight paths, or crossing subsystems → split candidate, `medium`), `scan`'s warnings at those values: `skills/plan/scripts/superegm/graph.py` (modify: the `width:` line), `review_plan.py` (modify: `set-input` derives it), `scan.py` (modify: the warning values), `skills/plan/SKILL.md` (modify: the rules; the `width:` read before `scan`; the header's wave plan), `skills/plan/references/handoff_plan.md` (modify: the Size row; the `graph` row's `width:` line), `skills/plan/references/issue_template.md` (modify: the limits paragraph at the amendment's values), `skills/review-plan/SKILL.md` (modify: the line handed to `set`), `skills/review-plan/references/proportion.md` (modify: the per-unit split check), `docs/claude.md`, `README.md` (modify: the 1.2 docs sweep, every unit's `docs: see U29` note resolved here), `tests/unit/test_plan.py`, `test_review_plan.py` (modify) | U28, U30, U31 (the docs sweep after the rows it sweeps: §9.1's one exception) | S |
-| U30 | The board (§7, §11): every `status` pass of a `wave` session, `--wait` included, writes the report's `## Units` table, with the new columns (state word from `report.py`'s `unit_state` plus `ready` and `waiting`, derived once there · round · launch · head · PR · waits on · next action, `word_action`'s for a posted round, else by state · cost from `total_cost_usd`), under its header line (the time of the last change) into the tracking issue's body between `<!-- superegm:board -->` and `<!-- /superegm:board -->` through `apply.edit_issue`, the text outside untouched, the markers appended once, one GitHub write per pass and none when the fresh rows match the block read back; one table in the file, on stdout and in the issue; `verify` compares the body outside the markers; the inbox stays the action list: `skills/plan/scripts/superegm/report.py` (modify: the words `ready` and `waiting`; the new columns of the `## Units` line), `status.py` (modify: the one write), `verify.py` (modify: the comparison outside the markers), `skills/wave/SKILL.md` (modify: the status step names the board), a `docs: see U29` Objective note, `tests/unit/test_wave.py` (modify) | — (landed units); after U22 and U24 on `status.py`, U25 on `test_wave.py` | S |
-| U31 | The watchdog (§4, §7, §11, §11.2): `config.builder.stall_minutes` (30); a launch with no exit file whose branch shows no commit newer than its own newest commit (or its `started_at`) for that long is stalled; `launch-builder --start` spawns the wrapper as a process-group leader on both paths (the typed wave skill calls it too) and appends the `running` entry itself (pid, `started_at`, the prompt hash); the `wave` session's `status` pass, a reader, reports `U<n> stalled (<minutes> min; last commit <time | none>)`, and the skill's step 3 records it through `record-launch --exit stalled`, which signals the group, waits 30 s for the wrapper's exit file `stalled` (the one proof) and records `exited (stalled)` with `last_commit_at` or `kill_failed` (the launch signalled no more, the unit idle by one clause of `unit_state` and in the inbox for the owner's interrupt; a later exit file clears it), journals it and routes the unit to point 3 with the stall facts, where a host-caused stall (no commit newer than this launch) does not spend the one relaunch and a second is `stop`; `doctor`'s `stall:` line; the wave skill's step 3 records the stalled line: `skills/plan/scripts/superegm/launch_builder.py` (modify: `--start` on both paths, the wrapper's trap, the `running` entry with the Popen pid), `status.py` (modify: the check and the event line), `record_launch.py` (modify: `--exit stalled`: the signal, the wait, the record or `kill_failed`; the entry re-read), `report.py` (modify: the `kill_failed` clause of `unit_state`), `inbox.py` (modify: the `kill_failed` kind), `decision.py` (modify: the carve-out), `doctor.py` (modify: the line), `__init__.py` (modify: `DEFAULT_CONFIG.builder.stall_minutes`), `skills/wave/SKILL.md` (modify: step 3's stalled line; the launch through `--start`), a `docs: see U29` Objective note, `tests/unit/test_wave.py`, `test_doctor.py`, `test_builders.py` (modify), `test_u31.py` (create: its own keys) | U24; after U30 on `status.py`, `report.py` and `skills/wave/SKILL.md`, after U28 on `__init__.py`, `doctor.py`, `launch_builder.py` and `record_launch.py` | M |
+| U30 | The board (§7, §11): every `status` pass of a `wave` session, `--wait` included, writes the report's `## Units` table, with the new columns (state word from `report.py`'s `unit_state` plus `ready` and `waiting`, derived once there · round · launch · head · PR · waits on · next action, `word_action`'s for a posted round, else by state · cost from `total_cost_usd`), under its header line (the time of the last change) into the tracking issue's body between `<!-- superegm:board -->` and `<!-- /superegm:board -->` through one splice function (replace between the markers, append once, write only on change; a module of the plan's choosing) and `apply.edit_issue`, one GitHub write per pass and none when the fresh rows match the block read back; one table in the file, on stdout and in the issue; `verify` compares the body outside the markers through the same splice; the inbox stays the action list: `skills/plan/scripts/superegm/report.py` (modify: the words `ready` and `waiting`; the new columns of the `## Units` line), the splice's module (the plan's choice: the one function), `status.py` (modify: the one write through it), `verify.py` (modify: the comparison outside the markers through it), `skills/wave/SKILL.md` (modify: the status step names the board), a `docs: see U29` Objective note, `tests/unit/test_wave.py` (modify) | — (landed units); after U22 and U24 on `status.py`, U24 on `skills/wave/SKILL.md`, U25 on `test_wave.py` | S |
+| U31 | The watchdog (§4, §7, §11, §11.2): `config.builder.stall_minutes` (30); a launch with no exit file whose branch shows no commit newer than its own newest commit (or its `started_at`) for that long is stalled; `launch-builder` spawns the wrapper as a process-group leader, its one behaviour (amendment 5's `--start` flag gone; the typed wave skill and the tick call it), and appends the `running` entry itself, once, with its full field set (§7); the `wave` session's `status` pass, a reader, reports `U<n> stalled (<minutes> min; last commit <time | none>)`, and the skill's step 3 records it through `record-launch --exit stalled`, which signals the group, waits 30 s for the wrapper's exit file `stalled` (the one proof) and records `exited (stalled)` with `last_commit_at` or `kill_failed` (the launch signalled no more, the unit idle by one clause of `unit_state` and in the inbox for the owner's interrupt; a later exit file clears it), journals it and routes the unit to point 3 with the stall facts, where a host-caused stall (no commit newer than this launch) does not spend the one relaunch and a second is `stop`; `doctor`'s `stall:` line; the wave skill's step 3 records the stalled line: `skills/plan/scripts/superegm/launch_builder.py` (modify: the start as the one behaviour, the flag gone, the wrapper's trap, the whole `running` entry with the Popen pid and the command line), `status.py` (modify: the check and the event line), `record_launch.py` (modify: `--exit stalled`: the signal, the wait, the record or `kill_failed`; the entry re-read), `report.py` (modify: the `kill_failed` clause of `unit_state`), `inbox.py` (modify: the `kill_failed` kind), `decision.py` (modify: the carve-out), `doctor.py` (modify: the line), `__init__.py` (modify: `DEFAULT_CONFIG.builder.stall_minutes`), `skills/wave/SKILL.md` (modify: step 3's stalled line; the launch through `launch-builder` alone), a `docs: see U29` Objective note, `tests/unit/test_wave.py`, `test_doctor.py`, `test_builders.py` (modify), `test_u31.py` (create: its own keys) | U24; after U30 on `status.py`, `report.py` and `skills/wave/SKILL.md`, after U28 on `__init__.py`, `doctor.py`, `launch_builder.py` and `record_launch.py` | M |
 
 Shared files of the 1.0.0 build: `test_helper.py` is U03's alone. `body.py` is U03's and then U05's (the derived Step
 defaults), which U03 blocks. Each workflow SKILL.md stub U01 creates is filled
@@ -2750,8 +2759,8 @@ the docs and `test_helper.py` edges gone by amendment 9's cross-cutting rule; th
 `DEFAULT_CONFIG`, `SUBCOMMANDS`, `init`'s key text and `doctor`'s line add one edge per unit,
 accepted by the owner, which module self-registration, owned by this release's sweep unit U32
 (amendment 11, next in this queue), removes for later releases, whose width comes from the
-subsystem rule's splits), U30 beside U26 and U27 (after U22 and U24 on `status.py` and U25 on
-`test_wave.py`, no file shared with them), U31 after U30 on `status.py`, `report.py` and
+subsystem rule's splits), U30 beside U26 and U27 (after U22 and U24 on `status.py` and `skills/wave/SKILL.md` and
+U25 on `test_wave.py`, no file shared with them), U31 after U30 on `status.py`, `report.py` and
 `skills/wave/SKILL.md` and U28 on `__init__.py`, `doctor.py`, `launch_builder.py` and
 `record_launch.py`, by its blocker U24, and U29, the docs sweep, after U28, U30 and U31, the
 rows it sweeps; the 1.2 rows are exempt from the split
@@ -2769,8 +2778,8 @@ the owner accepted every verdict and amended the test-suite non-goal on their ow
 and rulings first, then the inbox, then the driver; U25 sits where its shared files put it, and
 U26 (amendment 6) after U21 by its blocker and after U24 on `review.py`, U27 (amendment 7) beside U26, after U24 on `launch_builder.py` and `doctor.py`, and U28 (amendment 8) last, after
 U27 and every earlier unit on the files its row shares (the chains below), U30 (amendment 10)
-beside U26 and U27 (no file shared; U30 after U22 and U24 on `status.py` and U25 on
-`test_wave.py`), U31 (amendment 10) after U30 on `status.py`, `report.py` and
+beside U26 and U27 (no file shared; U30 after U22 and U24 on `status.py` and
+`skills/wave/SKILL.md` and U25 on `test_wave.py`), U31 (amendment 10) after U30 on `status.py`, `report.py` and
 `skills/wave/SKILL.md` and after U28 on `__init__.py`, `doctor.py`, `launch_builder.py` and
 `record_launch.py`, and U29 (amendment 9) last, the docs sweep, `Blocked by` U28, U30 and U31
 (the rows it sweeps; §9.1's one exception).
@@ -2837,7 +2846,7 @@ and an effort a member's model lacks; U29 a unit of 11 Steps, a Scope crossing t
 and a chain of three units; U30 a body without the markers and a byte-identical table (no
 write); U31 a launch with commits but no newer one at the bound, a host-caused stall (no commit
 newer than the launch) and its second, no exit file within 30 s of the signal (`kill_failed`,
-skipped after), a typed launch through `--start`, and one run proving `claude -p` exits on the
+skipped after), a typed launch through `launch-builder`, and one run proving `claude -p` exits on the
 wrapper's signal within the bound (a shell runs its trap after its foreground child returns). Not in 1.2: cross-repository handoffs
 (the lib-core and financial-twin inputs are one handoff per repository; the second spec states
 its prerequisite in prose and `Landed:` rows, §9.1, and the owner types its phases after the
@@ -2882,7 +2891,8 @@ Interfaces (the names the plans will carry):
   grammar.
 - U09 → U09b, U10, U10b, U11: `launch [--idle <units>]`; `launch-builder --unit <U> --round <n>
   --runcard <id> [--start] → command line (with `--start`, amendment 5, started detached by the
-  helper); exit 1 with the refusal`; `record-launch --unit <U> [--exit
+  helper; from amendment 10 the start is the one behaviour, the flag gone and the command line
+  in the entry, U31); exit 1 with the refusal`; `record-launch --unit <U> [--exit
   <code>]`; `launches/<unit>.json` per §7 (`launches[].round`, `launches[].status`,
   `launches[].result_file`, `launches[].prompt_sha256`); the `**Deviation**`, `**Reply <fid>:**`,
   `**Ruling:**` and `**Builder status:**` headings, the option-line form and the PR body's
@@ -2964,8 +2974,8 @@ Interfaces (the names the plans will carry):
 - U30 → the owner: the board between `<!-- superegm:board -->` and `<!-- /superegm:board -->` in the
   tracking issue (its header line with the time of the last change, and the `## Units` line's
   columns); the one table in `wave_<n>_report.md`, on stdout and in the issue.
-- U31 → the owner: the config key `builder.stall_minutes`; `launch-builder --start` on both paths,
-  writing the `running` entry; the event line `U<n> stalled (<minutes> min; last commit <time |
+- U31 → the owner: the config key `builder.stall_minutes`; `launch-builder` starting the launch
+  as its one behaviour and writing the whole `running` entry (`command` among its fields); the event line `U<n> stalled (<minutes> min; last commit <time |
   none>)`; `record-launch --exit stalled`; `launches[]`'s `pid`, `exited (stalled)`,
   `last_commit_at` and `kill_failed`; the exit file's `stalled`, the one proof; the inbox's
   `kill_failed` kind; the journal line `<unit> launch <n> stalled (<minutes> min; last commit
