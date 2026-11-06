@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # From the elephant-goldfish-model (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17).
 
 """superegm collect: the foreman's findings of a round through one `review record --reviewer foreman`, or a
 round that could not complete with `--not-run`."""
@@ -88,6 +88,9 @@ def collect(args, card):
   core.save_foreman(st, unit, data)
   rnd = review.load_round(st, rid, n)
   rnd["builder_contested"] = contested
+  brief = r / "astra_brief.md"
+  if "astra" in rnd["reviewers"] and brief.is_file():  # the lane's record names the brief the runner read
+    rnd["reviewers"]["astra"]["brief_sha256"] = core.sha256_file(brief)
   rnd["what_ran"] = review.derive_what_ran(review.load_review(st, rid), rnd, entry)
   core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
   core.journal(st, f"{unit} round {n} collected: {len(lines)} foreman findings under {args.runcard}")
