@@ -2,7 +2,8 @@
 # Added by SuperEGM (gsVAM), 2026: the close subcommand (spec section 12): `closed_at`, every unlanded unit journaled;
 # it refuses while a redesign-stopped unit's issue is open (one GitHub read per such unit); `write_closed`, `closed_at` in the state and handoffs/<id>.json (U20).
 
-"""superegm close: close the handoff under an integrate card; writes `closed_at` once."""
+"""superegm close: close the handoff under an integrate card; writes `closed_at` once, in its `state.json` and
+its `handoffs/<id>.json` (`write_closed`, spec section 7; a legacy handoff's file is written the first time)."""
 
 import json
 from pathlib import Path
