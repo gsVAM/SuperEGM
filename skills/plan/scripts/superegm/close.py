@@ -1,14 +1,15 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the close subcommand (spec section 12): `closed_at`, every unlanded unit journaled;
-# it refuses while a redesign-stopped unit's issue is open (one GitHub read per such unit).
+# it refuses while a redesign-stopped unit's issue is open (one GitHub read per such unit); `write_closed`, `closed_at` in the state and handoffs/<id>.json (U20).
 
 """superegm close: close the handoff under an integrate card; writes `closed_at` once."""
 
+import json
 from pathlib import Path
 
 import superegm as core
 
-WRITES = frozenset({"state"})  # the store kinds this subcommand writes
+WRITES = frozenset({"state", "handoffs"})  # the store kinds this subcommand writes
 SKILLS = frozenset({"integrate"})  # the skills whose card this subcommand accepts
 
 
@@ -45,8 +46,20 @@ def run(args):
   unlanded = sorted(uid for uid in state.get("units") or {} if not (saved.get(uid) or {}).get("landed"))
   for uid in unlanded:
     core.journal(st, f"close: {uid} unlanded")
-  state["closed_at"] = core.now_iso()
-  core.save_state(st.root, state)
-  core.journal(st, f"closed {state['handoff_id']} at {state['closed_at']}")
+  write_closed(st, state, None)
   print(f"closed {state['handoff_id']}; unlanded: {', '.join(unlanded) or 'none'}")
   return 0
+
+
+def write_closed(store: core.Store, state: dict, reason: str | None) -> None:
+  """`close`'s write (spec section 7): `closed_at` into the handoff's `state.json` and its
+  `handoffs/<id>.json` (written for a legacy handoff the first time), journaled; `reason` names a close
+  other than `close`'s own (`voided`: `approve-spec --void` on a handoff with no filed unit)."""
+  hid = state.get("handoff_id") or store.handoff_id
+  state["closed_at"] = core.now_iso()
+  core.atomic_write(store.path("state"), state)
+  path = store.path("handoffs", hid)
+  record = json.loads(core.read_text(path)) if path.is_file() else \
+      {"id": hid, "spec": (state.get("design") or {}).get("path"), "opened_at": None, "closed_at": None}
+  core.atomic_write(path, record | {"closed_at": state["closed_at"]})
+  core.journal(store, f"closed {hid} at {state['closed_at']}" + (f" (closed: {reason})" if reason else ""))

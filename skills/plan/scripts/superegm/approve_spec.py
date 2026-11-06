@@ -10,9 +10,10 @@ from pathlib import Path
 import re
 
 import superegm as core
+from superegm import close
 from superegm.review import evaluate, findings_of, latest_cycle, load_review, load_round, review_id, round_numbers
 
-WRITES = frozenset(["approvals", "handoffs"])  # the store kinds this subcommand writes
+WRITES = frozenset(["approvals", "handoffs", "state"])  # the store kinds this subcommand writes
 SKILLS = frozenset(["review-spec", "review-plan", "integrate"])  # the skills whose card this subcommand accepts
 CONFIG = ".superegm/config.json"
 UNITS_H2 = re.compile(r"^## (?:\d+\.?\s+)?Units\s*$")
@@ -116,6 +117,11 @@ def run(args):
   root = core.git_toplevel(spec)
   st = core.store(root)
   slug = core.spec_slug(spec)
+  if args.void or args.amend_units:  # an older handoff is frozen (spec section 7)
+    try:
+      core.require_latest_handoff(st)
+    except core.HandoffError as error:
+      raise core.HandoffError(f"approve-spec: {error}") from None
   if args.void:
     return void_approval(args, st, spec)
   if args.amend_units:
@@ -156,27 +162,33 @@ def run(args):
 
 
 def void_approval(args, st: core.Store, spec: Path) -> int:
-  """`--void --review <id>`: the approval is void once that review records a `fix-design` finding."""
+  """`--void --review <id>`: the latest approval (the history's last entry) is void once that review records
+  a `fix-design` finding; its handoff, when its `state.json` files no unit, closes through `close`'s write."""
   if not args.review:
     raise core.HandoffError("approve-spec: --void requires --review")
   slug, rid = core.spec_slug(spec), args.review
-  approval = core.load_approval(st, spec)
-  if approval is None:
+  entries = core.load_approvals(st, spec)
+  if not entries:
     raise core.HandoffError(f"approve-spec: no approval for {slug}")
   if load_review(st, rid) is None:
     raise core.HandoffError(f"approve-spec: review {rid}: not opened")
   if not any(f["disposition"] == "fix-design" for n in round_numbers(st, rid) for f in findings_of(load_round(st, rid, n))):
     raise core.HandoffError(f"approve-spec: review {rid} has no fix-design finding")
-  approval["voided_by"] = rid
-  core.atomic_write(st.path("approvals", slug), approval)
+  entries[-1]["voided_by"] = rid
+  write_entries(st, spec, entries)
   core.journal(st, f"approve-spec void {slug} by review {rid} under {args.runcard}")
+  hid = entries[-1].get("handoff_id")
+  voided = core.Store(st.root, handoff_id=hid, config=st.config, legacy=st.legacy)
+  state = handoff_state(st, hid) or {"handoff_id": hid}  # a handoff never planned: a minimal state.json
+  if hid and not files_a_unit(state) and not state.get("closed_at"):
+    close.write_closed(voided, state, "voided")
   print(f"approval of {slug} voided by review {rid}")
   return 0
 
 
 def amend_units(args, st: core.Store, spec: Path, root: Path) -> int:
-  """`--amend-units` (section 12): rows appended to `## Units` are re-approved without a review round;
-  any change to a line before that heading refuses."""
+  """`--amend-units` (section 12): rows appended to `## Units` are re-approved without a review round, a
+  later entry of the latest approval's handoff; any change to a line before that heading refuses."""
   slug = core.spec_slug(spec)
   approval = core.load_approval(st, spec)
   if approval is None:
@@ -188,10 +200,7 @@ def amend_units(args, st: core.Store, spec: Path, root: Path) -> int:
   sha = core.sha256_file(spec)
   commit = commit_by_path(root, [rel, CONFIG], f"superegm: approve {slug} at review {approval['review']}",
                           st.config["commit_trailer"])
-  approval.update({"sha256": sha, "commit": commit})
-  approval["amended"].append({"sha256": sha, "commit": commit, "at": core.now_iso()})
-  path = st.path("approvals", slug)
-  core.atomic_write(path, approval)
+  path = append_entry(st, spec, entry_of(sha, commit, args.runcard, approval["review"], approval["handoff_id"], "amend-units", []))
   core.journal(st, f"approve-spec amend-units {approval['handoff_id']} sha256 {sha[:12]} commit {commit[:12]} under {args.runcard}")
   print(f"approval recorded in {path}")
   return 0
