@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 import superegm
+from superegm import atomic_write
 from conftest import (ROOT, SCRIPTS, HELPER, REPO, DESIGN, Harness, make_world, make_repo, make_pr, set_config, applied, dry_run, state_of, unit_path, close_as_completed, git, mark_launched, launchable)
 
 
@@ -273,6 +274,33 @@ def test_store_paths_under_the_handoff_directory(tmp_path, legacy, kind, parts, 
   with pytest.raises(superegm.HandoffError, match="no handoff in this store"):
     superegm.Store(tmp_path).path("unit", "U17")
   assert superegm.Store(tmp_path).path("journal") == tmp_path / "journal.md" and superegm.Store(tmp_path).path("runcards", "review-spec-1f2e3d-0001") == tmp_path / "runcards/review-spec-1f2e3d-0001.json"
+
+
+entry = lambda hid: {"sha256": hid * 32, "commit": "c", "runcard": None, "review": None, "approved_at": "t", "handoff_id": hid, "kind": "opening", "voided_by": None, "escalated": []}
+
+@pytest.mark.parametrize("case, expect", [("flag", "H2"), ("card", "H1"), ("spec", "H2"), ("unit-one", "H1"),
+                                          ("unit-two", "store: U07 is filed in H1 and H2: pass --handoff"), ("none", None), ("legacy", "sample-legacy")])
+def test_store_resolves_the_handoff_once(world, monkeypatch, case, expect):
+  root = world.artifacts
+  if case == "legacy":
+    atomic_write(root / "state.json", {"handoff_id": "sample-legacy", "units": {}})
+  else:
+    atomic_write(root / "approvals/sample.json", {"path": str(world.spec), "entries": [entry("H1"), entry("H2")]})
+    for hid in ("H1", "H2"):
+      atomic_write(root / f"handoffs/{hid}.json", {"id": hid, "spec": str(world.spec), "opened_at": "t", "closed_at": None})
+      atomic_write(root / f"{hid}/state.json", {"handoff_id": hid, "units": {"U07": {"number": 1}} if case == "unit-two" or hid == "H1" else {}})
+    case == "card" and atomic_write(root / "H1/runcards/plan-H1-0001.json", {"skill": "plan", "handoff": "H1", "closed_at": None, "interrupted_at": None, "parent": None})
+  given = {"flag": dict(handoff="H2"), "card": dict(runcard="plan-H1-0001"), "spec": dict(design=str(world.spec)), "unit-one": dict(unit="U07"), "unit-two": dict(unit="U07")}.get(case, {})
+  monkeypatch.setattr(superegm, "CURRENT_ARGS", argparse.Namespace(**{"handoff": None, "runcard": None, "design": None, "plan": None, "artifact": None, "unit": None, **given}))
+  if expect and expect.startswith("store:"):
+    with pytest.raises(superegm.HandoffError, match=re.escape(expect)):
+      superegm.store(world.repo)
+    return
+  st = superegm.store(world.repo)
+  assert (st.handoff_id, st.legacy) == (expect, case == "legacy")
+  rows = [{"id": "sample-legacy", "spec": None, "opened_at": None, "closed_at": None, "legacy": True}] if case == "legacy" else \
+         [json.loads((root / f"handoffs/{hid}.json").read_text(encoding="utf-8")) | {"legacy": False} for hid in ("H1", "H2")]
+  assert superegm.handoffs(root) == rows
 
 
 WRITES = {"approve_spec": {"approvals"}, "graph": {"state", "plan", "units", "unit", "bodies"},
