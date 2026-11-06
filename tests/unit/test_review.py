@@ -7,7 +7,7 @@
 import hashlib, json, re, subprocess
 from pathlib import Path
 import pytest
-from superegm import store, atomic_write, sha256_text
+from superegm import store, atomic_write, sha256_text, handoffs
 from superegm.review import parse_findings
 from superegm.review import derive_what_ran
 from superegm.review import PANEL_OF
@@ -580,15 +580,28 @@ def test_approve_spec_asks_then_commits_by_path(world):
   assert not store(world.repo).path("approvals", SLUG).exists()
   code, out = approve(world, spec, cid, "--yes")
   assert code == 0 and "approval recorded" in out, out
-  rec = approval(world)
-  assert (rec["path"], rec["sha256"], rec["review"], rec["runcard"]) == (str(spec), sha, rid, cid)
+  rec = approval(world)["entries"][0]
+  assert (approval(world)["path"], rec["sha256"], rec["review"], rec["runcard"]) == (str(spec), sha, rid, cid)
   assert rec["commit"] == git(world, "rev-parse", "HEAD") and rec["handoff_id"] == f"2026-11-03-sample-de-{sha[:6]}"
-  assert rec["amended"] == [] and rec["voided_by"] is None and rec["approved_at"]
+  assert rec["kind"] == "opening" and rec["voided_by"] is None and rec["approved_at"]
   assert git(world, "log", "-1", "--format=%s") == f"superegm: approve {SLUG} at review {rid}"
   names = git(world, "show", "--name-only", "--format=", "HEAD").splitlines()
   assert f"docs/specs/{SLUG}.md" in names and "notes.txt" not in names and "?? notes.txt" in git(world, "status", "--porcelain")
   code, out = approve(world, spec, cid, "--leavemealone")
   assert code == 0 and "approval recorded" in out and "Approve `" not in out
+
+
+def test_approve_spec_appends_history_entries_and_opens_one_handoff_per_opening(world):
+  spec, cid, rid = converged_spec(world); assert approve(world, spec, cid, "--yes")[0] == 0
+  rec, sha = approval(world), hashlib.sha256(spec.read_bytes()).hexdigest()
+  assert list(rec) == ["entries", "path"] and [list(e) for e in rec["entries"]] == [["approved_at", "commit", "escalated", "handoff_id", "kind", "review", "runcard", "sha256", "voided_by"]]
+  first = rec["entries"][0]
+  assert (first["sha256"], first["kind"], first["handoff_id"]) == (sha, "opening", f"2026-11-03-sample-de-{sha[:6]}")
+  assert json.loads(store(world.repo).path("handoffs", first["handoff_id"]).read_text(encoding="utf-8")) == {"id": first["handoff_id"], "spec": str(spec), "opened_at": first["approved_at"], "closed_at": None}
+  spec2, cid2, rid2 = converged_spec(world, SPEC.replace("Text.", "Changed.")); assert approve(world, spec2, cid2, "--yes")[0] == 0
+  second = approval(world)["entries"][1]
+  assert second["kind"] == "opening" and second["handoff_id"] != first["handoff_id"] and store(world.repo).path("handoffs", second["handoff_id"]).is_file()
+  assert [h["id"] for h in handoffs(world.artifacts)] == sorted([first["handoff_id"], second["handoff_id"]])
 
 
 # ---------------------------------------------------------------- S13: approve-spec refusals
