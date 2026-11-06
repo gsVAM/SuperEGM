@@ -50,6 +50,7 @@ def register(subparsers):
   o.add_argument("--sha256", help="the bytes under review (a plan body or a head); a spec is hashed by the helper")
   o.add_argument("--reviewers", required=True, help="comma-separated reviewer ids, the kind's first reviewer first")
   o.add_argument("--astra", choices=("on", "off"), help="the Astra lane (default: config.astra.enabled)")
+  o.add_argument("--scope", help="kind spec: auto (default) | whole | headings separated by `;`")
   r = core.add_parser(action, "record", "record one reviewer's round")
   r.add_argument("--review", required=True)
   r.add_argument("--round", type=int, required=True)
@@ -327,6 +328,9 @@ def open_review(args) -> int:
     raise core.HandoffError("review open: no handoff_id in state.json")
   if kind == "plan" and args.sha256:
     raise core.HandoffError("review open: --sha256 is refused for kind plan")
+  given = getattr(args, "scope", None)  # a caller's own Namespace (the foreman's) may omit it
+  if given is not None and kind != "spec":
+    raise core.HandoffError(f"review open: --scope is refused for kind {kind}")
   latest, closed = latest_cycle(st, kind, artifact)
   if latest and not closed:  # a re-typed skill resumes the open cycle; the panel cannot change
     rid = review_id(st, kind, artifact, latest["cycle"])
@@ -334,10 +338,11 @@ def open_review(args) -> int:
     core.journal(st, f"review open {rid} resumed under {args.runcard}")
     print(rid)
     return 0
+  scope = scope_form(st, artifact, given) if kind == "spec" else None
   cycle = latest["cycle"] + 1 if latest else 1
   rid = review_id(st, kind, artifact, cycle)
   lane = seat_lane(kind, getattr(args, "astra", None), st.config.get("astra") or {})
-  review = {"kind": kind, "artifact": artifact, "cycle": cycle, "handoff_id": st.handoff_id,
+  review = {"kind": kind, "artifact": artifact, "cycle": cycle, "handoff_id": st.handoff_id, "scope": scope,
             "reviewers": reviewers + (["astra"] if lane else []),
             "runcard": args.runcard, "artifact_sha256": current_sha(st, kind, artifact) if kind == "plan" else args.sha256,
             "astra_incomplete": 0,
@@ -347,6 +352,22 @@ def open_review(args) -> int:
   core.journal(st, f"review open {rid} panel {','.join(review['reviewers'])} under {args.runcard}")
   print(rid)
   return 0
+
+
+def scope_form(st: core.Store, artifact: str, given) -> str | list:
+  """The stored form of a spec review's `--scope`: `auto` (the default), `whole`, or the headings the list
+  names, separated by `;` (a heading may hold a comma), each a heading of the spec now; the list needs a
+  previous approval to diff against."""
+  if given is None or given.strip() in ("auto", "whole"):
+    return (given or "auto").strip()
+  headings = [h.strip() for h in given.split(";") if h.strip()]
+  if not core.load_approval(st, Path(artifact)):
+    raise core.HandoffError("review open: --scope <list>: no approval: use whole")
+  present = {heading for heading, _, _ in sections(core.read_text(Path(artifact)))}
+  missing = [h for h in headings if h not in present]
+  if missing or not headings:
+    raise core.HandoffError(f"review open: --scope: {missing[0] if missing else given} is not in the spec")
+  return headings
 
 
 # ---------------------------------------------------------------- record
