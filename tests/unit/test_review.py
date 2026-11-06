@@ -370,6 +370,27 @@ def test_settle_and_its_refusals(world, kind, mode, reviewer, sev, loc, fid, dis
     assert finding["ruling"] == (None if not extra else "owner" if extra == ("--owner",) else f"judges:{extra[1]}")
 
 
+@pytest.mark.parametrize("author, body, expect", [
+  ("owner", "**Ruling:** design-1-1 finding overruled — Scope widened", "design-1-1 declined"),
+  ("passer-by", "**Ruling:** design-1-1 finding overruled — Scope widened", "review settle: comment 13 is by passer-by, not a login in config.owners"),
+  ("owner", "**Ruling:** design-1-1 finding upheld (fix it)", "review settle: comment 13 does not rule design-1-1 overruled"),
+])
+def test_settle_takes_the_owners_posted_overrule_in_leavemealone(world, author, body, expect):
+  """1.1.3 fix (wave-0021, U17 round 5): in leavemealone the owner's word still counts, by hand: `--owner --posted
+  <comment>` settles a high when the comment is an owner's `**Ruling:** <fid> finding overruled` (one GitHub read)."""
+  set_config(world, repo=REPO, owners=["owner"])
+  spec, cid, rid = opened(world, "spec", mode="leavemealone")
+  assert record(world, rid, 1, "design", [F("design", 1, 1, "high", loc="§1")], cid)[0] == 0
+  served = {"id": 13, "user": {"login": author}, "body": body}
+  world.gh.extend("api", lambda args, cwd, token=None: world.gh.ok(served) if world.gh.endpoint_of(args) == f"repos/{REPO}/issues/comments/13" else world.gh.do_api(args))
+  code, out = settle(world, rid, "design-1-1", "declined", cid, "--owner", "--posted", "13")
+  finding = rjson(world, rid, "round-1.json")["reviewers"]["design"]["findings"][0]
+  if expect.startswith("review settle:"):
+    assert code == 1 and expect in out and finding["disposition"] is None, out
+  else:
+    assert (code, out.strip()) == (0, expect) and (finding["disposition"], finding["ruling"]) == ("declined", "owner")
+
+
 # ---------------------------------------------------------------- S9: `review status`
 
 def s_unopened(w, c, r): return f"spec-{SLUG}-c9"

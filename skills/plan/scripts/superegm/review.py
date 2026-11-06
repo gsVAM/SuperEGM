@@ -70,6 +70,7 @@ def by_whom(parser, required):
   group = parser.add_mutually_exclusive_group(required=required)
   group.add_argument("--owner", action="store_true", help="the owner ruled")
   group.add_argument("--judges", metavar="ID", help="the judges panel that ruled")
+  parser.add_argument("--posted", metavar="COMMENT", help="in leavemealone with --owner: the owner's by-hand `**Ruling:** <fid> finding overruled` comment id")
 
 
 def run(args):
@@ -380,7 +381,9 @@ def settle_finding(args) -> int:
     raise core.HandoffError("review settle: fixed needs changed bytes")  # a head's current bytes are unknown: never
   if blocking(finding) and disposition in ("contested", "declined"):
     if card["mode"] == "leavemealone" and not args.judges:
-      raise core.HandoffError(f"review settle: {fid} is {finding['severity']}: --judges required in leavemealone-mode")
+      if not (args.owner and getattr(args, "posted", None)):
+        raise core.HandoffError(f"review settle: {fid} is {finding['severity']}: --judges required in leavemealone-mode")
+      verify_owner_ruling(st.config, fid, args.posted)
     if card["mode"] != "leavemealone" and not args.owner:
       raise core.HandoffError(f"review settle: {fid} is {finding['severity']}: --owner required in normal mode")
   finding["disposition"] = disposition
@@ -394,6 +397,17 @@ def settle_finding(args) -> int:
                + (f" copied to {', '.join(copies)}" if copies else "") + f" under {args.runcard}")
   print(f"{fid} {disposition}")
   return 0
+
+
+def verify_owner_ruling(config: dict, fid: str, comment_id: str) -> None:
+  """In leavemealone the owner's word still counts, by hand (1.1.3; U22 reads such comments itself): one GitHub
+  read of the comment, by a `config.owners` login, starting `**Ruling:** <fid> finding overruled`."""
+  comment = core.gh_json(["api", f"repos/{config['repo']}/issues/comments/{comment_id}"]) or {}
+  author = (comment.get("user") or {}).get("login")
+  if author not in (config.get("owners") or []):
+    raise core.HandoffError(f"review settle: comment {comment_id} is by {author}, not a login in config.owners")
+  if not (comment.get("body") or "").startswith(f"**Ruling:** {fid} finding overruled"):
+    raise core.HandoffError(f"review settle: comment {comment_id} does not rule {fid} overruled")
 
 
 def settle_set_copies(st: core.Store, rnd: dict, finding: dict) -> list:
