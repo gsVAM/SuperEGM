@@ -175,8 +175,9 @@ A SuperEGM wave's head review panel is `change-review, astra`: the lane is seate
 Both reviews use `handoff-standard.md` for their Claude goldfish; `egm-codebase-details` runs in REVIEW mode so that scope paths, symbols and callers are checked to exist as the units assume. The handoff gate and runs like Stages 7 and 9: its
 Claude reviewers go to `egm-review-loop` as `Reviewers` with `Stage: 10`, and
 its stop rule is the same, no open high or medium. The PR review is run by the
-foreman, uses the inspect launch of `resources/astra_lane.md` section 3b, and
-has no `egm-review-loop` stage: the foreman dispatches its reviewers directly
+foreman and, outside a SuperEGM wave, uses the inspect launch of
+`resources/astra_lane.md` section 3b (the inspect launch is the interactive flow only: a wave's head
+runs the `review` call of section 8), and has no `egm-review-loop` stage: the foreman dispatches its reviewers directly
 and writes the round report.
 
 Standards are unchanged: Stage 7 reviewers use `feature-spec-standard`, Stage

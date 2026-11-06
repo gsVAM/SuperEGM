@@ -160,10 +160,9 @@ validated literals never `$EGM_...`, and the Bash tool's `timeout` set to the
 runner's `--timeout` plus 300 seconds in milliseconds: `3900000` for the
 `--timeout 3600` inspect. In the interactive flow only, the foreman prepares the brief and this line but
 never runs it (a head review's lane is run by the foreman, section 8): a background command dies with the agent that started it, so a
-foreman that launched and then reported back would kill the run. The helper's
-`prepare` writes the exact line and that Bash timeout into
-`foreman_<unit-id>_r<round>_launch.md`; check it against this section rather
-than composing it by hand.
+foreman that launched and then reported back would kill the run. A SuperEGM
+wave's head review does not use this section: its lane is the `review` call of
+section 8 (`--timeout 540`, a 600000 ms foreground call).
 
 Always a fresh session. An inspect run is never resumed: each round reviews a
 new head, and `--base` already carries what changed.
@@ -290,7 +289,13 @@ not installed | stopped`. The foreman, never the main conversation, runs the run
 Claude panel as one foreground Bash call under a 600000 ms timeout with `--timeout 540`, in a fresh session,
 and records the result through `review record`. It is never a background command: the foreman waits for it.
 A lane that is `not installed`, `failed`, `killed` or `timeout` is recorded `not run (<reason>)` and never
-blocks the round; `not installed` and `stopped` count no incomplete run. The table below is the interactive flow only.
+blocks the round; `not installed` and `stopped` count no incomplete run.
+
+The head review mapping (section 6's table is the interactive flow's, and `review record` refuses its words): `severity`
+verbatim (`high`, `medium`, `low`); the bare id `astra-<round>-<n>`, Astra's own `id` dropped; `path` as the location;
+`evidence` as the claim; `regression: no`. The status line, the verdict and `fix` stay in the foreman's own words.
+
+The table below is the interactive flow only.
 
 | Case | What the user sees | Review continues as |
 | --- | --- | --- |
