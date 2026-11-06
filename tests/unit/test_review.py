@@ -839,3 +839,13 @@ def test_settle_file_is_all_or_nothing(world):
   assert "review settle: design-1-9 | fixed | gone: no finding design-1-9" in world.run("review", "settle", "--review", rid, "--file", str(path), "--runcard", cid)[1]
   path.write_text("\ndesign-1-1 fixed\n", encoding="utf-8")
   assert "review settle: design-1-1 fixed: not <fid> | <disposition> | <note>: nothing written" in world.run("review", "settle", "--review", rid, "--file", str(path), "--runcard", cid)[1]
+
+
+# ---------------------------------------------------------------- S25: the cap question names the scope (U19)
+
+def test_cap_question_names_the_scope(world):
+  spec, cid, rid = converged_spec(world); assert approve(world, spec, cid, "--yes")[0] == 0
+  spec.write_text(SPEC.replace("Text.", "Changed."), encoding="utf-8")
+  rid2 = reopen(world, "spec", cid)
+  rounds(world, rid2, cid, [HIGH(n) for n in range(1, 6)])
+  assert cap_question(world, rid2, cid)[1].startswith(f"## Q1 {rid2} is at its cap (scope: (preamble), ## 1. Intent, ## 2. Units)\n")
