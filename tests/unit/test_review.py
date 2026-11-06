@@ -12,6 +12,7 @@ from superegm.review import parse_findings
 from superegm.review import derive_what_ran
 from superegm.review import PANEL_OF
 from superegm.review import scope_sections
+from superegm.review import findings_of
 
 from conftest import REPO, set_config
 
@@ -819,3 +820,22 @@ def test_record_refuses_out_of_scope_findings_and_stores_them(world, location, k
   assert rnd["scope"] == [["neighbour", "(preamble)", 1, 2], ["changed", "## 1. Intent", 3, 6], ["neighbour", "## 2. Goals", 7, 10]]
   assert ("record: design-1-1 out of scope (## 3. Risks): not recorded" in out) is not kept
   assert ("out of scope: design-1-1" in (world.artifacts / "journal.md").read_text(encoding="utf-8")) is not kept
+
+
+# ---------------------------------------------------------------- S24: `review settle --file`, all or nothing (U19)
+
+def test_settle_file_is_all_or_nothing(world):
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [[F("design", 1, 1), F("design", 1, 2, "medium"), F("design", 1, 3, "low")]])
+  path = world.repo.parent / "dispositions.txt"
+  path.write_text("design-1-1 | fixed | moved\ndesign-1-2 | contested | wrong\ndesign-1-3 | declined | not worth it\n", encoding="utf-8")
+  code, out = world.run("review", "settle", "--review", rid, "--file", str(path), "--owner", "--runcard", cid)
+  assert code == 1 and "review settle: design-1-1 | fixed | moved: fixed needs changed bytes: nothing written" in out
+  assert all(f["disposition"] is None for f in findings_of(rjson(world, rid, "round-1.json")))
+  move(world, "spec", spec)
+  assert world.run("review", "settle", "--review", rid, "--file", str(path), "--owner", "--runcard", cid) == (0, "design-1-1 fixed\ndesign-1-2 contested\ndesign-1-3 declined\n")
+  assert [(f["disposition"], f["note"]) for f in findings_of(rjson(world, rid, "round-1.json"))] == [("fixed", "moved"), ("contested", "wrong"), ("declined", "not worth it")]
+  path.write_text("design-1-9 | fixed | gone\n", encoding="utf-8")
+  assert "review settle: design-1-9 | fixed | gone: no finding design-1-9" in world.run("review", "settle", "--review", rid, "--file", str(path), "--runcard", cid)[1]
+  path.write_text("\ndesign-1-1 fixed\n", encoding="utf-8")
+  assert "review settle: design-1-1 fixed: not <fid> | <disposition> | <note>: nothing written" in world.run("review", "settle", "--review", rid, "--file", str(path), "--runcard", cid)[1]
