@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03); `status --wait`, the event lines and the folding (U09b).
+# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03); `status --wait`, the event lines and the folding (U09b); `state.json` read through the resolved handoff (U20).
 
 """U09b: `status --wait`, the event lines, the folding; plus EGM's `status` tests U03 moved here."""
 
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import REPO, make_pr, applied, state_of, close_as_completed, mark_launched
+from conftest import REPO, make_pr, applied, state_of, close_as_completed, mark_launched, handoff_store
 from superegm import store
 
 SHA = "a" * 40
@@ -29,7 +29,7 @@ def seed(world, monkeypatch, units=None):
   every `status` run reads them. Returns (gh, store(world.repo), card id)."""
   units = {"U01": 2, "U02": 3, "U03": 4} | (units or {})
   assert world.run("graph", "--plan", world.plan)[0] == 0
-  path = world.artifacts / "state.json"
+  path = handoff_store(world).path("state")
   state = json.loads(path.read_text(encoding="utf-8"))
   state.update({"remote": "origin", "confirmed_sha256": "x", "verify": {"complete": True, "sha256": "x", "problems": []},
                 "units": {uid: {"number": n} for uid, n in units.items()}})
@@ -382,9 +382,9 @@ def test_the_helper_is_single_writer_by_design(world):
   make_pr(gh, 70, "a" * 40, closes=[(REPO, 2)])
   code, out = world.run("status", "--plan", world.plan, "--wait", 60, "--watch", "U01=70")
   assert code == 1 and "--wait only watches" in out
-  before = (world.artifacts / "state.json").read_text(encoding="utf-8")
+  before = handoff_store(world).path("state").read_text(encoding="utf-8")
   assert world.run("status", "--plan", world.plan, "--wait", 60)[0] == 0
-  after = (world.artifacts / "state.json").read_text(encoding="utf-8")
+  after = handoff_store(world).path("state").read_text(encoding="utf-8")
   assert after != before, "a wait still records what it saw, once, when it returns"
 
 
