@@ -545,8 +545,6 @@ def cap_question(st, rid: str) -> str:
       raise core.HandoffError("question: one option: stop")
   if continued:
     options.pop(0)
-    if len(options) < 2 and not head:
-      raise core.HandoffError(f"question: continue already ruled on {rid}; {options[0]} is the only option")
   if head:
     options.append(redesign_option(st, rid))
   return f"## Q1 {rid} is at its cap\n" + options_text(options)

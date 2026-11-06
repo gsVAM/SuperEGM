@@ -82,7 +82,7 @@ handoff stays open; Step 4.
 refused (`close: already closed at <ts>`). One `gh api repos/<repo>/issues/<n>` read per unit stopped for
 redesign (its `foreman/<U>.json` carries `stopped.brief`) comes first; while that issue is open `close` exits 1 with
 `close: <U> is stopped for redesign and #<n> is open: close it by hand once the re-planned unit is filed`, one line per
-such unit and nothing written: the owner closes it by hand, since the plugin edits no issue it did not file, and `close`
+such unit, each read journaled and `state.json` untouched: the owner closes it by hand, since the plugin edits no issue it did not file, and `close`
 runs again. The skill never closes it; it prints the refusal and ends at Step 4. The store is free for the next handoff: the next
 `graph` starts a fresh state.
 

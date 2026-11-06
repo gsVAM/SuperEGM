@@ -5,7 +5,7 @@ effects: working-tree
 description: "You MUST use this before any creative work - creating features, building components, adding functionality, modifying behavior, or planning anything new, in software or out of it (a talk, a business, a renovation)."
 ---
 
-<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: spec path docs/specs, the Units section, the review-spec gate; builder check and the mockups section removed. -->
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: spec path docs/specs, the Units section, the review-spec gate, the brainstorm-brief lookup; builder check and the mockups section removed. -->
 
 # Brainstorming
 
@@ -32,7 +32,7 @@ why?
 ## First: Is There a Brainstorm Brief?
 
 In a repository with `.superegm/config.json`, look before you ask anything. Read `artifacts_dir` from that file. Every handoff in that store whose `state.json` has no `closed_at` may hold `foreman/*.brainstorm.md` files: under the store's `<6 hex>/` layer in the flat store, or in the handoff's own directory once each handoff has one. Each is the brainstorm brief of a unit the owner stopped for redesign.
-For each brief, take the unit's issue number from that handoff's `state.json` and read the issue's `state` with `gh api repos/<repo>/issues/<n>`.
+For each brief, take the unit id from its file name (`<unit>-<decision id>.brainstorm.md`); the brief counts only when `foreman/<unit>.json` carries `stopped.brief` naming it. Take the unit's issue number from that handoff's `state.json` and read the issue's `state` with `gh api repos/<repo>/issues/<n>`, `<repo>` being `repo` in `.superegm/config.json`.
 For a brief of a unit stopped for redesign whose issue is still open, start from the brief: say so in one line, naming the handoff and the unit, and read what the owner asked, the findings and the deviations before your first question.
 A brief whose issue is closed is left in place and never offered. With no such brief, go on to "Your First Message".
 
