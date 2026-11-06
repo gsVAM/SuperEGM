@@ -803,6 +803,19 @@ def test_approve_spec_refuses_a_branch_not_holding_the_last_entrys_bytes(world):
   assert approve(world, spec3, cid3, "--yes")[0] == 0
 
 
+def test_amend_units_refuses_a_branch_not_holding_the_last_entrys_bytes(world):
+  spec, cid, rid = converged_spec(world); assert approve(world, spec, cid, "--yes")[0] == 0
+  rec = approval(world); sha7 = rec["entries"][0]["sha256"][:7]
+  icid = card(world, spec, "integrate")
+  git(world, "checkout", "-qb", "stale", "HEAD~1")
+  spec.parent.mkdir(parents=True, exist_ok=True)
+  spec.write_text(SPEC + "| U02 | more (from integrate, review x) | U01 | S |\n", encoding="utf-8")
+  head = git(world, "rev-parse", "HEAD")
+  code, out = approve(world, spec, icid, "--amend-units")
+  assert code == 1 and f"approve-spec: fold main first: approval {sha7} is not in this branch" in out
+  assert git(world, "rev-parse", "HEAD") == head and approval(world) == rec
+
+
 # ---------------------------------------------------------------- S17: the references
 
 REFS = ROOT / "skills" / "review-spec" / "references"

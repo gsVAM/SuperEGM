@@ -278,6 +278,20 @@ def test_graph_lists_filed_elsewhere_rows_and_refuses_a_frozen_handoff(world):
   assert "graph: webhooks-111111: not the latest approval: plan the rows in the latest handoff" in world.run("graph", "--plan", plan, "--handoff", "webhooks-111111")[1]
 
 
+def test_graph_refuses_a_handoff_its_spec_never_approved(world):
+  spec, _ = approve(world, handoff_id="webhooks-111111")
+  plan = world.repo.parent / "plan.md"
+  plan.write_text(plan_text(spec), encoding="utf-8")
+  card = world.open_card("plan", str(spec))
+  assert graph(world, plan, card)[0] == 0
+  before = find(world, "state.json").read_text(encoding="utf-8")
+  atomic_write(store_root(world) / "handoffs/other-333333.json", {"id": "other-333333", "spec": "other.md", "opened_at": "t", "closed_at": None})
+  code, out = world.run("graph", "--plan", plan, "--handoff", "other-333333")
+  assert code == 1 and f"graph: other-333333 is not a handoff of {spec.name}" in out
+  assert "store: nosuch-999999: no such handoff" in world.run("graph", "--plan", plan, "--handoff", "nosuch-999999")[1]
+  assert (store_root(world) / "webhooks-111111/state.json").read_text(encoding="utf-8") == before
+
+
 def test_graph_records_the_plan_path_and_copies_the_plan(world):
   spec, sha, plan, card = planned(world)
   code, out = world.run("graph", "--runcard", card)

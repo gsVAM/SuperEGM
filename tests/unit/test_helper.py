@@ -326,6 +326,45 @@ def test_a_legacy_store_hosts_the_next_handoff_beside_it(world, monkeypatch, giv
   assert superegm.handoffs(root) == [{"id": "sample-legacy", "spec": None, "opened_at": None, "closed_at": None, "legacy": True}, new | {"legacy": False}]
 
 
+def test_a_handoff_beside_a_legacy_store_reads_each_state_in_its_own_place(world, monkeypatch):
+  from superegm import approve_spec, graph
+  root = world.artifacts
+  atomic_write(root / "state.json", {"handoff_id": "sample-legacy", "units": {"U07": {"number": 1}}})
+  atomic_write(root / "approvals/sample.json", {"path": str(world.spec), "entries": [entry("sample-legacy"), entry("sample-222222")]})
+  atomic_write(root / "handoffs/sample-222222.json", {"id": "sample-222222", "spec": str(world.spec), "opened_at": "t", "closed_at": None})
+  atomic_write(root / "sample-222222/state.json", {"handoff_id": "sample-222222", "units": {}, "closed_at": "t"})
+  for given, beside in ((dict(handoff="sample-222222"), True), ({}, False)):
+    monkeypatch.setattr(superegm, "CURRENT_ARGS", argparse.Namespace(**{"handoff": None, "runcard": None, "design": None, "plan": None, "artifact": None, "unit": None, **given}))
+    st = superegm.store(world.repo)
+    assert graph.filed_in(st, world.spec) == ({"U07": "sample-legacy"} if beside else {})
+    assert approve_spec.handoff_state(st, "sample-222222") == {"handoff_id": "sample-222222", "units": {}, "closed_at": "t"}
+    assert approve_spec.handoff_state(st, "sample-legacy")["units"] == {"U07": {"number": 1}}
+    assert superegm.handoff_store(st, "sample-222222").path("state") == root / "sample-222222/state.json"
+    assert superegm.handoff_store(st, "sample-legacy").path("state") == root / "state.json"
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_an_unknown_handoff_is_refused(world, monkeypatch, legacy):
+  root = world.artifacts
+  if legacy:
+    atomic_write(root / "state.json", {"handoff_id": "sample-legacy", "units": {}})
+  atomic_write(root / "handoffs/sample-222222.json", {"id": "sample-222222", "spec": str(world.spec), "opened_at": "t", "closed_at": None})
+  for hid, ok in (("sample-222222", True), ("sample-999999", False)) + ((("sample-legacy", True),) if legacy else ()):
+    monkeypatch.setattr(superegm, "CURRENT_ARGS", argparse.Namespace(handoff=hid, runcard=None, design=None, plan=None, artifact=None, unit=None))
+    if ok:
+      assert superegm.store(world.repo).handoff_id == hid
+    else:
+      with pytest.raises(superegm.HandoffError, match=re.escape(f"store: {hid}: no such handoff")):
+        superegm.store(world.repo)
+
+
+def test_kind_of_a_store_level_orient_and_card_segments(tmp_path):
+  st = superegm.Store(tmp_path)
+  assert st.path("orient", "map.md") == tmp_path / "orient/map.md" and st.kind_of(tmp_path / "orient/map.md") == "orient"
+  assert [superegm.Store.card_segment(c) for c in ("plan-a6b9b0-0001", "review-spec-0001", "review-plan-0002", "review-spec-1f2e3d-0001")] == \
+         ["a6b9b0", None, None, "1f2e3d"]
+
+
 def test_runcard_ids_carry_the_handoff_hex_and_the_card_records_it(world):
   root = world.artifacts
   atomic_write(root / "approvals/sample.json", {"path": str(world.spec), "entries": [entry("sample-111111"), entry("sample-222222")]})
