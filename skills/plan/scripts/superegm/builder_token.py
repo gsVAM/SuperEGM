@@ -88,11 +88,12 @@ def jwt(app_id: int, key, openssl: str, now=None) -> str:
   return f"{head}.{payload}.{b64(signed.stdout)}"
 
 
-def api(method: str, path: str, auth: str):
-  """One request to the GitHub API as the JWT or the token `auth`; an HTTP refusal or a transport
-  error is a HandoffError naming the call."""
-  request = Request(API + path, method=method,
-                    headers={"Authorization": f"Bearer {auth}", "Accept": "application/vnd.github+json"})
+def api(method: str, path: str, auth: str, body: dict = None):
+  """One request to the GitHub API as the JWT or the token `auth`, with a JSON `body` when given; an
+  HTTP refusal or a transport error is a HandoffError naming the call."""
+  request = Request(API + path, method=method, data=json.dumps(body).encode("utf-8") if body is not None else None,
+                    headers={"Authorization": f"Bearer {auth}", "Accept": "application/vnd.github+json",
+                             **({"Content-Type": "application/json"} if body is not None else {})})
   try:
     with urlopen(request, timeout=30) as response:
       return json.loads(response.read() or b"null")
@@ -108,11 +109,12 @@ def api(method: str, path: str, auth: str):
 
 
 def mint(repo: str, app_id: int, key, openssl: str) -> str:
-  """A one-hour installation token for `repo`: the installation that includes it, resolved on every
-  mint (nothing is cached), then its access token."""
+  """A one-hour installation token for `repo` alone: the installation that includes it, resolved on
+  every mint (nothing is cached), then its access token scoped to the repository (`repositories`), so an
+  installation that reaches other repositories still yields a token that reaches this one only."""
   token = jwt(app_id, key, openssl)
   installation = api("GET", f"/repos/{repo}/installation", token)
-  return api("POST", f"/app/installations/{installation['id']}/access_tokens", token)["token"]
+  return api("POST", f"/app/installations/{installation['id']}/access_tokens", token, {"repositories": [repo.split("/")[1]]})["token"]
 
 
 FOUR = {"contents": "write", "issues": "write", "metadata": "read", "pull_requests": "write"}  # the installed permissions, exactly
@@ -145,13 +147,13 @@ def app_lines(app: dict, repo: str, key, openssl: str) -> list:
     return f"ok ({permission_set(installed)[1:-1]})"
 
   def token():
-    found["token"] = api("POST", f"/app/installations/{found['id']}/access_tokens", found["jwt"])["token"]
+    found["token"] = api("POST", f"/app/installations/{found['id']}/access_tokens", found["jwt"], {"repositories": [repo.split("/")[1]]})["token"]
     return "ok"
 
   def installation():
     data = api("GET", "/installation/repositories", found["token"])
     if data.get("total_count") != 1:
-      return f"installed on {data.get('total_count')} repositories, not {repo} alone"
+      return f"the token reaches {data.get('total_count')} repositories, not {repo} alone"
     name = data["repositories"][0]["full_name"]
     return f"ok ({repo})" if name.lower() == repo.lower() else f"installed on {name}, not {repo}"
 
