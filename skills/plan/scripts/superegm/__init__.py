@@ -1090,8 +1090,12 @@ class Handoff:
     self.repo_root = git_toplevel(design)
     # An unrelated commit after approval must not change a single rendered
     # body: the gate hashes, a bounded resume and verify all depend on them.
-    approval = load_approval(store, design)
-    if approval and approval["sha256"] != self.design_sha:
+    # The handoff's own approval is its latest entry (spec section 7); the spec may stand at a later link.
+    entries = load_approvals(store, design)
+    own = [i for i, e in enumerate(entries) if store.handoff_id and e.get("handoff_id") == store.handoff_id] \
+        or ([len(entries) - 1] if entries else [])
+    approval = entries[own[-1]] if own else None
+    if approval and self.design_sha not in {approval["sha256"], *(e["sha256"] for e in entries[own[-1] + 1:])}:
       raise HandoffError("spec changed since the approval: run approve-spec again")
     self.design_commit = (approval or {}).get("commit") or run_git(
         ["rev-parse", "--short", "HEAD"], self.repo_root).strip()
