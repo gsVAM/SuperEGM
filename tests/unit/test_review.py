@@ -4,9 +4,10 @@
 
 """U04: the review loop (`review open|record|settle|status|rule`) and `approve-spec` (spec section 8)."""
 
-import hashlib, json, re, subprocess
+import argparse, hashlib, json, re, subprocess
 from pathlib import Path
 import pytest
+import superegm
 from superegm import store, atomic_write, sha256_text, handoffs
 from superegm.review import parse_findings
 from superegm.review import derive_what_ran
@@ -68,16 +69,25 @@ def spec_file(world, text=SPEC):
   path.write_text(text, encoding="utf-8")
   return path.resolve()
 
+def hstore(world):
+  """The store as a `--spec <the sample spec>` subcommand resolves it: the spec's latest approval's handoff;
+  before any approval, none (a seeded flat `state.json` makes it a legacy store)."""
+  superegm.CURRENT_ARGS = argparse.Namespace(design=str(world.repo / "docs" / "specs" / f"{SLUG}.md"))
+  return store(world.repo)
+
 def seed_handoff(world, spec, hid=HID, **extra):
-  """state.json as approve-spec and graph leave it: the handoff id and the spec the plan and head cards are on."""
+  """state.json as approve-spec and graph leave it: the handoff id and the spec the plan and head cards are on;
+  in the spec's latest approval's handoff (its id) once one exists, else flat under `hid`."""
+  st = hstore(world)
+  hid = (st.handoff_id or hid) if hid else None
   state = {"units": {"U07": {}}, "design": {"path": str(spec)}, **extra}
-  atomic_write(store(world.repo).path("state"), state | ({"handoff_id": hid} if hid else {}))
+  atomic_write(st.path("state"), state | ({"handoff_id": hid} if hid else {}))
   if hid:
     seed_body(world, "U07")
 
 def seed_body(world, uid, text=BODY):
   """`unit_<id>.md` as `graph`'s `unit_file_text` writes it: the section, then the body in its fence."""
-  atomic_write(store(world.repo).path("unit", uid), f"### {uid}: Title\n\n## Issue body as posted\n\n````markdown\n{text}````\n")
+  atomic_write(hstore(world).path("unit", uid), f"### {uid}: Title\n\n## Issue body as posted\n\n````markdown\n{text}````\n")
 
 def card(world, artifact, skill="review-spec", mode=None, parent=None):
   argv = ["runcard", "open", "--skill", skill, "--artifact", str(artifact)]
@@ -99,7 +109,7 @@ def opened(world, kind="spec", reviewers=None, astra="off", mode=None, text=SPEC
   return spec, cid, out.strip()
 
 def rpath(world, rid, *parts):
-  return store(world.repo).path("reviews", rid, *parts)
+  return hstore(world).path("reviews", rid, *parts)
 
 def rjson(world, rid, name="review.json"):
   return json.loads(rpath(world, rid, name).read_text(encoding="utf-8"))
@@ -127,7 +137,7 @@ def rounds(world, rid, cid, per_round, start=1):
     assert record(world, rid, n, "zoom-out", [], cid)[0] == 0
 
 def head_round(world, n, phase, cid, outcome=None, unit="U07"):
-  path = store(world.repo).path("foreman", unit)
+  path = hstore(world).path("foreman", unit)
   data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"rounds": [], "decisions": [], "rulings": []}
   data["rounds"].append({"round": n, "runcard": cid, "launch": 1, "head": "f" * 40, "phase": phase,
                          "dispatch_id": f"d{n}", "outcome": outcome, "posted_at": None})
@@ -258,7 +268,7 @@ def test_latest_cycle_closes_by_the_approval_the_handoff_and_the_rulings(world):
   seed_handoff(world, spec)
   icid = card(world, spec, "integrate")
   i1 = reopen(world, "integrate", icid)
-  assert rjson(world, i1)["handoff_id"] == HID and record(world, i1, 1, "design", [], icid)[0] == 0
+  assert rjson(world, i1)["handoff_id"] == approval(world)["entries"][-1]["handoff_id"] and record(world, i1, 1, "design", [], icid)[0] == 0
   spec.write_text(SPEC + "\nmore rows\n")
   assert reopen(world, "integrate", icid) == i1
   assert approve(world, spec, icid, "--amend-units")[0] == 0
@@ -640,11 +650,11 @@ def test_approve_spec_records_the_escalated_pairs(world, named):
   rounds(world, rid2, cid, [[]])
   code, out = approve(world, spec, cid)
   assert code == 0 and (f"approve-spec: 1 escalated finding(s) await the owner: {pair}" in out) is not named
-  assert approve(world, spec, cid, "--yes")[0] == 0 and approval(world)["escalated"] == ([] if named else [pair])
+  assert approve(world, spec, cid, "--yes")[0] == 0 and approval(world)["entries"][-1]["escalated"] == ([] if named else [pair])
   spec, cid, rid3 = opened(world, text=text.replace("Text.", "Changed."))
   rounds(world, rid3, cid, [HIGH(1)])
   assert settle(world, rid3, "design-1-1", "escalated", cid)[0] == 0 and approve(world, spec, cid, "--leavemealone")[0] == 0
-  assert (rid3, approval(world)["escalated"]) == (f"spec-{SLUG}-c3", [f"{rid3}:design-1-1"])
+  assert (rid3, approval(world)["entries"][-1]["escalated"]) == (f"spec-{SLUG}-c3", [f"{rid3}:design-1-1"])
 
 
 @pytest.mark.parametrize("trailer", ["", "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"])
@@ -658,21 +668,23 @@ def test_approve_spec_appends_the_commit_trailer(world, trailer):
 
 # ---------------------------------------------------------------- S14: the handoff id
 
-@pytest.mark.parametrize("carried,extra,keeps", [
-  (True, {}, True),
-  (True, {"closed_at": "2026-11-03T00:00:00Z"}, False),
-  (False, {}, False),
+@pytest.mark.parametrize("filed,voided,keeps", [
+  (True, True, True),
+  (True, False, False),
+  (False, True, False),
 ])
-def test_handoff_id_copy_rule(world, carried, extra, keeps):
+def test_handoff_id_copy_rule(world, filed, voided, keeps):
   spec, cid, rid = converged_spec(world)
   assert approve(world, spec, cid, "--yes")[0] == 0
-  first = approval(world)["handoff_id"]
-  atomic_write(store(world.repo).path("state"), ({"handoff_id": first} if carried else {}) | extra)
+  first = approval(world)["entries"][-1]["handoff_id"]
+  atomic_write(world.artifacts / first / "state.json", {"handoff_id": first, "units": {"U07": {"number": 7} if filed else {}}})
+  if voided:  # as `--void` leaves the last entry
+    rec = approval(world); rec["entries"][-1]["voided_by"] = f"spec-{SLUG}-c1"; atomic_write(store(world.repo).path("approvals", SLUG), rec)
   spec2, cid2, rid2 = converged_spec(world, SPEC.replace("Text.", "Changed."))
   assert rid2.endswith("-c2") and approve(world, spec2, cid2, "--yes")[0] == 0
-  second = approval(world)["handoff_id"]
-  assert (second == first) is keeps
-  assert second.endswith(hashlib.sha256(spec2.read_bytes()).hexdigest()[:6]) is not keeps
+  second = approval(world)["entries"][-1]
+  assert (second["handoff_id"] == first) is keeps and second["kind"] == ("after-void" if keeps else "opening")
+  assert second["handoff_id"].endswith(hashlib.sha256(spec2.read_bytes()).hexdigest()[:6]) is not keeps
 
 
 # ---------------------------------------------------------------- S15: `approve-spec --void`
@@ -680,13 +692,23 @@ def test_handoff_id_copy_rule(world, carried, extra, keeps):
 def test_approve_spec_void(world):
   spec, cid, rid = converged_spec(world)
   assert approve(world, spec, cid, "--yes")[0] == 0
-  _, pcid, prid = opened(world, "plan")
+  earlier = approval(world)["entries"][-1]["handoff_id"]
+  changed = SPEC.replace("Text.", "Changed.")
+  spec, cid, rid = converged_spec(world, changed)
+  assert approve(world, spec, cid, "--yes")[0] == 0
+  hid = approval(world)["entries"][-1]["handoff_id"]
+  _, pcid, prid = opened(world, "plan", text=changed)
   assert record(world, prid, 1, "readiness", [F("readiness", 1, 1)], pcid)[0] == 0
   assert record(world, prid, 1, "proportion", [], pcid)[0] == 0 and record(world, prid, 1, "set", [], pcid)[0] == 0
   code, out = approve(world, spec, pcid, "--void", "--review", prid)
-  assert code == 1 and f"approve-spec: review {prid} has no fix-design finding" in out and approval(world)["voided_by"] is None
+  assert code == 1 and f"approve-spec: review {prid} has no fix-design finding" in out and approval(world)["entries"][-1]["voided_by"] is None
   assert settle(world, prid, "readiness-1-1", "fix-design", pcid)[0] == 0 and status(world, prid, pcid)[0] == 4
-  assert approve(world, spec, pcid, "--void", "--review", prid)[0] == 0 and approval(world)["voided_by"] == prid
+  code, out = approve(world, spec, pcid, "--void", "--review", prid, "--handoff", earlier)
+  assert code == 1 and f"approve-spec: {earlier}: not the latest approval: plan the rows in the latest handoff" in out
+  assert approve(world, spec, pcid, "--void", "--review", prid)[0] == 0 and approval(world)["entries"][-1]["voided_by"] == prid
+  closed_at = json.loads((world.artifacts / hid / "state.json").read_text(encoding="utf-8"))["closed_at"]
+  assert closed_at and json.loads(store(world.repo).path("handoffs", hid).read_text(encoding="utf-8"))["closed_at"] == closed_at
+  assert "closed: voided" in (world.artifacts / hid / "journal.md").read_text(encoding="utf-8")
   store(world.repo).path("approvals", SLUG).unlink()
   assert f"approve-spec: no approval for {SLUG}" in approve(world, spec, pcid, "--void", "--review", prid)[1]
 
@@ -696,20 +718,33 @@ def test_approve_spec_void(world):
 def test_approve_spec_amend_units(world):
   spec, cid, rid = converged_spec(world)
   assert approve(world, spec, cid, "--yes")[0] == 0
-  first = approval(world)
+  first = approval(world)["entries"][-1]
   icid = card(world, spec, "integrate")
   spec.write_text(SPEC + "| U02 | more (from integrate, review spec-x-integrate-c1) | U01 | S |\n", encoding="utf-8")
   code, out = approve(world, spec, icid, "--amend-units")
   assert code == 0, out
-  rec = approval(world)
+  whole = approval(world)
+  rec = whole["entries"][-1]
   assert rec["handoff_id"] == first["handoff_id"] and rec["sha256"] == hashlib.sha256(spec.read_bytes()).hexdigest() != first["sha256"]
-  assert rec["commit"] == git(world, "rev-parse", "HEAD") != first["commit"] and [a["sha256"] for a in rec["amended"]] == [rec["sha256"]]
+  assert rec["commit"] == git(world, "rev-parse", "HEAD") != first["commit"] and [e["kind"] for e in whole["entries"]] == ["opening", "amend-units"]
   assert git(world, "log", "-1", "--format=%s") == f"superegm: approve {SLUG} at review {rid}"
   spec.write_text(spec.read_text(encoding="utf-8").replace("Text.", "Changed."), encoding="utf-8")
   code, out = approve(world, spec, icid, "--amend-units")
-  assert code == 1 and "approve-spec: a line outside ## Units changed" in out and approval(world) == rec
+  assert code == 1 and "approve-spec: a line outside ## Units changed" in out and approval(world) == whole
   store(world.repo).path("approvals", SLUG).unlink()
   assert "approve-spec: no approval to amend" in approve(world, spec, icid, "--amend-units")[1]
+
+
+def test_amend_units_and_void_act_on_the_latest_entry_alone(world):
+  spec, cid, rid = converged_spec(world); assert approve(world, spec, cid, "--yes")[0] == 0
+  a = approval(world)["entries"][0]["handoff_id"]
+  spec2, cid2, rid2 = converged_spec(world, SPEC.replace("Text.", "Changed.")); assert approve(world, spec2, cid2, "--yes")[0] == 0
+  b = approval(world)["entries"][1]["handoff_id"]
+  icid = card(world, spec, "integrate")
+  spec.write_text(spec.read_text(encoding="utf-8") + "| U02 | more (from integrate, review x) | U01 | S |\n", encoding="utf-8")
+  assert f"approve-spec: {a}: not the latest approval: plan the rows in the latest handoff" in world.run("approve-spec", "--spec", str(spec), "--amend-units", "--handoff", a, "--runcard", icid)[1]
+  assert approve(world, spec, icid, "--amend-units")[0] == 0
+  assert [(e["kind"], e["handoff_id"]) for e in approval(world)["entries"]] == [("opening", a), ("opening", b), ("amend-units", b)]
 
 
 # ---------------------------------------------------------------- S17: the references
@@ -811,9 +846,9 @@ def test_review_scope_derives_the_round_from_the_approval_commit(world):
   rid2 = reopen(world, "spec", cid)
   lines = lambda: world.run("review", "scope", "--review", rid2, "--runcard", cid)[1].strip().splitlines()
   assert lines() == ["neighbour 1-2 (preamble)", "changed 3-6 ## 1. Intent", "neighbour 7-11 ## 2. Units"]
-  rec = approval(world); rec["commit"] = "0" * 40; atomic_write(store(world.repo).path("approvals", SLUG), rec)
+  rec = approval(world); rec["entries"][-1]["commit"] = "0" * 40; atomic_write(store(world.repo).path("approvals", SLUG), rec)
   assert lines()[1] == "changed 3-6 ## 1. Intent"
-  rec["sha256"] = "1" * 64; atomic_write(store(world.repo).path("approvals", SLUG), rec)
+  rec["entries"][-1]["sha256"] = "1" * 64; atomic_write(store(world.repo).path("approvals", SLUG), rec)
   assert lines() == ["whole 1-11 (no commit holds 1111111)"]
 
 

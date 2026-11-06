@@ -318,7 +318,7 @@ def test_runcard_ids_carry_the_handoff_hex_and_the_card_records_it(world):
   assert world.run("runcard", "open", "--skill", "judges", "--artifact", "q.md", "--parent", f"review-spec-{slug6}-0001")[1].strip() == f"judges-{slug6}-0001"
 
 
-WRITES = {"approve_spec": {"approvals"}, "graph": {"state", "plan", "units", "unit", "bodies"},
+WRITES = {"approve_spec": {"approvals", "handoffs", "state"},"graph": {"state", "plan", "units", "unit", "bodies"},
           "scan": {"file"}, "gate": {"state"},
           "dry_run": {"file", "state"}, "apply": {"state", "file"},
           "verify": {"state"}, "status": {"state"}, "launch": {"state", "runcards"}, "decide": {"state", "plan", "units", "unit", "bodies", "file"},
