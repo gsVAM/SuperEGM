@@ -570,7 +570,7 @@ def test_foreman_adapter_frontmatter_and_tools():
     "clean | revise | contested: <ids> | cap-reached | target-moved | error",
     "`target-moved` when `review post` exited 3",
     "`error` otherwise",
-    "never merges, never approves, never edits the owner's working tree, never removes a worktree, never launches a session, never convenes the judges, never infers that a builder died",
+    "never merges, never approves, never edits the owner's working tree, never removes a worktree, never launches a session (the head's Astra lane excepted: one bounded foreground runner call), never convenes the judges, never infers that a builder died",
 ])
 def test_foreman_brief_carries_the_round(line):
   assert line in (ROOT / "skills/wave/references/foreman_brief.md").read_text(encoding="utf-8"), line
