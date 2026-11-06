@@ -585,7 +585,11 @@ PROSE = [("skills/wave/references/foreman_brief.md", n) for n in ("Step 2b, the 
          (".claude-plugin/agents/foreman.md", "the head's Astra lane excepted: one bounded foreground runner call"),
          ("resources/astra_lane.md", "Modified by SuperEGM (gsVAM), 2026: "), ("resources/astra_lane.md", "**Data notice (head lane).**"),
          ("skills/wave/SKILL.md", "Astra review lane"),
-         ("skills/wave/references/foreman_brief.md", "`gpt-6-astra`"), ("skills/wave/references/foreman_brief.md", "`xhigh`")]
+         ("skills/wave/references/foreman_brief.md", "`gpt-6-astra`"), ("skills/wave/references/foreman_brief.md", "`xhigh`"),
+         ("skills/wave/references/foreman_brief.md", "never the review worktree's copy"), ("skills/wave/references/foreman_brief.md", "replace that separator in Astra's text"),
+         ("resources/astra_lane.md", "the `# Prior round` section"), ("docs/privacy.md", "the `# Prior round` section"),
+         ("docs/privacy.md", "outside a head review"), ("resources/review_panels.md", "(interactive flow only)"),
+         ("skills/using-superegm/references/claude-code-tools.md", "the head's Astra lane excepted")]
 
 
 @pytest.mark.parametrize("path, needle", PROSE)
