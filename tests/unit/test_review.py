@@ -863,3 +863,51 @@ RULES_PROSE = [("skills/using-superegm/SKILL.md", n) for n in ("fresh session pe
 @pytest.mark.parametrize("path, needle", RULES_PROSE)
 def test_the_four_rules_and_the_scope_prose(path, needle):
   assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
+
+
+# ---------------------------------------------------------------- review round 1 of PR #69 (U19): the branches the Steps leave untested
+
+def test_scope_refusals_resume_and_settle_arguments(world):
+  spec = spec_file(world); cid = card(world, spec, "integrate")
+  code, out = world.run("review", "open", "--kind", "integrate", "--artifact", str(spec), "--reviewers", "design", "--scope", "whole", "--runcard", cid)
+  assert code == 1 and "review open: --scope is refused for kind integrate" in out
+  code, out = world.run("review", "open", "--kind", "integrate", "--artifact", str(spec), "--reviewers", "design", "--runcard", cid)
+  assert code == 0, out
+  rid = out.strip()
+  assert rjson(world, rid)["scope"] is None
+  code, out = world.run("review", "scope", "--review", rid, "--runcard", cid)
+  assert code == 1 and f"review scope: {rid} is not a spec review" in out
+  spec, cid, rid = opened(world)
+  assert world.run("review", "open", "--kind", "spec", "--artifact", str(spec), "--reviewers", PANEL_OF["spec"], "--scope", "whole", "--runcard", cid) == (0, rid + "\n")
+  assert rjson(world, rid)["scope"] == "auto"
+  rounds(world, rid, cid, [HIGH(1)])
+  path = world.repo.parent / "dispositions.txt"; path.write_text("design-1-1 | contested | wrong\n", encoding="utf-8")
+  for extra in ([], ["--finding", "design-1-1"], ["--file", str(path), "--finding", "design-1-1", "--disposition", "contested"]):
+    code, out = world.run("review", "settle", "--review", rid, *extra, "--owner", "--runcard", cid)
+    assert code == 1 and "review settle: --file, or --finding with --disposition" in out, extra
+
+
+def test_record_keeps_a_set_reviewers_raw_lines_paired_after_its_unit_filter(world):
+  spec, cid, rid = converged_spec(world, SPEC4); assert approve(world, spec, cid, "--yes")[0] == 0
+  spec.write_text(SPEC4.replace("Text.", "Changed."), encoding="utf-8")
+  code, out = world.run("review", "open", "--kind", "spec", "--artifact", str(spec), "--reviewers", "design,set", "--runcard", cid)
+  assert code == 0, out
+  rid2 = out.strip()
+  other, refused = "set-1-1 | high | U42 line 5 | regression: no | another unit", "set-1-2 | high | line 13 | regression: no | risks"
+  assert record(world, rid2, 1, "set", [other, refused], cid)[0] == 0
+  rnd = rjson(world, rid2, "round-1.json")
+  assert rnd["out_of_scope"] == [refused] and rnd["reviewers"]["set"]["findings"] == []
+
+
+@pytest.mark.parametrize("approved", [True, False])
+def test_record_keeps_a_line_past_the_specs_end(world, approved):
+  if approved:
+    spec, cid, rid = converged_spec(world, SPEC4); assert approve(world, spec, cid, "--yes")[0] == 0
+    spec.write_text(SPEC4.replace("Text.", "Changed."), encoding="utf-8")
+    rid = reopen(world, "spec", cid)
+  else:
+    spec, cid, rid = opened(world, text=SPEC4)
+  line = "design-1-1 | high | skills/x.py:500 | regression: no | claim"
+  code, out = record(world, rid, 1, "design", [line], cid)
+  rnd = rjson(world, rid, "round-1.json")
+  assert code == 0 and rnd["out_of_scope"] == [] and len(rnd["reviewers"]["design"]["findings"]) == 1 and "out of scope" not in out
