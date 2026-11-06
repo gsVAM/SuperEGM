@@ -115,6 +115,19 @@ def test_graph_projection_on_the_fixture_graph():
                        "community 0: 4 nodes · src/worker.py, tests/check_worker.py\ncommunity 1: 2 nodes · src/queue.py, web/index.ts\n")
 
 
+def test_graph_projection_skips_a_fileless_node_file():
+  """graphify 0.9.103 carries a symbol defined outside the export (`Path`, `Exception`) as a node
+  with an empty `source_file`: its community lists no blank file and its end reads as the label alone."""
+  from superegm import orient
+  graph = json.loads(GRAPH.read_text(encoding="utf-8"))
+  graph["nodes"].append({"id": "ext_path", "label": "Path", "source_file": "", "source_location": None, "community": 0})
+  graph["links"].append({"source": "src/worker.py::work", "target": "ext_path", "relation": "uses", "confidence": "EXTRACTED", "confidence_score": 1.0})
+  head = orient.map_text(TREE, graph, T, "a" * 64).split("## Map\n")[0]
+  assert "community 0: 5 nodes · src/worker.py, tests/check_worker.py\n" in head
+  unit = orient.unit_text(TREE, [("src/worker.py", "modify")], graph, T, "a" * 64)
+  assert "edge uses work (src/worker.py:L6) -> Path\n" in unit
+
+
 @pytest.mark.parametrize("case, trimmed", [
   ("docs", "tests, read-first"),
   ("signatures", "tests, read-first, graph-outside, graph-inside, graph-nodes, signatures:src/worker.py"),
