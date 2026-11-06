@@ -11,6 +11,7 @@ from superegm import store, atomic_write, sha256_text
 from superegm.review import parse_findings
 from superegm.review import derive_what_ran
 from superegm.review import PANEL_OF
+from superegm.review import scope_sections
 
 from conftest import REPO, set_config
 
@@ -755,3 +756,20 @@ def test_no_removed_mechanism_named(rel, phrases):
     pytest.skip("D1 (b): resources/review_panels.md was not kept by U01")
   text = path.read_text(encoding="utf-8")
   assert [p for p in phrases if re.search(rf"(?<!SUPER){re.escape(p)}", text)] == []   # SUPEREGM_GOLDFISH_* is not EGM_GOLDFISH
+
+
+# ---------------------------------------------------------------- S20: the scope's sections and neighbours (U19)
+
+OLD = "# T\n\npre\n\n## 1. A\n\na\n\n### 1.1 B\n\nb\n\n### 1.2 C\n\nc\n\n## 2. D\n\nd\n\n## 3. E\n\ne\n\n```\n## not a heading\n```\n"
+
+@pytest.mark.parametrize("new, expect", [
+  (OLD.replace("\nc\n", "\nc changed\n"), [("neighbour", "### 1.1 B", 9, 12), ("changed", "### 1.2 C", 13, 16), ("neighbour", "## 2. D", 17, 20)]),
+  (OLD.replace("\nd\n", "\nd changed\n"), [("neighbour", "### 1.2 C", 13, 16), ("changed", "## 2. D", 17, 20), ("neighbour", "## 3. E", 21, 27)]),
+  (OLD.replace("\npre\n", "\npre changed\n"), [("changed", "(preamble)", 1, 4), ("neighbour", "## 1. A", 5, 8)]),
+  (OLD.replace("\nb\n", "\nb changed\n"), [("neighbour", "## 1. A", 5, 8), ("changed", "### 1.1 B", 9, 12), ("neighbour", "### 1.2 C", 13, 16)]),
+  (OLD.replace("## not a heading", "## not a heading, changed"), [("neighbour", "## 2. D", 17, 20), ("changed", "## 3. E", 21, 27)]),
+  (OLD.replace("\nb\n", "\nb changed\n").replace("\nc\n", "\nc changed\n"), [("neighbour", "## 1. A", 5, 8), ("changed", "### 1.1 B", 9, 12), ("changed", "### 1.2 C", 13, 16), ("neighbour", "## 2. D", 17, 20)]),
+  (OLD.replace("\nc\n", "\n"), [("neighbour", "### 1.1 B", 9, 12), ("changed", "### 1.2 C", 13, 15), ("neighbour", "## 2. D", 16, 19)]),
+  (OLD, [])])
+def test_scope_sections_and_neighbours(new, expect):
+  assert scope_sections(OLD, new) == expect
