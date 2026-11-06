@@ -248,6 +248,25 @@ def test_close_writes_closed_at_into_the_handoff_file_and_the_state(world):
   assert world.run("close", "--runcard", world.card("integrate"))[0] == 1
 
 
+def test_close_refuses_a_wave_card_journals_each_unlanded_unit_and_says_already_closed(world):
+  """The replaced 1.1 close test's assertions, kept (change-review-1-8)."""
+  seed(world)
+  state = json.loads(store(world.repo).path("state").read_text(encoding="utf-8"))
+  state["status"] = {"units": {"U07": {"landed": True}, "U08": {"landed": False}, "U09": {"landed": False}}}
+  put(world, state, "state")
+  assert world.run("close", "--runcard", world.card("wave"))[0] == 1
+  runcard = world.card("integrate")
+  code, out = world.run("close", "--runcard", runcard)
+  assert code == 0 and out.strip() == "closed sample-design-abc123; unlanded: U08, U09", out
+  closed_at = json.loads(store(world.repo).path("state").read_text(encoding="utf-8"))["closed_at"]
+  assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)", closed_at)
+  journal = (world.artifacts / "journal.md").read_text(encoding="utf-8")
+  assert "close: U08 unlanded\n" in journal and "close: U09 unlanded\n" in journal
+  assert f"closed sample-design-abc123 at {closed_at}\n" in journal
+  code, out = world.run("close", "--runcard", runcard)
+  assert code == 1 and f"close: already closed at {closed_at}" in out
+
+
 @pytest.mark.parametrize("state, code, line", [
   ("open", 1, "close: U07 is stopped for redesign and #410 is open: close it by hand once the re-planned unit is filed"),
   ("closed", 0, "closed sample-design-abc123; unlanded: U07, U08, U09")])
