@@ -1,6 +1,7 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3
-# question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`.
+# question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
+# (spec section 11.1) and the store-only brainstorm brief it writes.
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
@@ -130,7 +131,7 @@ def rule(args) -> int:
     if not reason.strip():
       raise Refusal("decision: redesign needs — <one sentence why>")
     chosen = f"redesign — {reason.strip()}"
-    brief = brainstorm_brief(st, unit, args.decision, decision, chosen, (state["units"][unit].get("pr") or {}).get("number"))
+    brief = brief_path(st, unit, args.decision)  # written after the comment is posted: a refusal leaves no brief
   if closed:
     posted = f"closed #{closed}"
   elif args.posted:
@@ -145,6 +146,8 @@ def rule(args) -> int:
     finally:
       os.unlink(path)
     posted = f"comment {url.rsplit('-', 1)[1]}"
+  if brief:
+    brainstorm_brief(st, unit, args.decision, decision, chosen, (state["units"][unit].get("pr") or {}).get("number"))
   data["rulings"].append({"decision": args.decision, "ruling": args.ruling, "by": args.by,
                           "reason": reason.strip() or None, "posted": posted, "posted_at": now})
   core.save_foreman(st, unit, data)
@@ -187,6 +190,10 @@ DIFF_WHOLE, DIFF_LINES = 40_000, 200  # a diff under 40 KB is copied whole, else
 ENTRY_RE = re.compile(r"^### .+ comment \S+ by ")
 
 
+def brief_path(store, unit: str, qid: str) -> Path:
+  return store.path("foreman", unit).with_name(f"{unit}-{qid}.brainstorm.md")
+
+
 def brainstorm_brief(store, unit: str, qid: str, decision: dict, ruling: str, pr) -> Path:
   """Write `foreman/<unit>-<qid>.brainstorm.md` (spec section 11): what the owner asked, the findings verbatim,
   the unit body, the latest posted round's diff summary and its builder deviations. Store-only, never committed;
@@ -194,10 +201,11 @@ def brainstorm_brief(store, unit: str, qid: str, decision: dict, ruling: str, pr
   posted = [r["round"] for r in core.load_foreman(store, unit)["rounds"] if r.get("phase") == "posted"]
   folder = store.path("review", unit, pr) / f"r{max(posted)}" if posted and pr else None
   diff = folder / "diff" if folder else None
-  text = diff.read_bytes().decode("utf-8", errors="replace") if diff and diff.is_file() else ""
+  raw = diff.read_bytes() if diff and diff.is_file() else b""
+  text = raw.decode("utf-8", errors="replace")
   lines = text.splitlines()
   paths = [l.rpartition(" b/")[2] for l in lines if l.startswith("diff --git ")]
-  shown = lines if len(text.encode("utf-8")) < DIFF_WHOLE else lines[:DIFF_LINES]
+  shown = lines if len(raw) < DIFF_WHOLE else lines[:DIFF_LINES]
   comments = folder / "comments.md" if folder else None
   entries, current = [], None
   for line in core.read_text(comments).splitlines() if comments and comments.is_file() else []:
@@ -211,7 +219,7 @@ def brainstorm_brief(store, unit: str, qid: str, decision: dict, ruling: str, pr
   out = ["# What the owner asked", "", ruling, "", "# Findings", "", decision["question"].rstrip("\n"), "",
          "# Unit body", ""] + [("  " + l).rstrip() for l in body] + ["", "# Diff", ""] + (paths or ["(none)"]) \
       + ["", "```diff"] + shown + ["```", "", "# Deviations", "", "\n\n".join(deviations) or "(none)", ""]
-  path = store.path("foreman", unit).with_name(f"{unit}-{qid}.brainstorm.md")
+  path = brief_path(store, unit, qid)
   core.atomic_write(path, "\n".join(out))
   core.journal(store, f"Brainstorm brief: {path}")
   return path

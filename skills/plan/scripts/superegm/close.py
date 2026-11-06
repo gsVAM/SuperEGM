@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the close subcommand (spec section 12): `closed_at`, every unlanded unit journaled.
+# Added by SuperEGM (gsVAM), 2026: the close subcommand (spec section 12): `closed_at`, every unlanded unit journaled;
+# it refuses while a redesign-stopped unit's issue is open (one GitHub read per such unit).
 
 """superegm close: close the handoff under an integrate card; writes `closed_at` once."""
 
