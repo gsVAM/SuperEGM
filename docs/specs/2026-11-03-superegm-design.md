@@ -2,8 +2,8 @@
 
 Date: 2026-11-03. Status: 1.0.0 released from review cycle 2 (round 5, the cap; cycle 1 ended at
 round 6 by the judges' ruling `q-close`: a new approach, not another patch; those cycles are
-records outside the store); amendment 2 is under its own spec review for 1.1.0 in the store's
-own numbering (cycle `spec-2026-11-03-superegm-design-c2`; owner rulings 2026-11-04 on zoom-out-1-4 and 1-7 (orient re-run on re-render; `--unit` writes unit files only); owner ruling 2026-11-04: the audit-trail line). Fixes 2026-11-05, released as 1.1.2: the tdd-order rule reads `test(S<n>)` subjects only and takes any test file by name (§11.1); test files are found by name wherever they live (§9.3). Owner: gsVAM.
+records outside the store); amendments 2–6 each reviewed in their own cycle in a store's
+own numbering (amendments 5 and 6: the 1.2 store's cycles, 2026-11-05, the approval naming the last; owner rulings 2026-11-04 on zoom-out-1-4 and 1-7 (orient re-run on re-render; `--unit` writes unit files only); owner ruling 2026-11-04: the audit-trail line). Fixes 2026-11-05, released as 1.1.2: the tdd-order rule reads `test(S<n>)` subjects only and takes any test file by name (§11.1); test files are found by name wherever they live (§9.3). Owner: gsVAM.
 Inputs: the brainstorm brief (stream 4); the SuperEGM judge-panel verdict (converged, round 2 of
 5); the cap-panel verdict on EGM 0.2.1; superpowers 7.0.0 and the EGM Astra fork at commit
 9bc49d4, both surveyed file by file; six goldfish rounds of cycle 1 (75, 75, 74, 61, 53, 65
@@ -18,6 +18,14 @@ Amendment 2 (2026-11-04): §9.3 Orient (graphify-backed), §9.1/§10 adopted iss
 Amendment 3 (2026-11-04): the builder as a GitHub App (§11, §16), the convergence rule, the judges record, the mention scan, approve-spec with escalations, the commit trailer (§8, §9.1, §13.1), units U15–U16; owner-approved by text.
 Amendment 4 (2026-11-05): Astra on every head review (§8, §11), the redesign ruling (§11, §12, §13.2), units U17–U18, amendment-scoped review (§8), unit U19, one store per handoff (§7, §9.1), unit U20; three follow-ups (§3, §5, §7); owner-approved by text; owner ruling 2026-11-05: approval chain (§5, §11, U20); owner ruling 2026-11-05: App installation and permissions (§3.1, §4.1, §11).
 Amendment 5 (2026-11-05): the fleet layer (external-review ingest, rulings by comment, the inbox and notify hook, the headless driver and registry, the foreman verifies), units U21–U25; owner-approved by text.
+Amendment 6 (2026-11-05): external review on the elephant's own PRs (`review ingest --pr`, §8, §11.2), unit U26; owner-approved by text.
+Amendment 7 (2026-11-06): the builder's plugins and MCP servers, passed per launch (`config.builder.plugins`, `config.builder.mcp`, `Skill` and `mcp__*` rules in `allowed_tools`; §4, §7, §11, §15), unit U27; owner-approved by text.
+Amendment 8 (2026-11-06): the default models and efforts per role (`builder.model` and `builder.effort`, `reviewers.model` and `reviewers.effort`, `astra.heads_effort`, `judges.members`; §7, §8, §11, §13), unit U28; owner-approved by text.
+Amendment 9 (2026-11-06): split units for parallel waves (the plan rules of §9.1, the proportion and set checks of §9.2, `graph --plan`'s `width:` line), unit U29; owner-approved by text.
+Amendment 10 (2026-11-06): the board and the watchdog (§3, §3.1, §4, §7, §11, §11.2, §13.2, §14), units U30–U31; owner-approved by text.
+Amendment 11 (2026-11-06): 1.1.3's integrate review carried mediums and the first wave's findings (scope additions to U22, U23, U27, U29 and U30; §7, §8, §9.1, §9.2, §11, §12, §13.2, §14), unit U32; owner-approved by text.
+Amendment 12 (2026-11-06): unit tiers (`Tier:` in §9.1's form, the proportion check in §9.2, `builder.tiers` in §7, the launch by tier in §11), unit U33; owner-approved by text.
+Amendment 13 (2026-11-06): the team brainstorm (§2, §3.1, §4, §5, §6, §7, §14), unit U34; owner-approved by text.
 
 ## 1. Intent
 
@@ -64,6 +72,7 @@ isolation recorded.
 | **adapter** | a Claude Code agent definition `.claude-plugin/agents/<id>.md` with frontmatter `name: <id>`, fixed `tools`, and `omitClaudeMd: true`, whose body reads the persona `agents/<id>.md`. Invoked as `superegm:<id>`. A review panel lists reviewer ids; every reviewer id except `set`, `astra`, `foreman` and `external:*` is an adapter id. |
 | **dispatching session** | the elephant or a foreman: the session that invokes adapters with the Agent tool and records each dispatch. |
 | **goldfish** | a fresh read-only reviewer dispatched through an adapter with tools `Read, Grep, Glob`. Sees only the artifact and the evidence it is handed. Never spawns. |
+| **teammate** | from amendment 13: one of four divergers (`cartographer`, `architect`, `skeptic`, `advocate`), each spawned from an adapter definition (its tools `Read, Grep, Glob` and its body; a teammate loads the project context as a session does (the docs, §4) and runs the hook (§4's assumption, the plan's probe), `SUPEREGM_ROLE` unset, so no isolation is claimed for it and the draft's `team: on` line records that exposure; the fallback's subagents alone are isolated as §14's goldfish are; a teammate is no session in the effect row's sense, living inside the owner's turn with no exit file and no liveness to prove) as a teammate the elephant spawns in the owner's interactive session for the brainstorm phase alone, working one approach in its own context, messaging the others over the platform's mailbox and reporting its approach to the lead by message. Not a reviewer: it reports no findings and sits on no panel; it writes no file. It ends when the brainstorm closes; what persists is what the lead wrote into the draft spec (§6), never its context. The lead is the owner's session, the elephant as always. |
 | **judge** | a goldfish with a model override that answers a question file by option id instead of reporting findings. |
 | **foreman** | a sub-elephant: a named subagent dispatched through the `superegm:foreman` adapter, in the foreground, to run one review round on one PR head and return one word. Its memory is `foreman/<unit>.json` and the PR's comments, never its context. |
 | **builder** | a fresh headless local Claude session whose brief is one issue body, the builder orders, the repository's PR block when configured, the unit's orient text (§9.3), the rulings posted on its issue, and from round 2 the foreman's reviews of its own branch. Writes code in its own worktree under the **builder account**, commits test-first, opens a draft PR. Not a goldfish: it writes. Never spawns. |
@@ -71,11 +80,11 @@ isolation recorded.
 | **Astra lane** | an optional extra reviewer (of a spec, a plan or, from amendment 4, a PR head) or judge on a non-Claude model (GPT-6 Astra) driven by the external `claudex-loop` runner (a Python CLI over the Codex CLI). Launched by the elephant from the main conversation, or by the foreman on a head (§11), never through an adapter. Recorded `not run (<reason>)` when the runner is absent or its lane is down. |
 | **unit** | one buildable piece of a frozen spec: one issue, one branch, one PR. Ids `U01`, `U02`, … are stable for the life of a handoff. |
 | **handoff** | one run of plan → file → wave → integrate for one frozen spec. Its id (§7) names the branches, the issue marker lines and `state.json`, and never changes while any unit is filed. Its files live under `artifacts_dir/<handoff id>/` (§7); one handoff per opening approval, and a spec's handoffs run beside one another, each at its link of the approval chain (§7, §9.1); `close` ends it (§12). |
-| **wave** | the set of units whose blockers have all landed, launched together. At most `max_in_flight` units are in flight at once; a unit is in flight from its first launch until it lands, is stopped, its latest round's outcome is `clean` (§7), or the elephant names it idle (stalled or CI-waiting, §11), and a freed slot is refilled. |
+| **wave** | the set of units whose blockers have all landed, launched together. At most `max_in_flight` units are in flight at once; a unit is in flight from its first launch until it lands, is stopped, its latest round's outcome is `clean` (§7; an outcome an ingest rewrites `revise` makes it ready again, not in flight, §11), the elephant names it idle (stalled or CI-waiting, §11) or, from amendment 5, it is pending a decision (§11.2), and a freed slot is refilled. |
 | **head** | the commit at the tip of a unit's PR branch when `prepare` fetches it (§11). |
 | **round** | one review of one artifact (a spec, a unit's plan body, or a PR head): dispatch, findings, verdict. Rounds are numbered per review; a round that is not `completed` (§8) does not count toward the cap. |
-| **clean** | the verdict on a round with no unsettled high or medium finding (§5). The destructive skill is always written `/superegm:clean`. |
-| **stalled** | a review whose two latest rounds under one run card are not `completed` (§8). It ends the invocation for that artifact; it is not a cap and not a pause. |
+| **clean** | the verdict on a round with no unsettled high or medium finding (§5). The destructive skill is always written `/superegm:clean`; from amendment 10 `wave` carries its `destructive-local` effect kind too (§14), for the watchdog's kill at the owner's configured bound (§11, §14). |
+| **stalled** | a review whose two latest rounds under one run card are not `completed` (§8). It ends the invocation for that artifact; it is not a cap and not a pause. From amendment 10 also a launch past `builder.stall_minutes` with no newer commit of its own (§11): the event line, the journal line and `exited (stalled)` carry that sense. |
 | **landed** | a unit whose watched PR is merged into `<base>` and whose issue is closed as completed, whoever closed it. Only landing makes dependants ready. |
 | **stopped** | a unit a ruling or the owner ended: issue open under `superegm:stopped` (or closed by the owner), branch kept, never relaunched; the owner lands it by hand or closes it with its unlanded dependants and re-appends what is still wanted (§12). |
 | **DoD** | definition of done: the numbered, checkable items in a unit's body; the standard every head review is judged against. |
@@ -85,9 +94,9 @@ isolation recorded.
 | **effect** | anything that leaves the working tree: GitHub writes, remote branches, starting a session or worker, writing the store, destructive local operations. |
 | **leavemealone-mode** | the mode in which every decision point listed in §13.2 goes to the judge panel first; the owner is paused only with the questions the judges do not converge on within their cap. |
 | **graphify** | an external, optional CLI (the PyPI package `graphifyy`, so spelled; the command `graphify` on `PATH`) that extracts a code graph from a directory by AST with no model (its headless `update`; `GRAPHIFY_OUT` names where its `graphify-out/` goes) into `graph.json`: nodes with `source_file` (relative to the directory it scanned), `source_location` and an integer `community`; edges marked EXTRACTED, INFERRED or AMBIGUOUS with a confidence. `orient` (§9.3) reads that file and nothing else of graphify's; nothing requires it. |
-| **external reviewer** | a review thread on a unit's PR from any login but the builder account's, a person's or a bot's (Devin's), recorded by `review ingest` (§8, amendment 5) as findings of the reviewer id `external:<login>`: accepted on kind `head` only, outside the panel, never an adapter, never dispatched. |
+| **external reviewer** | a review thread on a unit's PR, or on the spec PR (amendment 6), from any login but the builder account's, a person's or a bot's (Devin's), recorded by `review ingest` (§8, amendment 5) as findings of the reviewer id `external:<login>`: accepted on kinds `head` and `spec` (the spec PR, amendment 6), outside the panel, never an adapter, never dispatched. |
 | **registry** | `~/.superegm/registry.json`, outside every store: the list of the stores on this machine, written by `superegm register` alone and read by `inbox --all` and the driver (§11.2). It lists stores, not a graph; a store's own `handoffs/<id>.json` files index (§7) names that store's handoffs. |
-| **driver** | the owner's timer (a launchd agent; on Linux a systemd user timer) that runs `superegm driver tick` every `config.driver.interval_minutes`; a tick types `wave --leavemealone` once per open handoff of each registered store, chains nothing and merges nothing (§11.2). The session it launches runs with `SUPEREGM_ROLE=driver`. |
+| **driver** | the owner's timer (a launchd agent; on Linux a systemd user timer) that runs `superegm driver tick` every `install --interval <minutes>` (15) in the environment of `~/.superegm/env`; a tick types `wave --leavemealone` for one open handoff of a registered store at a time (one session per store), chains nothing and merges nothing (§11.2). The session it launches runs with `SUPEREGM_ROLE=driver`. |
 
 ## 3. Goals, non-goals, anti-goals
 
@@ -117,11 +126,11 @@ isolation recorded.
 - A local, no-GitHub wave. The wave files issues and reviews PRs; that is the one execution path.
 - The brainstorming visual companion (a local Node server that also fetches a logo from the
   network). Brainstorming stays text-only.
-- Running a target repository's test suite inside SuperEGM. DoD commands are run by the builder
+- A target repository's test suite as SuperEGM's evidence. DoD commands are run by the builder
   before it opens its PR and by the repository's CI on the head; the foreman reads CI as evidence
   and, from amendment 5 (the owner's word, not a panel's), re-runs the body's DoD `Run` items in
-  its review worktree and nothing else (§11): CI stays the evidence for the suite, and SuperEGM's
-  `clean` verdict still needs CI green on the head.
+  its review worktree as a check on the builder's paste and on each item's exit, nothing more (§11): CI stays the
+  evidence for the suite, and SuperEGM's `clean` verdict still needs CI green on the head.
 - Automatic splitting of a unit that will not converge. At a PR cap the rulings are "one more
   round", "stop" or "redesign" (§11, a stop with a brief); reshaping units is the owner's, by hand,
   with `integrate`'s append path or the brainstorm the brief starts.
@@ -157,14 +166,19 @@ isolation recorded.
 8. A guess about liveness. SuperEGM never infers that a runner, builder or session is dead from
    file silence. Termination is proved only by a terminal status in a result file, by an exit
    file the launched command wrote, by the return of a bounded foreground command the session itself ran
-   (the Bash tool's timeout ends it and returns; a foreman's Astra lane, §11), or by
-   the owner's typed interrupt.
+   (the Bash tool's timeout ends it and returns; a foreman's Astra lane, §11), by the owner's typed
+   interrupt, or by a boot id recorded at launch that is not the machine's current one (amendment 5,
+   §11.2: no process survives a reboot). From amendment 10 the watchdog's kill at
+   `builder.stall_minutes` is the owner's standing interrupt, set once in the config, and the
+   exit file the wrapper writes on the signal is its proof (§4, §11).
 9. A code-aware Markdown mention scanner. The scan is raw text plus an allow-list, with the
    one exception §9.1 states, in §9.1's smallest CommonMark grammar and no other: a fenced code
    block and an inline code span are skipped, so a `@` inside either is never a mention (GitHub
    does not notify for a mention inside code); everything else stays raw text.
-10. A ruling, decision, review or close that an account outside `config.owners` wrote (the
-    builder account first among them) being honoured as the owner's or the judges'. GitHub's
+10. A ruling, decision or review that an account outside `config.owners` wrote (the builder
+    account first among them) being honoured as the owner's or the judges'; a close by any
+    account but the builder's stops the unit as 1.0.0 built it (write access is its
+    authentication), never honoured as a ruling. GitHub's
     author field is the authentication; nothing in a comment's text is (§11.2).
 
 ### 3.1 Alternatives considered, and what the rounds removed
@@ -199,7 +213,8 @@ isolation recorded.
   the mechanics are now the plans' tests, and §11 keeps the contracts they must satisfy.
 - **Removed in cycle 1** (each had bred findings and served no asked-for scenario): an automatic
   `split` ruling; a `deviate` subcommand; a `budget` subcommand and per-night counters;
-  `stale`/`max_minutes`; a `publish` effect kind; a second Astra config block; a `wait`
+  `stale`/`max_minutes` (a bound the owner sets returns as amendment 10's `builder.stall_minutes`,
+  the watchdog: the kill is the owner's standing interrupt, its exit file the proof); a `publish` effect kind; a second Astra config block; a `wait`
   subcommand separate from EGM's `status --wait`; a byte-identity scheme different from EGM's;
   the `dangerous` sentinel; the two-step foreman round and background foremen; the `note`
   subcommand; `--judges 1|3` and `--cap` on the judges skill; `gate --accept`; the brainstorm
@@ -273,13 +288,74 @@ isolation recorded.
   Rejected: the prefix kept the unit files apart and nothing else, so two handoffs shared
   `state.json`, the journal and the run cards; one directory per handoff gives each its own, and
   a flat store is read in place as legacy (§7).
+- **Amendment 5: one long-lived session instead of a timer that re-types `wave`.** Rejected: a
+  session is one phase (§3), dies with its terminal, and its liveness is the guess anti-goal 8
+  forbids; a tick is a phase re-typed, with an exit file per launch. A GitHub Actions schedule
+  that re-types it was rejected with the fleet box: the owner's login would leave the machine.
+  A webhook needs a listener, which is the long-lived process again.
+- **Amendment 5: a token inside a ruling comment, the hook's command line in the committed
+  config, a graph of stores in the registry, `setsid(1)` for detachment.** Rejected: GitHub's
+  author field authenticates a ruling and a token would make a phone ruling harder (§11.2); a
+  command line in repository data lets a commit choose what runs as the owner (`~/.superegm/notify`
+  instead); a store's handoffs are its own index's and a cross-store `Blocked by` is prose and
+  `Landed:` rows (§9.1); macOS has no `setsid(1)`, so the wrapper is started in its own session.
+- **Amendment 6: the owner reading the elephant's PR threads by hand; a pseudo-unit for those
+  PRs through U21's `--unit` path; an ingest at every `review-spec` round.** Rejected: by hand is
+  the gap (the spec PR sat unread); a pseudo-unit would need a head, a foreman and a builder the
+  elephant's PR has none of; an ingest per round is a second moment (anti-goal 1): the one kept by choice is before the
+  approval, every push's threads read then at the cost §8 names (a stale thread settles by an
+  edit and a round, or by the owner's decline or a point-1 overrule), the PR open from the
+  review's first round (§8); a
+  plan kind and a `file` step were cut in review: no plan PR exists and `file` opens none.
+- **Amendment 7: a builder profile with no plugins (1.0.0's rule) and cycle 2's removal of
+  builders invoking skills (above).** Both reversed by the owner on 2026-11-06: a builder that
+  may run no skill and no MCP tool cannot use the house's tooling (context7, ponytail). The builder's plugins and MCP servers are passed on its command line per
+  launch (`--plugin-dir` per listed plugin, `--mcp-config <launch file> --strict-mcp-config`,
+  §11), so the set is exact by construction and the profile stays the login; each plugin's
+  version and hook events and every server go on the launch's record. A listed plugin's own
+  hooks come with it: the owner named the plugin, so its hooks are chosen, not hidden (ponytail's
+  lazy mode is its SessionStart hook). What stays refused is a hook or a skill the owner did not
+  choose through the list: the profile's `settings.json` hooks, a profile `skills/` or
+  `commands/` directory, a synced or installed plugin of the profile's own. Rejected: a profile
+  the owner installs the plugins into, inspected at the launch (what loads is then the profile's
+  state, not the config's, and a plugin both installed there and passed loads twice), and the
+  skills' text inlined into the orders (no hooks, no updates, a copy to maintain).
+- **Amendment 10: a per-step timer; a stall left `idle` with no kill; the wave report alone as
+  the board.** Rejected: a per-step timer needs the builder's cooperation and bounds nothing it
+  does not report; a stall left idle leaves its process running for the night, and
+  `launch-builder` refuses the relaunch while the launch is not terminal; the report is a store
+  file the owner cannot see from the tracking issue, the one page GitHub shows them. The
+  watchdog's kill is the owner's standing interrupt at a bound they set, the exit file the wrapper
+  writes on the signal its proof (anti-goal 8 amended); the board is the tracking issue's page.
+- **Amendment 12: a team builder.** Dropped: Claude Code's agent teams need an interactive
+  session; a headless builder gets subagents with no mailbox, which buys little over
+  a stronger model at higher effort. Revisit when teammates work under `-p`. Unit tiers (U33)
+  are what remains: the model and effort per unit, by its `Tier:`.
+- **Amendment 13: the team brainstorm.** Kept for the one interactive phase: four divergers with a
+  mailbox beat one model widening its own draft, and the subagent fallback (no mailbox) stays
+  because the lenses still diverge without it. Rejected: the judges as the panel (they converge;
+  this diverges), more than four roles (a context per role is the cost line's bound), a single
+  diverger (one lens widens its own draft, the reason above).
 
 ## 4. Constraints
 
 **Platform (from the live probes and the two code bases; do not re-derive)**
 - `name` on the Agent tool makes an agent addressable and resumable; it is not a distinct
-  teammate. Several agents may be dispatched in one message and run concurrently in the
+  teammate while agent teams are off (with the variable set, every named call launches a
+  teammate: amendment 13's bullet). Several agents may be dispatched in one message and run concurrently in the
   foreground; their returns arrive together.
+- Agent teams (amendment 13, from the docs): `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` and an
+  interactive session in the in-process teammate mode give the lead teammates with a mailbox
+  (`SendMessage` added to the definition's tools in that mode alone); a definition lends a
+  teammate its tools, model, effort and body, the body appended to the default system prompt;
+  `-p` spawns none (a named one runs as an ordinary subagent); a teammate may reject a shutdown and a resumed lead has none. A
+  teammate loads the project context as a session does (CLAUDE.md, MCP servers, skills;
+  `omitClaudeMd` is not applied to it); whether it runs this plugin's hook is the U34 plan's
+  probe, assumed yes until then. The variable is set for the brainstorm session alone, never in
+  `settings.json`, and the fallback's four and every goldfish are dispatched without `name`, so
+  no team forms unasked and goal 3's construction stands.
+- A foreground Bash tool call is capped at 10 minutes (600 s); a helper call that runs code under
+  it (the foreman's `collect`, §11) bounds its runs below that cap.
 - `omitClaudeMd` tracks the agent definition, never the name: an adapter subagent does not load
   CLAUDE.md or the memory index. SessionStart hooks run for sessions, not for Agent-tool
   subagents, so this plugin's hook never reaches a goldfish. **SubagentStart hooks in the owner's
@@ -297,8 +373,14 @@ isolation recorded.
   `effort` is passed only when the Agent tool offers that parameter. `claude -p` takes the prompt
   as text (`claude -p "$(cat <file>)"`); `--output-format json` writes one result object;
   `--permission-mode` takes `acceptEdits` or `bypassPermissions`; `--allowedTools` entries are
-  tool names or the one prefix form `Bash(<prefix>:*)`, which matches on the command's text and
-  cannot exclude a refspec; a headless session with no `Skill` entry invokes no skill.
+  tool names, the one prefix form `Bash(<prefix>:*)`, which matches on the command's text and
+  cannot exclude a refspec, and, from amendment 7, `Skill(<name>)` and `Skill(<name> *)` (exact
+  and prefix, Claude Code's own forms; a plugin's skill is named `<plugin>:<skill>`) and
+  `mcp__<server>__<tool>` or `mcp__<server>__*` (a plugin's bundled server is named
+  `plugin_<plugin>_<server>`); a rule naming no loaded skill or tool grants nothing; a
+  headless session with no `Skill` entry invokes no skill. `--plugin-dir <dir>` loads a plugin
+  for the session (repeatable; its hooks, skills and bundled servers with it); `--mcp-config
+  <file> --strict-mcp-config` loads that file's servers and no other configuration's.
 - `gh` acts as the account whose token `GH_TOKEN` holds; `git push` does so only over an HTTPS
   remote with `gh` as the credential helper, which `launch-builder` passes in the launched
   command's environment, never written to the shared git config. `git worktree add` refuses a
@@ -316,8 +398,8 @@ isolation recorded.
 - Every skill folder carries `assets/icon.svg` (EGM's palette rule, read from the SVG) and
   `test_scenarios.yaml` (EGM's shape).
 - Reviewer adapters: `tools` exactly `[Read, Grep, Glob]`, `model: inherit`, `omitClaudeMd: true`,
-  no `memory`, body reads `${CLAUDE_PLUGIN_ROOT}/agents/<id>.md`. The one non-reviewer adapter
-  (`foreman`) has the exact tool set in §14.
+  no `memory`, body reads `${CLAUDE_PLUGIN_ROOT}/agents/<id>.md`. The non-reviewer adapters
+  (`foreman`; from amendment 13 the brainstorm's `cartographer`, tools `[Read, Grep, Glob]`, U34) have the exact tool sets in §14.
 - The packer forbids MCP and allows **exactly** three hook files, nothing else under `hooks/`:
   `hooks/hooks.json` (one `SessionStart` entry), `hooks/run-hook.cmd`, `hooks/session-start`. The
   source `.claude-plugin/plugin.json` carries `"superegm": {"hook_sha256": …}`; the packer refuses
@@ -334,14 +416,26 @@ isolation recorded.
 - Headless sessions started by SuperEGM set `SUPEREGM_ROLE` to `builder` or `goldfish` (a tick's
   wave session, `driver`, §11.2), and
   `SUPEREGM_RUNCARD` to the run card they run under. The hook prints nothing when the role is
-  `goldfish` or `builder`. The builder profile (`config.builder.profile_dir`) is created empty by
-  the owner, with no plugins, no hooks and no `CLAUDE.md`; `launch-builder` refuses otherwise (the
-  hooks refusal is 1.1.0's, U14).
+  `goldfish` or `builder`. The builder profile (`config.builder.profile_dir`) is created by
+  the owner as the login alone: no hooks, no `CLAUDE.md`, no plugin of its own (the
+  organization's managed plugins are policy, recorded), `syncClaudeAiPlugins` false and, from
+  amendment 7, `disableClaudeAiConnectors` true in its `settings.json` (the account's claude.ai
+  connectors reach every subscription-login session, and the allow-list stops calls, not
+  descriptions) and no `skills/` or `commands/` directory; `launch-builder` refuses otherwise
+  (the hooks refusal is 1.1.0's, U14; the setting and directory checks are U27's). The builder's plugins and MCP
+  servers come from the config, passed per launch (§11).
 
 **Liveness and destruction (EGM round-12 doctrine, binding)**
 - A builder launch is **terminal** when its exit file exists (the launched command writes
-  `<result-file>.exit` on any exit) or when the owner's typed `/superegm:interrupt` recorded
-  `interrupted`. An Astra review run is terminal when its `result.json` says `completed` or
+  `<result-file>.exit` on any exit), when the owner's typed `/superegm:interrupt` recorded
+  `interrupted`, or, from amendment 5, when `driver tick`, `launch-builder`'s terminal check or
+  `runcard open` recorded it `interrupted (reboot)` on the one proof §11.2 adds (a boot id recorded at launch that is not the machine's current
+  one: no process survives a reboot), or, from amendment 10, when the watchdog's signal made the
+  wrapper write the exit file `stalled` (the wrapper traps the signal) within 30 s, the one
+  proof; no exit file at that bound is recorded `kill_failed` on the launch, which stays
+  `running` and is signalled no more, the unit marked idle with that reason and listed by the
+  inbox for the owner's typed interrupt, nothing else touched; a later pass that finds its exit
+  file reports the exit as the file reads, which clears the mark (§11). An Astra review run is terminal when its `result.json` says `completed` or
   `failed`, or when the bounded command that ran it has returned without one (its timeout, §11:
   the lane is then `not run (timeout)`). A round is terminal in phase `posted`, or `collected` with a `not run` reason.
   Nothing else is terminal; silence proves nothing.
@@ -372,8 +466,8 @@ isolation recorded.
 | An adopted issue's body overwritten wholesale | a person's text lost | the dry run shows the old body's sha256, `apply` refuses when the body changed since, comments and title are kept | U13 |
 | A PR block appended verbatim; a token recipe that does not fit the repository's owner kind | a builder PR the repository's CI rejects; a token with no access | the block is the repository's own text and its CI checks it; the recipe names the fine-grained form for an organization's repository and the classic form for a personal one, and `doctor` reports the token's kind | U14 |
 | The App's private key readable by the builder session (it mints in the builder's environment) | a misbehaving builder mints tokens for every repository the App is installed on | the key is a file the path names, never PEM text in the environment; the App's installations are the owner's choice (several accounts allowed, owner ruling 2026-11-05: a public App when several, which a stranger may install too), so a builder that mints reaches every repository every installation includes, an accepted residual of the ruling the owner bounds by reviewing the installations `doctor` lists (`GET /app/installations` with the JWT: account and repository count per installation, information only) and by installing narrowly; a `doctor` line reads `GET /repos/<repo>/installation` with the JWT and refuses unless an installation includes `config.repo`; a builder runs as the owner's OS user, so code it runs (a test, a DoD command) can reach what that user can on either path, the owner's SSH key and keyring included, and the protection does not fence the owner's own logins: an accepted residual of a local session on both paths, which no by-hand step of this plugin removes (§3.1 rejects the second OS user); a builder that commits a token is stopped by GitHub's push protection where it is enabled, and one that commits the key by its non-provider pattern scanning where that is enabled too (two fields `doctor` reports; free on a public repository), otherwise either is seen by the owner's eyes on the diff, after which the owner rotates the key or token; each minted token lives its hour unrevoked, a residual beside the key's; the elephant minting at launch was rejected (§3.1: a round outlives an hour) | U15 |
-| A timer that runs `wave` unattended with the owner's credentials (the `gh` login, the App key path, the profile) | a session acts as the owner while nobody watches | the driver types one phase, `wave --leavemealone`, and chains nothing; a tick launches only when the previous launch's exit file exists and no `wave` card of that handoff is open; the session never asks, journals and ends; merge stays human (the driver never merges; the inbox lists merge-ready PRs); the owner's login never leaves the machine (a fleet box is not supported); the launchd agent runs only what the plugin root names; accepted residual: the credentials are the owner's, unattended (§11.2) | U24 |
-| The head's code runs on the owner's machine (the foreman re-runs the DoD `Run` items) | a builder's test reaches what the owner's OS user can | the run's environment is the builder's shut-out one (§11: no owner git config, SSH or askpass; the sentinel `GH_TOKEN`; `SUPEREGM_APP_KEY` unset), each item bounded by `config.foreman.run_timeout_minutes`; CI already runs the same code elsewhere; a `Run` item that needs a service the worktree lacks reads `ran red` until the plan's `Run` lines are self-contained, the right cost | U25 |
+| A timer that runs `wave` unattended with the owner's credentials (the `gh` login, the App key path, the profile) | a session acts as the owner while nobody watches; every PR and issue comment (`comments.md`, any author) and every ingested thread (§8) reaches that session's foreman as text | the driver types one phase, `wave --leavemealone`, and chains nothing; a tick launches only when the store has no open `wave` card or live launch of its own and the handoff no open typed phase card (a reboot proven by the boot id excepted), and `runcard open` refuses a typed `wave` store-wide and a typed `plan`, `file`, `integrate`, `review-plan` or `orient` on the handoff while a tick's launch has none; the session never asks, journals and ends; merge stays human (the driver never merges; the inbox lists merge-ready PRs); the owner's login never leaves the machine (a fleet box is not supported); the launchd agent runs only what the plugin root names; a ruling is parsed by `ruling_of` from owners only, never read as prose; accepted residual: the credentials are the owner's, unattended (`~/.superegm/env`, mode 0600: the same the owner's shell holds), in a session that never prompts (`bypassPermissions`, or an allow-list as wide: the U24 plan's); the machine stays awake and logged in (a `gui/<uid>` agent fires no tick in sleep, and a sleeping machine suspends the live session's builders: `pmset` or `caffeinate`, a by-hand step; `doctor`'s driver line reports the sleep setting as information); and prompt injection through comment text into the foreman's context, bounded by its brief and by merge staying human (§11.2) | U24 |
+| The head's code runs on the owner's machine (the foreman re-runs the DoD `Run` items) | a builder's test reaches what the owner's OS user can: the keyring, `~/.ssh`, the App key file, the store itself | the run's environment is the builder's shut-out one (§11: no owner git config, SSH or askpass; the sentinel `GH_TOKEN`; `SUPEREGM_APP_KEY` unset), which removes the variables and not the filesystem; `collect` reads every input it judges before the first `Run` item and writes the round's record and `foreman/<unit>.json` back whole after the last, so an edit a run makes to those two files is overwritten; the re-run is bounded by `config.foreman.run_timeout_minutes` and its process groups are killed at the bound; a `Run` line installs into the worktree, never globally; a service the worktree lacks reads `ran red`, the plan's defect; accepted residual: the head's code runs as the owner's OS user, exactly as the builder's own test run of the same code already did (§11: the builder is a session on this machine), and a run, or a process it leaves behind, can write every other file of the store (a forged exit file, `state.json`) and the checkout's shared `.git/` (a hook or a `core.hooksPath`: the helper's own git calls pass `-c core.hooksPath=<an empty directory> -c core.fsmonitor=false`, so `prepare`'s and `launch-builder`'s checkouts run none; `collect` reads `.git/config` before the first `Run` item and writes it back after the last, as it does the two store files, so a `credential.helper`, `core.sshCommand`, `insteadOf` or `include.path` a run writes is undone before the next fetch; the owner's next typed commit, a process the run leaves behind, and a sibling `collect`'s read between a run's edit and the write-back (the normal batch of several ready heads) are the window; `doctor` reports the hooks directory's contents and a `core.hooksPath` as information), and the owner's files the next tick runs (`~/.superegm/notify`, `~/.superegm/env`, the plist, the installed plugin root; `doctor` reports the hook's sha as it reports the hooks directory) | U25 |
 
 **Cost and timeline (estimate, not a promise).** One leavemealone phase: spec review 2–5 rounds
 × 6 goldfish (two is the floor, the last one clean and its bytes left alone; this spec's own
@@ -394,7 +488,7 @@ passes.
 
 | # | Phase | Typed? | Artifact | Gate | Record |
 | --- | --- | --- | --- | --- | --- |
-| 0 | Brainstorm | auto (reads and drafts only) | spec file in the repo | the owner's opt-in | none yet |
+| 0 | Brainstorm | auto (reads and drafts only); from amendment 13 a team mode on the owner's ask | spec file in the repo | the owner's opt-in | the draft spec with its `## Alternatives Considered` (the approaches) and its current-state ground (the cartographer's notes), §6 |
 | 1 | Spec review | **typed** | review report | converged or ruled | review record; **approval record freezing the spec at a sha256** |
 | 2 | Plan | **typed** | the handoff plan with one TDD plan per unit; rendered issue bodies in the store | `graph` and `scan` pass | `handoff_units.json` with body hashes |
 | 3 | Plan review | **typed** | review report per unit over the exact bytes | converged or ruled | review record per unit |
@@ -501,7 +595,43 @@ every `external` skill lists `state-store`.
   owner-requested fix on a branch; never during brainstorm, spec or plan." A filed unit or an
   owner request is authorized by the run card the elephant holds; builders cannot invoke skills
   and follow the orders instead. `brainstorming` and `writing-skills` are exempt: they run on the
-  owner's request outside any unit. `verification-before-completion` never updates snapshots or
+  owner's request outside any unit. From amendment 13 (U34) `brainstorming` has a team mode: when
+  the session has agent teams enabled (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, an interactive
+  session in the in-process teammate mode, the default: a split-pane mode gives the adapters no mailbox, and the cartographer's first message within the skill's wait is the mailbox's proof, none meaning the fallback below) and the owner asks (`/superegm:brainstorming --team`, or `config.brainstorm.team` true, §7: `init` writes false),
+  the lead, the elephant in the owner's session, spawns the four teammates (§2) from their
+  adapter definitions: the `cartographer` reads the code (`Read`, `Grep`, `Glob`; §9.3's `orient` needs an
+  approved spec and a card, which a brainstorm precedes, so it is not called; the newest handoff's
+  `orient/map.md`, when the store holds one for this tree, is read first) and reports the
+  notes (where the topic's concerns live today, what calls what, what tests pin, what the
+  repository's own docs say, and the three things that would surprise a newcomer), which the
+  lead relays to the other three, spawned once the notes are in (the cartographer first in both modes); the `architect` designs against those notes
+  (the `design` persona's `Mode: BRAINSTORM`), the `skeptic` is the zoom-out persona's `Mode:
+  BRAINSTORM` turned forward (failure modes, what the owner will regret, the cheapest
+  alternative), the `advocate` takes the user's and the operator's day (what they see, type,
+  wait for; the `comprehension` persona's `Mode: BRAINSTORM`); the three run through their
+  landed adapters, no new one, each brief in `teammates.md` overriding the persona's code-search
+  step and its findings-line output and the adapter body's review framing (no target file to
+  read, no incomplete review to report: ask the cartographer, report an approach by message) and
+  setting the role's lenses; the cartographer is the one new persona and adapter. Each works one approach in its own context and
+  reports it to the lead by message (the approach, its costs, the questions it cannot answer
+  without the owner), and may message the others to challenge a claim; no teammate but the
+  cartographer reads code: the others ask it by mailbox ("who calls X", "what covers Y"), so the
+  lenses stay clean and the code reading lives in one context; no teammate writes a file (the
+  helper is the store's one writer, §7, and the skill is `working-tree`, §14). The lead merges:
+  the approaches side by side, one deduplicated question list ranked by how much the answer
+  changes the build, and puts the questions to the owner one at a time as the skill does today;
+  the draft spec, the skill's one output (§14), records the approaches under its `## Alternatives
+  Considered` (the section the feature-spec standard's Alternatives Rule reads) with a `team: on` or `off (subagents)` line there
+  (under `on`, what the teammates reported seeing, the project context and the hook once the
+  plan's probe establishes it; under `off`, what the subagents reported seeing), the owner's answers,
+  and the cartographer's notes in its current-state ground (the skill's design list gains both items); the chosen approach is the
+  spec's input as today. Asked for with teams off, in a split-pane teammate mode, or in a headless session (teams spawn no
+  teammate under `-p`): the same four run as subagents, the cartographer first and its reported notes handed into
+  the other three's prompts, with no mailbox (a question the notes do not answer joins the owner's list, no code read), and the entry says `off (subagents)`; not asked for: neither, the skill as today.
+  Teammates end when the brainstorm closes (the lead's shutdown request to each, which a teammate
+  may reject, the session's end ending it then; a resumed lead has no teammates); the next phase starts a fresh session (§5, U19's
+  rule) and reads the draft spec, never a teammate's context. Non-goals: teams in any headless
+  phase; more than four roles; the judges (they converge; this diverges). `verification-before-completion` never updates snapshots or
   fixtures.
 
 **Every effect refuses without an open run card.** An `external` skill's first action is
@@ -551,8 +681,8 @@ foreman's brief carries the handoff id and the foreman passes `--handoff <id>` o
 subcommand it runs); a `--spec` or `--plan` subcommand with no card takes the spec's latest
 approval's; a `--unit` subcommand or a unit-keyed card with no handoff takes the one open
 handoff whose `state.json` lists the unit as filed, refusing and naming both when two do; a spec
-review id resolves to the store level, any other `--review` id through the card; `status` and
-`report` show every handoff without it. An older handoff is frozen: `plan`, `review-plan`,
+review id resolves to the store level, any other `--review` id through the card; the inbox is the
+store-wide read (§11.2), `status` and `report` one handoff's (amendment 11). An older handoff is frozen: `plan`, `review-plan`,
 `file`, `graph` and `approve-spec --amend-units | --void` refuse for a handoff whose latest
 entry is not the history's last (`<handoff>: not the latest approval: plan the rows in the
 latest handoff`); its filed units run (`wave`) and it integrates and closes (§12); a void of a
@@ -564,19 +694,19 @@ at a time:
 
 | File | Writer |
 | --- | --- |
-| `state.json` | the elephant's typed skills (`plan`, `file`, `wave`, `integrate`), one at a time; `close` for `closed_at` (`approve-spec --void` on an unfiled handoff runs it); `notify` for `notified` alone (§11.2) |
+| `state.json` | the elephant's typed skills (`plan`, `file`, `wave`, `integrate`), one at a time; `close` for `closed_at` (`approve-spec --void` on an unfiled handoff runs it); `notify` for `notified` alone, under a `wave` card (§11.2) |
 | `handoffs/<id>.json` | that handoff's `approve-spec` (opened; `--void` closing an unfiled handoff) and `close` (its `closed_at`) |
 | `approvals/<spec-slug>.json` | `approve-spec` |
 | `handoff_plan.md`, `handoff_units.json`, `unit_<id>.md`, `handoff_bodies.md` | `plan` (`graph --plan <file>`; `decide` re-renders one unfiled unit and leaves a filed one as filed) |
-| `reviews/<review-id>/…` | the invocation that opened that review; on a head, also the foreman dispatch the round records (`review record`, `collect`, `review post`) |
+| `reviews/<review-id>/…` | the invocation that opened that review; on a head, also the foreman dispatch the round records (`review record`, `collect`, `review post`); `review ingest --pr` for `review.json`'s `ingested[]` (amendment 6, §8) |
 | `judges/<id>/…` | the invocation that opened that panel |
-| `runcards/<id>.json` | the skill that opened the card; `card_add` for later facts |
-| `launches/<unit>.json`, `launches/<unit>_r<n>_prompt.md`, `launches/<unit>_r<n>_bin/` | the elephant (`launch-builder`, `record-launch`, `interrupt --launch`) |
+| `runcards/<id>.json` | the skill that opened the card; `card_add` for later facts; a handoff's open `wave` card marked `interrupted` by `driver tick` (on its launch's exit file, or on the boot-id proof: a launch's or a typed card's recorded boot id that is not the machine's) or `driver reset` (§11.2) |
+| `launches/<unit>.json`, `launches/<unit>_r<n>_prompt.md`, `launches/<unit>_r<n>_bin/`, `launches/<unit>_r<n>_plugins.json` and `launches/<unit>_r<n>_mcp.json` (amendment 7: the plugins passed at the launch with their versions, directories and hook events, the profile's managed plugins, and the MCP file passed, superseding the `_managed.json` of 1.1.2's fix-k) | the elephant (`launch-builder`, `record-launch`, `interrupt --launch`); `driver tick`, `launch-builder` and `runcard open` for `interrupted (reboot)` alone (§11.2); `launch-builder` for the `running` entry, once (amendment 10), and `record-launch --exit stalled` for `exited (stalled)` and `kill_failed` (amendment 10, §11; the entry re-read before the write, an `interrupted` it finds kept) |
 | `worktrees/<unit>/` | the elephant (`launch-builder`, `/superegm:clean`) |
 | `foreman/<unit>.json`, `review/<unit>/pr<n>/` | the foreman dispatch whose `dispatch_id` the round records (`prepare --dispatch`, `collect`, `review post`); between dispatches `foreman dispatch`, `interrupt --round`, `/superegm:clean`, `review settle` (a head's `outcome`, §11), `review ingest` (`ingested[]`, and a `clean` outcome rewritten `revise`, §8) and `decision open\|rule` (`decisions[]`, `rulings[]`); `r<n>/dod/<item>.txt` by `collect` (§11) |
 | `wave_<n>_report.md` | `wave` (`superegm report`, after every batch) |
 | `foreman/<unit>-<decision id>.brainstorm.md` | `decision rule` on a `redesign` ruling (§11) |
-| `driver/<handoff>.json` | `driver tick` (`launches[]`) and `driver reset` (§11.2) |
+| `driver/<handoff>.json` | `driver tick` (`launches[]`; `notified` through a tick's `notify`), `driver reset`, and `runcard open` for `interrupted (reboot)` alone (§11.2) |
 | `~/.superegm/registry.json` (the registry, outside every store) | `register [--remove]` alone; `inbox --all` and `driver tick` read it (§11.2) |
 | `orient/map.md`, `orient/export/`, `orient/graphify-out/`, `orient/<unit>.md` (all under the handoff directory, §9.3) | `orient` (`superegm orient`, typed, and run by `plan`, `review-plan` and `launch-builder`; §9.3); `orient/export/` and `graphify-out/` are written by `git archive` and graphify through `orient`, one invocation at a time, the two writes not made through `atomic_write` |
 | `journal.md` | append-only, `O_APPEND`, one line per fact, written by the subcommand that wrote the fact |
@@ -595,47 +725,96 @@ excepted (§9.3). No lock file.
   another), `artifacts_dir` (absolute, outside the working tree), `mode` (`normal |
   leavemealone`), `max_in_flight` (5), `labels` (EGM's set with prefix `superegm:` plus
   `stopped`), `issue_template`, `tracking_issue_title`, `banned_terms`, `fix_request_mention`,
+  `brainstorm` (`team`: false; amendment 13, §6),
   `allowed_mentions`, `reviewers` (`spec`, `plan`, `head`, `integrate`: ordered reviewer lists;
-  `head` is `change-review, astra` by default, the `astra` entry informational, §8), `astra`
+  `head` is `change-review, astra` by default, the `astra` entry informational, §8; from
+  amendment 8 `model` and `effort`, every review goldfish dispatch of the four kinds (the judges
+  have their members' values), `opus` / `xhigh` in the Agent tool's own alias and level forms
+  (`sonnet`, `opus`, `haiku`, `fable`; `low` to `max`), passed as the adapter's per-dispatch
+  override, §8), `astra`
   (`enabled`, `model`, `effort`, `heads`: true, the lane on head reviews; a config without the
-  key reads it as true, §8, §11), `judges` (`min_vendors` 1; `members`: `fable` and
-  `opus` through the adapter at max effort, `astra` through the runner), `builder`
-  (`profile_dir`, `model`, `permission_mode` = `acceptEdits`, `gh_token_env` =
+  key reads it as true, §8, §11; from amendment 8 `heads_effort`, the foreman's lane, `high`,
+  `effort` staying the elephant's lanes'), `judges` (`min_vendors` 1; `members`, from amendment
+  8: `fable` through the adapter at `xhigh`, `astra` through the runner at `xhigh`, recorded
+  `not run` when the runner is absent, `opus` through the adapter at `max`; an adapter member's
+  `model`, when set, is the tool's alias too, a runner member's `astra.model`), `builder`
+  (`profile_dir`, `model` = `claude-opus-5-5` and `effort` = `medium` from amendment 8 (a full
+  model id, since `claude -p --model` takes one; the elephant is the session's model, never in
+  config); from amendment 12 `tiers` ({`difficult`, `easy`}, each `model` and
+  `effort`; `init` writes `difficult` `claude-opus-5-5` / `high` and `easy` `claude-sonnet-5-5` /
+  `medium`; the doable tier is `builder.model` and `builder.effort` themselves, the pair a unit with
+  no tier and a row the owner removed read too; a config without the key reads `init`'s rows
+  through the loader's merge below, and a key under `tiers` other than the two is refused by
+  `launch-builder` and `doctor`, §11); a config written before U28 reads the keys amendment 8 adds (`builder.effort`,
+  `reviewers.model`, `reviewers.effort`, `astra.heads_effort`) as `init`'s defaults, the loader
+  filling a missing nested key from `DEFAULT_CONFIG` as it reads `astra.heads` (U28 extends the
+  landed `astra` merge to `builder` and `reviewers`, which the loader replaces wholesale today); a member's
+  `effort` and `builder.model` are landed, their written values stand and only `init`'s
+  defaults change,
+  `permission_mode` = `acceptEdits`, `gh_token_env` =
   `SUPEREGM_BUILDER_TOKEN`, `app` = `null` (or `app_id`, `slug`, `private_key_env`, §11),
   `allowed_tools`: the read/edit tools, `git add|commit|status|diff|log|
-  mv|rm`, `gh pr create|edit|comment`, `gh issue comment`, each as a prefix pattern; the push
-  prefix for the unit's own branch is added per launch), `ci_wait_minutes` (30), `commit_trailer` (the empty string, §8), `owners` (the
+  mv|rm`, `gh pr create|edit|comment|view`, `gh issue comment` and the test runner (`pytest`, the Step
+  default's first word, §9.1; the default `init` writes; the owner edits it), `gh pr view` and the runner from
+  amendment 11 (the owner's item; the per-launch grant below covers every Step's own command, so the default adds a grant only to a body whose Steps all carry explicit `Run` lines), each as a prefix pattern; the push
+  prefix for the unit's own branch is added per launch; from amendment 7 also `Skill(<name>)`,
+  `Skill(<name> *)`, `mcp__<server>__<tool>` and `mcp__<server>__*` rules, §4; `plugins`, the
+  plugin ids `<name>@<marketplace>` passed to the builder, each resolved to the directory and
+  version of its `user`-scope entry in the elephant profile's `plugins/installed_plugins.json`
+  (the elephant profile: the one `CLAUDE_CONFIG_DIR` names in the session running the helper,
+  the env file's under the driver, §11.2, else `~/.claude`; the entry is read, its enablement
+  never: the owner keeps the listed plugins installed and disabled there, so no goldfish or
+  foreman that profile dispatches gets their hooks), `init` writes
+  `[]`; `mcp`, the builder's MCP servers in `.mcp.json`'s `mcpServers` form (a secret by `${VAR}`
+  reference, never literal: the config is committed), `init` writes `{}`; `builder.stall_minutes` (30,
+  amendment 10: the watchdog's bound, §11), `ci_wait_minutes` (30), `commit_trailer` (the empty string, §8), `owners` (the
   GitHub logins that may update `<base>`; `init` writes the login `gh api user` returns; a config
   without the key loads as `[]`, and `launch` and `doctor` refuse naming the key), `owner_team`
   (optional, `<org>/<slug>`: the team a ruleset's bypass actors may name) and `pr_block_file`
   (optional: a path in the repository, relative to its root like `issue_template`, whose text
   every builder PR body carries) (§11); and, from amendment 5, `ingest` (`severity_words`, a
   word → severity map; `init` writes Devin's known words `bug → high`, `issue → medium`, `nit →
-  low`, `suggestion → low`; `human_role`, default `write`), `notify` (an optional command line;
-  `init` writes `null`), `notify_timeout_seconds` (30), `driver` (`interval_minutes`, 15) and
-  `foreman` (`run_timeout_minutes`, 20) (§8, §11, §11.2). Unknown keys stop.
+  low`, `suggestion → low`; `human_role`, default `write`), `notify_timeout_seconds` (30; the
+  hook itself is `~/.superegm/notify`, outside the repository, §11.2) and `foreman`
+  (`run_timeout_minutes`, 8) (§8, §11, §11.2); the driver's interval and environment are the
+  machine's, never a repository's keys (`install --interval`, `~/.superegm/env`, §11.2). Unknown
+  keys stop.
 - Under `artifacts_dir/<handoff id>/` (the store-level files above at `artifacts_dir` itself), never committed:
   - `state.json` — EGM's handoff state with EGM's keys, minus `approval`, `pending_approval`,
     `gate_unreviewed_diff` and `decisions[…].published`, plus `plan` (the path of the elephant's
     plan file outside the store, from `--plan` on the first `graph`; EGM's `plan` named the store
     copy), `base_at_start`, per unit `body_sha256`, `filings[]` (the confirmed write list of every
     filing that ran `apply`, appended by `apply` before its first write, once per write-list
-    hash; EGM's `confirmed` is the pending one), `closed_at` (written by `close`) and `notified`
-    (the fingerprints of the inbox lines `notify` last sent, written by `notify` alone, §11.2). A unit
+    hash; EGM's `confirmed` is the pending one), `closed_at` (written by `close`), `notified`
+    (the fingerprints of every inbox line current at `notify`'s last call, sent then or before,
+    written by `notify` alone, §11.2), and from amendment 10 `board_changed_at` (written by `status`
+    at the splice's write, the board's header time, U30). A unit
     with a filed issue number is **frozen**: `graph` reads its section from the store
     (`handoff_plan.md`), never from the plan file, and refuses when the file's section differs;
     `graph` and `dry-run` re-render and re-hash unfiled units only; `apply` and `verify` act on
     the current filing's confirmed write list, `verify` reading back every issue that list names
     and comparing the stored body, never a re-render, and expecting in its obsolete-link pass the
     union of every list in `filings[]`; the tracking issue belongs to the latest filing's list
-    only (a later filing rewrites its body, an issue edit EGM's `apply` never made), earlier lists
+    only (a later filing rewrites its body, an issue edit EGM's `apply` never made; from
+    amendment 10 the body also carries the board, U30, §11: `status` rewrites it between
+    `<!-- superegm:board -->` and `<!-- /superegm:board -->` on every pass under a `wave` card
+    (`integrate`'s pass stays a read; a tick's session renders it at its first pass; a later
+    filing's rewrite drops the block and the next pass appends it again, the accepted transient), through one
+    splice function (replace the text between the markers, append the block once to a body
+    without them, write only on change: in a module of the plan's choosing that no other 1.2 unit
+edits, `apply.py` beside `edit_issue` the natural one, called by `status`
+    and by `verify`, which compares the body outside the markers) and `apply.edit_issue` (an owner's hand edit landing between that read and the write of a row change is overwritten, the accepted window as the filing transient is), one read of the body per pass at the splice, compared and written in
+    the same step, one GitHub write per pass and none when the fresh rows match the block read,
+    whose header time is then kept), earlier lists
     being compared on their unit issues. One check, `require_frozen_units(handoff)` in U03 (py),
     replaces EGM's whole-plan checks in `status`, `launch` and `prepare`: for every filed unit,
     the plan file's section equals the stored one and the body its filing's list in `filings[]`
     stores equals the one `unit_<id>.md` carries (EGM's unit file holds the body in a fence);
     any difference refuses.
   - `runcards/<id>.json` — `skill, artifact, artifact_sha256, reviewers, tiering, mode, parent,
-    opened_at, closed_at | interrupted_at, produced[]`.
+    opened_at, closed_at | interrupted_at, produced[]` and, from amendment 5, `boot_id` on every `wave` card and, on one opened under
+    `SUPEREGM_ROLE=driver`, `driver_card` (both written by `runcard open`, the latter from
+    `SUPEREGM_RUNCARD`; a record, not a parent: the driver card is closed by then, §11.2).
   - `approvals/<spec-slug>.json` (at the store level, above) — the spec's approval history:
     `path` and `entries[]`, one per approval in order, each `sha256, commit, runcard, review,
     approved_at, handoff_id, kind (opening | amend-units | after-void), voided_by, escalated[]`
@@ -653,10 +832,12 @@ excepted (§9.3). No lock file.
   - `handoff_plan.md`, `handoff_units.json`, `unit_<id>.md`, `handoff_bodies.md` — EGM's files
     with the new sections; `handoff_units.json` carries `body_sha256` per unit.
   - `reviews/<review-id>/review.json` (`kind, artifact, cycle, reviewers, runcard, converged,
-    converged_round, rulings[], scope` (kind `spec`: `auto`, `whole` or the headings named, §8); a
+    converged_round, rulings[], scope` and, from amendment 6, `ingested[]` (the root comment ids
+    `review ingest --pr` recorded in this cycle; the reader skips every cycle's of the spec, §8) (kind `spec`: `auto`, `whole` or the headings named, §8); a
     spec review's directory at the store level, above) and `round-<n>.json` (`runcard`, the
     top-level card the round's first `review record` carried; `artifact_sha256`; `scope`, the
-    round's headings with their line ranges at dispatch, and `out_of_scope[]`, the finding lines
+    round's headings with their line ranges, stored by the round's first record (amendment 11's
+    wording), and `out_of_scope[]`, the finding lines
     `review record` refused, verbatim (§8); findings per reviewer with id, severity,
     location, `regression: yes|no`, disposition, ruling; `builder_contested[]` of `{fid, reason}`
     on a head; each dispatch's isolation, model and effort requested → effective; `what_ran`,
@@ -671,14 +852,18 @@ excepted (§9.3). No lock file.
     artifact means its latest cycle; `latest_cycle` asks `evaluate` and reads `approvals/<slug>.json` for that, not a
     stored field (U16).
   - `launches/<unit>.json` — `launches[]` with `round` (the launch count), `worktree`, `branch`,
-    `started_at`, `status` ∈ `running | exited <code> | interrupted`, `result_file`,
-    `prompt_sha256`.
+    `started_at`, `boot_id` (amendment 5, written by `launch-builder` at the launch), `pid` (amendment 10: the wrapper's, the process-group leader `launch-builder` spawned, the watchdog's kill target, §11; from amendment 10 `launch-builder` writes the whole `running` entry once at the launch, every field of this list but the exit's, the command line it ran among them, and `record-launch` keeps `--exit` alone), `status` ∈ `running | exited <code> | exited (stalled) | interrupted | interrupted (reboot)` (the
+    last amendment 5's, `exited (stalled)` amendment 10's; `last_commit_at`, the launch's own newest commit time (one newer than `started_at`) or none, written by every `--exit` from amendment 10, the carve-out's one field; both terminal for `launch-builder` and `clean` as `interrupted` is), `kill_failed` (amendment 10: its reason, `no exit file` when none followed the signal within 30 s, or `pid reused` when the guard, run before any signal, found the group's present leader another's, or `no process` when it found no member living, no signal sent; the launch stays `running` and is signalled no more, the unit idle and in the inbox for the owner's interrupt; a later exit file clears it, §11), `result_file`,
+    `prompt_sha256`, `command` (amendment 10: the launched command line, the record of what ran), from amendment 12 `tier` (the unit's, from `handoff_units.json`, written by `launch-builder` with the entry), and from amendment 8 `model` and `effort` (requested, written with
+    the entry; the effective model and, from amendment 10, `total_cost_usd` (the board's cost) read by `record-launch
+    --exit` from the result file's `modelUsage` and `total_cost_usd` keys, the field U28's one run confirms, every
+    key when there are several, else `requested only`).
   - `foreman/<unit>.json` — `dispatch_id`, `rounds[]` (`round` (the review's round number),
     `runcard` (the wave card the dispatch ran under), `launch` (the launch count at dispatch),
     `head` (the tip `prepare` fetched), `phase ∈ fetched | prepared | collected | posted | kept |
     cleaned`, `dispatch_id`, `outcome` (the return word for a posted round, written by `review
     post`; else `not run (<reason>)`), `posted_at`, and from amendment 5 `dod_runs` (`{<item>:
-    {exit, summary, paste_summary, timed_out}}`) and `test_delta` (`[{file, line, kind: removed |
+    {exit, summary, paste_summary, timed_out}}`) and `test_delta` (`[{file, line, base_line, kind: removed |
     weakened, base_commit}]`), §11), `ingested[]` (the root comment ids of the PR review threads
     `review ingest` recorded, ids only: the findings are the record, §8), `decisions[]` (`id, point, question,
     asked_at`), `rulings[]` (`decision, ruling, by, posted_at`); a decision is pending from its
@@ -689,10 +874,11 @@ excepted (§9.3). No lock file.
     `round-<n>/<judge>.md`, `verdict.json`; `wave_<n>_report.md`; `journal.md`; under
     `review/<unit>/pr<n>/r<n>/dod/`, one `<item>.txt` per DoD `Run` item the foreman re-ran
     (`exit: <code>`, `summary: <line>`, `timed_out: yes|no`, §11); `driver/<handoff>.json` (the
-    `driver` kind: `launches[]` with `started_at`, `exit_file`, `status`, as `launches/` has them,
-    §11.2).
+    `driver` kind: `launches[]` with `started_at`, `boot_id`, `pid` (the wrapper's), `exit_file`,
+    `result_file`, `status`, as `launches/` has them from amendment 5, and `notified`, §11.2).
 - Outside every store, `~/.superegm/registry.json` is the registry (§2, §11.2): one entry per
-  store, `{repo, root, artifacts_dir, base, mode}`, written by `register` alone; the rule that
+  store, `{repo, root, artifacts_dir}` (no copy of the config's `base` or `mode`: nothing would
+  read it, anti-goal 1), written by `register` alone; the rule that
   every file has one writer holds there too. Unknown keys stop.
 
 ## 8. Spec review (phase 1) and the one review loop
@@ -736,7 +922,8 @@ by the foreman. The helper records and judges; the dispatching session dispatche
   keeps the findings whose `<location>` names the review's unit or no unit. On kind `head`,
   `--reviewer foreman` is accepted outside the panel for the helper's own findings (§11) and
   never counts toward every-reviewer-ran; so is `--reviewer external:<login>` (amendment 5), the
-  id `review ingest` records a PR review thread under, on kind `head` only. Every persona's output section is re-worded to the
+  id `review ingest` records a PR review thread under, on kinds `head` and `spec` (§8's two
+  ingest bullets; its location is the thread's own, outside the scope rule below). Every persona's output section is re-worded to the
   findings line below and its severity words (U01; each a changed Apache file). A round's
   `what_ran` is **derived** by the helper from the round's reviewer records and, on a head,
   from its `rounds[]` entry's `phase` and `outcome`; no caller sets it, and it is stored with
@@ -790,8 +977,23 @@ by the foreman. The helper records and judges; the dispatching session dispatche
   `test-delta` finding (§11, amendment 5) is the owner's alone: `review settle` on it takes
   `--owner` only, never `--judges`; `collect` ignores a `fixed` reply to it unless the head's
   assertion is back; the one ruling that clears it is the owner's `**Ruling:** <fid> allowed —
-  <reason>` (§13.2); in leavemealone-mode it stays until a head restores the assertion or the
-  owner rules, and the review runs to its cap, where the judges rule as §13.2 says. The owner
+  <reason>` (§13.2; the point-1 form `finding overruled — <reason>` on its fid is read as the same;
+  recorded as `declined --owner`, the five dispositions being the only ones);
+  in leavemealone-mode it stays until a head restores the assertion or the
+  owner rules (the inbox lists it from the round that records it, §11.2): a round whose only
+  unsettled high or medium findings are the owner's alone puts the unit `pending a decision`
+  (`review post` writes the outcome `owner: <ids>`, the foreman returns that word, and the wave
+  runs `decision open` with the `allowed` form as its option, no slot, §11.1) instead of a
+  relaunch,
+  and the owner's ruling releases it (a pending decision holds the unit from dispatch, §11.1, so
+  no head is reviewed meanwhile): `**Ruling:** <fid> allowed — <reason>` settles it and the unit
+  proceeds by `review status` as point 1 does; `**Ruling:** <fid> finding upheld` relaunches the
+  builder with the review to restore the assertion (the `revise` path), and the next round
+  re-derives the delta; at the review's cap (`review status` exit 2) the word stays `owner: <ids>` while every unsettled
+  finding is the owner's alone (the judges never see it; `allowed` clears it and the unit proceeds
+  by `review status`), and is `cap-reached` otherwise (§11); an upheld owner-only finding at the
+  cap goes to point 2 as a `cap-reached` (one more round or stop); the cap is never spent on a
+  finding the judges cannot settle. The owner
   may write a point-1 ruling as a comment on the unit's issue in §13.2's form (`**Ruling:** <fid>
   finding upheld` | `**Ruling:** <fid> finding overruled — <reason>`): the wave reads it as a
   `ruling` event (§11) and applies it through `review settle --owner` and `decision rule --by
@@ -801,29 +1003,87 @@ by the foreman. The helper records and judges; the dispatching session dispatche
 - **External review** (amendment 5, U21). A review thread a person or a bot leaves on a unit's PR
   is evidence the foreman would otherwise never read. `superegm review ingest --unit U<n>
   --runcard <id>` reads the PR's reviews and review comments (`gh api`, under the elephant's
-  token, reads only) and records every thread not yet ingested as one finding line,
-  `<reviewer>-<round>-<n> | <severity> | <file:line or PR> | regression: no | <the thread's first line, 200 chars>`,
+  token, reads only); a thread is a review comment with no `in_reply_to` (its replies are its
+  text), or a review body when it is non-empty, the review has no inline comments and its state
+  is not `APPROVED` (an approval's summary is not a finding), except a review whose body carries
+  `review post`'s own header: that is the foreman's, never a thread, whatever login posted it (the
+  elephant's token is the owner's, who also reviews by hand under it); it records every thread not yet ingested as one finding line,
+  `<reviewer>-<round>-<n> | <severity> | <file:line or PR> | regression: no | <the thread's first line, 200 chars, a `|` in it written `/`, a `@` written `@ ` and a `config.banned_terms` entry masked the same way, so the raw-text scan passes>`,
   through `review record --reviewer external:<login>` into the unit's latest posted round,
-  `--sha256` the thread's commit; it prints `<n> ingested`, exit 0. One thread is one finding:
+  `--sha256` that round's head (the thread's own `commit_id` goes in the finding's location); it prints `<n> ingested`, exit 0, and posts the ingested lines
+  as one review comment in `review post`'s form (the record the next builder's prompt carries,
+  §11: the builder sees posted review comments and nothing else), a thread from a human below
+  `config.ingest.human_role` recorded and never posted (a passer-by's text is not re-published
+  under the owner's login nor placed in a builder's prompt); `collect` carries an external
+  high or medium with no `**Reply <fid>:**` forward as it carries an upheld one, so a round that
+  never saw it cannot post `clean`. One thread is one finding:
   its key is the root comment's id, kept in `foreman/<unit>.json.ingested[]` (§7, ids only); an
   edited thread is re-read for its text, and a recorded finding's severity never changes. The
-  severity is the thread's own word when its first line carries `high`, `medium` or `low` or a
-  word `config.ingest.severity_words` maps to one (`init` writes Devin's: `bug → high`, `issue →
-  medium`, `nit → low`, `suggestion → low`); otherwise `low` for a bot author (a login ending
-  `[bot]`) and `medium` for a human whose repository permission
-  (`collaborators/<login>/permission`, read once per wave) is `config.ingest.human_role` (default
-  `write`) or above; a human below that role is a bot for this rule, so a public repository's
-  passer-by never blocks `clean`. A thread on a head later than the latest posted round's waits:
-  `collect` ingests it in the round that reviews that head. A thread whose author is in
-  `config.owners` and whose body is a ruling (§13.2) is a ruling, never a finding. An ingest is
+  severity: a human below `config.ingest.human_role` (the repository permission
+  `collaborators/<login>/permission`, read once per wave; default `write`) is `low` whatever the
+  words, so a public repository's passer-by never blocks `clean`; a review body from a bot (a login ending `[bot]`) is `low`, never the word map's, since a
+  bot's no-findings summary carries the map's words; a review body from a human at the role or
+  above is `medium` only when its first line carries a severity word or a mapped word, else
+  `low` (an owner's `LGTM, merging tomorrow` is not a finding); an
+  inline thread from a bot or from a human at the role is the thread's own word when its first
+  line starts with, or carries in a bold or bracketed marker, `high`, `medium` or `low` or a word
+  `config.ingest.severity_words` maps to one (so `not an issue` maps to nothing)
+  (`init` writes Devin's: `bug → high`, `issue → medium`, `nit → low`, `suggestion → low`), else
+  `low` for both (an owner's inline question or praise is not a finding; a word raises it). A thread on a head later than the latest posted round's waits:
+  the batch's `review ingest` records it once the round that reviews that head is posted
+  (`collect` reads no thread: its call has one budget, §11). A thread whose author is in
+  `config.owners` and whose body is in a ruling form (§13.2) is skipped, never a finding, and
+  rules nothing there: a ruling is read on the unit's issue alone, where the inbox's action
+  points. An ingest is
   never a counted round and never moves the cap; an unsettled external high or medium blocks
   `clean` exactly as a `foreman` finding does, and settles through the existing paths and no
   other (the builder's `**Reply <fid>:** fixed | contested`, `review settle`, a point-1 ruling: a
   contested external high or medium is a point-1 question like any other); a thread's GitHub
   "resolved" state settles nothing. When an ingest leaves `review status` at exit 3 on a unit
   whose latest posted round's `outcome` is `clean`, `review ingest` rewrites that `outcome` to
-  `revise` (the mirror of the `clean` write above) and journals `<unit> back in flight
-  (external:<login>)`; §11 says what the wave does with it.
+  `revise` (the mirror of the `clean` write above; the unit is ready again, not in flight, and its
+  relaunch waits for a slot as a ready unit does, §11), and at exit 2 (a review at its cap, the usual
+  end of a contested unit) to `cap-reached`, which the wave routes to decision point 2 as a posted
+  `cap-reached`; either journals `<unit> ready again (external:<login>)`; §11 says what the
+  wave does with it.
+- **External review on the elephant's own PR** (amendment 6, U26). The elephant's own PR is the
+  spec PR: `review-spec`'s preflight refuses on `<base>` (start on a branch, §5), commits the spec
+  by path (an empty commit when nothing changed, so a commit ahead of `<base>` exists), pushes the
+  branch, and opens the PR ready for review (a bot may skip drafts) on the elephant's branch when
+  `gh pr list --head` finds none (a `github-write`, §14, so
+  the ingest never reads nothing by forgetfulness),
+  `review-spec` pushes the branch after each fix commit and after the approval commit (a
+  `remote-branch` effect, §14; never `<base>`, §5) so a reviewer such as Devin reads every round's
+  bytes and the PR's head is the approved commit, and the owner's one human step (§5's push of the
+  approval to `<base>`) is what GitHub records as that PR's merge.
+  No other PR of the review workflow's exists: the plan is never committed and `file` opens none
+  (the PR `finishing-a-development-branch` opens is the owner's to read by hand).
+  `superegm review ingest --pr <n> --runcard <id>` (kind `spec`) reads that PR's review threads
+  with U21's reader, severity map and bot/human rules, and records them as `external:<login>`
+  findings into the latest round of the spec's latest cycle, the one `latest_cycle` returns,
+  closed by an `accept` or not (one predicate, §7); the thread's root comment id is kept in that
+  cycle's `review.json.ingested[]`, and the reader skips every id in any cycle's list of the spec
+  (the PR outlives a cycle), and carries every unsettled external high or medium of an earlier
+  cycle of the spec forward into the latest round, as `collect` carries one on a head (§11), so the
+  next round marks it and no closed cycle's finding is settled unseen; the carried copy and the
+  original are one finding, a disposition written on both (as a `set` copy's is), and the check
+  below reads the latest round alone. An unsettled external high or medium there refuses
+  `approve-spec` (`approve-spec: external:<login> <fid> unsettled on PR
+  <n>`, exit 1; one check beside the landed refusal of an unconverged review, since `converged:
+  by ruling` reads nothing settled and a `stop` opens the next cycle over the same PR).
+  The elephant settles them through the existing paths: `fixed` by an edit alone (the next round
+  reviews the new bytes and the push shows the reviewer the fix: the cost of a fix, a round, or a
+  cycle with a fresh cap when the edit follows an `accept`, paid for a thread a round already
+  answered too, since the elephant settles nothing on its own spec unseen, anti-goal 6; the owner
+  weighs `declined` with that cost in view), `contested` as decision point 1 of the review like any finding (the judges in
+  leavemealone-mode, the owner in the session otherwise), `declined` or `escalated` as §8 defines
+  them; `review ingest --pr` posts `**Reply <fid>:** fixed` on each thread settled `fixed` since
+  its last run, under the elephant's token (its own PR; a `github-write` of `review-spec`, §14).
+  `approve-spec` runs the ingest once, before its refusals, on the open PR whose head is the
+  current branch (`gh pr list --head`; none means nothing to read; never under `--amend-units`,
+  which takes no review round); a thread that arrives after the approval is the next cycle's
+  `approve-spec`'s while the PR is unmerged, else the owner's to read; a thread's GitHub
+  "resolved" state settles nothing.
 - `superegm review status --review <id> --runcard <id>` prints `round <n>: <clean|not clean>,
   regressions <k>, converged <yes|no|by ruling>, cap <yes|no>, stalled <yes|no>, sha256 <hex of
   the converged round>` and the trend line; exits 0 when converged, 5 when stalled, 2 at the cap
@@ -854,9 +1114,18 @@ by the foreman. The helper records and judges; the dispatching session dispatche
   --judges <judges-id>]` records it, refuses `accept` for kind `head`, a second `continue`, and
   every ruling after `stop`; `accept` sets `converged: by ruling`; `continue` raises the cap by
   one. No further round starts while `review status` exits 2.
-- Model tiering: panel goldfish run on `SUPEREGM_GOLDFISH_MODEL` at `SUPEREGM_GOLDFISH_EFFORT`
-  (EGM's rules renamed); judges use their configured model and effort; builders use
-  `config.builder`. The run card shows requested → effective.
+- Model tiering (amendment 8), one rule: panel goldfish run on `config.reviewers.model` at
+  `config.reviewers.effort` (`opus` / `xhigh`, the Agent tool's alias and level), passed on
+  each dispatch as the adapter's `model` and `effort` override (§4: the adapters stay `model:
+  inherit`), and the round record stores requested → effective (`review record`'s `--model` and
+  `--effort`); `SUPEREGM_GOLDFISH_MODEL` and `SUPEREGM_GOLDFISH_EFFORT`, when set, override the
+  config's values for the session, `inherit` meaning pass nothing, and an exported
+  `CLAUDE_CODE_EFFORT_LEVEL` is the effective effort of every goldfish, and with
+  `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` on no per-call `model` is passed and the forced model is
+  the effective one, which the record says in both cases (the landed `printenv` read) (`review_loop.md` carries this rule and the foreman brief's
+  `<GOLDFISH_MODEL>, <GOLDFISH_EFFORT>` placeholders are filled from it); judges use their member's model and effort (§13); builders use `config.builder` (§11); the
+  foreman's Astra lane runs at `astra.heads_effort` (§11). The elephant is the session's model,
+  never in config. The run card shows requested → effective.
 
 Spec review specifics:
 - `review-spec` opens a run card and the review `spec-<spec-slug>-c<n>` with
@@ -877,7 +1146,10 @@ Spec review specifics:
   review; a section list adds the headings it names, verbatim and without neighbours, to
   `auto`'s scope (so a fix outside the list joins as under `auto`), and is refused with no
   previous approval to diff against (`--scope <list>: no approval: use whole`). The round file stores
-  the round's scope as headings with their line ranges at dispatch. The brief the skill
+  the round's scope as headings with their line ranges, stored by the round's first record;
+  from amendment 11 a scoped finding whose location carries no line number joins
+  `out_of_scope[]` by the same path (section `none`, the journal line `<fid>: no line number`; a line the spec
+  does not hold takes the same path; the record proceeds), so the rule cannot be bypassed by a bare path (a `whole` round has no scope to bypass: no refusal; U32). The brief the skill
   dispatches names them and says: "findings only inside the changed sections and, on a
   neighbour, only on its fit with them; a finding on any other section is out of scope".
   `review record` accepts a finding whose cited line falls in a changed section or a neighbour,
@@ -944,8 +1216,17 @@ filed, open or closed, stopped units included (their `state.json`, found through
 §7: `graph` lists them in `handoff_units.json` as `filed_elsewhere[]` and refuses a section for
 one, and `review-plan` names them in the `set` reviewer's brief beside the `Landed:` rows, so it
 counts them covered), and runs `superegm graph --plan <file>`
-(copies the text into the store as `handoff_plan.md`, parses, derives waves, renders and hashes
-the **unfiled** bodies) then `superegm scan`. Filed units are frozen (§7): their sections in the
+(copies the text into the store as `handoff_plan.md`, parses, derives waves, prints the
+`wave <n>:` lines and, from amendment 9, a `width:` line (the shared-file chains alone: each
+chain, its length and its forcing edge, the `after` item into its third unit; the units per wave
+stand in the `wave <n>:` lines), derived from
+`handoff_units.json`'s `units[*].shared` as `set-input` derives the same line (§9.2), which
+the plan skill reads before `scan` and reshapes the plan on, splitting or
+re-scoping until every wave holds two or more units where the spec allows it (a split that needs
+a row the spec lacks appends it to `## Units` and re-approves through `approve-spec
+--amend-units`, §12, typed by the owner outside the skill, so such a split ends `plan` and
+restarts it after the re-approval, before `graph --plan` accepts the section); renders and
+hashes the **unfiled** bodies) then `superegm scan`. Filed units are frozen (§7): their sections in the
 plan file must equal the stored ones. Nothing is committed under `docs/…/plans`. Two handoffs of
 one spec whose units edit one file conflict at the owner's merge, resolved by hand at the fold
 (§5): the shared-file rule orders units within one plan, and that conflict is the cost of
@@ -961,7 +1242,8 @@ Each unit section carries EGM's fields and the superpowers additions:
 | Blocked by | `none` or unit ids |
 | Shared files | `none` or `` `path`: after U01, before U05 `` items |
 | Risk | `low\|medium\|high: reason` |
-| Size | `S\|M\|L` by scope-path count (`L` is about twenty Step groups, the most a 48 KB body holds) |
+| Size | `S\|M\|L` by scope-path count (`S` up to three paths, `M` up to eight; `L` the size the parser gives a Scope over eight paths, which the per-unit check reports as a split candidate, amendment 9) |
+| Tier | `difficult\|doable\|easy`, set by the author (amendment 12): `difficult` when the Steps leave a design choice open, the unit holds a novel algorithm or an unverified platform behaviour, or it consumes the interfaces of more than one subsystem; `easy` when the Steps are mechanical with pinned signatures and no open choice; else `doable`. A difficult unit satisfies the split rule hardest (§9.1, amendment 9): a small Scope, few Steps. The tier picks the builder's model and effort (`builder.tiers`, §7, §11); the field is optional to the parser, a section without it doable, the 1.2 rows among them, a word outside the three refused as a bad `Size` is |
 | Issue | optional; `#<n>`, an open issue in `config.repo` that `file` adopts instead of creating one (§10); `graph` refuses an `Issue` whose `#<n>` does not appear in the frozen spec's `## Units` section, a text check with no table parser (the owner names the adoption there) |
 | **Interfaces** | `Consumes:` and `Produces:` lines, one item per line (grammar below) |
 | Definition of done | numbered items; item 1 is always `The test for each Step was committed before its implementation (checked by superegm tdd-order)`; every other item is one of ``Run `<command>` — <what passing means>``, ``Exists `<path>` ``, or `CI green on the head`; only `Run` items are commands |
@@ -1043,11 +1325,37 @@ Spec: `docs/specs/2026-11-03-superegm-design.md` @ <sha7> · `<path:start-end (h
 ## Steps
 ## Decide before build
 ## Scope, order and risk
-Scope: … · Blocked by: #<U04>, #<U06> · Shared files: … · Risk: … · Size: M
+Scope: … · Blocked by: #<U04>, #<U06> · Shared files: … · Risk: … · Size: M · Tier: doable
 Branch: `superegm/<handoff-id>/U07` · Part of #<tracking>
 ```
 
 The tracking issue's marker is `<!-- superegm:handoff=<id> unit=tracking spec=<spec sha256> -->`.
+
+Plan rules from amendment 9 (the helper never splits a unit itself, and `max_in_flight` is
+unchanged). A unit's Scope stays within one subsystem, one module family: a helper module with
+the skill folder, references and tests that drive it (the docs are the sweep's). A unit whose
+Scope would cross two is written as two units, with a `Blocked by` edge only where one consumes
+the other's interface and the Shared files order for any file both edit, or split so that no
+file is shared; the one exception is the release's closing sweep (1.2: U29, the docs sweep),
+`Blocked by` the rows it sweeps so that it closes the release. A cross-cutting file leaves the chains:
+`README.md` and `docs/claude.md` are edited by one closing unit per release (a docs sweep, or
+the release's last unit) and never by the others, which, where they would have edited them,
+append a `docs: see U<n>` note to their Objective's one sentence instead (the DoD grammar is unchanged; the note is the docs sweep's `Blocked by` edge on that unit, the one interface-free edge); shared test helpers are split
+per module (a unit adds its own test file, never a line in `test_helper.py` unless it owns it);
+and the helper's registry lines (`DEFAULT_CONFIG` and `SUBCOMMANDS` in `__init__.py`, `init`'s
+key text, `doctor`'s line) are cross-cutting too: module self-registration (a unit adds a module without editing a
+registry) removes them, the work of U32 (amendment 11; its row states the mechanism),
+ordered after every unit on the package by the files it rewrites, no `Blocked by` edge; the wave skill is no registry, its per-unit steps an ordinary
+shared-file edge. Later releases' width comes from the subsystem
+rule's splits, the registry edge gone. The plan is shaped for wave width: the
+author reads the `width:` line `graph --plan` prints and splits or re-scopes until every wave
+holds two or more units where the spec allows it, and the plan's header states the wave plan
+and why any wave is a singleton. The checkers: the per-unit split check (Steps, bytes, paths,
+subsystems) is the `proportion` reviewer's, with, from amendment 12, the `Tier:` against the body (a
+finding when the body's open choices contradict the tier; a difficult unit at Size `L` is named in the split finding it draws already, §9.2), and the chain check the `set` reviewer's (§9.2); the
+header's wave plan and the singleton reasons are the author's alone (`set` reads them to grade a named chain `low`, amendment 11, and checks them not). Wave width is set by file
+overlap alone (1.1.3: U19 and U20 serialised behind each other on shared files, U20 at 15 Steps
+and 37 KB forcing a chain of its own).
 
 Rules `graph` and `scan` enforce (each a test; `graph` owns plan-shape rules, `scan` owns body
 rules; there is no third checker):
@@ -1055,7 +1363,8 @@ rules; there is no third checker):
 - `scan` reports per unit, as a stdout table and as `plan/scan/<unit>.json` in the store: `bytes`,
   `fenced_share` (bytes inside fences / bytes), `steps`, `spec_range_bytes` (the Design range's
   bytes in the frozen spec) and `ratio` (bytes / spec_range_bytes). It warns (exit 0;
-  `warnings[]` in the json) when bytes > 32,768, or steps > 20, or fenced_share > 0.40. Warnings
+  `warnings[]` in the json) when bytes > 24,576, or steps > 10 (amendment 9's values; 32,768 and
+  20 before), or fenced_share > 0.40. Warnings
   are the `proportion` reviewer's evidence (§9.2); they never block alone.
 - Numbered lists only. Never `- [ ]`. EGM's default issue template is replaced by the layout
   above and EGM's marker regex by the markers above.
@@ -1102,7 +1411,13 @@ rules; there is no third checker):
 - The reviewer id `set` is the readiness persona dispatched **once per `review-plan` round**
   over the set, for interface consistency and the cut: it receives the spec's `## Units` and,
   from every unfiled body, the Interfaces block and the Scope, Blocked by and Shared files lines
-  only. Its one findings file is given to every unit's `review record --reviewer set`, which
+  only, and, from amendment 9, the `width:` line `set-input` derives from `handoff_units.json`
+  (`units[*].shared`, each path with its `after` and `before` units, §9.1) with the plan
+  header's wave plan and singleton reasons (amendment 11), on which it reports the shared-file
+  chains longer than two units with their forcing edges (`medium`), the chains ending at one
+  unit folded into one finding whose location names that unit and whose claim carries them,
+  and a fold whose every chain the header names with its reason as `low` (one line, one severity): a kept chain is one decision, settled
+  once (the copy rule below keeps it for that unit alone). Its one findings file is given to every unit's `review record --reviewer set`, which
   keeps the findings for that unit (§8). Any reviewer other than `set` and `proportion` receives one body, the approved spec
   at its hash, every sibling's Interfaces block and, for `readiness`, the unit's
   `orient/<unit>.md` when it exists (§9.3). Units run **concurrently**, and the goldfish
@@ -1111,8 +1426,13 @@ rules; there is no third checker):
   `.claude-plugin/agents/zoom-out.md`) dispatched with the plan brief
   `skills/review-plan/references/proportion.md`: it receives the body, that unit's
   `plan/scan/<unit>.json` (§9.1) and the unit's spec range at the frozen hash, and answers
-  question 11 only. A proportion finding names the Step and the bytes it would remove; its
-  severity is `medium` at most. Dispositions follow §8 unchanged.
+  question 11 and, from amendment 9, the per-unit split check written into `proportion.md`: a
+  unit over 10 Steps or 24 KB, over eight Scope paths, or whose Scope crosses subsystems (§9.1's
+  families) is reported as a split candidate (`medium`), `scan`'s `warnings[]` at those values
+  its evidence, and from amendment 12 the `Tier:` check (§9.1: the body's open choices against the
+  tier, `medium` at most; a difficult unit at Size `L` named in the split finding, not a second one); the chain check is the `set` reviewer's (above). A proportion finding names the
+  Step and the bytes it would remove, or the split, a tier finding its reason (`tier: <reason>`); its severity is `medium` at most.
+  `readiness` is unchanged. Dispositions follow §8 unchanged.
 - The standard is `resources/document_standards/handoff-standard.md` (EGM's seven questions)
   plus four: 8, interfaces present and consistent; 9, every Step group complete and DoD item 1
   present; 10, global constraints and review focus present; 11, "Is the body no longer than the
@@ -1349,11 +1669,14 @@ protection the builder account can open PRs and never merge them; the owner, who
 restricts updates to the owners: `doctor` prints that line as information, and `wave` and
 `integrate` say it where they tell the owner to merge, §5); the plugin ships no approve or merge
 path, and the elephant and the
-foreman hold no GitHub write but the review comment, the ruling and decision comments, and the
-`superegm:stopped` label. `launch` also skips units labelled `superegm:stopped`, and counts a
-unit in flight from its first launch until its latest round's `outcome` is `clean`, it has
-landed, it carries that label, or the elephant names it idle (`launch --idle U07,U08`: the units
-this invocation found stalled or CI-waiting hold no slot).
+foreman hold no GitHub write but the review comment, the ruling and decision comments, the
+`superegm:stopped` label, from amendment 10 the board in the tracking issue's body (U30) and, from amendment 11, `close`'s issue closes (U32). `launch` also skips units labelled `superegm:stopped`, and counts a
+unit in flight from its first launch until its latest round's `outcome` is `clean` (and, from
+amendment 5, not again when an ingest rewrites that outcome `revise`: the unit is then ready and
+takes a slot when `launch` marks it, U21's `launch.py`), it has
+landed, it carries that label, the elephant names it idle (`launch --idle U07,U08`: the units
+this invocation found stalled or CI-waiting hold no slot) or, from amendment 5, it is pending a
+decision (§11.2, U24).
 
 **The builder as a GitHub App.** The builder's credential is one of two: the machine account
 above (`builder.gh_token_env`) or a GitHub App, `builder.app` = `{app_id: <int>, slug: <the
@@ -1455,9 +1778,20 @@ spec-hash line, which needs an approval; `protection_problems` on the placeholde
 `.superegm/config.json` and a `pull_request` workflow are at `origin/<base>`;
 `SUPEREGM_BUILDER_TOKEN` is set; the token's login (`gh api user` with the token) is not an
 owner; the protection check of `launch` (the `superegm/**` lines read the ruleset); the builder
-profile exists and is empty of `CLAUDE.md`,
-plugins and hooks (a `settings.json` with a `hooks` key; `profile_problem` gains that check, so
-`launch-builder` refuses it too). Its own lines, which `launch` does not check: `gh` resolves on this machine
+profile exists and is empty of `CLAUDE.md`, hooks (a `settings.json` with a `hooks` key;
+`profile_problem` gains that check, so `launch-builder` refuses it too) and plugins of its own
+(a managed plugin is policy and passes; a synced or installed one is refused) and, from
+amendment 7, of a `skills/` or `commands/` directory, and its `settings.json` sets
+`disableClaudeAiConnectors` true; and every id in `config.builder.plugins` resolves to an
+installed `user`-scope entry in the elephant profile's `plugins/installed_plugins.json` (§7) and
+is none of the builder profile's managed plugins (it would load twice; `profile_problem`'s lines,
+so `launch-builder` refuses too), the set printed (`plugins: <id>
+<version> [<hook events>]... | none`, `mcp: <names> | none`); and, from amendment 8, the role
+table, one `model:` line per role, each value as configured (`model: builder <tier> <model>
+<effort>`, one per tier from amendment 12, doable the `builder.model` pair,
+`model: goldfish <alias> <effort>`, `model: astra lanes <model> <effort>`, `model: astra head
+lane <model> <heads_effort>`, `model: judge <member> <model> <effort>` per member; informational,
+as the `astra:` line is; the elephant is the session's, not printed). Its own lines, which `launch` does not check: `stall: <builder.stall_minutes> min` (amendment 10, informational); `gh` resolves on this machine
 (`shutil.which`, the path the launch bakes in, both paths); the `gh auth`
 login is in `config.owners`; the builder's role on the repository
 (`repos/<repo>/collaborators/<login>/permission`) is `write` exactly, the role found named
@@ -1489,16 +1823,71 @@ under the launched environment starts with `https://`; `git credential fill` wit
 helper fails), which run on both paths.
 
 **The driver loop** runs in the main conversation (typed by the owner, or launched by the
-owner's timer, §11.2, one session per open handoff at a time), is the only long-lived actor, and is
+owner's timer, §11.2, one session per store at a time), is the only long-lived actor, and is
 event-driven: `superegm launch` marks the ready units up to `max_in_flight`; the elephant launches
 a builder per marked unit; `superegm status --wait <s> --runcard <id>` (EGM's loop, reading
-only and saving once on return, extended to read exit files and each unit's issue and PR
-comments) returns **every** unreported change since its last save, one event line each, or
+only and saving once on return, the board's GitHub write and its `board_changed_at` save aside (amendment 10, §7), extended to
+read exit files and each unit's issue and PR comments) returns **every** unreported change since its last save, one event line each, or
 `deadline` when nothing changed. The event kinds are `head` (with its CI state), `status` (a
 builder status comment), `exit` (a builder exit), `landed`, `closed` (a PR or issue closed by
 hand, with its actor), `deadline` and, from amendment 5, `ruling` (an owner's comment in §13.2's
 form: the unit, the author, the decision or finding it names, the comment id); the line form is
-U09b's, the seventh kind's U22's. Invariants the U10b plan must pin,
+U09b's, the seventh kind's U22's. From amendment 10 every `status` pass of a `wave` session,
+`--wait` included, does two more things. The watchdog (U31), one predicate and one clock: a
+`running` launch without the `kill_failed` mark, no exit file, whose branch shows no commit newer than the launch's own newest
+commit (or than its `started_at` when it has none) for `config.builder.stall_minutes` (30) is
+stalled (the launch sense of §2's row, amendment 10); the pass, a reader,
+reports it as the event line `U<n> stalled (<minutes> min; last commit <time | none>) pr=<n or none> status=<word or none>` from a
+local read of the worktree `HEAD` and `started_at`, derived afresh at every pass while the launch
+is `running` and unmarked (the predicate, no fingerprint: a session that ended before step 3 sees
+it again), and the skill's step 3 records it through
+`record-launch --exit stalled`, which re-reads the entry (an `interrupted` it finds is kept),
+checks that the group the `pid` names is the launch's own (a live group with no leader is: the
+wrapper died, its `claude -p` lives on, the signal ends it and the record is `kill_failed (no exit file)` by
+construction, the owner's interrupt the close; a present leader must be the launch's wrapper, the proof
+the plan's, the entry's `command` one; `kill_failed (pid reused)` when it is another's,
+`kill_failed (no process)` when no member lives, no signal either way),
+signals the process group through the `pid` the entry carries (the wrapper `launch-builder`
+spawned as the group's leader, below; U25's `kill_group`, the helper's one, sends SIGTERM, the
+signal the wrapper traps, and never escalates: the wait is `record-launch`'s own), waits for the wrapper's exit
+file `stalled` (the wrapper traps the signal and the trap's write ends it, no code written after;
+the one proof, §4; a file reading a code instead is refused, the next pass's `exit` line recording it), records `exited (stalled)`
+with the last commit time (`last_commit_at`, the launch's own newest commit, one newer than
+`started_at`, which every `--exit` writes, or none: the one field the carve-out reads for an exit or a stall) and journals it (the stalled line is that
+launch's exit line: `status` masks the `exit` and `builder_status` fingerprints of an `exited (stalled)` launch, so no
+`exit` or `status` event follows, the folded word reaching the stall's question; a `kill_failed` launch's late exit file still flows, below), the unit going to decision point 3 with the stall facts (below); no exit file within 30 s is recorded `kill_failed` instead, the launch
+`running` and signalled no more, the unit idle with that reason and in the inbox for the
+owner's typed interrupt, and a later pass that finds its exit file reports the exit as it
+reads, `--exit <code>` as for any launch or `--exit stalled` recording with no guard and no
+signal when the file already exists, either clearing the mark. The session's pass is the one
+reporter and `record-launch` the one writer: the driver tick reads and launches, and the
+session it launches reports at its first pass (§11.2); no foreman and no goldfish is killed,
+there is no per-step timer, and no web UI. The board (U30), for the owner away from the store,
+the tracking issue being the one page GitHub shows them: the report's `## Units` line per unit,
+from amendment 10 with the new columns (unit · state word, `report.py`'s `unit_state`
+(`active` is the ruling's in flight; a cap shows as `pending` with `waits on` naming the
+decision; a `kill_failed` launch still `running` reads `idle` by one more clause of
+`unit_state` over that field, the owner's interrupt ending it as any launch) plus `ready` for an unlaunched unit in the saved `status.ready` set less the card's `idle[]` (those read `idle`, the refusal the reason) and `waiting` for any other
+unlaunched unit (the point-3 word `blocked` is a case, not a state), derived once there ·
+round · launch · head, 7 hex · PR · waits on, the units or the decision it is blocked by, or `ci` for a head whose CI is pending or absent · next
+action, `word_action`'s verb for a posted round newer than the latest launch, none while a
+launch runs, `foreman dispatch` for a terminal launch (it refuses or acts: the predicate's one
+place, below), the idle reason's action for
+`idle` (the interrupt for a `kill_failed` one), the decision for `pending`, `launch-builder` for
+`ready`,
+none for `waiting`, `landed` and `stopped` · cost, the
+launches' `total_cost_usd` summed from the entries, where `record-launch --exit` writes it from
+the result file's read it makes for the model, none until then, U28; a killed launch's result file is partial: its entry records the cost as unrecorded and the cell marks the sum partial · tier, `units[*].tier`, doable when absent, the entry's copy the record of what ran, amendment 12), one table in the report
+file, on stdout and in the issue, under a header line (the handoff id, `<base>`, the spec
+sha256's first 12 hex, the waves, the time of the last change, which `status` saves in
+`state.json` at the splice's write and `report` prints), written by `status` into the
+tracking issue's body between its two markers (§7) through the one splice function and
+`apply.edit_issue`: a writing pass reads the body once at the splice, compares the fresh rows
+with the block's, sets `board_changed_at` to the pass time when they differ (kept otherwise: the
+one copy, saved to `state.json` at that write and printed into the header) and writes in the same step, a failed write journaled and
+never failing the pass (as a failing notify hook, §11.2); the
+inbox stays the action list (§11.2); per-round history stays in the store; no unit issue is
+written. Invariants the U10b plan must pin,
 driving the loop through `foreman dispatch`'s refusal (below):
 - An event is reported once and never lost: `status --wait` saves only the fingerprints of the
   units it reported, and the elephant handles every line of a batch before calling it again.
@@ -1515,18 +1904,25 @@ driving the loop through `foreman dispatch`'s refusal (below):
   predicate is evaluated.
 - When several heads are ready at once their foremen are dispatched in one message.
 - At every batch, before any `foreman dispatch`, the wave runs `review ingest` (§8) for every unit
-  with an open PR, awaiting-merge units included; a unit whose `clean` outcome the ingest
-  rewrote `revise` is handled as a `revise` word (the next builder is launched with the review).
+  with an open PR, awaiting-merge units included and stopped units excluded; a unit whose `clean` outcome the ingest
+  rewrote `revise` is handled as a `revise` word (the next builder is launched with the review),
+  its slot having been freed at `clean`: it is ready, not in flight, until `launch` marks it again
+  (§8; the in-flight predicate above says so).
   A thread that arrives after the loop ended is ingested by the next `wave`, typed or
   timer-typed.
 - A `ruling` line is applied as the point's own subcommand says below (`decision rule --by
   <login>` with `review settle --owner`, `review rule --owner`, or the deviation's record) and
   journaled `Ruling (<login>, comment <id>): …`; an edited comment is re-read, a recorded ruling
   never changes (a later edit journals `ruling edited after record, ignored`), and a `ruling`
-  whose decision is already ruled is journaled and dropped. A re-typed `wave` reads them before
+  whose decision is already ruled, or that names no open decision or finding, is journaled and
+  dropped (the whole-file `test-delta <file> allowed` form names every open decision whose
+  `test_delta` entry is in that file, a point-2 form the unit's open point-2 decision, and `redesign` its open point-1
+  and point-2 decisions, §13.2) (the `dod-<n>`, `test-delta`, deviation and `tdd-order` rulings reach `collect` from
+  the comments whatever the event's fate). A re-typed `wave` reads them before
   its first batch, as it reads pending decisions.
 - A builder's `exit` and its `**Builder status:**` comment are one decision, never two.
-- Lines for a stopped unit are ignored except `landed`. A launched unit whose PR is closed
+- Lines for a stopped unit are ignored except `landed` and, from amendment 10, `stalled` (step 3
+  records it the same: the kill is the one thing left to do for a stopped unit's launch, U31). A launched unit whose PR is closed
   unmerged, or whose issue is closed while its PR is unmerged, by an actor other than the builder
   account is `stop` without a ruling (the owner has ruled); a `closed` whose actor is the builder
   account's login, an interrupted launch, and an exit with no PR are point-3 questions.
@@ -1540,7 +1936,9 @@ driving the loop through `foreman dispatch`'s refusal (below):
   After every batch, and at the end, the elephant runs `superegm report`, which rewrites
   `wave_<n>_report.md` (per unit: state, head, rounds, open findings, every non-terminal launch,
   every head with pending or absent CI, every idle unit and why, every ready unit unlaunched for
-  want of a slot, every pending decision, every stopped unit and its unlanded dependants), and
+  want of a slot, every pending decision, every stopped unit and its unlanded dependants), whose
+  `## Units` line per unit is, from amendment 10, the board's row with the new columns, one
+  table in the file, on stdout and in the issue (U30), and
   at the end closes the run card. The skill is re-typeable and resumes from the store without a
   second launch, ruling or review of anything already recorded. A pause at a decision point
   ends the loop; builders keep running; the next `wave` handles what they reported.
@@ -1551,29 +1949,67 @@ launch is terminal, the builder token and profile pass §4's checks, and the iss
 equals the body the write list of the filing that created the unit's issue (`state.json.filings[]`)
 stores for it, filled and normalised as `verify` compares. Every launch adds a fresh worktree
 under `worktrees/U07/` on branch `superegm/<handoff-id>/U07` (round 1 from `origin/<base>`,
-later rounds at the PR tip), after detaching the earlier launch's worktree from the branch
-(`git switch --detach`; nothing in it is removed), and leaves earlier worktrees for
+later rounds at the PR tip) and detaches the earlier launch's worktree from the branch
+(`git switch --detach`; nothing in it is removed; from amendment 11 the invariants of a re-run: a re-run that fails before
+the switch leaves the earlier launch's worktree on its branch and the round's own detached; a re-run reuses its detached `r<n>` and refuses one on the branch, a launched builder or
+the window before the spawn, which the owner's hand clears once they have checked no builder
+runs there (`clean` keeps what no launch records; the catch below kept); the step order is the plan's, U32), and leaves earlier worktrees for
 `/superegm:clean`. It writes the prompt file, which holds exactly: the issue body,
 `references/builder_orders.md`, the `pr_block_file` text under a `# PR block` heading when the key
 is set, the unit's orient text under a `# Orient` heading (§9.3), the body's cited spec range
 under a `# Spec range` heading (above), every `**Deviation**` comment,
-every `**Decision D<n>:**` and `**Ruling:**` issue comment **whose author is not the builder
-account**, and from round 2 the foreman's review comments on the PR (the platform passes it as one
+every `**Decision D<n>:**` and `**Ruling:**` issue comment **whose author is in
+`config.owners`** (a `**Ruling:**` comment only when `ruling_of` parses it or it carries the
+judges' panel marker; a `**Decision D<n>:**` comment by its heading and author; amendment 5; an
+inexact ruling form binds nothing; 1.0.0 took any non-builder author, which on a public repository
+let a passer-by's ruling-form comment order the builder, anti-goal 10; the judges' posts are under
+the elephant's token and pass), and from round 2 the foreman's review comments on the PR (the platform passes it as one
 argument, §4; a prompt past the platform's limit fails the launch, which `record-launch --exit`
-records). The launched command carries: the builder profile;
+records). The launched command carries: the builder profile; `--plugin-dir <dir>` for each plugin
+`config.builder.plugins` names (the directory and version of its `user`-scope entry in the
+elephant profile's `installed_plugins.json`, §7, enabled there or not; a listed plugin's hooks,
+skills and bundled servers come with it) and
+`--mcp-config launches/<unit>_r<n>_mcp.json --strict-mcp-config`, the file written from
+`config.builder.mcp` at the launch, so no other MCP configuration loads (whether the flag keeps a
+listed plugin's bundled servers is the platform's, pinned by U27's plan with one run; the
+servers the builder sees are the file's and those, no other); the set recorded in
+`launches/<unit>_r<n>_plugins.json` (each plugin's id, version, directory and hook events; the
+managed plugins; the MCP file's server names) at the launch, §7;
 `GH_TOKEN` from `builder.gh_token_env` (on the App path, the sentinel `GH_TOKEN` and `<bin>/gh auth git-credential` instead; on both
 paths the owner's git configuration, SSH and askpass shut out and the helper reset, §11), with the HTTPS push rewrite and credential helper in its
-environment; `SUPEREGM_ROLE=builder` and `SUPEREGM_RUNCARD`; `claude -p` with the prompt file's
-content, the configured model and permission mode; the allow-list plus a push prefix for the
+environment; `ENABLE_CLAUDEAI_MCP_SERVERS=false` (belt and braces over the profile's
+`disableClaudeAiConnectors`, §4); `SUPEREGM_ROLE=builder` and `SUPEREGM_RUNCARD`; `claude -p` with the prompt file's
+content, the model and effort of the unit's tier (amendment 12: `units[*].tier` of
+`handoff_units.json`, `graph`'s parse of the section's `Tier:` field, no body parse at the launch;
+`difficult` and `easy` from `builder.tiers`, doable and a unit with no tier `builder.model` and
+`builder.effort` themselves; the tier on the launch record and the board; amendment 8: `--effort <level>`, the session
+flag `-p` honours, U28's one-run case; `CLAUDE_CODE_EFFORT_LEVEL`, which would beat the flag, is
+unset in the launched environment beside the askpass and token names) and permission mode; the allow-list (its `Skill(...)` and `mcp__*` rules among them, amendment 7) plus a push prefix for the
 unit's own branch and `Bash(<first word>:*)` for every command `run_commands` returns from the
-body; `--output-format json` into the result file; and the exit file on exit. The launch is
-recorded (`record-launch`), and `record-launch --exit <code>` later records the exit. An
+body; `--output-format json` into the result file; and the exit file on exit. From amendment 10
+starting the launch is `launch-builder`'s one behaviour, U24's (amendment 5's `--start` flag is
+gone; the typed wave skill and the tick's session both call it, and the command line it would
+have printed goes into the entry as the record, the journal line `<unit> launch <n> running (pid <pid>)`), a Popen in a new session with
+the wrapper the process-group leader, and `launch-builder` appends the `running` entry itself,
+once, after the spawn (`started_at` taken then; a crash between
+the spawn and the write leaves a builder with no entry, the accepted window, git's refusal on
+the unit's existing worktree path the catch against a second builder), with its full field set
+(§7: `round`, `worktree`, `branch`, `started_at`, `boot_id`, `pid`, `command`,
+`prompt_sha256`, `result_file`, U33's `tier`, and U28's requested `model` and `effort`), `record-launch`
+keeping its `--exit` role alone (`--exit <code | stalled>`; the flagless form is refused from
+U24 on; `--exit stalled` the watchdog's, U31's: the signal, the 30 s wait and the record or
+`kill_failed`, §11). An
 allow-list containing `Agent`, `Skill` or bare `Bash` is refused.
 
 **The builder orders** (`references/builder_orders.md`, absorbing superpowers' implementer prompt
-and the discipline of its receiving-code-review and test-driven-development skills): follow the
+and the discipline of its receiving-code-review and test-driven-development skills): the skills
+the builder may invoke are the ones its allow-list's `Skill` rules name, written into the orders
+at the launch (amendment 7; none when the list has no rule); a detached `HEAD` in its worktree
+stops it with `BLOCKED` (amendment 11); follow the
 Steps in order, test first, one `test(S<n>)` commit then one `feat(S<n>)` commit per Step; run
-every DoD `Run` command and paste each item's output in the PR body under its item number as a
+every DoD `Run` command and paste each item's output in the PR body under its item number, refreshing the body with
+`gh pr edit --body-file` before each round's push (amendment 11: the `--body-file` form written into the
+orders' existing before-push refresh line, the one such line once the push paragraph's after-push clause is dropped with it, U27), as a
 fenced block; push with `git push origin <branch>` and never to any other branch; open a
 **draft** PR against `<base>` whose body is the unit id, the prompt's `# PR block` section when it has
 one (verbatim, right after the audit-trail line), the DoD results in that form and
@@ -1628,7 +2064,10 @@ and returns one word plus one line:
   findings with the builder's replies and, on Astra's own, their dispositions), once per head
   per round, after CI concludes and after the Claude panel returned, fresh every round (no
   `--resume` on a head: the foreman keeps no session handle), as one foreground Bash call with
-  the runner's `--timeout 540` and the tool's timeout at 600 s (the platform caps a foreground
+  the runner's `--timeout 540` (and, from amendment 8, the lane's effort `astra.heads_effort`,
+  `high`, read by the foreman from the config file as its brief's step 2b directs, `high` the
+  brief's own fallback for a key the file lacks; the Astra judge member's `effort` is its own,
+  §13) and the tool's timeout at 600 s (the platform caps a foreground
   call there, §4; a head's diff is small, and the brief says so): no background command, no
   wait, the call returns with the run's end (the one session the foreman starts, §4; a batch
   waits for its foremen, so the lane adds at most 600 s to a batch), and
@@ -1656,31 +2095,84 @@ and returns one word plus one line:
   comment id, §10); and every finding of the last posted round the
   builder replied `contested` to, which is unsettled until a ruling. It reads `**Reply <fid>:**
   contested — <reason>` lines into `builder_contested[]` as `{fid, reason}`, ignoring a reply to
-  the CI finding. It also ingests the external threads held for this head (§8). From amendment 5
-  (U25) it verifies and never trusts, two gates before the word. **The DoD re-run**: it re-runs
-  every DoD `Run` item of the unit body in the review worktree at the head sha (the commands the
-  builder pasted), under `python3.12` resolved at dispatch (`shutil.which`; `doctor` checks it),
-  each item bounded by `config.foreman.run_timeout_minutes` (20), in the builder's shut-out
-  environment (no owner git config, SSH or askpass; the sentinel `GH_TOKEN`; `SUPEREGM_APP_KEY`
-  unset), so the head's code reaches no credential the builder could not; it records the exit
-  code and the summary line under `review/<unit>/pr<n>/r<n>/dod/<item>.txt` (`exit: <code>`,
-  `summary: <line>`, `timed_out: yes|no`) and in the round's `dod_runs` (§7). An item whose exit
-  is non-zero is a `foreman` high `dod-<n>: ran red (<line>)`, a timeout `dod-<n>: ran red
-  (timeout)`, and an item whose summary line differs from the builder's paste in its pass or fail
-  counts is a high `dod-<n>: paste differs from the run`; the fenced-output check stays. **The
-  test delta**: for every test file a commit of the PR's range touches (the commit walk of the
-  `tdd-order` rule above, so a file created then deleted in the range is among them; a Step's named
-  test path or a file the §9.3 test-file name rule names), it compares the assertions between the file at the PR range's base when it
-  exists there (a base file's assertions are the baseline, whatever commit removes them), else at its
-  first appearance in the range (the commit that creates it, whatever its subject), and at the head,
-  where a file absent at the head (deleted, renamed, or created then deleted in the range) reads as
-  zero assertions, so every baseline assertion counts as removed (lines starting `assert`, `pytest.raises`, and
-  `parametrize` rows); every removed or loosened assertion (removed; an `==`, `in` or `raises`
-  turned into something weaker; a parametrize row dropped) is a `foreman` high `test-delta:
-  <file>:<line> removed | weakened`, recorded in the round's `test_delta` (§7) and re-derived
-  every round until a head restores it or the owner's `**Ruling:** <fid> allowed — <reason>`
-  names it (§8's settle rule). The word is given only after both gates ran; the foreman brief
-  says so. `collect --dispatch <id> --not-run "<reason>"` (EGM's) records a round the
+  the CI finding (the external threads held for this head are the batch's `review ingest`'s,
+  §8, never this call's). From amendment 5 (U25) it verifies and never trusts, two gates before
+  the word. **The DoD re-run**: `collect`
+  reads every input it judges first (the CI JSON, the diff, `pr_body.md`, `comments.md`, the
+  round's record and `foreman/<unit>.json`, and the test files of both commits from git objects,
+  never from the worktree), holds them in memory, and only then runs every DoD `Run` item of the
+  unit body (`dod_items`: the body's lines as written, through `/bin/sh`, never `$SHELL`, whose
+  `~/.zshenv` would re-export what the allow-list dropped, each naming its own
+  interpreter or runner; the builder's paste is compared, never run; `doctor`'s `python3.12` line
+  is this repository's own prerequisite, not the gate's) in the review worktree at the head sha
+  (which `prepare` removes by force before it adds the next round's, the worktree being the
+  store's and never a person's, since a `Run` line may leave it dirty),
+  the whole `collect` call bounded by `config.foreman.run_timeout_minutes` (8; at most 9, under the
+  Bash tool's 10-minute foreground cap it runs under, §4, which the foreman brief asks for on the
+  `collect` call, `timeout: 600000`, the tool's default being 2 minutes, pinned by a test of the
+  brief's text: the reads and the write-back come first and last, the runs get what remains), each item started in its own process group and the group
+  killed when the item returns or at the bound, before the tool's, in a fixed environment (`PATH`, `HOME`, `LANG`, `TMPDIR`, the sentinel
+  `GH_TOKEN`, and the builder's git shut-out carried over: `GIT_CONFIG_GLOBAL` and
+  `GIT_CONFIG_SYSTEM` at `/dev/null`, `GIT_SSH_COMMAND=false`, `GIT_TERMINAL_PROMPT=0`, no
+  `GIT_ASKPASS` or `SSH_ASKPASS`, the builder's `GIT_CONFIG_KEY_n` pairs that empty
+  `credential.helper` and `core.askPass` (the review worktree shares the checkout's `.git/config`),
+  and `PIP_REQUIRE_VIRTUALENV=1` with `npm_config_prefix` at the worktree, so a bare install
+  cannot land in the owner's prefix; an allow-list, not the session's variables minus a deny-list,
+  so no `SUPEREGM_APP_KEY` or `SUPEREGM_BUILDER_TOKEN`; pinned by the builder's own test): the
+  variables are gone, the filesystem is not (§4.1's residual). A `Run` line that needs
+  dependencies installs them into the worktree (a venv or `node_modules` there, never a global
+  site-packages) on the same line (whether the builder's allow-list prefix admits a `&&`-chained
+  line is the U25 plan's probe; the fallback is `run_commands` returning every segment's first
+  word); a line that needs a service the worktree lacks reads `ran
+  red`, the plan's defect. After the last run it writes the round's record,
+  `foreman/<unit>.json` and the checkout's `.git/config` (the next fetch would honour a helper or
+  an `insteadOf` a run wrote there), those three files, back whole from what it read, so an edit a run made to
+  them is overwritten (two `collect` calls overlapping on one checkout, the normal batch of several ready heads, can
+  re-persist a run's `.git/config` edit between them, and an `insteadOf` or `include.path` no
+  `-c` can unset: the overlap is in §4.1's window beside the left-behind process); every other file of the store (`state.json`, `launches/`, a sibling's exit
+  file, the journal) stays as a run left it, §4.1's residual, with a process the run leaves
+  behind. It records the
+  exit code and the summary line under
+  `review/<unit>/pr<n>/r<n>/dod/<item>.txt` (`exit: <code>`, `summary: <line>`, `timed_out:
+  yes|no`) and in the round's `dod_runs` (§7). An item whose exit is non-zero is a `foreman` high
+  `dod-<n>: ran red (<line>)`, one cut by the bound `dod-<n>: ran red (timeout)` (the items after
+  it `not run (timeout)`), and an item whose summary line (pytest's; a runner whose output carries no pass or fail
+  counts compares on the exit code alone) differs from the builder's paste in its pass or fail
+  counts is a high `dod-<n>: paste differs from the run`; the fenced-output check
+  stays. A `dod-<n>` high is re-derived every round for that item number until a head turns it
+  green or a ruling names it: the owner's `**Ruling:** dod-<n> allowed — <reason>` (§13.2, as
+  `test-delta`'s does), or a point-1 overrule of the builder's contest, the judges' or the
+  owner's, which persists on the item number too: a line the worktree cannot run (a service, a
+  suite longer than the bound) is ruled once, not once per round, and never spends the cap. **The test delta**: for every test file a commit of the PR's range touches (the commit walk of
+  the `tdd-order` rule above, so a file created then deleted in the range is among them; a file
+  the §9.3 test-file name rule names) that no `Write` line of the unit's own body names (a test the plan set out to rewrite is
+  the owner's approved change; the gate guards the files the unit did not plan to touch, and a
+  named file's other assertions are the change-review goldfish's to see, a residual; paths
+  paired by git's rename
+  detection, so a renamed file compares with its old path and a split or merge compares each new
+  file with the source of its rename pair), it compares the file at its base (the range's base for a file that exists there: a base
+  file's assertions are the baseline, whatever commit removes them; its first appearance in the
+  range, the commit that creates it whatever its subject, for a file the range creates;
+  `base_commit` in the record) with the head, where a file absent at the head (deleted, or created
+  then deleted in the range; a rename is paired above) reads as zero assertions, so every baseline
+  assertion counts as removed: every removed or loosened assertion,
+  assertions paired across the change as git pairs them (a removed line with the added line at
+  its position in the same hunk, the rest unpaired) so a changed value (`== 3` to `== 4`, the
+  usual review fix) is never flagged (an `assert`, `pytest.raises` or
+  `parametrize` row with no pair at the head; a pair whose `==`, `in` or `raises` turned into
+  something weaker; a `def test_` deleted; a `skip` or `xfail` marker added) is a `foreman`
+  high `test-delta: <file>:<line> removed | weakened`, recorded in the round's `test_delta` (§7)
+  and re-derived every round until a head restores it or the owner's `**Ruling:** <fid> allowed —
+  <reason>` (or `finding overruled — <reason>`, read as `allowed`) names it (§8's settle rule): the ruling settles the entry (`file`, `base_commit`,
+  `base_line`, the assertion's line at the base, stable while the head's line moves, `kind`), not
+  the round's copy, so `collect` skips an allowed entry in later rounds, and
+  `**Ruling:** test-delta <file> allowed — <reason>` settles every entry of that file at once. The grammar is pytest's: on a repository whose tests are
+  not Python the gate records `test_delta: []`, said in the foreman brief, and CI stays the
+  evidence; a `conftest.py`, `addopts` or `testpaths` change that hides tests from every run is
+  the change-review goldfish's to see, not the gate's; a body with no `Run` item records `dod_runs: {}`. The word is given only after both
+  gates ran, mechanically: `review post` refuses a round whose entry lacks either key (`post:
+  gates not run`; empty is not absent), and the foreman brief says so.
+  `collect --dispatch <id> --not-run "<reason>"` (EGM's) records a round the
   foreman could not complete (a failed fetch, `prepare` or dispatch, or a panel goldfish still
   not run after its one re-dispatch) as `collected (not run (error: <reason>))`.
 - `review post --unit U07 --round <n> --dispatch <id> --runcard <child>` is EGM's posting guard
@@ -1699,7 +2191,10 @@ and returns one word plus one line:
   merge`.
 - The return word is the round's `outcome` when the round is `posted`, `target-moved` when
   `review post` refused, and `error` otherwise (the round recorded by `collect --not-run`). A
-  return that is none of those six words is read as the round's `outcome` when the round is
+  return that is none of those seven words (`owner: <ids>` included, written by `review post`
+  before `revise` and, below the cap, before `cap-reached`, since the cap is never spent on it; at
+  the cap, `review status` exit 2, `cap-reached` comes first unless the remainder is owner-only, §8) is read as the
+  round's `outcome` when the round is
   `posted`, and as `error` otherwise; the elephant records nothing itself, and the next
   `foreman dispatch` supersedes a round left non-terminal.
 - It never merges, never approves, never edits the owner's working tree, never removes a
@@ -1707,7 +2202,9 @@ and returns one word plus one line:
   call, above), never convenes the judges, never infers that a builder died.
 
 **What the elephant does with a word.** `clean`: the unit awaits merge and its slot is refilled.
-`revise`: the next builder is launched (its prompt carries the review). `contested`: decision
+`revise`: the next builder is launched (its prompt carries the review). `owner: <ids>` (amendment
+5): every unsettled high or medium is the owner's alone (§8): `decision open` on each, no
+relaunch, no slot, the inbox lists them. `contested`: decision
 point 1 (`decision open --point 1`), then the ruling is recorded with `review settle` and
 `decision rule` and posted on the issue as `**Ruling:** <fid> finding upheld (fix it) | finding
 overruled — <reason>`, and the unit proceeds by `review status` (converged → awaiting merge; at
@@ -1716,17 +2213,27 @@ open --point 2`), **one more round** (once; recorded with `review rule` and `dec
 next builder is launched with the review) or **stop**. At point 1 or 2 on a head a third ruling is **redesign** (§13.2, U18):
 `decision rule --unit U<n> --decision <id> --ruling "redesign — <one sentence why>"` records it
 (the judges' question file for such a point lists it with the sentence filled, §13.2), and the
-unit is stopped as below with a brainstorm brief. `error`, `target-moved`: the head is
+unit is stopped as below with a brainstorm brief; in leavemealone-mode (amendment 11, U23) a
+judges' `redesign` needs a `high` finding behind it or the owner's confirmation: without a high
+`decision rule --by judges:<panel-id>` refuses, so no ruling is written (the panel's answer stays in its record, as an `owner: <ids>` round's does,
+§8; the leavemealone table's cap row runs its `review rule stop` only after that call accepts, U23's edit of the row), the decision stays pending, listed by the inbox with the point's own forms (point 1 `<fid>
+finding upheld`, `<fid> finding overruled` or `redesign`; point 2 `one more round`, `stop` or
+`redesign`, §13.2) and re-convening no panel (on a resume too: a pending decision whose panel answered is the owner's alone, the verdict the read), and nothing is stopped until the owner's
+`**Ruling:**`: the one case of goal 5 and §2's leavemealone row where a converged answer reaches the owner. `error`, `target-moved`: the head is
 reviewed again at the next batch, unless `review status --runcard` reports the review stalled
 (exit 5), which makes the unit idle. `blocked` (a `BLOCKED` or `NEEDS_CONTEXT` status, a builder
-exit with no PR, an interrupted launch, a `closed` by the builder account, or a third `blocked`
-on one unit without an intervening head): decision point 3 (`decision open --point 3`), whose
+exit with no PR, an interrupted launch, a stalled launch (amendment 10, with its stall facts:
+the minutes, the last commit time or none), a `closed` by the builder account, or a third
+`blocked` on one unit without an intervening head): decision point 3 (`decision open --point 3`), whose
 ruling is recorded with `decision rule` and posted on the issue as `**Ruling:** (<comment-id>)
 <option> — <reason>` quoting the question, then the next builder or `stop`; for an exit with no
-PR, an interrupted launch, a builder's `closed` or a third `blocked` the options are `relaunch`,
-offered once per unit, and `stop the unit`, and once `relaunch` has been used the case is `stop`
-without a question. A by-hand `**Ruling:**` is honoured at every decision point of a unit from a
-login in `config.owners` and from no one else, in §13.2's one grammar (amendment 5; 1.0.0
+PR, an interrupted launch, a stalled launch, a builder's `closed` or a third `blocked` the
+options are `relaunch`, offered once per unit, and `stop the unit`, and once `relaunch` has been
+used the case is `stop` without a question; a launch with no commit of its own spends no
+relaunch, whether it exited with no PR or stalled, and a second such launch on one unit is
+`stop` (amendment 10's one rule for both cases). A by-hand `**Ruling:**` is honoured at every decision point of a unit from a
+login in `config.owners` and from no one else, in §13.2's one grammar (the owner's one `**Ruling:** (<comment-id>) <option> — <reason>` naming
+the builder's one `BLOCKED` status comment that folded several `**Deviation**` headings under one option list rules each of them with that option, `collect` reading every heading, amendment 11, U22; amendment 5; 1.0.0
 honoured any non-builder author, and only on a BLOCKED comment, a deviation or a `tdd-order`
 finding): the wave reads it as a `ruling` event and records it with `decision rule --by
 <login>`. `stop` (from any ruling or from the owner's by-hand close): the issue is labelled
@@ -1760,7 +2267,8 @@ no issue it did not file in this handoff); then the wave relaunches.
 closed as completed, whoever closed it. Landing makes dependants ready. `/superegm:clean --unit
 U07` (EGM's `prepare --clean` looped over the unit's review rounds, plus the removal of every
 builder worktree whose launches are all terminal, dirty or not: the typed skill is the owner's
-decision, and EGM's dirty refusal applies to review worktrees) is typed, `destructive-local`,
+decision; from amendment 5 a review worktree whose rounds are all terminal is removed whatever
+its tree holds too, since a DoD `Run` line may install into it, §11) is typed, `destructive-local`,
 refuses while any launch or round is not terminal, and keeps what it cannot prove.
 `/superegm:interrupt --unit U07 (--launch <n> | --round <n>)` is typed and records
 `interrupted` on a launch, or marks a prepared round `collected (not run (interrupted: owner))`;
@@ -1776,8 +2284,10 @@ them, and a timer on their machine re-types `wave`. Merge stays human (goal 6); 
 approves, merges or chains a phase (§3).
 
 **One ruling grammar.** `decision.ruling_of(comment, owners) -> Ruling | None` is the one parser
-(anti-goal 1), used by `status --wait` for the `ruling` event, by `collect` for deviations and
-`tdd-order`, and by `decision rule --by <login>` for the record. A comment is a ruling only when
+(anti-goal 1), used by `status --wait` for the `ruling` event, by `collect` for deviations,
+`tdd-order`, `dod-<n>` and `test-delta` (beside the `rulings[]` entries recorded `--by judges:<panel>`, which `collect`
+honours as it honours the owner's comment: the judges' posted copy carries the panel marker the
+parser skips, §13.2), and by `decision rule --by <login>` for the record. A comment is a ruling only when
 its author's login is in `config.owners` and its body matches one of §13.2's forms exactly;
 anything else is text. GitHub's author field is the authentication; there is no token in the
 comment (it would make a phone ruling harder and guard against little the login check misses).
@@ -1789,64 +2299,197 @@ line in `using-superegm`. Without `--all` it reads the current repository's stor
 handoff of its `handoffs/` index (§7) unless `--handoff` names one; `--all` reads every store
 the registry lists (`registry: none`, and the one store, while nothing is registered). It lists
 only what needs the owner: open decision points (`decisions[]` without a `rulings[]` entry), cap
-rulings (`review status` exit 2), contested findings (point 1 pending), merge-ready PRs (the
-latest round's `outcome: clean`), stalled units (exit 5), escalations
+rulings (`review status` exit 2 with no `stop` ruled), contested findings (point 1 pending), merge-ready PRs (the
+latest round's `outcome: clean`), stalled units (exit 5), a `running` launch recorded `kill_failed`
+(amendment 10, §11: the line carries the reason and, for `no exit file` alone, the recorded pid, the group id the owner
+signals as a group and whose leader may be gone already, as `driver status` prints a tick launch's, and the action is the owner's `/superegm:interrupt --unit <U> --launch <n>` once they
+have ended the process, then a re-typed `wave`, whose Entry raises point 3 for an `interrupted`
+launch with no decision on it, from `launches[].status` (U31; an `interrupted` launch wakes no tick)), escalations
 (`approvals/<slug>.json.escalated[]` awaiting the owner; an integrate round's `escalated`
-findings) and units stopped for redesign with their brief's path (§13.2's `redesign` ruling). Never:
-builders running, rounds in progress, heads waiting on CI, lows, or the judges' converged
+findings), units stopped for redesign with their brief's path (§13.2's `redesign` ruling),
+`test-delta` findings from the round that records them (the owner's alone, §8: the action is the
+`**Ruling:** <fid> allowed — <reason>` form), a handoff whose last tick refused (§11.2: a repeating failure, a bad `root`; the action is
+`driver status`, for the owner's re-typed `wave` or `driver reset`), the
+owner-only findings a unit waits on (`owner: <ids>`, §8) and the driver's `stale` state
+(`doctor`'s line, §11.2); a finding on the spec PR (amendment 6, §8) is the spec review's own,
+settled in the session or by the judges, and never an inbox item. As information, never an action: an open `wave` card, typed or a tick's, and a tick launch
+without an exit file, each with its age (`driver status` shows them; `notify` sends each once,
+its fingerprint the card's or launch's id without the age, so a tick that crashed at the first
+tick of the night is seen and a healthy night costs one line per launch). Never:
+builders running (a `kill_failed` launch excepted, above), rounds in progress, heads waiting on CI, lows, or the judges' converged
 rulings, which stay in the journal and the posted `**Ruling:**` comments (§13.2); the feed
 carries the unconverged alone. One line per item, `<repo> <unit or review> | <kind> | <action>`,
 the action being the exact comment to post (§13.2's form, copyable from a phone, with the
 issue's URL), the command to type, or the PR's URL to merge.
 
-**The notify hook.** `config.notify` (an optional command line; `init` writes `null`) is run by
-`wave` alone, typed or timer-typed, after each batch's `report`, through `superegm notify
---runcard <id>`: it computes the inbox lines new since `state.json.notified` (the line
-fingerprints), writes them to the hook's stdin, waits `config.notify_timeout_seconds` (30),
-journals the exit code and updates `notified`; a failing or slow hook never stops the wave. The
-hook runs under the wave's run card as one more of that invocation's effects (anti-goal 4);
-`inbox` typed alone prints and never notifies. The lines carry unit ids, forms and URLs, never a
-token or a diff. The owner's script runs with the owner's environment, bounded by the timeout.
+**The notify hook.** `~/.superegm/notify`, an executable the owner writes outside every
+repository (absent means no hook; a command line in the committed config would let any commit
+that reaches `<base>` choose what runs as the owner), is run by `wave`, typed or timer-typed,
+after each batch's `report`, and by a tick with inbox lines new since its last (below), through `superegm notify
+--runcard <id>`: it computes the card's handoff's inbox lines (`inbox --handoff <id>`) new since both of that
+handoff's `notified` sets (the line fingerprints: a line is new when neither holds it) and
+writes its caller's set alone
+(`state.json.notified` under a `wave` card, `driver/<handoff>.json.notified` under a `driver`
+card, so a tick never writes the file a live session may hold), writes them to the hook's
+stdin, waits `config.notify_timeout_seconds` (30, a
+number: it runs no code), journals the exit code and updates `notified` whatever the exit (a failing hook is the owner's to
+fix; the lines stay in the inbox, never re-sent); a failing or slow hook never stops the wave. The hook runs under the caller's run card as one more of that invocation's
+effects (anti-goal 4); `inbox` typed alone prints and never notifies. The lines carry unit ids,
+forms and URLs, never a token or a diff. The owner's script runs with the owner's environment,
+bounded by the timeout.
 
 **The registry.** `~/.superegm/registry.json` lives outside every store and is written by the
 helper alone (§7's rule extended): `superegm register [--remove] --runcard <id>`, typed from a
-repository through `/superegm:driver register`, adds `{repo, root, artifacts_dir, base, mode}`
-for the current store, or removes it; `inbox --all` and the driver read it. Unknown keys stop. It
-is a list of stores, not a graph: a store's handoffs are its own index's (§7), and a prerequisite
+repository through `/superegm:driver register`, adds `{repo, root, artifacts_dir}`
+for the current store, or removes it; `inbox --all` and the driver read it. Unknown keys stop. An
+entry is keyed on `artifacts_dir`: two worktrees of one repository share the committed store, so
+`register` from another worktree of a listed store updates its `root` (journaled `registry:
+<store> root <old> → <new>`), never adds a second entry, and the entry's `root` is the one checkout a
+tick's sessions run in, every handoff of the store's: the latest `register` names it (§5's one
+worktree per handoff moves it when a handoff is filed). It is a list of stores, not a graph: a store's handoffs are its own index's (§7), and a prerequisite
 in another repository is prose and `Landed:` rows in the second spec (§9.1, §17), typed by the
 owner after the first lands; no `Repo:` field and no cross-store `Blocked by` exist.
 
 **The driver.** It runs on the owner's machine and nowhere else: a fleet box is a second exposure
 story nobody priced, and the owner's login never leaves the machine. `/superegm:driver install |
 uninstall | status | register | reset` is typed (`effects: external`, kinds `start-session,
-state-store`; its card's artifact is the U24 plan's to name under §6's rule). `install` writes a
-launchd agent (`~/Library/LaunchAgents/com.superegm.driver.plist`; on Linux a systemd user
-timer) that every `config.driver.interval_minutes` (15) runs `superegm driver tick`; the agent
-runs only what the plugin root names; the owner's `gh` login and the App key path stay where
-they are today, and §4.1 names the residual: a timer runs with the owner's credentials
-unattended. `uninstall` removes it; `doctor` prints `driver: installed (<interval>) | not
-installed` as information. A tick types one phase and chains nothing (§3): for each open handoff
-of each registered store whose launched units are not all landed or stopped, and whose previous
-tick launch has an exit file, it opens a `driver` card, launches `claude -p` with
-`/superegm:wave <spec> --leavemealone` in the repository root under the owner's profile, with
+state-store`: the plist and the registry are `state-store` writes by §7's extension, outside the
+working tree; its card's artifact is the U24 plan's to name under §6's rule). `install [--interval <minutes>]` (15; the machine's, never a
+repository's key) writes a launchd agent (`~/Library/LaunchAgents/com.superegm.driver.plist`; on
+Linux a systemd user timer, which needs `loginctl enable-linger`, a by-hand step the skill names)
+that runs `superegm driver tick` through the absolute interpreter and the installed plugin root
+it names (`ProgramArguments`: the root installed under the env file's `CLAUDE_CONFIG_DIR`
+profile, the one the session's own helper calls resolve to), bootstrapped at once (`launchctl bootstrap gui/<uid>`), so `install`
+is re-typed after every plugin update (the root is versioned: §5's new-session rule, one line more).
+A timer has no shell: the tick reads `~/.superegm/env`, `KEY=value` lines the owner writes (mode
+0600): `PATH` (where `claude`, `gh`, `python3.12` and `openssl` resolve), `CLAUDE_CONFIG_DIR` (the
+profile the session runs under: one without SubagentStart hooks, §4's rule for reviews, which
+`doctor`'s `env:` line reports) and the credential the owner's shell holds today, `SUPEREGM_APP_KEY` (a path; the App is the driver's credential of
+choice) or `SUPEREGM_BUILDER_TOKEN` (a token there is §4.1's residual, the same the shell holds);
+the session and the notify hook run in that environment, and the plist carries no secret and no
+environment of its own. `uninstall` removes the agent; `doctor` prints `driver: installed
+(<interval>) at <root> | stale (<plist root>; the env profile's root <root>) | not installed`, `sleep: <pmset
+setting>`, `root: ok | not a worktree of <repo>` and `env: ok | missing <key> | readable by
+others` as information. A tick types one phase and chains nothing (§3): for each open handoff
+of each registered store with a filed unit that is neither landed nor stopped (a handoff with no
+launch yet included), and whose previous tick launch has an exit file, it opens a `driver` card,
+records the launch in `driver/<handoff>.json` before starting it (`launches[]` with `started_at`,
+`exit_file`, `status`, as `launches/` has them, §7: the list before the first write, as `apply`,
+§4.1, so a tick that crashes between the two leaves a launch without an exit file, which the next
+tick skips and `driver status` shows, below), launches `claude -p` with
+`/superegm:wave <spec> --handoff <id> --leavemealone` (the typed skills' form, §7) in the
+repository root under the profile the env file names, with
 `SUPEREGM_ROLE=driver` (a third role value: the hook prints its text for it, as for any role but
-`goldfish` and `builder`, §6), records the launch in `driver/<handoff>.json` (`launches[]` with
-`started_at`, `exit_file`, `status`, as `launches/` has them, §7) and closes the card: the
-session is that card's one effect, and the wave it types opens its own. The tick is the one
-helper call that starts a session itself, there being no elephant to hand the command line to;
+`goldfish` and `builder`, §6), in its own session and process group (the wrapper below, Python's
+`start_new_session=True`; the plist sets `AbandonProcessGroup`, the systemd unit
+`KillMode=process`, so the supervisor's reaping of the exited tick leaves the session alive; the
+U24 plan pins both keys by a test), and closes the card: the session is that card's one effect,
+and the wave it types opens its own. A tick launches nothing when there is nothing to do: before
+the launch it runs one read (`status`, no `--wait`, saving no fingerprint, so the next session's
+first `status --wait` still reports every event; from amendment 10 the read counts the watchdog predicate over the running launches as a
+trigger, kills nothing and renders no board: the session it launches kills and renders at its first pass, §11.1, U31;
+extended for the tick to count the review threads not in
+`ingested[]` on the latest posted round's head of each open PR (the ones U21's reader would record above `low`, by that
+reader and no restated rule, §8; a thread on a later head waits for that
+head's round, a stranger's buys no session) and the CI state of each idle head,
+`status.py`) and, when the
+previous session ended with every unit clean, landed, stopped, idle or pending and no event of the
+seven kinds, un-ingested thread or idle head's CI conclusion is newer than that session's last
+fingerprint (a comment that makes no event is no trigger: a public repository's stranger buys no
+session), it writes nothing (no card, no journal line, no store write: anti-goal 4; `driver status` derives
+idleness from the last launch's exit file) and ends (a stalled unit
+is idle: the owner's re-typed `wave`, a new run card, is its one retry, §8; a tick's session is
+no such retry: its dispatch predicate reads the stall through `review status --runcard <id>` with the
+handoff's `wave` cards since the last posted round as the card set, U24's form in `review.py`); a tick that launches costs one
+session, one that finds nothing costs one read. The tick and `launch-builder` (below) are the two helper calls that start a session
+themselves, the tick having no elephant to hand the command line to;
 the permission mode and allow-list it passes are the U24 plan's, pinned by a test that a tick's
-session never prompts. The session ends when the loop ends (§11.1: every unit clean, landed,
-stopped, pending or idle; a decision point ends it) and writes its exit file. It never types
+session never prompts; whether `claude -p` expands a prompt beginning `/superegm:wave` as the
+owner's typed command is the U24 plan's first probe (§4 records no such fact; `wave` is
+`disable-model-invocation`, so the `Skill` tool is no route), the fallback being the skill's body
+passed as the prompt; the second probe is the Agent tool under `claude -p` (the session's
+foremen and their goldfish, §11.1), with no fallback: a head is reviewed by a typed `wave` until
+it passes. The session ends when the loop ends (§11.1: every unit clean, landed,
+stopped, pending or idle); its exit file is the shell wrapper's, written
+on any exit as a builder's is (§4), the wrapper being the process the tick detaches, and its
+result file is named in `driver/<handoff>.json` as `launches/` names a builder's (§7). It never types
 `integrate`, `plan`, `review-plan` or `file`. Under `SUPEREGM_ROLE=driver` the `wave` skill never
-asks: a decision the judges did not converge on is a journal line and an inbox line, and the
-session ends; the next tick resumes the rest. Liveness is never guessed (anti-goal 8): a tick
-launches only when the previous launch's exit file exists and no `wave` card of that handoff is
-open (a tick that finds one refuses, journaled); a missing exit file (a reboot mid-wave) is shown
-by `driver status` and cleared by the owner's typed `/superegm:driver reset`, the owner's
-interrupt, never by a timeout. Builders launched by a tick's session are detached from it
-(`setsid`), which the U24 plan verifies against U09's launch command, since a `claude -p` session
-ends when its loop ends and its builders must not (§4). The driver never merges: the inbox lists
-merge-ready PRs. `notify` runs inside the tick's wave.
+asks: a decision the judges did not converge on is a journal line and an inbox line, and its unit
+is `pending a decision` (no slot: from amendment 5 `launch` excludes a unit with a pending
+decision from the in-flight count, `launch.py`, U24's) while the batch goes on; the session ends on §11.1's condition
+alone, and the next tick resumes the rest. Liveness is never guessed (anti-goal 8): a tick
+launches a handoff only when no handoff of the store has an open `wave` card or a launch of its
+own without an exit file (the one `.git`, §9.3) and that handoff has no open `plan`, `file`,
+`integrate`, `review-plan` or `orient` card (its own `state.json`, §7; another handoff's typed
+phases run beside a tick's session, the parallel case §7's approval chain allows); otherwise it
+skips, silently, as below. A `wave` card opened under
+`SUPEREGM_ROLE=driver` records its driver card (`SUPEREGM_RUNCARD`, §4); a typed `wave`'s card,
+live or dead, is the owner's, shown by `driver status` and the inbox with its age (information,
+sent by `notify` once, by its id) and cleared by the owner's re-typed `wave`, by `driver reset`, or by the boot-id proof on its
+recorded id (below). A launch of its own
+whose exit file exists while its `wave` card is still open is a session that ended without
+closing its card (an API error, a turn limit): the exit file is the proof, and the tick marks
+that card, and no other, `interrupted` as the `wave` skill starting again would (§6) and
+launches. A launch of its own without an exit file is the normal state of a live overnight
+session and is never reasoned about: the tick skips it (no journal line), and `driver status`
+and the inbox show it as information with its age, which `notify` sends once by the launch's id
+(the age is not in the fingerprint); a tick runs `notify`
+only when `notify`'s own predicate holds (a line neither `notified` set holds, above; each
+`notify` rewrites its caller's set as every current line's fingerprint, sent now or before, so a
+persistent line is never re-sent; a fingerprint carries the round or decision it names, so a
+line that recurs after a later round is new), under a `driver` card it opens for that alone. One proof is allowed,
+since no process survives a reboot: every launch and every `wave` card records the machine's boot
+id at its start (`kern.bootsessionuuid`; `/proc/sys/kernel/random/boot_id`; never the boot time,
+which a clock step moves), and a launch whose recorded id is not the current one is recorded
+`interrupted (reboot)`, journaled, its open `wave` card marked `interrupted` as the exit-file
+proof marks one (a typed `wave`'s card too, by its own recorded id, §7), and the tick launches; the same proof, applied by the tick before it launches, and by `launch-builder`'s
+terminal check and `runcard open`'s refusal when the owner types `wave` first after a reboot
+(one `sysctl`, no by-hand interrupt), records the builders that session had in flight (`launches/<unit>.json`: no exit file, a boot id not the current one)
+`interrupted (reboot)` too, so `launch-builder`'s terminal check passes and the new session
+relaunches them with no decision (§4's terminal rule, one more proof beside the exit file; not
+§11.1's point-3 interrupted launch, whose `relaunch` is the owner's once per unit). Two consecutive launches of its own that failed before the loop ran, read from
+`driver/<handoff>.json`'s own record (a non-zero exit, no `wave` card opened, or a card closed
+or left open before its first `report` or `status --wait`: an expired login, a spent quota, a
+`launch` refusal, an outage; a session that read a new comment, found nothing to do and
+reported is not one, nor a long session the tick marked after hours of rounds), are a failure
+that repeats: the tick refuses until
+the owner's re-typed `wave` (a later typed `wave` card that reached `report`, read from
+`runcards/`, is the intervening success) or `driver reset`, so a night never pays 96 sessions to one failure.
+The refusal, journaled `tick: refused (<handoff>: <reason>)` and carried by `notify`, is for a
+repeating failure and a registered `root` that is not a worktree of the store's repository
+alone. A store runs one session at a time (two waves would fetch into
+one `.git`'s `refs/superegm/base`, §9.3): a second handoff waits its turn, a silent skip like
+the live launch above, never a refusal or an inbox action, and the next free tick serves the
+handoff that has waited longest. `driver status`
+prints, per handoff, the last launch, its
+`started_at`, the wrapper's `pid` (a kill target, never a liveness guess), whether its exit file exists, the open `wave` card's id and age, and the last
+refusal; the owner's typed `/superegm:driver reset` is the interrupt for a launch the owner knows
+is dead (a reboot, a kill), never a timeout and never an inbox action: it records the launch
+`interrupted` and marks the handoff's open `wave` card
+`interrupted` (§7's writer row for `runcards/` names both). The same rule binds a typed `wave`:
+outside `SUPEREGM_ROLE=driver`, `runcard open` for `wave` refuses, marking the card it wrote `interrupted` (below),
+while any handoff of the store has a tick launch without an exit file in its
+`driver/<handoff>.json` (the one `.git`'s `refs/superegm/base`, §9.3), and for `plan`, `file`,
+`integrate` and `review-plan` (a typed `/superegm:orient` the same way) while that handoff's own
+tick launch has none (its `state.json`, §7; another handoff's are free), with the one message
+`driver: a tick's session may be live; /superegm:driver reset is the owner's interrupt`, so a
+store never has two waves and a handoff never two writers, but for the window between one side's
+read and its write (no lock, §3.1): the tick records its launch before it reads for a card and
+`runcard open` writes its card before it reads for a launch, so a collision leaves each side's
+mark for the other to see at its next step, and the side that then finds the other's mark backs off: the tick marks its own launch
+`interrupted` and ends, `runcard open` marks its own card `interrupted` and refuses (an
+`interrupted` launch or card is terminal for every predicate above, as §4 says of a builder's);
+the residual is one wasted session. A
+tick runs `superegm notify --runcard <driver card>` itself when it has new lines (a refusal, a
+launch without an exit file, a typed `wave` card, a stale root), so the inbox's driver line reaches the hook. Builders launched by a tick's session are started in their own session
+and process group: `launch-builder` (from amendment 10 its one behaviour; amendment 5's
+`--start` flag on U09's interface, since gone) starts the wrapper itself, detached (Python's `start_new_session=True`, never `setsid(1)`, which macOS
+lacks; stdin from `/dev/null`, stdout and stderr into the launch's log file, so the tool's pipe is
+not held open for the builder's hours), and returns at once, the session's Bash tool calling it
+in place of the wrapper; the detached
+process is the shell wrapper that writes the exit file (§4), never `claude -p` alone; pinned by a
+test, since a `claude -p` session ends when its loop ends and its builders must not (§4). The driver never
+merges: the inbox lists merge-ready PRs. `notify` runs inside the tick's wave.
 
 ## 12. Merge and integration (phases 6–7)
 
@@ -1854,7 +2497,7 @@ merge-ready PRs. `notify` runs inside the tick's wave.
   open a pull request as the owner, for a colleague's review (the owner's own branches need no
   PR: only the owner updates `<base>`); keep the branch as-is. Discard stays behind the typed
   word `discard`. "Merge back locally" is removed. A forced push is never offered.
-- `/superegm:integrate <spec-path>` runs after every unit has landed or been closed by the owner
+- `/superegm:integrate <spec-path>` runs after every unit has landed, has its PR merged with its issue still open (`close`'s to close, amendment 11) or been closed by the owner
   (who closes a stopped unit's unlanded dependants with it): one round of the review
   `spec-<spec-slug>-integrate-c<n>` (kind `integrate`, `config.reviewers.integrate`) of the
   frozen spec against the handoff's own merged PRs' diffs (`gh pr diff <n>` for each, concatenated
@@ -1877,7 +2520,15 @@ merge-ready PRs. `notify` runs inside the tick's wave.
   while such a unit's issue is open, read once from GitHub at `close` (`gh api` under the
   elephant's token, a read in §2's sense; the owner closes it by hand once the re-planned unit
   is filed, §11) and journaled with the read's answer (U18). The handoff closes (`superegm close`, which writes
-  `closed_at`) when an integrate round has nothing to escalate. `/superegm:integrate --close` is
+  `closed_at` and, from amendment 11, closes any unit issue whose PR merged while it stayed open (the unit then landed; the round path's gate admits such a unit,
+amendment 11, so the clause serves it and `--close` alike; a unit the owner closed unmerged leaves the tracking issue open on either path)
+and, when every unit then landed, the tracking issue as completed, the one issue no PR closes,
+journaling each, `closed_at` written last and a re-run reading an already-closed issue as done (§4.1's half-finished-writes rule); with units unlanded the tracking issue stays open to the owner, who is closing
+the stopped issues by hand already (a give-up's usual end: the condition's consequence, not a
+rule of `--close`); a `github-write` of `integrate` (§14), takes `--note <text>` into the journal as `runcard close
+--note` (U32's too) does, U32; `/superegm:integrate --close --patch`, the owner's typed statement that the
+handoff is a patch release, runs `close --note "patch release"` without the integrate round, the
+note the reason, no helper flag and no release plan: the owner's word is the source, U32) when an integrate round has nothing to escalate. `/superegm:integrate --close` is
   the owner's typed close of a handoff they have given up on: it runs `superegm close` without a
   review round, journaling every unlanded unit, and frees the store for the next handoff.
 
@@ -1901,9 +2552,18 @@ merge-ready PRs. `notify` runs inside the tick's wave.
   compares option ids and writes the neutral list of where positions differ; no one adds
   arguments between rounds.
 - Three models from two vendors, each a goldfish through the `superegm:judge` adapter
-  (`omitClaudeMd: true`, tools `[Read, Grep, Glob]`, `model: inherit`) with a per-dispatch model
-  override (`fable` at max, `opus` at max), plus GPT-6 Astra through the claudex-loop runner's
-  `review` mode on the question file when the runner is installed and reachable.
+  (`omitClaudeMd: true`, tools `[Read, Grep, Glob]`, `model: inherit`) with a per-dispatch model and effort
+  override read per judge from the panel file `judges open` writes (`judges/<id>/panel.json`,
+  each member of `config.judges.members` resolved there by `judge_members` once; amendment 8:
+  `fable` at `xhigh`, `opus` at `max`; an adapter member's `model`, when set, is the Agent tool's
+  alias; a runner member's `effort` is the source, the landed fallback to `astra.effort` serving a
+  member without one; the dispatch takes the effective pair as §8's one rule gives every
+  goldfish, `CLAUDE_CODE_EFFORT_LEVEL`'s and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`'s overrides read
+  and said in the record, pointed at and not restated; the session pair `SUPEREGM_GOLDFISH_MODEL`
+  and `SUPEREGM_GOLDFISH_EFFORT` stops at the review panels), plus
+  GPT-6 Astra through the claudex-loop runner's `review` mode on the question file at the
+  member's own effort (`xhigh`) when the runner is installed and reachable, recorded `not run`
+  otherwise.
 - Every judge reads only the question file and the listed evidence. The Astra judge runs with
   `SUPEREGM_ROLE=goldfish`.
 - Round 1 is independent. From round 2 each judge receives every prior verdict verbatim plus the
@@ -1929,7 +2589,7 @@ These are the decision points of the workflow, and this list is the only one:
    elephant's or the builder's reason is copied verbatim as the overrule option's text; every
    such finding of a round is one question of one panel; the CI finding is never one, and a
    `test-delta` finding (§11) is the owner's alone: the judges never settle it, so in
-   leavemealone-mode it runs the review to its cap, point 2);
+   leavemealone-mode the unit waits `pending a decision` on it, §8, never a cap round);
 2. a review at its cap: for a spec, plan or integrate review, continue one bounded round (once)
    / accept the remainder (not while the latest completed round's bytes moved, §8) / stop, and
    `stop` alone, ruled by the helper, whenever `accept` and `continue` are both refused (§8), the
@@ -1940,8 +2600,9 @@ These are the decision points of the workflow, and this list is the only one:
 3. an open question the elephant cannot answer from the frozen spec: a `blocking: yes` decision
    during `plan` (the options are the item's own); a builder's `BLOCKED` / `NEEDS_CONTEXT`
    status (the comment's own `- (a)` lines, plus `stop the unit`); a builder exit with no PR, an
-   interrupted launch, a `closed` by the builder account, or a third `blocked` without an
-   intervening head (`relaunch`, offered once per unit; `stop the unit`);
+   interrupted launch, a stalled launch (amendment 10, §11), a `closed` by the builder account,
+   or a third `blocked` without an intervening head (`relaunch`, offered once per unit, a launch
+   with no commit of its own spending none, §11's rule; `stop the unit`);
 4. the owner's approval of a converged spec in normal mode, and "Create" in normal mode.
 
 In normal mode every point pauses for the owner. In leavemealone-mode (`--leavemealone` or
@@ -1950,7 +2611,7 @@ In normal mode every point pauses for the owner. In leavemealone-mode (`--leavem
 --blocked (<comment-id> | launch <n> | closed <n>)) → <path>` to render the question file from
 the record with the options named above, one panel per review round, runs `judges open --parent
 <its run card>`, dispatches the judges as §13.1 says, and applies each converged answer (subject
-to `min_vendors`) through `review settle --judges`, `review rule --judges`, `decide --judges`,
+to `min_vendors`; a `redesign` with no high finding behind it excepted, amendment 11, §11) through `review settle --judges`, `review rule --judges`, `decide --judges`,
 or `decision rule --by judges:<panel-id>` and a `**Ruling:**` comment the skill posts with `gh
 issue comment` under the elephant's token, journaled as `Ruling (judges <id>, leavemealone): …`
 so the owner can read and overturn it; the unconverged questions pause the owner with the
@@ -1960,20 +2621,29 @@ leavemealone-mode (§8, §10). A foreman never convenes the judges; the elephant
 excluded**: no mode makes a machine approve or merge.
 
 **Rulings by comment** (amendment 5, U22). At points 1–3 of a unit, and on a deviation, a
-`tdd-order` or a `test-delta` finding, the owner may rule from anywhere by one comment on the
+`tdd-order`, a `test-delta` or a `dod-<n>` finding, the owner may rule from anywhere by one comment on the
 unit's issue, in these forms and no other (the one grammar, §11.2): point 1 `**Ruling:** <fid>
 finding upheld` | `**Ruling:** <fid> finding overruled — <reason>`; point 2, a head,
-`**Ruling:** one more round` | `**Ruling:** stop`; point 3 `**Ruling:** (<comment-id>) <option> —
-<reason>`; a deviation `**Ruling:** (<comment-id>) accepted | rejected — <reason>`; `tdd-order`
-and `test-delta` `**Ruling:** <fid> allowed — <reason>`; the `redesign` ruling (amendment 4)
-`**Ruling:** redesign — <reason>`. A comment is a ruling only when its author's login is in
+`**Ruling:** one more round` | `**Ruling:** stop`; point 3, and a deviation, whose own lines are its options (§10), `**Ruling:** (<comment-id>)
+<option> — <reason>` (a point-3 decision opened on a launch or a close, with no comment, takes
+the id `decision open` printed, the one the inbox line carries, in the parenthesis:
+`**Ruling:** (<decision id>) <option> — <reason>`); `tdd-order`,
+`test-delta` and `dod-<n>` `**Ruling:** <fid> allowed — <reason>` (a point-1 `finding overruled` on
+such a fid is read as `allowed`; the `dod-<n>` one keyed on
+the item number and the `test-delta` one on its entry, both persisting across rounds;
+`**Ruling:** test-delta <file> allowed — <reason>` for a whole file); the `redesign` ruling (amendment 4)
+`**Ruling:** redesign — <reason>`, read at a head's points 1 and 2 alone (§11: the brief needs
+the head's diff), where it rules every open decision of the unit at once (the unit stops); at
+point 3 it is text, and the inbox shows the decision still open. A comment is a ruling only when its author's login is in
 `config.owners` and its body matches one form exactly; a trailing word makes it text, so a typo
 is silence, which the inbox (§11.2) shows as the still-open decision. The wave applies it as the
 point's own subcommand says (§11) and the record is the one a ruling typed in the session
 leaves. Spec and plan reviews have no issue: their cap rulings stay typed. In leavemealone-mode
 the judges' converged rulings are posted in the same form under the elephant's token (above),
-where the owner reads them; a recorded ruling is never changed by a later comment (§11), and
-the inbox lists only what nobody has ruled.
+where the owner reads them, after the record and with the journal's `judges <panel>` marker in
+the text, which `ruling_of` skips, so a wave never records the panel's post as the owner's; a
+recorded ruling is never changed by a later comment (§11), and the inbox lists only what nobody
+has ruled.
 
 ## 14. Skill and adapter disposition
 
@@ -1984,28 +2654,31 @@ Naming: adapter file `.claude-plugin/agents/<id>.md`, frontmatter `name: <id>`, 
 | --- | --- | --- | --- | --- | --- |
 | brainstorming (sp) | `brainstorming` | working-tree | auto | owner, phase 0 | writes `docs/specs/YYYY-MM-DD-<topic>-design.md` (path changed from `docs/superpowers/specs/`) ending in `## Units`; the gate's next step is `/superegm:review-spec`; the builder check and the visual companion removed |
 | egm-draft (egm) | `draft` | working-tree | typed | owner, phase 0 | "draft a spec from a brief when brainstorming was skipped"; template ends in `## Units` |
-| egm-review + egm-review-loop + egm-resolve (egm) | `review-spec` (+ `references/review_loop.md`, `references/resolve.md`) | external: state-store, start-session | typed | owner, phase 1 | §8; the stage skills become references; "max 1 re-audit" goes; owns the Astra review lane on specs (the foreman runs it on heads, §11) |
+| egm-review + egm-review-loop + egm-resolve (egm) | `review-spec` (+ `references/review_loop.md`, `references/resolve.md`) | external: state-store, start-session, github-write, remote-branch (amendment 6: the preflight's PR, the `**Reply <fid>:** fixed` post of `review ingest --pr`, and the push of the elephant's branch after each fix commit and the approval commit) | typed | owner, phase 1 | §8; the stage skills become references; "max 1 re-audit" goes; owns the Astra review lane on specs (the foreman runs it on heads, §11) |
 | new | `orient` | external: state-store | typed (and run by `plan`, `review-plan` and `launch-builder`) | elephant, before planning on an existing repository; the readiness goldfish and every builder through its callers | §9.3; `orient/map.md`, `orient/<unit>.md` in the store |
 | egm-handoff planning half + writing-plans (sp) | `plan` | external: state-store, start-session, github-write | typed | owner, phase 2 | §9.1; `github-write` for the decision comment on a filed unit |
 | new | `review-plan` | external: state-store, start-session | typed | owner, phase 3 | §9.2 |
 | egm-handoff filing half | `file` | external: github-write, state-store | typed | owner, phase 4 | §10 |
-| egm-wave + SDD implementer prompt (sp) | `wave` (+ `references/foreman_brief.md`, `references/builder_orders.md`) | external: start-session, github-write, remote-branch, state-store | typed | owner, phase 5 | §11; the head panel: Claude goldfish and, from amendment 4, the Astra lane run by the foreman |
+| egm-wave + SDD implementer prompt (sp) | `wave` (+ `references/foreman_brief.md`, `references/builder_orders.md`) | external: start-session, github-write, remote-branch, state-store, destructive-local (amendment 10: the watchdog's kill, U31) | typed | owner, phase 5 | §11; the head panel: Claude goldfish and, from amendment 4, the Astra lane run by the foreman |
 | new | `interrupt` | external: state-store | typed | owner, phase 5 | §11 |
 | new | `clean` | external: destructive-local, state-store | typed | owner, phase 5 | §11 |
 | new | `inbox` | none | auto | owner, any time; `wave` through `notify` | §11.2; reads the store(s), no run card, as `doctor` |
-| new | `driver` | external: start-session, state-store | typed | owner, once per machine (`install`, `register`); the timer it installs | §11.2; `register`, `driver tick\|install\|uninstall\|status\|reset` |
+| new | `driver` | external: start-session, state-store | typed | owner, once per machine and after every plugin update (`install`), once per store (`register`); the timer it installs | §11.2; `register`, `driver tick\|install\|uninstall\|status\|reset` |
 | finishing-a-development-branch (sp) | same name | external: github-write, remote-branch, state-store | typed | owner, outside a wave | no local merge, no forced push; the PR as the owner |
-| new | `integrate` | external: state-store, start-session | typed | owner, phase 7 | §12; `--close` |
+| new | `integrate` | external: state-store, start-session, github-write (amendment 11: `close`'s issue closes, U32) | typed | owner, phase 7 | §12; `--close` |
 | new | `judges` | external: start-session, state-store, github-write | typed | owner (leavemealone skills call the `judges` helper subcommands directly) | §13 |
-| test-driven-development, systematic-debugging, verification-before-completion (sp) | same names | working-tree | auto, phase-gated | owner fixes on a filed unit's branch (builders invoke no skills; the orders carry the discipline) | the phase sentence |
+| test-driven-development, systematic-debugging, verification-before-completion (sp) | same names | working-tree | auto, phase-gated | owner fixes on a filed unit's branch (a builder invokes only the skills its `Skill` rules name, amendment 7; this repository lists ponytail alone, §17; the orders carry the discipline) | the phase sentence |
 | writing-skills (sp) | same name | working-tree | auto | owner, maintaining this plugin | |
-| using-superpowers (sp) | `using-superegm` | none | hook + auto | every elephant session (the builder profile has no plugins) | the dispatcher text; one platform reference |
+| using-superpowers (sp) | `using-superegm` | none | hook + auto | every elephant session (a builder loads the plugins `config.builder.plugins` names, amendment 7; this repository lists ponytail alone, §17) | the dispatcher text; one platform reference |
 | egm-drift-report (egm) | `drift-report` | working-tree | typed | owner, after `integrate` | writes `<date>_DRIFT_REPORT.md` |
 | egm-bootstrap (egm); executing-plans, subagent-driven-development, requesting-code-review, receiving-code-review, dispatching-parallel-agents, using-git-worktrees, diagnosing-superpowers (sp); egm-brainstorm (egm) | **retired** | | | | no caller in the workflow; their surviving content lives in `builder_orders.md` and `brainstorming` |
 
 Adapters in `.claude-plugin/agents/`: the reviewers `design`, `zoom-out`, `comprehension`,
 `codebase-details`, `readiness`, `structural`, `style`, `change-review`, `judge` (tools `[Read,
-Grep, Glob]`, `omitClaudeMd: true`); and `foreman` (tools `[Agent, Bash, Read, Grep, Glob]`,
+Grep, Glob]`, `omitClaudeMd: true`); from amendment 13 the brainstorm's `cartographer` (tools `[Read, Grep,
+Glob]`, `omitClaudeMd: true`, `model: inherit`; a non-reviewer the brainstorm's lead dispatches, on
+no panel; the other three teammates are the `design`, `zoom-out` and `comprehension` adapters in
+their personas' `Mode: BRAINSTORM`, U34); and `foreman` (tools `[Agent, Bash, Read, Grep, Glob]`,
 `omitClaudeMd: true`). EGM's `synthesizer` and `bootstrap-orchestrator` are dropped.
 
 ## 15. Repository, packer, tests
@@ -2042,8 +2715,12 @@ Grep, Glob]`, `omitClaudeMd: true`); and `foreman` (tools `[Agent, Bash, Read, G
   names a mechanism §3.1 removed or a form this spec changed.
 - Install: `claude plugin marketplace add gsVAM/superegm` then `claude plugin install
   superegm@superegm`. The README tells the owner to disable `egm@egm-astra` and
-  `superpowers@claude-plugins-official` first; to create the builder account, its token and an
-  empty builder profile (step 1 is the token recipe of §11; `owner_team` is documented in
+  `superpowers@claude-plugins-official` first; to create the builder account, its token and a
+  builder profile that is the login alone, `syncClaudeAiPlugins` false and
+  `disableClaudeAiConnectors` true set before the login (step 1 is the token recipe of §11; the
+  plugins `config.builder.plugins` names are installed once into the elephant profile (§7) and
+  disabled there (`enabledPlugins` false in its `settings.json`, which keeps the entry and the
+  cache directory), where the launch resolves them, amendment 7; `owner_team` is documented in
   `docs/getting_started.md`); to set the branch protection of §11 (updates to the
   base branch restricted to the owner with no bypass for the builder account; `superegm/**`
   protected from force-push and deletion) and a workflow triggered on `pull_request`; to run
@@ -2069,15 +2746,15 @@ Grep, Glob]`, `omitClaudeMd: true`); and `foreman` (tools `[Agent, Bash, Read, G
 
 ## 17. Units
 
-The unit graph for building SuperEGM 1.0.0 (thirteen units), from amendment 2, 1.1.0 (U12–U14) and, from amendment 3, 1.1.1 (U15–U16) and, from amendment 4, 1.1.2 (U17–U20) and, from amendment 5, 1.2 (U21–U25). Each unit's plan must fit 48 KB.
+The unit graph for building SuperEGM 1.0.0 (thirteen units), from amendment 2, 1.1.0 (U12–U14) and, from amendment 3, 1.1.1 (U15–U16) and, from amendment 4, 1.1.2 (U17–U20) and, from amendments 5–13, 1.2 (U21–U34). Each unit's plan must fit 48 KB.
 Interfaces are subcommand contracts and file keys unless marked `py`. A Consumes producer may be
 a transitive blocker. After U01 every 1.0.0 skill folder and adapter of §14 exists (the new ones
 as stubs), so the later 1.0.0 units modify and never create skill folders, adapters or personas;
 `orient` (amendment 2) is created by U12.
 
 Landed: U01, U02, U03, U04, U05, U06, U07, U08, U09, U09b, U10, U10b, U11 (1.0.0, released at
-363dd5e), U12, U13, U14 (1.1.0); U15 and U16 land before the 1.1.2 handoff is planned (the
-amendment-4 paragraph below); a later handoff on this spec drafts no section for a landed row
+363dd5e), U12, U13, U14 (1.1.0), U15, U16 (1.1.1), U17, U18, U19, U20 (1.1.2, landing before the 1.2
+handoff is planned; the amendment-4 paragraph below); a later handoff on this spec drafts no section for a landed row
 (§9.1).
 
 | Unit | Scope | Blocked by | Size |
@@ -2103,12 +2780,21 @@ amendment-4 paragraph below); a later handoff on this spec drafts no section for
 | U17 | Astra on every head review (§8, §11): `reviewers.head` default `change-review, astra` and `astra.heads`, both written by `init`; the astra-append rule for kind `head`; the foreman's Astra lane over the brief file `prepare --dispatch` writes (`r<n>/astra_brief.md`: what the Claude goldfish receive, the diff cut at 400 KB; its sha256 in the lane's record), one bounded foreground run (`--timeout 540`) after the Claude panel, fresh every round, recorded through the existing path; the degrade to `astra: not run (<reason>)` (`not installed`, `failed`, `killed`, `timeout`) with the round completing on the Claude reviewers; `doctor`'s informational `astra:` line: `skills/plan/scripts/superegm/foreman.py`, `prepare.py`, `collect.py`, `review.py`, `doctor.py`, `init.py`, `__init__.py` (modify: `DEFAULT_CONFIG`), `skills/wave/references/foreman_brief.md`, `resources/astra_lane.md`, `resources/review_panels.md`, `docs/claude.md` (modify), `tests/unit/test_foreman.py`, `test_review.py`, `test_doctor.py`, `test_helper.py` (modify) | — (U15, U16 landed by then) | M |
 | U18 | The `redesign` ruling (§11, §12, §13.2): `decision rule … --ruling "redesign — <one sentence why>"` at a head's points 1 and 2, the judges' question file listing it, the stop through the `superegm:stopped` path, the store's `foreman/<unit>-<decision id>.brainstorm.md` (store-only, never committed; a file of the `foreman` kind's directory, no new store kind), the `**Ruling:**` comment naming the brief, `report`'s `## Stopped` with the brief's path, `close`'s refusal while such a unit's issue is open (one GitHub read), the brainstorming skill's brief-first paragraph: `skills/plan/scripts/superegm/decision.py`, `judges.py` (modify: the `redesign` option, its sentence filled, at a head's points 1 and 2), `report.py`, `close.py` (modify), `skills/judges/references/leavemealone.md`, `skills/brainstorming/SKILL.md` (modify: the brief-first paragraph), `skills/wave/SKILL.md` (modify: the ruling's effect in Step 3), `skills/integrate/SKILL.md` (modify), `tests/unit/test_wave.py`, `test_leavemealone_finish.py` (modify) | — (U10b, U11 landed) | M |
 | U19 | Amendment-scoped spec review by default (§5, §8), batch dispositions and the four driving rules: `review open --kind spec --scope auto\|whole\|<sections>` (default `auto`: the sections changed since the last approval with their neighbours, re-derived every round from the current bytes; whole when none), the scope's form in the review record and the round's headings with line ranges, the brief wording, `review record`'s out-of-scope refusal and the round's `out_of_scope[]` lines, regressions and the cap over recorded findings, the cap question naming the scope; `review settle --file <dispositions>`; the four rules of §5 (a fresh session per phase, skills never switch branches, the admin-bypass merge line in `doctor`, `wave` and `integrate`, a new session after a plugin update): `skills/plan/scripts/superegm/review.py`, `doctor.py` (modify), `skills/review-spec/SKILL.md`, `skills/review-spec/references/review_loop.md` (modify: the scope rule and the brief wording), `skills/using-superegm/SKILL.md`, `skills/wave/SKILL.md`, `skills/integrate/SKILL.md` (modify), `tests/unit/test_review.py`, `test_doctor.py` (modify) | — (U16 landed by then) | M |
-| U20 | One store per handoff (§7, §8, §9.1, §11): `artifacts_dir/<handoff id>/` as the handoff's root for everything from its approval on (`state.json`, `journal.md`, the plan files, plan and head reviews, run cards, launches, worktrees, foreman, orient unit files, judges, brainstorm briefs, directly under it: no `<6 hex>/` layer inside a handoff directory), the store level keeping `handoffs/<id>.json` (one file per handoff: `id`, `spec`, `opened_at`, `closed_at`, written by that handoff's `approve-spec` and `close`), `approvals/<slug>.json` as the append-only approval history (`entries[]` with `sha256`, `commit`, `handoff_id`, `kind`; the 1.1 single record read as one entry), the spec reviews and its journal (`orient/` moves under the handoff directory); `--amend-units` and `--void` on the latest entry alone (a void of a handoff with no filed unit closes it); `approve-spec`'s descent refusal (the branch's history must hold the spec at the last entry's bytes); one handoff per opening approval, a re-approval after a void keeping it, any other approval opening a new one beside the earlier; `launch`'s chain check (the base spec at the handoff's approved bytes or at a later entry, else refused; owner ruling 2026-11-05) with the cited range read at the entry the body's marker names (`launch-builder`'s `# Spec range`, `prepare`'s `spec_range.md`: the entry's commit or any commit holding its bytes, else a refusal); `--handoff <id>` on every subcommand, `runcard open` included, resolved once in `__init__.py`'s `store()` with §7's defaults (the card's handoff, the latest approval's, the filed unit's), card ids `<skill>-<6 hex>-<n>`, the typed skills passing `[--handoff <id>]` and the foreman's brief carrying it, `status` and `report` showing all without it; an older handoff frozen (`plan`, `review-plan`, `file`, `graph`, `--amend-units` and `--void` refuse; `wave`, `integrate` and `close` run; the integrate diff restricted to the handoff's own PRs); `graph`'s `filed_elsewhere[]` and the `set` brief line; a flat 1.0/1.1 store read in place as the handoffs it names, `legacy: true`, no migration script: `skills/plan/scripts/superegm/__init__.py` (modify: `Store`, `store()`), `approve_spec.py` (modify: the history, the handoff file, the card of a by-hand `--amend-units`), `review.py` (modify: `fix-design` refused on a frozen handoff's integrate), `launch.py` (modify: the chain check), `launch_builder.py`, `prepare.py` (modify: the range copy), `graph.py`, `gate.py`, `dry_run.py`, `apply.py`, `verify.py`, `status.py`, `report.py`, `close.py` (modify: path resolution and the refusals), `skills/plan/SKILL.md`, `skills/review-plan/SKILL.md`, `skills/file/SKILL.md`, `skills/wave/SKILL.md`, `skills/integrate/SKILL.md`, `skills/clean/SKILL.md`, `skills/interrupt/SKILL.md`, `skills/wave/references/foreman_brief.md` (modify: `[--handoff <id>]`; the `set` brief line; the foreman's handoff id), `docs/claude.md` (modify), `tests/unit/test_helper.py` and one test per touched module (modify) | — (U16 landed by then) | M |
-| U21 | External-review ingest (§8): `review ingest`, the `external:<login>` reviewer id in `review record`, `foreman/<unit>.json.ingested[]`, `config.ingest` (`severity_words`, `human_role`), the `clean` → `revise` rewrite and its journal line, the wave's batch step: `skills/plan/scripts/superegm/review.py` (modify: `review ingest`, the id, the rewrite), `collect.py` (modify: the held threads), `__init__.py` (modify: `DEFAULT_CONFIG.ingest`, `SUBCOMMANDS`), `init.py`, `skills/wave/SKILL.md` (modify: the batch step), `resources/review_panels.md`, `docs/claude.md` (modify), `tests/unit/test_review.py`, `test_foreman.py`, `test_wave.py`, `test_helper.py` (modify; conftest's fake `gh` gains the review-thread endpoints) | — (U17–U20 landed) | M |
-| U22 | Rulings by GitHub comment (§11.2, §13.2): the one grammar and its parser `ruling_of`, owners only, the seventh event kind `ruling` and its line, `decision rule --by <login>` from a comment, `collect`'s deviation and `tdd-order` reads through the parser: `skills/plan/scripts/superegm/decision.py` (modify: the parser, `--by` from a comment), `status.py` (modify: the `ruling` event), `collect.py` (modify), `skills/wave/SKILL.md`, `skills/wave/references/builder_orders.md` (modify: the orders quote the forms a builder may see), `docs/claude.md` (modify), `tests/unit/test_events.py`, `test_wave.py`, `test_foreman.py`, `test_helper.py` (modify) | U21 | M |
-| U23 | The inbox and the notify hook (§11.2): `inbox [--all] [--json] [--handoff]` and its line form, `notify --runcard <id>`, `config.notify`, `notify_timeout_seconds`, `state.json.notified`, the `inbox` skill: `skills/plan/scripts/superegm/inbox.py` (create: `inbox`, `notify`), `__init__.py` (modify: the two keys, `SUBCOMMANDS`), `init.py` (modify), `skills/inbox/SKILL.md` (create: `effects: none`, auto-invokable like `doctor`'s line in `using-superegm`, with `assets/icon.svg` and `test_scenarios.yaml`), `skills/wave/SKILL.md` (modify: the notify step), `skills/using-superegm/SKILL.md`, `docs/claude.md`, `README.md` (modify), `tests/unit/test_inbox.py` (create), `test_wave.py`, `test_helper.py`, `test_packaging.py`, `test_effects.py`, `test_skeleton.py` (modify) | U22 | M |
-| U24 | The headless driver and the registry (§11.2): `register [--remove]`, `~/.superegm/registry.json`, `driver tick\|install\|uninstall\|status\|reset`, the launchd agent (on Linux a systemd user timer), `config.driver.interval_minutes`, `driver/<handoff>.json`, `inbox --all`, `SUPEREGM_ROLE=driver`, the `driver` skill, `doctor`'s driver line: `skills/plan/scripts/superegm/driver.py` (create), `inbox.py` (modify: `--all`), `__init__.py` (modify: `DEFAULT_CONFIG.driver`, the `driver` store kind, `SUBCOMMANDS`), `init.py`, `doctor.py` (modify: `driver: installed (<interval>) \| not installed`, information only), `skills/driver/SKILL.md` (create, with `assets/icon.svg` and `test_scenarios.yaml`), `skills/wave/SKILL.md` (modify: the `SUPEREGM_ROLE=driver` paragraph: never ask, journal and end), `skills/using-superegm/SKILL.md`, `docs/claude.md`, `README.md` (modify), `tests/unit/test_driver.py` (create), `test_inbox.py`, `test_doctor.py`, `test_helper.py`, `test_packaging.py`, `test_effects.py`, `test_skeleton.py` (modify) | U23 | L |
-| U25 | The foreman verifies (§11, §8): the DoD re-run gate and the test-delta gate in `collect`, `r<n>/dod/<item>.txt`, `rounds[].dod_runs`, `rounds[].test_delta`, the finding ids `dod-<n>` and `test-delta`, `config.foreman.run_timeout_minutes`, the `test-delta` settle rule and the `allowed` ruling, `doctor`'s `python3.12` line: `skills/plan/scripts/superegm/collect.py` (modify: both gates), `review.py` (modify: the settle rule), `doctor.py`, `__init__.py` (modify: `DEFAULT_CONFIG.foreman`), `init.py` (modify), `skills/wave/references/foreman_brief.md` (modify: the word is given only after both gates ran), `resources/review_panels.md` (modify: the foreman list gains both ids), `tests/unit/test_foreman.py`, `test_review.py`, `test_doctor.py`, `test_helper.py` (modify) | — (U17 landed); after U21 and U22 on shared files | M |
+| U20 | One store per handoff (§7, §8, §9.1, §11): `artifacts_dir/<handoff id>/` as the handoff's root for everything from its approval on (`state.json`, `journal.md`, the plan files, plan and head reviews, run cards, launches, worktrees, foreman, orient unit files, judges, brainstorm briefs, directly under it: no `<6 hex>/` layer inside a handoff directory), the store level keeping `handoffs/<id>.json` (one file per handoff: `id`, `spec`, `opened_at`, `closed_at`, written by that handoff's `approve-spec` and `close`), `approvals/<slug>.json` as the append-only approval history (`entries[]` with `sha256`, `commit`, `handoff_id`, `kind`; the 1.1 single record read as one entry), the spec reviews and its journal (`orient/` moves under the handoff directory); `--amend-units` and `--void` on the latest entry alone (a void of a handoff with no filed unit closes it); `approve-spec`'s descent refusal (the branch's history must hold the spec at the last entry's bytes); one handoff per opening approval, a re-approval after a void keeping it, any other approval opening a new one beside the earlier; `launch`'s chain check (the base spec at the handoff's approved bytes or at a later entry, else refused; owner ruling 2026-11-05) with the cited range read at the entry the body's marker names (`launch-builder`'s `# Spec range`, `prepare`'s `spec_range.md`: the entry's commit or any commit holding its bytes, else a refusal); `--handoff <id>` on every subcommand, `runcard open` included, resolved once in `__init__.py`'s `store()` with §7's defaults (the card's handoff, the latest approval's, the filed unit's), card ids `<skill>-<6 hex>-<n>`, the typed skills passing `[--handoff <id>]` and the foreman's brief carrying it, `status` and `report` showing all without it (corrected by amendment 11: the inbox shows all, these one, §11.2); an older handoff frozen (`plan`, `review-plan`, `file`, `graph`, `--amend-units` and `--void` refuse; `wave`, `integrate` and `close` run; the integrate diff restricted to the handoff's own PRs); `graph`'s `filed_elsewhere[]` and the `set` brief line; a flat 1.0/1.1 store read in place as the handoffs it names, `legacy: true`, no migration script: `skills/plan/scripts/superegm/__init__.py` (modify: `Store`, `store()`), `approve_spec.py` (modify: the history, the handoff file, the card of a by-hand `--amend-units`), `review.py` (modify: `fix-design` refused on a frozen handoff's integrate), `launch.py` (modify: the chain check), `launch_builder.py`, `prepare.py` (modify: the range copy), `graph.py`, `gate.py`, `dry_run.py`, `apply.py`, `verify.py`, `status.py`, `report.py`, `close.py` (modify: path resolution and the refusals), `skills/plan/SKILL.md`, `skills/review-plan/SKILL.md`, `skills/file/SKILL.md`, `skills/wave/SKILL.md`, `skills/integrate/SKILL.md`, `skills/clean/SKILL.md`, `skills/interrupt/SKILL.md`, `skills/wave/references/foreman_brief.md` (modify: `[--handoff <id>]`; the `set` brief line; the foreman's handoff id), `docs/claude.md` (modify), `tests/unit/test_helper.py` and one test per touched module (modify) | — (U16 landed by then) | M |
+| U21 | External-review ingest (§8): `review ingest`, the `external:<login>` reviewer id in `review record`, `foreman/<unit>.json.ingested[]`, `config.ingest` (`severity_words`, `human_role`), the `clean` → `revise` rewrite and its journal line, the wave's batch step: `skills/plan/scripts/superegm/review.py` (modify: `review ingest`, the id, the posted lines, the rewrite), `collect.py` (modify: an unreplied external high or medium carried forward), `launch.py` (modify: a rewritten outcome makes the unit ready, not in flight), `__init__.py` (modify: `DEFAULT_CONFIG.ingest`, `SUBCOMMANDS`), `init.py`, `skills/wave/SKILL.md` (modify: the batch step), `resources/review_panels.md` (modify), a `docs: see U29` Objective note, `tests/unit/test_review.py`, `test_foreman.py`, `test_wave.py` (modify; conftest's fake `gh` gains the review-thread endpoints), `test_helper.py` (modify: the written key-set pin's one line, for `ingest`) | — (U17–U20 landed) | M |
+| U22 | Rulings by GitHub comment (§11.2, §13.2): the one grammar and its parser `ruling_of`, owners only, the seventh event kind `ruling` and its line, `decision rule --by <login>` from a comment, `collect`'s deviation and `tdd-order` reads through the parser; from amendment 11 one ruling on a status comment that folded several deviations rules each with its option: `skills/plan/scripts/superegm/decision.py` (modify: the parser, `--by` from a comment), `status.py` (modify: the `ruling` event), `collect.py` (modify: every `**Deviation**` heading of a status comment read), `launch_builder.py` (modify: the prompt's rulings and decisions from `config.owners` alone), `skills/wave/SKILL.md`, `skills/wave/references/builder_orders.md` (modify: the orders quote the forms a builder may see), a `docs: see U29` Objective note, `tests/unit/test_events.py`, `test_wave.py`, `test_foreman.py` (modify), `test_u22.py` (create: its own keys) | U21 | M |
+| U23 | The inbox and the notify hook (§11.2): `inbox [--all] [--json] [--handoff]` and its line form, `notify --runcard <id>`, the `~/.superegm/notify` hook, `config.notify_timeout_seconds`, `state.json.notified`, the `inbox` skill; from amendment 11 the leavemealone redesign bar (a judges' `redesign` without a high finding is refused by `decision rule --by judges:<panel-id>` and waits as a pending decision the inbox lists until the owner's `**Ruling:**`, §11): `skills/plan/scripts/superegm/inbox.py` (create: `inbox`, `notify`), `__init__.py` (modify: the two keys, `SUBCOMMANDS`), `init.py` (modify), `skills/inbox/SKILL.md` (create: `effects: none`, auto-invokable like `doctor`'s line in `using-superegm`, with `assets/icon.svg` and `test_scenarios.yaml`), `skills/wave/SKILL.md` (modify: the notify step; the Entry's resume leaving a panel-answered decision to the owner), `decision.py` (modify: the bar's refusal, after U22), `skills/judges/references/leavemealone.md` (modify: the two `redesign` rows point at it, the cap row's `review rule stop` held until `decision rule` accepts), `skills/using-superegm/SKILL.md` (modify), a `docs: see U29` Objective note, `tests/unit/test_inbox.py`, `test_u23.py` (create: its own keys), `test_wave.py`, `test_packaging.py`, `test_effects.py`, `test_skeleton.py`, `test_helper.py` (modify: the key-set pin's one line, for `notify_timeout_seconds`) | U22 | M |
+| U24 | The headless driver and the registry (§11.2): `register [--remove]`, `~/.superegm/registry.json`, `driver tick\|install\|uninstall\|status\|reset`, the launchd agent with `AbandonProcessGroup` (on Linux a systemd user timer, `KillMode=process`), `install --interval`, `~/.superegm/env`, `driver/<handoff>.json`, `inbox --all`, `SUPEREGM_ROLE=driver`, the `driver` skill, `doctor`'s driver line, the typed `wave`'s refusal while a tick's launch has no exit file: `skills/plan/scripts/superegm/driver.py` (create), `inbox.py` (modify: `--all`; the driver items; `notify` under a `driver` card), `status.py` (modify: the tick's read), `review.py` (modify: the stall read across `wave` cards), `launch.py` (modify: a pending unit holds no slot), `launch_builder.py` (modify: starting the launch as its one behaviour, from amendment 10 with no flag: the Popen in a new session, the wrapper the detached process-group leader, the `running` entry it writes once with `pid`, `started_at`, the prompt hash, `boot_id` and `command`; the reboot proof in the terminal check), `__init__.py` (modify: `runcard open`'s refusal for `wave`, `plan`, `file`, `integrate`, `review-plan` and `orient`, its `driver_card` write and its reboot proof, the `driver` store kind, `SUBCOMMANDS`), `doctor.py` (modify: the `driver:`, `env:` and notify-hook-sha lines, information only), `skills/driver/SKILL.md` (create, with `assets/icon.svg` and `test_scenarios.yaml`), `skills/wave/SKILL.md` (modify: the `SUPEREGM_ROLE=driver` paragraph: never ask, journal and end; step 5's launch through `launch-builder` alone, the rule reaching every launch the skill makes: the `revise` row and the `What it does` line too), `record_launch.py` (modify: the flagless form refused, `--exit` required), `skills/using-superegm/SKILL.md` (modify), a `docs: see U29` Objective note, `tests/unit/test_driver.py`, `test_u24.py` (create: its own keys), the start's test in `test_builders.py` beside U09's launch tests (the launch's one behaviour, the entry's fields, the flagless `record-launch` refused), `test_inbox.py`, `test_doctor.py`, `test_packaging.py`, `test_effects.py`, `test_skeleton.py` (modify) | U23; after U25 on shared files | L |
+| U25 | The foreman verifies (§11, §8): the DoD re-run gate and the test-delta gate in `collect`, `r<n>/dod/<item>.txt`, `rounds[].dod_runs`, `rounds[].test_delta`, the finding ids `dod-<n>` and `test-delta`, `config.foreman.run_timeout_minutes`, the `test-delta` settle rule and the `allowed` rulings of `test-delta` and `dod-<n>`, `doctor`'s `python3.12` line: `skills/plan/scripts/superegm/collect.py` (modify: both gates, inputs read before the first run), `review.py` (modify: the settle rule; `review post`'s `gates not run` refusal and `owner: <ids>` outcome), `prepare.py` (modify: the review worktree removed by force; the hook-free git calls), `launch_builder.py` (modify: the hook-free git calls), `doctor.py` (modify: the `python3.12` line, the hooks-directory and `core.hooksPath` lines), `__init__.py` (modify: `DEFAULT_CONFIG.foreman`; `kill_group`, the process-group kill by SIGTERM with no escalation, the wait its caller's: `collect`'s at its bound, waiting no longer than the bound after the signal before it writes back (a survivor §4.1's residual), and from amendment 10 U31's, whose wrapper traps it), `init.py` (modify), `skills/wave/references/foreman_brief.md` (modify: the word is given only after both gates ran; the `owner` word), `skills/wave/SKILL.md` (modify: the `owner` word's row), `resources/review_panels.md` (modify: the foreman list gains both ids), `tests/unit/test_foreman.py`, `test_review.py`, `test_wave.py`, `test_doctor.py`, `test_helper.py` (modify: the key-set pin's one line, for `foreman`), `test_u25.py` (create: its own keys) | U22 (`ruling_of`; U17 landed); after U21 and U23 on shared files | M |
+| U26 | External review on the elephant's own PR (§8): `review ingest --pr <n>` (kind `spec`), U21's reader, severity map and bot/human rules reused, findings into the spec's latest cycle, closed by `accept` or not, `review.json`'s `ingested[]`, the `**Reply <fid>:** fixed` post on the thread under the elephant's token, `approve-spec`'s one ingest before its refusals and its one check (an unsettled external high or medium in the latest round, after the carry-forward, refuses, `by ruling` or not), `review-spec`'s `github-write` and `remote-branch`, the PR opened by the skill's preflight (refusing on `<base>`, committing the spec by path, pushing first) and the push after each fix and the approval commit, step 4's path back to step 3 on the refusal: `skills/plan/scripts/superegm/review.py` (modify: `--pr`, the review-level `ingested[]`, the reply post), `approve_spec.py` (modify: the one ingest call and the one check), `skills/review-spec/SKILL.md` (modify: the preflight's PR, the per-round fix commit §5 assumes and the push after it and after the approval commit, step 4's path back to step 3 on the ingest's refusal; the frontmatter's `github-write` and `remote-branch`), a `docs: see U29` Objective note, `tests/unit/test_review.py`, `test_effects.py` (modify), `test_u26.py` (create: its own keys) | U21; after U24 on shared files | M |
+| U27 | The builder's plugins and MCP servers, passed per launch (§4, §7, §11, §15): `config.builder.plugins` (`<name>@<marketplace>`; `init` writes `[]`), each resolved through the elephant profile's `plugins/installed_plugins.json` to `--plugin-dir <dir>`, and `config.builder.mcp` (`mcpServers` form; `init` writes `{}`), written to `launches/<unit>_r<n>_mcp.json` and passed with `--mcp-config --strict-mcp-config`; the per-launch record `launches/<unit>_r<n>_plugins.json` (id, version, directory, hook events per plugin; the managed plugins; the MCP server names; superseding `_managed.json`); `launch-builder`'s and `doctor`'s refusals (a listed plugin not installed or among the builder profile's managed plugins; a profile `skills/` or `commands/` directory or without `disableClaudeAiConnectors`, beside the landed login-only checks); `ENABLE_CLAUDEAI_MCP_SERVERS=false` in the launched environment; `doctor`'s `plugins:` and `mcp:` lines; `Skill(<name>)` / `Skill(<name> *)` and `mcp__<server>__<tool>` / `mcp__<server>__*` rules in `allowed_tools`; the skills named in the builder orders at the launch; from amendment 11 `gh pr view` and the test runner in `allowed_tools`' defaults and the orders' PR-body refresh line's `--body-file` form: `skills/plan/scripts/superegm/launch_builder.py` (modify: the flags, the MCP file, the record, the checks, the orders' skill line), `doctor.py` (modify: the two lines), `__init__.py` (modify: `DEFAULT_CONFIG.builder.plugins` and `.mcp`; `.allowed_tools`' two entries), `init.py` (modify), `skills/wave/references/builder_orders.md` (modify: the skills line; the refresh line's `--body-file` form, the push paragraph's after-push clause dropped), `skills/using-superegm/references/claude-code-tools.md` (modify: the `--allowedTools` sentence and the two flags), `docs/getting_started.md` (modify: the config's plugins and servers; the profile step), a `docs: see U29` Objective note, `tests/unit/test_builders.py`, `test_doctor.py` (modify), `test_u27.py` (create: its own keys) | — (U14, U15 landed); after U24 on `launch_builder.py` and `doctor.py` | M |
+| U28 | The default models and efforts per role (§7, §8, §11, §13): `builder.model` `claude-opus-5-5` (a full id) and `builder.effort` `medium`, passed to the launched `claude -p` as `--effort <level>` with `CLAUDE_CODE_EFFORT_LEVEL` unset, and written with the effective model into `launches/<unit>.json`; `reviewers.model` / `reviewers.effort` `opus` / `xhigh` (the Agent tool's alias and level), passed on every review goldfish dispatch as the adapter's override (the adapters stay `model: inherit`), the two session variables overriding them and `inherit` passing nothing; `astra.heads_effort` `high` for the foreman's lane; `judges.members` default `fable` (adapter, `xhigh`), `astra` (runner, `xhigh`, `not run` when absent), `opus` (adapter, `max`), an adapter member's `model` an alias; the elephant never in config; the four added keys read as `init`'s defaults in a pre-U28 config, the landed `builder.model` and member `effort` values standing; `doctor`'s role table: `skills/plan/scripts/superegm/__init__.py` (modify: `DEFAULT_CONFIG`, which `init` writes verbatim; the loader's `astra` merge extended to `builder` and `reviewers`, so a missing nested key reads from it), `launch_builder.py` (modify: `--effort`, the unset name, the entry's requested `model` and `effort`), `record_launch.py` (modify: the effective model from the result file's `modelUsage` and, amendment 10, `total_cost_usd` from the same read, the board's cost), `judges.py` (modify: the members' efforts; its `DEFAULT_MEMBERS` copy dropped for `DEFAULT_CONFIG.judges.members`, the one source), `doctor.py` (modify: the table, the members read through `judge_members`), `skills/review-spec/references/review_loop.md` (modify: the one rule), `skills/wave/references/foreman_brief.md` (modify: the placeholders filled from the config; step 2b's `astra.heads_effort` read and its `high` fallback), `skills/judges/SKILL.md` (modify: the override read per judge from the panel file; the effective pair by `review_loop.md`'s rule), `skills/judges/references/astra_judge.md` (modify: `<ASTRA_EFFORT>` from the panel file's member effort), `resources/review_panels.md` (modify: section 6 points at `review_loop.md`'s rule; section 1's table and `printenv` line untouched), a `docs: see U29` Objective note, `tests/unit/test_u28.py` (create: its own keys), `test_doctor.py`, `test_builders.py`, `test_judges.py`, `test_foreman.py`, `test_review.py` and `test_astra_fork.py` (modify: the pins on `review_loop.md` and `review_panels.md`) | — (landed units); after U27 and every earlier unit on the files its row shares | M |
+| U29 | Split units for parallel waves (§9.1, §9.2): the plan rules (a unit's Scope within one subsystem; a crossing unit written as two, a `Blocked by` edge only where one consumes the other's interface and the Shared files order for any file both edit; the cross-cutting rule for `README.md`, `docs/claude.md` and `test_helper.py`; Size `L` a split candidate; the plan shaped for wave width, its header stating the wave plan and why any wave is a singleton; a split's rows through `--amend-units`), `graph --plan`'s `width:` line derived from `handoff_units.json`, read by the plan skill before `scan`, `set-input` deriving the same line, the `set` reviewer's chain check (a chain longer than two units → its forcing edge, `medium`, once; from amendment 11 the header's wave plan and singleton reasons handed to `set`, the chains ending at one unit folded into one finding, a fold whose every chain the header names `low`) and the `proportion` persona's per-unit split check (over 10 Steps, 24 KB or eight paths, or crossing subsystems → split candidate, `medium`), `scan`'s warnings at those values: `skills/plan/scripts/superegm/graph.py` (modify: the `width:` line), `review_plan.py` (modify: `set-input` derives it), `scan.py` (modify: the warning values), `skills/plan/SKILL.md` (modify: the rules; the `width:` read before `scan`; the header's wave plan), `skills/plan/references/handoff_plan.md` (modify: the Size row; the `graph` row's `width:` line), `skills/plan/references/issue_template.md` (modify: the limits paragraph at the amendment's values), `skills/review-plan/SKILL.md` (modify: the line handed to `set`), `skills/review-plan/references/proportion.md` (modify: the per-unit split check), `docs/claude.md`, `README.md` (modify: the 1.2 docs sweep, every unit's `docs: see U29` note resolved here), `tests/unit/test_plan.py`, `test_review_plan.py` (modify) | U28, U30, U31, U32, U33, U34 (the docs sweep after the rows it sweeps: their `docs: see U29` notes are its edges, §9.1's one exception; the other noted rows land before U32 by the chains and blockers) | S |
+| U30 | The board (§7, §11): every `status` pass of a `wave` session, `--wait` included, writes the report's `## Units` table, with the new columns (state word from `report.py`'s `unit_state` plus `ready` and `waiting`, derived once there · round · launch · head · PR · waits on · next action, `word_action`'s for a posted round, else by state · cost from `total_cost_usd`), under its header line (the time of the last change) into the tracking issue's body between `<!-- superegm:board -->` and `<!-- /superegm:board -->` through one splice function (replace between the markers, append once, write only on change; a module of the plan's choosing) and `apply.edit_issue`, one GitHub write per pass and none when the fresh rows match the block read back; one table in the file, on stdout and in the issue; `verify` compares the body outside the markers through the same splice; the inbox stays the action list; from amendment 11 U20's row's "showing all without `--handoff`" is corrected, not the helper: the inbox is the store-wide read (§11.2), `status` and `report` one handoff's, a carded call taking the card's handoff: `skills/plan/scripts/superegm/report.py` (modify: the words `ready` and `waiting`; the new columns of the `## Units` line), the splice's module (the plan's choice among modules no other 1.2 unit edits, `apply.py` beside `edit_issue` the natural one: the one function), `status.py` (modify: the one write through it), `verify.py` (modify: the comparison outside the markers through it), `skills/wave/SKILL.md` (modify: the status step names the board), a `docs: see U29` Objective note, `tests/unit/test_wave.py` (modify) | — (landed units); after U22 and U24 on `status.py`, U24 on `skills/wave/SKILL.md`, U25 on `test_wave.py` | S |
+| U31 | The watchdog (§4, §7, §11, §11.2): `config.builder.stall_minutes` (30); a `running` launch without the `kill_failed` mark, no exit file, whose branch shows no commit newer than its own newest commit (or its `started_at`) for that long is stalled; the launch `launch-builder` starts (U24's one behaviour, §11) carries the wrapper's trap; the `wave` session's `status` pass, a reader, reports `U<n> stalled (<minutes> min; last commit <time | none>) pr=<n or none> status=<word or none>`, and the skill's step 3 records it through `record-launch --exit stalled`, which signals the group, waits 30 s for the wrapper's exit file `stalled` (the one proof) and records `exited (stalled)` with `last_commit_at` (the launch's own newest commit or none, written on every `--exit` from amendment 10, the one field the carve-out reads for an exit or a stall) or `kill_failed` (the launch signalled no more, the unit idle by one clause of `unit_state` and in the inbox for the owner's interrupt; a later exit file clears it), journals it and routes the unit to point 3 with the stall facts, where a launch with no commit of its own spends no relaunch, exit or stall, and a second is `stop`; `doctor`'s `stall:` line; the wave skill's step 3 records the stalled line: `skills/plan/scripts/superegm/launch_builder.py` (modify: the wrapper's trap), `status.py` (modify: the check, the event line and the mask; the tick's read counting the predicate as a trigger), `record_launch.py` (modify: `--exit stalled`: the signal and the wait through U25's `kill_group`, the record or `kill_failed`; the entry re-read; `last_commit_at` on every `--exit`), `report.py` (modify: the `kill_failed` clause of `unit_state`), `inbox.py` (modify: the `kill_failed` kind), `decision.py` (modify: the carve-out), `judges.py` (modify: `question --unit <U> --blocked launch <n>` renders the options from the pending decision's record, where `decision open` applied the carve-out once, and the stall facts from the launch entry; its own `relaunch already used` refusal dropped, so leavemealone-mode gets the panel where normal mode gets the question), `doctor.py` (modify: the line), `__init__.py` (modify: `DEFAULT_CONFIG.builder.stall_minutes`), `skills/wave/SKILL.md` (modify: step 3's stalled line; the Entry's resume raising point 3 for an `interrupted` launch with no decision on it; the leavemealone paragraph's reading of a refused question dropped with the refusal; the frontmatter's `destructive-local` for the kill), a `docs: see U29` Objective note, `tests/unit/test_wave.py`, `test_doctor.py`, `test_builders.py`, `test_judges.py`, `test_effects.py` (modify), `test_u31.py` (create: its own keys) | U24, U25 (`kill_group`); after U30 on `status.py`, `report.py` and `skills/wave/SKILL.md`, after U28 on `__init__.py`, `doctor.py`, `launch_builder.py`, `record_launch.py` and `judges.py` (module files; the test files follow the Shared files chains below) | M |
+| U32 | 1.1.3's carried findings (§8, §11, §12): `close` closes the tracking issue and any merged unit's open issue as completed, `--note` on `close` and `runcard close`, the integrate skill's `--patch` closing without the integrate round on the owner's typed word, a `close --note`; `launch-builder`'s idempotent re-run and the orders' detached-`HEAD` stop; the by-hand `approve-spec --amend-units` card (`approve-spec-<6 hex>-<n>`, which §12 states and the landed helper lacks); a scoped finding with no line number out of scope by the landed path; the ruling's `review status` `rounds:` item moot (a head gains no second cycle: `foreman dispatch` opens a head review only when none exists and `stop` ends the unit), nothing to build; and a sweep of the accepted cleanups (the three copies of the spec-blob hash search and of the chain selection folded into one helper; the `STORE`/`CURRENT_ARGS` coupling; the stale one-handoff prose in `handoff_plan.md`, `orient`, `issue_template` and `review_loop.md`; the brainstorming brief lookup): `skills/plan/scripts/superegm/close.py` (modify: the issue closes, `--note`), `runcard.py` (modify: `--note`), `launch_builder.py` (modify: the idempotent re-run), `approve_spec.py` (modify: the by-hand card), `review.py` (modify: the lineless finding out of scope), `skills/plan/scripts/superegm/` as one directory path with `init.py` and `doctor.py` (modify: module self-registration, each subcommand module exposing its parser registration, its config defaults, its `init` step text and its `doctor` check, discovered by import, the registry lines `DEFAULT_CONFIG`, `SUBCOMMANDS`, `init`'s key text and `doctor`'s line gone; the sweep's one helper), `skills/wave/references/builder_orders.md` (modify: the detached-`HEAD` stop), `skills/integrate/SKILL.md` (modify: Step 1's gate admitting a unit whose PR merged with its issue open and Step 2's diff set every merged PR of the handoff, that unit's included; the `--patch` path; the frontmatter's `github-write`), `skills/review-spec/references/review_loop.md` (modify: the sweep's prose; section 5's lineless-location sentence, §8's path), `skills/plan/references/handoff_plan.md`, `skills/plan/references/issue_template.md`, `skills/orient/SKILL.md`, `skills/brainstorming/SKILL.md` (modify: the sweep's prose), a `docs: see U29` Objective note, `tests/unit/test_leavemealone_finish.py`, `test_review.py`, `test_builders.py`, `test_effects.py` (modify), `test_u32.py` (create: its own keys) | — (the ruling's: blocked by no 1.2 unit); after every unit on the package it rewrites, U31 the last of them | M |
+| U33 | Unit tiers (§7, §9.1, §9.2, §11): the `Tier: difficult \| doable \| easy` line in the unit form with its criteria, optional to the parser (a section without it doable; a word outside the three refused as a bad `Size` is); `config.builder.tiers` (`init` writes `difficult` `claude-opus-5-5`/`high` and `easy` `claude-sonnet-5-5`/`medium`; doable is `builder.model`/`builder.effort` themselves, the pair a unit with no tier reads); `graph` writing `units[*].tier` into `handoff_units.json`, `launch-builder` picking the pair by it and writing `tier` with the `running` entry, the board's tier column; the `proportion` persona's tier check; `doctor`'s three builder rows: `skills/plan/scripts/superegm/__init__.py` (modify: the optional `Tier` field), `graph.py` (modify: `units[*].tier`), `launch_builder.py` (modify: the pair by tier, the entry's field; `builder.tiers`' defaults beside `builder`'s, after U32's self-registration), `report.py` (modify: the board's column), `doctor.py` (modify: the three rows), `skills/plan/SKILL.md`, `skills/plan/references/handoff_plan.md`, `issue_template.md` (modify: the field and its criteria; the layout's `Tier:` and its `{{tier}}` placeholder, an owner template without it refused at its next `graph --plan` until it gains one, the stated upgrade cost), `skills/review-plan/references/proportion.md` (modify: the tier check alone; U29's split check, landing after, names the Size-L case), a `docs: see U29` Objective note, `tests/unit/test_plan.py`, `test_review_plan.py`, `test_builders.py`, `test_doctor.py` (modify), `test_u33.py` (create: its own keys) | U28, U30; after U31 and U32 on `__init__.py`, `launch_builder.py`, `doctor.py`, `report.py` and `test_builders.py`, after U31 on `test_doctor.py`, after U32 on `handoff_plan.md` and `issue_template.md` (U29, the docs sweep, after it on `graph.py`, `proportion.md`, `issue_template.md`, `skills/plan/SKILL.md`, `test_plan.py` and `test_review_plan.py`) | S |
+| U34 | The team brainstorm (§2, §3.1, §4, §5, §6, §7, §14): `brainstorming`'s team mode (`--team`, `config.brainstorm.team`; the lead the owner's session; the four teammates through adapters (the cartographer new; the architect, skeptic and advocate the `design`, `zoom-out` and `comprehension` personas' `Mode: BRAINSTORM` through their landed adapters), one approach each reported by message, the mailbox between them, the cartographer's notes from its own code reading (no `orient` call, no file), the lead's merge and ranked questions into the draft's `## Alternatives Considered` and current-state ground; the fallback to subagents with no mailbox when asked with teams off or in a headless session, said in the Alternatives entry; teammates ending at the close by the lead's shutdown requests, the draft spec the record): `skills/brainstorming/SKILL.md` (modify: the team mode, the fallback, the merge), `skills/brainstorming/references/teammates.md` (create: the dispatch's inputs for the four, the topic, the owner's words so far and the message form; the three reused personas' overrides of their code-search step and findings output, and their lenses), `agents/cartographer.md` (create: the persona), `.claude-plugin/agents/cartographer.md` (create: the adapter, tools `Read, Grep, Glob`, `omitClaudeMd: true`; whether a teammate runs the hook is the plan's first probe, `omitClaudeMd` not applied to a teammate and no isolation claimed, §4), `.claude-plugin/plugin.json` (modify: the agents list), `skills/using-superegm/references/claude-code-tools.md` (modify: the agent-teams facts of §4), `skills/plan/scripts/superegm/__init__.py` (modify: the `brainstorm.team` default beside the core keys no subcommand owns, `repo`, `base`, `owners`, wherever U32 leaves them), a `docs: see U29` Objective note, `tests/unit/test_helper.py` (modify: the written key-set pin's one line, the exception §9.1 grants the owner of a line), `test_skeleton.py` (modify: `IDS` gaining `cartographer` after `foreman`, the manifest's list with it), `test_effects.py` (modify: the brainstorming ban on the word `subagent` narrowed to the removed builder-check names, the fallback's word returning), `test_u34.py` (create: its own keys) | — (landed units); after U33 on `__init__.py`, U32 on `skills/brainstorming/SKILL.md` and `test_effects.py`, U27 on `claude-code-tools.md`, U24 on `test_skeleton.py` (U29, the docs sweep, after it) | M |
 
 Shared files of the 1.0.0 build: `test_helper.py` is U03's alone. `body.py` is U03's and then U05's (the derived Step
 defaults), which U03 blocks. Each workflow SKILL.md stub U01 creates is filled
@@ -2191,35 +2877,127 @@ heading narrows or widens the scope; the tests pin the mapping on a fixture spec
 that a legacy flat store still reads and that `launch` refuses a base spec off the chain). The version bump to 1.1.2, the tag and the release are the
 owner's by-hand steps after all four merge, as before.
 
-Amendment 5 units (1.2): U21–U25 are filed from this spec as a fifth handoff (the helper's id
+Amendment 5–13 units (1.2): U21–U34 are filed from this spec as a fifth handoff (the helper's id
 form; the owner's name for it, `2026-11-05-superegm-1.2`, is the tracking issue's title and
 nothing else), through the installed 1.1.2 (`orient`, `review-spec --reviewers design`, approve,
 `plan`, `review-plan --reviewers readiness,proportion`, `file`, then `wave` through SuperEGM
 itself: the App builder, Astra on heads, `redesign` available), under the landed-row rule (a plan
-for it carries sections for U21–U25 only; U17–U20 landed, so no `Blocked by` names them). Once
-U21 lands, Devin's reviews of the later 1.2 PRs are ingested by the same wave: the dogfood. The
+for it carries sections for U21–U34 only; U17–U20 landed, so no `Blocked by` names them; the
+plan satisfies amendment 9's wave-width clause as far as 1.2 can: its header states the wave
+plan below, each wave but {U26, U27, U30} a singleton forced by a named `Blocked by` or module-file
+edge (`doctor.py`, `review.py`, `launch_builder.py`, the wave skill's steps, the shared tests;
+the docs and `test_helper.py` edges gone by amendment 9's cross-cutting rule; the registry lines
+`DEFAULT_CONFIG`, `SUBCOMMANDS`, `init`'s key text and `doctor`'s line add one edge per unit,
+accepted by the owner, which U32's self-registration, after every unit on the package, removes for
+later releases, whose width comes from the subsystem rule's splits), U30 beside U26 and U27 (after U22 and U24 on `status.py` and `skills/wave/SKILL.md` and
+U25 on `test_wave.py`, no file shared with them), U31 after U30 on `status.py`, `report.py` and
+`skills/wave/SKILL.md` and U28 on `__init__.py`, `doctor.py`, `launch_builder.py`,
+`record_launch.py` and `judges.py`, by its blockers U24 and U25 (`kill_group`, landed four waves earlier), U32 after every unit on the package it rewrites, U31 the last of them (the ruling's placement,
+blocked by no 1.2 unit: the shared-file edges order it one wave after U31, as `Blocked by` would), and U29 last, the
+docs sweep, after U28, U30, U31, U32, U33 and U34, the rows it sweeps, U33 (amendment 12) between U32 and U29, after U31 and U32 on the package files its row shares and before U29 on `graph.py` and `proportion.md`, U34 (amendment 13) between U33 and U29, after U33 on `__init__.py` and U32 on `skills/brainstorming/SKILL.md`; the 1.2 rows are untiered (filed under 1.1.2, no `Tier:` row: the doable pair), as they are exempt from the split
+checks as a set, reviewed under 1.1.2's `proportion.md`, which has none; their plan sections
+carry the size the path count gives, as the parser requires). Once
+U21 lands and the plugin is updated from the tree, the next `wave`, typed in a new session (§5: a
+wave is one invocation, and an update takes a new session), ingests Devin's reviews of the later
+1.2 PRs, and the next amendment's spec PR, opened by the review's preflight, is the first
+`review ingest --pr` reads once U26 lands (amendment 6; this repository's handoffs amend the
+approval commit by hand to drop `artifacts_dir`, then push the branch again with `--force-with-lease`,
+the elephant's own branch being outside the `superegm/**` rule, so the PR's head is the commit
+`<base>` receives): the dogfood. The
 order is the panel's (`1.2-questions-e8857c`, two rounds, Claude-only, every question converged;
 the owner accepted every verdict and amended the test-suite non-goal on their own word): ingest
-and rulings first, then the inbox, then the driver; U25 sits where its shared files put it.
-Shared files: `collect.py` is U21's, then U22's, then U25's; `review.py` U21's, then U25's;
-`skills/wave/SKILL.md` U21's, then U22's, U23's, U24's; `__init__.py`, `init.py` and
-`test_helper.py` every unit's in wave order (disjoint keys); `inbox.py` and `test_inbox.py`
-U23's, then U24's; `docs/claude.md` and `README.md` in wave order. Waves: {U21} → {U22} →
-{U23, U25} → {U24}; version 1.2.0 after all five merge (manifests, `docs/releases.md`, tag,
-release, plugin update: the owner's by-hand steps), after which `superegm driver install` is the
-owner's by-hand step, as the App registration was for 1.1.1. Risk: U21 medium (a human medium
+and rulings first, then the inbox, then the driver; U25 sits where its shared files put it, and
+U26 (amendment 6) after U21 by its blocker and after U24 on `review.py`, U27 (amendment 7) beside U26, after U24 on `launch_builder.py` and `doctor.py`, and U28 (amendment 8) last, after
+U27 and every earlier unit on the files its row shares (the chains below), U30 (amendment 10)
+beside U26 and U27 (no file shared; U30 after U22 and U24 on `status.py` and
+`skills/wave/SKILL.md` and U25 on `test_wave.py`), U31 (amendment 10) after U30 on `status.py`, `report.py` and
+`skills/wave/SKILL.md` and after U28 on `__init__.py`, `doctor.py`, `launch_builder.py`,
+`record_launch.py` and `judges.py`, U32 (amendment 11) after every unit on the package it rewrites, U31 the last of them,
+blocked by no 1.2 unit, U33 (amendment 12) after U31 and U32 on `__init__.py`, `launch_builder.py`, `doctor.py` and
+`report.py` and before U29 on `graph.py` and `proportion.md`, U34 (amendment 13) after U33 on `__init__.py` and U32 on `skills/brainstorming/SKILL.md`, and U29 (amendment 9) last, the docs sweep, `Blocked by` U28, U30, U31, U32, U33 and U34
+(the rows it sweeps; §9.1's one exception).
+Shared files: `collect.py` is U21's, then U22's, then U25's; `review.py` U21's, then U25's, U24's, U26's, U32's;
+`skills/wave/SKILL.md` U21's, then U22's, U23's, U25's, U24's, U30's, U31's; `__init__.py` U21's, U23's, U25's, U24's, U27's, U28's, U31's, U32's, U33's and U34's, `init.py` U21's, U23's, U25's, U27's and U32's, and
+`test_helper.py` no 1.2 unit's but the written key-set pin's one line, U21's, U23's, U25's, then U34's, each adding a top-level key (amendment 9: each unit's own test file; U25 still follows U23
+on `skills/wave/SKILL.md` and U24 follows U25 on `doctor.py`); `inbox.py` U23's, U24's, then U31's; `test_inbox.py`
+U23's, then U24's; `launch.py` U21's, then U24's; `doctor.py` and `test_doctor.py` U25's, then U24's, U27's, U28's, U31's (`doctor.py` then U32's), U33's; `skills/brainstorming/SKILL.md` U32's, then U34's; `test_skeleton.py` U23's, U24's, then U34's; `launch_builder.py` U22's, then U25's, U24's, U27's, U28's, U31's, U32's, U33's; `approve_spec.py` U26's, then U32's; `status.py` U22's, U24's, U30's, then U31's; `record_launch.py` U24's, U28's, then U31's; `judges.py` and `test_judges.py` U28's, then U31's; `test_effects.py` U23's, U24's, U26's, U31's, U32's, then U34's; `skills/using-superegm/references/claude-code-tools.md` U27's, then U34's;  `decision.py` U22's, U23's, then U31's; `test_wave.py` U21's, U22's, U23's, U25's, U30's, then U31's; `report.py` U30's, U31's, then U33's; `test_builders.py` U24's, U27's, U28's, U31's, U32's, then U33's; `resources/review_panels.md` U21's, U25's, then U28's; `foreman_brief.md` U25's, then U28's; `test_foreman.py` U21's, U22's, U25's, then U28's; `test_review.py` U21's, U25's, U26's, U28's, then U32's; `skills/wave/references/builder_orders.md` U22's, U27's, then U32's; `skills/review-spec/references/review_loop.md` U28's, then U32's; `docs/claude.md` and `README.md` U29's alone, the 1.2 docs sweep
+(amendment 9: the units whose approved rows edited the docs carry a `docs: see U29` Objective note). Waves: {U21} → {U22} →
+{U23} → {U25} → {U24} → {U26, U27, U30} → {U28} → {U31} → {U32} → {U33} → {U34} → {U29}; version 1.2.0 after all fourteen merge (manifests, `docs/releases.md`, tag,
+release, plugin update: the owner's by-hand steps), after which `superegm driver install` (re-typed
+after every later update), `~/.superegm/env`, `register` from each handoff's worktree, a machine kept awake
+(`pmset`/`caffeinate`) and the builder's tooling configured (amendment 7, this repository's
+choice: `config.builder.plugins` `["ponytail@ponytail"]` alone (never `superegm@superegm`),
+installed and disabled in the elephant profile, its SessionStart, SubagentStart and
+UserPromptSubmit hooks admitted and recorded; `config.builder.mcp` `{"context7": {"type":
+"http", "url": "https://mcp.context7.com/mcp"}}`, no key: the unauthenticated rate limit is
+accepted;
+`allowed_tools` gaining `Skill(ponytail:ponytail)`, `Skill(ponytail:ponytail *)`,
+`mcp__context7__resolve-library-id` and `mcp__context7__query-docs`, the names this platform
+gives them; and, when U28 lands, this repository's committed config edited to the ruled values:
+`builder` `claude-opus-5-5` at `medium`, `reviewers` `opus` at `xhigh`, the judges `fable` at
+`xhigh`, `astra` at `xhigh`, `opus` at `max`, `astra.heads_effort` `high`) are the owner's
+by-hand steps, as the App
+registration was for 1.1.1. Risk: U21 medium (a human medium
 returns an awaiting-merge unit to flight, which is the owner's wish; a flood of bot lows never
-blocks; the elephant's token reads only); U22 medium (a compromised owner login is a
+blocks; the elephant's token reads, and posts the one review comment); U22 medium (a compromised owner login is a
 compromised owner, outside the spec; the form check is exact, so a typo is silence, which the
 inbox shows as the still-open decision); U23 low for `inbox` (reads) and medium for `notify`
 (the owner's script runs with the owner's environment, bounded by the timeout); U24 high
-(unattended owner credentials, §4.1; two sessions on one handoff are prevented by the exit-file
-rule and the open `wave` card; the plist runs only what the plugin root names); U25 medium (the
-head's code runs on the owner's machine, §4.1). Plan-review focus: U21 a PR with 200 bot threads
+(unattended owner credentials and comment text in an unattended foreman, §4.1; two sessions on
+one handoff are prevented on both sides, the tick's (the exit file and the open `wave` card) and a
+typed `wave`'s (`runcard open`'s refusal);
+the plist runs only what the plugin root names); U25 medium (the head's code runs on the owner's
+machine, §4.1); U26 low (reads; opens the spec PR and posts replies on it under the owner's token; pushes
+the elephant's branch after each fix and the approval commit, never `<base>`); U27 medium (a
+listed plugin, hooks included, runs in the builder's context with the builder's token: the
+owner's named set alone, passed by flag, managed plugins policy, the set with each plugin's
+version and hook events on the record per launch: the hook events are the record's bound, not
+the plugin's component inventory; its mods and its own settings ride on the version); U28 low
+(defaults: an alias or effort the platform refuses is refused at the dispatch, recorded
+`--not-run`, or fails the launch, which `record-launch --exit` records); U29 low (plan rules and
+two reviewer checks; the helper splits nothing); U30 low (one issue-body write per pass, between
+the markers, never a unit issue); U31 medium (a process group killed by a recorded pid: the
+wrapper's own, read from the record, never guessed, and never signalled when the group is
+another's or gone (`kill_failed (pid reused)`, `kill_failed (no process)`), the exit file the one
+proof; a
+live builder between commits, a long `Run` suite or a large first read, is killed at the bound
+and its unpushed commits left in the detached worktree, the relaunch starting at the PR tip,
+the config value the mitigation and the cost stated; a stall with commits spends the relaunch as
+an exit does); U32 medium (discovery by import replaces how every subcommand loads and how `init` composes
+the config it writes: a module that fails to import or exposes no defaults breaks every command,
+and the import order sets the written config's key order; beside it a GitHub close of a merged unit's open issue
+whenever `close` runs and of the tracking issue when every unit then landed, a journal note, and `--patch` skipping a review on the
+owner's typed word; the plan's fit against the 48 KB bound is the stated risk, the self-registration one mechanical pattern per module); U33 low (a tier the
+author sets picks a model and effort the config names; a wrong tier costs rounds, which the
+proportion check and the foreman's rounds surface); U34 low (four contexts for the brainstorm's
+divergent step only, bounded by the skill's step; the owner's session is the lead; nothing a
+teammate reads or says reaches a later phase but through the draft spec; a teammate may reject the shutdown and run until the session ends, and a resumed lead has no teammates: the platform's stated limits).
+Plan-review focus: U21 a PR with 200 bot threads
 and one human medium, and a thread on a head not yet reviewed; U22 a comment one character off
-the form, and an owner's edit after the record; U23 a store with no open handoff; U24 a reboot
-mid-wave (no exit file), and a tick firing while a card is open; U25 a `Run` item that needs a
-service, and a parametrize row moved rather than dropped. Not in 1.2: cross-repository handoffs
+the form, and an owner's edit after the record; U23 a store with no open handoff, and the inbox's `test-delta` and `owner: <ids>` kinds built against §7's schema with fixture data (U25 lands after U23); U24 a reboot
+mid-wave (no exit file), a session that exited without closing its card, a typed `wave` during a
+tick's session, a tick during a typed `wave`, a plugin update under an installed timer, and two
+worktrees registering one store; U25 a `Run` item that needs a service,
+a `Run` line that installs, a suite longer than the bound, and a parametrize row moved rather
+than dropped; U26 a thread an earlier round already answered, and a thread arriving after an
+`accept`; U27 a listed plugin not installed, one installed but disabled (passes), a profile `skills/` directory, and whether
+`--strict-mcp-config` keeps a listed plugin's bundled servers (a `Skill` rule naming no loaded
+skill is inert on the platform: no check); U28 `--effort` honoured by `claude -p` and the result file's `modelUsage` field (one run)
+and an effort a member's model lacks; U29 a unit of 11 Steps, a Scope crossing two subsystems,
+and a chain of three units; U30 a body without the markers and a byte-identical table (no
+write); U31 a launch with commits but no newer one at the bound, a host-caused stall (no commit
+newer than the launch) and its second, no exit file within 30 s of the signal (`kill_failed`,
+skipped after), a present leader that is another's and no member living (the two refusals, `pid reused` and
+`no process`, and the proof the plan chose), a live group with no leader (signalled, `kill_failed (no exit file)`), a typed launch through `launch-builder`, and one run proving `claude -p`, signalled mid-command, exits on the
+wrapper's signal within the bound (a shell runs its trap after its foreground child returns); U32 a `close` with a unit whose PR is unmerged
+(journaled, its issue and the tracking issue left open), a unit whose PR merged with its issue open (admitted at Step 1, its PR in the round's diff, the issue closed), `--patch` journaled as the close's reason, a `launch-builder`
+re-run after a failure before the switch, a scoped finding with a bare path, a module without defaults, a
+module that fails to import, `init`'s written config key set equal before and after the
+self-registration (the order the discovery's); U33 a `handoff_units.json` without `units[*].tier` (the 1.2
+store's: doable, the `builder.model` pair) and a section without a `Tier:` row, a body whose open choices contradict its tier (a proportion finding), and a
+config without the `easy` row (the doable pair); U34 teams off when asked (the subagent fallback, said in the
+Alternatives entry), teams on in a split-pane mode (the fallback too, no mailbox proof), a headless session (no teammate spawns), a teammate asking the cartographer instead
+of reading code, and a brainstorm not asked for (no teammate and no subagent). Not in 1.2: cross-repository handoffs
 (the lib-core and financial-twin inputs are one handoff per repository; the second spec states
 its prerequisite in prose and `Landed:` rows, §9.1, and the owner types its phases after the
 first lands; neither a `Repo:` field nor a cross-store `Blocked by` is built; the registry is a
@@ -2262,15 +3040,17 @@ Interfaces (the names the plans will carry):
   --panel <id> → verdict JSON; exit 0 every question converged / 2 not`; the question-file
   grammar.
 - U09 → U09b, U10, U10b, U11: `launch [--idle <units>]`; `launch-builder --unit <U> --round <n>
-  --runcard <id> → command line; exit 1 with the refusal`; `record-launch --unit <U> [--exit
-  <code>]`; `launches/<unit>.json` per §7 (`launches[].round`, `launches[].status`,
+  --runcard <id> → the launch started and its `running` entry written (amendment 10, U24: the
+  one behaviour; amendment 5's `--start` flag and the printed command line gone, §11); exit 1
+  with the refusal`; `record-launch --unit <U> --exit <code | stalled>`
+  (from amendment 10 the flagless form is refused: the `running` entry is `launch-builder`'s); `launches/<unit>.json` per §7 (`launches[].round`, `launches[].status`,
   `launches[].result_file`, `launches[].prompt_sha256`); the `**Deviation**`, `**Reply <fid>:**`,
   `**Ruling:**` and `**Builder status:**` headings, the option-line form and the PR body's
   DoD-results form.
 - U09b → U10b: `status --wait <s> --runcard <id> → one or more event lines`; the six event kinds.
 - U10 → U10b, U11: `foreman dispatch --unit <U> --runcard <id> → <dispatch_id> <child-card>;
   exit 1 when the dispatch predicate fails`; `foreman-<unit>-<dispatch_id>` returns `clean |
-  revise | contested: <ids> | cap-reached | target-moved | error`; `review post … → exit 0 posted
+  revise | contested: <ids> | owner: <ids> (amendment 5) | cap-reached | target-moved | error`; `review post … → exit 0 posted
   / 3 target-moved`.
 - U10b → U11: `report`; `decision open --unit <U> --point <1|2|3> --question <file> → <id>`;
   `decision rule --unit <U> --decision <id> --ruling <text> --by <login | judges:<panel-id>>`;
@@ -2304,28 +3084,70 @@ Interfaces (the names the plans will carry):
   refusal of a base spec off the handoff's approval chain; the frozen older handoff's refusals;
   `handoff_units.json`'s `filed_elsewhere[]`; the prompt's `# Spec range` and
   `prepare`'s `spec_range.md`.
-- U21 → U22, U23: `review ingest --unit <U> --runcard <id> → <n> ingested; exit 0`; the reviewer
-  id `external:<login>`; `foreman/<unit>.json.ingested[]`; the journal line `<unit> back in flight
+- U21 → U22, U23, U26: `review ingest --unit <U> --runcard <id> → <n> ingested; exit 0`; the reviewer
+  id `external:<login>`; `foreman/<unit>.json.ingested[]`; the journal line `<unit> ready again
   (external:<login>)`; the config key `ingest` (`severity_words`, `human_role`).
-- U22 → U23, U24: py: `ruling_of(comment, owners) -> Ruling | None`; the seventh event kind
+- U22 → U23, U24, U25: py: `ruling_of(comment, owners) -> Ruling | None`; the seventh event kind
   `ruling` and its line; the comment forms of §13.2.
 - U23 → U24: `inbox [--all] [--json] [--handoff <id>] → one line per item: <repo> <unit or review>
-  | <kind> | <action>; exit 0`; `notify --runcard <id>`; `state.json.notified`; the config keys
-  `notify`, `notify_timeout_seconds`.
+  | <kind> | <action>; exit 0`; `notify --runcard <id>`; `state.json.notified`; the hook path
+  `~/.superegm/notify`; the config key `notify_timeout_seconds`.
 - U24 → the owner: `register [--remove] --runcard <id>`; the registry's keys `repo, root,
-  artifacts_dir, base, mode`; `driver tick|install|uninstall|status|reset`; `driver/<handoff>.json`;
-  the launchd label `com.superegm.driver`; the config key `driver.interval_minutes`; `doctor`'s
-  `driver:` line.
-- U25 → the owner: the finding ids `dod-<n>` (`ran red (<line>)` | `paste differs from the run`)
-  and `test-delta: <file>:<line> removed | weakened`; `rounds[].dod_runs.<item>.{exit, summary,
-  paste_summary, timed_out}`; `rounds[].test_delta[].{file, line, kind, base_commit}`;
+  artifacts_dir`; `driver tick|install|uninstall|status|reset`; `driver/<handoff>.json`;
+  the launchd label `com.superegm.driver`; `install --interval`; `~/.superegm/env`; `doctor`'s
+  `driver:` and `env:` lines; from amendment 10 `launch-builder`'s start as its one behaviour,
+  the `running` entry with `pid`, `boot_id` and `command`.
+- U25 → the owner: the `foreman-<round>-<n>` findings whose claims start `dod-<n>: ran red
+  (<line>) | paste differs from the run` and `test-delta: <file>:<line> removed | weakened`; the
+  three subjects the `allowed` ruling's parser matches: `<fid>`, `dod-<n>`, `test-delta <file>`; `rounds[].dod_runs.<item>.{exit, summary,
+  paste_summary, timed_out}`; `rounds[].test_delta[].{file, line, base_line, kind, base_commit}`;
   `r<n>/dod/<item>.txt`; the config key `foreman.run_timeout_minutes`; the ruling form
-  `**Ruling:** <fid> allowed — <reason>`.
+  `**Ruling:** <fid> allowed — <reason>` for `test-delta` and `dod-<n>`.
+- U26 → the owner: `review ingest --pr <n> --runcard <id> → <n> ingested; exit 0`; `review.json`'s
+  `ingested[]`; the `**Reply <fid>:** fixed` post; `approve-spec`'s refusal `approve-spec: external:<login> <fid>
+  unsettled on PR <n>`, exit 1.
+- U27 → the owner: the config keys `builder.plugins`, `builder.mcp`; `launches/<unit>_r<n>_plugins.json`
+  (`plugins[]` with `id`, `version`, `dir`, `hooks[]` the event names; `managed[]`; `mcp[]` the server
+  names) and `launches/<unit>_r<n>_mcp.json`; `doctor`'s `plugins:` and `mcp:` lines; the refusals
+  `launch-builder: plugin <id> not installed | managed in the builder profile` and `builder profile
+  <dir> holds skills/ | commands/ | lacks disableClaudeAiConnectors`; `ENABLE_CLAUDEAI_MCP_SERVERS=false`
+  in the launched environment.
+- U28 → the owner: the config keys `builder.effort`, `reviewers.model`, `reviewers.effort`,
+  `astra.heads_effort` and the new `init` defaults of `builder.model` and `judges.members[].effort`;
+  `doctor`'s `model:` lines, one per role; every dispatch record's `--model` and `--effort`
+  requested → effective; `launches/<unit>.json`'s `model` and `effort` (requested; the effective
+  model from the result file's `modelUsage`, else `requested only`).
+- U29 → the owner: `graph --plan`'s `width:` line (`width: chains <path>: U<a> > U<b> > … > U<n>
+  (after U<b>)…`, the forcing edge the `after` item into the third unit; `none` when no chain
+  exceeds two), derived from `handoff_units.json`'s `units[*].shared` as `set-input` derives it;
+  the proportion finding form `split candidate: <Steps | bytes | paths | subsystems>`; the `set`
+  finding form `chains at U<n>: <path> U<a> > U<b> > … > U<n> (after U<b>); <path> …` at the
+  location U<n>, `low` when the header names them.
+- U30 → the owner: the board between `<!-- superegm:board -->` and `<!-- /superegm:board -->` in the
+  tracking issue (its header line with the time of the last change, and the `## Units` line's
+  columns); the one table in `wave_<n>_report.md`, on stdout and in the issue.
+- U31 → the owner: the config key `builder.stall_minutes`; the wrapper's trap; the event line `U<n> stalled (<minutes> min; last commit <time |
+  none>) pr=<n or none> status=<word or none>`; `record-launch --exit stalled`; `launches[]`'s `pid`, `exited (stalled)`,
+  `last_commit_at` and `kill_failed`; the exit file's `stalled`, the one proof; the inbox's
+  `kill_failed` kind; the journal line `<unit> launch <n> stalled (<minutes> min; last commit
+  <time | none>)`; the point-3 question's stall facts; `doctor`'s `stall:` line.
+- U32 → the owner: `close [--note <text>]`, `integrate --close --patch` and `runcard close --note <text>`; the tracking issue and a
+  merged unit's open issue closed as completed; `review record`'s out-of-scope line `<fid>: no line number`;
+  the by-hand `approve-spec --amend-units` card
+  `approve-spec-<6 hex>-<n>` (opened and closed by the command itself when no `--runcard` is given,
+  skill `approve-spec`, §7's id form unchanged; effects `state-store`, the push the owner's, §5).
+- U33 → the owner: the unit form's optional `Tier:` line; the config key `builder.tiers` (`difficult`,
+  `easy`); `handoff_units.json`'s `units[*].tier` and `launches[]`'s `tier`; the board's tier column;
+  `doctor`'s three `model: builder <tier> …` lines; the proportion finding form `tier: <reason>`.
+- U34 → the owner: `/superegm:brainstorming --team`; the config key `brainstorm.team`; the draft
+  spec's `## Alternatives Considered` entry (the approaches) with its `team: on | off (subagents)` line and
+  its current-state ground (the cartographer's notes); the cartographer's persona and adapter; `teammates.md`.
 
 Waves: {U01} → {U02, U03} → {U04, U05, U08, U09} → {U06, U07, U09b, U10} → {U10b} → {U11}; then,
 as a second handoff (`2026-11-03-superegm-<6 hex>`), {U12} → {U13} → {U14}, and version 1.1.0
 after all three merge; then, as a third handoff (`2026-11-03-superegm-<6 hex>`), {U15} → {U16}, and
 version 1.1.1 after both merge; then, as a fourth handoff (`2026-11-03-superegm-<6 hex>`, the
 owner's name `2026-11-05-superegm-1.1.2`), {U17, U18} → {U19} → {U20}, and version 1.1.2 after all
-four merge; then, as a fifth handoff (`2026-11-05-superegm-1.2`), {U21} → {U22} → {U23, U25} →
-{U24}, and version 1.2.0 after all five merge.
+four merge; then, as a fifth handoff (`2026-11-03-superegm-<6 hex>`, the owner's name
+`2026-11-05-superegm-1.2` on the tracking issue), {U21} → {U22} → {U23} → {U25} → {U24} → {U26, U27, U30} → {U28} → {U31} → {U32} → {U33} → {U34} → {U29}, and
+version 1.2.0 after all fourteen merge.
