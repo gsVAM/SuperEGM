@@ -13,7 +13,6 @@ from pathlib import Path
 import superegm as core
 from superegm import foreman, launch_builder, review
 from superegm.launch import app_login
-from superegm.review_plan import SPEC_LINE_RE
 
 WRITES = frozenset(['foreman', 'review'])  # the store kinds this subcommand writes
 SKILLS = frozenset(['wave'])  # the skills whose card this subcommand accepts
@@ -112,22 +111,6 @@ def cut_diff(diff: bytes, limit: int = 400_000) -> str:
     return diff.decode("utf-8", errors="replace")
   size = f"{limit // 1000} KB" if limit % 1000 == 0 else f"{limit} bytes"
   return diff[:limit].decode("utf-8", errors="replace") + f"\n(diff cut at {size})\n"
-
-
-def spec_range(st, root: Path, body: str) -> str:
-  """The body's `Spec:` range read from the approved commit (`git show <commit>:<path>`), or `not available: <reason>`."""
-  match = SPEC_LINE_RE.search(body)
-  if not match:
-    return "not available: no `Spec:` line with a range in the unit body"
-  path, start, end = match.group(1), int(match.group(2)), int(match.group(3))
-  approval = core.load_approval(st, Path(path))
-  if not approval or not approval.get("commit"):
-    return f"not available: no approval record for {Path(path).stem}"
-  try:
-    text = core.run_git(["show", f"{approval['commit']}:{path}"], root)
-  except core.HandoffError as error:
-    return f"not available: {error}"
-  return "\n".join(text.splitlines()[start - 1:end])
 
 
 def prior_round_text(st, rid, previous) -> str:
