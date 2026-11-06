@@ -28,7 +28,7 @@ dispatch in full.
 1. `superegm judges question <form> --runcard <card>` prints the question file's path and, for a
    builder's `interface` deviation, a second line `consumers: #<n> …` (every filed unit whose body
    consumes a name of the deviating unit). A refusal `question: <reason>` means there is nothing
-   to ask (the CI finding, a low, a used `continue` on a spec or plan review, or `relaunch`): take
+   to ask (the CI finding, a low, a used `continue` on a spec or plan review whose bytes moved, or `relaunch`): take
    the one remaining path. A head whose `continue` is spent is asked `stop` and `redesign`, never refused.
 2. `superegm judges open --question <path> --evidence <paths> --parent <card>` opens the panel
    under a child card of the skill's card and prints `<panel>`; the evidence is the artifact under
