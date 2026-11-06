@@ -64,7 +64,7 @@ def record(world, review, reviewer, lines, runcard, tmp_path):
   assert code == 0, out
 
 
-def head_review(world, runcard, tmp_path):
+def head_review(world, runcard, tmp_path, findings=(FINDING, LOW)):
   code, out = world.run("review", "open", "--kind", "head", "--artifact", "U07", "--sha256", HEAD,
                         "--reviewers", "change-review", "--runcard", runcard)
   assert code == 0, out
@@ -73,23 +73,31 @@ def head_review(world, runcard, tmp_path):
   put(world, {"dispatch_id": "d1", "decisions": [], "rulings": [],
               "rounds": [{"round": 1, "runcard": runcard, "launch": 1, "head": HEAD, "phase": "collected",
                           "dispatch_id": "d1", "outcome": None, "posted_at": None}]}, "foreman", "U07")
-  record(world, review, "change-review", [FINDING, LOW], runcard, tmp_path)
+  record(world, review, "change-review", list(findings), runcard, tmp_path)
   record(world, review, "foreman", [CI], runcard, tmp_path)
   return review
 
 
-@pytest.mark.parametrize("form", ["round", "cap", "decision", "blocked-comment", "blocked-launch", "blocked-closed"])
+@pytest.mark.parametrize("form", ["round", "cap", "cap-spent", "decision", "blocked-comment", "blocked-launch", "blocked-closed"])
 def test_judges_question_forms(world, tmp_path, form):
   seed(world)
   runcard = world.card("wave")
   review = head_review(world, runcard, tmp_path)
+  if form == "cap-spent":
+    path = store(world.repo).path("reviews", review, "review.json")
+    spent = json.loads(path.read_text(encoding="utf-8"))
+    spent["rulings"].append({"id": "R1", "ruling": "continue", "by": "owner", "at": "t"})
+    put(world, spent, "reviews", review, "review.json")
   comment(world, 123, INTERFACE_COMMENT)
   put(world, {"launches": [{"round": 1, "status": "exited 0"}]}, "launches", "U07")
   args, expected = {
       "round": (["--review", review, "--round", "1", "--reason", "change-review-1-1=the test covers it"],
                 "## Q1 change-review-1-1 (high, src/x.py:3): the retry loop never backs off\n"
-                "- (a) finding upheld\n- (b) finding overruled — the test covers it\n"),
-      "cap": (["--review", review, "--cap"], f"## Q1 {review} is at its cap\n- (a) one more round\n- (b) stop\n"),
+                "- (a) finding upheld\n- (b) finding overruled — the test covers it\n- (c) redesign — the retry loop never backs off\n"),
+      "cap": (["--review", review, "--cap"], f"## Q1 {review} is at its cap\n- (a) one more round\n- (b) stop\n"
+              "- (c) redesign — the head is at its cap after 1 rounds: the retry loop never backs off\n"),
+      "cap-spent": (["--review", review, "--cap"], f"## Q1 {review} is at its cap\n- (a) stop\n"
+                    "- (b) redesign — the head is at its cap after 1 rounds: the retry loop never backs off\n"),
       "decision": (["--unit", "U07", "--decision", "D1"],
                    "## Q1 U07 D1: Retry ceiling?\n- (a) 5 attempts\n- (b) 10 attempts\n"),
       "blocked-comment": (["--unit", "U07", "--blocked", "123"],
@@ -111,6 +119,16 @@ def test_judges_question_forms(world, tmp_path, form):
   assert code == 1 and "runcard: --runcard is required" in out, out
 
 
+def test_a_cap_redesign_with_no_unsettled_claim_names_the_rounds_alone(world, tmp_path):
+  seed(world)
+  runcard = world.card("wave")
+  review = head_review(world, runcard, tmp_path, findings=(LOW,))
+  code, out = world.run("judges", "question", "--review", review, "--cap", "--runcard", runcard)
+  assert code == 0, out
+  assert Path(out.splitlines()[0]).read_text(encoding="utf-8") == (
+      f"## Q1 {review} is at its cap\n- (a) one more round\n- (b) stop\n- (c) redesign — the head is at its cap after 1 rounds\n")
+
+
 @pytest.mark.parametrize("case, args, message", [
     ("ci", ["--review", "{review}", "--round", "1", "--reason", "foreman-1-1=flaky"],
      "question: foreman-1-1 is the CI finding"),
@@ -118,8 +136,6 @@ def test_judges_question_forms(world, tmp_path, form):
      "question: change-review-1-2 is low"),
     ("unknown", ["--review", "{review}", "--round", "1", "--reason", "design-1-9=x"],
      "question: design-1-9 is not in round 1"),
-    ("continue-used", ["--review", "{review}", "--cap"],
-     "question: continue already ruled on {review}; stop is the only option"),
     ("relaunch-used", ["--unit", "U07", "--blocked", "launch", "1"],
      "question: relaunch already used on U07"),
 ])
@@ -128,11 +144,6 @@ def test_judges_question_refusals(world, tmp_path, case, args, message):
   runcard = world.card("wave")
   review = head_review(world, runcard, tmp_path)
   put(world, {"launches": [{"round": 1, "status": "exited 1"}]}, "launches", "U07")
-  if case == "continue-used":
-    # `review rule` refuses `not at the cap` after one round: the ruling it would write is seeded.
-    record = json.loads(store(world.repo).path("reviews", review, "review.json").read_text(encoding="utf-8"))
-    record["rulings"].append({"id": "R1", "ruling": "continue", "by": "owner", "at": "2026-11-03T00:00:00Z"})
-    put(world, record, "reviews", review, "review.json")
   if case == "relaunch-used":
     put(world, {"dispatch_id": None, "rounds": [], "decisions": [{"id": "d1", "point": 3}],
                 "rulings": [{"decision": "d1", "ruling": "relaunch", "by": "judges:p1"}]}, "foreman", "U07")
@@ -172,6 +183,11 @@ ROWS = [
     ("--unit <U> --blocked", "<option>",
      'superegm decision rule --unit <U> --decision <did> --ruling "<option>" --by judges:<panel> --runcard <card>'),
 ]
+ROWS += [
+  ("--review <id> --round <n>", "redesign — <why>",
+   'superegm decision rule --unit <U> --decision <did> --ruling "redesign — <why>" --by judges:<panel> --runcard <card>'),
+  ("--review <id> --cap", "redesign — <why>",
+   "superegm review rule --review <id> --ruling stop --judges <panel> --runcard <card>")]
 
 
 @pytest.mark.parametrize("form, option, command", ROWS)
@@ -239,6 +255,18 @@ def test_close_writes_closed_at_and_journals_unlanded(world):
   code, out = world.run("close", "--runcard", runcard)
   assert code == 1 and f"close: already closed at {closed_at}" in out
   assert json.loads(store(world.repo).path("state").read_text(encoding="utf-8"))["closed_at"] == closed_at
+
+
+@pytest.mark.parametrize("state, code, line", [
+  ("open", 1, "close: U07 is stopped for redesign and #410 is open: close it by hand once the re-planned unit is filed"),
+  ("closed", 0, "closed sample-design-abc123; unlanded: U07, U08, U09")])
+def test_close_refuses_while_a_redesign_units_issue_is_open(world, state, code, line):
+  seed(world)
+  put(world, {"dispatch_id": None, "rounds": [], "decisions": [], "rulings": [], "stopped": {"by": "owner", "reason": "redesign — why", "at": "t", "brief": "/b.md"}}, "foreman", "U07")
+  world.gh.issues[410] = {"number": 410, "id": 1, "body": "", "labels": [], "state": state, "state_reason": None}
+  got, out = world.run("close", "--runcard", world.card("integrate"))
+  assert (got, out.strip()) == (code, line), out
+  assert f"close: U07 stopped for redesign: #410 {state}" in (world.artifacts / "journal.md").read_text(encoding="utf-8")
 
 
 def test_integrate_skill_body():
@@ -373,3 +401,21 @@ PROSE_ROWS = [
 @pytest.mark.parametrize("path, needle, present", PROSE_ROWS)
 def test_the_app_path_prose(path, needle, present):
   assert (needle in (ROOT / path).read_text(encoding="utf-8")) is present, (path, needle)
+
+
+REDESIGN_PROSE = [("skills/wave/SKILL.md", "redesign — <one sentence why>"), ("skills/wave/SKILL.md", ".brainstorm.md"), ("skills/wave/SKILL.md", "stopped for redesign"),
+                  ("skills/integrate/SKILL.md", "stopped for redesign"), ("skills/integrate/SKILL.md", "closes it by hand"),
+                  ("skills/brainstorming/SKILL.md", "brainstorm brief"), ("skills/brainstorming/SKILL.md", "whose issue is still open"),
+                  ("skills/brainstorming/SKILL.md", "naming the handoff"), ("skills/brainstorming/SKILL.md", "never offered")]
+
+
+@pytest.mark.parametrize("path, needle", REDESIGN_PROSE)
+def test_the_redesign_prose(path, needle):
+  assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
+
+
+def test_the_point_one_redesign_waits_for_the_verdict_and_the_by_hand_ruling_is_told():
+  panel = (ROOT / "skills/judges/references/leavemealone.md").read_text(encoding="utf-8")
+  assert "held until the verdict" in panel and "the first question converged on `redesign`" in panel
+  assert "ruled by hand with `--posted`" in (ROOT / "skills/wave/SKILL.md").read_text(encoding="utf-8")
+  assert "the `Spec:` range" in (ROOT / "skills/brainstorming/SKILL.md").read_text(encoding="utf-8")

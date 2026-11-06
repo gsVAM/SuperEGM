@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the close subcommand (spec section 12): `closed_at`, every unlanded unit journaled.
+# Added by SuperEGM (gsVAM), 2026: the close subcommand (spec section 12): `closed_at`, every unlanded unit journaled;
+# it refuses while a redesign-stopped unit's issue is open (one GitHub read per such unit).
 
 """superegm close: close the handoff under an integrate card; writes `closed_at` once."""
 
@@ -24,6 +25,21 @@ def run(args):
     raise core.HandoffError(f"close: already closed at {state['closed_at']}")
   if not state.get("handoff_id"):
     raise core.HandoffError("close: no handoff in this store")
+  # A unit stopped for redesign keeps its issue open until the owner closes it by hand: one read each, all
+  # journaled, then the refusal, before any write.
+  refusals = []
+  for uid, record in sorted((state.get("units") or {}).items()):
+    if not (core.load_foreman(st, uid).get("stopped") or {}).get("brief"):
+      continue
+    number = record["number"]
+    issue = core.gh_json(["api", f"repos/{st.config['repo']}/issues/{number}"]) or {}
+    core.journal(st, f"close: {uid} stopped for redesign: #{number} {issue.get('state')}")
+    if issue.get("state") == "open":
+      refusals.append(f"close: {uid} is stopped for redesign and #{number} is open: "
+                      "close it by hand once the re-planned unit is filed")
+  if refusals:
+    print("\n".join(refusals))
+    return 1
   # The landed set is `status --wait`'s last snapshot (the integrate skill refreshes it first); no GitHub read here.
   saved = (state.get("status") or {}).get("units") or {}
   unlanded = sorted(uid for uid in state.get("units") or {} if not (saved.get(uid) or {}).get("landed"))
