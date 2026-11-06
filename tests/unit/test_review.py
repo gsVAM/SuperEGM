@@ -92,7 +92,7 @@ def opened(world, kind="spec", reviewers=None, astra="off", mode=None, text=SPEC
   cid = card(world, spec, SKILL_OF[kind], mode)
   artifact = str(spec) if kind in ("spec", "integrate") else "U07"
   code, out = world.run("review", "open", "--kind", kind, "--artifact", artifact, "--reviewers",
-                        reviewers or PANEL_OF[kind], "--astra", astra, "--runcard", cid)
+                        reviewers or PANEL_OF[kind], *(["--astra", astra] if astra is not None else []), "--runcard", cid)
   assert code == 0, out
   return spec, cid, out.strip()
 
@@ -204,10 +204,31 @@ def test_review_open_ids_panel_and_lane(world, kind, reviewers, astra, expect):
     return
   assert code == 0 and out.strip() == expect, out
   review = rjson(world, expect)
-  lane = astra == "on" and kind != "head"
+  lane = astra == "on"
   assert (review["kind"], review["cycle"], review["runcard"], review["artifact"]) == (kind, 1, cid, artifact)
   assert review["reviewers"] == reviewers.split(",") + (["astra"] if lane else [])
   assert review["converged"] == "no" and review["converged_round"] is None and review["rulings"] == []
+
+
+@pytest.mark.parametrize("kind, astra, flag, panel, lane", [
+  ("head", {"enabled": True}, None, "change-review,astra", True),
+  ("head", {"enabled": True, "heads": False}, None, "change-review", False),
+  ("head", {"enabled": False}, None, "change-review,astra", False),
+  ("head", {"enabled": True}, "off", "change-review", False),
+  ("plan", {"enabled": True, "heads": False}, None, "readiness", True)])
+def test_review_open_seats_the_lane_on_a_head_by_the_one_control(world, kind, astra, flag, panel, lane):
+  set_config(world, repo=REPO, astra=astra)
+  spec, cid, rid = opened(world, kind, reviewers=panel, astra=flag)
+  assert rjson(world, rid)["reviewers"] == panel.replace(",astra", "").split(",") + (["astra"] if lane else [])
+
+
+def test_a_not_installed_lane_record_is_not_an_incomplete_run(world):
+  set_config(world, repo=REPO, astra={"enabled": True})
+  spec, cid, rid = opened(world, "head", reviewers="change-review", astra=None)
+  for n, reason in ((1, "not installed"), (2, "timeout"), (3, "killed"), (4, "stopped: two incomplete runs")):
+    head_round(world, n, "posted", cid, "revise")
+    assert record(world, rid, n, "change-review", [], cid, sha=A)[0] == 0 and record(world, rid, n, "astra", cid=cid, sha=A, not_run=reason)[0] == 0
+    assert rjson(world, rid, f"round-{n}.json")["what_ran"] == "completed" and rjson(world, rid)["astra_incomplete"] == min(n - 1, 2)
 
 
 # ---------------------------------------------------------------- S3: cycles

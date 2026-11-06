@@ -31,7 +31,8 @@ precedes the filing.
 
 ## OpenAI: the Astra lane and the Astra judge
 
-When `config.astra.enabled` is true, one reviewer of a spec, plan or integrate review and one
+When `config.astra.enabled` is true, one reviewer of a spec, a plan, an integrate review or, with
+`config.astra.heads` (default true), every head review of a SuperEGM wave, and one
 judge of every panel run through the claudex-loop runner and the Codex CLI, and these leave the
 machine to OpenAI under the account `codex login status` reports, on that account's terms: the
 whole target (the spec; a unit's body; a question file with its evidence), the review brief the
@@ -41,9 +42,14 @@ file for Astra's own earlier findings: finding id, final disposition and who rul
 the user's OS account can read that Astra opens inside or outside the repository (the read-only
 sandbox blocks writes, not reads), and the user's Codex `AGENTS.md` and memories. SuperEGM does
 not put the Claude conversation, the Claude reviewers' reports or their dispositions rows in the
-brief; Astra is told not to open them, but it can read them like any other file in the folder.
-Write artifacts outside the repository (the store is `artifacts_dir`) to keep them out of the folder Astra reviews. The Astra lane
-never runs on a pull request head.
+brief outside a head review; Astra is told not to open them, but it can read them like any other file in the folder.
+Write artifacts outside the repository (the store is `artifacts_dir`) to keep them out of the folder Astra reviews. On a head review the brief
+the lane receives is the one the Claude goldfish receive, `r<n>/astra_brief.md`, and it leaves the machine too:
+the unit body and the spec range, then
+the diff, the CI file, the PR body and the comments (the diff cut at 400 KB), then the `# Prior round` section:
+the finding lines of every reviewer of the last posted round, the Claude reviewers' among them (Astra's own
+with their dispositions). From round 2 of a head, the Claude reviewers' findings therefore leave the machine.
+Set `"heads": false` under `astra` to keep heads Claude-only.
 
 Opt out with `"astra": {"enabled": false}` in `.superegm/config.json`, `codex logout`, or by not
 installing claudex-loop; the lane then records `not run` and the review runs Claude-only. Local

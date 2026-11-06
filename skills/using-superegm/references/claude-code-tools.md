@@ -23,7 +23,8 @@ relies on, from the live probes; do not re-derive them.
   without SubagentStart hooks.
 - A Bash background command dies when its own agent returns; one started from
   the main conversation survives across turns. So builders and the Astra runner
-  are launched by the elephant, never by a subagent that then returns.
+  are launched by the elephant, never by a subagent that then returns (the head's Astra lane excepted:
+  the foreman runs it as one bounded foreground call and waits for it).
 - Claude Code has no plugin-on-plugin dependency and cannot disable another
   plugin's hook or skills. Hence absorb, not depend.
 - A per-dispatch `model` override on a `model: inherit` adapter is honoured; a
