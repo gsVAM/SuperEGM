@@ -1,13 +1,15 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the Astra
 review lane. Not part of google/elephant-goldfish-model. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the head lane of section 8 and the interactive flow's qualifiers in the intro and section 3b (U17). -->
 
 # Astra lane
 
 The Astra lane adds one reviewer from a second model family, GPT-6 Astra, to
-Stages 7, 9 and 10, and reviews pull requests through the inspect launch of
-section 3b. The main conversation runs the claudex-loop runner as a
-background command. The lane is optional: when it does not run, the round is
+Stages 7, 9 and 10, and, in the interactive flow, reviews pull requests through
+the inspect launch of section 3b; a SuperEGM wave's head review is the foreman's
+`review` call of section 8. The main conversation runs the claudex-loop runner
+as a background command, except the foreman's one foreground call of section 8. The lane is optional: when it does not run, the round is
 not blocked and the report says so; when it runs, its high and medium findings
 block like any reviewer's. Use it only in Claude Code; in other hosts record
 `astra: not run (host)`. Panels, the run card and the configuration variables
@@ -152,9 +154,9 @@ the command expands.
 
 ## 3b. Launch (pull request review)
 
-A wave's pull request review uses the runner's `inspect` subcommand instead of
-`review`: the target is a change, not a document. The same rules as section 3
-apply — this main conversation only, `run_in_background: true`, one command,
+In the interactive flow a pull request review uses the runner's `inspect`
+subcommand instead of `review`: the target is a change, not a document. The
+same rules as section 3 apply — this main conversation only, `run_in_background: true`, one command,
 absolute paths in single quotes, no chaining, pipes, redirects or extra flags,
 validated literals never `$EGM_...`, and the Bash tool's `timeout` set to the
 runner's `--timeout` plus 300 seconds in milliseconds: `3900000` for the
@@ -290,6 +292,10 @@ Claude panel as one foreground Bash call under a 600000 ms timeout with `--timeo
 and records the result through `review record`. It is never a background command: the foreman waits for it.
 A lane that is `not installed`, `failed`, `killed` or `timeout` is recorded `not run (<reason>)` and never
 blocks the round; `not installed` and `stopped` count no incomplete run.
+
+**Data notice (head lane).** The brief sends to OpenAI, under the account `codex login status` reports, the unit body, the
+spec range, the diff (cut at 400 KB), the CI file, the PR body and the comments, and Astra may read the review worktree in
+full. `"heads": false` under `astra` keeps heads Claude-only (`docs/privacy.md`).
 
 The head review mapping (section 6's table is the interactive flow's, and `review record` refuses its words): `severity`
 verbatim (`high`, `medium`, `low`); the bare id `astra-<round>-<n>`, Astra's own `id` dropped; `path` as the location;

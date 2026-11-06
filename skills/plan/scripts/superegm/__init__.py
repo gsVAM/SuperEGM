@@ -574,8 +574,8 @@ def load_config(repo_root: Path) -> dict:
       raise HandoffError(f"{path}: {key} must be a positive integer")
   if not isinstance(config["commit_trailer"], str):
     raise HandoffError(f"{path}: commit_trailer must be a string")
-  # shortcut: the nested keys of reviewers/astra/judges/builder are not validated here, the unit
-  # that reads each validates
+  # shortcut: the nested keys of reviewers/judges/builder are not validated here, the unit that
+  # reads each validates (astra is checked above as an object, astra.heads as a bool)
   labels = config["labels"]
   for name in (labels["unit"], labels["tracking"], labels["stopped"], *labels["extra"]):
     if not LABEL_RE.match(name):

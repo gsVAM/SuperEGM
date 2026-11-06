@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: >-
   Launches the next wave of a handoff's GitHub issues, watches each in-flight
   issue through a foreman (a named or unnamed subagent), runs
-  the single review (Astra inspect lane plus Claude goldfish) on every PR
+  the single review (Astra review lane plus Claude goldfish) on every PR
   head with CI as evidence, posts one confirmed review comment per round,
   and detects landed units. Builders are local; shipping stays human.
   Claude Code only.
