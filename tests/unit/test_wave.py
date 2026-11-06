@@ -501,7 +501,7 @@ def test_a_refused_redesign_ruling_leaves_no_brief_and_a_small_diff_is_copied_wh
   card = open_wave_card(world)
   s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "rounds": [{"round": 1, "phase": "posted", "outcome": "revise", "launch": 1}]})
   folder = s.path("review", "U01", 70) / "r1"
-  # 300 lines of invalid UTF-8: 14 KB on disk, 41 KB once decoded with `errors="replace"`: under 40 KB, so copied whole
+  # 300 lines of invalid UTF-8: 13.5 KB on disk, 40.5 KB if re-encoded after `errors="replace"`: under 40 KB on disk, so copied whole
   atomic_write(folder / "diff", b"diff --git a/src/x.py b/src/x.py\n" + (b"+" + b"\xff" * 45 + b"\n") * 300)
   qid = world.run("decision", "open", "--unit", "U01", "--point", 2, "--question", question(world, FINDING + "\n"),
                   "--source", "review head-U01-c1 cap", "--runcard", card)[1].splitlines()[0]
