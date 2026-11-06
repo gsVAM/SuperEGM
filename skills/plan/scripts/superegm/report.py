@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the report subcommand (spec section 11): the per-batch wave report, the idle rules
-# and the end condition, plus the pure functions the wave skill cites.
+# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20).
 
 """superegm report: rewrite `wave_<n>_report.md` from the store and print the idle, pending and loop lines."""
 
@@ -42,7 +42,7 @@ def run(args):
   ended, why = loop_ended(states, ready, free)
   n = wave_number(st, args.runcard, card)
   path = st.path("wave_report", n)
-  lines = [f"# Wave {n} report", f"Run card: {args.runcard}", f"Loop: {'ended' if ended else 'continuing'} ({why})", "",
+  lines = [f"# Wave {n} report (handoff {st.handoff_id})", f"Run card: {args.runcard}", f"Loop: {'ended' if ended else 'continuing'} ({why})", "",
            "## Units"]
   for uid in units:
     lines.append(unit_line(uid, units[uid], views[uid], states.get(uid, "unlaunched"), foremen.get(uid, {}),
@@ -86,8 +86,8 @@ def unit_view(state: dict, uid: str) -> dict:
 
 
 def wave_number(st, rid: str, card: dict) -> int:
-  """The card's ordinal by `opened_at` among the store's top-level `wave` cards on the same artifact."""
-  folder = st.path("runcards", "x").parent
+  """The card's ordinal by `opened_at` among its handoff's top-level `wave` cards on the same artifact."""
+  folder = st.path("runcards", rid).parent  # the card's own `runcards/`: its handoff's (spec section 7)
   cards = []
   for other in folder.glob("*.json"):
     data = json.loads(core.read_text(other))

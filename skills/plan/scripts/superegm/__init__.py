@@ -181,35 +181,76 @@ def spec_slug(path) -> str:
 
 
 class Store:
-  """The files under `artifacts_dir`; every unit-keyed kind lives under the
-  handoff's 6-hex prefix so two handoffs share one store."""
+  """The files under `artifacts_dir` (spec section 7): the store level holds `handoffs/`,
+  `approvals/`, the spec reviews, their cards and judges and its own `journal.md`; everything
+  of a handoff lives under `<handoff id>/`. A flat 1.0/1.1 store (`legacy`) is read in place:
+  its files at the root, every unit-keyed kind under the handoff's 6-hex prefix."""
 
   FILES = {"state": "state.json", "journal": "journal.md", "plan": "handoff_plan.md",
            "units": "handoff_units.json", "bodies": "handoff_bodies.md"}
   # The Interfaces block's longer names for the same kinds.
   ALIASES = {"handoff_plan": "plan", "handoff_units": "units", "handoff_bodies": "bodies", "wave_report": "report"}
   KEYED = ("unit", "foreman", "launches", "worktrees", "review", "orient_unit")
+  LEVEL = ("approvals", "handoffs")  # always at the store level
+  SHARED = ("reviews", "judges", "questions")  # at the store level for a spec review's id, else the handoff's
 
-  def __init__(self, root: Path, handoff_id: str | None = None, config: dict | None = None):
+  def __init__(self, root: Path, handoff_id: str | None = None, config: dict | None = None, legacy: bool = False):
     self.root = Path(root)
     self.handoff_id = handoff_id
     self.config = config
+    self.legacy = legacy
+
+  @staticmethod
+  def card_segment(card_id: str):
+    """The hex segment of a `<skill>-<6 hex>-<n>` card id, or None for a `<skill>-<n>` one (a legacy
+    `review-spec-0001` included: its `spec` is the skill's second word, not a segment)."""
+    parts = str(card_id).removesuffix(".json").rsplit("-", 2)
+    if len(parts) != 3 or not parts[2].isdigit() or f"{parts[0].rsplit('-', 1)[-1]}-{parts[1]}" in ("review-spec", "review-plan"):
+      return None
+    return parts[1]
+
+  def card_dir(self, card_id: str) -> Path:
+    """`runcards/` of the handoff whose id ends with the card's segment, else the store's."""
+    seg = None if self.legacy else self.card_segment(card_id)
+    if seg:
+      if self.handoff_id and self.handoff_id.endswith(seg):
+        return self.root / self.handoff_id / "runcards"
+      for path in sorted((self.root / "handoffs").glob("*.json")):
+        if path.stem.endswith(seg):
+          return self.root / path.stem / "runcards"
+      for folder in sorted(self.root.glob(f"*{seg}/runcards")):
+        return folder
+    return self.root / "runcards"
+
+  def base(self, need=True) -> Path:
+    """The handoff's directory (`<6 hex>/` in a legacy store); the root when `need` is false and none resolved."""
+    if not self.handoff_id:
+      if need:
+        raise HandoffError("no handoff in this store: run approve-spec and graph first")
+      return self.root
+    return self.root / self.handoff_id[-6:] if self.legacy else self.root / self.handoff_id
 
   def path(self, kind, *parts) -> Path:
     kind, parts = self.ALIASES.get(kind, kind), [str(p) for p in parts]
+    home = self.root if self.legacy else self.base(need=False)
     if kind in self.FILES:
-      return self.root / self.FILES[kind]
+      return home / self.FILES[kind]
     if kind == "report":
-      return self.root / f"wave_{parts[0]}_report.md"
-    if kind in ("approvals", "runcards"):
+      return home / f"wave_{parts[0]}_report.md"
+    if kind == "file":
+      return home.joinpath(*parts)
+    if kind in self.LEVEL:
       return self.root / kind / (parts[0] if parts[0].endswith(".json") else f"{parts[0]}.json")
-    if kind in ("reviews", "judges", "questions", "orient", "file"):
-      return self.root.joinpath(*([kind] if kind != "file" else []), *parts)
+    if kind == "runcards":
+      return self.card_dir(parts[0]) / (parts[0] if parts[0].endswith(".json") else f"{parts[0]}.json")
+    if kind in self.SHARED:
+      spec_level = bool(parts) and parts[0].startswith("spec-") and "-integrate-" not in parts[0]
+      return (self.root if self.legacy or spec_level else home).joinpath(kind, *parts)
+    if kind == "orient":
+      return home.joinpath("orient", *parts)
     if kind not in self.KEYED:
       raise HandoffError(f"unknown store kind {kind}")
-    if not self.handoff_id:
-      raise HandoffError("no handoff in this store: run approve-spec and graph first")
-    base = self.root / self.handoff_id[-6:]
+    base = self.base()
     if kind == "unit":
       return base / f"unit_{parts[0]}.md"
     if kind == "foreman":
@@ -228,33 +269,158 @@ class Store:
     return Path(path).resolve().is_relative_to(self.root.resolve())
 
   def kind_of(self, path: Path) -> str:
+    """The kind `path` maps to, `path`'s inverse; a file beside `state.json` is `file`."""
     parts = Path(path).resolve().relative_to(self.root.resolve()).parts
     names = {v: k for k, v in self.FILES.items()}
+    level = lambda name: names.get(name) or ("report" if re.fullmatch(r"wave_\d+_report\.md", name) else "file")
     if len(parts) == 1:
-      if parts[0] in names:
-        return names[parts[0]]
-      return "report" if re.fullmatch(r"wave_\d+_report\.md", parts[0]) else "file"
-    if parts[0] in ("approvals", "runcards", "reviews", "judges", "questions", "orient"):
+      return level(parts[0])
+    if parts[0] in self.LEVEL + ("runcards",) + self.SHARED:
       return parts[0]
-    if re.fullmatch(r"[0-9a-f]{6}", parts[0]):
-      if len(parts) == 2 and re.fullmatch(r"unit_.+\.md", parts[1]):
-        return "unit"
-      if parts[1] == "orient":
-        return "orient_unit"
-      if parts[1] in self.KEYED:
-        return parts[1]
+    if parts[0] == "orient":  # the root's `orient/`: a legacy store's, or no handoff resolved
+      return "orient"
+    if self.legacy:
+      if re.fullmatch(r"[0-9a-f]{6}", parts[0]):
+        if len(parts) == 2 and re.fullmatch(r"unit_.+\.md", parts[1]):
+          return "unit"
+        if parts[1] == "orient":
+          return "orient_unit"
+        if parts[1] in self.KEYED:
+          return parts[1]
+      return "file"
+    rest = parts[1:]
+    if len(rest) == 1:
+      return "unit" if re.fullmatch(r"unit_.+\.md", rest[0]) else level(rest[0])
+    if rest[0] == "orient":
+      return "orient_unit" if re.fullmatch(r"U\d{2,}\b.*", rest[1]) else "orient"
+    if rest[0] in self.KEYED + ("runcards",) + self.SHARED:
+      return rest[0]
     return "file"
 
 
 STORE = None
+CURRENT_ARGS = None  # the running subcommand's arguments, recorded by `build_parser()`'s `parse_args`
+
+
+def handoffs(root: Path) -> list:
+  """One row per handoff: `handoffs/<id>.json` with `legacy: false`; a flat 1.0/1.1 store
+  (`state.json` at the root) is one `legacy: true` row from that file, first, whatever `handoffs/`
+  holds for its id, the handoffs opened beside it later following as their files."""
+  root = Path(root)
+  flat = root / "state.json"
+  rows = [json.loads(read_text(p)) | {"legacy": False} for p in sorted((root / "handoffs").glob("*.json"))]
+  if flat.is_file():
+    state = json.loads(read_text(flat))
+    hid = state.get("handoff_id")
+    return [{"id": hid, "spec": (state.get("design") or {}).get("path"),
+             "opened_at": None, "closed_at": state.get("closed_at"), "legacy": True}] + [r for r in rows if r["id"] != hid]
+  return rows
+
+
+def flat_handoff_id(root: Path):
+  """The id of a flat 1.0/1.1 store's handoff (`state.json` at the root), else None."""
+  flat = Path(root) / "state.json"
+  return json.loads(read_text(flat)).get("handoff_id") if flat.is_file() else None
+
+
+def handoff_store(st: Store, hid) -> Store:
+  """The store as handoff `hid` reads it: flat (`legacy`) when `hid` is the root `state.json`'s handoff,
+  else under `<hid>/`, whatever handoff `st` resolved."""
+  legacy = bool(hid) and hid == flat_handoff_id(st.root)
+  return Store(st.root, handoff_id=hid, config=st.config, legacy=legacy)
+
+
+def load_approvals(store: Store, spec) -> list:
+  """The spec's approval history, `approvals/<spec-slug>.json`'s `entries[]`; a 1.1 record
+  (one approval, no `entries`) reads as a one-entry history."""
+  path = store.path("approvals", spec_slug(spec))
+  if not path.is_file():
+    return []
+  record = json.loads(read_text(path))
+  if "entries" in record:
+    return list(record["entries"])
+  return [{"kind": "opening", "escalated": [], **{k: v for k, v in record.items() if k != "path"}}]
+
+
+def require_latest_handoff(store: Store) -> None:
+  """An older handoff is frozen: refuse when the store's handoff's latest entry is not the last
+  of its spec's history (found by scanning `approvals/*.json` for the id). No handoff passes."""
+  hid = store.handoff_id
+  if not hid:
+    return
+  for path in sorted((store.root / "approvals").glob("*.json")):
+    entries = load_approvals(store, path)
+    if any(e.get("handoff_id") == hid for e in entries) and entries[-1].get("handoff_id") != hid:
+      raise HandoffError(f"{hid}: not the latest approval: plan the rows in the latest handoff")
+
+
+def spec_of_plan(plan) -> str | None:
+  """The spec a plan file's `Design:` line names, resolved against the plan's folder."""
+  plan = Path(plan).expanduser().resolve()
+  match = re.search(r"^Design: `([^`]+)`", read_text(plan), re.M) if plan.is_file() else None
+  if not match:
+    return None
+  design = Path(match.group(1)).expanduser()
+  return str(design if design.is_absolute() else (plan.parent / design).resolve())
+
+
+def resolve_handoff(st: Store, args):
+  """The handoff, once: `--handoff`; then the card (`--runcard`, `--parent`); then the spec
+  (`--spec`, `--plan`'s `Design:` line, a file `--artifact`) through its latest approval; then
+  the unit (`--unit`, a unit-id `--artifact`) over the open handoffs whose state files it.
+  `review-spec`, or a card recording `handoff: null`, ends the resolution at none."""
+  if args is None:
+    return None
+  get = lambda key: getattr(args, key, None)
+  if get("handoff"):
+    return get("handoff")
+  if get("skill") == "review-spec":
+    return None
+  for key in ("runcard", "parent", "id"):  # `id`: the card `runcard close` names
+    path = st.path("runcards", get(key)) if get(key) and (key != "id" or get("command") == "runcard") else None
+    if path and path.is_file():
+      card = json.loads(read_text(path))
+      if "handoff" in card:
+        return card["handoff"]
+  artifact = get("artifact")
+  spec = get("design") or (spec_of_plan(get("plan")) if get("plan") else None) \
+      or (artifact if artifact and Path(str(artifact)).expanduser().is_file() else None)
+  if spec:
+    entries = load_approvals(st, spec)
+    return entries[-1].get("handoff_id") if entries else None
+  unit = get("unit") or (artifact if artifact and UNIT_ID_RE.match(str(artifact)) else None)
+  if unit:
+    filed = []
+    for row in handoffs(st.root):
+      state = st.root / "state.json" if row["legacy"] else st.root / row["id"] / "state.json"
+      units = json.loads(read_text(state)).get("units") or {} if state.is_file() else {}
+      if not row.get("closed_at") and (units.get(unit) or {}).get("number"):
+        filed.append(row["id"])
+    if len(filed) > 1:
+      raise HandoffError(f"store: {unit} is filed in {' and '.join(filed)}: pass --handoff")
+    return filed[0] if filed else None
+  return None
 
 
 def store(repo_root: Path) -> Store:
-  """The store `.superegm/config.json` names, with the handoff `state.json` records."""
+  """The store `.superegm/config.json` names and the handoff, resolved once from `CURRENT_ARGS`;
+  a flat store (`state.json` at the root) is read in place as its one `legacy` handoff, unless the
+  resolution names a handoff opened beside it (one with its own `handoffs/<id>.json`)."""
   global STORE
   config = load_config(repo_root)
   root = Path(config["artifacts_dir"])
-  STORE = Store(root, handoff_id=load_state(root).get("handoff_id"), config=config)
+  flat = root / "state.json"
+  st = Store(root, config=config)
+  hid = resolve_handoff(st, CURRENT_ARGS)
+  named = getattr(CURRENT_ARGS, "handoff", None)
+  if named and named != flat_handoff_id(root) and not st.path("handoffs", named).is_file():
+    raise HandoffError(f"store: {named}: no such handoff")
+  if flat.is_file():
+    flat_id = json.loads(read_text(flat)).get("handoff_id")
+    if not hid or hid == flat_id or not st.path("handoffs", hid).is_file():
+      hid, st.legacy = flat_id, True
+  st.handoff_id = hid
+  STORE = st
   return STORE
 
 
@@ -272,17 +438,28 @@ def load_card(store: Store, id: str) -> dict:
 
 
 def open_runcard(store: Store, skill: str, artifact: str, parent=None, mode=None) -> str:
-  """Open `<skill>-<n>`; every open card of the same skill and artifact is
-  marked interrupted first. `artifact` is stored resolved when it is a file."""
+  """Open `<skill>-<6 hex>-<n>` (spec section 7): the hex is the store's handoff's, else (a card
+  preceding any handoff, at the store level) the 6 hex of the spec slug (the parent card's, else
+  the artifact's stem), counted per skill and hex; a legacy store keeps `<skill>-<n>`. Every open
+  card of the same skill and artifact is marked interrupted first. `artifact` is stored resolved
+  when it is a file; the card records the handoff it resolved."""
   if parent is not None and not store.path("runcards", parent).is_file():
     raise HandoffError(f"runcard: parent {parent} not found")
   path = Path(artifact).expanduser()
   sha = sha256_file(path) if path.is_file() else None
   artifact = str(path.resolve()) if path.is_file() else artifact
-  folder = store.path("runcards", "x").parent
-  folder.mkdir(parents=True, exist_ok=True)
-  existing = sorted(folder.glob("*.json"))
-  rid = f"{skill}-{len(existing) + 1:04d}"
+  if store.legacy:
+    folder = store.root / "runcards"
+    folder.mkdir(parents=True, exist_ok=True)
+    existing = sorted(folder.glob("*.json"))
+    rid = f"{skill}-{len(existing) + 1:04d}"
+  else:
+    hexa = store.handoff_id[-6:] if store.handoff_id else \
+        (Store.card_segment(parent) if parent and Store.card_segment(parent) else sha256_text(spec_slug(artifact))[:6])
+    folder = store.root / store.handoff_id / "runcards" if store.handoff_id else store.root / "runcards"
+    folder.mkdir(parents=True, exist_ok=True)
+    rid = f"{skill}-{hexa}-{len(list(folder.glob(f'{skill}-{hexa}-*.json'))) + 1:04d}"
+    existing = sorted(folder.glob("*.json"))
   for other in existing:
     card = json.loads(read_text(other))
     if (card["skill"], card["artifact"]) == (skill, artifact) and not card["closed_at"] and not card["interrupted_at"]:
@@ -293,7 +470,8 @@ def open_runcard(store: Store, skill: str, artifact: str, parent=None, mode=None
   card = {"skill": skill, "artifact": artifact, "artifact_sha256": sha,
           "reviewers": list((config.get("reviewers") or {}).get(RUNCARD_REVIEWERS.get(skill, ""), [])),
           "tiering": None, "mode": mode or config.get("mode", "normal"), "parent": parent,
-          "opened_at": now_iso(), "closed_at": None, "interrupted_at": None, "produced": []}
+          "opened_at": now_iso(), "closed_at": None, "interrupted_at": None, "produced": [],
+          "handoff": store.handoff_id}
   atomic_write(store.path("runcards", rid), card)
   journal(store, f"runcard open {rid} {skill} {artifact}")
   return rid
@@ -353,9 +531,9 @@ def card_add(store: Store, id: str, key: str, item) -> None:
 
 
 def load_approval(store: Store, spec: Path):
-  """The `approvals/<spec-slug>.json` record of this spec, or None."""
-  path = store.path("approvals", spec_slug(spec))
-  return json.loads(read_text(path)) if path.is_file() else None
+  """The latest approval of this spec, its history's last entry, or None."""
+  entries = load_approvals(store, spec)
+  return entries[-1] if entries else None
 
 
 def journal(store: Store, line: str) -> None:
@@ -937,8 +1115,12 @@ class Handoff:
     self.repo_root = git_toplevel(design)
     # An unrelated commit after approval must not change a single rendered
     # body: the gate hashes, a bounded resume and verify all depend on them.
-    approval = load_approval(store, design)
-    if approval and approval["sha256"] != self.design_sha:
+    # The handoff's own approval is its latest entry (spec section 7); the spec may stand at a later link.
+    entries = load_approvals(store, design)
+    own = [i for i, e in enumerate(entries) if store.handoff_id and e.get("handoff_id") == store.handoff_id] \
+        or ([len(entries) - 1] if entries else [])
+    approval = entries[own[-1]] if own else None
+    if approval and self.design_sha not in {approval["sha256"], *(e["sha256"] for e in entries[own[-1] + 1:])}:
       raise HandoffError("spec changed since the approval: run approve-spec again")
     self.design_commit = (approval or {}).get("commit") or run_git(
         ["rev-parse", "--short", "HEAD"], self.repo_root).strip()
@@ -1204,6 +1386,9 @@ def substitute(template: str, values: dict) -> str:
 
 
 def state_path(artifact_dir: Path) -> Path:
+  """The handoff's `state.json`: through `STORE` when `artifact_dir` is its root."""
+  if STORE is not None and Path(artifact_dir) == STORE.root:
+    return STORE.path("state")
   return Path(artifact_dir) / "state.json"
 
 
@@ -1696,11 +1881,35 @@ def add_parser(subparsers, name, help_text, *, runcard=True):
   return p
 
 
+class Parser(argparse.ArgumentParser):
+  """The top-level parser: `parse_args` records the arguments in `CURRENT_ARGS`, which `store()`
+  resolves the handoff from."""
+
+  def parse_args(self, args=None, namespace=None):
+    global CURRENT_ARGS, STORE
+    CURRENT_ARGS = STORE = None  # a new command resolves its own handoff
+    CURRENT_ARGS = super().parse_args(args, namespace)
+    return CURRENT_ARGS
+
+
+def add_handoff_flag(parser) -> None:
+  """`--handoff <id>` on every leaf subparser (spec section 7)."""
+  children = [a for a in parser._actions if isinstance(a, argparse._SubParsersAction)]
+  if not children:
+    if "--handoff" not in parser._option_string_actions:
+      parser.add_argument("--handoff", help="the handoff this command acts on (default: resolved from the card, spec or unit)")
+    return
+  for action in children:
+    for child in dict.fromkeys(action.choices.values()):
+      add_handoff_flag(child)
+
+
 def build_parser():
-  parser = argparse.ArgumentParser(prog="superegm.py", description=__doc__.splitlines()[0])
+  parser = Parser(prog="superegm.py", description=__doc__.splitlines()[0])
   sub = parser.add_subparsers(dest="command", required=True)
   for name in SUBCOMMANDS:
     importlib.import_module(f"superegm.{name}").register(sub)
+  add_handoff_flag(parser)
   return parser
 
 

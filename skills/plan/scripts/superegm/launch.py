@@ -41,10 +41,12 @@ def launch(args, card):
   repo_root = core.git_toplevel(Path.cwd())
   core.run_git(["fetch", "--no-write-fetch-head", config["remote"], f"+refs/heads/{base}:refs/superegm/base"], repo_root)
   spec = Path(core.handoff_spec(args, st))
-  approval = core.load_approval(st, spec)
-  if not approval:
+  entries = core.load_approvals(st, spec)
+  own = [i for i, e in enumerate(entries) if e.get("handoff_id") == st.handoff_id] or ([len(entries) - 1] if entries else [])
+  if not own:
     raise core.HandoffError(f"{spec} has no approval record")
-  problems = origin_problems(repo_root, base, approval)
+  # the handoff's own entry (the last carrying its id) and the later links of the chain (spec section 7)
+  problems = origin_problems(repo_root, base, {**entries[own[-1]], "path": str(spec)}, entries[own[-1] + 1:])
   if problems:
     raise core.HandoffError(problems[0])
   handoff = core.Handoff(plan, st)
@@ -143,15 +145,16 @@ def builder_login(config, token_env_value):
   return builder
 
 
-def origin_problems(repo_root, base, approval=None):
-  """What `refs/superegm/base` (origin/<base>, just fetched) lacks for a launch (spec section 11);
-  without an approval (`doctor`) the spec-hash line is skipped."""
+def origin_problems(repo_root, base, approval=None, later=()):
+  """What `refs/superegm/base` (origin/<base>, just fetched) lacks for a launch (spec section 11): the
+  spec at the approved bytes of `approval` (the handoff's own entry, its `path` the spec) or at a later
+  link of the chain (`later`, the entries after it); without an approval (`doctor`) that line is skipped."""
   ref, problems = "refs/superegm/base", []
   if approval:
     rel = Path(approval["path"]).resolve().relative_to(repo_root.resolve()).as_posix()
     blob = subprocess.run(["git", "cat-file", "-p", f"{ref}:{rel}"], cwd=str(repo_root), capture_output=True).stdout
-    if hashlib.sha256(blob).hexdigest() != approval["sha256"]:
-      problems.append(f"spec at origin/{base} is not the approved bytes")
+    if hashlib.sha256(blob).hexdigest() not in {approval["sha256"], *(e["sha256"] for e in later)}:
+      problems.append(f"spec at origin/{base} is neither the approved bytes nor a later link of the approval chain")
   if subprocess.run(["git", "cat-file", "-e", f"{ref}:.superegm/config.json"], cwd=str(repo_root), capture_output=True).returncode:
     problems.append(f".superegm/config.json is absent at origin/{base}")
   names = core.run_git(["ls-tree", "--name-only", f"{ref}:.github/workflows"], repo_root, check=False).split()

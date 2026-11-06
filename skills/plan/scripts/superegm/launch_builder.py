@@ -3,6 +3,7 @@
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch."""
 
+import hashlib
 import json
 import os
 import re
@@ -14,6 +15,7 @@ import superegm as core
 from superegm import body, orient
 from superegm.builder_token import key_path, tool
 from superegm.launch import builder_email, builder_login, load_launches, terminal
+from superegm.review_plan import SPEC_LINE_RE
 
 WRITES = frozenset(["launches", "orient_unit"])  # the store kinds this subcommand writes
 SKILLS = frozenset(["wave"])  # the skills whose card this subcommand accepts
@@ -76,13 +78,15 @@ def prepare(args, card):
   elif rnd >= 2:  # no PR yet (decision point 3's `relaunch`): the retained local branch is the tree the builder gets
     ref = f"refs/heads/{branch}"
   pr_block = pr_block_text(handoff.repo_root, ref, config["pr_block_file"]) if config["pr_block_file"] else None
-  # The launch's tree, before any worktree: an orient refusal is an ordinary precondition.
+  # The launch's tree, before any worktree: an orient or spec-range refusal is an ordinary precondition.
   orient_text = core.read_text(orient.orient_unit(st, handoff.repo_root, ref, unit))
+  range_text = spec_range_text(handoff.repo_root, st, issue_body, "refs/superegm/base")
   comments = core.gh_pages(f"repos/{repo}/issues/{number}/comments")
   reviews = core.gh_pages(f"repos/{repo}/pulls/{pr}/reviews") if pr else []
   audit = AUDIT_LINE.format(owner=record["launched"].get("by", "unknown"),  # a pre-upgrade mark records no login
                             runcard=args.runcard, unit=unit, handoff=st.handoff_id)
-  text = prompt_text(number, unit, issue_body, core.read_text(ORDERS).replace("{{gh}}", launched_gh), orient_text, comments, reviews, pr, builder, audit, pr_block)
+  text = prompt_text(number, unit, issue_body, core.read_text(ORDERS).replace("{{gh}}", launched_gh), orient_text, comments, reviews, pr, builder, audit, pr_block,
+                     spec_range=range_text)
   worktree = add_worktree(handoff.repo_root, st, unit, rnd, branch, pr)
   prompt = st.path("launches", f"{unit}_r{rnd}_prompt.md")
   core.atomic_write(prompt, text)
@@ -220,6 +224,31 @@ def allowed_tools(configured, branch, body_text, gh):
   return tools
 
 
+def spec_range_text(repo_root: Path, store, body_text: str, ref: str) -> str:
+  """The spec range the body cites (spec section 7): its `Spec:` line's `start..end` read at the commit
+  holding the bytes the marker's sha256 names: the history entry carrying that sha, else the first commit
+  of `git log <ref> -- <rel>` whose blob hashes to it; no such commit refuses."""
+  marker, match = body.MARKER_RE.match(body_text), SPEC_LINE_RE.search(body_text)
+  if not marker or not match:
+    raise core.HandoffError("spec range: the body carries no marker or no `Spec:` range")
+  sha, rel, start, end = marker.group(3), match.group(1), int(match.group(2)), int(match.group(3))
+  show = lambda commit: subprocess.run(["git", "show", f"{commit}:{rel}"], cwd=str(repo_root), capture_output=True)
+  holds = lambda blob: blob.returncode == 0 and hashlib.sha256(blob.stdout).hexdigest() == sha
+  text = None
+  for entry in core.load_approvals(store, Path(rel)):
+    if entry.get("sha256") == sha and entry.get("commit") and holds(blob := show(entry["commit"])):
+      text = blob.stdout
+      break
+  if text is None:
+    for commit in core.run_git(["log", "--format=%H", ref, "--", rel], repo_root, check=False).split():
+      if holds(blob := show(commit)):
+        text = blob.stdout
+        break
+  if text is None:
+    raise core.HandoffError(f"spec range: no commit holds {sha[:7]}")
+  return "\n".join(text.decode("utf-8").splitlines()[start - 1:end]) + "\n"
+
+
 def filed_body(state, unit):
   """The body the filing that created the unit's issue stores, with its numbers filled (spec section 7)."""
   filed = next(w[4] for f in state.get("filings") or [] for w in f["writes"] if w[0] == "issue" and w[1] == unit)
@@ -227,16 +256,18 @@ def filed_body(state, unit):
   return body.fill_numbers(filed, numbers, (state.get("tracking") or {}).get("number"))
 
 
-def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr, builder, audit, pr_block=None):
+def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr, builder, audit, pr_block=None, spec_range=None):
   """Exactly what spec section 3's anti-goal 3 allows: the issue body, the audit-trail line, the orders, the repository's
-  PR block when `pr_block_file` is set, the unit's orient file, every Deviation comment, every
-  Decision and Ruling comment not by the builder account, and from round 2 the foreman's reviews on the PR."""
+  PR block when `pr_block_file` is set, the unit's orient file, the frozen spec range the body cites, every Deviation
+  comment, every Decision and Ruling comment not by the builder account, and from round 2 the foreman's reviews on the PR."""
   kept = [c for c in comments if PROMPT_COMMENT_RE.match(c["body"])
           and (c["body"].startswith("**Deviation") or c["user"]["login"] != builder)]
   parts = [f"# Issue #{issue_number} — {unit}\n\n{body}", f"# Audit trail\n\n{audit}", f"# Builder orders\n\n{orders}"]
   if pr_block is not None:
     parts.append(f"# PR block\n\n{pr_block}")
   parts.append(f"# Orient\n\n{orient}")
+  if spec_range is not None:
+    parts.append(f"# Spec range\n\n{spec_range}")
   parts.append(f"# Comments on issue #{issue_number}\n\n" + "\n".join(f"## {c['user']['login']} · comment {c['id']}\n{c['body']}\n" for c in kept))
   if pr:
     kept = [r for r in reviews if r.get("body") and r["user"]["login"] != builder]

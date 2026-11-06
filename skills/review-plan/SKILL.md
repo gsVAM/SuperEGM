@@ -7,17 +7,17 @@ disable-model-invocation: true
 description: Reviews a handoff plan against its design through the judge panel before any issue is filed.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the body: plan review over the helper's review-plan and review subcommands (U06). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the body: plan review over the helper's review-plan and review subcommands (U06); `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20). -->
 
 # Plan review (phase 3)
 
 In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.
 
-    /superegm:review-plan <spec-path> [--units U01,U02] [--reviewers readiness,proportion,set,…] [--leavemealone]
+    /superegm:review-plan <spec-path> [--handoff <id>] [--units U01,U02] [--reviewers readiness,proportion,set,…] [--leavemealone]
 
 ## What it does
 
-One review per unfiled unit, id `plan-<unit>-c<n>` (under the handoff's six-hex prefix), kind
+One review per unfiled unit, id `plan-<unit>-c<n>` (in the handoff's directory of the store), kind
 `plan`, over the unit's current rendered body, the fenced text of `unit_<id>.md`. The panel is
 `readiness,proportion,set` unless the invocation says otherwise: `readiness` first, `proportion`
 the zoom-out persona with its plan brief, and `set` the readiness persona dispatched
@@ -39,7 +39,7 @@ dispatch.
    owner's by-hand steps it prints are not needed for this review.
 2. `python3 '<HELPER>' runcard open --skill review-plan --artifact '<spec>' --mode '<normal|leavemealone>'`
    prints `<card>`; it goes on every writing helper call below. `<spec>` is the approved spec
-   the plan names (`state.json`'s `design.path`).
+   the plan names (`state.json`'s `design.path`). With `[--handoff <id>]` on the invocation, pass `--handoff '<id>'` to this `runcard open` and to every helper call below; an older handoff is frozen and refuses.
 3. The panel is `--reviewers` when the invocation gave it, else `config.reviewers.plan`;
    `readiness` is first, one to six ids.
 4. Each decision point (a high or medium you contest or decline, a review at its cap)
@@ -104,10 +104,10 @@ this invocation's round count, 1 at its first Step 2.
    dispositions, rendered from `round-<n-1>.json` as review_loop.md section 2 says, the fixes
    marked `-> fixed`; the round number and its own reviewer id; the findings line
    `<reviewer>-<round>-<n> | high|medium|low | <location> | regression: yes|no | <claim>`, one
-   per finding, written to `<artifacts_dir>/reviews/<id>/round-<n>-<reviewer>.txt`, an empty
+   per finding, written to `<artifacts_dir>/<handoff id>/reviews/<id>/round-<n>-<reviewer>.txt`, an empty
    file when it found nothing. The `readiness` goldfish also receives the standard's readiness
    sentence: a question a builder would have to ask before building is a finding, a blocking
-   one is `high`; and, by absolute path, the unit's `<6 hex>/orient/<unit>.md` when the store
+   one is `high`; and, by absolute path, the unit's `orient/<unit>.md` in the handoff's directory when the store
    holds it (the brief says `no orient file` when it is absent); that dispatch is recorded with
    `--isolation 'exposed:orient <tree sha>'`, the tree its first line names, joined with
    whatever else the goldfish reports.
@@ -116,11 +116,12 @@ this invocation's round count, 1 at its first Step 2.
    text, the text `python3 '<HELPER>' review-plan proportion-input --unit '<unit>' --spec '<spec>'`
    prints (the body, its `plan/scan/<unit>.json`, the spec lines of its Design range), saved
    beside the set text as `<card>_proportion_<unit>_r<k>.md`. When the scan files are missing
-   or older than the bodies, run `python3 '<HELPER>' scan` first. It answers question 11 only;
+   or older than the bodies, run `python3 '<HELPER>' scan --plan '<plan>'` first. It answers question 11 only;
    its findings are `medium` at most and name the Step and the bytes they would remove.
 4. One `set` dispatch through `superegm:readiness` with the set text and the standard;
    questions 1 to 4 and 8 are its lens (coverage of the spec's `## Units`, contradictions,
    blockers, shared-file order, interfaces; a row the section's `Landed:` line names counts as covered).
+   So does a row `handoff_units.json`'s `filed_elsewhere` lists: a unit filed in another handoff of the spec, planned there.
    Its ids are `set-<k>-<n>`; each location names the
    unit or units it concerns, or none; its one findings file is `<card>_set_r<k>.txt` beside the
    set text.
@@ -153,7 +154,7 @@ on the exit code alone:
 
 Fixing (exit 3): a finding against a body is fixed in the plan file `state.json` names as
 `plan`, never in a body by hand; re-render with
-`python3 '<HELPER>' graph --plan '<plan>' --runcard '<card>'`, then `python3 '<HELPER>' scan`
+`python3 '<HELPER>' graph --plan '<plan>' --runcard '<card>'`, then `python3 '<HELPER>' scan --plan '<plan>'`
 (D1 (a): `graph` accepts this card; the re-render is the next round of the same review). Write
 every disposition of the round with
 `python3 '<HELPER>' review settle --review '<id>' --finding '<fid>' --disposition '<fixed|contested|declined|escalated|fix-design>' --runcard '<card>'`

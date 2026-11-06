@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Files a confirmed handoff plan as GitHub issues, with the tracking issue, one sub-issue per unit and the blocked-by links.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the file skill body, phase 4 of the SuperEGM loop (design section 10). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the file skill body, phase 4 of the SuperEGM loop (design section 10); `[--handoff <id>]` and a frozen handoff's refusal (U20). -->
 
 # file
 
@@ -33,6 +33,8 @@ creates only the new issues and rewrites the tracking issue.
     repository root.
 *   **`--leavemealone`** (optional): the automatic Create of leavemealone-mode
     for this run; without it the mode is the config's `mode`.
+*   **`[--handoff <id>]`** (optional, after `<SpecPath>`): the handoff to file; by default the spec's latest
+    approval's. An older handoff is frozen: every command below refuses it (`<handoff>: not the latest approval: plan the rows in the latest handoff`).
 
 Ask for a missing `SpecPath` in plain chat.
 
@@ -45,7 +47,8 @@ no chaining, pipes, redirects or environment variables; the Bash `timeout`
 is the default. **One command at a time**: the helper is single-writer, so
 let each command finish before starting the next. Every command below takes
 `--spec '<SpecPath>'` and `--runcard '<CARD>'` and exits 1 with one
-`superegm: <reason>` line when it refuses; show that line to the owner.
+`superegm: <reason>` line when it refuses; show that line to the owner. When the invocation named a handoff,
+pass `--handoff '<id>'` to `runcard open` and to every command below.
 
 ## Step 1: Run card
 

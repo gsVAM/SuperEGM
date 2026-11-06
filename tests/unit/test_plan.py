@@ -80,7 +80,9 @@ def store_root(world):
   return Path(json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["artifacts_dir"])
 
 
-def approve(world, text=SPEC, handoff_id=None, name="2026-11-03-webhooks-design.md"):
+def approve(world, text=SPEC, handoff_id=None, name="2026-11-03-webhooks-design.md", append=False):
+  """The spec committed and approved: a 1.1 record, or with `append` one more entry of its history (the record
+  read as its first entry)."""
   spec = world.repo / "docs/specs" / name
   spec.parent.mkdir(parents=True, exist_ok=True)
   spec.write_text(text, encoding="utf-8")
@@ -89,9 +91,15 @@ def approve(world, text=SPEC, handoff_id=None, name="2026-11-03-webhooks-design.
   sha = hashlib.sha256(spec.read_bytes()).hexdigest()
   path = store_root(world) / "approvals" / f"{spec.stem}.json"
   path.parent.mkdir(parents=True, exist_ok=True)
-  atomic_write(path, {"path": str(spec), "sha256": sha, "commit": git(["rev-parse", "--short", "HEAD"], world.repo).strip(),
-                      "runcard": "rc-spec", "review": f"spec-{spec.stem}-c1", "approved_at": "2026-11-03T00:00:00Z",
-                      "amended": [], "voided_by": None, "handoff_id": handoff_id or f"2026-11-03-webhooks-{sha[:6]}"})
+  entry = {"sha256": sha, "commit": git(["rev-parse", "--short", "HEAD"], world.repo).strip(),
+           "runcard": "rc-spec", "review": f"spec-{spec.stem}-c1", "approved_at": "2026-11-03T00:00:00Z",
+           "voided_by": None, "handoff_id": handoff_id or f"2026-11-03-webhooks-{sha[:6]}"}
+  if append:
+    held = json.loads(path.read_text(encoding="utf-8"))
+    entries = held.get("entries") or [{"kind": "opening", "escalated": [], **{k: v for k, v in held.items() if k not in ("path", "amended")}}]
+    atomic_write(path, {"path": str(spec), "entries": entries + [{**entry, "kind": "opening", "escalated": []}]})
+  else:
+    atomic_write(path, {"path": str(spec), **entry, "amended": []})
   return spec, sha
 
 
@@ -99,7 +107,7 @@ def planned(world, units=UNITS, text=SPEC):
   spec, sha = approve(world, text)
   plan = world.repo.parent / "plan.md"
   plan.write_text(plan_text(spec, units), encoding="utf-8")
-  return spec, sha, plan, open_runcard(store(world.repo), "plan", str(spec))
+  return spec, sha, plan, world.open_card("plan", str(spec))
 
 
 def graph(world, plan, card):
@@ -111,7 +119,7 @@ def find(world, name):
 
 
 def state(world):
-  return json.loads((store_root(world) / "state.json").read_text(encoding="utf-8"))
+  return json.loads(find(world, "state.json").read_text(encoding="utf-8"))  # the one handoff's, under its directory
 
 
 def body_of(world, uid):
@@ -242,19 +250,46 @@ def test_graph_keeps_the_handoff_id_across_a_reapproval(world):
   spec2, sha2 = approve(world, SPEC.replace("Delivery.", "Delivery, retried."), handoff_id=hid)
   assert sha2 != sha and graph(world, plan, card)[0] == 0
   assert state(world)["handoff_id"] == hid and f"spec={sha2} -->" in body_of(world, "U01")
-  # one handoff per store: another id is refused until closed_at is written
+  # one store, one directory per handoff (spec section 7): another spec's handoff is planned beside the open one
   spec3, sha3 = approve(world, SPEC.replace("Webhooks", "Payments"), handoff_id="2026-11-04-payments-abcdef",
                         name="2026-11-04-payments-design.md")
   plan3 = world.repo.parent / "plan3.md"
   plan3.write_text(plan_text(spec3), encoding="utf-8")
-  card3 = open_runcard(store(world.repo), "plan", str(spec3))
-  code, out = graph(world, plan3, card3)
-  assert code == 1 and f"graph: the store holds handoff {hid}, not closed" in out and "integrate --close" in out
-  s = state(world)
-  s["closed_at"] = "2026-11-04T00:00:00Z"
-  atomic_write(store_root(world) / "state.json", s)
+  card3 = world.open_card("plan", str(spec3))
   assert graph(world, plan3, card3)[0] == 0
-  assert state(world)["handoff_id"] == "2026-11-04-payments-abcdef" and "closed_at" not in state(world)
+  held = lambda h: json.loads((store_root(world) / h / "state.json").read_text(encoding="utf-8"))
+  assert held("2026-11-04-payments-abcdef")["handoff_id"] == "2026-11-04-payments-abcdef" and held(hid)["handoff_id"] == hid
+
+
+def test_graph_lists_filed_elsewhere_rows_and_refuses_a_frozen_handoff(world):
+  # setup adapted to this file's helpers (ruling 6680080392): `approve` returns (spec, sha); the plan is written and its
+  # card opened on the webhooks spec directly (`planned` re-approves, which would replace the history)
+  spec, _ = approve(world, handoff_id="webhooks-111111")
+  atomic_write(store_root(world) / "webhooks-111111/state.json", {"handoff_id": "webhooks-111111", "units": {"U01": {"number": 41}}})
+  atomic_write(store_root(world) / "handoffs/webhooks-111111.json", {"id": "webhooks-111111", "spec": str(spec), "opened_at": "t", "closed_at": None})
+  spec.write_text(spec.read_text(encoding="utf-8") + "| U04 | more | U03 | S |\n", encoding="utf-8")
+  approve(world, text=spec.read_text(encoding="utf-8"), handoff_id="webhooks-222222", append=True)
+  plan = world.repo.parent / "plan.md"
+  plan.write_text(plan_text(spec), encoding="utf-8")
+  card = world.open_card("plan", str(spec))
+  assert "graph: U01 is filed in webhooks-111111: no section for it" in graph(world, plan, card)[1]
+  plan.write_text(plan_text(spec, (section("U02", "Worker"), section("U03", "Admin", "U02"))), encoding="utf-8")
+  assert graph(world, plan, card)[0] == 0 and json.loads(find(world, "handoff_units.json").read_text(encoding="utf-8"))["filed_elsewhere"] == ["U01"]
+  assert "graph: webhooks-111111: not the latest approval: plan the rows in the latest handoff" in world.run("graph", "--plan", plan, "--handoff", "webhooks-111111")[1]
+
+
+def test_graph_refuses_a_handoff_its_spec_never_approved(world):
+  spec, _ = approve(world, handoff_id="webhooks-111111")
+  plan = world.repo.parent / "plan.md"
+  plan.write_text(plan_text(spec), encoding="utf-8")
+  card = world.open_card("plan", str(spec))
+  assert graph(world, plan, card)[0] == 0
+  before = find(world, "state.json").read_text(encoding="utf-8")
+  atomic_write(store_root(world) / "handoffs/other-333333.json", {"id": "other-333333", "spec": "other.md", "opened_at": "t", "closed_at": None})
+  code, out = world.run("graph", "--plan", plan, "--handoff", "other-333333")
+  assert code == 1 and f"graph: other-333333 is not a handoff of {spec.name}" in out
+  assert "store: nosuch-999999: no such handoff" in world.run("graph", "--plan", plan, "--handoff", "nosuch-999999")[1]
+  assert (store_root(world) / "webhooks-111111/state.json").read_text(encoding="utf-8") == before
 
 
 def test_graph_records_the_plan_path_and_copies_the_plan(world):
@@ -268,7 +303,7 @@ def test_graph_records_the_plan_path_and_copies_the_plan(world):
   assert world.run("graph", "--runcard", card)[0] == 0
   assert "A worker exists." in find(world, "handoff_plan.md").read_text(encoding="utf-8")
   assert plan.read_text(encoding="utf-8") == plan_text(spec).replace("Worker exists.", "A worker exists.")
-  assert world.run("scan")[0] == 0
+  assert world.run("scan", "--plan", plan)[0] == 0
 
 
 FIXED_DOD_1 = "1. The test for each Step was committed before its implementation (checked by superegm tdd-order)"
@@ -352,7 +387,7 @@ def test_graph_hashes_unfiled_bodies(world):
 def file_unit(world, uid, number):
   s = state(world)
   s["units"][uid]["number"] = number
-  atomic_write(store_root(world) / "state.json", s)
+  atomic_write(find(world, "state.json"), s)
 
 
 def test_graph_refuses_an_edited_filed_section(world):
@@ -415,13 +450,13 @@ def test_scan_rules(world, rule, old, new):
   assert old in text
   plan.write_text(text.replace(old, new, 1), encoding="utf-8")
   assert graph(world, plan, card)[0] == 0
-  code, out = world.run("scan")
+  code, out = world.run("scan", "--plan", plan)
   assert code == 1 and f"{rule}: U02" in out and out.rstrip().endswith("problem(s)"), out
   if rule == "body-size":
     assert "exceeds 49,152: split it" in out
   plan.write_text(text, encoding="utf-8")
   assert graph(world, plan, card)[0] == 0
-  code, out = world.run("scan")
+  code, out = world.run("scan", "--plan", plan)
   assert code == 0 and out.rstrip().endswith("scan: clean"), out
 
 
@@ -432,7 +467,7 @@ BLOCKED = (UNITS[0], section("U02", "Worker", "U01", ["u01_fn(x: int) -> int (U0
 def test_decide_rewrites_the_plan_line_and_rerenders(world):
   spec, sha, plan, card = planned(world, BLOCKED)
   assert graph(world, plan, card)[0] == 0
-  code, out = world.run("scan")
+  code, out = world.run("scan", "--plan", plan)
   assert code == 1 and "decision-blocking: U02" in out
   before = state(world)["units"]["U02"]["body_sha256"]
   code, out = world.run("decide", "--unit", "U02", "--decision", "D1", "--answer", "(b)", "--runcard", card)
@@ -442,7 +477,7 @@ def test_decide_rewrites_the_plan_line_and_rerenders(world):
   d = state(world)["decisions"]["U02/D1"]
   assert d["answer"] == "(b)" and d["by"] == "owner" and d["decided_at"] and "published" not in d
   assert not list(store_root(world).rglob("decision_comment_U02_D1.md"))
-  assert world.run("scan")[0] == 0
+  assert world.run("scan", "--plan", plan)[0] == 0
 
 
 def test_decide_refuses_an_answer_outside_the_options(world):
@@ -539,7 +574,7 @@ NUMBERS = [
 def test_scan_numbers_and_warnings(world, old, new, key, limit):
   spec, sha, plan, card = planned(world)
   assert graph(world, plan, card)[0] == 0
-  code, out = world.run("scan")
+  code, out = world.run("scan", "--plan", plan)
   numbers = json.loads(find(world, "U02.json").read_text(encoding="utf-8"))
   assert code == 0 and re.search(r"^unit\s+bytes\s+fenced_share\s+steps\s+spec_range_bytes\s+ratio", out, re.M), out
   assert set(numbers) == {"bytes", "fenced_share", "steps", "spec_range_bytes", "ratio", "warnings"} and numbers["warnings"] == []
@@ -550,7 +585,7 @@ def test_scan_numbers_and_warnings(world, old, new, key, limit):
   assert old in text
   plan.write_text(text.replace(old, new, 1), encoding="utf-8")
   assert graph(world, plan, card)[0] == 0
-  code, out = world.run("scan")
+  code, out = world.run("scan", "--plan", plan)
   numbers = json.loads(find(world, "U02.json").read_text(encoding="utf-8"))
   assert code == 0 and out.rstrip().endswith("scan: clean") and numbers[key] > float(limit.replace(",", "")), out
   assert numbers["warnings"] == [f"{key} {numbers[key]:,} > {limit}"]
@@ -661,3 +696,10 @@ PROSE_ROWS = [
 @pytest.mark.parametrize("path, needle", PROSE_ROWS)
 def test_landed_rows_and_the_issue_field_in_the_plan_prose(path, needle):
   assert needle in (ROOT / path).read_text(encoding="utf-8"), f"{path} lacks {needle!r}"
+
+
+def test_every_scan_call_in_the_plan_skills_names_the_plan():
+  """`scan` takes no card and no spec: without `--plan` a 1.2 store resolves no handoff (change-review-1-2)."""
+  for path in ("skills/plan/SKILL.md", "skills/review-plan/SKILL.md"):
+    calls = re.findall(r"'<HELPER>' scan [^`]*", (ROOT / path).read_text(encoding="utf-8"))
+    assert calls and all(call.startswith("'<HELPER>' scan --plan ") for call in calls), (path, calls)

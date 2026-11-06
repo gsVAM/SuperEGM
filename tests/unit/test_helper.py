@@ -15,7 +15,9 @@ from pathlib import Path
 
 import pytest
 
-from conftest import (ROOT, SCRIPTS, HELPER, REPO, DESIGN, Harness, make_world, make_repo, make_pr, set_config, applied, dry_run, state_of, unit_path, close_as_completed, git, mark_launched, launchable)
+import superegm
+from superegm import atomic_write
+from conftest import (ROOT, SCRIPTS, HELPER, REPO, DESIGN, Harness, make_world, make_repo, make_pr, set_config, applied, dry_run, state_of, unit_path, close_as_completed, git, mark_launched, launchable, handoff_store)
 
 
 # ---------------------------------------------- EGM's tests of the shared names
@@ -181,7 +183,7 @@ def test_helper_runs_under_its_new_name(world):
   assert world.ns["build_parser"]().prog == "superegm.py"
   code, out = world.run("graph", "--plan", world.plan)
   assert code == 0, out
-  assert (world.artifacts / "handoff_units.json").is_file()
+  assert handoff_store(world).path("units").is_file()
   for skill in ("skills/plan/SKILL.md", "skills/wave/SKILL.md"):
     assert "egm_handoff.py" not in (ROOT / skill).read_text(encoding="utf-8"), skill
 
@@ -228,7 +230,7 @@ def test_store_paths_are_prefixed_by_the_handoff_hex(world):
   root = world.artifacts
   assert superegm.store(world.repo).root == root and not str(root).startswith(str(world.repo))
   assert superegm.load_config(world.repo)["_source"].endswith(".superegm/config.json")
-  a, b = superegm.Store(root, handoff_id="sample-111111"), superegm.Store(root, handoff_id="sample-222222")
+  a, b = superegm.Store(root, handoff_id="sample-111111", legacy=True), superegm.Store(root, handoff_id="sample-222222", legacy=True)
   assert a.path("state") == b.path("state") == root / "state.json"
   assert a.path("runcards", "plan-0001") == root / "runcards/plan-0001.json"
   assert a.path("approvals", "sample") == root / "approvals/sample.json"
@@ -238,7 +240,7 @@ def test_store_paths_are_prefixed_by_the_handoff_hex(world):
   assert a.path("launches", "U01_r1_prompt.md") == root / "111111/launches/U01_r1_prompt.md"
   assert a.path("review", "U01", 7) == root / "111111/review/U01/pr7" and a.path("worktrees", "U01") == root / "111111/worktrees/U01"
   with pytest.raises(superegm.HandoffError, match="no handoff in this store"):
-    superegm.Store(root).path("foreman", "U01")
+    superegm.Store(root, legacy=True).path("foreman", "U01")
   superegm.atomic_write(a.path("foreman", "U01"), {"rounds": []})
   assert json.loads((root / "111111/foreman/U01.json").read_text(encoding="utf-8")) == {"rounds": []}
   superegm.atomic_write(a.path("file", "x.diff"), b"\x00bin")
@@ -248,10 +250,147 @@ def test_store_paths_are_prefixed_by_the_handoff_hex(world):
   assert [l.split(" ", 1)[1] for l in lines] == ["first fact", "second fact"] and lines[0].startswith("2023-")
   assert superegm.spec_slug("/x/docs/specs/2026-11-03-superegm-design.md") == "2026-11-03-superegm-design"
   assert not list(root.rglob("*.tmp*"))
-  assert world.run("graph", "--plan", world.plan)[0] == 0 and (root / "state.json").is_file()
+  assert world.run("graph", "--plan", world.plan)[0] == 0 and not (root / "state.json").exists()
+  assert (root / state_of(world)["handoff_id"] / "state.json").is_file()
 
 
-WRITES = {"approve_spec": {"approvals"}, "graph": {"state", "plan", "units", "unit", "bodies"},
+H ="2026-11-03-superegm-a6b9b0"
+NEW = [("state", (), f"{H}/state.json"), ("journal", (), f"{H}/journal.md"), ("plan", (), f"{H}/handoff_plan.md"), ("units", (), f"{H}/handoff_units.json"),
+       ("bodies", (), f"{H}/handoff_bodies.md"), ("unit", ("U17",), f"{H}/unit_U17.md"), ("foreman", ("U17",), f"{H}/foreman/U17.json"),
+       ("launches", ("U17_r1_bin", "gh"), f"{H}/launches/U17_r1_bin/gh"), ("review", ("U17", 7), f"{H}/review/U17/pr7"), ("worktrees", ("U17",), f"{H}/worktrees/U17"),
+       ("orient", ("map.md",), f"{H}/orient/map.md"), ("orient_unit", ("U17.md",), f"{H}/orient/U17.md"), ("report", (2,), f"{H}/wave_2_report.md"),
+       ("wave_report", (1,), f"{H}/wave_1_report.md"), ("file", ("handoff_dryrun.md",), f"{H}/handoff_dryrun.md"),
+       ("runcards", ("plan-a6b9b0-0001",), f"{H}/runcards/plan-a6b9b0-0001.json"), ("runcards", ("review-spec-1f2e3d-0001",), "runcards/review-spec-1f2e3d-0001.json"),
+       ("reviews", ("plan-U17-c1", "review.json"), f"{H}/reviews/plan-U17-c1/review.json"), ("reviews", ("spec-sample-c1",), "reviews/spec-sample-c1"),
+       ("reviews", ("spec-sample-integrate-c1",), f"{H}/reviews/spec-sample-integrate-c1"), ("judges", ("spec-sample-c1-cap-0214d6",), "judges/spec-sample-c1-cap-0214d6"),
+       ("judges", ("U17-D1-0214d6",), f"{H}/judges/U17-D1-0214d6"), ("questions", ("U17-D1.md",), f"{H}/questions/U17-D1.md"),
+       ("approvals", ("sample",), "approvals/sample.json"), ("approvals", ("sample.json",), "approvals/sample.json"), ("handoffs", (H,), f"handoffs/{H}.json")]
+LEGACY = [("state", (), "state.json"), ("unit", ("U17",), "a6b9b0/unit_U17.md"), ("foreman", ("U17",), "a6b9b0/foreman/U17.json"), ("orient", ("map.md",), "orient/map.md"),
+          ("orient_unit", ("U17.md",), "a6b9b0/orient/U17.md"), ("reviews", ("a6b9b0-plan-U17-c1",), "reviews/a6b9b0-plan-U17-c1"), ("runcards", ("plan-0001",), "runcards/plan-0001.json")]
+
+@pytest.mark.parametrize("legacy, kind, parts, rel", [(False, *row) for row in NEW] + [(True, *row) for row in LEGACY])
+def test_store_paths_under_the_handoff_directory(tmp_path, legacy, kind, parts, rel):
+  st = superegm.Store(tmp_path, handoff_id=H, legacy=legacy)
+  assert st.path(kind, *parts) == tmp_path / rel and st.kind_of(tmp_path / rel) == st.ALIASES.get(kind, kind)
+  with pytest.raises(superegm.HandoffError, match="no handoff in this store"):
+    superegm.Store(tmp_path).path("unit", "U17")
+  assert superegm.Store(tmp_path).path("journal") == tmp_path / "journal.md" and superegm.Store(tmp_path).path("runcards", "review-spec-1f2e3d-0001") == tmp_path / "runcards/review-spec-1f2e3d-0001.json"
+
+
+entry = lambda hid: {"sha256": hid * 32, "commit": "c", "runcard": None, "review": None, "approved_at": "t", "handoff_id": hid, "kind": "opening", "voided_by": None, "escalated": []}
+
+@pytest.mark.parametrize("case, expect", [("flag", "H2"), ("card", "H1"), ("spec", "H2"), ("unit-one", "H1"),
+                                          ("unit-two", "store: U07 is filed in H1 and H2: pass --handoff"), ("none", None), ("legacy", "sample-legacy")])
+def test_store_resolves_the_handoff_once(world, monkeypatch, case, expect):
+  root = world.artifacts
+  if case == "legacy":
+    atomic_write(root / "state.json", {"handoff_id": "sample-legacy", "units": {}})
+  else:
+    atomic_write(root / "approvals/sample.json", {"path": str(world.spec), "entries": [entry("H1"), entry("H2")]})
+    for hid in ("H1", "H2"):
+      atomic_write(root / f"handoffs/{hid}.json", {"id": hid, "spec": str(world.spec), "opened_at": "t", "closed_at": None})
+      atomic_write(root / f"{hid}/state.json", {"handoff_id": hid, "units": {"U07": {"number": 1}} if case == "unit-two" or hid == "H1" else {}})
+    case == "card" and atomic_write(root / "H1/runcards/plan-H1-0001.json", {"skill": "plan", "handoff": "H1", "closed_at": None, "interrupted_at": None, "parent": None})
+  given = {"flag": dict(handoff="H2"), "card": dict(runcard="plan-H1-0001"), "spec": dict(design=str(world.spec)), "unit-one": dict(unit="U07"), "unit-two": dict(unit="U07")}.get(case, {})
+  monkeypatch.setattr(superegm, "CURRENT_ARGS", argparse.Namespace(**{"handoff": None, "runcard": None, "design": None, "plan": None, "artifact": None, "unit": None, **given}))
+  if expect and expect.startswith("store:"):
+    with pytest.raises(superegm.HandoffError, match=re.escape(expect)):
+      superegm.store(world.repo)
+    return
+  st = superegm.store(world.repo)
+  assert (st.handoff_id, st.legacy) == (expect, case == "legacy")
+  rows = [{"id": "sample-legacy", "spec": None, "opened_at": None, "closed_at": None, "legacy": True}] if case == "legacy" else \
+         [json.loads((root / f"handoffs/{hid}.json").read_text(encoding="utf-8")) | {"legacy": False} for hid in ("H1", "H2")]
+  assert superegm.handoffs(root) == rows
+
+
+@pytest.mark.parametrize("given, expect", [({}, ("sample-legacy", True)), (dict(handoff="sample-legacy"), ("sample-legacy", True)),
+                                           (dict(design="spec"), ("sample-222222", False)), (dict(handoff="sample-222222"), ("sample-222222", False)),
+                                           (dict(unit="U07"), ("sample-legacy", True))])
+def test_a_legacy_store_hosts_the_next_handoff_beside_it(world, monkeypatch, given, expect):
+  root = world.artifacts
+  atomic_write(root / "state.json", {"handoff_id": "sample-legacy", "units": {"U07": {"number": 1}}})
+  atomic_write(root / "approvals/sample.json", {"path": str(world.spec), "entries": [entry("sample-legacy"), entry("sample-222222")]})
+  new = {"id": "sample-222222", "spec": str(world.spec), "opened_at": "t", "closed_at": None}
+  atomic_write(root / "handoffs/sample-222222.json", new)
+  given = {k: str(world.spec) if v == "spec" else v for k, v in given.items()}
+  monkeypatch.setattr(superegm, "CURRENT_ARGS", argparse.Namespace(**{"handoff": None, "runcard": None, "design": None, "plan": None, "artifact": None, "unit": None, **given}))
+  st = superegm.store(world.repo)
+  assert (st.handoff_id, st.legacy) == expect
+  assert st.path("state") == (root / "state.json" if st.legacy else root / "sample-222222/state.json")
+  if st.legacy:
+    with pytest.raises(superegm.HandoffError, match="sample-legacy: not the latest approval"):
+      superegm.require_latest_handoff(st)
+  else:
+    superegm.require_latest_handoff(st)
+  assert superegm.handoffs(root) == [{"id": "sample-legacy", "spec": None, "opened_at": None, "closed_at": None, "legacy": True}, new | {"legacy": False}]
+
+
+def test_a_handoff_beside_a_legacy_store_reads_each_state_in_its_own_place(world, monkeypatch):
+  from superegm import approve_spec, graph
+  root = world.artifacts
+  atomic_write(root / "state.json", {"handoff_id": "sample-legacy", "units": {"U07": {"number": 1}}})
+  atomic_write(root / "approvals/sample.json", {"path": str(world.spec), "entries": [entry("sample-legacy"), entry("sample-222222")]})
+  atomic_write(root / "handoffs/sample-222222.json", {"id": "sample-222222", "spec": str(world.spec), "opened_at": "t", "closed_at": None})
+  atomic_write(root / "sample-222222/state.json", {"handoff_id": "sample-222222", "units": {}, "closed_at": "t"})
+  for given, beside in ((dict(handoff="sample-222222"), True), ({}, False)):
+    monkeypatch.setattr(superegm, "CURRENT_ARGS", argparse.Namespace(**{"handoff": None, "runcard": None, "design": None, "plan": None, "artifact": None, "unit": None, **given}))
+    st = superegm.store(world.repo)
+    assert graph.filed_in(st, world.spec) == ({"U07": "sample-legacy"} if beside else {})
+    assert approve_spec.handoff_state(st, "sample-222222") == {"handoff_id": "sample-222222", "units": {}, "closed_at": "t"}
+    assert approve_spec.handoff_state(st, "sample-legacy")["units"] == {"U07": {"number": 1}}
+    assert superegm.handoff_store(st, "sample-222222").path("state") == root / "sample-222222/state.json"
+    assert superegm.handoff_store(st, "sample-legacy").path("state") == root / "state.json"
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_an_unknown_handoff_is_refused(world, monkeypatch, legacy):
+  root = world.artifacts
+  if legacy:
+    atomic_write(root / "state.json", {"handoff_id": "sample-legacy", "units": {}})
+  atomic_write(root / "handoffs/sample-222222.json", {"id": "sample-222222", "spec": str(world.spec), "opened_at": "t", "closed_at": None})
+  for hid, ok in (("sample-222222", True), ("sample-999999", False)) + ((("sample-legacy", True),) if legacy else ()):
+    monkeypatch.setattr(superegm, "CURRENT_ARGS", argparse.Namespace(handoff=hid, runcard=None, design=None, plan=None, artifact=None, unit=None))
+    if ok:
+      assert superegm.store(world.repo).handoff_id == hid
+    else:
+      with pytest.raises(superegm.HandoffError, match=re.escape(f"store: {hid}: no such handoff")):
+        superegm.store(world.repo)
+
+
+def test_kind_of_a_store_level_orient_and_card_segments(tmp_path):
+  st = superegm.Store(tmp_path)
+  assert st.path("orient", "map.md") == tmp_path / "orient/map.md" and st.kind_of(tmp_path / "orient/map.md") == "orient"
+  assert [superegm.Store.card_segment(c) for c in ("plan-a6b9b0-0001", "review-spec-0001", "review-plan-0002", "review-spec-1f2e3d-0001")] == \
+         ["a6b9b0", None, None, "1f2e3d"]
+
+
+def test_runcard_ids_carry_the_handoff_hex_and_the_card_records_it(world):
+  root = world.artifacts
+  atomic_write(root / "approvals/sample.json", {"path": str(world.spec), "entries": [entry("sample-111111"), entry("sample-222222")]})
+  for hid in ("sample-111111", "sample-222222"):
+    atomic_write(root / f"handoffs/{hid}.json", {"id": hid, "spec": str(world.spec), "opened_at": "t", "closed_at": None})
+  slug6 = hashlib.sha256(b"sample").hexdigest()[:6]
+  assert world.open_card("plan", str(world.spec)) == "plan-222222-0001" and (root / "sample-222222/runcards/plan-222222-0001.json").is_file()
+  assert world.run("runcard", "open", "--skill", "plan", "--artifact", str(world.spec), "--handoff", "sample-111111")[1].strip() == "plan-111111-0001"
+  assert world.open_card("review-spec", str(world.spec)) == f"review-spec-{slug6}-0001" and (root / f"runcards/review-spec-{slug6}-0001.json").is_file()
+  assert json.loads((root / "sample-222222/runcards/plan-222222-0001.json").read_text(encoding="utf-8"))["handoff"] == "sample-222222"
+  assert json.loads((root / f"runcards/review-spec-{slug6}-0001.json").read_text(encoding="utf-8"))["handoff"] is None
+  assert world.run("runcard", "open", "--skill", "judges", "--artifact", "q.md", "--parent", f"review-spec-{slug6}-0001")[1].strip() == f"judges-{slug6}-0001"
+
+
+HANDOFF_PROSE = [(f"skills/{s}/SKILL.md", "[--handoff <id>]") for s in ("plan", "review-plan", "file", "wave", "integrate", "clean", "interrupt")] + [
+  ("skills/wave/references/foreman_brief.md", n) for n in ("--handoff <handoff-id>", "<ARTIFACT_DIR>/<handoff-id>/review/", "spec_range.md", "no commit holds")] + [
+  ("skills/review-plan/SKILL.md", "filed_elsewhere"), ("skills/plan/SKILL.md", "filed_elsewhere"), ("skills/integrate/SKILL.md", "gh pr diff"), ("skills/integrate/SKILL.md", "(to the latest handoff)"),
+  ("docs/claude.md", "artifacts_dir/<handoff id>/"), ("docs/claude.md", "handoffs/<id>.json"), ("docs/claude.md", "legacy")]
+
+@pytest.mark.parametrize("path, needle", HANDOFF_PROSE)
+def test_the_handoff_flag_and_store_layout_prose(path, needle):
+  assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
+  assert "<6 hex>/" not in (ROOT / "skills/wave/references/foreman_brief.md").read_text(encoding="utf-8")
+
+
+WRITES = {"approve_spec":{"approvals", "handoffs", "state"},"graph": {"state", "plan", "units", "unit", "bodies"},
           "scan": {"file"}, "gate": {"state"},
           "dry_run": {"file", "state"}, "apply": {"state", "file"},
           "verify": {"state"}, "status": {"state"}, "launch": {"state", "runcards"}, "decide": {"state", "plan", "units", "unit", "bodies", "file"},
@@ -293,14 +432,15 @@ def test_config_and_label_renames(world, where, expected):
   elif where == "BRANCH_PREFIX":
     assert superegm.BRANCH_PREFIX == expected
     assert world.run("graph", "--plan", world.plan)[0] == 0
-    body = (world.artifacts / "handoff_bodies.md").read_text(encoding="utf-8")
+    body = handoff_store(world).path("bodies").read_text(encoding="utf-8")
     assert f"Branch: `superegm/{state_of(world)['handoff_id']}/U01`" in body
   elif where == "error prefix":
     code, out = world.run("graph", "--plan", world.repo / "missing.md")
     assert code == 1 and out.startswith(expected) and "egm_handoff" not in out
   else:
     assert world.run("graph", "--plan", world.plan)[0] == 0
-    assert (world.artifacts / expected).is_file() and not (world.artifacts / "handoff_state.json").exists()
+    folder = handoff_store(world).path("state").parent
+    assert (folder / expected).is_file() and not (folder / "handoff_state.json").exists()
 
 
 def test_commit_trailer_defaults_empty_and_must_be_a_string(world):
@@ -419,31 +559,33 @@ def test_body_parsers_markers_and_heading():
 
 def test_runcard_open_close_child_and_interrupt(world):
   import superegm
-  read = lambda rid: json.loads((world.artifacts / f"runcards/{rid}.json").read_text(encoding="utf-8"))
+  st = handoff_store(world)
+  hx = st.handoff_id[-6:]
+  read = lambda rid: json.loads(st.path("runcards", rid).read_text(encoding="utf-8"))
   code, out = world.run("runcard", "open", "--skill", "plan", "--artifact", world.spec)
   first = out.strip()
-  assert code == 0 and first == "plan-0001"
+  assert code == 0 and first == f"plan-{hx}-0001"
   card = read(first)
   assert set(card) == {"skill", "artifact", "artifact_sha256", "reviewers", "tiering", "mode", "parent",
-                       "opened_at", "closed_at", "interrupted_at", "produced"}
+                       "opened_at", "closed_at", "interrupted_at", "produced", "handoff"}
   assert card["artifact"] == str(world.spec) and card["artifact_sha256"] == hashlib.sha256(world.spec.read_bytes()).hexdigest()
   assert card["mode"] == "normal" and card["produced"] == [] and card["closed_at"] is None and card["parent"] is None
-  assert world.run("runcard", "open", "--skill", "wave", "--artifact", world.spec, "--mode", "leavemealone")[1].strip() == "wave-0002"
-  assert read("wave-0002")["mode"] == "leavemealone"
+  assert world.run("runcard", "open", "--skill", "wave", "--artifact", world.spec, "--mode", "leavemealone")[1].strip() == f"wave-{hx}-0001"
+  assert read(f"wave-{hx}-0001")["mode"] == "leavemealone"
   code, out = world.run("runcard", "open", "--skill", "judges", "--artifact", "q.md", "--parent", first)
   child = out.strip()
   assert code == 0 and read(child)["parent"] == first and read(child)["artifact"] == "q.md"
   code, out = world.run("runcard", "open", "--skill", "judges", "--artifact", "q.md", "--parent", "plan-9999")
   assert code == 1 and "runcard: parent plan-9999 not found" in out
   second = world.run("runcard", "open", "--skill", "plan", "--artifact", world.spec)[1].strip()
-  assert read(first)["interrupted_at"] and read(child)["interrupted_at"] is None and read("wave-0002")["interrupted_at"] is None
-  superegm.card_add(superegm.store(world.repo), second, "produced", "handoff_plan.md")
+  assert read(first)["interrupted_at"] and read(child)["interrupted_at"] is None and read(f"wave-{hx}-0001")["interrupted_at"] is None
+  superegm.card_add(st, second, "produced", "handoff_plan.md")
   assert read(second)["produced"] == ["handoff_plan.md"]
   assert world.run("runcard", "close", second) == (0, f"closed {second}\n")
   assert read(second)["closed_at"]
   code, out = world.run("runcard", "close", second)
   assert code == 1 and f"runcard: {second} is closed" in out
-  lines = (world.artifacts / "journal.md").read_text(encoding="utf-8")
+  lines = st.path("journal").read_text(encoding="utf-8")
   assert f"runcard open {first} plan" in lines and f"runcard interrupted {first}" in lines and f"runcard close {second}" in lines
 
 
@@ -458,11 +600,11 @@ def _child_of_interrupted(w):
 @pytest.mark.parametrize("setup, unit, reason", [
   (lambda w: None, "U01", r"--runcard is required"),
   (lambda w: "plan-9999", "U01", r"plan-9999 not found"),
-  (_closed, "U01", r"wave-\d+ is closed"),
-  (_interrupted, "U01", r"wave-\d+ is interrupted"),
-  (lambda w: w.card("plan"), "U01", r"plan-\d+ belongs to plan, not foreman\|wave"),
-  (lambda w: w.open_card("wave", "U02"), "U01", r"wave-\d+ is for U02, not U01"),
-  (lambda w: w.open_card("wave", "U02"), None, r"wave-\d+ is for U02, not .*sample\.md"),
+  (_closed, "U01", r"wave-[0-9a-f]{6}-\d+ is closed"),
+  (_interrupted, "U01", r"wave-[0-9a-f]{6}-\d+ is interrupted"),
+  (lambda w: w.card("plan"), "U01", r"plan-[0-9a-f]{6}-\d+ belongs to plan, not foreman\|wave"),
+  (lambda w: w.open_card("wave", "U02"), "U01", r"wave-[0-9a-f]{6}-\d+ is for U02, not U01"),
+  (lambda w: w.open_card("wave", "U02"), None, r"wave-[0-9a-f]{6}-\d+ is for U02, not .*sample\.md"),
   (lambda w: w.card("wave"), "U01", None),
   (lambda w: w.open_card("wave", "U01"), "U01", None),
   (_child_of_interrupted, "U01", None),
@@ -471,6 +613,7 @@ def test_runcard_refusals(world, setup, unit, reason):
   import superegm
   assert world.run("graph", "--plan", world.plan)[0] == 0
   args = argparse.Namespace(runcard=setup(world), unit=unit)
+  handoff_store(world)  # the sample spec's handoff, as a `--spec` subcommand resolves it
   if reason is None:
     assert superegm.require_runcard(args, {"wave", "foreman"})["skill"] in ("wave", "foreman")
   else:
@@ -520,15 +663,16 @@ def test_approve_spec_writes_the_approvals_record_with_handoff_id(world):
   assert code == 0 and "Approve | Stop" in out and not (world.artifacts / "state.json").exists()
   code, out = world.run("approve-spec", "--spec", world.spec, "--yes")
   assert code == 0, out
-  record = json.loads((world.artifacts / "approvals/sample.json").read_text(encoding="utf-8"))
+  whole = json.loads((world.artifacts / "approvals/sample.json").read_text(encoding="utf-8"))
+  record = whole["entries"][-1]  # entries[0] is the world's 1.1 record, read as a one-entry history
   sha = hashlib.sha256(world.spec.read_bytes()).hexdigest()
-  assert set(record) == {"path", "sha256", "commit", "runcard", "review", "approved_at", "escalated", "amended", "voided_by", "handoff_id"}
-  assert record["path"] == str(world.spec) and record["sha256"] == sha and record["handoff_id"] == f"sample-{sha[:6]}"
-  assert record["runcard"] == cid and record["review"] == rid and record["amended"] == [] and record["voided_by"] is None
+  assert set(record) == {"sha256", "commit", "runcard", "review", "approved_at", "escalated", "kind", "voided_by", "handoff_id"}
+  assert whole["path"] == str(world.spec) and record["sha256"] == sha and record["handoff_id"] == f"sample-{sha[:6]}"
+  assert record["runcard"] == cid and record["review"] == rid and record["kind"] == "opening" and record["voided_by"] is None
   assert record["commit"] == git(["rev-parse", "HEAD"], world.repo).strip()
   assert world.run("graph", "--plan", world.plan)[0] == 0
   assert state_of(world)["handoff_id"] == record["handoff_id"]
-  assert json.loads((world.artifacts / "handoff_units.json").read_text(encoding="utf-8"))["handoff_id"] == record["handoff_id"]
+  assert json.loads(handoff_store(world).path("units").read_text(encoding="utf-8"))["handoff_id"] == record["handoff_id"]
 
 
 def test_foreman_file_schema_and_round_entries(world):
@@ -539,7 +683,7 @@ def test_foreman_file_schema_and_round_entries(world):
   data = superegm.load_foreman(st, "U01")
   superegm.round_entry(data, 2)["runcard"] = world.card("wave")  # as a foreman subcommand records a round
   superegm.save_foreman(st, "U01", data)
-  path = world.artifacts / state_of(world)["handoff_id"][-6:] / "foreman/U01.json"
+  path = world.artifacts / state_of(world)["handoff_id"] / "foreman/U01.json"
   data = json.loads(path.read_text(encoding="utf-8"))
   assert set(data) == {"dispatch_id", "rounds", "decisions", "rulings"} and len(data["rounds"]) == 1
   entry = data["rounds"][0]
@@ -551,8 +695,8 @@ def test_foreman_file_schema_and_round_entries(world):
 
 
 def test_require_frozen_units_refuses_a_filed_units_drift(world):
+  launchable(world)  # the spec's approval first: a re-approval of a changed spec opens a new handoff (spec section 7)
   applied(world)
-  launchable(world)
   assert world.run("status")[0] == 0
   text = world.plan.read_text(encoding="utf-8")
   world.plan.write_text(text.replace("An in-memory queue with enqueue and dequeue exists.", "A queue exists."), encoding="utf-8")
@@ -564,9 +708,9 @@ def test_require_frozen_units_refuses_a_filed_units_drift(world):
   world.plan.write_text(text, encoding="utf-8")
   state = state_of(world)
   state["filings"] = [{"sha256": state["confirmed_sha256"], "writes": state["confirmed"]["writes"], "at": "2026-11-03T00:00:00Z"}]
-  (world.artifacts / "state.json").write_text(json.dumps(state), encoding="utf-8")
+  handoff_store(world).path("state").write_text(json.dumps(state), encoding="utf-8")
   assert world.run("status")[0] == 0
-  unit_file = world.artifacts / state["handoff_id"][-6:] / "unit_U01.md"
+  unit_file = world.artifacts / state["handoff_id"] / "unit_U01.md"
   unit_file.write_text(unit_file.read_text(encoding="utf-8") + "\n## Decisions answered since the issue was posted\n\n- none\n", encoding="utf-8")
   assert world.run("status")[0] == 0, "text outside the fence is not the body"
   unit_file.write_text(unit_file.read_text(encoding="utf-8").replace("## Objective\nAn in-memory queue", "## Objective\nA queue"), encoding="utf-8")
@@ -646,7 +790,7 @@ def test_store_kinds_answer_to_the_interfaces_names(world):
   S3's test names `plan|units|bodies|report`. A sibling unit may use either."""
   import superegm
   root = world.artifacts
-  a = superegm.Store(root, handoff_id="sample-111111")
+  a = superegm.Store(root, handoff_id="sample-111111", legacy=True)
   assert a.path("handoff_plan") == a.path("plan") and a.path("handoff_units") == a.path("units")
   assert a.path("handoff_bodies") == a.path("bodies") and a.path("wave_report", 2) == a.path("report", 2)
   assert a.path("approvals", "sample.json") == a.path("approvals", "sample")
@@ -681,7 +825,7 @@ def test_builder_app_key_and_the_bin_kind(world, value, message):
   assert superegm.load_config(world.repo)["builder"]["app"] == APP
   set_config(world, repo=REPO, builder={k: v for k, v in superegm.DEFAULT_CONFIG["builder"].items() if k != "app"})
   assert superegm.load_config(world.repo)["builder"]["app"] is None
-  a = superegm.Store(world.artifacts, handoff_id="sample-111111")
+  a = superegm.Store(world.artifacts, handoff_id="sample-111111", legacy=True)
   p = a.path("launches", "U07_r1_bin", "gh")
   assert p == world.artifacts / "111111/launches/U07_r1_bin/gh" and a.kind_of(p) == "launches"
 

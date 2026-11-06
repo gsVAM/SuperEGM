@@ -511,17 +511,26 @@ def world(tmp_path, capsys, monkeypatch):
   return make_world(tmp_path, capsys, monkeypatch)
 
 
+def handoff_store(world):
+  """The world's store, its handoff resolved as a `--spec <the sample spec>` subcommand resolves it
+  (the spec's latest approval; a flat store, `state.json` at the root, is its one legacy handoff)."""
+  import argparse
+  import superegm
+  superegm.CURRENT_ARGS = argparse.Namespace(design=str(world.spec))
+  return superegm.store(world.repo)
+
+
 def state_of(world):
-  return json.loads((world.artifacts / "state.json").read_text(encoding="utf-8"))
+  return json.loads(handoff_store(world).path("state").read_text(encoding="utf-8"))
 
 
 def unit_path(world, uid):
-  """`unit_<id>.md` under the handoff's 6-hex prefix (after `graph` ran)."""
-  return world.artifacts / state_of(world)["handoff_id"][-6:] / f"unit_{uid}.md"
+  """`unit_<id>.md` in the handoff's directory (after `graph` ran)."""
+  return handoff_store(world).path("unit", uid)
 
 
 def foreman_path(world, uid):
-  return world.artifacts / state_of(world)["handoff_id"][-6:] / "foreman" / f"{uid}.json"
+  return handoff_store(world).path("foreman", uid)
 
 
 def round_of(data, n):
@@ -543,8 +552,12 @@ def result_for(world, uid, rnd):
 
 def converge(artifacts: Path, handoff_id: str, uid: str, sha: str, cycle: int = 1) -> None:
   """What `review-plan` leaves for a converged unit (U04's files, U04's review id): `review.json`
-  and its converged round at the body hash."""
-  folder = artifacts / "reviews" / f"{handoff_id[-6:]}-plan-{uid}-c{cycle}"
+  and its converged round at the body hash, in the handoff's own `reviews/` (`plan-<unit>-c<n>`; a legacy flat store
+  keeps U04's `<6 hex>-plan-<unit>-c<n>` at its root)."""
+  import superegm
+  legacy = (artifacts / "state.json").is_file()
+  rid = f"{handoff_id[-6:]}-plan-{uid}-c{cycle}" if legacy else f"plan-{uid}-c{cycle}"
+  folder = superegm.Store(artifacts, handoff_id=handoff_id, legacy=legacy).path("reviews", rid)
   folder.mkdir(parents=True, exist_ok=True)
   (folder / "review.json").write_text(json.dumps({"kind": "plan", "artifact": uid, "cycle": cycle, "reviewers": ["readiness"],
                                                   "runcard": "rc-plan", "converged": "yes", "converged_round": 1, "rulings": []}),
@@ -558,7 +571,7 @@ def pass_gate(world):
   the body can pass `scan`, spec section 9.1); every unit's plan review converged at its body hash;
   `gate --pass` on the spec."""
   assert world.run("graph", "--plan", world.plan)[0] == 0
-  units = lambda: json.loads((world.artifacts / "handoff_units.json").read_text(encoding="utf-8"))["units"]
+  units = lambda: json.loads(handoff_store(world).path("units").read_text(encoding="utf-8"))["units"]
   for uid, unit in units().items():
     for decision in unit["decisions"]:
       if decision["blocking"] and not decision.get("answer"):
@@ -603,7 +616,7 @@ def mark_launched(world, *units):
   state = state_of(world)
   for uid in units:
     state["units"][uid]["launched"] = {"at": world.ns["now_iso"](), "runcard": world.card("wave")}
-  (world.artifacts / "state.json").write_text(json.dumps(state), encoding="utf-8")
+  handoff_store(world).path("state").write_text(json.dumps(state), encoding="utf-8")
 
 
 def launchable(world):

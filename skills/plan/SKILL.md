@@ -12,7 +12,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: phase 2 of the SuperEGM loop (the plan file, graph, scan, decide); EGM's approval, review gate, dry run and filing steps live in review-spec, review-plan and file. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: phase 2 of the SuperEGM loop (the plan file, graph, scan, decide); EGM's approval, review gate, dry run and filing steps live in review-spec, review-plan and file; `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the handoff skill. Not part of google/elephant-goldfish-model. -->
 
@@ -43,6 +43,8 @@ issues.
 
 *   **`SpecPath`**: the approved spec, absolute or relative to the
     repository root.
+*   **`[--handoff <id>]`** (optional, after `<SpecPath>`): the handoff to plan; by default the spec's latest
+    approval's. An older handoff is frozen: the helper refuses it (`<handoff>: not the latest approval: plan the rows in the latest handoff`).
 
 Ask for a missing `SpecPath` in plain chat.
 
@@ -58,7 +60,7 @@ the files they write are in `references/handoff_plan.md` sections 4 to 6;
 the body layout is `references/issue_template.md`; the repository config
 `.superegm/config.json` is `references/handoff_config.md`. Every store
 write runs under the run card of Step 1; `superegm scan` writes a derived
-report only and needs no card.
+report only and needs no card. When the invocation named a handoff, pass `--handoff '<id>'` to `runcard open` and to every helper call below; without it the card carries the handoff it resolved.
 
 ## Step 1: Run card
 
@@ -84,13 +86,14 @@ and `## 2. Units`.
 Run `python3 '<HELPER>' orient --spec '<SpecPath>' --runcard '<CARD>'` before drafting
 and again after every `graph` of Step 3 that exits 0; stop on its exit 1 with its line.
 It writes `orient/map.md` (the repository map, with graphify's communities when that CLI
-is installed) and, once a handoff is open, every unfiled unit's `<6 hex>/orient/<unit>.md`,
+is installed) and, once a handoff is open, every unfiled unit's `orient/<unit>.md`, all under the handoff's directory,
 copied from the repository's own files and never summarized. Read `orient/map.md` before
 drafting.
 
 1.  Read the spec's `## Units` table. For every row not yet in the plan
     file add one `### U<nn>: <title>` section by section 2's schema, its
     Steps by section 3's rules. A row the section's `Landed:` line names (a unit that landed in an earlier handoff) gets no section.
+    Nor does a row filed in another handoff of the spec: `graph` lists them in `handoff_units.json`'s `filed_elsewhere` and refuses a section for one.
     Keep every section already there; a filed unit's section (one with an
     issue number in `state.json`) is frozen and stays byte-identical.
 2.  Nothing is committed under the repository's docs: the plan file stays
@@ -113,8 +116,9 @@ overrides the default and is the Step's one command.
 
 Run `python3 '<HELPER>' graph --plan '<plan file>' --runcard '<CARD>'`. It
 refuses, naming the file and line where one applies, on: a spec whose
-sha256 no approval matches (back to `/superegm:review-spec`); a store that
-holds another handoff not yet closed (`/superegm:integrate --close` first);
+sha256 no approval matches (back to `/superegm:review-spec`); an older
+handoff (`graph: <handoff>: not the latest approval: plan the rows in the latest handoff`);
+a section for a unit filed in another handoff (`graph: <U> is filed in <handoff>: no section for it`);
 a plan-shape deviation (a missing block, an interfaces line, a
 definition-of-done item, a decide item with one option or a default outside
 its options, no `## Global constraints`); an unknown reference; a
@@ -125,9 +129,9 @@ line per wave, the critical path and what it wrote.
 
 ## Step 4: scan and decisions
 
-1.  Run `python3 '<HELPER>' scan`. It prints the per-unit numbers table
+1.  Run `python3 '<HELPER>' scan --plan '<plan file>'`. It prints the per-unit numbers table
     (`bytes`, `fenced_share`, `steps`, `spec_range_bytes`, `ratio`; also
-    written as `<6hex>/plan/scan/<unit>.json` for the proportion reviewer
+    written as `plan/scan/<unit>.json` in the handoff's directory for the proportion reviewer
     with its `warnings[]`, which never block), then one
     `<rule>: <unit>: <line>` per problem, then `scan: clean` or
     `scan: <n> problem(s)`. The rules are spec section 9.1's: `body-size`
@@ -149,8 +153,8 @@ line per wave, the critical path and what it wrote.
     line in the plan file and re-renders that unit's body, so the next
     `scan` is clean for it. For a filed unit it leaves the plan line, the
     body and `unit_<id>.md` as filed, records the answer in
-    `state.decisions` and writes `<6hex>/decision_comment_<unit>_D<n>.md`
-    in the store: run `python3 '<HELPER>' scan --comment '<that file>'`,
+    `state.decisions` and writes `decision_comment_<unit>_D<n>.md`
+    in the handoff's directory: run `python3 '<HELPER>' scan --plan '<plan file>' --comment '<that file>'`,
     then post it with `GH_HOST=github.com gh issue comment <number> -R
     OWNER/NAME --body-file '<that file>'` under this card (its skill lists
     `github-write`), one Bash approval.

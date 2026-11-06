@@ -1,10 +1,11 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema and issue body; the handoff id comes from the approval record; the plan is copied into the store; the optional `Issue` field checked against the spec's `## Units` section (U13); every escalated pair needs a `## Units` row or a blocking decision (U16).
+# Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema and issue body; the handoff id comes from the approval record; the plan is copied into the store; the optional `Issue` field checked against the spec's `## Units` section (U13); every escalated pair needs a `## Units` row or a blocking decision (U16); `filed_elsewhere[]`, an older handoff frozen, one store of many handoffs (U20).
 
 """superegm graph: parse the plan under its approval; write the store's plan copy,
 units, unit files and bodies."""
 
+import json
 import re
 from pathlib import Path
 
@@ -183,15 +184,23 @@ class Plan(core.Plan):
     return i
 
 
-def require_free_store(state: dict, handoff_id: str) -> dict:
-  """One handoff per store: the state as it is, a fresh one once the held handoff
-  is closed, or a refusal while another handoff is open."""
-  held = state.get("handoff_id")
-  if not held or held == handoff_id:
-    return state
-  if state.get("closed_at"):
-    return {}
-  raise core.HandoffError(f"graph: the store holds handoff {held}, not closed: run /superegm:integrate --close first")
+def filed_in(store: core.Store, spec: Path) -> dict:
+  """`{unit: handoff id}` of the units the spec's other handoffs (every id its approval history names but
+  the store's own) file in their `state.json`, each read in its own place (a legacy handoff's at the root)."""
+  filed = {}
+  for hid in dict.fromkeys(e.get("handoff_id") for e in core.load_approvals(store, spec)):
+    path = core.handoff_store(store, hid).path("state") if hid and hid != store.handoff_id else None
+    if path and path.is_file():
+      for uid, record in (json.loads(core.read_text(path)).get("units") or {}).items():
+        if (record or {}).get("number"):
+          filed.setdefault(uid, hid)
+  return filed
+
+
+def filed_elsewhere(store: core.Store, spec: Path) -> list:
+  """The units filed in another handoff of the spec (the plan's `Landed:` rows, `handoff_units.json`'s
+  `filed_elsewhere[]`)."""
+  return sorted(filed_in(store, spec))
 
 
 class Handoff(core.Handoff):
@@ -210,8 +219,17 @@ class Handoff(core.Handoff):
     self.design_path = design.resolve()
     self.design_sha = core.sha256_file(self.design_path)
     self.repo_root = core.git_toplevel(self.design_path)
-    approval = core.load_approval(store, self.design_path)
-    if not approval or approval.get("voided_by") or approval["sha256"] != self.design_sha:
+    # The handoff's own approval: the last entry carrying the resolved handoff's id, else (no handoff resolved, or
+    # a legacy store's) the history's last; an older handoff's spec may stand at a later link of the chain (spec
+    # section 7). A 1.2 handoff no entry of this spec names is another spec's: refused, never rebound.
+    entries = core.load_approvals(store, self.design_path)
+    own = [i for i, e in enumerate(entries) if store.handoff_id and e.get("handoff_id") == store.handoff_id]
+    if store.handoff_id and not store.legacy and entries and not own:
+      raise core.HandoffError(f"graph: {store.handoff_id} is not a handoff of {self.design_path.name}")
+    own = own or ([len(entries) - 1] if entries else [])
+    approval = entries[own[-1]] if own else None
+    later = {e["sha256"] for e in entries[own[-1] + 1:]} if own else set()
+    if not approval or approval.get("voided_by") or (approval["sha256"] != self.design_sha and self.design_sha not in later):
       raise core.HandoffError(f"graph: no approval matches {self.design_path.name} at its current sha256 "
                               f"{self.design_sha[:12]}: run /superegm:review-spec (approve-spec) first")
     self.handoff_id, self.spec_sha = approval["handoff_id"], approval["sha256"]
@@ -239,8 +257,13 @@ class Handoff(core.Handoff):
     self.template = self.config["_template"] if self.config["issue_template"] else BODY_TEMPLATE
     check_template(self.template)
     self.graph = core.Graph(self.plan)
-    self.state = require_free_store(state, self.handoff_id)
+    self.state = state
     store.handoff_id = self.handoff_id
+    elsewhere = filed_in(store, self.design_path)
+    for uid in self.plan.units:
+      if uid in elsewhere:
+        raise core.HandoffError(f"graph: {uid} is filed in {elsewhere[uid]}: no section for it")
+    self.filed_elsewhere = sorted(elsewhere)
     self.check_labels()
     self.check_frozen()
 
@@ -300,7 +323,7 @@ class Handoff(core.Handoff):
             "order": g.order, "waves": {str(w): us for w, us in sorted(g.waves.items())},
             "critical_path": g.critical_path,
             "edges": [{"from": a, "to": b, "kind": k} for a, b, k in g.edges],
-            "units": units}
+            "units": units, "filed_elsewhere": self.filed_elsewhere}
     core.atomic_write(self.store.path("units"), data)
     for uid in g.order:
       if self.filed(uid) is None:
@@ -331,7 +354,12 @@ def load(store: core.Store, plan) -> Handoff:
 
 
 def run(args):
-  handoff = load(core.store(core.git_toplevel(Path.cwd())), args.plan)
+  st = core.store(core.git_toplevel(Path.cwd()))
+  try:  # an older handoff is frozen (spec section 7)
+    core.require_latest_handoff(st)
+  except core.HandoffError as error:
+    raise core.HandoffError(f"graph: {error}") from None
+  handoff = load(st, args.plan)
   # The card is on the spec the plan names: `require_runcard` reads it from `design`.
   args.design = str(handoff.design_path)
   core.require_runcard(args, SKILLS)

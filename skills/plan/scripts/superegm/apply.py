@@ -64,6 +64,7 @@ class Budget:
 def run(args):
   card = core.require_runcard(args, SKILLS)
   handoff = gate.open_handoff(Path(args.design))
+  gate.require_latest(handoff, "apply")
   state, st = handoff.state, handoff.store
   repo = handoff.config["repo"]
   if not args.yes:
@@ -84,7 +85,7 @@ def run(args):
     raise core.HandoffError("the write list changed since the dry run (plan, config, template or repo): run dry-run again")
   hashes = gate.body_hashes(handoff)
   for uid in sorted(units):
-    converged, sha = gate.converged_review(handoff.artifact_dir, uid)
+    converged, sha = gate.converged_review(handoff.store, uid)
     if not converged or sha != hashes[uid]:
       raise core.HandoffError(f"apply: {uid} body differs from its converged round")
   # A banned_terms or mention rule added after the dry run leaves the write list

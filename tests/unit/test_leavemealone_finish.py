@@ -237,7 +237,19 @@ def test_leavemealone_wiring(skill):
   assert len(body.encode("utf-8")) <= 24_000
 
 
-def test_close_writes_closed_at_and_journals_unlanded(world):
+def test_close_writes_closed_at_into_the_handoff_file_and_the_state(world):
+  seed(world)
+  assert store(world.repo).legacy and not (world.artifacts / "handoffs").exists()
+  code, out = world.run("close", "--runcard", world.card("integrate"))
+  assert code == 0 and out.strip() == "closed sample-design-abc123; unlanded: U07, U08, U09", out
+  closed_at = json.loads((world.artifacts / "state.json").read_text(encoding="utf-8"))["closed_at"]
+  assert json.loads((world.artifacts / "handoffs/sample-design-abc123.json").read_text(encoding="utf-8")) == {"id": "sample-design-abc123", "spec": str(world.spec.resolve()), "opened_at": None, "closed_at": closed_at}
+  assert f"closed sample-design-abc123 at {closed_at}" in (world.artifacts / "journal.md").read_text(encoding="utf-8")
+  assert world.run("close", "--runcard", world.card("integrate"))[0] == 1
+
+
+def test_close_refuses_a_wave_card_journals_each_unlanded_unit_and_says_already_closed(world):
+  """The replaced 1.1 close test's assertions, kept (change-review-1-8)."""
   seed(world)
   state = json.loads(store(world.repo).path("state").read_text(encoding="utf-8"))
   state["status"] = {"units": {"U07": {"landed": True}, "U08": {"landed": False}, "U09": {"landed": False}}}
@@ -246,15 +258,13 @@ def test_close_writes_closed_at_and_journals_unlanded(world):
   runcard = world.card("integrate")
   code, out = world.run("close", "--runcard", runcard)
   assert code == 0 and out.strip() == "closed sample-design-abc123; unlanded: U08, U09", out
-  state = json.loads(store(world.repo).path("state").read_text(encoding="utf-8"))
-  closed_at = state["closed_at"]
+  closed_at = json.loads(store(world.repo).path("state").read_text(encoding="utf-8"))["closed_at"]
   assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)", closed_at)
   journal = (world.artifacts / "journal.md").read_text(encoding="utf-8")
   assert "close: U08 unlanded\n" in journal and "close: U09 unlanded\n" in journal
   assert f"closed sample-design-abc123 at {closed_at}\n" in journal
   code, out = world.run("close", "--runcard", runcard)
   assert code == 1 and f"close: already closed at {closed_at}" in out
-  assert json.loads(store(world.repo).path("state").read_text(encoding="utf-8"))["closed_at"] == closed_at
 
 
 @pytest.mark.parametrize("state, code, line", [
@@ -278,7 +288,7 @@ def test_integrate_skill_body():
       # `status` serves the integrate card (I-4): no wave card, so `wave_number` never counts one.
       "status --wait 1 --runcard <card>",
       "review open --kind integrate --artifact <spec-path> --reviewers <config.reviewers.integrate> --runcard <card>",
-      "git diff <base_at_start>..<base>",
+      "GH_HOST=github.com gh pr diff <n> -R OWNER/NAME",  # the handoff's own PRs (U20)
       "review record --review <id> --round 1",
       "review status --review <id> --runcard <card>",
       "review settle --review <id> --finding <fid> --disposition escalated --runcard <card>",
