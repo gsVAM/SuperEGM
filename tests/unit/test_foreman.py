@@ -367,6 +367,22 @@ def test_collect_records_foreman_findings(world, tmp_path, monkeypatch, name):
   assert json.loads(w.st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][-1]["phase"] == "collected"
 
 
+def test_collect_carries_an_overruled_scope_finding_forward(world, tmp_path, monkeypatch):
+  """1.1.3 fix (wave-0021, U17 round 5): an owner's `**Ruling:** <fid> finding overruled` on an earlier round's
+  out-of-Scope finding widens the Scope for that path, so later rounds do not record it again."""
+  commits = [("test(S1): hook", "tests/unit/test_hooks.py"), ("feat(S1): hook", "src/hooks.py"), ("feat(S1): more", "src/other.py")]
+  comments = {2: [c(13, "owner", "**Ruling:** foreman-1-2 finding overruled — Scope widened to src/other.py")]}
+  kw = dict(rounds=[POSTED_R1], launches=TWO_LAUNCHES, comments=comments)
+  st0, card0, _ = seed(world, **kw)
+  open_head_review(world, st0, card0, "0" * 40, {
+      "change-review": "change-review-1-1 | high | src/hooks.py:1 | regression: no | no hook\n",
+      "foreman": "foreman-1-1 | high | ci | regression: no | CI not green on this head: ci red (tests)\n"
+                 "foreman-1-2 | high | src/other.py | regression: no | changed path outside Scope paths\n"})
+  w = prepared(world, tmp_path, monkeypatch, commits=commits, **kw)
+  code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
+  assert (code, out.strip()) == (0, "collected: 0 foreman findings"), out
+
+
 @pytest.mark.parametrize("phase, outcome, ok", [
     ("fetched", None, True), ("prepared", None, True), ("collected", None, True),
     ("posted", "revise", False), ("collected", "not run (superseded)", False)])
