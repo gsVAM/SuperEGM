@@ -1,11 +1,12 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19).
 
 """superegm review open|record|settle|status|rule: the one review loop (spec section 8)."""
 
 import argparse
 import contextlib
 from dataclasses import dataclass
+import difflib
 import io
 import json
 from pathlib import Path
@@ -163,6 +164,55 @@ def derive_what_ran(review: dict, rnd: dict, entry: dict | None) -> str:
     if record.get("not_run"):
       return f"not run ({reviewer}: {record['not_run']})"
   return "completed"
+
+
+# ---------------------------------------------------------------- the scope of a spec round (U19)
+
+
+HEADING_RE = re.compile(r"^ {0,3}(#{2,3})[ \t]+\S")  # an H2 or an H3 opens a section
+
+
+def sections(text: str) -> list[tuple[str, int, int]]:
+  """`(heading, start, end)` per section, 1-based and inclusive: the preamble above the first H2 (when it
+  holds a line) as `(preamble)`, then every H2 and H3; a heading-like line inside a fenced block (section
+  9.1's CommonMark-smallest grammar, `scan_text`'s) opens none."""
+  lines, starts, fence = text.splitlines(), [], None
+  for number, line in enumerate(lines, 1):
+    if fence:
+      if re.match(rf"^ {{0,3}}{fence[0]}{{{fence[1]},}}\s*$", line):
+        fence = None
+    elif (opener := core.FENCE_RE.match(line)) and not (opener.group(1)[0] == "`" and "`" in opener.group(2)):
+      fence = (opener.group(1)[0], len(opener.group(1)))
+    elif HEADING_RE.match(line):
+      starts.append((line.strip(), number))
+  if not starts or starts[0][1] > 1:
+    starts.insert(0, ("(preamble)", 1))
+  return [(heading, start, (starts[i + 1][1] - 1) if i + 1 < len(starts) else len(lines))
+          for i, (heading, start) in enumerate(starts) if start <= len(lines)]
+
+
+def section_of(spans: list[tuple[str, int, int]], line: int):
+  """The index of the section holding line `line`, or None past the end."""
+  return next((i for i, (_, start, end) in enumerate(spans) if start <= line <= end), None)
+
+
+def scope_sections(old: str, new: str) -> list[tuple[str, str, int, int]]:
+  """`(changed|neighbour, heading, start, end)` in the new text's document order: a section holding a line
+  the diff from `old` to `new` inserted or replaced, or the line before a deletion, is changed; the one
+  section before and after each changed one is its neighbour (for an H3, its sibling H3, else its parent
+  H2 before it and the next H2 after it: the adjacent sections either way)."""
+  spans, changed = sections(new), set()
+  matcher = difflib.SequenceMatcher(None, old.splitlines(), new.splitlines(), autojunk=False)
+  for tag, _, _, j1, j2 in matcher.get_opcodes():
+    if tag == "equal":
+      continue
+    for line in (range(j1 + 1, j2 + 1) if j2 > j1 else [max(j1, 1)]):
+      index = section_of(spans, line)
+      if index is not None:
+        changed.add(index)
+  neighbours = {i + d for i in changed for d in (-1, 1)} - changed
+  return [("changed" if i in changed else "neighbour", heading, start, end)
+          for i, (heading, start, end) in enumerate(spans) if i in changed or i in neighbours]
 
 
 # ---------------------------------------------------------------- the store
