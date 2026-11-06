@@ -47,7 +47,7 @@ def app_api(monkeypatch, answers=None) -> list:
 
   def urlopen(request, timeout=None):
     method, path = request.get_method(), request.full_url.removeprefix("https://api.github.com")
-    calls.append((method, path, request.get_header("Authorization")))
+    calls.append((method, path, request.get_header("Authorization"), json.loads(request.data) if request.data else None))
     answer = routes.get((method, path), (404, "Not Found"))
     if isinstance(answer, tuple):
       raise urllib.error.HTTPError(request.full_url, answer[0], answer[1], {}, io.BytesIO(json.dumps({"message": answer[1]}).encode("utf-8")))
@@ -61,6 +61,7 @@ def test_mint_walks_two_calls_over_urllib_and_reports_the_refusal_verbatim(key, 
   calls = app_api(monkeypatch)
   assert mint(REPO, 12345, key, OPENSSL) == "ghs_minted"
   assert [c[:2] for c in calls] == [("GET", f"/repos/{REPO}/installation"), ("POST", "/app/installations/777/access_tokens")]
+  assert calls[1][3] == {"repositories": [REPO.split("/")[1]]}, "the token is scoped to the repository alone (2026-11-06: an installation may reach several)"
   app_api(monkeypatch, {("POST", "/app/installations/777/access_tokens"): (403, "You have exceeded a secondary rate limit")})
   with pytest.raises(superegm.HandoffError, match=re.escape("POST /app/installations/777/access_tokens: HTTP 403: You have exceeded a secondary rate limit")):
     mint(REPO, 12345, key, OPENSSL)
