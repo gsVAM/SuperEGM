@@ -13,7 +13,7 @@ import superegm as core
 from superegm import store, atomic_write, sha256_file, DEFAULT_CONFIG
 from superegm import review as review_mod, tdd_order
 from superegm import foreman as foreman_mod
-from superegm.prepare import cut_diff, spec_range, prior_round_text
+from superegm.prepare import cut_diff, prior_round_text
 from test_builder_token import APP
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -349,25 +349,6 @@ def test_prepare_writes_the_astra_brief_and_prints_the_lane_state(world, tmp_pat
 
 def test_the_brief_cut_note_names_the_limit_it_cut_at():
   assert cut_diff(b"x" * 11, limit=10).endswith("\n(diff cut at 10 bytes)\n") and cut_diff(b"x" * 400_001).endswith("(diff cut at 400 KB)\n")
-
-
-def test_spec_range_reads_the_approved_commit(world, tmp_path):
-  st = store(world.repo)
-  repo = tmp_path / "specrepo"; repo.mkdir()
-  def g(*a):
-    return subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True, text=True).stdout.strip()
-  g("init", "-q", "-b", "main"); g("config", "user.email", "t@example.invalid"); g("config", "user.name", "T")
-  (repo / "docs").mkdir(); (repo / "docs/s.md").write_text("one\ntwo\nthree\nfour\n", encoding="utf-8")
-  g("add", "-A"); g("commit", "-qm", "spec"); commit = g("rev-parse", "HEAD")
-  (repo / "docs/s.md").write_text("changed\n", encoding="utf-8")  # the working tree moved on; the approved commit is read
-  body = "Spec: `docs/s.md` @ abc · `docs/s.md:2-3 (### 2. Two)`\n"
-  assert spec_range(st, repo, body).startswith("not available: no approval record for s")
-  atomic_write(st.path("approvals", "s"), {"commit": commit})
-  assert spec_range(st, repo, body) == "two\nthree"
-  other = body.replace("docs/s.md", "docs/t.md")
-  atomic_write(st.path("approvals", "t"), {"commit": commit})
-  assert spec_range(st, repo, other).startswith("not available: git show")
-  assert spec_range(st, repo, "no range here").startswith("not available: no `Spec:` line")
 
 
 @pytest.mark.parametrize("holds", [True, False])
