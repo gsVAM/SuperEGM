@@ -88,7 +88,9 @@ def prepare(args, card):
   core.atomic_write(prompt, text)
   if app:
     write_bin(st, unit, rnd, config, openssl, gh)
-  core.journal(st, f"{unit} launch {rnd} prepared")
+  managed = managed_plugins(Path(config["builder"]["profile_dir"]).expanduser() / "plugins")
+  core.atomic_write(st.path("launches", f"{unit}_r{rnd}_managed.json"), json.dumps(managed) + "\n")
+  core.journal(st, f"{unit} launch {rnd} prepared" + (f" (managed plugins: {', '.join(managed)})" if managed else ""))
   print(command_line(config, worktree, prompt, st.path("launches", f"{unit}_r{rnd}_result.json"), args.runcard, tools, launched_gh,
                      identity["login"], identity["email"]))
   return 0
@@ -138,23 +140,37 @@ def refusal(store, state, config, unit, rnd, builder):
   return None
 
 
+def installed_entries(plugins):
+  """`installed_plugins.json`'s entries as `{name: [scope, ...]}`; `None` when the file is unreadable."""
+  installed = plugins / "installed_plugins.json"
+  if not installed.is_file():
+    return {}
+  try:
+    data = json.loads(installed.read_text(encoding="utf-8"))
+  except ValueError:
+    return None
+  entries = data.get("plugins") if isinstance(data, dict) else None
+  return {name: [e.get("scope") for e in (records or []) if isinstance(e, dict)] for name, records in (entries or {}).items()} if isinstance(entries, dict) else None
+
+
+def managed_plugins(plugins):
+  """The plugins the organization's policy installs into every profile of the account (`scope: managed`): policy,
+  not the owner's plugins; each launch records them (owner ruling 2026-11-06)."""
+  entries = installed_entries(plugins) or {}
+  return sorted(name for name, scopes in entries.items() if scopes and all(s == "managed" for s in scopes))
+
+
 def plugins_held(plugins):
   """Claude Code writes `installed_plugins.json`, `known_marketplaces.json`, clones of its default marketplaces
-  under `marketplaces/` (catalogs, not plugins) and its own `store/` into a profile on every start, and
-  `syncClaudeAiPlugins: false` leaves `.trash/`: none of those is a plugin. A plugin is an `installed_plugins.json`
-  entry, a `synced/<bucket>/<name>` directory (the account's plugins, synced on sign-in unless the profile's
-  settings set `syncClaudeAiPlugins` false), or anything under `cache/` (the installed copies)."""
+  under `marketplaces/` (catalogs, not plugins), its own `store/`, and the organization's managed plugins with
+  their copies under `cache/` into a profile on every start, and `syncClaudeAiPlugins: false` leaves `.trash/`:
+  none of those is the owner's plugin. One is an `installed_plugins.json` entry of any scope but `managed`, or a
+  `synced/<bucket>/<name>` directory (the account's plugins, synced on sign-in unless the profile's settings set
+  `syncClaudeAiPlugins` false)."""
   if not plugins.is_dir():
     return False
-  installed = plugins / "installed_plugins.json"
-  if installed.is_file():
-    try:
-      data = json.loads(installed.read_text(encoding="utf-8"))
-    except ValueError:
-      return True
-    if isinstance(data, dict) and data.get("plugins"):
-      return True
-  if (plugins / "cache").is_dir() and any((plugins / "cache").iterdir()):
+  entries = installed_entries(plugins)
+  if entries is None or any(name not in managed_plugins(plugins) for name in entries):
     return True
   synced = plugins / "synced"
   return synced.is_dir() and any(
