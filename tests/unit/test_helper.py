@@ -303,6 +303,20 @@ def test_store_resolves_the_handoff_once(world, monkeypatch, case, expect):
   assert superegm.handoffs(root) == rows
 
 
+def test_runcard_ids_carry_the_handoff_hex_and_the_card_records_it(world):
+  root = world.artifacts
+  atomic_write(root / "approvals/sample.json", {"path": str(world.spec), "entries": [entry("sample-111111"), entry("sample-222222")]})
+  for hid in ("sample-111111", "sample-222222"):
+    atomic_write(root / f"handoffs/{hid}.json", {"id": hid, "spec": str(world.spec), "opened_at": "t", "closed_at": None})
+  slug6 = hashlib.sha256(b"sample").hexdigest()[:6]
+  assert world.open_card("plan", str(world.spec)) == "plan-222222-0001" and (root / "sample-222222/runcards/plan-222222-0001.json").is_file()
+  assert world.run("runcard", "open", "--skill", "plan", "--artifact", str(world.spec), "--handoff", "sample-111111")[1].strip() == "plan-111111-0001"
+  assert world.open_card("review-spec", str(world.spec)) == f"review-spec-{slug6}-0001" and (root / f"runcards/review-spec-{slug6}-0001.json").is_file()
+  assert json.loads((root / "sample-222222/runcards/plan-222222-0001.json").read_text(encoding="utf-8"))["handoff"] == "sample-222222"
+  assert json.loads((root / f"runcards/review-spec-{slug6}-0001.json").read_text(encoding="utf-8"))["handoff"] is None
+  assert world.run("runcard", "open", "--skill", "judges", "--artifact", "q.md", "--parent", f"review-spec-{slug6}-0001")[1].strip() == f"judges-{slug6}-0001"
+
+
 WRITES = {"approve_spec": {"approvals"}, "graph": {"state", "plan", "units", "unit", "bodies"},
           "scan": {"file"}, "gate": {"state"},
           "dry_run": {"file", "state"}, "apply": {"state", "file"},

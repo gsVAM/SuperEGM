@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the orient subcommand's tests (spec section 9.3).
+# Added by SuperEGM (gsVAM), 2026: the orient subcommand's tests (spec section 9.3); the store kinds under a legacy store and the map read through the resolved handoff (U20).
 
 """Orient: the store kinds, the names rule, the extractor on the fixture tree, the projection on
 the fixture graph, the trimming sequence, the export, the graphify build against a fake CLI, the
@@ -8,7 +8,7 @@ subcommand's lines and refusals, and the callers' texts. No test runs graphify."
 import hashlib, json, os, shutil
 from pathlib import Path
 import pytest
-from conftest import DESIGN, git
+from conftest import DESIGN, git, handoff_store
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_store_orient_kinds(world):
   import superegm
   root = world.artifacts
-  a = superegm.Store(root, handoff_id="sample-111111")
+  a = superegm.Store(root, handoff_id="sample-111111", legacy=True)
   assert a.path("orient", "map.md") == root / "orient/map.md" and a.path("orient", "export") == root / "orient/export"
   assert superegm.Store(root).path("orient", "graphify-out") == root / "orient/graphify-out"
   assert a.path("orient_unit", "U12.md") == root / "111111/orient/U12.md"
@@ -195,15 +195,15 @@ def no_graphify(monkeypatch):
 
 def test_orient_writes_the_map_and_every_unfiled_unit(world, no_graphify):
   from superegm import store
-  st, card = store(world.repo), world.card("plan")
+  st, card = handoff_store(world), world.card("plan")
   first = lambda ref: f"orient: tree {git(['rev-parse', ref + '^{tree}'], world.repo).strip()} · graphify: not installed · trimmed: nothing"
   line = lambda p: f"{p} {p.stat().st_size}"
   code, out = world.run("orient", "--spec", world.spec, "--runcard", card)
   assert code == 0 and out.splitlines() == [line(st.path("orient", "map.md"))], out
   text = st.path("orient", "map.md").read_text(encoding="utf-8")
-  assert text.splitlines()[0] == first("HEAD") and ". | 2 files | .json | - | -" in text and not list(st.root.glob("*/orient"))
+  assert text.splitlines()[0] == first("HEAD") and ". | 2 files | .json | - | -" in text and not list(st.root.glob("*/orient/U*.md"))
   assert world.run("graph", "--plan", world.plan)[0] == 0
-  st = store(world.repo)
+  st = handoff_store(world)
   code, out = world.run("orient", "--spec", world.spec, "--runcard", card)
   files = [st.path("orient", "map.md")] + [st.path("orient_unit", f"{u}.md") for u in ("U01", "U02", "U03")]
   assert code == 0 and out.splitlines() == [line(p) for p in files], out
