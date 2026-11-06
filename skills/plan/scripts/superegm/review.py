@@ -282,12 +282,27 @@ def scope_of(st: core.Store, review: dict, spec: Path) -> list:
 
 
 def review_id(st: core.Store, kind: str, artifact: str, cycle: int = 1) -> str:
-  """`spec-<slug>-c<n>`, `spec-<slug>-integrate-c<n>`, `<6 hex>-plan-<unit>-c<n>`, `<6 hex>-head-<unit>-c<n>`."""
+  """`spec-<slug>-c<n>`, `spec-<slug>-integrate-c<n>`, `plan-<unit>-c<n>`, `head-<unit>-c<n>` (in the handoff's
+  directory, spec section 7; a legacy flat store keeps the `<6 hex>-` prefix that kept its handoffs apart)."""
   if kind in ("spec", "integrate"):
     base = f"spec-{core.spec_slug(artifact)}" + ("-integrate" if kind == "integrate" else "")
   else:
-    base = f"{st.handoff_id[-6:]}-{kind}-{artifact}"
+    base = f"{hex_prefix(st)}{kind}-{artifact}"
   return f"{base}-c{cycle}"
+
+
+def hex_prefix(st: core.Store) -> str:
+  """`<6 hex>-` before a plan or head review id in a legacy flat store; nothing in a handoff's directory."""
+  return f"{st.handoff_id[-6:]}-" if st.legacy else ""
+
+
+def frozen(st: core.Store) -> str | None:
+  """Why the store's handoff is frozen (an older handoff, spec section 7), or None."""
+  try:
+    core.require_latest_handoff(st)
+  except core.HandoffError as error:
+    return str(error)
+  return None
 
 
 def load_review(st: core.Store, rid: str):
@@ -389,6 +404,8 @@ def open_review(args) -> int:
     raise core.HandoffError(f"review open: first reviewer must be {FIRST[kind]}")
   if kind in ("plan", "head") and not st.handoff_id:
     raise core.HandoffError("review open: no handoff_id in state.json")
+  if kind == "plan" and frozen(st):  # an older handoff is frozen for review-plan (spec section 7)
+    raise core.HandoffError(f"review open: {frozen(st)}")
   if kind == "plan" and args.sha256:
     raise core.HandoffError("review open: --sha256 is refused for kind plan")
   given = getattr(args, "scope", None)  # a caller's own Namespace (the foreman's) may omit it
@@ -597,6 +614,8 @@ def check_settle(st: core.Store, rid: str, review: dict, card: dict, args, fid: 
   n, rnd, reviewer, finding = locate_finding(st, rid, fid)
   if review["kind"] == "head" and disposition == "fix-design":
     raise core.HandoffError("review settle: fix-design is refused on a head")
+  if review["kind"] == "integrate" and disposition == "fix-design" and frozen(st):  # its spec is the latest handoff's now
+    raise core.HandoffError("review settle: fix-design is refused on a frozen handoff's integrate: settle it escalated")
   if reviewer == "foreman" and finding["location"] == "ci":  # D2 (a): `collect` records it afresh each round
     raise core.HandoffError("review settle: the CI finding is settled by no one")
   if disposition == "fixed" and rnd["artifact_sha256"] == current_sha(st, review["kind"], review["artifact"]):
@@ -627,7 +646,7 @@ def settle_set_copies(st: core.Store, rnd: dict, finding: dict) -> list:
   under the same run card whose `set` record holds the same id and claim takes the disposition and
   ruling (one already holding them, the settled round included, is left alone); the review ids written."""
   copies = []
-  for folder in st.path("reviews").glob(f"{st.handoff_id[-6:]}-plan-*-c*"):
+  for folder in st.path("reviews").glob(f"{hex_prefix(st)}plan-*-c*"):
     for n in round_numbers(st, folder.name):
       other = load_round(st, folder.name, n)
       twins = [f for f in ((other["reviewers"].get("set") or {}).get("findings") or [])
