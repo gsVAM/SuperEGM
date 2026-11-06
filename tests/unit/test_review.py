@@ -89,10 +89,11 @@ def seed_body(world, uid, text=BODY):
   """`unit_<id>.md` as `graph`'s `unit_file_text` writes it: the section, then the body in its fence."""
   atomic_write(hstore(world).path("unit", uid), f"### {uid}: Title\n\n## Issue body as posted\n\n````markdown\n{text}````\n")
 
-def card(world, artifact, skill="review-spec", mode=None, parent=None):
+def card(world, artifact, skill="review-spec", mode=None, parent=None, handoff=None):
   argv = ["runcard", "open", "--skill", skill, "--artifact", str(artifact)]
   argv += ["--mode", mode] if mode else []
   argv += ["--parent", parent] if parent else []
+  argv += ["--handoff", handoff] if handoff else []
   code, out = world.run(*argv)
   assert code == 0, out
   return out.strip()
@@ -745,6 +746,20 @@ def test_amend_units_and_void_act_on_the_latest_entry_alone(world):
   assert f"approve-spec: {a}: not the latest approval: plan the rows in the latest handoff" in world.run("approve-spec", "--spec", str(spec), "--amend-units", "--handoff", a, "--runcard", icid)[1]
   assert approve(world, spec, icid, "--amend-units")[0] == 0
   assert [(e["kind"], e["handoff_id"]) for e in approval(world)["entries"]] == [("opening", a), ("opening", b), ("amend-units", b)]
+
+
+def test_plan_and_head_review_ids_drop_the_hex_and_a_frozen_handoff_refuses_fix_design(world):
+  spec, cid, rid = converged_spec(world); assert approve(world, spec, cid, "--yes")[0] == 0
+  a = approval(world)["entries"][0]["handoff_id"]
+  seed_handoff(world, spec, hid=a)
+  assert opened(world, "plan")[2] == "plan-U07-c1" and opened(world, "head")[2] == "head-U07-c1"
+  spec2, cid2, rid2 = converged_spec(world, SPEC.replace("Text.", "Changed.")); assert approve(world, spec2, cid2, "--yes")[0] == 0
+  pcid = card(world, spec, "review-plan", handoff=a)
+  assert f"review open: {a}: not the latest approval: plan the rows in the latest handoff" in world.run("review", "open", "--kind", "plan", "--artifact", "U07", "--reviewers", "readiness", "--runcard", pcid)[1]
+  icid = card(world, spec, "integrate", handoff=a)
+  irid = world.run("review", "open", "--kind", "integrate", "--artifact", str(spec), "--reviewers", "design", "--runcard", icid)[1].strip()
+  assert record(world, irid, 1, "design", [F("design", 1, 1)], icid)[0] == 0
+  assert "review settle: fix-design is refused on a frozen handoff's integrate: settle it escalated" in settle(world, irid, "design-1-1", "fix-design", icid)[1]
 
 
 def test_approve_spec_refuses_a_branch_not_holding_the_last_entrys_bytes(world):

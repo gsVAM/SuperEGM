@@ -537,7 +537,7 @@ def test_subprocess_command_shape_with_fake_gh_on_path(tmp_path, capsys, monkeyp
     cards[skill] = opened.stdout.strip()
   assert run("graph", "--plan", plan, "--runcard", cards["plan"]).returncode == 0
   assert run("decide", "--unit", "U03", "--decision", "D2", "--default", "--runcard", cards["plan"]).returncode == 0
-  units = json.loads((artifacts / "handoff_units.json").read_text(encoding="utf-8"))
+  units = json.loads(next(artifacts.glob("*/handoff_units.json")).read_text(encoding="utf-8"))  # in the handoff's directory
   for uid, unit in units["units"].items():  # as `gated` writes them
     converge_review(artifacts, units["handoff_id"], uid, unit["body_sha256"])
   result = run("gate", "--pass", "--spec", spec, "--runcard", cards["file"])
