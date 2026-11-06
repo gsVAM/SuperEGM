@@ -103,7 +103,7 @@ def install_pr_api(world, *, reviews, comments, login) -> list:
 
 
 def seed(world, *, head="a" * 40, ci="success", launches=({"round": 1, "status": "exited 0"},),
-         rounds=(), base_ref="main", comments=None, reviews=(), login="builder-bot", pr_body=PR_BODY, builder=None, astra=None):
+         rounds=(), base_ref="main", comments=None, reviews=(), login="builder-bot", pr_body=PR_BODY, builder=None, astra=None, marker=True):
   """Through U03's `store`, `Store.path` and `atomic_write`, what `locate`, `Handoff` and `require_frozen_units`
   read: the plan (conftest's heading, a `Design:` line naming `world.spec` in backticks, `## Global constraints`,
   `## Units`, SECTION) written to `world.plan` and
@@ -118,7 +118,9 @@ def seed(world, *, head="a" * 40, ci="success", launches=({"round": 1, "status":
   ci not in (None, "pending") else "pending", "statuses": []}`; `launches UNIT` = `{"launches": list(launches)}` when
   launches; `foreman UNIT` = `{"dispatch_id": f"d{len(rounds)}" if rounds else None, "rounds": list(rounds),
   "decisions": [], "rulings": []}`; `posted = install_pr_api(world, reviews=list(reviews), comments=comments or {},
-  login=login)`; `builder`, when given, is the config's `builder` key. Returns `(st, card, posted)` with
+  login=login)`; `builder`, when given, is the config's `builder` key. The unit file's body is BODY prefixed with
+  the marker line (the spec's sha256, or `1` * 64 when `marker` is false: no commit holds it) and a `Spec:` line
+  citing SECTION's design range (lines 13-15 of conftest's fixture spec). Returns `(st, card, posted)` with
   `card = world.open_card("wave", str(world.spec))`."""
   spec = world.spec.resolve()
   set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"],
@@ -129,12 +131,16 @@ def seed(world, *, head="a" * 40, ci="success", launches=({"round": 1, "status":
   world.plan.write_text(plan, encoding="utf-8")
   st = store(world.repo)
   st.handoff_id = f"sample-{sha256_file(spec)[:6]}"
+  atomic_write(st.path("handoffs", st.handoff_id), {"id": st.handoff_id, "spec": str(spec), "opened_at": "2026-11-02T00:00:00Z", "closed_at": None})
   atomic_write(st.path("handoff_plan"), plan)
   atomic_write(st.path("state"), {"plan": str(world.plan), "repo": REPO, "handoff_id": st.handoff_id,
                                   "design": {"path": str(spec)},
                                   "units": {UNIT: {"number": 2, "pr": {"number": PR, "head": head, "base_ref": base_ref,
                                                                        "base_sha": "b" * 40}}}})
-  atomic_write(st.path("unit", UNIT), f"{SECTION}\n## Issue body as posted\n\n```markdown\n{BODY}```\n")
+  sha = sha256_file(spec)
+  cited = (f"<!-- superegm:handoff={st.handoff_id} unit={UNIT} spec={sha if marker else '1' * 64} -->\n"
+           f"Spec: `docs/designs/sample.md` @ {sha[:7]} · `docs/designs/sample.md:13-15 (#### 1. src/webhooks/queue.ts)`\n")
+  atomic_write(st.path("unit", UNIT), f"{SECTION}\n## Issue body as posted\n\n```markdown\n{cited}{BODY}```\n")
   make_pr(world.gh, PR, head, closes=[(REPO, 2)]).update({"baseRefName": base_ref, "body": pr_body})
   if ci is not None:
     world.gh.check_runs[head] = [{"name": "tests", "status": "in_progress" if ci == "pending" else "completed",
@@ -362,6 +368,18 @@ def test_spec_range_reads_the_approved_commit(world, tmp_path):
   atomic_write(st.path("approvals", "t"), {"commit": commit})
   assert spec_range(st, repo, other).startswith("not available: git show")
   assert spec_range(st, repo, "no range here").startswith("not available: no `Spec:` line")
+
+
+@pytest.mark.parametrize("holds", [True, False])
+def test_prepare_writes_spec_range_md_from_the_chain(world, tmp_path, monkeypatch, holds):
+  target, base, head, g = pr_repo(world, tmp_path, monkeypatch)
+  st, card, child, did, _ = dispatched(world, head=head, marker=holds)
+  code, out = world.run("prepare", "--unit", UNIT, "--dispatch", did, "--runcard", child)
+  d = st.path("review", UNIT, f"pr{PR}")
+  if holds:
+    assert code == 0 and (d / "r1/spec_range.md").read_text(encoding="utf-8") == "\n".join(world.spec.read_text(encoding="utf-8").splitlines()[12:15]) + "\n"
+  else:
+    assert (code, out.strip()) == (1, "spec range: no commit holds 1111111") and not (d / "r1/spec_range.md").exists() and not (d / "worktree").exists()
 
 
 def test_the_prior_round_lists_findings_with_astras_dispositions(world):

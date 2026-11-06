@@ -424,7 +424,8 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   tree = git(["rev-parse", "refs/superegm/base^{tree}"], world.repo).strip()
   unit_file = s.path("orient_unit", f"{UNIT}.md").read_text(encoding="utf-8")
   assert unit_file.startswith(f"orient: tree {tree} · graphify: not installed · trimmed: nothing\n## src/worker.py (create)\nsiblings: none\ntests: none\n")
-  assert f"\n\n---\n\n# Builder orders\n\n{orders}\n\n---\n\n# Orient\n\n{unit_file}\n\n---\n\n# Comments on issue #{ISSUE}\n" in prompt
+  cited = "\n".join(Path(state_of(s)["design"]["path"]).read_text(encoding="utf-8").splitlines()[0:2]) + "\n"  # the body's `Spec:` range
+  assert f"\n\n---\n\n# Builder orders\n\n{orders}\n\n---\n\n# Orient\n\n{unit_file}\n\n---\n\n# Spec range\n\n{cited}\n\n---\n\n# Comments on issue #{ISSUE}\n" in prompt
   assert "read the `# Orient` section before Step 1" in orders
 
 
