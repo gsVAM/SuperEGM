@@ -13,7 +13,7 @@ import superegm as core
 from superegm import store, atomic_write, sha256_file, DEFAULT_CONFIG
 from superegm import review as review_mod, tdd_order
 from superegm import foreman as foreman_mod
-from superegm.prepare import cut_diff
+from superegm.prepare import cut_diff, spec_range, prior_round_text
 from test_builder_token import APP
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -341,6 +341,40 @@ def test_prepare_writes_the_astra_brief_and_prints_the_lane_state(world, tmp_pat
   assert cut_diff(b"x" * 400_001).endswith("\n(diff cut at 400 KB)\n") and cut_diff(b"x" * 400_000) == "x" * 400_000
 
 
+def test_the_brief_cut_note_names_the_limit_it_cut_at():
+  assert cut_diff(b"x" * 11, limit=10).endswith("\n(diff cut at 10 bytes)\n") and cut_diff(b"x" * 400_001).endswith("(diff cut at 400 KB)\n")
+
+
+def test_spec_range_reads_the_approved_commit(world, tmp_path):
+  st = store(world.repo)
+  repo = tmp_path / "specrepo"; repo.mkdir()
+  def g(*a):
+    return subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True, text=True).stdout.strip()
+  g("init", "-q", "-b", "main"); g("config", "user.email", "t@example.invalid"); g("config", "user.name", "T")
+  (repo / "docs").mkdir(); (repo / "docs/s.md").write_text("one\ntwo\nthree\nfour\n", encoding="utf-8")
+  g("add", "-A"); g("commit", "-qm", "spec"); commit = g("rev-parse", "HEAD")
+  (repo / "docs/s.md").write_text("changed\n", encoding="utf-8")  # the working tree moved on; the approved commit is read
+  body = "Spec: `docs/s.md` @ abc · `docs/s.md:2-3 (### 2. Two)`\n"
+  assert spec_range(st, repo, body).startswith("not available: no approval record for s")
+  atomic_write(st.path("approvals", "s"), {"commit": commit})
+  assert spec_range(st, repo, body) == "two\nthree"
+  other = body.replace("docs/s.md", "docs/t.md")
+  atomic_write(st.path("approvals", "t"), {"commit": commit})
+  assert spec_range(st, repo, other).startswith("not available: git show")
+  assert spec_range(st, repo, "no range here").startswith("not available: no `Spec:` line")
+
+
+def test_the_prior_round_lists_findings_with_astras_dispositions(world):
+  st = store(world.repo)
+  assert prior_round_text(st, None, None) == "none"
+  f1 = {"id": "change-review-1-1", "severity": "high", "location": "a.py:1", "regression": "no", "claim": "c1", "disposition": "fixed"}
+  f2 = {"id": "astra-1-1", "severity": "medium", "location": "b.py:2", "regression": "yes", "claim": "c2", "disposition": "contested"}
+  atomic_write(st.path("reviews", "rv", "round-1.json"), {"reviewers": {"change-review": {"findings": [f1]}, "astra": {"findings": [f2]}}})
+  assert sorted(prior_round_text(st, "rv", 1).splitlines()) == [  # the store sorts reviewer keys
+    "astra-1-1 | medium | b.py:2 | regression: yes | c2 -> contested",
+    "change-review-1-1 | high | a.py:1 | regression: no | c1"]
+
+
 def test_collect_records_the_brief_sha256_on_the_lane_record(world, tmp_path, monkeypatch):
   monkeypatch.setattr(foreman_mod, "runner_path", lambda: None)
   w = prepared(world, tmp_path, monkeypatch, astra={"enabled": True})
@@ -543,8 +577,8 @@ def test_foreman_brief_carries_the_round(line):
 
 
 PROSE = [("skills/wave/references/foreman_brief.md", n) for n in ("Step 2b, the Astra lane", "--timeout 540", "600000", "astra_brief.md", "--not-run 'not installed'",
-                                                                   "stopped: two incomplete runs", "astra: ok <RUNNER>", "fresh every round")] + [
-         ("resources/astra_lane.md", "## 8. The head lane"), ("resources/astra_lane.md", "--timeout 540"), ("resources/astra_lane.md", "one foreground"),
+                                                                   "stopped: two incomplete runs", "astra: ok <RUNNER>", "fresh every round", "every panel entry but `astra`", "(the head's Astra lane excepted: one bounded foreground runner call)", "record the lane once per round")] + [
+         ("resources/astra_lane.md", "## 8. The head lane"), ("resources/astra_lane.md", "--timeout 540"), ("resources/astra_lane.md", "one foreground"), ("resources/astra_lane.md", "head lane excepted"), ("resources/astra_lane.md", "interactive flow only"),
          ("resources/review_panels.md", "change-review, astra"), ("docs/claude.md", "one bounded foreground"), ("docs/claude.md", "astra.heads")]
 
 

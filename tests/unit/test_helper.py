@@ -700,3 +700,11 @@ def test_astra_heads_key_and_the_head_panel_default(world, astra, heads):
       superegm.load_config(world.repo)
     return
   assert superegm.load_config(world.repo)["astra"] == {**superegm.DEFAULT_CONFIG["astra"], **astra}
+
+
+@pytest.mark.parametrize("value", [None, "on", ["enabled"]])
+def test_a_non_object_astra_value_names_the_astra_key(world, value):
+  import superegm
+  set_config(world, repo=REPO, astra=value)
+  with pytest.raises(superegm.HandoffError, match=re.escape("astra must be an object")):
+    superegm.load_config(world.repo)
