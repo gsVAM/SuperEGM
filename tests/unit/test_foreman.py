@@ -580,12 +580,28 @@ PROSE = [("skills/wave/references/foreman_brief.md", n) for n in ("Step 2b, the 
                                                                    "stopped: two incomplete runs", "astra: ok <RUNNER>", "fresh every round", "every panel entry but `astra`", "(the head's Astra lane excepted: one bounded foreground runner call)", "record the lane once per round", "a head's diff is small", "ends `astra: ok` or `astra: not installed`")] + [
          ("resources/astra_lane.md", "## 8. The head lane"), ("resources/astra_lane.md", "--timeout 540"), ("resources/astra_lane.md", "one foreground"), ("resources/astra_lane.md", "head lane excepted"), ("resources/astra_lane.md", "interactive flow only"),
          ("resources/astra_lane.md", "The head review mapping"), ("resources/astra_lane.md", "the bare id `astra-<round>-<n>`"), ("resources/review_panels.md", "inspect launch is the interactive flow only"),
-         ("resources/review_panels.md", "change-review, astra"), ("docs/claude.md", "one bounded foreground"), ("docs/claude.md", "astra.heads")]
+         ("resources/review_panels.md", "change-review, astra"), ("docs/claude.md", "one bounded foreground"), ("docs/claude.md", "astra.heads"),
+         ("docs/privacy.md", "every head review of a SuperEGM wave"), ("docs/privacy.md", "the diff, the CI file, the PR body and the comments"),
+         (".claude-plugin/agents/foreman.md", "the head's Astra lane excepted: one bounded foreground runner call"),
+         ("resources/astra_lane.md", "Modified by SuperEGM (gsVAM), 2026: "), ("resources/astra_lane.md", "**Data notice (head lane).**"),
+         ("skills/wave/SKILL.md", "Astra review lane"),
+         ("skills/wave/references/foreman_brief.md", "`gpt-6-astra`"), ("skills/wave/references/foreman_brief.md", "`xhigh`")]
 
 
 @pytest.mark.parametrize("path, needle", PROSE)
 def test_the_head_lane_prose(path, needle):
   assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
+
+
+ABSENT = [("docs/privacy.md", "never runs on a pull request head"), ("docs/privacy.md", "one reviewer of a spec, plan or integrate review"),
+          ("skills/wave/SKILL.md", "Astra inspect lane"), ("resources/astra_lane.md", "through the inspect launch of section 3b."),
+          ("resources/astra_lane.md", "A wave's pull request review uses the runner's `inspect` subcommand"),
+          ("resources/astra_lane.md", "writes the exact line and that Bash timeout into")]
+
+
+@pytest.mark.parametrize("path, text", ABSENT)
+def test_the_head_lane_prose_drops_the_stale_claims(path, text):
+  assert text not in " ".join((ROOT / path).read_text(encoding="utf-8").split()), (path, text)
 
 
 FILES = [".claude-plugin/agents/foreman.md", "skills/wave/references/foreman_brief.md",
