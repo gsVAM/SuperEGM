@@ -1,15 +1,18 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19).
 
-"""superegm review open|record|settle|status|rule: the one review loop (spec section 8)."""
+"""superegm review open|record|settle|status|rule|scope|post: the one review loop (spec section 8)."""
 
 import argparse
 import contextlib
 from dataclasses import dataclass
+import difflib
+import hashlib
 import io
 import json
 from pathlib import Path
 import re
+import subprocess
 import sys
 
 import superegm as core
@@ -49,6 +52,7 @@ def register(subparsers):
   o.add_argument("--sha256", help="the bytes under review (a plan body or a head); a spec is hashed by the helper")
   o.add_argument("--reviewers", required=True, help="comma-separated reviewer ids, the kind's first reviewer first")
   o.add_argument("--astra", choices=("on", "off"), help="the Astra lane (default: config.astra.enabled)")
+  o.add_argument("--scope", help="kind spec: auto (default) | whole | headings separated by `;`")
   r = core.add_parser(action, "record", "record one reviewer's round")
   r.add_argument("--review", required=True)
   r.add_argument("--round", type=int, required=True)
@@ -62,11 +66,14 @@ def register(subparsers):
   r.add_argument("--effort", help="<requested>:<effective>")
   s = core.add_parser(action, "settle", "write a finding's disposition")
   s.add_argument("--review", required=True)
-  s.add_argument("--finding", required=True)
-  s.add_argument("--disposition", choices=DISPOSITIONS, required=True)
+  s.add_argument("--finding")
+  s.add_argument("--disposition", choices=DISPOSITIONS)
+  s.add_argument("--file", help="one `<fid> | <disposition> | <note>` per line, settled all or nothing (in place of --finding)")
   by_whom(s, required=False)
   t = core.add_parser(action, "status", "the review's state; the exit code is the verdict")
   t.add_argument("--review", required=True)
+  c = core.add_parser(action, "scope", "a spec review's scope this round: one line per section, for the brief")
+  c.add_argument("--review", required=True)
   u = core.add_parser(action, "rule", "record a ruling at the cap")
   u.add_argument("--review", required=True)
   u.add_argument("--ruling", choices=RULINGS, required=True)
@@ -88,7 +95,7 @@ def by_whom(parser, required):
 def run(args):
   try:
     return {"open": open_review, "record": record_round, "settle": settle_finding,
-            "status": status_review, "rule": rule_review, "post": post}[args.action](args)
+            "status": status_review, "rule": rule_review, "post": post, "scope": scope_review}[args.action](args)
   except Refusal as refusal:
     print(refusal)
     return 1
@@ -165,16 +172,137 @@ def derive_what_ran(review: dict, rnd: dict, entry: dict | None) -> str:
   return "completed"
 
 
+# ---------------------------------------------------------------- the scope of a spec round (U19)
+
+
+HEADING_RE = re.compile(r"^ {0,3}(#{2,3})[ \t]+\S")  # an H2 or an H3 opens a section
+
+
+def sections(text: str) -> list[tuple[str, int, int]]:
+  """`(heading, start, end)` per section, 1-based and inclusive: the preamble above the first H2 (when it
+  holds a line) as `(preamble)`, then every H2 and H3; a heading-like line inside a fenced block (section
+  9.1's CommonMark-smallest grammar, `scan_text`'s) opens none."""
+  lines, starts, fence = text.splitlines(), [], None
+  for number, line in enumerate(lines, 1):
+    if fence:
+      if re.match(rf"^ {{0,3}}{fence[0]}{{{fence[1]},}}\s*$", line):
+        fence = None
+    elif (opener := core.FENCE_RE.match(line)) and not (opener.group(1)[0] == "`" and "`" in opener.group(2)):
+      fence = (opener.group(1)[0], len(opener.group(1)))
+    elif HEADING_RE.match(line):
+      starts.append((line.strip(), number))
+  if not starts or starts[0][1] > 1:
+    starts.insert(0, ("(preamble)", 1))
+  return [(heading, start, (starts[i + 1][1] - 1) if i + 1 < len(starts) else len(lines))
+          for i, (heading, start) in enumerate(starts) if start <= len(lines)]
+
+
+def section_of(spans: list[tuple[str, int, int]], line: int):
+  """The index of the section holding line `line`, or None past the end."""
+  return next((i for i, (_, start, end) in enumerate(spans) if start <= line <= end), None)
+
+
+def scope_sections(old: str, new: str) -> list[tuple[str, str, int, int]]:
+  """`(changed|neighbour, heading, start, end)` in the new text's document order: a section holding a line
+  the diff from `old` to `new` inserted or replaced, or the line before a deletion, is changed; the one
+  section before and after each changed one is its neighbour (for an H3, its sibling H3, else its parent
+  H2 before it and the next H2 after it: the adjacent sections either way)."""
+  spans, changed = sections(new), set()
+  matcher = difflib.SequenceMatcher(None, old.splitlines(), new.splitlines(), autojunk=False)
+  for tag, _, _, j1, j2 in matcher.get_opcodes():
+    if tag == "equal":
+      continue
+    for line in (range(j1 + 1, j2 + 1) if j2 > j1 else [max(j1, 1)]):
+      index = section_of(spans, line)
+      if index is not None:
+        changed.add(index)
+  neighbours = {i + d for i in changed for d in (-1, 1)} - changed
+  return [("changed" if i in changed else "neighbour", heading, start, end)
+          for i, (heading, start, end) in enumerate(spans) if i in changed or i in neighbours]
+
+
+def cited_line(location: str) -> int | None:
+  """The line a finding's location cites: the first integer after `line `, `lines `, `L` or `:`, else None."""
+  match = re.search(r"(?:\blines? |\bL|:)(\d+)", location)
+  return int(match.group(1)) if match else None
+
+
+def out_of_scope(rows: list, spans: list, location: str):
+  """The heading of the section a finding cites when no scope row holds its line, else None: a location
+  naming no line, or a line past the spec's end (another file's), is kept (D1 (a): the goldfish was briefed
+  to cite lines, and an unplaceable finding is not lost)."""
+  line = cited_line(location)
+  index = None if line is None else section_of(spans, line)
+  if index is None or any(start <= line <= end for _, _, start, end in rows):
+    return None
+  return spans[index][0]
+
+
+def approved_text(spec: Path, approval: dict):
+  """The approved bytes as text: the spec at the approval's `commit` (voided or not), else at the first commit
+  of the current branch's `git log -- <spec>` whose blob hashes to its `sha256`; None when no commit holds them."""
+  root = core.git_toplevel(spec.parent)
+  rel = spec.resolve().relative_to(root.resolve()).as_posix()
+  show = lambda commit: subprocess.run(["git", "show", f"{commit}:{rel}"], cwd=str(root), capture_output=True)
+  if approval.get("commit") and (at := show(approval["commit"])).returncode == 0:
+    return at.stdout.decode("utf-8")
+  for commit in core.run_git(["log", "--format=%H", "--", rel], root, check=False).split():
+    blob = show(commit)
+    if blob.returncode == 0 and hashlib.sha256(blob.stdout).hexdigest() == approval["sha256"]:
+      return blob.stdout.decode("utf-8")
+  return None
+
+
+def scope_of(st: core.Store, review: dict, spec: Path) -> list:
+  """The round's scope rows, `(changed|neighbour|whole, heading, start, end)`, from the current bytes: under
+  `auto` (a review opened before U19 reads as `auto`) the sections `scope_sections` finds against the
+  approved bytes; a section list adds its headings as `changed`, without neighbours (a heading the bytes no
+  longer hold is dropped). One `whole` row otherwise, its heading field the reason: `(whole)`, `(no
+  approval)`, `(no commit holds <sha7>)`, or `(no change)` when nothing changed and no listed heading stands."""
+  text = core.read_text(spec)
+  whole = lambda reason: [("whole", f"({reason})", 1, len(text.splitlines()))]
+  form = review.get("scope") or "auto"
+  if form == "whole":
+    return whole("whole")
+  approval = core.load_approval(st, spec)
+  if not approval:
+    return whole("no approval")
+  old = approved_text(spec, approval)
+  if old is None:
+    return whole(f"no commit holds {approval['sha256'][:7]}")
+  rows = {row[2]: row for row in scope_sections(old, text)}  # by start line: two sections may share a heading
+  if isinstance(form, list):
+    for heading, start, end in sections(text):
+      if heading in form:
+        rows[start] = ("changed", heading, start, end)
+  return [rows[start] for start in sorted(rows)] or whole("no change")
+
+
 # ---------------------------------------------------------------- the store
 
 
 def review_id(st: core.Store, kind: str, artifact: str, cycle: int = 1) -> str:
-  """`spec-<slug>-c<n>`, `spec-<slug>-integrate-c<n>`, `<6 hex>-plan-<unit>-c<n>`, `<6 hex>-head-<unit>-c<n>`."""
+  """`spec-<slug>-c<n>`, `spec-<slug>-integrate-c<n>`, `plan-<unit>-c<n>`, `head-<unit>-c<n>` (in the handoff's
+  directory, spec section 7; a legacy flat store keeps the `<6 hex>-` prefix that kept its handoffs apart)."""
   if kind in ("spec", "integrate"):
     base = f"spec-{core.spec_slug(artifact)}" + ("-integrate" if kind == "integrate" else "")
   else:
-    base = f"{st.handoff_id[-6:]}-{kind}-{artifact}"
+    base = f"{hex_prefix(st)}{kind}-{artifact}"
   return f"{base}-c{cycle}"
+
+
+def hex_prefix(st: core.Store) -> str:
+  """`<6 hex>-` before a plan or head review id in a legacy flat store; nothing in a handoff's directory."""
+  return f"{st.handoff_id[-6:]}-" if st.legacy else ""
+
+
+def frozen(st: core.Store) -> str | None:
+  """Why the store's handoff is frozen (an older handoff, spec section 7), or None."""
+  try:
+    core.require_latest_handoff(st)
+  except core.HandoffError as error:
+    return str(error)
+  return None
 
 
 def load_review(st: core.Store, rid: str):
@@ -225,7 +353,8 @@ def latest_cycle(st: core.Store, kind: str, artifact: str) -> tuple[dict | None,
     closed = bool(approval) and approval["review"] == rid and approval["sha256"] != current_sha(st, kind, artifact)
   if not closed and kind == "integrate":
     state = core.load_state(st.root)
-    amended = (core.load_approval(st, Path(artifact)) or {}).get("amended") or []
+    amended = [e for e in core.load_approvals(st, Path(artifact))
+               if e.get("kind") == "amend-units" and e.get("handoff_id") == review.get("handoff_id")]
     latest_sha = evaluate(st, review, None).latest_sha
     closed = bool(state.get("closed_at")) or ("handoff_id" in review and state.get("handoff_id") != review["handoff_id"]) \
         or bool(amended and latest_sha and amended[-1]["sha256"] != latest_sha)
@@ -275,8 +404,13 @@ def open_review(args) -> int:
     raise core.HandoffError(f"review open: first reviewer must be {FIRST[kind]}")
   if kind in ("plan", "head") and not st.handoff_id:
     raise core.HandoffError("review open: no handoff_id in state.json")
+  if kind == "plan" and frozen(st):  # an older handoff is frozen for review-plan (spec section 7)
+    raise core.HandoffError(f"review open: {frozen(st)}")
   if kind == "plan" and args.sha256:
     raise core.HandoffError("review open: --sha256 is refused for kind plan")
+  given = getattr(args, "scope", None)  # a caller's own Namespace (the foreman's) may omit it
+  if given is not None and kind != "spec":
+    raise core.HandoffError(f"review open: --scope is refused for kind {kind}")
   latest, closed = latest_cycle(st, kind, artifact)
   if latest and not closed:  # a re-typed skill resumes the open cycle; the panel cannot change
     rid = review_id(st, kind, artifact, latest["cycle"])
@@ -284,10 +418,11 @@ def open_review(args) -> int:
     core.journal(st, f"review open {rid} resumed under {args.runcard}")
     print(rid)
     return 0
+  scope = scope_form(st, artifact, given) if kind == "spec" else None
   cycle = latest["cycle"] + 1 if latest else 1
   rid = review_id(st, kind, artifact, cycle)
   lane = seat_lane(kind, getattr(args, "astra", None), st.config.get("astra") or {})
-  review = {"kind": kind, "artifact": artifact, "cycle": cycle, "handoff_id": st.handoff_id,
+  review = {"kind": kind, "artifact": artifact, "cycle": cycle, "handoff_id": st.handoff_id, "scope": scope,
             "reviewers": reviewers + (["astra"] if lane else []),
             "runcard": args.runcard, "artifact_sha256": current_sha(st, kind, artifact) if kind == "plan" else args.sha256,
             "astra_incomplete": 0,
@@ -296,6 +431,39 @@ def open_review(args) -> int:
   core.card_add(st, args.runcard, "produced", rid)
   core.journal(st, f"review open {rid} panel {','.join(review['reviewers'])} under {args.runcard}")
   print(rid)
+  return 0
+
+
+def scope_form(st: core.Store, artifact: str, given) -> str | list:
+  """The stored form of a spec review's `--scope`: `auto` (the default), `whole`, or the headings the list
+  names, separated by `;` (a heading may hold a comma), each a heading of the spec now; the list needs a
+  previous approval to diff against."""
+  if given is None or given.strip() in ("auto", "whole"):
+    return (given or "auto").strip()
+  headings = [h.strip() for h in given.split(";") if h.strip()]
+  if not core.load_approval(st, Path(artifact)):
+    raise core.HandoffError("review open: --scope <list>: no approval: use whole")
+  present = {heading for heading, _, _ in sections(core.read_text(Path(artifact)))}
+  missing = [h for h in headings if h not in present]
+  if missing or not headings:
+    raise core.HandoffError(f"review open: --scope: {missing[0] if missing else given} is not in the spec")
+  return headings
+
+
+# ---------------------------------------------------------------- scope
+
+
+def scope_review(args) -> int:
+  """Prints the round's scope, `<changed|neighbour|whole> <start>-<end> <heading>` per section; writes nothing."""
+  st = core.store(core.git_toplevel(Path.cwd()))
+  review = load_review(st, args.review)
+  if review is None:
+    raise core.HandoffError(f"review {args.review}: not opened")
+  if review["kind"] != "spec":
+    raise core.HandoffError(f"review scope: {args.review} is not a spec review")
+  bind(args, review)
+  for kind, heading, start, end in scope_of(st, review, Path(review["artifact"])):
+    print(f"{kind} {start}-{end} {heading}")
   return 0
 
 
@@ -334,26 +502,45 @@ def record_round(args) -> int:
   if not existing and evaluate(st, review, card.get("parent") or args.runcard).code == 2:
     print("review record: review at its cap: rule first", file=sys.stderr)
     return 2
+  rnd = existing or {"round": n, "runcard": card.get("parent") or args.runcard, "artifact_sha256": sha,
+                     "builder_contested": [], "reviewers": {}}
+  if kind == "spec" and "scope" not in rnd:  # the round's scope, stored by its first record, checked by every later one
+    rows = [list(row) for row in scope_of(st, review, Path(review["artifact"]))]
+    rnd.update({"scope": rows, "out_of_scope": [],
+                "note": rows[0][1][1:-1] if rows and rows[0][0] == "whole" else None})
+  refused = []
   if args.not_run:
     record = {"findings": [], "not_run": args.not_run, "isolation": None, "model": None, "effort": None}
   else:
     path = Path(args.findings)
+    text = core.read_text(path)
     try:
-      findings = parse_findings(core.read_text(path), reviewer, n)
+      findings = parse_findings(text, reviewer, n)
     except ValueError as error:
       raise core.HandoffError(f"review record: {path}:{error}")
-    if reviewer == "set":
-      findings = keep_for_unit(findings, review["artifact"])
+    pairs = list(zip(findings, [line for line in text.splitlines() if line.strip()]))  # one finding per non-blank line
+    if reviewer == "set":  # the raw lines filtered alongside, so a kept line stays its own finding's
+      kept = [id(finding) for finding in keep_for_unit(findings, review["artifact"])]
+      pairs = [(finding, line) for finding, line in pairs if id(finding) in kept]
+    findings = [finding for finding, _ in pairs]
+    if kind == "spec":
+      spans = sections(core.read_text(Path(review["artifact"])))
+      verdicts = [(finding, line, out_of_scope(rnd["scope"], spans, finding["location"])) for finding, line in pairs]
+      findings = [finding for finding, _, section in verdicts if section is None]
+      refused = [(finding["id"], line, section) for finding, line, section in verdicts if section is not None]
+      mine = lambda line: line.split(" | ", 1)[0].rsplit("-", 2)[0] == reviewer
+      rnd["out_of_scope"] = [line for line in rnd["out_of_scope"] if not mine(line)] + [line for _, line, _ in refused]
     record = {"findings": findings, "not_run": None, "isolation": args.isolation, "model": args.model,
               "effort": args.effort}
-  rnd = existing or {"round": n, "runcard": card.get("parent") or args.runcard, "artifact_sha256": sha,
-                     "builder_contested": [], "reviewers": {}}
   rnd["reviewers"][reviewer] = record
   if reviewer == "astra" and args.not_run and not args.not_run.startswith(("not installed", "stopped")):
     review["astra_incomplete"] += 1
   rnd["what_ran"] = derive_what_ran(review, rnd, entry)
   core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
   store_verdict(st, rid, review, rnd["runcard"])
+  for fid, _, section in refused:
+    core.journal(st, f"review record {rid} round {n} out of scope: {fid} ({section}) under {args.runcard}")
+    print(f"record: {fid} out of scope ({section}): not recorded")
   core.journal(st, f"review record {rid} round {n} {reviewer} what_ran {rnd['what_ran']} under {args.runcard}")
   print(f"round {n} {reviewer} recorded, what_ran {rnd['what_ran']}")
   return 0
@@ -378,15 +565,57 @@ def locate_finding(st: core.Store, rid: str, fid: str):
 
 
 def settle_finding(args) -> int:
+  """`--finding` with `--disposition`, or `--file`: every line checked under the per-finding refusals first,
+  and a refused line (named) writes nothing."""
   st = core.store(core.git_toplevel(Path.cwd()))
-  rid, fid, disposition = args.review, args.finding, args.disposition
+  rid = args.review
+  if bool(getattr(args, "file", None)) == bool(args.finding or args.disposition) or (args.finding is None) != (args.disposition is None):
+    raise core.HandoffError("review settle: --file, or --finding with --disposition")
   review = load_review(st, rid)
   if review is None:
     raise core.HandoffError(f"review {rid}: not opened")
   card = bind(args, review)
+  if not getattr(args, "file", None):
+    checked = [(args.finding, args.disposition, None, check_settle(st, rid, review, card, args, args.finding, args.disposition))]
+  else:
+    checked = []
+    for line in core.read_text(Path(args.file)).splitlines():
+      if not line.strip():
+        continue
+      fields = [f.strip() for f in line.split(" | ")]
+      if len(fields) != 3 or fields[1] not in DISPOSITIONS or not fields[0]:
+        raise core.HandoffError(f"review settle: {line}: not <fid> | <disposition> | <note>: nothing written")
+      try:
+        checked.append((fields[0], fields[1], fields[2], check_settle(st, rid, review, card, args, fields[0], fields[1])))
+      except core.HandoffError as error:
+        raise core.HandoffError(f"review settle: {line}: {str(error).removeprefix('review settle: ')}: nothing written")
+  runcard = card.get("parent") or args.runcard
+  for fid, disposition, note, n in checked:
+    rnd = load_round(st, rid, n)
+    reviewer, finding = next((r, f) for r, record in rnd["reviewers"].items() for f in record["findings"] if f["id"] == fid)
+    finding["disposition"] = disposition
+    finding["ruling"] = "owner" if args.owner else f"judges:{args.judges}" if args.judges else None
+    if note is not None:
+      finding["note"] = note
+    core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
+    copies = settle_set_copies(st, rnd, finding) if (review["kind"], reviewer, disposition) == ("plan", "set", "fixed") else []
+    core.journal(st, f"review settle {rid} {fid} {disposition} by {finding['ruling'] or 'the elephant'}"
+                 + (f" copied to {', '.join(copies)}" if copies else "") + f" under {args.runcard}")
+  status = store_verdict(st, rid, review, runcard)
+  if review["kind"] == "head" and status.code == 0:
+    write_head_outcome(st, review, runcard)
+  for fid, disposition, _, _ in checked:
+    print(f"{fid} {disposition}")
+  return 0
+
+
+def check_settle(st: core.Store, rid: str, review: dict, card: dict, args, fid: str, disposition: str) -> int:
+  """The per-finding refusals of `review settle`; the round number of `fid` when none applies."""
   n, rnd, reviewer, finding = locate_finding(st, rid, fid)
   if review["kind"] == "head" and disposition == "fix-design":
     raise core.HandoffError("review settle: fix-design is refused on a head")
+  if review["kind"] == "integrate" and disposition == "fix-design" and frozen(st):  # its spec is the latest handoff's now
+    raise core.HandoffError("review settle: fix-design is refused on a frozen handoff's integrate: settle it escalated")
   if reviewer == "foreman" and finding["location"] == "ci":  # D2 (a): `collect` records it afresh each round
     raise core.HandoffError("review settle: the CI finding is settled by no one")
   if disposition == "fixed" and rnd["artifact_sha256"] == current_sha(st, review["kind"], review["artifact"]):
@@ -398,17 +627,7 @@ def settle_finding(args) -> int:
       verify_owner_ruling(st.config, fid, args.posted)
     if card["mode"] != "leavemealone" and not args.owner:
       raise core.HandoffError(f"review settle: {fid} is {finding['severity']}: --owner required in normal mode")
-  finding["disposition"] = disposition
-  finding["ruling"] = "owner" if args.owner else f"judges:{args.judges}" if args.judges else None
-  core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
-  copies = settle_set_copies(st, rnd, finding) if (review["kind"], reviewer, disposition) == ("plan", "set", "fixed") else []
-  status = store_verdict(st, rid, review, card.get("parent") or args.runcard)
-  if review["kind"] == "head" and status.code == 0:
-    write_head_outcome(st, review, card.get("parent") or args.runcard)
-  core.journal(st, f"review settle {rid} {fid} {disposition} by {finding['ruling'] or 'the elephant'}"
-               + (f" copied to {', '.join(copies)}" if copies else "") + f" under {args.runcard}")
-  print(f"{fid} {disposition}")
-  return 0
+  return n
 
 
 def verify_owner_ruling(config: dict, fid: str, comment_id: str) -> None:
@@ -427,7 +646,7 @@ def settle_set_copies(st: core.Store, rnd: dict, finding: dict) -> list:
   under the same run card whose `set` record holds the same id and claim takes the disposition and
   ruling (one already holding them, the settled round included, is left alone); the review ids written."""
   copies = []
-  for folder in st.path("reviews").glob(f"{st.handoff_id[-6:]}-plan-*-c*"):
+  for folder in st.path("reviews").glob(f"{hex_prefix(st)}plan-*-c*"):
     for n in round_numbers(st, folder.name):
       other = load_round(st, folder.name, n)
       twins = [f for f in ((other["reviewers"].get("set") or {}).get("findings") or [])

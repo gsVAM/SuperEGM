@@ -13,6 +13,8 @@ In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.
 
 Typed by the owner to record what the owner knows: that a builder launch was stopped, or that a prepared review round will not run. SuperEGM never infers either from silence; an owner's decision is not a guess, and every effect refuses without an open run card.
 
+The owner types `/superegm:interrupt <unit> (--launch <n> | --round <n>) [--handoff <id>]`; `--handoff` names the handoff when the unit is filed in more than one open handoff (the helper refuses naming both), and is passed to `runcard open` and to every helper call below.
+
 1. Open the card on the unit id: `superegm runcard open --skill interrupt --artifact <unit>`; it prints `<id>`.
 2. Run the one subcommand with the owner's typed arguments: `superegm interrupt --unit <unit> (--launch <n> | --round <n>) --runcard <id>`. `--launch <n>` records `interrupted` on the unit's launch `<n>` (the launch count); `--round <n>` marks the unit's prepared round `<n>` `collected` with the outcome `not run (interrupted: owner)`.
 3. Close the card: `superegm runcard close <id>`.

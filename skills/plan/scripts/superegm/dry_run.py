@@ -63,6 +63,7 @@ def adopted_issues(handoff) -> dict:
 def run(args):
   core.require_runcard(args, SKILLS)
   handoff = gate.open_handoff(Path(args.design))
+  gate.require_latest(handoff, "dry-run")
   state = handoff.state
   gate.require_gate(handoff)
   plan_sha, bodies_sha = core.gate_hashes(handoff)

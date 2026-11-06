@@ -17,12 +17,24 @@ from pathlib import Path
 
 import pytest
 
+import argparse
+import superegm
 from superegm import store, atomic_write, spec_slug
-from conftest import HELPER, REPO, make_world, make_repo, make_plan, set_config, state_of, git, converge as converge_review
+from conftest import HELPER, REPO, make_world, make_repo, make_plan, set_config, git, converge as converge_review
 
 ROOT = Path(__file__).resolve().parents[2]
 PKG = "skills/plan/scripts/superegm"
 SLUG = "2026-11-03-sample-design"          # the spec is docs/specs/<SLUG>.md, H1 `# Sample design`
+
+
+def hp(world, kind, *parts):
+  """A store path of this file's handoff: resolved as a `--spec docs/specs/<SLUG>.md` subcommand resolves it."""
+  superegm.CURRENT_ARGS = argparse.Namespace(design=str(world.repo / f"docs/specs/{SLUG}.md"))
+  return store(world.repo).path(kind, *parts)
+
+
+def state_of(world):
+  return json.loads(hp(world, "state").read_text(encoding="utf-8"))
 ROWS = [("U01", "Queue", "none"), ("U02", "Worker", "U01"), ("U03", "Admin endpoint", "U02")]  # (unit, title, blocked by)
 
 
@@ -78,8 +90,10 @@ def plan_text(spec, sections) -> str:
           + "\n## Global constraints\n- TypeScript strict mode, no new dependencies\n")
 
 
-def approve(world, rows=ROWS[:2], amended=()):
-  """Write and commit the spec; record its approval (U03's schema) and return (spec, handoff_id)."""
+def approve(world, rows=ROWS[:2], amended=(), append=False):
+  """Write and commit the spec; record its approval as `approve-spec` does (the history, spec section 7) and return
+  (spec, handoff_id): a fresh history of one opening; `amended` (the opening's sha256) appends an `amend-units` entry
+  keeping that handoff; `append` appends an opening of a new handoff beside the earlier one."""
   spec = world.repo / f"docs/specs/{SLUG}.md"
   spec.parent.mkdir(parents=True, exist_ok=True)
   spec.write_text(spec_text(rows), encoding="utf-8")
@@ -87,12 +101,15 @@ def approve(world, rows=ROWS[:2], amended=()):
   git(["commit", "-qm", f"spec with {len(rows)} units"], world.repo)
   sha = hashlib.sha256(spec.read_bytes()).hexdigest()
   handoff_id = f"{spec_slug(spec)}-{(amended[0] if amended else sha)[:6]}"
-  record = {"path": str(spec), "sha256": sha, "commit": git(["rev-parse", "HEAD"], world.repo).strip(),
-            "runcard": "review-spec-0001", "review": f"spec-{spec_slug(spec)}-c1", "approved_at": "2026-11-03T00:00:00Z",
-            "amended": list(amended), "voided_by": None, "handoff_id": handoff_id}
+  entry = {"sha256": sha, "commit": git(["rev-parse", "HEAD"], world.repo).strip(), "runcard": "review-spec-0001",
+           "review": f"spec-{spec_slug(spec)}-c1", "approved_at": "2026-11-03T00:00:00Z", "handoff_id": handoff_id,
+           "kind": "amend-units" if amended else "opening", "voided_by": None, "escalated": []}
   path = world.artifacts / "approvals" / f"{spec_slug(spec)}.json"
   path.parent.mkdir(parents=True, exist_ok=True)
-  path.write_text(json.dumps(record), encoding="utf-8")
+  held = json.loads(path.read_text(encoding="utf-8"))["entries"] if (amended or append) and path.is_file() else []
+  path.write_text(json.dumps({"path": str(spec), "entries": held + [entry]}), encoding="utf-8")
+  if not amended:
+    atomic_write(world.artifacts / "handoffs" / f"{handoff_id}.json", {"id": handoff_id, "spec": str(spec), "opened_at": entry["approved_at"], "closed_at": None})
   return spec, handoff_id
 
 
@@ -127,7 +144,7 @@ def planned(world, units=("U01", "U02")):
 
 def converge(world, uid, cycle=1, sha=None) -> None:
   """What `review-plan` leaves for a converged unit, at its body hash unless `sha` says otherwise."""
-  units = json.loads((world.artifacts / "handoff_units.json").read_text(encoding="utf-8"))["units"]
+  units = json.loads(hp(world, "units").read_text(encoding="utf-8"))["units"]
   converge_review(world.artifacts, state_of(world)["handoff_id"], uid, sha or units[uid]["body_sha256"], cycle)
 
 
@@ -218,6 +235,16 @@ REMOVED = ["--accept", "--reviewed", "--readiness", "--what-ran", "what_ran", "W
            "Codex", "handoff_summary.md", "egm-wave", "synthesizer", "readiness test"]
 
 
+@pytest.mark.parametrize("sub", ["gate", "dry-run", "apply", "verify"])
+def test_the_filing_refuses_a_frozen_handoff(world, sub):
+  gated(world)
+  hid = json.loads((world.artifacts / f"approvals/{SLUG}.json").read_text(encoding="utf-8"))["entries"][-1]["handoff_id"]
+  approve(world, rows=ROWS, append=True)
+  argv = {"gate": ["gate", "--pass"], "dry-run": ["dry-run"], "apply": ["apply", "--yes"], "verify": ["verify"]}[sub]
+  code, out = world.run(*argv, "--spec", world.spec, "--handoff", hid)
+  assert code == 1 and f"{hid}: not the latest approval: plan the rows in the latest handoff" in out
+
+
 @pytest.mark.parametrize("path", [f"{PKG}/gate.py", f"{PKG}/dry_run.py", f"{PKG}/apply.py", f"{PKG}/verify.py",
                                   "skills/file/SKILL.md"])
 def test_removed_forms_are_gone_from_the_filing_files(world, path):
@@ -234,7 +261,7 @@ def test_dry_run_records_the_confirmed_list_of_unfiled_units_with_three_reads(wo
   world.gh.calls.clear()
   code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
   assert code == 0, out
-  text = (world.artifacts / "handoff_dryrun.md").read_text(encoding="utf-8")
+  text = hp(world, "file", "handoff_dryrun.md").read_text(encoding="utf-8")
   assert "3 issues (1 tracking, 2 units), 2 sub-issue links, 1 blocked-by links" in text
   for label in ("superegm:unit", "superegm:tracking", "superegm:stopped", "superegm:wave-1", "superegm:wave-2",
                 f"superegm:handoff-{handoff_id[-6:]}"):
@@ -250,7 +277,7 @@ def test_dry_run_records_the_confirmed_list_of_unfiled_units_with_three_reads(wo
   assert u02[4].startswith(f"<!-- superegm:handoff={handoff_id} unit=U02 spec=")
   assert "#<U01>" in u02[4] and "#<tracking>" in u02[4]
   # refused after a change to the store's plan copy: the gate must run again
-  copy = world.artifacts / "handoff_plan.md"
+  copy = hp(world, "plan")
   copy.write_text(copy.read_text(encoding="utf-8").replace("low: new module", "low: a new module", 1), encoding="utf-8")
   code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
   assert code == 1 and "changed after the gate" in out, out
@@ -265,7 +292,7 @@ def test_dry_run_refuses_101_units_missing_extra_and_warns_above_450(world):
   world.gh.labels["needs-triage"] = {"name": "needs-triage"}
   code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
   assert code == 0 and "3 issues" in out
-  dryrun = (world.artifacts / "handoff_dryrun.md").read_text(encoding="utf-8")
+  dryrun = hp(world, "file", "handoff_dryrun.md").read_text(encoding="utf-8")
   assert "Labels: superegm:handoff-" in dryrun and "needs-triage" in dryrun
   big = [unit_section(f"U{n:02d}", f"Unit {n}",
                       "none" if n == 1 else f"U{n - 1:02d}" if n == 2 else f"U{n - 1:02d}, U{n - 2:02d}")
@@ -284,7 +311,7 @@ def test_dry_run_refuses_101_units_missing_extra_and_warns_above_450(world):
   gate_big(big[:100])
   code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
   assert code == 0, out
-  text = (world.artifacts / "handoff_dryrun.md").read_text(encoding="utf-8")
+  text = hp(world, "file", "handoff_dryrun.md").read_text(encoding="utf-8")
   assert "WARNING" in text and "--max-writes" in text
 
 
@@ -298,7 +325,7 @@ def test_apply_appends_the_filing_and_base_at_start_before_its_first_write(world
   assert state["filings"][0]["writes"] == state["confirmed"]["writes"]
   assert state["base_at_start"] == git(["rev-parse", "main"], world.repo).strip()  # the config's default `base`
   assert not world.gh.issues and all(s != "done" for s in state["labels"].values())
-  journal = (world.artifacts / "journal.md").read_text(encoding="utf-8")
+  journal = hp(world, "journal").read_text(encoding="utf-8")
   assert f"filing {state['confirmed_sha256'][:12]}: 2 units (U01, U02)" in journal
   assert "Create: automatic" not in journal
 
@@ -314,12 +341,12 @@ def test_apply_refusals(world, case, expected):
   if case == "stale-review":
     converge(world, "U02", sha="0" * 64)
   if case == "plan-drift":
-    copy = world.artifacts / "handoff_plan.md"
+    copy = hp(world, "plan")
     copy.write_text(copy.read_text(encoding="utf-8").replace("low: new module", "low: a new module", 1), encoding="utf-8")
   if case == "list-drift":
     state = state_of(world)
     state["confirmed"]["writes"][0] = ["repo", "someone/else"]
-    atomic_write(world.artifacts / "state.json", state)
+    atomic_write(hp(world, "state"), state)
   code, out = world.run(*argv)
   assert code == 1 and expected in out, out
   assert not any(c[0] in ("label", "issue") for c in world.gh.calls)
@@ -358,10 +385,10 @@ def test_apply_creates_labels_issues_and_links_in_order_and_a_rerun_writes_nothi
 @pytest.mark.parametrize("mode, journaled", [("leavemealone", True), (None, False)])
 def test_apply_journals_the_automatic_create_in_leavemealone_mode(world, mode, journaled):
   spec, plan, handoff_id, card = applied(world, mode=mode)
-  journal = (world.artifacts / "journal.md").read_text(encoding="utf-8")
+  journal = hp(world, "journal").read_text(encoding="utf-8")
   assert (journal.count("Create: automatic (leavemealone)") == 1) is journaled, journal
   assert world.run("apply", "--spec", spec, "--runcard", card, "--yes")[0] == 0  # a resume journals nothing again
-  assert (world.artifacts / "journal.md").read_text(encoding="utf-8").count("Create: automatic (leavemealone)") == int(journaled)
+  assert hp(world, "journal").read_text(encoding="utf-8").count("Create: automatic (leavemealone)") == int(journaled)
 
 
 def test_apply_state_saved_after_each_write_and_422_link_reread(world):
@@ -411,7 +438,7 @@ def test_apply_max_writes_resumes_in_bounded_calls(world):
 def test_a_later_filing_rewrites_the_tracking_issue_and_verify_checks_the_union(world):
   spec, card, first = later_filing(world)
   gh = world.gh
-  dryrun = (world.artifacts / "handoff_dryrun.md").read_text(encoding="utf-8")
+  dryrun = hp(world, "file", "handoff_dryrun.md").read_text(encoding="utf-8")
   assert "### issue U03" in dryrun and "### issue tracking" in dryrun and "### issue U01" not in dryrun
   assert "Tracking issue #1 will be rewritten" in dryrun
   before = {n: dict(i) for n, i in gh.issues.items()}
@@ -510,7 +537,7 @@ def test_subprocess_command_shape_with_fake_gh_on_path(tmp_path, capsys, monkeyp
     cards[skill] = opened.stdout.strip()
   assert run("graph", "--plan", plan, "--runcard", cards["plan"]).returncode == 0
   assert run("decide", "--unit", "U03", "--decision", "D2", "--default", "--runcard", cards["plan"]).returncode == 0
-  units = json.loads((artifacts / "handoff_units.json").read_text(encoding="utf-8"))
+  units = json.loads(next(artifacts.glob("*/handoff_units.json")).read_text(encoding="utf-8"))  # in the handoff's directory
   for uid, unit in units["units"].items():  # as `gated` writes them
     converge_review(artifacts, units["handoff_id"], uid, unit["body_sha256"])
   result = run("gate", "--pass", "--spec", spec, "--runcard", cards["file"])
@@ -550,7 +577,7 @@ def test_apply_recovers_issues_by_the_new_marker_after_a_crash(world):
   for record in (state["tracking"], *state["units"].values()):
     for key in ("number", "id", "done", "filing"):
       record.pop(key, None)
-  atomic_write(world.artifacts / "state.json", state)
+  atomic_write(hp(world, "state"), state)
   gh = world.gh
   gh.calls.clear()
   assert world.run("apply", "--spec", spec, "--runcard", card, "--yes")[0] == 0
@@ -693,7 +720,7 @@ def test_dry_run_refuses_an_issue_it_cannot_adopt(world, case, expected):
   code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
   if expected is None:
     assert code == 0, out
-    text = (world.artifacts / "handoff_dryrun.md").read_text(encoding="utf-8")
+    text = hp(world, "file", "handoff_dryrun.md").read_text(encoding="utf-8")
     assert f"### edit #7 U02 (old body sha256 {OLD})" in text and "### issue U02" not in text
     assert "### issue U01" in text and "### issue U03" in text
     assert "4 issues (1 tracking, 3 units), 3 sub-issue links, 2 blocked-by links" in text
@@ -706,7 +733,7 @@ def test_dry_run_refuses_an_issue_it_cannot_adopt(world, case, expected):
     assert state_of(world)["confirmed"]["sha256"] == hashlib.sha256(world.ns["canonical"](writes).encode("utf-8")).hexdigest()
     return
   assert code == 1 and expected in out, out
-  assert "confirmed" not in state_of(world) and not (world.artifacts / "handoff_dryrun.md").exists()
+  assert "confirmed" not in state_of(world) and not hp(world, "file", "handoff_dryrun.md").exists()
 
 
 def test_apply_refuses_an_adopted_body_changed_since_the_dry_run(world):
@@ -763,7 +790,7 @@ def test_apply_resumes_an_adopted_unit_after_a_crash_past_the_edit(world):
   for record in (state["tracking"], *state["units"].values()):
     for key in ("number", "id", "done", "filing"):
       record.pop(key, None)
-  atomic_write(world.artifacts / "state.json", state)
+  atomic_write(hp(world, "state"), state)
   gh.calls.clear()
   assert world.run("apply", "--spec", spec, "--runcard", card, "--yes")[0] == 0
   assert gh.issues[7]["body"] == edited and [c[2] for c in gh.calls if c[:2] == ["issue", "edit"]] == ["1"]

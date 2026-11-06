@@ -13,7 +13,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the wave skill. Not part of google/elephant-goldfish-model. -->
 
@@ -52,6 +52,10 @@ is one `superegm: <reason>` line, exit 1.
 
 ## Entry: resume from the store
 
+0. The invocation is `/superegm:wave <spec> [--handoff <id>] [--leavemealone]`. With `--handoff`, pass
+   `--handoff '<id>'` to `runcard open` and to every helper call below (an older handoff's filed units
+   still run); without it the card carries the spec's latest approval's handoff. The foreman's brief
+   names the handoff id (`<handoff-id>`), and the foreman passes `--handoff` on every subcommand it runs.
 1. Run `python3 '<HELPER>' runcard open --skill wave --artifact '<spec>'`
    (`<spec>` is the approved spec the invocation named), adding
    `--mode leavemealone` when the invocation said `--leavemealone` or the
@@ -251,7 +255,7 @@ rounds; the non-terminal launches (builders still running report to the
 next `wave`); the heads with pending or absent CI; the idle units and why;
 the ready units without a slot; the pending decisions; the stopped units
 with their unlanded dependants. That is what stayed open, for the owner to
-merge, close, or re-type `/superegm:wave`.
+merge, close, or re-type `/superegm:wave`. Where the base ruleset restricts updates to config.owners, the owner merges with the admin bypass: `gh pr merge --admin`.
 
 ## Leavemealone-mode
 

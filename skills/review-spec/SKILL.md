@@ -11,7 +11,7 @@ description: >-
   Zoom Out Review, and Implementation Readiness.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: renamed to review-spec; the body is spec section 8's one review loop over the helper (the stages, presets, semantic split, checkpoint gates and report files are gone); persona path agents/zoom-out.md. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: renamed to review-spec; the body is spec section 8's one review loop over the helper (the stages, presets, semantic split, checkpoint gates and report files are gone); persona path agents/zoom-out.md; the amendment scope, the branch sentence and the batch settle (U19). -->
 
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: run card, panel presets, Astra lane. -->
 
@@ -19,7 +19,7 @@ description: >-
 
 In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.
 
-    /superegm:review-spec <spec-path> [--reviewers design,zoom-out,…] [--astra on|off] [--leavemealone]
+    /superegm:review-spec <spec-path> [--reviewers design,zoom-out,…] [--astra on|off] [--leavemealone] [--scope auto|whole|<sections>]
 
 Reviews a spec through fresh-context goldfish reviewers until it converges, then records the
 owner's approval, which freezes the spec at its sha256 for the plan. One loop, one convergence
@@ -52,6 +52,10 @@ and tell the owner: a review in the same context is not a goldfish review.
 
 ### 1. Preflight
 
+First: start on the branch you want the commits on. Your fixes and `approve-spec`'s approval
+commit land on the checkout's current branch; this skill never switches branches or adds a
+worktree in the owner's checkout.
+
 1. `TargetFile` is `<spec-path>`, a committed or uncommitted spec under `docs/specs/` whose
    last H2 (after any numeric prefix) is `Units`. If it is missing, ask for the path in plain
    chat (an open-ended input, not a choice) and end the turn.
@@ -71,20 +75,39 @@ and tell the owner: a review in the same context is not a goldfish review.
 
 ### 2. Open
 
-    superegm review open --kind spec --artifact <spec-path> --reviewers <panel> [--astra on|off] --runcard <id>
+    superegm review open --kind spec --artifact <spec-path> --reviewers <panel> [--astra on|off] [--scope auto|whole|<sections>] --runcard <id>
 
 The id is `spec-<spec-slug>-c<n>`. A cycle still open from an earlier invocation is resumed
-with its stored panel; a closed one (`accept`, `stop`, or a spec edited after the approval that
-names it) starts the next cycle with a fresh cap.
+with its stored panel and scope form; a closed one (`accept`, `stop`, or a spec edited after the
+approval that names it) starts the next cycle with a fresh cap.
+
+`--scope` is the invocation's, default `auto`: an amendment is reviewed in scope, the sections
+changed since the last approval and their neighbours, re-derived every round; with no approval
+the whole spec. `whole` forces a full review. A list names headings verbatim, separated by `;`,
+added to `auto`'s scope without neighbours (`(preamble)` names the text above the first `##`),
+and is refused with no approval (`--scope <list>: no approval: use whole`) or when a heading is
+not one of the spec's `##` or `###` headings now (`--scope: <heading> is not in the spec`).
 
 ### 3. The loop
 
-Run the loop exactly as `references/review_loop.md` says: each round the whole panel
-concurrently through the adapters, the Astra lane alongside when it is on, every reviewer
-recorded with `superegm review record` (an empty file is a record; one retry, then
-`--not-run`), then `references/resolve.md` between rounds: fix the spec, write every disposition
-with `superegm review settle`, and put every high or medium you contest or decline to the owner
-in one question (normal mode) or to the judges (leavemealone-mode). Then:
+Run the loop exactly as `references/review_loop.md` says. Before each round's dispatch, ask the
+helper for the round's scope:
+
+    superegm review scope --review <id> --runcard <id>
+
+and put the lines it prints in every goldfish's brief with the scope sentence of
+`references/review_loop.md` section 2. Then the whole panel concurrently through the adapters,
+the Astra lane alongside when it is on, every reviewer recorded with `superegm review record`
+(an empty file is a record; one retry, then `--not-run`). A finding citing a line outside the
+scope is out of scope: the helper refuses it, keeps it in the round's `out_of_scope[]`, and you
+neither fix nor settle it. Between rounds, `references/resolve.md`: fix the spec, write the
+round's dispositions in one call (one `<fid> | <disposition> | <note>` per line; a refused line
+writes nothing and is named),
+
+    superegm review settle --review <id> --file <dispositions> [--owner | --judges <judges-id>] --runcard <id>
+
+and put every high or medium you contest or decline to the owner in one question (normal mode)
+or to the judges (leavemealone-mode). Then:
 
     superegm review status --review <id> --runcard <id>
 

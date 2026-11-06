@@ -1,6 +1,6 @@
 <!-- Copyright 2026 Google LLC. SPDX-License-Identifier: Apache-2.0. -->
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: Astra lane, per-reviewer model and effort, persisted dispositions. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: EGM's review-loop skill rewritten as the one review loop over the helper's `superegm review` subcommands (spec section 8); the stages, the report files and the second clean round are gone. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: EGM's review-loop skill rewritten as the one review loop over the helper's `superegm review` subcommands (spec section 8); the stages, the report files and the second clean round are gone; a spec round's scope, `out_of_scope[]` and the batch settle (U19). -->
 
 # The review loop
 
@@ -63,6 +63,12 @@ Each goldfish receives only:
 - from round 2, the prior round's findings with their dispositions, rendered by you from
   `reviews/<id>/round-<n-1>.json` as findings lines followed by `-> <disposition>`; a
   `fixed` line tells the goldfish where to look for a regression;
+- on kind `spec`, the round's scope: the lines `superegm review scope --review <id> --runcard <id>`
+  prints for this round (`<changed|neighbour|whole> <start>-<end> <heading>`, re-derived every round
+  from the current bytes against the last approval, so a section a between-round fix touched joins),
+  and, unless the one line is `whole`, the sentence, verbatim:
+  findings only inside the changed sections and, on a neighbour, only on its fit with them; a finding on any other section is out of scope
+  (cite a line number in `<location>`, which is what the helper checks);
 - the round number and its own reviewer id, so its ids are `<id>-<round>-<n>`;
 - the instruction to write its findings file and nothing else, one findings line per finding,
   an empty file when it found nothing, and to end its report with what it saw besides the
@@ -131,6 +137,17 @@ Record every reviewer of the round, the lane included, as its result arrives:
   the round is `posted`; otherwise `not run (<the first reviewer without a record, or the
   reason>)`, printed on every record. Only a `completed` round counts toward the cap or can
   converge; the findings of any other round settle nothing and block nothing.
+- On kind `spec` the round's first record stores the round's `scope` (headings with their line
+  ranges) and every record checks against it: a finding whose cited line (the first number after
+  `line `, `lines `, `L` or `:` in its location) falls outside every changed section and neighbour
+  is refused, `record: <fid> out of scope (<section>): not recorded`, and kept verbatim in the round's
+  `out_of_scope[]` with one journal line: no disposition, never counted, never a fix round. A
+  location citing no line, or a line past the spec's end (another file's), is recorded. The record
+  still succeeds for the reviewer's other lines; a reviewer recorded again in the same round
+  replaces its own earlier `out_of_scope[]` lines. The round's `note` is the `whole` row's reason
+  (`whole`, `no approval`, `no change`, `no commit holds <sha7>`), else null. `review scope` writes
+  nothing, so the scope stored at the first record is the one the brief carried only while the spec
+  is not edited between the two: never edit the spec between `review scope` and the round's records.
 - The first record of a new round is refused with `review record: review at its cap: rule
   first` (exit 2) while the review is at its cap (section 6). A record with a grammar error
   writes nothing: fix the goldfish's file and record again.
@@ -145,6 +162,15 @@ helper refuses it without. `fixed` changes the artifact, so its bytes differ fro
 sha (on a spec, plan or integrate round whose bytes are still the current ones the helper refuses
 `review settle: fixed needs changed bytes`): the next round reviews the new bytes, and a goldfish
 that finds the same defect at the same scope marks it `regression: yes`.
+
+A round's dispositions may go in one call: `superegm review settle --review <id> --file <dispositions>
+[--owner | --judges <id>] --runcard <id>`, one `<fid> | <disposition> | <note>` per line. Every line is
+checked under the per-finding refusals first; one refused line is named
+(`review settle: <line>: <reason>: nothing written`) and nothing is written. Each settled
+finding stores its line's third field as `note`; the per-finding form writes no `note`. In
+leavemealone-mode `--owner --posted <comment>` verifies the one comment against each high or
+medium `contested` or `declined` line, and a comment rules one finding: a file holding two such
+findings is refused, so settle them per finding, each with its own `--posted`.
 
 ## 5. Status
 

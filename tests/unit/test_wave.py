@@ -175,6 +175,13 @@ def test_a_launch_after_a_clean_round_keeps_the_unit_active(world):
 # ---------------------------------------------------------------- S2: the report file and the end line
 
 
+def test_the_report_names_its_handoff(world):
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})
+  assert world.run("report", "--runcard", card)[0] == 0
+  assert s.path("wave_report", 1).read_text(encoding="utf-8").startswith(f"# Wave 1 report (handoff {s.handoff_id})\n")
+
+
 def test_report_rewrites_the_wave_report_and_prints_the_end_line(world):
   card = open_wave_card(world)
   s = wave_store(world,
@@ -189,7 +196,7 @@ def test_report_rewrites_the_wave_report_and_prints_the_end_line(world):
   assert out.splitlines()[0] == str(path) and path.name == "wave_1_report.md"
   assert "idle: none" in out and "pending: none" in out and "loop: continuing (in flight: U02)" in out
   text = path.read_text(encoding="utf-8")
-  assert text.startswith(f"# Wave 1 report\nRun card: {card}\n")
+  assert text.startswith(f"# Wave 1 report (handoff {s.handoff_id})\nRun card: {card}\n")
   assert "- U01 #2: clean · pr #70 head aaaaaaa · ci green · rounds 1 (r1 posted clean) · launch 1 exited 0" in text
   assert "- U02 #3: active · pr #71 head bbbbbbb · ci pending · rounds 1 (r1 posted contested: f-1-2) · launch 1 running" in text
   assert "## Non-terminal launches\n- U02 launch 1 running" in text
@@ -529,7 +536,7 @@ def test_a_refused_redesign_ruling_leaves_no_brief_and_a_small_diff_is_copied_wh
                                  *more, "--runcard", card)
   assert rule("--posted", "9") == (1, "decision: comment 9 was written by someone, not owner\n")
   assert not brief.exists() and "stopped" not in foreman_of(s, "U01") and foreman_of(s, "U01")["rulings"] == []
-  assert "Brainstorm brief" not in (world.artifacts / "journal.md").read_text(encoding="utf-8")
+  assert "Brainstorm brief" not in s.path("journal").read_text(encoding="utf-8")
   assert rule()[0] == 0
   text = brief.read_text(encoding="utf-8")
   assert sum(l.startswith("+�") for l in text.splitlines()) == 300

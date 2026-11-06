@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the orient subcommand's tests (spec section 9.3).
+# Added by SuperEGM (gsVAM), 2026: the orient subcommand's tests (spec section 9.3); the store kinds under a legacy store and the map read through the resolved handoff (U20).
 
 """Orient: the store kinds, the names rule, the extractor on the fixture tree, the projection on
 the fixture graph, the trimming sequence, the export, the graphify build against a fake CLI, the
@@ -8,7 +8,7 @@ subcommand's lines and refusals, and the callers' texts. No test runs graphify."
 import hashlib, json, os, shutil
 from pathlib import Path
 import pytest
-from conftest import DESIGN, git
+from conftest import DESIGN, git, handoff_store
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_store_orient_kinds(world):
   import superegm
   root = world.artifacts
-  a = superegm.Store(root, handoff_id="sample-111111")
+  a = superegm.Store(root, handoff_id="sample-111111", legacy=True)
   assert a.path("orient", "map.md") == root / "orient/map.md" and a.path("orient", "export") == root / "orient/export"
   assert superegm.Store(root).path("orient", "graphify-out") == root / "orient/graphify-out"
   assert a.path("orient_unit", "U12.md") == root / "111111/orient/U12.md"
@@ -195,15 +195,15 @@ def no_graphify(monkeypatch):
 
 def test_orient_writes_the_map_and_every_unfiled_unit(world, no_graphify):
   from superegm import store
-  st, card = store(world.repo), world.card("plan")
+  st, card = handoff_store(world), world.card("plan")
   first = lambda ref: f"orient: tree {git(['rev-parse', ref + '^{tree}'], world.repo).strip()} · graphify: not installed · trimmed: nothing"
   line = lambda p: f"{p} {p.stat().st_size}"
   code, out = world.run("orient", "--spec", world.spec, "--runcard", card)
   assert code == 0 and out.splitlines() == [line(st.path("orient", "map.md"))], out
   text = st.path("orient", "map.md").read_text(encoding="utf-8")
-  assert text.splitlines()[0] == first("HEAD") and ". | 2 files | .json | - | -" in text and not list(st.root.glob("*/orient"))
+  assert text.splitlines()[0] == first("HEAD") and ". | 2 files | .json | - | -" in text and not list(st.root.glob("*/orient/U*.md"))
   assert world.run("graph", "--plan", world.plan)[0] == 0
-  st = store(world.repo)
+  st = handoff_store(world)
   code, out = world.run("orient", "--spec", world.spec, "--runcard", card)
   files = [st.path("orient", "map.md")] + [st.path("orient_unit", f"{u}.md") for u in ("U01", "U02", "U03")]
   assert code == 0 and out.splitlines() == [line(p) for p in files], out
@@ -222,16 +222,16 @@ def test_orient_writes_the_map_and_every_unfiled_unit(world, no_graphify):
 
 @pytest.mark.parametrize("case, reason", [
   ("no-card", "runcard: --runcard is required"),
-  ("file-card", "runcard: file-0001 belongs to file, not orient|plan|review-plan|wave"),
+  ("file-card", "runcard: <FILE CARD> belongs to file, not orient|plan|review-plan|wave"),
   ("no-plan", "orient: U01 is not in the plan: run graph --plan first"),
   ("not-in-plan", "orient: U09 is not in the plan: run graph --plan first"),
   ("bad-ref", "orient: ref nope is not in this repository"),
 ])
 def test_orient_refusals(world, no_graphify, case, reason):
-  from superegm import store
-  st, argv = store(world.repo), ["orient", "--spec", world.spec]
+  st, argv = handoff_store(world), ["orient", "--spec", world.spec]
   if case != "no-card":
     argv += ["--runcard", world.card("file" if case == "file-card" else "plan")]
+    reason = reason.replace("<FILE CARD>", argv[-1])  # `file-<the handoff's 6 hex>-0001`
   if case == "no-plan":
     argv += ["--unit", "U01"]
   if case == "not-in-plan":
@@ -252,7 +252,7 @@ def test_callers_skill_and_reference_texts():
   for needle in ("before drafting", "after every `graph`", "orient/map.md", "stop on its exit 1 with its line"):
     assert needle in plan, needle
   assert "superegm orient --spec '<spec>' --runcard '<card>'" in rp and "<HELPER>' orient" not in rp
-  for needle in ("<6 hex>/orient/<unit>.md", "exposed:orient <tree sha>", "no orient file", "after every `graph`",
+  for needle in ("`orient/<unit>.md` in the handoff's directory", "exposed:orient <tree sha>", "no orient file", "after every `graph`",
                  "superegm orient --spec '<spec>' --unit U<id> --runcard '<card>'"):  # the last: owner ruling zoom-out-1-4
     assert needle in rp, needle
   harness = "In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first."

@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # From the elephant-goldfish-model (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_prepare` as the prepare module, keyed by the dispatch id; the fetched tip is the round's head; `pr_body.md` and `comments.md` beside the diff and the CI file; the App path's builder login (U15); the Astra brief and the lane's word on the `prepared:` line (U17).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_prepare` as the prepare module, keyed by the dispatch id; the fetched tip is the round's head; `pr_body.md` and `comments.md` beside the diff and the CI file; the App path's builder login (U15); the Astra brief and the lane's word on the `prepared:` line (U17); `r<n>/spec_range.md` at the marker's sha, the brief's range read from it (U20).
 
 """superegm prepare: fetch the PR into refs/superegm, add the review worktree, write the diff, CI, PR body and comments."""
 
@@ -11,9 +11,8 @@ import subprocess
 from pathlib import Path
 
 import superegm as core
-from superegm import foreman, review
+from superegm import foreman, launch_builder, review
 from superegm.launch import app_login
-from superegm.review_plan import SPEC_LINE_RE
 
 WRITES = frozenset(['foreman', 'review'])  # the store kinds this subcommand writes
 SKILLS = frozenset(['wave'])  # the skills whose card this subcommand accepts
@@ -71,6 +70,10 @@ def prepare(args, card):
                 f"+refs/heads/{base}:refs/superegm/pr-base/{number}"], root)
   head = core.run_git(["rev-parse", f"refs/superegm/pr/{number}"], root).strip()
   merge_base = core.run_git(["merge-base", f"refs/superegm/pr-base/{number}", f"refs/superegm/pr/{number}"], root).strip()
+  try:  # the cited range at the marker's sha (spec section 7), before any worktree: no commit holding it refuses
+    cited = launch_builder.spec_range_text(root, st, core.unit_file_body(st.path("unit", unit)), f"refs/superegm/pr-base/{number}")
+  except core.HandoffError as error:
+    raise review.Refusal(str(error)) from None
   if tree.exists():
     if tree.resolve() not in core.registered_worktrees(root):
       raise core.HandoffError(f"{tree} exists but is not a registered worktree: remove it by hand")
@@ -82,6 +85,7 @@ def prepare(args, card):
   diff = subprocess.run(["git", "-C", str(tree), "diff", "--no-ext-diff", "--no-textconv", "--binary", merge_base, "--"],
                         capture_output=True, check=True).stdout
   core.atomic_write(r / "diff", diff)
+  core.atomic_write(r / "spec_range.md", cited)
   ci = core.read_ci(repo, head)
   ci["verdict"] = core.ci_verdict(ci)
   core.atomic_write(r / "ci.json", json.dumps(ci, indent=2) + "\n")
@@ -109,22 +113,6 @@ def cut_diff(diff: bytes, limit: int = 400_000) -> str:
   return diff[:limit].decode("utf-8", errors="replace") + f"\n(diff cut at {size})\n"
 
 
-def spec_range(st, root: Path, body: str) -> str:
-  """The body's `Spec:` range read from the approved commit (`git show <commit>:<path>`), or `not available: <reason>`."""
-  match = SPEC_LINE_RE.search(body)
-  if not match:
-    return "not available: no `Spec:` line with a range in the unit body"
-  path, start, end = match.group(1), int(match.group(2)), int(match.group(3))
-  approval = core.load_approval(st, Path(path))
-  if not approval or not approval.get("commit"):
-    return f"not available: no approval record for {Path(path).stem}"
-  try:
-    text = core.run_git(["show", f"{approval['commit']}:{path}"], root)
-  except core.HandoffError as error:
-    return f"not available: {error}"
-  return "\n".join(text.splitlines()[start - 1:end])
-
-
 def prior_round_text(st, rid, previous) -> str:
   """The last posted round's finding lines, ` -> <disposition>` after Astra's settled ones; `none` before any."""
   rnd = review.load_round(st, rid, previous) if rid and previous else None
@@ -146,7 +134,7 @@ def astra_brief(st, root: Path, unit: str, r: Path, diff: bytes, ci: dict, pr_bo
   if panel.get("astra_incomplete", 0) >= 2:
     return "astra: stopped"
   body = core.unit_file_body(st.path("unit", unit))
-  sections = [("Unit body", body), ("Spec range", spec_range(st, root, body)), ("Diff", cut_diff(diff)),
+  sections = [("Unit body", body), ("Spec range", core.read_text(r / "spec_range.md")), ("Diff", cut_diff(diff)),
               ("CI", json.dumps(ci, indent=2)), ("PR body", pr_body), ("Comments", core.read_text(r / "comments.md")),
               ("Prior round", prior_round_text(st, rid, previous))]
   core.atomic_write(r / "astra_brief.md", "".join(f"# {name}\n\n````\n{text}\n````\n\n" for name, text in sections))
