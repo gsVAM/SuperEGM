@@ -682,3 +682,10 @@ PROSE_ROWS = [
 @pytest.mark.parametrize("path, needle", PROSE_ROWS)
 def test_landed_rows_and_the_issue_field_in_the_plan_prose(path, needle):
   assert needle in (ROOT / path).read_text(encoding="utf-8"), f"{path} lacks {needle!r}"
+
+
+def test_every_scan_call_in_the_plan_skills_names_the_plan():
+  """`scan` takes no card and no spec: without `--plan` a 1.2 store resolves no handoff (change-review-1-2)."""
+  for path in ("skills/plan/SKILL.md", "skills/review-plan/SKILL.md"):
+    calls = re.findall(r"'<HELPER>' scan [^`]*", (ROOT / path).read_text(encoding="utf-8"))
+    assert calls and all(call.startswith("'<HELPER>' scan --plan ") for call in calls), (path, calls)
