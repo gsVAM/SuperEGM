@@ -12,6 +12,8 @@ from conftest import make_pr, set_config
 import superegm as core
 from superegm import store, atomic_write, sha256_file, DEFAULT_CONFIG
 from superegm import review as review_mod, tdd_order
+from superegm import foreman as foreman_mod
+from superegm.prepare import cut_diff
 from test_builder_token import APP
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -101,7 +103,7 @@ def install_pr_api(world, *, reviews, comments, login) -> list:
 
 
 def seed(world, *, head="a" * 40, ci="success", launches=({"round": 1, "status": "exited 0"},),
-         rounds=(), base_ref="main", comments=None, reviews=(), login="builder-bot", pr_body=PR_BODY, builder=None):
+         rounds=(), base_ref="main", comments=None, reviews=(), login="builder-bot", pr_body=PR_BODY, builder=None, astra=None):
   """Through U03's `store`, `Store.path` and `atomic_write`, what `locate`, `Handoff` and `require_frozen_units`
   read: the plan (conftest's heading, a `Design:` line naming `world.spec` in backticks, `## Global constraints`,
   `## Units`, SECTION) written to `world.plan` and
@@ -121,7 +123,7 @@ def seed(world, *, head="a" * 40, ci="success", launches=({"round": 1, "status":
   spec = world.spec.resolve()
   set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"],
              reviewers={"spec": [], "plan": [], "head": ["change-review"], "integrate": []},
-             **({"builder": builder} if builder else {}))
+             **({"builder": builder} if builder else {}), **({"astra": astra} if astra else {}))
   plan = (f"# Handoff plan: Webhook delivery\n\nDesign: `{spec}`\n\n## Global constraints\n- none\n\n"
           f"## Units\n\n{SECTION}")
   world.plan.write_text(plan, encoding="utf-8")
@@ -250,13 +252,16 @@ def pr_repo(world, tmp_path, monkeypatch, commits=(("test(S1): hook", "tests/uni
   return target, base, head, g
 
 
-def prepared(world, tmp_path, monkeypatch, commits=None, **kw):
+def prepared(world, tmp_path, monkeypatch, commits=None, incomplete=0, **kw):
   target, base, head, g = pr_repo(world, tmp_path, monkeypatch, **({"commits": commits} if commits else {}))
   st, card, child, did, posted = dispatched(world, head=head, **kw)
+  if incomplete:  # the lane's incomplete runs so far, as `review record` counts them
+    path = st.path("reviews", head_rid(st)) / "review.json"
+    atomic_write(path, {**json.loads(path.read_text(encoding="utf-8")), "astra_incomplete": incomplete})
   code, out = world.run("prepare", "--unit", UNIT, "--dispatch", did, "--runcard", child)
   assert code == 0, out
   return SimpleNamespace(st=st, card=card, child=child, did=did, posted=posted, head=head, base=base, g=g,
-                         target=target, rid=head_rid(st), dir=st.path("review", UNIT, f"pr{PR}"))
+                         target=target, rid=head_rid(st), dir=st.path("review", UNIT, f"pr{PR}"), out=out)
 
 
 @pytest.mark.parametrize("app", [False, True])
@@ -269,7 +274,7 @@ def test_prepare_reviews_the_tip_it_fetches(world, tmp_path, monkeypatch, app):
   code, out = world.run("prepare", "--unit", UNIT, "--dispatch", "d9", "--runcard", child)
   assert (code, out.strip()) == (1, "dispatch: d9 is not U01's current dispatch (d1)")
   code, out = world.run("prepare", "--unit", UNIT, "--dispatch", did, "--runcard", child)
-  assert (code, out.strip()) == (0, f"prepared: head {head[:7]} merge-base {base[:7]} ci green previous -"), out
+  assert (code, out.strip()) == (0, f"prepared: head {head[:7]} merge-base {base[:7]} ci green previous - astra: off"), out
   entry = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][0]
   assert entry["phase"] == "prepared" and entry["head"] == head and entry["merge_base"] == base
   d = st.path("review", UNIT, f"pr{PR}")
@@ -318,6 +323,22 @@ def test_prepare_writes_comments_after_posted_at_plus_the_aged_kinds(world, tmp_
   assert text.startswith("builder: builder-bot\n")
   assert "### issue #2 comment 13 by owner at 2026-11-02T14:00:00Z\nlooks fine\n" in text
   assert (f"### pr #70 comment 12 by builder-bot at {at}\n{body}\n" in text) is kept
+
+
+@pytest.mark.parametrize("astra, runner, incomplete, state, brief", [
+  ({"enabled": False}, None, 0, "astra: off", False),
+  ({"enabled": True}, "/x/runner.py", 0, "astra: ok /x/runner.py", True),
+  ({"enabled": True}, None, 0, "astra: not installed", True),
+  ({"enabled": True}, "/x/runner.py", 2, "astra: stopped", False)])
+def test_prepare_writes_the_astra_brief_and_prints_the_lane_state(world, tmp_path, monkeypatch, astra, runner, incomplete, state, brief):
+  monkeypatch.setattr(foreman_mod, "runner_path", lambda: runner)
+  w = prepared(world, tmp_path, monkeypatch, astra=astra, incomplete=incomplete, rounds=[POSTED_R1], launches=TWO_LAUNCHES)
+  assert w.out.strip().endswith(state) and (w.dir / "r2/astra_brief.md").is_file() is brief
+  if brief:
+    text = (w.dir / "r2/astra_brief.md").read_text(encoding="utf-8")
+    assert re.findall(r"^# ([^\n]+)\n\n````\n", text, re.M) == ["Unit body", "Spec range", "Diff", "CI", "PR body", "Comments", "Prior round"]
+    assert BODY in text and PR_BODY in text and "+feat(S1): hook" in text
+  assert cut_diff(b"x" * 400_001).endswith("\n(diff cut at 400 KB)\n") and cut_diff(b"x" * 400_000) == "x" * 400_000
 
 
 DEV = "**Deviation (dod):** item 3 is wrong\n- (a) drop it\n- (b) keep it\n**Builder status:** BLOCKED"
@@ -514,7 +535,7 @@ def test_foreman_brief_carries_the_round(line):
 FILES = [".claude-plugin/agents/foreman.md", "skills/wave/references/foreman_brief.md",
          "skills/plan/scripts/superegm/foreman.py", "skills/plan/scripts/superegm/prepare.py",
          "skills/plan/scripts/superegm/collect.py"]
-TERMS = ["head-moved", "astra", "Astra", "run folder", "run_folder", "`launched`", "inspect", "Blocker", "Major",
+TERMS = ["head-moved", "run folder", "run_folder", "`launched`", "inspect", "Blocker", "Major",
          "wave_round_", "pr_comment_", "wave_dispositions", "egm-change-review", "refs/egm/", "foreman_<unit-id>_state.json",
          "--verdict", ".egm/handoff.json", "handoff_state.json", "new triple", "require_reviewed_pair", "unit_file_text",
          "record-launch", "SendMessage"]
