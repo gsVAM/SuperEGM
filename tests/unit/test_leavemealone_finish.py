@@ -64,7 +64,7 @@ def record(world, review, reviewer, lines, runcard, tmp_path):
   assert code == 0, out
 
 
-def head_review(world, runcard, tmp_path):
+def head_review(world, runcard, tmp_path, findings=(FINDING, LOW)):
   code, out = world.run("review", "open", "--kind", "head", "--artifact", "U07", "--sha256", HEAD,
                         "--reviewers", "change-review", "--runcard", runcard)
   assert code == 0, out
@@ -73,7 +73,7 @@ def head_review(world, runcard, tmp_path):
   put(world, {"dispatch_id": "d1", "decisions": [], "rulings": [],
               "rounds": [{"round": 1, "runcard": runcard, "launch": 1, "head": HEAD, "phase": "collected",
                           "dispatch_id": "d1", "outcome": None, "posted_at": None}]}, "foreman", "U07")
-  record(world, review, "change-review", [FINDING, LOW], runcard, tmp_path)
+  record(world, review, "change-review", list(findings), runcard, tmp_path)
   record(world, review, "foreman", [CI], runcard, tmp_path)
   return review
 
@@ -117,6 +117,16 @@ def test_judges_question_forms(world, tmp_path, form):
   assert code == 0, out
   code, out = world.run("judges", "question", *args, card=None)
   assert code == 1 and "runcard: --runcard is required" in out, out
+
+
+def test_a_cap_redesign_with_no_unsettled_claim_names_the_rounds_alone(world, tmp_path):
+  seed(world)
+  runcard = world.card("wave")
+  review = head_review(world, runcard, tmp_path, findings=(LOW,))
+  code, out = world.run("judges", "question", "--review", review, "--cap", "--runcard", runcard)
+  assert code == 0, out
+  assert Path(out.splitlines()[0]).read_text(encoding="utf-8") == (
+      f"## Q1 {review} is at its cap\n- (a) one more round\n- (b) stop\n- (c) redesign — the head is at its cap after 1 rounds\n")
 
 
 @pytest.mark.parametrize("case, args, message", [
