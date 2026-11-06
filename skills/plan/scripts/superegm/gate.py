@@ -27,11 +27,19 @@ def open_handoff(spec: Path) -> graph.Handoff:
   return graph.load(st, st.path("plan"))
 
 
-def converged_review(artifact_dir: Path, uid: str):
-  """(converged, the converged round's artifact_sha256) of the unit's latest plan review, found by
-  kind and artifact, never by id; U04 writes `converged` as `yes | no | by ruling R<n>`."""
+def require_latest(handoff, name: str) -> None:
+  """An older handoff is frozen (spec section 7): the filing's `name` refuses before anything else."""
+  try:
+    core.require_latest_handoff(handoff.store)
+  except core.HandoffError as error:
+    raise core.HandoffError(f"{name}: {error}") from None
+
+
+def converged_review(store: core.Store, uid: str):
+  """(converged, the converged round's artifact_sha256) of the unit's latest plan review in the handoff's
+  `reviews/`, found by kind and artifact, never by id; U04 writes `converged` as `yes | no | by ruling R<n>`."""
   latest = None
-  for path in (Path(artifact_dir) / "reviews").glob("*/review.json"):
+  for path in store.path("reviews").glob("*/review.json"):
     review = json.loads(core.read_text(path))
     if review.get("kind") == "plan" and review.get("artifact") == uid \
         and (latest is None or review["cycle"] > latest[0]["cycle"]):
@@ -81,13 +89,14 @@ def pending_writes(handoff, units=None, adopted=None) -> list:
 def run(args):
   core.require_runcard(args, SKILLS)
   handoff = open_handoff(Path(args.design))
+  require_latest(handoff, "gate")
   state = handoff.state
-  unfiled = [uid for uid in handoff.graph.order if handoff.filed(uid) is None]
+  unfiled =[uid for uid in handoff.graph.order if handoff.filed(uid) is None]
   if not unfiled:
     raise core.HandoffError("gate: nothing to file (every unit is filed)")
   hashes = body_hashes(handoff)
   for uid in unfiled:
-    converged, sha = converged_review(handoff.artifact_dir, uid)
+    converged, sha = converged_review(handoff.store, uid)
     if not converged:
       raise core.HandoffError(f"gate: {uid} plan review not converged")
     if sha != hashes[uid]:

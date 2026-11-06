@@ -136,4 +136,6 @@ def run_verify(handoff, writes=None):
 
 def run(args):
   core.require_runcard(args, SKILLS)
-  return run_verify(gate.open_handoff(Path(args.design)))
+  handoff = gate.open_handoff(Path(args.design))
+  gate.require_latest(handoff, "verify")
+  return run_verify(handoff)

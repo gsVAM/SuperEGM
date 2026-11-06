@@ -221,8 +221,14 @@ class Handoff(core.Handoff):
     self.design_path = design.resolve()
     self.design_sha = core.sha256_file(self.design_path)
     self.repo_root = core.git_toplevel(self.design_path)
-    approval = core.load_approval(store, self.design_path)
-    if not approval or approval.get("voided_by") or approval["sha256"] != self.design_sha:
+    # The handoff's own approval: the last entry carrying the resolved handoff's id, else the history's last; an
+    # older handoff's spec may stand at a later link of the chain (spec section 7).
+    entries = core.load_approvals(store, self.design_path)
+    own = [i for i, e in enumerate(entries) if store.handoff_id and e.get("handoff_id") == store.handoff_id] \
+        or ([len(entries) - 1] if entries else [])
+    approval = entries[own[-1]] if own else None
+    later = {e["sha256"] for e in entries[own[-1] + 1:]} if own else set()
+    if not approval or approval.get("voided_by") or (approval["sha256"] != self.design_sha and self.design_sha not in later):
       raise core.HandoffError(f"graph: no approval matches {self.design_path.name} at its current sha256 "
                               f"{self.design_sha[:12]}: run /superegm:review-spec (approve-spec) first")
     self.handoff_id, self.spec_sha = approval["handoff_id"], approval["sha256"]
