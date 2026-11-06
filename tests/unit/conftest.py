@@ -552,8 +552,12 @@ def result_for(world, uid, rnd):
 
 def converge(artifacts: Path, handoff_id: str, uid: str, sha: str, cycle: int = 1) -> None:
   """What `review-plan` leaves for a converged unit (U04's files, U04's review id): `review.json`
-  and its converged round at the body hash."""
-  folder = artifacts / "reviews" / f"{handoff_id[-6:]}-plan-{uid}-c{cycle}"
+  and its converged round at the body hash, in the handoff's own `reviews/` (`plan-<unit>-c<n>`; a legacy flat store
+  keeps U04's `<6 hex>-plan-<unit>-c<n>` at its root)."""
+  import superegm
+  legacy = (artifacts / "state.json").is_file()
+  rid = f"{handoff_id[-6:]}-plan-{uid}-c{cycle}" if legacy else f"plan-{uid}-c{cycle}"
+  folder = superegm.Store(artifacts, handoff_id=handoff_id, legacy=legacy).path("reviews", rid)
   folder.mkdir(parents=True, exist_ok=True)
   (folder / "review.json").write_text(json.dumps({"kind": "plan", "artifact": uid, "cycle": cycle, "reviewers": ["readiness"],
                                                   "runcard": "rc-plan", "converged": "yes", "converged_round": 1, "rulings": []}),
