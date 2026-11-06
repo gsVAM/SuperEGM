@@ -20,6 +20,7 @@ Amendment 4 (2026-11-05): Astra on every head review (§8, §11), the redesign r
 Amendment 5 (2026-11-05): the fleet layer (external-review ingest, rulings by comment, the inbox and notify hook, the headless driver and registry, the foreman verifies), units U21–U25; owner-approved by text.
 Amendment 6 (2026-11-05): external review on the elephant's own PRs (`review ingest --pr`, §8, §11.2), unit U26; owner-approved by text.
 Amendment 7 (2026-11-06): the builder's plugins and MCP servers, passed per launch (`config.builder.plugins`, `config.builder.mcp`, `Skill` and `mcp__*` rules in `allowed_tools`; §4, §7, §11, §15), unit U27; owner-approved by text.
+Amendment 8 (2026-11-06): the default models and efforts per role (`builder.model` and `builder.effort`, `reviewers.model` and `reviewers.effort`, `astra.heads_effort`, `judges.members`; §7, §8, §11, §13), unit U28; owner-approved by text.
 
 ## 1. Intent
 
@@ -648,11 +649,16 @@ excepted (§9.3). No lock file.
   leavemealone`), `max_in_flight` (5), `labels` (EGM's set with prefix `superegm:` plus
   `stopped`), `issue_template`, `tracking_issue_title`, `banned_terms`, `fix_request_mention`,
   `allowed_mentions`, `reviewers` (`spec`, `plan`, `head`, `integrate`: ordered reviewer lists;
-  `head` is `change-review, astra` by default, the `astra` entry informational, §8), `astra`
+  `head` is `change-review, astra` by default, the `astra` entry informational, §8; from
+  amendment 8 `model` and `effort`, every goldfish dispatch of every kind, `claude-opus-5-5` /
+  `xhigh`, passed as the adapter's per-dispatch override, §8), `astra`
   (`enabled`, `model`, `effort`, `heads`: true, the lane on head reviews; a config without the
-  key reads it as true, §8, §11), `judges` (`min_vendors` 1; `members`: `fable` and
-  `opus` through the adapter at max effort, `astra` through the runner), `builder`
-  (`profile_dir`, `model`, `permission_mode` = `acceptEdits`, `gh_token_env` =
+  key reads it as true, §8, §11; from amendment 8 `heads_effort`, the foreman's lane, `high`,
+  `effort` staying the elephant's lanes'), `judges` (`min_vendors` 1; `members`, from amendment
+  8: `fable` through the adapter at `xhigh`, `astra` through the runner at `xhigh`, recorded
+  `not run` when the runner is absent, `opus` through the adapter at `max`), `builder`
+  (`profile_dir`, `model` = `claude-opus-5-5` and `effort` = `medium` from amendment 8 (the
+  elephant is the session's model, never in config), `permission_mode` = `acceptEdits`, `gh_token_env` =
   `SUPEREGM_BUILDER_TOKEN`, `app` = `null` (or `app_id`, `slug`, `private_key_env`, §11),
   `allowed_tools`: the read/edit tools, `git add|commit|status|diff|log|
   mv|rm`, `gh pr create|edit|comment`, `gh issue comment`, each as a prefix pattern; the push
@@ -997,9 +1003,13 @@ by the foreman. The helper records and judges; the dispatching session dispatche
   --judges <judges-id>]` records it, refuses `accept` for kind `head`, a second `continue`, and
   every ruling after `stop`; `accept` sets `converged: by ruling`; `continue` raises the cap by
   one. No further round starts while `review status` exits 2.
-- Model tiering: panel goldfish run on `SUPEREGM_GOLDFISH_MODEL` at `SUPEREGM_GOLDFISH_EFFORT`
-  (EGM's rules renamed); judges use their configured model and effort; builders use
-  `config.builder`. The run card shows requested → effective.
+- Model tiering (amendment 8): panel goldfish run on `config.reviewers.model` at
+  `config.reviewers.effort` (`claude-opus-5-5` / `xhigh`; `SUPEREGM_GOLDFISH_MODEL` and
+  `SUPEREGM_GOLDFISH_EFFORT` override them for a session), passed on each dispatch as the
+  adapter's `model` and `effort` override (§4: the adapters stay `model: inherit`); judges use
+  their member's model and effort (§13); builders use `config.builder` (§11); the foreman's Astra
+  lane runs at `astra.heads_effort` (§11). The elephant is the session's model, never in config.
+  The run card shows requested → effective.
 
 Spec review specifics:
 - `review-spec` opens a run card and the review `spec-<spec-slug>-c<n>` with
@@ -1609,7 +1619,10 @@ amendment 7, of a `skills/` or `commands/` directory, and its `settings.json` se
 installed `user`-scope entry in the elephant profile's `plugins/installed_plugins.json` (§7) and
 is none of the builder profile's managed plugins (it would load twice; `profile_problem`'s lines,
 so `launch-builder` refuses too), the set printed (`plugins: <id>
-<version> [<hook events>]... | none`, `mcp: <names> | none`). Its own lines, which `launch` does not check: `gh` resolves on this machine
+<version> [<hook events>]... | none`, `mcp: <names> | none`); and, from amendment 8, the role
+table (`model: builder <model> <effort> | goldfish <model> <effort> | astra lane <model>
+<heads_effort> | judge <member> <model> <effort>...`; the elephant is the session's, not
+printed). Its own lines, which `launch` does not check: `gh` resolves on this machine
 (`shutil.which`, the path the launch bakes in, both paths); the `gh auth`
 login is in `config.owners`; the builder's role on the repository
 (`repos/<repo>/collaborators/<login>/permission`) is `write` exactly, the role found named
@@ -1736,7 +1749,9 @@ managed plugins; the MCP file's server names) at the launch, §7;
 paths the owner's git configuration, SSH and askpass shut out and the helper reset, §11), with the HTTPS push rewrite and credential helper in its
 environment; `ENABLE_CLAUDEAI_MCP_SERVERS=false` (belt and braces over the profile's
 `disableClaudeAiConnectors`, §4); `SUPEREGM_ROLE=builder` and `SUPEREGM_RUNCARD`; `claude -p` with the prompt file's
-content, the configured model and permission mode; the allow-list (its `Skill(...)` and `mcp__*` rules among them, amendment 7) plus a push prefix for the
+content, the configured model, effort (amendment 8: `--effort <level>`, the session flag
+`-p` honours, U28's one-run case; `CLAUDE_CODE_EFFORT_LEVEL` in the environment is the
+fallback) and permission mode; the allow-list (its `Skill(...)` and `mcp__*` rules among them, amendment 7) plus a push prefix for the
 unit's own branch and `Bash(<first word>:*)` for every command `run_commands` returns from the
 body; `--output-format json` into the result file; and the exit file on exit. The launch is
 recorded (`record-launch`), and `record-launch --exit <code>` later records the exit. An
@@ -1802,7 +1817,8 @@ and returns one word plus one line:
   findings with the builder's replies and, on Astra's own, their dispositions), once per head
   per round, after CI concludes and after the Claude panel returned, fresh every round (no
   `--resume` on a head: the foreman keeps no session handle), as one foreground Bash call with
-  the runner's `--timeout 540` and the tool's timeout at 600 s (the platform caps a foreground
+  the runner's `--timeout 540` (and, from amendment 8, the lane's effort `astra.heads_effort`,
+  `high`; the Astra judge member's `effort` is its own, §13) and the tool's timeout at 600 s (the platform caps a foreground
   call there, §4; a head's diff is small, and the brief says so): no background command, no
   wait, the call returns with the run's end (the one session the foreman starts, §4; a batch
   waits for its foremen, so the lane adds at most 600 s to a batch), and
@@ -2263,9 +2279,11 @@ merges: the inbox lists merge-ready PRs. `notify` runs inside the tick's wave.
   compares option ids and writes the neutral list of where positions differ; no one adds
   arguments between rounds.
 - Three models from two vendors, each a goldfish through the `superegm:judge` adapter
-  (`omitClaudeMd: true`, tools `[Read, Grep, Glob]`, `model: inherit`) with a per-dispatch model
-  override (`fable` at max, `opus` at max), plus GPT-6 Astra through the claudex-loop runner's
-  `review` mode on the question file when the runner is installed and reachable.
+  (`omitClaudeMd: true`, tools `[Read, Grep, Glob]`, `model: inherit`) with a per-dispatch model and effort
+  override from `config.judges.members` (amendment 8: `fable` at `xhigh`, `opus` at `max`), plus
+  GPT-6 Astra through the claudex-loop runner's `review` mode on the question file at the
+  member's own effort (`xhigh`) when the runner is installed and reachable, recorded `not run`
+  otherwise.
 - Every judge reads only the question file and the listed evidence. The Astra judge runs with
   `SUPEREGM_ROLE=goldfish`.
 - Round 1 is independent. From round 2 each judge receives every prior verdict verbatim plus the
@@ -2444,7 +2462,7 @@ Grep, Glob]`, `omitClaudeMd: true`); and `foreman` (tools `[Agent, Bash, Read, G
 
 ## 17. Units
 
-The unit graph for building SuperEGM 1.0.0 (thirteen units), from amendment 2, 1.1.0 (U12–U14) and, from amendment 3, 1.1.1 (U15–U16) and, from amendment 4, 1.1.2 (U17–U20) and, from amendments 5–7, 1.2 (U21–U27). Each unit's plan must fit 48 KB.
+The unit graph for building SuperEGM 1.0.0 (thirteen units), from amendment 2, 1.1.0 (U12–U14) and, from amendment 3, 1.1.1 (U15–U16) and, from amendment 4, 1.1.2 (U17–U20) and, from amendments 5–8, 1.2 (U21–U28). Each unit's plan must fit 48 KB.
 Interfaces are subcommand contracts and file keys unless marked `py`. A Consumes producer may be
 a transitive blocker. After U01 every 1.0.0 skill folder and adapter of §14 exists (the new ones
 as stubs), so the later 1.0.0 units modify and never create skill folders, adapters or personas;
@@ -2486,6 +2504,7 @@ handoff is planned; the amendment-4 paragraph below); a later handoff on this sp
 | U25 | The foreman verifies (§11, §8): the DoD re-run gate and the test-delta gate in `collect`, `r<n>/dod/<item>.txt`, `rounds[].dod_runs`, `rounds[].test_delta`, the finding ids `dod-<n>` and `test-delta`, `config.foreman.run_timeout_minutes`, the `test-delta` settle rule and the `allowed` rulings of `test-delta` and `dod-<n>`, `doctor`'s `python3.12` line: `skills/plan/scripts/superegm/collect.py` (modify: both gates, inputs read before the first run), `review.py` (modify: the settle rule; `review post`'s `gates not run` refusal and `owner: <ids>` outcome), `prepare.py` (modify: the review worktree removed by force; the hook-free git calls), `launch_builder.py` (modify: the hook-free git calls), `doctor.py` (modify: the `python3.12` line, the hooks-directory and `core.hooksPath` lines), `__init__.py` (modify: `DEFAULT_CONFIG.foreman`), `init.py` (modify), `skills/wave/references/foreman_brief.md` (modify: the word is given only after both gates ran; the `owner` word), `skills/wave/SKILL.md` (modify: the `owner` word's row), `resources/review_panels.md` (modify: the foreman list gains both ids), `tests/unit/test_foreman.py`, `test_review.py`, `test_wave.py`, `test_doctor.py`, `test_helper.py` (modify) | U22 (`ruling_of`; U17 landed); after U21 and U23 on shared files | M |
 | U26 | External review on the elephant's own PR (§8): `review ingest --pr <n>` (kind `spec`), U21's reader, severity map and bot/human rules reused, findings into the spec's latest cycle, closed by `accept` or not, `review.json`'s `ingested[]`, the `**Reply <fid>:** fixed` post on the thread under the elephant's token, `approve-spec`'s one ingest before its refusals and its one check (an unsettled external high or medium in the latest round, after the carry-forward, refuses, `by ruling` or not), `review-spec`'s `github-write` and `remote-branch`, the PR opened by the skill's preflight (refusing on `<base>`, committing the spec by path, pushing first) and the push after each fix and the approval commit, step 4's path back to step 3 on the refusal: `skills/plan/scripts/superegm/review.py` (modify: `--pr`, the review-level `ingested[]`, the reply post), `approve_spec.py` (modify: the one ingest call and the one check), `skills/review-spec/SKILL.md` (modify: the preflight's PR, the per-round fix commit §5 assumes and the push after it and after the approval commit, step 4's path back to step 3 on the ingest's refusal; the frontmatter's `github-write` and `remote-branch`), `docs/claude.md`, `README.md` (modify), `tests/unit/test_review.py`, `test_effects.py`, `test_helper.py` (modify) | U21; after U24 on shared files | M |
 | U27 | The builder's plugins and MCP servers, passed per launch (§4, §7, §11, §15): `config.builder.plugins` (`<name>@<marketplace>`; `init` writes `[]`), each resolved through the elephant profile's `plugins/installed_plugins.json` to `--plugin-dir <dir>`, and `config.builder.mcp` (`mcpServers` form; `init` writes `{}`), written to `launches/<unit>_r<n>_mcp.json` and passed with `--mcp-config --strict-mcp-config`; the per-launch record `launches/<unit>_r<n>_plugins.json` (id, version, directory, hook events per plugin; the managed plugins; the MCP server names; superseding `_managed.json`); `launch-builder`'s and `doctor`'s refusals (a listed plugin not installed or among the builder profile's managed plugins; a profile `skills/` or `commands/` directory or without `disableClaudeAiConnectors`, beside the landed login-only checks); `ENABLE_CLAUDEAI_MCP_SERVERS=false` in the launched environment; `doctor`'s `plugins:` and `mcp:` lines; `Skill(<name>)` / `Skill(<name> *)` and `mcp__<server>__<tool>` / `mcp__<server>__*` rules in `allowed_tools`; the skills named in the builder orders at the launch: `skills/plan/scripts/superegm/launch_builder.py` (modify: the flags, the MCP file, the record, the checks, the orders' skill line), `doctor.py` (modify: the two lines), `__init__.py` (modify: `DEFAULT_CONFIG.builder.plugins` and `.mcp`), `init.py` (modify), `skills/wave/references/builder_orders.md` (modify: the skills line), `skills/using-superegm/references/claude-code-tools.md` (modify: the `--allowedTools` sentence and the two flags), `docs/claude.md`, `README.md`, `docs/getting_started.md` (modify: the config's plugins and servers; the profile step), `tests/unit/test_builders.py`, `test_doctor.py`, `test_helper.py` (modify) | — (U14, U15 landed); after U24 and U26 on shared files | M |
+| U28 | The default models and efforts per role (§7, §8, §11, §13): `builder.model` `claude-opus-5-5` and `builder.effort` `medium`, passed to the launched `claude -p` as `--effort <level>`; `reviewers.model` / `reviewers.effort` `claude-opus-5-5` / `xhigh`, passed on every goldfish dispatch as the adapter's override (the adapters stay `model: inherit`); `astra.heads_effort` `high` for the foreman's lane; `judges.members` default `fable` (adapter, `xhigh`), `astra` (runner, `xhigh`, `not run` when absent), `opus` (adapter, `max`); the elephant never in config; `init` writes the defaults; `doctor`'s role table: `skills/plan/scripts/superegm/__init__.py` (modify: `DEFAULT_CONFIG`), `init.py` (modify), `launch_builder.py` (modify: `--effort`), `foreman.py` (modify: the lane's effort), `judges.py` (modify: the members' efforts), `doctor.py` (modify: the table), the review skills' dispatch text (`skills/review-spec/SKILL.md`, `skills/review-plan/SKILL.md`, `skills/wave/SKILL.md`, `skills/judges/SKILL.md`: the override passed), `resources/review_panels.md` (modify: the per-reviewer model and effort), `docs/claude.md`, `README.md` (modify), `tests/unit/test_helper.py`, `test_doctor.py`, `test_builders.py`, `test_judges.py`, `test_foreman.py` (modify) | — (landed units); after U27 on shared files | S |
 
 Shared files of the 1.0.0 build: `test_helper.py` is U03's alone. `body.py` is U03's and then U05's (the derived Step
 defaults), which U03 blocks. Each workflow SKILL.md stub U01 creates is filled
@@ -2568,12 +2587,12 @@ heading narrows or widens the scope; the tests pin the mapping on a fixture spec
 that a legacy flat store still reads and that `launch` refuses a base spec off the chain). The version bump to 1.1.2, the tag and the release are the
 owner's by-hand steps after all four merge, as before.
 
-Amendment 5, 6 and 7 units (1.2): U21–U27 are filed from this spec as a fifth handoff (the helper's id
+Amendment 5–8 units (1.2): U21–U28 are filed from this spec as a fifth handoff (the helper's id
 form; the owner's name for it, `2026-11-05-superegm-1.2`, is the tracking issue's title and
 nothing else), through the installed 1.1.2 (`orient`, `review-spec --reviewers design`, approve,
 `plan`, `review-plan --reviewers readiness,proportion`, `file`, then `wave` through SuperEGM
 itself: the App builder, Astra on heads, `redesign` available), under the landed-row rule (a plan
-for it carries sections for U21–U27 only; U17–U20 landed, so no `Blocked by` names them). Once
+for it carries sections for U21–U28 only; U17–U20 landed, so no `Blocked by` names them). Once
 U21 lands and the plugin is updated from the tree, the next `wave`, typed in a new session (§5: a
 wave is one invocation, and an update takes a new session), ingests Devin's reviews of the later
 1.2 PRs, and the next amendment's spec PR, opened by the review's preflight, is the first
@@ -2584,15 +2603,15 @@ the elephant's own branch being outside the `superegm/**` rule, so the PR's head
 order is the panel's (`1.2-questions-e8857c`, two rounds, Claude-only, every question converged;
 the owner accepted every verdict and amended the test-suite non-goal on their own word): ingest
 and rulings first, then the inbox, then the driver; U25 sits where its shared files put it, and
-U26 (amendment 6) after U21 by its blocker and after U24 on `review.py`, and U27 (amendment 7)
-last, after U24 and U26 on the files below.
+U26 (amendment 6) after U21 by its blocker and after U24 on `review.py`, U27 (amendment 7) after U24 and U26 on the files below, and U28 (amendment 8) last, after
+U27 on `__init__.py`, `init.py`, `doctor.py` and `launch_builder.py`.
 Shared files: `collect.py` is U21's, then U22's, then U25's; `review.py` U21's, then U25's, U24's, U26's;
-`skills/wave/SKILL.md` U21's, then U22's, U23's, U25's, U24's; `__init__.py` U21's, U23's, U25's, U24's and U27's, `init.py` U21's, U23's, U25's and U27's, and
+`skills/wave/SKILL.md` U21's, then U22's, U23's, U25's, U24's; `__init__.py` U21's, U23's, U25's, U24's, U27's and U28's, `init.py` U21's, U23's, U25's, U27's and U28's, and
 `test_helper.py` every unit's, one per wave (disjoint keys, but a wave has no order inside it,
 §9.1: so U25 follows U23 and U24 follows U25 on them); `inbox.py` and `test_inbox.py`
-U23's, then U24's; `launch.py` U21's, then U24's; `doctor.py` and `test_doctor.py` U25's, then U24's, then U27's; `launch_builder.py` U22's, then U25's, U24's, U27's; `docs/claude.md` and `README.md` in
+U23's, then U24's; `launch.py` U21's, then U24's; `doctor.py` and `test_doctor.py` U25's, then U24's, U27's, U28's; `launch_builder.py` U22's, then U25's, U24's, U27's, U28's; `docs/claude.md` and `README.md` in
 wave order. Waves: {U21} → {U22} →
-{U23} → {U25} → {U24} → {U26} → {U27}; version 1.2.0 after all seven merge (manifests, `docs/releases.md`, tag,
+{U23} → {U25} → {U24} → {U26} → {U27} → {U28}; version 1.2.0 after all eight merge (manifests, `docs/releases.md`, tag,
 release, plugin update: the owner's by-hand steps), after which `superegm driver install` (re-typed
 after every later update), `~/.superegm/env`, `register` from each handoff's worktree, a machine kept awake
 (`pmset`/`caffeinate`) and the builder's tooling configured (amendment 7, this repository's
@@ -2619,7 +2638,9 @@ the elephant's branch after each fix and the approval commit, never `<base>`); U
 listed plugin, hooks included, runs in the builder's context with the builder's token: the
 owner's named set alone, passed by flag, managed plugins policy, the set with each plugin's
 version and hook events on the record per launch: the hook events are the record's bound, not
-the plugin's component inventory; its mods and its own settings ride on the version).
+the plugin's component inventory; its mods and its own settings ride on the version); U28 low
+(defaults: a model or effort the platform does not offer falls back to the model's highest
+level or fails the launch, which `record-launch --exit` records).
 Plan-review focus: U21 a PR with 200 bot threads
 and one human medium, and a thread on a head not yet reviewed; U22 a comment one character off
 the form, and an owner's edit after the record; U23 a store with no open handoff, and the inbox's `test-delta` and `owner: <ids>` kinds built against §7's schema with fixture data (U25 lands after U23); U24 a reboot
@@ -2630,7 +2651,8 @@ a `Run` line that installs, a suite longer than the bound, and a parametrize row
 than dropped; U26 a thread an earlier round already answered, and a thread arriving after an
 `accept`; U27 a listed plugin not installed, one installed but disabled (passes), a profile `skills/` directory, and whether
 `--strict-mcp-config` keeps a listed plugin's bundled servers (a `Skill` rule naming no loaded
-skill is inert on the platform: no check). Not in 1.2: cross-repository handoffs
+skill is inert on the platform: no check); U28 `--effort` honoured by `claude -p` (one run)
+and an effort a member's model lacks. Not in 1.2: cross-repository handoffs
 (the lib-core and financial-twin inputs are one handoff per repository; the second spec states
 its prerequisite in prose and `Landed:` rows, §9.1, and the owner types its phases after the
 first lands; neither a `Repo:` field nor a cross-store `Blocked by` is built; the registry is a
@@ -2743,6 +2765,9 @@ Interfaces (the names the plans will carry):
   `launch-builder: plugin <id> not installed | managed in the builder profile` and `builder profile
   <dir> holds skills/ | commands/ | lacks disableClaudeAiConnectors`; `ENABLE_CLAUDEAI_MCP_SERVERS=false`
   in the launched environment.
+- U28 → the owner: the config keys `builder.effort`, `reviewers.model`, `reviewers.effort`,
+  `astra.heads_effort`, `judges.members[].effort`; `doctor`'s `model:` lines; every dispatch and
+  launch record's `--model` and `--effort` requested → effective carrying them.
 
 Waves: {U01} → {U02, U03} → {U04, U05, U08, U09} → {U06, U07, U09b, U10} → {U10b} → {U11}; then,
 as a second handoff (`2026-11-03-superegm-<6 hex>`), {U12} → {U13} → {U14}, and version 1.1.0
@@ -2750,5 +2775,5 @@ after all three merge; then, as a third handoff (`2026-11-03-superegm-<6 hex>`),
 version 1.1.1 after both merge; then, as a fourth handoff (`2026-11-03-superegm-<6 hex>`, the
 owner's name `2026-11-05-superegm-1.1.2`), {U17, U18} → {U19} → {U20}, and version 1.1.2 after all
 four merge; then, as a fifth handoff (`2026-11-03-superegm-<6 hex>`, the owner's name
-`2026-11-05-superegm-1.2` on the tracking issue), {U21} → {U22} → {U23} → {U25} → {U24} → {U26} → {U27}, and
-version 1.2.0 after all seven merge.
+`2026-11-05-superegm-1.2` on the tracking issue), {U21} → {U22} → {U23} → {U25} → {U24} → {U26} → {U27} → {U28}, and
+version 1.2.0 after all eight merge.
