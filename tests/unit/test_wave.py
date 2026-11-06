@@ -480,6 +480,7 @@ def test_a_redesign_ruling_stops_the_unit_and_writes_the_brainstorm_brief(world,
   assert f["stopped"] == {"by": "owner", "reason": "redesign — the retry design is wrong", "at": f["rulings"][-1]["posted_at"], "brief": str(brief)}
   assert "superegm:stopped" in world.gh.issues[2]["labels"]
   assert world.gh.comments[2][-1]["body"].startswith(f"**Ruling:** redesign — the retry design is wrong\n\nStopped for redesign; the brainstorm brief is `{brief}`.\n")
+  assert world.gh.comments[2][-1]["body"].splitlines()[3:] == ["Close this issue by hand once the re-planned unit is filed.", "", "> " + FINDING]
   text = brief.read_text(encoding="utf-8")
   assert [l for l in text.splitlines() if l.startswith("# ")] == ["# What the owner asked", "# Findings", "# Unit body", "# Diff", "# Deviations"]
   assert "redesign — the retry design is wrong" in text and FINDING in text and "<!-- superegm:handoff=" in text
@@ -528,3 +529,16 @@ def test_a_brief_with_no_posted_round_names_no_diff_and_no_deviations(world):
   text = s.path("foreman", "U01").with_name(f"U01-{qid}.brainstorm.md").read_text(encoding="utf-8")
   assert text.split("# Diff")[1].split("# Deviations")[0].split() == ["(none)", "```diff", "```"]
   assert text.split("# Deviations")[1].strip() == "(none)"
+
+
+def test_a_by_hand_redesign_ruling_stops_the_unit_and_posts_nothing(world, monkeypatch):
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "builder-token")
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "rounds": [{"round": 1, "phase": "posted", "outcome": "revise", "launch": 1}]})
+  qid = world.run("decision", "open", "--unit", "U01", "--point", 2, "--question", question(world, FINDING + "\n"),
+                  "--source", "review head-U01-c1 cap", "--runcard", card)[1].splitlines()[0]
+  fake_gh(world, {"user": {"login": BUILDER}, f"repos/{REPO}/issues/comments/9": {"id": 9, "user": {"login": "owner"}, "body": "**Ruling:** (cap) redesign — why\n"}})
+  code, out = world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", "redesign — why", "--by", "owner", "--posted", "9", "--runcard", card)
+  brief = s.path("foreman", "U01").with_name(f"U01-{qid}.brainstorm.md")
+  assert (code, out) == (0, "recorded (comment 9)\n"), out
+  assert brief.is_file() and foreman_of(s, "U01")["stopped"]["brief"] == str(brief) and world.gh.comments.get(2, []) == []
