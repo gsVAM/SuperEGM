@@ -849,3 +849,17 @@ def test_cap_question_names_the_scope(world):
   rid2 = reopen(world, "spec", cid)
   rounds(world, rid2, cid, [HIGH(n) for n in range(1, 6)])
   assert cap_question(world, rid2, cid)[1].startswith(f"## Q1 {rid2} is at its cap (scope: (preamble), ## 1. Intent, ## 2. Units)\n")
+
+
+# ---------------------------------------------------------------- S26: the four rules and the scope prose (U19)
+
+RULES_PROSE = [("skills/using-superegm/SKILL.md", n) for n in ("fresh session per phase", "never switches branches", "one worktree per handoff", "gh pr merge --admin", "after a plugin install or update")] + [
+  ("skills/review-spec/SKILL.md", n) for n in ("[--scope auto|whole|<sections>]", "start on the branch you want the commits on", "superegm review scope --review <id>",
+                                               "superegm review settle --review <id> --file <dispositions>", "out of scope")] + [
+  ("skills/review-spec/references/review_loop.md", "findings only inside the changed sections and, on a neighbour, only on its fit with them; a finding on any other section is out of scope"),
+  ("skills/review-spec/references/review_loop.md", "out_of_scope[]"), ("skills/review-spec/references/review_loop.md", "--file <dispositions>"),
+  ("skills/wave/SKILL.md", "gh pr merge --admin"), ("skills/integrate/SKILL.md", "gh pr merge --admin")]
+
+@pytest.mark.parametrize("path, needle", RULES_PROSE)
+def test_the_four_rules_and_the_scope_prose(path, needle):
+  assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
