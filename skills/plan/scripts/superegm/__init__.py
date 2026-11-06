@@ -296,16 +296,106 @@ class Store:
 
 
 STORE = None
+CURRENT_ARGS = None  # the running subcommand's arguments, recorded by `build_parser()`'s `parse_args`
+
+
+def handoffs(root: Path) -> list:
+  """One row per handoff: `handoffs/<id>.json` with `legacy: false`; a flat 1.0/1.1 store
+  (`state.json` at the root) is one `legacy: true` row from that file whatever `handoffs/` holds."""
+  root = Path(root)
+  flat = root / "state.json"
+  if flat.is_file():
+    state = json.loads(read_text(flat))
+    return [{"id": state.get("handoff_id"), "spec": (state.get("design") or {}).get("path"),
+             "opened_at": None, "closed_at": state.get("closed_at"), "legacy": True}]
+  return [json.loads(read_text(p)) | {"legacy": False} for p in sorted((root / "handoffs").glob("*.json"))]
+
+
+def load_approvals(store: Store, spec) -> list:
+  """The spec's approval history, `approvals/<spec-slug>.json`'s `entries[]`; a 1.1 record
+  (one approval, no `entries`) reads as a one-entry history."""
+  path = store.path("approvals", spec_slug(spec))
+  if not path.is_file():
+    return []
+  record = json.loads(read_text(path))
+  if "entries" in record:
+    return list(record["entries"])
+  return [{"kind": "opening", "escalated": [], **{k: v for k, v in record.items() if k != "path"}}]
+
+
+def require_latest_handoff(store: Store) -> None:
+  """An older handoff is frozen: refuse when the store's handoff's latest entry is not the last
+  of its spec's history (found by scanning `approvals/*.json` for the id). No handoff passes."""
+  hid = store.handoff_id
+  if not hid:
+    return
+  for path in sorted((store.root / "approvals").glob("*.json")):
+    entries = load_approvals(store, path)
+    if any(e.get("handoff_id") == hid for e in entries) and entries[-1].get("handoff_id") != hid:
+      raise HandoffError(f"{hid}: not the latest approval: plan the rows in the latest handoff")
+
+
+def spec_of_plan(plan) -> str | None:
+  """The spec a plan file's `Design:` line names, resolved against the plan's folder."""
+  plan = Path(plan).expanduser().resolve()
+  match = re.search(r"^Design: `([^`]+)`", read_text(plan), re.M) if plan.is_file() else None
+  if not match:
+    return None
+  design = Path(match.group(1)).expanduser()
+  return str(design if design.is_absolute() else (plan.parent / design).resolve())
+
+
+def resolve_handoff(st: Store, args):
+  """The handoff, once: `--handoff`; then the card (`--runcard`, `--parent`); then the spec
+  (`--spec`, `--plan`'s `Design:` line, a file `--artifact`) through its latest approval; then
+  the unit (`--unit`, a unit-id `--artifact`) over the open handoffs whose state files it.
+  `review-spec`, or a card recording `handoff: null`, ends the resolution at none."""
+  if args is None:
+    return None
+  get = lambda key: getattr(args, key, None)
+  if get("handoff"):
+    return get("handoff")
+  if get("skill") == "review-spec":
+    return None
+  for key in ("runcard", "parent"):
+    path = st.path("runcards", get(key)) if get(key) else None
+    if path and path.is_file():
+      card = json.loads(read_text(path))
+      if "handoff" in card:
+        return card["handoff"]
+  artifact = get("artifact")
+  spec = get("design") or (spec_of_plan(get("plan")) if get("plan") else None) \
+      or (artifact if artifact and Path(str(artifact)).expanduser().is_file() else None)
+  if spec:
+    entries = load_approvals(st, spec)
+    return entries[-1].get("handoff_id") if entries else None
+  unit = get("unit") or (artifact if artifact and UNIT_ID_RE.match(str(artifact)) else None)
+  if unit:
+    filed = []
+    for row in handoffs(st.root):
+      state = st.root / row["id"] / "state.json"
+      units = json.loads(read_text(state)).get("units") or {} if state.is_file() else {}
+      if not row.get("closed_at") and (units.get(unit) or {}).get("number"):
+        filed.append(row["id"])
+    if len(filed) > 1:
+      raise HandoffError(f"store: {unit} is filed in {' and '.join(filed)}: pass --handoff")
+    return filed[0] if filed else None
+  return None
 
 
 def store(repo_root: Path) -> Store:
-  """The store `.superegm/config.json` names, with the handoff `state.json` records."""
+  """The store `.superegm/config.json` names and the handoff, resolved once from `CURRENT_ARGS`;
+  a flat store (`state.json` at the root) is read in place as its one `legacy` handoff."""
   global STORE
   config = load_config(repo_root)
   root = Path(config["artifacts_dir"])
   flat = root / "state.json"
-  STORE = Store(root, handoff_id=json.loads(read_text(flat)).get("handoff_id") if flat.is_file() else None,
-                config=config, legacy=True)
+  if flat.is_file():
+    STORE = Store(root, handoff_id=json.loads(read_text(flat)).get("handoff_id"), config=config, legacy=True)
+    return STORE
+  st = Store(root, config=config)
+  st.handoff_id = resolve_handoff(st, CURRENT_ARGS)
+  STORE = st
   return STORE
 
 
@@ -404,9 +494,9 @@ def card_add(store: Store, id: str, key: str, item) -> None:
 
 
 def load_approval(store: Store, spec: Path):
-  """The `approvals/<spec-slug>.json` record of this spec, or None."""
-  path = store.path("approvals", spec_slug(spec))
-  return json.loads(read_text(path)) if path.is_file() else None
+  """The latest approval of this spec, its history's last entry, or None."""
+  entries = load_approvals(store, spec)
+  return entries[-1] if entries else None
 
 
 def journal(store: Store, line: str) -> None:
@@ -1750,11 +1840,35 @@ def add_parser(subparsers, name, help_text, *, runcard=True):
   return p
 
 
+class Parser(argparse.ArgumentParser):
+  """The top-level parser: `parse_args` records the arguments in `CURRENT_ARGS`, which `store()`
+  resolves the handoff from."""
+
+  def parse_args(self, args=None, namespace=None):
+    global CURRENT_ARGS
+    CURRENT_ARGS = None
+    CURRENT_ARGS = super().parse_args(args, namespace)
+    return CURRENT_ARGS
+
+
+def add_handoff_flag(parser) -> None:
+  """`--handoff <id>` on every leaf subparser (spec section 7)."""
+  children = [a for a in parser._actions if isinstance(a, argparse._SubParsersAction)]
+  if not children:
+    if "--handoff" not in parser._option_string_actions:
+      parser.add_argument("--handoff", help="the handoff this command acts on (default: resolved from the card, spec or unit)")
+    return
+  for action in children:
+    for child in dict.fromkeys(action.choices.values()):
+      add_handoff_flag(child)
+
+
 def build_parser():
-  parser = argparse.ArgumentParser(prog="superegm.py", description=__doc__.splitlines()[0])
+  parser = Parser(prog="superegm.py", description=__doc__.splitlines()[0])
   sub = parser.add_subparsers(dest="command", required=True)
   for name in SUBCOMMANDS:
     importlib.import_module(f"superegm.{name}").register(sub)
+  add_handoff_flag(parser)
   return parser
 
 
