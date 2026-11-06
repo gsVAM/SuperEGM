@@ -119,9 +119,13 @@ def rule(args) -> int:
   decision = next((d for d in data["decisions"] if d["id"] == args.decision), None)
   if decision is None:
     raise Refusal(f"decision: {unit} has no decision {args.decision}")
-  if any(r["decision"] == args.decision for r in data["rulings"]):
-    raise Refusal(f"decision: {args.decision} already ruled")
   head, _, reason = args.ruling.partition(" — ")
+  ruled = [r for r in data["rulings"] if r["decision"] == args.decision]
+  # Point 1 takes one ruling per contested finding (`<fid> finding upheld | overruled`, the leavemealone row's
+  # "one call per finding"); the other points take one ruling.
+  fid_of = lambda text: text.partition(" — ")[0].strip().split(" ")[0]
+  if ruled and (decision["point"] != 1 or any(fid_of(r["ruling"]) == fid_of(head) for r in ruled)):
+    raise Refusal(f"decision: {args.decision} already ruled")
   chosen = check_ruling(decision["point"], decision["options"], head.strip())
   if closed:
     posted = f"closed #{closed}"

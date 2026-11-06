@@ -291,6 +291,22 @@ def test_decision_open_records_the_question_and_prints_its_options(world, point,
 # ---------------------------------------------------------------- S5: decision rule
 
 
+def test_point_1_takes_one_ruling_per_contested_finding(world):
+  """1.1.3 fix (wave-0021, U18 round 4): a point-1 decision carries every contested finding of the round, and the
+  leavemealone row rules them one call per finding; only a second ruling on the same finding is refused."""
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})
+  qid = world.run("decision", "open", "--unit", "U01", "--point", 1, "--question", question(world),
+                  "--source", "review head-U01-c1 round 4", "--runcard", card)[1].splitlines()[0]
+  rule = lambda ruling: world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", ruling, "--by", "judges:p-1", "--runcard", card)
+  assert rule("f-4-1 finding upheld")[0] == 0
+  assert rule("f-4-2 finding overruled — the plan says so")[0] == 0
+  assert rule("f-4-1 finding overruled — changed my mind") == (1, f"decision: {qid} already ruled\n")
+  rulings = foreman_of(s, "U01")["rulings"]
+  assert [r["ruling"] for r in rulings if r["decision"] == qid] == ["f-4-1 finding upheld", "f-4-2 finding overruled — the plan says so"]
+  assert len(world.gh.comments[2]) == 2, "one **Ruling:** comment per finding, none for the refusal"
+
+
 @pytest.mark.parametrize("point,source,ruling,posted", [
   (1, "review head-U01-c1 round 2", "f-2-1 finding overruled — the test already covers it",
    "**Ruling:** f-2-1 finding overruled — the test already covers it"),
