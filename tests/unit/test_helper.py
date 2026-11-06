@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+import superegm
 from conftest import (ROOT, SCRIPTS, HELPER, REPO, DESIGN, Harness, make_world, make_repo, make_pr, set_config, applied, dry_run, state_of, unit_path, close_as_completed, git, mark_launched, launchable)
 
 
@@ -228,7 +229,7 @@ def test_store_paths_are_prefixed_by_the_handoff_hex(world):
   root = world.artifacts
   assert superegm.store(world.repo).root == root and not str(root).startswith(str(world.repo))
   assert superegm.load_config(world.repo)["_source"].endswith(".superegm/config.json")
-  a, b = superegm.Store(root, handoff_id="sample-111111"), superegm.Store(root, handoff_id="sample-222222")
+  a, b = superegm.Store(root, handoff_id="sample-111111", legacy=True), superegm.Store(root, handoff_id="sample-222222", legacy=True)
   assert a.path("state") == b.path("state") == root / "state.json"
   assert a.path("runcards", "plan-0001") == root / "runcards/plan-0001.json"
   assert a.path("approvals", "sample") == root / "approvals/sample.json"
@@ -238,7 +239,7 @@ def test_store_paths_are_prefixed_by_the_handoff_hex(world):
   assert a.path("launches", "U01_r1_prompt.md") == root / "111111/launches/U01_r1_prompt.md"
   assert a.path("review", "U01", 7) == root / "111111/review/U01/pr7" and a.path("worktrees", "U01") == root / "111111/worktrees/U01"
   with pytest.raises(superegm.HandoffError, match="no handoff in this store"):
-    superegm.Store(root).path("foreman", "U01")
+    superegm.Store(root, legacy=True).path("foreman", "U01")
   superegm.atomic_write(a.path("foreman", "U01"), {"rounds": []})
   assert json.loads((root / "111111/foreman/U01.json").read_text(encoding="utf-8")) == {"rounds": []}
   superegm.atomic_write(a.path("file", "x.diff"), b"\x00bin")
@@ -249,6 +250,29 @@ def test_store_paths_are_prefixed_by_the_handoff_hex(world):
   assert superegm.spec_slug("/x/docs/specs/2026-11-03-superegm-design.md") == "2026-11-03-superegm-design"
   assert not list(root.rglob("*.tmp*"))
   assert world.run("graph", "--plan", world.plan)[0] == 0 and (root / "state.json").is_file()
+
+
+H = "2026-11-03-superegm-a6b9b0"
+NEW = [("state", (), f"{H}/state.json"), ("journal", (), f"{H}/journal.md"), ("plan", (), f"{H}/handoff_plan.md"), ("units", (), f"{H}/handoff_units.json"),
+       ("bodies", (), f"{H}/handoff_bodies.md"), ("unit", ("U17",), f"{H}/unit_U17.md"), ("foreman", ("U17",), f"{H}/foreman/U17.json"),
+       ("launches", ("U17_r1_bin", "gh"), f"{H}/launches/U17_r1_bin/gh"), ("review", ("U17", 7), f"{H}/review/U17/pr7"), ("worktrees", ("U17",), f"{H}/worktrees/U17"),
+       ("orient", ("map.md",), f"{H}/orient/map.md"), ("orient_unit", ("U17.md",), f"{H}/orient/U17.md"), ("report", (2,), f"{H}/wave_2_report.md"),
+       ("wave_report", (1,), f"{H}/wave_1_report.md"), ("file", ("handoff_dryrun.md",), f"{H}/handoff_dryrun.md"),
+       ("runcards", ("plan-a6b9b0-0001",), f"{H}/runcards/plan-a6b9b0-0001.json"), ("runcards", ("review-spec-1f2e3d-0001",), "runcards/review-spec-1f2e3d-0001.json"),
+       ("reviews", ("plan-U17-c1", "review.json"), f"{H}/reviews/plan-U17-c1/review.json"), ("reviews", ("spec-sample-c1",), "reviews/spec-sample-c1"),
+       ("reviews", ("spec-sample-integrate-c1",), f"{H}/reviews/spec-sample-integrate-c1"), ("judges", ("spec-sample-c1-cap-0214d6",), "judges/spec-sample-c1-cap-0214d6"),
+       ("judges", ("U17-D1-0214d6",), f"{H}/judges/U17-D1-0214d6"), ("questions", ("U17-D1.md",), f"{H}/questions/U17-D1.md"),
+       ("approvals", ("sample",), "approvals/sample.json"), ("approvals", ("sample.json",), "approvals/sample.json"), ("handoffs", (H,), f"handoffs/{H}.json")]
+LEGACY = [("state", (), "state.json"), ("unit", ("U17",), "a6b9b0/unit_U17.md"), ("foreman", ("U17",), "a6b9b0/foreman/U17.json"), ("orient", ("map.md",), "orient/map.md"),
+          ("orient_unit", ("U17.md",), "a6b9b0/orient/U17.md"), ("reviews", ("a6b9b0-plan-U17-c1",), "reviews/a6b9b0-plan-U17-c1"), ("runcards", ("plan-0001",), "runcards/plan-0001.json")]
+
+@pytest.mark.parametrize("legacy, kind, parts, rel", [(False, *row) for row in NEW] + [(True, *row) for row in LEGACY])
+def test_store_paths_under_the_handoff_directory(tmp_path, legacy, kind, parts, rel):
+  st = superegm.Store(tmp_path, handoff_id=H, legacy=legacy)
+  assert st.path(kind, *parts) == tmp_path / rel and st.kind_of(tmp_path / rel) == st.ALIASES.get(kind, kind)
+  with pytest.raises(superegm.HandoffError, match="no handoff in this store"):
+    superegm.Store(tmp_path).path("unit", "U17")
+  assert superegm.Store(tmp_path).path("journal") == tmp_path / "journal.md" and superegm.Store(tmp_path).path("runcards", "review-spec-1f2e3d-0001") == tmp_path / "runcards/review-spec-1f2e3d-0001.json"
 
 
 WRITES = {"approve_spec": {"approvals"}, "graph": {"state", "plan", "units", "unit", "bodies"},
@@ -646,7 +670,7 @@ def test_store_kinds_answer_to_the_interfaces_names(world):
   S3's test names `plan|units|bodies|report`. A sibling unit may use either."""
   import superegm
   root = world.artifacts
-  a = superegm.Store(root, handoff_id="sample-111111")
+  a = superegm.Store(root, handoff_id="sample-111111", legacy=True)
   assert a.path("handoff_plan") == a.path("plan") and a.path("handoff_units") == a.path("units")
   assert a.path("handoff_bodies") == a.path("bodies") and a.path("wave_report", 2) == a.path("report", 2)
   assert a.path("approvals", "sample.json") == a.path("approvals", "sample")
@@ -681,7 +705,7 @@ def test_builder_app_key_and_the_bin_kind(world, value, message):
   assert superegm.load_config(world.repo)["builder"]["app"] == APP
   set_config(world, repo=REPO, builder={k: v for k, v in superegm.DEFAULT_CONFIG["builder"].items() if k != "app"})
   assert superegm.load_config(world.repo)["builder"]["app"] is None
-  a = superegm.Store(world.artifacts, handoff_id="sample-111111")
+  a = superegm.Store(world.artifacts, handoff_id="sample-111111", legacy=True)
   p = a.path("launches", "U07_r1_bin", "gh")
   assert p == world.artifacts / "111111/launches/U07_r1_bin/gh" and a.kind_of(p) == "launches"
 
