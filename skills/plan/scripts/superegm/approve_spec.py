@@ -46,7 +46,7 @@ def units_is_last_h2(text: str) -> bool:
 
 def handoff_state(st: core.Store, hid: str) -> dict:
   """The `state.json` of handoff `hid`: its directory's, or the flat one in a legacy store."""
-  path = core.Store(st.root, handoff_id=hid, legacy=st.legacy).path("state")
+  path = core.handoff_store(st, hid).path("state")
   return json.loads(core.read_text(path)) if path.is_file() else {}
 
 
@@ -121,6 +121,12 @@ def branch_holds(repo_root: Path, rel: str, sha256: str) -> bool:
   return False
 
 
+def require_branch_holds(st: core.Store, repo_root: Path, rel: str, entry: dict) -> None:
+  """Refuse a branch that never folded the history's last entry: no commit of it holds that entry's bytes."""
+  if not branch_holds(repo_root, rel, entry["sha256"]):
+    raise core.HandoffError(f"approve-spec: fold {st.config['base']} first: approval {entry['sha256'][:7]} is not in this branch")
+
+
 def commit_by_path(repo_root: Path, paths: list[str], message: str, trailer: str) -> str:
   """Add and commit `paths` alone, ignoring other changes in the tree, `trailer` (when set) after a
   blank line; the commit may be empty."""
@@ -161,8 +167,8 @@ def run(args):
   if not (root / CONFIG).is_file():
     raise core.HandoffError(f"approve-spec: {CONFIG} missing: run superegm init")
   last = core.load_approval(st, spec)
-  if last and not branch_holds(root, spec.relative_to(root).as_posix(), last["sha256"]):
-    raise core.HandoffError(f"approve-spec: fold {st.config['base']} first: approval {last['sha256'][:7]} is not in this branch")
+  if last:
+    require_branch_holds(st, root, spec.relative_to(root).as_posix(), last)
   escalated =escalated_pairs(st, spec, int(last["review"].rsplit("-c", 1)[1]) if last and last.get("review") else 0)
   if escalated:
     print(f"approve-spec: {len(escalated)} escalated finding(s) await the owner: {', '.join(escalated)}")
@@ -204,7 +210,7 @@ def void_approval(args, st: core.Store, spec: Path) -> int:
     core.atomic_write(path, record)
   core.journal(st, f"approve-spec void {slug} by review {rid} under {args.runcard}")
   hid = entries[-1].get("handoff_id")
-  voided = core.Store(st.root, handoff_id=hid, config=st.config, legacy=st.legacy)
+  voided = core.handoff_store(st, hid)
   state = handoff_state(st, hid) or {"handoff_id": hid}  # a handoff never planned: a minimal state.json
   if hid and not files_a_unit(state) and not state.get("closed_at"):
     close.write_closed(voided, state, "voided")
@@ -220,6 +226,7 @@ def amend_units(args, st: core.Store, spec: Path, root: Path) -> int:
   if approval is None:
     raise core.HandoffError("approve-spec: no approval to amend")
   rel = spec.relative_to(root).as_posix()
+  require_branch_holds(st, root, rel, approval)
   approved = core.run_git(["show", f"{approval['commit']}:{rel}"], root)
   if before_units(approved) != before_units(core.read_text(spec)):
     raise core.HandoffError("approve-spec: a line outside ## Units changed")

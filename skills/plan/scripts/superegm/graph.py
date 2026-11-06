@@ -186,12 +186,10 @@ class Plan(core.Plan):
 
 def filed_in(store: core.Store, spec: Path) -> dict:
   """`{unit: handoff id}` of the units the spec's other handoffs (every id its approval history names but
-  the store's own) file in their `state.json`; none in a legacy store, which holds one handoff."""
-  if store.legacy:
-    return {}
+  the store's own) file in their `state.json`, each read in its own place (a legacy handoff's at the root)."""
   filed = {}
   for hid in dict.fromkeys(e.get("handoff_id") for e in core.load_approvals(store, spec)):
-    path = store.root / hid / "state.json" if hid and hid != store.handoff_id else None
+    path = core.handoff_store(store, hid).path("state") if hid and hid != store.handoff_id else None
     if path and path.is_file():
       for uid, record in (json.loads(core.read_text(path)).get("units") or {}).items():
         if (record or {}).get("number"):
@@ -221,11 +219,14 @@ class Handoff(core.Handoff):
     self.design_path = design.resolve()
     self.design_sha = core.sha256_file(self.design_path)
     self.repo_root = core.git_toplevel(self.design_path)
-    # The handoff's own approval: the last entry carrying the resolved handoff's id, else the history's last; an
-    # older handoff's spec may stand at a later link of the chain (spec section 7).
+    # The handoff's own approval: the last entry carrying the resolved handoff's id, else (no handoff resolved, or
+    # a legacy store's) the history's last; an older handoff's spec may stand at a later link of the chain (spec
+    # section 7). A 1.2 handoff no entry of this spec names is another spec's: refused, never rebound.
     entries = core.load_approvals(store, self.design_path)
-    own = [i for i, e in enumerate(entries) if store.handoff_id and e.get("handoff_id") == store.handoff_id] \
-        or ([len(entries) - 1] if entries else [])
+    own = [i for i, e in enumerate(entries) if store.handoff_id and e.get("handoff_id") == store.handoff_id]
+    if store.handoff_id and not store.legacy and entries and not own:
+      raise core.HandoffError(f"graph: {store.handoff_id} is not a handoff of {self.design_path.name}")
+    own = own or ([len(entries) - 1] if entries else [])
     approval = entries[own[-1]] if own else None
     later = {e["sha256"] for e in entries[own[-1] + 1:]} if own else set()
     if not approval or approval.get("voided_by") or (approval["sha256"] != self.design_sha and self.design_sha not in later):

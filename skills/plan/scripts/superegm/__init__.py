@@ -202,9 +202,12 @@ class Store:
 
   @staticmethod
   def card_segment(card_id: str):
-    """The hex segment of a `<skill>-<6 hex>-<n>` card id, or None for a `<skill>-<n>` one."""
+    """The hex segment of a `<skill>-<6 hex>-<n>` card id, or None for a `<skill>-<n>` one (a legacy
+    `review-spec-0001` included: its `spec` is the skill's second word, not a segment)."""
     parts = str(card_id).removesuffix(".json").rsplit("-", 2)
-    return parts[1] if len(parts) == 3 and parts[2].isdigit() else None
+    if len(parts) != 3 or not parts[2].isdigit() or f"{parts[0].rsplit('-', 1)[-1]}-{parts[1]}" in ("review-spec", "review-plan"):
+      return None
+    return parts[1]
 
   def card_dir(self, card_id: str) -> Path:
     """`runcards/` of the handoff whose id ends with the card's segment, else the store's."""
@@ -274,9 +277,9 @@ class Store:
       return level(parts[0])
     if parts[0] in self.LEVEL + ("runcards",) + self.SHARED:
       return parts[0]
+    if parts[0] == "orient":  # the root's `orient/`: a legacy store's, or no handoff resolved
+      return "orient"
     if self.legacy:
-      if parts[0] == "orient":
-        return "orient"
       if re.fullmatch(r"[0-9a-f]{6}", parts[0]):
         if len(parts) == 2 and re.fullmatch(r"unit_.+\.md", parts[1]):
           return "unit"
@@ -312,6 +315,19 @@ def handoffs(root: Path) -> list:
     return [{"id": hid, "spec": (state.get("design") or {}).get("path"),
              "opened_at": None, "closed_at": state.get("closed_at"), "legacy": True}] + [r for r in rows if r["id"] != hid]
   return rows
+
+
+def flat_handoff_id(root: Path):
+  """The id of a flat 1.0/1.1 store's handoff (`state.json` at the root), else None."""
+  flat = Path(root) / "state.json"
+  return json.loads(read_text(flat)).get("handoff_id") if flat.is_file() else None
+
+
+def handoff_store(st: Store, hid) -> Store:
+  """The store as handoff `hid` reads it: flat (`legacy`) when `hid` is the root `state.json`'s handoff,
+  else under `<hid>/`, whatever handoff `st` resolved."""
+  legacy = bool(hid) and hid == flat_handoff_id(st.root)
+  return Store(st.root, handoff_id=hid, config=st.config, legacy=legacy)
 
 
 def load_approvals(store: Store, spec) -> list:
@@ -396,6 +412,9 @@ def store(repo_root: Path) -> Store:
   flat = root / "state.json"
   st = Store(root, config=config)
   hid = resolve_handoff(st, CURRENT_ARGS)
+  named = getattr(CURRENT_ARGS, "handoff", None)
+  if named and named != flat_handoff_id(root) and not st.path("handoffs", named).is_file():
+    raise HandoffError(f"store: {named}: no such handoff")
   if flat.is_file():
     flat_id = json.loads(read_text(flat)).get("handoff_id")
     if not hid or hid == flat_id or not st.path("handoffs", hid).is_file():
