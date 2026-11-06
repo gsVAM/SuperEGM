@@ -222,16 +222,16 @@ def test_orient_writes_the_map_and_every_unfiled_unit(world, no_graphify):
 
 @pytest.mark.parametrize("case, reason", [
   ("no-card", "runcard: --runcard is required"),
-  ("file-card", "runcard: file-0001 belongs to file, not orient|plan|review-plan|wave"),
+  ("file-card", "runcard: <FILE CARD> belongs to file, not orient|plan|review-plan|wave"),
   ("no-plan", "orient: U01 is not in the plan: run graph --plan first"),
   ("not-in-plan", "orient: U09 is not in the plan: run graph --plan first"),
   ("bad-ref", "orient: ref nope is not in this repository"),
 ])
 def test_orient_refusals(world, no_graphify, case, reason):
-  from superegm import store
-  st, argv = store(world.repo), ["orient", "--spec", world.spec]
+  st, argv = handoff_store(world), ["orient", "--spec", world.spec]
   if case != "no-card":
     argv += ["--runcard", world.card("file" if case == "file-card" else "plan")]
+    reason = reason.replace("<FILE CARD>", argv[-1])  # `file-<the handoff's 6 hex>-0001`
   if case == "no-plan":
     argv += ["--unit", "U01"]
   if case == "not-in-plan":
