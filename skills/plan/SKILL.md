@@ -154,7 +154,7 @@ line per wave, the critical path and what it wrote.
     `scan` is clean for it. For a filed unit it leaves the plan line, the
     body and `unit_<id>.md` as filed, records the answer in
     `state.decisions` and writes `decision_comment_<unit>_D<n>.md`
-    in the handoff's directory: run `python3 '<HELPER>' scan --comment '<that file>'`,
+    in the handoff's directory: run `python3 '<HELPER>' scan --plan '<plan file>' --comment '<that file>'`,
     then post it with `GH_HOST=github.com gh issue comment <number> -R
     OWNER/NAME --body-file '<that file>'` under this card (its skill lists
     `github-write`), one Bash approval.
