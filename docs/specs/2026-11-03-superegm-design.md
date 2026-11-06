@@ -19,6 +19,7 @@ Amendment 3 (2026-11-04): the builder as a GitHub App (§11, §16), the converge
 Amendment 4 (2026-11-05): Astra on every head review (§8, §11), the redesign ruling (§11, §12, §13.2), units U17–U18, amendment-scoped review (§8), unit U19, one store per handoff (§7, §9.1), unit U20; three follow-ups (§3, §5, §7); owner-approved by text; owner ruling 2026-11-05: approval chain (§5, §11, U20); owner ruling 2026-11-05: App installation and permissions (§3.1, §4.1, §11).
 Amendment 5 (2026-11-05): the fleet layer (external-review ingest, rulings by comment, the inbox and notify hook, the headless driver and registry, the foreman verifies), units U21–U25; owner-approved by text.
 Amendment 6 (2026-11-05): external review on the elephant's own PRs (`review ingest --pr`, §8, §11.2), unit U26; owner-approved by text.
+Amendment 7 (2026-11-06): the builder profile's plugin and MCP allow-lists (`config.builder.plugins`, `config.builder.mcp`, `Skill` and `mcp__*` rules in `allowed_tools`; §4, §7, §11, §16), unit U27; owner-approved by text.
 
 ## 1. Intent
 
@@ -296,6 +297,12 @@ isolation recorded.
   edit and a round, or by the owner's decline or a point-1 overrule), the PR open from the
   review's first round (§8); a
   plan kind and a `file` step were cut in review: no plan PR exists and `file` opens none.
+- **Amendment 7: a builder profile with no plugins (1.0.0's rule).** Reversed by the owner on
+  2026-11-06: a builder that may run no skill and no MCP tool cannot use the house's tooling
+  (context7, ponytail); the profile holds an owner-named set, each plugin without hooks or a
+  `CLAUDE.md`, recorded per launch, so what reaches the builder's context stays the owner's
+  choice and on the record. A plugin's hooks stay refused: they reach a context the owner cannot
+  see.
 
 ## 4. Constraints
 
@@ -322,8 +329,10 @@ isolation recorded.
   `effort` is passed only when the Agent tool offers that parameter. `claude -p` takes the prompt
   as text (`claude -p "$(cat <file>)"`); `--output-format json` writes one result object;
   `--permission-mode` takes `acceptEdits` or `bypassPermissions`; `--allowedTools` entries are
-  tool names or the one prefix form `Bash(<prefix>:*)`, which matches on the command's text and
-  cannot exclude a refspec; a headless session with no `Skill` entry invokes no skill.
+  tool names, the one prefix form `Bash(<prefix>:*)`, which matches on the command's text and
+  cannot exclude a refspec, and, from amendment 7, `Skill(<name>)` and `Skill(<name> *)` (exact
+  and prefix, Claude Code's own forms) and `mcp__<server>__<tool>` or `mcp__<server>__*`; a
+  headless session with no `Skill` entry invokes no skill.
 - `gh` acts as the account whose token `GH_TOKEN` holds; `git push` does so only over an HTTPS
   remote with `gh` as the credential helper, which `launch-builder` passes in the launched
   command's environment, never written to the shared git config. `git worktree add` refuses a
@@ -359,9 +368,12 @@ isolation recorded.
 - Headless sessions started by SuperEGM set `SUPEREGM_ROLE` to `builder` or `goldfish` (a tick's
   wave session, `driver`, §11.2), and
   `SUPEREGM_RUNCARD` to the run card they run under. The hook prints nothing when the role is
-  `goldfish` or `builder`. The builder profile (`config.builder.profile_dir`) is created empty by
-  the owner, with no plugins, no hooks and no `CLAUDE.md`; `launch-builder` refuses otherwise (the
-  hooks refusal is 1.1.0's, U14).
+  `goldfish` or `builder`. The builder profile (`config.builder.profile_dir`) is created by
+  the owner with no hooks and no `CLAUDE.md` and, from amendment 7, holds the plugins
+  `config.builder.plugins` names (`<name>@<marketplace>`, installed by the owner under
+  `CLAUDE_CONFIG_DIR=<profile>`) and the MCP servers `config.builder.mcp` names, and nothing
+  else; `launch-builder` refuses otherwise (the hooks refusal is 1.1.0's, U14; the plugin and MCP
+  checks are U27's, §11).
 
 **Liveness and destruction (EGM round-12 doctrine, binding)**
 - A builder launch is **terminal** when its exit file exists (the launched command writes
@@ -598,7 +610,7 @@ at a time:
 | `reviews/<review-id>/…` | the invocation that opened that review; on a head, also the foreman dispatch the round records (`review record`, `collect`, `review post`); `review ingest --pr` for `review.json`'s `ingested[]` (amendment 6, §8) |
 | `judges/<id>/…` | the invocation that opened that panel |
 | `runcards/<id>.json` | the skill that opened the card; `card_add` for later facts; a handoff's open `wave` card marked `interrupted` by `driver tick` (on its launch's exit file, or on the boot-id proof: a launch's or a typed card's recorded boot id that is not the machine's) or `driver reset` (§11.2) |
-| `launches/<unit>.json`, `launches/<unit>_r<n>_prompt.md`, `launches/<unit>_r<n>_bin/` | the elephant (`launch-builder`, `record-launch`, `interrupt --launch`); `driver tick`, `launch-builder` and `runcard open` for `interrupted (reboot)` alone (§11.2) |
+| `launches/<unit>.json`, `launches/<unit>_r<n>_prompt.md`, `launches/<unit>_r<n>_bin/`, `launches/<unit>_r<n>_plugins.json` (amendment 7: the profile's plugin and MCP set at the launch, allowed and managed, superseding the `_managed.json` of 1.1.2's fix-k) | the elephant (`launch-builder`, `record-launch`, `interrupt --launch`); `driver tick`, `launch-builder` and `runcard open` for `interrupted (reboot)` alone (§11.2) |
 | `worktrees/<unit>/` | the elephant (`launch-builder`, `/superegm:clean`) |
 | `foreman/<unit>.json`, `review/<unit>/pr<n>/` | the foreman dispatch whose `dispatch_id` the round records (`prepare --dispatch`, `collect`, `review post`); between dispatches `foreman dispatch`, `interrupt --round`, `/superegm:clean`, `review settle` (a head's `outcome`, §11), `review ingest` (`ingested[]`, and a `clean` outcome rewritten `revise`, §8) and `decision open\|rule` (`decisions[]`, `rulings[]`); `r<n>/dod/<item>.txt` by `collect` (§11) |
 | `wave_<n>_report.md` | `wave` (`superegm report`, after every batch) |
@@ -631,7 +643,10 @@ excepted (§9.3). No lock file.
   `SUPEREGM_BUILDER_TOKEN`, `app` = `null` (or `app_id`, `slug`, `private_key_env`, §11),
   `allowed_tools`: the read/edit tools, `git add|commit|status|diff|log|
   mv|rm`, `gh pr create|edit|comment`, `gh issue comment`, each as a prefix pattern; the push
-  prefix for the unit's own branch is added per launch), `ci_wait_minutes` (30), `commit_trailer` (the empty string, §8), `owners` (the
+  prefix for the unit's own branch is added per launch; from amendment 7 also `Skill(<name>)`,
+  `Skill(<name> *)`, `mcp__<server>__<tool>` and `mcp__<server>__*` rules, §4; `plugins`, the
+  plugin ids `<name>@<marketplace>` the profile may hold and enable, `init` writes `[]`; `mcp`,
+  the MCP server names the profile's `.claude.json` may define, `init` writes `[]`, §11), `ci_wait_minutes` (30), `commit_trailer` (the empty string, §8), `owners` (the
   GitHub logins that may update `<base>`; `init` writes the login `gh api user` returns; a config
   without the key loads as `[]`, and `launch` and `doctor` refuse naming the key), `owner_team`
   (optional, `<org>/<slug>`: the team a ruleset's bypass actors may name) and `pr_block_file`
@@ -1567,9 +1582,12 @@ spec-hash line, which needs an approval; `protection_problems` on the placeholde
 `.superegm/config.json` and a `pull_request` workflow are at `origin/<base>`;
 `SUPEREGM_BUILDER_TOKEN` is set; the token's login (`gh api user` with the token) is not an
 owner; the protection check of `launch` (the `superegm/**` lines read the ruleset); the builder
-profile exists and is empty of `CLAUDE.md`,
-plugins and hooks (a `settings.json` with a `hooks` key; `profile_problem` gains that check, so
-`launch-builder` refuses it too). Its own lines, which `launch` does not check: `gh` resolves on this machine
+profile exists and is empty of `CLAUDE.md` and hooks (a `settings.json` with a `hooks` key;
+`profile_problem` gains that check, so `launch-builder` refuses it too) and, from amendment 7,
+holds no plugin outside `config.builder.plugins` (a managed plugin is policy and passes; a
+synced plugin, and an allowed plugin that carries hooks or a `CLAUDE.md`, is refused) and no
+MCP server outside `config.builder.mcp`, the set printed (`plugins: <ids> | none`, `mcp:
+<names> | none`). Its own lines, which `launch` does not check: `gh` resolves on this machine
 (`shutil.which`, the path the launch bakes in, both paths); the `gh auth`
 login is in `config.owners`; the builder's role on the repository
 (`repos/<repo>/collaborators/<login>/permission`) is `write` exactly, the role found named
@@ -1682,18 +1700,21 @@ inexact ruling form binds nothing; 1.0.0 took any non-builder author, which on a
 let a passer-by's ruling-form comment order the builder, anti-goal 10; the judges' posts are under
 the elephant's token and pass), and from round 2 the foreman's review comments on the PR (the platform passes it as one
 argument, §4; a prompt past the platform's limit fails the launch, which `record-launch --exit`
-records). The launched command carries: the builder profile;
+records). The launched command carries: the builder profile (its plugin and MCP set recorded
+in `launches/<unit>_r<n>_plugins.json` at the launch, §7);
 `GH_TOKEN` from `builder.gh_token_env` (on the App path, the sentinel `GH_TOKEN` and `<bin>/gh auth git-credential` instead; on both
 paths the owner's git configuration, SSH and askpass shut out and the helper reset, §11), with the HTTPS push rewrite and credential helper in its
 environment; `SUPEREGM_ROLE=builder` and `SUPEREGM_RUNCARD`; `claude -p` with the prompt file's
-content, the configured model and permission mode; the allow-list plus a push prefix for the
+content, the configured model and permission mode; the allow-list (its `Skill(...)` and `mcp__*` rules among them, amendment 7) plus a push prefix for the
 unit's own branch and `Bash(<first word>:*)` for every command `run_commands` returns from the
 body; `--output-format json` into the result file; and the exit file on exit. The launch is
 recorded (`record-launch`), and `record-launch --exit <code>` later records the exit. An
 allow-list containing `Agent`, `Skill` or bare `Bash` is refused.
 
 **The builder orders** (`references/builder_orders.md`, absorbing superpowers' implementer prompt
-and the discipline of its receiving-code-review and test-driven-development skills): follow the
+and the discipline of its receiving-code-review and test-driven-development skills): the skills
+the builder may invoke are the ones its allow-list's `Skill` rules name, written into the orders
+at the launch (amendment 7; none when the list has no rule); follow the
 Steps in order, test first, one `test(S<n>)` commit then one `feat(S<n>)` commit per Step; run
 every DoD `Run` command and paste each item's output in the PR body under its item number as a
 fenced block; push with `git push origin <branch>` and never to any other branch; open a
@@ -2318,7 +2339,7 @@ Naming: adapter file `.claude-plugin/agents/<id>.md`, frontmatter `name: <id>`, 
 | new | `judges` | external: start-session, state-store, github-write | typed | owner (leavemealone skills call the `judges` helper subcommands directly) | §13 |
 | test-driven-development, systematic-debugging, verification-before-completion (sp) | same names | working-tree | auto, phase-gated | owner fixes on a filed unit's branch (builders invoke no skills; the orders carry the discipline) | the phase sentence |
 | writing-skills (sp) | same name | working-tree | auto | owner, maintaining this plugin | |
-| using-superpowers (sp) | `using-superegm` | none | hook + auto | every elephant session (the builder profile has no plugins) | the dispatcher text; one platform reference |
+| using-superpowers (sp) | `using-superegm` | none | hook + auto | every elephant session (the builder profile holds the plugins `config.builder.plugins` names, amendment 7, never this one) | the dispatcher text; one platform reference |
 | egm-drift-report (egm) | `drift-report` | working-tree | typed | owner, after `integrate` | writes `<date>_DRIFT_REPORT.md` |
 | egm-bootstrap (egm); executing-plans, subagent-driven-development, requesting-code-review, receiving-code-review, dispatching-parallel-agents, using-git-worktrees, diagnosing-superpowers (sp); egm-brainstorm (egm) | **retired** | | | | no caller in the workflow; their surviving content lives in `builder_orders.md` and `brainstorming` |
 
@@ -2361,8 +2382,11 @@ Grep, Glob]`, `omitClaudeMd: true`); and `foreman` (tools `[Agent, Bash, Read, G
   names a mechanism §3.1 removed or a form this spec changed.
 - Install: `claude plugin marketplace add gsVAM/superegm` then `claude plugin install
   superegm@superegm`. The README tells the owner to disable `egm@egm-astra` and
-  `superpowers@claude-plugins-official` first; to create the builder account, its token and an
-  empty builder profile (step 1 is the token recipe of §11; `owner_team` is documented in
+  `superpowers@claude-plugins-official` first; to create the builder account, its token and a
+  builder profile holding the plugins and MCP servers `config.builder.plugins` and
+  `config.builder.mcp` name and nothing else (step 1 is the token recipe of §11; the profile's
+  plugins are installed under `CLAUDE_CONFIG_DIR=<profile>` with `claude plugin marketplace add`
+  and `claude plugin install <id>`, amendment 7; `owner_team` is documented in
   `docs/getting_started.md`); to set the branch protection of §11 (updates to the
   base branch restricted to the owner with no bypass for the builder account; `superegm/**`
   protected from force-push and deletion) and a workflow triggered on `pull_request`; to run
@@ -2388,7 +2412,7 @@ Grep, Glob]`, `omitClaudeMd: true`); and `foreman` (tools `[Agent, Bash, Read, G
 
 ## 17. Units
 
-The unit graph for building SuperEGM 1.0.0 (thirteen units), from amendment 2, 1.1.0 (U12–U14) and, from amendment 3, 1.1.1 (U15–U16) and, from amendment 4, 1.1.2 (U17–U20) and, from amendments 5 and 6, 1.2 (U21–U26). Each unit's plan must fit 48 KB.
+The unit graph for building SuperEGM 1.0.0 (thirteen units), from amendment 2, 1.1.0 (U12–U14) and, from amendment 3, 1.1.1 (U15–U16) and, from amendment 4, 1.1.2 (U17–U20) and, from amendments 5–7, 1.2 (U21–U27). Each unit's plan must fit 48 KB.
 Interfaces are subcommand contracts and file keys unless marked `py`. A Consumes producer may be
 a transitive blocker. After U01 every 1.0.0 skill folder and adapter of §14 exists (the new ones
 as stubs), so the later 1.0.0 units modify and never create skill folders, adapters or personas;
@@ -2429,6 +2453,7 @@ handoff is planned; the amendment-4 paragraph below); a later handoff on this sp
 | U24 | The headless driver and the registry (§11.2): `register [--remove]`, `~/.superegm/registry.json`, `driver tick\|install\|uninstall\|status\|reset`, the launchd agent with `AbandonProcessGroup` (on Linux a systemd user timer, `KillMode=process`), `install --interval`, `~/.superegm/env`, `driver/<handoff>.json`, `inbox --all`, `SUPEREGM_ROLE=driver`, the `driver` skill, `doctor`'s driver line, the typed `wave`'s refusal while a tick's launch has no exit file: `skills/plan/scripts/superegm/driver.py` (create), `inbox.py` (modify: `--all`; the driver items; `notify` under a `driver` card), `status.py` (modify: the tick's read), `review.py` (modify: the stall read across `wave` cards), `launch.py` (modify: a pending unit holds no slot), `launch_builder.py` (modify: `--start`, the wrapper as the detached process; the reboot proof in the terminal check), `__init__.py` (modify: `runcard open`'s refusal for `wave`, `plan`, `file`, `integrate`, `review-plan` and `orient`, its `driver_card` write and its reboot proof, the `driver` store kind, `SUBCOMMANDS`), `doctor.py` (modify: the `driver:`, `env:` and notify-hook-sha lines, information only), `skills/driver/SKILL.md` (create, with `assets/icon.svg` and `test_scenarios.yaml`), `skills/wave/SKILL.md` (modify: the `SUPEREGM_ROLE=driver` paragraph: never ask, journal and end), `skills/using-superegm/SKILL.md`, `docs/claude.md`, `README.md` (modify), `tests/unit/test_driver.py` (create), the `--start` test beside U09's launch tests, `test_inbox.py`, `test_doctor.py`, `test_helper.py`, `test_packaging.py`, `test_effects.py`, `test_skeleton.py` (modify) | U23; after U25 on shared files | L |
 | U25 | The foreman verifies (§11, §8): the DoD re-run gate and the test-delta gate in `collect`, `r<n>/dod/<item>.txt`, `rounds[].dod_runs`, `rounds[].test_delta`, the finding ids `dod-<n>` and `test-delta`, `config.foreman.run_timeout_minutes`, the `test-delta` settle rule and the `allowed` rulings of `test-delta` and `dod-<n>`, `doctor`'s `python3.12` line: `skills/plan/scripts/superegm/collect.py` (modify: both gates, inputs read before the first run), `review.py` (modify: the settle rule; `review post`'s `gates not run` refusal and `owner: <ids>` outcome), `prepare.py` (modify: the review worktree removed by force; the hook-free git calls), `launch_builder.py` (modify: the hook-free git calls), `doctor.py` (modify: the `python3.12` line, the hooks-directory and `core.hooksPath` lines), `__init__.py` (modify: `DEFAULT_CONFIG.foreman`), `init.py` (modify), `skills/wave/references/foreman_brief.md` (modify: the word is given only after both gates ran; the `owner` word), `skills/wave/SKILL.md` (modify: the `owner` word's row), `resources/review_panels.md` (modify: the foreman list gains both ids), `tests/unit/test_foreman.py`, `test_review.py`, `test_wave.py`, `test_doctor.py`, `test_helper.py` (modify) | U22 (`ruling_of`; U17 landed); after U21 and U23 on shared files | M |
 | U26 | External review on the elephant's own PR (§8): `review ingest --pr <n>` (kind `spec`), U21's reader, severity map and bot/human rules reused, findings into the spec's latest cycle, closed by `accept` or not, `review.json`'s `ingested[]`, the `**Reply <fid>:** fixed` post on the thread under the elephant's token, `approve-spec`'s one ingest before its refusals and its one check (an unsettled external high or medium in the latest round, after the carry-forward, refuses, `by ruling` or not), `review-spec`'s `github-write` and `remote-branch`, the PR opened by the skill's preflight (refusing on `<base>`, committing the spec by path, pushing first) and the push after each fix and the approval commit, step 4's path back to step 3 on the refusal: `skills/plan/scripts/superegm/review.py` (modify: `--pr`, the review-level `ingested[]`, the reply post), `approve_spec.py` (modify: the one ingest call and the one check), `skills/review-spec/SKILL.md` (modify: the preflight's PR, the per-round fix commit §5 assumes and the push after it and after the approval commit, step 4's path back to step 3 on the ingest's refusal; the frontmatter's `github-write` and `remote-branch`), `docs/claude.md`, `README.md` (modify), `tests/unit/test_review.py`, `test_effects.py`, `test_helper.py` (modify) | U21; after U24 on shared files | M |
+| U27 | The builder's skill and MCP allow-lists (§4, §7, §11, §16): `config.builder.plugins` (`<name>@<marketplace>`; `init` writes `[]`) and `config.builder.mcp` (server names; `init` writes `[]`), `launch-builder`'s refusals (a non-managed plugin outside the list, a synced plugin, an allowed plugin carrying hooks or a `CLAUDE.md`, an MCP server outside the list; managed plugins stay policy), the per-launch record `launches/<unit>_r<n>_plugins.json` (superseding `_managed.json`), `doctor`'s `plugins:` and `mcp:` lines, `Skill(<name>)` / `Skill(<name> *)` and `mcp__<server>__<tool>` / `mcp__<server>__*` rules in `allowed_tools`, the skills named in the builder orders at the launch: `skills/plan/scripts/superegm/launch_builder.py` (modify: the checks, the record, the orders' skill line), `doctor.py` (modify: the two lines), `__init__.py` (modify: `DEFAULT_CONFIG.builder.plugins` and `.mcp`), `init.py` (modify), `skills/wave/references/builder_orders.md` (modify: the skills line), `docs/claude.md`, `README.md`, `docs/getting_started.md` (modify: the profile's install steps), `tests/unit/test_builders.py`, `test_doctor.py`, `test_helper.py` (modify) | — (U14, U15 landed); after U24 and U26 on shared files | M |
 
 Shared files of the 1.0.0 build: `test_helper.py` is U03's alone. `body.py` is U03's and then U05's (the derived Step
 defaults), which U03 blocks. Each workflow SKILL.md stub U01 creates is filled
@@ -2511,12 +2536,12 @@ heading narrows or widens the scope; the tests pin the mapping on a fixture spec
 that a legacy flat store still reads and that `launch` refuses a base spec off the chain). The version bump to 1.1.2, the tag and the release are the
 owner's by-hand steps after all four merge, as before.
 
-Amendment 5 and 6 units (1.2): U21–U26 are filed from this spec as a fifth handoff (the helper's id
+Amendment 5, 6 and 7 units (1.2): U21–U27 are filed from this spec as a fifth handoff (the helper's id
 form; the owner's name for it, `2026-11-05-superegm-1.2`, is the tracking issue's title and
 nothing else), through the installed 1.1.2 (`orient`, `review-spec --reviewers design`, approve,
 `plan`, `review-plan --reviewers readiness,proportion`, `file`, then `wave` through SuperEGM
 itself: the App builder, Astra on heads, `redesign` available), under the landed-row rule (a plan
-for it carries sections for U21–U26 only; U17–U20 landed, so no `Blocked by` names them). Once
+for it carries sections for U21–U27 only; U17–U20 landed, so no `Blocked by` names them). Once
 U21 lands and the plugin is updated from the tree, the next `wave`, typed in a new session (§5: a
 wave is one invocation, and an update takes a new session), ingests Devin's reviews of the later
 1.2 PRs, and the next amendment's spec PR, opened by the review's preflight, is the first
@@ -2527,17 +2552,20 @@ the elephant's own branch being outside the `superegm/**` rule, so the PR's head
 order is the panel's (`1.2-questions-e8857c`, two rounds, Claude-only, every question converged;
 the owner accepted every verdict and amended the test-suite non-goal on their own word): ingest
 and rulings first, then the inbox, then the driver; U25 sits where its shared files put it, and
-U26 (amendment 6) last, after U21 by its blocker and after U24 on `review.py`.
+U26 (amendment 6) after U21 by its blocker and after U24 on `review.py`, and U27 (amendment 7)
+last, after U24 and U26 on the files below.
 Shared files: `collect.py` is U21's, then U22's, then U25's; `review.py` U21's, then U25's, U24's, U26's;
-`skills/wave/SKILL.md` U21's, then U22's, U23's, U25's, U24's; `__init__.py` U21's, U23's, U25's and U24's, `init.py` U21's, U23's and U25's, and
+`skills/wave/SKILL.md` U21's, then U22's, U23's, U25's, U24's; `__init__.py` U21's, U23's, U25's, U24's and U27's, `init.py` U21's, U23's, U25's and U27's, and
 `test_helper.py` every unit's, one per wave (disjoint keys, but a wave has no order inside it,
 §9.1: so U25 follows U23 and U24 follows U25 on them); `inbox.py` and `test_inbox.py`
-U23's, then U24's; `launch.py` U21's, then U24's; `doctor.py` and `test_doctor.py` U25's, then U24's; `launch_builder.py` U22's, then U25's, then U24's; `docs/claude.md` and `README.md` in
+U23's, then U24's; `launch.py` U21's, then U24's; `doctor.py` and `test_doctor.py` U25's, then U24's, then U27's; `launch_builder.py` U22's, then U25's, U24's, U27's; `docs/claude.md` and `README.md` in
 wave order. Waves: {U21} → {U22} →
-{U23} → {U25} → {U24} → {U26}; version 1.2.0 after all six merge (manifests, `docs/releases.md`, tag,
+{U23} → {U25} → {U24} → {U26} → {U27}; version 1.2.0 after all seven merge (manifests, `docs/releases.md`, tag,
 release, plugin update: the owner's by-hand steps), after which `superegm driver install` (re-typed
-after every later update), `~/.superegm/env`, `register` from each handoff's worktree and a machine kept awake
-(`pmset`/`caffeinate`) are the owner's by-hand steps, as the App
+after every later update), `~/.superegm/env`, `register` from each handoff's worktree, a machine kept awake
+(`pmset`/`caffeinate`) and the builder profile's plugins installed (amendment 7: `ponytail` and
+`context7`, this repository's choice, with `Skill` and the two context7 tools in
+`allowed_tools`) are the owner's by-hand steps, as the App
 registration was for 1.1.1. Risk: U21 medium (a human medium
 returns an awaiting-merge unit to flight, which is the owner's wish; a flood of bot lows never
 blocks; the elephant's token reads, and posts the one review comment); U22 medium (a compromised owner login is a
@@ -2549,7 +2577,10 @@ one handoff are prevented on both sides, the tick's (the exit file and the open 
 typed `wave`'s (`runcard open`'s refusal);
 the plist runs only what the plugin root names); U25 medium (the head's code runs on the owner's
 machine, §4.1); U26 low (reads; opens the spec PR and posts replies on it under the owner's token; pushes
-the elephant's branch after each fix and the approval commit, never `<base>`).
+the elephant's branch after each fix and the approval commit, never `<base>`); U27 medium (a
+plugin in the builder's profile runs in the builder's context with the builder's token: the
+owner's named set alone, no hooks, no `CLAUDE.md`, managed plugins policy, the set on the record
+per launch).
 Plan-review focus: U21 a PR with 200 bot threads
 and one human medium, and a thread on a head not yet reviewed; U22 a comment one character off
 the form, and an owner's edit after the record; U23 a store with no open handoff, and the inbox's `test-delta` and `owner: <ids>` kinds built against §7's schema with fixture data (U25 lands after U23); U24 a reboot
@@ -2558,7 +2589,8 @@ tick's session, a tick during a typed `wave`, a plugin update under an installed
 worktrees registering one store; U25 a `Run` item that needs a service,
 a `Run` line that installs, a suite longer than the bound, and a parametrize row moved rather
 than dropped; U26 a thread an earlier round already answered, and a thread arriving after an
-`accept`. Not in 1.2: cross-repository handoffs
+`accept`; U27 a synced plugin in the profile, an allowed plugin with a hook, and a `Skill` rule
+for a skill the profile does not hold. Not in 1.2: cross-repository handoffs
 (the lib-core and financial-twin inputs are one handoff per repository; the second spec states
 its prerequisite in prose and `Landed:` rows, §9.1, and the owner types its phases after the
 first lands; neither a `Repo:` field nor a cross-store `Blocked by` is built; the registry is a
@@ -2665,6 +2697,10 @@ Interfaces (the names the plans will carry):
 - U26 → the owner: `review ingest --pr <n> --runcard <id> → <n> ingested; exit 0`; `review.json`'s
   `ingested[]`; the `**Reply <fid>:** fixed` post; `approve-spec`'s refusal `approve-spec: external:<login> <fid>
   unsettled on PR <n>`, exit 1.
+- U27 → the owner: the config keys `builder.plugins`, `builder.mcp`; `launches/<unit>_r<n>_plugins.json`
+  (`plugins[]` with `id`, `managed`; `mcp[]`); `doctor`'s `plugins:` and `mcp:` lines; the refusals
+  `launch-builder: plugin <id> not in config.builder.plugins | synced | carries hooks | carries
+  CLAUDE.md` and `mcp server <name> not in config.builder.mcp`.
 
 Waves: {U01} → {U02, U03} → {U04, U05, U08, U09} → {U06, U07, U09b, U10} → {U10b} → {U11}; then,
 as a second handoff (`2026-11-03-superegm-<6 hex>`), {U12} → {U13} → {U14}, and version 1.1.0
@@ -2672,5 +2708,5 @@ after all three merge; then, as a third handoff (`2026-11-03-superegm-<6 hex>`),
 version 1.1.1 after both merge; then, as a fourth handoff (`2026-11-03-superegm-<6 hex>`, the
 owner's name `2026-11-05-superegm-1.1.2`), {U17, U18} → {U19} → {U20}, and version 1.1.2 after all
 four merge; then, as a fifth handoff (`2026-11-03-superegm-<6 hex>`, the owner's name
-`2026-11-05-superegm-1.2` on the tracking issue), {U21} → {U22} → {U23} → {U25} → {U24} → {U26}, and
-version 1.2.0 after all six merge.
+`2026-11-05-superegm-1.2` on the tracking issue), {U21} → {U22} → {U23} → {U25} → {U24} → {U26} → {U27}, and
+version 1.2.0 after all seven merge.
