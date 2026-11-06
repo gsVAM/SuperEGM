@@ -747,6 +747,21 @@ def test_amend_units_and_void_act_on_the_latest_entry_alone(world):
   assert [(e["kind"], e["handoff_id"]) for e in approval(world)["entries"]] == [("opening", a), ("opening", b), ("amend-units", b)]
 
 
+def test_approve_spec_refuses_a_branch_not_holding_the_last_entrys_bytes(world):
+  spec, cid, rid = converged_spec(world); assert approve(world, spec, cid, "--yes")[0] == 0
+  sha7 = approval(world)["entries"][0]["sha256"][:7]
+  git(world, "checkout", "-qb", "stale", "HEAD~1")
+  spec2, cid2, rid2 = converged_spec(world, SPEC.replace("Text.", "Elsewhere."))
+  head = git(world, "rev-parse", "HEAD")
+  assert f"approve-spec: fold main first: approval {sha7} is not in this branch" in approve(world, spec2, cid2, "--yes")[1] and git(world, "rev-parse", "HEAD") == head
+  spec2.unlink()  # the stale branch's untracked copy: `main` tracks the file, so checkout would refuse to overwrite it
+  git(world, "checkout", "-q", "main"); git(world, "commit", "-q", "--amend", "--no-edit", "--allow-empty")
+  # the stale branch's cycle c2 is still open (no approval names it): its round 2 converges at these bytes
+  spec3, cid3, rid3 = spec_file(world, SPEC.replace("Text.", "Changed.")), cid2, rid2
+  rounds(world, rid3, cid3, [[]], start=2); assert status(world, rid3, cid3)[0] == 0
+  assert approve(world, spec3, cid3, "--yes")[0] == 0
+
+
 # ---------------------------------------------------------------- S17: the references
 
 REFS = ROOT / "skills" / "review-spec" / "references"
