@@ -801,3 +801,21 @@ def test_review_scope_derives_the_round_from_the_approval_commit(world):
   assert lines()[1] == "changed 3-6 ## 1. Intent"
   rec["sha256"] = "1" * 64; atomic_write(store(world.repo).path("approvals", SLUG), rec)
   assert lines() == ["whole 1-11 (no commit holds 1111111)"]
+
+
+# ---------------------------------------------------------------- S23: `review record` refuses a finding out of scope (U19)
+
+SPEC4 = SPEC.replace("## 2. Units", "## 2. Goals\n\nGoals.\n\n## 3. Risks\n\nRisks.\n\n## 4. Units")
+
+@pytest.mark.parametrize("location, kept", [("§1 line 5", True), ("line 2", True), ("docs/specs/x.md:13", False), ("§1", True)])
+def test_record_refuses_out_of_scope_findings_and_stores_them(world, location, kept):
+  spec, cid, rid = converged_spec(world, SPEC4); assert approve(world, spec, cid, "--yes")[0] == 0
+  spec.write_text(SPEC4.replace("Text.", "Changed."), encoding="utf-8")
+  rid2 = reopen(world, "spec", cid)
+  line = f"design-1-1 | high | {location} | regression: no | claim"
+  code, out = record(world, rid2, 1, "design", [line], cid)
+  rnd = rjson(world, rid2, "round-1.json")
+  assert code == 0 and rnd["out_of_scope"] == ([] if kept else [line]) and len(rnd["reviewers"]["design"]["findings"]) == int(kept)
+  assert rnd["scope"] == [["neighbour", "(preamble)", 1, 2], ["changed", "## 1. Intent", 3, 6], ["neighbour", "## 2. Goals", 7, 10]]
+  assert ("record: design-1-1 out of scope (## 3. Risks): not recorded" in out) is not kept
+  assert ("out of scope: design-1-1" in (world.artifacts / "journal.md").read_text(encoding="utf-8")) is not kept
