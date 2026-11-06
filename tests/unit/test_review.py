@@ -773,3 +773,17 @@ OLD = "# T\n\npre\n\n## 1. A\n\na\n\n### 1.1 B\n\nb\n\n### 1.2 C\n\nc\n\n## 2. D
   (OLD, [])])
 def test_scope_sections_and_neighbours(new, expect):
   assert scope_sections(OLD, new) == expect
+
+
+# ---------------------------------------------------------------- S21: `review open --scope` (U19)
+
+@pytest.mark.parametrize("scope, approved, expect", [
+  (None, False, "auto"), ("whole", False, "whole"), ("## 1. Intent;## 2. Units", True, ["## 1. Intent", "## 2. Units"]),
+  ("## 9. Nope", True, "review open: --scope: ## 9. Nope is not in the spec"), ("## 1. Intent", False, "review open: --scope <list>: no approval: use whole")])
+def test_review_open_records_the_scope_form(world, scope, approved, expect):
+  if approved:
+    spec, cid, rid = converged_spec(world); assert approve(world, spec, cid, "--yes")[0] == 0; move(world, "spec", spec)
+  else:
+    spec = spec_file(world); cid = card(world, spec)
+  code, out = world.run("review", "open", "--kind", "spec", "--artifact", str(spec), "--reviewers", "design", *(["--scope", scope] if scope else []), "--runcard", cid)
+  assert (code == 0 and rjson(world, out.strip())["scope"] == expect) or (code == 1 and expect in out), out
