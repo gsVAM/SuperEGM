@@ -341,6 +341,16 @@ def test_prepare_writes_the_astra_brief_and_prints_the_lane_state(world, tmp_pat
   assert cut_diff(b"x" * 400_001).endswith("\n(diff cut at 400 KB)\n") and cut_diff(b"x" * 400_000) == "x" * 400_000
 
 
+def test_collect_records_the_brief_sha256_on_the_lane_record(world, tmp_path, monkeypatch):
+  monkeypatch.setattr(foreman_mod, "runner_path", lambda: None)
+  w = prepared(world, tmp_path, monkeypatch, astra={"enabled": True})
+  record(world, w.st, w.rid, 1, w.head, w.child, {"change-review": ""})
+  assert world.run("review", "record", "--review", w.rid, "--round", 1, "--sha256", w.head, "--reviewer", "astra", "--not-run", "not installed", "--runcard", w.child)[0] == 0
+  assert world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)[0] == 0
+  rnd = json.loads((w.st.path("reviews", w.rid) / "round-1.json").read_text(encoding="utf-8"))
+  assert rnd["reviewers"]["astra"]["brief_sha256"] == sha256_file(w.dir / "r1/astra_brief.md")
+
+
 DEV = "**Deviation (dod):** item 3 is wrong\n- (a) drop it\n- (b) keep it\n**Builder status:** BLOCKED"
 CASES = {
     "clean": ({}, []),
