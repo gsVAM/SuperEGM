@@ -25,7 +25,7 @@ Amendment 9 (2026-11-06): split units for parallel waves (the plan rules of §9.
 Amendment 10 (2026-11-06): the board and the watchdog (§3, §3.1, §4, §7, §11, §11.2, §13.2, §14), units U30–U31; owner-approved by text.
 Amendment 11 (2026-11-06): 1.1.3's integrate review carried mediums and the first wave's findings (scope additions to U22, U23, U27, U29 and U30; §7, §8, §9.1, §9.2, §11, §12, §13.2, §14), unit U32; owner-approved by text.
 Amendment 12 (2026-11-06): unit tiers (`Tier:` in §9.1's form, the proportion check in §9.2, `builder.tiers` in §7, the launch by tier in §11), unit U33; owner-approved by text.
-Amendment 13 (2026-11-06): the team brainstorm (§2, §3.1, §5, §6, §7, §11's doctor line), unit U34; owner-approved by text.
+Amendment 13 (2026-11-06): the team brainstorm (§2, §3.1, §4, §5, §6, §7, §14), unit U34; owner-approved by text.
 
 ## 1. Intent
 
@@ -72,7 +72,7 @@ isolation recorded.
 | **adapter** | a Claude Code agent definition `.claude-plugin/agents/<id>.md` with frontmatter `name: <id>`, fixed `tools`, and `omitClaudeMd: true`, whose body reads the persona `agents/<id>.md`. Invoked as `superegm:<id>`. A review panel lists reviewer ids; every reviewer id except `set`, `astra`, `foreman` and `external:*` is an adapter id. |
 | **dispatching session** | the elephant or a foreman: the session that invokes adapters with the Agent tool and records each dispatch. |
 | **goldfish** | a fresh read-only reviewer dispatched through an adapter with tools `Read, Grep, Glob`. Sees only the artifact and the evidence it is handed. Never spawns. |
-| **teammate** | from amendment 13: one of four divergers (`cartographer`, `architect`, `skeptic`, `advocate`), each dispatched through an adapter (the isolation of §14, tools `Read, Grep, Glob`) as a teammate the elephant spawns in the owner's interactive session for the brainstorm phase alone, working one approach in its own context, messaging the others over the platform's mailbox and reporting its approach to the lead by message. Not a reviewer: it reports no findings and sits on no panel; it writes no file. It ends when the brainstorm closes; what persists is what the lead wrote into the draft spec (§6), never its context. The lead is the owner's session, the elephant as always. |
+| **teammate** | from amendment 13: one of four divergers (`cartographer`, `architect`, `skeptic`, `advocate`), each spawned from an adapter definition (its tools `Read, Grep, Glob` and its body; a teammate loads the project context and runs the hook as a session does, `SUPEREGM_ROLE` unset, so no isolation is claimed for it and the draft's `team: on` line records that exposure; the fallback's subagents alone are isolated as §14's goldfish are; a teammate is no session in the effect row's sense, living inside the owner's turn with no exit file and no liveness to prove) as a teammate the elephant spawns in the owner's interactive session for the brainstorm phase alone, working one approach in its own context, messaging the others over the platform's mailbox and reporting its approach to the lead by message. Not a reviewer: it reports no findings and sits on no panel; it writes no file. It ends when the brainstorm closes; what persists is what the lead wrote into the draft spec (§6), never its context. The lead is the owner's session, the elephant as always. |
 | **judge** | a goldfish with a model override that answers a question file by option id instead of reporting findings. |
 | **foreman** | a sub-elephant: a named subagent dispatched through the `superegm:foreman` adapter, in the foreground, to run one review round on one PR head and return one word. Its memory is `foreman/<unit>.json` and the PR's comments, never its context. |
 | **builder** | a fresh headless local Claude session whose brief is one issue body, the builder orders, the repository's PR block when configured, the unit's orient text (§9.3), the rulings posted on its issue, and from round 2 the foreman's reviews of its own branch. Writes code in its own worktree under the **builder account**, commits test-first, opens a draft PR. Not a goldfish: it writes. Never spawns. |
@@ -386,8 +386,8 @@ isolation recorded.
 - Every skill folder carries `assets/icon.svg` (EGM's palette rule, read from the SVG) and
   `test_scenarios.yaml` (EGM's shape).
 - Reviewer adapters: `tools` exactly `[Read, Grep, Glob]`, `model: inherit`, `omitClaudeMd: true`,
-  no `memory`, body reads `${CLAUDE_PLUGIN_ROOT}/agents/<id>.md`. The one non-reviewer adapter
-  (`foreman`) has the exact tool set in §14.
+  no `memory`, body reads `${CLAUDE_PLUGIN_ROOT}/agents/<id>.md`. The non-reviewer adapters
+  (`foreman`; from amendment 13 the three brainstorm teammates, tools `[Read, Grep, Glob]`, U34) have the exact tool sets in §14.
 - The packer forbids MCP and allows **exactly** three hook files, nothing else under `hooks/`:
   `hooks/hooks.json` (one `SessionStart` entry), `hooks/run-hook.cmd`, `hooks/session-start`. The
   source `.claude-plugin/plugin.json` carries `"superegm": {"hook_sha256": …}`; the packer refuses
@@ -585,15 +585,17 @@ every `external` skill lists `state-store`.
   and follow the orders instead. `brainstorming` and `writing-skills` are exempt: they run on the
   owner's request outside any unit. From amendment 13 (U34) `brainstorming` has a team mode: when
   the session has agent teams enabled (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, an interactive
-  session) and the owner asks (`/superegm:brainstorming --team`, or `config.brainstorm.team` true, §7: `init` writes false),
-  the lead, the elephant in the owner's session, spawns the four teammates (§2) through their
-  adapters: the `cartographer` reads the code (`Read`, `Grep`, `Glob`; §9.3's `orient` needs an
+  session in the in-process teammate mode, the default: a split-pane mode gives the adapters no mailbox) and the owner asks (`/superegm:brainstorming --team`, or `config.brainstorm.team` true, §7: `init` writes false),
+  the lead, the elephant in the owner's session, spawns the four teammates (§2) from their
+  adapter definitions: the `cartographer` reads the code (`Read`, `Grep`, `Glob`; §9.3's `orient` needs an
   approved spec and a card, which a brainstorm precedes, so it is not called) and reports the
   notes (where the topic's concerns live today, what calls what, what tests pin, what the
   repository's own docs say, and the three things that would surprise a newcomer), the
   `architect` designs against those notes, the `skeptic` is the zoom-out persona's `Mode:
   BRAINSTORM` turned forward (failure modes, what the owner will regret, the cheapest
-  alternative; the landed `zoom-out` adapter, no new one), the `advocate` takes the user's and the
+  alternative; the landed `zoom-out` adapter, no new one, its brief in `teammates.md` overriding
+  the persona's code-search step and its findings-line output: ask the cartographer, report an
+  approach by message), the `advocate` takes the user's and the
   operator's day (what they see, type, wait for). Each works one approach in its own context and
   reports it to the lead by message (the approach, its costs, the questions it cannot answer
   without the owner), and may message the others to challenge a claim; no teammate but the
@@ -602,13 +604,15 @@ every `external` skill lists `state-store`.
   helper is the store's one writer, §7, and the skill is `working-tree`, §14). The lead merges:
   the approaches side by side, one deduplicated question list ranked by how much the answer
   changes the build, and puts the questions to the owner one at a time as the skill does today;
-  the draft spec, the skill's one output (§14), records the approaches under §3.1 Alternatives
-  (§3.1's rule) with a `team: on` or `off (subagents)` line in that entry, the owner's answers,
-  and the cartographer's notes in its existing-code paragraphs; the chosen approach is the
+  the draft spec, the skill's one output (§14), records the approaches under its `## Alternatives
+  Considered` (the section §3.1's rule reads) with a `team: on` or `off (subagents)` line there
+  (under `on`, that the teammates saw the project context and the hook), the owner's answers,
+  and the cartographer's notes in its current-state ground (the skill's design list gains both items); the chosen approach is the
   spec's input as today. Asked for with teams off, or in a headless session (teams spawn no
-  teammate under `-p`): the same four run as subagents, the cartographer first, with no
-  mailbox, and the entry says `off (subagents)`; not asked for: neither, the skill as today.
-  Teammates end when the brainstorm closes; the next phase starts a fresh session (§5, U19's
+  teammate under `-p`): the same four run as subagents, the cartographer first and its reported notes handed into
+  the other three's prompts, with no mailbox, and the entry says `off (subagents)`; not asked for: neither, the skill as today.
+  Teammates end when the brainstorm closes (the lead's shutdown request to each, which a teammate
+  may reject, the session's end ending it then; a resumed lead has no teammates); the next phase starts a fresh session (§5, U19's
   rule) and reads the draft spec, never a teammate's context. Non-goals: teams in any headless
   phase; more than four roles; the judges (they converge; this diverges). `verification-before-completion` never updates snapshots or
   fixtures.
@@ -1777,9 +1781,7 @@ login is in `config.owners`; the builder's role on the repository
 otherwise; the token's kind and scopes, from the `X-OAuth-Scopes` header of `gh api -i user`
 with the token (a classic token must carry `repo` and not `workflow`; a fine-grained token sends
 no scopes header and is reported `fine-grained: permissions not probed`); and, informationally
-and never a failure, that `graphify` is on `PATH`, from amendment 13 whether the
-`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` variable is set (`teams: set | unset (brainstorm runs its
-roles as subagents)`; a headless session spawns no teammate whatever it says), the Astra runner (`astra: ok (<runner path>)`
+and never a failure, that `graphify` is on `PATH`, the Astra runner (`astra: ok (<runner path>)`
 or `astra: not installed (heads will record not run)`, U17) and the admin-bypass merge line
 above. On the App path (`builder.app` set) its
 lines are instead: the credential path in use (a refusal naming both variables when the
@@ -2656,7 +2658,9 @@ Naming: adapter file `.claude-plugin/agents/<id>.md`, frontmatter `name: <id>`, 
 
 Adapters in `.claude-plugin/agents/`: the reviewers `design`, `zoom-out`, `comprehension`,
 `codebase-details`, `readiness`, `structural`, `style`, `change-review`, `judge` (tools `[Read,
-Grep, Glob]`, `omitClaudeMd: true`); and `foreman` (tools `[Agent, Bash, Read, Grep, Glob]`,
+Grep, Glob]`, `omitClaudeMd: true`); from amendment 13 the brainstorm's teammates `cartographer`,
+`architect` and `advocate` (tools `[Read, Grep, Glob]`; non-reviewers the brainstorm's lead
+dispatches, on no panel, U34); and `foreman` (tools `[Agent, Bash, Read, Grep, Glob]`,
 `omitClaudeMd: true`). EGM's `synthesizer` and `bootstrap-orchestrator` are dropped.
 
 ## 15. Repository, packer, tests
@@ -2772,7 +2776,7 @@ handoff is planned; the amendment-4 paragraph below); a later handoff on this sp
 | U31 | The watchdog (§4, §7, §11, §11.2): `config.builder.stall_minutes` (30); a `running` launch without the `kill_failed` mark, no exit file, whose branch shows no commit newer than its own newest commit (or its `started_at`) for that long is stalled; the launch `launch-builder` starts (U24's one behaviour, §11) carries the wrapper's trap; the `wave` session's `status` pass, a reader, reports `U<n> stalled (<minutes> min; last commit <time | none>) pr=<n or none> status=<word or none>`, and the skill's step 3 records it through `record-launch --exit stalled`, which signals the group, waits 30 s for the wrapper's exit file `stalled` (the one proof) and records `exited (stalled)` with `last_commit_at` (the launch's own newest commit or none, written on every `--exit` from amendment 10, the one field the carve-out reads for an exit or a stall) or `kill_failed` (the launch signalled no more, the unit idle by one clause of `unit_state` and in the inbox for the owner's interrupt; a later exit file clears it), journals it and routes the unit to point 3 with the stall facts, where a launch with no commit of its own spends no relaunch, exit or stall, and a second is `stop`; `doctor`'s `stall:` line; the wave skill's step 3 records the stalled line: `skills/plan/scripts/superegm/launch_builder.py` (modify: the wrapper's trap), `status.py` (modify: the check, the event line and the mask; the tick's read counting the predicate as a trigger), `record_launch.py` (modify: `--exit stalled`: the signal and the wait through U25's `kill_group`, the record or `kill_failed`; the entry re-read; `last_commit_at` on every `--exit`), `report.py` (modify: the `kill_failed` clause of `unit_state`), `inbox.py` (modify: the `kill_failed` kind), `decision.py` (modify: the carve-out), `judges.py` (modify: `question --unit <U> --blocked launch <n>` renders the options from the pending decision's record, where `decision open` applied the carve-out once, and the stall facts from the launch entry; its own `relaunch already used` refusal dropped, so leavemealone-mode gets the panel where normal mode gets the question), `doctor.py` (modify: the line), `__init__.py` (modify: `DEFAULT_CONFIG.builder.stall_minutes`), `skills/wave/SKILL.md` (modify: step 3's stalled line; the Entry's resume raising point 3 for an `interrupted` launch with no decision on it; the leavemealone paragraph's reading of a refused question dropped with the refusal; the frontmatter's `destructive-local` for the kill), a `docs: see U29` Objective note, `tests/unit/test_wave.py`, `test_doctor.py`, `test_builders.py`, `test_judges.py`, `test_effects.py` (modify), `test_u31.py` (create: its own keys) | U24, U25 (`kill_group`); after U30 on `status.py`, `report.py` and `skills/wave/SKILL.md`, after U28 on `__init__.py`, `doctor.py`, `launch_builder.py`, `record_launch.py` and `judges.py` (module files; the test files follow the Shared files chains below) | M |
 | U32 | 1.1.3's carried findings (§8, §11, §12): `close` closes the tracking issue and any merged unit's open issue as completed, `--note` on `close` and `runcard close`, the integrate skill's `--patch` closing without the integrate round on the owner's typed word, a `close --note`; `launch-builder`'s idempotent re-run and the orders' detached-`HEAD` stop; the by-hand `approve-spec --amend-units` card (`approve-spec-<6 hex>-<n>`, which §12 states and the landed helper lacks); a scoped finding with no line number out of scope by the landed path; the ruling's `review status` `rounds:` item moot (a head gains no second cycle: `foreman dispatch` opens a head review only when none exists and `stop` ends the unit), nothing to build; and a sweep of the accepted cleanups (the three copies of the spec-blob hash search and of the chain selection folded into one helper; the `STORE`/`CURRENT_ARGS` coupling; the stale one-handoff prose in `handoff_plan.md`, `orient`, `issue_template` and `review_loop.md`; the brainstorming brief lookup): `skills/plan/scripts/superegm/close.py` (modify: the issue closes, `--note`), `runcard.py` (modify: `--note`), `launch_builder.py` (modify: the idempotent re-run), `approve_spec.py` (modify: the by-hand card), `review.py` (modify: the lineless finding out of scope), `skills/plan/scripts/superegm/` as one directory path with `init.py` and `doctor.py` (modify: module self-registration, each subcommand module exposing its parser registration, its config defaults, its `init` step text and its `doctor` check, discovered by import, the registry lines `DEFAULT_CONFIG`, `SUBCOMMANDS`, `init`'s key text and `doctor`'s line gone; the sweep's one helper), `skills/wave/references/builder_orders.md` (modify: the detached-`HEAD` stop), `skills/integrate/SKILL.md` (modify: Step 1's gate admitting a unit whose PR merged with its issue open and Step 2's diff set every merged PR of the handoff, that unit's included; the `--patch` path; the frontmatter's `github-write`), `skills/review-spec/references/review_loop.md` (modify: the sweep's prose; section 5's lineless-location sentence, §8's path), `skills/plan/references/handoff_plan.md`, `skills/plan/references/issue_template.md`, `skills/orient/SKILL.md`, `skills/brainstorming/SKILL.md` (modify: the sweep's prose), a `docs: see U29` Objective note, `tests/unit/test_leavemealone_finish.py`, `test_review.py`, `test_builders.py`, `test_effects.py` (modify), `test_u32.py` (create: its own keys) | — (the ruling's: blocked by no 1.2 unit); after every unit on the package it rewrites, U31 the last of them | M |
 | U33 | Unit tiers (§7, §9.1, §9.2, §11): the `Tier: difficult \| doable \| easy` line in the unit form with its criteria, optional to the parser (a section without it doable; a word outside the three refused as a bad `Size` is); `config.builder.tiers` (`init` writes `difficult` `claude-opus-5-5`/`high` and `easy` `claude-sonnet-5-5`/`medium`; doable is `builder.model`/`builder.effort` themselves, the pair a unit with no tier reads); `graph` writing `units[*].tier` into `handoff_units.json`, `launch-builder` picking the pair by it and writing `tier` with the `running` entry, the board's tier column; the `proportion` persona's tier check; `doctor`'s three builder rows: `skills/plan/scripts/superegm/__init__.py` (modify: the optional `Tier` field), `graph.py` (modify: `units[*].tier`), `launch_builder.py` (modify: the pair by tier, the entry's field; `builder.tiers`' defaults beside `builder`'s, after U32's self-registration), `report.py` (modify: the board's column), `doctor.py` (modify: the three rows), `skills/plan/SKILL.md`, `skills/plan/references/handoff_plan.md`, `issue_template.md` (modify: the field and its criteria; the layout's `Tier:` and its `{{tier}}` placeholder, an owner template without it refused at its next `graph --plan` until it gains one, the stated upgrade cost), `skills/review-plan/references/proportion.md` (modify: the tier check alone; U29's split check, landing after, names the Size-L case), a `docs: see U29` Objective note, `tests/unit/test_plan.py`, `test_review_plan.py`, `test_builders.py`, `test_doctor.py` (modify), `test_u33.py` (create: its own keys) | U28, U30; after U31 and U32 on `__init__.py`, `launch_builder.py`, `doctor.py`, `report.py` and `test_builders.py`, after U31 on `test_doctor.py`, after U32 on `handoff_plan.md` and `issue_template.md` (U29, the docs sweep, after it on `graph.py`, `proportion.md`, `issue_template.md`, `skills/plan/SKILL.md`, `test_plan.py` and `test_review_plan.py`) | S |
-| U34 | The team brainstorm (§2, §3.1, §5, §6, §11): `brainstorming`'s team mode (`--team`, `config.brainstorm.team`; the lead the owner's session; the four teammates through adapters, one approach each reported by message, the mailbox between them, the cartographer's notes from its own code reading (no `orient` call, no file), the lead's merge and ranked questions into the draft spec's §3.1 Alternatives and existing-code paragraphs; the fallback to subagents with no mailbox when asked with teams off or in a headless session, said in the §3.1 entry; teammates ending at the close, the draft spec the record), `doctor`'s `teams:` line: `skills/brainstorming/SKILL.md` (modify: the team mode, the fallback, the merge), `skills/brainstorming/references/teammates.md` (create: the three new roles' briefs; the skeptic the `zoom-out` persona's `Mode: BRAINSTORM`), `agents/cartographer.md`, `architect.md`, `advocate.md` (create: the personas), `.claude-plugin/agents/cartographer.md`, `architect.md`, `advocate.md` (create: the adapters, tools `Read, Grep, Glob`, §14's isolation), `.claude-plugin/plugin.json` (modify: the agents list), `skills/plan/scripts/superegm/__init__.py` (modify: the `brainstorm.team` default, declared where the key's module exposes it after U32's self-registration), `doctor.py` (modify: the `teams:` check, the same way), a `docs: see U29` Objective note, `tests/unit/test_frontmatter.py`, `test_skeleton.py`, `test_doctor.py` (modify), `test_u34.py` (create: its own keys) | — (landed units); after U33 on `doctor.py`, `__init__.py` and `test_doctor.py`, U32 on `skills/brainstorming/SKILL.md`, U24 on `test_skeleton.py` (U29, the docs sweep, after it) | M |
+| U34 | The team brainstorm (§2, §3.1, §4, §5, §6, §14): `brainstorming`'s team mode (`--team`, `config.brainstorm.team`; the lead the owner's session; the four teammates through adapters, one approach each reported by message, the mailbox between them, the cartographer's notes from its own code reading (no `orient` call, no file), the lead's merge and ranked questions into the draft's `## Alternatives Considered` and current-state ground; the fallback to subagents with no mailbox when asked with teams off or in a headless session, said in the Alternatives entry; teammates ending at the close by the lead's shutdown requests, the draft spec the record): `skills/brainstorming/SKILL.md` (modify: the team mode, the fallback, the merge), `skills/brainstorming/references/teammates.md` (create: the dispatch's inputs for the four, the topic, the owner's words so far and the message form; the skeptic's override of the `zoom-out` persona's code-search step and findings output), `agents/cartographer.md`, `architect.md`, `advocate.md` (create: the personas), `.claude-plugin/agents/cartographer.md`, `architect.md`, `advocate.md` (create: the adapters, tools `Read, Grep, Glob`; whether a teammate takes its definition's `omitClaudeMd` as a subagent does is the plan's first probe, the spec claiming no isolation), `.claude-plugin/plugin.json` (modify: the agents list), `skills/plan/scripts/superegm/__init__.py` (modify: the `brainstorm.team` default, declared where the key's module exposes it after U32's self-registration), a `docs: see U29` Objective note, `tests/unit/test_skeleton.py`, `test_effects.py` (modify), `test_u34.py` (create: its own keys) | — (landed units); after U33 on `__init__.py`, U32 on `skills/brainstorming/SKILL.md` and `test_effects.py`, U24 on `test_skeleton.py` (U29, the docs sweep, after it) | M |
 
 Shared files of the 1.0.0 build: `test_helper.py` is U03's alone. `body.py` is U03's and then U05's (the derived Step
 defaults), which U03 blocks. Each workflow SKILL.md stub U01 creates is filled
@@ -2872,7 +2876,7 @@ U25 on `test_wave.py`, no file shared with them), U31 after U30 on `status.py`, 
 `skills/wave/SKILL.md` and U28 on `__init__.py`, `doctor.py`, `launch_builder.py`,
 `record_launch.py` and `judges.py`, by its blockers U24 and U25 (`kill_group`, landed four waves earlier), U32 after every unit on the package it rewrites, U31 the last of them (the ruling's placement,
 blocked by no 1.2 unit: the shared-file edges order it one wave after U31, as `Blocked by` would), and U29 last, the
-docs sweep, after U28, U30, U31, U32, U33 and U34, the rows it sweeps, U33 (amendment 12) between U32 and U29, after U31 and U32 on the package files its row shares and before U29 on `graph.py` and `proportion.md`, U34 (amendment 13) between U33 and U29, after U33 on `doctor.py` and `__init__.py` and U32 on `skills/brainstorming/SKILL.md`; the 1.2 rows are untiered (filed under 1.1.2, no `Tier:` row: the doable pair), as they are exempt from the split
+docs sweep, after U28, U30, U31, U32, U33 and U34, the rows it sweeps, U33 (amendment 12) between U32 and U29, after U31 and U32 on the package files its row shares and before U29 on `graph.py` and `proportion.md`, U34 (amendment 13) between U33 and U29, after U33 on `__init__.py` and U32 on `skills/brainstorming/SKILL.md`; the 1.2 rows are untiered (filed under 1.1.2, no `Tier:` row: the doable pair), as they are exempt from the split
 checks as a set, reviewed under 1.1.2's `proportion.md`, which has none; their plan sections
 carry the size the path count gives, as the parser requires). Once
 U21 lands and the plugin is updated from the tree, the next `wave`, typed in a new session (§5: a
@@ -2892,13 +2896,13 @@ beside U26 and U27 (no file shared; U30 after U22 and U24 on `status.py` and
 `skills/wave/SKILL.md` and after U28 on `__init__.py`, `doctor.py`, `launch_builder.py`,
 `record_launch.py` and `judges.py`, U32 (amendment 11) after every unit on the package it rewrites, U31 the last of them,
 blocked by no 1.2 unit, U33 (amendment 12) after U31 and U32 on `__init__.py`, `launch_builder.py`, `doctor.py` and
-`report.py` and before U29 on `graph.py` and `proportion.md`, U34 (amendment 13) after U33 on `doctor.py` and `__init__.py` and U32 on `skills/brainstorming/SKILL.md`, and U29 (amendment 9) last, the docs sweep, `Blocked by` U28, U30, U31, U32, U33 and U34
+`report.py` and before U29 on `graph.py` and `proportion.md`, U34 (amendment 13) after U33 on `__init__.py` and U32 on `skills/brainstorming/SKILL.md`, and U29 (amendment 9) last, the docs sweep, `Blocked by` U28, U30, U31, U32, U33 and U34
 (the rows it sweeps; §9.1's one exception).
 Shared files: `collect.py` is U21's, then U22's, then U25's; `review.py` U21's, then U25's, U24's, U26's, U32's;
 `skills/wave/SKILL.md` U21's, then U22's, U23's, U25's, U24's, U30's, U31's; `__init__.py` U21's, U23's, U25's, U24's, U27's, U28's, U31's, U32's, U33's and U34's, `init.py` U21's, U23's, U25's, U27's and U32's, and
 `test_helper.py` no 1.2 unit's (amendment 9: each unit's own test file; U25 still follows U23
 on `skills/wave/SKILL.md` and U24 follows U25 on `doctor.py`); `inbox.py` U23's, U24's, then U31's; `test_inbox.py`
-U23's, then U24's; `launch.py` U21's, then U24's; `doctor.py` and `test_doctor.py` U25's, then U24's, U27's, U28's, U31's (`doctor.py` then U32's), U33's, U34's; `skills/brainstorming/SKILL.md` U32's, then U34's; `test_skeleton.py` U23's, U24's, then U34's; `launch_builder.py` U22's, then U25's, U24's, U27's, U28's, U31's, U32's, U33's; `approve_spec.py` U26's, then U32's; `status.py` U22's, U24's, U30's, then U31's; `record_launch.py` U24's, U28's, then U31's; `judges.py` and `test_judges.py` U28's, then U31's; `test_effects.py` U23's, U24's, U26's, U31's, then U32's;  `decision.py` U22's, U23's, then U31's; `test_wave.py` U21's, U22's, U23's, U25's, U30's, then U31's; `report.py` U30's, U31's, then U33's; `test_builders.py` U24's, U27's, U28's, U31's, U32's, then U33's; `resources/review_panels.md` U21's, U25's, then U28's; `foreman_brief.md` U25's, then U28's; `test_foreman.py` U21's, U22's, U25's, then U28's; `test_review.py` U21's, U25's, U26's, U28's, then U32's; `skills/wave/references/builder_orders.md` U22's, U27's, then U32's; `skills/review-spec/references/review_loop.md` U28's, then U32's; `docs/claude.md` and `README.md` U29's alone, the 1.2 docs sweep
+U23's, then U24's; `launch.py` U21's, then U24's; `doctor.py` and `test_doctor.py` U25's, then U24's, U27's, U28's, U31's (`doctor.py` then U32's), U33's; `skills/brainstorming/SKILL.md` U32's, then U34's; `test_skeleton.py` U23's, U24's, then U34's; `launch_builder.py` U22's, then U25's, U24's, U27's, U28's, U31's, U32's, U33's; `approve_spec.py` U26's, then U32's; `status.py` U22's, U24's, U30's, then U31's; `record_launch.py` U24's, U28's, then U31's; `judges.py` and `test_judges.py` U28's, then U31's; `test_effects.py` U23's, U24's, U26's, U31's, U32's, then U34's;  `decision.py` U22's, U23's, then U31's; `test_wave.py` U21's, U22's, U23's, U25's, U30's, then U31's; `report.py` U30's, U31's, then U33's; `test_builders.py` U24's, U27's, U28's, U31's, U32's, then U33's; `resources/review_panels.md` U21's, U25's, then U28's; `foreman_brief.md` U25's, then U28's; `test_foreman.py` U21's, U22's, U25's, then U28's; `test_review.py` U21's, U25's, U26's, U28's, then U32's; `skills/wave/references/builder_orders.md` U22's, U27's, then U32's; `skills/review-spec/references/review_loop.md` U28's, then U32's; `docs/claude.md` and `README.md` U29's alone, the 1.2 docs sweep
 (amendment 9: the units whose approved rows edited the docs carry a `docs: see U29` Objective note). Waves: {U21} → {U22} →
 {U23} → {U25} → {U24} → {U26, U27, U30} → {U28} → {U31} → {U32} → {U33} → {U34} → {U29}; version 1.2.0 after all fourteen merge (manifests, `docs/releases.md`, tag,
 release, plugin update: the owner's by-hand steps), after which `superegm driver install` (re-typed
@@ -2949,7 +2953,7 @@ owner's typed word; the plan's fit against the 48 KB bound is the stated risk, t
 author sets picks a model and effort the config names; a wrong tier costs rounds, which the
 proportion check and the foreman's rounds surface); U34 low (four contexts for the brainstorm's
 divergent step only, bounded by the skill's step; the owner's session is the lead; nothing a
-teammate reads or says reaches a later phase but through the draft spec).
+teammate reads or says reaches a later phase but through the draft spec; a teammate may reject the shutdown and run until the session ends, and a resumed lead has no teammates: the platform's stated limits).
 Plan-review focus: U21 a PR with 200 bot threads
 and one human medium, and a thread on a head not yet reviewed; U22 a comment one character off
 the form, and an owner's edit after the record; U23 a store with no open handoff, and the inbox's `test-delta` and `owner: <ids>` kinds built against §7's schema with fixture data (U25 lands after U23); U24 a reboot
@@ -2974,7 +2978,7 @@ module that fails to import, `init`'s written config key set equal before and af
 self-registration (the order the discovery's); U33 a `handoff_units.json` without `units[*].tier` (the 1.2
 store's: doable, the `builder.model` pair) and a section without a `Tier:` row, a body whose open choices contradict its tier (a proportion finding), and a
 config without the `easy` row (the doable pair); U34 teams off when asked (the subagent fallback, said in the
-§3.1 entry), a headless session (no teammate spawns), a teammate asking the cartographer instead
+Alternatives entry), a headless session (no teammate spawns), a teammate asking the cartographer instead
 of reading code, and a brainstorm not asked for (no teammate and no subagent). Not in 1.2: cross-repository handoffs
 (the lib-core and financial-twin inputs are one handoff per repository; the second spec states
 its prerequisite in prose and `Landed:` rows, §9.1, and the owner types its phases after the
@@ -3118,9 +3122,8 @@ Interfaces (the names the plans will carry):
   `easy`); `handoff_units.json`'s `units[*].tier` and `launches[]`'s `tier`; the board's tier column;
   `doctor`'s three `model: builder <tier> …` lines; the proportion finding form `tier: <reason>`.
 - U34 → the owner: `/superegm:brainstorming --team`; the config key `brainstorm.team`; the draft
-  spec's §3.1 Alternatives entry (the approaches) with its `team: on | off (subagents)` line and
-  its existing-code paragraphs (the cartographer's notes); the three personas and adapters;
-  `doctor`'s `teams:` line.
+  spec's `## Alternatives Considered` entry (the approaches) with its `team: on | off (subagents)` line and
+  its current-state ground (the cartographer's notes); the three personas and adapters.
 
 Waves: {U01} → {U02, U03} → {U04, U05, U08, U09} → {U06, U07, U09b, U10} → {U10b} → {U11}; then,
 as a second handoff (`2026-11-03-superegm-<6 hex>`), {U12} → {U13} → {U14}, and version 1.1.0
