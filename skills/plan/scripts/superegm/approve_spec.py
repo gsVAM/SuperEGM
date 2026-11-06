@@ -187,8 +187,14 @@ def void_approval(args, st: core.Store, spec: Path) -> int:
     raise core.HandoffError(f"approve-spec: review {rid}: not opened")
   if not any(f["disposition"] == "fix-design" for n in round_numbers(st, rid) for f in findings_of(load_round(st, rid, n))):
     raise core.HandoffError(f"approve-spec: review {rid} has no fix-design finding")
-  entries[-1]["voided_by"] = rid
-  write_entries(st, spec, entries)
+  path = st.path("approvals", slug)
+  record = json.loads(core.read_text(path))
+  if "entries" in record:
+    entries[-1]["voided_by"] = rid
+    write_entries(st, spec, entries)
+  else:  # a 1.1 record is its one entry: `voided_by` written in place, nothing migrated
+    entries[-1]["voided_by"] = record["voided_by"] = rid
+    core.atomic_write(path, record)
   core.journal(st, f"approve-spec void {slug} by review {rid} under {args.runcard}")
   hid = entries[-1].get("handoff_id")
   voided = core.Store(st.root, handoff_id=hid, config=st.config, legacy=st.legacy)
