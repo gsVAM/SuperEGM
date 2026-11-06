@@ -318,7 +318,18 @@ def test_runcard_ids_carry_the_handoff_hex_and_the_card_records_it(world):
   assert world.run("runcard", "open", "--skill", "judges", "--artifact", "q.md", "--parent", f"review-spec-{slug6}-0001")[1].strip() == f"judges-{slug6}-0001"
 
 
-WRITES = {"approve_spec": {"approvals", "handoffs", "state"},"graph": {"state", "plan", "units", "unit", "bodies"},
+HANDOFF_PROSE = [(f"skills/{s}/SKILL.md", "[--handoff <id>]") for s in ("plan", "review-plan", "file", "wave", "integrate", "clean", "interrupt")] + [
+  ("skills/wave/references/foreman_brief.md", n) for n in ("--handoff <handoff-id>", "<ARTIFACT_DIR>/<handoff-id>/review/", "spec_range.md", "no commit holds")] + [
+  ("skills/review-plan/SKILL.md", "filed_elsewhere"), ("skills/plan/SKILL.md", "filed_elsewhere"), ("skills/integrate/SKILL.md", "gh pr diff"), ("skills/integrate/SKILL.md", "(to the latest handoff)"),
+  ("docs/claude.md", "artifacts_dir/<handoff id>/"), ("docs/claude.md", "handoffs/<id>.json"), ("docs/claude.md", "legacy")]
+
+@pytest.mark.parametrize("path, needle", HANDOFF_PROSE)
+def test_the_handoff_flag_and_store_layout_prose(path, needle):
+  assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
+  assert "<6 hex>/" not in (ROOT / "skills/wave/references/foreman_brief.md").read_text(encoding="utf-8")
+
+
+WRITES = {"approve_spec":{"approvals", "handoffs", "state"},"graph": {"state", "plan", "units", "unit", "bodies"},
           "scan": {"file"}, "gate": {"state"},
           "dry_run": {"file", "state"}, "apply": {"state", "file"},
           "verify": {"state"}, "status": {"state"}, "launch": {"state", "runcards"}, "decide": {"state", "plan", "units", "unit", "bodies", "file"},

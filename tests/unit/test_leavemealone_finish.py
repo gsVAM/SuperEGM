@@ -269,7 +269,7 @@ def test_integrate_skill_body():
       # `status` serves the integrate card (I-4): no wave card, so `wave_number` never counts one.
       "status --wait 1 --runcard <card>",
       "review open --kind integrate --artifact <spec-path> --reviewers <config.reviewers.integrate> --runcard <card>",
-      "git diff <base_at_start>..<base>",
+      "GH_HOST=github.com gh pr diff <n> -R OWNER/NAME",  # the handoff's own PRs (U20)
       "review record --review <id> --round 1",
       "review status --review <id> --runcard <card>",
       "review settle --review <id> --finding <fid> --disposition escalated --runcard <card>",

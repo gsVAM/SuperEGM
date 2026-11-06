@@ -252,7 +252,7 @@ def test_callers_skill_and_reference_texts():
   for needle in ("before drafting", "after every `graph`", "orient/map.md", "stop on its exit 1 with its line"):
     assert needle in plan, needle
   assert "superegm orient --spec '<spec>' --runcard '<card>'" in rp and "<HELPER>' orient" not in rp
-  for needle in ("<6 hex>/orient/<unit>.md", "exposed:orient <tree sha>", "no orient file", "after every `graph`",
+  for needle in ("`orient/<unit>.md` in the handoff's directory", "exposed:orient <tree sha>", "no orient file", "after every `graph`",
                  "superegm orient --spec '<spec>' --unit U<id> --runcard '<card>'"):  # the last: owner ruling zoom-out-1-4
     assert needle in rp, needle
   harness = "In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first."
