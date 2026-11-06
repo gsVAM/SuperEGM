@@ -17,7 +17,7 @@ from test_builder_token import key, APP, OPENSSL, FOUR, app_api  # noqa: F401  t
 ROOT = Path(__file__).resolve().parents[2]
 REPO, BASE, UNIT, ISSUE, TRACKING, PR = "example-org/webhooks", "main", "U07", 7, 1, 70
 F = "`" * 3
-BODY = (f"<!-- superegm:handoff=HID unit=UID spec=SHA -->\n# UID — Worker\n\n## Objective\nA worker exists.\n\n"
+BODY = (f"<!-- superegm:handoff=HID unit=UID spec=SHA -->\n# UID — Worker\nSpec: `REL` @ SEVEN · `REL:1-2 (# Webhook delivery)`\n\n## Objective\nA worker exists.\n\n"
         f"## Definition of done\n1. The test for each Step was committed before its implementation (checked by superegm tdd-order)\n"
         f"2. Run `pytest tests/unit/test_worker.py -q` — the worker's cases pass\n3. Exists `src/worker.py`\n4. CI green on the head\n\n"
         f"## Steps\n1. Write the failing test `test_w` in `tests/unit/test_worker.py`:\n   {F}python\n   def test_w(): ...\n   {F}\n"
@@ -136,13 +136,14 @@ def seed(world, units=(UNIT,), max_in_flight=5, workflow="on: [push, pull_reques
   numbers = {u: 7 + i for i, u in enumerate(units)}
   bodies = {}
   for u, n in numbers.items():
-    body = BODY.replace("HID", hid).replace("UID", u).replace("SHA", sha)
+    body = BODY.replace("HID", hid).replace("UID", u).replace("SHA", sha).replace("REL", spec.relative_to(repo.resolve()).as_posix()).replace("SEVEN", sha[:7])
     bodies[u] = body
     put(s.path("unit", u), f"{SECTION.replace('UID', u).replace('SPEC', str(spec))}\n## Issue body as posted\n\n{F}markdown\n{body}{F}\n")
     writes.append(["issue", u, f"{u}: Worker", ["superegm:unit"], body])
     world.gh.issues[n] = {"number": n, "id": 1000 + n, "body": fill_numbers(body, numbers, TRACKING), "labels": ["superegm:unit"], "state": "open", "state_reason": None}
   put(s.path("approvals", f"{spec_slug(spec)}.json"), json.dumps({"path": str(spec), "sha256": sha, "commit": git(["rev-parse", "--short", "HEAD"], repo).strip(),
       "runcard": "c0", "review": "r0", "approved_at": "2026-11-03T00:00:00Z", "amended": [], "voided_by": None, "handoff_id": hid}))
+  put(s.path("handoffs", hid), json.dumps({"id": hid, "spec": str(spec), "opened_at": "2026-11-03T00:00:00Z", "closed_at": None}))
   put(s.path("state"), json.dumps({"handoff_id": hid, "repo": REPO, "plan": str(plan), "confirmed_sha256": "x",
       "design": {"path": str(spec), "sha256": sha},
       "verify": {"complete": True, "sha256": "x", "problems": []}, "tracking": {"number": TRACKING, "id": 1000},
@@ -178,6 +179,20 @@ def app_seed(world, monkeypatch, key, tmp_path, **gh):
 
 def state_of(s):
   return json.loads(s.path("state").read_text(encoding="utf-8"))
+
+
+def remark(s, world, old, new, uid=UNIT):
+  """The marker's spec sha256 `old` rewritten `new` in the unit file, the filing's body and the issue's body."""
+  path = s.path("unit", uid)
+  put(path, path.read_text(encoding="utf-8").replace(f"spec={old}", f"spec={new}"))
+  state = state_of(s)
+  for filing in state["filings"]:
+    for item in filing["writes"]:
+      if item[0] == "issue" and item[1] == uid:
+        item[4] = item[4].replace(f"spec={old}", f"spec={new}")
+  put(s.path("state"), json.dumps(state))
+  issue = world.gh.issues[state["units"][uid]["number"]]
+  issue["body"] = issue["body"].replace(f"spec={old}", f"spec={new}")
 
 
 def launches_of(s, uid=UNIT):
@@ -299,6 +314,24 @@ def test_launch_accepts_the_approved_bytes_or_a_later_link(world, monkeypatch, a
   at_origin != "approved" and push_to_origin(world, rel, texts[at_origin])
   code, out = world.run("launch", "--runcard", card)
   assert (code == 0) is ok and ("launch: spec at origin/main is neither the approved bytes nor a later link of the approval chain" in out) is not ok
+
+
+@pytest.mark.parametrize("case", ["entry", "rewritten", "none"])
+def test_launch_builder_copies_the_cited_range_at_the_markers_sha(world, monkeypatch, case):
+  s, card, hid, bodies = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0
+  spec = Path(state_of(s)["design"]["path"]); sha = hashlib.sha256(spec.read_bytes()).hexdigest()
+  if case != "entry":
+    record = json.loads(s.path("approvals", "sample").read_text(encoding="utf-8")); record["commit"] = "0" * 40
+    put(s.path("approvals", "sample"), json.dumps(record))
+  case == "none" and remark(s, world, sha, "1" * 64)
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)
+  if case == "none":
+    assert code == 1 and "launch-builder: spec range: no commit holds 1111111" in out and not s.path("worktrees", UNIT, "r1").exists()
+    return
+  prompt = s.path("launches", f"{UNIT}_r1_prompt.md").read_text(encoding="utf-8")
+  assert "# Spec range\n\n" + "\n".join(spec.read_text(encoding="utf-8").splitlines()[0:2]) + "\n" in prompt
 
 
 def launched(s, uid, status, rnd=1):
