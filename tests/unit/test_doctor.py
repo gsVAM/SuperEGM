@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U14's tests of `superegm doctor` (spec section 11); the App lines and the launched environment (U15).
+# Added by SuperEGM (gsVAM), 2026: U14's tests of `superegm doctor` (spec section 11); the App lines and the launched environment (U15); the informational `merge:` line (U19).
 
 """`superegm doctor`: one line per wave prerequisite, `ok` or the refusal `launch` or `launch-builder`
 would give, in a pinned order; no run card, no store write."""
@@ -12,7 +12,8 @@ from test_builders import UNIT, RULESET, SUPEREGM_RULESET, seed, app_seed, githu
 from test_builder_token import key, OPENSSL, FOUR  # noqa: F401  the key fixture
 
 OK = ["config: ok", "owner: ok (owner)", "origin: ok", "token: ok", "builder: ok (builder-bot)", "role: ok (write)",
-      "scopes: ok (classic: repo, read:org)", "protection: ok", "profile: ok", "gh: ok (/usr/local/bin/gh)", "environment: ok",
+      "scopes: ok (classic: repo, read:org)", "protection: ok",
+      "merge: gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset restricts updates to config.owners)", "profile: ok", "gh: ok (/usr/local/bin/gh)", "environment: ok",
       "graphify: not on PATH (informational)", "astra: not installed (heads will record not run)"]
 NAMES = [line.split(":")[0] for line in OK]
 
@@ -72,7 +73,8 @@ def test_doctor_lines(world, monkeypatch, tmp_path, case, code, expected):
 
 OK_APP = ["config: ok", "owner: ok (owner)", "origin: ok", "credential: ok (app superegm-builder)", "key: ok ({key})", "openssl: ok ({openssl})", "artifacts_dir: ok",
           "app: ok (superegm-builder #12345)", f"permissions: ok ({FOUR[1:-1]})", "token: ok", "installation: ok (example-org/webhooks)",
-          "scanning: push protection enabled, non-provider patterns enabled", "protection: ok", "profile: ok", "gh: ok ({gh})", "environment: ok", "graphify: not on PATH (informational)", "astra: not installed (heads will record not run)"]
+          "scanning: push protection enabled, non-provider patterns enabled", "protection: ok",
+          "merge: gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset restricts updates to config.owners)", "profile: ok", "gh: ok ({gh})", "environment: ok", "graphify: not on PATH (informational)", "astra: not installed (heads will record not run)"]
 
 
 @pytest.mark.parametrize("case, code, expected, skipped", [

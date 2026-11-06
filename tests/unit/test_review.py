@@ -11,6 +11,8 @@ from superegm import store, atomic_write, sha256_text
 from superegm.review import parse_findings
 from superegm.review import derive_what_ran
 from superegm.review import PANEL_OF
+from superegm.review import scope_sections
+from superegm.review import findings_of
 
 from conftest import REPO, set_config
 
@@ -755,3 +757,157 @@ def test_no_removed_mechanism_named(rel, phrases):
     pytest.skip("D1 (b): resources/review_panels.md was not kept by U01")
   text = path.read_text(encoding="utf-8")
   assert [p for p in phrases if re.search(rf"(?<!SUPER){re.escape(p)}", text)] == []   # SUPEREGM_GOLDFISH_* is not EGM_GOLDFISH
+
+
+# ---------------------------------------------------------------- S20: the scope's sections and neighbours (U19)
+
+OLD = "# T\n\npre\n\n## 1. A\n\na\n\n### 1.1 B\n\nb\n\n### 1.2 C\n\nc\n\n## 2. D\n\nd\n\n## 3. E\n\ne\n\n```\n## not a heading\n```\n"
+
+@pytest.mark.parametrize("new, expect", [
+  (OLD.replace("\nc\n", "\nc changed\n"), [("neighbour", "### 1.1 B", 9, 12), ("changed", "### 1.2 C", 13, 16), ("neighbour", "## 2. D", 17, 20)]),
+  (OLD.replace("\nd\n", "\nd changed\n"), [("neighbour", "### 1.2 C", 13, 16), ("changed", "## 2. D", 17, 20), ("neighbour", "## 3. E", 21, 27)]),
+  (OLD.replace("\npre\n", "\npre changed\n"), [("changed", "(preamble)", 1, 4), ("neighbour", "## 1. A", 5, 8)]),
+  (OLD.replace("\nb\n", "\nb changed\n"), [("neighbour", "## 1. A", 5, 8), ("changed", "### 1.1 B", 9, 12), ("neighbour", "### 1.2 C", 13, 16)]),
+  (OLD.replace("## not a heading", "## not a heading, changed"), [("neighbour", "## 2. D", 17, 20), ("changed", "## 3. E", 21, 27)]),
+  (OLD.replace("\nb\n", "\nb changed\n").replace("\nc\n", "\nc changed\n"), [("neighbour", "## 1. A", 5, 8), ("changed", "### 1.1 B", 9, 12), ("changed", "### 1.2 C", 13, 16), ("neighbour", "## 2. D", 17, 20)]),
+  (OLD.replace("\nc\n", "\n"), [("neighbour", "### 1.1 B", 9, 12), ("changed", "### 1.2 C", 13, 15), ("neighbour", "## 2. D", 16, 19)]),
+  (OLD, [])])
+def test_scope_sections_and_neighbours(new, expect):
+  assert scope_sections(OLD, new) == expect
+
+
+# ---------------------------------------------------------------- S21: `review open --scope` (U19)
+
+@pytest.mark.parametrize("scope, approved, expect", [
+  (None, False, "auto"), ("whole", False, "whole"), ("## 1. Intent;## 2. Units", True, ["## 1. Intent", "## 2. Units"]),
+  ("## 9. Nope", True, "review open: --scope: ## 9. Nope is not in the spec"), ("## 1. Intent", False, "review open: --scope <list>: no approval: use whole")])
+def test_review_open_records_the_scope_form(world, scope, approved, expect):
+  if approved:
+    spec, cid, rid = converged_spec(world); assert approve(world, spec, cid, "--yes")[0] == 0; move(world, "spec", spec)
+  else:
+    spec = spec_file(world); cid = card(world, spec)
+  code, out = world.run("review", "open", "--kind", "spec", "--artifact", str(spec), "--reviewers", "design", *(["--scope", scope] if scope else []), "--runcard", cid)
+  assert (code == 0 and rjson(world, out.strip())["scope"] == expect) or (code == 1 and expect in out), out
+
+
+# ---------------------------------------------------------------- S22: `review scope`, derived from the approval's commit (U19)
+
+def test_review_scope_derives_the_round_from_the_approval_commit(world):
+  spec, cid, rid = converged_spec(world); assert approve(world, spec, cid, "--yes")[0] == 0
+  spec.write_text(SPEC.replace("Text.", "Changed."), encoding="utf-8")
+  rid2 = reopen(world, "spec", cid)
+  lines = lambda: world.run("review", "scope", "--review", rid2, "--runcard", cid)[1].strip().splitlines()
+  assert lines() == ["neighbour 1-2 (preamble)", "changed 3-6 ## 1. Intent", "neighbour 7-11 ## 2. Units"]
+  rec = approval(world); rec["commit"] = "0" * 40; atomic_write(store(world.repo).path("approvals", SLUG), rec)
+  assert lines()[1] == "changed 3-6 ## 1. Intent"
+  rec["sha256"] = "1" * 64; atomic_write(store(world.repo).path("approvals", SLUG), rec)
+  assert lines() == ["whole 1-11 (no commit holds 1111111)"]
+
+
+# ---------------------------------------------------------------- S23: `review record` refuses a finding out of scope (U19)
+
+SPEC4 = SPEC.replace("## 2. Units", "## 2. Goals\n\nGoals.\n\n## 3. Risks\n\nRisks.\n\n## 4. Units")
+
+@pytest.mark.parametrize("location, kept", [("§1 line 5", True), ("line 2", True), ("docs/specs/x.md:13", False), ("§1", True)])
+def test_record_refuses_out_of_scope_findings_and_stores_them(world, location, kept):
+  spec, cid, rid = converged_spec(world, SPEC4); assert approve(world, spec, cid, "--yes")[0] == 0
+  spec.write_text(SPEC4.replace("Text.", "Changed."), encoding="utf-8")
+  rid2 = reopen(world, "spec", cid)
+  line = f"design-1-1 | high | {location} | regression: no | claim"
+  code, out = record(world, rid2, 1, "design", [line], cid)
+  rnd = rjson(world, rid2, "round-1.json")
+  assert code == 0 and rnd["out_of_scope"] == ([] if kept else [line]) and len(rnd["reviewers"]["design"]["findings"]) == int(kept)
+  assert rnd["scope"] == [["neighbour", "(preamble)", 1, 2], ["changed", "## 1. Intent", 3, 6], ["neighbour", "## 2. Goals", 7, 10]]
+  assert ("record: design-1-1 out of scope (## 3. Risks): not recorded" in out) is not kept
+  assert ("out of scope: design-1-1" in (world.artifacts / "journal.md").read_text(encoding="utf-8")) is not kept
+
+
+# ---------------------------------------------------------------- S24: `review settle --file`, all or nothing (U19)
+
+def test_settle_file_is_all_or_nothing(world):
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [[F("design", 1, 1), F("design", 1, 2, "medium"), F("design", 1, 3, "low")]])
+  path = world.repo.parent / "dispositions.txt"
+  path.write_text("design-1-1 | fixed | moved\ndesign-1-2 | contested | wrong\ndesign-1-3 | declined | not worth it\n", encoding="utf-8")
+  code, out = world.run("review", "settle", "--review", rid, "--file", str(path), "--owner", "--runcard", cid)
+  assert code == 1 and "review settle: design-1-1 | fixed | moved: fixed needs changed bytes: nothing written" in out
+  assert all(f["disposition"] is None for f in findings_of(rjson(world, rid, "round-1.json")))
+  move(world, "spec", spec)
+  assert world.run("review", "settle", "--review", rid, "--file", str(path), "--owner", "--runcard", cid) == (0, "design-1-1 fixed\ndesign-1-2 contested\ndesign-1-3 declined\n")
+  assert [(f["disposition"], f["note"]) for f in findings_of(rjson(world, rid, "round-1.json"))] == [("fixed", "moved"), ("contested", "wrong"), ("declined", "not worth it")]
+  path.write_text("design-1-9 | fixed | gone\n", encoding="utf-8")
+  assert "review settle: design-1-9 | fixed | gone: no finding design-1-9" in world.run("review", "settle", "--review", rid, "--file", str(path), "--runcard", cid)[1]
+  path.write_text("\ndesign-1-1 fixed\n", encoding="utf-8")
+  assert "review settle: design-1-1 fixed: not <fid> | <disposition> | <note>: nothing written" in world.run("review", "settle", "--review", rid, "--file", str(path), "--runcard", cid)[1]
+
+
+# ---------------------------------------------------------------- S25: the cap question names the scope (U19)
+
+def test_cap_question_names_the_scope(world):
+  spec, cid, rid = converged_spec(world); assert approve(world, spec, cid, "--yes")[0] == 0
+  spec.write_text(SPEC.replace("Text.", "Changed."), encoding="utf-8")
+  rid2 = reopen(world, "spec", cid)
+  rounds(world, rid2, cid, [HIGH(n) for n in range(1, 6)])
+  assert cap_question(world, rid2, cid)[1].startswith(f"## Q1 {rid2} is at its cap (scope: (preamble), ## 1. Intent, ## 2. Units)\n")
+
+
+# ---------------------------------------------------------------- S26: the four rules and the scope prose (U19)
+
+RULES_PROSE = [("skills/using-superegm/SKILL.md", n) for n in ("fresh session per phase", "never switches branches", "one worktree per handoff", "gh pr merge --admin", "after a plugin install or update")] + [
+  ("skills/review-spec/SKILL.md", n) for n in ("[--scope auto|whole|<sections>]", "start on the branch you want the commits on", "superegm review scope --review <id>",
+                                               "superegm review settle --review <id> --file <dispositions>", "out of scope")] + [
+  ("skills/review-spec/references/review_loop.md", "findings only inside the changed sections and, on a neighbour, only on its fit with them; a finding on any other section is out of scope"),
+  ("skills/review-spec/references/review_loop.md", "out_of_scope[]"), ("skills/review-spec/references/review_loop.md", "--file <dispositions>"),
+  ("skills/wave/SKILL.md", "gh pr merge --admin"), ("skills/integrate/SKILL.md", "gh pr merge --admin")]
+
+@pytest.mark.parametrize("path, needle", RULES_PROSE)
+def test_the_four_rules_and_the_scope_prose(path, needle):
+  assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
+
+
+# ---------------------------------------------------------------- review round 1 of PR #69 (U19): the branches the Steps leave untested
+
+def test_scope_refusals_resume_and_settle_arguments(world):
+  spec = spec_file(world); cid = card(world, spec, "integrate")
+  code, out = world.run("review", "open", "--kind", "integrate", "--artifact", str(spec), "--reviewers", "design", "--scope", "whole", "--runcard", cid)
+  assert code == 1 and "review open: --scope is refused for kind integrate" in out
+  code, out = world.run("review", "open", "--kind", "integrate", "--artifact", str(spec), "--reviewers", "design", "--runcard", cid)
+  assert code == 0, out
+  rid = out.strip()
+  assert rjson(world, rid)["scope"] is None
+  code, out = world.run("review", "scope", "--review", rid, "--runcard", cid)
+  assert code == 1 and f"review scope: {rid} is not a spec review" in out
+  spec, cid, rid = opened(world)
+  assert world.run("review", "open", "--kind", "spec", "--artifact", str(spec), "--reviewers", PANEL_OF["spec"], "--scope", "whole", "--runcard", cid) == (0, rid + "\n")
+  assert rjson(world, rid)["scope"] == "auto"
+  rounds(world, rid, cid, [HIGH(1)])
+  path = world.repo.parent / "dispositions.txt"; path.write_text("design-1-1 | contested | wrong\n", encoding="utf-8")
+  for extra in ([], ["--finding", "design-1-1"], ["--file", str(path), "--finding", "design-1-1", "--disposition", "contested"]):
+    code, out = world.run("review", "settle", "--review", rid, *extra, "--owner", "--runcard", cid)
+    assert code == 1 and "review settle: --file, or --finding with --disposition" in out, extra
+
+
+def test_record_keeps_a_set_reviewers_raw_lines_paired_after_its_unit_filter(world):
+  spec, cid, rid = converged_spec(world, SPEC4); assert approve(world, spec, cid, "--yes")[0] == 0
+  spec.write_text(SPEC4.replace("Text.", "Changed."), encoding="utf-8")
+  code, out = world.run("review", "open", "--kind", "spec", "--artifact", str(spec), "--reviewers", "design,set", "--runcard", cid)
+  assert code == 0, out
+  rid2 = out.strip()
+  other, refused = "set-1-1 | high | U42 line 5 | regression: no | another unit", "set-1-2 | high | line 13 | regression: no | risks"
+  assert record(world, rid2, 1, "set", [other, refused], cid)[0] == 0
+  rnd = rjson(world, rid2, "round-1.json")
+  assert rnd["out_of_scope"] == [refused] and rnd["reviewers"]["set"]["findings"] == []
+
+
+@pytest.mark.parametrize("approved", [True, False])
+def test_record_keeps_a_line_past_the_specs_end(world, approved):
+  if approved:
+    spec, cid, rid = converged_spec(world, SPEC4); assert approve(world, spec, cid, "--yes")[0] == 0
+    spec.write_text(SPEC4.replace("Text.", "Changed."), encoding="utf-8")
+    rid = reopen(world, "spec", cid)
+  else:
+    spec, cid, rid = opened(world, text=SPEC4)
+  line = "design-1-1 | high | skills/x.py:500 | regression: no | claim"
+  code, out = record(world, rid, 1, "design", [line], cid)
+  rnd = rjson(world, rid, "round-1.json")
+  assert code == 0 and rnd["out_of_scope"] == [] and len(rnd["reviewers"]["design"]["findings"]) == 1 and "out of scope" not in out

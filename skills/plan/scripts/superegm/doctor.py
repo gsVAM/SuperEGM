@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17).
+# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19).
 
 """superegm doctor: one line per wave prerequisite, `ok` or the refusal `launch` or `launch-builder`
 would give; read-only, no run card."""
@@ -17,6 +17,9 @@ from superegm.launch import app_login, builder_login, origin_problems, protectio
 from superegm.launch_builder import SENTINEL, UNSET, launched_pairs, profile_problem
 
 WRITES = frozenset()  # doctor writes nothing
+INFORMATIONAL = ("graphify", "scanning", "astra", "merge")  # lines that never fail the exit
+MERGE = ("gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset "
+         "restricts updates to config.owners)")
 
 
 def register(subparsers):
@@ -35,18 +38,18 @@ def run(args):
   lines = [("config", "ok"), *checks(config, repo_root, os.environ.get(config["builder"]["gh_token_env"]))]
   for name, text in lines:
     print(f"{name}: {text}")
-  return 0 if all(text.startswith("ok") for name, text in lines if name not in ("graphify", "scanning", "astra")) else 1
+  return 0 if all(text.startswith("ok") for name, text in lines if name not in INFORMATIONAL) else 1
 
 
 def checks(config, repo_root, token):
   """The lines after `config`: `launch`'s and `launch-builder`'s own predicates, each line `ok…` or the
   refusal they would give (a check's HandoffError or GhError text is its line). On the machine-account
-  path the order is owner, origin, token, builder, role, scopes, protection, profile, gh, environment,
+  path the order is owner, origin, token, builder, role, scopes, protection, merge, profile, gh, environment,
   graphify, astra; the builder, role, scopes and protection lines need the token and are absent without it.
   On the App path: owner, origin, credential, key, openssl, artifacts_dir, app, permissions, token,
-  installation, scanning, protection, profile, gh, environment, graphify, astra; the four App lines are absent
-  after a failing key or openssl. The environment line is absent after a failing gh line; graphify,
-  astra and scanning are informational and never fail."""
+  installation, scanning, protection, merge, profile, gh, environment, graphify, astra; the four App lines are
+  absent after a failing key or openssl. The environment line is absent after a failing gh line; graphify,
+  astra, scanning and merge are informational and never fail."""
   repo, base, owners, team, app = config["repo"], config["base"], config["owners"], config["owner_team"], config["builder"]["app"]
   lines, found = [], {}
 
@@ -138,6 +141,7 @@ def checks(config, repo_root, token):
     lines.append(("token", "ok"))
     for name, fn in (("builder", builder), ("role", role), ("scopes", scopes), ("protection", protection)):
       check(name, fn)
+  lines.append(("merge", MERGE))
   check("profile", lambda: profile_problem(Path(config["builder"]["profile_dir"]).expanduser()) or "ok")
   check("gh", gh)
   if "gh" in found:

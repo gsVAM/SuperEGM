@@ -291,7 +291,7 @@ def test_integrate_skill_body():
       "In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.",
   ]:
     assert snippet in body, snippet
-  assert not re.search(r"--approve|--request-changes|gh pr merge|merge locally", body)
+  assert not re.search(r"--approve|--request-changes|gh pr merge(?! --admin)|merge locally", body)
   assert len(body.encode("utf-8")) <= 24_000
 
 
