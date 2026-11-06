@@ -1,7 +1,8 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
 # Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_approve` as the approve-spec module (U03); the section 8 form: a converged
-# review, the `Units` check, the commit by path, `--void` and `--amend-units` (U04); the escalated pairs recorded (U16).
+# review, the `Units` check, the commit by path, `--void` and `--amend-units` (U04); the escalated pairs recorded (U16);
+# the approval history, one handoff per opening, the latest-entry rule and the branch check (U20).
 
 """superegm approve-spec: record the owner's approval of a converged spec (spec section 8)."""
 
@@ -67,6 +68,14 @@ def append_entry(st: core.Store, spec: Path, entry: dict) -> Path:
   path = st.path("approvals", core.spec_slug(spec))
   core.atomic_write(path, {"path": str(spec), "entries": core.load_approvals(st, spec) + [entry]})
   return path
+
+
+def write_handoff_file(st: core.Store, handoff_id: str, spec: Path, opened_at) -> None:
+  """`handoffs/<id>.json` at an opening, or the first time an approval touches a legacy handoff (its
+  `opened_at` unknown, null); an existing file is left as it is (spec section 7)."""
+  path = st.path("handoffs", handoff_id)
+  if not path.is_file():
+    core.atomic_write(path, {"id": handoff_id, "spec": str(spec), "opened_at": opened_at, "closed_at": None})
 
 
 def write_entries(st: core.Store, spec: Path, entries: list) -> None:
@@ -166,9 +175,7 @@ def run(args):
                           st.config["commit_trailer"])
   entry = entry_of(sha, commit, args.runcard, rid, handoff_id, kind, escalated)
   path = append_entry(st, spec, entry)
-  handoff_file = st.path("handoffs", handoff_id)
-  if kind == "opening" and not handoff_file.is_file():
-    core.atomic_write(handoff_file, {"id": handoff_id, "spec": str(spec), "opened_at": entry["approved_at"], "closed_at": None})
+  write_handoff_file(st, handoff_id, spec, entry["approved_at"] if kind == "opening" else None)
   core.journal(st, f"approve-spec {kind} {handoff_id} sha256 {sha[:12]} at review {rid} commit {commit[:12]} under {args.runcard}")
   print(f"approval recorded in {path}")
   return 0
@@ -219,7 +226,9 @@ def amend_units(args, st: core.Store, spec: Path, root: Path) -> int:
   sha = core.sha256_file(spec)
   commit = commit_by_path(root, [rel, CONFIG], f"superegm: approve {slug} at review {approval['review']}",
                           st.config["commit_trailer"])
-  path = append_entry(st, spec, entry_of(sha, commit, args.runcard, approval["review"], approval["handoff_id"], "amend-units", []))
+  path = append_entry(st, spec, entry_of(sha, commit, args.runcard, approval["review"], approval["handoff_id"], "amend-units",
+                                         list(approval.get("escalated") or [])))
+  write_handoff_file(st, approval["handoff_id"], spec, None)
   core.journal(st, f"approve-spec amend-units {approval['handoff_id']} sha256 {sha[:12]} commit {commit[:12]} under {args.runcard}")
   print(f"approval recorded in {path}")
   return 0
