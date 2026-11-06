@@ -3,7 +3,7 @@ Copyright 2026 Google LLC.
 SPDX-License-Identifier: Apache-2.0
 -->
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: fork install commands, Astra lane section, panel stage order. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: the platform facts of design section 4 in SuperEGM's names; EGM's install, stage, review-orchestrator and environment-variable text removed. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the platform facts of design section 4 in SuperEGM's names; EGM's install, stage, review-orchestrator and environment-variable text removed; the Astra head lane's foreground exception (U17). -->
 
 # Claude Code: the platform facts
 
@@ -42,7 +42,9 @@ A Bash background command dies with the agent that started it: a subagent's back
 is killed when that subagent gives its final response, while one started from the main
 conversation keeps running across turns. So builders, `status --wait` and the Astra runner are
 launched by the elephant from the main conversation, never by a subagent that then returns; the
-foreman prepares, this session runs.
+foreman prepares, this session runs. The one exception is the Astra lane on a head review
+(`astra.enabled` and `astra.heads`): the foreman runs the runner as one bounded foreground Bash
+call (`--timeout 540` under a 600000 ms limit) and waits for it, so nothing outlives the foreman.
 
 ## Headless sessions: builders and goldfish
 

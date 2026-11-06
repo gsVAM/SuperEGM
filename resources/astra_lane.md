@@ -280,7 +280,17 @@ A resumed run re-reads the edited document and is told not to relitigate
 resolved items without new evidence. The previous round's skipped lane (`not
 run`) is never resumed.
 
-## 8. Fall back, never block
+## 8. The head lane, fall back, never block
+
+A SuperEGM wave's head review seats the lane on every round when `astra.enabled` and `astra.heads` are
+both true in `.superegm/config.json`. The helper's `prepare` writes `r<n>/astra_brief.md` (what the Claude
+goldfish receive, the diff cut at 400 KB) and ends its `prepared:` line `astra: off | ok <runner> |
+not installed | stopped`. The foreman, never the main conversation, runs the runner once per round after the
+Claude panel as one foreground Bash call under a 600000 ms timeout with `--timeout 540`, in a fresh session,
+and records the result through `review record`. It is never a background command: the foreman waits for it.
+A lane that is `not installed`, `failed`, `killed` or `timeout` is recorded `not run (<reason>)` and never
+blocks the round; `not installed` and `stopped` count no incomplete run. The table below is the interactive
+flow's.
 
 | Case | What the user sees | Review continues as |
 | --- | --- | --- |
