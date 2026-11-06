@@ -357,8 +357,8 @@ def resolve_handoff(st: Store, args):
     return get("handoff")
   if get("skill") == "review-spec":
     return None
-  for key in ("runcard", "parent"):
-    path = st.path("runcards", get(key)) if get(key) else None
+  for key in ("runcard", "parent", "id"):  # `id`: the card `runcard close` names
+    path = st.path("runcards", get(key)) if get(key) and (key != "id" or get("command") == "runcard") else None
     if path and path.is_file():
       card = json.loads(read_text(path))
       if "handoff" in card:
@@ -413,17 +413,28 @@ def load_card(store: Store, id: str) -> dict:
 
 
 def open_runcard(store: Store, skill: str, artifact: str, parent=None, mode=None) -> str:
-  """Open `<skill>-<n>`; every open card of the same skill and artifact is
-  marked interrupted first. `artifact` is stored resolved when it is a file."""
+  """Open `<skill>-<6 hex>-<n>` (spec section 7): the hex is the store's handoff's, else (a card
+  preceding any handoff, at the store level) the 6 hex of the spec slug (the parent card's, else
+  the artifact's stem), counted per skill and hex; a legacy store keeps `<skill>-<n>`. Every open
+  card of the same skill and artifact is marked interrupted first. `artifact` is stored resolved
+  when it is a file; the card records the handoff it resolved."""
   if parent is not None and not store.path("runcards", parent).is_file():
     raise HandoffError(f"runcard: parent {parent} not found")
   path = Path(artifact).expanduser()
   sha = sha256_file(path) if path.is_file() else None
   artifact = str(path.resolve()) if path.is_file() else artifact
-  folder = store.path("runcards", "x").parent
-  folder.mkdir(parents=True, exist_ok=True)
-  existing = sorted(folder.glob("*.json"))
-  rid = f"{skill}-{len(existing) + 1:04d}"
+  if store.legacy:
+    folder = store.root / "runcards"
+    folder.mkdir(parents=True, exist_ok=True)
+    existing = sorted(folder.glob("*.json"))
+    rid = f"{skill}-{len(existing) + 1:04d}"
+  else:
+    hexa = store.handoff_id[-6:] if store.handoff_id else \
+        (Store.card_segment(parent) if parent and Store.card_segment(parent) else sha256_text(spec_slug(artifact))[:6])
+    folder = store.root / store.handoff_id / "runcards" if store.handoff_id else store.root / "runcards"
+    folder.mkdir(parents=True, exist_ok=True)
+    rid = f"{skill}-{hexa}-{len(list(folder.glob(f'{skill}-{hexa}-*.json'))) + 1:04d}"
+    existing = sorted(folder.glob("*.json"))
   for other in existing:
     card = json.loads(read_text(other))
     if (card["skill"], card["artifact"]) == (skill, artifact) and not card["closed_at"] and not card["interrupted_at"]:
@@ -434,7 +445,8 @@ def open_runcard(store: Store, skill: str, artifact: str, parent=None, mode=None
   card = {"skill": skill, "artifact": artifact, "artifact_sha256": sha,
           "reviewers": list((config.get("reviewers") or {}).get(RUNCARD_REVIEWERS.get(skill, ""), [])),
           "tiering": None, "mode": mode or config.get("mode", "normal"), "parent": parent,
-          "opened_at": now_iso(), "closed_at": None, "interrupted_at": None, "produced": []}
+          "opened_at": now_iso(), "closed_at": None, "interrupted_at": None, "produced": [],
+          "handoff": store.handoff_id}
   atomic_write(store.path("runcards", rid), card)
   journal(store, f"runcard open {rid} {skill} {artifact}")
   return rid
@@ -1845,8 +1857,8 @@ class Parser(argparse.ArgumentParser):
   resolves the handoff from."""
 
   def parse_args(self, args=None, namespace=None):
-    global CURRENT_ARGS
-    CURRENT_ARGS = None
+    global CURRENT_ARGS, STORE
+    CURRENT_ARGS = STORE = None  # a new command resolves its own handoff
     CURRENT_ARGS = super().parse_args(args, namespace)
     return CURRENT_ARGS
 
