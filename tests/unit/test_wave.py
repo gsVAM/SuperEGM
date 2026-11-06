@@ -494,3 +494,36 @@ def test_the_report_names_a_redesign_units_brief(world):
   atomic_write(s.path("foreman", "U01"), data)
   assert world.run("report", "--runcard", card)[0] == 0
   assert "## Stopped\n- U01 (owner: redesign — why): unlanded dependants U02; brief /store/foreman/U01-q1.brainstorm.md" in s.path("wave_report", 1).read_text(encoding="utf-8")
+
+
+def test_a_refused_redesign_ruling_leaves_no_brief_and_a_small_diff_is_copied_whole(world, monkeypatch):
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "builder-token")
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "rounds": [{"round": 1, "phase": "posted", "outcome": "revise", "launch": 1}]})
+  folder = s.path("review", "U01", 70) / "r1"
+  # 300 lines of invalid UTF-8: 14 KB on disk, 41 KB once decoded with `errors="replace"`: under 40 KB, so copied whole
+  atomic_write(folder / "diff", b"diff --git a/src/x.py b/src/x.py\n" + (b"+" + b"\xff" * 45 + b"\n") * 300)
+  qid = world.run("decision", "open", "--unit", "U01", "--point", 2, "--question", question(world, FINDING + "\n"),
+                  "--source", "review head-U01-c1 cap", "--runcard", card)[1].splitlines()[0]
+  brief = s.path("foreman", "U01").with_name(f"U01-{qid}.brainstorm.md")
+  fake_gh(world, {"user": {"login": BUILDER}, f"repos/{REPO}/issues/comments/9": {"id": 9, "user": {"login": "someone"}, "body": "**Ruling:** (cap) redesign — why\n"}})
+  rule = lambda *more: world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", "redesign — why", "--by", "owner",
+                                 *more, "--runcard", card)
+  assert rule("--posted", "9") == (1, "decision: comment 9 was written by someone, not owner\n")
+  assert not brief.exists() and "stopped" not in foreman_of(s, "U01") and foreman_of(s, "U01")["rulings"] == []
+  assert "Brainstorm brief" not in (world.artifacts / "journal.md").read_text(encoding="utf-8")
+  assert rule()[0] == 0
+  text = brief.read_text(encoding="utf-8")
+  assert sum(l.startswith("+�") for l in text.splitlines()) == 300
+  assert text.split("# Deviations")[1].strip() == "(none)"  # no comments.md for the round
+
+
+def test_a_brief_with_no_posted_round_names_no_diff_and_no_deviations(world):
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})
+  qid = world.run("decision", "open", "--unit", "U01", "--point", 2, "--question", question(world, FINDING + "\n"),
+                  "--source", "review head-U01-c1 cap", "--runcard", card)[1].splitlines()[0]
+  assert world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", "redesign — why", "--by", "owner", "--runcard", card)[0] == 0
+  text = s.path("foreman", "U01").with_name(f"U01-{qid}.brainstorm.md").read_text(encoding="utf-8")
+  assert text.split("# Diff")[1].split("# Deviations")[0].split() == ["(none)", "```diff", "```"]
+  assert text.split("# Deviations")[1].strip() == "(none)"
