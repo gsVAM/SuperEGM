@@ -412,3 +412,10 @@ REDESIGN_PROSE = [("skills/wave/SKILL.md", "redesign — <one sentence why>"), (
 @pytest.mark.parametrize("path, needle", REDESIGN_PROSE)
 def test_the_redesign_prose(path, needle):
   assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
+
+
+def test_the_point_one_redesign_waits_for_the_verdict_and_the_by_hand_ruling_is_told():
+  panel = (ROOT / "skills/judges/references/leavemealone.md").read_text(encoding="utf-8")
+  assert "held until the verdict" in panel and "the first question converged on `redesign`" in panel
+  assert "ruled by hand with `--posted`" in (ROOT / "skills/wave/SKILL.md").read_text(encoding="utf-8")
+  assert "the `Spec:` range" in (ROOT / "skills/brainstorming/SKILL.md").read_text(encoding="utf-8")
