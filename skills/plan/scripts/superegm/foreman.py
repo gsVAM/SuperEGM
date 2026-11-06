@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the foreman subcommand (spec section 11).
+# Added by SuperEGM (gsVAM), 2026: the foreman subcommand (spec section 11); `runner_path`, the claudex-loop runner's lookup (U17).
 
 """superegm foreman dispatch: one evaluation of the dispatch predicate, the supersede of a non-terminal
 round, the head review and the child card of a round."""
@@ -7,6 +7,8 @@ round, the head review and the child card of a round."""
 import argparse
 import contextlib
 import io
+import os
+import re
 from pathlib import Path
 
 import superegm as core
@@ -16,6 +18,24 @@ from superegm.review import head_review_id  # the unit's latest `head-<unit>-c<n
 
 WRITES = frozenset({"foreman", "reviews", "runcards"})  # the store kinds this subcommand writes
 SKILLS = frozenset({"wave"})  # the skills whose card this subcommand accepts
+
+
+def runner_path(environ=None) -> str | None:
+  """The claudex-loop runner of the highest unorphaned cache version, or None. The plugins root is
+  `CLAUDE_CODE_PLUGIN_CACHE_DIR` (the folder holding `cache`), else `<CLAUDE_CONFIG_DIR or ~/.claude>/plugins`;
+  versions compare as integer tuples, a non-numeric name is skipped, a folder with `.orphaned_at` is excluded."""
+  environ = os.environ if environ is None else environ
+  root = environ.get("CLAUDE_CODE_PLUGIN_CACHE_DIR") or str(Path(environ.get("CLAUDE_CONFIG_DIR") or "~/.claude").expanduser() / "plugins")
+  versions = Path(root).expanduser() / "cache/claudex-loop/claudex-loop"
+  best = None
+  for folder in versions.iterdir() if versions.is_dir() else ():
+    if not re.fullmatch(r"\d+(\.\d+)*", folder.name) or (folder / ".orphaned_at").exists():
+      continue
+    runner = folder / "skills/claudex-loop/scripts/runner.py"
+    key = tuple(int(part) for part in folder.name.split("."))
+    if runner.is_file() and (best is None or key > best[0]):
+      best = (key, runner)
+  return str(best[1]) if best else None
 
 
 def register(subparsers):

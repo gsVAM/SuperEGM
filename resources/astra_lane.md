@@ -1,13 +1,15 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the Astra
 review lane. Not part of google/elephant-goldfish-model. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the head lane of section 8 and the interactive flow's qualifiers in the intro and section 3b (U17). -->
 
 # Astra lane
 
 The Astra lane adds one reviewer from a second model family, GPT-6 Astra, to
-Stages 7, 9 and 10, and reviews pull requests through the inspect launch of
-section 3b. The main conversation runs the claudex-loop runner as a
-background command. The lane is optional: when it does not run, the round is
+Stages 7, 9 and 10, and, in the interactive flow, reviews pull requests through
+the inspect launch of section 3b; a SuperEGM wave's head review is the foreman's
+`review` call of section 8. The main conversation runs the claudex-loop runner
+as a background command, except the foreman's one foreground call of section 8. The lane is optional: when it does not run, the round is
 not blocked and the report says so; when it runs, its high and medium findings
 block like any reviewer's. Use it only in Claude Code; in other hosts record
 `astra: not run (host)`. Panels, the run card and the configuration variables
@@ -48,7 +50,7 @@ Record the lane as `not run` with the first reason that applies: `host` (not
 Claude Code, checked before any command), `no claudex-loop runner`, `codex not
 on PATH`, `codex not logged in`, `sandbox` (your Bash runs in Claude Code's
 sandbox without the exceptions in `docs/claude.md`), `subagent` (you are a
-subagent or a workflow agent, see section 3). Tell the user in one line and
+subagent or a workflow agent, see section 3; the head lane excepted, section 8). Tell the user in one line and
 continue with the Claude
 reviewers only. Do not run the preflight again in this review. Python and the
 Codex CLI version are not probed: the runner reports those failures (section 5).
@@ -110,6 +112,7 @@ Start the runner with the Bash tool, `run_in_background: true`, from this main
 conversation. Never start it from a subagent, the synthesizer or a workflow
 agent: a background command dies with the agent that started it. If you are a
 subagent or workflow agent, do not launch; record `astra: not run (subagent)`.
+This is the interactive flow only: a wave foreman runs the head lane as section 8 says (head lane excepted).
 Use one command. Put absolute paths in single quotes. Do not chain, pipe,
 redirect or add flags. Model and effort are the validated literals from
 `resources/review_panels.md` section 1, written by you, never `$EGM_...`.
@@ -151,18 +154,17 @@ the command expands.
 
 ## 3b. Launch (pull request review)
 
-A wave's pull request review uses the runner's `inspect` subcommand instead of
-`review`: the target is a change, not a document. The same rules as section 3
-apply — this main conversation only, `run_in_background: true`, one command,
+In the interactive flow a pull request review uses the runner's `inspect`
+subcommand instead of `review`: the target is a change, not a document. The
+same rules as section 3 apply — this main conversation only, `run_in_background: true`, one command,
 absolute paths in single quotes, no chaining, pipes, redirects or extra flags,
 validated literals never `$EGM_...`, and the Bash tool's `timeout` set to the
 runner's `--timeout` plus 300 seconds in milliseconds: `3900000` for the
-`--timeout 3600` inspect. The foreman prepares the brief and this line but
-never runs it: a background command dies with the agent that started it, so a
-foreman that launched and then reported back would kill the run. The helper's
-`prepare` writes the exact line and that Bash timeout into
-`foreman_<unit-id>_r<round>_launch.md`; check it against this section rather
-than composing it by hand.
+`--timeout 3600` inspect. In the interactive flow only, the foreman prepares the brief and this line but
+never runs it (a head review's lane is run by the foreman, section 8): a background command dies with the agent that started it, so a
+foreman that launched and then reported back would kill the run. A SuperEGM
+wave's head review does not use this section: its lane is the `review` call of
+section 8 (`--timeout 540`, a 600000 ms foreground call).
 
 Always a fresh session. An inspect run is never resumed: each round reviews a
 new head, and `--base` already carries what changed.
@@ -280,7 +282,27 @@ A resumed run re-reads the edited document and is told not to relitigate
 resolved items without new evidence. The previous round's skipped lane (`not
 run`) is never resumed.
 
-## 8. Fall back, never block
+## 8. The head lane, fall back, never block
+
+A SuperEGM wave's head review seats the lane on every round when `astra.enabled` and `astra.heads` are
+both true in `.superegm/config.json`. The helper's `prepare` writes `r<n>/astra_brief.md` (what the Claude
+goldfish receive, the diff cut at 400 KB) and ends its `prepared:` line `astra: off | ok <runner> |
+not installed | stopped`. The foreman, never the main conversation, runs the runner once per round after the
+Claude panel as one foreground Bash call under a 600000 ms timeout with `--timeout 540`, in a fresh session,
+and records the result through `review record`. It is never a background command: the foreman waits for it.
+A lane that is `not installed`, `failed`, `killed` or `timeout` is recorded `not run (<reason>)` and never
+blocks the round; `not installed` and `stopped` count no incomplete run.
+
+**Data notice (head lane).** The brief sends to OpenAI, under the account `codex login status` reports, the unit body, the
+spec range, the diff (cut at 400 KB), the CI file, the PR body, the comments and the `# Prior round` section (the last
+posted round's finding lines of every reviewer, the Claude reviewers' among them, Astra's with their dispositions), and Astra may read the review worktree in
+full. `"heads": false` under `astra` keeps heads Claude-only (`docs/privacy.md`).
+
+The head review mapping (section 6's table is the interactive flow's, and `review record` refuses its words): `severity`
+verbatim (`high`, `medium`, `low`); the bare id `astra-<round>-<n>`, Astra's own `id` dropped; `path` as the location;
+`evidence` as the claim; `regression: no`. The status line, the verdict and `fix` stay in the foreman's own words.
+
+The table below is the interactive flow only.
 
 | Case | What the user sees | Review continues as |
 | --- | --- | --- |

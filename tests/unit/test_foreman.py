@@ -12,6 +12,8 @@ from conftest import make_pr, set_config
 import superegm as core
 from superegm import store, atomic_write, sha256_file, DEFAULT_CONFIG
 from superegm import review as review_mod, tdd_order
+from superegm import foreman as foreman_mod
+from superegm.prepare import cut_diff, spec_range, prior_round_text
 from test_builder_token import APP
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -101,7 +103,7 @@ def install_pr_api(world, *, reviews, comments, login) -> list:
 
 
 def seed(world, *, head="a" * 40, ci="success", launches=({"round": 1, "status": "exited 0"},),
-         rounds=(), base_ref="main", comments=None, reviews=(), login="builder-bot", pr_body=PR_BODY, builder=None):
+         rounds=(), base_ref="main", comments=None, reviews=(), login="builder-bot", pr_body=PR_BODY, builder=None, astra=None):
   """Through U03's `store`, `Store.path` and `atomic_write`, what `locate`, `Handoff` and `require_frozen_units`
   read: the plan (conftest's heading, a `Design:` line naming `world.spec` in backticks, `## Global constraints`,
   `## Units`, SECTION) written to `world.plan` and
@@ -121,7 +123,7 @@ def seed(world, *, head="a" * 40, ci="success", launches=({"round": 1, "status":
   spec = world.spec.resolve()
   set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"],
              reviewers={"spec": [], "plan": [], "head": ["change-review"], "integrate": []},
-             **({"builder": builder} if builder else {}))
+             **({"builder": builder} if builder else {}), **({"astra": astra} if astra else {}))
   plan = (f"# Handoff plan: Webhook delivery\n\nDesign: `{spec}`\n\n## Global constraints\n- none\n\n"
           f"## Units\n\n{SECTION}")
   world.plan.write_text(plan, encoding="utf-8")
@@ -250,13 +252,16 @@ def pr_repo(world, tmp_path, monkeypatch, commits=(("test(S1): hook", "tests/uni
   return target, base, head, g
 
 
-def prepared(world, tmp_path, monkeypatch, commits=None, **kw):
+def prepared(world, tmp_path, monkeypatch, commits=None, incomplete=0, **kw):
   target, base, head, g = pr_repo(world, tmp_path, monkeypatch, **({"commits": commits} if commits else {}))
   st, card, child, did, posted = dispatched(world, head=head, **kw)
+  if incomplete:  # the lane's incomplete runs so far, as `review record` counts them
+    path = st.path("reviews", head_rid(st)) / "review.json"
+    atomic_write(path, {**json.loads(path.read_text(encoding="utf-8")), "astra_incomplete": incomplete})
   code, out = world.run("prepare", "--unit", UNIT, "--dispatch", did, "--runcard", child)
   assert code == 0, out
   return SimpleNamespace(st=st, card=card, child=child, did=did, posted=posted, head=head, base=base, g=g,
-                         target=target, rid=head_rid(st), dir=st.path("review", UNIT, f"pr{PR}"))
+                         target=target, rid=head_rid(st), dir=st.path("review", UNIT, f"pr{PR}"), out=out)
 
 
 @pytest.mark.parametrize("app", [False, True])
@@ -269,7 +274,7 @@ def test_prepare_reviews_the_tip_it_fetches(world, tmp_path, monkeypatch, app):
   code, out = world.run("prepare", "--unit", UNIT, "--dispatch", "d9", "--runcard", child)
   assert (code, out.strip()) == (1, "dispatch: d9 is not U01's current dispatch (d1)")
   code, out = world.run("prepare", "--unit", UNIT, "--dispatch", did, "--runcard", child)
-  assert (code, out.strip()) == (0, f"prepared: head {head[:7]} merge-base {base[:7]} ci green previous -"), out
+  assert (code, out.strip()) == (0, f"prepared: head {head[:7]} merge-base {base[:7]} ci green previous - astra: off"), out
   entry = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][0]
   assert entry["phase"] == "prepared" and entry["head"] == head and entry["merge_base"] == base
   d = st.path("review", UNIT, f"pr{PR}")
@@ -318,6 +323,66 @@ def test_prepare_writes_comments_after_posted_at_plus_the_aged_kinds(world, tmp_
   assert text.startswith("builder: builder-bot\n")
   assert "### issue #2 comment 13 by owner at 2026-11-02T14:00:00Z\nlooks fine\n" in text
   assert (f"### pr #70 comment 12 by builder-bot at {at}\n{body}\n" in text) is kept
+
+
+@pytest.mark.parametrize("astra, runner, incomplete, state, brief", [
+  ({"enabled": False}, None, 0, "astra: off", False),
+  ({"enabled": True}, "/x/runner.py", 0, "astra: ok /x/runner.py", True),
+  ({"enabled": True}, None, 0, "astra: not installed", True),
+  ({"enabled": True}, "/x/runner.py", 2, "astra: stopped", False)])
+def test_prepare_writes_the_astra_brief_and_prints_the_lane_state(world, tmp_path, monkeypatch, astra, runner, incomplete, state, brief):
+  monkeypatch.setattr(foreman_mod, "runner_path", lambda: runner)
+  w = prepared(world, tmp_path, monkeypatch, astra=astra, incomplete=incomplete, rounds=[POSTED_R1], launches=TWO_LAUNCHES)
+  assert w.out.strip().endswith(state) and (w.dir / "r2/astra_brief.md").is_file() is brief
+  if brief:
+    text = (w.dir / "r2/astra_brief.md").read_text(encoding="utf-8")
+    assert re.findall(r"^# ([^\n]+)\n\n````\n", text, re.M) == ["Unit body", "Spec range", "Diff", "CI", "PR body", "Comments", "Prior round"]
+    assert BODY in text and PR_BODY in text and "+feat(S1): hook" in text
+  assert cut_diff(b"x" * 400_001).endswith("\n(diff cut at 400 KB)\n") and cut_diff(b"x" * 400_000) == "x" * 400_000
+
+
+def test_the_brief_cut_note_names_the_limit_it_cut_at():
+  assert cut_diff(b"x" * 11, limit=10).endswith("\n(diff cut at 10 bytes)\n") and cut_diff(b"x" * 400_001).endswith("(diff cut at 400 KB)\n")
+
+
+def test_spec_range_reads_the_approved_commit(world, tmp_path):
+  st = store(world.repo)
+  repo = tmp_path / "specrepo"; repo.mkdir()
+  def g(*a):
+    return subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True, text=True).stdout.strip()
+  g("init", "-q", "-b", "main"); g("config", "user.email", "t@example.invalid"); g("config", "user.name", "T")
+  (repo / "docs").mkdir(); (repo / "docs/s.md").write_text("one\ntwo\nthree\nfour\n", encoding="utf-8")
+  g("add", "-A"); g("commit", "-qm", "spec"); commit = g("rev-parse", "HEAD")
+  (repo / "docs/s.md").write_text("changed\n", encoding="utf-8")  # the working tree moved on; the approved commit is read
+  body = "Spec: `docs/s.md` @ abc · `docs/s.md:2-3 (### 2. Two)`\n"
+  assert spec_range(st, repo, body).startswith("not available: no approval record for s")
+  atomic_write(st.path("approvals", "s"), {"commit": commit})
+  assert spec_range(st, repo, body) == "two\nthree"
+  other = body.replace("docs/s.md", "docs/t.md")
+  atomic_write(st.path("approvals", "t"), {"commit": commit})
+  assert spec_range(st, repo, other).startswith("not available: git show")
+  assert spec_range(st, repo, "no range here").startswith("not available: no `Spec:` line")
+
+
+def test_the_prior_round_lists_findings_with_astras_dispositions(world):
+  st = store(world.repo)
+  assert prior_round_text(st, None, None) == "none"
+  f1 = {"id": "change-review-1-1", "severity": "high", "location": "a.py:1", "regression": "no", "claim": "c1", "disposition": "fixed"}
+  f2 = {"id": "astra-1-1", "severity": "medium", "location": "b.py:2", "regression": "yes", "claim": "c2", "disposition": "contested"}
+  atomic_write(st.path("reviews", "rv", "round-1.json"), {"reviewers": {"change-review": {"findings": [f1]}, "astra": {"findings": [f2]}}})
+  assert sorted(prior_round_text(st, "rv", 1).splitlines()) == [  # the store sorts reviewer keys
+    "astra-1-1 | medium | b.py:2 | regression: yes | c2 -> contested",
+    "change-review-1-1 | high | a.py:1 | regression: no | c1"]
+
+
+def test_collect_records_the_brief_sha256_on_the_lane_record(world, tmp_path, monkeypatch):
+  monkeypatch.setattr(foreman_mod, "runner_path", lambda: None)
+  w = prepared(world, tmp_path, monkeypatch, astra={"enabled": True})
+  record(world, w.st, w.rid, 1, w.head, w.child, {"change-review": ""})
+  assert world.run("review", "record", "--review", w.rid, "--round", 1, "--sha256", w.head, "--reviewer", "astra", "--not-run", "not installed", "--runcard", w.child)[0] == 0
+  assert world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)[0] == 0
+  rnd = json.loads((w.st.path("reviews", w.rid) / "round-1.json").read_text(encoding="utf-8"))
+  assert rnd["reviewers"]["astra"]["brief_sha256"] == sha256_file(w.dir / "r1/astra_brief.md")
 
 
 DEV = "**Deviation (dod):** item 3 is wrong\n- (a) drop it\n- (b) keep it\n**Builder status:** BLOCKED"
@@ -537,16 +602,48 @@ def test_foreman_adapter_frontmatter_and_tools():
     "clean | revise | contested: <ids> | cap-reached | target-moved | error",
     "`target-moved` when `review post` exited 3",
     "`error` otherwise",
-    "never merges, never approves, never edits the owner's working tree, never removes a worktree, never launches a session, never convenes the judges, never infers that a builder died",
+    "never merges, never approves, never edits the owner's working tree, never removes a worktree, never launches a session (the head's Astra lane excepted: one bounded foreground runner call), never convenes the judges, never infers that a builder died",
 ])
 def test_foreman_brief_carries_the_round(line):
   assert line in (ROOT / "skills/wave/references/foreman_brief.md").read_text(encoding="utf-8"), line
 
 
+PROSE = [("skills/wave/references/foreman_brief.md", n) for n in ("Step 2b, the Astra lane", "--timeout 540", "600000", "astra_brief.md", "--not-run 'not installed'",
+                                                                   "stopped: two incomplete runs", "astra: ok <RUNNER>", "fresh every round", "every panel entry but `astra`", "(the head's Astra lane excepted: one bounded foreground runner call)", "record the lane once per round", "a head's diff is small", "ends `astra: ok` or `astra: not installed`")] + [
+         ("resources/astra_lane.md", "## 8. The head lane"), ("resources/astra_lane.md", "--timeout 540"), ("resources/astra_lane.md", "one foreground"), ("resources/astra_lane.md", "head lane excepted"), ("resources/astra_lane.md", "interactive flow only"),
+         ("resources/astra_lane.md", "The head review mapping"), ("resources/astra_lane.md", "the bare id `astra-<round>-<n>`"), ("resources/review_panels.md", "inspect launch is the interactive flow only"),
+         ("resources/review_panels.md", "change-review, astra"), ("docs/claude.md", "one bounded foreground"), ("docs/claude.md", "astra.heads"),
+         ("docs/privacy.md", "every head review of a SuperEGM wave"), ("docs/privacy.md", "the diff, the CI file, the PR body and the comments"),
+         (".claude-plugin/agents/foreman.md", "the head's Astra lane excepted: one bounded foreground runner call"),
+         ("resources/astra_lane.md", "Modified by SuperEGM (gsVAM), 2026: "), ("resources/astra_lane.md", "**Data notice (head lane).**"),
+         ("skills/wave/SKILL.md", "Astra review lane"),
+         ("skills/wave/references/foreman_brief.md", "`gpt-6-astra`"), ("skills/wave/references/foreman_brief.md", "`xhigh`"),
+         ("skills/wave/references/foreman_brief.md", "never the review worktree's copy"), ("skills/wave/references/foreman_brief.md", "replace that separator in Astra's text"),
+         ("resources/astra_lane.md", "the `# Prior round` section"), ("docs/privacy.md", "the `# Prior round` section"),
+         ("docs/privacy.md", "outside a head review"), ("resources/review_panels.md", "(interactive flow only)"),
+         ("skills/using-superegm/references/claude-code-tools.md", "the head's Astra lane excepted")]
+
+
+@pytest.mark.parametrize("path, needle", PROSE)
+def test_the_head_lane_prose(path, needle):
+  assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
+
+
+ABSENT = [("docs/privacy.md", "never runs on a pull request head"), ("docs/privacy.md", "one reviewer of a spec, plan or integrate review"),
+          ("skills/wave/SKILL.md", "Astra inspect lane"), ("resources/astra_lane.md", "through the inspect launch of section 3b."),
+          ("resources/astra_lane.md", "A wave's pull request review uses the runner's `inspect` subcommand"),
+          ("resources/astra_lane.md", "writes the exact line and that Bash timeout into")]
+
+
+@pytest.mark.parametrize("path, text", ABSENT)
+def test_the_head_lane_prose_drops_the_stale_claims(path, text):
+  assert text not in " ".join((ROOT / path).read_text(encoding="utf-8").split()), (path, text)
+
+
 FILES = [".claude-plugin/agents/foreman.md", "skills/wave/references/foreman_brief.md",
          "skills/plan/scripts/superegm/foreman.py", "skills/plan/scripts/superegm/prepare.py",
          "skills/plan/scripts/superegm/collect.py"]
-TERMS = ["head-moved", "astra", "Astra", "run folder", "run_folder", "`launched`", "inspect", "Blocker", "Major",
+TERMS = ["head-moved", "run folder", "run_folder", "`launched`", "inspect", "Blocker", "Major",
          "wave_round_", "pr_comment_", "wave_dispositions", "egm-change-review", "refs/egm/", "foreman_<unit-id>_state.json",
          "--verdict", ".egm/handoff.json", "handoff_state.json", "new triple", "require_reviewed_pair", "unit_file_text",
          "record-launch", "SendMessage"]
