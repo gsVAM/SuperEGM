@@ -787,3 +787,17 @@ def test_review_open_records_the_scope_form(world, scope, approved, expect):
     spec = spec_file(world); cid = card(world, spec)
   code, out = world.run("review", "open", "--kind", "spec", "--artifact", str(spec), "--reviewers", "design", *(["--scope", scope] if scope else []), "--runcard", cid)
   assert (code == 0 and rjson(world, out.strip())["scope"] == expect) or (code == 1 and expect in out), out
+
+
+# ---------------------------------------------------------------- S22: `review scope`, derived from the approval's commit (U19)
+
+def test_review_scope_derives_the_round_from_the_approval_commit(world):
+  spec, cid, rid = converged_spec(world); assert approve(world, spec, cid, "--yes")[0] == 0
+  spec.write_text(SPEC.replace("Text.", "Changed."), encoding="utf-8")
+  rid2 = reopen(world, "spec", cid)
+  lines = lambda: world.run("review", "scope", "--review", rid2, "--runcard", cid)[1].strip().splitlines()
+  assert lines() == ["neighbour 1-2 (preamble)", "changed 3-6 ## 1. Intent", "neighbour 7-11 ## 2. Units"]
+  rec = approval(world); rec["commit"] = "0" * 40; atomic_write(store(world.repo).path("approvals", SLUG), rec)
+  assert lines()[1] == "changed 3-6 ## 1. Intent"
+  rec["sha256"] = "1" * 64; atomic_write(store(world.repo).path("approvals", SLUG), rec)
+  assert lines() == ["whole 1-11 (no commit holds 1111111)"]
