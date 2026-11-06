@@ -13,7 +13,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the wave skill. Not part of google/elephant-goldfish-model. -->
 
@@ -251,7 +251,7 @@ rounds; the non-terminal launches (builders still running report to the
 next `wave`); the heads with pending or absent CI; the idle units and why;
 the ready units without a slot; the pending decisions; the stopped units
 with their unlanded dependants. That is what stayed open, for the owner to
-merge, close, or re-type `/superegm:wave`.
+merge, close, or re-type `/superegm:wave`. Where the base ruleset restricts updates to config.owners, the owner merges with the admin bypass: `gh pr merge --admin`.
 
 ## Leavemealone-mode
 

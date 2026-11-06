@@ -34,6 +34,7 @@ every writing call carries `--runcard`.
    non-builder login (`closed`'s issue entry). Without `--close`, one such unit ends the
    invocation here: print the list, say that the owner merges, closes or re-types
    `/superegm:wave`, and go to Step 4. With `--close`, go to Step 3.
+   Where the base ruleset restricts updates to config.owners, say that the owner merges with the admin bypass: `gh pr merge --admin`.
 
 ## Step 2: one integrate round
 
