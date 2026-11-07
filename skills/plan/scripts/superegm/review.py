@@ -479,9 +479,13 @@ def record_round(args) -> int:
     raise core.HandoffError(f"review {rid}: not opened")
   card = bind(args, review)
   kind, existing = review["kind"], load_round(st, rid, n)
+  external = reviewer.startswith("external:")
   if reviewer == "foreman":  # the helper's own findings (section 11), outside the panel
     if kind != "head":
       raise core.HandoffError("review record: foreman is accepted on a head only")
+  elif external:  # a PR thread's author (`review ingest`), outside the panel
+    if kind not in ("head", "spec"):
+      raise core.HandoffError(f"review record: {reviewer} is accepted on a head or a spec only")
   elif reviewer not in review["reviewers"]:
     raise core.HandoffError(f"review record: {reviewer} is not on the panel")
   if kind == "plan" and args.sha256:
@@ -524,13 +528,16 @@ def record_round(args) -> int:
       kept = [id(finding) for finding in keep_for_unit(findings, review["artifact"])]
       pairs = [(finding, line) for finding, line in pairs if id(finding) in kept]
     findings = [finding for finding, _ in pairs]
-    if kind == "spec":
+    if kind == "spec" and not external:  # a thread's location is a file of the PR, never a spec section
       spans = sections(core.read_text(Path(review["artifact"])))
       verdicts = [(finding, line, out_of_scope(rnd["scope"], spans, finding["location"])) for finding, line in pairs]
       findings = [finding for finding, _, section in verdicts if section is None]
       refused = [(finding["id"], line, section) for finding, line, section in verdicts if section is not None]
       mine = lambda line: line.split(" | ", 1)[0].rsplit("-", 2)[0] == reviewer
       rnd["out_of_scope"] = [line for line in rnd["out_of_scope"] if not mine(line)] + [line for _, line, _ in refused]
+    if external:  # an ingest appends: a recorded finding keeps its severity and disposition
+      kept = (rnd["reviewers"].get(reviewer) or {}).get("findings") or []
+      findings = kept + [f for f in findings if f["id"] not in {k["id"] for k in kept}]
     record = {"findings": findings, "not_run": None, "isolation": args.isolation, "model": args.model,
               "effort": args.effort}
   rnd["reviewers"][reviewer] = record
