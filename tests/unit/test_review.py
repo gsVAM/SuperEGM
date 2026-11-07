@@ -1093,3 +1093,21 @@ def test_thread_line_form_and_masking(world, thread, severity, line):
   fid, config = line.split(" | ")[0], superegm.load_config(world.repo)   # banned_terms: ["(?i)secret-codename"]
   assert thread_line(fid.rsplit("-", 2)[0], 2, int(fid.rsplit("-", 1)[1]), thread, severity, config) == line
   assert superegm.scan_text(line, config, "comment", label="comment") == []
+
+
+@pytest.mark.parametrize("kind, code", [("head", 0), ("spec", 0), ("plan", 1)])
+def test_record_takes_an_external_reviewer_outside_the_panel_and_appends(world, kind, code):
+  spec, cid, rid = opened(world, kind)
+  ext, sha = "external:devin-ai-integration[bot]", A if kind == "head" else None
+  kind == "head" and head_round(world, 1, "posted", cid, "clean")
+  if code:
+    assert f"review record: {ext} is accepted on a head or a spec only" in record(world, rid, 1, ext, [F(ext, 1, 1)], cid, sha=sha)[1]
+    return
+  for reviewer in PANEL_OF[kind].split(","):
+    assert record(world, rid, 1, reviewer, [], cid, sha=sha)[0] == 0
+  assert record(world, rid, 1, ext, [F(ext, 1, 1)], cid, sha=sha)[0] == 0
+  assert settle(world, rid, f"{ext}-1-1", "contested", cid, "--owner")[0] == 0
+  assert record(world, rid, 1, ext, [F(ext, 1, 2, "medium")], cid, sha=sha)[0] == 0
+  rnd = rjson(world, rid, "round-1.json")
+  assert [(f["id"], f["disposition"]) for f in rnd["reviewers"][ext]["findings"]] == [(f"{ext}-1-1", "contested"), (f"{ext}-1-2", None)]
+  assert rnd["what_ran"] == "completed" and status(world, rid, cid)[0] == 3
