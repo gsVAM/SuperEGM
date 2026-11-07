@@ -535,6 +535,23 @@ def test_a_carried_copy_settled_or_contested_ends_the_carry_of_its_original(worl
   assert (w.dir / f"r{n}/foreman.findings").read_text(encoding="utf-8") == ""
 
 
+def test_an_upheld_contest_of_a_carried_copy_takes_a_fixed_reply_under_the_original_id(world, tmp_path, monkeypatch):
+  """external:alice-1-1 carried as foreman-2-1, contested as foreman-3-1, foreman-3-1 upheld: a `fixed` reply under
+  any id of the finding's group (the external id included) answers the ruling."""
+  replies = [c(15, "owner", "**Ruling:** foreman-3-1 finding upheld", at="2026-11-02T13:00:00Z"),
+             c(16, "builder-bot", "**Reply external:alice-1-1:** fixed — the hook fires on push", at="2026-11-02T14:00:00Z")]
+  kw = dict(rounds=[POSTED_R1, R2, R3], launches=[{"round": i, "status": "exited 0"} for i in range(1, 5)], comments={70: replies})
+  st0, card0, _ = seed(world, **kw)
+  rid = open_head_review(world, st0, card0, "0" * 40, {"change-review": "", "external:alice": EXT})
+  record(world, st0, rid, 2, "0" * 40, card0, {"change-review": "", "foreman": COPY})
+  record(world, st0, rid, 3, "0" * 40, card0, {"change-review": "", "foreman": "foreman-3-1 | high | pr #70 comment 9 | regression: no | contested foreman-2-1: it fires\n"})
+  w = prepared(world, tmp_path, monkeypatch, **kw)
+  atomic_write(w.dir / "r3/comments.md", "builder: builder-bot\n### pr #70 comment 9 by builder-bot at 2026-11-02T11:00:00Z\n"
+                                         "**Reply foreman-2-1:** contested — it fires\n")
+  code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
+  assert (code, out.strip()) == (0, "collected: 0 foreman findings"), out
+
+
 @pytest.mark.parametrize("phase, outcome, ok", [
     ("fetched", None, True), ("prepared", None, True), ("collected", None, True),
     ("posted", "revise", False), ("collected", "not run (superseded)", False)])
@@ -701,11 +718,24 @@ def test_review_ingest_at_the_cap_rewrites_clean_to_cap_reached(world, monkeypat
   entry = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][0]
   assert (entry["outcome"], entry["rewritten_from"]) == ("cap-reached", "clean")
   assert st.path("journal").read_text(encoding="utf-8").count(f"{UNIT} ready again (external:alice)") == 1
-  # stopped before the routing line was acted on: a retry prints it again until point 2 is opened on that head
+  # stopped before the routing line was acted on: a retry prints it again until point 2 is opened after the round's post
+  assert world.run("review", "ingest", "--unit", UNIT, "--runcard", card)[1].split() == ["0", "ingested", "outcome:", "cap-reached"]
+  state = json.loads(st.path("state").read_text(encoding="utf-8"))  # the PR head moved past the reviewed one: `decision open` records it
+  state.setdefault("status", {}).setdefault("units", {}).setdefault(UNIT, {})["head"] = "e" * 40
+  atomic_write(st.path("state"), state)
+  question = world.repo.parent / "q2.md"
+  question.write_text("U01 at the cap after an external finding\n", encoding="utf-8")
+  world.clock = 1_793_000_000.0  # 2026-10-26: a point 2 asked before the round's `posted_at` routes nothing
+  code, out = world.run("decision", "open", "--unit", UNIT, "--point", "2", "--question", str(question), "--source", f"review {rid} cap", "--runcard", card)
+  assert code == 0, out
   assert world.run("review", "ingest", "--unit", UNIT, "--runcard", card)[1].split() == ["0", "ingested", "outcome:", "cap-reached"]
   data = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))
-  data["decisions"].append({"id": "q1", "point": 2, "source": f"review {rid} cap", "head": head, "question": "q", "asked_at": "t", "options": []})
+  data["rulings"].append({"decision": data["decisions"][-1]["id"], "ruling": "stop", "by": "owner", "reason": "r", "posted": None, "posted_at": "t"})
   atomic_write(st.path("foreman", UNIT), data)
+  world.clock = 1_794_000_000.0  # 2026-11-07, after the round's post
+  code, out = world.run("decision", "open", "--unit", UNIT, "--point", "2", "--question", str(question), "--source", f"review {rid} cap", "--runcard", card)
+  assert code == 0, out
+  assert json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["decisions"][-1]["head"] == "e" * 40
   assert world.run("review", "ingest", "--unit", UNIT, "--runcard", card)[1].split() == ["0", "ingested"]
   assert st.path("journal").read_text(encoding="utf-8").count(f"{UNIT} ready again (external:alice)") == 1
 
@@ -717,6 +747,38 @@ def test_review_ingest_posts_when_another_review_merely_carries_its_header_and_i
   code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
   assert (code, out.split()[:2], len(posted)) == (0, ["1", "ingested"], 1), out
   assert "external:alice-1-1 | high | src/hooks.py:3 at " in posted[0]["body"]
+
+
+def test_review_ingest_posts_past_an_exact_copy_of_its_lines_on_another_commit(world):
+  """An exact copy of the planned header and line, bound to another commit by another reviewer, is not the ingest's
+  own comment: the ingest posts on the round's head and records, never refusing on the copy."""
+  st, card, posted, rid, head = ingest_world(world, [(1, "alice", "bug: the hook never fires")], {"alice": {"role_name": "write"}})
+  line = f"external:alice-1-1 | high | src/hooks.py:3 at {head[:7]} | regression: no | bug: the hook never fires"
+  world.gh.reviews.append({"id": 5, "user": {"login": "mallory"}, "commit_id": "f" * 40, "submitted_at": "2026-11-03T09:00:00Z",
+                           "body": f"{review_mod.header(1, head)}\n\n{line}\n"})
+  code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
+  assert (code, out.split()[:2], len(posted)) == (0, ["1", "ingested"], 1), out
+  assert line in posted[0]["body"] and posted[0]["commit_id"] == head
+
+
+def test_review_ingest_resumes_an_earlier_rounds_plan_after_a_later_round_is_posted(world, monkeypatch):
+  """Round 1's ingest posts, then stops before alice is recorded; round 2 is posted before the retry. The retry
+  finishes round 1's plan (no second post, alice recorded in round 1 against her thread)."""
+  bot = "devin-ai-integration[bot]"
+  st, card, posted, rid, head = ingest_world(world, [(1, bot, "bug: one"), (2, "alice", "issue: two")], {"alice": {"role_name": "write"}})
+  real = review_mod.record_round
+  monkeypatch.setattr(review_mod, "record_round", lambda a: 1 if a.reviewer == "external:alice" else real(a))
+  assert world.run("review", "ingest", "--unit", UNIT, "--runcard", card)[0] == 1 and len(posted) == 1
+  monkeypatch.setattr(review_mod, "record_round", real)
+  data = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))
+  data["rounds"].append({**POSTED_R1, "round": 2, "launch": 2, "dispatch_id": "d2", "head": head, "outcome": "revise"})
+  atomic_write(st.path("foreman", UNIT), data)
+  atomic_write(st.path("review", UNIT, f"pr{PR}") / "r2/ci.json", json.dumps({"verdict": "ci green"}))
+  code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
+  assert (code, out.split()[:2], len(posted)) == (0, ["1", "ingested"], 1), out
+  rnd = json.loads((st.path("reviews", rid) / "round-1.json").read_text(encoding="utf-8"))
+  assert [(f["id"], f["thread"]) for f in rnd["reviewers"]["external:alice"]["findings"]] == [("external:alice-1-1", 2)]
+  assert sorted(json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["ingested"]) == [1, 2]
 
 
 @pytest.mark.parametrize("case", ["over-limit", "scan"])
