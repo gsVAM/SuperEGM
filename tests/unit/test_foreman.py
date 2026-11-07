@@ -427,6 +427,17 @@ CASES |= {"deviation-ruled-by-stranger": ({"comments": {2: [c(12, "builder-bot",
                                      "rulings": [{"decision": "q1", "ruling": "(a)", "by": "judges:p-1", "reason": None, "posted": "comment 13", "posted_at": "t"}]}, []),
   "tdd-order-allowed": ({"prior": True, "prior_foreman": TDD, "commits": [("feat(S1): hook", "src/hooks.py"), ("test(S1): hook", "tests/unit/test_hooks.py")],
                          "comments": {2: [c(15, "owner", "**Ruling:** foreman-1-2 allowed — an adopted history")]}}, [])}
+UPHELD_Q1 = {"decisions": [{"id": "q1", "point": 1, "source": "review r round 1"}],
+             "rulings": [{"decision": "q1", "ruling": "change-review-1-1 finding upheld", "by": "owner", "reason": None, "posted": "comment 15", "posted_at": "t"}]}
+CASES |= {  # round 2 (PR #96 review): the record wins over an edit of its comment and over a later comment on its fid
+  "recorded-upheld-edited": ({"prior": True, "comments": {2: [c(15, "owner", "**Ruling:** change-review-1-1 finding overruled — changed")]}} | UPHELD_Q1,
+                             ["issue #2 comment 15 | regression: no | upheld change-review-1-1: no `fixed` reply"]),
+  "recorded-upheld-contradicted": ({"prior": True, "comments": {2: [c(15, "owner", "**Ruling:** change-review-1-1 finding upheld (fix it)"),
+                                                                    c(17, "owner", "**Ruling:** change-review-1-1 finding overruled — again")]}} | UPHELD_Q1,
+                                   ["issue #2 comment 15 | regression: no | upheld change-review-1-1: no `fixed` reply"]),
+  "tdd-order-allowed-and-contested": ({"prior": True, "prior_foreman": TDD, "commits": [("feat(S1): hook", "src/hooks.py"), ("test(S1): hook", "tests/unit/test_hooks.py")],
+                                       "comments": {2: [c(15, "owner", "**Ruling:** foreman-1-2 allowed — an adopted history")],
+                                                    70: [c(14, "builder-bot", "**Reply foreman-1-2:** contested — adopted history")]}}, [])}
 
 
 @pytest.mark.parametrize("name", list(CASES))

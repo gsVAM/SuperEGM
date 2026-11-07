@@ -83,7 +83,7 @@ def ruling_form(point: int, subject: str, option: str | None = None) -> str:
     text = subject
   else:
     text = f"{subject} {option}"
-  bare = text in ("one more round", "stop") or text.endswith(" finding upheld")
+  bare = (point == 2 and text in ("one more round", "stop")) or (point == 1 and option == "finding upheld")
   return f"**Ruling:** {text}" + ("" if bare else " — <reason>")
 
 
@@ -101,7 +101,7 @@ def recorded_rulings(foreman: dict) -> list:
     posted = entry.get("posted") or ""
     cid = int(posted.split()[1]) if posted.startswith("comment ") and posted.split()[1].isdigit() else 0
     option, subject = None, ""
-    if text.startswith("redesign"):
+    if text == "redesign" and decision["point"] in (1, 2):  # a head's third ruling; a point-3 option may begin with the word
       kind = "redesign"
     elif decision["point"] == 1:
       kind, subject = ("upheld" if text.endswith("upheld") else "overruled"), text.split(" ")[0]
@@ -112,6 +112,36 @@ def recorded_rulings(foreman: dict) -> list:
       kind, subject = "option", source.removeprefix("comment ") if source.startswith("comment ") else decision["id"]
       option = text.split(" ")[0] or None
     out.append(Ruling(kind, subject, option, entry.get("reason"), entry.get("by") or "", cid))
+  return out
+
+
+GROUPS = {"upheld": "fid", "overruled": "fid", "allowed": "fid", "option": "option"}  # the kinds that rule one subject
+
+
+def binding_rulings(comments: list, owners: list, recorded: list) -> list:
+  """The rulings that bind (spec section 13.2: a recorded ruling is never changed by a later comment): the record's
+  (`recorded`, as `recorded_rulings` reads it), then each owner's form comment `ruling_of` reads whose comment id
+  the record does not hold and whose fid or option subject the record does not already rule."""
+  recorded = list(recorded)
+  ids = {r.comment_id for r in recorded if r.comment_id}
+  keys = {(GROUPS[r.kind], r.subject) for r in recorded if r.kind in GROUPS}
+  return recorded + [r for c in comments if (r := ruling_of(c, owners))
+                     and r.comment_id not in ids and (GROUPS.get(r.kind), r.subject) not in keys]
+
+
+def overridden_comments(comments: list, owners: list, foreman: dict) -> set:
+  """The ids of the owners' ruling comments the record overrides: a recorded post edited after its record
+  (`updated_at` later than the entry's `posted_at`), and an unrecorded form ruling a subject the record already rules."""
+  entries = {r.get("posted"): r for r in foreman.get("rulings") or [] if str(r.get("posted") or "").startswith("comment ")}
+  bound = {r.comment_id for r in binding_rulings(comments, owners, recorded_rulings(foreman))}
+  out = set()
+  for c in comments:
+    entry = entries.get(f"comment {c['id']}")
+    if entry:
+      if (c.get("updated_at") or "") > (entry.get("posted_at") or ""):
+        out.add(c["id"])
+    elif ruling_of(c, owners) and int(c["id"]) not in bound:
+      out.add(c["id"])
   return out
 
 
@@ -216,7 +246,7 @@ def rule(args) -> int:
   head, _, reason = args.ruling.partition(" — ")
   found = comment = None
   if args.posted and not closed:  # a by-hand ruling: read through the one grammar (spec section 13.2, U22)
-    comment, found, decisions = verify_posted(st, unit, data, args)
+    comment, found, decisions = verify_posted(st, unit, data, args, number)
   else:
     decision = next((d for d in data["decisions"] if d["id"] == args.decision), None)
     if decision is None:
@@ -230,11 +260,20 @@ def rule(args) -> int:
     if ruled and (decision["point"] != 1 or any(fid_of(r["ruling"]) == fid_of(head) for r in ruled)):
       dropped(st, args, f"{decision['id']} already ruled")
   decision = decisions[0]
-  chosen = [check_ruling(d["point"], d["options"], head.strip()) for d in decisions][0]
+  basis = next((d for d in decisions if d["point"] in (1, 2)), decision) if found and found.kind == "redesign" else decision
+  chosen = check_ruling(basis["point"], basis["options"], head.strip())
   brief = None
-  if found:
+  if found:  # the record is the comment's ruling: a `--ruling` that resolves to another option is refused
+    said = {"upheld": f"{found.subject} finding upheld", "overruled": f"{found.subject} finding overruled",
+            "round": "one more round", "stop": "stop", "option": found.option, "redesign": "redesign"}.get(found.kind) or ""
+    try:
+      ruled_by_comment = check_ruling(basis["point"], basis["options"], said)
+    except Refusal:
+      ruled_by_comment = None
+    if ruled_by_comment != chosen:
+      raise Refusal(f"decision: comment {args.posted} rules {said}, not {head.strip()}")
     reason = found.reason or ""
-  elif not reason.strip() and (decision["point"] == 3 or chosen.endswith(" finding overruled")):
+  elif not reason.strip() and not args.by.startswith("judges:") and (decision["point"] == 3 or chosen.endswith(" finding overruled")):
     reason = "ruled in the session"  # a session ruling typed without the reason its form carries
   if chosen == "redesign":
     if not reason.strip():
@@ -247,7 +286,8 @@ def rule(args) -> int:
   elif found:
     posted, posted_at = f"comment {args.posted}", comment.get("created_at") or now
   else:
-    body = ruling_comment(decision["point"], decision["source"], chosen + (f" — {reason}" if reason and not brief else ""),
+    bare = chosen.endswith(" finding upheld") if decision["point"] == 1 else decision["point"] == 2  # forms with no reason
+    body = ruling_comment(decision["point"], decision["source"], chosen + (f" — {reason}" if reason and not brief and not bare else ""),
                           decision["question"], brief, args.by, decision["id"])
     path = body_file(body, st.root)
     try:
@@ -255,13 +295,17 @@ def rule(args) -> int:
     finally:
       os.unlink(path)
     cid = url.rsplit("-", 1)[1]
-    posted, posted_at = f"comment {cid}", read_back(st, cid).get("created_at") or now
+    posted = f"comment {cid}"
   if brief:
     brainstorm_brief(st, unit, decision["id"], decision, chosen, (state["units"][unit].get("pr") or {}).get("number"))
-  for d in decisions:
-    data["rulings"].append({"decision": d["id"], "ruling": args.ruling, "by": args.by,
-                            "reason": reason.strip() or None, "posted": posted, "posted_at": posted_at})
-  core.save_foreman(st, unit, data)
+  entries = [{"decision": d["id"], "ruling": args.ruling, "by": args.by,
+              "reason": reason.strip() or None, "posted": posted, "posted_at": posted_at} for d in decisions]
+  data["rulings"] += entries
+  core.save_foreman(st, unit, data)  # recorded before the read-back: `status --wait` skips the session's own post
+  if url and (created := read_back(st, cid).get("created_at")):
+    for entry in entries:
+      entry["posted_at"] = created
+    core.save_foreman(st, unit, data)
   for d in decisions:
     if found:
       words = " ".join(w for w in (found.kind, found.subject, found.option) if w)
@@ -368,14 +412,18 @@ def brainstorm_brief(store, unit: str, qid: str, decision: dict, ruling: str, pr
   return path
 
 
-def verify_posted(store, unit: str, foreman: dict, args):
-  """A by-hand `**Ruling:**` (spec section 13.2, U22): honoured only from the author who is `--by`, only when
-  `ruling_of` reads it as a `config.owners` login's form, only once (a recorded comment edited later is ignored),
-  and only on the decisions its kind and subject name: `--decision`'s, else the latest point-1 decision with no
-  ruling on its fid, the open point-2 one, the point-3 one on its comment or decision id, or for `redesign` every
-  pending decision of the unit. Returns (comment, ruling, decisions)."""
+def verify_posted(store, unit: str, foreman: dict, args, number: int):
+  """A by-hand `**Ruling:**` (spec section 13.2, U22): honoured only on the unit's issue (`number`), only from the
+  author who is `--by`, only when `ruling_of` reads it as a `config.owners` login's form, only once (a recorded
+  comment edited later is ignored), and only on the decisions its kind and subject name: `--decision`'s, else the
+  latest point-1 decision whose question names the fid (else the latest point-1 decision) with no ruling on that
+  fid, the open point-2 one, the point-3 one on its comment or decision id, or for `redesign` every pending
+  decision of the unit. Returns (comment, ruling, decisions)."""
   cid = args.posted
   comment = core.gh_json(["api", f"repos/{store.config['repo']}/issues/comments/{cid}"]) or {}
+  issue_url = comment.get("issue_url") or ""
+  if issue_url and not issue_url.endswith(f"/issues/{number}"):
+    raise Refusal(f"decision: comment {cid} is not on issue #{number}")
   author = (comment.get("user") or {}).get("login")
   if author != args.by:
     raise Refusal(f"decision: comment {cid} was written by {author}, not {args.by}")
@@ -403,7 +451,10 @@ def verify_posted(store, unit: str, foreman: dict, args):
   if found.kind == "redesign":
     decisions = pending if any(d["point"] in points for d in pending) else []
   elif found.kind in ("upheld", "overruled"):
-    decisions = [d for d in foreman["decisions"] if d["point"] == 1 and not any(
+    point1 = [d for d in foreman["decisions"] if d["point"] == 1]
+    names = re.compile(rf"(?<![\w-]){re.escape(found.subject)}(?![\w-])")
+    candidates = [d for d in point1 if names.search(d.get("question") or "")] or point1[-1:]
+    decisions = [d for d in candidates if not any(
         r["decision"] == d["id"] and fid_of(r["ruling"]) == found.subject for r in foreman["rulings"])][-1:]
   elif found.kind in ("round", "stop"):
     decisions = [d for d in pending if d["point"] == 2][-1:]

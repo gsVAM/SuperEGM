@@ -7,7 +7,7 @@ import re
 
 import pytest
 
-from superegm.decision import ruling_form, ruling_of
+from superegm.decision import recorded_rulings, ruling_form, ruling_of
 from superegm.launch_builder import prompt_text
 
 FORMS = [
@@ -56,3 +56,30 @@ def test_the_prompt_keeps_rulings_and_decisions_from_owners_alone():
   comments = [{"id": i, "user": {"login": who}, "body": body} for i, who, body in COMMENTS]
   text = prompt_text(2, "U01", "body", "orders", "orient", comments, [], None, "builder-bot", "audit", owners=["owner"])
   assert re.findall(r"^## \S+ · comment (\d+)$", text.split("# Comments on issue #2\n\n", 1)[1], re.M) == ["1", "3", "4", "8"]
+
+
+# Round 2 (PR #96 review): option text that ends like a bare form still carries its reason; a point-3 option
+# beginning with `redesign` is an option; the record wins over an edit of its comment and a later comment on its subject.
+
+
+def test_a_point_3_option_ending_finding_upheld_keeps_its_reason():
+  text = ruling_form(3, "77", "(a) mark finding upheld")
+  assert text == "**Ruling:** (77) (a) mark finding upheld — <reason>"
+  assert ruling_of({"id": 1, "user": {"login": "o"}, "body": text}, ["o"]).kind == "option"
+
+
+def test_a_recorded_point_3_option_naming_redesign_is_an_option():
+  foreman = {"decisions": [{"id": "q1", "point": 3, "source": "comment 12"}],
+             "rulings": [{"decision": "q1", "ruling": "redesign the queue", "by": "judges:p-1", "reason": None, "posted": "comment 13"}]}
+  assert [(r.kind, r.subject, r.option) for r in recorded_rulings(foreman)] == [("option", "12", "redesign")]
+
+
+def test_the_prompt_drops_a_ruling_the_record_overrides():
+  comments = [{"id": 4, "user": {"login": "owner"}, "body": "**Ruling:** f-1-1 finding overruled — changed", "created_at": "t1", "updated_at": "t3"},
+              {"id": 5, "user": {"login": "owner"}, "body": "**Ruling:** f-1-1 finding overruled — again", "created_at": "t2", "updated_at": "t2"},
+              {"id": 6, "user": {"login": "owner"}, "body": "**Ruling:** f-1-2 finding upheld (fix it)", "created_at": "t1", "updated_at": "t1"}]
+  foreman = {"decisions": [{"id": "q1", "point": 1, "source": "review r round 1"}],
+             "rulings": [{"decision": "q1", "ruling": "f-1-1 finding upheld", "by": "owner", "posted": "comment 4", "posted_at": "t1"},
+                         {"decision": "q1", "ruling": "f-1-2 finding upheld", "by": "owner", "posted": "comment 6", "posted_at": "t1"}]}
+  text = prompt_text(2, "U01", "body", "orders", "orient", comments, [], None, "builder-bot", "audit", owners=["owner"], foreman=foreman)
+  assert re.findall(r"^## \S+ · comment (\d+)$", text.split("# Comments on issue #2\n\n", 1)[1], re.M) == ["6"]

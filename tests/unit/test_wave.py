@@ -409,6 +409,57 @@ def test_a_by_hand_ruling_naming_the_blocked_comment_rules_its_decision(world):
   assert world.gh.comments[2][-1]["body"].splitlines()[:2] == ["**Ruling:** stop", "(judges p-1, leavemealone)"]
 
 
+def test_a_by_hand_ruling_records_the_comments_own_ruling_on_its_own_issue(world):
+  """Round 2 (PR #96 review): without `--decision`, points 2 and 3 found by the comment's form; a `--ruling` other
+  than the comment's refused; a comment on another issue refused; a point-1 fid matched to the decision naming it."""
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})
+  set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"], owners=["owner"])
+  fake_gh(world, {f"repos/{REPO}/issues/comments/{cid}": {"id": cid, "user": {"login": "owner"}, "body": body,
+                                                          "issue_url": f"https://api.github.com/repos/{REPO}/issues/{n}"} for cid, n, body in (
+      (90, 2, "**Ruling:** one more round\n"), (91, 9, "**Ruling:** stop\n"), (92, 2, "**Ruling:** (q1) relaunch — again\n"),
+      (93, 2, "**Ruling:** f-1-1 finding overruled — x\n"), (94, 2, "**Ruling:** f-2-1 finding overruled — y\n"), (95, 2, "**Ruling:** f-2-1 finding overruled — z\n"))})
+  opened = lambda point, source, text: world.run("decision", "open", "--unit", "U01", "--point", point, "--question", question(world, text), "--source", source, "--runcard", card)[1].splitlines()[0]
+  rule = lambda posted, ruling, *d: world.run("decision", "rule", "--unit", "U01", *d, "--ruling", ruling, "--by", "owner", "--posted", posted, "--runcard", card)
+  q1 = opened(3, "launch 1", "exited with no PR\n")
+  assert rule("90", "one more round", "--decision", q1) == (1, "decision: comment 90 rules no point-3 decision\n")
+  assert rule("92", "stop the unit") == (1, "decision: comment 92 rules relaunch, not stop the unit\n")
+  assert rule("92", "relaunch") == (0, "recorded (comment 92)\n")
+  q2 = opened(2, "review head-U01-c1 cap", "cap\n")
+  assert rule("91", "stop") == (1, "decision: comment 91 is not on issue #2\n")
+  assert rule("90", "stop") == (1, "decision: comment 90 rules one more round, not stop\n")
+  assert rule("90", "one more round") == (0, "recorded (comment 90)\n")
+  q3 = opened(1, "review head-U01-c1 round 1", "f-1-1 | high | a.py | regression: no | x\n")
+  assert rule("93", "f-1-1 finding overruled — x") == (0, "recorded (comment 93)\n")
+  q4 = opened(1, "review head-U01-c1 round 2", "f-2-1 | high | a.py | regression: no | y\n")
+  assert rule("94", "f-2-1 finding overruled — y") == (0, "recorded (comment 94)\n")
+  assert rule("95", "f-2-1 finding overruled — z") == (1, "decision: comment 95 does not name an open decision\n")
+  ruled = [(r["decision"], r["ruling"], r["posted"]) for r in foreman_of(s, "U01")["rulings"]]
+  assert ruled == [(q1, "relaunch", "comment 92"), (q2, "one more round", "comment 90"), (q3, "f-1-1 finding overruled — x", "comment 93"),
+                   (q4, "f-2-1 finding overruled — y", "comment 94")] and 2 not in world.gh.comments
+  assert not s.path("foreman", "U01").with_name("U01-q1.brainstorm.md").exists() and "stopped" not in foreman_of(s, "U01")
+
+
+def test_a_posted_ruling_is_a_form_ruling_of_reads_and_a_panels_carries_no_session_reason(world):
+  """Round 2 (PR #96 review): a reason typed on `finding upheld` or `one more round` stays in the record, out of the
+  posted form; a panel's point-3 ruling with no reason is not labelled `ruled in the session`."""
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})
+  set_config(world, repo=REPO, owners=["owner"])
+  fake_gh(world)
+  rule = lambda qid, ruling, by="owner": world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", ruling, "--by", by, "--runcard", card)
+  opened = lambda point, source, text=BLOCKED: world.run("decision", "open", "--unit", "U01", "--point", point, "--question", question(world, text), "--source", source, "--runcard", card)[1].splitlines()[0]
+  q1 = opened(1, "review head-U01-c1 round 2", "f-2-1 | high | a.py | regression: no | x\n")
+  assert rule(q1, "f-2-1 finding upheld — it holds")[0] == 0
+  assert world.gh.comments[2][-1]["body"].splitlines()[0] == "**Ruling:** f-2-1 finding upheld (fix it)"
+  q2 = opened(2, "review head-U01-c1 cap", "cap\n")
+  assert rule(q2, "one more round — once")[0] == 0 and world.gh.comments[2][-1]["body"].splitlines()[0] == "**Ruling:** one more round"
+  q3 = opened(3, "comment 77")
+  assert rule(q3, "(b)", "judges:p-1")[0] == 0
+  assert world.gh.comments[2][-1]["body"].splitlines()[0] == "**Ruling:** (77) use Redis"
+  assert [r["reason"] for r in foreman_of(s, "U01")["rulings"]] == ["it holds", "once", None]
+
+
 def test_the_owners_close_is_stop_without_a_question(world):
   card = open_wave_card(world)
   s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})

@@ -240,15 +240,20 @@ Leavemealone-mode: U11 wires §13.2 here.
   `decision rule --posted closed:<n>` records nothing but the stop.
 - `ruling` lines (`U<n> ruling by <login>: <kind> <subject> (comment <id>)`):
   an owner's `**Ruling:**` comment in one of the forms (a `config.owners`
-  author, the form exact, else it is text). A `finding upheld|overruled` on a
-  review's finding runs `review settle … --owner --posted <comment id>` (or
-  `review rule … --owner` at a cap) first; then run
+  author, the form exact, else it is text). First run
   `python3 '<HELPER>' decision rule --unit <U> --ruling '<its option>' --by <login> --posted <comment-id> --runcard '<CARD>'`
   with no `--decision`: the comment names its decision (`redesign` every
-  pending one). An `allowed` ruling needs none: `collect` reads it. Nothing
-  is posted; the journal says `ruling edited after record, ignored` for a
-  recorded comment re-read, and `ruling dropped (<by>, comment <id>): …` for
-  one naming no open decision; take either as the fact it states.
+  pending one), and a `--ruling` other than the comment's is refused. Only on
+  exit 0 continue as that point's section does: `finding overruled` →
+  `review settle … --disposition contested --owner --posted <comment id>`;
+  `one more round` → `review rule … --ruling continue --owner`, then
+  `launch-builder`; `stop` or `redesign` → `review rule … --ruling stop --owner`.
+  An `allowed` ruling takes no `decision rule`: `collect` reads a prior
+  round's `tdd-order` one; a `dod-<n>` or `test-delta` one the owner weighs.
+  Nothing is posted; the journal says `ruling edited after record, ignored`
+  for a recorded comment re-read, and `ruling dropped (<by>, comment <id>): …`
+  for one naming no open decision; take either as the fact it states, and
+  run nothing else for it.
 - A stopped unit keeps its branch and its open issue, is never dispatched or
   launched again, and is listed in the report with its unlanded dependants
   for the owner (design section 12).

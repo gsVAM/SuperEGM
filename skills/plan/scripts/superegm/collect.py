@@ -14,7 +14,7 @@ from pathlib import Path
 
 import superegm as core
 from superegm import body as body_mod, review, tdd_order
-from superegm.decision import recorded_rulings, ruling_of
+from superegm.decision import binding_rulings, recorded_rulings
 from superegm.foreman import head_review_id
 from superegm.launch_builder import DOD_RESULT_RE
 from superegm.prepare import HEADER_RE
@@ -204,9 +204,8 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
     elif kind == "run" and n not in results:
       found.append(("pr_body.md", f"Run item {n}: no fenced output"))
   # The rulings: an owner's form comment read by `ruling_of`, and the record (`rulings[]`, the judges' post included)
-  parsed = [r for c in comments if (r := ruling_of(c, owners))]
-  seen = {r.comment_id for r in parsed}
-  rulings = parsed + [r for r in recorded if r.comment_id not in seen]
+  # (spec section 13.2: a recorded ruling is never changed by a later comment, so the record wins on its comment ids and subjects)
+  rulings = binding_rulings(comments, owners, recorded)
   by_id = {c["id"]: c for c in comments}
   overruled = {r.subject for r in rulings if r.kind == "overruled"}
   allowed = {r.subject for r in rulings if r.kind == "allowed"}
@@ -224,7 +223,7 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
       if kind and kind.group(1) != "other" and c["id"] not in ruled:
         found.append((where(c), f"deviation ({kind.group(1)}) unruled"))
   if prior_round:
-    settled = {r.subject for r in rulings if r.kind in ("upheld", "overruled")}
+    settled = {r.subject for r in rulings if r.kind in ("upheld", "overruled", "allowed")}
     for c in comments:
       reply = REPLY_RE.match(c["body"])
       if not reply or c["login"] != login or reply.group(2) != "contested":
