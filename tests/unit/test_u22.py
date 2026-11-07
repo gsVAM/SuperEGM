@@ -5,7 +5,7 @@
 
 import pytest
 
-from superegm.decision import ruling_of
+from superegm.decision import ruling_form, ruling_of
 
 FORMS = [
   ("**Ruling:** f-2-1 finding upheld", ("upheld", "f-2-1", None, None)),
@@ -27,3 +27,17 @@ def test_ruling_of_is_the_one_grammar(body, expect):
   ruling = ruling_of(comment, ["gsvam", "other"])
   assert (ruling and (ruling.kind, ruling.subject, ruling.option, ruling.reason)) == expect
   assert ruling_of(comment, ["other"]) is None and (not expect or (ruling.login, ruling.comment_id) == ("gsvam", 501))
+
+
+RENDER = [((1, "f-2-1", "finding upheld"), "**Ruling:** f-2-1 finding upheld"), ((1, "f-2-1", "finding overruled"), "**Ruling:** f-2-1 finding overruled — <reason>"),
+          ((1, "test-delta tests/unit/test_x.py", "allowed"), "**Ruling:** test-delta tests/unit/test_x.py allowed — <reason>"),
+          ((1, "redesign", None), "**Ruling:** redesign — <reason>"), ((2, "one more round", None), "**Ruling:** one more round"),
+          ((3, "77", "(b) use Redis"), "**Ruling:** (77) (b) use Redis — <reason>"), ((3, "q3", "relaunch"), "**Ruling:** (q3) relaunch — <reason>")]
+
+
+@pytest.mark.parametrize("args, text", RENDER)
+def test_ruling_form_renders_what_ruling_of_reads(args, text):
+  assert ruling_form(*args) == text
+  ruling = ruling_of({"id": 1, "user": {"login": "o"}, "body": text}, ["o"])
+  assert ruling and (ruling.reason or "<reason>") == "<reason>"
+  assert ruling.subject == ("" if ruling.kind in ("round", "stop", "redesign") else args[1].removeprefix("test-delta "))
