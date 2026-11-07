@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U10's tests of the foreman's helper subcommands.
+# Modified by SuperEGM (gsVAM), 2026: collect reads rulings through `ruling_of` and the record (U22).
 
 """U10: foreman dispatch, prepare, collect, tdd-order, review post. This file replaces U03's nine moved
 prepare/collect tests (they pin `--round`, `--run-folder`, `--verdict`, `head-moved`, `launched` and `--remove`:
@@ -109,7 +110,8 @@ def builder_token(monkeypatch):
 
 
 def seed(world, *, head="a" * 40, ci="success", launches=({"round": 1, "status": "exited 0"},),
-         rounds=(), base_ref="main", comments=None, reviews=(), login="builder-bot", pr_body=PR_BODY, builder=None, astra=None, marker=True, owners=None):
+         rounds=(), base_ref="main", comments=None, reviews=(), login="builder-bot", pr_body=PR_BODY, builder=None, astra=None, marker=True, owners=None,
+         decisions=(), rulings=()):
   """Through U03's `store`, `Store.path` and `atomic_write`, what `locate`, `Handoff` and `require_frozen_units`
   read: the plan (conftest's heading, a `Design:` line naming `world.spec` in backticks, `## Global constraints`,
   `## Units`, SECTION) written to `world.plan` and
@@ -132,7 +134,7 @@ def seed(world, *, head="a" * 40, ci="success", launches=({"round": 1, "status":
   set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"],
              reviewers={"spec": [], "plan": [], "head": ["change-review"], "integrate": []},
              **({"builder": builder} if builder else {}), **({"astra": astra} if astra else {}),
-             **({"owners": owners} if owners else {}))
+             owners=owners or ["owner"])
   plan = (f"# Handoff plan: Webhook delivery\n\nDesign: `{spec}`\n\n## Global constraints\n- none\n\n"
           f"## Units\n\n{SECTION}")
   world.plan.write_text(plan, encoding="utf-8")
@@ -156,7 +158,7 @@ def seed(world, *, head="a" * 40, ci="success", launches=({"round": 1, "status":
   if launches:
     atomic_write(st.path("launches", UNIT), {"launches": list(launches)})
   atomic_write(st.path("foreman", UNIT), {"dispatch_id": f"d{len(rounds)}" if rounds else None, "rounds": list(rounds),
-                                          "decisions": [], "rulings": []})
+                                          "decisions": list(decisions), "rulings": list(rulings)})
   posted = install_pr_api(world, reviews=list(reviews), comments=comments or {}, login=login)
   return st, world.open_card("wave", str(spec)), posted
 
@@ -413,19 +415,31 @@ CASES = {
                ["issue #2 comment 15 | regression: no | upheld change-review-1-1: no `fixed` reply"]),
     "ci-reply-ignored": ({"prior": True, "comments": {70: [c(16, "builder-bot", "**Reply foreman-1-1:** contested — flaky")]}}, []),
 }
+TWO = "**Deviation (dod):** item 3 is wrong\n**Deviation (test):** the fence pins a typo\nWhich way?\n- (a) drop both\n- (b) keep both\n**Builder status:** BLOCKED"
+TDD = "foreman-1-2 | high | tests/unit/test_hooks.py | regression: no | tdd-order: S1: feat(S1) precedes test(S1)\n"
+CASES |= {"deviation-ruled-by-stranger": ({"comments": {2: [c(12, "builder-bot", DEV), c(13, "passer-by", "**Ruling:** (12) (a) — drop it")]}},
+               ["issue #2 comment 12 | regression: no | deviation (dod) unruled"]),
+  "folded-deviations": ({"comments": {2: [c(12, "builder-bot", TWO)]}},
+                        ["issue #2 comment 12 | regression: no | deviation (dod) unruled", "issue #2 comment 12 | regression: no | deviation (test) unruled"]),
+  "folded-deviations-ruled": ({"comments": {2: [c(12, "builder-bot", TWO), c(13, "owner", "**Ruling:** (12) (a) drop both — fine")]}}, []),
+  "deviation-ruled-by-the-record": ({"comments": {2: [c(12, "builder-bot", DEV), c(13, "owner", "**Ruling:** (12) (a) — drop it\n(judges p-1, leavemealone)")]},
+                                     "decisions": [{"id": "q1", "point": 3, "source": "comment 12"}],
+                                     "rulings": [{"decision": "q1", "ruling": "(a)", "by": "judges:p-1", "reason": None, "posted": "comment 13", "posted_at": "t"}]}, []),
+  "tdd-order-allowed": ({"prior": True, "prior_foreman": TDD, "commits": [("feat(S1): hook", "src/hooks.py"), ("test(S1): hook", "tests/unit/test_hooks.py")],
+                         "comments": {2: [c(15, "owner", "**Ruling:** foreman-1-2 allowed — an adopted history")]}}, [])}
 
 
 @pytest.mark.parametrize("name", list(CASES))
 def test_collect_records_foreman_findings(world, tmp_path, monkeypatch, name):
   kw, expected = dict(CASES[name][0]), CASES[name][1]
-  prior = kw.pop("prior", False)
+  prior, prior_foreman = kw.pop("prior", False), kw.pop("prior_foreman", "")
   if prior:
     kw.update(rounds=[POSTED_R1], launches=TWO_LAUNCHES)
-  if prior:  # the last posted round: one change-review high and the CI finding
+  if prior:  # the last posted round: one change-review high and the CI finding (and `prior_foreman`'s)
     st0, card0, _ = seed(world, **{k: v for k, v in kw.items() if k != "commits"})
     open_head_review(world, st0, card0, "0" * 40, {
         "change-review": "change-review-1-1 | high | src/hooks.py:1 | regression: no | no hook\n",
-        "foreman": "foreman-1-1 | high | ci | regression: no | CI not green on this head: ci red (tests)\n"})
+        "foreman": "foreman-1-1 | high | ci | regression: no | CI not green on this head: ci red (tests)\n" + prior_foreman})
   w = prepared(world, tmp_path, monkeypatch, **kw)
   r = 2 if prior else 1
   code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
