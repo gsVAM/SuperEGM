@@ -3,9 +3,12 @@
 
 """U22: the one ruling grammar `decision.ruling_of`, its renderer `ruling_form` and the builder prompt's keep rule."""
 
+import re
+
 import pytest
 
 from superegm.decision import ruling_form, ruling_of
+from superegm.launch_builder import prompt_text
 
 FORMS = [
   ("**Ruling:** f-2-1 finding upheld", ("upheld", "f-2-1", None, None)),
@@ -41,3 +44,15 @@ def test_ruling_form_renders_what_ruling_of_reads(args, text):
   ruling = ruling_of({"id": 1, "user": {"login": "o"}, "body": text}, ["o"])
   assert ruling and (ruling.reason or "<reason>") == "<reason>"
   assert ruling.subject == ("" if ruling.kind in ("round", "stop", "redesign") else args[1].removeprefix("test-delta "))
+
+
+COMMENTS = [(1, "owner", "**Decision D1:** (a) five"), (3, "builder-bot", "**Deviation (other):** renamed a fixture"),
+            (4, "owner", "**Ruling:** (3) (a) proceed — fine"), (5, "passer-by", "**Ruling:** (3) (b) stop — now"), (6, "passer-by", "**Decision D2:** (b) ten"),
+            (7, "owner", "**Ruling:** (3) (b) stop"), (8, "owner", "**Ruling:** (3) (a) proceed — fine\n(judges p-1, leavemealone)\n\n> q"),
+            (9, "passer-by", "**Ruling:** (3) (b) stop — now\n(judges p-1, leavemealone)")]
+
+
+def test_the_prompt_keeps_rulings_and_decisions_from_owners_alone():
+  comments = [{"id": i, "user": {"login": who}, "body": body} for i, who, body in COMMENTS]
+  text = prompt_text(2, "U01", "body", "orders", "orient", comments, [], None, "builder-bot", "audit", owners=["owner"])
+  assert re.findall(r"^## \S+ · comment (\d+)$", text.split("# Comments on issue #2\n\n", 1)[1], re.M) == ["1", "3", "4", "8"]
