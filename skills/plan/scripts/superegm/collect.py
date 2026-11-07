@@ -66,13 +66,15 @@ def collect(args, card):
   login, comments = parse_comments(core.read_text(r / "comments.md"))
   rid = head_review_id(st, unit)
   prior = max((e["round"] for e in data["rounds"] if e.get("phase") == "posted"), default=None)
-  prior_ci_fid, prior_tdd, prior_scope, contest_of, external, earlier, disposed = None, [], {}, {}, [], set(), set()
+  prior_ci_fid, prior_tdd, prior_scope, contest_of, external, earlier, disposed = None, {}, {}, {}, [], set(), set()
   posted = {e["round"]: e.get("posted_at") or "" for e in data["rounds"] if e.get("phase") == "posted"}
   for e in data["rounds"]:  # every posted round: an overruled out-of-Scope finding widens the Scope for good;
     if e.get("phase") == "posted":  # a contest or carried finding names the finding a reply may answer under
       for f in prior_foreman_findings(st, rid, e["round"]):
         if f["claim"] == "changed path outside Scope paths":
           prior_scope[f["id"]] = f["location"]
+        if f["claim"].startswith("tdd-order: "):  # a ruled tdd-order failure stays ruled in every later round
+          prior_tdd[f["id"]] = f["claim"].removeprefix("tdd-order: ")
         if (m := re.match(r"(?:contested|unreplied) (\S+):", f["claim"])):
           contest_of[f["id"]] = m.group(1)
           if f.get("disposition") is not None:  # a settled copy settles what it carries
@@ -85,13 +87,11 @@ def collect(args, card):
   for f in prior_foreman_findings(st, rid, prior):
     if f["location"] == "ci":
       prior_ci_fid = f["id"]
-    if f["claim"].startswith("tdd-order:"):
-      prior_tdd.append(f["id"])
   lines, contested = foreman_findings(n, json.loads(core.read_text(r / "ci.json"))["verdict"], text, scope, worktree, changed,
                                       core.read_text(r / "pr_body.md"), comments, login, prior, prior_ci_fid,
                                       tdd_order.commits_of(worktree, entry["merge_base"]), prior_tdd, prior_scope, contest_of,
                                       external, earlier, disposed, posted, handoff.config.get("owners") or [],
-                                      recorded_rulings(data))
+                                      recorded_rulings(data), data.get("decisions") or [])
   findings = r / "foreman.findings"
   core.atomic_write(findings, "".join(line + "\n" for line in lines))
   with contextlib.redirect_stdout(io.StringIO()):
@@ -157,16 +157,16 @@ def parse_comments(text: str) -> tuple:
 
 
 def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, worktree: Path, changed: list, pr_body: str,
-                     comments: list, login: str, prior_round, prior_ci_fid, commits: list = (), prior_tdd_fids: list = (),
+                     comments: list, login: str, prior_round, prior_ci_fid, commits: list = (), prior_tdd: dict = None,
                      prior_scope: dict = None, contest_of: dict = None, external: list = (),
                      earlier: set = frozenset(), disposed: set = frozenset(), posted: dict = None,
-                     owners: list = (), recorded: list = ()) -> tuple:
+                     owners: list = (), recorded: list = (), decisions: list = ()) -> tuple:
   """The foreman's high findings of spec section 11 in this order: CI, the DoD items, scope, tdd-order,
   deviations, contested, upheld, unreplied external; and `builder_contested[]` for the contested ones. Rulings
   and replies count only from the right author: a ruling is a `config.owners` login's comment `ruling_of` reads
   (spec section 13.2's one grammar) or an entry of the record (`recorded`, `recorded_rulings`), replies come
-  from the builder. Every `**Deviation**` line of a comment is one deviation; an `allowed` ruling on a prior
-  round's tdd-order fid skips tdd-order as an overrule does.
+  from the builder. Every `**Deviation**` line of a comment is one deviation; an `allowed` ruling on a posted
+  round's tdd-order fid (`prior_tdd`, fid to failure) skips that failure as an overrule does, and no other.
   An external high or medium with no disposition is carried until a reply names it, or names a posted carried
   copy of it, in this round's comments or an earlier round's (`earlier`, the builder's reply ids there), or
   until one of its copies is settled (`disposed`, the copies whose disposition is set). Its group is the
@@ -205,17 +205,20 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
       found.append(("pr_body.md", f"Run item {n}: no fenced output"))
   # The rulings: an owner's form comment read by `ruling_of`, and the record (`rulings[]`, the judges' post included)
   # (spec section 13.2: a recorded ruling is never changed by a later comment, so the record wins on its comment ids and subjects)
-  rulings = binding_rulings(comments, owners, recorded)
+  rulings = binding_rulings(comments, owners, recorded, decisions)
   by_id = {c["id"]: c for c in comments}
   overruled = {r.subject for r in rulings if r.kind == "overruled"}
   allowed = {r.subject for r in rulings if r.kind == "allowed"}
   widened = {path for fid, path in (prior_scope or {}).items() if fid in overruled}  # an owner's overrule widens the Scope
   found += [(path, "changed path outside Scope paths") for path in changed if path not in scope and path not in widened]
-  if not set(prior_tdd_fids) & (overruled | allowed):
-    tests = {n: t for n, t, _ in body_mod.step_paths(body)}
-    for failure in tdd_order.check(body, list(commits)):
-      step = re.match(r"S(\d+):", failure) or re.search(r"test\(S(\d+)\)", failure)
-      found.append((tests.get(int(step.group(1)), "tests/") if step else "tests/", f"tdd-order: {failure}"))
+  # a tdd-order failure a posted round raised and a ruling overruled or allowed is skipped; any other failure is raised
+  skipped = {text for fid, text in (prior_tdd or {}).items() if fid in overruled | allowed}
+  tests = {n: t for n, t, _ in body_mod.step_paths(body)}
+  for failure in tdd_order.check(body, list(commits)):
+    if failure in skipped:
+      continue
+    step = re.match(r"S(\d+):", failure) or re.search(r"test\(S(\d+)\)", failure)
+    found.append((tests.get(int(step.group(1)), "tests/") if step else "tests/", f"tdd-order: {failure}"))
   ruled = {int(r.subject) for r in rulings if r.kind == "option" and r.subject.isdigit()}
   for c in comments:  # every `**Deviation**` heading a comment folds; one ruling naming the comment rules them all
     for line in c["body"].splitlines():

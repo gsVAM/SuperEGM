@@ -264,15 +264,17 @@ def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr,
   comment, every Decision comment by a `config.owners` login, every Ruling comment by one in a form the one grammar
   reads (`parse_form`; the judges' post under the elephant's token kept, a typo or a stranger's dropped, and one the
   unit's record overrides dropped: `overridden_comments` of `foreman`), and from round 2 the foreman's reviews on the PR."""
-  overridden = overridden_comments(comments, list(owners), foreman) if foreman else set()
+  overridden = overridden_comments(comments, list(owners), foreman or {})
 
   def keep(c):
-    if not PROMPT_COMMENT_RE.match(c["body"]) or c["id"] in overridden:
+    if not PROMPT_COMMENT_RE.match(c["body"]) or (c["id"] in overridden and overridden[c["id"]] is None):
       return False
     if c["body"].startswith("**Deviation"):
       return True
-    return c["user"]["login"] in owners and (not c["body"].startswith("**Ruling:**") or parse_form(c["body"]) is not None)
-  kept = [c for c in comments if keep(c)]
+    return c["user"]["login"] in owners and (not c["body"].startswith("**Ruling:**") or parse_form(c["body"]) is not None
+                                             or overridden.get(c["id"]) is not None)
+  # an edited recorded ruling is shown as its record (spec section 13.2: a later comment never changes it)
+  kept = [c | {"body": overridden[c["id"]]} if overridden.get(c["id"]) else c for c in comments if keep(c)]
   parts = [f"# Issue #{issue_number} — {unit}\n\n{body}", f"# Audit trail\n\n{audit}", f"# Builder orders\n\n{orders}"]
   if pr_block is not None:
     parts.append(f"# PR block\n\n{pr_block}")
