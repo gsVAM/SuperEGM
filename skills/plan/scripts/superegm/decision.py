@@ -71,6 +71,23 @@ def ruling_of(comment: dict, owners: list) -> "Ruling | None":
   return form and Ruling(*form, login=login, comment_id=int(comment["id"]))
 
 
+def ruling_form(point: int, subject: str, option: str | None = None) -> str:
+  """The form `ruling_of` reads, as the inbox's action text: point 1 `subject` the fid or `test-delta <file>` and
+  `option` the verdict; point 2 `subject` the verdict; `redesign` as `subject` with no option; point 3 `subject` the
+  comment or decision id and `option` its text. ` — <reason>` ends every form but `finding upheld`, `one more round`
+  and `stop`."""
+  if subject == "redesign" and option is None:
+    text = "redesign"
+  elif point == 3:
+    text = f"({subject}) {option}"
+  elif point == 2:
+    text = subject
+  else:
+    text = f"{subject} {option}"
+  bare = text in ("one more round", "stop") or text.endswith(" finding upheld")
+  return f"**Ruling:** {text}" + ("" if bare else " — <reason>")
+
+
 def register(subparsers):
   p = subparsers.add_parser("decision", help="decision open|rule")
   action = p.add_subparsers(dest="action", required=True)
