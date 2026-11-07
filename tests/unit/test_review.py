@@ -1028,3 +1028,22 @@ def test_record_keeps_a_line_past_the_specs_end(world, approved):
   code, out = record(world, rid, 1, "design", [line], cid)
   rnd = rjson(world, rid, "round-1.json")
   assert code == 0 and rnd["out_of_scope"] == [] and len(rnd["reviewers"]["design"]["findings"]) == 1 and "out of scope" not in out
+
+
+# ---------------------------------------------------------------- U21: external-review ingest
+
+from superegm import init
+
+INGEST = {"severity_words": {"bug": "high", "issue": "medium", "nit": "low", "suggestion": "low"}, "human_role": "write"}
+
+@pytest.mark.parametrize("ingest, expect", [
+  (None, INGEST), ({"severity_words": {"bug": "blocker"}}, "ingest.severity_words must map words to high|medium|low"),
+  ({"human_role": "owner"}, "ingest.human_role must be one of read, triage, write, maintain, admin")])
+def test_ingest_config_key_and_the_init_sentence(world, ingest, expect):
+  assert superegm.DEFAULT_CONFIG["ingest"] == INGEST and "ingest.severity_words" in init.STEPS and "ingest.human_role" in init.STEPS
+  set_config(world, repo=REPO, **({"ingest": ingest} if ingest is not None else {}))
+  if isinstance(expect, str):
+    with pytest.raises(superegm.HandoffError, match=re.escape(expect)):
+      superegm.load_config(world.repo)
+    return
+  assert superegm.load_config(world.repo)["ingest"] == expect
