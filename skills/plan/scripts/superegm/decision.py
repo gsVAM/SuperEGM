@@ -8,6 +8,7 @@
 import json
 import os
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import superegm as core
@@ -19,6 +20,55 @@ from superegm.review import Refusal
 WRITES = frozenset({"foreman"})  # the store kinds this subcommand writes
 SKILLS = frozenset({"wave"})  # the skills whose card this subcommand accepts
 RELAUNCH = ["relaunch", "stop the unit"]
+
+# The one ruling grammar (spec section 13.2, amendment 5): a comment's first line in one of these forms and no other.
+FID = r"[^\s()]+"
+REASON = r" — (?P<reason>\S.*)"
+FORM_RES = (
+  ("upheld", re.compile(rf"(?P<subject>{FID}) finding upheld(?: \(fix it\))?")),
+  ("overruled", re.compile(rf"(?P<subject>{FID}) finding overruled{REASON}")),
+  ("round", re.compile(r"one more round")),
+  ("stop", re.compile(r"stop")),
+  ("option", re.compile(rf"\((?P<subject>\d+|q\d+)\) (?P<option>\S.*?){REASON}")),
+  ("allowed-file", re.compile(rf"test-delta (?P<subject>\S+) allowed{REASON}")),
+  ("redesign", re.compile(rf"redesign{REASON}")),
+  ("allowed", re.compile(rf"(?P<subject>{FID}) allowed{REASON}")),
+)
+JUDGES_MARK_RE = re.compile(r"^\(judges \S+, leavemealone\)$", re.M)
+
+
+@dataclass(frozen=True)
+class Ruling:
+  kind: str  # upheld | overruled | round | stop | option | allowed | allowed-file | redesign
+  subject: str  # the fid, the comment or decision id, the `dod-<n>` item, the file, or "" for round, stop and redesign
+  option: str | None  # the option text at point 3
+  reason: str | None  # the text after the first ` — `, as typed
+  login: str
+  comment_id: int
+
+
+def parse_form(body: str):
+  """The form a body's first line is in, as (kind, subject, option, reason), or None: the judges' marker is not read here."""
+  line = body.split("\n", 1)[0].rstrip("\r")
+  if not line.startswith("**Ruling:** "):
+    return None
+  text = line[len("**Ruling:** "):]
+  for kind, form in FORM_RES:
+    if m := form.fullmatch(text):
+      groups = m.groupdict()
+      return kind, groups.get("subject") or "", groups.get("option"), groups.get("reason")
+  return None
+
+
+def ruling_of(comment: dict, owners: list) -> "Ruling | None":
+  """The owner's ruling a comment carries, or None: an author outside `owners`, a body matching no form exactly, or the
+  judges' post (the `(judges <panel>, leavemealone)` marker on any line, recorded from `rulings[]`, never re-read)."""
+  login = (comment.get("user") or {}).get("login") or comment.get("login")
+  body = comment.get("body") or ""
+  if login not in owners or JUDGES_MARK_RE.search(body.replace("\r", "")):
+    return None
+  form = parse_form(body)
+  return form and Ruling(*form, login=login, comment_id=int(comment["id"]))
 
 
 def register(subparsers):
