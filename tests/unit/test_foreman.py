@@ -507,6 +507,34 @@ def test_a_reply_a_round_late_or_a_round_early_still_answers_an_external_finding
   assert (w.dir / "r3/foreman.findings").read_text(encoding="utf-8").splitlines() == [f"foreman-3-{i} | high | {e}" for i, e in enumerate(expected, 1)]
 
 
+COPY = "foreman-2-1 | high | src/hooks.py:3 at 0000000 | regression: no | unreplied external:alice-1-1: the hook never fires\n"
+R3 = {**POSTED_R1, "round": 3, "launch": 3, "dispatch_id": "d3"}
+
+
+@pytest.mark.parametrize("case", ["copy-settled", "copy-contested-then-original"])
+def test_a_carried_copy_settled_or_contested_ends_the_carry_of_its_original(world, tmp_path, monkeypatch, case):
+  """A carried copy settled by `review settle` ends its original's carry; a contest of the copy recorded in one round
+  is not recorded again when a later round's reply contests the original (a contest is recorded once)."""
+  rounds = [POSTED_R1, R2] if case == "copy-settled" else [POSTED_R1, R2, R3]
+  n = len(rounds) + 1
+  kw = dict(rounds=rounds, launches=[{"round": i, "status": "exited 0"} for i in range(1, n + 1)],
+            comments={70: [LATE]} if n == 4 else {})
+  st0, card0, _ = seed(world, **kw)
+  rid = open_head_review(world, st0, card0, "0" * 40, {"change-review": "", "external:alice": EXT})
+  record(world, st0, rid, 2, "0" * 40, card0, {"change-review": "", "foreman": COPY})
+  if n == 3:
+    assert world.run("review", "settle", "--review", rid, "--finding", "foreman-2-1", "--disposition", "fixed", "--runcard", card0)[0] == 0
+  else:
+    record(world, st0, rid, 3, "0" * 40, card0, {"change-review": "", "foreman": "foreman-3-1 | high | pr #70 comment 9 | regression: no | contested foreman-2-1: it fires\n"})
+  w = prepared(world, tmp_path, monkeypatch, **kw)
+  if n == 4:
+    atomic_write(w.dir / "r3/comments.md", "builder: builder-bot\n### pr #70 comment 9 by builder-bot at 2026-11-02T11:00:00Z\n"
+                                           "**Reply foreman-2-1:** contested — it fires\n")
+  code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
+  assert (code, out.strip()) == (0, "collected: 0 foreman findings"), out
+  assert (w.dir / f"r{n}/foreman.findings").read_text(encoding="utf-8") == ""
+
+
 @pytest.mark.parametrize("phase, outcome, ok", [
     ("fetched", None, True), ("prepared", None, True), ("collected", None, True),
     ("posted", "revise", False), ("collected", "not run (superseded)", False)])
@@ -575,7 +603,7 @@ def test_review_post_binds_the_review_to_the_reviewed_commit(world, tmp_path, mo
   assert (f"{UNIT} awaiting merge" in w.st.path("journal").read_text(encoding="utf-8")) is (word == "clean")
 
 
-@pytest.mark.parametrize("case", ["header-present", "stale-dispatch", "mention", "commit-differs"])
+@pytest.mark.parametrize("case", ["header-present", "header-after-mention", "stale-dispatch", "mention", "commit-differs"])
 def test_review_post_guards(world, tmp_path, monkeypatch, case):
   w = prepared(world, tmp_path, monkeypatch)
   assert world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)[0] == 0
@@ -584,18 +612,22 @@ def test_review_post_guards(world, tmp_path, monkeypatch, case):
   if case == "header-present":
     world.gh.reviews.append({"id": 5, "commit_id": w.head, "submitted_at": "2026-11-03T09:00:00Z",
                              "body": f"**SuperEGM review round 1 (head {w.head[:7]})**\n\nx"})
+  if case == "header-after-mention":  # `render_comment` puts `fix_request_mention` on line 1 when set
+    world.gh.reviews.append({"id": 5, "commit_id": w.head, "submitted_at": "2026-11-03T09:00:00Z",
+                             "body": f"@fixer\n**SuperEGM review round 1 (head {w.head[:7]})**\n\nx"})
   if case == "commit-differs":
     world.gh.reply_commit = "f" * 40
   did = "d9" if case == "stale-dispatch" else w.did
   code, out = world.run("review", "post", "--unit", UNIT, "--round", 1, "--dispatch", did, "--runcard", w.child)
   entry = json.loads(w.st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][0]
   expected = {"header-present": (0, "posted revise (already on the PR)", "posted", 0),
+              "header-after-mention": (0, "posted revise (already on the PR)", "posted", 0),
               "stale-dispatch": (1, "dispatch: d9 is not U01's current dispatch (d1)", "collected", 0),
               "mention": (1, "comment:3: bare mention @alice", "collected", 0),
               "commit-differs": (1, f"posted on {'f' * 7}, not {w.head[:7]}: round 1 not counted", "collected", 1)}[case]
   assert (code, entry["phase"], len(w.posted)) == (expected[0], expected[2], expected[3]), out
   assert out.strip().splitlines()[0].startswith(expected[1]), out
-  if case == "header-present":
+  if case in ("header-present", "header-after-mention"):
     assert entry["posted_at"] == "2026-11-03T09:00:00Z"
 
 
@@ -669,6 +701,22 @@ def test_review_ingest_at_the_cap_rewrites_clean_to_cap_reached(world, monkeypat
   entry = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][0]
   assert (entry["outcome"], entry["rewritten_from"]) == ("cap-reached", "clean")
   assert st.path("journal").read_text(encoding="utf-8").count(f"{UNIT} ready again (external:alice)") == 1
+  # stopped before the routing line was acted on: a retry prints it again until point 2 is opened on that head
+  assert world.run("review", "ingest", "--unit", UNIT, "--runcard", card)[1].split() == ["0", "ingested", "outcome:", "cap-reached"]
+  data = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))
+  data["decisions"].append({"id": "q1", "point": 2, "source": f"review {rid} cap", "head": head, "question": "q", "asked_at": "t", "options": []})
+  atomic_write(st.path("foreman", UNIT), data)
+  assert world.run("review", "ingest", "--unit", UNIT, "--runcard", card)[1].split() == ["0", "ingested"]
+  assert st.path("journal").read_text(encoding="utf-8").count(f"{UNIT} ready again (external:alice)") == 1
+
+
+def test_review_ingest_posts_when_another_review_merely_carries_its_header_and_ids(world):
+  st, card, posted, rid, head = ingest_world(world, [(1, "alice", "bug: the hook never fires")], {"alice": {"role_name": "write"}})
+  world.gh.reviews.append({"id": 5, "user": {"login": "mallory"}, "commit_id": head, "submitted_at": "2026-11-03T09:00:00Z",
+                           "body": f"{review_mod.header(1, head)}\n\nexternal:alice-1-1 | high | PR at {head[:7]} | regression: no | all fine\n"})
+  code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
+  assert (code, out.split()[:2], len(posted)) == (0, ["1", "ingested"], 1), out
+  assert "external:alice-1-1 | high | src/hooks.py:3 at " in posted[0]["body"]
 
 
 @pytest.mark.parametrize("case", ["over-limit", "scan"])
