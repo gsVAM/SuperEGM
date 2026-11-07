@@ -157,7 +157,8 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
   rulings = [(c, m) for c in others if (m := RULING_RE.match(c["body"]))]
   overruled = {m.group(1) for _, m in rulings if m.group(2) == "overruled"}
   widened = {path for fid, path in (prior_scope or {}).items() if fid in overruled}  # an owner's overrule widens the Scope
-  found += [(path, "changed path outside Scope paths") for path in changed if path not in scope and path not in widened]
+  in_scope = lambda path: any(path == s or path.startswith(s.rstrip("/") + "/") for s in scope)  # a directory covers its files
+  found += [(path, "changed path outside Scope paths") for path in changed if not in_scope(path) and path not in widened]
   if not set(prior_tdd_fids) & overruled:
     tests = {n: t for n, t, _ in body_mod.step_paths(body)}
     for failure in tdd_order.check(body, list(commits)):
