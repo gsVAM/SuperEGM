@@ -103,7 +103,7 @@ def install_pr_api(world, *, reviews, comments, login) -> list:
 
 
 def seed(world, *, head="a" * 40, ci="success", launches=({"round": 1, "status": "exited 0"},),
-         rounds=(), base_ref="main", comments=None, reviews=(), login="builder-bot", pr_body=PR_BODY, builder=None, astra=None, marker=True):
+         rounds=(), base_ref="main", comments=None, reviews=(), login="builder-bot", pr_body=PR_BODY, builder=None, astra=None, marker=True, owners=None):
   """Through U03's `store`, `Store.path` and `atomic_write`, what `locate`, `Handoff` and `require_frozen_units`
   read: the plan (conftest's heading, a `Design:` line naming `world.spec` in backticks, `## Global constraints`,
   `## Units`, SECTION) written to `world.plan` and
@@ -125,7 +125,8 @@ def seed(world, *, head="a" * 40, ci="success", launches=({"round": 1, "status":
   spec = world.spec.resolve()
   set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"],
              reviewers={"spec": [], "plan": [], "head": ["change-review"], "integrate": []},
-             **({"builder": builder} if builder else {}), **({"astra": astra} if astra else {}))
+             **({"builder": builder} if builder else {}), **({"astra": astra} if astra else {}),
+             **({"owners": owners} if owners else {}))
   plan = (f"# Handoff plan: Webhook delivery\n\nDesign: `{spec}`\n\n## Global constraints\n- none\n\n"
           f"## Units\n\n{SECTION}")
   world.plan.write_text(plan, encoding="utf-8")
@@ -570,6 +571,38 @@ def test_review_post_target_moved(world, tmp_path, monkeypatch, merge_pr):
     assert entry["phase"] == "collected" and entry["outcome"] == "not run (target-moved)"
   else:
     assert (code, len(w.posted)) == (0, 1) and entry["phase"] == "posted"
+
+
+@pytest.mark.parametrize("outcome", ["clean", "revise", None])
+def test_review_ingest_records_posts_and_rewrites_clean(world, outcome):
+  git = lambda *a: subprocess.run(["git", "-C", str(world.repo), *a], check=True, capture_output=True, text=True).stdout.strip()
+  head, later = git("rev-parse", "HEAD"), (git("commit", "-q", "--allow-empty", "-m", "later"), git("rev-parse", "HEAD"))[1]
+  t = lambda cid, login, body, commit=head: {"id": cid, "user": {"login": login}, "body": body, "path": "src/hooks.py", "line": 3, "commit_id": commit, "created_at": "t"}
+  st, card, posted = seed(world, head=head, rounds=[{**POSTED_R1, "head": head, "outcome": outcome}] if outcome else [], owners=["owner"])
+  rid = outcome and open_head_review(world, st, card, head, {"change-review": ""})
+  atomic_write(st.path("review", UNIT, f"pr{PR}") / "r1/ci.json", json.dumps({"verdict": "ci green"}))
+  world.gh.threads[PR] = [t(i, "devin-ai-integration[bot]", "nit: " + "spacing " * 25) for i in range(1, 201)] + [t(201, "alice", "**Issue**: no hook"), t(202, "bob", "bug: mine"),
+    t(203, "alice", "bug: later", later), t(204, "builder-bot", "bug: x"), t(205, "owner", "**Ruling:** foreman-1-1 finding upheld")]
+  world.gh.roles.update(alice={"role_name": "write"}, bob={"role_name": "read"})
+  code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
+  if outcome is None:
+    assert (code, out.strip(), posted) == (0, "0 ingested", [])
+    return
+  assert (code, out.split()) == (0, ["202", "ingested"] + (["outcome:", "revise"] if outcome == "clean" else []))
+  body = posted[0]["body"]
+  assert len(posted) == 1 and posted[0]["commit_id"] == head and body.startswith(review_mod.header(1, head)) and body.endswith("\nCI: ci green\n")
+  assert body.count("external:devin-ai-integration[bot]-1-") == 200 and "external:alice-1-1 | medium | src/hooks.py:3 at " in body and "external:bob" not in body and "external:owner" not in body
+  data = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))
+  assert sorted(data["ingested"]) == list(range(1, 203)) and (data["rounds"][0]["outcome"], data["rounds"][0].get("rewritten_from")) == ("revise", "clean" if outcome == "clean" else None)
+  assert st.path("journal").read_text(encoding="utf-8").count(f"{UNIT} ready again (external:alice)") == (outcome == "clean")
+  world.gh.threads[PR][200]["body"] = "nit: no hook, a nit on reflection"
+  assert world.run("review", "ingest", "--unit", UNIT, "--runcard", card)[1].strip() == "0 ingested" and len(posted) == 1
+  alice = json.loads((st.path("reviews", rid) / "round-1.json").read_text(encoding="utf-8"))["reviewers"]["external:alice"]["findings"][0]
+  assert (alice["severity"], alice["claim"]) == ("medium", "nit: no hook, a nit on reflection")
+  assert sum(c[1].startswith(f"repos/{REPO}/collaborators/") for c in world.gh.calls) == 2
+  world.gh.threads[PR].append(t(206, "carol", "bug: late")); world.gh.roles["carol"] = 500
+  code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
+  assert (code, len(posted), json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["ingested"]) == (1, 1, data["ingested"]) and "HTTP 500" in out
 
 
 @pytest.mark.parametrize("status_exit, contested, word", [
