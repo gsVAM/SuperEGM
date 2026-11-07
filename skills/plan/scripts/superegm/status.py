@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the `ruling` event (U22).
 
 """superegm status: landed and ready sets, PRs, CI; refuses without a complete receipt.
 `--wait <s>` polls, reading only, and prints every unreported event line, or `deadline`."""
@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 
 import superegm as core
+from superegm.decision import ruling_of
 from superegm.launch import load_launches, terminal
 
 WRITES = frozenset(['state'])  # the store kinds this subcommand writes
@@ -16,7 +17,7 @@ SKILLS = frozenset(['wave', 'integrate'])  # the skills whose card this subcomma
 STATUS_RE = re.compile(r"^\*\*Builder status:\*\*\s*(DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT)\b")
 # The saved fingerprint of a unit (spec section 11): every `--wait` reports the keys that differ from it.
 EMPTY = {"pr": None, "head": None, "ci": None, "exit": None, "builder_status": None, "landed": False,
-         "closed": [None, None]}
+         "closed": [None, None], "rulings": []}
 
 
 def register(subparsers):
@@ -135,6 +136,29 @@ def closed_facts(repo: str, issue: dict, pr, landed: bool) -> list:
   return facts
 
 
+def ruling_facts(store, uid: str, comments: list, owners) -> list:
+  """One `Ruling` per comment of an owner `ruling_of` parses (spec section 13.2); a comment the unit's `rulings[]`
+  names as `posted` is skipped unless its `updated_at` is later than that entry's `posted_at` (the posted comment's
+  own `created_at`), so an unedited recorded post is no event and an owner's edit of it is one."""
+  posted = {}
+  for entry in core.load_foreman(store, uid).get("rulings") or []:
+    kind, _, cid = (entry.get("posted") or "").partition("comment ")
+    if not kind and cid.isdigit():
+      posted[int(cid)] = entry.get("posted_at") or ""
+  facts = []
+  for comment in comments:
+    ruling = ruling_of(comment, owners)
+    if ruling and (ruling.comment_id not in posted or (comment.get("updated_at") or "") > posted[ruling.comment_id]):
+      facts.append(ruling)
+  return facts
+
+
+def ruling_entries(facts: list, comments: list) -> list:
+  """The saved `rulings` key: `[comment id, kind, subject, option, login, updated_at or created_at]` per fact."""
+  stamps = {c.get("id"): c.get("updated_at") or c.get("created_at") for c in comments}
+  return [[r.comment_id, r.kind, r.subject, r.option, r.login, stamps.get(r.comment_id)] for r in facts]
+
+
 def fingerprint(unit: dict) -> dict:
   """The saved keys of a unit (lists, not tuples: the saved one comes back from JSON)."""
   return {key: unit[key] for key in EMPTY}
@@ -142,7 +166,7 @@ def fingerprint(unit: dict) -> dict:
 
 def unit_events(uid: str, previous, current: dict) -> list:
   """One line per event of the unit since `previous` (`EMPTY` when nothing was saved), kinds in
-  the order head, exit, status, landed, closed; a builder's exit carries its status word."""
+  the order head, exit, status, landed, closed, ruling; a builder's exit carries its status word."""
   before = {**EMPTY, **(previous or {})}
   lines = []
   if current["ci"] is not None and any(current[k] != before[k] for k in ("pr", "head", "ci")):
@@ -159,6 +183,11 @@ def unit_events(uid: str, previous, current: dict) -> list:
   for what, fact, earlier in zip(("pr", "issue"), current["closed"], before["closed"]):
     if fact and fact != earlier:
       lines.append(f"{uid} closed {what}={fact[0]} by={fact[1]}")
+  for entry in current["rulings"]:
+    if entry not in before["rulings"]:
+      cid, kind, subject, option, login = entry[:5]
+      what = " ".join(part for part in (kind, subject, option) if part)
+      lines.append(f"{uid} ruling by {login}: {what} (comment {cid})")
   return lines
 
 
@@ -223,6 +252,7 @@ def unit_view(handoff, uid):
   comments = core.gh_pages(f"repos/{repo}/issues/{number}/comments?per_page=100")
   view["exit"], view["builder_status"] = builder_facts(handoff.store, uid, comments)
   view["closed"] = closed_facts(repo, issue, pr, view["landed"])
+  view["rulings"] = ruling_entries(ruling_facts(handoff.store, uid, comments, handoff.config.get("owners") or []), comments)
   record["status"] = view["status"]
   state["units"][uid] = record
   return view
