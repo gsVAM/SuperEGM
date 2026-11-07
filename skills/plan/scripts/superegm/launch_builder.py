@@ -14,7 +14,7 @@ from pathlib import Path
 import superegm as core
 from superegm import body, orient
 from superegm.builder_token import key_path, tool
-from superegm.decision import overridden_comments, parse_form
+from superegm.decision import deleted_rulings, overridden_comments, parse_form
 from superegm.launch import builder_email, builder_login, load_launches, terminal
 from superegm.review_plan import SPEC_LINE_RE
 
@@ -264,7 +264,8 @@ def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr,
   comment, every Decision comment by a `config.owners` login, every Ruling comment by one in a form the one grammar
   reads (`parse_form`; the judges' post under the elephant's token kept, a typo or a stranger's dropped, one the
   unit's record overrides dropped, and a recorded one edited after its record, whatever the edit, shown as its
-  record: `overridden_comments` of `foreman`), and from round 2 the foreman's reviews on the PR."""
+  record: `overridden_comments` of `foreman`; a recorded one deleted shown as its record in its place:
+  `deleted_rulings`), and from round 2 the foreman's reviews on the PR."""
   overridden = overridden_comments(comments, list(owners), foreman or {})
 
   def keep(c):
@@ -278,6 +279,8 @@ def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr,
                                              or overridden.get(c["id"]) is not None)
   # an edited recorded ruling is shown as its record (spec section 13.2: a later comment never changes it)
   kept = [c | {"body": overridden[c["id"]]} if overridden.get(c["id"]) else c for c in comments if keep(c)]
+  for gone in deleted_rulings(comments, foreman or {}):  # in its place among the comments, by id
+    kept.insert(next((i for i, c in enumerate(kept) if int(c["id"]) > gone["id"]), len(kept)), gone)
   parts = [f"# Issue #{issue_number} — {unit}\n\n{body}", f"# Audit trail\n\n{audit}", f"# Builder orders\n\n{orders}"]
   if pr_block is not None:
     parts.append(f"# PR block\n\n{pr_block}")

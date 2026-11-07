@@ -250,8 +250,8 @@ Leavemealone-mode: U11 wires §13.2 here.
   an `allowed` ruling as for an open decision,
   `<fid> allowed` as `--ruling '<fid> finding overruled'`, though
   in leavemealone-mode an allowance naming an open decision is refused (its
-  `review settle --posted` reads only `<fid> finding overruled — <reason>`;
-  the owner reposts in that form). Only on
+  `review settle --posted` reads only `<fid> finding overruled — <reason>`,
+  the form the journal's dropped line names for the owner). Only on
   exit 0 continue as that point's section does. Point 1: `finding overruled`
   → `review settle … --disposition contested --owner --posted <comment id>`;
   then, for `finding upheld` too, by `review status`: 0 → the unit awaits
@@ -266,7 +266,7 @@ Leavemealone-mode: U11 wires §13.2 here.
   `tdd-order` one; a `dod-<n>` or `test-delta` one the owner weighs.
   Nothing is posted; the journal says `ruling edited after record, ignored`
   for a recorded comment re-read, and `ruling dropped (<by>, comment <id>): …`
-  for one naming no open decision or an already ruled one; take either as the fact it states, and
+  for one naming no open decision or an already ruled one, or a refused allowance; take either as the fact it states, and
   run nothing else for it.
 - A stopped unit keeps its branch and its open issue, is never dispatched or
   launched again, and is listed in the report with its unlanded dependants

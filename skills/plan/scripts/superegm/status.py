@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 import superegm as core
-from superegm.decision import ruling_of
+from superegm.decision import edited_after_record, ruling_of
 from superegm.launch import load_launches, terminal
 
 WRITES = frozenset(['state'])  # the store kinds this subcommand writes
@@ -140,17 +140,17 @@ def ruling_facts(store, uid: str, comments: list, owners) -> list:
   """One `Ruling` per comment of an owner `ruling_of` parses (spec section 13.2); a comment the unit's `rulings[]`
   names as `posted` is skipped unless its `updated_at` is later than that entry's `posted_at` (the comment's
   `updated_at` when recorded, else its `created_at`), so an unedited recorded post is no event and an owner's edit of it is one.
-  An `unread` entry (the session's own post whose GitHub time was never read back, `posted_at` the host's) is never an event."""
+  For an `unread` entry (the session's own post whose GitHub time was never read back, `posted_at` the host's) the edit
+  is an `updated_at` later than the comment's own `created_at` (`decision.edited_after_record`)."""
   posted = {}
   for entry in core.load_foreman(store, uid).get("rulings") or []:
     kind, _, cid = (entry.get("posted") or "").partition("comment ")
     if not kind and cid.isdigit():
-      posted[int(cid)] = None if entry.get("unread") else entry.get("posted_at") or ""
+      posted[int(cid)] = entry
   facts = []
   for comment in comments:
     ruling = ruling_of(comment, owners)
-    at = posted.get(ruling.comment_id, "") if ruling else ""
-    if ruling and (ruling.comment_id not in posted or (at is not None and (comment.get("updated_at") or "") > at)):
+    if ruling and (ruling.comment_id not in posted or edited_after_record(comment, posted[ruling.comment_id])):
       facts.append(ruling)
   return facts
 
