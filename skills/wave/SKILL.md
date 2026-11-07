@@ -108,7 +108,7 @@ ignored except `landed`:
    Then: `DONE` and `DONE_WITH_CONCERNS` need nothing (the head is reviewed
    at step 4); `BLOCKED` or `NEEDS_CONTEXT`, an exit with no PR
    (`pr=none`), or an interrupted launch → Decision point 3.
-3b. `superegm review ingest` for every launched unit with a PR,
+3b. `superegm review ingest` for every unit with an open PR (landed units print `0 ingested`),
    awaiting-merge units included, stopped units excluded:
    `python3 '<HELPER>' review ingest --unit <U> --runcard '<CARD>'` records
    the PR's new review threads as `external:<login>` findings into the latest
@@ -140,8 +140,9 @@ ignored except `landed`:
    `python3 '<HELPER>' report --idle '<U>=launch-builder: <reason>' --runcard '<CARD>'`.
 6. `superegm report`: `python3 '<HELPER>' report --runcard '<CARD>'`. If a
    decision was opened this batch, pause: ask the owner at its decision
-   point and run `report` again once ruled. Else `loop: ended` → The end;
-   otherwise the next batch.
+   point and run `report` again once ruled.
+   Else `loop: ended` → step 3b, then `report` again (a thread posted before the last
+   round's review is read now); still `loop: ended` → The end; otherwise the next batch.
 
 `report` derives each launched unit's state with `unit_state`, one of six:
 `landed`, `stopped`, `pending`, `idle`, `clean`, else `active`; only an

@@ -162,7 +162,9 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
   and replies count only from the right author: rulings from anyone but the builder, replies from the builder.
   An external high or medium with no disposition is carried until a reply names it, or names a posted carried
   copy of it, in this round's comments or an earlier round's (`earlier`, the builder's reply ids there); a
-  `contested` reply to such a finding is recorded whatever round it comes in (spec section 8, External review)."""
+  `contested` reply to such a finding is recorded in the round it comes in, a round late included, when no
+  earlier round's comments hold a builder reply to it or its carried copy (`late`) and no ruling already
+  names it: a contest is recorded once (spec section 8, External review)."""
   found, contested = [], []
   open_ext = {f["id"] for f in external if f["disposition"] is None and f["severity"] in ("high", "medium")}
   open_ext |= {cid for cid, original in (contest_of or {}).items() if original in open_ext}
