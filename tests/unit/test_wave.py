@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U10b's tests of the driver: report, decision open|rule, the wave skill body.
+# Added by SuperEGM (gsVAM), 2026: U10b's tests of the driver: report, decision open|rule, the wave skill body; the by-hand ruling read through `ruling_of` (U22).
 
 """U10b: the pure functions the wave skill cites, `report`, `decision open|rule` and the skill body.
 Fixtures: conftest's `world`, `applied` and `make_pr` (U03/U07)."""
@@ -319,8 +319,9 @@ def test_point_1_takes_one_ruling_per_contested_finding(world):
   (1, "review head-U01-c1 round 2", "f-2-1 finding overruled — the test already covers it",
    "**Ruling:** f-2-1 finding overruled — the test already covers it"),
   (1, "review head-U01-c1 round 2", "f-2-1 finding upheld", "**Ruling:** f-2-1 finding upheld (fix it)"),
-  (2, "review head-U01-c1 cap", "one more round", "**Ruling:** (cap) one more round"),
+  (2, "review head-U01-c1 cap", "one more round", "**Ruling:** one more round"),
   (3, "comment 77", "(b) — Redis is already a dependency", "**Ruling:** (77) use Redis — Redis is already a dependency"),
+  (3, "comment 77", "(b)", "**Ruling:** (77) use Redis — ruled in the session"),
 ])
 def test_decision_rule_records_posts_and_journals(world, point, source, ruling, posted):
   card = open_wave_card(world)
@@ -368,7 +369,7 @@ def test_a_stop_ruling_labels_the_issue_and_the_report_lists_unlanded_dependants
   f = foreman_of(s, "U01")
   assert f["stopped"] == {"by": "owner", "reason": "stop the unit", "at": f["rulings"][-1]["posted_at"]}
   assert "superegm:stopped" in world.gh.issues[2]["labels"]
-  assert world.gh.comments[2][-1]["body"].startswith("**Ruling:** (launch 1) stop the unit\n")
+  assert world.gh.comments[2][-1]["body"].startswith("**Ruling:** (q1) stop the unit — ruled in the session\n")
   code, out = world.run("report", "--runcard", card)
   assert "loop: ended" in out and "pending: none" in out
   assert "## Stopped\n- U01 (owner: stop the unit): unlanded dependants U02, U03" in s.path("wave_report", 1).read_text(encoding="utf-8")
@@ -378,37 +379,34 @@ def test_a_stop_ruling_labels_the_issue_and_the_report_lists_unlanded_dependants
 # ---------------------------------------------------------------- S7: the by-hand ruling and the owner's close
 
 
-@pytest.mark.parametrize("app", [False, True])
-def test_a_by_hand_ruling_naming_the_blocked_comment_rules_its_decision(world, monkeypatch, app):
+def test_a_by_hand_ruling_naming_the_blocked_comment_rules_its_decision(world):
   card = open_wave_card(world)
-  if app:  # the App path: the login is derived from the config, no token, no `user` route
-    set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"], builder={**DEFAULT_CONFIG["builder"], "app": APP})
-    monkeypatch.delenv("SUPEREGM_BUILDER_TOKEN", raising=False)
   s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})
-  login = "superegm-builder[bot]" if app else BUILDER
-  app or monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "builder-token")  # config.builder.gh_token_env, U03's default
-  fake_gh(world, {**({} if app else {"user": {"login": BUILDER}}), **{f"repos/{REPO}/issues/comments/{cid}": {"id": cid, "user": {"login": author}, "body": body}
-                  for cid, author, body in ((78, "owner", "**Ruling:** (77) (b) use Redis — fine\n"),
-                                            (79, login, "**Ruling:** (77) (a) — I decided\n"),
-                                            (80, "owner", "**Ruling:** (12) (a) — another comment\n"))}})
-  assert decision.builder_login(superegm.load_config(world.repo)) == login and launch.app_login(superegm.load_config(world.repo)) == (login if app else None)
-  qid = world.run("decision", "open", "--unit", "U01", "--point", 3, "--question", question(world), "--source", "comment 77",
-                  "--runcard", card)[1].splitlines()[0]
-  rule = lambda posted, by="owner": world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", "(b)",
-                                              "--by", by, "--posted", posted, "--runcard", card)
-  code, out = rule("79", login)
-  assert code == 1 and out == f"decision: comment 79 was written by the builder account {login} and is not honoured\n"
-  code, out = rule("80")
-  assert code == 1 and out == "decision: comment 80 does not name comment 77\n"
-  code, out = rule("78", "someone")
-  assert code == 1 and out == "decision: comment 78 was written by owner, not someone\n"
-  assert foreman_of(s, "U01")["rulings"] == []
-  code, out = rule("78")
-  assert code == 0 and out.strip() == "recorded (comment 78)"
+  set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"], owners=["owner"])
+  fake_gh(world, {f"repos/{REPO}/issues/comments/{cid}": {"id": cid, "user": {"login": author}, "body": body} for cid, author, body in (
+      (78, "owner", "**Ruling:** (77) (b) use Redis — fine\n"), (79, BUILDER, "**Ruling:** (77) (a) — I decided\n"),
+      (80, "owner", "**Ruling:** (12) (a) — other\n"), (81, "owner", "**Ruling:** (77) (b) use Redis\n"), (82, "owner", "**Ruling:** (77) (a) — late\n"),
+      (83, "owner", "**Ruling:** f-4-1 finding upheld\n"), (84, "owner", "**Ruling:** f-4-2 finding overruled — the plan says so\n"), (85, "owner", "**Ruling:** f-4-1 finding overruled — again\n"))})
+  qid = world.run("decision", "open", "--unit", "U01", "--point", 3, "--question", question(world), "--source", "comment 77", "--runcard", card)[1].splitlines()[0]
+  rule = lambda posted, by="owner", ruling="(b)", d=("--decision", qid): world.run("decision", "rule", "--unit", "U01", *d, "--ruling", ruling, "--by", by, "--posted", posted, "--runcard", card)
+  assert rule("79", BUILDER) == (1, f"decision: comment 79 by {BUILDER} is not an owner's ruling\n")
+  assert rule("81") == (1, "decision: comment 81 by owner is not an owner's ruling\n")
+  assert rule("80") == (1, "decision: comment 80 does not name comment 77\n")
+  assert rule("78", "someone") == (1, "decision: comment 78 was written by owner, not someone\n")
+  assert rule("78") == (0, "recorded (comment 78)\n")
   r = foreman_of(s, "U01")["rulings"][-1]
-  assert (r["decision"], r["ruling"], r["by"], r["posted"]) == (qid, "(b)", "owner", "comment 78")
-  assert 2 not in world.gh.comments, "nothing is posted for a by-hand ruling"
-  assert "pending: none" in world.run("report", "--runcard", card)[1]
+  assert (r["decision"], r["ruling"], r["by"], r["posted"]) == (qid, "(b)", "owner", "comment 78") and 2 not in world.gh.comments
+  assert rule("78") == (1, "decision: comment 78 already recorded (ruling edited after record, ignored)\n")
+  assert rule("82") == (1, f"decision: {qid} already ruled\n")
+  journal = s.path("journal").read_text(encoding="utf-8")
+  assert f"Ruling (owner, comment 78): U01 {qid} option 77" in journal and f"Ruling (owner, comment 78): U01 {qid} ruling edited after record, ignored" in journal
+  assert f"ruling dropped (owner, comment 82): {qid} already ruled" in journal
+  world.run("decision", "open", "--unit", "U01", "--point", 1, "--question", question(world), "--source", "round 4", "--runcard", card)
+  assert rule("83", "owner", "f-4-1 finding upheld", ())[0] == 0 and rule("84", "owner", "f-4-2 finding overruled — the plan says so", ()) == (0, "recorded (comment 84)\n")
+  assert rule("85", "owner", "f-4-1 finding overruled — again", ()) == (1, "decision: comment 85 does not name an open decision\n")
+  q2 = world.run("decision", "open", "--unit", "U01", "--point", 2, "--question", question(world, "cap\n"), "--source", "review head-U01-c1 cap", "--runcard", card)[1].splitlines()[0]
+  assert world.run("decision", "rule", "--unit", "U01", "--decision", q2, "--ruling", "stop", "--by", "judges:p-1", "--runcard", card)[0] == 0
+  assert world.gh.comments[2][-1]["body"].splitlines()[:2] == ["**Ruling:** stop", "(judges p-1, leavemealone)"]
 
 
 def test_the_owners_close_is_stop_without_a_question(world):
@@ -532,7 +530,8 @@ def test_a_refused_redesign_ruling_leaves_no_brief_and_a_small_diff_is_copied_wh
   qid = world.run("decision", "open", "--unit", "U01", "--point", 2, "--question", question(world, FINDING + "\n"),
                   "--source", "review head-U01-c1 cap", "--runcard", card)[1].splitlines()[0]
   brief = s.path("foreman", "U01").with_name(f"U01-{qid}.brainstorm.md")
-  fake_gh(world, {"user": {"login": BUILDER}, f"repos/{REPO}/issues/comments/9": {"id": 9, "user": {"login": "someone"}, "body": "**Ruling:** (cap) redesign — why\n"}})
+  set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"], owners=["owner"])
+  fake_gh(world, {"user": {"login": BUILDER}, f"repos/{REPO}/issues/comments/9": {"id": 9, "user": {"login": "someone"}, "body": "**Ruling:** redesign — why\n"}})
   rule = lambda *more: world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", "redesign — why", "--by", "owner",
                                  *more, "--runcard", card)
   assert rule("--posted", "9") == (1, "decision: comment 9 was written by someone, not owner\n")
@@ -561,7 +560,8 @@ def test_a_by_hand_redesign_ruling_stops_the_unit_and_posts_nothing(world, monke
   s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "rounds": [{"round": 1, "phase": "posted", "outcome": "revise", "launch": 1}]})
   qid = world.run("decision", "open", "--unit", "U01", "--point", 2, "--question", question(world, FINDING + "\n"),
                   "--source", "review head-U01-c1 cap", "--runcard", card)[1].splitlines()[0]
-  fake_gh(world, {"user": {"login": BUILDER}, f"repos/{REPO}/issues/comments/9": {"id": 9, "user": {"login": "owner"}, "body": "**Ruling:** (cap) redesign — why\n"}})
+  set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"], owners=["owner"])
+  fake_gh(world, {"user": {"login": BUILDER}, f"repos/{REPO}/issues/comments/9": {"id": 9, "user": {"login": "owner"}, "body": "**Ruling:** redesign — why\n"}})
   code, out = world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", "redesign — why", "--by", "owner", "--posted", "9", "--runcard", card)
   brief = s.path("foreman", "U01").with_name(f"U01-{qid}.brainstorm.md")
   assert (code, out) == (0, "recorded (comment 9)\n"), out

@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's test world (the fake gh, the harness, the sample repository and plan) moved out of test_helper.py so every unit's tests share it; the sample plan in the section 9.1 grammar under an approval record (U05); the PR review threads and collaborator roles of the fake gh (U21).
+# Modified by SuperEGM (gsVAM), 2026: EGM's test world (the fake gh, the harness, the sample repository and plan) moved out of test_helper.py so every unit's tests share it; the sample plan in the section 9.1 grammar under an approval record (U05); the PR review threads and collaborator roles of the fake gh (U21); the one-comment route `issues/comments/<id>` (U22).
 
 """The test world: a temporary repository, a store, the fake `gh` and the harness.
 
@@ -385,6 +385,10 @@ class FakeGitHub:
     if match:
       issue = self.issues[int(match.group(1))]
       return self.ok({**issue, "labels": [{"name": l} for l in issue["labels"]]})
+    match = re.fullmatch(r"/issues/comments/(\d+)", rest)
+    if match:  # one comment by its id, wherever it was posted (U22's read-back of a session ruling)
+      found = [c for cs in self.comments.values() for c in cs if str(c.get("id")) == match.group(1)]
+      return self.ok(found[0]) if found else (1, "", "gh: Not Found (HTTP 404)")
     match = re.fullmatch(r"/issues/(\d+)/comments", rest)
     if match:
       assert paginate, args
