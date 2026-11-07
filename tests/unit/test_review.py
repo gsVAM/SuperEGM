@@ -1118,3 +1118,6 @@ def test_record_takes_an_external_reviewer_outside_the_panel_and_appends(world, 
   rnd = rjson(world, rid, "round-1.json")
   assert [(f["id"], f["disposition"]) for f in rnd["reviewers"][ext]["findings"]] == [(f"{ext}-1-1", "contested"), (f"{ext}-1-2", None)]
   assert rnd["what_ran"] == "completed" and status(world, rid, cid)[0] == 3
+  code, out = record(world, rid, 1, ext, cid=cid, sha=sha, not_run="unavailable")   # a not-run would erase recorded findings
+  assert code == 1 and f"review record: --not-run is refused for an external reviewer ({ext})" in out, out
+  assert rjson(world, rid, "round-1.json")["reviewers"][ext] == rnd["reviewers"][ext]

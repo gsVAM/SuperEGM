@@ -599,7 +599,7 @@ INGEST_PROSE = [("skills/wave/SKILL.md", n) for n in ("3b. `superegm review inge
   "`outcome: revise`", "never `launch-builder` here", "`outcome: cap-reached` → Decision point 2",
   "for every unit with an open PR", "Before the close, run batch step 3b once and `report` again",
   "Exit 1: report the unit and the refusal line in chat", "(never a landed unit)", "clear on the next batch's retry",
-  "repeat until the owner resolves them by hand")] + [
+  "repeat until the owner resolves them by hand", "`header present on` and a `review ingest: comment:<n>:` scan refusal")] + [
                 ("resources/review_panels.md", "`external:<login>`"), ("resources/review_panels.md", "`review ingest`")]
 
 
