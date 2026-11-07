@@ -438,6 +438,13 @@ CASES |= {  # round 2 (PR #96 review): the record wins over an edit of its comme
   "tdd-order-allowed-and-contested": ({"prior": True, "prior_foreman": TDD, "commits": [("feat(S1): hook", "src/hooks.py"), ("test(S1): hook", "tests/unit/test_hooks.py")],
                                        "comments": {2: [c(15, "owner", "**Ruling:** foreman-1-2 allowed — an adopted history")],
                                                     70: [c(14, "builder-bot", "**Reply foreman-1-2:** contested — adopted history")]}}, [])}
+CASES |= {  # round 3 (PR #96 review): an option the comment does not offer rules nothing; an allowance skips its own failure alone
+  "deviation-ruled-off-the-options": ({"comments": {2: [c(12, "builder-bot", DEV), c(13, "owner", "**Ruling:** (12) (c) proceed — fine")]}},
+                                      ["issue #2 comment 12 | regression: no | deviation (dod) unruled"]),
+  "tdd-order-allowed-another-failure": ({"prior": True, "prior_foreman": TDD, "commits": [("test(S1): hook", "tests/unit/test_hooks.py")],
+                                         "comments": {2: [c(15, "owner", "**Ruling:** foreman-1-2 allowed — an adopted history")]}},
+                                        ["src/hooks.py | regression: no | Exists item 3: path absent",
+                                         "tests/unit/test_hooks.py | regression: no | tdd-order: S1: no feat(S1) commit touches src/hooks.py"])}
 
 
 @pytest.mark.parametrize("name", list(CASES))

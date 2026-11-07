@@ -82,4 +82,27 @@ def test_the_prompt_drops_a_ruling_the_record_overrides():
              "rulings": [{"decision": "q1", "ruling": "f-1-1 finding upheld", "by": "owner", "posted": "comment 4", "posted_at": "t1"},
                          {"decision": "q1", "ruling": "f-1-2 finding upheld", "by": "owner", "posted": "comment 6", "posted_at": "t1"}]}
   text = prompt_text(2, "U01", "body", "orders", "orient", comments, [], None, "builder-bot", "audit", owners=["owner"], foreman=foreman)
-  assert re.findall(r"^## \S+ · comment (\d+)$", text.split("# Comments on issue #2\n\n", 1)[1], re.M) == ["6"]
+  shown = text.split("# Comments on issue #2\n\n", 1)[1]
+  assert re.findall(r"^## \S+ · comment (\d+)$", shown, re.M) == ["4", "6"]  # comment 4 edited after its record: shown as the record
+  assert "## owner · comment 4\n**Ruling:** f-1-1 finding upheld\n(as recorded by owner; the comment was edited after its record)\n" in shown
+  assert "changed" not in shown and "again" not in shown
+
+
+# Round 3 (PR #96 review): an edit before the record is the recorded text; an option the decision does not offer binds nothing.
+
+
+def test_an_edit_before_the_record_keeps_the_ruling_in_the_prompt():
+  comments = [{"id": 4, "user": {"login": "owner"}, "body": "**Ruling:** (3) (a) proceed — fixed the typo", "created_at": "t1", "updated_at": "t2"}]
+  foreman = {"decisions": [{"id": "q1", "point": 3, "source": "comment 3", "options": ["(a) proceed", "stop the unit"]}],
+             "rulings": [{"decision": "q1", "ruling": "(a)", "by": "owner", "reason": "fixed the typo", "posted": "comment 4", "posted_at": "t2"}]}
+  text = prompt_text(2, "U01", "body", "orders", "orient", comments, [], None, "builder-bot", "audit", owners=["owner"], foreman=foreman)
+  assert "## owner · comment 4\n**Ruling:** (3) (a) proceed — fixed the typo\n" in text
+
+
+def test_an_option_the_comment_does_not_offer_binds_nothing():
+  blocked = "**Deviation (dod):** item 3\nWhich?\n- (a) drop it\n- (b) keep it\n**Builder status:** BLOCKED"
+  comments = [{"id": 3, "user": {"login": "builder-bot"}, "body": blocked},
+              {"id": 4, "user": {"login": "owner"}, "body": "**Ruling:** (3) (c) proceed — fine"},
+              {"id": 5, "user": {"login": "owner"}, "body": "**Ruling:** (3) (b) keep it — fine"}]
+  text = prompt_text(2, "U01", "body", "orders", "orient", comments, [], None, "builder-bot", "audit", owners=["owner"], foreman={})
+  assert re.findall(r"^## \S+ · comment (\d+)$", text.split("# Comments on issue #2\n\n", 1)[1], re.M) == ["3", "5"]
