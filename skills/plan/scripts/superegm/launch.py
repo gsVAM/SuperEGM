@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_launch` as the launch module; it marks the ready units up to `max_in_flight` after the protection checks of spec section 11, the owners set and the team bypass included; the builder as a GitHub App (U15).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_launch` as the launch module; it marks the ready units up to `max_in_flight` after the protection checks of spec section 11, the owners set and the team bypass included; the builder as a GitHub App (U15); a unit whose `clean` outcome an ingest rewrote is ready again (U21).
 
 """superegm launch: check what the launch needs, then mark the ready units up to `max_in_flight`."""
 
@@ -76,7 +76,10 @@ def launch(args, card):
   views = {uid: {**summary["units"][uid], "launched": state["units"][uid].get("launched"), "stopped": uid in stopped}
            for uid in handoff.graph.order}
   flying = [uid for uid in handoff.graph.order if in_flight(st, uid, views[uid], idle)]
-  marked = [uid for uid in summary["ready"] if uid not in stopped][:max(0, config["max_in_flight"] - len(flying))]
+  again = {uid for uid in handoff.graph.order if uid not in stopped and not views[uid].get("landed")
+           and ready_again(core.load_foreman(st, uid), load_launches(st, uid))}
+  ready = set(summary["ready"]) | again  # a unit an ingest returned to `revise` waits for a slot as a ready unit does
+  marked = [uid for uid in handoff.graph.order if uid in ready and uid not in stopped][:max(0, config["max_in_flight"] - len(flying))]
   for uid in marked:
     state["units"].setdefault(uid, {})["launched"] = {"at": core.now_iso(), "runcard": args.runcard, "by": me}
     core.journal(st, f"{uid} marked for launch")
@@ -92,7 +95,16 @@ def in_flight(store, uid, view, idle):
   launch recorded after the clean round holds the slot again."""
   if not view.get("launched") or view.get("landed") or view.get("stopped") or uid in idle:
     return False
-  return not latest_clean(core.load_foreman(store, uid), load_launches(store, uid))
+  foreman, launches = core.load_foreman(store, uid), load_launches(store, uid)
+  return not latest_clean(foreman, launches) and not ready_again(foreman, launches)
+
+
+def ready_again(foreman: dict, launches: list) -> bool:
+  """The latest round's `clean` outcome an ingest rewrote `revise` (spec section 8, External review) and no
+  launch recorded after it: the unit is ready again, not in flight, until its relaunch records one."""
+  latest = max(foreman.get("rounds") or [], key=lambda r: r.get("round") or 0, default={})
+  return (latest.get("phase") == "posted" and latest.get("outcome") == "revise" and latest.get("rewritten_from") == "clean"
+          and not (launches and launches[-1]["round"] > (latest.get("launch") or 0)))
 
 
 def latest_clean(foreman: dict, launches: list) -> bool:
