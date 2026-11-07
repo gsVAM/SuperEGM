@@ -777,6 +777,40 @@ def header(round_n: int, head: str) -> str:
   return f"**SuperEGM review round {round_n} (head {head[:7]})**"
 
 
+POST_HEADER_RE = re.compile(r"^\*\*SuperEGM review round \d+ \(head [0-9a-f]{7}\)\*\*$", re.M)  # `header`'s form
+
+
+def read_threads(repo: str, number: int, skip: set) -> list[dict]:
+  """A PR's review threads (spec section 8, External review): a review comment with no `in_reply_to`, its
+  replies its text, and a non-empty review body of a review with no inline comments that is not `APPROVED`;
+  a review carrying `review post`'s header is the foreman's, never a thread. `skip` holds root ids left out."""
+  comments = core.gh_pages(f"repos/{repo}/pulls/{number}/comments")
+  reviews = core.gh_pages(f"repos/{repo}/pulls/{number}/reviews")
+  login = lambda item: ((item.get("user") or {}).get("login")) or "ghost"
+  replies = {}
+  for c in comments:
+    if c.get("in_reply_to_id") is not None:
+      replies.setdefault(c["in_reply_to_id"], []).append(c.get("body") or "")
+  inline = {c.get("pull_request_review_id") for c in comments}
+  threads = []
+  for c in comments:
+    if c.get("in_reply_to_id") is not None or c["id"] in skip:
+      continue
+    threads.append({"id": c["id"], "login": login(c), "bot": login(c).endswith("[bot]"),
+                    "body": "\n\n".join([c.get("body") or "", *replies.get(c["id"], [])]), "path": c.get("path"),
+                    "line": c.get("line"), "commit_id": c.get("commit_id"), "review_body": False,
+                    "created_at": c.get("created_at")})
+  for r in reviews:
+    body = r.get("body") or ""
+    if POST_HEADER_RE.search(body):
+      continue
+    if (not body.strip() or r["id"] in inline or r.get("state") == "APPROVED" or r["id"] in skip):
+      continue
+    threads.append({"id": r["id"], "login": login(r), "bot": login(r).endswith("[bot]"), "body": body, "path": None,
+                    "line": None, "commit_id": r.get("commit_id"), "review_body": True, "created_at": r.get("submitted_at")})
+  return threads
+
+
 def render_comment(round_json: dict, head: str, ci_verdict: str, mention) -> str:
   """The configured mention as line 1 when set, the header, the round's finding lines (section 8's form)
   and `CI: <verdict>`; no run card, no model names."""
