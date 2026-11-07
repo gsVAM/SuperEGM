@@ -91,7 +91,8 @@ def collect(args, card):
                                       core.read_text(r / "pr_body.md"), comments, login, prior, prior_ci_fid,
                                       tdd_order.commits_of(worktree, entry["merge_base"]), prior_tdd, prior_scope, contest_of,
                                       external, earlier, disposed, posted, handoff.config.get("owners") or [],
-                                      recorded_rulings(data), data.get("decisions") or [], recorded_times(data))
+                                      recorded_rulings(data), data.get("decisions") or [], recorded_times(data),
+                                      handoff.state["units"][unit].get("number"))
   findings = r / "foreman.findings"
   core.atomic_write(findings, "".join(line + "\n" for line in lines))
   with contextlib.redirect_stdout(io.StringIO()):
@@ -166,7 +167,8 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
                      comments: list, login: str, prior_round, prior_ci_fid, commits: list = (), prior_tdd: dict = None,
                      prior_scope: dict = None, contest_of: dict = None, external: list = (),
                      earlier: set = frozenset(), disposed: set = frozenset(), posted: dict = None,
-                     owners: list = (), recorded: list = (), decisions: list = (), recorded_at: dict = None) -> tuple:
+                     owners: list = (), recorded: list = (), decisions: list = (), recorded_at: dict = None,
+                     issue_number: int = None) -> tuple:
   """The foreman's high findings of spec section 11 in this order: CI, the DoD items, scope, tdd-order,
   deviations, contested, upheld, unreplied external; and `builder_contested[]` for the contested ones. Rulings
   and replies count only from the right author: a ruling is a `config.owners` login's comment `ruling_of` reads
@@ -180,7 +182,9 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
   external id). A `contested` reply to such a finding is recorded in the round it comes in, a round late
   included, when no earlier round's comments hold a builder reply to any id of its group (`late`) and no
   ruling in this round's comments names it: a contest is recorded once (spec section 8, External review). An
-  upheld ruling is answered by a `fixed` reply later than it (than its record's `posted_at`, `recorded_at`, when recorded) under the ruled id or under any id of its group. A reply
+  upheld ruling is answered by a `fixed` reply later than it (than its record's `posted_at`, `recorded_at`, when recorded) under the ruled id or under any id of its group;
+  a recorded one binds whether or not its comment is still in `comments` (edited into prose or deleted), located
+  on the unit's issue (`issue_number`). A reply
   to a carried copy `foreman-<r>-<k>`, `fixed` or `contested`, counts (toward the carry, or as a contest) only
   when it comes after round r was posted (`posted`, each posted round's `posted_at`): before that the copy did
   not exist."""
@@ -245,13 +249,16 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
       reason = (reply.group(3) or "").strip()
       found.append((where(c), f"contested {fid}: {reason}"))
       contested.append({"fid": f"foreman-{round_n}-{len(found)}", "reason": reason})
+    times = recorded_at or {}
     for ruling in rulings:
       c = by_id.get(ruling.comment_id)  # the comment the ruling names: its time bounds the `fixed` reply
+      if c is None and ruling.comment_id in times:  # a recorded ruling whose comment is gone or no longer a form
+        c = {"kind": "issue", "number": issue_number, "id": ruling.comment_id, "at": ""}
       if ruling.kind not in ("upheld", "overruled") or c is None:
         continue
       fid = ruling.subject
       answers = {fid, links.get(fid, fid)} | groups.get(origin(fid), set())  # the ruled finding, or any id of its group
-      since = max(c["at"], (recorded_at or {}).get(ruling.comment_id) or "")  # a recorded ruling binds from its record's time
+      since = max(c["at"], times.get(ruling.comment_id) or "")  # a recorded ruling binds from its record's time
       fixed = any(o["login"] == login and o["at"] > since and (m := REPLY_RE.match(o["body"]))
                   and m.group(1) in answers and m.group(2) == "fixed" for o in comments)
       if ruling.kind == "upheld" and not fixed:
