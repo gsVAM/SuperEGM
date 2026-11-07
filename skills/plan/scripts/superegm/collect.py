@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # From the elephant-goldfish-model (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17); an unreplied external high or medium carried forward (U21).
 
 """superegm collect: the foreman's findings of a round through one `review record --reviewer foreman`, or a
 round that could not complete with `--not-run`."""
@@ -67,14 +67,22 @@ def collect(args, card):
   login, comments = parse_comments(core.read_text(r / "comments.md"))
   rid = head_review_id(st, unit)
   prior = max((e["round"] for e in data["rounds"] if e.get("phase") == "posted"), default=None)
-  prior_ci_fid, prior_tdd, prior_scope, contest_of = None, [], {}, {}
+  prior_ci_fid, prior_tdd, prior_scope, contest_of, external, earlier, disposed = None, [], {}, {}, [], set(), set()
+  posted = {e["round"]: e.get("posted_at") or "" for e in data["rounds"] if e.get("phase") == "posted"}
   for e in data["rounds"]:  # every posted round: an overruled out-of-Scope finding widens the Scope for good;
-    if e.get("phase") == "posted":  # a contest finding names the goldfish finding a `fixed` reply may answer under
+    if e.get("phase") == "posted":  # a contest or carried finding names the finding a reply may answer under
       for f in prior_foreman_findings(st, rid, e["round"]):
         if f["claim"] == "changed path outside Scope paths":
           prior_scope[f["id"]] = f["location"]
-        if (m := re.match(r"contested (\S+):", f["claim"])):
+        if (m := re.match(r"(?:contested|unreplied) (\S+):", f["claim"])):
           contest_of[f["id"]] = m.group(1)
+          if f.get("disposition") is not None:  # a settled copy settles what it carries
+            disposed.add(f["id"])
+      external += external_findings(st, rid, e["round"])
+      seen = st.path("review", unit, f"pr{number}") / f"r{e['round']}" / "comments.md"
+      if seen.is_file():  # a reply in an earlier round's window still answers its finding
+        who, said = parse_comments(core.read_text(seen))
+        earlier |= {m.group(1) for c in said if c["login"] == who and (m := REPLY_RE.match(c["body"])) and timely(m.group(1), c["at"], posted)}
   for f in prior_foreman_findings(st, rid, prior):
     if f["location"] == "ci":
       prior_ci_fid = f["id"]
@@ -82,7 +90,8 @@ def collect(args, card):
       prior_tdd.append(f["id"])
   lines, contested = foreman_findings(n, json.loads(core.read_text(r / "ci.json"))["verdict"], text, scope, worktree, changed,
                                       core.read_text(r / "pr_body.md"), comments, login, prior, prior_ci_fid,
-                                      tdd_order.commits_of(worktree, entry["merge_base"]), prior_tdd, prior_scope, contest_of)
+                                      tdd_order.commits_of(worktree, entry["merge_base"]), prior_tdd, prior_scope, contest_of,
+                                      external, earlier, disposed, posted)
   findings = r / "foreman.findings"
   core.atomic_write(findings, "".join(line + "\n" for line in lines))
   with contextlib.redirect_stdout(io.StringIO()):
@@ -120,6 +129,15 @@ def prior_foreman_findings(st, rid, prior) -> list:
   return ((rnd.get("reviewers") or {}).get("foreman") or {}).get("findings") or []
 
 
+def external_findings(st, rid, rnd_n) -> list:
+  """The `external:<login>` findings `review ingest` recorded in a posted round's file, or []."""
+  if not rnd_n or not rid:
+    return []
+  rnd = review.load_round(st, rid, rnd_n) or {}
+  return [f for name, record in (rnd.get("reviewers") or {}).items() if name.startswith("external:")
+          for f in record.get("findings") or []]
+
+
 def parse_comments(text: str) -> tuple:
   """`comments.md` back: the builder login and `{kind, number, id, login, at, body}` per entry."""
   lines = text.splitlines()
@@ -140,11 +158,39 @@ def parse_comments(text: str) -> tuple:
 
 def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, worktree: Path, changed: list, pr_body: str,
                      comments: list, login: str, prior_round, prior_ci_fid, commits: list = (), prior_tdd_fids: list = (),
-                     prior_scope: dict = None, contest_of: dict = None) -> tuple:
+                     prior_scope: dict = None, contest_of: dict = None, external: list = (),
+                     earlier: set = frozenset(), disposed: set = frozenset(), posted: dict = None) -> tuple:
   """The foreman's high findings of spec section 11 in this order: CI, the DoD items, scope, tdd-order,
-  deviations, contested, upheld; and `builder_contested[]` for the contested ones. Rulings and replies
-  count only from the right author: rulings from anyone but the builder, replies from the builder."""
+  deviations, contested, upheld, unreplied external; and `builder_contested[]` for the contested ones. Rulings
+  and replies count only from the right author: rulings from anyone but the builder, replies from the builder.
+  An external high or medium with no disposition is carried until a reply names it, or names a posted carried
+  copy of it, in this round's comments or an earlier round's (`earlier`, the builder's reply ids there), or
+  until one of its copies is settled (`disposed`, the copies whose disposition is set). Its group is the
+  finding and every copy of it, a recorded contest of a copy included (`contest_of` followed back to the
+  external id). A `contested` reply to such a finding is recorded in the round it comes in, a round late
+  included, when no earlier round's comments hold a builder reply to any id of its group (`late`) and no
+  ruling in this round's comments names it: a contest is recorded once (spec section 8, External review). An
+  upheld ruling is answered by a later `fixed` reply under the ruled id or under any id of its group. A reply
+  to a carried copy `foreman-<r>-<k>`, `fixed` or `contested`, counts (toward the carry, or as a contest) only
+  when it comes after round r was posted (`posted`, each posted round's `posted_at`): before that the copy did
+  not exist."""
   found, contested = [], []
+  links = contest_of or {}
+
+  def origin(fid):
+    seen = set()
+    while fid in links and fid not in seen:
+      seen.add(fid)
+      fid = links[fid]
+    return fid
+
+  groups = {}
+  for fid in set(links) | {f["id"] for f in external}:
+    groups.setdefault(origin(fid), set()).add(fid)
+  open_ext = {f["id"] for f in external if f["disposition"] is None and f["severity"] in ("high", "medium")
+              and not groups[f["id"]] & set(disposed)}
+  open_ext |= {cid for cid in links if origin(cid) in open_ext}
+  late = {fid for fid in open_ext if not groups[origin(fid)] & set(earlier)}
   if ci_verdict != "ci green":
     found.append(("ci", f"CI not green on this head: {ci_verdict}"))
   results = {int(m.group(1)) for m in DOD_RESULT_RE.finditer(pr_body)}
@@ -175,20 +221,35 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
       if not reply or c["login"] != login or reply.group(2) != "contested":
         continue
       fid = reply.group(1)
-      if fid == prior_ci_fid or fid in settled or fid.split("-")[-2] != str(prior_round):
+      if fid == prior_ci_fid or fid in settled or (fid.split("-")[-2] != str(prior_round) and fid not in late):
+        continue
+      if posted is not None and not timely(fid, c["at"], posted):  # a contest of a copy not yet posted contests nothing
         continue
       reason = (reply.group(3) or "").strip()
       found.append((where(c), f"contested {fid}: {reason}"))
       contested.append({"fid": f"foreman-{round_n}-{len(found)}", "reason": reason})
     for c, ruling in rulings:
       fid = ruling.group(1)
-      answers = {fid, (contest_of or {}).get(fid, fid)}  # the ruled contest finding, or the goldfish finding it names
+      answers = {fid, links.get(fid, fid)} | groups.get(origin(fid), set())  # the ruled finding, or any id of its group
       fixed = any(o["login"] == login and o["at"] > c["at"] and (m := REPLY_RE.match(o["body"]))
                   and m.group(1) in answers and m.group(2) == "fixed" for o in comments)
       if ruling.group(2) == "upheld" and not fixed:
         found.append((where(c), f"upheld {fid}: no `fixed` reply"))
+  replied = {m.group(1) for c in comments if c["login"] == login and (m := REPLY_RE.match(c["body"]))
+             and (posted is None or timely(m.group(1), c["at"], posted))} | set(earlier)
+  for f in external:
+    if f["id"] not in open_ext:
+      continue
+    if not groups[f["id"]] & replied:
+      found.append((f["location"], f"unreplied {f['id']}: {f['claim']}"))
   lines = [f"foreman-{round_n}-{i} | high | {location} | regression: no | {claim}" for i, (location, claim) in enumerate(found, 1)]
   return lines, contested
+
+
+def timely(fid: str, at: str, posted: dict) -> bool:
+  """A reply to `foreman-<r>-<k>` counts only after round r was posted (`posted`: round → `posted_at`); any other id always."""
+  m = re.fullmatch(r"foreman-(\d+)-\d+", fid)
+  return m is None or (int(m.group(1)) in posted and at > posted[int(m.group(1))])
 
 
 def where(comment: dict) -> str:

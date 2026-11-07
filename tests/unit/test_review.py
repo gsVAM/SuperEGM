@@ -1028,3 +1028,104 @@ def test_record_keeps_a_line_past_the_specs_end(world, approved):
   code, out = record(world, rid, 1, "design", [line], cid)
   rnd = rjson(world, rid, "round-1.json")
   assert code == 0 and rnd["out_of_scope"] == [] and len(rnd["reviewers"]["design"]["findings"]) == 1 and "out of scope" not in out
+
+
+# ---------------------------------------------------------------- U21: external-review ingest
+
+from superegm import init
+
+INGEST = {"severity_words": {"bug": "high", "issue": "medium", "nit": "low", "suggestion": "low"}, "human_role": "write"}
+
+@pytest.mark.parametrize("ingest, expect", [
+  (None, INGEST), ({"severity_words": {"bug": "blocker"}}, "ingest.severity_words must map words to high|medium|low"),
+  ({"human_role": "owner"}, "ingest.human_role must be one of read, triage, write, maintain, admin")])
+def test_ingest_config_key_and_the_init_sentence(world, ingest, expect):
+  assert superegm.DEFAULT_CONFIG["ingest"] == INGEST and "ingest.severity_words" in init.STEPS and "ingest.human_role" in init.STEPS
+  set_config(world, repo=REPO, **({"ingest": ingest} if ingest is not None else {}))
+  if isinstance(expect, str):
+    with pytest.raises(superegm.HandoffError, match=re.escape(expect)):
+      superegm.load_config(world.repo)
+    return
+  assert superegm.load_config(world.repo)["ingest"] == expect
+
+
+from superegm.review import read_threads, header
+
+SHA, AT = "c" * 40, "2026-11-04T10:00:00Z"
+rv = lambda rid, login, body, state="COMMENTED": {"id": rid, "user": {"login": login}, "body": body, "state": state, "commit_id": SHA, "submitted_at": AT}
+cm = lambda cid, login, body, reply_to=None, review_id=None: {"id": cid, "user": {"login": login}, "body": body, "in_reply_to_id": reply_to,
+  "pull_request_review_id": review_id, "path": "src/x.py", "line": 3, "commit_id": SHA, "created_at": AT}
+
+def test_read_threads_keeps_roots_and_qualifying_review_bodies(world):
+  world.gh.threads[70] = [cm(1, "devin-ai-integration[bot]", "**Bug**: off by one", review_id=10), cm(2, "alice", "agreed", reply_to=1), cm(3, "bob", "why?")]
+  world.gh.reviews[70] = [rv(10, "devin-ai-integration[bot]", "2 issues found"), rv(11, "carol", "ship it", "APPROVED"),
+                          rv(13, "owner", f"{header(1, SHA)}\n\nchange-review-1-1 | high | x | regression: no | y"), rv(14, "erin", "**Issue**: the retry never backs off")]
+  threads = read_threads(REPO, 70, skip={3})
+  assert [(t["id"], t["bot"], t["review_body"], t["path"], t["line"], t["commit_id"], t["created_at"]) for t in threads] == [(1, True, False, "src/x.py", 3, SHA, AT), (14, False, True, None, None, SHA, AT)]
+  assert threads[0]["body"] == "**Bug**: off by one\n\nagreed" and threads[1]["login"] == "erin"
+
+
+from superegm.review import collaborator_role, thread_severity
+
+T = lambda body, login="devin-ai-integration[bot]", review_body=False: {"login": login, "bot": login.endswith("[bot]"), "body": body, "review_body": review_body}
+
+@pytest.mark.parametrize("thread, role, severity", [
+  (T("**Bug**: off by one"), None, "high"), (T("Found a **bug** here"), None, "high"), (T("[issue] the retry never backs off"), None, "medium"),
+  (T("[Medium] the cap is off"), None, "medium"), (T("nit: typo"), None, "low"), (T("this is not an issue"), None, "low"), (T("2 issues found", review_body=True), None, "low"),
+  (T("bug: the cap is off", "alice"), "write", "high"), (T("bug: the cap is off", "alice"), "none", "low"),
+  (T("an issue in the loop", "alice", True), "admin", "medium"), (T("LGTM, merging tomorrow", "alice", True), "admin", "low")])
+def test_thread_severity_rules_and_the_role_read(world, thread, role, severity):
+  if role not in (None, "none"):
+    world.gh.roles["alice"] = {"permission": "write", "role_name": role}
+  seen = collaborator_role(REPO, "alice") if role else None
+  assert seen == role and thread_severity(thread, {"ingest": INGEST}, seen) == severity
+
+
+@pytest.mark.parametrize("answer, role", [({"permission": "write", "role_name": "security-reviewer"}, "write"),
+                                          ({"permission": "nonsense", "role_name": "custom"}, "none")])
+def test_a_custom_repository_role_reads_as_its_base_permission(world, answer, role):
+  world.gh.roles["alice"] = answer
+  assert collaborator_role(REPO, "alice") == role
+
+
+@pytest.mark.parametrize("body, severity", [("security-bug: credentials are exposed", "high"), ("[security-bug] credentials are exposed", "high"),
+                                            ("**security-bug**: credentials are exposed", "high"), ("security: credentials are exposed", "low")])
+def test_an_inline_thread_keeps_a_compound_severity_word_whole(body, severity):
+  """A configured compound word (`security-bug`) is matched whole at the start of the first line, as in a marker."""
+  config = {"ingest": {**INGEST, "severity_words": {**INGEST["severity_words"], "security-bug": "high"}}}
+  assert thread_severity(T(body), config, None) == severity
+
+
+from superegm.review import thread_line
+
+@pytest.mark.parametrize("thread, severity, line", [
+  ({"path": "src/x.py", "line": 3, "commit_id": "c" * 40, "body": "**Bug**: a | b\nmore"}, "high",
+   "external:devin-ai-integration[bot]-2-7 | high | src/x.py:3 at ccccccc | regression: no | **Bug**: a / b"),
+  ({"path": "README.md", "line": None, "commit_id": "c" * 40, "body": "ping @alice about secret-codename"}, "low",
+   "external:alice-2-1 | low | README.md at ccccccc | regression: no | ping @ alice about s ecret-codename"),
+  ({"path": None, "line": None, "commit_id": "c" * 40, "body": "x" * 300}, "low", "external:alice-2-1 | low | PR at ccccccc | regression: no | " + "x" * 200)])
+def test_thread_line_form_and_masking(world, thread, severity, line):
+  fid, config = line.split(" | ")[0], superegm.load_config(world.repo)   # banned_terms: ["(?i)secret-codename"]
+  assert thread_line(fid.rsplit("-", 2)[0], 2, int(fid.rsplit("-", 1)[1]), thread, severity, config) == line
+  assert superegm.scan_text(line, config, "comment", label="comment") == []
+
+
+@pytest.mark.parametrize("kind, code", [("head", 0), ("spec", 0), ("plan", 1)])
+def test_record_takes_an_external_reviewer_outside_the_panel_and_appends(world, kind, code):
+  spec, cid, rid = opened(world, kind)
+  ext, sha = "external:devin-ai-integration[bot]", A if kind == "head" else None
+  kind == "head" and head_round(world, 1, "posted", cid, "clean")
+  if code:
+    assert f"review record: {ext} is accepted on a head or a spec only" in record(world, rid, 1, ext, [F(ext, 1, 1)], cid, sha=sha)[1]
+    return
+  for reviewer in PANEL_OF[kind].split(","):
+    assert record(world, rid, 1, reviewer, [], cid, sha=sha)[0] == 0
+  assert record(world, rid, 1, ext, [F(ext, 1, 1)], cid, sha=sha)[0] == 0
+  assert settle(world, rid, f"{ext}-1-1", "contested", cid, "--owner")[0] == 0
+  assert record(world, rid, 1, ext, [F(ext, 1, 2, "medium")], cid, sha=sha)[0] == 0
+  rnd = rjson(world, rid, "round-1.json")
+  assert [(f["id"], f["disposition"]) for f in rnd["reviewers"][ext]["findings"]] == [(f"{ext}-1-1", "contested"), (f"{ext}-1-2", None)]
+  assert rnd["what_ran"] == "completed" and status(world, rid, cid)[0] == 3
+  code, out = record(world, rid, 1, ext, cid=cid, sha=sha, not_run="unavailable")   # a not-run would erase recorded findings
+  assert code == 1 and f"review record: --not-run is refused for an external reviewer ({ext})" in out, out
+  assert rjson(world, rid, "round-1.json")["reviewers"][ext] == rnd["reviewers"][ext]

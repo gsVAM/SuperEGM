@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17).
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
@@ -98,6 +98,8 @@ DEFAULT_CONFIG = {
     "owners": [],  # the GitHub logins that may update <base> (spec section 11); init writes `gh api user`'s
     "owner_team": None,  # `<org>/<slug>`: the one team a ruleset's bypass actors may name
     "pr_block_file": None,  # a path relative to the repository root whose text every builder PR body carries
+    "ingest": {"severity_words": {"bug": "high", "issue": "medium", "nit": "low", "suggestion": "low"},
+               "human_role": "write"},  # `review ingest`: a thread's word map and the role a human's thread counts from
 }
 
 DEFAULT_TEMPLATE = """<!-- superegm:handoff={{handoff_id}} unit={{unit_id}} spec={{spec_sha256}} -->
@@ -708,14 +710,21 @@ def load_config(repo_root: Path) -> dict:
         if unknown:
           raise HandoffError(f"{path}: unknown label keys {sorted(unknown)}")
         config["labels"].update(value)
-      elif key == "astra" and isinstance(value, dict):
-        config["astra"] = {**config["astra"], **value}
+      elif key in ("astra", "ingest") and isinstance(value, dict):
+        config[key] = {**config[key], **value}
       else:
         config[key] = value
   if not isinstance(config["astra"], dict):
     raise HandoffError("astra must be an object")
   if not isinstance(config["astra"].get("heads"), bool):
     raise HandoffError("astra.heads must be true or false")
+  if not isinstance(config["ingest"], dict):
+    raise HandoffError("ingest must be an object")
+  words = config["ingest"].get("severity_words")
+  if not isinstance(words, dict) or any(not isinstance(k, str) or v not in ("high", "medium", "low") for k, v in words.items()):
+    raise HandoffError("ingest.severity_words must map words to high|medium|low")
+  if config["ingest"].get("human_role") not in ROLES[1:]:
+    raise HandoffError(f"ingest.human_role must be one of {', '.join(ROLES[1:])}")
   if not config["repo"]:
     origin = run_git(["remote", "get-url", "origin"], repo_root)
     config["repo"] = parse_remote_url(origin)
@@ -1406,15 +1415,16 @@ def save_state(artifact_dir: Path, state: dict) -> None:
 # ---------------------------------------------------------------- scan
 
 
-def scan_text(text: str, config: dict, kind: str, dod=None, label="body") -> list:
+def scan_text(text: str, config: dict, kind: str, dod=None, label="body", limit=BODY_LIMIT) -> list:
   """The raw text rules, one `<rule>: <label>[:<line>]: <reason>` per problem: `body-size`,
   `banned-term`, `mention`, `merge-marker`, `dod-missing`. The mention rule alone skips a
   fenced code block and an inline code span (GitHub notifies for neither); a banned term is
-  refused wherever it stands, and a legitimate `@scope/pkg` goes in `allowed_mentions`."""
+  refused wherever it stands, and a legitimate `@scope/pkg` goes in `allowed_mentions`.
+  `limit=None` skips the body-size rule (`review ingest` bounds its comment by GitHub's own limit)."""
   problems = []
   size = len(text.encode("utf-8"))
-  if size > BODY_LIMIT:
-    problems.append(f"body-size: {label}: {size:,} bytes exceeds {BODY_LIMIT:,}: split it")
+  if limit is not None and size > limit:
+    problems.append(f"body-size: {label}: {size:,} bytes exceeds {limit:,}: split it")
   terms = [re.compile(t) for t in config["banned_terms"]]
   mention = config.get("fix_request_mention")
   allowed = set(config.get("allowed_mentions") or [])
@@ -1913,6 +1923,6 @@ def build_parser():
   return parser
 
 
-from .review import PANEL_OF  # noqa: E402  review.py imports this package, so it loads after the names it uses
+from .review import PANEL_OF, ROLES  # noqa: E402  review.py imports this package, so it loads after the names it uses
 DEFAULT_CONFIG["reviewers"] = {kind: panel.split(",") for kind, panel in PANEL_OF.items()}  # one source: the spec's panels
 DEFAULT_CONFIG["reviewers"]["head"].append("astra")  # informational: the lane is seated by astra.enabled and astra.heads
