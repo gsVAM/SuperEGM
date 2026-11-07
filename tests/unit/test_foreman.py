@@ -485,6 +485,28 @@ def test_collect_carries_an_unreplied_external_high_forward(world, tmp_path, mon
   assert (w.dir / f"r{n}/foreman.findings").read_text(encoding="utf-8").splitlines() == [f"foreman-{n}-{i} | high | {e}" for i, e in enumerate(expected, 1)]
 
 
+LATE = c(14, "builder-bot", "**Reply external:alice-1-1:** contested — it fires on push")
+
+
+@pytest.mark.parametrize("earlier, replies, expected", [
+  (None, {70: [LATE]}, ["pr #70 comment 14 | regression: no | contested external:alice-1-1: it fires on push"]),
+  ("**Reply external:alice-1-1:** fixed", {}, []), ("**Reply external:alice-1-1:** contested — it fires", {70: [LATE]}, []),
+  ("**Reply external:alice-1-1:** contested — it fires", {}, [])])
+def test_a_reply_a_round_late_or_a_round_early_still_answers_an_external_finding(world, tmp_path, monkeypatch, earlier, replies, expected):
+  """Round 3's collect: a contested reply to an external finding round 2 never saw is recorded, never dropped; a
+  reply in round 2's window (its `comments.md`) still answers the finding, and a contest is recorded once."""
+  kw = dict(rounds=[POSTED_R1, R2], launches=[{"round": i, "status": "exited 0"} for i in (1, 2, 3)], comments=replies)
+  st0, card0, _ = seed(world, **kw)
+  rid = open_head_review(world, st0, card0, "0" * 40, {"change-review": "", "external:alice": EXT})
+  record(world, st0, rid, 2, "0" * 40, card0, {"change-review": ""})
+  w = prepared(world, tmp_path, monkeypatch, **kw)
+  if earlier:
+    atomic_write(w.dir / "r2/comments.md", f"builder: builder-bot\n### pr #70 comment 9 by builder-bot at 2026-11-02T11:00:00Z\n{earlier}\n")
+  code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
+  assert (code, out.strip()) == (0, f"collected: {len(expected)} foreman findings"), out
+  assert (w.dir / "r3/foreman.findings").read_text(encoding="utf-8").splitlines() == [f"foreman-3-{i} | high | {e}" for i, e in enumerate(expected, 1)]
+
+
 @pytest.mark.parametrize("phase, outcome, ok", [
     ("fetched", None, True), ("prepared", None, True), ("collected", None, True),
     ("posted", "revise", False), ("collected", "not run (superseded)", False)])
@@ -624,6 +646,81 @@ def test_review_ingest_records_posts_and_rewrites_clean(world, outcome):
   world.gh.threads[PR].append(t(206, "carol", "bug: late")); world.gh.roles["carol"] = 500
   code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
   assert (code, len(posted), json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["ingested"]) == (1, 1, data["ingested"]) and "HTTP 500" in out
+
+
+def ingest_world(world, threads, roles=(), outcome="clean"):
+  """A unit with one posted round on the repository's HEAD, its head review open with a clean `change-review`, and
+  `threads` (`(id, login, body)`) on the PR at that head."""
+  head = subprocess.run(["git", "-C", str(world.repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+  st, card, posted = seed(world, head=head, rounds=[{**POSTED_R1, "head": head, "outcome": outcome}], owners=["owner"])
+  rid = open_head_review(world, st, card, head, {"change-review": ""})
+  atomic_write(st.path("review", UNIT, f"pr{PR}") / "r1/ci.json", json.dumps({"verdict": "ci green"}))
+  world.gh.threads[PR] = [{"id": i, "user": {"login": who}, "body": body, "path": "src/hooks.py", "line": 3, "commit_id": head, "created_at": "t"}
+                          for i, who, body in threads]
+  world.gh.roles.update(roles)
+  return st, card, posted, rid, head
+
+
+def test_review_ingest_at_the_cap_rewrites_clean_to_cap_reached(world, monkeypatch):
+  st, card, posted, rid, head = ingest_world(world, [(1, "alice", "bug: the hook never fires")], {"alice": {"role_name": "write"}})
+  monkeypatch.setattr(review_mod, "CAP", 1)
+  code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
+  assert (code, out.split()) == (0, ["1", "ingested", "outcome:", "cap-reached"]), out
+  entry = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][0]
+  assert (entry["outcome"], entry["rewritten_from"]) == ("cap-reached", "clean")
+  assert st.path("journal").read_text(encoding="utf-8").count(f"{UNIT} ready again (external:alice)") == 1
+
+
+@pytest.mark.parametrize("case", ["over-limit", "scan"])
+def test_review_ingest_refusals_record_nothing(world, case):
+  bot = "devin-ai-integration[bot]"
+  threads = [(i, bot, "nit: " + "spacing " * 25) for i in range(1, 301)] if case == "over-limit" else [(1, bot, "nit: spacing")]
+  st, card, posted, rid, head = ingest_world(world, threads)
+  if case == "scan":
+    set_config(world, repo=REPO, owners=["owner"], banned_terms=["(?i)ci green"])
+  journal = st.path("journal").read_text(encoding="utf-8")
+  code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
+  reason = "review ingest: comment over 65,536 bytes (300 threads)" if case == "over-limit" else "banned term"
+  assert code == 1 and reason in out and posted == [], out
+  data = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))
+  rnd = json.loads((st.path("reviews", rid) / "round-1.json").read_text(encoding="utf-8"))
+  assert data.get("ingested") is None and data["rounds"][0]["outcome"] == "clean" and not any(r.startswith("external:") for r in rnd["reviewers"])
+  assert st.path("journal").read_text(encoding="utf-8") == journal
+
+
+@pytest.mark.parametrize("fault", ["record", "commit"])
+def test_review_ingest_resumes_an_interrupted_ingest_without_a_second_post(world, monkeypatch, fault):
+  bot = "devin-ai-integration[bot]"
+  st, card, posted, rid, head = ingest_world(world, [(1, bot, "bug: one"), (2, "alice", "issue: two")], {"alice": {"role_name": "write"}})
+  real = review_mod.record_round
+  if fault == "record":  # the comment is posted, the bot recorded, then alice's record refused
+    monkeypatch.setattr(review_mod, "record_round", lambda a: 1 if a.reviewer == "external:alice" else real(a))
+  else:
+    world.gh.reply_commit = "f" * 40
+  code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
+  assert code == 1 and len(posted) == 1, out
+  if fault == "commit":
+    assert "the comment stands on the PR, nothing recorded" in out
+    world.gh.reply_commit = None
+    code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
+    assert code == 1 and f"header present on fffffff, not {head[:7]}: nothing recorded" in out and len(posted) == 1, out
+    assert json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8")).get("ingested") is None
+    return
+  assert json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["ingested"] == [1]
+  monkeypatch.setattr(review_mod, "record_round", real)
+  code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
+  assert (code, out.split()[:2], len(posted)) == (0, ["1", "ingested"], 1), out
+  rnd = json.loads((st.path("reviews", rid) / "round-1.json").read_text(encoding="utf-8"))
+  assert [(f["id"], f["thread"]) for r in (f"external:{bot}", "external:alice") for f in rnd["reviewers"][r]["findings"]] == [
+    (f"external:{bot}-1-1", 1), ("external:alice-1-1", 2)]
+  assert sorted(json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["ingested"]) == [1, 2]
+
+
+def test_review_ingest_that_finds_nothing_writes_nothing(world):
+  st, card, posted, rid, head = ingest_world(world, [], outcome="revise")
+  before = (st.path("foreman", UNIT).read_text(encoding="utf-8"), st.path("journal").read_text(encoding="utf-8"))
+  assert world.run("review", "ingest", "--unit", UNIT, "--runcard", card)[1].strip() == "0 ingested"
+  assert (st.path("foreman", UNIT).read_text(encoding="utf-8"), st.path("journal").read_text(encoding="utf-8")) == before
 
 
 @pytest.mark.parametrize("status_exit, contested, word", [

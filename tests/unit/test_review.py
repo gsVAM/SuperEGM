@@ -1081,6 +1081,13 @@ def test_thread_severity_rules_and_the_role_read(world, thread, role, severity):
   assert seen == role and thread_severity(thread, {"ingest": INGEST}, seen) == severity
 
 
+@pytest.mark.parametrize("answer, role", [({"permission": "write", "role_name": "security-reviewer"}, "write"),
+                                          ({"permission": "nonsense", "role_name": "custom"}, "none")])
+def test_a_custom_repository_role_reads_as_its_base_permission(world, answer, role):
+  world.gh.roles["alice"] = answer
+  assert collaborator_role(REPO, "alice") == role
+
+
 from superegm.review import thread_line
 
 @pytest.mark.parametrize("thread, severity, line", [

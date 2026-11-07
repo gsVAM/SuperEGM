@@ -584,6 +584,16 @@ def test_launch_marks_a_unit_whose_clean_outcome_an_ingest_rewrote(world, monkey
   assert "in flight: U07" in world.run("launch", "--runcard", card)[1]
 
 
+def test_an_idle_unit_an_ingest_rewrote_is_not_marked_again(world, monkeypatch):
+  s, card, hid, _ = filed(world, units=("U07", "U08"), max_in_flight=1)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert "marked: U07" in world.run("launch", "--runcard", card)[1]
+  launched(s, "U07", "exited 0")
+  foreman_file(s, "U07", [{"round": 1, "launch": 1, "head": "a" * 40, "phase": "posted", "outcome": "revise", "rewritten_from": "clean"}])
+  code, out = world.run("launch", "--idle", "U07", "--runcard", card)
+  assert "marked: U07" not in out, out
+
+
 ROOT = SKILL.parents[2]
 INGEST_PROSE = [("skills/wave/SKILL.md", n) for n in ("3b. `superegm review ingest`", "awaiting-merge units included, stopped units excluded", "`0 ingested` before its first posted round",
   "`outcome: revise`", "never `launch-builder` here", "`outcome: cap-reached` → Decision point 2")] + [
