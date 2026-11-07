@@ -11,6 +11,7 @@ import superegm  # the harness reloads the package per test: read load_config at
 from superegm import store, atomic_write, DEFAULT_CONFIG, decision, launch
 from test_builder_token import APP
 from superegm.report import unit_state, loop_ended, word_action
+from test_builders import seed as filed, launched, foreman as foreman_file
 
 REPO, BUILDER, NOW = "example-org/webhooks", "builder-bot", 1_700_000_000.0
 BLOCKED = "**Builder status:** BLOCKED\nWhich queue?\n- (a) use the in-memory queue\n- (b) use Redis\n"
@@ -565,3 +566,19 @@ def test_a_by_hand_redesign_ruling_stops_the_unit_and_posts_nothing(world, monke
   brief = s.path("foreman", "U01").with_name(f"U01-{qid}.brainstorm.md")
   assert (code, out) == (0, "recorded (comment 9)\n"), out
   assert brief.is_file() and foreman_of(s, "U01")["stopped"]["brief"] == str(brief) and world.gh.comments.get(2, []) == []
+
+
+def test_launch_marks_a_unit_whose_clean_outcome_an_ingest_rewrote(world, monkeypatch):
+  s, card, hid, _ = filed(world, units=("U07", "U08"), max_in_flight=1)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert "marked: U07" in world.run("launch", "--runcard", card)[1]
+  launched(s, "U07", "exited 0")
+  entry = {"round": 1, "launch": 1, "head": "a" * 40, "phase": "posted", "outcome": "revise"}
+  foreman_file(s, "U07", [{**entry, "rewritten_from": "clean"}])
+  one = [{"round": 1, "status": "exited 0"}]
+  assert launch.ready_again(foreman_of(s, "U07"), one) and not launch.ready_again({"rounds": [entry]}, one) and not launch.ready_again(foreman_of(s, "U07"), one + [{"round": 2}])
+  assert not launch.ready_again({"rounds": [{**entry, "outcome": "cap-reached", "rewritten_from": "clean"}]}, one)
+  code, out = world.run("launch", "--runcard", card)
+  assert "in flight: none" in out and "marked: U07" in out, out
+  launched(s, "U07", "running", rnd=2)
+  assert "in flight: U07" in world.run("launch", "--runcard", card)[1]
