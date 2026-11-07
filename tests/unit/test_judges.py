@@ -116,6 +116,7 @@ def test_judge_members_forms(members):
   assert got["fable"] == {"via": "adapter", "vendor": "anthropic", "model": "fable", "effort": "max"}
   assert got["astra"] == {"via": "runner", "vendor": "openai", "model": "gpt-6-astra", "effort": "xhigh"}
   assert judges.judge_members({})["opus"] == {"via": "adapter", "vendor": "anthropic", "model": "opus", "effort": "max"}
+  assert judges.judge_members({})["fable"]["effort"] == "xhigh"
 
 
 def test_open_records_panel_and_round_one_brief(world):

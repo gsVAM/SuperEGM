@@ -83,10 +83,10 @@ DEFAULT_CONFIG = {
     "reviewers": None,  # the spec's panels, from review.PANEL_OF at the end of this module
     "astra": {"enabled": False, "model": "gpt-6-astra", "effort": "xhigh", "heads": True},
     "judges": {"min_vendors": 1,
-               "members": [{"name": "fable", "via": "adapter", "effort": "max"},
+               "members": [{"name": "fable", "via": "adapter", "effort": "xhigh"},
                            {"name": "opus", "via": "adapter", "effort": "max"},
                            {"name": "astra", "via": "runner"}]},
-    "builder": {"profile_dir": "~/.superegm/builder-profile", "model": "claude-fable-5-1",
+    "builder": {"profile_dir": "~/.superegm/builder-profile", "model": "claude-opus-5-5",
                 "permission_mode": "acceptEdits", "gh_token_env": "SUPEREGM_BUILDER_TOKEN",
                 "allowed_tools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git add:*)", "Bash(git commit:*)",
                                   "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git mv:*)",
