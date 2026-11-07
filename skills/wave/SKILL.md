@@ -13,7 +13,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the wave skill. Not part of google/elephant-goldfish-model. -->
 
@@ -108,6 +108,14 @@ ignored except `landed`:
    Then: `DONE` and `DONE_WITH_CONCERNS` need nothing (the head is reviewed
    at step 4); `BLOCKED` or `NEEDS_CONTEXT`, an exit with no PR
    (`pr=none`), or an interrupted launch → Decision point 3.
+3b. `superegm review ingest` for every launched unit with a PR,
+   awaiting-merge units included, stopped units excluded:
+   `python3 '<HELPER>' review ingest --unit <U> --runcard '<CARD>'` records
+   the PR's new review threads as `external:<login>` findings into the latest
+   posted round and prints `<n> ingested` (`0 ingested` before its first posted round).
+   `outcome: revise`: the unit is ready again; `launch` marks it at step 5 when a
+   slot is free (never `launch-builder` here).
+   `outcome: cap-reached` → Decision point 2 (source `cap-reached`).
 4. `superegm foreman dispatch` for every active unit with a head, `deadline`
    included: `python3 '<HELPER>' foreman dispatch --unit <U> --runcard '<CARD>'`.
    It prints `<dispatch-id> <child-card>` when section 11's predicate holds

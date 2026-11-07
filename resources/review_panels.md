@@ -2,7 +2,7 @@
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: panel presets,
 routing table, run card and configuration. Not part of google/elephant-goldfish-model.
 Modified by SuperEGM (gsVAM), 2026: section 7's convergence rule and cap live in
-skills/review-spec/references/review_loop.md; the second clean round for document reviews is gone; the head review's panel row (U17). -->
+skills/review-spec/references/review_loop.md; the second clean round for document reviews is gone; the head review's panel row (U17); the external reviewer id of `review ingest` (U21). -->
 
 # Review panels, run card and configuration
 
@@ -171,6 +171,8 @@ Two reviews of the fork's handoff and wave skills reuse the same panels:
 | PR review (one pull request against one build unit) | - | Astra inspect (interactive flow only) | `egm-change-review` + Astra inspect (interactive flow only) | `egm-change-review`, `egm-codebase-details` + Astra inspect (interactive flow only) |
 
 A SuperEGM wave's head review panel is `change-review, astra`: the lane is seated by `astra.enabled` and `astra.heads`, and the foreman runs it once per round (`resources/astra_lane.md` section 8).
+
+A review thread a person or a bot leaves on the unit's PR is recorded by the wave's `review ingest` under the reviewer id `external:<login>`, outside the panel, into the latest posted round; an unsettled external high or medium blocks `clean` as a panel finding does.
 
 Both reviews use `handoff-standard.md` for their Claude goldfish; `egm-codebase-details` runs in REVIEW mode so that scope paths, symbols and callers are checked to exist as the units assume. The handoff gate and runs like Stages 7 and 9: its
 Claude reviewers go to `egm-review-loop` as `Reviewers` with `Stage: 10`, and
