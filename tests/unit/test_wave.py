@@ -710,3 +710,12 @@ FORMS_PROSE = [("skills/wave/SKILL.md", n) for n in ("`closed`, `ruling`", "- `r
 @pytest.mark.parametrize("path, needle", FORMS_PROSE)
 def test_the_wave_skill_and_the_orders_quote_the_ruling_forms(path, needle):
   assert needle in (SKILL.parents[2] / path).read_text(encoding="utf-8"), (path, needle)
+
+
+@pytest.mark.parametrize("needle", [  # round 3 (PR #96 review): a ruling by comment continues as its point's typed section does
+    "then, for `finding upheld` too, by `review status`: 0 → the unit awaits\n  merge; 2 → Decision point 2; else `launch-builder`",
+    "a spent `one more round` is refused before anything is recorded",
+    "(a `redesign` at point 1 runs no `review rule`)",
+    "option on a `BLOCKED` comment → `launch-builder` now"])
+def test_a_ruling_by_comment_continues_as_its_point_does(needle):
+  assert needle in SKILL.read_text(encoding="utf-8"), needle
