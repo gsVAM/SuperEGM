@@ -168,7 +168,8 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
   finding and every copy of it, a recorded contest of a copy included (`contest_of` followed back to the
   external id). A `contested` reply to such a finding is recorded in the round it comes in, a round late
   included, when no earlier round's comments hold a builder reply to any id of its group (`late`) and no
-  ruling in this round's comments names it: a contest is recorded once (spec section 8, External review)."""
+  ruling in this round's comments names it: a contest is recorded once (spec section 8, External review). An
+  upheld ruling is answered by a later `fixed` reply under the ruled id or under any id of its group."""
   found, contested = [], []
   links = contest_of or {}
 
@@ -223,7 +224,7 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
       contested.append({"fid": f"foreman-{round_n}-{len(found)}", "reason": reason})
     for c, ruling in rulings:
       fid = ruling.group(1)
-      answers = {fid, (contest_of or {}).get(fid, fid)}  # the ruled contest finding, or the goldfish finding it names
+      answers = {fid, links.get(fid, fid)} | groups.get(origin(fid), set())  # the ruled finding, or any id of its group
       fixed = any(o["login"] == login and o["at"] > c["at"] and (m := REPLY_RE.match(o["body"]))
                   and m.group(1) in answers and m.group(2) == "fixed" for o in comments)
       if ruling.group(2) == "upheld" and not fixed:

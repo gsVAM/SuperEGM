@@ -108,7 +108,7 @@ ignored except `landed`:
    Then: `DONE` and `DONE_WITH_CONCERNS` need nothing (the head is reviewed
    at step 4); `BLOCKED` or `NEEDS_CONTEXT`, an exit with no PR
    (`pr=none`), or an interrupted launch → Decision point 3.
-3b. `superegm review ingest` for every unit with an open PR (landed units print `0 ingested`),
+3b. `superegm review ingest` for every unit with an open PR (never a landed unit),
    awaiting-merge units included, stopped units excluded:
    `python3 '<HELPER>' review ingest --unit <U> --runcard '<CARD>'` records
    the PR's new review threads as `external:<login>` findings into the latest
@@ -116,7 +116,9 @@ ignored except `landed`:
    `outcome: revise`: the unit is ready again; `launch` marks it at step 5 when a
    slot is free (never `launch-builder` here).
    `outcome: cap-reached` → Decision point 2 (source `review <head-review-id> cap`).
-   Exit 1: report the unit and the refusal line in chat (it stands until the owner acts); the batch goes on.
+   Exit 1: report the unit and the refusal line in chat; the batch goes on. A GitHub read or a record
+   refusal may clear on the next batch's retry; `comment over 65,536 bytes` and `header present on`
+   repeat until the owner resolves them by hand, so say so in chat each batch.
    At the entry this step runs too, after entry step 2's lines and before entry step 3's `report`.
 4. `superegm foreman dispatch` for every active unit with a head, `deadline`
    included: `python3 '<HELPER>' foreman dispatch --unit <U> --runcard '<CARD>'`.

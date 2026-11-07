@@ -962,14 +962,16 @@ def ingest(args) -> int:
   round; the ones from a bot or a human at `ingest.human_role` or above posted first as one review comment
   in `review post`'s form. A landed unit is not read. Every read precedes every write: a refused read records
   nothing. A login's new findings are numbered after its highest recorded id. Before the post the ingest writes
-  its plan, `r<n>/ingest.json` (each line, each finding id's root comment id, the comment body), and a plan not
-  marked `done` is resumed verbatim before any new thread is read into one: the comment is found on the PR
-  under the round's header on any line, carrying every planned line whole, and not posted again, each finding is recorded against the thread it
+  its plan, `r<n>/ingest.json` (each line, each finding id's root comment id, the comment body, and once posted
+  the comment's id under `posted`), and a plan not marked `done`, in any posted round, the earliest first, is
+  resumed verbatim into its own round before any new thread is read into one: the comment is found on the PR
+  by its `posted` id, or, when its answer was never saved, as a comment on the round's head under the round's
+  header on any line carrying every planned line whole, and not posted again; each finding is recorded against the thread it
   was posted for (`record_round` stamps the root id under `thread` in the same write), and the threads join
   `ingested[]`. With no new thread an ingest still re-reads an edited thread's text into its finding (its
   severity kept), backfills `ingested[]` from a finding's `thread`, and rewrites a `clean` outcome; an ingest
   that finds nothing to change writes nothing. A `cap-reached` it wrote prints `outcome: cap-reached` again on
-  every ingest until a Decision point 2 on that head is opened (`source` `review <id> cap`)."""
+  every ingest until a Decision point 2 (`source` `review <id> cap`) is opened after the round's `posted_at`."""
   from superegm.launch import app_login  # lazily: launch imports this module
   st = core.store(core.git_toplevel(Path.cwd()))
   card = core.require_runcard(args, SKILLS)
@@ -977,21 +979,25 @@ def ingest(args) -> int:
   wave = card.get("parent") or args.runcard
   data = core.load_foreman(st, unit)
   state = core.load_state(st.root)
-  entry = max((e for e in data["rounds"] if e.get("phase") == "posted" and e.get("head")),
-              key=lambda e: e["round"], default=None)
+  posted_rounds = sorted((e for e in data["rounds"] if e.get("phase") == "posted" and e.get("head")), key=lambda e: e["round"])
+  entry = posted_rounds[-1] if posted_rounds else None
   rid = head_review_id(st, unit)
   landed = (((state.get("status") or {}).get("units") or {}).get(unit) or {}).get("landed")
   if entry is None or rid is None or landed:  # a merged PR's thread returns nothing to flight
     print("0 ingested")
     return 0
-  n, head = entry["round"], entry["head"]
   repo, number = config["repo"], state["units"][unit]["pr"]["number"]
   root = core.git_toplevel(Path.cwd())
+  plan, latest = None, entry
+  for e in posted_rounds:  # an unfinished plan, in whatever posted round it was written, is finished first
+    path = st.path("review", unit, f"pr{number}") / f"r{e['round']}" / "ingest.json"
+    saved = json.loads(core.read_text(path)) if path.exists() else None
+    if saved and not saved.get("done") and saved.get("round") == e["round"] and saved.get("head") == e["head"]:
+      plan, entry = saved, e
+      break
+  n, head = entry["round"], entry["head"]
   folder = st.path("review", unit, f"pr{number}") / f"r{n}"
   plan_path = folder / "ingest.json"
-  plan = json.loads(core.read_text(plan_path)) if plan_path.exists() else None
-  if plan and (plan.get("done") or plan.get("round") != n or plan.get("head") != head):
-    plan = None
   recorded = {f["thread"] for m in round_numbers(st, rid) for name, record in load_round(st, rid, m)["reviewers"].items()
               if name.startswith("external:") for f in record["findings"] if "thread" in f}
   done = set(data.get("ingested") or []) | recorded
@@ -1052,8 +1058,12 @@ def ingest(args) -> int:
   present = None
   if body:
     planned = {line for line in body.splitlines() if line.startswith("external:")}  # each line whole, its text too
-    present = next((r for r in core.gh_pages(f"repos/{repo}/pulls/{number}/reviews")
-                    if carries_header(r.get("body"), n, head) and planned <= set(r["body"].splitlines())), None)
+    reviews = core.gh_pages(f"repos/{repo}/pulls/{number}/reviews")
+    if plan.get("posted") is not None:  # the ingest's own comment, by the id its post answered
+      present = next((r for r in reviews if r.get("id") == plan["posted"]), None)
+    else:  # a post whose answer was never saved: a comment on the round's head carrying every planned line whole
+      present = next((r for r in reviews if r.get("commit_id") == head and carries_header(r.get("body"), n, head)
+                      and planned <= set(r["body"].splitlines())), None)
     if present and present.get("commit_id") != head:  # an interrupted ingest's comment, bound to another sha
       raise Refusal(f"review ingest: header present on {(present.get('commit_id') or '')[:7]}, not {head[:7]}: nothing recorded")
   for login in read:
@@ -1065,6 +1075,9 @@ def ingest(args) -> int:
     _, text = core.gh_post(f"repos/{repo}/pulls/{number}/reviews",
                            {"commit_id": head, "event": "COMMENT", "body": f"@{folder / 'ingest.md'}"})
     response = json.loads(text) if text.strip() else {}
+    if response.get("id") is not None:  # a retry finds this comment by its id, never by its text
+      plan = {**plan, "posted": response["id"]}
+      core.atomic_write(plan_path, plan)
     if response.get("commit_id") != head:
       raise Refusal(f"review ingest: posted on {(response.get('commit_id') or '')[:7]}, not {head[:7]}: "
                     "the comment stands on the PR, nothing recorded")
@@ -1099,13 +1112,14 @@ def ingest(args) -> int:
       core.atomic_write(st.path("reviews", rid, f"round-{m}.json"), saved)
   data = core.load_foreman(st, unit)
   missing = sorted(recorded - set(data.get("ingested") or []))
-  saved_entry = next(e for e in data["rounds"] if e["round"] == n)
+  saved_entry = next(e for e in data["rounds"] if e["round"] == latest["round"])
   word = None
   if saved_entry.get("outcome") == "clean":  # the mirror of `review post`'s `clean` write
     word = {3: "revise", 2: "cap-reached"}.get(status_code(rid, wave))
     if word:
       saved_entry.update({"outcome": word, "rewritten_from": "clean"})
-  routed = any(d.get("point") == 2 and d.get("source") == f"review {rid} cap" and d.get("head") == head
+  # point 2 opened since the round was posted: `decision open` records the PR's head then, not the round's
+  routed = any(d.get("point") == 2 and d.get("source") == f"review {rid} cap" and d.get("asked_at", "") >= saved_entry.get("posted_at", "")
                for d in data.get("decisions") or [])
   again = not word and not routed and (saved_entry.get("outcome"), saved_entry.get("rewritten_from")) == ("cap-reached", "clean")
   if missing or word:
@@ -1116,12 +1130,12 @@ def ingest(args) -> int:
   print(f"{count} ingested")
   if word:
     rank = {s: i for i, s in enumerate(SEVERITIES)}
-    open_ext = [f for name, record in (load_round(st, rid, n) or {"reviewers": {}})["reviewers"].items()
+    open_ext = [f for m in round_numbers(st, rid) for name, record in (load_round(st, rid, m) or {"reviewers": {}})["reviewers"].items()
                 if name.startswith("external:") for f in record["findings"] if f["disposition"] is None]
     login = min(open_ext, key=lambda f: rank[f["severity"]])["id"].rsplit("-", 2)[0] if open_ext else "external:?"
     core.journal(st, f"{unit} ready again ({login}) under {wave}")
     print(f"outcome: {word}")
-  elif again:  # a rewrite whose routing line was never acted on: printed until point 2 is opened on this head
+  elif again:  # a rewrite whose routing line was never acted on: printed until point 2 is opened after the post
     print("outcome: cap-reached")
   return 0
 
