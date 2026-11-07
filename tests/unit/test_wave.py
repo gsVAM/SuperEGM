@@ -702,6 +702,61 @@ def test_a_by_hand_ruling_rules_only_a_finding_its_decision_names_and_its_point_
   assert not foreman_of(s, "U01").get("stopped") and not list(s.path("foreman", "U01").parent.glob("U01-*.brainstorm.md"))
 
 
+def test_a_by_hand_ruling_finds_its_fid_on_a_finding_line_alone(world):
+  """Round 5 (PR #96 review): a point-1 question asks about the fids its finding lines start with (`<fid> |` or
+  `## Q<n> <fid> (`), never one its claim or reason text quotes."""
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})
+  set_config(world, repo=REPO, owners=["owner"])
+  fake_gh(world, {f"repos/{REPO}/issues/comments/{cid}": {"id": cid, "user": {"login": "owner"}, "body": body, "created_at": "2026-11-03T10:00:00Z"}
+                  for cid, body in ((80, "**Ruling:** astra-3-1 finding overruled — x\n"), (81, "**Ruling:** foreman-4-1 finding overruled — y\n"),
+                                    (82, "**Ruling:** foreman-4-2 finding upheld\n"))})
+  opened = lambda point, source, text: world.run("decision", "open", "--unit", "U01", "--point", point, "--question", question(world, text), "--source", source, "--runcard", card)[1].splitlines()[0]
+  rule = lambda posted, ruling, *d: world.run("decision", "rule", "--unit", "U01", *d, "--ruling", ruling, "--by", "owner", "--posted", posted, "--runcard", card)
+  q1 = opened(1, "review head-U01-c1 round 4", "foreman-4-1 | high | pr #96 comment 1 | regression: no | contested astra-3-1: x\n"
+              "## Q2 foreman-4-2 (high, pr #96 comment 2): contested astra-3-2: y\n")
+  assert rule("80", "astra-3-1 finding overruled") == (1, "decision: comment 80 does not name an open decision\n")
+  assert rule("80", "astra-3-1 finding overruled", "--decision", q1) == (1, f"decision: comment 80 rules astra-3-1, not a finding of {q1}\n")
+  assert rule("81", "foreman-4-1 finding overruled") == (0, "recorded (comment 81)\n")
+  assert rule("82", "foreman-4-2 finding upheld") == (0, "recorded (comment 82)\n")
+  assert [r["decision"] for r in foreman_of(s, "U01")["rulings"]] == [q1, q1]
+
+
+def test_an_allowance_on_an_open_decision_in_leavemealone_takes_the_overrule_form(world):
+  """Round 5 (PR #96 review): `review settle --posted` reads only `<fid> finding overruled`, so in leavemealone-mode
+  an allowance naming an open point-1 decision is refused before anything is recorded, unjournaled."""
+  card = world.run("runcard", "open", "--skill", "wave", "--artifact", world.spec, "--mode", "leavemealone", card=None)[1].strip()
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})
+  set_config(world, repo=REPO, owners=["owner"])
+  fake_gh(world, {f"repos/{REPO}/issues/comments/73": {"id": 73, "user": {"login": "owner"}, "body": "**Ruling:** foreman-1-2 allowed — adopted\n",
+                                                       "created_at": "2026-11-03T10:00:00Z"}})
+  q = world.run("decision", "open", "--unit", "U01", "--point", 1, "--question",
+                question(world, "foreman-1-2 | high | tests/unit/test_hooks.py | regression: no | tdd-order: S1\n"),
+                "--source", "review head-U01-c1 round 2", "--runcard", card)[1].splitlines()[0]
+  assert world.run("decision", "rule", "--unit", "U01", "--ruling", "foreman-1-2 finding overruled", "--by", "owner", "--posted", "73", "--runcard", card) == (
+      1, f"decision: comment 73 allows foreman-1-2; in leavemealone-mode {q} takes `**Ruling:** foreman-1-2 finding overruled — <reason>`\n")
+  assert foreman_of(s, "U01")["rulings"] == [] and "comment 73" not in s.path("journal").read_text(encoding="utf-8")
+
+
+def test_a_session_post_read_back_fails_is_never_read_as_edited(world, monkeypatch):
+  """Round 5 (PR #96 review): when the session's own post cannot be read back, its `posted_at` is the host's time,
+  not GitHub's, and the entry says so (`unread`): such a post never reads as an edit after the record."""
+  from superegm.decision import overridden_comments
+  from superegm.status import ruling_facts
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})
+  set_config(world, repo=REPO, owners=["owner"])
+  fake_gh(world)
+  monkeypatch.setattr("superegm.decision.read_back", lambda st, cid: {})  # the read-back's `GhError`
+  q = world.run("decision", "open", "--unit", "U01", "--point", 2, "--question", question(world, "cap\n"), "--source", "review head-U01-c1 cap", "--runcard", card)[1].splitlines()[0]
+  assert world.run("decision", "rule", "--unit", "U01", "--decision", q, "--ruling", "stop", "--by", "owner", "--runcard", card)[0] == 0
+  entry = foreman_of(s, "U01")["rulings"][-1]
+  assert entry["posted_at"] and entry.get("unread") is True
+  posted = {"id": int(entry["posted"].removeprefix("comment ")), "user": {"login": "owner"}, "body": world.gh.comments[2][-1]["body"],
+            "created_at": "2099-01-01T00:00:00Z", "updated_at": "2099-01-01T00:00:00Z"}
+  assert ruling_facts(s, "U01", [posted], ["owner"]) == [] and overridden_comments([posted], ["owner"], foreman_of(s, "U01")) == {}
+
+
 def test_launch_marks_a_unit_whose_clean_outcome_an_ingest_rewrote(world, monkeypatch):
   s, card, hid, _ = filed(world, units=("U07", "U08"), max_in_flight=1)
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
@@ -770,6 +825,10 @@ def test_a_ruling_by_comment_continues_as_its_point_does(needle):
     ("skills/wave/SKILL.md", "`ruling dropped (<by>, comment <id>): …`\n  for one naming no open decision or an already ruled one"),
     ("skills/wave/references/builder_orders.md", "`**Ruling:** (<decision id>) <option> — <reason>`"),
     ("skills/wave/references/builder_orders.md", "(as recorded by <by>; the comment was edited after its record)"),
-    ("skills/wave/references/builder_orders.md", "(judges <panel>, leavemealone)")])
+    ("skills/wave/references/builder_orders.md", "(judges <panel>, leavemealone)"),
+    # round 5 (PR #96 review): a redesign's `--ruling` carries no invented reason; an allowance in leavemealone-mode
+    ("skills/wave/SKILL.md", "`redesign` as `--ruling 'redesign'`"),
+    ("skills/wave/SKILL.md", "in leavemealone-mode an allowance naming an open decision is refused"),
+    ("skills/wave/references/builder_orders.md", "(recorded on <decision id> as: <option>)")])
 def test_the_ruling_prose_names_how_a_ruling_is_applied_and_read(path, needle):
   assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)

@@ -453,6 +453,9 @@ CASES |= {  # round 4 (PR #96 review): a ruling binds from the unit's issue alon
                                      "decisions": UPHELD_Q1["decisions"],
                                      "rulings": [UPHELD_Q1["rulings"][0] | {"posted_at": "2026-11-02T15:00:00Z"}]},
                                     ["issue #2 comment 15 | regression: no | upheld change-review-1-1: no `fixed` reply"])}
+CASES |= {  # round 5 (PR #96 review): a recorded upheld ruling binds when its comment is gone (edited into prose or deleted)
+  "recorded-upheld-comment-gone": ({"prior": True, "comments": {2: [c(16, "owner", "an aside")]}} | UPHELD_Q1,
+                                   ["issue #2 comment 15 | regression: no | upheld change-review-1-1: no `fixed` reply"])}
 
 
 @pytest.mark.parametrize("name", list(CASES))

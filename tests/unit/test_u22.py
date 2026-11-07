@@ -128,3 +128,33 @@ def test_an_edited_recorded_comment_shows_its_record_whatever_the_edit(edited):
              "rulings": [{"decision": "q1", "ruling": "f-1-1 finding upheld", "by": "owner", "posted": "comment 4", "posted_at": "t1"}]}
   text = prompt_text(2, "U01", "body", "orders", "orient", comments, [], None, "builder-bot", "audit", owners=["owner"], foreman=foreman)
   assert "## owner · comment 4\n**Ruling:** f-1-1 finding upheld\n(as recorded by owner; the comment was edited after its record)\n" in text
+
+
+# Round 5 (PR #96 review): a bare `round`, `stop` or `redesign` binds only while a decision it can rule is open; a
+# recorded option is shown with the option its decision's frozen question offered.
+
+BARE = [{"id": 5, "user": {"login": "owner"}, "body": "**Ruling:** redesign — the queue is wrong"},
+        {"id": 6, "user": {"login": "owner"}, "body": "**Ruling:** stop"},
+        {"id": 7, "user": {"login": "owner"}, "body": "**Ruling:** (q1) relaunch — again"},
+        {"id": 8, "user": {"login": "owner"}, "body": "**Ruling:** one more round"}]
+BARE_RECORD = {"decisions": [{"id": "q1", "point": 3, "source": "launch 1", "options": ["relaunch", "stop the unit"]},
+                             {"id": "q2", "point": 2, "source": "review r cap", "options": ["one more round", "stop"]}],
+               "rulings": [{"decision": "q1", "ruling": "relaunch", "by": "owner", "reason": "again", "posted": "comment 7", "posted_at": "t1"},
+                           {"decision": "q2", "ruling": "one more round", "by": "owner", "reason": None, "posted": "comment 8", "posted_at": "t1"}]}
+
+
+@pytest.mark.parametrize("pending, kept", [((), ["7", "8"]), ([{"id": "q3", "point": 2, "source": "review r cap", "options": ["one more round", "stop"]}],
+                                                              ["5", "6", "7", "8"])])
+def test_a_bare_round_stop_or_redesign_binds_only_while_a_decision_it_rules_is_open(pending, kept):
+  foreman = BARE_RECORD | {"decisions": BARE_RECORD["decisions"] + list(pending)}
+  text = prompt_text(2, "U01", "body", "orders", "orient", BARE, [], None, "builder-bot", "audit", owners=["owner"], foreman=foreman)
+  assert re.findall(r"^## \S+ · comment (\d+)$", text.split("# Comments on issue #2\n\n", 1)[1], re.M) == kept
+
+
+def test_a_recorded_option_shows_the_option_its_question_offered():
+  comments = [{"id": 3, "user": {"login": "builder-bot"}, "body": "**Deviation (dod):** x\n- (a) remove validation\n- (b) keep it\n**Builder status:** BLOCKED"},
+              {"id": 4, "user": {"login": "owner"}, "body": "**Ruling:** (3) (a) — approved", "created_at": "t1"}]
+  foreman = {"decisions": [{"id": "q1", "point": 3, "source": "comment 3", "options": ["(a) keep validation", "(b) remove it", "stop the unit"]}],
+             "rulings": [{"decision": "q1", "ruling": "(a)", "by": "owner", "reason": "approved", "posted": "comment 4", "posted_at": "t1"}]}
+  text = prompt_text(2, "U01", "body", "orders", "orient", comments, [], None, "builder-bot", "audit", owners=["owner"], foreman=foreman)
+  assert "## owner · comment 4\n**Ruling:** (3) (a) — approved\n(recorded on q1 as: (a) keep validation)\n" in text
