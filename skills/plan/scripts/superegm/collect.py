@@ -171,8 +171,9 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
   included, when no earlier round's comments hold a builder reply to any id of its group (`late`) and no
   ruling in this round's comments names it: a contest is recorded once (spec section 8, External review). An
   upheld ruling is answered by a later `fixed` reply under the ruled id or under any id of its group. A reply
-  to a carried copy `foreman-<r>-<k>` counts toward the carry only when it comes after round r was posted
-  (`posted`, each posted round's `posted_at`): before that the copy did not exist."""
+  to a carried copy `foreman-<r>-<k>`, `fixed` or `contested`, counts (toward the carry, or as a contest) only
+  when it comes after round r was posted (`posted`, each posted round's `posted_at`): before that the copy did
+  not exist."""
   found, contested = [], []
   links = contest_of or {}
 
@@ -221,6 +222,8 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
         continue
       fid = reply.group(1)
       if fid == prior_ci_fid or fid in settled or (fid.split("-")[-2] != str(prior_round) and fid not in late):
+        continue
+      if posted is not None and not timely(fid, c["at"], posted):  # a contest of a copy not yet posted contests nothing
         continue
       reason = (reply.group(3) or "").strip()
       found.append((where(c), f"contested {fid}: {reason}"))

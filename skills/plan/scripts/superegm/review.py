@@ -518,10 +518,10 @@ def record_round(args) -> int:
     rnd.update({"scope": rows, "out_of_scope": [],
                 "note": rows[0][1][1:-1] if rows and rows[0][0] == "whole" else None})
   refused = []
-  if args.not_run and reviewer.startswith("external:"):  # an ingest's record holds findings: a not-run would erase them
+  if args.not_run and external:  # an ingest's record holds findings: a not-run would erase them
     raise core.HandoffError(f"review record: --not-run is refused for an external reviewer ({reviewer})")
   if args.not_run:
-    record ={"findings": [], "not_run": args.not_run, "isolation": None, "model": None, "effort": None}
+    record = {"findings": [], "not_run": args.not_run, "isolation": None, "model": None, "effort": None}
   else:
     path = Path(args.findings)
     text = core.read_text(path)
@@ -879,7 +879,7 @@ def thread_severity(thread: dict, config: dict, role: str | None) -> str:
   found = [m.group(0) for m in re.finditer(r"[^\W_]+(?:[-'][^\W_]+)*", first)]
   if thread["review_body"]:
     return "medium" if any(w in words for w in found) else "low"
-  starts = re.match(r"\W*([^\W_]+)", first)
+  starts = re.match(r"\W*([^\W_]+(?:[-'][^\W_]+)*)", first)  # a compound word (`security-bug`) whole, as the tokenizer's
   marked = [(m.group(1) or m.group(2)).strip(" :") for m in re.finditer(r"\*\*([^*]+?)\*\*|\[([^\]]+?)\]", first)]
   for word in ([starts.group(1)] if starts else []) + marked:
     if word in words:
@@ -965,16 +965,18 @@ def ingest(args) -> int:
   in `review post`'s form. A landed unit is not read. Every read precedes every write: a refused read records
   nothing. A login's new findings are numbered after its highest recorded id. Before the post the ingest writes
   its plan, `r<n>/ingest.json` (each line, each finding id's root comment id, the comment body, and once posted
-  the comment's id under `posted`), and a plan not marked `done`, in any posted round, the earliest first, is
-  resumed verbatim into its own round before any new thread is read into one: the comment is found on the PR
+  the comment's id under `posted`), and a plan not marked `done` on the latest posted round is resumed verbatim
+  before any new thread is read into one; one on an earlier round is marked `abandoned` and refused, recording
+  nothing, the refusal telling the owner to re-run `review ingest`, which plans those threads afresh on the latest
+  round (a plan is never finished into an earlier round). The plan is marked `done` only after every record, the
+  foreman file and the journal are saved. A resumed plan's comment is found on the PR
   by its `posted` id, or, when its answer was never saved, as a comment on the round's head under the round's
   header on any line carrying every planned line whole, and not posted again; each finding is recorded against the thread it
   was posted for (`record_round` stamps the root id under `thread` in the same write), and the threads join
   `ingested[]`. With no new thread an ingest still re-reads an edited thread's text into its finding (its
   severity kept), backfills `ingested[]` from a finding's `thread`, and rewrites a `clean` outcome; an ingest
-  that finds nothing to change writes nothing. A plan finished into an earlier round than the latest posted one
-  rewrites the latest's `clean` when a finding it recorded is an unsettled high or medium (`review status` reads
-  the latest completed round alone). With no builder App and no builder token the ingest refuses: `gh api user`
+  that finds nothing to change writes nothing. The `ready again` journal line names the login of the round's first
+  external finding at the highest severity whose `disposition` is unset (a builder's reply sets none). With no builder App and no builder token the ingest refuses: `gh api user`
   would answer the owner's login. A `cap-reached` it wrote prints `outcome: cap-reached` again on every ingest
   until a Decision point 2 (`source` `review <id> cap`) is opened at or after the round's `posted_at` (`asked_at`
   is the host's clock, `posted_at` GitHub's: a host clock behind GitHub's delays the stop)."""
@@ -998,12 +1000,17 @@ def ingest(args) -> int:
   for e in posted_rounds:  # an unfinished plan, in whatever posted round it was written, is finished first
     path = st.path("review", unit, f"pr{number}") / f"r{e['round']}" / "ingest.json"
     saved = json.loads(core.read_text(path)) if path.exists() else None
-    if saved and not saved.get("done") and saved.get("round") == e["round"] and saved.get("head") == e["head"]:
+    if (saved and not saved.get("done") and not saved.get("abandoned") and saved.get("round") == e["round"]
+        and saved.get("head") == e["head"]):
       plan, entry = saved, e
       break
   n, head = entry["round"], entry["head"]
   folder = st.path("review", unit, f"pr{number}") / f"r{n}"
   plan_path = folder / "ingest.json"
+  if plan is not None and n < latest["round"]:  # never finished into an earlier round: the owner's re-run plans afresh
+    core.atomic_write(plan_path, {**plan, "abandoned": True})
+    raise Refusal(f"review ingest: round {n}'s unfinished ingest is not on the latest posted round ({latest['round']}): "
+                  f"nothing recorded; re-run `review ingest` to plan its threads afresh on round {latest['round']}")
   recorded = {f["thread"] for m in round_numbers(st, rid) for name, record in load_round(st, rid, m)["reviewers"].items()
               if name.startswith("external:") for f in record["findings"] if "thread" in f}
   done = set(data.get("ingested") or []) | recorded
@@ -1105,8 +1112,6 @@ def ingest(args) -> int:
     have = set(data.get("ingested") or [])
     data.setdefault("ingested", []).extend(tid for tid in mine.values() if tid not in have)
     core.save_foreman(st, unit, data)
-  if lines:
-    core.atomic_write(plan_path, {**plan, "done": True})
   edited = {t["id"]: t for t in threads if t["id"] in done}
   for m in round_numbers(st, rid):  # an edited thread's text re-read, its severity kept
     saved, changed = load_round(st, rid, m), False
@@ -1125,11 +1130,6 @@ def ingest(args) -> int:
   word = None
   if saved_entry.get("outcome") == "clean":  # the mirror of `review post`'s `clean` write
     word = {3: "revise", 2: "cap-reached"}.get(status_code(rid, wave))
-    if not word and lines and n < latest["round"]:  # a plan finished into an earlier round: `review status` reads the latest alone
-      ids = set(thread_of)
-      if any(blocking(f) and f["disposition"] is None for record in load_round(st, rid, n)["reviewers"].values()
-             for f in record["findings"] if f["id"] in ids):
-        word = "cap-reached" if "cap yes" in evaluate(st, load_review(st, rid), wave).line else "revise"
     if word:
       saved_entry.update({"outcome": word, "rewritten_from": "clean"})
   # point 2 opened since the round was posted: `decision open` records the PR's head then, not the round's
@@ -1141,13 +1141,16 @@ def ingest(args) -> int:
     core.save_foreman(st, unit, data)
   if count:
     core.journal(st, f"{unit} round {n} ingested {count} under {wave}")
-  print(f"{count} ingested")
-  if word:
+  if word:  # the login of the round's first external finding at the highest severity no settlement recorded
     rank = {s: i for i, s in enumerate(SEVERITIES)}
-    open_ext = [f for m in round_numbers(st, rid) for name, record in (load_round(st, rid, m) or {"reviewers": {}})["reviewers"].items()
+    open_ext = [f for name, record in (load_round(st, rid, n) or {"reviewers": {}})["reviewers"].items()
                 if name.startswith("external:") for f in record["findings"] if f["disposition"] is None]
     login = min(open_ext, key=lambda f: rank[f["severity"]])["id"].rsplit("-", 2)[0] if open_ext else "external:?"
     core.journal(st, f"{unit} ready again ({login}) under {wave}")
+  if lines:  # done only once every record, the foreman file and the journal are saved
+    core.atomic_write(plan_path, {**plan, "done": True})
+  print(f"{count} ingested")
+  if word:
     print(f"outcome: {word}")
   elif again:  # a rewrite whose routing line was never acted on: printed until point 2 is opened after the post
     print("outcome: cap-reached")

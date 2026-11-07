@@ -117,7 +117,8 @@ ignored except `landed`:
    slot is free (never `launch-builder` here).
    `outcome: cap-reached` → Decision point 2 (source `review <head-review-id> cap`).
    Exit 1: report the unit and the refusal line in chat; the batch goes on. A GitHub read or a record
-   refusal may clear on the next batch's retry; `comment over 65,536 bytes`,
+   refusal may clear on the next batch's retry, and `unfinished ingest is not on the latest posted round` clears on the re-run it names;
+   `comment over 65,536 bytes`, `is not set: the builder's login is unknown`,
    `header present on` and a `review ingest: comment:<n>:` scan refusal repeat until the owner resolves them by hand, so say so in chat each batch.
    At the entry this step runs too, after entry step 2's lines and before entry step 3's `report`.
 4. `superegm foreman dispatch` for every active unit with a head, `deadline`
