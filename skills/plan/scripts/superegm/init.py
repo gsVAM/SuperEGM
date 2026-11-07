@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the init subcommand; `owners` from `gh api user` and the pointer to the README's token recipe and to `doctor` (spec section 11); the astra.enabled and astra.heads sentence (U17).
+# Added by SuperEGM (gsVAM), 2026: the init subcommand; `owners` from `gh api user` and the pointer to the README's token recipe and to `doctor` (spec section 11); the astra.enabled and astra.heads sentence (U17); the ingest sentence (U21).
 
 """superegm init: write .superegm/config.json with every key's default; print the owner's by-hand steps."""
 
@@ -25,6 +25,7 @@ By hand, before the first typed skill runs:
 5. Commit {path}; approve-spec commits it with the spec.
 The store is {artifacts_dir} (config key artifacts_dir); it is never committed.
 The Astra lane is off until you set astra.enabled to true; astra.heads (default true) then seats it on every head review.
+`review ingest` reads PR review threads with ingest.severity_words (Devin's words by default) and counts a human's thread from ingest.human_role (default write) up.
 then run `superegm doctor`"""
 
 

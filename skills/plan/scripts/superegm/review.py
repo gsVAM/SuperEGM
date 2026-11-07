@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21).
 
 """superegm review open|record|settle|status|rule|scope|post: the one review loop (spec section 8)."""
 
@@ -25,6 +25,7 @@ REVIEWERS = ("design", "zoom-out", "comprehension", "readiness", "structural", "
 FIRST = {"spec": "design", "plan": "readiness", "head": "change-review"}  # the kind's fixed first reviewer (section 5)
 PANEL_OF = {"spec": "design,zoom-out", "integrate": "design", "plan": "readiness,proportion,set", "head": "change-review"}
 LANE_KINDS = ("spec", "plan", "integrate", "head")  # the kinds the Astra lane joins
+ROLES = ("none", "read", "triage", "write", "maintain", "admin")  # a repository role, lowest first; `none` the endpoint's non-collaborator
 
 
 def seat_lane(kind: str, flag: str | None, astra: dict) -> bool:
