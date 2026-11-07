@@ -464,6 +464,27 @@ def test_collect_carries_an_overruled_scope_finding_forward(world, tmp_path, mon
   assert (code, out.strip()) == (0, "collected: 0 foreman findings"), out
 
 
+EXT = "external:alice-1-1 | high | src/hooks.py:3 at 0000000 | regression: no | the hook never fires\n"
+CARRIED = "src/hooks.py:3 at 0000000 | regression: no | unreplied external:alice-1-1: the hook never fires"
+R2 = {**POSTED_R1, "round": 2, "launch": 2, "dispatch_id": "d2"}
+
+
+@pytest.mark.parametrize("rounds, replies, expected", [
+  ([POSTED_R1], {}, [CARRIED]), ([POSTED_R1], {70: [c(14, "builder-bot", "**Reply foreman-2-1:** fixed")]}, [CARRIED]),
+  ([POSTED_R1], {70: [c(14, "builder-bot", "**Reply external:alice-1-1:** fixed")]}, []), ([POSTED_R1, R2], {}, [CARRIED]),
+  ([POSTED_R1], {70: [c(14, "builder-bot", "**Reply external:alice-1-1:** contested — it fires on push")]}, ["pr #70 comment 14 | regression: no | contested external:alice-1-1: it fires on push"])])
+def test_collect_carries_an_unreplied_external_high_forward(world, tmp_path, monkeypatch, rounds, replies, expected):
+  n = len(rounds) + 1
+  kw = dict(rounds=rounds, launches=[{"round": i, "status": "exited 0"} for i in range(1, n + 1)], comments=replies)
+  st0, card0, _ = seed(world, **kw)
+  rid = open_head_review(world, st0, card0, "0" * 40, {"change-review": "", "external:alice": EXT})
+  n == 3 and record(world, st0, rid, 2, "0" * 40, card0, {"change-review": ""})
+  w = prepared(world, tmp_path, monkeypatch, **kw)
+  code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
+  assert (code, out.strip()) == (0, f"collected: {len(expected)} foreman findings"), out
+  assert (w.dir / f"r{n}/foreman.findings").read_text(encoding="utf-8").splitlines() == [f"foreman-{n}-{i} | high | {e}" for i, e in enumerate(expected, 1)]
+
+
 @pytest.mark.parametrize("phase, outcome, ok", [
     ("fetched", None, True), ("prepared", None, True), ("collected", None, True),
     ("posted", "revise", False), ("collected", "not run (superseded)", False)])
