@@ -652,3 +652,10 @@ TERMS = ["head-moved", "run folder", "run_folder", "`launched`", "inspect", "Blo
 @pytest.mark.parametrize("file", FILES)
 def test_removed_mechanisms_are_not_named(file, term):
   assert term not in (ROOT / file).read_text(encoding="utf-8"), (file, term)
+
+
+def test_a_directory_scope_path_covers_the_files_under_it(tmp_path):
+  from superegm.collect import foreman_findings
+  changed = ["libs/c/corpus/a.json", "libs/c/corpus/sub/b.json", "libs/c/corpus.json", "libs/c/corpusx/c.json", "src/x.py"]
+  lines, _ = foreman_findings(1, "ci green", "", ["libs/c/corpus", "src/x.py"], tmp_path, changed, "", [], "builder-bot", None, None)
+  assert [l.split(" | ")[2] for l in lines] == ["libs/c/corpus.json", "libs/c/corpusx/c.json"]
