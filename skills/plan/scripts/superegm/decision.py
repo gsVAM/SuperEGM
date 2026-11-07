@@ -1,11 +1,11 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
-# (spec section 11.1) and the store-only brainstorm brief it writes.
+# (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
+# `recorded_rulings`) and the by-hand ruling read through it (U22).
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
-import json
 import os
 import re
 from dataclasses import dataclass
@@ -13,7 +13,6 @@ from pathlib import Path
 
 import superegm as core
 from superegm.apply import body_file
-from superegm.launch import app_login
 from superegm.report import pending_decisions, unit_view
 from superegm.review import Refusal
 
@@ -99,7 +98,7 @@ def register(subparsers):
                  help="comment <id> | launch <n> | closed <n> | review <id> round <n> | review <id> cap")
   r = core.add_parser(action, "rule", "record a ruling and post it as the `**Ruling:**` comment")
   r.add_argument("--unit", required=True)
-  r.add_argument("--decision", help="the decision id `open` printed; required unless --posted closed:<n>")
+  r.add_argument("--decision", help="the decision id `open` printed; required unless --posted (a comment the ruling's form names, or closed:<n>)")
   r.add_argument("--ruling", required=True, help="an option's letter or text, optionally ` — <reason>`; or on a head (points 1, 2) `redesign — <one sentence why>`")
   r.add_argument("--by", required=True, help="<login> | judges:<panel-id>")
   r.add_argument("--posted", help="<comment-id> of a by-hand **Ruling:** (nothing is posted) | closed:<n>")
@@ -179,55 +178,92 @@ def rule(args) -> int:
   if unit not in (state.get("units") or {}):
     raise Refusal(f"decision: {unit} is not a unit of this handoff")
   number, closed = state["units"][unit]["number"], (args.posted or "").partition("closed:")[2]
-  if not args.decision:
+  if not args.decision and not (args.posted and not closed):
     if not closed:
       raise Refusal("decision: --decision is required unless --posted closed:<n>")
     stop_unit(st, unit, args.by, f"closed #{closed} by {args.by}", number, now)
     print(f"recorded (closed #{closed})")
     return 0
   data = core.load_foreman(st, unit)
-  decision = next((d for d in data["decisions"] if d["id"] == args.decision), None)
-  if decision is None:
-    raise Refusal(f"decision: {unit} has no decision {args.decision}")
   head, _, reason = args.ruling.partition(" — ")
-  ruled = [r for r in data["rulings"] if r["decision"] == args.decision]
+  found = comment = None
+  if args.posted and not closed:  # a by-hand ruling: read through the one grammar (spec section 13.2, U22)
+    comment, found, decisions = verify_posted(st, unit, data, args)
+  else:
+    decision = next((d for d in data["decisions"] if d["id"] == args.decision), None)
+    if decision is None:
+      raise Refusal(f"decision: {unit} has no decision {args.decision}")
+    decisions = [decision]
   # Point 1 takes one ruling per contested finding (`<fid> finding upheld | overruled`, the leavemealone row's
   # "one call per finding"); the other points take one ruling.
   fid_of = lambda text: text.partition(" — ")[0].strip().split(" ")[0]
-  if ruled and (decision["point"] != 1 or any(fid_of(r["ruling"]) == fid_of(head) for r in ruled)):
-    raise Refusal(f"decision: {args.decision} already ruled")
-  chosen = check_ruling(decision["point"], decision["options"], head.strip())
+  for decision in decisions:
+    ruled = [r for r in data["rulings"] if r["decision"] == decision["id"]]
+    if ruled and (decision["point"] != 1 or any(fid_of(r["ruling"]) == fid_of(head) for r in ruled)):
+      dropped(st, args, f"{decision['id']} already ruled")
+  decision = decisions[0]
+  chosen = [check_ruling(d["point"], d["options"], head.strip()) for d in decisions][0]
   brief = None
+  if found:
+    reason = found.reason or ""
+  elif not reason.strip() and (decision["point"] == 3 or chosen.endswith(" finding overruled")):
+    reason = "ruled in the session"  # a session ruling typed without the reason its form carries
   if chosen == "redesign":
     if not reason.strip():
       raise Refusal("decision: redesign needs — <one sentence why>")
     chosen = f"redesign — {reason.strip()}"
-    brief = brief_path(st, unit, args.decision)  # written after the comment is posted: a refusal leaves no brief
+    brief = brief_path(st, unit, decision["id"])  # written after the comment is posted: a refusal leaves no brief
+  posted_at, url = now, None
   if closed:
     posted = f"closed #{closed}"
-  elif args.posted:
-    verify_posted(st, st.config, decision, args.posted, args.by)
-    posted = f"comment {args.posted}"
+  elif found:
+    posted, posted_at = f"comment {args.posted}", comment.get("created_at") or now
   else:
     body = ruling_comment(decision["point"], decision["source"], chosen + (f" — {reason}" if reason and not brief else ""),
-                          decision["question"], brief)
+                          decision["question"], brief, args.by, decision["id"])
     path = body_file(body, st.root)
     try:
       url = core.gh(["issue", "comment", str(number), "-R", st.config["repo"], "--body-file", path]).strip()
     finally:
       os.unlink(path)
-    posted = f"comment {url.rsplit('-', 1)[1]}"
+    cid = url.rsplit("-", 1)[1]
+    posted, posted_at = f"comment {cid}", read_back(st, cid).get("created_at") or now
   if brief:
-    brainstorm_brief(st, unit, args.decision, decision, chosen, (state["units"][unit].get("pr") or {}).get("number"))
-  data["rulings"].append({"decision": args.decision, "ruling": args.ruling, "by": args.by,
-                          "reason": reason.strip() or None, "posted": posted, "posted_at": now})
+    brainstorm_brief(st, unit, decision["id"], decision, chosen, (state["units"][unit].get("pr") or {}).get("number"))
+  for d in decisions:
+    data["rulings"].append({"decision": d["id"], "ruling": args.ruling, "by": args.by,
+                            "reason": reason.strip() or None, "posted": posted, "posted_at": posted_at})
   core.save_foreman(st, unit, data)
-  who = f"judges {args.by[7:]}, leavemealone" if args.by.startswith("judges:") else args.by
-  core.journal(st, f"Ruling ({who}): {unit} {args.decision} {args.ruling}")
+  for d in decisions:
+    if found:
+      words = " ".join(w for w in (found.kind, found.subject, found.option) if w)
+      core.journal(st, f"Ruling ({args.by}, comment {args.posted}): {unit} {d['id']} {words}" + (f" — {found.reason}" if found.reason else ""))
+    else:
+      who = f"judges {args.by[7:]}, leavemealone" if args.by.startswith("judges:") else args.by
+      typed = args.ruling + (" — ruled in the session" if reason == "ruled in the session" else "")
+      core.journal(st, f"Ruling ({who}): {unit} {d['id']} {typed}")
   if chosen.startswith("stop") or brief:
     stop_unit(st, unit, args.by, chosen, number, now, brief)
-  print(url if posted.startswith("comment") and not args.posted else f"recorded ({posted})")
+  print(url or f"recorded ({posted})")
   return 0
+
+
+KIND_POINTS = {"upheld": (1,), "overruled": (1,), "round": (2,), "stop": (2,), "option": (3,), "redesign": (1, 2)}
+
+
+def dropped(store, args, reason: str):
+  """Refuse a ruling that names no open decision or a ruled one; a by-hand one is journaled as dropped."""
+  if args.posted and not args.posted.startswith("closed:"):
+    core.journal(store, f"ruling dropped ({args.by}, comment {args.posted}): {reason}")
+  raise Refusal(f"decision: {reason}")
+
+
+def read_back(store, comment_id) -> dict:
+  """The comment by its id (`created_at` is the record's `posted_at`); {} when GitHub does not return it."""
+  try:
+    return core.gh_json(["api", f"repos/{store.config['repo']}/issues/comments/{comment_id}"]) or {}
+  except core.GhError:
+    return {}
 
 
 def check_ruling(point: int, options: list, ruling: str) -> str:
@@ -245,20 +281,24 @@ def check_ruling(point: int, options: list, ruling: str) -> str:
   raise Refusal("decision: ruling is none of the options: " + "; ".join(options + extra))
 
 
-def ruling_comment(point: int, source: str, ruling: str, question: str, brief=None) -> str:
-  """Spec section 11's `**Ruling:**` line (point 1 `<fid> finding upheld (fix it) | finding overruled — <reason>`,
-  point 2 `(cap) <option>`, point 3 `(<comment-id>) <option> — <reason>`), a blank line and the quoted question.
-  A redesign ruling (`brief` given) takes the form `**Ruling:** redesign — <why>`, the stopped-for-redesign line
-  naming the brief, the close-by-hand line, a blank line and the quoted question."""
+def ruling_comment(point: int, source: str, ruling: str, question: str, brief=None, by: str = "", qid: str = "") -> str:
+  """Spec section 13.2's `**Ruling:**` form (point 1 `<fid> finding upheld (fix it) | finding overruled — <reason>`,
+  point 2 `one more round | stop`, point 3 `(<comment-id>) <option> — <reason>`, `(<qid>)` for a decision opened
+  on no comment), the judges' `(judges <panel>, leavemealone)` marker line when `by` is `judges:<panel>`, a blank
+  line and the quoted question. A redesign ruling (`brief` given) takes the form `**Ruling:** redesign — <why>`,
+  the stopped-for-redesign line naming the brief, the close-by-hand line, a blank line and the quoted question."""
   quoted = "\n".join("> " + l for l in question.rstrip("\n").splitlines())
+  marker = f"\n(judges {by[7:]}, leavemealone)" if by.startswith("judges:") else ""
   if brief:  # a redesign ruling: the unit is stopped, the brief named, the owner closes the issue by hand
-    return (f"**Ruling:** {ruling}\n\nStopped for redesign; the brainstorm brief is `{brief}`.\n"
+    return (f"**Ruling:** {ruling}{marker}\n\nStopped for redesign; the brainstorm brief is `{brief}`.\n"
             f"Close this issue by hand once the re-planned unit is filed.\n\n{quoted}\n")
   if point == 1:
     line = ruling.replace("finding upheld", "finding upheld (fix it)", 1)
+  elif point == 2:
+    line = ruling
   else:
-    line = f"({source.removeprefix('comment ') if point == 3 else 'cap'}) {ruling}"
-  return f"**Ruling:** {line}\n\n{quoted}\n"
+    line = f"({source.removeprefix('comment ') if source.startswith('comment ') else qid}) {ruling}"
+  return f"**Ruling:** {line}{marker}\n\n{quoted}\n"
 
 
 DIFF_WHOLE, DIFF_LINES = 40_000, 200  # a diff under 40 KB is copied whole, else its first 200 lines
@@ -300,26 +340,49 @@ def brainstorm_brief(store, unit: str, qid: str, decision: dict, ruling: str, pr
   return path
 
 
-def builder_login(config) -> str:
-  """The builder's login: `<slug>[bot]` from the config on the App path, else the machine account's
-  under its token (read from GitHub, not from the wave card)."""
-  if app_login(config):
-    return app_login(config)
-  env = config["builder"]["gh_token_env"]
-  if not os.environ.get(env):
-    raise Refusal(f"decision: {env} is not set")
-  return json.loads(core.gh(["api", "user"], token=os.environ[env]))["login"]
-
-
-def verify_posted(store, config, decision: dict, comment_id: str, by: str) -> None:
-  """A by-hand `**Ruling:**` is honoured only from a non-builder author who is `--by`, and only when it
-  names the BLOCKED comment the decision came from (anti-goal 10)."""
-  comment = core.gh_json(["api", f"repos/{config['repo']}/issues/comments/{comment_id}"]) or {}
+def verify_posted(store, unit: str, foreman: dict, args):
+  """A by-hand `**Ruling:**` (spec section 13.2, U22): honoured only from the author who is `--by`, only when
+  `ruling_of` reads it as a `config.owners` login's form, only once (a recorded comment edited later is ignored),
+  and only on the decisions its kind and subject name: `--decision`'s, else the latest point-1 decision with no
+  ruling on its fid, the open point-2 one, the point-3 one on its comment or decision id, or for `redesign` every
+  pending decision of the unit. Returns (comment, ruling, decisions)."""
+  cid = args.posted
+  comment = core.gh_json(["api", f"repos/{store.config['repo']}/issues/comments/{cid}"]) or {}
   author = (comment.get("user") or {}).get("login")
-  if author == builder_login(config):
-    raise Refusal(f"decision: comment {comment_id} was written by the builder account {author} and is not honoured")
-  source = decision["source"]
-  if source.startswith("comment ") and f"({source.split()[1]})" not in (comment.get("body") or ""):
-    raise Refusal(f"decision: comment {comment_id} does not name {source}")
-  if author != by:
-    raise Refusal(f"decision: comment {comment_id} was written by {author}, not {by}")
+  if author != args.by:
+    raise Refusal(f"decision: comment {cid} was written by {author}, not {args.by}")
+  found = ruling_of(comment, store.config.get("owners") or [])
+  if found is None:
+    raise Refusal(f"decision: comment {cid} by {author} is not an owner's ruling")
+  recorded = next((r for r in foreman["rulings"] if r.get("posted") == f"comment {cid}"), None)
+  if recorded:
+    core.journal(store, f"Ruling ({args.by}, comment {cid}): {unit} {recorded['decision']} ruling edited after record, ignored")
+    raise Refusal(f"decision: comment {cid} already recorded (ruling edited after record, ignored)")
+  points = KIND_POINTS.get(found.kind, ())
+  if args.decision:
+    decision = next((d for d in foreman["decisions"] if d["id"] == args.decision), None)
+    if decision is None:
+      raise Refusal(f"decision: {unit} has no decision {args.decision}")
+    if decision["point"] not in points:
+      raise Refusal(f"decision: comment {cid} rules no point-{decision['point']} decision")
+    source = decision["source"]
+    named = source.removeprefix("comment ") if source.startswith("comment ") else decision["id"]
+    if found.kind == "option" and found.subject != named:
+      raise Refusal(f"decision: comment {cid} does not name {source if source.startswith('comment ') else decision['id']}")
+    return comment, found, [decision]
+  pending = pending_decisions(foreman)
+  fid_of = lambda text: text.partition(" — ")[0].strip().split(" ")[0]
+  if found.kind == "redesign":
+    decisions = pending if any(d["point"] in points for d in pending) else []
+  elif found.kind in ("upheld", "overruled"):
+    decisions = [d for d in foreman["decisions"] if d["point"] == 1 and not any(
+        r["decision"] == d["id"] and fid_of(r["ruling"]) == found.subject for r in foreman["rulings"])][-1:]
+  elif found.kind in ("round", "stop"):
+    decisions = [d for d in pending if d["point"] == 2][-1:]
+  elif found.kind == "option":
+    decisions = [d for d in foreman["decisions"] if d["point"] == 3 and found.subject in (d["id"], d["source"].removeprefix("comment "))][-1:]
+  else:
+    decisions = []
+  if not decisions:
+    dropped(store, args, f"comment {cid} does not name an open decision")
+  return comment, found, decisions
