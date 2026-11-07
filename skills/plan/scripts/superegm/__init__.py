@@ -1415,15 +1415,16 @@ def save_state(artifact_dir: Path, state: dict) -> None:
 # ---------------------------------------------------------------- scan
 
 
-def scan_text(text: str, config: dict, kind: str, dod=None, label="body") -> list:
+def scan_text(text: str, config: dict, kind: str, dod=None, label="body", limit=BODY_LIMIT) -> list:
   """The raw text rules, one `<rule>: <label>[:<line>]: <reason>` per problem: `body-size`,
   `banned-term`, `mention`, `merge-marker`, `dod-missing`. The mention rule alone skips a
   fenced code block and an inline code span (GitHub notifies for neither); a banned term is
-  refused wherever it stands, and a legitimate `@scope/pkg` goes in `allowed_mentions`."""
+  refused wherever it stands, and a legitimate `@scope/pkg` goes in `allowed_mentions`.
+  `limit=None` skips the body-size rule (`review ingest` bounds its comment by GitHub's own limit)."""
   problems = []
   size = len(text.encode("utf-8"))
-  if size > BODY_LIMIT:
-    problems.append(f"body-size: {label}: {size:,} bytes exceeds {BODY_LIMIT:,}: split it")
+  if limit is not None and size > limit:
+    problems.append(f"body-size: {label}: {size:,} bytes exceeds {limit:,}: split it")
   terms = [re.compile(t) for t in config["banned_terms"]]
   mention = config.get("fix_request_mention")
   allowed = set(config.get("allowed_mentions") or [])

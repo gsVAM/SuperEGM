@@ -10,6 +10,7 @@ import difflib
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -83,6 +84,8 @@ def register(subparsers):
   v.add_argument("--unit", required=True)
   v.add_argument("--round", type=int, required=True)
   v.add_argument("--dispatch", required=True, help="the dispatch id `foreman dispatch` printed")
+  i = core.add_parser(action, "ingest", "record a unit's PR review threads as external findings into its latest posted round")
+  i.add_argument("--unit", required=True)
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -96,7 +99,8 @@ def by_whom(parser, required):
 def run(args):
   try:
     return {"open": open_review, "record": record_round, "settle": settle_finding,
-            "status": status_review, "rule": rule_review, "post": post, "scope": scope_review}[args.action](args)
+            "status": status_review, "rule": rule_review, "post": post, "scope": scope_review,
+            "ingest": ingest}[args.action](args)
   except Refusal as refusal:
     print(refusal)
     return 1
@@ -938,6 +942,130 @@ def post(args) -> int:
     raise Refusal(f"posted on {(response.get('commit_id') or '')[:7]}, not {head[:7]}: round {n} not counted")
   word = count_posted(st, unit, entry, response.get("submitted_at") or core.now_iso(), rid, runcard)
   print(f"posted {word}")
+  return 0
+
+
+COMMENT_LIMIT = 65_536  # GitHub's review comment limit, in bytes: the ingest comment's bound
+
+
+def ingest(args) -> int:
+  """`review ingest --unit` (spec section 8, External review): every review thread of the unit's PR not yet
+  ingested, on a head the latest posted round reviewed, recorded as one `external:<login>` finding in that
+  round; the ones from a bot or a human at `ingest.human_role` or above posted first as one review comment
+  in `review post`'s form. Every read precedes every write: a refused read records nothing."""
+  from superegm.launch import app_login  # lazily: launch imports this module
+  st = core.store(core.git_toplevel(Path.cwd()))
+  card = core.require_runcard(args, SKILLS)
+  unit, config = args.unit, st.config
+  wave = card.get("parent") or args.runcard
+  data = core.load_foreman(st, unit)
+  entry = max((e for e in data["rounds"] if e.get("phase") == "posted" and e.get("head")),
+              key=lambda e: e["round"], default=None)
+  rid = head_review_id(st, unit)
+  if entry is None or rid is None:
+    print("0 ingested")
+    return 0
+  n, head = entry["round"], entry["head"]
+  repo, number = config["repo"], core.load_state(st.root)["units"][unit]["pr"]["number"]
+  root = core.git_toplevel(Path.cwd())
+  env = config["builder"]["gh_token_env"]
+  builder = app_login(config) or core.gh(["api", "user", "-q", ".login"], token=os.environ.get(env) if env else None).strip()
+  owners, done = set(config.get("owners") or []), set(data.get("ingested") or [])
+  threads = read_threads(repo, number, skip=set())
+  fresh = []
+  for thread in threads:
+    first = ((thread["body"] or "").strip().splitlines() or [""])[0]
+    if thread["id"] in done or thread["login"] == builder:
+      continue
+    if thread["login"] in owners and first.startswith("**Ruling:**"):
+      continue  # a ruling is read on the unit's issue alone
+    try:  # a thread on a later head waits for the round that reviews it
+      core.run_git(["merge-base", "--is-ancestor", thread["commit_id"] or "", head], root, check=True)
+    except core.HandoffError:
+      continue
+    fresh.append(thread)
+  roles = {r["login"]: r["role"] for r in core.load_card(st, wave).get("roles") or []}
+  read = {}
+  for thread in fresh:
+    if thread["bot"] or thread["login"] in roles or thread["login"] in read:
+      continue
+    try:
+      read[thread["login"]] = collaborator_role(repo, thread["login"])
+    except core.GhError as error:
+      raise Refusal(f"review ingest: {error}")
+  roles.update(read)
+  rnd = load_round(st, rid, n) or {"reviewers": {}}
+  minimum = ROLES.index(config["ingest"]["human_role"])
+  lines, postable, thread_of = {}, {}, {}
+  for thread in fresh:
+    ext = f"external:{thread['login']}"
+    role = None if thread["bot"] else roles.get(thread["login"], "none")
+    k = len(((rnd["reviewers"].get(ext) or {}).get("findings") or [])) + len(lines.get(ext, [])) + 1
+    line = thread_line(ext, n, k, thread, thread_severity(thread, config, role), config)
+    lines.setdefault(ext, []).append(line)
+    thread_of[line.split(" | ", 1)[0]] = thread["id"]
+    if thread["bot"] or ROLES.index(role) >= minimum:
+      postable.setdefault(ext, []).append(line)
+  edited = {t["id"]: t for t in threads if t["id"] in done}
+  folder = st.path("review", unit, f"pr{number}") / f"r{n}"
+  if postable:
+    shown = {"round": n, "reviewers": {ext: {"findings": parse_findings("\n".join(ls), ext, n)} for ext, ls in postable.items()}}
+    verdict = json.loads(core.read_text(folder / "ci.json"))["verdict"]
+    body = render_comment(shown, head, verdict, config.get("fix_request_mention") or None)
+    if len(body.encode("utf-8")) > COMMENT_LIMIT:
+      raise Refusal(f"review ingest: comment over 65,536 bytes ({sum(map(len, postable.values()))} threads)")
+    problems = core.scan_text(body, config, "comment", label="comment", limit=None)
+    if problems:
+      raise Refusal(problems[0].split(": ", 1)[1])
+  for login in read:
+    core.card_add(st, wave, "roles", {"login": login, "role": read[login]})
+  if postable:
+    core.atomic_write(folder / "ingest.md", body)
+    _, text = core.gh_post(f"repos/{repo}/pulls/{number}/reviews",
+                           {"commit_id": head, "event": "COMMENT", "body": f"@{folder / 'ingest.md'}"})
+    response = json.loads(text) if text.strip() else {}
+    if response.get("commit_id") != head:
+      raise Refusal(f"review ingest: posted on {(response.get('commit_id') or '')[:7]}, not {head[:7]}: nothing recorded")
+  for ext, ls in lines.items():
+    path = folder / f"external-{ext.split(':', 1)[1]}.findings"
+    core.atomic_write(path, "\n".join(ls) + "\n")
+    with contextlib.redirect_stdout(io.StringIO()):
+      code = record_round(argparse.Namespace(review=rid, round=n, sha256=head, reviewer=ext, findings=str(path), not_run=None,
+                                             isolation="exposed:ingest", model="none:none", effort="none:none",
+                                             runcard=args.runcard, unit=None, design=None, plan=None))
+    if code != 0:
+      raise Refusal(f"review ingest: {ext} not recorded in round {n} (exit {code})")
+  for m in round_numbers(st, rid):  # the thread's id on its finding; an edited thread's text re-read, its severity kept
+    saved, changed = load_round(st, rid, m), False
+    for reviewer, record in saved["reviewers"].items():
+      for finding in record["findings"] if reviewer.startswith("external:") else []:
+        if finding["id"] in thread_of and m == n:
+          finding["thread"], changed = thread_of[finding["id"]], True
+        thread = edited.get(finding.get("thread"))
+        if thread is not None:
+          claim = thread_line(reviewer, m, 1, thread, finding["severity"], config).split(" | ", 4)[4]
+          if claim != finding["claim"]:
+            finding["claim"], changed = claim, True
+    if changed:
+      core.atomic_write(st.path("reviews", rid, f"round-{m}.json"), saved)
+  data = core.load_foreman(st, unit)
+  data.setdefault("ingested", []).extend(t["id"] for t in fresh)
+  saved_entry = next(e for e in data["rounds"] if e["round"] == n)
+  word = None
+  if saved_entry.get("outcome") == "clean":  # the mirror of `review post`'s `clean` write
+    word = {3: "revise", 2: "cap-reached"}.get(status_code(rid, wave))
+    if word:
+      saved_entry.update({"outcome": word, "rewritten_from": "clean"})
+  core.save_foreman(st, unit, data)
+  core.journal(st, f"{unit} round {n} ingested {len(fresh)} under {wave}")
+  print(f"{len(fresh)} ingested")
+  if word:
+    rank = {s: i for i, s in enumerate(SEVERITIES)}
+    open_ext = [f for name, record in (load_round(st, rid, n) or {"reviewers": {}})["reviewers"].items()
+                if name.startswith("external:") for f in record["findings"] if f["disposition"] is None]
+    login = min(open_ext, key=lambda f: rank[f["severity"]])["id"].rsplit("-", 2)[0] if open_ext else "external:?"
+    core.journal(st, f"{unit} ready again ({login}) under {wave}")
+    print(f"outcome: {word}")
   return 0
 
 
