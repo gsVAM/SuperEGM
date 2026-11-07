@@ -518,8 +518,10 @@ def record_round(args) -> int:
     rnd.update({"scope": rows, "out_of_scope": [],
                 "note": rows[0][1][1:-1] if rows and rows[0][0] == "whole" else None})
   refused = []
+  if args.not_run and reviewer.startswith("external:"):  # an ingest's record holds findings: a not-run would erase them
+    raise core.HandoffError(f"review record: --not-run is refused for an external reviewer ({reviewer})")
   if args.not_run:
-    record = {"findings": [], "not_run": args.not_run, "isolation": None, "model": None, "effort": None}
+    record ={"findings": [], "not_run": args.not_run, "isolation": None, "model": None, "effort": None}
   else:
     path = Path(args.findings)
     text = core.read_text(path)
@@ -970,8 +972,12 @@ def ingest(args) -> int:
   was posted for (`record_round` stamps the root id under `thread` in the same write), and the threads join
   `ingested[]`. With no new thread an ingest still re-reads an edited thread's text into its finding (its
   severity kept), backfills `ingested[]` from a finding's `thread`, and rewrites a `clean` outcome; an ingest
-  that finds nothing to change writes nothing. A `cap-reached` it wrote prints `outcome: cap-reached` again on
-  every ingest until a Decision point 2 (`source` `review <id> cap`) is opened after the round's `posted_at`."""
+  that finds nothing to change writes nothing. A plan finished into an earlier round than the latest posted one
+  rewrites the latest's `clean` when a finding it recorded is an unsettled high or medium (`review status` reads
+  the latest completed round alone). With no builder App and no builder token the ingest refuses: `gh api user`
+  would answer the owner's login. A `cap-reached` it wrote prints `outcome: cap-reached` again on every ingest
+  until a Decision point 2 (`source` `review <id> cap`) is opened at or after the round's `posted_at` (`asked_at`
+  is the host's clock, `posted_at` GitHub's: a host clock behind GitHub's delays the stop)."""
   from superegm.launch import app_login  # lazily: launch imports this module
   st = core.store(core.git_toplevel(Path.cwd()))
   card = core.require_runcard(args, SKILLS)
@@ -1005,7 +1011,10 @@ def ingest(args) -> int:
   read, new = {}, plan is None
   if new:
     env = config["builder"]["gh_token_env"]
-    builder = app_login(config) or core.gh(["api", "user", "-q", ".login"], token=os.environ.get(env) if env else None).strip()
+    token = os.environ.get(env) if env else None
+    if not app_login(config) and not token:  # with no token `gh api user` answers the owner's login, not the builder's
+      raise Refusal(f"review ingest: {env} is not set: the builder's login is unknown")
+    builder = app_login(config) or core.gh(["api", "user", "-q", ".login"], token=token).strip()
     owners = set(config.get("owners") or [])
     fresh = []
     for thread in threads:
@@ -1052,7 +1061,7 @@ def ingest(args) -> int:
         raise Refusal(f"review ingest: comment over 65,536 bytes ({sum(map(len, postable.values()))} threads)")
       problems = core.scan_text(body, config, "comment", label="comment", limit=None)
       if problems:
-        raise Refusal(problems[0].split(": ", 1)[1])
+        raise Refusal(f"review ingest: {problems[0].split(': ', 1)[1]}")
     plan = {"round": n, "head": head, "lines": lines, "threads": thread_of, "body": body, "done": False}
   thread_of, lines, body = plan["threads"], plan["lines"], plan["body"]  # a resumed plan's own, verbatim
   present = None
@@ -1116,6 +1125,11 @@ def ingest(args) -> int:
   word = None
   if saved_entry.get("outcome") == "clean":  # the mirror of `review post`'s `clean` write
     word = {3: "revise", 2: "cap-reached"}.get(status_code(rid, wave))
+    if not word and lines and n < latest["round"]:  # a plan finished into an earlier round: `review status` reads the latest alone
+      ids = set(thread_of)
+      if any(blocking(f) and f["disposition"] is None for record in load_round(st, rid, n)["reviewers"].values()
+             for f in record["findings"] if f["id"] in ids):
+        word = "cap-reached" if "cap yes" in evaluate(st, load_review(st, rid), wave).line else "revise"
     if word:
       saved_entry.update({"outcome": word, "rewritten_from": "clean"})
   # point 2 opened since the round was posted: `decision open` records the PR's head then, not the round's
