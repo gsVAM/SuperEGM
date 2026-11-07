@@ -811,6 +811,43 @@ def read_threads(repo: str, number: int, skip: set) -> list[dict]:
   return threads
 
 
+def collaborator_role(repo: str, login: str) -> str:
+  """The login's repository role (`collaborators/<login>/permission`); `none` when GitHub answers 404 (not a
+  collaborator). Any other refusal propagates."""
+  try:
+    data = core.gh_json(["api", f"repos/{repo}/collaborators/{login}/permission"]) or {}
+  except core.GhError as error:
+    if error.http_status == 404:
+      return "none"
+    raise
+  role = data.get("role_name") or data.get("permission") or "none"
+  return role if role in ROLES else "none"
+
+
+def thread_severity(thread: dict, config: dict, role: str | None) -> str:
+  """A thread's severity (spec section 8, External review): a human below `ingest.human_role` is `low`; a bot's
+  review body is `low`; a human's review body is `medium` when its first line carries a severity word or a
+  mapped word, else `low`; an inline thread is the word its first line starts with or carries in a bold or
+  bracketed marker, else `low`. Words match whole and case-folded."""
+  ingest = config["ingest"]
+  if not thread["bot"] and ROLES.index(role if role in ROLES else "none") < ROLES.index(ingest["human_role"]):
+    return "low"
+  if thread["review_body"] and thread["bot"]:
+    return "low"
+  words = {w.casefold(): s for w, s in ingest["severity_words"].items()}
+  words.update({s: s for s in SEVERITIES})
+  first = ((thread.get("body") or "").strip().splitlines() or [""])[0].casefold()
+  found = [m.group(0) for m in re.finditer(r"[^\W_]+(?:[-'][^\W_]+)*", first)]
+  if thread["review_body"]:
+    return "medium" if any(w in words for w in found) else "low"
+  starts = re.match(r"\W*([^\W_]+)", first)
+  marked = [(m.group(1) or m.group(2)).strip(" :") for m in re.finditer(r"\*\*([^*]+?)\*\*|\[([^\]]+?)\]", first)]
+  for word in ([starts.group(1)] if starts else []) + marked:
+    if word in words:
+      return words[word]
+  return "low"
+
+
 def render_comment(round_json: dict, head: str, ci_verdict: str, mention) -> str:
   """The configured mention as line 1 when set, the header, the round's finding lines (section 8's form)
   and `CI: <verdict>`; no run card, no model names."""
