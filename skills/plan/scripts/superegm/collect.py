@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # From the elephant-goldfish-model (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17); an unreplied external high or medium carried forward (U21).
 
 """superegm collect: the foreman's findings of a round through one `review record --reviewer foreman`, or a
 round that could not complete with `--not-run`."""
@@ -67,14 +67,15 @@ def collect(args, card):
   login, comments = parse_comments(core.read_text(r / "comments.md"))
   rid = head_review_id(st, unit)
   prior = max((e["round"] for e in data["rounds"] if e.get("phase") == "posted"), default=None)
-  prior_ci_fid, prior_tdd, prior_scope, contest_of = None, [], {}, {}
+  prior_ci_fid, prior_tdd, prior_scope, contest_of, external = None, [], {}, {}, []
   for e in data["rounds"]:  # every posted round: an overruled out-of-Scope finding widens the Scope for good;
-    if e.get("phase") == "posted":  # a contest finding names the goldfish finding a `fixed` reply may answer under
+    if e.get("phase") == "posted":  # a contest or carried finding names the finding a reply may answer under
       for f in prior_foreman_findings(st, rid, e["round"]):
         if f["claim"] == "changed path outside Scope paths":
           prior_scope[f["id"]] = f["location"]
-        if (m := re.match(r"contested (\S+):", f["claim"])):
+        if (m := re.match(r"(?:contested|unreplied) (\S+):", f["claim"])):
           contest_of[f["id"]] = m.group(1)
+      external += external_findings(st, rid, e["round"])
   for f in prior_foreman_findings(st, rid, prior):
     if f["location"] == "ci":
       prior_ci_fid = f["id"]
@@ -82,7 +83,8 @@ def collect(args, card):
       prior_tdd.append(f["id"])
   lines, contested = foreman_findings(n, json.loads(core.read_text(r / "ci.json"))["verdict"], text, scope, worktree, changed,
                                       core.read_text(r / "pr_body.md"), comments, login, prior, prior_ci_fid,
-                                      tdd_order.commits_of(worktree, entry["merge_base"]), prior_tdd, prior_scope, contest_of)
+                                      tdd_order.commits_of(worktree, entry["merge_base"]), prior_tdd, prior_scope, contest_of,
+                                      external)
   findings = r / "foreman.findings"
   core.atomic_write(findings, "".join(line + "\n" for line in lines))
   with contextlib.redirect_stdout(io.StringIO()):
@@ -120,6 +122,15 @@ def prior_foreman_findings(st, rid, prior) -> list:
   return ((rnd.get("reviewers") or {}).get("foreman") or {}).get("findings") or []
 
 
+def external_findings(st, rid, rnd_n) -> list:
+  """The `external:<login>` findings `review ingest` recorded in a posted round's file, or []."""
+  if not rnd_n or not rid:
+    return []
+  rnd = review.load_round(st, rid, rnd_n) or {}
+  return [f for name, record in (rnd.get("reviewers") or {}).items() if name.startswith("external:")
+          for f in record.get("findings") or []]
+
+
 def parse_comments(text: str) -> tuple:
   """`comments.md` back: the builder login and `{kind, number, id, login, at, body}` per entry."""
   lines = text.splitlines()
@@ -140,10 +151,12 @@ def parse_comments(text: str) -> tuple:
 
 def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, worktree: Path, changed: list, pr_body: str,
                      comments: list, login: str, prior_round, prior_ci_fid, commits: list = (), prior_tdd_fids: list = (),
-                     prior_scope: dict = None, contest_of: dict = None) -> tuple:
+                     prior_scope: dict = None, contest_of: dict = None, external: list = ()) -> tuple:
   """The foreman's high findings of spec section 11 in this order: CI, the DoD items, scope, tdd-order,
-  deviations, contested, upheld; and `builder_contested[]` for the contested ones. Rulings and replies
-  count only from the right author: rulings from anyone but the builder, replies from the builder."""
+  deviations, contested, upheld, unreplied external; and `builder_contested[]` for the contested ones. Rulings
+  and replies count only from the right author: rulings from anyone but the builder, replies from the builder.
+  An external high or medium with no disposition is carried until a reply names it, or names a posted carried
+  copy of it (spec section 8, External review)."""
   found, contested = [], []
   if ci_verdict != "ci green":
     found.append(("ci", f"CI not green on this head: {ci_verdict}"))
@@ -187,6 +200,13 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
                   and m.group(1) in answers and m.group(2) == "fixed" for o in comments)
       if ruling.group(2) == "upheld" and not fixed:
         found.append((where(c), f"upheld {fid}: no `fixed` reply"))
+  replied = {m.group(1) for c in comments if c["login"] == login and (m := REPLY_RE.match(c["body"]))}
+  for f in external:
+    if f["disposition"] is not None or f["severity"] not in ("high", "medium"):
+      continue
+    copies = {cid for cid, original in (contest_of or {}).items() if original == f["id"]}
+    if not ({f["id"]} | copies) & replied:
+      found.append((f["location"], f"unreplied {f['id']}: {f['claim']}"))
   lines = [f"foreman-{round_n}-{i} | high | {location} | regression: no | {claim}" for i, (location, claim) in enumerate(found, 1)]
   return lines, contested
 
