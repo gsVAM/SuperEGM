@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's test world (the fake gh, the harness, the sample repository and plan) moved out of test_helper.py so every unit's tests share it; the sample plan in the section 9.1 grammar under an approval record (U05).
+# Modified by SuperEGM (gsVAM), 2026: EGM's test world (the fake gh, the harness, the sample repository and plan) moved out of test_helper.py so every unit's tests share it; the sample plan in the section 9.1 grammar under an approval record (U05); the PR review threads and collaborator roles of the fake gh (U21).
 
 """The test world: a temporary repository, a store, the fake `gh` and the harness.
 
@@ -228,6 +228,7 @@ class FakeGitHub:
     self.prs, self.graphql = {}, {}
     self.check_runs, self.combined = {}, {}
     self.comments, self.reviews = {}, {}
+    self.threads, self.roles = {}, {}  # PR review comments by PR number; collaborator permission by login (an int: that HTTP error)
     self.calls = []
     self.push = True
     self.rate_limit_hits = 0
@@ -388,6 +389,17 @@ class FakeGitHub:
     if match:
       assert paginate, args
       return self.ok([self.comments.get(int(match.group(1)), [])])
+    match = re.fullmatch(r"/pulls/(\d+)/(comments|reviews)", rest)
+    if match:
+      assert paginate and "--slurp" in args, args
+      store = self.threads if match.group(2) == "comments" else self.reviews
+      return self.ok([store.get(int(match.group(1)), [])])
+    match = re.fullmatch(r"/collaborators/([^/]+)/permission", rest)
+    if match:
+      role = self.roles.get(match.group(1), 404)
+      if isinstance(role, int):
+        return 1, "", f"gh: collaborator permission (HTTP {role})"
+      return self.ok(role)
     match = re.fullmatch(r"/issues/(\d+)/sub_issues", rest)
     if match:
       assert paginate, args

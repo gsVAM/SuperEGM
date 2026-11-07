@@ -1047,3 +1047,19 @@ def test_ingest_config_key_and_the_init_sentence(world, ingest, expect):
       superegm.load_config(world.repo)
     return
   assert superegm.load_config(world.repo)["ingest"] == expect
+
+
+from superegm.review import read_threads, header
+
+SHA, AT = "c" * 40, "2026-11-04T10:00:00Z"
+rv = lambda rid, login, body, state="COMMENTED": {"id": rid, "user": {"login": login}, "body": body, "state": state, "commit_id": SHA, "submitted_at": AT}
+cm = lambda cid, login, body, reply_to=None, review_id=None: {"id": cid, "user": {"login": login}, "body": body, "in_reply_to_id": reply_to,
+  "pull_request_review_id": review_id, "path": "src/x.py", "line": 3, "commit_id": SHA, "created_at": AT}
+
+def test_read_threads_keeps_roots_and_qualifying_review_bodies(world):
+  world.gh.threads[70] = [cm(1, "devin-ai-integration[bot]", "**Bug**: off by one", review_id=10), cm(2, "alice", "agreed", reply_to=1), cm(3, "bob", "why?")]
+  world.gh.reviews[70] = [rv(10, "devin-ai-integration[bot]", "2 issues found"), rv(11, "carol", "ship it", "APPROVED"),
+                          rv(13, "owner", f"{header(1, SHA)}\n\nchange-review-1-1 | high | x | regression: no | y"), rv(14, "erin", "**Issue**: the retry never backs off")]
+  threads = read_threads(REPO, 70, skip={3})
+  assert [(t["id"], t["bot"], t["review_body"], t["path"], t["line"], t["commit_id"], t["created_at"]) for t in threads] == [(1, True, False, "src/x.py", 3, SHA, AT), (14, False, True, None, None, SHA, AT)]
+  assert threads[0]["body"] == "**Bug**: off by one\n\nagreed" and threads[1]["login"] == "erin"
