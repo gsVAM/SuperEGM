@@ -582,3 +582,14 @@ def test_launch_marks_a_unit_whose_clean_outcome_an_ingest_rewrote(world, monkey
   assert "in flight: none" in out and "marked: U07" in out, out
   launched(s, "U07", "running", rnd=2)
   assert "in flight: U07" in world.run("launch", "--runcard", card)[1]
+
+
+ROOT = SKILL.parents[2]
+INGEST_PROSE = [("skills/wave/SKILL.md", n) for n in ("3b. `superegm review ingest`", "awaiting-merge units included, stopped units excluded", "`0 ingested` before its first posted round",
+  "`outcome: revise`", "never `launch-builder` here", "`outcome: cap-reached` → Decision point 2")] + [
+                ("resources/review_panels.md", "`external:<login>`"), ("resources/review_panels.md", "`review ingest`")]
+
+
+@pytest.mark.parametrize("path, needle", INGEST_PROSE)
+def test_the_batch_ingest_step_and_the_external_reviewer_id_prose(path, needle):
+  assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
