@@ -1063,3 +1063,19 @@ def test_read_threads_keeps_roots_and_qualifying_review_bodies(world):
   threads = read_threads(REPO, 70, skip={3})
   assert [(t["id"], t["bot"], t["review_body"], t["path"], t["line"], t["commit_id"], t["created_at"]) for t in threads] == [(1, True, False, "src/x.py", 3, SHA, AT), (14, False, True, None, None, SHA, AT)]
   assert threads[0]["body"] == "**Bug**: off by one\n\nagreed" and threads[1]["login"] == "erin"
+
+
+from superegm.review import collaborator_role, thread_severity
+
+T = lambda body, login="devin-ai-integration[bot]", review_body=False: {"login": login, "bot": login.endswith("[bot]"), "body": body, "review_body": review_body}
+
+@pytest.mark.parametrize("thread, role, severity", [
+  (T("**Bug**: off by one"), None, "high"), (T("Found a **bug** here"), None, "high"), (T("[issue] the retry never backs off"), None, "medium"),
+  (T("[Medium] the cap is off"), None, "medium"), (T("nit: typo"), None, "low"), (T("this is not an issue"), None, "low"), (T("2 issues found", review_body=True), None, "low"),
+  (T("bug: the cap is off", "alice"), "write", "high"), (T("bug: the cap is off", "alice"), "none", "low"),
+  (T("an issue in the loop", "alice", True), "admin", "medium"), (T("LGTM, merging tomorrow", "alice", True), "admin", "low")])
+def test_thread_severity_rules_and_the_role_read(world, thread, role, severity):
+  if role not in (None, "none"):
+    world.gh.roles["alice"] = {"permission": "write", "role_name": role}
+  seen = collaborator_role(REPO, "alice") if role else None
+  assert seen == role and thread_severity(thread, {"ingest": INGEST}, seen) == severity
