@@ -681,11 +681,14 @@ def test_a_by_hand_ruling_rules_only_a_finding_its_decision_names_and_its_point_
   q1 = opened(1, "review head-U01-c1 round 1", "f-1-1 | high | a.py | regression: no | x\n")
   assert rule("70", "f-1-9 finding upheld") == (1, "decision: comment 70 does not name an open decision\n")
   assert rule("70", "f-1-9 finding upheld", "--decision", q1) == (1, f"decision: comment 70 rules f-1-9, not a finding of {q1}\n")
+  typed = lambda qid, ruling: world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", ruling, "--by", "owner", "--runcard", card)[0]
+  assert typed(q1, "f-1-1 finding upheld") == 0
   q2 = opened(1, "review head-U01-c1 round 2", "f-2-1 | high | a.py | regression: no | y\n")
-  q3 = opened(1, "review head-U01-c1 round 2", "f-2-1 | high | a.py | regression: no | y\n")
   assert rule("71", "f-2-1 finding overruled — x", "--decision", q2) == (0, "recorded (comment 71)\n")
+  q3 = opened(1, "review head-U01-c1 round 3", "f-2-1 | high | a.py | regression: no | y\nf-3-1 | high | a.py | regression: no | z\n")
   assert rule("72", "f-2-1 finding upheld", "--decision", q3) == (1, "decision: f-2-1 already ruled\n")
   assert "ruling dropped (owner, comment 72): f-2-1 already ruled" in journal()
+  assert typed(q3, "f-3-1 finding upheld") == 0
   q4 = opened(1, "review head-U01-c1 round 2", "foreman-1-2 | high | tests/unit/test_hooks.py | regression: no | tdd-order: S1\n")
   assert rule("73", "foreman-1-2 finding overruled") == (0, "recorded (comment 73)\n")
   r = foreman_of(s, "U01")["rulings"][-1]
@@ -693,8 +696,8 @@ def test_a_by_hand_ruling_rules_only_a_finding_its_decision_names_and_its_point_
   assert rule("74", "foreman-1-3 finding overruled") == (1, "decision: comment 74 allows foreman-1-3; no open decision names it\n")
   assert "comment 74" not in journal()
   opened(3, "comment 51", "**Builder status:** BLOCKED\nWhich?\n- (a) redesign\n- (b) keep it\n")
-  opened(3, "comment 50", "**Builder status:** BLOCKED\nWhich?\n- (a) stop retrying on 4xx\n- (b) keep retrying\n")
   assert rule("75", "(a)") == (0, "recorded (comment 75)\n")
+  opened(3, "comment 50", "**Builder status:** BLOCKED\nWhich?\n- (a) stop retrying on 4xx\n- (b) keep retrying\n")
   assert rule("76", "(a)") == (0, "recorded (comment 76)\n")
   assert not foreman_of(s, "U01").get("stopped") and not list(s.path("foreman", "U01").parent.glob("U01-*.brainstorm.md"))
 
