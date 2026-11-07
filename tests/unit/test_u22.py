@@ -106,3 +106,25 @@ def test_an_option_the_comment_does_not_offer_binds_nothing():
               {"id": 5, "user": {"login": "owner"}, "body": "**Ruling:** (3) (b) keep it — fine"}]
   text = prompt_text(2, "U01", "body", "orders", "orient", comments, [], None, "builder-bot", "audit", owners=["owner"], foreman={})
   assert re.findall(r"^## \S+ · comment (\d+)$", text.split("# Comments on issue #2\n\n", 1)[1], re.M) == ["3", "5"]
+
+
+# Round 4 (PR #96 review): the record binds a decision whichever id a later comment names it by; an edited recorded
+# comment is shown as its record whatever the edit made of it.
+
+
+def test_a_comment_naming_a_ruled_decision_by_its_id_binds_nothing():
+  comments = [{"id": 3, "user": {"login": "builder-bot"}, "body": "**Deviation (dod):** x\n- (a) proceed\n- (b) stop\n**Builder status:** BLOCKED"},
+              {"id": 4, "user": {"login": "owner"}, "body": "**Ruling:** (q1) (b) stop — changed", "created_at": "t2", "updated_at": "t2"}]
+  foreman = {"decisions": [{"id": "q1", "point": 3, "source": "comment 3", "options": ["(a) proceed", "(b) stop", "stop the unit"]}],
+             "rulings": [{"decision": "q1", "ruling": "(a)", "by": "judges:p-1", "reason": None, "posted": "comment 9", "posted_at": "t1"}]}
+  text = prompt_text(2, "U01", "body", "orders", "orient", comments, [], None, "builder-bot", "audit", owners=["owner"], foreman=foreman)
+  assert re.findall(r"^## \S+ · comment (\d+)$", text.split("# Comments on issue #2\n\n", 1)[1], re.M) == ["3"]
+
+
+@pytest.mark.parametrize("edited", ["now just prose", "", "**Rulng:** f-1-1 finding overruled — x"])
+def test_an_edited_recorded_comment_shows_its_record_whatever_the_edit(edited):
+  comments = [{"id": 4, "user": {"login": "owner"}, "body": edited, "created_at": "t1", "updated_at": "t3"}]
+  foreman = {"decisions": [{"id": "q1", "point": 1, "source": "review r round 1"}],
+             "rulings": [{"decision": "q1", "ruling": "f-1-1 finding upheld", "by": "owner", "posted": "comment 4", "posted_at": "t1"}]}
+  text = prompt_text(2, "U01", "body", "orders", "orient", comments, [], None, "builder-bot", "audit", owners=["owner"], foreman=foreman)
+  assert "## owner · comment 4\n**Ruling:** f-1-1 finding upheld\n(as recorded by owner; the comment was edited after its record)\n" in text

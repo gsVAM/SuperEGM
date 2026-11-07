@@ -445,6 +445,14 @@ CASES |= {  # round 3 (PR #96 review): an option the comment does not offer rule
                                          "comments": {2: [c(15, "owner", "**Ruling:** foreman-1-2 allowed — an adopted history")]}},
                                         ["src/hooks.py | regression: no | Exists item 3: path absent",
                                          "tests/unit/test_hooks.py | regression: no | tdd-order: S1: no feat(S1) commit touches src/hooks.py"])}
+CASES |= {  # round 4 (PR #96 review): a ruling binds from the unit's issue alone; a fixed reply answers an upheld ruling only after its record
+  "deviation-ruled-on-the-pr": ({"comments": {2: [c(12, "builder-bot", DEV)], 70: [c(13, "owner", "**Ruling:** (12) (a) — drop it")]}},
+                                ["issue #2 comment 12 | regression: no | deviation (dod) unruled"]),
+  "upheld-recorded-after-the-fix": ({"prior": True, "comments": {2: [c(15, "owner", "**Ruling:** change-review-1-1 finding upheld (fix it)")],
+                                                                 70: [c(16, "builder-bot", "**Reply change-review-1-1:** fixed", at="2026-11-02T14:00:00Z")]},
+                                     "decisions": UPHELD_Q1["decisions"],
+                                     "rulings": [UPHELD_Q1["rulings"][0] | {"posted_at": "2026-11-02T15:00:00Z"}]},
+                                    ["issue #2 comment 15 | regression: no | upheld change-review-1-1: no `fixed` reply"])}
 
 
 @pytest.mark.parametrize("name", list(CASES))

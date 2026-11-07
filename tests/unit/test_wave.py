@@ -661,6 +661,44 @@ def test_a_by_hand_ruling_without_decision_rules_what_its_form_names_once(world,
   assert len(list(brief.parent.glob("U01-*.brainstorm.md"))) == 1
 
 
+def test_a_by_hand_ruling_rules_only_a_finding_its_decision_names_and_its_point_decides_the_effect(world, monkeypatch):
+  """Round 4 (PR #96 review): a fid no question names falls back only to a point-1 decision naming no finding; a fid
+  ruled on another decision is dropped with `--decision` too; an `allowed` ruling records on the open point-1 decision
+  naming its fid, else is refused unjournaled (`collect` reads it); a point-3 option whose text begins `stop` or is
+  `redesign` neither stops the unit nor writes a brief."""
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "builder-token")
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "rounds": [{"round": 1, "phase": "posted", "outcome": "revise", "launch": 1}]})
+  set_config(world, repo=REPO, owners=["owner"])
+  fake_gh(world, {f"repos/{REPO}/issues/comments/{cid}": {"id": cid, "user": {"login": "owner"}, "body": body, "created_at": "2026-11-03T10:00:00Z"}
+                  for cid, body in ((70, "**Ruling:** f-1-9 finding upheld\n"), (71, "**Ruling:** f-2-1 finding overruled — x\n"),
+                                    (72, "**Ruling:** f-2-1 finding upheld\n"), (73, "**Ruling:** foreman-1-2 allowed — an adopted history\n"),
+                                    (74, "**Ruling:** foreman-1-3 allowed — y\n"), (75, "**Ruling:** (51) (a) redesign — fine\n"),
+                                    (76, "**Ruling:** (50) (a) stop retrying on 4xx — fine\n"))})
+  opened = lambda point, source, text: world.run("decision", "open", "--unit", "U01", "--point", point, "--question", question(world, text), "--source", source, "--runcard", card)[1].splitlines()[0]
+  rule = lambda posted, ruling, *d: world.run("decision", "rule", "--unit", "U01", *d, "--ruling", ruling, "--by", "owner", "--posted", posted, "--runcard", card)
+  journal = lambda: s.path("journal").read_text(encoding="utf-8")
+  q1 = opened(1, "review head-U01-c1 round 1", "f-1-1 | high | a.py | regression: no | x\n")
+  assert rule("70", "f-1-9 finding upheld") == (1, "decision: comment 70 does not name an open decision\n")
+  assert rule("70", "f-1-9 finding upheld", "--decision", q1) == (1, f"decision: comment 70 rules f-1-9, not a finding of {q1}\n")
+  q2 = opened(1, "review head-U01-c1 round 2", "f-2-1 | high | a.py | regression: no | y\n")
+  q3 = opened(1, "review head-U01-c1 round 2", "f-2-1 | high | a.py | regression: no | y\n")
+  assert rule("71", "f-2-1 finding overruled — x", "--decision", q2) == (0, "recorded (comment 71)\n")
+  assert rule("72", "f-2-1 finding upheld", "--decision", q3) == (1, "decision: f-2-1 already ruled\n")
+  assert "ruling dropped (owner, comment 72): f-2-1 already ruled" in journal()
+  q4 = opened(1, "review head-U01-c1 round 2", "foreman-1-2 | high | tests/unit/test_hooks.py | regression: no | tdd-order: S1\n")
+  assert rule("73", "foreman-1-2 finding overruled") == (0, "recorded (comment 73)\n")
+  r = foreman_of(s, "U01")["rulings"][-1]
+  assert (r["decision"], r["ruling"], r["reason"]) == (q4, "foreman-1-2 finding overruled", "an adopted history")
+  assert rule("74", "foreman-1-3 finding overruled") == (1, "decision: comment 74 allows foreman-1-3; no open decision names it\n")
+  assert "comment 74" not in journal()
+  opened(3, "comment 51", "**Builder status:** BLOCKED\nWhich?\n- (a) redesign\n- (b) keep it\n")
+  opened(3, "comment 50", "**Builder status:** BLOCKED\nWhich?\n- (a) stop retrying on 4xx\n- (b) keep retrying\n")
+  assert rule("75", "(a)") == (0, "recorded (comment 75)\n")
+  assert rule("76", "(a)") == (0, "recorded (comment 76)\n")
+  assert not foreman_of(s, "U01").get("stopped") and not list(s.path("foreman", "U01").parent.glob("U01-*.brainstorm.md"))
+
+
 def test_launch_marks_a_unit_whose_clean_outcome_an_ingest_rewrote(world, monkeypatch):
   s, card, hid, _ = filed(world, units=("U07", "U08"), max_in_flight=1)
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
@@ -719,3 +757,16 @@ def test_the_wave_skill_and_the_orders_quote_the_ruling_forms(path, needle):
     "option on a `BLOCKED` comment → `launch-builder` now"])
 def test_a_ruling_by_comment_continues_as_its_point_does(needle):
   assert needle in SKILL.read_text(encoding="utf-8"), needle
+
+
+@pytest.mark.parametrize("path, needle", [  # round 4 (PR #96 review): how `--ruling` is built, the allowance, NEEDS_CONTEXT, the orders' shapes
+    ("skills/wave/SKILL.md", "`--ruling` is the event's words as the point's form"),
+    ("skills/wave/SKILL.md", "`<fid> allowed` as `--ruling '<fid> finding overruled'`"),
+    ("skills/wave/SKILL.md", "no open decision names it"),
+    ("skills/wave/SKILL.md", "`BLOCKED` or `NEEDS_CONTEXT` comment"),
+    ("skills/wave/SKILL.md", "`ruling dropped (<by>, comment <id>): …`\n  for one naming no open decision or an already ruled one"),
+    ("skills/wave/references/builder_orders.md", "`**Ruling:** (<decision id>) <option> — <reason>`"),
+    ("skills/wave/references/builder_orders.md", "(as recorded by <by>; the comment was edited after its record)"),
+    ("skills/wave/references/builder_orders.md", "(judges <panel>, leavemealone)")])
+def test_the_ruling_prose_names_how_a_ruling_is_applied_and_read(path, needle):
+  assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
