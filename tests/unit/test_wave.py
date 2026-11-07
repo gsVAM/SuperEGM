@@ -455,8 +455,8 @@ def test_the_wave_skill_body_is_the_driver_loop(world):
                   "### Decision point 2", "### Decision point 3", "## Stops and by-hand rulings", "## Retries", "## The end"):
     assert heading in body, heading
   assert body.count("Leavemealone-mode: U11 wires §13.2 here.") == 3
-  for order in ("1. `landed`", "2. `closed`", "3. `exit` and `status`", "4. `superegm foreman dispatch`", "5. `superegm launch`",
-                "6. `superegm report`"):
+  for order in ("1. `landed`", "2. `closed`", "3. `exit` and `status`", "4. `ruling`", "5. `superegm foreman dispatch`", "6. `superegm launch`",
+                "7. `superegm report`"):
     assert order in body, order
   for cited in ("unit_state", "loop_ended", "word_action", "recovered", "ci_wait_minutes", "--idle", "--posted closed:",
                 "status --wait", "launch-builder", "record-launch", "review settle", "review rule", "review status",
@@ -606,3 +606,14 @@ INGEST_PROSE = [("skills/wave/SKILL.md", n) for n in ("3b. `superegm review inge
 @pytest.mark.parametrize("path, needle", INGEST_PROSE)
 def test_the_batch_ingest_step_and_the_external_reviewer_id_prose(path, needle):
   assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
+
+
+FORMS_PROSE = [("skills/wave/SKILL.md", n) for n in ("`closed`, `ruling`", "- `ruling` lines", "ruling edited after record, ignored", "ruling dropped (")] + [
+               ("skills/wave/references/builder_orders.md", n) for n in ("**Ruling:** <fid> finding upheld", "**Ruling:** <fid> finding overruled — <reason>",
+               "**Ruling:** one more round", "**Ruling:** stop", "**Ruling:** <fid> allowed — <reason>",
+               "**Ruling:** redesign — <reason>", "`config.owners`")]
+
+
+@pytest.mark.parametrize("path, needle", FORMS_PROSE)
+def test_the_wave_skill_and_the_orders_quote_the_ruling_forms(path, needle):
+  assert needle in (SKILL.parents[2] / path).read_text(encoding="utf-8"), (path, needle)
