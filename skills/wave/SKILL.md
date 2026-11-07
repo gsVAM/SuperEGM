@@ -243,7 +243,11 @@ Leavemealone-mode: U11 wires §13.2 here.
   author, the form exact, else it is text). First run
   `python3 '<HELPER>' decision rule --unit <U> --ruling '<its option>' --by <login> --posted <comment-id> --runcard '<CARD>'`
   with no `--decision`: the comment names its decision (`redesign` every
-  pending one), and a `--ruling` other than the comment's is refused. Only on
+  pending one), and a `--ruling` other than the comment's is refused.
+  `--ruling` is the event's words as the point's form: `<fid> finding upheld`
+  or `<fid> finding overruled`, `one more round`, `stop`, the option's letter
+  `(<x>)`, `redesign — <why>`; an `allowed` ruling as for an open decision,
+  `<fid> allowed` as `--ruling '<fid> finding overruled'`. Only on
   exit 0 continue as that point's section does. Point 1: `finding overruled`
   → `review settle … --disposition contested --owner --posted <comment id>`;
   then, for `finding upheld` too, by `review status`: 0 → the unit awaits
@@ -252,12 +256,13 @@ Leavemealone-mode: U11 wires §13.2 here.
   `one more round` → `review rule … --ruling continue --owner`, then
   `launch-builder`; `stop` or `redesign` → `review rule … --ruling stop --owner`
   (a `redesign` at point 1 runs no `review rule`). Point 3: `relaunch`, or an
-  option on a `BLOCKED` comment → `launch-builder` now; `stop the unit` stops it.
-  An `allowed` ruling takes no `decision rule`: `collect` reads a prior
-  round's `tdd-order` one; a `dod-<n>` or `test-delta` one the owner weighs.
+  option on a `BLOCKED` comment → `launch-builder` now, as for any option on a
+  `BLOCKED` or `NEEDS_CONTEXT` comment; `stop the unit` stops it. An `allowed`
+  ruling refused with `no open decision names it` needs nothing more: `collect` reads a prior round's
+  `tdd-order` one; a `dod-<n>` or `test-delta` one the owner weighs.
   Nothing is posted; the journal says `ruling edited after record, ignored`
   for a recorded comment re-read, and `ruling dropped (<by>, comment <id>): …`
-  for one naming no open decision; take either as the fact it states, and
+  for one naming no open decision or an already ruled one; take either as the fact it states, and
   run nothing else for it.
 - A stopped unit keeps its branch and its open issue, is never dispatched or
   launched again, and is listed in the report with its unlanded dependants

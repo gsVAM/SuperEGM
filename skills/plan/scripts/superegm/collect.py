@@ -91,7 +91,7 @@ def collect(args, card):
                                       core.read_text(r / "pr_body.md"), comments, login, prior, prior_ci_fid,
                                       tdd_order.commits_of(worktree, entry["merge_base"]), prior_tdd, prior_scope, contest_of,
                                       external, earlier, disposed, posted, handoff.config.get("owners") or [],
-                                      recorded_rulings(data), data.get("decisions") or [])
+                                      recorded_rulings(data), data.get("decisions") or [], recorded_times(data))
   findings = r / "foreman.findings"
   core.atomic_write(findings, "".join(line + "\n" for line in lines))
   with contextlib.redirect_stdout(io.StringIO()):
@@ -156,16 +156,22 @@ def parse_comments(text: str) -> tuple:
   return login, comments
 
 
+def recorded_times(foreman: dict) -> dict:
+  """Each recorded ruling's comment id to its entry's `posted_at` (the comment as recorded)."""
+  return {int(cid): e.get("posted_at") or "" for e in foreman.get("rulings") or []
+          if (cid := str(e.get("posted") or "").removeprefix("comment ")).isdigit()}
+
+
 def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, worktree: Path, changed: list, pr_body: str,
                      comments: list, login: str, prior_round, prior_ci_fid, commits: list = (), prior_tdd: dict = None,
                      prior_scope: dict = None, contest_of: dict = None, external: list = (),
                      earlier: set = frozenset(), disposed: set = frozenset(), posted: dict = None,
-                     owners: list = (), recorded: list = (), decisions: list = ()) -> tuple:
+                     owners: list = (), recorded: list = (), decisions: list = (), recorded_at: dict = None) -> tuple:
   """The foreman's high findings of spec section 11 in this order: CI, the DoD items, scope, tdd-order,
   deviations, contested, upheld, unreplied external; and `builder_contested[]` for the contested ones. Rulings
   and replies count only from the right author: a ruling is a `config.owners` login's comment `ruling_of` reads
-  (spec section 13.2's one grammar) or an entry of the record (`recorded`, `recorded_rulings`), replies come
-  from the builder. Every `**Deviation**` line of a comment is one deviation; an `allowed` ruling on a posted
+  (spec section 13.2's one grammar) on the unit's issue, never the PR, or an entry of the record (`recorded`,
+  `recorded_rulings`), replies come from the builder. Every `**Deviation**` line of a comment is one deviation; an `allowed` ruling on a posted
   round's tdd-order fid (`prior_tdd`, fid to failure) skips that failure as an overrule does, and no other.
   An external high or medium with no disposition is carried until a reply names it, or names a posted carried
   copy of it, in this round's comments or an earlier round's (`earlier`, the builder's reply ids there), or
@@ -174,7 +180,7 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
   external id). A `contested` reply to such a finding is recorded in the round it comes in, a round late
   included, when no earlier round's comments hold a builder reply to any id of its group (`late`) and no
   ruling in this round's comments names it: a contest is recorded once (spec section 8, External review). An
-  upheld ruling is answered by a later `fixed` reply under the ruled id or under any id of its group. A reply
+  upheld ruling is answered by a `fixed` reply later than it (than its record's `posted_at`, `recorded_at`, when recorded) under the ruled id or under any id of its group. A reply
   to a carried copy `foreman-<r>-<k>`, `fixed` or `contested`, counts (toward the carry, or as a contest) only
   when it comes after round r was posted (`posted`, each posted round's `posted_at`): before that the copy did
   not exist."""
@@ -205,7 +211,7 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
       found.append(("pr_body.md", f"Run item {n}: no fenced output"))
   # The rulings: an owner's form comment read by `ruling_of`, and the record (`rulings[]`, the judges' post included)
   # (spec section 13.2: a recorded ruling is never changed by a later comment, so the record wins on its comment ids and subjects)
-  rulings = binding_rulings(comments, owners, recorded, decisions)
+  rulings = binding_rulings([c for c in comments if c["kind"] == "issue"], owners, recorded, decisions)  # an issue comment alone rules
   by_id = {c["id"]: c for c in comments}
   overruled = {r.subject for r in rulings if r.kind == "overruled"}
   allowed = {r.subject for r in rulings if r.kind == "allowed"}
@@ -245,7 +251,8 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
         continue
       fid = ruling.subject
       answers = {fid, links.get(fid, fid)} | groups.get(origin(fid), set())  # the ruled finding, or any id of its group
-      fixed = any(o["login"] == login and o["at"] > c["at"] and (m := REPLY_RE.match(o["body"]))
+      since = max(c["at"], (recorded_at or {}).get(ruling.comment_id) or "")  # a recorded ruling binds from its record's time
+      fixed = any(o["login"] == login and o["at"] > since and (m := REPLY_RE.match(o["body"]))
                   and m.group(1) in answers and m.group(2) == "fixed" for o in comments)
       if ruling.kind == "upheld" and not fixed:
         found.append((where(c), f"upheld {fid}: no `fixed` reply"))

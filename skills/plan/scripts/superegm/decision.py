@@ -125,10 +125,16 @@ def binding_rulings(comments: list, owners: list, recorded: list, decisions=None
   only when it is one of the options its decision offers (`decisions`, else the named comment's `- (` lines and
   `stop the unit`), as `decision rule` would accept it."""
   recorded = list(recorded)
+  point3 = [d for d in decisions or [] if d.get("point") == 3]
+
+  def key(r):  # an option names its decision by its comment id or by its own id: either is the decision
+    if r.kind != "option":
+      return GROUPS.get(r.kind), r.subject
+    return "option", next((d["id"] for d in point3 if r.subject in (d["id"], str(d.get("source") or "").removeprefix("comment "))), r.subject)
   ids = {r.comment_id for r in recorded if r.comment_id}
-  keys = {(GROUPS[r.kind], r.subject) for r in recorded if r.kind in GROUPS}
+  keys = {key(r) for r in recorded if r.kind in GROUPS}
   return recorded + [r for c in comments if (r := ruling_of(c, owners))
-                     and r.comment_id not in ids and (GROUPS.get(r.kind), r.subject) not in keys
+                     and r.comment_id not in ids and key(r) not in keys
                      and (r.kind != "option" or offered(r, comments, decisions or []))]
 
 
@@ -292,7 +298,7 @@ def rule(args) -> int:
   # Point 1 takes one ruling per contested finding (`<fid> finding upheld | overruled`, the leavemealone row's
   # "one call per finding"), keyed on the comment's fid on a by-hand ruling; the other points take one ruling.
   fid_of = lambda text: text.partition(" — ")[0].strip().split(" ")[0]
-  fid = found.subject if found and found.kind in ("upheld", "overruled") else fid_of(head)
+  fid = found.subject if found and found.kind in ("upheld", "overruled", "allowed") else fid_of(head)
   for d in decisions:
     ruled = [r for r in data["rulings"] if r["decision"] == d["id"]]
     if ruled and (d["point"] != 1 or any(fid_of(r["ruling"]) == fid for r in ruled)):
@@ -303,7 +309,8 @@ def rule(args) -> int:
   brief = None
   if found:  # the record is the comment's ruling: a `--ruling` that resolves to another option is refused
     said = {"upheld": f"{found.subject} finding upheld", "overruled": f"{found.subject} finding overruled",
-            "round": "one more round", "stop": "stop", "option": found.option, "redesign": "redesign"}.get(found.kind) or ""
+            "round": "one more round", "stop": "stop", "option": found.option, "redesign": "redesign",
+            "allowed": f"{found.subject} finding overruled"}.get(found.kind) or ""  # an allowance is recorded as an overrule (§13.2)
     try:
       ruled_by_comment = check_ruling(basis["point"], basis["options"], said)
     except Refusal:
@@ -314,7 +321,7 @@ def rule(args) -> int:
   elif not reason.strip() and (decision["point"] == 3 or chosen.endswith(" finding overruled")):
     # a ruling typed without the reason its form carries: the session's, or the panel's, named as such
     reason = f"ruled by judges {args.by[7:]}" if args.by.startswith("judges:") else "ruled in the session"
-  if chosen == "redesign":
+  if chosen == "redesign" and basis["point"] in (1, 2):  # a head's third ruling; a point-3 option named `redesign` is an option
     if not reason.strip():
       raise Refusal("decision: redesign needs — <one sentence why>")
     chosen = f"redesign — {reason.strip()}"
@@ -354,13 +361,14 @@ def rule(args) -> int:
       who = f"judges {args.by[7:]}, leavemealone" if args.by.startswith("judges:") else args.by
       typed = args.ruling + (f" — {reason}" if reason and " — " not in args.ruling else "")  # a defaulted reason
       core.journal(st, f"Ruling ({who}): {unit} {d['id']} {typed}")
-  if chosen.startswith("stop") or brief:
+  # the effect is the point's, never the option's wording: point 2's `stop`, point 3's `stop the unit`, a redesign
+  if (decision["point"], chosen) in ((2, "stop"), (3, "stop the unit")) or brief:
     stop_unit(st, unit, args.by, chosen, number, now, brief)
   print(url or f"recorded ({posted})")
   return 0
 
 
-KIND_POINTS = {"upheld": (1,), "overruled": (1,), "round": (2,), "stop": (2,), "option": (3,), "redesign": (1, 2)}
+KIND_POINTS = {"upheld": (1,), "overruled": (1,), "allowed": (1,), "round": (2,), "stop": (2,), "option": (3,), "redesign": (1, 2)}
 
 
 def dropped(store, args, reason: str):
@@ -456,8 +464,8 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int):
   """A by-hand `**Ruling:**` (spec section 13.2, U22): honoured only on the unit's issue (`number`), only from the
   author who is `--by`, only when `ruling_of` reads it as a `config.owners` login's form, only once (a recorded
   comment edited later is ignored), and only on the decisions its kind and subject name: `--decision`'s, else the
-  latest point-1 decision whose question names the fid (else the latest point-1 decision) with no ruling on that
-  fid, the open point-2 one, the point-3 one on its comment or decision id, or for `redesign` every pending
+  latest point-1 decision whose question names the fid (else the latest naming no finding) with no ruling on that
+  fid (an `allowed` one: only a decision naming it, recorded as `<fid> finding overruled`), the open point-2 one, the point-3 one on its comment or decision id, or for `redesign` every pending
   decision of the unit. Returns (comment, ruling, decisions)."""
   cid = args.posted
   comment = core.gh_json(["api", f"repos/{store.config['repo']}/issues/comments/{cid}"]) or {}
@@ -491,8 +499,8 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int):
     named = source.removeprefix("comment ") if source.startswith("comment ") else decision["id"]
     if found.kind == "option" and found.subject != named:
       raise Refusal(f"decision: comment {cid} does not name {source if source.startswith('comment ') else decision['id']}")
-    if found.kind in ("upheld", "overruled"):  # the fid must be one of this decision's, and ruled nowhere else
-      if decision not in fid_decisions(foreman, found.subject):
+    if found.kind in ("upheld", "overruled", "allowed"):  # the fid must be one of this decision's, and ruled nowhere else
+      if decision not in fid_decisions(foreman, found.subject, strict=found.kind == "allowed"):
         raise Refusal(f"decision: comment {cid} rules {found.subject}, not a finding of {decision['id']}")
       if fid_ruled(foreman, found.subject, but=decision["id"]):
         dropped(store, args, f"{found.subject} already ruled")
@@ -500,24 +508,31 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int):
   pending = pending_decisions(foreman)
   if found.kind == "redesign":
     decisions = pending if any(d["point"] in points for d in pending) else []
-  elif found.kind in ("upheld", "overruled"):
-    decisions = [d for d in fid_decisions(foreman, found.subject) if not fid_ruled(foreman, found.subject)][-1:]
+  elif found.kind in ("upheld", "overruled", "allowed"):
+    decisions = [d for d in fid_decisions(foreman, found.subject, strict=found.kind == "allowed") if not fid_ruled(foreman, found.subject)][-1:]
   elif found.kind in ("round", "stop"):
     decisions = [d for d in pending if d["point"] == 2][-1:]
   elif found.kind == "option":
     decisions = [d for d in foreman["decisions"] if d["point"] == 3 and found.subject in (d["id"], d["source"].removeprefix("comment "))][-1:]
   else:
     decisions = []
+  if not decisions and found.kind in ("allowed", "allowed-file"):  # an allowance no decision asks about: `collect` reads it
+    raise Refusal(f"decision: comment {cid} allows {found.subject}; no open decision names it")
   if not decisions:
     dropped(store, args, f"comment {cid} does not name an open decision")
   return comment, found, decisions
 
 
-def fid_decisions(foreman: dict, fid: str) -> list:
-  """The point-1 decisions a finding id belongs to: those whose question names it (word-bounded), else the latest."""
+FID_RE = re.compile(r"(?<![\w-])[a-z][\w-]*-\d+-\d+(?![\w-])")  # a finding id, `<reviewer>-<round>-<n>`
+
+
+def fid_decisions(foreman: dict, fid: str, strict: bool = False) -> list:
+  """The point-1 decisions a finding id belongs to: those whose question names it (word-bounded), else (not
+  `strict`) the latest point-1 decision whose question names no finding id at all; never one asking about others."""
   point1 = [d for d in foreman["decisions"] if d["point"] == 1]
   names = re.compile(rf"(?<![\w-]){re.escape(fid)}(?![\w-])")
-  return [d for d in point1 if names.search(d.get("question") or "")] or point1[-1:]
+  named = [d for d in point1 if names.search(d.get("question") or "")]
+  return named or ([] if strict else [d for d in point1 if not FID_RE.search(d.get("question") or "")][-1:])
 
 
 def fid_ruled(foreman: dict, fid: str, but: str = "") -> bool:

@@ -138,8 +138,8 @@ def closed_facts(repo: str, issue: dict, pr, landed: bool) -> list:
 
 def ruling_facts(store, uid: str, comments: list, owners) -> list:
   """One `Ruling` per comment of an owner `ruling_of` parses (spec section 13.2); a comment the unit's `rulings[]`
-  names as `posted` is skipped unless its `updated_at` is later than that entry's `posted_at` (the posted comment's
-  own `created_at`), so an unedited recorded post is no event and an owner's edit of it is one."""
+  names as `posted` is skipped unless its `updated_at` is later than that entry's `posted_at` (the comment's
+  `updated_at` when recorded, else its `created_at`), so an unedited recorded post is no event and an owner's edit of it is one."""
   posted = {}
   for entry in core.load_foreman(store, uid).get("rulings") or []:
     kind, _, cid = (entry.get("posted") or "").partition("comment ")

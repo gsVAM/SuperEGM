@@ -262,12 +262,15 @@ def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr,
   """Exactly what spec section 3's anti-goal 3 allows: the issue body, the audit-trail line, the orders, the repository's
   PR block when `pr_block_file` is set, the unit's orient file, the frozen spec range the body cites, every Deviation
   comment, every Decision comment by a `config.owners` login, every Ruling comment by one in a form the one grammar
-  reads (`parse_form`; the judges' post under the elephant's token kept, a typo or a stranger's dropped, and one the
-  unit's record overrides dropped: `overridden_comments` of `foreman`), and from round 2 the foreman's reviews on the PR."""
+  reads (`parse_form`; the judges' post under the elephant's token kept, a typo or a stranger's dropped, one the
+  unit's record overrides dropped, and a recorded one edited after its record, whatever the edit, shown as its
+  record: `overridden_comments` of `foreman`), and from round 2 the foreman's reviews on the PR."""
   overridden = overridden_comments(comments, list(owners), foreman or {})
 
   def keep(c):
-    if not PROMPT_COMMENT_RE.match(c["body"]) or (c["id"] in overridden and overridden[c["id"]] is None):
+    if overridden.get(c["id"]) is not None:  # the record stands in for its comment's edit
+      return True
+    if not PROMPT_COMMENT_RE.match(c["body"]) or c["id"] in overridden:
       return False
     if c["body"].startswith("**Deviation"):
       return True
