@@ -811,6 +811,30 @@ def read_threads(repo: str, number: int, skip: set) -> list[dict]:
   return threads
 
 
+def mask(text: str, config: dict) -> str:
+  """A thread's text made safe to post: `|` written `/`, `@` written `@ `, a `banned_terms` match split the same way."""
+  text = text.replace("|", "/").replace("@", "@ ")
+  for pattern in config.get("banned_terms") or []:
+    term = re.compile(pattern)
+    for _ in range(len(text) + 1):
+      match = term.search(text)
+      if not match or not match.group(0):
+        break
+      text = text[:match.start() + 1] + " " + text[match.start() + 1:]
+  return text
+
+
+def thread_line(reviewer: str, rnd: int, n: int, thread: dict, severity: str, config: dict) -> str:
+  """The thread's finding line: `<reviewer>-<round>-<n> | <severity> | <file:line or PR> at <commit7> |
+  regression: no | <the first line, 200 chars, masked>`."""
+  where = thread.get("path") or "PR"
+  if thread.get("path") and thread.get("line") is not None:
+    where += f":{thread['line']}"
+  where = f"{mask(where, config)} at {(thread.get('commit_id') or '')[:7]}"
+  first = ((thread.get("body") or "").strip().splitlines() or [""])[0].strip()[:200]
+  return f"{reviewer}-{rnd}-{n} | {severity} | {where} | regression: no | {mask(first, config)}"
+
+
 def collaborator_role(repo: str, login: str) -> str:
   """The login's repository role (`collaborators/<login>/permission`); `none` when GitHub answers 404 (not a
   collaborator). Any other refusal propagates."""
