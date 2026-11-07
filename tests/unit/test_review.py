@@ -1088,6 +1088,14 @@ def test_a_custom_repository_role_reads_as_its_base_permission(world, answer, ro
   assert collaborator_role(REPO, "alice") == role
 
 
+@pytest.mark.parametrize("body, severity", [("security-bug: credentials are exposed", "high"), ("[security-bug] credentials are exposed", "high"),
+                                            ("**security-bug**: credentials are exposed", "high"), ("security: credentials are exposed", "low")])
+def test_an_inline_thread_keeps_a_compound_severity_word_whole(body, severity):
+  """A configured compound word (`security-bug`) is matched whole at the start of the first line, as in a marker."""
+  config = {"ingest": {**INGEST, "severity_words": {**INGEST["severity_words"], "security-bug": "high"}}}
+  assert thread_severity(T(body), config, None) == severity
+
+
 from superegm.review import thread_line
 
 @pytest.mark.parametrize("thread, severity, line", [

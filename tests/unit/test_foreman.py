@@ -533,6 +533,24 @@ def test_a_reply_to_a_carried_copy_counts_only_after_the_copy_is_posted(world, t
   assert (w.dir / "r3/foreman.findings").read_text(encoding="utf-8").splitlines() == [f"foreman-3-{i} | high | {e}" for i, e in enumerate(expected, 1)]
 
 
+@pytest.mark.parametrize("at, expected", [
+  ("2026-11-02T13:00:00Z", [CARRIED]),
+  ("2026-11-02T16:00:00Z", ["pr #70 comment 14 | regression: no | contested foreman-2-1: it fires on push"])])
+def test_a_contest_of_a_carried_copy_counts_only_after_the_copy_is_posted(world, tmp_path, monkeypatch, at, expected):
+  """`**Reply foreman-2-1:** contested` written before round 2 (which carries external:alice-1-1 as foreman-2-1) is
+  posted contests nothing: round 3 records no contest and carries the original again; after the post it is a contest."""
+  r2 = {**R2, "posted_at": "2026-11-02T15:00:00Z"}
+  kw = dict(rounds=[POSTED_R1, r2], launches=[{"round": i, "status": "exited 0"} for i in (1, 2, 3)],
+            comments={70: [c(14, "builder-bot", "**Reply foreman-2-1:** contested — it fires on push", at=at)]})
+  st0, card0, _ = seed(world, **kw)
+  rid = open_head_review(world, st0, card0, "0" * 40, {"change-review": "", "external:alice": EXT})
+  record(world, st0, rid, 2, "0" * 40, card0, {"change-review": "", "foreman": COPY})
+  w = prepared(world, tmp_path, monkeypatch, **kw)
+  code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
+  assert (code, out.strip()) == (0, f"collected: {len(expected)} foreman findings"), out
+  assert (w.dir / "r3/foreman.findings").read_text(encoding="utf-8").splitlines() == [f"foreman-3-{i} | high | {e}" for i, e in enumerate(expected, 1)]
+
+
 @pytest.mark.parametrize("case", ["copy-settled", "copy-contested-then-original"])
 def test_a_carried_copy_settled_or_contested_ends_the_carry_of_its_original(world, tmp_path, monkeypatch, case):
   """A carried copy settled by `review settle` ends its original's carry; a contest of the copy recorded in one round
@@ -783,29 +801,9 @@ def test_review_ingest_posts_past_an_exact_copy_of_its_lines_on_another_commit(w
   assert line in posted[0]["body"] and posted[0]["commit_id"] == head
 
 
-def test_review_ingest_resumes_an_earlier_rounds_plan_after_a_later_round_is_posted(world, monkeypatch):
-  """Round 1's ingest posts, then stops before alice is recorded; round 2 is posted before the retry. The retry
-  finishes round 1's plan (no second post, alice recorded in round 1 against her thread)."""
-  bot = "devin-ai-integration[bot]"
-  st, card, posted, rid, head = ingest_world(world, [(1, bot, "bug: one"), (2, "alice", "issue: two")], {"alice": {"role_name": "write"}})
-  real = review_mod.record_round
-  monkeypatch.setattr(review_mod, "record_round", lambda a: 1 if a.reviewer == "external:alice" else real(a))
-  assert world.run("review", "ingest", "--unit", UNIT, "--runcard", card)[0] == 1 and len(posted) == 1
-  monkeypatch.setattr(review_mod, "record_round", real)
-  data = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))
-  data["rounds"].append({**POSTED_R1, "round": 2, "launch": 2, "dispatch_id": "d2", "head": head, "outcome": "revise"})
-  atomic_write(st.path("foreman", UNIT), data)
-  atomic_write(st.path("review", UNIT, f"pr{PR}") / "r2/ci.json", json.dumps({"verdict": "ci green"}))
-  code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
-  assert (code, out.split()[:2], len(posted)) == (0, ["1", "ingested"], 1), out
-  rnd = json.loads((st.path("reviews", rid) / "round-1.json").read_text(encoding="utf-8"))
-  assert [(f["id"], f["thread"]) for f in rnd["reviewers"]["external:alice"]["findings"]] == [("external:alice-1-1", 2)]
-  assert sorted(json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["ingested"]) == [1, 2]
-
-
-def test_review_ingest_resumed_into_an_earlier_round_rewrites_a_later_clean(world, monkeypatch):
-  """Round 1's ingest posts alice's medium, then stops before recording it; round 2 is posted `clean`. The retry records
-  alice into round 1 and rewrites round 2's `clean` to `revise`: an unsettled external medium blocks `clean` whatever round holds it."""
+def test_review_ingest_refuses_to_finish_a_plan_into_an_earlier_round(world, monkeypatch):
+  """Round 1's ingest posts alice's medium, then stops before recording it; round 2 is posted `clean`. The retry never
+  finishes round 1's plan into round 1: it refuses, recording nothing, and the re-run it names plans afresh on round 2."""
   bot = "devin-ai-integration[bot]"
   st, card, posted, rid, head = ingest_world(world, [(1, bot, "nit: one"), (2, "alice", "issue: two")], {"alice": {"role_name": "write"}})
   real = review_mod.record_round
@@ -818,10 +816,34 @@ def test_review_ingest_resumed_into_an_earlier_round_rewrites_a_later_clean(worl
   record(world, st, rid, 2, head, card, {"change-review": ""})
   atomic_write(st.path("review", UNIT, f"pr{PR}") / "r2/ci.json", json.dumps({"verdict": "ci green"}))
   code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
-  assert (code, out.split(), len(posted)) == (0, ["1", "ingested", "outcome:", "revise"], 1), out
-  entry = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][1]
-  assert (entry["outcome"], entry["rewritten_from"]) == ("revise", "clean")
-  assert st.path("journal").read_text(encoding="utf-8").count(f"{UNIT} ready again (external:alice)") == 1
+  assert code == 1 and len(posted) == 1, out
+  assert ("review ingest: round 1's unfinished ingest is not on the latest posted round (2): nothing recorded; "
+          "re-run `review ingest` to plan its threads afresh on round 2") in out
+  assert "external:alice" not in json.loads((st.path("reviews", rid) / "round-1.json").read_text(encoding="utf-8"))["reviewers"]
+  assert json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][1]["outcome"] == "clean"
+  code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
+  assert (code, out.split(), len(posted)) == (0, ["1", "ingested", "outcome:", "revise"], 2), out
+  assert posted[1]["body"].startswith(review_mod.header(2, head)) and "external:alice-2-1 | medium | " in posted[1]["body"]
+  rnd = json.loads((st.path("reviews", rid) / "round-2.json").read_text(encoding="utf-8"))
+  assert [(f["id"], f["thread"]) for f in rnd["reviewers"]["external:alice"]["findings"]] == [("external:alice-2-1", 2)]
+  assert sorted(json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["ingested"]) == [1, 2]
+
+
+def test_review_ingest_marks_its_plan_done_only_after_every_save(world, monkeypatch):
+  """Stopped at the save of the rewritten outcome, the plan is not `done`: the retry finishes it and rewrites `clean`."""
+  st, card, posted, rid, head = ingest_world(world, [(1, "alice", "issue: the hook never fires")], {"alice": {"role_name": "write"}})
+  real = review_mod.core.save_foreman
+  def killed(st_, unit, data):
+    if any(e.get("rewritten_from") for e in data["rounds"]):
+      raise review_mod.core.HandoffError("killed")
+    real(st_, unit, data)
+  monkeypatch.setattr(review_mod.core, "save_foreman", killed)
+  assert world.run("review", "ingest", "--unit", UNIT, "--runcard", card)[0] == 1 and len(posted) == 1
+  assert json.loads((st.path("review", UNIT, f"pr{PR}") / "r1/ingest.json").read_text(encoding="utf-8"))["done"] is False
+  monkeypatch.setattr(review_mod.core, "save_foreman", real)
+  code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
+  assert (code, out.split()[2:], len(posted)) == (0, ["outcome:", "revise"], 1), out
+  assert json.loads((st.path("review", UNIT, f"pr{PR}") / "r1/ingest.json").read_text(encoding="utf-8"))["done"] is True
 
 
 def test_review_ingest_refuses_an_unknown_builder_login(world, monkeypatch):
