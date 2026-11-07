@@ -964,11 +964,12 @@ def ingest(args) -> int:
   nothing. A login's new findings are numbered after its highest recorded id. Before the post the ingest writes
   its plan, `r<n>/ingest.json` (each line, each finding id's root comment id, the comment body), and a plan not
   marked `done` is resumed verbatim before any new thread is read into one: the comment is found on the PR
-  under the round's header on any line and not posted again, each finding is recorded against the thread it
+  under the round's header on any line, carrying every planned line whole, and not posted again, each finding is recorded against the thread it
   was posted for (`record_round` stamps the root id under `thread` in the same write), and the threads join
   `ingested[]`. With no new thread an ingest still re-reads an edited thread's text into its finding (its
   severity kept), backfills `ingested[]` from a finding's `thread`, and rewrites a `clean` outcome; an ingest
-  that finds nothing to change writes nothing."""
+  that finds nothing to change writes nothing. A `cap-reached` it wrote prints `outcome: cap-reached` again on
+  every ingest until a Decision point 2 on that head is opened (`source` `review <id> cap`)."""
   from superegm.launch import app_login  # lazily: launch imports this module
   st = core.store(core.git_toplevel(Path.cwd()))
   card = core.require_runcard(args, SKILLS)
@@ -1050,9 +1051,9 @@ def ingest(args) -> int:
   thread_of, lines, body = plan["threads"], plan["lines"], plan["body"]  # a resumed plan's own, verbatim
   present = None
   if body:
-    ids = [line.split(" | ", 1)[0] + " | " for line in body.splitlines() if line.startswith("external:")]
+    planned = {line for line in body.splitlines() if line.startswith("external:")}  # each line whole, its text too
     present = next((r for r in core.gh_pages(f"repos/{repo}/pulls/{number}/reviews")
-                    if carries_header(r.get("body"), n, head) and all(i in r["body"] for i in ids)), None)
+                    if carries_header(r.get("body"), n, head) and planned <= set(r["body"].splitlines())), None)
     if present and present.get("commit_id") != head:  # an interrupted ingest's comment, bound to another sha
       raise Refusal(f"review ingest: header present on {(present.get('commit_id') or '')[:7]}, not {head[:7]}: nothing recorded")
   for login in read:
@@ -1104,6 +1105,9 @@ def ingest(args) -> int:
     word = {3: "revise", 2: "cap-reached"}.get(status_code(rid, wave))
     if word:
       saved_entry.update({"outcome": word, "rewritten_from": "clean"})
+  routed = any(d.get("point") == 2 and d.get("source") == f"review {rid} cap" and d.get("head") == head
+               for d in data.get("decisions") or [])
+  again = not word and not routed and (saved_entry.get("outcome"), saved_entry.get("rewritten_from")) == ("cap-reached", "clean")
   if missing or word:
     data.setdefault("ingested", []).extend(missing)
     core.save_foreman(st, unit, data)
@@ -1117,6 +1121,8 @@ def ingest(args) -> int:
     login = min(open_ext, key=lambda f: rank[f["severity"]])["id"].rsplit("-", 2)[0] if open_ext else "external:?"
     core.journal(st, f"{unit} ready again ({login}) under {wave}")
     print(f"outcome: {word}")
+  elif again:  # a rewrite whose routing line was never acted on: printed until point 2 is opened on this head
+    print("outcome: cap-reached")
   return 0
 
 

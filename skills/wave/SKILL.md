@@ -116,6 +116,7 @@ ignored except `landed`:
    `outcome: revise`: the unit is ready again; `launch` marks it at step 5 when a
    slot is free (never `launch-builder` here).
    `outcome: cap-reached` → Decision point 2 (source `review <head-review-id> cap`).
+   Exit 1: report the unit and the refusal line in chat (it stands until the owner acts); the batch goes on.
    At the entry this step runs too, after entry step 2's lines and before entry step 3's `report`.
 4. `superegm foreman dispatch` for every active unit with a head, `deadline`
    included: `python3 '<HELPER>' foreman dispatch --unit <U> --runcard '<CARD>'`.
@@ -140,9 +141,8 @@ ignored except `landed`:
    `python3 '<HELPER>' report --idle '<U>=launch-builder: <reason>' --runcard '<CARD>'`.
 6. `superegm report`: `python3 '<HELPER>' report --runcard '<CARD>'`. If a
    decision was opened this batch, pause: ask the owner at its decision
-   point and run `report` again once ruled.
-   Else `loop: ended` → step 3b, then `report` again (a thread posted before the last
-   round's review is read now); still `loop: ended` → The end; otherwise the next batch.
+   point and run `report` again once ruled. Else `loop: ended` → The end;
+   otherwise the next batch.
 
 `report` derives each launched unit's state with `unit_state`, one of six:
 `landed`, `stopped`, `pending`, `idle`, `clean`, else `active`; only an
@@ -258,6 +258,8 @@ Leavemealone-mode: U11 wires §13.2 here.
   one place, and the batch order above is how a refusal is handled.
 
 ## The end
+
+Before the close, run batch step 3b once and `report` again (a thread posted before the last round's review is read now): an `outcome:` line or no longer `loop: ended` → back to the batches.
 
 `loop: ended` → run `python3 '<HELPER>' runcard close '<CARD>'`. Then
 report in chat from `wave_<n>_report.md`: per unit its state, head and
