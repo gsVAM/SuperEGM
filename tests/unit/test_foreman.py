@@ -716,6 +716,54 @@ def test_review_ingest_resumes_an_interrupted_ingest_without_a_second_post(world
   assert sorted(json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["ingested"]) == [1, 2]
 
 
+@pytest.mark.parametrize("fault", ["save", "mention", "deleted"])
+def test_review_ingest_resumes_its_plan_whatever_window_it_stopped_in(world, monkeypatch, fault):
+  """Round 2's windows: a record landed but `ingested[]` not saved; a mention on line 1 of the comment; a posted
+  thread deleted before the retry. Each retry posts nothing and records each posted id against its own thread."""
+  st, card, posted, rid, head = ingest_world(world, [(1, "alice", "issue: one"), (2, "alice", "issue: two")], {"alice": {"role_name": "write"}})
+  if fault == "mention":
+    config = json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))
+    set_config(world, **{k: v for k, v in config.items() if k != "artifacts_dir"}, fix_request_mention="@copilot")
+  real_save, real_record = review_mod.core.save_foreman, review_mod.record_round
+  if fault == "save":  # the round file written, then the ingest killed before anything else lands
+    def killed(a):
+      real_record(a)
+      raise review_mod.core.HandoffError("killed")
+    monkeypatch.setattr(review_mod, "record_round", killed)
+  else:
+    monkeypatch.setattr(review_mod, "record_round", lambda a: 1)
+  code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
+  assert code == 1 and len(posted) == 1, out
+  assert (fault == "mention") == posted[0]["body"].startswith("@copilot\n")
+  monkeypatch.setattr(review_mod.core, "save_foreman", real_save); monkeypatch.setattr(review_mod, "record_round", real_record)
+  if fault == "deleted":
+    world.gh.threads[PR] = world.gh.threads[PR][1:]
+  code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
+  assert code == 0 and len(posted) == 1, out
+  rnd = json.loads((st.path("reviews", rid) / "round-1.json").read_text(encoding="utf-8"))
+  assert [(f["id"], f["thread"], f["claim"]) for f in rnd["reviewers"]["external:alice"]["findings"]] == [
+    ("external:alice-1-1", 1, "issue: one"), ("external:alice-1-2", 2, "issue: two")]
+  assert sorted(json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["ingested"]) == [1, 2]
+  assert world.run("review", "ingest", "--unit", UNIT, "--runcard", card)[1].strip() == "0 ingested" and len(posted) == 1
+
+
+def test_review_ingest_numbers_after_the_highest_recorded_id(world):
+  st, card, posted, rid, head = ingest_world(world, [(5, "alice", "bug: new")], {"alice": {"role_name": "write"}})
+  record(world, st, rid, 1, head, card, {"external:alice": "external:alice-1-2 | low | src/hooks.py:3 at 0000000 | regression: no | old\n"})
+  assert world.run("review", "ingest", "--unit", UNIT, "--runcard", card)[1].split()[:2] == ["1", "ingested"]
+  rnd = json.loads((st.path("reviews", rid) / "round-1.json").read_text(encoding="utf-8"))
+  assert [(f["id"], f["severity"]) for f in rnd["reviewers"]["external:alice"]["findings"]] == [("external:alice-1-2", "low"), ("external:alice-1-3", "high")]
+
+
+def test_review_ingest_skips_a_landed_unit(world):
+  st, card, posted, rid, head = ingest_world(world, [(1, "alice", "bug: after the merge")], {"alice": {"role_name": "write"}})
+  state = json.loads(st.path("state").read_text(encoding="utf-8"))
+  atomic_write(st.path("state"), {**state, "status": {"units": {UNIT: {"landed": True}}}})
+  before = st.path("foreman", UNIT).read_text(encoding="utf-8")
+  assert world.run("review", "ingest", "--unit", UNIT, "--runcard", card)[1].strip() == "0 ingested"
+  assert posted == [] and st.path("foreman", UNIT).read_text(encoding="utf-8") == before
+
+
 def test_review_ingest_that_finds_nothing_writes_nothing(world):
   st, card, posted, rid, head = ingest_world(world, [], outcome="revise")
   before = (st.path("foreman", UNIT).read_text(encoding="utf-8"), st.path("journal").read_text(encoding="utf-8"))

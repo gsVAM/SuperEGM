@@ -596,7 +596,8 @@ def test_an_idle_unit_an_ingest_rewrote_is_not_marked_again(world, monkeypatch):
 
 ROOT = SKILL.parents[2]
 INGEST_PROSE = [("skills/wave/SKILL.md", n) for n in ("3b. `superegm review ingest`", "awaiting-merge units included, stopped units excluded", "`0 ingested` before its first posted round",
-  "`outcome: revise`", "never `launch-builder` here", "`outcome: cap-reached` → Decision point 2")] + [
+  "`outcome: revise`", "never `launch-builder` here", "`outcome: cap-reached` → Decision point 2",
+  "for every unit with an open PR", "Else `loop: ended` → step 3b, then `report` again")] + [
                 ("resources/review_panels.md", "`external:<login>`"), ("resources/review_panels.md", "`review ingest`")]
 
 
