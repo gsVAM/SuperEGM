@@ -87,6 +87,34 @@ def ruling_form(point: int, subject: str, option: str | None = None) -> str:
   return f"**Ruling:** {text}" + ("" if bare else " — <reason>")
 
 
+def recorded_rulings(foreman: dict) -> list:
+  """One `Ruling` per `rulings[]` entry joined to its decision (the record a session, the judges or a by-hand
+  ruling leaves): `redesign` by its text; point 1 the fid and `upheld | overruled`; point 2 `round | stop`;
+  point 3 `option` on the source's comment id, else the decision id, the entry's leading token its option."""
+  decisions = {d["id"]: d for d in foreman.get("decisions") or []}
+  out = []
+  for entry in foreman.get("rulings") or []:
+    decision = decisions.get(entry.get("decision"))
+    if decision is None:
+      continue
+    text = (entry.get("ruling") or "").partition(" — ")[0].strip()
+    posted = entry.get("posted") or ""
+    cid = int(posted.split()[1]) if posted.startswith("comment ") and posted.split()[1].isdigit() else 0
+    option, subject = None, ""
+    if text.startswith("redesign"):
+      kind = "redesign"
+    elif decision["point"] == 1:
+      kind, subject = ("upheld" if text.endswith("upheld") else "overruled"), text.split(" ")[0]
+    elif decision["point"] == 2:
+      kind = "round" if text == "one more round" else "stop"
+    else:
+      source = str(decision.get("source") or "")
+      kind, subject = "option", source.removeprefix("comment ") if source.startswith("comment ") else decision["id"]
+      option = text.split(" ")[0] or None
+    out.append(Ruling(kind, subject, option, entry.get("reason"), entry.get("by") or "", cid))
+  return out
+
+
 def register(subparsers):
   p = subparsers.add_parser("decision", help="decision open|rule")
   action = p.add_subparsers(dest="action", required=True)

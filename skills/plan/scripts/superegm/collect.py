@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # From the elephant-goldfish-model (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17); an unreplied external high or medium carried forward (U21).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17); an unreplied external high or medium carried forward (U21); rulings read through `ruling_of` and the record, every folded deviation heading (U22).
 
 """superegm collect: the foreman's findings of a round through one `review record --reviewer foreman`, or a
 round that could not complete with `--not-run`."""
@@ -14,6 +14,7 @@ from pathlib import Path
 
 import superegm as core
 from superegm import body as body_mod, review, tdd_order
+from superegm.decision import recorded_rulings, ruling_of
 from superegm.foreman import head_review_id
 from superegm.launch_builder import DOD_RESULT_RE
 from superegm.prepare import HEADER_RE
@@ -21,8 +22,6 @@ from superegm.prepare import HEADER_RE
 WRITES = frozenset(['foreman', 'review', 'reviews'])  # the store kinds this subcommand writes
 SKILLS = frozenset(['wave'])  # the skills whose card this subcommand accepts
 DEVIATION_RE = re.compile(r"^\*\*Deviation \((interface|dod|test|other)\):\*\*")
-RULED_RE = re.compile(r"^\*\*Ruling:\*\* \((\d+)\)")  # a ruling on a deviation comment, by its id (section 10)
-RULING_RE = re.compile(r"^\*\*Ruling:\*\* (\S+) finding (upheld|overruled)")
 REPLY_RE = re.compile(r"^\*\*Reply (\S+):\*\* (fixed|contested)(?:\s*[—-]\s*(.*))?", re.S)
 
 
@@ -91,7 +90,8 @@ def collect(args, card):
   lines, contested = foreman_findings(n, json.loads(core.read_text(r / "ci.json"))["verdict"], text, scope, worktree, changed,
                                       core.read_text(r / "pr_body.md"), comments, login, prior, prior_ci_fid,
                                       tdd_order.commits_of(worktree, entry["merge_base"]), prior_tdd, prior_scope, contest_of,
-                                      external, earlier, disposed, posted)
+                                      external, earlier, disposed, posted, handoff.config.get("owners") or [],
+                                      recorded_rulings(data))
   findings = r / "foreman.findings"
   core.atomic_write(findings, "".join(line + "\n" for line in lines))
   with contextlib.redirect_stdout(io.StringIO()):
@@ -159,10 +159,14 @@ def parse_comments(text: str) -> tuple:
 def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, worktree: Path, changed: list, pr_body: str,
                      comments: list, login: str, prior_round, prior_ci_fid, commits: list = (), prior_tdd_fids: list = (),
                      prior_scope: dict = None, contest_of: dict = None, external: list = (),
-                     earlier: set = frozenset(), disposed: set = frozenset(), posted: dict = None) -> tuple:
+                     earlier: set = frozenset(), disposed: set = frozenset(), posted: dict = None,
+                     owners: list = (), recorded: list = ()) -> tuple:
   """The foreman's high findings of spec section 11 in this order: CI, the DoD items, scope, tdd-order,
   deviations, contested, upheld, unreplied external; and `builder_contested[]` for the contested ones. Rulings
-  and replies count only from the right author: rulings from anyone but the builder, replies from the builder.
+  and replies count only from the right author: a ruling is a `config.owners` login's comment `ruling_of` reads
+  (spec section 13.2's one grammar) or an entry of the record (`recorded`, `recorded_rulings`), replies come
+  from the builder. Every `**Deviation**` line of a comment is one deviation; an `allowed` ruling on a prior
+  round's tdd-order fid skips tdd-order as an overrule does.
   An external high or medium with no disposition is carried until a reply names it, or names a posted carried
   copy of it, in this round's comments or an earlier round's (`earlier`, the builder's reply ids there), or
   until one of its copies is settled (`disposed`, the copies whose disposition is set). Its group is the
@@ -199,23 +203,28 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
       found.append((text, f"Exists item {n}: path absent"))
     elif kind == "run" and n not in results:
       found.append(("pr_body.md", f"Run item {n}: no fenced output"))
-  others = [c for c in comments if c["login"] != login]
-  rulings = [(c, m) for c in others if (m := RULING_RE.match(c["body"]))]
-  overruled = {m.group(1) for _, m in rulings if m.group(2) == "overruled"}
+  # The rulings: an owner's form comment read by `ruling_of`, and the record (`rulings[]`, the judges' post included)
+  parsed = [r for c in comments if (r := ruling_of(c, owners))]
+  seen = {r.comment_id for r in parsed}
+  rulings = parsed + [r for r in recorded if r.comment_id not in seen]
+  by_id = {c["id"]: c for c in comments}
+  overruled = {r.subject for r in rulings if r.kind == "overruled"}
+  allowed = {r.subject for r in rulings if r.kind == "allowed"}
   widened = {path for fid, path in (prior_scope or {}).items() if fid in overruled}  # an owner's overrule widens the Scope
   found += [(path, "changed path outside Scope paths") for path in changed if path not in scope and path not in widened]
-  if not set(prior_tdd_fids) & overruled:
+  if not set(prior_tdd_fids) & (overruled | allowed):
     tests = {n: t for n, t, _ in body_mod.step_paths(body)}
     for failure in tdd_order.check(body, list(commits)):
       step = re.match(r"S(\d+):", failure) or re.search(r"test\(S(\d+)\)", failure)
       found.append((tests.get(int(step.group(1)), "tests/") if step else "tests/", f"tdd-order: {failure}"))
-  ruled = {int(m.group(1)) for c in others if (m := RULED_RE.match(c["body"]))}
-  for c in comments:
-    kind = DEVIATION_RE.match(c["body"])
-    if kind and kind.group(1) != "other" and c["id"] not in ruled:
-      found.append((where(c), f"deviation ({kind.group(1)}) unruled"))
+  ruled = {int(r.subject) for r in rulings if r.kind == "option" and r.subject.isdigit()}
+  for c in comments:  # every `**Deviation**` heading a comment folds; one ruling naming the comment rules them all
+    for line in c["body"].splitlines():
+      kind = DEVIATION_RE.match(line)
+      if kind and kind.group(1) != "other" and c["id"] not in ruled:
+        found.append((where(c), f"deviation ({kind.group(1)}) unruled"))
   if prior_round:
-    settled = {m.group(1) for _, m in rulings}
+    settled = {r.subject for r in rulings if r.kind in ("upheld", "overruled")}
     for c in comments:
       reply = REPLY_RE.match(c["body"])
       if not reply or c["login"] != login or reply.group(2) != "contested":
@@ -228,12 +237,15 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
       reason = (reply.group(3) or "").strip()
       found.append((where(c), f"contested {fid}: {reason}"))
       contested.append({"fid": f"foreman-{round_n}-{len(found)}", "reason": reason})
-    for c, ruling in rulings:
-      fid = ruling.group(1)
+    for ruling in rulings:
+      c = by_id.get(ruling.comment_id)  # the comment the ruling names: its time bounds the `fixed` reply
+      if ruling.kind not in ("upheld", "overruled") or c is None:
+        continue
+      fid = ruling.subject
       answers = {fid, links.get(fid, fid)} | groups.get(origin(fid), set())  # the ruled finding, or any id of its group
       fixed = any(o["login"] == login and o["at"] > c["at"] and (m := REPLY_RE.match(o["body"]))
                   and m.group(1) in answers and m.group(2) == "fixed" for o in comments)
-      if ruling.group(2) == "upheld" and not fixed:
+      if ruling.kind == "upheld" and not fixed:
         found.append((where(c), f"upheld {fid}: no `fixed` reply"))
   replied = {m.group(1) for c in comments if c["login"] == login and (m := REPLY_RE.match(c["body"]))
              and (posted is None or timely(m.group(1), c["at"], posted))} | set(earlier)
