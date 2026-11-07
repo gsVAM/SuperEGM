@@ -76,7 +76,7 @@ def launch(args, card):
   views = {uid: {**summary["units"][uid], "launched": state["units"][uid].get("launched"), "stopped": uid in stopped}
            for uid in handoff.graph.order}
   flying = [uid for uid in handoff.graph.order if in_flight(st, uid, views[uid], idle)]
-  again = {uid for uid in handoff.graph.order if uid not in stopped and not views[uid].get("landed")
+  again = {uid for uid in handoff.graph.order if uid not in stopped and uid not in idle and not views[uid].get("landed")
            and ready_again(core.load_foreman(st, uid), load_launches(st, uid))}
   ready = set(summary["ready"]) | again  # a unit an ingest returned to `revise` waits for a slot as a ready unit does
   marked = [uid for uid in handoff.graph.order if uid in ready and uid not in stopped][:max(0, config["max_in_flight"] - len(flying))]
@@ -92,7 +92,8 @@ def launch(args, card):
 def in_flight(store, uid, view, idle):
   """True from the unit's mark (the mark reserves the slot) until its latest round is posted
   `clean`, it has landed, it carries the stopped label, or this invocation names it idle; a
-  launch recorded after the clean round holds the slot again."""
+  launch recorded after the clean round holds the slot again. A unit whose `clean` an ingest rewrote
+  (`ready_again`) holds no slot until its relaunch records a launch."""
   if not view.get("launched") or view.get("landed") or view.get("stopped") or uid in idle:
     return False
   foreman, launches = core.load_foreman(store, uid), load_launches(store, uid)

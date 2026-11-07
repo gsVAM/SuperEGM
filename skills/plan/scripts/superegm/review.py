@@ -1,7 +1,7 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21).
 
-"""superegm review open|record|settle|status|rule|scope|post: the one review loop (spec section 8)."""
+"""superegm review open|record|settle|status|rule|scope|post|ingest: the one review loop (spec section 8)."""
 
 import argparse
 import contextlib
@@ -847,7 +847,8 @@ def thread_line(reviewer: str, rnd: int, n: int, thread: dict, severity: str, co
 
 
 def collaborator_role(repo: str, login: str) -> str:
-  """The login's repository role (`collaborators/<login>/permission`); `none` when GitHub answers 404 (not a
+  """The login's repository role (`collaborators/<login>/permission`): its `role_name`, or its base `permission`
+  when the role name is not one of `ROLES` (a custom repository role); `none` when GitHub answers 404 (not a
   collaborator). Any other refusal propagates."""
   try:
     data = core.gh_json(["api", f"repos/{repo}/collaborators/{login}/permission"]) or {}
@@ -855,8 +856,7 @@ def collaborator_role(repo: str, login: str) -> str:
     if error.http_status == 404:
       return "none"
     raise
-  role = data.get("role_name") or data.get("permission") or "none"
-  return role if role in ROLES else "none"
+  return next((r for r in (data.get("role_name"), data.get("permission")) if r in ROLES), "none")
 
 
 def thread_severity(thread: dict, config: dict, role: str | None) -> str:
@@ -952,7 +952,11 @@ def ingest(args) -> int:
   """`review ingest --unit` (spec section 8, External review): every review thread of the unit's PR not yet
   ingested, on a head the latest posted round reviewed, recorded as one `external:<login>` finding in that
   round; the ones from a bot or a human at `ingest.human_role` or above posted first as one review comment
-  in `review post`'s form. Every read precedes every write: a refused read records nothing."""
+  in `review post`'s form. Every read precedes every write: a refused read records nothing. Each finding
+  carries its root comment's id under `thread` (the key an edited thread is re-read by), and each login's
+  threads join `ingested[]` as soon as its record lands; a thread whose finding carries its id counts as
+  ingested, and a comment already on the PR under the round's header carrying every line is not posted again,
+  so an interrupted ingest resumes where it stopped. An ingest that finds nothing writes nothing."""
   from superegm.launch import app_login  # lazily: launch imports this module
   st = core.store(core.git_toplevel(Path.cwd()))
   card = core.require_runcard(args, SKILLS)
@@ -970,7 +974,9 @@ def ingest(args) -> int:
   root = core.git_toplevel(Path.cwd())
   env = config["builder"]["gh_token_env"]
   builder = app_login(config) or core.gh(["api", "user", "-q", ".login"], token=os.environ.get(env) if env else None).strip()
-  owners, done = set(config.get("owners") or []), set(data.get("ingested") or [])
+  recorded = {f["thread"] for m in round_numbers(st, rid) for name, record in load_round(st, rid, m)["reviewers"].items()
+              if name.startswith("external:") for f in record["findings"] if "thread" in f}
+  owners, done = set(config.get("owners") or []), set(data.get("ingested") or []) | recorded
   threads = read_threads(repo, number, skip=set())
   fresh = []
   for thread in threads:
@@ -1007,7 +1013,7 @@ def ingest(args) -> int:
     if thread["bot"] or ROLES.index(role) >= minimum:
       postable.setdefault(ext, []).append(line)
   edited = {t["id"]: t for t in threads if t["id"] in done}
-  folder = st.path("review", unit, f"pr{number}") / f"r{n}"
+  folder, present = st.path("review", unit, f"pr{number}") / f"r{n}", None
   if postable:
     shown = {"round": n, "reviewers": {ext: {"findings": parse_findings("\n".join(ls), ext, n)} for ext, ls in postable.items()}}
     verdict = json.loads(core.read_text(folder / "ci.json"))["verdict"]
@@ -1017,15 +1023,21 @@ def ingest(args) -> int:
     problems = core.scan_text(body, config, "comment", label="comment", limit=None)
     if problems:
       raise Refusal(problems[0].split(": ", 1)[1])
+    ids = [line.split(" | ", 1)[0] + " | " for ls in postable.values() for line in ls]
+    present = next((r for r in core.gh_pages(f"repos/{repo}/pulls/{number}/reviews")
+                    if (r.get("body") or "").startswith(header(n, head)) and all(i in r["body"] for i in ids)), None)
+    if present and present.get("commit_id") != head:  # an interrupted ingest's comment, bound to another sha
+      raise Refusal(f"review ingest: header present on {(present.get('commit_id') or '')[:7]}, not {head[:7]}: nothing recorded")
   for login in read:
     core.card_add(st, wave, "roles", {"login": login, "role": read[login]})
-  if postable:
+  if postable and not present:  # never posted twice: an interrupted ingest's comment stands
     core.atomic_write(folder / "ingest.md", body)
     _, text = core.gh_post(f"repos/{repo}/pulls/{number}/reviews",
                            {"commit_id": head, "event": "COMMENT", "body": f"@{folder / 'ingest.md'}"})
     response = json.loads(text) if text.strip() else {}
     if response.get("commit_id") != head:
-      raise Refusal(f"review ingest: posted on {(response.get('commit_id') or '')[:7]}, not {head[:7]}: nothing recorded")
+      raise Refusal(f"review ingest: posted on {(response.get('commit_id') or '')[:7]}, not {head[:7]}: "
+                    "the comment stands on the PR, nothing recorded")
   for ext, ls in lines.items():
     path = folder / f"external-{ext.split(':', 1)[1]}.findings"
     core.atomic_write(path, "\n".join(ls) + "\n")
@@ -1035,12 +1047,18 @@ def ingest(args) -> int:
                                              runcard=args.runcard, unit=None, design=None, plan=None))
     if code != 0:
       raise Refusal(f"review ingest: {ext} not recorded in round {n} (exit {code})")
-  for m in round_numbers(st, rid):  # the thread's id on its finding; an edited thread's text re-read, its severity kept
+    saved = load_round(st, rid, n)  # the thread's id on its finding, then the login's threads ingested
+    for finding in saved["reviewers"][ext]["findings"]:
+      if finding["id"] in thread_of:
+        finding["thread"] = thread_of[finding["id"]]
+    core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), saved)
+    data = core.load_foreman(st, unit)
+    data.setdefault("ingested", []).extend(thread_of[line.split(" | ", 1)[0]] for line in ls)
+    core.save_foreman(st, unit, data)
+  for m in round_numbers(st, rid):  # an edited thread's text re-read, its severity kept
     saved, changed = load_round(st, rid, m), False
     for reviewer, record in saved["reviewers"].items():
       for finding in record["findings"] if reviewer.startswith("external:") else []:
-        if finding["id"] in thread_of and m == n:
-          finding["thread"], changed = thread_of[finding["id"]], True
         thread = edited.get(finding.get("thread"))
         if thread is not None:
           claim = thread_line(reviewer, m, 1, thread, finding["severity"], config).split(" | ", 4)[4]
@@ -1049,15 +1067,18 @@ def ingest(args) -> int:
     if changed:
       core.atomic_write(st.path("reviews", rid, f"round-{m}.json"), saved)
   data = core.load_foreman(st, unit)
-  data.setdefault("ingested", []).extend(t["id"] for t in fresh)
+  missing = sorted(recorded - set(data.get("ingested") or []))
   saved_entry = next(e for e in data["rounds"] if e["round"] == n)
   word = None
   if saved_entry.get("outcome") == "clean":  # the mirror of `review post`'s `clean` write
     word = {3: "revise", 2: "cap-reached"}.get(status_code(rid, wave))
     if word:
       saved_entry.update({"outcome": word, "rewritten_from": "clean"})
-  core.save_foreman(st, unit, data)
-  core.journal(st, f"{unit} round {n} ingested {len(fresh)} under {wave}")
+  if missing or word:
+    data.setdefault("ingested", []).extend(missing)
+    core.save_foreman(st, unit, data)
+  if fresh:
+    core.journal(st, f"{unit} round {n} ingested {len(fresh)} under {wave}")
   print(f"{len(fresh)} ingested")
   if word:
     rank = {s: i for i, s in enumerate(SEVERITIES)}

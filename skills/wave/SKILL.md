@@ -115,7 +115,8 @@ ignored except `landed`:
    posted round and prints `<n> ingested` (`0 ingested` before its first posted round).
    `outcome: revise`: the unit is ready again; `launch` marks it at step 5 when a
    slot is free (never `launch-builder` here).
-   `outcome: cap-reached` → Decision point 2 (source `cap-reached`).
+   `outcome: cap-reached` → Decision point 2 (source `review <head-review-id> cap`).
+   At the entry this step runs too, after entry step 2's lines and before entry step 3's `report`.
 4. `superegm foreman dispatch` for every active unit with a head, `deadline`
    included: `python3 '<HELPER>' foreman dispatch --unit <U> --runcard '<CARD>'`.
    It prints `<dispatch-id> <child-card>` when section 11's predicate holds

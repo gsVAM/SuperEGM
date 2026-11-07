@@ -67,7 +67,7 @@ def collect(args, card):
   login, comments = parse_comments(core.read_text(r / "comments.md"))
   rid = head_review_id(st, unit)
   prior = max((e["round"] for e in data["rounds"] if e.get("phase") == "posted"), default=None)
-  prior_ci_fid, prior_tdd, prior_scope, contest_of, external = None, [], {}, {}, []
+  prior_ci_fid, prior_tdd, prior_scope, contest_of, external, earlier = None, [], {}, {}, [], set()
   for e in data["rounds"]:  # every posted round: an overruled out-of-Scope finding widens the Scope for good;
     if e.get("phase") == "posted":  # a contest or carried finding names the finding a reply may answer under
       for f in prior_foreman_findings(st, rid, e["round"]):
@@ -76,6 +76,10 @@ def collect(args, card):
         if (m := re.match(r"(?:contested|unreplied) (\S+):", f["claim"])):
           contest_of[f["id"]] = m.group(1)
       external += external_findings(st, rid, e["round"])
+      seen = st.path("review", unit, f"pr{number}") / f"r{e['round']}" / "comments.md"
+      if seen.is_file():  # a reply in an earlier round's window still answers its finding
+        who, said = parse_comments(core.read_text(seen))
+        earlier |= {m.group(1) for c in said if c["login"] == who and (m := REPLY_RE.match(c["body"]))}
   for f in prior_foreman_findings(st, rid, prior):
     if f["location"] == "ci":
       prior_ci_fid = f["id"]
@@ -84,7 +88,7 @@ def collect(args, card):
   lines, contested = foreman_findings(n, json.loads(core.read_text(r / "ci.json"))["verdict"], text, scope, worktree, changed,
                                       core.read_text(r / "pr_body.md"), comments, login, prior, prior_ci_fid,
                                       tdd_order.commits_of(worktree, entry["merge_base"]), prior_tdd, prior_scope, contest_of,
-                                      external)
+                                      external, earlier)
   findings = r / "foreman.findings"
   core.atomic_write(findings, "".join(line + "\n" for line in lines))
   with contextlib.redirect_stdout(io.StringIO()):
@@ -151,13 +155,18 @@ def parse_comments(text: str) -> tuple:
 
 def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, worktree: Path, changed: list, pr_body: str,
                      comments: list, login: str, prior_round, prior_ci_fid, commits: list = (), prior_tdd_fids: list = (),
-                     prior_scope: dict = None, contest_of: dict = None, external: list = ()) -> tuple:
+                     prior_scope: dict = None, contest_of: dict = None, external: list = (),
+                     earlier: set = frozenset()) -> tuple:
   """The foreman's high findings of spec section 11 in this order: CI, the DoD items, scope, tdd-order,
   deviations, contested, upheld, unreplied external; and `builder_contested[]` for the contested ones. Rulings
   and replies count only from the right author: rulings from anyone but the builder, replies from the builder.
   An external high or medium with no disposition is carried until a reply names it, or names a posted carried
-  copy of it (spec section 8, External review)."""
+  copy of it, in this round's comments or an earlier round's (`earlier`, the builder's reply ids there); a
+  `contested` reply to such a finding is recorded whatever round it comes in (spec section 8, External review)."""
   found, contested = [], []
+  open_ext = {f["id"] for f in external if f["disposition"] is None and f["severity"] in ("high", "medium")}
+  open_ext |= {cid for cid, original in (contest_of or {}).items() if original in open_ext}
+  late = {fid for fid in open_ext if not {fid, (contest_of or {}).get(fid, fid)} & set(earlier)}
   if ci_verdict != "ci green":
     found.append(("ci", f"CI not green on this head: {ci_verdict}"))
   results = {int(m.group(1)) for m in DOD_RESULT_RE.finditer(pr_body)}
@@ -188,7 +197,7 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
       if not reply or c["login"] != login or reply.group(2) != "contested":
         continue
       fid = reply.group(1)
-      if fid == prior_ci_fid or fid in settled or fid.split("-")[-2] != str(prior_round):
+      if fid == prior_ci_fid or fid in settled or (fid.split("-")[-2] != str(prior_round) and fid not in late):
         continue
       reason = (reply.group(3) or "").strip()
       found.append((where(c), f"contested {fid}: {reason}"))
@@ -200,7 +209,7 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
                   and m.group(1) in answers and m.group(2) == "fixed" for o in comments)
       if ruling.group(2) == "upheld" and not fixed:
         found.append((where(c), f"upheld {fid}: no `fixed` reply"))
-  replied = {m.group(1) for c in comments if c["login"] == login and (m := REPLY_RE.match(c["body"]))}
+  replied = {m.group(1) for c in comments if c["login"] == login and (m := REPLY_RE.match(c["body"]))} | set(earlier)
   for f in external:
     if f["disposition"] is not None or f["severity"] not in ("high", "medium"):
       continue
