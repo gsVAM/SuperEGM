@@ -118,7 +118,8 @@ def test_a_comment_naming_a_ruled_decision_by_its_id_binds_nothing():
   foreman = {"decisions": [{"id": "q1", "point": 3, "source": "comment 3", "options": ["(a) proceed", "(b) stop", "stop the unit"]}],
              "rulings": [{"decision": "q1", "ruling": "(a)", "by": "judges:p-1", "reason": None, "posted": "comment 9", "posted_at": "t1"}]}
   text = prompt_text(2, "U01", "body", "orders", "orient", comments, [], None, "builder-bot", "audit", owners=["owner"], foreman=foreman)
-  assert re.findall(r"^## \S+ · comment (\d+)$", text.split("# Comments on issue #2\n\n", 1)[1], re.M) == ["3"]
+  # comment 9, the recorded post, is absent from the list: round 6 shows it as its record (deleted after its record)
+  assert re.findall(r"^## \S+ · comment (\d+)$", text.split("# Comments on issue #2\n\n", 1)[1], re.M) == ["3", "9"]
 
 
 @pytest.mark.parametrize("edited", ["now just prose", "", "**Rulng:** f-1-1 finding overruled — x"])
@@ -158,3 +159,15 @@ def test_a_recorded_option_shows_the_option_its_question_offered():
              "rulings": [{"decision": "q1", "ruling": "(a)", "by": "owner", "reason": "approved", "posted": "comment 4", "posted_at": "t1"}]}
   text = prompt_text(2, "U01", "body", "orders", "orient", comments, [], None, "builder-bot", "audit", owners=["owner"], foreman=foreman)
   assert "## owner · comment 4\n**Ruling:** (3) (a) — approved\n(recorded on q1 as: (a) keep validation)\n" in text
+
+
+def test_a_deleted_recorded_ruling_is_shown_as_its_record():
+  """Round 6 (PR #96 review): a recorded ruling whose comment was deleted before the relaunch still reaches the
+  builder, as its record, in the comment's place."""
+  comments = [{"id": 3, "user": {"login": "builder-bot"}, "body": "**Deviation (dod):** x\n- (a) keep validation\n- (b) remove it\n**Builder status:** BLOCKED"},
+              {"id": 9, "user": {"login": "owner"}, "body": "**Decision D1:** (a) five"}]
+  foreman = {"decisions": [{"id": "q1", "point": 3, "source": "comment 3", "options": ["(a) keep validation", "(b) remove it", "stop the unit"]}],
+             "rulings": [{"decision": "q1", "ruling": "(a)", "by": "owner", "reason": "approved", "posted": "comment 4", "posted_at": "t1"}]}
+  text = prompt_text(2, "U01", "body", "orders", "orient", comments, [], None, "builder-bot", "audit", owners=["owner"], foreman=foreman)
+  assert re.findall(r"^## \S+ · comment (\d+)$", text, re.M) == ["3", "4", "9"]
+  assert "## owner · comment 4\n**Ruling:** (3) (a) keep validation — approved\n(as recorded by owner; the comment was deleted after its record)\n" in text

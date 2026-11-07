@@ -724,7 +724,8 @@ def test_a_by_hand_ruling_finds_its_fid_on_a_finding_line_alone(world):
 
 def test_an_allowance_on_an_open_decision_in_leavemealone_takes_the_overrule_form(world):
   """Round 5 (PR #96 review): `review settle --posted` reads only `<fid> finding overruled`, so in leavemealone-mode
-  an allowance naming an open point-1 decision is refused before anything is recorded, unjournaled."""
+  an allowance naming an open point-1 decision is refused before anything is recorded; round 6: the refusal is
+  journaled as dropped, the owner's notice of it."""
   card = world.run("runcard", "open", "--skill", "wave", "--artifact", world.spec, "--mode", "leavemealone", card=None)[1].strip()
   s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})
   set_config(world, repo=REPO, owners=["owner"])
@@ -735,7 +736,9 @@ def test_an_allowance_on_an_open_decision_in_leavemealone_takes_the_overrule_for
                 "--source", "review head-U01-c1 round 2", "--runcard", card)[1].splitlines()[0]
   assert world.run("decision", "rule", "--unit", "U01", "--ruling", "foreman-1-2 finding overruled", "--by", "owner", "--posted", "73", "--runcard", card) == (
       1, f"decision: comment 73 allows foreman-1-2; in leavemealone-mode {q} takes `**Ruling:** foreman-1-2 finding overruled — <reason>`\n")
-  assert foreman_of(s, "U01")["rulings"] == [] and "comment 73" not in s.path("journal").read_text(encoding="utf-8")
+  assert foreman_of(s, "U01")["rulings"] == [] and (
+      f"ruling dropped (owner, comment 73): comment 73 allows foreman-1-2; in leavemealone-mode {q} takes "
+      "`**Ruling:** foreman-1-2 finding overruled — <reason>`") in s.path("journal").read_text(encoding="utf-8")
 
 
 def test_a_session_post_read_back_fails_is_never_read_as_edited(world, monkeypatch):
@@ -755,6 +758,34 @@ def test_a_session_post_read_back_fails_is_never_read_as_edited(world, monkeypat
   posted = {"id": int(entry["posted"].removeprefix("comment ")), "user": {"login": "owner"}, "body": world.gh.comments[2][-1]["body"],
             "created_at": "2099-01-01T00:00:00Z", "updated_at": "2099-01-01T00:00:00Z"}
   assert ruling_facts(s, "U01", [posted], ["owner"]) == [] and overridden_comments([posted], ["owner"], foreman_of(s, "U01")) == {}
+  # round 6 (PR #96 review): an edit of the unread post (GitHub's `updated_at` past its own `created_at`) is an edit
+  edited = posted | {"body": "**Ruling:** one more round", "updated_at": "2099-01-01T00:05:00Z"}
+  assert [r.kind for r in ruling_facts(s, "U01", [edited], ["owner"])] == ["round"]
+  assert overridden_comments([edited], ["owner"], foreman_of(s, "U01")) == {
+      edited["id"]: "**Ruling:** stop\n(as recorded by owner; the comment was edited after its record)"}
+
+
+def test_a_finding_line_is_a_rows_or_a_question_headings_and_takes_an_external_fid(world):
+  """Round 6 (PR #96 review): `<fid> (` starts a finding line only after `## Q<n>`, so a quoted original on a line of
+  its own is not the question's; an external fid (`external:<login>-<r>-<n>`) is a finding line's like any other."""
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})
+  set_config(world, repo=REPO, owners=["owner"])
+  fake_gh(world, {f"repos/{REPO}/issues/comments/{cid}": {"id": cid, "user": {"login": "owner"}, "body": body, "created_at": "2026-11-03T10:00:00Z"}
+                  for cid, body in ((90, "**Ruling:** change-review-1-4 finding overruled — x\n"),
+                                    (91, "**Ruling:** external:devin-ai-integration[bot]-2-7 finding overruled — y\n"),
+                                    (92, "**Ruling:** external:alice-1-1 finding upheld\n"))})
+  opened = lambda text: world.run("decision", "open", "--unit", "U01", "--point", 1, "--question", question(world, text), "--source", "review head-U01-c1 round 2", "--runcard", card)[1].splitlines()[0]
+  rule = lambda posted, ruling, *d: world.run("decision", "rule", "--unit", "U01", *d, "--ruling", ruling, "--by", "owner", "--posted", posted, "--runcard", card)
+  q1 = opened("foreman-2-1 | high | pr #96 comment 1 | regression: no | contested change-review-1-4: x\n\n"
+              "change-review-1-4 (low, declined by the owner): the path\n"
+              "external:devin-ai-integration[bot]-2-7 | high | a.py:1 | regression: no | y\n"
+              "## Q2 external:alice-1-1 (high, a.py:2): z\n")
+  assert rule("90", "change-review-1-4 finding overruled") == (1, "decision: comment 90 does not name an open decision\n")
+  assert rule("90", "change-review-1-4 finding overruled", "--decision", q1) == (1, f"decision: comment 90 rules change-review-1-4, not a finding of {q1}\n")
+  assert rule("91", "external:devin-ai-integration[bot]-2-7 finding overruled") == (0, "recorded (comment 91)\n")
+  assert rule("92", "external:alice-1-1 finding upheld", "--decision", q1) == (0, "recorded (comment 92)\n")
+  assert [r["decision"] for r in foreman_of(s, "U01")["rulings"]] == [q1, q1]
 
 
 def test_launch_marks_a_unit_whose_clean_outcome_an_ingest_rewrote(world, monkeypatch):
@@ -829,6 +860,9 @@ def test_a_ruling_by_comment_continues_as_its_point_does(needle):
     # round 5 (PR #96 review): a redesign's `--ruling` carries no invented reason; an allowance in leavemealone-mode
     ("skills/wave/SKILL.md", "`redesign` as `--ruling 'redesign'`"),
     ("skills/wave/SKILL.md", "in leavemealone-mode an allowance naming an open decision is refused"),
-    ("skills/wave/references/builder_orders.md", "(recorded on <decision id> as: <option>)")])
+    ("skills/wave/references/builder_orders.md", "(recorded on <decision id> as: <option>)"),
+    # round 6 (PR #96 review): the refused allowance is journaled for the owner; a deleted recorded comment
+    ("skills/wave/SKILL.md", "or a refused allowance"),
+    ("skills/wave/references/builder_orders.md", "(as recorded by <by>; the comment was deleted after its record)")])
 def test_the_ruling_prose_names_how_a_ruling_is_applied_and_read(path, needle):
   assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
