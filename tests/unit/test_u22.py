@@ -171,3 +171,15 @@ def test_a_deleted_recorded_ruling_is_shown_as_its_record():
   text = prompt_text(2, "U01", "body", "orders", "orient", comments, [], None, "builder-bot", "audit", owners=["owner"], foreman=foreman)
   assert re.findall(r"^## \S+ · comment (\d+)$", text, re.M) == ["3", "4", "9"]
   assert "## owner · comment 4\n**Ruling:** (3) (a) keep validation — approved\n(as recorded by owner; the comment was deleted after its record)\n" in text
+
+
+def test_a_recorded_ruling_in_no_form_is_shown_as_its_record():
+  """Round 7 (PR #96 review): a ruling recorded before the one grammar (`(3) use Redis`, no reason), its comment
+  unedited, still reaches the builder, as its record, in the comment's place."""
+  comments = [{"id": 3, "user": {"login": "builder-bot"}, "body": "**Deviation (dod):** x\n- (a) keep validation\n- (b) use Redis\n**Builder status:** BLOCKED"},
+              {"id": 4, "user": {"login": "owner"}, "body": "**Ruling:** (3) use Redis", "created_at": "t0", "updated_at": "t0"}]
+  foreman = {"decisions": [{"id": "q1", "point": 3, "source": "comment 3", "options": ["(a) keep validation", "(b) use Redis", "stop the unit"]}],
+             "rulings": [{"decision": "q1", "ruling": "use Redis", "by": "owner", "reason": None, "posted": "comment 4", "posted_at": "t1"}]}
+  text = prompt_text(2, "U01", "body", "orders", "orient", comments, [], None, "builder-bot", "audit", owners=["owner"], foreman=foreman)
+  assert re.findall(r"^## \S+ · comment (\d+)$", text, re.M) == ["3", "4"]
+  assert "## owner · comment 4\n**Ruling:** (3) (b) use Redis\n(as recorded by owner; the comment is in no ruling form)\n" in text

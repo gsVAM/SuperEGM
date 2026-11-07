@@ -863,6 +863,10 @@ def test_a_ruling_by_comment_continues_as_its_point_does(needle):
     ("skills/wave/references/builder_orders.md", "(recorded on <decision id> as: <option>)"),
     # round 6 (PR #96 review): the refused allowance is journaled for the owner; a deleted recorded comment
     ("skills/wave/SKILL.md", "or a refused allowance"),
-    ("skills/wave/references/builder_orders.md", "(as recorded by <by>; the comment was deleted after its record)")])
+    ("skills/wave/references/builder_orders.md", "(as recorded by <by>; the comment was deleted after its record)"),
+    # round 7 (PR #96 review): the finding lines `decision rule` reads; entry step 4 reads a posted ruling through the record
+    ("skills/wave/SKILL.md", "each finding on a line of its own starting `<fid> |` or `## Q<n> <fid> (`"),
+    ("skills/wave/SKILL.md", "binds once `decision rule --posted <comment id>` records it"),
+    ("skills/wave/references/builder_orders.md", "(as recorded by <by>; the comment is in no ruling form)")])
 def test_the_ruling_prose_names_how_a_ruling_is_applied_and_read(path, needle):
   assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
