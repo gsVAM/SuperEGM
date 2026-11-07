@@ -78,8 +78,10 @@ is one `superegm: <reason>` line, exit 1.
 4. Rule every `pending:` item first, through its decision point below (the
    source names the point: `comment <id>`, `launch <n>` and `closed <n>` are
    point 3; `review <id> round <n>` is point 1; `review <id> cap` is point
-   2). Before asking a point-3 question, read the issue's comments (the
-   by-hand rulings section): a `**Ruling:**` already posted rules it.
+   2). Before asking a point-3 question, read the issue's comments
+   (`GH_HOST=github.com gh api repos/<repo>/issues/<n>/comments --paginate`): an owner's
+   `**Ruling:**` already posted binds once `decision rule --posted <comment id>` records it,
+   as the `ruling` bullet says.
 5. Run `report` again. `loop: ended` → The end. Otherwise run batches, the
    first from its step 5: step 2 was its wait, and its lines are handled.
 
@@ -179,7 +181,8 @@ dispatch):
 ### Decision point 1
 
 The builder contested findings. Write them (ids, claims, the builder's
-reasons from the round's `comments.md`) to a question file and run
+reasons from the round's `comments.md`) to a question file, each finding on a line of its own starting `<fid> |` or `## Q<n> <fid> (`
+(the lines `decision rule` finds a fid's decision by), and run
 `python3 '<HELPER>' decision open --unit <U> --point 1 --question '<file>' --source 'review <head-review-id> round <n>' --runcard '<CARD>'`
 (options `finding upheld; finding overruled`). In normal mode ask the owner,
 one question per finding, the builder's reason verbatim as the overrule

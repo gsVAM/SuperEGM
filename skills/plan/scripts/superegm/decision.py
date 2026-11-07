@@ -169,7 +169,8 @@ def offered(r: "Ruling", comments: list, decisions: list) -> bool:
 def overridden_comments(comments: list, owners: list, foreman: dict) -> dict:
   """The owners' ruling comments the record overrides, by id: a recorded post edited after its record (`updated_at`
   later than the entry's `posted_at`, the comment's own time when recorded; for an `unread` entry, the session's post
-  whose GitHub time was never read back, later than the comment's own `created_at`) maps to the record's text, which the prompt shows in its place; an
+  whose GitHub time was never read back, later than the comment's own `created_at`) maps to the record's text, which the prompt shows in its place, as
+  does a recorded comment in no form (a ruling recorded before the one grammar, such as `(77) use Redis`); an
   unedited recorded point-3 ruling whose option is not its decision's full option text maps to its body with the
   line `(recorded on <decision id> as: <option>)` (the frozen question's option, never the named comment's live
   text); an unrecorded form ruling a subject the record already rules, an option the decision does not offer, or a
@@ -184,6 +185,8 @@ def overridden_comments(comments: list, owners: list, foreman: dict) -> dict:
     if entry:
       if edited_after_record(c, entry):
         out[c["id"]] = record_text(foreman, entry)
+      elif parse_form(c.get("body") or "") is None:  # recorded before the one grammar (no reason): the record binds
+        out[c["id"]] = record_text(foreman, entry, "the comment is in no ruling form")
       elif (full := recorded_option(foreman, entry)) and (form := parse_form(c.get("body") or "")) and form[0] == "option" and form[2] != full:
         first, sep, rest = (c.get("body") or "").partition("\n")
         out[c["id"]] = f"{first}\n(recorded on {entry['decision']} as: {full}){sep}{rest}"
