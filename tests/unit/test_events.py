@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03); `status --wait`, the event lines and the folding (U09b); `state.json` read through the resolved handoff (U20).
+# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03); `status --wait`, the event lines and the folding (U09b); `state.json` read through the resolved handoff (U20); the `ruling` event (U22).
 
 """U09b: `status --wait`, the event lines, the folding; plus EGM's `status` tests U03 moved here."""
 
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import REPO, make_pr, applied, state_of, close_as_completed, mark_launched, handoff_store
+from conftest import REPO, make_pr, applied, state_of, close_as_completed, mark_launched, handoff_store, set_config
 from superegm import store
 
 SHA = "a" * 40
@@ -127,6 +127,28 @@ def test_six_event_kinds(world, monkeypatch, tmp_path, kind, arrange, lines):
   code, out = world.run(*WAIT, card)
   assert code == 0 and out.splitlines() == lines, out
   assert not world.sleeps
+
+
+RULING = "**Ruling:** (500) (b) use Redis — fine"
+LINE = "U01 ruling by gsvam: option 500 (b) use Redis (comment 501)"
+RECORDED = {"dispatch_id": None, "rounds": [], "decisions": [{"id": "q1", "point": 3, "source": "comment 500"}],
+            "rulings": [{"decision": "q1", "ruling": "(b)", "by": "gsvam", "reason": "fine", "posted": "comment 501", "posted_at": T0}]}
+
+
+@pytest.mark.parametrize("login, body, foreman, edited, lines", [
+  ("gsvam", RULING, None, False, [LINE]), ("passer-by", RULING, None, False, ["deadline"]), ("gsvam", RULING, RECORDED, False, ["deadline"]),
+  ("gsvam", RULING, RECORDED, True, [LINE])])
+def test_the_ruling_event(world, monkeypatch, login, body, foreman, edited, lines):
+  set_config(world, repo=REPO, owners=["gsvam"])
+  gh, st, card = seed(world, monkeypatch)
+  foreman and put(st.path("foreman", "U01"), json.dumps(foreman))
+  comment(gh, body, login=login, cid=501)
+  edited and gh.comments[2][-1].update(updated_at="2026-11-03T11:00:00Z")
+  code, out = world.run(*WAIT, card)
+  assert code == 0 and out.splitlines() == lines, out
+  assert world.run(*WAIT, card)[1] == "deadline\n"
+  gh.comments[2][-1].update(body="**Ruling:** (500) (a) keep it — why", updated_at="2026-11-03T12:00:00Z")
+  assert world.run(*WAIT, card)[1] == ("U01 ruling by gsvam: option 500 (a) keep it (comment 501)\n" if login == "gsvam" else "deadline\n")
 
 
 def exit_file(tmp, code):
