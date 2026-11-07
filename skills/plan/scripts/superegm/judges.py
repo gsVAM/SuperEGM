@@ -25,7 +25,7 @@ OPTION_RE = re.compile(r"^- \(([a-z])\) (.+)$")
 ANSWER_RE = re.compile(r"^Q(\d+): \(([a-z])\)\s*$")
 SAW_RE = re.compile(r"^saw:\s*(.*)$")  # the judge's isolation report, first or last line of the reply
 NOTE_KEYS = {"reason": "reason", "would change my mind": "would_change"}
-DEFAULT_MEMBERS = {"fable": {"via": "adapter"}, "opus": {"via": "adapter"}, "astra": {"via": "runner"}}
+DEFAULT_MEMBERS = {"fable": {"via": "adapter", "effort": "xhigh"}, "opus": {"via": "adapter"}, "astra": {"via": "runner"}}
 VENDOR_OF = {"adapter": "anthropic", "runner": "openai"}
 
 

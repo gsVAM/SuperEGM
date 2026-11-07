@@ -32,8 +32,8 @@ Unknown keys stop.
   "allowed_mentions": [],
   "reviewers": {"spec": ["design", "zoom-out"], "plan": ["readiness", "proportion", "set"], "head": ["change-review"], "integrate": ["design"]},
   "astra": {"enabled": false, "model": "gpt-6-astra", "effort": "xhigh"},
-  "judges": {"min_vendors": 1, "members": [{"name": "fable", "via": "adapter", "effort": "max"}, {"name": "opus", "via": "adapter", "effort": "max"}, {"name": "astra", "via": "runner"}]},
-  "builder": {"profile_dir": "~/.superegm/builder-profile", "model": "claude-fable-5-1", "permission_mode": "acceptEdits", "gh_token_env": "SUPEREGM_BUILDER_TOKEN", "allowed_tools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git add:*)", "Bash(git commit:*)", "Bash(gh pr create:*)"], "app": null},
+  "judges": {"min_vendors": 1, "members": [{"name": "fable", "via": "adapter", "effort": "xhigh"}, {"name": "opus", "via": "adapter", "effort": "max"}, {"name": "astra", "via": "runner"}]},
+  "builder": {"profile_dir": "~/.superegm/builder-profile", "model": "claude-opus-5-5", "permission_mode": "acceptEdits", "gh_token_env": "SUPEREGM_BUILDER_TOKEN", "allowed_tools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git add:*)", "Bash(git commit:*)", "Bash(gh pr create:*)"], "app": null},
   "ci_wait_minutes": 30,
   "commit_trailer": "",
   "owners": ["OWNER"],
@@ -62,7 +62,7 @@ Unknown keys stop.
 | `allowed_mentions` | `[]` | `@name` strings that may appear in any body or comment. A name inside a fenced code block or an inline code span is never a mention (GitHub notifies for neither); any other legitimate mention must be listed here as the EXACT token GitHub would resolve, e.g. `@types/node` - `@types` does not cover `@types/node`, and `@acme` never covers the team `@acme/release`, which would subscribe its members. The allowlist exempts mentions only, never banned terms. Otherwise a refusal names the line and the author rewords. |
 | `reviewers` | the spec's panels | One reviewer list per review kind (`spec`, `plan`, `head`, `integrate`); each name is an adapter in `.claude-plugin/agents/`. |
 | `astra` | disabled | `enabled`, `model`, `effort`: the Astra lane, GPT-model reviewers run headlessly through claudex-loop. |
-| `judges` | `min_vendors` 1; fable, opus (adapter, max), astra (runner) | The judge panel of leavemealone-mode: a converged verdict needs judges spanning `min_vendors` vendors; each member runs `via` an adapter or the runner. |
+| `judges` | `min_vendors` 1; fable (adapter, xhigh), opus (adapter, max), astra (runner) | The judge panel of leavemealone-mode: a converged verdict needs judges spanning `min_vendors` vendors; each member runs `via` an adapter or the runner. |
 | `builder` | see the example | `profile_dir` (the empty builder profile), `model`, `permission_mode` (`acceptEdits`), `gh_token_env` (`SUPEREGM_BUILDER_TOKEN`, the variable holding the builder account's token) and `allowed_tools` (tool names and `Bash(<prefix>:*)` patterns; `Agent`, `Skill` and a bare `Bash` are refused; the push prefix for the unit's own branch is added per launch) and `app` (`"app": null`, the machine account; or `{app_id, slug, private_key_env}`, the builder as a GitHub App: `<slug>[bot]` under one-hour tokens minted per call from the key file the variable `private_key_env` names, `SUPEREGM_APP_KEY` by default; with it set, `gh_token_env`'s variable must be unset). |
 | `ci_wait_minutes` | `30` | A positive integer: how long a head's CI may stay pending or absent before the wave reports it CI-waiting. |
 | `commit_trailer` | `""` | A string appended, after a blank line, to every commit the helper makes (`approve-spec`'s approval and `--amend-units` commits), e.g. a `Co-Authored-By:` line; empty appends nothing. |
