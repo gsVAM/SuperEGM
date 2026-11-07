@@ -244,10 +244,15 @@ Leavemealone-mode: U11 wires §13.2 here.
   `python3 '<HELPER>' decision rule --unit <U> --ruling '<its option>' --by <login> --posted <comment-id> --runcard '<CARD>'`
   with no `--decision`: the comment names its decision (`redesign` every
   pending one), and a `--ruling` other than the comment's is refused. Only on
-  exit 0 continue as that point's section does: `finding overruled` →
-  `review settle … --disposition contested --owner --posted <comment id>`;
+  exit 0 continue as that point's section does. Point 1: `finding overruled`
+  → `review settle … --disposition contested --owner --posted <comment id>`;
+  then, for `finding upheld` too, by `review status`: 0 → the unit awaits
+  merge; 2 → Decision point 2; else `launch-builder`. Point 2 (the head at
+  its cap; a spent `one more round` is refused before anything is recorded):
   `one more round` → `review rule … --ruling continue --owner`, then
-  `launch-builder`; `stop` or `redesign` → `review rule … --ruling stop --owner`.
+  `launch-builder`; `stop` or `redesign` → `review rule … --ruling stop --owner`
+  (a `redesign` at point 1 runs no `review rule`). Point 3: `relaunch`, or an
+  option on a `BLOCKED` comment → `launch-builder` now; `stop the unit` stops it.
   An `allowed` ruling takes no `decision rule`: `collect` reads a prior
   round's `tdd-order` one; a `dod-<n>` or `test-delta` one the owner weighs.
   Nothing is posted; the journal says `ruling edited after record, ignored`
