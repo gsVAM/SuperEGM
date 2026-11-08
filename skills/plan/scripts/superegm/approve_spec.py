@@ -138,13 +138,16 @@ def commit_by_path(repo_root: Path, paths: list[str], message: str, trailer: str
 
 def spec_pr(repo: str, branch: str) -> int | None:
   """The open PR whose head is `branch` (the elephant's spec PR, spec section 8), or None: none means nothing to read."""
-  prs = json.loads(core.gh(["pr", "list", "-R", repo, "--head", branch, "--state", "open", "--limit", "1000",
-                            "--json", "number,headRefOid"]) or "[]")
+  try:
+    prs = json.loads(core.gh(["pr", "list", "-R", repo, "--head", branch, "--state", "open", "--limit", "1000",
+                              "--json", "number,headRefOid"]) or "[]")
+  except core.GhError as error:
+    raise core.HandoffError(f"approve-spec: {error}") from None
   return prs[0]["number"] if prs else None
 
 
 def run(args):
-  card =core.require_runcard(args, SKILLS)
+  card = core.require_runcard(args, SKILLS)
   spec = Path(args.design).expanduser().resolve()
   if not spec.is_file():
     raise core.HandoffError(f"approve-spec: spec {spec} does not exist")
@@ -165,7 +168,10 @@ def run(args):
     raise core.HandoffError(f"approve-spec: no spec review for {slug}")
   rid = review_id(st, "spec", str(spec), review["cycle"])
   number = spec_pr(st.config["repo"], core.run_git(["rev-parse", "--abbrev-ref", "HEAD"], root).strip())
-  if number is not None and round_numbers(st, rid):  # the spec PR's threads, read once before the refusals (U26)
+  # U26: one `review ingest --pr` before the refusals: it reads the spec PR's threads, writes them, and the carried
+  # findings, into the latest round and posts the fixed replies; no open PR, or a cycle with no round yet to take
+  # the threads, reads nothing (the latter is refused below as not converged); a gh failure refuses in one line.
+  if number is not None and round_numbers(st, rid):
     _, unsettled = ingest_pr(st, review, number, card.get("parent") or args.runcard)
     if unsettled:
       fid = unsettled[0]

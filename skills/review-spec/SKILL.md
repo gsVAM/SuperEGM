@@ -72,7 +72,7 @@ worktree in the owner's checkout.
 
    When the list is empty, open the PR ready for review, never `--draft` (a bot may skip drafts):
    `gh pr create --head <branch> --base <base> --title "<the spec's H1>" --body "<spec-path>"`.
-   `<n>` below is that PR's number.
+   `<branch>` is the current branch; `<n>` below is the number of the PR the list found or the one just created.
 3. Open the run card: `superegm runcard open --skill review-spec --artifact <spec-path>`, with
    `--mode leavemealone` when the invocation said `--leavemealone`. The id goes on every helper
    call below; a card of an earlier invocation on the same spec is marked interrupted.
@@ -125,7 +125,7 @@ or to the judges (leavemealone-mode). After the dispositions, commit the fix by 
     git push origin <branch>
     superegm review ingest --pr <n> --runcard <id>
 
-The ingest records the PR's new threads as `external:<login>` findings into the latest round, carries an unsettled external high or medium of an earlier cycle forward, and posts `**Reply <fid>:** fixed` on each thread settled `fixed`. Settle them like any finding: `fixed` by an edit alone (the next round reviews it); a thread's GitHub "resolved" state settles nothing. Then:
+The ingest records the PR's new threads as `external:<login>` findings into the latest round, carries an unsettled external high or medium of an earlier round, of this cycle or an earlier one, forward, and posts `**Reply <fid>:** fixed` on each thread settled `fixed`. Settle them like any finding: `fixed` by an edit alone (the next round reviews it); a thread's GitHub "resolved" state settles nothing. Then:
 
     superegm review status --review <id> --runcard <id>
 
@@ -160,7 +160,7 @@ after a blank line), and writes `approvals/<spec-slug>.json` (`commit`, `sha256`
 cycles since the last approval that no `## Units` row names; each needs a row there or a
 `blocking: yes` decision in the plan before `graph` accepts the plan.
 
-The helper ingests the spec PR once before its refusals (never under `--amend-units`); an unsettled external high or medium there refuses with `approve-spec: external:<login> <fid> unsettled on PR <n>`, ruled or not: settle it and go back to step 3 (the next round).
+The helper ingests the spec PR once before its refusals (never under `--amend-units`; with no open PR on the current branch, or no round in the cycle yet, it reads nothing); an unsettled external high or medium there refuses with `approve-spec: external:<login> <fid> unsettled on PR <n>`, ruled or not: settle it and go back to step 3 (the next round). When the cycle was closed by an `accept` and settling it edits the spec, the edit opens the next cycle with a fresh cap: run step 2's `review open` first, then back to step 3.
 After the approval commit, `git push origin <branch>`, so the PR's head is the approved commit.
 
 Tell the owner, in one line: push the approval commit to `origin/<base>` (only the owner updates
