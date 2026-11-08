@@ -12,7 +12,7 @@ import superegm  # the harness reloads the package per test: read load_config at
 from superegm import store, atomic_write, DEFAULT_CONFIG, decision, launch
 from test_builder_token import APP
 from superegm.report import unit_state, unit_view, loop_ended, word_action
-from superegm.apply import splice_board
+from superegm.apply import board_changed_at, splice_board
 from test_builders import seed as filed, launched, foreman as foreman_file
 
 REPO, BUILDER, NOW = "example-org/webhooks", "builder-bot", 1_700_000_000.0
@@ -347,6 +347,38 @@ def test_splice_board_keeps_the_board_above_a_trailing_orphan_marker():
   assert splice_board(WRAPPED + orphan, LATER.replace("| ready |", "| active |")) == MOVED + orphan
 
 
+def test_splice_board_keeps_a_crlf_body_whose_rows_are_unchanged():
+  crlf = WRAPPED.replace("\n", "\r\n")
+  assert splice_board(crlf, LATER) == crlf
+  assert "| U01 #2 | active |" in splice_board(crlf, LATER.replace("| ready |", "| active |"))
+
+
+def test_board_changed_at_reads_the_header_time_of_the_held_board():
+  assert board_changed_at(WRAPPED) == "2026-11-03T00:00:00Z"
+  assert board_changed_at(WRAPPED.replace("\n", "\r\n")) == "2026-11-03T00:00:00Z"
+  assert board_changed_at("# Build\n\ntext\n") is None
+
+
+def test_a_board_whose_write_landed_unrecorded_gives_its_time_to_the_state(world):
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"launched": False, "ready": True, "launches": []}, U02={"launched": False, "launches": []}, U03={"launched": False, "launches": []})
+  assert world.run("status", "--runcard", card)[0] == 0
+  landed = json.loads(s.path("state").read_text(encoding="utf-8"))["board_changed_at"]
+  state = json.loads(s.path("state").read_text(encoding="utf-8")); state["board_changed_at"] = "2026-01-01T00:00:00Z"; atomic_write(s.path("state"), state)
+  world.advance(60)
+  edits = lambda: [c for c in world.gh.calls if c[:2] == ["issue", "edit"] and "--body-file" in c]
+  assert world.run("status", "--runcard", card)[0] == 0 and len(edits()) == 1
+  assert json.loads(s.path("state").read_text(encoding="utf-8"))["board_changed_at"] == landed
+
+
+def test_the_board_names_the_latest_idle_reason(world):
+  card = open_wave_card(world)
+  wave_store(world, U01={"pr": 70, "head": A, "ci": "green"})
+  assert world.run("report", "--runcard", card, "--idle", "U01=first reason")[0] == 0
+  out = world.run("report", "--runcard", card, "--idle", "U01=second reason")[1]
+  assert "| U01 #2 | idle | none | 1 running | aaaaaaa | #70 | none | second reason | none |" in out, out
+
+
 def test_the_board_waits_on_a_shared_file_predecessor_and_an_open_blocking_decision(world):
   class Graph(world.ns["Graph"]):  # U03 after U01 by a shared file alone, beside its blocker U02
     def __init__(self, plan):
@@ -642,7 +674,8 @@ def test_the_wave_skill_body_is_the_driver_loop(world):
 
 
 @pytest.mark.parametrize("needle", ["`<!-- superegm:board -->`", "the tracking issue's body", "none when the rows are unchanged",
-                                    "the inbox stays the action list", "read the card's handoff alone", "report path, the board, `idle:`"])
+                                    "the inbox stays the action list", "read the card's handoff alone", "report path, the board, `idle:`",
+                                    "- `owner: <ids>` → `decision open`", "the plan and the spec"])
 def test_the_wave_skill_names_the_board(needle):
   body = SKILL.read_text(encoding="utf-8").split("---", 2)[2]
   assert needle in body, needle
