@@ -14,7 +14,7 @@ IDS = ("design", "zoom-out", "comprehension", "codebase-details", "readiness", "
 SKILLS = ("brainstorming", "draft", "review-spec", "plan", "review-plan", "file", "wave", "interrupt",
           "clean", "finishing-a-development-branch", "integrate", "judges", "test-driven-development",
           "systematic-debugging", "verification-before-completion", "writing-skills",
-          "using-superegm", "drift-report", "orient")
+          "using-superegm", "drift-report", "orient", "inbox")
 
 
 def frontmatter(path: Path) -> dict:

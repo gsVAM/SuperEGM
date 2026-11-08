@@ -31,3 +31,10 @@ PROSE = [("skills/wave/SKILL.md", n) for n in ("notify --runcard '<CARD>'", "a f
 @pytest.mark.parametrize("path, needle", PROSE)
 def test_the_notify_step_and_the_bar_prose(path, needle):
   assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
+
+
+def test_the_inbox_skill_is_auto_invokable_with_effects_none():
+  text = (ROOT / "skills/inbox/SKILL.md").read_text(encoding="utf-8")
+  assert "disable-model-invocation" not in text
+  for needle in ("superegm inbox", "--all", "--json", "--handoff", "never notifies", "no run card", "Added by SuperEGM"):
+    assert needle in text, needle
