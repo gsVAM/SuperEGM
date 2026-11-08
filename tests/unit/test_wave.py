@@ -19,6 +19,8 @@ REPO, BUILDER, NOW = "example-org/webhooks", "builder-bot", 1_700_000_000.0
 BLOCKED = "**Builder status:** BLOCKED\nWhich queue?\n- (a) use the in-memory queue\n- (b) use Redis\n"
 CLEAN = {"launches": [{"round": 1, "status": "exited 0"}], "rounds": [{"round": 1, "phase": "posted", "outcome": "clean", "launch": 1}]}
 SKILL = Path(__file__).resolve().parents[2] / "skills/wave/SKILL.md"
+POINTS = SKILL.parent / "references/decision_points.md"
+RULINGS = SKILL.parent / "references/rulings.md"
 
 
 def open_wave_card(world):
@@ -732,10 +734,15 @@ def test_the_wave_skill_body_is_the_driver_loop(world):
   body = text.split("---", 2)[2]
   assert len(body.encode("utf-8")) <= 24_000
   assert "In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first." in body
-  for heading in ("## Entry: resume from the store", "## A batch", "## The word table", "### Decision point 1",
-                  "### Decision point 2", "### Decision point 3", "## Stops and by-hand rulings", "## Retries", "## The end"):
+  for heading in ("## Entry: resume from the store", "## A batch", "## The word table", "## Retries", "## The end"):
     assert heading in body, heading
-  assert body.count("Leavemealone-mode: U11 wires §13.2 here.") == 3
+  points = POINTS.read_text(encoding="utf-8")
+  for heading in ("### Decision point 1", "### Decision point 2", "### Decision point 3"):
+    assert heading in points, heading
+  assert "## Stops and by-hand rulings" in RULINGS.read_text(encoding="utf-8")
+  assert points.count("Leavemealone-mode: U11 wires §13.2 here.") == 3
+  for ref in ("references/decision_points.md", "references/rulings.md", "references/leavemealone_mode.md"):
+    assert f"`{ref}`" in body, ref
   for order in ("1. `landed`", "2. `closed`", "3. `exit` and `status`", "4. `ruling`", "5. `superegm foreman dispatch`", "6. `superegm launch`",
                 "7. `superegm report`"):
     assert order in body, order
@@ -749,20 +756,25 @@ def test_the_wave_skill_body_is_the_driver_loop(world):
 
 @pytest.mark.parametrize("needle", ["`<!-- superegm:board -->`", "the tracking issue's body", "none when the rows are unchanged",
                                     "the inbox stays the action list", "read the card's handoff alone", "report path, the board, `idle:`",
-                                    "- `owner: <ids>` → `decision open`", "the plan and the spec",
-                                    "decision open --unit <U> --point 1 --question '<file>' --source 'review <head-review-id> round <n>'",
-                                    "`<fid> allowed — <reason>`", "--disposition declined --owner"])
+                                    "- `owner: <ids>` → `decision open`", "the plan and the spec"])
 def test_the_wave_skill_names_the_board(needle):
   body = SKILL.read_text(encoding="utf-8").split("---", 2)[2]
   assert needle in body, needle
   assert len(body.encode("utf-8")) <= 24_000
 
 
+@pytest.mark.parametrize("needle", ["- `owner: <ids>` → `decision open`",
+                                    "decision open --unit <U> --point 1 --question '<file>' --source 'review <head-review-id> round <n>'",
+                                    "`<fid> allowed — <reason>`", "--disposition declined --owner"])
+def test_the_decision_points_reference_names_the_owner_row(needle):
+  assert needle in POINTS.read_text(encoding="utf-8"), needle
+
+
 @pytest.mark.parametrize("needle", ["no judge panel, in leavemealone-mode too", "--disposition declined --owner --posted <comment-id>",
                                     "**Ruling:** <fid> finding overruled — <reason>", "`<fid> finding upheld` below the cap is the `revise` row",
                                     "at the cap (`review status` exit 2) it is Decision point 2", "then by `review status` as Decision point 1 proceeds"])
 def test_the_owner_row_is_the_owners_alone_in_either_mode_and_spends_no_cap(needle):
-  body = SKILL.read_text(encoding="utf-8").split("---", 2)[2]
+  body = POINTS.read_text(encoding="utf-8")
   row = body.split("- `owner: <ids>` → ", 1)[1].split("\n- `", 1)[0]
   assert needle in row, needle
   assert "Apply it as Decision point 1 does" not in row
@@ -782,7 +794,8 @@ def test_the_wave_entry_refreshes_the_snapshot_before_report():
   "marking a PR ready", "head-moved", "merge locally", "egm/<handoff-id>", "`--wait 1500`", "two consecutive `deadline`s",
   "--not-run <reason>", "ask the user whether to re-review", "max 1 re-audit", "Blocker or Major"])
 def test_the_wave_skill_names_no_removed_mechanism(removed):
-  assert removed not in SKILL.read_text(encoding="utf-8"), removed
+  for path in (SKILL, POINTS, RULINGS, SKILL.parent / "references/leavemealone_mode.md"):
+    assert removed not in path.read_text(encoding="utf-8"), (path.name, removed)
 
 
 # ---------------------------------------------------------------- U18: the redesign ruling
@@ -1266,7 +1279,8 @@ def test_the_batch_ingest_step_and_the_external_reviewer_id_prose(path, needle):
   assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
 
 
-FORMS_PROSE = [("skills/wave/SKILL.md", n) for n in ("`closed`, `ruling`", "- `ruling` lines", "ruling edited after record, ignored", "ruling dropped (")] + [
+FORMS_PROSE = [("skills/wave/SKILL.md", "`closed`, `ruling`")] + [
+               ("skills/wave/references/rulings.md", n) for n in ("- `ruling` lines", "ruling edited after record, ignored", "ruling dropped (")] + [
                ("skills/wave/references/builder_orders.md", n) for n in ("**Ruling:** <fid> finding upheld", "**Ruling:** <fid> finding overruled — <reason>",
                "**Ruling:** one more round", "**Ruling:** stop", "**Ruling:** <fid> allowed — <reason>",
                "**Ruling:** redesign — <reason>", "`config.owners`")]
@@ -1283,27 +1297,27 @@ def test_the_wave_skill_and_the_orders_quote_the_ruling_forms(path, needle):
     "(a `redesign` at point 1 runs no `review rule`)",
     "option on a `BLOCKED` comment → `launch-builder` now"])
 def test_a_ruling_by_comment_continues_as_its_point_does(needle):
-  assert needle in SKILL.read_text(encoding="utf-8"), needle
+  assert needle in RULINGS.read_text(encoding="utf-8"), needle
 
 
 @pytest.mark.parametrize("path, needle", [  # round 4 (PR #96 review): how `--ruling` is built, the allowance, NEEDS_CONTEXT, the orders' shapes
-    ("skills/wave/SKILL.md", "`--ruling` is the event's words as the point's form"),
-    ("skills/wave/SKILL.md", "`<fid> allowed` as `--ruling '<fid> finding overruled'`"),
-    ("skills/wave/SKILL.md", "no open decision names it"),
-    ("skills/wave/SKILL.md", "`BLOCKED` or `NEEDS_CONTEXT` comment"),
-    ("skills/wave/SKILL.md", "`ruling dropped (<by>, comment <id>): …`\n  for one naming no open decision or an already ruled one"),
+    ("skills/wave/references/rulings.md", "`--ruling` is the event's words as the point's form"),
+    ("skills/wave/references/rulings.md", "`<fid> allowed` as `--ruling '<fid> finding overruled'`"),
+    ("skills/wave/references/rulings.md", "no open decision names it"),
+    ("skills/wave/references/rulings.md", "`BLOCKED` or `NEEDS_CONTEXT` comment"),
+    ("skills/wave/references/rulings.md", "`ruling dropped (<by>, comment <id>): …`\n  for one naming no open decision or an already ruled one"),
     ("skills/wave/references/builder_orders.md", "`**Ruling:** (<decision id>) <option> — <reason>`"),
     ("skills/wave/references/builder_orders.md", "(as recorded by <by>; the comment was edited after its record)"),
     ("skills/wave/references/builder_orders.md", "(judges <panel>, leavemealone)"),
     # round 5 (PR #96 review): a redesign's `--ruling` carries no invented reason; an allowance in leavemealone-mode
-    ("skills/wave/SKILL.md", "`redesign` as `--ruling 'redesign'`"),
-    ("skills/wave/SKILL.md", "in leavemealone-mode an allowance naming an open decision is refused"),
+    ("skills/wave/references/rulings.md", "`redesign` as `--ruling 'redesign'`"),
+    ("skills/wave/references/rulings.md", "in leavemealone-mode an allowance naming an open decision is refused"),
     ("skills/wave/references/builder_orders.md", "(recorded on <decision id> as: <option>)"),
     # round 6 (PR #96 review): the refused allowance is journaled for the owner; a deleted recorded comment
-    ("skills/wave/SKILL.md", "or a refused allowance"),
+    ("skills/wave/references/rulings.md", "or a refused allowance"),
     ("skills/wave/references/builder_orders.md", "(as recorded by <by>; the comment was deleted after its record)"),
     # round 7 (PR #96 review): the finding lines `decision rule` reads; entry step 4 reads a posted ruling through the record
-    ("skills/wave/SKILL.md", "each finding on a line of its own starting `<fid> |` or `## Q<n> <fid> (`"),
+    ("skills/wave/references/decision_points.md", "each finding on a line of its own starting `<fid> |` or `## Q<n> <fid> (`"),
     ("skills/wave/SKILL.md", "binds once `decision rule --posted <comment id>` records it"),
     ("skills/wave/SKILL.md", "whose post or label request fails"),
     ("skills/wave/SKILL.md", "a `--posted` one included"),
@@ -1311,7 +1325,7 @@ def test_a_ruling_by_comment_continues_as_its_point_does(needle):
     # round 8 (PR #96 review): the whole-file allowance; who posts the judges' ruling; a run stopped after a record
     ("skills/wave/references/builder_orders.md", "`**Ruling:** test-delta <file> allowed — <reason>`"),
     ("skills/wave/references/builder_orders.md", "posted under the elephant's token after the record"),
-    ("skills/wave/SKILL.md", "a run stopped between a record and its continuation"),
+    ("skills/wave/references/rulings.md", "a run stopped between a record and its continuation"),
     # round 13 (PR #96 review, codebase-details-12-4): a label left on by a failed session stop comes off by hand
     ("skills/wave/SKILL.md", "`<U> <qid>: label superegm:stopped left on issue #<n>`"),
     ("skills/wave/SKILL.md", "--remove-label superegm:stopped")])
