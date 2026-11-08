@@ -122,7 +122,10 @@ def binding_rulings(comments: list, owners: list, recorded: list, decisions=None
   (`recorded`, as `recorded_rulings` reads it), then each owner's form comment `ruling_of` reads whose comment id
   the record does not hold and whose fid or option subject the record does not already rule; an option ruling binds
   only when it is one of the options its decision offers (`decisions`, else the named comment's `- (` lines and
-  `stop the unit`), as `decision rule` would accept it. Given `pending` (the open decisions, `pending_decisions`),
+  `stop the unit`), as `decision rule` would accept it, with two exceptions `offered` names: an option naming a
+  comment id this issue lacks binds unchecked (an interface ruling copied from its producer's issue, which
+  `decision rule` drops here as naming no open decision, and which a mistyped id cannot be told apart from), and an
+  option on a named comment with no `- (` lines binds whatever its text. Given `pending` (the open decisions, `pending_decisions`),
   an unrecorded `one more round` or `stop` binds only while a point-2 decision is open and a `redesign` only while
   a head's (point 1 or 2) is: otherwise `decision rule` drops it, and at point 3 a redesign is text. Once a point-1
   question exists, an unrecorded `finding upheld` binds only on a fid one asks about (`fid_decisions`, whose
@@ -155,7 +158,10 @@ def binding_rulings(comments: list, owners: list, recorded: list, decisions=None
 
 
 def offered(r: "Ruling", comments: list, decisions: list) -> bool:
-  """Whether an option ruling names one of its decision's options (`check_ruling` at point 3)."""
+  """Whether an option ruling names one of its decision's options (`check_ruling` at point 3), except where there
+  is nothing to check it against: a numeric id this issue's comments lack (a ruling copied from a producer's
+  issue, or a mistyped id: both bind, unchecked) and a named comment with no `- (` lines (any option binds); a
+  decision id the record lacks binds nothing."""
   decision = next((d for d in decisions if d.get("point") == 3 and r.subject == option_name(d)), None)
   if decision is not None:
     options = decision.get("options") or []
@@ -205,9 +211,12 @@ def overridden_comments(comments: list, owners: list, foreman: dict) -> dict:
 
 def edited_after_record(comment: dict, entry: dict) -> bool:
   """Whether a recorded comment was edited after its record: its `updated_at` later than the entry's `posted_at`, or,
-  for an `unread` entry (`posted_at` the host's time, GitHub's never read back), later than its own `created_at`."""
-  since = comment.get("created_at") if entry.get("unread") else entry.get("posted_at")
-  return (comment.get("updated_at") or "") > (since or "")
+  for an `unread` entry (`posted_at` the host's time, GitHub's never read back), later than its own `created_at`.
+  The comment's `created_at` is a floor for either: a session ruling recorded before U22 holds the host's time from
+  before its post, which an unedited post's GitHub time passes."""
+  created = comment.get("created_at") or ""
+  since = created if entry.get("unread") else max(entry.get("posted_at") or "", created)
+  return (comment.get("updated_at") or "") > since
 
 
 def deleted_rulings(comments: list, foreman: dict) -> list:
@@ -435,17 +444,22 @@ def rule(args) -> int:
   if brief:
     brainstorm_brief(st, unit, decision["id"], decision, chosen, (state["units"][unit].get("pr") or {}).get("number"))
   entries = [{"decision": d["id"], "ruling": args.ruling, "by": args.by,
-              "reason": reason.strip() or None, "posted": posted, "posted_at": posted_at} for d in decisions]
+              "reason": reason.strip() or None, "posted": posted, "posted_at": posted_at}
+             | ({"unread": True} if url else {}) for d in decisions]
   data["rulings"] += entries
   if stops:  # the stop is written with the ruling, in one save
     data["stopped"] = stopped_entry(args.by, chosen, now, brief)
-  core.save_foreman(st, unit, data)  # recorded before the read-back: `status --wait` skips the session's own post
+  # recorded before the read-back, the session's post marked `unread` (its GitHub time not yet read), so a
+  # `status --wait` pass in between compares its edits with its own `created_at` and skips the unedited post
+  core.save_foreman(st, unit, data)
   if url:  # the session's own post: its time is GitHub's creation time, read back, so any edit since (one before the
-    # read-back too) reads as an edit after the record; unread, the host's `now` is marked `unread`
+    # read-back too) reads as an edit after the record; a failed read-back leaves the entry `unread`
     created = read_back(st, cid).get("created_at")
-    for entry in entries:
-      entry.update({"posted_at": created} if created else {"unread": True})
-    core.save_foreman(st, unit, data)
+    if created:
+      for entry in entries:
+        entry.pop("unread", None)
+        entry["posted_at"] = created
+      core.save_foreman(st, unit, data)
   for d in decisions:
     if found:
       words = " ".join(w for w in (found.kind, found.subject, found.option) if w)
@@ -601,6 +615,8 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int, mode=None)
     if found.kind == "redesign" and decision["id"] not in {d["id"] for d in pending_decisions(foreman)}:
       dropped(store, args, f"{decision['id']} already ruled")  # a redesign rules open decisions alone, as without --decision
     refuse_allowance(store, args, found, [decision], cid, mode)
+    if found.kind == "redesign":  # every pending decision at once (spec section 13.2), the named one first: its brief
+      return comment, found, [decision] + [d for d in pending_decisions(foreman) if d["id"] != decision["id"]]
     return comment, found, [decision]
   pending = pending_decisions(foreman)
   if found.kind == "redesign":

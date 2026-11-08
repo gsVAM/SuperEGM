@@ -284,7 +284,7 @@ Leavemealone-mode: U11 wires §13.2 here.
 - A `launch-builder` refusal is idle for the invocation; no retry.
 - `status --wait` exiting non-zero: run it once more; if it fails again, run
   `report`, say so in chat, and end this invocation.
-- A `decision rule` whose post or label request fails (a `gh` error, not a refusal) records nothing: run it again, a `--posted` one included.
+- A `decision rule` whose post or label request fails (a `gh` error, not a refusal) records nothing: run it again, a `--posted` one included. A journaled `<U> <qid>: label superegm:stopped left on issue #<n>` means the label stayed on: run `gh issue edit <n> --remove-label superegm:stopped` first.
 - Never evaluate the dispatch predicate yourself: `foreman dispatch` is its
   one place, and the batch order above is how a refusal is handled.
 

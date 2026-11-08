@@ -106,7 +106,8 @@ def ci_word(verdict: str):
 
 def builder_facts(st, uid: str, comments: list) -> tuple:
   """From the latest launch by `round`: `[round, <text of its exit file>]` when that file exists,
-  and `[id, word, login]` of the last `**Builder status:**` comment created at or after its
+  and `[id, word, login]` of the last `**Builder status:**` comment (one opening with that line or with its
+  `**Deviation**` headings) created at or after its
   `started_at` (every such comment when nothing was launched). The word is masked (None) while
   the launch is not terminal (spec section 4), so it folds into the exit line it belongs to."""
   latest = max(load_launches(st, uid), key=lambda entry: entry["round"], default=None)
@@ -117,7 +118,10 @@ def builder_facts(st, uid: str, comments: list) -> tuple:
   since = latest["started_at"] if latest else ""
   status = None
   for comment in comments:
-    match = STATUS_RE.search(comment.get("body") or "")
+    body = comment.get("body") or ""
+    # a status comment opens with its status line or its `**Deviation**` headings (the orders' shapes); a status
+    # line quoted below another comment's first line, such as an owner's ruling, is not one
+    match = STATUS_RE.search(body) if body.startswith(("**Builder status:**", "**Deviation")) else None
     if match and (comment.get("created_at") or "") >= since:
       status = [comment["id"], match.group(1), (comment.get("user") or {}).get("login")]
   return exit, None if latest and not terminal(latest) else status
