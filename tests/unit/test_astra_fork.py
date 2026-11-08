@@ -337,7 +337,8 @@ def test_every_gh_command_in_the_skills_is_pinned_to_github_com() -> None:
   """R2-03: gh_env() pins only the helper's own subprocesses; a bare `gh` in a
   skill still follows an inherited GH_HOST to an enterprise server."""
   for path in ("skills/wave/SKILL.md", "skills/plan/SKILL.md",
-               "skills/wave/references/foreman_brief.md"):
+               "skills/wave/references/foreman_brief.md", "skills/wave/references/decision_points.md",
+               "skills/wave/references/rulings.md", "skills/wave/references/leavemealone_mode.md"):
     text = read(path)
     for match in re.finditer(r"(?<![\w=.])gh (issue|pr|api|label|auth) ", text):
       tail = " ".join(text[match.start():match.start() + 90].split())
@@ -371,9 +372,9 @@ def test_convergence_rule_is_stated_once_and_referenced() -> None:
     assert text in flat, text
   # SuperEGM section 11: the wave skill pauses at the cap (decision point 2); the convergence doctrine
   # lives in review_loop.md, which the wave skill no longer references (U10b).
-  wave = " ".join(read("skills/wave/SKILL.md").split())
+  wave = " ".join(read("skills/wave/references/decision_points.md").split())
   assert "Cap: 5 rounds, then PAUSE" in wave
-  assert "Cap 3 rounds" not in wave, "the fixed cap must be gone"
+  assert "Cap 3 rounds" not in wave and "Cap 3 rounds" not in read("skills/wave/SKILL.md"), "the fixed cap must be gone"
   # SuperEGM section 9.2: the plan review's rounds run through the judge panel, which stops at the cap.
   judges = " ".join(read("skills/judges/SKILL.md").split())
   assert "the cap of 5 rounds is reached" in judges and "cap_reached" in judges
@@ -388,7 +389,8 @@ def test_no_teammate_claims_survive() -> None:
   None of those claims may reappear."""
   for path in ("README.md", "docs/claude.md", "resources/astra_lane.md",
                "resources/review_panels.md", "skills/wave/SKILL.md",
-               "skills/wave/references/foreman_brief.md",
+               "skills/wave/references/foreman_brief.md", "skills/wave/references/decision_points.md",
+               "skills/wave/references/rulings.md", "skills/wave/references/leavemealone_mode.md",
                "skills/plan/SKILL.md", "skills/review-spec/references/review_loop.md"):
     flat = " ".join(read(path).split())
     assert "teammate" not in flat.lower(), f"{path} still says teammate"
