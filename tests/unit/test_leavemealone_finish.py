@@ -225,11 +225,17 @@ COMMON = ["judges open --question <path> --evidence <paths> --parent <card>",
           "`--leavemealone`", "`config.mode`", "unconverged"]
 
 
+# the wave skill's section moved to its own reference (the owner's ruling: a 24K skill body is context bloat)
+WIRING_FILE = {"wave": "skills/wave/references/leavemealone_mode.md"}
+
+
 @pytest.mark.parametrize("skill", sorted(WIRING))
 def test_leavemealone_wiring(skill):
-  text = (ROOT / f"skills/{skill}/SKILL.md").read_text(encoding="utf-8")
-  body = text.split("---", 2)[2]
-  section = body[body.index("## Leavemealone-mode"):]
+  body = (ROOT / f"skills/{skill}/SKILL.md").read_text(encoding="utf-8").split("---", 2)[2]
+  if skill in WIRING_FILE:
+    section = (ROOT / WIRING_FILE[skill]).read_text(encoding="utf-8")
+  else:
+    section = body[body.index("## Leavemealone-mode"):]
   for snippet in WIRING[skill] + COMMON:
     assert snippet in section, (skill, snippet)
   assert "merge" not in section.lower().replace("awaiting merge", "")
@@ -385,6 +391,8 @@ REMOVED = ["egm-bootstrap", "synthesizer", "bootstrap_orchestrator", "distributi
 MINE = ["README.md", "docs/index.md", "docs/getting_started.md", "docs/claude.md", "docs/faq.md", "docs/privacy.md",
         "docs/releases.md", "scripts/prepare_release.py", "tests/unit/test_releases.py", "skills/review-spec/SKILL.md",
         "skills/review-plan/SKILL.md", "skills/plan/SKILL.md", "skills/wave/SKILL.md", "skills/integrate/SKILL.md",
+        "skills/wave/references/decision_points.md", "skills/wave/references/rulings.md",
+        "skills/wave/references/leavemealone_mode.md",
         "skills/judges/references/leavemealone.md", "skills/plan/scripts/superegm/judges.py",
         "skills/plan/scripts/superegm/close.py", "skills/plan/references/handoff_config.md"]
 
@@ -413,7 +421,8 @@ def test_the_app_path_prose(path, needle, present):
   assert (needle in (ROOT / path).read_text(encoding="utf-8")) is present, (path, needle)
 
 
-REDESIGN_PROSE = [("skills/wave/SKILL.md", "redesign — <one sentence why>"), ("skills/wave/SKILL.md", ".brainstorm.md"), ("skills/wave/SKILL.md", "stopped for redesign"),
+REDESIGN_PROSE = [("skills/wave/references/decision_points.md", "redesign — <one sentence why>"), ("skills/wave/references/decision_points.md", ".brainstorm.md"),
+                  ("skills/wave/references/decision_points.md", "stopped for redesign"),
                   ("skills/integrate/SKILL.md", "stopped for redesign"), ("skills/integrate/SKILL.md", "closes it by hand"),
                   ("skills/brainstorming/SKILL.md", "brainstorm brief"), ("skills/brainstorming/SKILL.md", "whose issue is still open"),
                   ("skills/brainstorming/SKILL.md", "naming the handoff"), ("skills/brainstorming/SKILL.md", "never offered")]
@@ -427,5 +436,5 @@ def test_the_redesign_prose(path, needle):
 def test_the_point_one_redesign_waits_for_the_verdict_and_the_by_hand_ruling_is_told():
   panel = (ROOT / "skills/judges/references/leavemealone.md").read_text(encoding="utf-8")
   assert "held until the verdict" in panel and "the first question converged on `redesign`" in panel
-  assert "ruled by hand with `--posted`" in (ROOT / "skills/wave/SKILL.md").read_text(encoding="utf-8")
+  assert "ruled by hand with `--posted`" in (ROOT / "skills/wave/references/decision_points.md").read_text(encoding="utf-8")
   assert "the `Spec:` range" in (ROOT / "skills/brainstorming/SKILL.md").read_text(encoding="utf-8")

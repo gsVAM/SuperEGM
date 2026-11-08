@@ -24,7 +24,8 @@ def test_notify_timeout_seconds_key_and_the_inbox_module(world, value, ok):
   assert superegm.load_config(world.repo)["notify_timeout_seconds"] == value
 
 
-PROSE = [("skills/wave/SKILL.md", n) for n in ("notify --runcard '<CARD>'", "a failing or slow hook never stops the wave", "a pending decision whose panel answered is the owner's alone")] + [
+PROSE = [("skills/wave/SKILL.md", n) for n in ("notify --runcard '<CARD>'", "a failing or slow hook never stops the wave")] + [
+         ("skills/wave/references/leavemealone_mode.md", "a pending decision whose panel answered is the owner's alone")] + [
          ("skills/judges/references/leavemealone.md", n) for n in ("needs a `high` finding behind it", "held until `decision rule` accepts")]
 
 

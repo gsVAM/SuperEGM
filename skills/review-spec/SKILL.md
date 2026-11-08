@@ -2,7 +2,7 @@
 name: review-spec
 license: Apache-2.0
 effects: external
-effect_kinds: [state-store, start-session]
+effect_kinds: [state-store, start-session, github-write, remote-branch]
 disable-model-invocation: true
 description: >-
   Orchestrates the EGM Goldfish Review Protocol. Used as part of the EGM
@@ -11,7 +11,7 @@ description: >-
   Zoom Out Review, and Implementation Readiness.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: renamed to review-spec; the body is spec section 8's one review loop over the helper (the stages, presets, semantic split, checkpoint gates and report files are gone); persona path agents/zoom-out.md; the amendment scope, the branch sentence and the batch settle (U19). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: renamed to review-spec; the body is spec section 8's one review loop over the helper (the stages, presets, semantic split, checkpoint gates and report files are gone); persona path agents/zoom-out.md; the amendment scope, the branch sentence and the batch settle (U19); the spec PR, the pushes and the PR's ingest (U26). -->
 
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: run card, panel presets, Astra lane. -->
 
@@ -62,6 +62,17 @@ worktree in the owner's checkout.
 2. If `.superegm/config.json` is missing, run `superegm init` first: it writes the config with
    every key and prints the owner's by-hand steps (the builder account and profile, the branch
    protection). Do them later; the review does not need them.
+
+   Then the spec PR, the elephant's own (spec section 8): refuse on `<base>` (`config.base`; start on a branch) before any commit, push or PR, and end the turn. Otherwise, with `<spec-path>` relative to the repository root:
+
+       git add -- <spec-path>
+       git commit --allow-empty -m "superegm: review <spec-slug>" -- <spec-path>
+       git push -u origin <branch>
+       gh pr list --head <branch> --state open --json number
+
+   When the list is empty, open the PR ready for review, never `--draft` (a bot may skip drafts):
+   `gh pr create --head <branch> --base <base> --title "<the spec's H1>" --body "<spec-path>"`.
+   `<branch>` is the current branch; `<n>` below is the number of the PR the list found or the one just created.
 3. Open the run card: `superegm runcard open --skill review-spec --artifact <spec-path>`, with
    `--mode leavemealone` when the invocation said `--leavemealone`. The id goes on every helper
    call below; a card of an earlier invocation on the same spec is marked interrupted.
@@ -107,7 +118,14 @@ writes nothing and is named),
     superegm review settle --review <id> --file <dispositions> [--owner | --judges <judges-id>] --runcard <id>
 
 and put every high or medium you contest or decline to the owner in one question (normal mode)
-or to the judges (leavemealone-mode). Then:
+or to the judges (leavemealone-mode). After the dispositions, commit the fix by path and push it, so a PR reviewer reads every round's bytes, then ingest the PR:
+
+    git add -- <spec-path>
+    git commit --allow-empty -m "superegm: fix <spec-slug> round <round>" -- <spec-path>
+    git push origin <branch>
+    superegm review ingest --pr <n> --runcard <id>
+
+The ingest records the PR's new threads as `external:<login>` findings into the latest round, carries an unsettled external high or medium of an earlier round, of this cycle or an earlier one, forward, and posts `**Reply <fid>:** fixed` on each thread settled `fixed`. A thread by a `config.owners` login whose first line starts `**Ruling:**` is dropped, never a finding, and settles nothing: rule on the spec in the session (normal mode) or through the judges (leavemealone-mode), never on the PR. Settle them like any finding: `fixed` by an edit alone (the next round reviews it); a thread's GitHub "resolved" state settles nothing. Then:
 
     superegm review status --review <id> --runcard <id>
 
@@ -139,11 +157,16 @@ in the tree, with the message `superegm: approve <spec-slug> at review <id>` (`c
 after a blank line), and writes `approvals/<spec-slug>.json` (`commit`, `sha256`, `handoff_id`,
 `escalated[]`). Before its question the helper lists the pairs that record will carry as
 `approve-spec: <n> escalated finding(s) await the owner: <ids>`: every `escalated` finding of the
-cycles since the last approval that no `## Units` row names; each needs a row there or a
-`blocking: yes` decision in the plan before `graph` accepts the plan.
+cycles since the last approval that no `## Units` row names (re-approving the cycle the last approval names,
+its bytes unmoved, lists that entry's unnamed pairs again beside that cycle's new ones); each needs a row there or a
+`blocking: yes` decision in the plan before `graph` accepts the plan. An external finding carried
+into later rounds is one pair: name the listed id, the latest copy's (an earlier copy's id discharges nothing).
+
+The helper ingests the spec PR once before its refusals (never under `--amend-units`; with no open PR on the current branch, or no round in the cycle yet, it reads nothing); an unsettled external high or medium there refuses with `approve-spec: external:<login> <fid> unsettled on PR <n>`, ruled or not; `<n>` there is the PR the finding's thread is on: a finding carried from an earlier PR names that PR, not the current branch's. Settle it: `declined` or `escalated` edits nothing, so run `approve-spec` again; `contested` goes to its ruler (decision point 1); `fixed` edits the spec, so run `superegm review status` and act on its exit code (3: back to step 3, the next round; 2: step 5), except when the cycle was closed by an `accept`: the edit opens the next cycle with a fresh cap, so run step 2's `review open` first, then back to step 3. A reply the ingest could not post is named (`review ingest: reply <fid> not posted: <error>`) and retried on the next ingest; it never refuses.
+After the approval commit, `git push origin <branch>`, so the PR's head is the approved commit.
 
 Tell the owner, in one line: push the approval commit to `origin/<base>` (only the owner updates
-the base branch; `launch` refuses the first wave until the spec there hashes to the approval),
+the base branch; `launch` refuses the first wave until the spec there hashes to the approval; GitHub records that push as the PR's merge),
 then type `/superegm:plan <spec-path>`. Nothing chains.
 
 ### 5. At the cap (exit 2)

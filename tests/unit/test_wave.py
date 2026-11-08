@@ -3,6 +3,7 @@
 
 """U10b: the pure functions the wave skill cites, `report`, `decision open|rule` and the skill body.
 Fixtures: conftest's `world`, `applied` and `make_pr` (U03/U07)."""
+import hashlib
 import json
 from pathlib import Path
 import pytest
@@ -10,14 +11,17 @@ from conftest import applied, make_pr, set_config
 import superegm  # the harness reloads the package per test: read load_config at call time
 from superegm import store, atomic_write, DEFAULT_CONFIG, decision, launch
 from test_builder_token import APP
-from superegm.report import unit_state, loop_ended, word_action
+from superegm.report import unit_state, unit_view, loop_ended, word_action
 from superegm.review import parse_findings
+from superegm.apply import board_changed_at, splice_board
 from test_builders import seed as filed, launched, foreman as foreman_file
 
 REPO, BUILDER, NOW = "example-org/webhooks", "builder-bot", 1_700_000_000.0
 BLOCKED = "**Builder status:** BLOCKED\nWhich queue?\n- (a) use the in-memory queue\n- (b) use Redis\n"
 CLEAN = {"launches": [{"round": 1, "status": "exited 0"}], "rounds": [{"round": 1, "phase": "posted", "outcome": "clean", "launch": 1}]}
 SKILL = Path(__file__).resolve().parents[2] / "skills/wave/SKILL.md"
+POINTS = SKILL.parent / "references/decision_points.md"
+RULINGS = SKILL.parent / "references/rulings.md"
 
 
 def open_wave_card(world):
@@ -107,6 +111,19 @@ def test_unit_state_names_one_of_six_states(view, foreman, card, expected):
   assert unit_state("U01", view, foreman, [], card, {"ci_wait_minutes": 30}, NOW) == expected
 
 
+@pytest.mark.parametrize("view, card, expected", [
+  ({"ci": None, "head": None, "landed": False, "launched": False, "ready": True}, CARD, "ready"),
+  ({"ci": None, "head": None, "landed": False, "launched": False, "ready": True},
+   {**CARD, "idle": [{"unit": "U02", "reason": "launch-builder: no token", "at": NOW}]}, "idle"),
+  ({"ci": None, "head": None, "landed": False, "launched": False, "ready": False}, CARD, "waiting"),
+  ({"ci": None, "head": None, "landed": True, "launched": False, "ready": False}, CARD, "landed"),
+  ({"ci": "green", "head": "a" * 40, "landed": False, "launched": True, "ready": False}, CARD, "active")])
+def test_unit_state_names_ready_and_waiting_for_an_unlaunched_unit(view, card, expected):
+  assert unit_state("U02", view, {}, [], card, {"ci_wait_minutes": 30}, NOW) == expected
+  state = {"units": {"U02": {"launched": None}}, "status": {"ready": ["U02"], "units": {"U02": {"pr": None, "head": None, "ci": None, "landed": False}}}}
+  assert unit_view(state, "U02") == {"pr": None, "head": None, "ci": None, "landed": False, "launched": False, "ready": True}
+
+
 @pytest.mark.parametrize("states,ready,slots,expected", [
   ({"U01": "clean", "U02": "landed", "U03": "stopped", "U04": "pending", "U05": "idle"}, [], 1,
    (True, "every launched unit is clean, landed, stopped, pending or idle")),
@@ -125,6 +142,7 @@ def test_loop_ended_is_the_end_condition(states, ready, slots, expected):
   ("error", 5, "idle: review stalled"), ("target-moved", 5, "idle: review stalled"), ("blocked", 3, "decision 3"),
   ("recovered clean", 0, "await-merge"), ("recovered contested: f-2-1", 3, "decision 1"),
   ("recovered cap-reached", 2, "decision 2"), ("a sentence instead of a word", 3, "redispatch"),
+  ("owner: f-1-2", 3, "decision open"),
 ])
 def test_word_action_is_the_word_table(word, review_exit, action):
   assert word_action(word, review_exit) == action
@@ -172,7 +190,7 @@ def test_a_launch_after_a_clean_round_keeps_the_unit_active(world):
   assert unit_state("U01", view, foreman_of(s, "U01"), launches, CARD, {}, NOW) == "active"
   code, out = world.run("report", "--runcard", card)
   assert code == 0 and "loop: continuing (in flight: U01)" in out, out
-  assert "- U01 #2: active · pr #70 head aaaaaaa · ci green · rounds 1 (r1 posted clean) · launch 2 running" in s.path("wave_report", 1).read_text(encoding="utf-8")
+  assert "| U01 #2 | active | r1 posted clean | 2 running | aaaaaaa | #70 | none | none | none |" in s.path("wave_report", 1).read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------- S2: the report file and the end line
@@ -200,8 +218,8 @@ def test_report_rewrites_the_wave_report_and_prints_the_end_line(world):
   assert "idle: none" in out and "pending: none" in out and "loop: continuing (in flight: U02)" in out
   text = path.read_text(encoding="utf-8")
   assert text.startswith(f"# Wave 1 report (handoff {s.handoff_id})\nRun card: {card}\n")
-  assert "- U01 #2: clean · pr #70 head aaaaaaa · ci green · rounds 1 (r1 posted clean) · launch 1 exited 0" in text
-  assert "- U02 #3: active · pr #71 head bbbbbbb · ci pending · rounds 1 (r1 posted contested: f-1-2) · launch 1 running" in text
+  assert "| U01 #2 | clean | r1 posted clean | 1 exited 0 | aaaaaaa | #70 | none | await-merge | none |" in text
+  assert "| U02 #3 | active | r1 posted contested: f-1-2 | 1 running | bbbbbbb | #71 | ci, U01 | decision 1 | none |" in text
   assert "## Non-terminal launches\n- U02 launch 1 running" in text
   assert "## Heads with pending or absent CI\n- U02 bbbbbbb waiting-for-ci" in text
   assert "## Ready, unlaunched\n- U03 (slot free)" in text
@@ -255,10 +273,217 @@ def test_report_idle_names_a_launch_builder_refusal(world):
   assert world.run("report", "--runcard", card, "--idle", "U09=stalled")[0] == 1, "an unknown unit"
 
 
+def test_report_refuses_a_changed_spec_and_a_state_without_its_plan(world):
+  """`report` opens the card's handoff as `status` does: it reads the plan and the spec, and refuses as `status`
+  does when the spec changed since its approval or the state names no plan (the skill's step 3)."""
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": A, "ci": "green"})
+  assert world.run("report", "--runcard", card)[0] == 0
+  report = s.path("wave_report", 1).read_text(encoding="utf-8")
+  spec = world.spec.read_text(encoding="utf-8")
+  world.spec.write_text(spec + "\nchanged after the approval\n", encoding="utf-8")
+  code, out = world.run("report", "--runcard", card)
+  assert code == 1 and "spec changed since the approval: run approve-spec again" in out, out
+  assert s.path("wave_report", 1).read_text(encoding="utf-8") == report, "a refusal rewrites nothing"
+  world.spec.write_text(spec, encoding="utf-8")
+  state = json.loads(s.path("state").read_text(encoding="utf-8")); state.pop("plan"); atomic_write(s.path("state"), state)
+  code, out = world.run("report", "--runcard", card)
+  assert code == 1 and "state holds no plan path" in out, out
+
+
 # ---------------------------------------------------------------- S4: decision open
 
 
 PRIOR = {"id": "q1", "point": 3, "source": "comment 60", "head": "a" * 40, "question": BLOCKED, "asked_at": "t"}
+A = "a" * 40
+HEAD = "| unit | state | round | launch | head | PR | waits on | next action | cost |"
+
+
+@pytest.mark.parametrize("units, idle, row", [
+  ({"U01": {"pr": 70, "head": A, "ci": "green", "launches": [{"round": 1, "status": "exited 0", "total_cost_usd": 1.5}],
+            "rounds": [{"round": 1, "phase": "posted", "outcome": "clean", "launch": 1, "head": A}]}}, None,
+   "| U01 #2 | clean | r1 posted clean | 1 exited 0 | aaaaaaa | #70 | none | await-merge | 1.50 |"),
+  ({"U01": {"pr": 70, "head": A, "ci": "green", "launches": [{"round": 1, "status": "exited 0", "total_cost_usd": 0.5}],
+            "rounds": [{"round": 1, "phase": "posted", "outcome": "revise", "launch": 1, "head": A}]}}, None,
+   "| U01 #2 | active | r1 posted revise | 1 exited 0 | aaaaaaa | #70 | none | launch-builder | 0.50 |"),
+  ({"U01": {"pr": 70, "head": A, "ci": "green", "launches": [{"round": 1, "status": "exited 0"}, {"round": 2, "status": "running"}],
+            "rounds": [{"round": 1, "phase": "posted", "outcome": "revise", "launch": 1, "head": A}]}}, None,
+   "| U01 #2 | active | r1 posted revise | 2 running | aaaaaaa | #70 | none | none | none |"),
+  ({"U01": {"pr": 70, "head": A, "ci": "green", "launches": [{"round": 1, "status": "exited 0", "total_cost_usd": 1.0},
+                                                            {"round": 2, "status": "exited 137", "total_cost_usd": "unrecorded"}]}}, None,
+   "| U01 #2 | active | none | 2 exited 137 | aaaaaaa | #70 | none | foreman dispatch | 1.00 (partial) |"),
+  ({"U01": {"pr": 70, "head": A, "ci": "green", "launches": [{"round": 1, "status": "interrupted", "total_cost_usd": 2.0}]}}, None,
+   "| U01 #2 | active | none | 1 interrupted | aaaaaaa | #70 | none | foreman dispatch | 2.00 |"),
+  ({"U01": {"pr": 70, "head": A, "ci": "green", "launches": [{"round": 1, "status": "exited 0"}],
+            "rounds": [{"round": 1, "phase": "posted", "outcome": "owner: f-1-2", "launch": 1, "head": A}]}}, None,
+   "| U01 #2 | active | r1 posted owner: f-1-2 | 1 exited 0 | aaaaaaa | #70 | none | decision open | none |"),
+  ({"U01": {"launches": []}}, None, "| U01 #2 | active | none | none | none | none | none | foreman dispatch | none |"),
+  ({"U01": {"pr": 70, "head": A, "ci": "pending"}}, None, "| U01 #2 | active | none | 1 running | aaaaaaa | #70 | ci | none | none |"),
+  ({"U01": {"pr": 70, "head": A, "ci": "green", "decisions": [PRIOR]}}, None, "| U01 #2 | pending | none | 1 running | aaaaaaa | #70 | q1 | decision 3 | none |"),
+  ({"U01": {"pr": 70, "head": A, "ci": "green"}}, "U01=launch-builder: no token",
+   "| U01 #2 | idle | none | 1 running | aaaaaaa | #70 | none | launch-builder: no token | none |"),
+  ({"U01": {"pr": 70, "head": A, "ci": None, "landed": True}}, None, "| U01 #2 | landed | none | 1 running | aaaaaaa | #70 | none | none | none |"),
+  ({"U01": {"launched": False, "ready": True, "launches": []}}, None, "| U01 #2 | ready | none | none | none | none | none | launch-builder | none |"),
+  ({"U01": {"pr": 70, "head": A, "ci": "green"}, "U02": {"launched": False, "launches": []}}, None,
+   "| U02 #3 | waiting | none | none | none | none | U01 | none | none |")])
+def test_the_board_row_per_unit(world, units, idle, row):
+  card = open_wave_card(world)
+  s = wave_store(world, **units)
+  code, out = world.run("report", "--runcard", card, *(["--idle", idle] if idle else []))
+  assert code == 0, out
+  text = s.path("wave_report", 1).read_text(encoding="utf-8")
+  header = (f"handoff {s.handoff_id} · base main · spec {hashlib.sha256(world.spec.read_bytes()).hexdigest()[:12]}"
+            " · waves {U01} → {U02} → {U03} · changed none")
+  assert f"## Units\n{header}\n{HEAD}\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n" in text
+  assert row in text and row in out and out.splitlines()[0] == str(s.path("wave_report", 1)) and "- U01 #2:" not in text
+
+
+BLOCK = "handoff h · base main · spec 0123456789ab · waves {U01} · changed 2026-11-03T00:00:00Z\n| unit | state |\n| --- | --- |\n| U01 #2 | ready |"
+LATER = BLOCK.replace("T00:00:00Z", "T01:00:00Z")
+WRAPPED = "# Build\n\ntext\n\n<!-- superegm:board -->\n" + BLOCK + "\n<!-- /superegm:board -->\n"
+MOVED = WRAPPED.replace("| ready |", "| active |").replace("T00:00:00Z", "T01:00:00Z")
+
+
+@pytest.mark.parametrize("body, block, expected", [
+  ("# Build\n\ntext\n", BLOCK, WRAPPED), ("# Build\n\ntext", BLOCK, WRAPPED), (WRAPPED, LATER, WRAPPED),
+  (WRAPPED, LATER.replace("| ready |", "| active |"), MOVED),
+  (WRAPPED + "\nafter\n", LATER.replace("| ready |", "| active |"), MOVED + "\nafter\n")])
+def test_splice_board_replaces_appends_or_keeps(body, block, expected):
+  assert splice_board(body, block) == expected
+  assert splice_board(expected, block) == expected
+
+
+@pytest.mark.parametrize("orphan", ["<!-- /superegm:board -->", "<!-- superegm:board -->"])
+def test_splice_board_appends_once_past_an_orphan_marker(orphan):
+  body = f"# Build\n\n{orphan}\nowner text\n"
+  first = splice_board(body, BLOCK)
+  assert first == body + "\n<!-- superegm:board -->\n" + BLOCK + "\n<!-- /superegm:board -->\n"
+  assert splice_board(first, LATER) == first
+  moved = splice_board(first, LATER.replace("| ready |", "| active |"))
+  assert moved.startswith(body) and "| U01 #2 | active |" in moved and moved.count("<!-- /superegm:board -->") == first.count("<!-- /superegm:board -->")
+
+
+def test_splice_board_keeps_the_board_above_a_trailing_orphan_marker():
+  orphan = "\n<!-- superegm:board -->\nowner note\n"
+  assert splice_board(WRAPPED + orphan, LATER) == WRAPPED + orphan
+  assert splice_board(WRAPPED + orphan, LATER.replace("| ready |", "| active |")) == MOVED + orphan
+
+
+def test_splice_board_keeps_a_crlf_body_whose_rows_are_unchanged():
+  crlf = WRAPPED.replace("\n", "\r\n")
+  assert splice_board(crlf, LATER) == crlf
+  assert "| U01 #2 | active |" in splice_board(crlf, LATER.replace("| ready |", "| active |"))
+
+
+def test_board_changed_at_reads_the_header_time_of_the_held_board():
+  assert board_changed_at(WRAPPED) == "2026-11-03T00:00:00Z"
+  assert board_changed_at(WRAPPED.replace("\n", "\r\n")) == "2026-11-03T00:00:00Z"
+  assert board_changed_at("# Build\n\ntext\n") is None
+
+
+def test_a_board_whose_write_landed_unrecorded_gives_its_time_to_the_state(world):
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"launched": False, "ready": True, "launches": []}, U02={"launched": False, "launches": []}, U03={"launched": False, "launches": []})
+  assert world.run("status", "--runcard", card)[0] == 0
+  landed = json.loads(s.path("state").read_text(encoding="utf-8"))["board_changed_at"]
+  state = json.loads(s.path("state").read_text(encoding="utf-8")); state["board_changed_at"] = "2026-01-01T00:00:00Z"; atomic_write(s.path("state"), state)
+  world.advance(60)
+  edits = lambda: [c for c in world.gh.calls if c[:2] == ["issue", "edit"] and "--body-file" in c]
+  assert world.run("status", "--runcard", card)[0] == 0 and len(edits()) == 1
+  assert json.loads(s.path("state").read_text(encoding="utf-8"))["board_changed_at"] == landed
+
+
+def test_the_board_names_the_latest_idle_reason(world):
+  card = open_wave_card(world)
+  wave_store(world, U01={"pr": 70, "head": A, "ci": "green"})
+  assert world.run("report", "--runcard", card, "--idle", "U01=first reason")[0] == 0
+  out = world.run("report", "--runcard", card, "--idle", "U01=second reason")[1]
+  assert "| U01 #2 | idle | none | 1 running | aaaaaaa | #70 | none | second reason | none |" in out, out
+
+
+def test_the_board_waits_on_a_shared_file_predecessor_and_an_open_blocking_decision(world):
+  class Graph(world.ns["Graph"]):  # U03 after U01 by a shared file alone, beside its blocker U02
+    def __init__(self, plan):
+      super().__init__(plan)
+      self.preds["U03"].add("U01")
+  world.ns["Graph"] = Graph
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": A, "ci": "green"}, U02={"pr": 71, "head": A, "ci": None, "landed": True},
+                 U03={"launched": False, "launches": []})
+  out = world.run("report", "--runcard", card)[1]
+  assert "| U03 #4 | waiting | none | none | none | none | U01 | none | none |" in out, out
+  state = json.loads(s.path("state").read_text(encoding="utf-8"))
+  state["status"]["open_blocking"] = {"U03": ["D1"]}
+  atomic_write(s.path("state"), state)
+  out = world.run("report", "--runcard", card)[1]
+  assert "| U03 #4 | waiting | none | none | none | none | U01, U03/D1 | none | none |" in out, out
+
+
+def test_the_board_escapes_its_cells(world):
+  card = open_wave_card(world)
+  wave_store(world, U01={"pr": 70, "head": A, "ci": "green"})
+  code, out = world.run("report", "--runcard", card, "--idle", "U01=a | b\nc <!-- /superegm:board -->")
+  assert code == 0, out
+  board = out.split("\nidle: ")[0]
+  assert "| U01 #2 | idle | none | 1 running | aaaaaaa | #70 | none | a \\| b c &lt;!-- /superegm:board --> | none |" in board
+  assert "<!-- /superegm:board -->" not in board
+
+
+def test_a_unit_idle_on_ci_keeps_a_steady_board_row(world):
+  card = open_wave_card(world)
+  wave_store(world, U01={"pr": 70, "head": A, "ci": "pending"})
+  assert world.run("report", "--runcard", card)[0] == 0
+  world.advance(31 * 60)
+  first = world.run("report", "--runcard", card)[1]
+  world.advance(5 * 60)
+  later = world.run("report", "--runcard", card)[1]
+  row = "| U01 #2 | idle | none | 1 running | aaaaaaa | #70 | ci | ci pending (ci_wait_minutes 30) | none |"
+  assert row in first and row in later
+
+
+def test_a_plain_wave_status_pass_saves_the_board_change(world):
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"launched": False, "ready": True, "launches": []}, U02={"launched": False, "launches": []}, U03={"launched": False, "launches": []})
+  assert world.run("status", "--runcard", card)[0] == 0
+  edits = [c for c in world.gh.calls if c[:2] == ["issue", "edit"] and "--body-file" in c]
+  changed = json.loads(s.path("state").read_text(encoding="utf-8")).get("board_changed_at")
+  assert len(edits) == 1 and changed == world.ns["now_iso"]() and f" · changed {changed}\n" in world.gh.issues[1]["body"]
+
+
+def test_a_wave_status_pass_writes_the_board_once_and_only_on_change(world):
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"launched": False, "ready": True, "launches": []}, U02={"launched": False, "launches": []}, U03={"launched": False, "launches": []})
+  edits = lambda: [c for c in world.gh.calls if c[:2] == ["issue", "edit"] and "--body-file" in c]
+  reads = lambda: [c for c in world.gh.calls if c[:2] == ["api", f"repos/{REPO}/issues/1"]]
+  changed_at = lambda: json.loads(s.path("state").read_text(encoding="utf-8")).get("board_changed_at")
+  before = world.gh.issues[1]["body"]
+  assert world.run("status", "--wait", 1, "--runcard", card) == (0, "deadline\n")
+  body, first = world.gh.issues[1]["body"], world.ns["now_iso"]()
+  assert (len(reads()), len(edits()), changed_at()) == (1, 1, first)
+  assert body.startswith(before.rstrip("\n") + "\n\n<!-- superegm:board -->\nhandoff ") and body.endswith("\n<!-- /superegm:board -->\n")
+  assert f" · changed {first}\n| unit | state |" in body and "| U01 #2 | ready | none | none | none | none | none | launch-builder | none |" in body
+  world.advance(60)
+  assert world.run("status", "--runcard", card)[0] == 0 and (len(edits()), changed_at()) == (1, first), "equal rows: no write"
+  state = json.loads(s.path("state").read_text(encoding="utf-8")); state["units"]["U01"]["launched"] = {"at": "t"}; atomic_write(s.path("state"), state)
+  assert world.run("status", "--wait", 1, "--runcard", card)[0] == 0 and len(edits()) == 2 and changed_at() == world.ns["now_iso"]() != first
+  assert "| U01 #2 | active | none | none | none | none | none | foreman dispatch | none |" in world.gh.issues[1]["body"]
+  assert world.gh.issues[1]["body"].split("<!-- superegm:board -->")[0] == body.split("<!-- superegm:board -->")[0]
+  state["units"]["U02"]["launched"] = {"at": "t"}; atomic_write(s.path("state"), state)
+  assert world.run("status", "--wait", 1, "--runcard", world.open_card("integrate", world.spec))[0] == 0 and len(edits()) == 2, "integrate reads"
+  world.gh.extend("issue", lambda args, cwd, token=None: (1, "", "HTTP 502") if "--body-file" in args else world.gh.do_issue(args))
+  assert world.run("status", "--wait", 1, "--runcard", card) == (0, "deadline\n")
+  assert "board write failed" in s.path("journal").read_text(encoding="utf-8")
+
+
+def test_verify_compares_the_tracking_body_outside_the_board(world):
+  wave_store(world, U01={"launched": False, "ready": True, "launches": []})
+  posted = world.gh.issues[1]["body"]
+  world.gh.issues[1]["body"] = splice_board(posted, BLOCK)
+  code, out = world.run("verify", "--spec", world.spec)
+  assert code == 0 and out.startswith("verify: complete, ") and "0 problem(s)" in out, out
+  world.gh.issues[1]["body"] = splice_board(posted + "\nedited by hand\n", BLOCK)
+  code, out = world.run("verify", "--spec", world.spec)
+  assert code == 1 and "MISMATCH body of #1 (tracking) differs from the rendered body" in out, out
 
 
 @pytest.mark.parametrize("point,source,decisions,rulings,expect", [
@@ -375,7 +600,7 @@ def test_a_stop_ruling_labels_the_issue_and_the_report_lists_unlanded_dependants
   code, out = world.run("report", "--runcard", card)
   assert "loop: ended" in out and "pending: none" in out
   assert "## Stopped\n- U01 (owner: stop the unit): unlanded dependants U02, U03" in s.path("wave_report", 1).read_text(encoding="utf-8")
-  assert "- U01 #2: stopped ·" in s.path("wave_report", 1).read_text(encoding="utf-8")
+  assert "| U01 #2 | stopped | none | 1 running | aaaaaaa | #70 | none | none | none |" in s.path("wave_report", 1).read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------- S7: the by-hand ruling and the owner's close
@@ -510,10 +735,15 @@ def test_the_wave_skill_body_is_the_driver_loop(world):
   body = text.split("---", 2)[2]
   assert len(body.encode("utf-8")) <= 24_000
   assert "In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first." in body
-  for heading in ("## Entry: resume from the store", "## A batch", "## The word table", "### Decision point 1",
-                  "### Decision point 2", "### Decision point 3", "## Stops and by-hand rulings", "## Retries", "## The end"):
+  for heading in ("## Entry: resume from the store", "## A batch", "## The word table", "## Retries", "## The end"):
     assert heading in body, heading
-  assert body.count("Leavemealone-mode: U11 wires §13.2 here.") == 3
+  points = POINTS.read_text(encoding="utf-8")
+  for heading in ("### Decision point 1", "### Decision point 2", "### Decision point 3"):
+    assert heading in points, heading
+  assert "## Stops and by-hand rulings" in RULINGS.read_text(encoding="utf-8")
+  assert points.count("Leavemealone-mode: U11 wires §13.2 here.") == 3
+  for ref in ("references/decision_points.md", "references/rulings.md", "references/leavemealone_mode.md"):
+    assert f"`{ref}`" in body, ref
   for order in ("1. `landed`", "2. `closed`", "3. `exit` and `status`", "4. `ruling`", "5. `superegm foreman dispatch`", "6. `superegm launch`",
                 "7. `superegm report`"):
     assert order in body, order
@@ -523,6 +753,32 @@ def test_the_wave_skill_body_is_the_driver_loop(world):
     assert cited in body, cited
   for sub in ("report", "decision", "status", "launch", "launch-builder", "record-launch", "foreman", "review", "runcard"):
     assert world.run(sub, "--help")[0] == 0, sub
+
+
+@pytest.mark.parametrize("needle", ["`<!-- superegm:board -->`", "the tracking issue's body", "none when the rows are unchanged",
+                                    "the inbox stays the action list", "read the card's handoff alone", "report path, the board, `idle:`",
+                                    "- `owner: <ids>` → `decision open`", "the plan and the spec"])
+def test_the_wave_skill_names_the_board(needle):
+  body = SKILL.read_text(encoding="utf-8").split("---", 2)[2]
+  assert needle in body, needle
+  assert len(body.encode("utf-8")) <= 24_000
+
+
+@pytest.mark.parametrize("needle", ["- `owner: <ids>` → `decision open`",
+                                    "decision open --unit <U> --point 1 --question '<file>' --source 'review <head-review-id> round <n>'",
+                                    "`<fid> allowed — <reason>`", "--disposition declined --owner"])
+def test_the_decision_points_reference_names_the_owner_row(needle):
+  assert needle in POINTS.read_text(encoding="utf-8"), needle
+
+
+@pytest.mark.parametrize("needle", ["no judge panel, in leavemealone-mode too", "--disposition declined --owner --posted <comment-id>",
+                                    "**Ruling:** <fid> finding overruled — <reason>", "`<fid> finding upheld` below the cap is the `revise` row",
+                                    "at the cap (`review status` exit 2) it is Decision point 2", "then by `review status` as Decision point 1 proceeds"])
+def test_the_owner_row_is_the_owners_alone_in_either_mode_and_spends_no_cap(needle):
+  body = POINTS.read_text(encoding="utf-8")
+  row = body.split("- `owner: <ids>` → ", 1)[1].split("\n- `", 1)[0]
+  assert needle in row, needle
+  assert "Apply it as Decision point 1 does" not in row
 
 
 def test_the_wave_entry_refreshes_the_snapshot_before_report():
@@ -539,7 +795,8 @@ def test_the_wave_entry_refreshes_the_snapshot_before_report():
   "marking a PR ready", "head-moved", "merge locally", "egm/<handoff-id>", "`--wait 1500`", "two consecutive `deadline`s",
   "--not-run <reason>", "ask the user whether to re-review", "max 1 re-audit", "Blocker or Major"])
 def test_the_wave_skill_names_no_removed_mechanism(removed):
-  assert removed not in SKILL.read_text(encoding="utf-8"), removed
+  for path in (SKILL, POINTS, RULINGS, SKILL.parent / "references/leavemealone_mode.md"):
+    assert removed not in path.read_text(encoding="utf-8"), (path.name, removed)
 
 
 # ---------------------------------------------------------------- U18: the redesign ruling
@@ -1062,7 +1319,8 @@ def test_the_batch_ingest_step_and_the_external_reviewer_id_prose(path, needle):
   assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
 
 
-FORMS_PROSE = [("skills/wave/SKILL.md", n) for n in ("`closed`, `ruling`", "- `ruling` lines", "ruling edited after record, ignored", "ruling dropped (")] + [
+FORMS_PROSE = [("skills/wave/SKILL.md", "`closed`, `ruling`")] + [
+               ("skills/wave/references/rulings.md", n) for n in ("- `ruling` lines", "ruling edited after record, ignored", "ruling dropped (")] + [
                ("skills/wave/references/builder_orders.md", n) for n in ("**Ruling:** <fid> finding upheld", "**Ruling:** <fid> finding overruled — <reason>",
                "**Ruling:** one more round", "**Ruling:** stop", "**Ruling:** <fid> allowed — <reason>",
                "**Ruling:** redesign — <reason>", "`config.owners`")]
@@ -1079,27 +1337,27 @@ def test_the_wave_skill_and_the_orders_quote_the_ruling_forms(path, needle):
     "(a `redesign` at point 1 runs no `review rule`)",
     "option on a `BLOCKED` comment → `launch-builder` now"])
 def test_a_ruling_by_comment_continues_as_its_point_does(needle):
-  assert needle in SKILL.read_text(encoding="utf-8"), needle
+  assert needle in RULINGS.read_text(encoding="utf-8"), needle
 
 
 @pytest.mark.parametrize("path, needle", [  # round 4 (PR #96 review): how `--ruling` is built, the allowance, NEEDS_CONTEXT, the orders' shapes
-    ("skills/wave/SKILL.md", "`--ruling` is the event's words as the point's form"),
-    ("skills/wave/SKILL.md", "`<fid> allowed` as `--ruling '<fid> finding overruled'`"),
-    ("skills/wave/SKILL.md", "no open decision names it"),
-    ("skills/wave/SKILL.md", "`BLOCKED` or `NEEDS_CONTEXT` comment"),
-    ("skills/wave/SKILL.md", "`ruling dropped (<by>, comment <id>): …`\n  for one naming no open decision or an already ruled one"),
+    ("skills/wave/references/rulings.md", "`--ruling` is the event's words as the point's form"),
+    ("skills/wave/references/rulings.md", "`<fid> allowed` as `--ruling '<fid> finding overruled'`"),
+    ("skills/wave/references/rulings.md", "no open decision names it"),
+    ("skills/wave/references/rulings.md", "`BLOCKED` or `NEEDS_CONTEXT` comment"),
+    ("skills/wave/references/rulings.md", "`ruling dropped (<by>, comment <id>): …`\n  for one naming no open decision or an already ruled one"),
     ("skills/wave/references/builder_orders.md", "`**Ruling:** (<decision id>) <option> — <reason>`"),
     ("skills/wave/references/builder_orders.md", "(as recorded by <by>; the comment was edited after its record)"),
     ("skills/wave/references/builder_orders.md", "(judges <panel>, leavemealone)"),
     # round 5 (PR #96 review): a redesign's `--ruling` carries no invented reason; an allowance in leavemealone-mode
-    ("skills/wave/SKILL.md", "`redesign` as `--ruling 'redesign'`"),
-    ("skills/wave/SKILL.md", "in leavemealone-mode an allowance naming an open decision is refused"),
+    ("skills/wave/references/rulings.md", "`redesign` as `--ruling 'redesign'`"),
+    ("skills/wave/references/rulings.md", "in leavemealone-mode an allowance naming an open decision is refused"),
     ("skills/wave/references/builder_orders.md", "(recorded on <decision id> as: <option>)"),
     # round 6 (PR #96 review): the refused allowance is journaled for the owner; a deleted recorded comment
-    ("skills/wave/SKILL.md", "or a refused allowance"),
+    ("skills/wave/references/rulings.md", "or a refused allowance"),
     ("skills/wave/references/builder_orders.md", "(as recorded by <by>; the comment was deleted after its record)"),
     # round 7 (PR #96 review): the finding lines `decision rule` reads; entry step 4 reads a posted ruling through the record
-    ("skills/wave/SKILL.md", "each finding on a line of its own starting `<fid> |` or `## Q<n> <fid> (`"),
+    ("skills/wave/references/decision_points.md", "each finding on a line of its own starting `<fid> |` or `## Q<n> <fid> (`"),
     ("skills/wave/SKILL.md", "binds once `decision rule --posted <comment id>` records it"),
     ("skills/wave/SKILL.md", "whose post or label request fails"),
     ("skills/wave/SKILL.md", "a `--posted` one included"),
@@ -1107,7 +1365,7 @@ def test_a_ruling_by_comment_continues_as_its_point_does(needle):
     # round 8 (PR #96 review): the whole-file allowance; who posts the judges' ruling; a run stopped after a record
     ("skills/wave/references/builder_orders.md", "`**Ruling:** test-delta <file> allowed — <reason>`"),
     ("skills/wave/references/builder_orders.md", "posted under the elephant's token after the record"),
-    ("skills/wave/SKILL.md", "a run stopped between a record and its continuation"),
+    ("skills/wave/references/rulings.md", "a run stopped between a record and its continuation"),
     # round 13 (PR #96 review, codebase-details-12-4): a label left on by a failed session stop comes off by hand
     ("skills/wave/SKILL.md", "`<U> <qid>: label superegm:stopped left on issue #<n>`"),
     ("skills/wave/SKILL.md", "--remove-label superegm:stopped")])
