@@ -153,7 +153,7 @@ def test_ingest_pr_records_each_reply_as_it_posts_on_the_threads_own_pr(world, m
   for fid in (f"{BOT}-1-1", f"{HUMAN}-1-2"):
     assert settle(world, rid, fid, "fixed", cid)[0] == 0
   code, out = ingest(world, cid)
-  assert code == 1 and out.strip().startswith("review ingest: ") and "Traceback" not in out
+  assert code == 0 and f"review ingest: reply {HUMAN}-1-2 not posted: " in out and "Traceback" not in out   # a failed reply is named, never a refusal
   assert posted == [f"repos/{REPO}/pulls/7/comments/11/replies"] and rjson(world, rid, "round-1.json")["reviewers"][BOT]["findings"][0]["replied"] == 91
   failing.clear()
   assert ingest(world, cid, number=8)[0] == 0   # a later PR of the spec: each reply on its own thread's PR
@@ -176,3 +176,71 @@ def test_approve_spec_with_no_round_reads_nothing_and_refuses_as_unconverged(wor
   spec, cid, rid = opened(world)
   code, out = approve(world, spec, cid, "--yes")
   assert code == 1 and f"approve-spec: review {rid} is not converged" in out and seen == []
+
+
+def test_ingest_pr_never_reuses_an_id_an_earlier_cycle_holds(world, monkeypatch):
+  reader(monkeypatch)
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [HIGH(k) for k in range(1, 6)])
+  assert ingest(world, cid)[0] == 0 and rule(world, rid, "stop", cid)[0] == 0          # c1 round 5 holds the bot's -5-1
+  _, cid2, rid2 = opened(world)
+  rounds(world, rid2, cid2, [HIGH(1)])
+  assert ingest(world, cid2)[0] == 0 and settle(world, rid2, f"{BOT}-5-1", "declined", cid2, "--owner")[0] == 0   # carried, then settled: carried no more
+  rounds(world, rid2, cid2, [HIGH(k) for k in range(2, 6)], start=2)
+  reader(monkeypatch, threads=THREADS + [{**THREADS[0], "id": 15, "body": "**bug** a new claim", "line": 8}])
+  assert ingest(world, cid2)[1].strip() == "1 ingested"
+  assert [f["id"] for f in rjson(world, rid2, "round-5.json")["reviewers"][BOT]["findings"]] == [f"{BOT}-5-2"]   # never c1's -5-1 again
+  assert settle(world, rid2, f"{BOT}-5-2", "declined", cid2, "--owner")[0] == 0
+  assert rjson(world, rid2, "round-5.json")["reviewers"][BOT]["findings"][0]["disposition"] == "declined"
+
+
+def test_ingest_pr_finds_a_reply_posted_but_never_recorded(world, monkeypatch):
+  reader(monkeypatch, threads=THREADS + [REVIEW])
+  posted = []
+  def api(args, cwd, token=None):
+    endpoint = world.gh.endpoint_of(args)
+    if args[1:4] == ["-i", "-X", "POST"]:
+      posted.append(endpoint)
+      return world.gh.ok(text="HTTP/2.0 201 Created\n\n")   # posted, its answer unreadable
+    return world.gh.do_api(args)
+  world.gh.extend("api", api)
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [[]])
+  assert ingest(world, cid)[0] == 0
+  move(world, "spec", spec)
+  for fid in (f"{BOT}-1-1", f"{HUMAN}-1-2"):
+    assert settle(world, rid, fid, "fixed", cid)[0] == 0
+  world.gh.threads[7] = [{"id": 95, "in_reply_to_id": 11, "body": f"**Reply {BOT}-1-1:** fixed"}]   # an earlier run's post, its id never saved
+  assert ingest(world, cid)[0] == 0 and posted == [f"repos/{REPO}/issues/7/comments"]
+  findings = rjson(world, rid, "round-1.json")["reviewers"]
+  assert (findings[BOT]["findings"][0]["replied"], findings[HUMAN]["findings"][1]["replied"]) == (95, True)
+  assert ingest(world, cid)[0] == 0 and len(posted) == 1   # never reposted, its id read or not
+
+
+@pytest.mark.parametrize("broken", ["pr list", "threads"])
+def test_approve_spec_refuses_a_gh_failure_in_one_line(world, monkeypatch, broken):
+  seen = reader(monkeypatch)
+  make_pr(world.gh, 7, "c" * 40, branch="main")
+  if broken == "pr list":
+    world.gh.extend("pr", lambda args, cwd, token=None: (1, "", "gh: Server Error (HTTP 502)"))
+  else:
+    def failing(repo, number, skip):
+      raise review_mod.core.GhError(["api"], 1, "", "gh: Server Error (HTTP 502)")
+    monkeypatch.setattr(review_mod, "read_threads", failing)
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [[]])
+  code, out = approve(world, spec, cid, "--yes")
+  assert code == 1 and out.strip().startswith("superegm: approve-spec: gh ") and len(out.strip().splitlines()) == 1 and "Traceback" not in out
+  assert not store(world.repo).path("approvals", SLUG).exists() and seen == []
+
+
+def test_approve_spec_refuses_a_missing_config_before_any_github_call(world, monkeypatch):
+  from superegm import approve_spec
+  reader(monkeypatch)
+  make_pr(world.gh, 7, "c" * 40, branch="main")
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [[]])
+  monkeypatch.setattr(approve_spec, "CONFIG", ".superegm/absent.json")
+  code, out = approve(world, spec, cid, "--yes")
+  assert (code, out.strip()) == (1, "superegm: approve-spec: .superegm/absent.json missing: run superegm init")
+  assert not [c for c in world.gh.calls if c[:2] == ["pr", "list"]]
