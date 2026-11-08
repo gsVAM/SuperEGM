@@ -1220,7 +1220,7 @@ def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[
   """The spec PR's threads (spec section 8, External review on the elephant's own PR) recorded as `external:<login>`
   findings into the latest round of `review`'s cycle, closed by an `accept` or not; a thread whose root id is in
   any cycle's `ingested[]`, or on any external finding of any cycle's round (a write the `ingested[]` one never
-  followed, backfilled), is skipped by the reader. Every unsettled external high or medium of an earlier round is
+  followed, backfilled), is skipped by the reader, and an owner's `**Ruling:**` is skipped after it. Every unsettled external high or medium of an earlier round is
   carried into the round first, and a new thread's id is numbered after every id of its reviewer and round number
   in any cycle, so no fid is reused. Recorded outside the panel and the round's byte and scope checks, so `what_ran`
   is untouched; each finding keeps its PR's `number` as `pr`. Then the reply pass posts `**Reply <fid>:** fixed` on
@@ -1240,8 +1240,10 @@ def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[
               for f in record["findings"] if f.get("thread") is not None]
   backfill = sorted({tid for tid in recorded if tid not in listed})
   carried = carry_externals(st, review["artifact"], rid, rnd)
-  try:
-    threads = read_threads(config["repo"], number, listed | set(recorded))
+  owners = set(config.get("owners") or [])
+  try:  # an owner's `**Ruling:**` is a ruling, never a finding (as the `--unit` path skips it)
+    threads = [t for t in read_threads(config["repo"], number, listed | set(recorded))
+               if not (t["login"] in owners and ((t["body"] or "").strip().splitlines() or [""])[0].startswith("**Ruling:**"))]
     roles = {}
     for thread in threads:
       if not thread["bot"] and thread["login"] not in roles:

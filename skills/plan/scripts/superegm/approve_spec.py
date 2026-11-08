@@ -99,7 +99,8 @@ def escalated_pairs(st: core.Store, spec: Path, since: int) -> list:
   """Every `escalated` finding of the spec's review cycles above `since`, as `<review id>:<finding id>`
   in round order, less the pairs the spec's `## Units` section names (D2 (a)). One finding is one pair: an
   external finding's carried copies (U26: the same reviewer, id and claim in later rounds or cycles) are one
-  finding, named by its latest copy and discharged by a Units mention of any copy."""
+  finding, named by its latest copy and discharged by a Units mention of that copy alone (the pair recorded and
+  the one `graph` discharges)."""
   named, found, cycle = units_section(core.read_text(spec)), {}, since + 1
   while load_review(st, rid := review_id(st, "spec", str(spec), cycle)) is not None:
     for n in round_numbers(st, rid):
@@ -110,7 +111,7 @@ def escalated_pairs(st: core.Store, spec: Path, since: int) -> list:
             key = (reviewer, f["id"], f["claim"]) if reviewer.startswith("external:") else pair
             found[key] = found.pop(key, []) + [pair]
     cycle += 1
-  return [pairs[-1] for pairs in found.values() if not any(pair in named for pair in pairs)]
+  return [pairs[-1] for pairs in found.values() if pairs[-1] not in named]
 
 
 def before_units(text: str) -> str:
@@ -202,7 +203,10 @@ def run(args):
   last = core.load_approval(st, spec)
   if last:
     require_branch_holds(st, root, spec.relative_to(root).as_posix(), last)
-  escalated =escalated_pairs(st, spec, int(last["review"].rsplit("-c", 1)[1]) if last and last.get("review") else 0)
+  # the cycles past the last approval's; a re-approval of that same cycle (its bytes unmoved, U26: a thread ingested
+  # and escalated after the approval) reads that cycle again, since `graph` reads the latest entry's list alone
+  since = int(last["review"].rsplit("-c", 1)[1]) if last and last.get("review") else 0
+  escalated = escalated_pairs(st, spec, since - 1 if last and last.get("review") == rid else since)
   if escalated:
     print(f"approve-spec: {len(escalated)} escalated finding(s) await the owner: {', '.join(escalated)}")
   if not (args.yes or args.leavemealone or card["mode"] == "leavemealone"):
