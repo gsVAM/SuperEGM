@@ -10,7 +10,7 @@ from conftest import applied, make_pr, set_config
 import superegm  # the harness reloads the package per test: read load_config at call time
 from superegm import store, atomic_write, DEFAULT_CONFIG, decision, launch
 from test_builder_token import APP
-from superegm.report import unit_state, loop_ended, word_action
+from superegm.report import unit_state, unit_view, loop_ended, word_action
 from test_builders import seed as filed, launched, foreman as foreman_file
 
 REPO, BUILDER, NOW = "example-org/webhooks", "builder-bot", 1_700_000_000.0
@@ -103,6 +103,19 @@ CARD = {"opened_at": NOW, "idle": [], "heads": []}
 ])
 def test_unit_state_names_one_of_six_states(view, foreman, card, expected):
   assert unit_state("U01", view, foreman, [], card, {"ci_wait_minutes": 30}, NOW) == expected
+
+
+@pytest.mark.parametrize("view, card, expected", [
+  ({"ci": None, "head": None, "landed": False, "launched": False, "ready": True}, CARD, "ready"),
+  ({"ci": None, "head": None, "landed": False, "launched": False, "ready": True},
+   {**CARD, "idle": [{"unit": "U02", "reason": "launch-builder: no token", "at": NOW}]}, "idle"),
+  ({"ci": None, "head": None, "landed": False, "launched": False, "ready": False}, CARD, "waiting"),
+  ({"ci": None, "head": None, "landed": True, "launched": False, "ready": False}, CARD, "landed"),
+  ({"ci": "green", "head": "a" * 40, "landed": False, "launched": True, "ready": False}, CARD, "active")])
+def test_unit_state_names_ready_and_waiting_for_an_unlaunched_unit(view, card, expected):
+  assert unit_state("U02", view, {}, [], card, {"ci_wait_minutes": 30}, NOW) == expected
+  state = {"units": {"U02": {"launched": None}}, "status": {"ready": ["U02"], "units": {"U02": {"pr": None, "head": None, "ci": None, "landed": False}}}}
+  assert unit_view(state, "U02") == {"pr": None, "head": None, "ci": None, "landed": False, "launched": False, "ready": True}
 
 
 @pytest.mark.parametrize("states,ready,slots,expected", [
