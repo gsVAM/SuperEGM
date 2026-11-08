@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the judges subcommand (spec section 13.1) and `judges question`, the
-# leavemealone-mode question renderer of section 13.2 (U11); the cap question names a spec review's scope (U19).
+# leavemealone-mode question renderer of section 13.2 (U11); the cap question names a spec review's scope (U19); the default members read from `DEFAULT_CONFIG` (U28).
 
 """superegm judges open|record|diff|verdict|question: the judge panel over a question file, and the
 question file rendered from the record at a decision point."""
@@ -25,7 +25,6 @@ OPTION_RE = re.compile(r"^- \(([a-z])\) (.+)$")
 ANSWER_RE = re.compile(r"^Q(\d+): \(([a-z])\)\s*$")
 SAW_RE = re.compile(r"^saw:\s*(.*)$")  # the judge's isolation report, first or last line of the reply
 NOTE_KEYS = {"reason": "reason", "would change my mind": "would_change"}
-DEFAULT_MEMBERS = {"fable": {"via": "adapter", "effort": "xhigh"}, "opus": {"via": "adapter"}, "astra": {"via": "runner"}}
 VENDOR_OF = {"adapter": "anthropic", "runner": "openai"}
 
 
@@ -90,7 +89,7 @@ def judge_members(config: dict) -> dict[str, dict]:
   dicts (keyed `id`, or `name` as `init` writes it) or of ids is normalised."""
   judges_cfg = config.get("judges") or {}
   astra = config.get("astra") or {}
-  members = judges_cfg.get("members") or DEFAULT_MEMBERS
+  members = judges_cfg.get("members") or core.DEFAULT_CONFIG["judges"]["members"]
   if isinstance(members, list):
     members = {(m if isinstance(m, str) else m.get("id") or m.get("name")): ({} if isinstance(m, str) else m)
                for m in members}
