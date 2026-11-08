@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from conftest import REPO, set_config
-from superegm import atomic_write
+from superegm import atomic_write, handoff_store
 from superegm.decision import ruling_form
 from superegm.inbox import inbox_items, notify_lines
 from superegm.review import parse_findings
@@ -180,7 +180,9 @@ def alive(pid: int) -> bool:
   return True
 
 
-@pytest.mark.parametrize("hook, journal", [("printf '\\377'", "hook exit 0"), ('sleep 30 & echo $! > "$0.pid"; wait', "hook timeout")])
+@pytest.mark.parametrize("hook, journal", [("printf '\\377'", "hook exit 0"), ('sleep 30 & echo $! > "$0.pid"; wait', "hook timeout"),
+                                           # round 3 (astra-2-6, change-review-2-2): a child that leaves the group keeps no pipe of notify's open
+                                           ("python3 -c 'import os, time; os.setsid(); time.sleep(8)' & echo $! > \"$0.setsid\"; sleep 30", "hook timeout")])
 def test_a_hook_that_writes_bytes_or_leaves_a_child_never_stops_notify(world, tmp_path, monkeypatch, hook, journal):
   """Round 2 (astra-1-3, astra-1-4): undecodable output is never decoded; the timeout ends the hook's process group."""
   monkeypatch.setenv("HOME", str(tmp_path / "home"))
@@ -191,7 +193,12 @@ def test_a_hook_that_writes_bytes_or_leaves_a_child_never_stops_notify(world, tm
   set_config(world, repo=REPO, notify_timeout_seconds=1)
   card = open_wave_card(world)
   s = seed(world, **U(decisions=D(3, "comment 77")))
+  started = time.time()
   assert world.run("notify", "--runcard", card) == (0, "")
+  escaped = Path(f"{script}.setsid")
+  if escaped.exists() and alive(int(escaped.read_text(encoding="utf-8").strip())):
+    os.kill(int(escaped.read_text(encoding="utf-8").strip()), 9)
+  assert time.time() - started < 6
   assert f"notify: {journal} (2 new)" in s.path("journal").read_text(encoding="utf-8")
   assert "notified" in json.loads(s.path("state").read_text(encoding="utf-8"))
   pidfile = Path(f"{script}.pid")
@@ -200,3 +207,77 @@ def test_a_hook_that_writes_bytes_or_leaves_a_child_never_stops_notify(world, tm
     while time.time() < deadline and alive(pid):
       time.sleep(0.05)
     assert not alive(pid)
+
+
+def second_handoff(world, s, hid="sample-ffffff"):
+  """A second open handoff of the same spec, its state and foremen copied from the first's."""
+  atomic_write(s.path("handoffs", hid), {"id": hid, "spec": str(world.spec), "opened_at": "t", "closed_at": None})
+  b = handoff_store(s, hid)
+  atomic_write(b.path("state"), json.loads(s.path("state").read_text(encoding="utf-8")))
+  for path in s.path("foreman", "U01").parent.glob("*.json"):
+    atomic_write(b.path("foreman", path.stem), json.loads(path.read_text(encoding="utf-8")))
+  return b
+
+
+def test_two_handoffs_each_list_their_own_units_lines(world):
+  """Round 3 (astra-2-1, codebase-details-2-1): unit and decision ids repeat across handoffs, so each handoff's
+  unit lines are its own; only a spec-level escalation is listed once."""
+  open_wave_card(world)
+  s = seed(world, escalated=["spec-sample-c1:design-1-1"], **U(decisions=D(3, "comment 77")))
+  second_handoff(world, s)
+  items = inbox_items(s, sorted([s.handoff_id, "sample-ffffff"]))
+  assert [i["fingerprint"] for i in items if i["kind"] == "decision"] == ["U01/decision/q1", "U01/decision/q1"]
+  assert len([i for i in items if i["kind"] == "escalated"]) == 1
+
+
+def test_notify_writes_the_cards_handoffs_set_whatever_handoff_resolved(world):
+  """Round 3 (astra-2-2, change-review-2-1, codebase-details-2-4): the lines, the journal and the `notified` set are
+  the card's handoff's; `--handoff` naming another leaves that one's set alone."""
+  card = open_wave_card(world)
+  s = seed(world, **U(decisions=D(3, "comment 77")))
+  b = second_handoff(world, s)
+  atomic_write(b.path("state"), json.loads(b.path("state").read_text(encoding="utf-8")) | {"notified": ["x"]})
+  assert world.run("notify", "--handoff", "sample-ffffff", "--runcard", card)[0] == 0
+  assert json.loads(b.path("state").read_text(encoding="utf-8"))["notified"] == ["x"]
+  assert json.loads(s.path("state").read_text(encoding="utf-8"))["notified"] == sorted(["U01/decision/q1", card])
+  assert "notify: no hook (2 new)" in s.path("journal").read_text(encoding="utf-8")
+
+
+def test_an_owner_finding_settled_or_ruled_leaves_the_inbox(world):
+  """Round 3 (astra-2-4): the outcome keeps naming a settled fid until the round converges; the line leaves at its
+  settlement or its point-1 ruling."""
+  card = open_wave_card(world)
+  findings = F("high", "high", "high")
+  findings[0]["disposition"] = "allowed"
+  s = seed(world, **U(rounds=POSTED(1, "owner: foreman-1-1, foreman-1-2, foreman-1-3"), reviews=HEAD(1, findings),
+                      decisions=D(1, "review head-U01-c1 round 1", question="foreman-1-2 | high | src/x.py:3 | regression: no | c"),
+                      rulings=[{"decision": "q1", "ruling": "foreman-1-2 finding overruled — r"}]))
+  assert [i["fingerprint"] for i in inbox_items(s, [s.handoff_id])] == ["U01/owner/1/foreman-1-3", card]
+
+
+def test_an_allowance_on_an_open_decision_takes_the_overrule_form_in_leavemealone(world):
+  """Round 3 (astra-2-3): in leavemealone-mode `decision rule` refuses an `allowed` comment naming an open point-1
+  decision, so the line offers the overrule form there; elsewhere, and in normal mode, the allowance."""
+  set_config(world, repo=REPO, mode="leavemealone")
+  card = open_wave_card(world)
+  s = seed(world, **U(rounds=POSTED(1, "owner: foreman-1-1, foreman-1-2"), reviews=HEAD(1, F("high", "high")),
+                      decisions=D(1, "review head-U01-c1 round 1", question="foreman-1-1 | high | src/x.py:3 | regression: no | c")))
+  assert [i["action"] for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "owner"] == \
+      [f"{ruling_form(1, 'foreman-1-1', 'finding overruled')} on {ISSUE}", f"{ALLOWED('foreman-1-2')} on {ISSUE}"]
+  assert card
+
+
+def test_an_escalation_a_plan_decision_routes_leaves_once_answered(world):
+  """Round 3 (astra-2-5, codebase-details-2-2): graph accepts an escalated pair a `blocking: yes` D<n> line names;
+  until `decide` answers it the line names that decide call, then it leaves."""
+  open_wave_card(world)
+  s = seed(world, escalated=["spec-sample-c1:design-1-1"], **U())
+  state = json.loads(s.path("state").read_text(encoding="utf-8"))
+  answers = state.pop("decisions")  # `apply` filed after `decide` answered D2; here it is still open
+  atomic_write(s.path("state"), state)
+  plan = Path(state["plan"])
+  plan.write_text(plan.read_text(encoding="utf-8").replace("D2 Page size for the listing?", "D2 Page size (spec-sample-c1:design-1-1: c)?"), encoding="utf-8")
+  esc = lambda: [(i["subject"], i["action"]) for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "escalated"]
+  assert esc() == [("spec-sample-c1", "superegm decide --unit U03 --decision D2 --answer <option> --runcard <card>")]
+  atomic_write(s.path("state"), state | {"decisions": answers})
+  assert "U03/D2" in answers and esc() == []
