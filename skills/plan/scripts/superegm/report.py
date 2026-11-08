@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the report subcommand (spec section 11): the per-batch wave report, the idle rules
-# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20).
+# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30).
 
 """superegm report: rewrite `wave_<n>_report.md` from the store and print the idle, pending and loop lines."""
 
@@ -80,9 +80,13 @@ def record_heads(store, card_id: str, views: dict, now: float) -> dict:
 
 
 def unit_view(state: dict, uid: str) -> dict:
-  """The one reader of `status.units[<id>]` (what `status --wait` saves): `pr, head, ci, landed`."""
-  saved = ((state.get("status") or {}).get("units") or {}).get(uid) or {}
-  return {key: saved.get(key) for key in ("pr", "head", "ci")} | {"landed": bool(saved.get("landed"))}
+  """The one reader of `status.units[<id>]` (what `status --wait` saves): `pr, head, ci, landed`, plus
+  `launched` (`units[<id>].launched` truthy) and `ready` (`<id>` in the saved `status.ready`)."""
+  status = state.get("status") or {}
+  saved = (status.get("units") or {}).get(uid) or {}
+  return ({key: saved.get(key) for key in ("pr", "head", "ci")} | {"landed": bool(saved.get("landed"))}
+          | {"launched": bool(((state.get("units") or {}).get(uid) or {}).get("launched")),
+             "ready": uid in (status.get("ready") or [])})
 
 
 def wave_number(st, rid: str, card: dict) -> int:
@@ -147,7 +151,9 @@ def stopped_line(st, uid: str, stopped: dict, views: dict) -> str:
 def unit_state(uid: str, view: dict, foreman: dict, launches: list, card: dict, config: dict, now: float) -> str:
   """One of six: `landed`, `stopped`, `pending` (a decision without its ruling), `idle` (named on the
   card, or a head whose CI is pending or absent for `ci_wait_minutes` since the card first saw it),
-  `clean` (the latest round posted clean, no launch recorded after it), else `active`."""
+  `clean` (the latest round posted clean, no launch recorded after it), else `active`; an unlaunched
+  unit not named idle is `ready` (in the saved `status.ready`) or `waiting` (a view without
+  `launched` reads as launched)."""
   if view.get("landed"):
     return "landed"
   if foreman.get("stopped"):
@@ -156,6 +162,8 @@ def unit_state(uid: str, view: dict, foreman: dict, launches: list, card: dict, 
     return "pending"
   if any(entry["unit"] == uid for entry in card.get("idle") or []):
     return "idle"
+  if not view.get("launched", True):
+    return "ready" if view.get("ready") else "waiting"
   seen = ci_seen_at(uid, view, card)
   if seen is not None and now - seen >= config.get("ci_wait_minutes", 30) * 60:
     return "idle"
