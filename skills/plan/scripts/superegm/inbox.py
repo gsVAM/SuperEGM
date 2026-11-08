@@ -54,15 +54,22 @@ def status_of(hs: core.Store, rid: str, rev: dict):
     return None
 
 
-def review_dirs(hs: core.Store, spec) -> list:
-  """The handoff's `reviews/*` and, when `spec` is a path, the store's spec and integrate reviews of that spec
-  (`spec-<slug>-c<n>`, `spec-<slug>-integrate-c<n>`, review.review_id)."""
-  dirs = sorted(p for p in hs.path("reviews").glob("*") if (p / "review.json").is_file())
-  if spec and hs.path("reviews") != hs.root / "reviews":
-    own = re.compile(rf"spec-{re.escape(core.spec_slug(spec))}(?:-integrate)?-c\d+")
-    dirs += sorted(p for p in (hs.root / "reviews").glob("spec-*")
-                   if own.fullmatch(p.name) and (p / "review.json").is_file())
-  return dirs
+def review_dirs(hs: core.Store, spec, read: bool = False) -> list:
+  """The handoff's reviews: its `reviews/*` and the spec reviews of its `spec` (`spec-<slug>-c<n>`, review.review_id)
+  at the store's `reviews/`, unless `read` (another handoff of the spec listed them). A spec review lives at the
+  store's `reviews/` whatever the handoff, an integrate review under the handoff's own `reviews/` (Store.path); in a
+  legacy (flat) store that folder is the store's, so there another spec's spec and integrate reviews are dropped."""
+  shared, slug = hs.root / "reviews", re.escape(core.spec_slug(spec)) if spec else None
+
+  def keep(p: Path) -> bool:
+    if not (p / "review.json").is_file():
+      return False
+    if p.parent != shared or not p.name.startswith("spec-"):
+      return True
+    if slug and re.fullmatch(rf"spec-{slug}-integrate-c\d+", p.name):
+      return True
+    return bool(slug) and not read and bool(re.fullmatch(rf"spec-{slug}-c\d+", p.name))
+  return sorted(p for p in set(hs.path("reviews").glob("*")) | set(shared.glob("spec-*")) if keep(p))
 
 
 def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, mode: str = "normal") -> list:
@@ -77,7 +84,8 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
   for d in [d for d in foreman.get("decisions") or [] if d.get("point") == 1 or d in report.pending_decisions(foreman)]:
     point, did = d.get("point"), d["id"]
     if point == 2:
-      out.append(item(repo, uid, "cap", ruling_form(2, "one more round | stop | redesign") + on_issue, did))
+      menu = " | ".join(ruling_form(2, o) for o in ("one more round", "stop", "redesign"))  # one form per choice
+      out.append(item(repo, uid, "cap", menu + on_issue, did))
     elif point in (3, 5):
       words = (d.get("source") or "").split()
       subject = words[1] if len(words) == 2 and words[0] == "comment" else did
@@ -92,8 +100,8 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
       rnd = review.load_round(hs, rid, n) or {}
       fids = review.contested_fids(rnd) or [c["fid"] for c in rnd.get("builder_contested") or []]
       ruled = ruled_of(did)
-      out += [item(repo, uid, "contested", ruling_form(1, fid, "finding upheld | finding overruled") + on_issue,
-                   f"{did}/{fid}") for fid in fids if fid not in ruled]
+      menu = lambda fid: " | ".join(ruling_form(1, fid, o) for o in ("finding upheld", "finding overruled"))
+      out += [item(repo, uid, "contested", menu(fid) + on_issue, f"{did}/{fid}") for fid in fids if fid not in ruled]
   entry = latest_posted(foreman)
   if entry:
     n, rid = entry["round"], review.head_review_id(hs, uid)
@@ -120,15 +128,19 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
   return out
 
 
-def review_items(hs: core.Store, repo: str, spec: str, rid: str, rev: dict, foremen: dict) -> list:
+def review_items(hs: core.Store, repo: str, spec: str, rid: str, rev: dict, foremen: dict, mode: str = "normal") -> list:
   """A review's cap or stalled line (cap: `review status` exit 2 with no `stop` ruled; stalled: a head's exit 5)
-  and an integrate review's `escalated` findings."""
+  and an integrate review's `escalated` findings (in leavemealone the owner declines a blocking one with the id of
+  their `**Ruling:** <fid> finding overruled — <reason>` comment, `--posted`, review.check_settle)."""
   out = []
   if rev["kind"] == "integrate":
     for rnd in review.rounds_of(hs, rid, rev):
-      out += [item(repo, rid, "escalated", f"superegm review settle --review {rid} --finding {f['id']} --disposition "
-                   "fixed | declined --owner --runcard <card>", f["id"])
-              for f in review.findings_of(rnd) if f.get("disposition") == "escalated"]
+      for f in review.findings_of(rnd):
+        if f.get("disposition") != "escalated":
+          continue
+        posted = " --posted <comment id>" if mode == "leavemealone" and review.blocking(f) else ""
+        out.append(item(repo, rid, "escalated", f"superegm review settle --review {rid} --finding {f['id']} "
+                        f"--disposition fixed | declined --owner{posted} --runcard <card>", f["id"]))
   if rev.get("converged") != "no" or any(r["ruling"] == "stop" for r in rev.get("rulings") or []):
     return out
   status = status_of(hs, rid, rev)
@@ -198,11 +210,11 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
       live.add(uid)
       found += unit_items(hs, repo, state, uid, foreman, mode)
     if units:
-      for path in review_dirs(hs, spec if spec and spec not in read_specs else None):
+      for path in review_dirs(hs, spec, spec in read_specs):
         rev = json.loads(core.read_text(path / "review.json"))
         if rev["kind"] in ("head", "plan") and rev["artifact"] not in live:
           continue
-        found += review_items(hs, repo, spec, path.name, rev, foremen)
+        found += review_items(hs, repo, spec, path.name, rev, foremen, mode)
       read_specs.add(spec)
     found.sort(key=lambda i: (i["subject"], KINDS.index(i["kind"])))
     out += found + wave_items(hs, repo, hid)
