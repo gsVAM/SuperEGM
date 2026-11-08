@@ -702,6 +702,16 @@ def test_the_wave_skill_names_the_board(needle):
   assert len(body.encode("utf-8")) <= 24_000
 
 
+@pytest.mark.parametrize("needle", ["no judge panel, in leavemealone-mode too", "--disposition declined --owner --posted <comment-id>",
+                                    "**Ruling:** <fid> finding overruled — <reason>", "`<fid> finding upheld` below the cap is the `revise` row",
+                                    "at the cap (`review status` exit 2) it is Decision point 2", "then by `review status` as Decision point 1 proceeds"])
+def test_the_owner_row_is_the_owners_alone_in_either_mode_and_spends_no_cap(needle):
+  body = SKILL.read_text(encoding="utf-8").split("---", 2)[2]
+  row = body.split("- `owner: <ids>` → ", 1)[1].split("\n- `", 1)[0]
+  assert needle in row, needle
+  assert "Apply it as Decision point 1 does" not in row
+
+
 def test_the_wave_entry_refreshes_the_snapshot_before_report():
   """Defect 5: `report` reads the snapshot only `status --wait` saves (§11.1: a re-typed wave resumes from the
   store); the entry refreshes it, with the batch's timeout, and handles its lines before `report`."""
