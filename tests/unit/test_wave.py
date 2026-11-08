@@ -341,6 +341,30 @@ def test_splice_board_appends_once_past_an_orphan_marker(orphan):
   assert moved.startswith(body) and "| U01 #2 | active |" in moved and moved.count("<!-- /superegm:board -->") == first.count("<!-- /superegm:board -->")
 
 
+def test_splice_board_keeps_the_board_above_a_trailing_orphan_marker():
+  orphan = "\n<!-- superegm:board -->\nowner note\n"
+  assert splice_board(WRAPPED + orphan, LATER) == WRAPPED + orphan
+  assert splice_board(WRAPPED + orphan, LATER.replace("| ready |", "| active |")) == MOVED + orphan
+
+
+def test_the_board_waits_on_a_shared_file_predecessor_and_an_open_blocking_decision(world):
+  class Graph(world.ns["Graph"]):  # U03 after U01 by a shared file alone, beside its blocker U02
+    def __init__(self, plan):
+      super().__init__(plan)
+      self.preds["U03"].add("U01")
+  world.ns["Graph"] = Graph
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": A, "ci": "green"}, U02={"pr": 71, "head": A, "ci": None, "landed": True},
+                 U03={"launched": False, "launches": []})
+  out = world.run("report", "--runcard", card)[1]
+  assert "| U03 #4 | waiting | none | none | none | none | U01 | none | none |" in out, out
+  state = json.loads(s.path("state").read_text(encoding="utf-8"))
+  state["status"]["open_blocking"] = {"U03": ["D1"]}
+  atomic_write(s.path("state"), state)
+  out = world.run("report", "--runcard", card)[1]
+  assert "| U03 #4 | waiting | none | none | none | none | U01, U03/D1 | none | none |" in out, out
+
+
 def test_the_board_escapes_its_cells(world):
   card = open_wave_card(world)
   wave_store(world, U01={"pr": 70, "head": A, "ci": "green"})
