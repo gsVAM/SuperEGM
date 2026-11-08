@@ -356,6 +356,17 @@ def test_a_wave_status_pass_writes_the_board_once_and_only_on_change(world):
   assert "board write failed" in s.path("journal").read_text(encoding="utf-8")
 
 
+def test_verify_compares_the_tracking_body_outside_the_board(world):
+  wave_store(world, U01={"launched": False, "ready": True, "launches": []})
+  posted = world.gh.issues[1]["body"]
+  world.gh.issues[1]["body"] = splice_board(posted, BLOCK)
+  code, out = world.run("verify", "--spec", world.spec)
+  assert code == 0 and out.startswith("verify: complete, ") and "0 problem(s)" in out, out
+  world.gh.issues[1]["body"] = splice_board(posted + "\nedited by hand\n", BLOCK)
+  code, out = world.run("verify", "--spec", world.spec)
+  assert code == 1 and "MISMATCH body of #1 (tracking) differs from the rendered body" in out, out
+
+
 @pytest.mark.parametrize("point,source,decisions,rulings,expect", [
   (1, "review head-U01-c1 round 2", [], [], "options: finding upheld; finding overruled"),
   (2, "review head-U01-c1 cap", [], [], "options: one more round; stop"),
