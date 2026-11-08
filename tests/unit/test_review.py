@@ -847,10 +847,15 @@ def test_review_spec_skill_body():
   front, body = text.split("\n---\n", 1)
   assert len(body.encode()) <= 24_000
   assert "In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first." in body
+  assert "effect_kinds: [state-store, start-session, github-write, remote-branch]" in front
   for phrase in ("<spec-path> [--reviewers design,zoom-out,…] [--astra on|off] [--leavemealone]", "superegm init",
                  "superegm runcard open --skill review-spec", "superegm review open --kind spec", "config.reviewers.spec",
                  "`design` is first", "references/review_loop.md", "references/resolve.md", "superegm review status",
-                 "superegm approve-spec", "--leavemealone", "approve-spec --void", "origin/<base>", "superegm runcard close"):
+                 "superegm approve-spec", "--leavemealone", "approve-spec --void", "origin/<base>", "superegm runcard close",
+                 "refuse on `<base>`", 'git commit --allow-empty -m "superegm: review <spec-slug>" -- <spec-path>', "git push -u origin <branch>",
+                 "gh pr list --head <branch> --state open", "gh pr create --head <branch> --base <base>", "never `--draft`",
+                 'git commit --allow-empty -m "superegm: fix <spec-slug> round <round>" -- <spec-path>', "git push origin <branch>",
+                 "superegm review ingest --pr <n> --runcard <id>", "unsettled on PR <n>", "back to step 3", "the PR's merge"):
     assert phrase in body, phrase
   for ref in set(re.findall(r"`(references/[^`]+)`", body)):
     assert (SKILL.parent / ref).is_file(), ref

@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PACKER = runpy.run_path(str(ROOT / "scripts/pack_plugin.py"))
 SKILLS = sorted(p.parent.name for p in (ROOT / "skills").glob("*/SKILL.md"))
 EXTERNAL = {
-    "review-spec": ("state-store", "start-session"),
+    "review-spec": ("state-store", "start-session", "github-write", "remote-branch"),
     "plan": ("state-store", "start-session", "github-write"),
     "review-plan": ("state-store", "start-session"),
     "file": ("github-write", "state-store"),
