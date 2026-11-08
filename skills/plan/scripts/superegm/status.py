@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the board's one write per `wave` pass, `post_board` (U30).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the `ruling` event and a status line after a comment's deviation headings (U22); the board's one write per `wave` pass, `post_board` (U30).
 
 """superegm status: landed and ready sets, PRs, CI; refuses without a complete receipt.
 `--wait <s>` polls, reading only, and prints every unreported event line, or `deadline`. Under a `wave` card
@@ -12,15 +12,17 @@ from pathlib import Path
 
 import superegm as core
 from superegm import apply
+from superegm.decision import edited_after_record, ruling_of
 from superegm.launch import load_launches, terminal
 from superegm.report import board_table
 
 WRITES = frozenset(['state'])  # the store kinds this subcommand writes
 SKILLS = frozenset(['wave', 'integrate'])  # the skills whose card this subcommand accepts
-STATUS_RE = re.compile(r"^\*\*Builder status:\*\*\s*(DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT)\b")
+# a status line anywhere in the comment: a deviation's `**Deviation**` headings come before it (the builder orders)
+STATUS_RE = re.compile(r"^\*\*Builder status:\*\*\s*(DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT)\b", re.M)
 # The saved fingerprint of a unit (spec section 11): every `--wait` reports the keys that differ from it.
 EMPTY = {"pr": None, "head": None, "ci": None, "exit": None, "builder_status": None, "landed": False,
-         "closed": [None, None]}
+         "closed": [None, None], "rulings": []}
 
 
 def register(subparsers):
@@ -144,7 +146,8 @@ def ci_word(verdict: str):
 
 def builder_facts(st, uid: str, comments: list) -> tuple:
   """From the latest launch by `round`: `[round, <text of its exit file>]` when that file exists,
-  and `[id, word, login]` of the last `**Builder status:**` comment created at or after its
+  and `[id, word, login]` of the last `**Builder status:**` comment (one opening with that line or with its
+  `**Deviation**` headings) created at or after its
   `started_at` (every such comment when nothing was launched). The word is masked (None) while
   the launch is not terminal (spec section 4), so it folds into the exit line it belongs to."""
   latest = max(load_launches(st, uid), key=lambda entry: entry["round"], default=None)
@@ -155,7 +158,10 @@ def builder_facts(st, uid: str, comments: list) -> tuple:
   since = latest["started_at"] if latest else ""
   status = None
   for comment in comments:
-    match = STATUS_RE.match(comment.get("body") or "")
+    body = comment.get("body") or ""
+    # a status comment opens with its status line or its `**Deviation**` headings (the orders' shapes); a status
+    # line quoted below another comment's first line, such as an owner's ruling, is not one
+    match = STATUS_RE.search(body) if body.startswith(("**Builder status:**", "**Deviation")) else None
     if match and (comment.get("created_at") or "") >= since:
       status = [comment["id"], match.group(1), (comment.get("user") or {}).get("login")]
   return exit, None if latest and not terminal(latest) else status
@@ -175,6 +181,32 @@ def closed_facts(repo: str, issue: dict, pr, landed: bool) -> list:
   return facts
 
 
+def ruling_facts(store, uid: str, comments: list, owners) -> list:
+  """One `Ruling` per comment of an owner `ruling_of` parses (spec section 13.2); a comment the unit's `rulings[]`
+  names as `posted` is skipped unless its `updated_at` is later than that entry's `posted_at` (a by-hand `--posted`
+  record's: the comment's `updated_at` when recorded, else its `created_at`; a session post's: its `created_at`, read
+  back, so any edit of it since its creation is one), so an unedited recorded post is no event and an owner's edit of it is one.
+  For an `unread` entry (the session's own post whose GitHub time was never read back, `posted_at` the host's) the edit
+  is an `updated_at` later than the comment's own `created_at` (`decision.edited_after_record`)."""
+  posted = {}
+  for entry in core.load_foreman(store, uid).get("rulings") or []:
+    kind, _, cid = (entry.get("posted") or "").partition("comment ")
+    if not kind and cid.isdigit():
+      posted[int(cid)] = entry
+  facts = []
+  for comment in comments:
+    ruling = ruling_of(comment, owners)
+    if ruling and (ruling.comment_id not in posted or edited_after_record(comment, posted[ruling.comment_id])):
+      facts.append(ruling)
+  return facts
+
+
+def ruling_entries(facts: list, comments: list) -> list:
+  """The saved `rulings` key: `[comment id, kind, subject, option, login, updated_at or created_at]` per fact."""
+  stamps = {c.get("id"): c.get("updated_at") or c.get("created_at") for c in comments}
+  return [[r.comment_id, r.kind, r.subject, r.option, r.login, stamps.get(r.comment_id)] for r in facts]
+
+
 def fingerprint(unit: dict) -> dict:
   """The saved keys of a unit (lists, not tuples: the saved one comes back from JSON)."""
   return {key: unit[key] for key in EMPTY}
@@ -182,7 +214,7 @@ def fingerprint(unit: dict) -> dict:
 
 def unit_events(uid: str, previous, current: dict) -> list:
   """One line per event of the unit since `previous` (`EMPTY` when nothing was saved), kinds in
-  the order head, exit, status, landed, closed; a builder's exit carries its status word."""
+  the order head, exit, status, landed, closed, ruling; a builder's exit carries its status word."""
   before = {**EMPTY, **(previous or {})}
   lines = []
   if current["ci"] is not None and any(current[k] != before[k] for k in ("pr", "head", "ci")):
@@ -199,6 +231,11 @@ def unit_events(uid: str, previous, current: dict) -> list:
   for what, fact, earlier in zip(("pr", "issue"), current["closed"], before["closed"]):
     if fact and fact != earlier:
       lines.append(f"{uid} closed {what}={fact[0]} by={fact[1]}")
+  for entry in current["rulings"]:
+    if entry not in before["rulings"]:
+      cid, kind, subject, option, login = entry[:5]
+      what = " ".join(part for part in (kind, subject, option) if part)
+      lines.append(f"{uid} ruling by {login}: {what} (comment {cid})")
   return lines
 
 
@@ -263,6 +300,7 @@ def unit_view(handoff, uid):
   comments = core.gh_pages(f"repos/{repo}/issues/{number}/comments?per_page=100")
   view["exit"], view["builder_status"] = builder_facts(handoff.store, uid, comments)
   view["closed"] = closed_facts(repo, issue, pr, view["landed"])
+  view["rulings"] = ruling_entries(ruling_facts(handoff.store, uid, comments, handoff.config.get("owners") or []), comments)
   record["status"] = view["status"]
   state["units"][uid] = record
   return view
