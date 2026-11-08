@@ -361,3 +361,68 @@ def test_an_escalated_integrate_findings_settle_line_carries_what_its_mode_needs
   s = seed(world, **U(reviews=REVIEW("integrate", rid, {1: ROUND(1, [{**F(severity)[0], "disposition": "escalated"}])})))
   [line] = [i["action"] for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "escalated"]
   assert line == f"superegm review settle --review {rid} --finding foreman-1-1 --disposition fixed | declined {flags} --runcard <card>"
+
+
+def test_a_spent_choice_leaves_the_cap_menu(world):
+  """Round 8 (astra-7-1): a head's `one more round` is once per unit (decision.py refuses it spent) and a review's
+  `continue` once per cycle (review rule refuses it ruled), so a cap reached again offers neither."""
+  open_wave_card(world)
+  ruled = D(2, "review head-U01-c1 cap")
+  pending = D(2, "review head-U01-c1 cap", id="q2")
+  s = seed(world, **U(decisions=ruled + pending, rulings=[{"decision": "q1", "ruling": "one more round", "by": "owner"}],
+                      rounds=POSTED(6), reviews=HEAD(6, F("high"), rulings=[{"ruling": "continue"}])))
+  caps = [(i["subject"], i["action"]) for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "cap"]
+  assert caps == [("U01", f"**Ruling:** stop | **Ruling:** redesign — <reason> on {ISSUE}")]
+
+
+def test_a_spent_continue_leaves_the_review_cap_command(world):
+  """Round 8 (astra-7-1): a review's `continue` is once per cycle (review rule refuses it ruled)."""
+  open_wave_card(world)
+  rid = "plan-U01-c1"
+  s = seed(world, **U(reviews=REVIEW("plan", rid, {n: ROUND(n, F("high")) for n in range(1, 7)}, rulings=[{"ruling": "continue"}])))
+  caps = [(i["subject"], i["action"]) for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "cap"]
+  assert caps == [(rid, f"superegm review rule --review {rid} --ruling accept|stop --owner --runcard <card>")]
+
+
+def escalated_integrate(folder, fid):
+  rid = "spec-sample-integrate-c1"
+  atomic_write(folder / rid / "review.json", REVIEW("integrate", rid, {})[rid][0])
+  atomic_write(folder / rid / "round-1.json", ROUND(1, [{**F("high")[0], "id": fid, "disposition": "escalated"}]))
+
+
+def test_a_root_integrate_review_is_the_legacy_handoffs_alone(world):
+  """Round 8 (astra-7-2, codebase-details-7-1): a 1.2 handoff's integrate review lives under its own `reviews/`; the
+  store root's `spec-<slug>-integrate-c<n>` is the legacy flat handoff's of the same spec, never the 1.2 one's."""
+  open_wave_card(world)
+  s = seed(world, **U())
+  legacy_handoff(world, s)
+  escalated_integrate(s.path("reviews", "x").parent, "foreman-1-1")
+  escalated_integrate(s.root / "reviews", "foreman-1-2")
+  fps = lambda ids: [i["fingerprint"] for i in inbox_items(s, ids) if i["kind"] == "escalated"]
+  assert fps([s.handoff_id]) == ["spec-sample-integrate-c1/escalated/foreman-1-1"]
+  assert fps(["sample-legacy"]) == ["spec-sample-integrate-c1/escalated/foreman-1-2"]
+
+
+def test_a_legacy_handoff_reads_its_own_prefixed_reviews_alone(world):
+  """Round 8 (change-review-7-1): a flat store keeps each flat handoff's plan and head reviews apart by the
+  `<6 hex>-` prefix (review.hex_prefix); a legacy handoff reads its own prefix's and never an earlier handoff's."""
+  open_wave_card(world)
+  s = seed(world, **U())
+  legacy = legacy_handoff(world, s)
+  own = f"{legacy.handoff_id[-6:]}-plan-U01-c1"
+  for rid in ("abcdef-plan-U01-c1", own):
+    review, rounds = REVIEW("plan", rid, {n: ROUND(n, F("high")) for n in range(1, 6)})[rid]
+    atomic_write(s.root / "reviews" / rid / "review.json", review)
+    for n, rnd in rounds.items():
+      atomic_write(s.root / "reviews" / rid / f"round-{n}.json", rnd)
+  legacy.path("unit", "U01").write_text(s.path("unit", "U01").read_text(encoding="utf-8"), encoding="utf-8")
+  assert [i["subject"] for i in inbox_items(s, ["sample-legacy"]) if i["kind"] == "cap"] == [own]
+
+
+def test_inbox_all_json_prints_json_lines_alone(world):
+  """Round 8 (astra-7-3): `--json` is one object per line, so `--all`'s registry note is not printed there."""
+  assert world.run("inbox", "--all", "--json") == (0, "")
+  open_wave_card(world)
+  seed(world, **U(decisions=D(3, "comment 77")))
+  out = world.run("inbox", "--all", "--json")[1]
+  assert out == world.run("inbox", "--json")[1] and all(json.loads(line) for line in out.splitlines())
