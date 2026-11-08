@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from conftest import REPO
+from conftest import REPO, set_config
 from superegm import atomic_write
 from superegm.decision import ruling_form
 from superegm.inbox import inbox_items
@@ -95,3 +95,22 @@ def test_inbox_prints_one_line_per_item(world):
   atomic_write(s.path("handoffs", "sample-ffffff"), {"id": "sample-ffffff", "spec": str(world.spec), "opened_at": "t", "closed_at": None})  # approved, never planned: no state.json
   atomic_write(s.path("approvals", "sample"), {"path": str(world.spec), "entries": [{"escalated": ["spec-sample-c1:design-1-1"]}]})
   assert world.run("inbox") == (0, f"{REPO} spec-sample-c1 | escalated | /superegm:plan {world.spec}\n")
+
+
+@pytest.mark.parametrize("hook, journal", [("exit 0", "hook exit 0"), ("exit 3", "hook exit 3"), ("sleep 3", "hook timeout"), ("", "hook failed: Permission denied"), (None, "no hook")])
+def test_notify_runs_the_hook_once_with_the_new_lines(world, tmp_path, monkeypatch, hook, journal):
+  monkeypatch.setenv("HOME", str(tmp_path / "home"))
+  got, script = tmp_path / "got", tmp_path / "home/.superegm/notify"
+  if hook is not None:
+    script.parent.mkdir(parents=True)
+    script.write_text(f"#!/bin/sh\ncat > '{got}'\n{hook}\n", encoding="utf-8")
+    script.chmod(0o755 if hook else 0o644)
+  set_config(world, repo=REPO, notify_timeout_seconds=1)
+  card = open_wave_card(world)
+  s = seed(world, **U(decisions=D(3, "comment 77")))
+  lines, notified = world.run("inbox")[1], lambda: json.loads(s.path("state").read_text(encoding="utf-8"))["notified"]
+  assert world.run("notify", "--runcard", card) == (0, "")
+  assert got.read_text(encoding="utf-8") == lines if hook else not got.exists()
+  assert notified() == sorted(["U01/decision/q1", card]) and f"notify: {journal} (2 new)" in s.path("journal").read_text(encoding="utf-8")
+  got.exists() and got.unlink()
+  assert world.run("notify", "--runcard", card) == (0, "") and not got.exists() and notified() == sorted(["U01/decision/q1", card])
