@@ -298,6 +298,9 @@ class FakeGitHub:
     if args[1] == "edit":
       self.assert_write()
       issue = self.issues[int(args[2])]
+      if "--add-label" not in args:  # a label taken off alone
+        issue["labels"] = [l for l in issue["labels"] if l != args[args.index("--remove-label") + 1]]
+        return self.ok(text="")
       added = args[args.index("--add-label") + 1]
       if added not in self.labels:
         # The real gh refuses a label the repository does not have; a fake that

@@ -124,9 +124,15 @@ def binding_rulings(comments: list, owners: list, recorded: list, decisions=None
   only when it is one of the options its decision offers (`decisions`, else the named comment's `- (` lines and
   `stop the unit`), as `decision rule` would accept it. Given `pending` (the open decisions, `pending_decisions`),
   an unrecorded `one more round` or `stop` binds only while a point-2 decision is open and a `redesign` only while
-  a head's (point 1 or 2) is: otherwise `decision rule` drops it, and at point 3 a redesign is text."""
+  a head's (point 1 or 2) is: otherwise `decision rule` drops it, and at point 3 a redesign is text. Once a point-1
+  question exists, an unrecorded `finding upheld` binds only on a fid one asks about (`fid_decisions`), as `decision
+  rule` would record it: a typo's fid binds nothing."""
   recorded = list(recorded)
   point3 = [d for d in decisions or [] if d.get("point") == 3]
+  point1 = any(d.get("point") == 1 for d in decisions or [])
+
+  def asked_for(r):
+    return r.kind != "upheld" or not point1 or bool(fid_decisions({"decisions": decisions}, r.subject))
   open_points = None if pending is None else {d.get("point") for d in pending}
 
   def open_for(r):
@@ -141,7 +147,7 @@ def binding_rulings(comments: list, owners: list, recorded: list, decisions=None
   ids = {r.comment_id for r in recorded if r.comment_id}
   keys = {key(r) for r in recorded if r.kind in GROUPS}
   return recorded + [r for c in comments if (r := ruling_of(c, owners))
-                     and r.comment_id not in ids and key(r) not in keys and open_for(r)
+                     and r.comment_id not in ids and key(r) not in keys and open_for(r) and asked_for(r)
                      and (r.kind != "option" or offered(r, comments, decisions or []))]
 
 
@@ -389,7 +395,8 @@ def rule(args) -> int:
     chosen = f"redesign — {reason.strip()}"
     brief = brief_path(st, unit, decision["id"])  # written after the comment is posted: a refusal leaves no brief
   # the effect is the point's, never the option's wording: point 2's `stop`, point 3's `stop the unit`, a redesign.
-  # The label goes first, so a failed request records nothing and the comment replays (round 9).
+  # The label goes first, so a failed request records nothing and the same call reruns (round 9); a session post
+  # that then fails takes the label off again (round 10).
   stops = (decision["point"], chosen) in ((2, "stop"), (3, "stop the unit")) or brief
   if stops:
     label_stopped(st, number)
@@ -406,6 +413,10 @@ def rule(args) -> int:
     path = body_file(body, st.root)
     try:
       url = core.gh(["issue", "comment", str(number), "-R", st.config["repo"], "--body-file", path]).strip()
+    except core.GhError:
+      if stops:  # nothing is recorded: the label comes off again, so the issue is not stopped and the call reruns
+        core.gh(["issue", "edit", str(number), "-R", st.config["repo"], "--remove-label", st.config["labels"]["stopped"]])
+      raise
     finally:
       os.unlink(path)
     cid = url.rsplit("-", 1)[1]

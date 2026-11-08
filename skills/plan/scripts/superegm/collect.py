@@ -185,7 +185,9 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
   ruling in this round's comments names it: a contest is recorded once (spec section 8, External review). An
   upheld ruling is answered by a `fixed` reply later than it (than its record's `posted_at`, `recorded_at`, when recorded) under the ruled id or under any id of its group;
   a recorded one binds whether or not its comment is still in `comments` (edited into prose or deleted), located
-  on the unit's issue (`issue_number`). A reply
+  on the unit's issue (`issue_number`). An `unread` entry has no record time (`recorded_times` maps it to ""), so
+  its comment's own time is the bound, and when that comment is gone its stand-in has no time and any `fixed`
+  reply counts. A reply
   to a carried copy `foreman-<r>-<k>`, `fixed` or `contested`, counts (toward the carry, or as a contest) only
   when it comes after round r was posted (`posted`, each posted round's `posted_at`): before that the copy did
   not exist."""
@@ -267,7 +269,7 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
         continue
       fid = ruling.subject
       answers = {fid, links.get(fid, fid)} | groups.get(origin(fid), set())  # the ruled finding, or any id of its group
-      since = max(c["at"], times.get(ruling.comment_id) or "")  # a recorded ruling binds from its record's time
+      since = max(c["at"], times.get(ruling.comment_id) or "")  # from its record's time; an unread one from the comment's
       fixed = any(o["login"] == login and o["at"] > since and (m := REPLY_RE.match(o["body"]))
                   and m.group(1) in answers and m.group(2) == "fixed" for o in comments)
       if ruling.kind == "upheld" and not fixed:

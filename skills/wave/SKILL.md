@@ -284,7 +284,7 @@ Leavemealone-mode: U11 wires §13.2 here.
 - A `launch-builder` refusal is idle for the invocation; no retry.
 - `status --wait` exiting non-zero: run it once more; if it fails again, run
   `report`, say so in chat, and end this invocation.
-- A `decision rule` whose post fails records nothing: run it again.
+- A `decision rule` whose post or label request fails (a `gh` error, not a refusal) records nothing: run it again, a `--posted` one included.
 - Never evaluate the dispatch predicate yourself: `foreman dispatch` is its
   one place, and the batch order above is how a refusal is handled.
 
