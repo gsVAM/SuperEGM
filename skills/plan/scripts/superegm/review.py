@@ -616,7 +616,8 @@ def settle_finding(args) -> int:
     if note is not None:
       finding["note"] = note
     core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
-    copies = settle_set_copies(st, rnd, finding) if (review["kind"], reviewer, disposition) == ("plan", "set", "fixed") else []
+    copies = settle_set_copies(st, rnd, finding) if (review["kind"], reviewer, disposition) == ("plan", "set", "fixed") \
+        else settle_external_copies(st, review, reviewer, finding) if review["kind"] == "spec" and reviewer.startswith("external:") else []
     core.journal(st, f"review settle {rid} {fid} {disposition} by {finding['ruling'] or 'the elephant'}"
                  + (f" copied to {', '.join(copies)}" if copies else "") + f" under {args.runcard}")
   status = store_verdict(st, rid, review, runcard)
@@ -1209,14 +1210,60 @@ def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[
     [finding] = parse_findings(thread_line(ext, n, top + 1, thread, severity, config), ext, n)
     record["findings"].append({**finding, "thread": thread["id"], "review_body": thread["review_body"]})
     added.append(thread["id"])
-  if added:
+  carried = carry_externals(st, review["artifact"], rid, rnd)
+  if added or carried:
     core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
     review["ingested"] = (review.get("ingested") or []) + added
     store_verdict(st, rid, review, runcard)
+  if carried:
+    core.journal(st, f"review ingest {rid} round {n} carried {', '.join(carried)} under {runcard}")
+  if added:
     core.journal(st, f"review ingest {rid} round {n} PR {number} ingested {len(added)} under {runcard}")
   unsettled = [f["id"] for name, record in rnd["reviewers"].items() if name.startswith("external:")
                for f in record["findings"] if blocking(f) and f["disposition"] is None]
   return len(added), unsettled
+
+
+def carry_externals(st: core.Store, artifact: str, rid: str, rnd: dict) -> list[str]:
+  """Every unsettled external high or medium of an earlier round of the spec's cycles (this cycle's earlier rounds
+  included) copied into `rnd` (the latest round, in memory) when no finding there holds its `(id, claim)`, as `collect`
+  carries one on a head: the copy and the original are one finding. The fids carried."""
+  held = {(f["id"], f["claim"]) for f in findings_of(rnd)}
+  carried = []
+  for other_rid, _ in spec_cycles(st, artifact):
+    for m in round_numbers(st, other_rid):
+      if (other_rid, m) == (rid, rnd["round"]):
+        continue
+      for reviewer, record in load_round(st, other_rid, m)["reviewers"].items():
+        for finding in record["findings"] if reviewer.startswith("external:") else []:
+          if blocking(finding) and finding["disposition"] is None and (finding["id"], finding["claim"]) not in held:
+            rnd["reviewers"].setdefault(reviewer, {"findings": [], "not_run": None, "isolation": "exposed:ingest",
+                                                   "model": "none:none", "effort": "none:none"})["findings"].append(dict(finding))
+            held.add((finding["id"], finding["claim"]))
+            carried.append(finding["id"])
+  return carried
+
+
+def settle_external_copies(st: core.Store, review: dict, reviewer: str, finding: dict) -> list[str]:
+  """An external finding settled on a spec settles its copies: every round of every cycle of the spec holding the
+  same `(id, claim)` under `reviewer` takes the disposition, ruling and note (one already holding them, the settled
+  round included, is left alone); the review ids written."""
+  copies = []
+  for other_rid, _ in spec_cycles(st, review["artifact"]):
+    for m in round_numbers(st, other_rid):
+      other = load_round(st, other_rid, m)
+      twins = [f for f in ((other["reviewers"].get(reviewer) or {}).get("findings") or [])
+               if (f["id"], f["claim"]) == (finding["id"], finding["claim"])
+               and (f["disposition"], f["ruling"], f.get("note")) != (finding["disposition"], finding["ruling"], finding.get("note"))]
+      if twins:
+        for twin in twins:
+          twin["disposition"], twin["ruling"] = finding["disposition"], finding["ruling"]
+          if "note" in finding:
+            twin["note"] = finding["note"]
+        core.atomic_write(st.path("reviews", other_rid, f"round-{m}.json"), other)
+        if other_rid not in copies:
+          copies.append(other_rid)
+  return copies
 
 
 def outcome_word(status_exit: int, contested: list) -> str:
