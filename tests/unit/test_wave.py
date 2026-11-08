@@ -576,6 +576,14 @@ def test_the_wave_skill_body_is_the_driver_loop(world):
     assert world.run(sub, "--help")[0] == 0, sub
 
 
+@pytest.mark.parametrize("needle", ["`<!-- superegm:board -->`", "the tracking issue's body", "none when the rows are unchanged",
+                                    "the inbox stays the action list", "read the card's handoff alone", "report path, the board, `idle:`"])
+def test_the_wave_skill_names_the_board(needle):
+  body = SKILL.read_text(encoding="utf-8").split("---", 2)[2]
+  assert needle in body, needle
+  assert len(body.encode("utf-8")) <= 24_000
+
+
 def test_the_wave_entry_refreshes_the_snapshot_before_report():
   """Defect 5: `report` reads the snapshot only `status --wait` saves (§11.1: a re-typed wave resumes from the
   store); the entry refreshes it, with the batch's timeout, and handles its lines before `report`."""
