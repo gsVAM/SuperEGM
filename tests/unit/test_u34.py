@@ -75,3 +75,13 @@ def test_brainstorming_team_mode_prose(needle):
   assert needle in text, needle
   assert text.index("## Think Wide With a Team") < text.index("## Play It Back")
   assert len(text.split("---", 2)[2].strip().encode("utf-8")) <= 24_000
+
+
+FACTS = ("`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`", "in-process teammate mode", "`SendMessage`", "every named call launches a teammate", "split-pane",
+         "`-p` spawns none", "may reject a shutdown", "a resumed lead has none", "`omitClaudeMd` is not applied", "assumed yes",
+         "never in `settings.json`", "SessionStart hooks run for sessions, not for Agent-tool subagents", "the cartographer's `saw:` line")
+
+
+@pytest.mark.parametrize("needle", FACTS)
+def test_platform_reference_carries_the_agent_teams_facts(needle):
+  assert needle in (ROOT / "skills/using-superegm/references/claude-code-tools.md").read_text(encoding="utf-8"), needle
