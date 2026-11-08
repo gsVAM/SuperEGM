@@ -861,6 +861,30 @@ def test_a_stop_whose_label_fails_records_nothing_so_its_comment_replays(world, 
   assert "superegm:stopped" in world.gh.issues[2]["labels"]
 
 
+def test_a_session_stop_whose_post_fails_leaves_no_label(world, monkeypatch):
+  """Round 10 (PR #96 review, change-review-10-2): a session stop's label precedes its post; a post that fails takes
+  the label off again, so nothing is recorded, the issue is not stopped, and the same call runs again."""
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})
+  set_config(world, repo=REPO, owners=["owner"])
+  fake_gh(world)
+  q = world.run("decision", "open", "--unit", "U01", "--point", 2, "--question", question(world, "cap\n"), "--source", "review head-U01-c1 cap", "--runcard", card)[1].splitlines()[0]
+  real = superegm.gh
+  def failing(args, *a, **kw):
+    if args[:2] == ["issue", "comment"]:
+      raise superegm.GhError(args, 1, "", "HTTP 502")
+    return real(args, *a, **kw)
+  monkeypatch.setattr(superegm, "gh", failing)
+  rule = lambda: world.run("decision", "rule", "--unit", "U01", "--decision", q, "--ruling", "stop", "--by", "owner", "--runcard", card)
+  with pytest.raises(superegm.GhError):
+    rule()
+  f = foreman_of(s, "U01")
+  assert f["rulings"] == [] and "stopped" not in f and "superegm:stopped" not in world.gh.issues[2]["labels"]
+  monkeypatch.setattr(superegm, "gh", real)
+  assert rule()[0] == 0 and "superegm:stopped" in world.gh.issues[2]["labels"]
+  assert [r["decision"] for r in foreman_of(s, "U01")["rulings"]] == [q]
+
+
 def test_launch_marks_a_unit_whose_clean_outcome_an_ingest_rewrote(world, monkeypatch):
   s, card, hid, _ = filed(world, units=("U07", "U08"), max_in_flight=1)
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
@@ -940,6 +964,8 @@ def test_a_ruling_by_comment_continues_as_its_point_does(needle):
     # round 7 (PR #96 review): the finding lines `decision rule` reads; entry step 4 reads a posted ruling through the record
     ("skills/wave/SKILL.md", "each finding on a line of its own starting `<fid> |` or `## Q<n> <fid> (`"),
     ("skills/wave/SKILL.md", "binds once `decision rule --posted <comment id>` records it"),
+    ("skills/wave/SKILL.md", "whose post or label request fails"),
+    ("skills/wave/SKILL.md", "a `--posted` one included"),
     ("skills/wave/references/builder_orders.md", "(as recorded by <by>; the comment is in no ruling form)"),
     # round 8 (PR #96 review): the whole-file allowance; who posts the judges' ruling; a run stopped after a record
     ("skills/wave/references/builder_orders.md", "`**Ruling:** test-delta <file> allowed — <reason>`"),

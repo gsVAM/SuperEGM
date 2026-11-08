@@ -7,7 +7,7 @@ import re
 
 import pytest
 
-from superegm.decision import recorded_rulings, ruling_form, ruling_of
+from superegm.decision import binding_rulings, recorded_rulings, ruling_form, ruling_of
 from superegm.launch_builder import prompt_text
 
 FORMS = [
@@ -183,3 +183,16 @@ def test_a_recorded_ruling_in_no_form_is_shown_as_its_record():
   text = prompt_text(2, "U01", "body", "orders", "orient", comments, [], None, "builder-bot", "audit", owners=["owner"], foreman=foreman)
   assert re.findall(r"^## \S+ · comment (\d+)$", text, re.M) == ["3", "4"]
   assert "## owner · comment 4\n**Ruling:** (3) (b) use Redis\n(as recorded by owner; the comment is in no ruling form)\n" in text
+
+
+def test_an_upheld_fid_no_decision_asks_about_binds_nothing():
+  """Round 10 (PR #96 review, astra-10-2): an unrecorded `finding upheld` binds only on a fid a point-1 decision
+  asks about, as `decision rule --posted` would record it; a typo's fid binds nothing once a question names others."""
+  comments = [{"id": 4, "user": {"login": "owner"}, "body": "**Ruling:** f-1-9 finding upheld", "created_at": "t2", "updated_at": "t2"},
+              {"id": 5, "user": {"login": "owner"}, "body": "**Ruling:** f-1-1 finding upheld", "created_at": "t3", "updated_at": "t3"}]
+  decisions = [{"id": "q1", "point": 1, "source": "review r round 1", "question": "f-1-1 | high | a.py | regression: no | x\n"}]
+  assert [r.comment_id for r in binding_rulings(comments, ["owner"], [], decisions)] == [5]
+  assert [r.comment_id for r in binding_rulings(comments, ["owner"], [], [])] == [4, 5]  # no point-1 question: nothing to check
+  foreman = {"decisions": decisions, "rulings": [{"decision": "q1", "ruling": "f-1-1 finding upheld", "by": "owner", "posted": "comment 5", "posted_at": "t3"}]}
+  text = prompt_text(2, "U01", "body", "orders", "orient", comments, [], None, "builder-bot", "audit", owners=["owner"], foreman=foreman)
+  assert re.findall(r"^## \S+ · comment (\d+)$", text.split("# Comments on issue #2\n\n", 1)[1], re.M) == ["5"]
