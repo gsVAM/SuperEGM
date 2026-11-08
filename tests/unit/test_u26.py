@@ -41,3 +41,20 @@ def test_ingest_pr_records_threads_into_the_latest_round(world, monkeypatch, sta
   assert rjson(world, rid)["ingested"] == [11, 12] and rjson(world, rid)["converged"] == ("by ruling R1" if state == "accept" else "no")
   assert (ingest(world, cid)[1].strip(), seen[-1]) == ("0 ingested", {11, 12})   # every cycle's ids are the reader's skip
   assert status(world, rid, cid)[0] == (0 if state == "accept" else 3)
+
+def test_ingest_pr_carries_an_unsettled_external_forward_and_settles_both(world, monkeypatch):
+  reader(monkeypatch)
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [HIGH(k) for k in range(1, 6)])
+  assert ingest(world, cid)[0] == 0 and rule(world, rid, "stop", cid)[0] == 0        # c1 holds the bot's high and alice's low, then stops at its cap
+  _, cid2, rid2 = opened(world)
+  rounds(world, rid2, cid2, [[]])
+  assert ingest(world, cid2)[1].strip() == "0 ingested"
+  fid, carried = f"{BOT}-5-1", rjson(world, rid2, "round-1.json")["reviewers"]
+  assert [(f["id"], f["thread"]) for f in carried[BOT]["findings"]] == [(fid, 11)] and HUMAN not in carried   # a low is not carried
+  assert status(world, rid2, cid2)[0] == 3
+  assert settle(world, rid2, fid, "declined", cid2, "--owner")[0] == 0
+  both = [f for r in (rjson(world, rid, "round-5.json"), rjson(world, rid2, "round-1.json")) for f in r["reviewers"][BOT]["findings"]]
+  assert [(f["disposition"], f["ruling"]) for f in both] == [("declined", "owner")] * 2
+  assert status(world, rid2, cid2)[0] == 0 and ingest(world, cid2)[0] == 0
+  assert len(rjson(world, rid2, "round-1.json")["reviewers"][BOT]["findings"]) == 1      # settled: carried no more, never twice
