@@ -23,8 +23,9 @@ def register(subparsers):
 
 def run(args):
   card = core.require_runcard(args, SKILLS)
-  st = core.store(core.git_toplevel(Path.cwd()))
-  state, config, now = core.load_state(st.root), st.config, core.NOW()
+  plan, st = core.locate(args)
+  handoff = core.Handoff(plan, st)
+  state, config, now = handoff.state, st.config, core.NOW()
   units = state.get("units") or {}
   views = {uid: unit_view(state, uid) for uid in units}
   launched = [uid for uid in units if units[uid].get("launched")]
@@ -44,9 +45,8 @@ def run(args):
   path = st.path("wave_report", n)
   lines = [f"# Wave {n} report (handoff {st.handoff_id})", f"Run card: {args.runcard}", f"Loop: {'ended' if ended else 'continuing'} ({why})", "",
            "## Units"]
-  for uid in units:
-    lines.append(unit_line(uid, units[uid], views[uid], states.get(uid, "unlaunched"), foremen.get(uid, {}),
-                           load_launches(st, uid)))
+  board = board_table(handoff, state, card, now)
+  lines.append(board)
   idle = [uid for uid in units if uid in named_idle or states.get(uid) == "idle"]
   pending = [(uid, d) for uid in launched for d in pending_decisions(foremen[uid])]
   lines += section("Non-terminal launches", [f"{uid} launch {e['round']} {e['status']}" for uid in launched
@@ -62,6 +62,7 @@ def run(args):
                                if states[uid] == "stopped"])
   core.atomic_write(path, "\n".join(lines) + "\n")
   print(path)
+  print(board)
   print("idle: " + (",".join(idle) or "none"))
   print("pending: " + ("; ".join(f"{uid} {d['id']} (point {d['point']}, {d['source']})" for uid, d in pending) or "none"))
   print(f"loop: {'ended' if ended else 'continuing'} ({why})")
@@ -100,13 +101,75 @@ def wave_number(st, rid: str, card: dict) -> int:
   return sorted(cards).index((card["opened_at"], rid)) + 1
 
 
-def unit_line(uid: str, record: dict, view: dict, state: str, foreman: dict, launches: list) -> str:
-  rounds = foreman.get("rounds") or []
-  detail = ", ".join(f"r{r.get('round')} {r.get('phase')}" + (f" {r['outcome']}" if r.get("outcome") else "") for r in rounds)
-  latest = launches[-1] if launches else None
-  return (f"- {uid} #{record.get('number')}: {state} · pr {'#%s' % view['pr'] if view['pr'] else 'none'} "
-          f"head {view['head'][:7] if view['head'] else 'none'} · ci {view['ci'] or 'none'} · rounds {len(rounds)}"
-          f"{' (' + detail + ')' if rounds else ''} · launch {'%s %s' % (latest['round'], latest['status']) if latest else 'none'}")
+BOARD_COLUMNS = ("unit", "state", "round", "launch", "head", "PR", "waits on", "next action", "cost")
+
+
+def board_table(handoff, state: dict, card: dict, now: float) -> str:
+  """The board (spec section 11.1): a header line (handoff, base, spec sha, waves, `board_changed_at`)
+  and one row per unit of the graph's order, the same table in the report, on stdout and in the issue."""
+  st, config, units = handoff.store, handoff.config, state.get("units") or {}
+  views = {uid: unit_view(state, uid) for uid in handoff.graph.order}
+  foremen = {uid: core.load_foreman(st, uid) for uid in handoff.graph.order}
+  launches = {uid: load_launches(st, uid) for uid in handoff.graph.order}
+  states = {uid: unit_state(uid, views[uid], foremen[uid], launches[uid], card, config, now) for uid in handoff.graph.order}
+  reasons = dict(reversed(idle_reasons(card, states, views, config, now)))
+  waves = " → ".join("{" + ", ".join(handoff.graph.waves[w]) + "}" for w in sorted(handoff.graph.waves))
+  lines = [f"handoff {handoff.handoff_id} · base {config.get('base', 'main')} · spec {handoff.design_sha[:12]} · waves {waves}"
+           f" · changed {state.get('board_changed_at') or 'none'}",
+           "| " + " | ".join(BOARD_COLUMNS) + " |", "| " + " | ".join("---" for _ in BOARD_COLUMNS) + " |"]
+  for uid in handoff.graph.order:
+    view, foreman, entries, word = views[uid], foremen[uid], launches[uid], states[uid]
+    rounds = foreman.get("rounds") or []
+    latest = max(rounds, key=lambda r: r.get("round") or 0, default=None)
+    launch = entries[-1] if entries else None
+    decisions = pending_decisions(foreman)
+    waits = [d["id"] for d in decisions]
+    if not view["landed"] and view["head"] and view["ci"] in (None, "pending"):
+      waits.append("ci")
+    plan_unit = handoff.plan.units.get(uid)
+    waits += [b for b in (plan_unit.blockers if plan_unit else []) if not unit_view(state, b)["landed"]]
+    cells = [f"{uid} #{(units.get(uid) or {}).get('number')}", word, round_cell(latest),
+             f"{launch['round']} {launch['status']}" if launch else "none", view["head"][:7] if view["head"] else "none",
+             f"#{view['pr']}" if view["pr"] else "none", ", ".join(waits) or "none",
+             next_action(word, latest, launch, decisions, reasons.get(uid)), cost_cell(entries)]
+    lines.append("| " + " | ".join(cells) + " |")
+  return "\n".join(lines)
+
+
+def round_cell(latest) -> str:
+  if not latest:
+    return "none"
+  return f"r{latest.get('round')} {latest.get('phase')}" + (f" {latest['outcome']}" if latest.get("outcome") else "")
+
+
+def next_action(word: str, latest, launch, decisions: list, reason) -> str:
+  """The board's `next action` by state: `launch-builder` for `ready`, the decision for `pending`, the idle
+  reason for `idle`, none for `waiting`, `landed` and `stopped`; an `active` or `clean` unit's from the word
+  of a posted round not older than the latest launch, else none while a launch runs, `foreman dispatch` once
+  it is terminal or when there is none."""
+  if word == "ready":
+    return "launch-builder"
+  if word == "pending":
+    return f"decision {decisions[0]['point']}"
+  if word == "idle":
+    return reason or "none"
+  if word not in ("active", "clean"):
+    return "none"
+  if (latest and latest.get("phase") == "posted" and latest.get("outcome")
+      and not (launch and launch["round"] > (latest.get("launch") or 0))):
+    return word_action(latest["outcome"], 0)
+  if launch and not (launch["status"].startswith("exited") or launch["status"] == "interrupted"):
+    return "none"
+  return "foreman dispatch"
+
+
+def cost_cell(entries: list) -> str:
+  """The launches' `total_cost_usd` summed; `(partial)` when an entry holds `unrecorded`; none until one has it."""
+  costs = [e.get("total_cost_usd") for e in entries if e.get("total_cost_usd") is not None]
+  if not costs:
+    return "none"
+  total = sum(c for c in costs if isinstance(c, (int, float)))
+  return f"{total:.2f}" + (" (partial)" if any(c == "unrecorded" for c in costs) else "")
 
 
 def section(title: str, items: list) -> list:
@@ -209,4 +272,6 @@ def word_action(word: str, review_exit: int) -> str:
     return "decision 2"
   if word == "blocked":
     return "decision 3"
+  if word.startswith("owner: "):
+    return "decision open"
   return "idle: review stalled" if review_exit == 5 else "redispatch"
