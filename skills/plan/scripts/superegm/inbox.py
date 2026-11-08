@@ -189,5 +189,30 @@ def register(subparsers):
   p.set_defaults(run=run, writes=WRITES)
 
 
+def line_of(i: dict) -> str:
+  return f"{i['repo']} {i['subject']} | {i['kind']} | {i['action']}"
+
+
+def open_store(args) -> tuple:
+  """The repository's store (no handoff resolved) and the handoff ids to read: `--handoff`'s, else every open
+  row of its `handoffs/` index."""
+  config = core.load_config(core.git_toplevel(Path.cwd()))
+  st = core.Store(Path(config["artifacts_dir"]), config=config)
+  rows = core.handoffs(st.root)
+  named = getattr(args, "handoff", None)
+  if named:
+    if named not in {r["id"] for r in rows}:
+      raise core.HandoffError(f"store: {named}: no such handoff")
+    return st, [named]
+  return st, [r["id"] for r in rows if r["id"] and not r.get("closed_at")]
+
+
 def run(args):
+  if args.command == "inbox":
+    st, ids = open_store(args)
+    if args.all:
+      print("registry: none")  # U24 builds the registry; until then the one store
+    for i in inbox_items(st, ids):
+      print(json.dumps(i) if args.json else line_of(i))
+    return 0
   return 0
