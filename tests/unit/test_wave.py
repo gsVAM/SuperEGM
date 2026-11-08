@@ -11,6 +11,7 @@ import superegm  # the harness reloads the package per test: read load_config at
 from superegm import store, atomic_write, DEFAULT_CONFIG, decision, launch
 from test_builder_token import APP
 from superegm.report import unit_state, loop_ended, word_action
+from superegm.review import parse_findings
 from test_builders import seed as filed, launched, foreman as foreman_file
 
 REPO, BUILDER, NOW = "example-org/webhooks", "builder-bot", 1_700_000_000.0
@@ -566,6 +567,28 @@ def test_a_redesign_ruling_stops_the_unit_and_writes_the_brainstorm_brief(world,
   assert "redesign — the retry design is wrong" in text and FINDING in text and "<!-- superegm:handoff=" in text
   assert "src/x.py" in text and sum(l.startswith("+x") for l in text.splitlines()) == 199 and "**Deviation (other):** renamed a fixture" in text
   assert not any(c[:2] == ["api", f"repos/{REPO}/pulls/70"] for c in world.gh.calls)
+
+
+REVIEW = {"kind": "head", "artifact": "U01", "cycle": 1, "reviewers": ["change-review"], "runcard": "wave-1", "converged": "no", "rulings": []}
+
+
+@pytest.mark.parametrize("by, severity, code", [("judges:p-1", "medium", 1), ("judges:p-1", "high", 0), ("owner", "medium", 0)])
+def test_a_judges_redesign_needs_a_high_finding_behind_it(world, by, severity, code):
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "rounds": [{"round": 1, "phase": "posted", "outcome": "revise", "launch": 1}]})
+  atomic_write(s.path("handoffs", s.handoff_id), {"id": s.handoff_id, "spec": str(world.spec), "opened_at": "t", "closed_at": None})
+  atomic_write(s.path("reviews", "head-U01-c1", "review.json"), REVIEW | {"runcard": card})
+  atomic_write(s.path("reviews", "head-U01-c1", "round-1.json"), {"round": 1, "runcard": card, "artifact_sha256": "a" * 40, "what_ran": "completed",
+                                                                 "reviewers": {"change-review": {"findings": parse_findings(FINDING.replace("high", severity), "change-review", 1)}}})
+  qid = world.run("decision", "open", "--unit", "U01", "--point", 2, "--question", question(world, FINDING + "\n"), "--source", "review head-U01-c1 cap", "--runcard", card)[1].splitlines()[0]
+  result = world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", "redesign — why", "--by", by, "--runcard", card)
+  f = foreman_of(s, "U01")
+  if code:
+    assert result == (1, "decision: redesign by judges:p-1 needs a high finding behind it\n")
+    assert f["rulings"] == [] and "stopped" not in f and world.gh.comments.get(2, []) == []
+    assert f"{REPO} U01 | cap | " in world.run("inbox")[1]
+  else:
+    assert result[0] == 0 and f["stopped"]["reason"] == "redesign — why" and f["stopped"]["by"] == by
 
 
 def test_the_report_names_a_redesign_units_brief(world):
