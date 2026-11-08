@@ -2,10 +2,10 @@
 # Added by SuperEGM (gsVAM), 2026: the report subcommand (spec section 11): the per-batch wave report, the idle rules
 # and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30).
 
-"""superegm report: rewrite `wave_<n>_report.md` from the store and print the idle, pending and loop lines."""
+"""superegm report: rewrite `wave_<n>_report.md` from the store and print its path, the board and the idle,
+pending and loop lines."""
 
 import json
-from pathlib import Path
 
 import superegm as core
 from superegm.launch import latest_clean, load_launches
@@ -15,7 +15,7 @@ SKILLS = frozenset({"wave"})  # the skills whose card this subcommand accepts
 
 
 def register(subparsers):
-  p = core.add_parser(subparsers, "report", "rewrite the wave report; print the idle, pending and loop lines")
+  p = core.add_parser(subparsers, "report", "rewrite the wave report; print its path, the board and the idle, pending and loop lines")
   p.add_argument("--idle", action="append", default=[], metavar="U=<reason>",
                  help="name a unit idle for this invocation (it holds no slot), with why")
   p.set_defaults(run=run, writes=WRITES)
@@ -112,7 +112,11 @@ def board_table(handoff, state: dict, card: dict, now: float) -> str:
   foremen = {uid: core.load_foreman(st, uid) for uid in handoff.graph.order}
   launches = {uid: load_launches(st, uid) for uid in handoff.graph.order}
   states = {uid: unit_state(uid, views[uid], foremen[uid], launches[uid], card, config, now) for uid in handoff.graph.order}
-  reasons = dict(reversed(idle_reasons(card, states, views, config, now)))
+  # The card's reason, else the CI bound without its growing minute count, so an idle row stays equal across passes.
+  reasons = dict(reversed([(e["unit"], e["reason"]) for e in card.get("idle") or [] if e["unit"] in views]))
+  for uid in handoff.graph.order:
+    reasons.setdefault(uid, f"ci {views[uid]['ci'] or 'absent'} (ci_wait_minutes {config.get('ci_wait_minutes', 30)})")
+  open_blocking = (state.get("status") or {}).get("open_blocking") or {}
   waves = " → ".join("{" + ", ".join(handoff.graph.waves[w]) + "}" for w in sorted(handoff.graph.waves))
   lines = [f"handoff {handoff.handoff_id} · base {config.get('base', 'main')} · spec {handoff.design_sha[:12]} · waves {waves}"
            f" · changed {state.get('board_changed_at') or 'none'}",
@@ -126,14 +130,21 @@ def board_table(handoff, state: dict, card: dict, now: float) -> str:
     waits = [d["id"] for d in decisions]
     if not view["landed"] and view["head"] and view["ci"] in (None, "pending"):
       waits.append("ci")
-    plan_unit = handoff.plan.units.get(uid)
-    waits += [b for b in (plan_unit.blockers if plan_unit else []) if not unit_view(state, b)["landed"]]
-    cells = [f"{uid} #{(units.get(uid) or {}).get('number')}", word, round_cell(latest),
+    # Every predecessor `status_pass` holds readiness on: the blockers and the shared-file order, then the plan's open blocking decisions.
+    waits += [p for p in handoff.graph.order if p in handoff.graph.preds[uid] and not views[p]["landed"]]
+    waits += [f"{uid}/{d}" for d in open_blocking.get(uid) or []]
+    cells =[f"{uid} #{(units.get(uid) or {}).get('number')}", word, round_cell(latest),
              f"{launch['round']} {launch['status']}" if launch else "none", view["head"][:7] if view["head"] else "none",
              f"#{view['pr']}" if view["pr"] else "none", ", ".join(waits) or "none",
              next_action(word, latest, launch, decisions, reasons.get(uid)), cost_cell(entries)]
-    lines.append("| " + " | ".join(cells) + " |")
+    lines.append("| " + " | ".join(map(board_cell, cells)) + " |")
   return "\n".join(lines)
+
+
+def board_cell(text: str) -> str:
+  """A cell kept inside its row and its block: `|` escaped, line breaks folded, `<!--` written `&lt;!--` so no
+  cell text (an `--idle` reason) ends the table or reads as a board marker."""
+  return " ".join(str(text).replace("|", "\\|").replace("<!--", "&lt;!--").split())
 
 
 def round_cell(latest) -> str:
@@ -212,7 +223,7 @@ def stopped_line(st, uid: str, stopped: dict, views: dict) -> str:
 
 
 def unit_state(uid: str, view: dict, foreman: dict, launches: list, card: dict, config: dict, now: float) -> str:
-  """One of six: `landed`, `stopped`, `pending` (a decision without its ruling), `idle` (named on the
+  """One of eight: `landed`, `stopped`, `pending` (a decision without its ruling), `idle` (named on the
   card, or a head whose CI is pending or absent for `ci_wait_minutes` since the card first saw it),
   `clean` (the latest round posted clean, no launch recorded after it), else `active`; an unlaunched
   unit not named idle is `ready` (in the saved `status.ready`) or `waiting` (a view without

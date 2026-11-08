@@ -3,7 +3,9 @@
 # Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the board's one write per `wave` pass, `post_board` (U30).
 
 """superegm status: landed and ready sets, PRs, CI; refuses without a complete receipt.
-`--wait <s>` polls, reading only, and prints every unreported event line, or `deadline`."""
+`--wait <s>` polls, reading only, and prints every unreported event line, or `deadline`. Under a `wave` card
+every pass, `--wait` included, also reads the tracking issue once and rewrites its board when the rows changed
+(`post_board`, the one GitHub write, its `board_changed_at` save and a failed write's journal line, spec 11.1)."""
 
 import re
 from pathlib import Path
@@ -22,7 +24,8 @@ EMPTY = {"pr": None, "head": None, "ci": None, "exit": None, "builder_status": N
 
 
 def register(subparsers):
-  p = core.add_parser(subparsers, "status", "landed and ready sets, PRs, CI; refuses without a complete receipt")
+  p = core.add_parser(subparsers, "status", "landed and ready sets, PRs, CI; refuses without a complete receipt; "
+                         "under a wave card, writes the board into the tracking issue")
   p.add_argument("--wait", type=int, help="seconds; print every unreported event line, or deadline")
   p.add_argument("--watch", action="append", help="U03=412 records that PR for the unit")
   p.add_argument("--confirm-landed", action="append", help="unit the user confirmed landed")
