@@ -5,7 +5,7 @@ effects: working-tree
 description: "You MUST use this before any creative work - creating features, building components, adding functionality, modifying behavior, or planning anything new, in software or out of it (a talk, a business, a renovation)."
 ---
 
-<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: spec path docs/specs, the Units section, the review-spec gate, the brainstorm-brief lookup; builder check and the mockups section removed. -->
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: spec path docs/specs, the Units section, the review-spec gate, the brainstorm-brief lookup; builder check and the mockups section removed; the team brainstorm (U34). -->
 
 # Brainstorming
 
@@ -110,6 +110,41 @@ or minimal ones, aren't bulletproof, and skip the plan, implementation,
 and review process. Bring what the spike taught you back into the
 conversation.
 
+## Think Wide With a Team
+
+This section runs only when the owner asks for it: they typed `/superegm:brainstorming --team`, or `brainstorm.team` is true in `.superegm/config.json`.
+A brainstorm not asked for runs neither teammates nor subagents: the skill as above, nothing more.
+Run it once you know the topic well enough to state it in one line, before you propose anything.
+
+**Teams or the fallback.** Read the variable with one Bash `echo "$CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"`.
+The owner sets `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` for the brainstorm session alone, never in `settings.json`; you never set it.
+Teams are on when it reads `1` in an interactive session; a headless session gets none (teams spawn no teammate under `-p`), and a split-pane teammate mode gives the teammates no mailbox.
+Teams on: spawn the four as teammates. Teams off, under `-p`, or a split-pane mode that leaves you waiting: take the fallback below.
+
+**The spawn.** Brief each as `references/teammates.md` says: the topic, the owner's words so far, the message form and its role's section.
+First the cartographer: the Agent tool with `superegm:cartographer` and `name: cartographer`; it reads the code and sends you its notes.
+Once the cartographer's notes are in, spawn the three in one message, the cartographer's notes in each prompt, each in `Mode: BRAINSTORM`:
+the architect as `superegm:design` with `name: architect`, the skeptic as `superegm:zoom-out` with `name: skeptic`, the advocate as `superegm:comprehension` with `name: advocate`.
+Each works one approach in its own context and reports it to you by message; they may message each other to challenge a claim, and ask the cartographer, never the code.
+
+**The wait.** The same for each spawn: note one Bash `date` at the spawn and end your turn, with no `sleep`.
+Read your inbox at its next turn and merge a report that arrived within ten minutes of that `date`.
+A next turn ten minutes or more after the `date` with no message from the cartographer means the mailbox is not working (a split-pane mode): send it a shutdown request and take the fallback.
+A next turn ten minutes or more after the `date` with none from one of the three means one message asking it; still none at the turn after, write that approach `not reported`.
+A `name: cartographer` spawn that returns in the same turn ran as a subagent: its return is the fallback's first return, so do not wait; go on with the fallback.
+
+**The fallback.** With teams off, under `-p` or in a split-pane mode, the same four run as subagents with no mailbox: each dispatched without `name`, so no team forms.
+The cartographer first; its returned notes go into the other three's prompts, which run in one message and return together.
+A question the notes do not answer goes on that subagent's `questions:` lines for the owner; no subagent but the cartographer reads code.
+
+**The merge.** Put the approaches side by side, and make one deduplicated question list ranked by how much the answer changes the build.
+Ask the owner those questions one at a time, as the conversation does.
+The written design records the approaches under its `## Alternatives Considered`, with one line there: `team: on` or `team: off (subagents)`, and what the teammates or subagents reported seeing from their `saw:` lines.
+Under `team: on` the cartographer's `saw:` line answers the probe: whether a teammate sees the project context and this plugin's SessionStart hook; write what it reported.
+The cartographer's notes go in the design's current-state ground; the approach the owner chooses is the design's input.
+When the brainstorm closes, send each teammate a shutdown request; a teammate may reject it, and the session's end ends it then. A resumed session has no teammates.
+No teammate or subagent writes a file: the design is yours to write.
+
 ## Play It Back
 
 Play back as you go. As soon as you understand one part well enough to
@@ -147,6 +182,10 @@ could plan from without going back to your human partner. Cover:
 - constraints
 - the parts of the how they decided, as they decided them
 - what's left to the builder
+- the current state: what exists now, with the cartographer's notes when
+  the team ran
+- `## Alternatives Considered`, ahead of `## Units`: the approaches weighed
+  and why the chosen one won, with the `team:` line when the team ran
 - a final `## Units` section, the last H2 of the document: one row per
   buildable unit (id, title, blocked by)
 
