@@ -12,6 +12,7 @@ import superegm  # the harness reloads the package per test: read load_config at
 from superegm import store, atomic_write, DEFAULT_CONFIG, decision, launch
 from test_builder_token import APP
 from superegm.report import unit_state, unit_view, loop_ended, word_action
+from superegm.apply import splice_board
 from test_builders import seed as filed, launched, foreman as foreman_file
 
 REPO, BUILDER, NOW = "example-org/webhooks", "builder-bot", 1_700_000_000.0
@@ -313,6 +314,21 @@ def test_the_board_row_per_unit(world, units, idle, row):
             " · waves {U01} → {U02} → {U03} · changed none")
   assert f"## Units\n{header}\n{HEAD}\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n" in text
   assert row in text and row in out and out.splitlines()[0] == str(s.path("wave_report", 1)) and "- U01 #2:" not in text
+
+
+BLOCK = "handoff h · base main · spec 0123456789ab · waves {U01} · changed 2026-11-03T00:00:00Z\n| unit | state |\n| --- | --- |\n| U01 #2 | ready |"
+LATER = BLOCK.replace("T00:00:00Z", "T01:00:00Z")
+WRAPPED = "# Build\n\ntext\n\n<!-- superegm:board -->\n" + BLOCK + "\n<!-- /superegm:board -->\n"
+MOVED = WRAPPED.replace("| ready |", "| active |").replace("T00:00:00Z", "T01:00:00Z")
+
+
+@pytest.mark.parametrize("body, block, expected", [
+  ("# Build\n\ntext\n", BLOCK, WRAPPED), ("# Build\n\ntext", BLOCK, WRAPPED), (WRAPPED, LATER, WRAPPED),
+  (WRAPPED, LATER.replace("| ready |", "| active |"), MOVED),
+  (WRAPPED + "\nafter\n", LATER.replace("| ready |", "| active |"), MOVED + "\nafter\n")])
+def test_splice_board_replaces_appends_or_keeps(body, block, expected):
+  assert splice_board(body, block) == expected
+  assert splice_board(expected, block) == expected
 
 
 @pytest.mark.parametrize("point,source,decisions,rulings,expect", [
