@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21).
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the brainstorm.team key (U34).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
@@ -96,6 +96,7 @@ DEFAULT_CONFIG = {
     "ci_wait_minutes": 30,
     "commit_trailer": "",  # appended, after a blank line, to every commit the helper makes
     "owners": [],  # the GitHub logins that may update <base> (spec section 11); init writes `gh api user`'s
+    "brainstorm": {"team": False},  # true: brainstorming runs its team mode unasked (spec section 6, U34)
     "owner_team": None,  # `<org>/<slug>`: the one team a ruleset's bypass actors may name
     "pr_block_file": None,  # a path relative to the repository root whose text every builder PR body carries
     "ingest": {"severity_words": {"bug": "high", "issue": "medium", "nit": "low", "suggestion": "low"},
@@ -710,7 +711,7 @@ def load_config(repo_root: Path) -> dict:
         if unknown:
           raise HandoffError(f"{path}: unknown label keys {sorted(unknown)}")
         config["labels"].update(value)
-      elif key in ("astra", "ingest") and isinstance(value, dict):
+      elif key in ("astra", "ingest", "brainstorm") and isinstance(value, dict):
         config[key] = {**config[key], **value}
       else:
         config[key] = value
@@ -718,6 +719,10 @@ def load_config(repo_root: Path) -> dict:
     raise HandoffError("astra must be an object")
   if not isinstance(config["astra"].get("heads"), bool):
     raise HandoffError("astra.heads must be true or false")
+  if not isinstance(config["brainstorm"], dict):
+    raise HandoffError("brainstorm must be an object")
+  if not isinstance(config["brainstorm"].get("team"), bool):
+    raise HandoffError("brainstorm.team must be true or false")
   if not isinstance(config["ingest"], dict):
     raise HandoffError("ingest must be an object")
   words = config["ingest"].get("severity_words")
