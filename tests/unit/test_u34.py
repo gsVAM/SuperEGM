@@ -39,3 +39,23 @@ def test_cartographer_adapter_and_persona():
   assert FINDINGS_LINE not in body and "regression:" not in body
   manifest = json.loads((ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
   assert "./.claude-plugin/agents/cartographer.md" in manifest["agents"] and IDS[-1] == "cartographer"
+
+
+TEAMMATES = ROOT / "skills/brainstorming/references/teammates.md"
+BRIEFS = [("The dispatch", n) for n in ("the topic", "the owner's words so far", "`Mode: BRAINSTORM`", "`superegm:cartographer`", "`superegm:design`",
+                                        "`superegm:zoom-out`", "`superegm:comprehension`", "no target file to read", "no incomplete review to report",
+                                        "not the findings line", "writes no file", "the cartographer's notes")] + [
+         ("The message form", n) for n in ("approach:", "costs:", "questions:", "saw:", "notes:", "ask cartographer:", "its return")] + [
+         ("Cartographer", n) for n in ("`orient/map.md`", "no `orient` call", "who calls X", "what covers Y", "the three things that would surprise a newcomer")] + [
+         ("Architect", "designs against the notes"), ("Skeptic", "failure modes"), ("Skeptic", "what the owner will regret"),
+         ("Skeptic", "the cheapest alternative"), ("Advocate", "what they see, type, wait for"), ("Advocate", "the operator's day")]
+
+
+def test_teammates_reference_briefs():
+  text = TEAMMATES.read_text(encoding="utf-8")
+  assert text.startswith("<!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.") and "Added by SuperEGM (gsVAM), 2026:" in text
+  sections = dict(zip(re.findall(r"^## (.+)$", text, re.M), re.split(r"^## .+$", text, flags=re.M)[1:]))
+  assert list(sections) == ["The dispatch", "The message form", "Cartographer", "Architect", "Skeptic", "Advocate"]
+  for section, needle in BRIEFS:
+    assert needle in sections[section], (section, needle)
+  assert not re.search(r"Blocker|Major|Nit", text)
