@@ -217,8 +217,15 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
   # (spec section 13.2: a recorded ruling is never changed by a later comment, so the record wins on its comment ids and subjects)
   rulings = binding_rulings([c for c in comments if c["kind"] == "issue"], owners, recorded, decisions)  # an issue comment alone rules
   by_id = {c["id"]: c for c in comments}
-  overruled = {r.subject for r in rulings if r.kind == "overruled"}
-  allowed = {r.subject for r in rulings if r.kind == "allowed"}
+  # a ruling on a contest's copy (`contested <fid>: …`) rules the finding it contests, down the chain to the original
+  def chain(fid):
+    out = {fid}
+    while fid in links and links[fid] not in out:
+      fid = links[fid]
+      out.add(fid)
+    return out
+  overruled = set().union(*(chain(r.subject) for r in rulings if r.kind == "overruled"))
+  allowed = set().union(*(chain(r.subject) for r in rulings if r.kind == "allowed"))
   widened = {path for fid, path in (prior_scope or {}).items() if fid in overruled}  # an owner's overrule widens the Scope
   in_scope = lambda path: any(path == s or path.startswith(s.rstrip("/") + "/") for s in scope)  # a directory covers its files
   found += [(path, "changed path outside Scope paths") for path in changed if not in_scope(path) and path not in widened]

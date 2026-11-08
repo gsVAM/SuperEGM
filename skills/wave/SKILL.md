@@ -270,7 +270,8 @@ Leavemealone-mode: U11 wires §13.2 here.
   Nothing is posted; the journal says `ruling edited after record, ignored`
   for a recorded comment re-read, and `ruling dropped (<by>, comment <id>): …`
   for one naming no open decision or an already ruled one, or a refused allowance; take either as the fact it states, and
-  run nothing else for it.
+  run nothing else for it. For a run stopped between a record and its continuation, the
+  journal's `Ruling (…)` line with no continuation after it is the step to finish.
 - A stopped unit keeps its branch and its open issue, is never dispatched or
   launched again, and is listed in the report with its unlanded dependants
   for the owner (design section 12).

@@ -108,8 +108,7 @@ def recorded_rulings(foreman: dict) -> list:
     elif decision["point"] == 2:
       kind = "round" if text == "one more round" else "stop"
     else:
-      source = str(decision.get("source") or "")
-      kind, subject = "option", source.removeprefix("comment ") if source.startswith("comment ") else decision["id"]
+      kind, subject = "option", option_name(decision)
       option = text.split(" ")[0] or None
     out.append(Ruling(kind, subject, option, entry.get("reason"), entry.get("by") or "", cid))
   return out
@@ -135,10 +134,10 @@ def binding_rulings(comments: list, owners: list, recorded: list, decisions=None
       return True
     return bool(open_points & ({2} if r.kind in ("round", "stop") else {1, 2}))
 
-  def key(r):  # an option names its decision by its comment id or by its own id: either is the decision
+  def key(r):  # an option names its decision as `option_name` says: the comment id, or the decision id of a commentless one
     if r.kind != "option":
       return GROUPS.get(r.kind), r.subject
-    return "option", next((d["id"] for d in point3 if r.subject in (d["id"], str(d.get("source") or "").removeprefix("comment "))), r.subject)
+    return "option", next((d["id"] for d in point3 if r.subject == option_name(d)), r.subject)
   ids = {r.comment_id for r in recorded if r.comment_id}
   keys = {key(r) for r in recorded if r.kind in GROUPS}
   return recorded + [r for c in comments if (r := ruling_of(c, owners))
@@ -148,7 +147,7 @@ def binding_rulings(comments: list, owners: list, recorded: list, decisions=None
 
 def offered(r: "Ruling", comments: list, decisions: list) -> bool:
   """Whether an option ruling names one of its decision's options (`check_ruling` at point 3)."""
-  decision = next((d for d in decisions if d.get("point") == 3 and r.subject in (d["id"], str(d.get("source") or "").removeprefix("comment "))), None)
+  decision = next((d for d in decisions if d.get("point") == 3 and r.subject == option_name(d)), None)
   if decision is not None:
     options = decision.get("options") or []
   else:
@@ -336,7 +335,7 @@ def rule(args) -> int:
   number, closed = state["units"][unit]["number"], (args.posted or "").partition("closed:")[2]
   if not args.decision and not (args.posted and not closed):
     if not closed:
-      raise Refusal("decision: --decision is required unless --posted closed:<n>")
+      raise Refusal("decision: --decision is required unless --posted <comment id> or closed:<n>")
     stop_unit(st, unit, args.by, f"closed #{closed} by {args.by}", number, now)
     print(f"recorded (closed #{closed})")
     return 0
@@ -404,8 +403,9 @@ def rule(args) -> int:
               "reason": reason.strip() or None, "posted": posted, "posted_at": posted_at} for d in decisions]
   data["rulings"] += entries
   core.save_foreman(st, unit, data)  # recorded before the read-back: `status --wait` skips the session's own post
-  if url:  # the session's own post: its time is GitHub's, read back; unread, the host's `now` is marked `unread`
-    created = (back := read_back(st, cid)).get("updated_at") or back.get("created_at")
+  if url:  # the session's own post: its time is GitHub's creation time, read back, so any edit since (one before the
+    # read-back too) reads as an edit after the record; unread, the host's `now` is marked `unread`
+    created = read_back(st, cid).get("created_at")
     for entry in entries:
       entry.update({"posted_at": created} if created else {"unread": True})
     core.save_foreman(st, unit, data)
@@ -554,8 +554,7 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int, mode=None)
     if decision["point"] not in points:
       raise Refusal(f"decision: comment {cid} rules no point-{decision['point']} decision")
     source = decision["source"]
-    named = source.removeprefix("comment ") if source.startswith("comment ") else decision["id"]
-    if found.kind == "option" and found.subject != named:
+    if found.kind == "option" and found.subject != option_name(decision):
       raise Refusal(f"decision: comment {cid} does not name {source if source.startswith('comment ') else decision['id']}")
     if found.kind in ("upheld", "overruled", "allowed"):  # the fid must be one of this decision's, and ruled nowhere else
       if decision not in fid_decisions(foreman, found.subject, strict=found.kind == "allowed"):
@@ -572,7 +571,7 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int, mode=None)
   elif found.kind in ("round", "stop"):
     decisions = [d for d in pending if d["point"] == 2][-1:]
   elif found.kind == "option":
-    decisions = [d for d in foreman["decisions"] if d["point"] == 3 and found.subject in (d["id"], d["source"].removeprefix("comment "))][-1:]
+    decisions = [d for d in foreman["decisions"] if d["point"] == 3 and found.subject == option_name(d)][-1:]
   else:
     decisions = []
   if not decisions and found.kind in ("allowed", "allowed-file"):  # an allowance no decision asks about: `collect` reads it
@@ -581,6 +580,13 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int, mode=None)
     dropped(store, args, f"comment {cid} does not name an open decision")
   refuse_allowance(store, args, found, decisions, cid, mode)
   return comment, found, decisions
+
+
+def option_name(decision: dict) -> str:
+  """The parenthesis a point-3 option ruling names its decision by (spec section 13.2): the comment id of one opened
+  on a comment, the decision id of one opened on a launch or a close; never the other, with or without `--decision`."""
+  source = str(decision.get("source") or "")
+  return source.removeprefix("comment ") if source.startswith("comment ") else decision["id"]
 
 
 def refuse_allowance(store, args, found: "Ruling", decisions: list, cid, mode) -> None:

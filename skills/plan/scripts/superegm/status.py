@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the `ruling` event (U22).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the `ruling` event and a status line after a comment's deviation headings (U22).
 
 """superegm status: landed and ready sets, PRs, CI; refuses without a complete receipt.
 `--wait <s>` polls, reading only, and prints every unreported event line, or `deadline`."""
@@ -14,7 +14,8 @@ from superegm.launch import load_launches, terminal
 
 WRITES = frozenset(['state'])  # the store kinds this subcommand writes
 SKILLS = frozenset(['wave', 'integrate'])  # the skills whose card this subcommand accepts
-STATUS_RE = re.compile(r"^\*\*Builder status:\*\*\s*(DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT)\b")
+# a status line anywhere in the comment: a deviation's `**Deviation**` headings come before it (the builder orders)
+STATUS_RE = re.compile(r"^\*\*Builder status:\*\*\s*(DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT)\b", re.M)
 # The saved fingerprint of a unit (spec section 11): every `--wait` reports the keys that differ from it.
 EMPTY = {"pr": None, "head": None, "ci": None, "exit": None, "builder_status": None, "landed": False,
          "closed": [None, None], "rulings": []}
@@ -116,7 +117,7 @@ def builder_facts(st, uid: str, comments: list) -> tuple:
   since = latest["started_at"] if latest else ""
   status = None
   for comment in comments:
-    match = STATUS_RE.match(comment.get("body") or "")
+    match = STATUS_RE.search(comment.get("body") or "")
     if match and (comment.get("created_at") or "") >= since:
       status = [comment["id"], match.group(1), (comment.get("user") or {}).get("login")]
   return exit, None if latest and not terminal(latest) else status
