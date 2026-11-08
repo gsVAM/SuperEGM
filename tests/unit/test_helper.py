@@ -188,10 +188,7 @@ def test_helper_runs_under_its_new_name(world):
     assert "egm_handoff.py" not in (ROOT / skill).read_text(encoding="utf-8"), skill
 
 
-MODULES = ("init", "runcard", "approve_spec", "graph", "scan", "review", "gate", "dry_run", "apply",
-           "verify", "status", "launch", "launch_builder", "record_launch", "foreman", "prepare",
-           "collect", "tdd_order", "decide", "decision", "interrupt", "clean", "report", "close", "judges",
-           "review_plan", "orient", "doctor", "builder_token")
+MODULES = tuple(sorted(p.stem for p in (SCRIPTS / "superegm").glob("*.py") if p.stem not in ("__init__", "body")))
 
 
 @pytest.mark.parametrize("name", MODULES)
@@ -397,7 +394,7 @@ WRITES = {"approve_spec":{"approvals", "handoffs", "state"},"graph": {"state", "
           "record_launch": {"launches"}, "collect": {"foreman", "review", "reviews"}, "prepare": {"foreman", "review"},
           "launch_builder": {"launches", "orient_unit"}, "interrupt": {"launches", "foreman"}, "clean": set(),
           "orient": {"orient", "orient_unit"},
-          "runcard": {"runcards"}, "init": set(), "doctor": set(), "builder_token": set()}
+          "runcard": {"runcards"}, "init": set(), "doctor": set(), "builder_token": set(), "inbox": {"state"}}
 
 
 @pytest.mark.parametrize("name, kinds", sorted(WRITES.items()))
@@ -464,7 +461,7 @@ def test_init_writes_the_config_with_every_key_and_refuses_another_base(tmp_path
   assert set(config) == {"repo", "base", "artifacts_dir", "mode", "max_in_flight", "labels", "issue_template",
                          "tracking_issue_title", "banned_terms", "fix_request_mention", "allowed_mentions",
                          "reviewers", "astra", "judges", "builder", "ci_wait_minutes", "commit_trailer", "owners", "owner_team",
-                         "pr_block_file", "ingest"}
+                         "pr_block_file", "ingest", "notify_timeout_seconds"}
   assert config["owners"] == ["octocat"] and config["owner_team"] is None and config["pr_block_file"] is None
   assert config["repo"] == REPO and config["base"] == "main" and config["artifacts_dir"] == str(tmp_path / "store")
   assert config["mode"] == "normal" and config["max_in_flight"] == 5 and config["ci_wait_minutes"] == 30

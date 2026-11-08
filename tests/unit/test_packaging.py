@@ -77,6 +77,7 @@ def test_runtime_bundle_ships_exactly_the_kept_files(source: Path, tmp_path: Pat
                "prepare", "record_launch", "report", "review", "review_plan", "runcard", "scan", "status", "tdd_order",
                "verify")
     package += ("orient", "builder_token")
+    package += ("inbox",)
     assert sorted(p for p in names if p.endswith(".py")) == sorted(
         ["skills/plan/scripts/superegm.py", *(f"skills/plan/scripts/superegm/{m}.py" for m in package)])
     assert not any(p.startswith(("tests/", ".github/", ".agents/", "docs/designs/"))
