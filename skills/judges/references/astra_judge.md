@@ -1,7 +1,7 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the Astra
 review lane. Not part of google/elephant-goldfish-model.
-Modified by SuperEGM (gsVAM), 2026: the judge lane. -->
+Modified by SuperEGM (gsVAM), 2026: the judge lane; the lane's model and effort read from the panel's `astra` member (U28). -->
 
 # Astra judge lane
 
@@ -11,8 +11,10 @@ file, as a background command. The lane is optional: when it does not run,
 the round is not blocked, the judge is recorded `not run (<reason>)`, the
 panel runs Claude-only and the verdict says `degraded: true`. Use it only in
 Claude Code; in other hosts record `not run (host)`. `<ASTRA_MODEL>` and
-`<ASTRA_EFFORT>` below are `config.astra.model` and `config.astra.effort`
-from `.superegm/config.json`.
+`<ASTRA_EFFORT>` below are
+the `astra` member's `model` and `effort` in `<STORE>/judges/<PANEL>/panel.json`
+(the panel's copy of the member's pair, `astra.model` and `astra.effort` when the
+member sets none).
 
 ## 1. Preflight (once per panel)
 

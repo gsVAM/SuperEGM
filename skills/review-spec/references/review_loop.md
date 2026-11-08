@@ -1,6 +1,6 @@
 <!-- Copyright 2026 Google LLC. SPDX-License-Identifier: Apache-2.0. -->
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: Astra lane, per-reviewer model and effort, persisted dispositions. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: EGM's review-loop skill rewritten as the one review loop over the helper's `superegm review` subcommands (spec section 8); the stages, the report files and the second clean round are gone; a spec round's scope, `out_of_scope[]` and the batch settle (U19). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: EGM's review-loop skill rewritten as the one review loop over the helper's `superegm review` subcommands (spec section 8); the stages, the report files and the second clean round are gone; a spec round's scope, `out_of_scope[]` and the batch settle (U19); section 2's model and effort paragraph is the one rule, the config pair before the session pair (U28). -->
 
 # The review loop
 
@@ -74,13 +74,21 @@ Each goldfish receives only:
   an empty file when it found nothing, and to end its report with what it saw besides the
   brief (nothing, or the text a hook or an instruction file injected).
 
-Model and effort: the rules of `resources/review_panels.md` section 6 with the variables
-renamed. `SUPEREGM_GOLDFISH_MODEL` (`inherit`, `sonnet`, `opus`, `haiku`, `fable`; default
-`inherit`) and `SUPEREGM_GOLDFISH_EFFORT` (`inherit`, `low`, `medium`, `high`, `xhigh`, `max`;
-default `inherit`), read once with `printenv`, validated against those lists, and passed per
-Agent call as `model:` and `effort:` only when not `inherit` and the tool offers the parameter;
-`CLAUDE_CODE_SUBAGENT_MODEL_FORCE` on means no per-call model. Never put an environment value
-into a shell command.
+Model and effort, one rule: every panel goldfish of the four kinds runs on
+`config.reviewers.model` at `config.reviewers.effort` (`opus` / `xhigh` by default, the Agent tool's alias and level),
+passed on each dispatch as the adapter's `model:` and `effort:` override (the adapters stay `model: inherit`),
+and the round record stores requested -> effective (`review record`'s `--model` and `--effort`, section 3).
+`SUPEREGM_GOLDFISH_MODEL` and `SUPEREGM_GOLDFISH_EFFORT`, when set, override the config's values for the session,
+`inherit` meaning pass nothing; they are read once with `printenv` and validated against
+(`inherit`, `sonnet`, `opus`, `haiku`, `fable`) and (`inherit`, `low`, `medium`, `high`, `xhigh`, `max`).
+An exported `CLAUDE_CODE_EFFORT_LEVEL` is the effective effort of every goldfish, and with
+`CLAUDE_CODE_SUBAGENT_MODEL_FORCE` on no per-call `model` is passed and the forced model is the
+effective one; the record says so in both cases. An `effort:` is passed only where the Agent tool
+offers the parameter. The judges use their member's model and effort (`skills/judges/SKILL.md`);
+builders use `config.builder`; the foreman's Astra lane runs at `astra.heads_effort`
+(`skills/wave/references/foreman_brief.md`), the elephant's lanes at `astra.effort`.
+The elephant is the session's model, never in config. `resources/review_panels.md` section 6
+holds the per-call mechanics. Never put an environment value into a shell command.
 
 The Astra lane (kinds `spec`, `plan`, `integrate`, when the review opened with it):
 
@@ -226,7 +234,7 @@ with `requested -> effective`:
 | Role | Model: requested -> effective | Effort: requested -> effective |
 | --- | --- | --- |
 | Elephant | the session's model -> same | session setting -> session setting |
-| Claude goldfish | `SUPEREGM_GOLDFISH_MODEL` -> the alias passed, or the session's model for `inherit`, or the forced model | `SUPEREGM_GOLDFISH_EFFORT` -> the value passed, or `inherit` |
+| Claude goldfish | `config.reviewers.model`, or `SUPEREGM_GOLDFISH_MODEL` when set -> the alias passed, or the session's model for `inherit`, or the forced model | `config.reviewers.effort`, or `SUPEREGM_GOLDFISH_EFFORT` when set -> the value passed, `CLAUDE_CODE_EFFORT_LEVEL` when exported, or `inherit` |
 | Astra goldfish | `config.astra.model` -> `result.json`'s `effective_model`, `requested only` before the run | `config.astra.effort` -> `effective_effort`, `requested only` before the run |
 
 Any value you cannot know is `unknown`; never present a configuration value as an observed

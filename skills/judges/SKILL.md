@@ -58,8 +58,9 @@ config's `artifacts_dir`.
         astra --not-run '<reason>' --runcard <CARD>`.
     2.  **The two Claude judges**, dispatched in one message, concurrently,
         each through the `superegm:judge` adapter (`omitClaudeMd: true`,
-        tools `[Read, Grep, Glob]`) with the model override `model: fable`
-        and `model: opus`, effort `max` where the Agent tool offers it, and
+        tools `[Read, Grep, Glob]`) with the override read per judge from `<STORE>/judges/<PANEL>/panel.json`:
+        `judges.<id>.model` as `model:` and `judges.<id>.effort` as `effort:`
+        (the effective pair by `review_loop.md`'s one rule), and
         the prompt: Read `<STORE>/judges/<PANEL>/round-<n>/brief.md` and
         answer as it says. Nothing else goes in the prompt: no summary of
         the question, no opinion, no history.

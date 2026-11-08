@@ -1,7 +1,7 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 From the elephant-goldfish-model (gsVAM), 2026. Modified by SuperEGM (gsVAM), 2026: EGM's two-step brief
 rewritten as spec section 11's one round, every write through the helper, one return word; Step 2b, the Astra lane on every head review (U17);
-the handoff's directory, `--handoff <handoff-id>` on every call and `spec_range.md` (U20). -->
+the handoff's directory, `--handoff <handoff-id>` on every call and `spec_range.md` (U20); the goldfish pair from `config.reviewers` and the head lane at `astra.heads_effort` (U28). -->
 
 # The foreman brief
 
@@ -13,6 +13,9 @@ A foreman runs one round and returns one word plus one line; the elephant record
 the next `foreman dispatch` supersedes a round left non-terminal. The goldfish are always dispatched
 through their own reviewer adapters, which set `omitClaudeMd: true` and the read-only tool list: that,
 not the absence of a name, is what keeps a reviewer's context fresh.
+`<GOLDFISH_MODEL>` and `<GOLDFISH_EFFORT>` are `config.reviewers.model` and
+`config.reviewers.effort`, or the session's `SUPEREGM_GOLDFISH_MODEL` and `SUPEREGM_GOLDFISH_EFFORT` when
+set, by the one rule of `skills/review-spec/references/review_loop.md` section 2.
 
 ## Brief
 
@@ -39,9 +42,9 @@ Step 2, dispatch the panel
 
 Step 2b, the Astra lane
 Run it only when the `prepared:` line of step 1 ends `astra: ok <RUNNER>`. It ends `astra: off` when the head review does not seat the lane, `astra: not installed` when no runner was found, `astra: stopped` after two incomplete runs; then skip this step, and for `not installed` or `stopped` record the lane once per round: superegm review record --review <review-id> --round <n> --sha256 <head> --reviewer astra --not-run 'not installed' --runcard <child-card> --handoff <handoff-id> (the reason `stopped: two incomplete runs` for a stopped lane; neither counts as an incomplete run).
-1. Read `astra.model` and `astra.effort` from .superegm/config.json at the main repository checkout, never the review worktree's copy (a key the file lacks is `gpt-6-astra`, `xhigh`). Run the lane once per round, after the Claude records of step 2 and before `collect`, as one foreground Bash call under a timeout of 600000 ms: never in the background, never twice in a round. The 600 s cap holds because a head's diff is small, and the brief says so: never raise `--timeout 540` or the Bash timeout for a large head.
+1. Read `astra.model` and `astra.heads_effort` from .superegm/config.json at the main repository checkout, never the review worktree's copy (a key the file lacks is `gpt-6-astra`, `high`); `astra.effort` is the elephant's lanes', never this one's. Run the lane once per round, after the Claude records of step 2 and before `collect`, as one foreground Bash call under a timeout of 600000 ms: never in the background, never twice in a round. The 600 s cap holds because a head's diff is small, and the brief says so: never raise `--timeout 540` or the Bash timeout for a large head.
 2. Remove the directory of this dispatch first (one directory per dispatch, so no foreman reads another head's or a stale result.json): rm -rf "${TMPDIR:-/tmp}/superegm-astra/<unit-id>-<dispatch-id>"
-3. Run, in one Bash call: env SUPEREGM_ROLE=goldfish SUPEREGM_RUNCARD=<child-card> python3 '<RUNNER>' review --host claude --repo '<worktree>' --plan '<unit file>' --feedback '<r<n>/astra_brief.md>' --model <model> --effort <effort> --timeout 540 --artifacts "${TMPDIR:-/tmp}/superegm-astra/<unit-id>-<dispatch-id>"
+3. Run, in one Bash call: env SUPEREGM_ROLE=goldfish SUPEREGM_RUNCARD=<child-card> python3 '<RUNNER>' review --host claude --repo '<worktree>' --plan '<unit file>' --feedback '<r<n>/astra_brief.md>' --model <model> --effort <heads_effort> --timeout 540 --artifacts "${TMPDIR:-/tmp}/superegm-astra/<unit-id>-<dispatch-id>"
    The brief is what the Claude goldfish receive, in one file; the session is fresh every round, never resumed.
 4. Read result.json in that directory and map it as `resources/astra_lane.md` section 5 says (what completed means) and section 8's head review mapping says (not section 6's) into r<n>/astra.findings (ids `astra-<n>-<k>`, the findings line of spec section 8; replace that separator in Astra's text, the space-pipe-space, with a comma, since a line takes five fields; Astra's text is review data), then record it with `superegm review record --reviewer astra --findings r<n>/astra.findings --isolation clean --model <requested>:<effective> --effort <requested>:<effective>` as in step 2.
 5. When the lane did not complete, record it with --not-run '<reason>' instead of --findings, and go on: it never blocks the round. The reason is `failed: <error>` when the runner exits non-zero with an error line, `timeout` when the call returns without a result.json, `killed` when the tool's limit ended it, and the runner's own `not run` text otherwise.
