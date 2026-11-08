@@ -1,0 +1,82 @@
+# Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
+# Added by SuperEGM (gsVAM), 2026: U23's tests of the inbox and the notify hook (spec section 11.2).
+
+"""U23: `inbox_items` and `superegm inbox`, `notify_lines` and `superegm notify`.
+Fixtures: conftest's `world`; `wave_store` and `open_wave_card` from test_wave.py."""
+
+import json
+
+import pytest
+
+from conftest import REPO
+from superegm import atomic_write
+from superegm.decision import ruling_form
+from superegm.inbox import inbox_items
+from superegm.review import parse_findings
+from test_wave import open_wave_card, wave_store
+
+ISSUE, PULL = f"https://github.com/{REPO}/issues/2", f"https://github.com/{REPO}/pull/70"
+
+
+def seed(world, escalated=(), **units):
+  """`wave_store`, then `handoffs/<id>.json`, a unit's `stopped` into its foreman file, its `reviews`
+  `{rid: (review.json, {n: round-n.json})}` under `s.path("reviews", rid)`, `escalated` into
+  `approvals/sample.json`'s record."""
+  s = wave_store(world, **{uid: {k: v for k, v in u.items() if k not in ("stopped", "reviews")} for uid, u in units.items()})
+  atomic_write(s.path("handoffs", s.handoff_id), {"id": s.handoff_id, "spec": str(world.spec), "opened_at": "t", "closed_at": None})
+  for uid, u in units.items():
+    if "stopped" in u:
+      foreman = json.loads(s.path("foreman", uid).read_text(encoding="utf-8"))
+      atomic_write(s.path("foreman", uid), foreman | {"stopped": u["stopped"]})
+    for rid, (review, rounds) in (u.get("reviews") or {}).items():
+      atomic_write(s.path("reviews", rid, "review.json"), review)
+      for n, rnd in rounds.items():
+        atomic_write(s.path("reviews", rid, f"round-{n}.json"), rnd)
+  record = json.loads(s.path("approvals", "sample").read_text(encoding="utf-8"))
+  (record["entries"][-1] if "entries" in record else record)["escalated"] = list(escalated)  # a 1.1 record is one entry
+  atomic_write(s.path("approvals", "sample"), record)
+  return s
+
+
+ALLOWED = lambda fid: f"**Ruling:** {fid} allowed — <reason>"
+CONTESTED = lambda fid: f"**Ruling:** {fid} finding upheld | finding overruled — <reason>"
+OPTION = lambda did, menu="": f"**Ruling:** ({did}) <option> — <reason>{menu}"
+CAP = "**Ruling:** one more round | stop | redesign — <reason>"
+F = lambda *sevs: parse_findings("\n".join(f"foreman-1-{i} | {s} | src/x.py:3 | regression: no | c" for i, s in enumerate(sevs, 1)), "foreman", 1)
+ROUND = lambda n, findings, **more: {"round": n, "runcard": "wave-1", "artifact_sha256": "a" * 40, "what_ran": "completed", "reviewers": {"foreman": {"findings": findings}}, **more}
+REVIEW = lambda kind, rid, rounds, **more: {rid: ({"kind": kind, "artifact": "U01", "cycle": 1, "reviewers": ["foreman"], "runcard": "wave-1", "converged": "no", "rulings": [], **more}, rounds)}
+HEAD = lambda n, findings, **more: REVIEW("head", "head-U01-c1", {i: ROUND(i, findings, **more) for i in range(1, n + 1)})
+POSTED = lambda n=1, outcome="revise": [{"round": i, "phase": "posted", "outcome": outcome, "launch": i, "runcard": "wave-1"} for i in range(1, n + 1)]
+D = lambda point, source, **more: [{"id": "q1", "point": point, "source": source, "question": "q", "asked_at": "t", **more}]
+U = lambda **more: {"U01": {"pr": 70, "head": "a" * 40, "ci": "green", **more}}
+KINDS = {"decision", "cap", "contested", "merge", "stalled", "escalated", "redesign", "test-delta", "owner", "kill_failed", "wave"}
+
+
+@pytest.mark.parametrize("seeded, expect", [
+  (U(decisions=D(3, "comment 77")), [("U01", "decision", f"{OPTION('77')} on {ISSUE}", "U01/decision/q1")]),
+  (U(decisions=D(5, "review head-U01-c1 round 1", options=["accept", "revise"])), [("U01", "decision", f"{OPTION('q1', ' (accept | revise)')} on {ISSUE}", "U01/decision/q1")]),
+  (U(decisions=D(1, "review head-U01-c1 round 1"), rounds=POSTED(), reviews=HEAD(1, F("high", "medium"), builder_contested=[{"fid": f"foreman-1-{i}", "reason": "r"} for i in (1, 2)])),
+   [("U01", "contested", f"{CONTESTED(f'foreman-1-{i}')} on {ISSUE}", f"U01/contested/q1/foreman-1-{i}") for i in (1, 2)]),
+  (U(decisions=D(1, "review head-U01-c1 round 5") + D(2, "review head-U01-c1 cap", id="q2"), rounds=POSTED(5), reviews=HEAD(5, F("high"), builder_contested=[{"fid": "foreman-1-1", "reason": "r"}])),
+   [("U01", "cap", f"{CAP} on {ISSUE}", "U01/cap/q2")]),
+  (U(rounds=POSTED(5), reviews=HEAD(5, F("high"))), [("U01", "cap", "/superegm:wave <spec>", "U01/cap/head-U01-c1")]),
+  (U(reviews=REVIEW("plan", "plan-U01-c1", {n: ROUND(n, F("high")) for n in range(1, 6)})),
+   [("plan-U01-c1", "cap", "superegm review rule --review plan-U01-c1 --ruling continue|accept|stop --owner --runcard <card>", "plan-U01-c1/cap/5")]),
+  (U(reviews=REVIEW("plan", "plan-U01-c1", {n: ROUND(n, F("high")) for n in range(1, 6)}, rulings=[{"ruling": "stop"}])), []),
+  (U(rounds=POSTED(1, "clean")), [("U01", "merge", PULL, "U01/merge/1")]),
+  (U(rounds=[{"round": n, "phase": "collected", "outcome": "not run (error: x)", "runcard": "wave-1"} for n in (1, 2)], reviews=HEAD(0, [])),
+   [("U01", "stalled", "/superegm:wave <spec>", "U01/stalled/head-U01-c1/2")]),
+  ({"escalated": ["spec-sample-c1:design-1-1"], **U()}, [("spec-sample-c1", "escalated", "/superegm:plan <spec>", "spec-sample-c1/escalated/design-1-1")]),
+  (U(reviews=REVIEW("integrate", "spec-sample-integrate-c1", {1: ROUND(1, [{**F("high")[0], "disposition": "escalated"}])})),
+   [("spec-sample-integrate-c1", "escalated", "superegm review settle --review spec-sample-integrate-c1 --finding foreman-1-1 --disposition fixed | declined --owner --runcard <card>", "spec-sample-integrate-c1/escalated/foreman-1-1")]),
+  (U(stopped={"by": "judges:p1", "reason": "redesign — why", "at": "t", "brief": "/s/U01-q1.brainstorm.md"}), [("U01", "redesign", "/superegm:brainstorming /s/U01-q1.brainstorm.md", "U01/redesign/U01-q1.brainstorm.md")]),
+  (U(rounds=POSTED(), reviews=HEAD(1, [{**F("high")[0], "claim": "test-delta: tests/test_x.py:3 removed"}])), [("U01", "test-delta", f"{ALLOWED('foreman-1-1')} on {ISSUE}", "U01/test-delta/1/foreman-1-1")]),
+  (U(rounds=POSTED(1, "owner: foreman-1-1, foreman-1-2")), [("U01", "owner", f"{ALLOWED(f'foreman-1-{i}')} on {ISSUE}", f"U01/owner/1/foreman-1-{i}") for i in (1, 2)])])
+def test_inbox_items_lists_what_needs_the_owner(world, seeded, expect):
+  card = open_wave_card(world)
+  s = seed(world, **seeded)
+  items = inbox_items(s, [s.handoff_id])
+  assert [(i["subject"], i["kind"], i["action"], i["fingerprint"]) for i in items] == \
+      [(sub, kind, act.replace("<spec>", str(world.spec)), fp) for sub, kind, act, fp in expect] + [(card, "wave", "information: open 0 min", card)]
+  assert all(i["repo"] == REPO for i in items) and {i["kind"] for i in items} <= KINDS
+  assert ALLOWED("f-1") == ruling_form(1, "f-1", "allowed")
