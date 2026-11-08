@@ -17,7 +17,7 @@ In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.
 
 ## What it does
 
-Read-only: no run card, no store write, no GitHub call; typed alone it prints and never notifies. It reads the current repository's store, every open handoff of its `handoffs/` index unless `--handoff` names one; `--all` reads every store the registry lists (`registry: none`, and the one store, while nothing is registered). `--json` prints one object per line with the keys `repo`, `subject`, `kind`, `action` and `fingerprint`. An empty store prints nothing.
+Read-only: no run card, no store write, no GitHub call; typed alone it prints and never notifies. It reads the current repository's store, every open handoff of its `handoffs/` index unless `--handoff` names one; `--all` reads every store the registry lists (`registry: none`, and the one store, while nothing is registered; under `--json` that line is left out). `--json` prints one object per line with the keys `repo`, `subject`, `kind`, `action` and `fingerprint`. An empty store prints nothing.
 
 One line per item:
 
@@ -26,7 +26,7 @@ One line per item:
 The action is the exact comment to post (a `**Ruling:**` form with the issue's URL, copyable from a phone), the command to type, or the PR's URL to merge. The kinds:
 
 - `decision`: an open point-3 or point-5 decision, `**Ruling:** (<comment id>) <option> — <reason>` when its source is a comment, else `**Ruling:** (<decision id>) <option> — <reason>`, followed by the menu of the record's `options`, `(<a> | <b>)`, when it has some.
-- `cap`: a review at its cap with no `stop` ruled; a head's pending point-2 decision is `**Ruling:** one more round | **Ruling:** stop | **Ruling:** redesign — <reason>` (one form per choice: post one, the reason with `redesign` alone), a head at its cap with no such decision is `/superegm:wave <spec>` (the wave opens it), and a spec, plan or integrate review's cap is `superegm review rule --review <id> --ruling continue|accept|stop --owner --runcard <card>`.
+- `cap`: a review at its cap with no `stop` ruled; a head's pending point-2 decision is `**Ruling:** one more round | **Ruling:** stop | **Ruling:** redesign — <reason>` (one form per choice: post one, the reason with `redesign` alone), a head at its cap with no such decision is `/superegm:wave <spec>` (the wave opens it), and a spec, plan or integrate review's cap is `superegm review rule --review <id> --ruling continue|accept|stop --owner --runcard <card>`. A spent choice leaves the menu: `one more round` once ruled on the unit, `continue` once ruled on the review.
 - `contested`: a point-1 decision's contested finding, `**Ruling:** <fid> finding upheld | **Ruling:** <fid> finding overruled — <reason>` (post one; the reason with `finding overruled` alone).
 - `merge`: the latest round's `outcome: clean`; the action is the PR's URL.
 - `stalled`: a head review that stalled (`review status` exit 5); re-type `/superegm:wave <spec>`.

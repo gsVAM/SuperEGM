@@ -57,17 +57,21 @@ def status_of(hs: core.Store, rid: str, rev: dict):
 def review_dirs(hs: core.Store, spec, read: bool = False) -> list:
   """The handoff's reviews: its `reviews/*` and the spec reviews of its `spec` (`spec-<slug>-c<n>`, review.review_id)
   at the store's `reviews/`, unless `read` (another handoff of the spec listed them). A spec review lives at the
-  store's `reviews/` whatever the handoff, an integrate review under the handoff's own `reviews/` (Store.path); in a
-  legacy (flat) store that folder is the store's, so there another spec's spec and integrate reviews are dropped."""
+  store's `reviews/` whatever the handoff, an integrate review under the handoff's own `reviews/` (Store.path). In a
+  legacy (flat) store that folder is the store's, shared by every flat handoff and spec: there the handoff keeps its
+  own spec's integrate reviews and its own `<6 hex>-` plan and head reviews (review.hex_prefix) alone; a 1.2
+  handoff never reads the root's integrate reviews, the legacy handoff's."""
   shared, slug = hs.root / "reviews", re.escape(core.spec_slug(spec)) if spec else None
 
   def keep(p: Path) -> bool:
     if not (p / "review.json").is_file():
       return False
-    if p.parent != shared or not p.name.startswith("spec-"):
+    if p.parent != shared:
       return True
+    if not p.name.startswith("spec-"):
+      return hs.legacy and p.name.startswith(review.hex_prefix(hs))
     if slug and re.fullmatch(rf"spec-{slug}-integrate-c\d+", p.name):
-      return True
+      return hs.legacy
     return bool(slug) and not read and bool(re.fullmatch(rf"spec-{slug}-c\d+", p.name))
   return sorted(p for p in set(hs.path("reviews").glob("*")) | set(shared.glob("spec-*")) if keep(p))
 
@@ -84,7 +88,11 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
   for d in [d for d in foreman.get("decisions") or [] if d.get("point") == 1 or d in report.pending_decisions(foreman)]:
     point, did = d.get("point"), d["id"]
     if point == 2:
-      menu = " | ".join(ruling_form(2, o) for o in ("one more round", "stop", "redesign"))  # one form per choice
+      # one form per choice; `one more round` is spent once ruled on any cap decision of the unit (decision.rule)
+      caps = {c["id"] for c in foreman.get("decisions") or [] if c.get("point") == 2}
+      spent = any(r.get("decision") in caps and r["ruling"].partition(" — ")[0].strip() == "one more round"
+                  for r in foreman.get("rulings") or [])
+      menu = " | ".join(ruling_form(2, o) for o in ("one more round", "stop", "redesign")[spent:])
       out.append(item(repo, uid, "cap", menu + on_issue, did))
     elif point in (3, 5):
       words = (d.get("source") or "").split()
@@ -153,8 +161,10 @@ def review_items(hs: core.Store, repo: str, spec: str, rid: str, rev: dict, fore
       out.append(item(repo, unit, "stalled", f"/superegm:wave {spec}", f"{rid}/{rounds[-1]['round']}"))
     elif status.code == 2 and not any(d.get("point") == 2 for d in report.pending_decisions(foremen.get(unit) or {})):
       out.append(item(repo, unit, "cap", f"/superegm:wave {spec}", rid))
-  elif status.code == 2:
-    out.append(item(repo, rid, "cap", f"superegm review rule --review {rid} --ruling continue|accept|stop --owner "
+  elif status.code == 2:  # `continue` is spent once ruled (review rule)
+    spent = any(r["ruling"] == "continue" for r in rev.get("rulings") or [])
+    choices = "accept|stop" if spent else "continue|accept|stop"
+    out.append(item(repo, rid, "cap", f"superegm review rule --review {rid} --ruling {choices} --owner "
                     "--runcard <card>", rounds[-1]["round"] if rounds else 0))
   return out
 
@@ -289,7 +299,7 @@ def open_store(args) -> tuple:
 def run(args):
   if args.command == "inbox":
     st, ids = open_store(args)
-    if args.all:
+    if args.all and not args.json:  # --json prints one object per line and nothing else
       print("registry: none")  # U24 builds the registry; until then the one store
     for i in inbox_items(st, ids):
       print(json.dumps(i) if args.json else line_of(i))
