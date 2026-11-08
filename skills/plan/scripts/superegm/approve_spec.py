@@ -2,7 +2,8 @@
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
 # Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_approve` as the approve-spec module (U03); the section 8 form: a converged
 # review, the `Units` check, the commit by path, `--void` and `--amend-units` (U04); the escalated pairs recorded (U16);
-# the approval history, one handoff per opening, the latest-entry rule and the branch check (U20).
+# the approval history, one handoff per opening, the latest-entry rule and the branch check (U20); the spec PR's
+# ingest once before the refusals and the refusal of an unsettled external finding (U26).
 
 """superegm approve-spec: record the owner's approval of a converged spec (spec section 8)."""
 
@@ -14,9 +15,9 @@ import subprocess
 
 import superegm as core
 from superegm import close
-from superegm.review import evaluate, findings_of, latest_cycle, load_review, load_round, review_id, round_numbers
+from superegm.review import evaluate, findings_of, ingest_pr, latest_cycle, load_review, load_round, review_id, round_numbers
 
-WRITES = frozenset(["approvals", "handoffs", "state"])  # the store kinds this subcommand writes
+WRITES = frozenset(["approvals", "handoffs", "state", "reviews"])  # the store kinds this subcommand writes
 SKILLS = frozenset(["review-spec", "review-plan", "integrate"])  # the skills whose card this subcommand accepts
 CONFIG = ".superegm/config.json"
 UNITS_H2 = re.compile(r"^## (?:\d+\.?\s+)?Units\s*$")
@@ -135,8 +136,15 @@ def commit_by_path(repo_root: Path, paths: list[str], message: str, trailer: str
   return core.run_git(["rev-parse", "HEAD"], repo_root).strip()
 
 
+def spec_pr(repo: str, branch: str) -> int | None:
+  """The open PR whose head is `branch` (the elephant's spec PR, spec section 8), or None: none means nothing to read."""
+  prs = json.loads(core.gh(["pr", "list", "-R", repo, "--head", branch, "--state", "open", "--limit", "1000",
+                            "--json", "number,headRefOid"]) or "[]")
+  return prs[0]["number"] if prs else None
+
+
 def run(args):
-  card = core.require_runcard(args, SKILLS)
+  card =core.require_runcard(args, SKILLS)
   spec = Path(args.design).expanduser().resolve()
   if not spec.is_file():
     raise core.HandoffError(f"approve-spec: spec {spec} does not exist")
@@ -156,6 +164,12 @@ def run(args):
   if review is None:
     raise core.HandoffError(f"approve-spec: no spec review for {slug}")
   rid = review_id(st, "spec", str(spec), review["cycle"])
+  number = spec_pr(st.config["repo"], core.run_git(["rev-parse", "--abbrev-ref", "HEAD"], root).strip())
+  if number is not None and round_numbers(st, rid):  # the spec PR's threads, read once before the refusals (U26)
+    _, unsettled = ingest_pr(st, review, number, card.get("parent") or args.runcard)
+    if unsettled:
+      fid = unsettled[0]
+      raise core.HandoffError(f"approve-spec: {fid.rsplit('-', 2)[0]} {fid} unsettled on PR {number}")
   status = evaluate(st, review, card.get("parent") or args.runcard)
   if status.code != 0:
     raise core.HandoffError(f"approve-spec: review {rid} is not converged (review status exit {status.code})")
