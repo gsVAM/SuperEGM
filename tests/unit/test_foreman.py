@@ -461,6 +461,11 @@ CASES |= {  # round 8 (PR #96 review): a ruling on a contest's copy rules the fi
   "tdd-order-contest-overruled": ({"prior": True, "prior_foreman": CONTESTED_TDD,
                                    "commits": [("feat(S1): hook", "src/hooks.py"), ("test(S1): hook", "tests/unit/test_hooks.py")],
                                    "comments": {2: [c(15, "owner", "**Ruling:** foreman-1-3 finding overruled — an adopted history")]}}, [])}
+CASES |= {  # round 9 (PR #96 review): an unread record's `posted_at` is the host's clock, never a bound on the fixed reply
+  "upheld-unread-host-ahead": ({"prior": True, "comments": {2: [c(15, "owner", "**Ruling:** change-review-1-1 finding upheld (fix it)")],
+                                                            70: [c(16, "builder-bot", "**Reply change-review-1-1:** fixed", at="2026-11-02T13:30:00Z")]},
+                                "decisions": UPHELD_Q1["decisions"],
+                                "rulings": [UPHELD_Q1["rulings"][0] | {"posted_at": "2026-11-02T14:00:00Z", "unread": True}]}, [])}
 
 
 @pytest.mark.parametrize("name", list(CASES))

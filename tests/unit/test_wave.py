@@ -834,6 +834,33 @@ def test_a_by_hand_option_names_one_decision_and_a_redesign_rules_every_pending_
   assert all(f"Ruling (owner, comment 94): U01 {q} redesign — the queue is wrong" in journal for q in (q1, q2))
 
 
+def test_a_stop_whose_label_fails_records_nothing_so_its_comment_replays(world, monkeypatch):
+  """Round 9 (PR #96 review): a stop's label is applied before the ruling is recorded, so a failed label request
+  leaves the decision open and the comment unrecorded, and the same `decision rule --posted` applies it on a retry."""
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})
+  set_config(world, repo=REPO, owners=["owner"])
+  fake_gh(world, {f"repos/{REPO}/issues/comments/95": {"id": 95, "user": {"login": "owner"}, "body": "**Ruling:** stop\n",
+                                                        "created_at": "2026-11-03T10:00:00Z"}})
+  q = world.run("decision", "open", "--unit", "U01", "--point", 2, "--question", question(world, "cap\n"), "--source", "review head-U01-c1 cap", "--runcard", card)[1].splitlines()[0]
+  real = superegm.gh
+  def failing(args, *a, **kw):
+    if "--add-label" in args:
+      raise superegm.GhError(args, 1, "", "HTTP 502")
+    return real(args, *a, **kw)
+  monkeypatch.setattr(superegm, "gh", failing)
+  rule = lambda: world.run("decision", "rule", "--unit", "U01", "--ruling", "stop", "--by", "owner", "--posted", "95", "--runcard", card)
+  with pytest.raises(superegm.GhError):  # the helper's `gh` failure
+    rule()
+  f = foreman_of(s, "U01")
+  assert f["rulings"] == [] and "stopped" not in f and "superegm:stopped" not in world.gh.issues[2]["labels"]
+  monkeypatch.setattr(superegm, "gh", real)
+  assert rule() == (0, "recorded (comment 95)\n")
+  f = foreman_of(s, "U01")
+  assert [r["decision"] for r in f["rulings"]] == [q] and f["stopped"]["reason"] == "stop"
+  assert "superegm:stopped" in world.gh.issues[2]["labels"]
+
+
 def test_launch_marks_a_unit_whose_clean_outcome_an_ingest_rewrote(world, monkeypatch):
   s, card, hid, _ = filed(world, units=("U07", "U08"), max_in_flight=1)
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
