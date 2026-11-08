@@ -1221,7 +1221,40 @@ def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[
     core.journal(st, f"review ingest {rid} round {n} PR {number} ingested {len(added)} under {runcard}")
   unsettled = [f["id"] for name, record in rnd["reviewers"].items() if name.startswith("external:")
                for f in record["findings"] if blocking(f) and f["disposition"] is None]
+  reply_fixed(st, review["artifact"], number, runcard)
   return len(added), unsettled
+
+
+def reply_fixed(st: core.Store, artifact: str, number: int, runcard: str) -> list[int]:
+  """One `**Reply <fid>:** fixed` on each thread of the spec PR settled `fixed` and not yet replied to, in any round
+  of any cycle of the spec, under the session's own token; a review body has no replies endpoint, so its reply is a
+  PR comment. The reply's id is written as `replied` on every copy of the finding. The thread ids replied to."""
+  rounds_ = [(other_rid, m, load_round(st, other_rid, m)) for other_rid, _ in spec_cycles(st, artifact)
+             for m in round_numbers(st, other_rid)]
+  copies = {}
+  for _, _, rnd in rounds_:
+    for name, record in rnd["reviewers"].items():
+      for f in record["findings"] if name.startswith("external:") else []:
+        if f.get("thread") is not None:
+          copies.setdefault(f["thread"], []).append(f)
+  replied = []
+  for thread, found in sorted(copies.items()):
+    if any(f.get("replied") for f in found) or not any(f["disposition"] == "fixed" for f in found):
+      continue
+    fixed = next(f for f in found if f["disposition"] == "fixed")
+    endpoint = (f"repos/{st.config['repo']}/issues/{number}/comments" if fixed.get("review_body")
+                else f"repos/{st.config['repo']}/pulls/{number}/comments/{thread}/replies")
+    _, body = core.gh_post(endpoint, {"body": f"**Reply {fixed['id']}:** fixed"})
+    reply_id = json.loads(body)["id"]
+    for f in found:
+      f["replied"] = reply_id
+    replied.append(thread)
+  if replied:
+    for other_rid, m, rnd in rounds_:
+      if any(f.get("thread") in replied for f in findings_of(rnd)):
+        core.atomic_write(st.path("reviews", other_rid, f"round-{m}.json"), rnd)
+    core.journal(st, f"review ingest PR {number} replied fixed on {', '.join(map(str, replied))} under {runcard}")
+  return replied
 
 
 def carry_externals(st: core.Store, artifact: str, rid: str, rnd: dict) -> list[str]:
