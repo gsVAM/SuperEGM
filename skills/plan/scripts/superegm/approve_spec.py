@@ -97,13 +97,20 @@ def units_section(text: str) -> str:
 
 def escalated_pairs(st: core.Store, spec: Path, since: int) -> list:
   """Every `escalated` finding of the spec's review cycles above `since`, as `<review id>:<finding id>`
-  in round order, less the pairs the spec's `## Units` section names (D2 (a))."""
-  named, pairs, cycle = units_section(core.read_text(spec)), [], since + 1
+  in round order, less the pairs the spec's `## Units` section names (D2 (a)). One finding is one pair: an
+  external finding's carried copies (U26: the same reviewer, id and claim in later rounds or cycles) are one
+  finding, named by its latest copy and discharged by a Units mention of any copy."""
+  named, found, cycle = units_section(core.read_text(spec)), {}, since + 1
   while load_review(st, rid := review_id(st, "spec", str(spec), cycle)) is not None:
-    pairs += [f"{rid}:{f['id']}" for n in round_numbers(st, rid) for f in findings_of(load_round(st, rid, n))
-              if f["disposition"] == "escalated"]
+    for n in round_numbers(st, rid):
+      for reviewer, record in load_round(st, rid, n)["reviewers"].items():
+        for f in record["findings"]:
+          if f["disposition"] == "escalated":
+            pair = f"{rid}:{f['id']}"
+            key = (reviewer, f["id"], f["claim"]) if reviewer.startswith("external:") else pair
+            found[key] = found.pop(key, []) + [pair]
     cycle += 1
-  return [pair for pair in pairs if pair not in named]
+  return [pairs[-1] for pairs in found.values() if not any(pair in named for pair in pairs)]
 
 
 def before_units(text: str) -> str:
@@ -179,9 +186,11 @@ def run(args):
       _, unsettled = ingest_pr(st, review, number, card.get("parent") or args.runcard)
     except Refusal as error:
       raise core.HandoffError(f"approve-spec: {str(error).removeprefix('review ingest: ')}") from None
-    if unsettled:
+    if unsettled:  # named on the PR its thread came from: a carried finding's may be an earlier PR's
       fid = unsettled[0]
-      raise core.HandoffError(f"approve-spec: {fid.rsplit('-', 2)[0]} {fid} unsettled on PR {number}")
+      latest = load_round(st, rid, round_numbers(st, rid)[-1])
+      pr = next((f.get("pr") for f in findings_of(latest) if f["id"] == fid and f.get("pr")), number)
+      raise core.HandoffError(f"approve-spec: {fid.rsplit('-', 2)[0]} {fid} unsettled on PR {pr}")
   status = evaluate(st, review, card.get("parent") or args.runcard)
   if status.code != 0:
     raise core.HandoffError(f"approve-spec: review {rid} is not converged (review status exit {status.code})")

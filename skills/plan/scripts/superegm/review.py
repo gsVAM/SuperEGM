@@ -345,7 +345,8 @@ def head_entry(st: core.Store, unit: str, n: int):
 def cycle_ids(st: core.Store, kind: str, artifact: str) -> list[str]:
   """The review ids of every cycle of this artifact holding a `review.json`, oldest first."""
   base = review_id(st, kind, artifact, 0)[:-3]
-  found = sorted(int(m.group(1)) for p in st.path("reviews").glob(f"{base}-c*")
+  folder = st.path("reviews", f"{base}-c0").parent  # where this kind's reviews sit: a spec's at the store's root
+  found = sorted(int(m.group(1)) for p in folder.glob(f"{base}-c*")
                  if (m := re.fullmatch(rf"{re.escape(base)}-c(\d+)", p.name)) and (p / "review.json").is_file())
   return [f"{base}-c{c}" for c in found]
 
@@ -685,6 +686,28 @@ def settle_set_copies(st: core.Store, rnd: dict, finding: dict) -> list:
   return copies
 
 
+def settle_external_copies(st: core.Store, review: dict, reviewer: str, finding: dict) -> list[str]:
+  """An external finding settled on a spec settles its copies: every round of every cycle of the spec holding the
+  same `(id, claim)` under `reviewer` takes the disposition, ruling and note (one already holding them, the settled
+  round included, is left alone); the review ids written."""
+  copies = []
+  for other_rid, _ in spec_cycles(st, review["artifact"]):
+    for m in round_numbers(st, other_rid):
+      other = load_round(st, other_rid, m)
+      twins = [f for f in ((other["reviewers"].get(reviewer) or {}).get("findings") or [])
+               if (f["id"], f["claim"]) == (finding["id"], finding["claim"])
+               and (f["disposition"], f["ruling"], f.get("note")) != (finding["disposition"], finding["ruling"], finding.get("note"))]
+      if twins:
+        for twin in twins:
+          twin["disposition"], twin["ruling"] = finding["disposition"], finding["ruling"]
+          if "note" in finding:
+            twin["note"] = finding["note"]
+        core.atomic_write(st.path("reviews", other_rid, f"round-{m}.json"), other)
+        if other_rid not in copies:
+          copies.append(other_rid)
+  return copies
+
+
 def write_head_outcome(st: core.Store, review: dict, runcard: str) -> None:
   """`outcome: clean` on the unit's latest posted round and `<unit> awaiting merge` in the journal:
   whichever of `review post` (U10) and `review settle` leaves `review status` at 0 writes it."""
@@ -969,7 +992,7 @@ def carries_header(body, n: int, head: str) -> bool:
 
 def ingest(args) -> int:
   """`review ingest --pr <n>` routes to `ingest_spec_pr` (U26: the spec PR's threads into the latest round of the
-  spec's latest cycle, posted or not). `review ingest --unit` (spec section 8, External review): every review thread of the unit's PR not yet
+  spec's latest cycle, closed by an `accept` or not). `review ingest --unit` (spec section 8, External review): every review thread of the unit's PR not yet
   ingested, on a head the latest posted round reviewed, recorded as one `external:<login>` finding in that
   round; the ones from a bot or a human at `ingest.human_role` or above posted first as one review comment
   in `review post`'s form. A landed unit is not read. Every read precedes every write: a refused read records
@@ -1260,7 +1283,8 @@ def reply_fixed(st: core.Store, artifact: str, number: int, runcard: str) -> lis
   """One `**Reply <fid>:** fixed` on each thread of the spec PR settled `fixed` and not yet replied to, in any round
   of any cycle of the spec, under the session's own token, on the PR the thread came from (`pr`, else `number`); a
   review body has no replies endpoint, so its reply is a PR comment. Before posting, the PR's comments are read once:
-  a reply already there (a post whose answer was lost) is recorded, never posted again. The reply's id is written as
+  a reply already there (a post whose answer was lost) is recorded, never posted again, when it is the session's own
+  login's and sits where this reply would (a PR comment for a review body, an inline reply to the thread's root else). The reply's id is written as
   `replied` on every copy of the finding right after its post, so a later failed post never repeats it. A failed read
   or post is named on stderr (`review ingest: reply <fid> not posted: <error>`) and retried on the next run, never a
   refusal: the reply is a courtesy of the ingest, not a condition of the approval. The thread ids replied to."""
@@ -1272,7 +1296,7 @@ def reply_fixed(st: core.Store, artifact: str, number: int, runcard: str) -> lis
       for f in record["findings"] if name.startswith("external:") else []:
         if f.get("thread") is not None:
           copies.setdefault(f["thread"], []).append(f)
-  replied, posted_on = [], {}
+  replied, posted_on, me = [], {}, None
   repo = st.config["repo"]
   for thread, found in sorted(copies.items()):
     if any(f.get("replied") for f in found) or not any(f["disposition"] == "fixed" for f in found):
@@ -1281,10 +1305,14 @@ def reply_fixed(st: core.Store, artifact: str, number: int, runcard: str) -> lis
     pr, text = fixed.get("pr") or number, f"**Reply {fixed['id']}:** fixed"
     try:
       if pr not in posted_on:  # the PR's comments, read once: a reply posted but never recorded
-        posted_on[pr] = ([(c.get("in_reply_to_id"), c) for c in core.gh_pages(f"repos/{repo}/pulls/{pr}/comments")]
-                         + [(None, c) for c in core.gh_pages(f"repos/{repo}/issues/{pr}/comments")])
-      there = next((c for to, c in posted_on[pr] if (c.get("body") or "").strip() == text
-                    and (fixed.get("review_body") or to == thread)), None)
+        posted_on[pr] = ([("inline", c) for c in core.gh_pages(f"repos/{repo}/pulls/{pr}/comments")]
+                         + [("pr", c) for c in core.gh_pages(f"repos/{repo}/issues/{pr}/comments")])
+      # where this reply would sit: a review body's as a PR comment, a thread's as an inline reply to its root
+      candidates = [c for where, c in posted_on[pr] if (c.get("body") or "").strip() == text
+                    and (where == "pr" if fixed.get("review_body") else where == "inline" and c.get("in_reply_to_id") == thread)]
+      if candidates and me is None:  # read only when a candidate exists: the session's own login, once
+        me = (core.gh_json(["api", "user"]) or {}).get("login") or ""
+      there = next((c for c in candidates if (c.get("user") or {}).get("login") == me), None)
       if there is not None:
         reply_id = there.get("id") or True
       else:
@@ -1325,28 +1353,6 @@ def carry_externals(st: core.Store, artifact: str, rid: str, rnd: dict) -> list[
             held.add((finding["id"], finding["claim"]))
             carried.append(finding["id"])
   return carried
-
-
-def settle_external_copies(st: core.Store, review: dict, reviewer: str, finding: dict) -> list[str]:
-  """An external finding settled on a spec settles its copies: every round of every cycle of the spec holding the
-  same `(id, claim)` under `reviewer` takes the disposition, ruling and note (one already holding them, the settled
-  round included, is left alone); the review ids written."""
-  copies = []
-  for other_rid, _ in spec_cycles(st, review["artifact"]):
-    for m in round_numbers(st, other_rid):
-      other = load_round(st, other_rid, m)
-      twins = [f for f in ((other["reviewers"].get(reviewer) or {}).get("findings") or [])
-               if (f["id"], f["claim"]) == (finding["id"], finding["claim"])
-               and (f["disposition"], f["ruling"], f.get("note")) != (finding["disposition"], finding["ruling"], finding.get("note"))]
-      if twins:
-        for twin in twins:
-          twin["disposition"], twin["ruling"] = finding["disposition"], finding["ruling"]
-          if "note" in finding:
-            twin["note"] = finding["note"]
-        core.atomic_write(st.path("reviews", other_rid, f"round-{m}.json"), other)
-        if other_rid not in copies:
-          copies.append(other_rid)
-  return copies
 
 
 def outcome_word(status_exit: int, contested: list) -> str:
