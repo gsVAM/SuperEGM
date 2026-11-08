@@ -301,8 +301,9 @@ def splice_board(body: str, block: str) -> str:
   text around them untouched; appended once after the text when the markers are absent; the body kept as
   it is when the block it holds equals `block`, the header's change time aside. The board is the last open
   marker with a close marker after it, so an orphan marker left by a hand edit stays text and is never paired."""
-  start = body.rfind(BOARD_OPEN)
-  end = body.find(BOARD_CLOSE, start) if start >= 0 else -1
+  start, end = body.rfind(BOARD_OPEN), -1
+  while start >= 0 and (end := body.find(BOARD_CLOSE, start)) < 0:
+    start = body.rfind(BOARD_OPEN, 0, start)
   if end < 0:
     return body.rstrip("\n") + f"\n\n{BOARD_OPEN}\n{block}\n{BOARD_CLOSE}\n"
   held = body[start + len(BOARD_OPEN):end].strip("\n")

@@ -103,7 +103,9 @@ def post_board(handoff, card: dict, status: dict) -> bool:
 
 def wait_events(handoff, seconds: int, card: dict) -> list:
   """Poll `status_pass` (reading only) until a unit has an unreported event or the deadline
-  passes; the event lines, or `deadline`; one state write on return."""
+  passes; the event lines, or `deadline`; one state write on return. Before that write, under a
+  `wave` `card`, `post_board` reads the tracking issue once and, when the rows changed, rewrites
+  its board (`gh issue edit`, `board_changed_at`), a failed read or write journaled `board write failed`."""
   state = handoff.state
   previous = (state.get("status") or {}).get("units") or {}
   deadline = core.NOW() + seconds
