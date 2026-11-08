@@ -197,20 +197,14 @@ def test_ingest_pr_never_reuses_an_id_an_earlier_cycle_holds(world, monkeypatch)
 def test_ingest_pr_finds_a_reply_posted_but_never_recorded(world, monkeypatch):
   reader(monkeypatch, threads=THREADS + [REVIEW])
   posted = []
-  def api(args, cwd, token=None):
-    endpoint = world.gh.endpoint_of(args)
-    if args[1:4] == ["-i", "-X", "POST"]:
-      posted.append(endpoint)
-      return world.gh.ok(text="HTTP/2.0 201 Created\n\n")   # posted, its answer unreadable
-    return world.gh.do_api(args)
-  world.gh.extend("api", api)
+  owner_api(world, posted, reply_body="")   # posted, its answer unreadable
   spec, cid, rid = opened(world)
   rounds(world, rid, cid, [[]])
   assert ingest(world, cid)[0] == 0
   move(world, "spec", spec)
   for fid in (f"{BOT}-1-1", f"{HUMAN}-1-2"):
     assert settle(world, rid, fid, "fixed", cid)[0] == 0
-  world.gh.threads[7] = [{"id": 95, "in_reply_to_id": 11, "body": f"**Reply {BOT}-1-1:** fixed"}]   # an earlier run's post, its id never saved
+  world.gh.threads[7] = [{"id": 95, "in_reply_to_id": 11, "user": {"login": "owner"}, "body": f"**Reply {BOT}-1-1:** fixed"}]   # an earlier run's post, its id never saved
   assert ingest(world, cid)[0] == 0 and posted == [f"repos/{REPO}/issues/7/comments"]
   findings = rjson(world, rid, "round-1.json")["reviewers"]
   assert (findings[BOT]["findings"][0]["replied"], findings[HUMAN]["findings"][1]["replied"]) == (95, True)
@@ -244,3 +238,90 @@ def test_approve_spec_refuses_a_missing_config_before_any_github_call(world, mon
   code, out = approve(world, spec, cid, "--yes")
   assert (code, out.strip()) == (1, "superegm: approve-spec: .superegm/absent.json missing: run superegm init")
   assert not [c for c in world.gh.calls if c[:2] == ["pr", "list"]]
+
+
+def test_spec_cycles_are_found_beside_a_handoff_directory(world):
+  spec, cid, rid = opened(world)
+  st = store(world.repo)
+  handoff = review_mod.core.Store(st.root, handoff_id="2026-11-03-other-abcdef", config=st.config)   # an explicit --handoff
+  assert review_mod.cycle_ids(handoff, "spec", str(spec)) == [rid] and review_mod.latest_cycle(handoff, "spec", str(spec))[0]["cycle"] == 1
+
+
+def test_a_carried_external_escalated_is_one_pair(world, monkeypatch):
+  reader(monkeypatch, threads=THREADS[:1])
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [HIGH(k) for k in range(1, 6)])
+  assert ingest(world, cid)[0] == 0 and rule(world, rid, "stop", cid)[0] == 0
+  _, cid2, rid2 = opened(world)
+  rounds(world, rid2, cid2, [[]])
+  assert ingest(world, cid2)[0] == 0 and settle(world, rid2, f"{BOT}-5-1", "escalated", cid2)[0] == 0   # both copies escalated
+  code, out = approve(world, spec, cid2, "--yes")
+  assert code == 0 and f"approve-spec: 1 escalated finding(s) await the owner: {rid2}:{BOT}-5-1" in out
+  assert approval(world)["entries"][-1]["escalated"] == [f"{rid2}:{BOT}-5-1"]
+
+
+def owner_api(world, posted, reply_body="{}", broken=None):
+  """The fake `gh api` with the session's own login, `owner`, a recorded POST, and a failing PR-comments read while `broken`."""
+  def api(args, cwd, token=None):
+    endpoint = world.gh.endpoint_of(args)
+    if endpoint == "user":
+      return world.gh.ok({"login": "owner"})
+    if args[1:4] == ["-i", "-X", "POST"]:
+      posted.append(endpoint)
+      return world.gh.ok(text="HTTP/2.0 201 Created\n\n" + (json.dumps({"id": 90 + len(posted)}) if reply_body is None else reply_body))
+    if broken and broken["read"] and endpoint == f"repos/{REPO}/pulls/7/comments":
+      return 1, "", "gh: Server Error (HTTP 502)"
+    return world.gh.do_api(args)
+  world.gh.extend("api", api)
+
+
+def test_reply_reconcile_takes_only_the_sessions_own_reply_where_it_belongs(world, monkeypatch):
+  reader(monkeypatch, threads=THREADS + [REVIEW])
+  posted, broken = [], {"read": True}
+  owner_api(world, posted, reply_body=None, broken=broken)
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [[]])
+  assert ingest(world, cid)[0] == 0
+  move(world, "spec", spec)
+  for fid in (f"{BOT}-1-1", f"{HUMAN}-1-2"):
+    assert settle(world, rid, fid, "fixed", cid)[0] == 0
+  code, out = ingest(world, cid)   # the PR's comments unreadable: named, nothing posted, retried next run
+  assert code == 0 and f"review ingest: reply {BOT}-1-1 not posted: " in out and posted == []
+  broken["read"] = False
+  world.gh.threads[7] = [{"id": 96, "in_reply_to_id": 11, "user": {"login": "mallory"}, "body": f"**Reply {BOT}-1-1:** fixed"},   # another participant's
+                         {"id": 97, "in_reply_to_id": 11, "user": {"login": "owner"}, "body": f"**Reply {HUMAN}-1-2:** fixed"}]  # inline: not the review body's
+  assert ingest(world, cid)[0] == 0 and posted == [f"repos/{REPO}/pulls/7/comments/11/replies", f"repos/{REPO}/issues/7/comments"]
+  findings = rjson(world, rid, "round-1.json")["reviewers"]
+  assert (findings[BOT]["findings"][0]["replied"], findings[HUMAN]["findings"][1]["replied"]) == (91, 92)
+
+
+def test_reply_reconcile_finds_a_review_body_reply_posted_as_a_pr_comment(world, monkeypatch):
+  reader(monkeypatch, threads=THREADS + [REVIEW])
+  posted = []
+  owner_api(world, posted)
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [[]])
+  assert ingest(world, cid)[0] == 0
+  move(world, "spec", spec)
+  assert settle(world, rid, f"{HUMAN}-1-2", "fixed", cid)[0] == 0
+  world.gh.comments[7] = [{"id": 98, "user": {"login": "owner"}, "body": f"**Reply {HUMAN}-1-2:** fixed"}]   # an earlier run's, its id never saved
+  assert ingest(world, cid)[0] == 0 and posted == []
+  assert rjson(world, rid, "round-1.json")["reviewers"][HUMAN]["findings"][1]["replied"] == 98
+
+
+def test_approve_spec_names_the_pr_a_carried_finding_came_from(world, monkeypatch):
+  reader(monkeypatch, threads=THREADS[:1])
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [HIGH(k) for k in range(1, 6)])
+  assert ingest(world, cid)[0] == 0 and rule(world, rid, "stop", cid)[0] == 0          # PR 7's thread, unsettled
+  make_pr(world.gh, 8, "c" * 40, branch="main")                                          # the branch's PR now
+  _, cid2, rid2 = opened(world)
+  rounds(world, rid2, cid2, [[]])
+  code, out = approve(world, spec, cid2, "--yes")
+  assert code == 1 and f"approve-spec: {BOT} {BOT}-5-1 unsettled on PR 7" in out
+
+
+def test_step_4_sends_a_fixed_settle_to_review_status():
+  from pathlib import Path
+  body = (Path(__file__).resolve().parents[2] / "skills" / "review-spec" / "SKILL.md").read_text(encoding="utf-8")
+  assert "`fixed` edits the spec, so run `superegm review status` and act on its exit code (3: back to step 3, the next round; 2: step 5)" in body
