@@ -269,6 +269,24 @@ def test_report_idle_names_a_launch_builder_refusal(world):
   assert world.run("report", "--runcard", card, "--idle", "U09=stalled")[0] == 1, "an unknown unit"
 
 
+def test_report_refuses_a_changed_spec_and_a_state_without_its_plan(world):
+  """`report` opens the card's handoff as `status` does: it reads the plan and the spec, and refuses as `status`
+  does when the spec changed since its approval or the state names no plan (the skill's step 3)."""
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": A, "ci": "green"})
+  assert world.run("report", "--runcard", card)[0] == 0
+  report = s.path("wave_report", 1).read_text(encoding="utf-8")
+  spec = world.spec.read_text(encoding="utf-8")
+  world.spec.write_text(spec + "\nchanged after the approval\n", encoding="utf-8")
+  code, out = world.run("report", "--runcard", card)
+  assert code == 1 and "spec changed since the approval: run approve-spec again" in out, out
+  assert s.path("wave_report", 1).read_text(encoding="utf-8") == report, "a refusal rewrites nothing"
+  world.spec.write_text(spec, encoding="utf-8")
+  state = json.loads(s.path("state").read_text(encoding="utf-8")); state.pop("plan"); atomic_write(s.path("state"), state)
+  code, out = world.run("report", "--runcard", card)
+  assert code == 1 and "state holds no plan path" in out, out
+
+
 # ---------------------------------------------------------------- S4: decision open
 
 
@@ -675,7 +693,9 @@ def test_the_wave_skill_body_is_the_driver_loop(world):
 
 @pytest.mark.parametrize("needle", ["`<!-- superegm:board -->`", "the tracking issue's body", "none when the rows are unchanged",
                                     "the inbox stays the action list", "read the card's handoff alone", "report path, the board, `idle:`",
-                                    "- `owner: <ids>` → `decision open`", "the plan and the spec"])
+                                    "- `owner: <ids>` → `decision open`", "the plan and the spec",
+                                    "decision open --unit <U> --point 1 --question '<file>' --source 'review <head-review-id> round <n>'",
+                                    "`<fid> allowed — <reason>`", "--disposition declined --owner"])
 def test_the_wave_skill_names_the_board(needle):
   body = SKILL.read_text(encoding="utf-8").split("---", 2)[2]
   assert needle in body, needle
