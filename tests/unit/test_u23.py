@@ -22,3 +22,12 @@ def test_notify_timeout_seconds_key_and_the_inbox_module(world, value, ok):
       superegm.load_config(world.repo)
     return
   assert superegm.load_config(world.repo)["notify_timeout_seconds"] == value
+
+
+PROSE = [("skills/wave/SKILL.md", n) for n in ("notify --runcard '<CARD>'", "a failing or slow hook never stops the wave", "a pending decision whose panel answered is the owner's alone")] + [
+         ("skills/judges/references/leavemealone.md", n) for n in ("needs a `high` finding behind it", "held until `decision rule` accepts")]
+
+
+@pytest.mark.parametrize("path, needle", PROSE)
+def test_the_notify_step_and_the_bar_prose(path, needle):
+  assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
