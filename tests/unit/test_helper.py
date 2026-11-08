@@ -390,7 +390,7 @@ def test_the_handoff_flag_and_store_layout_prose(path, needle):
   assert "<6 hex>/" not in (ROOT / "skills/wave/references/foreman_brief.md").read_text(encoding="utf-8")
 
 
-WRITES = {"approve_spec":{"approvals", "handoffs", "state"},"graph": {"state", "plan", "units", "unit", "bodies"},
+WRITES = {"approve_spec":{"approvals", "handoffs", "state", "reviews"},"graph": {"state", "plan", "units", "unit", "bodies"},
           "scan": {"file"}, "gate": {"state"},
           "dry_run": {"file", "state"}, "apply": {"state", "file"},
           "verify": {"state"}, "status": {"state"}, "launch": {"state", "runcards"}, "decide": {"state", "plan", "units", "unit", "bodies", "file"},
