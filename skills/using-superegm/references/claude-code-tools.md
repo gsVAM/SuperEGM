@@ -12,7 +12,8 @@ subagent dispatch, todos, `Skill`). These are the platform facts SuperEGM
 relies on, from the live probes; do not re-derive them.
 
 - `name` on the Agent tool makes an agent addressable and resumable; it is not
-  a distinct teammate while agent teams are off: with the variable set, every named call launches a teammate.
+  a distinct teammate while agent teams are off: with the variable set, every named call launches a teammate
+  in an interactive session; under `-p` a named one runs as an ordinary subagent.
   Several agents may be dispatched in one message and run
   concurrently in the foreground; their returns arrive together.
 - Agent teams (the brainstorm's team mode, U34) need `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` and an interactive session
@@ -25,8 +26,8 @@ relies on, from the live probes; do not re-derive them.
   A teammate may reject a shutdown request, the session's end ending it then; a resumed lead has none.
   The variable is set for the brainstorm session alone, never in `settings.json`; the fallback's four and every goldfish are
   dispatched without `name`, so no team forms unasked.
-- `omitClaudeMd` tracks the agent definition, never the name: an adapter
-  subagent does not load CLAUDE.md or the memory index.
+- `omitClaudeMd` tracks the agent definition, never the name, while agent teams are off: an adapter
+  subagent does not load CLAUDE.md or the memory index. With the variable set, a name makes the call a teammate, to which it is not applied.
   SessionStart hooks run for sessions, not for Agent-tool subagents, so this
   plugin's hook never reaches a goldfish. SubagentStart hooks in the owner's own profile do reach
   adapter subagents; the plugin cannot suppress them, so every dispatch record

@@ -96,7 +96,7 @@ DEFAULT_CONFIG = {
     "ci_wait_minutes": 30,
     "commit_trailer": "",  # appended, after a blank line, to every commit the helper makes
     "owners": [],  # the GitHub logins that may update <base> (spec section 11); init writes `gh api user`'s
-    "brainstorm": {"team": False},  # true: brainstorming runs its team mode unasked (spec section 6, U34)
+    "brainstorm": {"team": False},  # true: the owner asks for brainstorming's team mode by config, as `--team` does (spec section 6, U34)
     "owner_team": None,  # `<org>/<slug>`: the one team a ruleset's bypass actors may name
     "pr_block_file": None,  # a path relative to the repository root whose text every builder PR body carries
     "ingest": {"severity_words": {"bug": "high", "issue": "medium", "nit": "low", "suggestion": "low"},
@@ -711,6 +711,8 @@ def load_config(repo_root: Path) -> dict:
         if unknown:
           raise HandoffError(f"{path}: unknown label keys {sorted(unknown)}")
         config["labels"].update(value)
+      elif key == "brainstorm" and isinstance(value, dict) and set(value) - set(DEFAULT_CONFIG["brainstorm"]):
+        raise HandoffError(f"{path}: unknown brainstorm keys {sorted(set(value) - set(DEFAULT_CONFIG['brainstorm']))}")
       elif key in ("astra", "ingest", "brainstorm") and isinstance(value, dict):
         config[key] = {**config[key], **value}
       else:

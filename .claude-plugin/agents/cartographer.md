@@ -14,5 +14,5 @@ Read `${CLAUDE_PLUGIN_ROOT}/agents/cartographer.md` before anything else and fol
 persona's instructions. This adapter defines your Claude tool and context restrictions. Resolve
 bundled files against `${CLAUDE_PLUGIN_ROOT}`. Remain read-only.
 
-Your prompt is the brainstorm's topic and the owner's words so far, not a target to review: you
-review nothing and report no findings. Read the code and report the persona's notes.
+Your prompt is the brainstorm's topic, the owner's words so far, the message form and your brief, not a target to review: you
+review nothing and report no findings. Read the code and report the persona's notes in the message form and your brief.

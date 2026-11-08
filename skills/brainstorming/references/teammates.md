@@ -17,7 +17,7 @@ The lead hands each of the four the same four things, in this order:
 
 The four run through their adapters, in this order:
 
-- the cartographer: `superegm:cartographer`, first, alone; its prompt is the topic and the owner's words, no `Mode`.
+- the cartographer: `superegm:cartographer`, first, alone; its prompt carries the four things above, with no `Mode`.
 - the architect: `superegm:design` with `Mode: BRAINSTORM`.
 - the skeptic: `superegm:zoom-out` with `Mode: BRAINSTORM`.
 - the advocate: `superegm:comprehension` with `Mode: BRAINSTORM`.
@@ -30,6 +30,14 @@ there is no target file to read and no standard to read first; there is no incom
 skip the persona's codebase search step and read no code: ask the cartographer (by message as a teammate; as a subagent, put the question on a `questions:` line);
 report one approach in the message form, not the findings line: no severity, no finding ids;
 the role's lenses below replace the persona's `Mode: BRAINSTORM` list where they differ.
+
+The adapter's body sits in the system prompt and tells the agent to follow its persona, read the target and return findings;
+so the override names the instructions it overrides, each by its words, and says this task sets them aside:
+the adapter's "Before returning findings, read the target and every supplied standard" and "report an incomplete review instead of a verdict";
+the persona's codebase searches (the zoom-out persona's "Perform codebase searches", its `Mode: BRAINSTORM` step 2, becomes an `ask cartographer:` message);
+the persona's findings-line output. The spec puts this override in the brief, so the lead pastes it whole, word for word, into each of the three prompts.
+The lead checks each report: a report not in the message form (a findings line, a severity, a finding id) gets one message asking for the approach in the message form;
+as a subagent, or still not in the form after that message, the lead writes the approach it can read from the report and marks it `not in the message form`.
 
 Every teammate writes no file: the helper is the store's one writer and the draft is the lead's.
 A teammate may message another teammate to challenge a claim; it reports to the lead alone.
