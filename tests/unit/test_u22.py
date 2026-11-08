@@ -196,3 +196,12 @@ def test_an_upheld_fid_no_decision_asks_about_binds_nothing():
   foreman = {"decisions": decisions, "rulings": [{"decision": "q1", "ruling": "f-1-1 finding upheld", "by": "owner", "posted": "comment 5", "posted_at": "t3"}]}
   text = prompt_text(2, "U01", "body", "orders", "orient", comments, [], None, "builder-bot", "audit", owners=["owner"], foreman=foreman)
   assert re.findall(r"^## \S+ · comment (\d+)$", text.split("# Comments on issue #2\n\n", 1)[1], re.M) == ["5"]
+
+
+def test_a_ruling_copied_from_another_issue_keeps_its_option():
+  """Round 11 (PR #96 review, astra-11-1): an owner's interface ruling copied onto a consumer's issue names the
+  producer's comment, which this issue does not hold: nothing here can check its option, so it stays in the prompt."""
+  comments = [{"id": 4, "user": {"login": "owner"}, "body": "**Ruling:** (12) (a) keep the name — the producer's choice"}]
+  assert [r.comment_id for r in binding_rulings(comments, ["owner"], [], [])] == [4]
+  text = prompt_text(2, "U01", "body", "orders", "orient", comments, [], None, "builder-bot", "audit", owners=["owner"], foreman={})
+  assert re.findall(r"^## \S+ · comment (\d+)$", text.split("# Comments on issue #2\n\n", 1)[1], re.M) == ["4"]

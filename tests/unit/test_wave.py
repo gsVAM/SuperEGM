@@ -885,6 +885,59 @@ def test_a_session_stop_whose_post_fails_leaves_no_label(world, monkeypatch):
   assert [r["decision"] for r in foreman_of(s, "U01")["rulings"]] == [q]
 
 
+def test_a_session_stop_whose_post_fails_keeps_a_label_it_found(world, monkeypatch):
+  """Round 11 (PR #96 review, codebase-details-11-1): a failed post takes off only a label the call put on; an issue
+  already labelled stopped (the owner's close) keeps it, and a failed removal is journaled and the post's error raised."""
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})
+  set_config(world, repo=REPO, owners=["owner"])
+  fake_gh(world)
+  q = world.run("decision", "open", "--unit", "U01", "--point", 2, "--question", question(world, "cap\n"), "--source", "review head-U01-c1 cap", "--runcard", card)[1].splitlines()[0]
+  world.gh.issues[2]["labels"].append("superegm:stopped")
+  real = superegm.gh
+  def failing(args, *a, **kw):
+    if args[:2] == ["issue", "comment"]:
+      raise superegm.GhError(args, 1, "", "HTTP 502")
+    return real(args, *a, **kw)
+  monkeypatch.setattr(superegm, "gh", failing)
+  rule = lambda: world.run("decision", "rule", "--unit", "U01", "--decision", q, "--ruling", "stop", "--by", "owner", "--runcard", card)
+  with pytest.raises(superegm.GhError, match="HTTP 502"):
+    rule()
+  assert world.gh.issues[2]["labels"].count("superegm:stopped") == 1 and foreman_of(s, "U01")["rulings"] == []
+  world.gh.issues[2]["labels"].remove("superegm:stopped")
+  def failing_twice(args, *a, **kw):
+    if args[:2] == ["issue", "comment"]:
+      raise superegm.GhError(args, 1, "", "HTTP 502")
+    if "--remove-label" in args:
+      raise superegm.GhError(args, 1, "", "HTTP 504")
+    return real(args, *a, **kw)
+  monkeypatch.setattr(superegm, "gh", failing_twice)
+  with pytest.raises(superegm.GhError, match="HTTP 502"):
+    rule()
+  assert f"U01 {q}: label superegm:stopped left on issue #2" in s.path("journal").read_text(encoding="utf-8")
+
+
+def test_a_by_hand_redesign_naming_a_ruled_decision_is_dropped(world):
+  """Round 11 (PR #96 review, astra-11-2): `--decision` names a decision a redesign rules only while it is pending,
+  as the path without `--decision` does: a fully ruled point-1 decision beside a pending point-3 one stops nothing."""
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})
+  set_config(world, repo=REPO, owners=["owner"])
+  fake_gh(world, {f"repos/{REPO}/issues/comments/{cid}": {"id": cid, "user": {"login": "owner"}, "body": body, "created_at": "2026-11-03T10:00:00Z"}
+                  for cid, body in ((96, "**Ruling:** f-1-1 finding upheld\n"), (97, "**Ruling:** redesign — the queue is wrong\n"))})
+  q1 = world.run("decision", "open", "--unit", "U01", "--point", 1, "--question", question(world, "f-1-1 | high | a.py | regression: no | x\n"),
+                 "--source", "review head-U01-c1 round 1", "--runcard", card)[1].splitlines()[0]
+  rule = lambda posted, ruling, *d: world.run("decision", "rule", "--unit", "U01", *d, "--ruling", ruling, "--by", "owner", "--posted", posted, "--runcard", card)
+  assert rule("96", "f-1-1 finding upheld")[0] == 0
+  f = foreman_of(s, "U01")
+  f["decisions"].append({"id": "q2", "point": 3, "source": "launch 1", "question": "no PR\n", "options": ["relaunch", "stop the unit"]})
+  s.path("foreman", "U01").write_text(json.dumps(f), encoding="utf-8")
+  assert rule("97", "redesign", "--decision", q1) == (1, f"decision: {q1} already ruled\n")
+  f = foreman_of(s, "U01")
+  assert "stopped" not in f and len(f["rulings"]) == 1 and "superegm:stopped" not in world.gh.issues[2]["labels"]
+  assert f"ruling dropped (owner, comment 97): {q1} already ruled" in s.path("journal").read_text(encoding="utf-8")
+
+
 def test_launch_marks_a_unit_whose_clean_outcome_an_ingest_rewrote(world, monkeypatch):
   s, card, hid, _ = filed(world, units=("U07", "U08"), max_in_flight=1)
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")

@@ -466,6 +466,12 @@ CASES |= {  # round 9 (PR #96 review): an unread record's `posted_at` is the hos
                                                             70: [c(16, "builder-bot", "**Reply change-review-1-1:** fixed", at="2026-11-02T13:30:00Z")]},
                                 "decisions": UPHELD_Q1["decisions"],
                                 "rulings": [UPHELD_Q1["rulings"][0] | {"posted_at": "2026-11-02T14:00:00Z", "unread": True}]}, [])}
+CASES |= {  # round 11 (PR #96 review, astra-11-3): an unread record whose comment is gone is bound by the host's time
+  "upheld-unread-comment-gone": ({"prior": True, "comments": {2: [c(16, "owner", "an aside")],
+                                                              70: [c(17, "builder-bot", "**Reply change-review-1-1:** fixed", at="2026-11-02T13:30:00Z")]},
+                                  "decisions": UPHELD_Q1["decisions"],
+                                  "rulings": [UPHELD_Q1["rulings"][0] | {"posted_at": "2026-11-02T14:00:00Z", "unread": True}]},
+                                 ["issue #2 comment 15 | regression: no | upheld change-review-1-1: no `fixed` reply"])}
 
 
 @pytest.mark.parametrize("name", list(CASES))
