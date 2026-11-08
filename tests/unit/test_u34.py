@@ -85,3 +85,26 @@ FACTS = ("`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`", "in-process teammate mode",
 @pytest.mark.parametrize("needle", FACTS)
 def test_platform_reference_carries_the_agent_teams_facts(needle):
   assert needle in (ROOT / "skills/using-superegm/references/claude-code-tools.md").read_text(encoding="utf-8"), needle
+
+
+def test_brainstorm_refuses_an_unknown_subkey(world):
+  set_config(world, repo=REPO, brainstorm={"teams": True})
+  with pytest.raises(superegm.HandoffError, match=re.escape("unknown brainstorm keys ['teams']")):
+    superegm.load_config(world.repo)
+
+
+ROUND_1 = [("skills/brainstorming/SKILL.md", n) for n in (
+             "a missing key reads false", "tell the owner you are waiting on the cartographer", "a second Bash `date`",
+             "a report in your inbox at that turn is merged", "once you take the fallback, a teammate's later message is not merged",
+             "a report found after an approach is written `not reported` replaces that line", "when the team or its fallback ran")] + [
+           ("skills/brainstorming/references/teammates.md", n) for n in (
+             "its prompt carries the four things above", "the instructions it overrides", "a report not in the message form")] + [
+           ("agents/cartographer.md", n) for n in ("a null `opened_at`", "the newest handoff whose directory holds a map", "every map is a lead")] + [
+           (".claude-plugin/agents/cartographer.md", "the message form and your brief")] + [
+           ("skills/using-superegm/references/claude-code-tools.md", n) for n in (
+             "a named one runs as an ordinary subagent", "while agent teams are off")]
+
+
+@pytest.mark.parametrize("path, needle", ROUND_1)
+def test_round_1_review_prose(path, needle):
+  assert needle in (ROOT / path).read_text(encoding="utf-8"), needle
