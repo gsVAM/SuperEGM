@@ -325,3 +325,50 @@ def test_step_4_sends_a_fixed_settle_to_review_status():
   from pathlib import Path
   body = (Path(__file__).resolve().parents[2] / "skills" / "review-spec" / "SKILL.md").read_text(encoding="utf-8")
   assert "`fixed` edits the spec, so run `superegm review status` and act on its exit code (3: back to step 3, the next round; 2: step 5)" in body
+
+
+def test_reapproving_the_same_cycle_records_an_escalation_ingested_after_its_approval(world, monkeypatch):
+  reader(monkeypatch, threads=THREADS[:1])
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [[]])
+  assert approve(world, spec, cid, "--yes")[0] == 0           # no PR yet: c1 approved, nothing escalated
+  make_pr(world.gh, 7, "c" * 40, branch="main")
+  assert ingest(world, cid)[0] == 0 and settle(world, rid, f"{BOT}-1-1", "escalated", cid)[0] == 0   # c1 stays: its bytes did not move
+  code, out = approve(world, spec, cid, "--yes")
+  assert code == 0 and f"approve-spec: 1 escalated finding(s) await the owner: {rid}:{BOT}-1-1" in out
+  assert approval(world)["entries"][-1]["escalated"] == [f"{rid}:{BOT}-1-1"]
+
+
+def test_ingest_pr_skips_an_owners_ruling(world, monkeypatch):
+  from conftest import set_config
+  set_config(world, repo=REPO, owners=["owner"])
+  ruling = {"id": 14, "login": "owner", "bot": False, "body": f"**Ruling:** {HUMAN}-1-1 finding overruled — low risk", "path": None,
+            "line": None, "commit_id": "c" * 40, "review_body": True, "created_at": "2026-11-05T00:00:03Z"}
+  reader(monkeypatch, threads=THREADS[:1] + [ruling], role="admin")
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [[]])
+  assert ingest(world, cid)[1].strip() == "1 ingested" and ingest(world, cid)[1].strip() == "0 ingested"
+  assert "external:owner" not in rjson(world, rid, "round-1.json")["reviewers"] and 14 not in rjson(world, rid)["ingested"]
+
+
+@pytest.mark.parametrize("copy, discharged", [("c2", True), ("c1", False)])
+def test_a_carried_external_escalated_is_discharged_by_its_listed_copy_alone(world, monkeypatch, copy, discharged):
+  from test_review import SPEC
+  reader(monkeypatch, threads=THREADS[:1])
+  pair = lambda c: f"spec-{SLUG}-{c}:{BOT}-5-1"
+  text = SPEC + f"Escalated: {pair(copy)} is U01's.\n"   # graph discharges the recorded pair alone, the copy approve-spec lists
+  spec, cid, rid = opened(world, text=text)
+  rounds(world, rid, cid, [HIGH(k) for k in range(1, 6)])
+  assert ingest(world, cid)[0] == 0 and rule(world, rid, "stop", cid)[0] == 0
+  _, cid2, rid2 = opened(world, text=text)
+  rounds(world, rid2, cid2, [[]])
+  assert ingest(world, cid2)[0] == 0 and settle(world, rid2, f"{BOT}-5-1", "escalated", cid2)[0] == 0
+  assert approve(world, spec, cid2, "--yes")[0] == 0
+  assert approval(world)["entries"][-1]["escalated"] == ([] if discharged else [pair("c2")])
+
+
+def test_step_4_names_the_pr_a_carried_finding_came_from():
+  from pathlib import Path
+  body = (Path(__file__).resolve().parents[2] / "skills" / "review-spec" / "SKILL.md").read_text(encoding="utf-8")
+  assert "`<n>` there is the PR the finding's thread is on: a finding carried from an earlier PR names that PR, not the current branch's" in body
+  assert "name the listed id, the latest copy's" in body
