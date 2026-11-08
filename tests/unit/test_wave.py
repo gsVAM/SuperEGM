@@ -3,6 +3,7 @@
 
 """U10b: the pure functions the wave skill cites, `report`, `decision open|rule` and the skill body.
 Fixtures: conftest's `world`, `applied` and `make_pr` (U03/U07)."""
+import hashlib
 import json
 from pathlib import Path
 import pytest
@@ -136,6 +137,7 @@ def test_loop_ended_is_the_end_condition(states, ready, slots, expected):
   ("error", 5, "idle: review stalled"), ("target-moved", 5, "idle: review stalled"), ("blocked", 3, "decision 3"),
   ("recovered clean", 0, "await-merge"), ("recovered contested: f-2-1", 3, "decision 1"),
   ("recovered cap-reached", 2, "decision 2"), ("a sentence instead of a word", 3, "redispatch"),
+  ("owner: f-1-2", 3, "decision open"),
 ])
 def test_word_action_is_the_word_table(word, review_exit, action):
   assert word_action(word, review_exit) == action
@@ -183,7 +185,7 @@ def test_a_launch_after_a_clean_round_keeps_the_unit_active(world):
   assert unit_state("U01", view, foreman_of(s, "U01"), launches, CARD, {}, NOW) == "active"
   code, out = world.run("report", "--runcard", card)
   assert code == 0 and "loop: continuing (in flight: U01)" in out, out
-  assert "- U01 #2: active · pr #70 head aaaaaaa · ci green · rounds 1 (r1 posted clean) · launch 2 running" in s.path("wave_report", 1).read_text(encoding="utf-8")
+  assert "| U01 #2 | active | r1 posted clean | 2 running | aaaaaaa | #70 | none | none | none |" in s.path("wave_report", 1).read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------- S2: the report file and the end line
@@ -211,8 +213,8 @@ def test_report_rewrites_the_wave_report_and_prints_the_end_line(world):
   assert "idle: none" in out and "pending: none" in out and "loop: continuing (in flight: U02)" in out
   text = path.read_text(encoding="utf-8")
   assert text.startswith(f"# Wave 1 report (handoff {s.handoff_id})\nRun card: {card}\n")
-  assert "- U01 #2: clean · pr #70 head aaaaaaa · ci green · rounds 1 (r1 posted clean) · launch 1 exited 0" in text
-  assert "- U02 #3: active · pr #71 head bbbbbbb · ci pending · rounds 1 (r1 posted contested: f-1-2) · launch 1 running" in text
+  assert "| U01 #2 | clean | r1 posted clean | 1 exited 0 | aaaaaaa | #70 | none | await-merge | none |" in text
+  assert "| U02 #3 | active | r1 posted contested: f-1-2 | 1 running | bbbbbbb | #71 | ci, U01 | decision 1 | none |" in text
   assert "## Non-terminal launches\n- U02 launch 1 running" in text
   assert "## Heads with pending or absent CI\n- U02 bbbbbbb waiting-for-ci" in text
   assert "## Ready, unlaunched\n- U03 (slot free)" in text
@@ -270,6 +272,47 @@ def test_report_idle_names_a_launch_builder_refusal(world):
 
 
 PRIOR = {"id": "q1", "point": 3, "source": "comment 60", "head": "a" * 40, "question": BLOCKED, "asked_at": "t"}
+A = "a" * 40
+HEAD = "| unit | state | round | launch | head | PR | waits on | next action | cost |"
+
+
+@pytest.mark.parametrize("units, idle, row", [
+  ({"U01": {"pr": 70, "head": A, "ci": "green", "launches": [{"round": 1, "status": "exited 0", "total_cost_usd": 1.5}],
+            "rounds": [{"round": 1, "phase": "posted", "outcome": "clean", "launch": 1, "head": A}]}}, None,
+   "| U01 #2 | clean | r1 posted clean | 1 exited 0 | aaaaaaa | #70 | none | await-merge | 1.50 |"),
+  ({"U01": {"pr": 70, "head": A, "ci": "green", "launches": [{"round": 1, "status": "exited 0", "total_cost_usd": 0.5}],
+            "rounds": [{"round": 1, "phase": "posted", "outcome": "revise", "launch": 1, "head": A}]}}, None,
+   "| U01 #2 | active | r1 posted revise | 1 exited 0 | aaaaaaa | #70 | none | launch-builder | 0.50 |"),
+  ({"U01": {"pr": 70, "head": A, "ci": "green", "launches": [{"round": 1, "status": "exited 0"}, {"round": 2, "status": "running"}],
+            "rounds": [{"round": 1, "phase": "posted", "outcome": "revise", "launch": 1, "head": A}]}}, None,
+   "| U01 #2 | active | r1 posted revise | 2 running | aaaaaaa | #70 | none | none | none |"),
+  ({"U01": {"pr": 70, "head": A, "ci": "green", "launches": [{"round": 1, "status": "exited 0", "total_cost_usd": 1.0},
+                                                            {"round": 2, "status": "exited 137", "total_cost_usd": "unrecorded"}]}}, None,
+   "| U01 #2 | active | none | 2 exited 137 | aaaaaaa | #70 | none | foreman dispatch | 1.00 (partial) |"),
+  ({"U01": {"pr": 70, "head": A, "ci": "green", "launches": [{"round": 1, "status": "interrupted", "total_cost_usd": 2.0}]}}, None,
+   "| U01 #2 | active | none | 1 interrupted | aaaaaaa | #70 | none | foreman dispatch | 2.00 |"),
+  ({"U01": {"pr": 70, "head": A, "ci": "green", "launches": [{"round": 1, "status": "exited 0"}],
+            "rounds": [{"round": 1, "phase": "posted", "outcome": "owner: f-1-2", "launch": 1, "head": A}]}}, None,
+   "| U01 #2 | active | r1 posted owner: f-1-2 | 1 exited 0 | aaaaaaa | #70 | none | decision open | none |"),
+  ({"U01": {"launches": []}}, None, "| U01 #2 | active | none | none | none | none | none | foreman dispatch | none |"),
+  ({"U01": {"pr": 70, "head": A, "ci": "pending"}}, None, "| U01 #2 | active | none | 1 running | aaaaaaa | #70 | ci | none | none |"),
+  ({"U01": {"pr": 70, "head": A, "ci": "green", "decisions": [PRIOR]}}, None, "| U01 #2 | pending | none | 1 running | aaaaaaa | #70 | q1 | decision 3 | none |"),
+  ({"U01": {"pr": 70, "head": A, "ci": "green"}}, "U01=launch-builder: no token",
+   "| U01 #2 | idle | none | 1 running | aaaaaaa | #70 | none | launch-builder: no token | none |"),
+  ({"U01": {"pr": 70, "head": A, "ci": None, "landed": True}}, None, "| U01 #2 | landed | none | 1 running | aaaaaaa | #70 | none | none | none |"),
+  ({"U01": {"launched": False, "ready": True, "launches": []}}, None, "| U01 #2 | ready | none | none | none | none | none | launch-builder | none |"),
+  ({"U01": {"pr": 70, "head": A, "ci": "green"}, "U02": {"launched": False, "launches": []}}, None,
+   "| U02 #3 | waiting | none | none | none | none | U01 | none | none |")])
+def test_the_board_row_per_unit(world, units, idle, row):
+  card = open_wave_card(world)
+  s = wave_store(world, **units)
+  code, out = world.run("report", "--runcard", card, *(["--idle", idle] if idle else []))
+  assert code == 0, out
+  text = s.path("wave_report", 1).read_text(encoding="utf-8")
+  header = (f"handoff {s.handoff_id} · base main · spec {hashlib.sha256(world.spec.read_bytes()).hexdigest()[:12]}"
+            " · waves {U01} → {U02} → {U03} · changed none")
+  assert f"## Units\n{header}\n{HEAD}\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n" in text
+  assert row in text and row in out and out.splitlines()[0] == str(s.path("wave_report", 1)) and "- U01 #2:" not in text
 
 
 @pytest.mark.parametrize("point,source,decisions,rulings,expect", [
@@ -385,7 +428,7 @@ def test_a_stop_ruling_labels_the_issue_and_the_report_lists_unlanded_dependants
   code, out = world.run("report", "--runcard", card)
   assert "loop: ended" in out and "pending: none" in out
   assert "## Stopped\n- U01 (owner: stop the unit): unlanded dependants U02, U03" in s.path("wave_report", 1).read_text(encoding="utf-8")
-  assert "- U01 #2: stopped ·" in s.path("wave_report", 1).read_text(encoding="utf-8")
+  assert "| U01 #2 | stopped | none | 1 running | aaaaaaa | #70 | none | none | none |" in s.path("wave_report", 1).read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------- S7: the by-hand ruling and the owner's close
