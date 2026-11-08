@@ -1,10 +1,11 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_apply`, `Budget`, `apply_writes`, `create_issue` and `post_link` on the confirmed write list of unfiled units; `filings[]` and `base_at_start` before the first write; the labels of spec section 10; an adopted issue re-read before any write (U13).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_apply`, `Budget`, `apply_writes`, `create_issue` and `post_link` on the confirmed write list of unfiled units; `filings[]` and `base_at_start` before the first write; the labels of spec section 10; an adopted issue re-read before any write (U13); `splice_board`, the board between the tracking body's markers (U30).
 
 """superegm apply: create labels, issues and links (needs --yes)."""
 
 import os
+import re
 import tempfile
 import time
 import urllib.parse
@@ -289,6 +290,30 @@ def edit_issue(repo, number, body, artifact_dir) -> None:
     core.gh_retry(["issue", "edit", str(number), "-R", repo, "--body-file", path])
   finally:
     os.unlink(path)
+
+
+BOARD_OPEN, BOARD_CLOSE = "<!-- superegm:board -->", "<!-- /superegm:board -->"
+CHANGED_RE = re.compile(r" · changed \S+$")
+
+
+def splice_board(body: str, block: str) -> str:
+  """The one splice of the board (spec section 11.1): `block` between the tracking body's two markers, the
+  text around them untouched; appended once after the text when the markers are absent; the body kept as
+  it is when the block it holds equals `block`, the header's change time aside."""
+  start, end = body.find(BOARD_OPEN), body.find(BOARD_CLOSE)
+  if start < 0 or end < start:
+    return body.rstrip("\n") + f"\n\n{BOARD_OPEN}\n{block}\n{BOARD_CLOSE}\n"
+  held = body[start + len(BOARD_OPEN):end].strip("\n")
+  if held == block or same_rows(held, block):
+    return body
+  return body[:start] + f"{BOARD_OPEN}\n{block}\n{BOARD_CLOSE}" + body[end + len(BOARD_CLOSE):]
+
+
+def same_rows(held: str, block: str) -> bool:
+  """Two blocks equal but for the header line's ` · changed <time>`."""
+  first_held, _, rest_held = held.partition("\n")
+  first, _, rest = block.partition("\n")
+  return bool(held and block) and rest_held == rest and CHANGED_RE.sub("", first_held) == CHANGED_RE.sub("", first)
 
 
 def create_issue(repo, title, body, labels, artifact_dir):
