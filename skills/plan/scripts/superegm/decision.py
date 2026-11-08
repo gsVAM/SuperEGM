@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
-# `recorded_rulings`) and the by-hand ruling read through it (U22).
+# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23).
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
@@ -14,6 +14,7 @@ from pathlib import Path
 import superegm as core
 from superegm.apply import body_file
 from superegm.report import pending_decisions, unit_view
+from superegm import review
 from superegm.review import Refusal
 
 WRITES = frozenset({"foreman"})  # the store kinds this subcommand writes
@@ -352,6 +353,15 @@ def stopped_entry(by: str, reason: str, now_iso: str, brief=None) -> dict:
   return {"by": by, "reason": reason, "at": now_iso} | ({"brief": str(brief)} if brief else {})
 
 
+def high_behind(st, unit: str, source: str) -> bool:
+  """A `high` finding with no disposition in the unit's latest posted round of the review the decision's source
+  names (its second word): what a judges' `redesign` needs behind it."""
+  words = (source or "").split()
+  posted = [e["round"] for e in core.load_foreman(st, unit)["rounds"] if e.get("phase") == "posted"]
+  rnd = review.load_round(st, words[1], max(posted)) if len(words) > 1 and posted else None
+  return bool(rnd) and any(f["severity"] == "high" and f["disposition"] is None for f in review.findings_of(rnd))
+
+
 def rule(args) -> int:
   card = core.require_runcard(args, SKILLS)
   st = core.store(core.git_toplevel(Path.cwd()))
@@ -404,6 +414,8 @@ def rule(args) -> int:
   if chosen == "redesign" and basis["point"] in (1, 2):  # a head's third ruling; a point-3 option named `redesign` is an option
     if not reason.strip():
       raise Refusal("decision: redesign needs — <one sentence why>")
+    if args.by.startswith("judges:") and not high_behind(st, unit, decision["source"]):  # spec section 11.2 (U23)
+      raise Refusal(f"decision: redesign by {args.by} needs a high finding behind it")
     chosen = f"redesign — {reason.strip()}"
     brief = brief_path(st, unit, decision["id"])  # written after the comment is posted: a refusal leaves no brief
   # the effect is the point's, never the option's wording: point 2's `stop`, point 3's `stop the unit`, a redesign.
