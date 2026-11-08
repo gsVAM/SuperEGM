@@ -7,7 +7,7 @@ import re
 
 import pytest
 
-from superegm.decision import binding_rulings, recorded_rulings, ruling_form, ruling_of
+from superegm.decision import binding_rulings, edited_after_record, recorded_rulings, ruling_form, ruling_of
 from superegm.launch_builder import prompt_text
 
 FORMS = [
@@ -205,3 +205,12 @@ def test_a_ruling_copied_from_another_issue_keeps_its_option():
   assert [r.comment_id for r in binding_rulings(comments, ["owner"], [], [])] == [4]
   text = prompt_text(2, "U01", "body", "orders", "orient", comments, [], None, "builder-bot", "audit", owners=["owner"], foreman={})
   assert re.findall(r"^## \S+ · comment (\d+)$", text.split("# Comments on issue #2\n\n", 1)[1], re.M) == ["4"]
+
+
+def test_a_session_record_older_than_its_post_is_not_an_edit():
+  """Round 13 (PR #96 review, codebase-details-12-2): a session ruling recorded before U22 holds the host's time from
+  before its post; the comment's own `created_at` bounds the edit check, so the unedited post is not an edit."""
+  entry = {"decision": "q1", "ruling": "stop", "by": "owner", "posted": "comment 4", "posted_at": "2026-11-03T10:00:00Z"}
+  posted = {"id": 4, "created_at": "2026-11-03T10:00:02Z", "updated_at": "2026-11-03T10:00:02Z"}
+  assert not edited_after_record(posted, entry)
+  assert edited_after_record(posted | {"updated_at": "2026-11-03T10:05:00Z"}, entry)

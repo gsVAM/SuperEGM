@@ -113,6 +113,11 @@ KINDS = [
   # round 8 (PR #96 review): a status line after a comment's `**Deviation**` headings is its status
   ("status after deviations", lambda gh, st, tmp: comment(gh, "**Deviation (dod):** item 3 is wrong\n**Builder status:** BLOCKED\n- (a) drop it"),
    ["U01 status word=BLOCKED comment=500 by=builder-bot"]),
+  # round 13 (PR #96 review, astra-12-1): a status line quoted below another comment's first line is not a status
+  ("status quoted in a later comment", lambda gh, st, tmp: (
+      comment(gh, "**Deviation (dod):** item 3 is wrong\n**Builder status:** BLOCKED\n- (a) drop it"),
+      comment(gh, "**Ruling:** (500) (a) drop it — ok\n```\n**Builder status:** BLOCKED\n```", login="passer-by", cid=501)),
+   ["U01 status word=BLOCKED comment=500 by=builder-bot"]),
   ("landed", lambda gh, st, tmp: (pr(gh, merged="2026-11-02T10:00:00Z"), closed(gh, 2, "gsvam", "completed")),
    ["U01 landed pr=70"]),
   ("closed pr by the builder", lambda gh, st, tmp: (pr(gh, "green"), gh.prs[70].update(state="CLOSED"),

@@ -939,6 +939,49 @@ def test_a_by_hand_redesign_naming_a_ruled_decision_is_dropped(world):
   assert f"ruling dropped (owner, comment 97): {q1} already ruled" in s.path("journal").read_text(encoding="utf-8")
 
 
+def test_a_by_hand_redesign_naming_one_decision_rules_every_pending_one(world, monkeypatch):
+  """Round 13 (PR #96 review, astra-12-3): a redesign with `--decision` rules every pending decision of the unit at
+  once, as without it (spec section 13.2), the named one first, so the brief is its."""
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "builder-token")
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "rounds": [{"round": 1, "phase": "posted", "outcome": "revise", "launch": 1}]})
+  set_config(world, repo=REPO, owners=["owner"])
+  q1 = world.run("decision", "open", "--unit", "U01", "--point", 3, "--question", question(world), "--source", "comment 77", "--runcard", card)[1].splitlines()[0]
+  fake_gh(world, {f"repos/{REPO}/issues/comments/98": {"id": 98, "user": {"login": "owner"}, "body": "**Ruling:** redesign — the queue is wrong\n",
+                                                        "created_at": "2026-11-03T10:00:00Z"}})
+  f = foreman_of(s, "U01")
+  f["decisions"].append({"id": "q2", "point": 2, "source": "review head-U01-c1 cap", "question": "cap\n", "options": ["one more round", "stop"]})
+  s.path("foreman", "U01").write_text(json.dumps(f), encoding="utf-8")
+  assert world.run("decision", "rule", "--unit", "U01", "--decision", "q2", "--ruling", "redesign", "--by", "owner", "--posted", "98",
+                   "--runcard", card) == (0, "recorded (comment 98)\n")
+  f = foreman_of(s, "U01")
+  assert [(r["decision"], r["posted"]) for r in f["rulings"]] == [("q2", "comment 98"), (q1, "comment 98")]
+  brief = s.path("foreman", "U01").with_name("U01-q2.brainstorm.md")
+  assert brief.is_file() and f["stopped"]["brief"] == str(brief) and len(list(brief.parent.glob("U01-*.brainstorm.md"))) == 1
+
+
+def test_a_session_post_is_unread_until_its_read_back(world, monkeypatch):
+  """Round 13 (PR #96 review, codebase-details-12-1): the record saved before the read-back marks the session's post
+  `unread`, so a `status --wait` pass in that window reads its unedited post as unedited; the read-back clears it."""
+  from superegm.status import ruling_facts
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})
+  set_config(world, repo=REPO, owners=["owner"])
+  fake_gh(world)
+  seen = []
+  def read_back(st, cid):
+    entry = foreman_of(s, "U01")["rulings"][-1]
+    posted = {"id": int(cid), "user": {"login": "owner"}, "body": "**Ruling:** stop", "created_at": "2099-01-01T00:00:00Z", "updated_at": "2099-01-01T00:00:00Z"}
+    seen.append((entry.get("unread"), ruling_facts(s, "U01", [posted], ["owner"])))
+    return {"created_at": "2099-01-01T00:00:00Z", "updated_at": "2099-01-01T00:00:00Z"}
+  monkeypatch.setattr("superegm.decision.read_back", read_back)
+  q = world.run("decision", "open", "--unit", "U01", "--point", 2, "--question", question(world, "cap\n"), "--source", "review head-U01-c1 cap", "--runcard", card)[1].splitlines()[0]
+  assert world.run("decision", "rule", "--unit", "U01", "--decision", q, "--ruling", "stop", "--by", "owner", "--runcard", card)[0] == 0
+  assert seen == [(True, [])]
+  entry = foreman_of(s, "U01")["rulings"][-1]
+  assert entry["posted_at"] == "2099-01-01T00:00:00Z" and "unread" not in entry
+
+
 def test_launch_marks_a_unit_whose_clean_outcome_an_ingest_rewrote(world, monkeypatch):
   s, card, hid, _ = filed(world, units=("U07", "U08"), max_in_flight=1)
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
@@ -1024,6 +1067,9 @@ def test_a_ruling_by_comment_continues_as_its_point_does(needle):
     # round 8 (PR #96 review): the whole-file allowance; who posts the judges' ruling; a run stopped after a record
     ("skills/wave/references/builder_orders.md", "`**Ruling:** test-delta <file> allowed — <reason>`"),
     ("skills/wave/references/builder_orders.md", "posted under the elephant's token after the record"),
-    ("skills/wave/SKILL.md", "a run stopped between a record and its continuation")])
+    ("skills/wave/SKILL.md", "a run stopped between a record and its continuation"),
+    # round 13 (PR #96 review, codebase-details-12-4): a label left on by a failed session stop comes off by hand
+    ("skills/wave/SKILL.md", "`<U> <qid>: label superegm:stopped left on issue #<n>`"),
+    ("skills/wave/SKILL.md", "--remove-label superegm:stopped")])
 def test_the_ruling_prose_names_how_a_ruling_is_applied_and_read(path, needle):
   assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
