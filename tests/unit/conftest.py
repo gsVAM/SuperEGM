@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's test world (the fake gh, the harness, the sample repository and plan) moved out of test_helper.py so every unit's tests share it; the sample plan in the section 9.1 grammar under an approval record (U05); the PR review threads and collaborator roles of the fake gh (U21); the one-comment route `issues/comments/<id>` (U22).
+# Modified by SuperEGM (gsVAM), 2026: EGM's test world (the fake gh, the harness, the sample repository and plan) moved out of test_helper.py so every unit's tests share it; the sample plan in the section 9.1 grammar under an approval record (U05); the PR review threads and collaborator roles of the fake gh (U21); the one-comment route `issues/comments/<id>`, `gh issue edit` taking a label off alone and adding a label the issue has once (U22).
 
 """The test world: a temporary repository, a store, the fake `gh` and the harness.
 
@@ -217,7 +217,8 @@ def approve(repo: Path, artifacts: Path) -> dict:
 
 
 class FakeGitHub:
-  """An in-process `gh` that keeps a small GitHub in memory and records calls."""
+  """An in-process `gh` that keeps a small GitHub in memory and records calls. `gh issue edit` adds a label
+  (refusing one the repository lacks, holding it once) and takes one off with `--remove-label`, alone or beside it."""
 
   def __init__(self, repo=REPO):
     self.repo = repo
@@ -306,8 +307,10 @@ class FakeGitHub:
         # The real gh refuses a label the repository does not have; a fake that
         # appends it hides exactly the bug this guards.
         return 1, "", f"could not add label: '{added}' not found (HTTP 422)"
-      issue["labels"] = [l for l in issue["labels"] if l != args[args.index("--remove-label") + 1]]
-      issue["labels"].append(added)
+      removed = args[args.index("--remove-label") + 1] if "--remove-label" in args else None
+      issue["labels"] = [l for l in issue["labels"] if l != removed]
+      if added not in issue["labels"]:  # GitHub adds a label the issue already has once
+        issue["labels"].append(added)
       return self.ok(text="")
     raise AssertionError(args)
 

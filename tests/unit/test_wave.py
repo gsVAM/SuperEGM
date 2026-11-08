@@ -37,7 +37,8 @@ def fake_gh(world, routes=None):
     if args[1] == "edit" and "--add-label" in args:
       label = args[args.index("--add-label") + 1]
       assert label in world.gh.labels, label
-      world.gh.issues[int(args[2])]["labels"].append(label)
+      labels = world.gh.issues[int(args[2])]["labels"]
+      labels.append(label) if label not in labels else None  # GitHub holds a label once
       return world.gh.ok(text="")
     if args[1] != "comment":
       return world.gh.do_issue(args)

@@ -78,7 +78,7 @@ is one `superegm: <reason>` line, exit 1.
 4. Rule every `pending:` item first, through its decision point below (the
    source names the point: `comment <id>`, `launch <n>` and `closed <n>` are
    point 3; `review <id> round <n>` is point 1; `review <id> cap` is point
-   2). Before asking a point-3 question, read the issue's comments
+   2). Before asking any of them, read the issue's comments
    (`GH_HOST=github.com gh api repos/<repo>/issues/<n>/comments --paginate`): an owner's
    `**Ruling:**` already posted binds once `decision rule --posted <comment id>` records it,
    as the `ruling` bullet says.

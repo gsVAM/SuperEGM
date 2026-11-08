@@ -125,8 +125,11 @@ def binding_rulings(comments: list, owners: list, recorded: list, decisions=None
   `stop the unit`), as `decision rule` would accept it. Given `pending` (the open decisions, `pending_decisions`),
   an unrecorded `one more round` or `stop` binds only while a point-2 decision is open and a `redesign` only while
   a head's (point 1 or 2) is: otherwise `decision rule` drops it, and at point 3 a redesign is text. Once a point-1
-  question exists, an unrecorded `finding upheld` binds only on a fid one asks about (`fid_decisions`), as `decision
-  rule` would record it: a typo's fid binds nothing."""
+  question exists, an unrecorded `finding upheld` binds only on a fid one asks about (`fid_decisions`, whose
+  fallback, the latest point-1 decision with no finding line, asks about any fid), as `decision rule` would record
+  it. Before any point-1 question an upheld fid binds as the landed `collect` read it, and a `finding overruled`
+  always binds: section 13.2 reads an overrule on a `tdd-order`, `test-delta` or `dod-<n>` fid that no decision asks
+  about as an allowance, which `collect` applies without a record."""
   recorded = list(recorded)
   point3 = [d for d in decisions or [] if d.get("point") == 3]
   point1 = any(d.get("point") == 1 for d in decisions or [])
@@ -158,8 +161,8 @@ def offered(r: "Ruling", comments: list, decisions: list) -> bool:
     options = decision.get("options") or []
   else:
     named = next((c for c in comments if str(c.get("id")) == r.subject), None)
-    if named is None:
-      return False
+    if named is None:  # a comment id this issue lacks: an interface ruling copied from its producer's issue (spec
+      return r.subject.isdigit()  # section 13.2), nothing here to check it against; a decision id it lacks binds nothing
     lines = [line[2:].strip() for line in (named.get("body") or "").splitlines() if line.startswith("- (")]
     if not lines:  # a comment with no option lines (a kind-`other` deviation): nothing to check the option against
       return True
@@ -396,9 +399,14 @@ def rule(args) -> int:
     brief = brief_path(st, unit, decision["id"])  # written after the comment is posted: a refusal leaves no brief
   # the effect is the point's, never the option's wording: point 2's `stop`, point 3's `stop the unit`, a redesign.
   # The label goes first, so a failed request records nothing and the same call reruns (round 9); a session post
-  # that then fails takes the label off again (round 10).
+  # that then fails takes off again only a label this call put on (rounds 10 and 11).
   stops = (decision["point"], chosen) in ((2, "stop"), (3, "stop the unit")) or brief
+  label = st.config["labels"]["stopped"]
+  had = False
   if stops:
+    if not (closed or found):  # a session post can fail after the label: know whether it was already on (the owner's close)
+      labels = core.gh_json(["issue", "view", str(number), "-R", st.config["repo"], "--json", "labels"]).get("labels") or []
+      had = any(l.get("name") == label for l in labels)
     label_stopped(st, number)
   posted_at, url = now, None
   if closed:
@@ -414,8 +422,11 @@ def rule(args) -> int:
     try:
       url = core.gh(["issue", "comment", str(number), "-R", st.config["repo"], "--body-file", path]).strip()
     except core.GhError:
-      if stops:  # nothing is recorded: the label comes off again, so the issue is not stopped and the call reruns
-        core.gh(["issue", "edit", str(number), "-R", st.config["repo"], "--remove-label", st.config["labels"]["stopped"]])
+      if stops and not had:  # nothing is recorded: the label this call put on comes off, so the call reruns
+        try:
+          core.gh(["issue", "edit", str(number), "-R", st.config["repo"], "--remove-label", label])
+        except core.GhError:  # the post's error is the one raised; the label left on is journaled
+          core.journal(st, f"{unit} {decision['id']}: label {label} left on issue #{number}")
       raise
     finally:
       os.unlink(path)
@@ -587,6 +598,8 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int, mode=None)
         raise Refusal(f"decision: comment {cid} rules {found.subject}, not a finding of {decision['id']}")
       if fid_ruled(foreman, found.subject, but=decision["id"]):
         dropped(store, args, f"{found.subject} already ruled")
+    if found.kind == "redesign" and decision["id"] not in {d["id"] for d in pending_decisions(foreman)}:
+      dropped(store, args, f"{decision['id']} already ruled")  # a redesign rules open decisions alone, as without --decision
     refuse_allowance(store, args, found, [decision], cid, mode)
     return comment, found, [decision]
   pending = pending_decisions(foreman)
