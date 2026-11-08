@@ -331,6 +331,47 @@ def test_splice_board_replaces_appends_or_keeps(body, block, expected):
   assert splice_board(expected, block) == expected
 
 
+@pytest.mark.parametrize("orphan", ["<!-- /superegm:board -->", "<!-- superegm:board -->"])
+def test_splice_board_appends_once_past_an_orphan_marker(orphan):
+  body = f"# Build\n\n{orphan}\nowner text\n"
+  first = splice_board(body, BLOCK)
+  assert first == body + "\n<!-- superegm:board -->\n" + BLOCK + "\n<!-- /superegm:board -->\n"
+  assert splice_board(first, LATER) == first
+  moved = splice_board(first, LATER.replace("| ready |", "| active |"))
+  assert moved.startswith(body) and "| U01 #2 | active |" in moved and moved.count("<!-- /superegm:board -->") == first.count("<!-- /superegm:board -->")
+
+
+def test_the_board_escapes_its_cells(world):
+  card = open_wave_card(world)
+  wave_store(world, U01={"pr": 70, "head": A, "ci": "green"})
+  code, out = world.run("report", "--runcard", card, "--idle", "U01=a | b\nc <!-- /superegm:board -->")
+  assert code == 0, out
+  board = out.split("\nidle: ")[0]
+  assert "| U01 #2 | idle | none | 1 running | aaaaaaa | #70 | none | a \\| b c &lt;!-- /superegm:board --> | none |" in board
+  assert "<!-- /superegm:board -->" not in board
+
+
+def test_a_unit_idle_on_ci_keeps_a_steady_board_row(world):
+  card = open_wave_card(world)
+  wave_store(world, U01={"pr": 70, "head": A, "ci": "pending"})
+  assert world.run("report", "--runcard", card)[0] == 0
+  world.advance(31 * 60)
+  first = world.run("report", "--runcard", card)[1]
+  world.advance(5 * 60)
+  later = world.run("report", "--runcard", card)[1]
+  row = "| U01 #2 | idle | none | 1 running | aaaaaaa | #70 | ci | ci pending (ci_wait_minutes 30) | none |"
+  assert row in first and row in later
+
+
+def test_a_plain_wave_status_pass_saves_the_board_change(world):
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"launched": False, "ready": True, "launches": []}, U02={"launched": False, "launches": []}, U03={"launched": False, "launches": []})
+  assert world.run("status", "--runcard", card)[0] == 0
+  edits = [c for c in world.gh.calls if c[:2] == ["issue", "edit"] and "--body-file" in c]
+  changed = json.loads(s.path("state").read_text(encoding="utf-8")).get("board_changed_at")
+  assert len(edits) == 1 and changed == world.ns["now_iso"]() and f" · changed {changed}\n" in world.gh.issues[1]["body"]
+
+
 def test_a_wave_status_pass_writes_the_board_once_and_only_on_change(world):
   card = open_wave_card(world)
   s = wave_store(world, U01={"launched": False, "ready": True, "launches": []}, U02={"launched": False, "launches": []}, U03={"launched": False, "launches": []})
