@@ -58,3 +58,28 @@ def test_ingest_pr_carries_an_unsettled_external_forward_and_settles_both(world,
   assert [(f["disposition"], f["ruling"]) for f in both] == [("declined", "owner")] * 2
   assert status(world, rid2, cid2)[0] == 0 and ingest(world, cid2)[0] == 0
   assert len(rjson(world, rid2, "round-1.json")["reviewers"][BOT]["findings"]) == 1      # settled: carried no more, never twice
+
+
+REVIEW = {"id": 13, "login": "alice", "bot": False, "body": "medium: the cap is unstated", "path": None, "line": None, "commit_id": "c" * 40, "review_body": True, "created_at": "2026-11-05T00:00:02Z"}
+
+def test_ingest_pr_replies_fixed_once_on_each_thread_settled_fixed(world, monkeypatch):
+  reader(monkeypatch, threads=THREADS + [REVIEW])
+  posted = []
+  def api(args, cwd, token=None):
+    endpoint = world.gh.endpoint_of(args)
+    if args[1:4] == ["-i", "-X", "POST"] and re.fullmatch(rf"repos/{REPO}/(pulls/7/comments/\d+/replies|issues/7/comments)", endpoint):
+      posted.append((endpoint, dict(a.split("=", 1) for a in args[args.index("-F") + 1::2])["body"], token))
+      return world.gh.ok(text="HTTP/2.0 201 Created\n\n" + json.dumps({"id": 90 + len(posted)}))
+    return world.gh.do_api(args)
+  world.gh.extend("api", api)
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [[]])
+  assert ingest(world, cid)[0] == 0 and posted == []
+  move(world, "spec", spec)
+  for fid, disposition in ((f"{BOT}-1-1", "fixed"), (f"{HUMAN}-1-1", "declined"), (f"{HUMAN}-1-2", "fixed")):
+    assert settle(world, rid, fid, disposition, cid)[0] == 0
+  assert ingest(world, cid)[0] == 0 and posted == [(f"repos/{REPO}/pulls/7/comments/11/replies", f"**Reply {BOT}-1-1:** fixed", None),
+                                                   (f"repos/{REPO}/issues/7/comments", f"**Reply {HUMAN}-1-2:** fixed", None)]   # the fixed threads alone, the review-body thread's reply a PR comment, under the session's own token
+  findings = rjson(world, rid, "round-1.json")["reviewers"]
+  assert [f.get("replied") for r in (BOT, HUMAN) for f in findings[r]["findings"]] == [91, None, 92]
+  assert ingest(world, cid)[0] == 0 and len(posted) == 2
