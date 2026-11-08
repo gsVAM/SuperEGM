@@ -456,6 +456,11 @@ CASES |= {  # round 4 (PR #96 review): a ruling binds from the unit's issue alon
 CASES |= {  # round 5 (PR #96 review): a recorded upheld ruling binds when its comment is gone (edited into prose or deleted)
   "recorded-upheld-comment-gone": ({"prior": True, "comments": {2: [c(16, "owner", "an aside")]}} | UPHELD_Q1,
                                    ["issue #2 comment 15 | regression: no | upheld change-review-1-1: no `fixed` reply"])}
+CONTESTED_TDD = TDD + "foreman-1-3 | high | pr #70 comment 14 | regression: no | contested foreman-1-2: an adopted history\n"
+CASES |= {  # round 8 (PR #96 review): a ruling on a contest's copy rules the finding it contests
+  "tdd-order-contest-overruled": ({"prior": True, "prior_foreman": CONTESTED_TDD,
+                                   "commits": [("feat(S1): hook", "src/hooks.py"), ("test(S1): hook", "tests/unit/test_hooks.py")],
+                                   "comments": {2: [c(15, "owner", "**Ruling:** foreman-1-3 finding overruled — an adopted history")]}}, [])}
 
 
 @pytest.mark.parametrize("name", list(CASES))

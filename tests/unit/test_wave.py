@@ -476,7 +476,7 @@ def test_the_owners_close_is_stop_without_a_question(world):
   assert "superegm:stopped" in world.gh.issues[2]["labels"] and 2 not in world.gh.comments
   assert "- U01 (owner: closed #70 by owner): unlanded dependants" in (world.run("report", "--runcard", card), s.path("wave_report", 1).read_text(encoding="utf-8"))[1]
   code, out = world.run("decision", "rule", "--unit", "U01", "--ruling", "stop the unit", "--by", "owner", "--runcard", card)
-  assert code == 1 and out == "decision: --decision is required unless --posted closed:<n>\n"
+  assert code == 1 and out == "decision: --decision is required unless --posted <comment id> or closed:<n>\n"
 
 
 # ---------------------------------------------------------------- S8: a re-typed wave resumes from the store
@@ -788,6 +788,52 @@ def test_a_finding_line_is_a_rows_or_a_question_headings_and_takes_an_external_f
   assert [r["decision"] for r in foreman_of(s, "U01")["rulings"]] == [q1, q1]
 
 
+def test_a_session_post_is_recorded_at_its_creation_so_any_edit_reads_as_one(world, monkeypatch):
+  """Round 8 (PR #96 review): the session's own post is recorded at GitHub's `created_at`, never its `updated_at`, so
+  an owner's edit between the record and the read-back still reads as an edit after the record."""
+  from superegm.status import ruling_facts
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})
+  set_config(world, repo=REPO, owners=["owner"])
+  fake_gh(world)
+  monkeypatch.setattr("superegm.decision.read_back", lambda st, cid: {"created_at": "2099-01-01T00:00:00Z", "updated_at": "2099-01-01T00:05:00Z"})
+  q = world.run("decision", "open", "--unit", "U01", "--point", 2, "--question", question(world, "cap\n"), "--source", "review head-U01-c1 cap", "--runcard", card)[1].splitlines()[0]
+  assert world.run("decision", "rule", "--unit", "U01", "--decision", q, "--ruling", "stop", "--by", "owner", "--runcard", card)[0] == 0
+  entry = foreman_of(s, "U01")["rulings"][-1]
+  assert entry["posted_at"] == "2099-01-01T00:00:00Z" and not entry.get("unread")
+  edited = {"id": int(entry["posted"].removeprefix("comment ")), "user": {"login": "owner"}, "body": "**Ruling:** one more round",
+            "created_at": "2099-01-01T00:00:00Z", "updated_at": "2099-01-01T00:05:00Z"}
+  assert [r.kind for r in ruling_facts(s, "U01", [edited], ["owner"])] == ["round"]
+
+
+def test_a_by_hand_option_names_one_decision_and_a_redesign_rules_every_pending_one(world, monkeypatch):
+  """Round 8 (PR #96 review): a point-3 option names a decision opened on a comment by the comment's id alone, with or
+  without `--decision`; a `redesign` with no `--decision` rules every pending decision, one entry each, one brief (the
+  first decision's)."""
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "builder-token")
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "rounds": [{"round": 1, "phase": "posted", "outcome": "revise", "launch": 1}]})
+  set_config(world, repo=REPO, owners=["owner"])
+  q1 = world.run("decision", "open", "--unit", "U01", "--point", 3, "--question", question(world), "--source", "comment 77", "--runcard", card)[1].splitlines()[0]
+  fake_gh(world, {f"repos/{REPO}/issues/comments/{cid}": {"id": cid, "user": {"login": "owner"}, "body": body, "created_at": "2026-11-03T10:00:00Z"}
+                  for cid, body in ((93, f"**Ruling:** ({q1}) (b) use Redis — fine\n"), (94, "**Ruling:** redesign — the queue is wrong\n"))})
+  rule = lambda posted, ruling, *d: world.run("decision", "rule", "--unit", "U01", *d, "--ruling", ruling, "--by", "owner", "--posted", posted, "--runcard", card)
+  assert rule("93", "(b)") == (1, "decision: comment 93 does not name an open decision\n")
+  assert rule("93", "(b)", "--decision", q1) == (1, "decision: comment 93 does not name comment 77\n")
+  f = foreman_of(s, "U01")  # `decision open` opens one at a time; a record may hold more pending (a cap beside a point-3)
+  q2 = "q2"
+  f["decisions"].append({"id": q2, "point": 2, "source": "review head-U01-c1 cap", "question": "cap\n",
+                        "options": ["one more round", "stop"]})
+  s.path("foreman", "U01").write_text(json.dumps(f), encoding="utf-8")
+  assert rule("94", "redesign") == (0, "recorded (comment 94)\n")
+  f = foreman_of(s, "U01")
+  assert [(r["decision"], r["posted"]) for r in f["rulings"]] == [(q1, "comment 94"), (q2, "comment 94")]
+  brief = s.path("foreman", "U01").with_name(f"U01-{q1}.brainstorm.md")
+  assert brief.is_file() and f["stopped"]["brief"] == str(brief) and len(list(brief.parent.glob("U01-*.brainstorm.md"))) == 1
+  journal = s.path("journal").read_text(encoding="utf-8")
+  assert all(f"Ruling (owner, comment 94): U01 {q} redesign — the queue is wrong" in journal for q in (q1, q2))
+
+
 def test_launch_marks_a_unit_whose_clean_outcome_an_ingest_rewrote(world, monkeypatch):
   s, card, hid, _ = filed(world, units=("U07", "U08"), max_in_flight=1)
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
@@ -867,6 +913,10 @@ def test_a_ruling_by_comment_continues_as_its_point_does(needle):
     # round 7 (PR #96 review): the finding lines `decision rule` reads; entry step 4 reads a posted ruling through the record
     ("skills/wave/SKILL.md", "each finding on a line of its own starting `<fid> |` or `## Q<n> <fid> (`"),
     ("skills/wave/SKILL.md", "binds once `decision rule --posted <comment id>` records it"),
-    ("skills/wave/references/builder_orders.md", "(as recorded by <by>; the comment is in no ruling form)")])
+    ("skills/wave/references/builder_orders.md", "(as recorded by <by>; the comment is in no ruling form)"),
+    # round 8 (PR #96 review): the whole-file allowance; who posts the judges' ruling; a run stopped after a record
+    ("skills/wave/references/builder_orders.md", "`**Ruling:** test-delta <file> allowed — <reason>`"),
+    ("skills/wave/references/builder_orders.md", "posted under the elephant's token after the record"),
+    ("skills/wave/SKILL.md", "a run stopped between a record and its continuation")])
 def test_the_ruling_prose_names_how_a_ruling_is_applied_and_read(path, needle):
   assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
