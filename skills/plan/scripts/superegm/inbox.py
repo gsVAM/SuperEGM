@@ -7,6 +7,8 @@ store's open handoffs, read-only and with no run card; superegm notify --runcard
 
 import calendar
 import json
+import os
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -64,7 +66,11 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict) 
   out = []
   number = (state["units"].get(uid) or {}).get("number")
   on_issue = f" on {GITHUB}/{repo}/issues/{number}"
-  for d in report.pending_decisions(foreman):
+  ruled_of = lambda did: {r["ruling"].partition(" — ")[0].strip().split(" ")[0]
+                          for r in foreman.get("rulings") or [] if r.get("decision") == did}
+  # point 1 takes one ruling per contested finding (decision.rule): its decision stays open for the fids no
+  # ruling names yet, where `pending_decisions` drops it at its first ruling
+  for d in [d for d in foreman.get("decisions") or [] if d.get("point") == 1 or d in report.pending_decisions(foreman)]:
     point, did = d.get("point"), d["id"]
     if point == 2:
       out.append(item(repo, uid, "cap", ruling_form(2, "one more round | stop | redesign") + on_issue, did))
@@ -81,19 +87,20 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict) 
         continue
       rnd = review.load_round(hs, rid, n) or {}
       fids = review.contested_fids(rnd) or [c["fid"] for c in rnd.get("builder_contested") or []]
+      ruled = ruled_of(did)
       out += [item(repo, uid, "contested", ruling_form(1, fid, "finding upheld | finding overruled") + on_issue,
-                   f"{did}/{fid}") for fid in fids]
+                   f"{did}/{fid}") for fid in fids if fid not in ruled]
   entry = latest_posted(foreman)
   if entry:
     n, rid = entry["round"], review.head_review_id(hs, uid)
     rnd = (review.load_round(hs, rid, n) if rid else None) or {}
-    for f in ((rnd.get("reviewers") or {}).get("foreman") or {}).get("findings") or []:
-      if f["disposition"] is None and f["claim"].startswith("test-delta"):
-        out.append(item(repo, uid, "test-delta", ruling_form(1, f["id"], "allowed") + on_issue, f"{n}/{f['id']}"))
+    deltas = [f["id"] for f in ((rnd.get("reviewers") or {}).get("foreman") or {}).get("findings") or []
+              if f["disposition"] is None and f["claim"].startswith("test-delta")]
+    out += [item(repo, uid, "test-delta", ruling_form(1, fid, "allowed") + on_issue, f"{n}/{fid}") for fid in deltas]
     outcome = entry.get("outcome") or ""
-    if outcome.startswith("owner: "):
+    if outcome.startswith("owner: "):  # a finding the test-delta line names already is one line, not two
       out += [item(repo, uid, "owner", ruling_form(1, fid, "allowed") + on_issue, f"{n}/{fid}")
-              for fid in (x.strip() for x in outcome.removeprefix("owner: ").split(",")) if fid]
+              for fid in (x.strip() for x in outcome.removeprefix("owner: ").split(",")) if fid and fid not in deltas]
   if latest_clean(foreman, load_launches(hs, uid)):
     pr = report.unit_view(state, uid)["pr"] or ((state["units"].get(uid) or {}).get("pr") or {}).get("number")
     rounds = foreman.get("rounds") or []
@@ -128,12 +135,14 @@ def review_items(hs: core.Store, repo: str, spec: str, rid: str, rev: dict, fore
   return out
 
 
-def wave_items(hs: core.Store, repo: str) -> list:
+def wave_items(hs: core.Store, repo: str, hid: str) -> list:
   """The handoff's open top-level `wave` card, as information, with its age in minutes."""
   folder = (hs.root if hs.legacy else hs.base()) / "runcards"
   out = []
   for path in sorted(folder.glob("*.json")):
     card = json.loads(core.read_text(path))
+    if card.get("handoff", hid) != hid:
+      continue
     if card.get("skill") == "wave" and not card.get("parent") and not card.get("closed_at") and not card.get("interrupted_at"):
       opened = calendar.timegm(time.strptime(card["opened_at"], "%Y-%m-%dT%H:%M:%SZ"))
       minutes = int((core.NOW() - opened) // 60)
@@ -146,17 +155,13 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
   """What needs the owner across the handoffs `handoff_ids` (spec section 11.2), one dict per item: `repo`,
   `subject`, `kind`, `action`, `fingerprint`; ordered by handoff id, subject, then kind, the `wave` card last."""
   repo, rows = store.config["repo"], {r["id"]: r for r in core.handoffs(store.root)}
-  out, root_specs = [], True
+  out, root_specs, seen = [], True, set()
   for hid in sorted(handoff_ids):
     hs, spec = core.handoff_store(store, hid), (rows.get(hid) or {}).get("spec")
     state = approve_spec.handoff_state(store, hid)
-    found = []
-    entries = core.load_approvals(hs, Path(spec)) if spec else []
-    for ref in (entries[-1].get("escalated") or []) if entries else []:
-      rid, _, fid = ref.partition(":")
-      found.append(item(repo, rid, "escalated", f"/superegm:plan {spec}", fid))
     units = state.get("units") or {}
     foremen = {uid: core.load_foreman(hs, uid) for uid in units}
+    found = escalations(hs, repo, hid, spec, foremen)
     live = set()
     for uid, foreman in foremen.items():
       stopped = foreman.get("stopped")
@@ -176,7 +181,33 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
         found += review_items(hs, repo, spec, path.name, rev, foremen)
       root_specs = False
     found.sort(key=lambda i: (i["subject"], KINDS.index(i["kind"])))
-    out += found + wave_items(hs, repo)
+    out += [i for i in found if i["fingerprint"] not in seen] + wave_items(hs, repo, hid)
+    seen |= {i["fingerprint"] for i in found}
+  return out
+
+
+def escalations(hs: core.Store, repo: str, hid: str, spec, foremen: dict) -> list:
+  """The `escalated[]` pairs of the latest approval entry the handoff owns (the spec's latest when no entry names
+  a handoff) that the owner has not handled: a pair the spec's `## Units` section names, or a unit's decision
+  carries in its question, is handled (graph's reading of the same list)."""
+  entries = core.load_approvals(hs, Path(spec)) if spec else []
+  owned = [e for e in entries if e.get("handoff_id") == hid]
+  if not owned and not any(e.get("handoff_id") for e in entries):
+    owned = entries[-1:]
+  pairs = (owned[-1].get("escalated") or []) if owned else []
+  if not pairs:
+    return []
+  try:
+    named = approve_spec.units_section(core.read_text(Path(spec)))
+  except OSError:
+    named = ""
+  asked = [d.get("question") or "" for f in foremen.values() for d in f.get("decisions") or []]
+  out = []
+  for pair in pairs:
+    if pair in named or any(pair in q for q in asked):
+      continue
+    rid, _, fid = pair.partition(":")
+    out.append(item(repo, rid, "escalated", f"/superegm:plan {spec}", fid))
   return out
 
 
@@ -218,7 +249,7 @@ def run(args):
     return 0
   card = core.require_runcard(args, SKILLS)
   st = core.STORE
-  items = inbox_items(st, [card.get("handoff_id") or st.handoff_id])
+  items = inbox_items(st, [card.get("handoff") or st.handoff_id])
   new = notify_lines(st, card, items)
   if new:
     word = run_hook("".join(line_of(i) + "\n" for i in new), st.config)  # a failing or slow hook never stops the wave
@@ -231,7 +262,7 @@ def run(args):
 
 def notify_lines(store: core.Store, card: dict, items=None) -> list:
   """The `inbox_items` of the card's handoff whose `fingerprint` its `state.json.notified` lacks."""
-  hid = card.get("handoff_id") or store.handoff_id
+  hid = card.get("handoff") or store.handoff_id
   if items is None:
     items = inbox_items(store, [hid])
   seen = set(approve_spec.handoff_state(store, hid).get("notified") or [])
@@ -243,11 +274,26 @@ def run_hook(text: str, config: dict) -> str:
   hook = Path.home() / ".superegm" / "notify"
   if not hook.is_file():
     return "no hook"
-  try:
-    done = subprocess.run([str(hook)], input=text, capture_output=True, text=True,
-                          timeout=config.get("notify_timeout_seconds", 30))
-  except subprocess.TimeoutExpired:
-    return "hook timeout"
+  try:  # its own process group, so the timeout ends whatever the hook started; its output is bytes, never decoded
+    proc = subprocess.Popen([str(hook)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            start_new_session=True)
   except OSError as exc:
     return f"hook failed: {exc.strerror}"
-  return f"hook exit {done.returncode}"
+  try:
+    proc.communicate(text.encode("utf-8"), timeout=config.get("notify_timeout_seconds", 30))
+  except subprocess.TimeoutExpired:
+    kill_group(proc)
+    return "hook timeout"
+  except OSError as exc:
+    kill_group(proc)
+    return f"hook failed: {exc.strerror}"
+  return f"hook exit {proc.returncode}"
+
+
+def kill_group(proc) -> None:
+  """SIGKILL the hook's process group (its leader may be gone already), then reap the hook."""
+  try:
+    os.killpg(proc.pid, signal.SIGKILL)
+  except (ProcessLookupError, PermissionError):
+    pass
+  proc.communicate()

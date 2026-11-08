@@ -146,11 +146,11 @@ ignored except `landed`:
    `python3 '<HELPER>' record-launch --unit <U> --runcard '<CARD>'`. A
    `launch-builder` refusal makes the unit idle for this invocation:
    `python3 '<HELPER>' report --idle '<U>=launch-builder: <reason>' --runcard '<CARD>'`.
-7. `superegm report`: `python3 '<HELPER>' report --runcard '<CARD>'`. If a
+7. `superegm report`: `python3 '<HELPER>' report --runcard '<CARD>'`, then `python3 '<HELPER>' notify --runcard '<CARD>'`
+   (the owner's `~/.superegm/notify` hook gets the inbox lines new since the last notify; a failing or slow hook never stops the wave). If a
    decision was opened this batch, pause: ask the owner at its decision
    point and run `report` again once ruled. Else `loop: ended` → The end;
-   otherwise the next batch. After this `report`, run `python3 '<HELPER>' notify --runcard '<CARD>'`:
-   the owner's `~/.superegm/notify` hook gets the inbox lines new since the last notify; a failing or slow hook never stops the wave.
+   otherwise the next batch.
 
 `report` derives each launched unit's state with `unit_state`, one of six:
 `landed`, `stopped`, `pending`, `idle`, `clean`, else `active`; only an

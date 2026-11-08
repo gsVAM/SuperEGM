@@ -761,7 +761,7 @@ def load_config(repo_root: Path) -> dict:
     if isinstance(config[key], bool) or not isinstance(config[key], int) or config[key] < 1:
       raise HandoffError(f"{path}: {key} must be a positive integer")
   timeout = config["notify_timeout_seconds"]
-  if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
+  if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0 < timeout < float("inf"):
     raise HandoffError(f"{path}: notify_timeout_seconds must be a positive number")
   if not isinstance(config["commit_trailer"], str):
     raise HandoffError(f"{path}: commit_trailer must be a string")
