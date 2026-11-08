@@ -591,6 +591,23 @@ def test_a_judges_redesign_needs_a_high_finding_behind_it(world, by, severity, c
     assert result[0] == 0 and f["stopped"]["reason"] == "redesign — why" and f["stopped"]["by"] == by
 
 
+@pytest.mark.parametrize("rounds, disposition, source, behind", [
+  ([{"round": 1, "phase": "posted", "outcome": "revise", "launch": 1}], None, "review head-U01-c1 cap", True),
+  ([{"round": 1, "phase": "posted", "outcome": "revise", "launch": 1}], "fixed", "review head-U01-c1 cap", False),
+  ([], None, "review head-U01-c1 cap", False),
+  ([{"round": 1, "phase": "posted", "outcome": "revise", "launch": 1}], None, "review", False)])
+def test_high_behind_reads_the_latest_posted_rounds_unsettled_highs(world, rounds, disposition, source, behind):
+  """Round 2 (change-review-1-4): a settled high, no posted round and a source naming no review leave nothing behind."""
+  from superegm.decision import high_behind
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "rounds": rounds})
+  atomic_write(s.path("reviews", "head-U01-c1", "review.json"), REVIEW | {"runcard": card})
+  findings = [{**f, "disposition": disposition} for f in parse_findings(FINDING, "change-review", 1)]
+  atomic_write(s.path("reviews", "head-U01-c1", "round-1.json"), {"round": 1, "runcard": card, "artifact_sha256": "a" * 40, "what_ran": "completed",
+                                                                 "reviewers": {"change-review": {"findings": findings}}})
+  assert high_behind(s, "U01", source) is behind
+
+
 def test_the_report_names_a_redesign_units_brief(world):
   card = open_wave_card(world)
   s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"}, U02={"launched": False})

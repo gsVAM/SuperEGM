@@ -5,13 +5,16 @@
 Fixtures: conftest's `world`; `wave_store` and `open_wave_card` from test_wave.py."""
 
 import json
+import os
+import time
+from pathlib import Path
 
 import pytest
 
 from conftest import REPO, set_config
 from superegm import atomic_write
 from superegm.decision import ruling_form
-from superegm.inbox import inbox_items
+from superegm.inbox import inbox_items, notify_lines
 from superegm.review import parse_findings
 from test_wave import open_wave_card, wave_store
 
@@ -114,3 +117,86 @@ def test_notify_runs_the_hook_once_with_the_new_lines(world, tmp_path, monkeypat
   assert notified() == sorted(["U01/decision/q1", card]) and f"notify: {journal} (2 new)" in s.path("journal").read_text(encoding="utf-8")
   got.exists() and got.unlink()
   assert world.run("notify", "--runcard", card) == (0, "") and not got.exists() and notified() == sorted(["U01/decision/q1", card])
+
+
+def test_a_point_1_decision_lists_each_finding_until_its_own_ruling(world):
+  """Round 2 (astra-1-1): point 1 takes one ruling per contested finding, so a ruled fid leaves and the other stays."""
+  card = open_wave_card(world)
+  s = seed(world, **U(decisions=D(1, "review head-U01-c1 round 1"), rulings=[{"decision": "q1", "ruling": "foreman-1-1 finding upheld — r"}],
+                      rounds=POSTED(), reviews=HEAD(1, F("high", "medium"), builder_contested=[{"fid": f"foreman-1-{i}", "reason": "r"} for i in (1, 2)])))
+  assert [i["fingerprint"] for i in inbox_items(s, [s.handoff_id])] == ["U01/contested/q1/foreman-1-2", card]
+
+
+def test_a_test_delta_finding_the_outcome_also_names_is_one_line(world):
+  """Round 2 (astra-1-5): one finding, one line, whether `test-delta` or `owner: <ids>` names it."""
+  card = open_wave_card(world)
+  s = seed(world, **U(rounds=POSTED(1, "owner: foreman-1-1, foreman-1-2"),
+                      reviews=HEAD(1, [{**F("high")[0], "claim": "test-delta: tests/test_x.py:3 removed"}])))
+  assert [(i["kind"], i["fingerprint"]) for i in inbox_items(s, [s.handoff_id])] == \
+      [("test-delta", "U01/test-delta/1/foreman-1-1"), ("owner", "U01/owner/1/foreman-1-2"), ("wave", card)]
+
+
+def test_an_escalation_is_its_own_handoffs_once_and_leaves_once_handled(world):
+  """Round 2 (astra-1-6, astra-1-7): two open handoffs of one spec list the approval's escalation once, under the
+  handoff the entry names; a pair the spec's `## Units` names, or a unit's decision carries, is handled."""
+  open_wave_card(world)
+  s = seed(world, escalated=["spec-sample-c1:design-1-1"], **U(decisions=D(3, "comment 77")))
+  atomic_write(s.path("handoffs", "sample-ffffff"), {"id": "sample-ffffff", "spec": str(world.spec), "opened_at": "t", "closed_at": None})
+  esc = lambda: [(i["subject"], i["kind"]) for i in inbox_items(s, sorted([s.handoff_id, "sample-ffffff"])) if i["kind"] == "escalated"]
+  assert esc() == [("spec-sample-c1", "escalated")]
+  foreman = json.loads(s.path("foreman", "U01").read_text(encoding="utf-8"))
+  atomic_write(s.path("foreman", "U01"), foreman | {"decisions": D(3, "comment 77", question="spec-sample-c1:design-1-1: the claim")})
+  assert esc() == []
+  atomic_write(s.path("foreman", "U01"), foreman)
+  world.spec.write_text(world.spec.read_text(encoding="utf-8") + "\n## Units\n\n| U01 | spec-sample-c1:design-1-1 |\n", encoding="utf-8")
+  assert esc() == []
+
+
+def test_inbox_handoff_reads_the_named_handoff_alone(world):
+  """Round 2 (change-review-1-1): `--handoff` names one handoff of the index; an unknown id is refused."""
+  open_wave_card(world)
+  s = seed(world, **U(decisions=D(3, "comment 77")))
+  atomic_write(s.path("handoffs", "sample-ffffff"), {"id": "sample-ffffff", "spec": str(world.spec), "opened_at": "t", "closed_at": None})
+  assert world.run("inbox", "--handoff", "sample-ffffff") == (0, "")
+  assert f"{REPO} U01 | decision | " in world.run("inbox", "--handoff", s.handoff_id)[1]
+  code, out = world.run("inbox", "--handoff", "sample-000000")
+  assert code == 1 and "store: sample-000000: no such handoff" in out
+
+
+def test_notify_lines_reads_the_cards_handoff(world):
+  """Round 2 (astra-1-2): the card's `handoff`, the key `runcard open` writes, chooses the handoff."""
+  open_wave_card(world)
+  s = seed(world, **U(decisions=D(3, "comment 77")))
+  atomic_write(s.path("handoffs", "sample-ffffff"), {"id": "sample-ffffff", "spec": str(world.spec), "opened_at": "t", "closed_at": None})
+  assert [i["subject"] for i in notify_lines(s, {"handoff": "sample-ffffff"})] == []
+  assert "U01" in [i["subject"] for i in notify_lines(s, {"handoff": s.handoff_id})]
+
+
+def alive(pid: int) -> bool:
+  try:
+    os.kill(pid, 0)
+  except ProcessLookupError:
+    return False
+  return True
+
+
+@pytest.mark.parametrize("hook, journal", [("printf '\\377'", "hook exit 0"), ('sleep 30 & echo $! > "$0.pid"; wait', "hook timeout")])
+def test_a_hook_that_writes_bytes_or_leaves_a_child_never_stops_notify(world, tmp_path, monkeypatch, hook, journal):
+  """Round 2 (astra-1-3, astra-1-4): undecodable output is never decoded; the timeout ends the hook's process group."""
+  monkeypatch.setenv("HOME", str(tmp_path / "home"))
+  script = tmp_path / "home/.superegm/notify"
+  script.parent.mkdir(parents=True)
+  script.write_text(f"#!/bin/sh\ncat > /dev/null\n{hook}\n", encoding="utf-8")
+  script.chmod(0o755)
+  set_config(world, repo=REPO, notify_timeout_seconds=1)
+  card = open_wave_card(world)
+  s = seed(world, **U(decisions=D(3, "comment 77")))
+  assert world.run("notify", "--runcard", card) == (0, "")
+  assert f"notify: {journal} (2 new)" in s.path("journal").read_text(encoding="utf-8")
+  assert "notified" in json.loads(s.path("state").read_text(encoding="utf-8"))
+  pidfile = Path(f"{script}.pid")
+  if pidfile.exists():
+    pid, deadline = int(pidfile.read_text(encoding="utf-8").strip()), time.time() + 3
+    while time.time() < deadline and alive(pid):
+      time.sleep(0.05)
+    assert not alive(pid)
