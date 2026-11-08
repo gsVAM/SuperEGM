@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21).
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
@@ -100,6 +100,7 @@ DEFAULT_CONFIG = {
     "pr_block_file": None,  # a path relative to the repository root whose text every builder PR body carries
     "ingest": {"severity_words": {"bug": "high", "issue": "medium", "nit": "low", "suggestion": "low"},
                "human_role": "write"},  # `review ingest`: a thread's word map and the role a human's thread counts from
+    "notify_timeout_seconds": 30,  # how long `notify` waits on the owner's ~/.superegm/notify hook (spec section 11.2)
 }
 
 DEFAULT_TEMPLATE = """<!-- superegm:handoff={{handoff_id}} unit={{unit_id}} spec={{spec_sha256}} -->
@@ -759,6 +760,9 @@ def load_config(repo_root: Path) -> dict:
   for key in ("max_in_flight", "ci_wait_minutes"):
     if isinstance(config[key], bool) or not isinstance(config[key], int) or config[key] < 1:
       raise HandoffError(f"{path}: {key} must be a positive integer")
+  timeout = config["notify_timeout_seconds"]
+  if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
+    raise HandoffError(f"{path}: notify_timeout_seconds must be a positive number")
   if not isinstance(config["commit_trailer"], str):
     raise HandoffError(f"{path}: commit_trailer must be a string")
   # shortcut: the nested keys of reviewers/judges/builder are not validated here, the unit that
@@ -1878,7 +1882,7 @@ def run_terminated(folder) -> bool:
 SUBCOMMANDS = ("init", "runcard", "approve_spec", "graph", "scan", "review", "gate", "dry_run", "apply",
                "verify", "status", "launch", "launch_builder", "record_launch", "foreman", "prepare",
                "collect", "tdd_order", "decide", "decision", "interrupt", "clean", "report", "close", "judges",
-               "review_plan", "orient", "doctor", "builder_token")
+               "review_plan", "orient", "doctor", "builder_token", "inbox")
 
 
 def add_parser(subparsers, name, help_text, *, runcard=True):
