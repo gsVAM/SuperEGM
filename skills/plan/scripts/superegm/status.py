@@ -139,8 +139,9 @@ def closed_facts(repo: str, issue: dict, pr, landed: bool) -> list:
 
 def ruling_facts(store, uid: str, comments: list, owners) -> list:
   """One `Ruling` per comment of an owner `ruling_of` parses (spec section 13.2); a comment the unit's `rulings[]`
-  names as `posted` is skipped unless its `updated_at` is later than that entry's `posted_at` (the comment's
-  `updated_at` when recorded, else its `created_at`), so an unedited recorded post is no event and an owner's edit of it is one.
+  names as `posted` is skipped unless its `updated_at` is later than that entry's `posted_at` (a by-hand `--posted`
+  record's: the comment's `updated_at` when recorded, else its `created_at`; a session post's: its `created_at`, read
+  back, so any edit of it since its creation is one), so an unedited recorded post is no event and an owner's edit of it is one.
   For an `unread` entry (the session's own post whose GitHub time was never read back, `posted_at` the host's) the edit
   is an `updated_at` later than the comment's own `created_at` (`decision.edited_after_record`)."""
   posted = {}

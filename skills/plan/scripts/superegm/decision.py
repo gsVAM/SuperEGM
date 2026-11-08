@@ -319,11 +319,19 @@ def options_for(point: int, source: str, question: str, foreman: dict, head: str
 def stop_unit(store, uid: str, by: str, reason: str, number: int, now_iso: str, brief=None) -> None:
   """Label the issue `superegm:stopped`, write `foreman["stopped"]` (with `brief`, the redesign brief's path,
   when there is one), journal (spec section 11)."""
-  core.gh(["issue", "edit", str(number), "-R", store.config["repo"], "--add-label", store.config["labels"]["stopped"]])
+  label_stopped(store, number)
   data = core.load_foreman(store, uid)
-  data["stopped"] = {"by": by, "reason": reason, "at": now_iso} | ({"brief": str(brief)} if brief else {})
+  data["stopped"] = stopped_entry(by, reason, now_iso, brief)
   core.save_foreman(store, uid, data)
   core.journal(store, f"{uid} stopped by {by}: {reason}")
+
+
+def label_stopped(store, number: int) -> None:
+  core.gh(["issue", "edit", str(number), "-R", store.config["repo"], "--add-label", store.config["labels"]["stopped"]])
+
+
+def stopped_entry(by: str, reason: str, now_iso: str, brief=None) -> dict:
+  return {"by": by, "reason": reason, "at": now_iso} | ({"brief": str(brief)} if brief else {})
 
 
 def rule(args) -> int:
@@ -380,6 +388,11 @@ def rule(args) -> int:
       raise Refusal("decision: redesign needs — <one sentence why>")
     chosen = f"redesign — {reason.strip()}"
     brief = brief_path(st, unit, decision["id"])  # written after the comment is posted: a refusal leaves no brief
+  # the effect is the point's, never the option's wording: point 2's `stop`, point 3's `stop the unit`, a redesign.
+  # The label goes first, so a failed request records nothing and the comment replays (round 9).
+  stops = (decision["point"], chosen) in ((2, "stop"), (3, "stop the unit")) or brief
+  if stops:
+    label_stopped(st, number)
   posted_at, url = now, None
   if closed:
     posted = f"closed #{closed}"
@@ -402,6 +415,8 @@ def rule(args) -> int:
   entries = [{"decision": d["id"], "ruling": args.ruling, "by": args.by,
               "reason": reason.strip() or None, "posted": posted, "posted_at": posted_at} for d in decisions]
   data["rulings"] += entries
+  if stops:  # the stop is written with the ruling, in one save
+    data["stopped"] = stopped_entry(args.by, chosen, now, brief)
   core.save_foreman(st, unit, data)  # recorded before the read-back: `status --wait` skips the session's own post
   if url:  # the session's own post: its time is GitHub's creation time, read back, so any edit since (one before the
     # read-back too) reads as an edit after the record; unread, the host's `now` is marked `unread`
@@ -417,9 +432,8 @@ def rule(args) -> int:
       who = f"judges {args.by[7:]}, leavemealone" if args.by.startswith("judges:") else args.by
       typed = args.ruling + (f" — {reason}" if reason and " — " not in args.ruling else "")  # a defaulted reason
       core.journal(st, f"Ruling ({who}): {unit} {d['id']} {typed}")
-  # the effect is the point's, never the option's wording: point 2's `stop`, point 3's `stop the unit`, a redesign
-  if (decision["point"], chosen) in ((2, "stop"), (3, "stop the unit")) or brief:
-    stop_unit(st, unit, args.by, chosen, number, now, brief)
+  if stops:
+    core.journal(st, f"{unit} stopped by {args.by}: {chosen}")
   print(url or f"recorded ({posted})")
   return 0
 
@@ -435,7 +449,8 @@ def dropped(store, args, reason: str):
 
 
 def read_back(store, comment_id) -> dict:
-  """The comment by its id (its `updated_at`, else `created_at`, is the record's `posted_at`); {} when GitHub does not return it."""
+  """The comment by its id (`rule` stores a session post's `created_at` as the record's `posted_at`, and marks the
+  entry `unread: true` when it is missing); {} when GitHub does not return it."""
   try:
     return core.gh_json(["api", f"repos/{store.config['repo']}/issues/comments/{comment_id}"]) or {}
   except core.GhError:

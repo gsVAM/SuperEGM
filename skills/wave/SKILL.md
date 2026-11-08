@@ -269,7 +269,7 @@ Leavemealone-mode: U11 wires §13.2 here.
   `tdd-order` one; a `dod-<n>` or `test-delta` one the owner weighs.
   Nothing is posted; the journal says `ruling edited after record, ignored`
   for a recorded comment re-read, and `ruling dropped (<by>, comment <id>): …`
-  for one naming no open decision or an already ruled one, or a refused allowance; take either as the fact it states, and
+  for one naming no open decision or an already ruled one, or a refused allowance (not one refused with `no open decision names it`); take either as the fact it states, and
   run nothing else for it. For a run stopped between a record and its continuation, the
   journal's `Ruling (…)` line with no continuation after it is the step to finish.
 - A stopped unit keeps its branch and its open issue, is never dispatched or

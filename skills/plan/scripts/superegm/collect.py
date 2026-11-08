@@ -158,8 +158,9 @@ def parse_comments(text: str) -> tuple:
 
 
 def recorded_times(foreman: dict) -> dict:
-  """Each recorded ruling's comment id to its entry's `posted_at` (the comment as recorded)."""
-  return {int(cid): e.get("posted_at") or "" for e in foreman.get("rulings") or []
+  """Each recorded ruling's comment id to its entry's `posted_at` (the comment as recorded); "" for an `unread`
+  entry, whose `posted_at` is the host's clock, not GitHub's, so the comment's own creation time stands."""
+  return {int(cid): "" if e.get("unread") else e.get("posted_at") or "" for e in foreman.get("rulings") or []
           if (cid := str(e.get("posted") or "").removeprefix("comment ")).isdigit()}
 
 
