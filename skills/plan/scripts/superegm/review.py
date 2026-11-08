@@ -85,7 +85,9 @@ def register(subparsers):
   v.add_argument("--round", type=int, required=True)
   v.add_argument("--dispatch", required=True, help="the dispatch id `foreman dispatch` printed")
   i = core.add_parser(action, "ingest", "record a unit's PR review threads as external findings into its latest posted round")
-  i.add_argument("--unit", required=True)
+  which = i.add_mutually_exclusive_group(required=True)
+  which.add_argument("--unit")
+  which.add_argument("--pr", type=int, help="the spec PR: its threads into the latest round of the spec's latest cycle")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -982,6 +984,8 @@ def ingest(args) -> int:
   is the host's clock, `posted_at` GitHub's: a host clock behind GitHub's delays the stop)."""
   from superegm.launch import app_login  # lazily: launch imports this module
   st = core.store(core.git_toplevel(Path.cwd()))
+  if getattr(args, "pr", None) is not None:
+    return ingest_spec_pr(args, st)
   card = core.require_runcard(args, SKILLS)
   unit, config = args.unit, st.config
   wave = card.get("parent") or args.runcard
@@ -1155,6 +1159,64 @@ def ingest(args) -> int:
   elif again:  # a rewrite whose routing line was never acted on: printed until point 2 is opened after the post
     print("outcome: cap-reached")
   return 0
+
+
+def ingest_spec_pr(args, st: core.Store) -> int:
+  """`review ingest --pr <n>` (kind spec, U26): the card's artifact is the spec; its latest cycle takes the threads."""
+  if args.runcard:
+    args.design = core.load_card(st, args.runcard)["artifact"]
+  core.require_runcard(args, SKILLS)
+  review, _ = latest_cycle(st, "spec", args.design)
+  if review is None:
+    raise Refusal(f"review ingest: no spec review for {core.spec_slug(args.design)}")
+  count, _ = ingest_pr(st, review, args.pr, args.runcard)
+  print(f"{count} ingested")
+  return 0
+
+
+def spec_cycles(st: core.Store, artifact: str) -> list[tuple[str, dict]]:
+  """Every cycle of the spec's review, `(review id, review.json)`, oldest first."""
+  base = review_id(st, "spec", artifact, 0)[:-3]
+  found = sorted(int(m.group(1)) for p in st.path("reviews").glob(f"{base}-c*")
+                 if (m := re.fullmatch(rf"{re.escape(base)}-c(\d+)", p.name)) and (p / "review.json").is_file())
+  return [(f"{base}-c{c}", load_review(st, f"{base}-c{c}")) for c in found]
+
+
+def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[int, list[str]]:
+  """The spec PR's threads (spec section 8, External review on the elephant's own PR) recorded as `external:<login>`
+  findings into the latest round of `review`'s cycle, closed by an `accept` or not; a thread whose root id is in
+  any cycle's `ingested[]` is skipped by the reader. Recorded outside the panel and the round's byte and scope
+  checks, so `what_ran` is untouched. Returns the count and that round's unsettled external high and medium fids."""
+  rid = review_id(st, "spec", review["artifact"], review["cycle"])
+  numbers = round_numbers(st, rid)
+  if not numbers:
+    raise Refusal(f"review ingest: {rid} has no round")
+  n, config = numbers[-1], st.config
+  rnd = load_round(st, rid, n)
+  skip = {tid for _, other in spec_cycles(st, review["artifact"]) for tid in (other.get("ingested") or [])}
+  threads = read_threads(config["repo"], number, skip)
+  roles = {}
+  for thread in threads:
+    if not thread["bot"] and thread["login"] not in roles:
+      roles[thread["login"]] = collaborator_role(config["repo"], thread["login"])
+  added = []
+  for thread in threads:
+    ext = f"external:{thread['login']}"
+    record = rnd["reviewers"].setdefault(ext, {"findings": [], "not_run": None, "isolation": "exposed:ingest",
+                                               "model": "none:none", "effort": "none:none"})
+    top = max((int(f["id"].rsplit("-", 1)[1]) for f in record["findings"]), default=0)
+    severity = thread_severity(thread, config, None if thread["bot"] else roles[thread["login"]])
+    [finding] = parse_findings(thread_line(ext, n, top + 1, thread, severity, config), ext, n)
+    record["findings"].append({**finding, "thread": thread["id"], "review_body": thread["review_body"]})
+    added.append(thread["id"])
+  if added:
+    core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
+    review["ingested"] = (review.get("ingested") or []) + added
+    store_verdict(st, rid, review, runcard)
+    core.journal(st, f"review ingest {rid} round {n} PR {number} ingested {len(added)} under {runcard}")
+  unsettled = [f["id"] for name, record in rnd["reviewers"].items() if name.startswith("external:")
+               for f in record["findings"] if blocking(f) and f["disposition"] is None]
+  return len(added), unsettled
 
 
 def outcome_word(status_exit: int, contested: list) -> str:
