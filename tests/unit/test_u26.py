@@ -261,7 +261,9 @@ def test_a_carried_external_escalated_is_one_pair(world, monkeypatch):
 
 
 def owner_api(world, posted, reply_body="{}", broken=None):
-  """The fake `gh api` with the session's own login, `owner`, a recorded POST, and a failing PR-comments read while `broken`."""
+  """The fake `gh api` with the session's own login, `owner`, a recorded POST, and a failing PR-comments read while `broken`.
+  A POST answers 201 with `reply_body` as its literal body: `None` answers the JSON id `90 + len(posted)`; any string,
+  the default `"{}"` or `""` among them, is a 2xx with no readable id, which records `replied: true`."""
   def api(args, cwd, token=None):
     endpoint = world.gh.endpoint_of(args)
     if endpoint == "user":
@@ -372,3 +374,18 @@ def test_step_4_names_the_pr_a_carried_finding_came_from():
   body = (Path(__file__).resolve().parents[2] / "skills" / "review-spec" / "SKILL.md").read_text(encoding="utf-8")
   assert "`<n>` there is the PR the finding's thread is on: a finding carried from an earlier PR names that PR, not the current branch's" in body
   assert "name the listed id, the latest copy's" in body
+
+
+def test_reapproving_the_same_cycle_keeps_an_earlier_cycles_escalated_pair(world, monkeypatch):
+  reader(monkeypatch, threads=THREADS[:1])
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [HIGH(k) for k in range(1, 6)])
+  assert settle(world, rid, "design-4-1", "escalated", cid)[0] == 0 and rule(world, rid, "stop", cid)[0] == 0
+  _, cid2, rid2 = opened(world)
+  rounds(world, rid2, cid2, [[]])
+  assert approve(world, spec, cid2, "--yes")[0] == 0           # no PR yet: c2 approved with c1's escalated pair
+  assert approval(world)["entries"][-1]["escalated"] == [f"{rid}:design-4-1"]
+  make_pr(world.gh, 7, "c" * 40, branch="main")
+  assert ingest(world, cid2)[0] == 0 and settle(world, rid2, f"{BOT}-1-1", "escalated", cid2)[0] == 0
+  assert approve(world, spec, cid2, "--yes")[0] == 0           # the re-approval of c2 keeps c1's pair beside c2's new one
+  assert approval(world)["entries"][-1]["escalated"] == [f"{rid}:design-4-1", f"{rid2}:{BOT}-1-1"]
