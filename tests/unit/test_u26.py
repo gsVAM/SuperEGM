@@ -83,3 +83,25 @@ def test_ingest_pr_replies_fixed_once_on_each_thread_settled_fixed(world, monkey
   findings = rjson(world, rid, "round-1.json")["reviewers"]
   assert [f.get("replied") for r in (BOT, HUMAN) for f in findings[r]["findings"]] == [91, None, 92]
   assert ingest(world, cid)[0] == 0 and len(posted) == 2
+
+
+@pytest.mark.parametrize("ruled, flag, pr", [(False, "--yes", True), (True, "--yes", True), (True, "--leavemealone", True), (False, "--yes", False)])
+def test_approve_spec_ingests_once_and_refuses_an_unsettled_external(world, monkeypatch, ruled, flag, pr):
+  seen = reader(monkeypatch, threads=THREADS[:1])
+  if pr:
+    make_pr(world.gh, 7, "c" * 40, branch="main")
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [HIGH(k) for k in range(1, 6)] if ruled else [[]])
+  if ruled:
+    assert rule(world, rid, "accept", cid)[0] == 0
+  fid = f"{BOT}-{5 if ruled else 1}-1"
+  code, out = approve(world, spec, cid, flag)
+  if not pr:
+    assert (code, seen) == (0, []) and approval(world)["entries"][-1]["review"] == rid   # none means nothing to read
+    return
+  assert code == 1 and f"approve-spec: {BOT} {fid} unsettled on PR 7" in out and len(seen) == 1 and not store(world.repo).path("approvals", SLUG).exists()
+  assert [c[c.index("--head") + 1] for c in world.gh.calls if c[:2] == ["pr", "list"]] == ["main"]
+  assert settle(world, rid, fid, "declined", cid, "--owner")[0] == 0
+  assert approve(world, spec, cid, flag)[0] == 0 and len(seen) == 2 and approval(world)["entries"][-1]["review"] == rid
+  spec.write_text(spec.read_text(encoding="utf-8") + "| U02 | more | U01 | S |\n", encoding="utf-8")
+  assert approve(world, spec, cid, "--amend-units")[0] == 0 and len(seen) == 2             # never under --amend-units
