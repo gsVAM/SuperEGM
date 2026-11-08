@@ -13,7 +13,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the batch's `notify` and the owner's-alone sentence (U23). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the wave skill. Not part of google/elephant-goldfish-model. -->
 
@@ -81,7 +81,7 @@ is one `superegm: <reason>` line, exit 1.
    2). Before asking any of them, read the issue's comments
    (`GH_HOST=github.com gh api repos/<repo>/issues/<n>/comments --paginate`): an owner's
    `**Ruling:**` already posted binds once `decision rule --posted <comment id>` records it,
-   as the `ruling` bullet says.
+   as the `ruling` bullet says. A judges' `redesign` refused, a pending decision whose panel answered is the owner's alone (`judges/<panel>/verdict.json` converged on it): ask the owner, never the panel again.
 5. Run `report` again. `loop: ended` → The end. Otherwise run batches, the
    first from its step 5: step 2 was its wait, and its lines are handled.
 
@@ -149,7 +149,8 @@ ignored except `landed`:
 7. `superegm report`: `python3 '<HELPER>' report --runcard '<CARD>'`. If a
    decision was opened this batch, pause: ask the owner at its decision
    point and run `report` again once ruled. Else `loop: ended` → The end;
-   otherwise the next batch.
+   otherwise the next batch. After this `report`, run `python3 '<HELPER>' notify --runcard '<CARD>'`:
+   the owner's `~/.superegm/notify` hook gets the inbox lines new since the last notify; a failing or slow hook never stops the wave.
 
 `report` derives each launched unit's state with `unit_state`, one of six:
 `landed`, `stopped`, `pending`, `idle`, `clean`, else `active`; only an
