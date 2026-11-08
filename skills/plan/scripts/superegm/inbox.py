@@ -8,6 +8,7 @@ store's open handoffs, read-only and with no run card; superegm notify --runcard
 import calendar
 import json
 import os
+import re
 import signal
 import subprocess
 import time
@@ -53,11 +54,14 @@ def status_of(hs: core.Store, rid: str, rev: dict):
     return None
 
 
-def review_dirs(hs: core.Store, root_specs: bool) -> list:
-  """The handoff's `reviews/*` and, when `root_specs`, the store's `reviews/spec-*`."""
+def review_dirs(hs: core.Store, spec) -> list:
+  """The handoff's `reviews/*` and, when `spec` is a path, the store's spec and integrate reviews of that spec
+  (`spec-<slug>-c<n>`, `spec-<slug>-integrate-c<n>`, review.review_id)."""
   dirs = sorted(p for p in hs.path("reviews").glob("*") if (p / "review.json").is_file())
-  if root_specs and hs.path("reviews") != hs.root / "reviews":
-    dirs += sorted(p for p in (hs.root / "reviews").glob("spec-*") if (p / "review.json").is_file())
+  if spec and hs.path("reviews") != hs.root / "reviews":
+    own = re.compile(rf"spec-{re.escape(core.spec_slug(spec))}(?:-integrate)?-c\d+")
+    dirs += sorted(p for p in (hs.root / "reviews").glob("spec-*")
+                   if own.fullmatch(p.name) and (p / "review.json").is_file())
   return dirs
 
 
@@ -171,7 +175,7 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
   """What needs the owner across the handoffs `handoff_ids` (spec section 11.2), one dict per item: `repo`,
   `subject`, `kind`, `action`, `fingerprint`; ordered by handoff id, subject, then kind, the `wave` card last."""
   repo, rows = store.config["repo"], {r["id"]: r for r in core.handoffs(store.root)}
-  out, root_specs, seen = [], True, set()
+  out, read_specs, seen = [], set(), set()  # a spec's store-level reviews are read once, under its first handoff
   for hid in sorted(handoff_ids):
     hs, spec = core.handoff_store(store, hid), (rows.get(hid) or {}).get("spec")
     state = approve_spec.handoff_state(store, hid)
@@ -194,12 +198,12 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
       live.add(uid)
       found += unit_items(hs, repo, state, uid, foreman, mode)
     if units:
-      for path in review_dirs(hs, root_specs):
+      for path in review_dirs(hs, spec if spec and spec not in read_specs else None):
         rev = json.loads(core.read_text(path / "review.json"))
         if rev["kind"] in ("head", "plan") and rev["artifact"] not in live:
           continue
         found += review_items(hs, repo, spec, path.name, rev, foremen)
-      root_specs = False
+      read_specs.add(spec)
     found.sort(key=lambda i: (i["subject"], KINDS.index(i["kind"])))
     out += found + wave_items(hs, repo, hid)
   return out

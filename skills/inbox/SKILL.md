@@ -2,7 +2,7 @@
 name: inbox
 license: Apache-2.0
 effects: none
-description: Use when the owner asks what needs them - lists, read-only, every open decision, cap ruling, contested finding, merge-ready PR, stalled unit, escalation and redesign across the store's open handoffs, one line each with the comment, command or PR URL that moves it.
+description: Use when the owner asks what needs them - lists, read-only, every open decision, cap ruling, contested finding, merge-ready PR, stalled unit, escalation, redesign, test-delta finding and owner-only finding across the store's open handoffs, one line each with the comment, command or PR URL that moves it, and each open wave card as information.
 ---
 
 <!-- Added by SuperEGM (gsVAM), 2026: the inbox skill (spec section 11.2). -->
