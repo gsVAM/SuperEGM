@@ -13,7 +13,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the wave skill. Not part of google/elephant-goldfish-model. -->
 
@@ -40,8 +40,8 @@ adapter), records the findings, posts one review comment bound to the
 reviewed commit, and returns one word. You handle the word (the table
 below); the builder answers the review in its next launch.
 
-Your only GitHub writes are the `**Ruling:**` comment `decision rule` posts
-and the `superegm:stopped` label a stop adds. Merge is human: the owner
+Your only GitHub writes are the `**Ruling:**` comment `decision rule` posts,
+the `superegm:stopped` label a stop adds and the board `status` writes into the tracking issue. Merge is human: the owner
 alone updates `<base>`; nothing here approves, merges, closes an issue or
 pushes to a builder's branch. One command at a time: the helper is
 single-writer. `<HELPER>` = `${CLAUDE_PLUGIN_ROOT}/skills/plan/scripts/superegm.py`;
@@ -56,6 +56,7 @@ is one `superegm: <reason>` line, exit 1.
    `--handoff '<id>'` to `runcard open` and to every helper call below (an older handoff's filed units
    still run); without it the card carries the spec's latest approval's handoff. The foreman's brief
    names the handoff id (`<handoff-id>`), and the foreman passes `--handoff` on every subcommand it runs.
+   `status` and `report` read the card's handoff alone; the inbox is the store-wide read.
 1. Run `python3 '<HELPER>' runcard open --skill wave --artifact '<spec>'`
    (`<spec>` is the approved spec the invocation named), adding
    `--mode leavemealone` when the invocation said `--leavemealone` or the
@@ -65,16 +66,18 @@ is one `superegm: <reason>` line, exit 1.
 2. Run `python3 '<HELPER>' status --wait 1 --runcard '<CARD>'` as a batch
    runs its wait (`run_in_background: true`, Bash timeout 1,800,000 ms: the
    first pass reads every unit's issue, PR and checks). It reads GitHub
-   once, saves the snapshot `report` derives from (`report` reads the store
-   alone: on the previous invocation's snapshot it sees an empty ready set
+   once, saves the snapshot `report` derives from (`report` reads GitHub
+   never: on the previous invocation's snapshot it sees an empty ready set
    and ends the loop before any batch) and returns every event since that
    invocation's last save, or `deadline`. Handle every line as a batch's
    steps 1–3 before going on, and `ruling` lines as its step 4.
+   Every `status` pass under this card rewrites the board (the `## Units` table `report` prints) between `<!-- superegm:board -->` and `<!-- /superegm:board -->` in the tracking issue's body:
+   one GitHub write per pass and none when the rows are unchanged; the inbox stays the action list.
 3. Run `python3 '<HELPER>' report --runcard '<CARD>'`. Everything is derived
-   from the store: pending decisions from `decisions[]` minus `rulings[]`,
+   from the store, the plan and the spec (`report` opens the card's handoff as `status` does, and refuses as it does when the spec changed since its approval): pending decisions from `decisions[]` minus `rulings[]`,
    launches in flight from `launches[].status`, rounds from `rounds[]`, idle
    units from this card alone (idle never carries over). Its lines: the
-   report path, `idle:`, `pending:`, `loop:`.
+   report path, the board, `idle:`, `pending:`, `loop:`.
 4. Rule every `pending:` item first, through its decision point below (the
    source names the point: `comment <id>`, `launch <n>` and `closed <n>` are
    point 3; `review <id> round <n>` is point 1; `review <id> cap` is point
@@ -171,7 +174,14 @@ dispatch):
   prompt carries the review).
 - `contested: <ids>` → Decision point 1.
 - `cap-reached` → Decision point 2.
-- `error`, `target-moved`, or a return that is none of the six words →
+- `owner: <ids>` → `decision open` for the owner's findings: no relaunch, no slot; the inbox lists them. Write the findings (ids, claims) to a question file and run
+  `python3 '<HELPER>' decision open --unit <U> --point 1 --question '<file>' --source 'review <head-review-id> round <n>' --runcard '<CARD>'`, the option the owner's `<fid> allowed — <reason>` (point 1's `<fid> finding overruled — <reason>` is read as the same).
+  The owner rules it, no judge panel, in leavemealone-mode too. On `allowed` run
+  `python3 '<HELPER>' review settle --review <head-review-id> --finding <fid> --disposition declined --owner --runcard '<CARD>'`; in leavemealone-mode only the owner's by-hand comment
+  `**Ruling:** <fid> finding overruled — <reason>` on the issue settles it, with `--disposition declined --owner --posted <comment-id>`. Record it with `decision rule … --ruling '<fid> finding overruled — <reason>' --by <login>`,
+  then by `review status` as Decision point 1 proceeds. `<fid> finding upheld` below the cap is the `revise` row;
+  at the cap (`review status` exit 2) it is Decision point 2 (`cap-reached`), never a relaunch.
+- `error`, `target-moved`, or a return that is none of these words →
   redispatch: nothing runs now; the head is reviewed again at the next
   batch's step 5, unless `review status` exits 5 (stalled) →
   `python3 '<HELPER>' report --idle '<U>=review stalled' --runcard '<CARD>'`.
