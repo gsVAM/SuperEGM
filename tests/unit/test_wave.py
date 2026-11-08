@@ -331,6 +331,31 @@ def test_splice_board_replaces_appends_or_keeps(body, block, expected):
   assert splice_board(expected, block) == expected
 
 
+def test_a_wave_status_pass_writes_the_board_once_and_only_on_change(world):
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"launched": False, "ready": True, "launches": []}, U02={"launched": False, "launches": []}, U03={"launched": False, "launches": []})
+  edits = lambda: [c for c in world.gh.calls if c[:2] == ["issue", "edit"] and "--body-file" in c]
+  reads = lambda: [c for c in world.gh.calls if c[:2] == ["api", f"repos/{REPO}/issues/1"]]
+  changed_at = lambda: json.loads(s.path("state").read_text(encoding="utf-8")).get("board_changed_at")
+  before = world.gh.issues[1]["body"]
+  assert world.run("status", "--wait", 1, "--runcard", card) == (0, "deadline\n")
+  body, first = world.gh.issues[1]["body"], world.ns["now_iso"]()
+  assert (len(reads()), len(edits()), changed_at()) == (1, 1, first)
+  assert body.startswith(before.rstrip("\n") + "\n\n<!-- superegm:board -->\nhandoff ") and body.endswith("\n<!-- /superegm:board -->\n")
+  assert f" · changed {first}\n| unit | state |" in body and "| U01 #2 | ready | none | none | none | none | none | launch-builder | none |" in body
+  world.advance(60)
+  assert world.run("status", "--runcard", card)[0] == 0 and (len(edits()), changed_at()) == (1, first), "equal rows: no write"
+  state = json.loads(s.path("state").read_text(encoding="utf-8")); state["units"]["U01"]["launched"] = {"at": "t"}; atomic_write(s.path("state"), state)
+  assert world.run("status", "--wait", 1, "--runcard", card)[0] == 0 and len(edits()) == 2 and changed_at() == world.ns["now_iso"]() != first
+  assert "| U01 #2 | active | none | none | none | none | none | foreman dispatch | none |" in world.gh.issues[1]["body"]
+  assert world.gh.issues[1]["body"].split("<!-- superegm:board -->")[0] == body.split("<!-- superegm:board -->")[0]
+  state["units"]["U02"]["launched"] = {"at": "t"}; atomic_write(s.path("state"), state)
+  assert world.run("status", "--wait", 1, "--runcard", world.open_card("integrate", world.spec))[0] == 0 and len(edits()) == 2, "integrate reads"
+  world.gh.extend("issue", lambda args, cwd, token=None: (1, "", "HTTP 502") if "--body-file" in args else world.gh.do_issue(args))
+  assert world.run("status", "--wait", 1, "--runcard", card) == (0, "deadline\n")
+  assert "board write failed" in s.path("journal").read_text(encoding="utf-8")
+
+
 @pytest.mark.parametrize("point,source,decisions,rulings,expect", [
   (1, "review head-U01-c1 round 2", [], [], "options: finding upheld; finding overruled"),
   (2, "review head-U01-c1 cap", [], [], "options: one more round; stop"),

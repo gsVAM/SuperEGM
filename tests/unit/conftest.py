@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's test world (the fake gh, the harness, the sample repository and plan) moved out of test_helper.py so every unit's tests share it; the sample plan in the section 9.1 grammar under an approval record (U05); the PR review threads and collaborator roles of the fake gh (U21).
+# Modified by SuperEGM (gsVAM), 2026: EGM's test world (the fake gh, the harness, the sample repository and plan) moved out of test_helper.py so every unit's tests share it; the sample plan in the section 9.1 grammar under an approval record (U05); the PR review threads and collaborator roles of the fake gh (U21); `gh issue edit --body-file` in the fake gh (U30).
 
 """The test world: a temporary repository, a store, the fake `gh` and the harness.
 
@@ -298,6 +298,9 @@ class FakeGitHub:
     if args[1] == "edit":
       self.assert_write()
       issue = self.issues[int(args[2])]
+      if "--body-file" in args:
+        issue["body"] = Path(args[args.index("--body-file") + 1]).read_text(encoding="utf-8")
+        return self.ok(text="")
       added = args[args.index("--add-label") + 1]
       if added not in self.labels:
         # The real gh refuses a label the repository does not have; a fake that
