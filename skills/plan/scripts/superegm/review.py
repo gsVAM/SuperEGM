@@ -1220,7 +1220,9 @@ def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[
   """The spec PR's threads (spec section 8, External review on the elephant's own PR) recorded as `external:<login>`
   findings into the latest round of `review`'s cycle, closed by an `accept` or not; a thread whose root id is in
   any cycle's `ingested[]`, or on any external finding of any cycle's round (a write the `ingested[]` one never
-  followed, backfilled), is skipped by the reader, and an owner's `**Ruling:**` is skipped after it. Every unsettled external high or medium of an earlier round is
+  followed, backfilled), is skipped by the reader, and an owner's `**Ruling:**` is dropped after it (never a finding, never in `ingested[]`,
+  and settling nothing: unlike the `--unit` path, which reads a ruling on the unit's issue, nothing reads one on the
+  spec PR; a spec's rulings are made in the session or by the judges). Every unsettled external high or medium of an earlier round is
   carried into the round first, and a new thread's id is numbered after every id of its reviewer and round number
   in any cycle, so no fid is reused. Recorded outside the panel and the round's byte and scope checks, so `what_ran`
   is untouched; each finding keeps its PR's `number` as `pr`. Then the reply pass posts `**Reply <fid>:** fixed` on
@@ -1241,7 +1243,7 @@ def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[
   backfill = sorted({tid for tid in recorded if tid not in listed})
   carried = carry_externals(st, review["artifact"], rid, rnd)
   owners = set(config.get("owners") or [])
-  try:  # an owner's `**Ruling:**` is a ruling, never a finding (as the `--unit` path skips it)
+  try:  # an owner's `**Ruling:**` is dropped, never a finding; nothing reads it here (the `--unit` path reads its issue's)
     threads = [t for t in read_threads(config["repo"], number, listed | set(recorded))
                if not (t["login"] in owners and ((t["body"] or "").strip().splitlines() or [""])[0].startswith("**Ruling:**"))]
     roles = {}

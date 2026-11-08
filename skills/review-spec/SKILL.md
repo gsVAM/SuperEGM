@@ -125,7 +125,7 @@ or to the judges (leavemealone-mode). After the dispositions, commit the fix by 
     git push origin <branch>
     superegm review ingest --pr <n> --runcard <id>
 
-The ingest records the PR's new threads as `external:<login>` findings into the latest round, carries an unsettled external high or medium of an earlier round, of this cycle or an earlier one, forward, and posts `**Reply <fid>:** fixed` on each thread settled `fixed`. Settle them like any finding: `fixed` by an edit alone (the next round reviews it); a thread's GitHub "resolved" state settles nothing. Then:
+The ingest records the PR's new threads as `external:<login>` findings into the latest round, carries an unsettled external high or medium of an earlier round, of this cycle or an earlier one, forward, and posts `**Reply <fid>:** fixed` on each thread settled `fixed`. A thread by a `config.owners` login whose first line starts `**Ruling:**` is dropped, never a finding, and settles nothing: rule on the spec in the session (normal mode) or through the judges (leavemealone-mode), never on the PR. Settle them like any finding: `fixed` by an edit alone (the next round reviews it); a thread's GitHub "resolved" state settles nothing. Then:
 
     superegm review status --review <id> --runcard <id>
 
@@ -157,7 +157,8 @@ in the tree, with the message `superegm: approve <spec-slug> at review <id>` (`c
 after a blank line), and writes `approvals/<spec-slug>.json` (`commit`, `sha256`, `handoff_id`,
 `escalated[]`). Before its question the helper lists the pairs that record will carry as
 `approve-spec: <n> escalated finding(s) await the owner: <ids>`: every `escalated` finding of the
-cycles since the last approval that no `## Units` row names; each needs a row there or a
+cycles since the last approval that no `## Units` row names (re-approving the cycle the last approval names,
+its bytes unmoved, lists that entry's unnamed pairs again beside that cycle's new ones); each needs a row there or a
 `blocking: yes` decision in the plan before `graph` accepts the plan. An external finding carried
 into later rounds is one pair: name the listed id, the latest copy's (an earlier copy's id discharges nothing).
 

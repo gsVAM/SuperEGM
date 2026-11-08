@@ -3,7 +3,9 @@
 # Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_approve` as the approve-spec module (U03); the section 8 form: a converged
 # review, the `Units` check, the commit by path, `--void` and `--amend-units` (U04); the escalated pairs recorded (U16);
 # the approval history, one handoff per opening, the latest-entry rule and the branch check (U20); the spec PR's
-# ingest once before the refusals and the refusal of an unsettled external finding (U26).
+# ingest once before the refusals, the refusal of an unsettled external finding, an external finding's carried copies
+# as one escalated pair discharged by its latest copy alone, and a re-approval of the same cycle reading that cycle
+# again and keeping the replaced entry's unnamed pairs (U26).
 
 """superegm approve-spec: record the owner's approval of a converged spec (spec section 8)."""
 
@@ -204,9 +206,15 @@ def run(args):
   if last:
     require_branch_holds(st, root, spec.relative_to(root).as_posix(), last)
   # the cycles past the last approval's; a re-approval of that same cycle (its bytes unmoved, U26: a thread ingested
-  # and escalated after the approval) reads that cycle again, since `graph` reads the latest entry's list alone
+  # and escalated after the approval) reads that cycle again and keeps the replaced entry's pairs the `## Units`
+  # section does not name (that entry may cover earlier cycles too), since `graph` reads the latest entry's list alone
   since = int(last["review"].rsplit("-c", 1)[1]) if last and last.get("review") else 0
-  escalated = escalated_pairs(st, spec, since - 1 if last and last.get("review") == rid else since)
+  if last and last.get("review") == rid:
+    named = units_section(core.read_text(spec))
+    kept = [pair for pair in last.get("escalated") or [] if pair not in named]
+    escalated = kept + [pair for pair in escalated_pairs(st, spec, since - 1) if pair not in kept]
+  else:
+    escalated = escalated_pairs(st, spec, since)
   if escalated:
     print(f"approve-spec: {len(escalated)} escalated finding(s) await the owner: {', '.join(escalated)}")
   if not (args.yes or args.leavemealone or card["mode"] == "leavemealone"):
