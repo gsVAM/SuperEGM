@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U10's tests of the foreman's helper subcommands.
+# Modified by SuperEGM (gsVAM), 2026: collect reads rulings through `ruling_of` and the record (U22).
 
 """U10: foreman dispatch, prepare, collect, tdd-order, review post. This file replaces U03's nine moved
 prepare/collect tests (they pin `--round`, `--run-folder`, `--verdict`, `head-moved`, `launched` and `--remove`:
@@ -109,7 +110,8 @@ def builder_token(monkeypatch):
 
 
 def seed(world, *, head="a" * 40, ci="success", launches=({"round": 1, "status": "exited 0"},),
-         rounds=(), base_ref="main", comments=None, reviews=(), login="builder-bot", pr_body=PR_BODY, builder=None, astra=None, marker=True, owners=None):
+         rounds=(), base_ref="main", comments=None, reviews=(), login="builder-bot", pr_body=PR_BODY, builder=None, astra=None, marker=True, owners=None,
+         decisions=(), rulings=()):
   """Through U03's `store`, `Store.path` and `atomic_write`, what `locate`, `Handoff` and `require_frozen_units`
   read: the plan (conftest's heading, a `Design:` line naming `world.spec` in backticks, `## Global constraints`,
   `## Units`, SECTION) written to `world.plan` and
@@ -132,7 +134,7 @@ def seed(world, *, head="a" * 40, ci="success", launches=({"round": 1, "status":
   set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"],
              reviewers={"spec": [], "plan": [], "head": ["change-review"], "integrate": []},
              **({"builder": builder} if builder else {}), **({"astra": astra} if astra else {}),
-             **({"owners": owners} if owners else {}))
+             owners=owners or ["owner"])
   plan = (f"# Handoff plan: Webhook delivery\n\nDesign: `{spec}`\n\n## Global constraints\n- none\n\n"
           f"## Units\n\n{SECTION}")
   world.plan.write_text(plan, encoding="utf-8")
@@ -156,7 +158,7 @@ def seed(world, *, head="a" * 40, ci="success", launches=({"round": 1, "status":
   if launches:
     atomic_write(st.path("launches", UNIT), {"launches": list(launches)})
   atomic_write(st.path("foreman", UNIT), {"dispatch_id": f"d{len(rounds)}" if rounds else None, "rounds": list(rounds),
-                                          "decisions": [], "rulings": []})
+                                          "decisions": list(decisions), "rulings": list(rulings)})
   posted = install_pr_api(world, reviews=list(reviews), comments=comments or {}, login=login)
   return st, world.open_card("wave", str(spec)), posted
 
@@ -413,19 +415,76 @@ CASES = {
                ["issue #2 comment 15 | regression: no | upheld change-review-1-1: no `fixed` reply"]),
     "ci-reply-ignored": ({"prior": True, "comments": {70: [c(16, "builder-bot", "**Reply foreman-1-1:** contested — flaky")]}}, []),
 }
+TWO = "**Deviation (dod):** item 3 is wrong\n**Deviation (test):** the fence pins a typo\nWhich way?\n- (a) drop both\n- (b) keep both\n**Builder status:** BLOCKED"
+TDD = "foreman-1-2 | high | tests/unit/test_hooks.py | regression: no | tdd-order: S1: feat(S1) precedes test(S1)\n"
+CASES |= {"deviation-ruled-by-stranger": ({"comments": {2: [c(12, "builder-bot", DEV), c(13, "passer-by", "**Ruling:** (12) (a) — drop it")]}},
+               ["issue #2 comment 12 | regression: no | deviation (dod) unruled"]),
+  "folded-deviations": ({"comments": {2: [c(12, "builder-bot", TWO)]}},
+                        ["issue #2 comment 12 | regression: no | deviation (dod) unruled", "issue #2 comment 12 | regression: no | deviation (test) unruled"]),
+  "folded-deviations-ruled": ({"comments": {2: [c(12, "builder-bot", TWO), c(13, "owner", "**Ruling:** (12) (a) drop both — fine")]}}, []),
+  "deviation-ruled-by-the-record": ({"comments": {2: [c(12, "builder-bot", DEV), c(13, "owner", "**Ruling:** (12) (a) — drop it\n(judges p-1, leavemealone)")]},
+                                     "decisions": [{"id": "q1", "point": 3, "source": "comment 12"}],
+                                     "rulings": [{"decision": "q1", "ruling": "(a)", "by": "judges:p-1", "reason": None, "posted": "comment 13", "posted_at": "t"}]}, []),
+  "tdd-order-allowed": ({"prior": True, "prior_foreman": TDD, "commits": [("feat(S1): hook", "src/hooks.py"), ("test(S1): hook", "tests/unit/test_hooks.py")],
+                         "comments": {2: [c(15, "owner", "**Ruling:** foreman-1-2 allowed — an adopted history")]}}, [])}
+UPHELD_Q1 = {"decisions": [{"id": "q1", "point": 1, "source": "review r round 1"}],
+             "rulings": [{"decision": "q1", "ruling": "change-review-1-1 finding upheld", "by": "owner", "reason": None, "posted": "comment 15", "posted_at": "t"}]}
+CASES |= {  # round 2 (PR #96 review): the record wins over an edit of its comment and over a later comment on its fid
+  "recorded-upheld-edited": ({"prior": True, "comments": {2: [c(15, "owner", "**Ruling:** change-review-1-1 finding overruled — changed")]}} | UPHELD_Q1,
+                             ["issue #2 comment 15 | regression: no | upheld change-review-1-1: no `fixed` reply"]),
+  "recorded-upheld-contradicted": ({"prior": True, "comments": {2: [c(15, "owner", "**Ruling:** change-review-1-1 finding upheld (fix it)"),
+                                                                    c(17, "owner", "**Ruling:** change-review-1-1 finding overruled — again")]}} | UPHELD_Q1,
+                                   ["issue #2 comment 15 | regression: no | upheld change-review-1-1: no `fixed` reply"]),
+  "tdd-order-allowed-and-contested": ({"prior": True, "prior_foreman": TDD, "commits": [("feat(S1): hook", "src/hooks.py"), ("test(S1): hook", "tests/unit/test_hooks.py")],
+                                       "comments": {2: [c(15, "owner", "**Ruling:** foreman-1-2 allowed — an adopted history")],
+                                                    70: [c(14, "builder-bot", "**Reply foreman-1-2:** contested — adopted history")]}}, [])}
+CASES |= {  # round 3 (PR #96 review): an option the comment does not offer rules nothing; an allowance skips its own failure alone
+  "deviation-ruled-off-the-options": ({"comments": {2: [c(12, "builder-bot", DEV), c(13, "owner", "**Ruling:** (12) (c) proceed — fine")]}},
+                                      ["issue #2 comment 12 | regression: no | deviation (dod) unruled"]),
+  "tdd-order-allowed-another-failure": ({"prior": True, "prior_foreman": TDD, "commits": [("test(S1): hook", "tests/unit/test_hooks.py")],
+                                         "comments": {2: [c(15, "owner", "**Ruling:** foreman-1-2 allowed — an adopted history")]}},
+                                        ["src/hooks.py | regression: no | Exists item 3: path absent",
+                                         "tests/unit/test_hooks.py | regression: no | tdd-order: S1: no feat(S1) commit touches src/hooks.py"])}
+CASES |= {  # round 4 (PR #96 review): a ruling binds from the unit's issue alone; a fixed reply answers an upheld ruling only after its record
+  "deviation-ruled-on-the-pr": ({"comments": {2: [c(12, "builder-bot", DEV)], 70: [c(13, "owner", "**Ruling:** (12) (a) — drop it")]}},
+                                ["issue #2 comment 12 | regression: no | deviation (dod) unruled"]),
+  "upheld-recorded-after-the-fix": ({"prior": True, "comments": {2: [c(15, "owner", "**Ruling:** change-review-1-1 finding upheld (fix it)")],
+                                                                 70: [c(16, "builder-bot", "**Reply change-review-1-1:** fixed", at="2026-11-02T14:00:00Z")]},
+                                     "decisions": UPHELD_Q1["decisions"],
+                                     "rulings": [UPHELD_Q1["rulings"][0] | {"posted_at": "2026-11-02T15:00:00Z"}]},
+                                    ["issue #2 comment 15 | regression: no | upheld change-review-1-1: no `fixed` reply"])}
+CASES |= {  # round 5 (PR #96 review): a recorded upheld ruling binds when its comment is gone (edited into prose or deleted)
+  "recorded-upheld-comment-gone": ({"prior": True, "comments": {2: [c(16, "owner", "an aside")]}} | UPHELD_Q1,
+                                   ["issue #2 comment 15 | regression: no | upheld change-review-1-1: no `fixed` reply"])}
+CONTESTED_TDD = TDD + "foreman-1-3 | high | pr #70 comment 14 | regression: no | contested foreman-1-2: an adopted history\n"
+CASES |= {  # round 8 (PR #96 review): a ruling on a contest's copy rules the finding it contests
+  "tdd-order-contest-overruled": ({"prior": True, "prior_foreman": CONTESTED_TDD,
+                                   "commits": [("feat(S1): hook", "src/hooks.py"), ("test(S1): hook", "tests/unit/test_hooks.py")],
+                                   "comments": {2: [c(15, "owner", "**Ruling:** foreman-1-3 finding overruled — an adopted history")]}}, [])}
+CASES |= {  # round 9 (PR #96 review): an unread record's `posted_at` is the host's clock, never a bound on the fixed reply
+  "upheld-unread-host-ahead": ({"prior": True, "comments": {2: [c(15, "owner", "**Ruling:** change-review-1-1 finding upheld (fix it)")],
+                                                            70: [c(16, "builder-bot", "**Reply change-review-1-1:** fixed", at="2026-11-02T13:30:00Z")]},
+                                "decisions": UPHELD_Q1["decisions"],
+                                "rulings": [UPHELD_Q1["rulings"][0] | {"posted_at": "2026-11-02T14:00:00Z", "unread": True}]}, [])}
+CASES |= {  # round 11 (PR #96 review, astra-11-3): an unread record whose comment is gone is bound by the host's time
+  "upheld-unread-comment-gone": ({"prior": True, "comments": {2: [c(16, "owner", "an aside")],
+                                                              70: [c(17, "builder-bot", "**Reply change-review-1-1:** fixed", at="2026-11-02T13:30:00Z")]},
+                                  "decisions": UPHELD_Q1["decisions"],
+                                  "rulings": [UPHELD_Q1["rulings"][0] | {"posted_at": "2026-11-02T14:00:00Z", "unread": True}]},
+                                 ["issue #2 comment 15 | regression: no | upheld change-review-1-1: no `fixed` reply"])}
 
 
 @pytest.mark.parametrize("name", list(CASES))
 def test_collect_records_foreman_findings(world, tmp_path, monkeypatch, name):
   kw, expected = dict(CASES[name][0]), CASES[name][1]
-  prior = kw.pop("prior", False)
+  prior, prior_foreman = kw.pop("prior", False), kw.pop("prior_foreman", "")
   if prior:
     kw.update(rounds=[POSTED_R1], launches=TWO_LAUNCHES)
-  if prior:  # the last posted round: one change-review high and the CI finding
+  if prior:  # the last posted round: one change-review high and the CI finding (and `prior_foreman`'s)
     st0, card0, _ = seed(world, **{k: v for k, v in kw.items() if k != "commits"})
     open_head_review(world, st0, card0, "0" * 40, {
         "change-review": "change-review-1-1 | high | src/hooks.py:1 | regression: no | no hook\n",
-        "foreman": "foreman-1-1 | high | ci | regression: no | CI not green on this head: ci red (tests)\n"})
+        "foreman": "foreman-1-1 | high | ci | regression: no | CI not green on this head: ci red (tests)\n" + prior_foreman})
   w = prepared(world, tmp_path, monkeypatch, **kw)
   r = 2 if prior else 1
   code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)

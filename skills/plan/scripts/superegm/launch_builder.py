@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch."""
 
@@ -14,6 +14,7 @@ from pathlib import Path
 import superegm as core
 from superegm import body, orient
 from superegm.builder_token import key_path, tool
+from superegm.decision import deleted_rulings, overridden_comments, parse_form
 from superegm.launch import builder_email, builder_login, load_launches, terminal
 from superegm.review_plan import SPEC_LINE_RE
 
@@ -86,7 +87,7 @@ def prepare(args, card):
   audit = AUDIT_LINE.format(owner=record["launched"].get("by", "unknown"),  # a pre-upgrade mark records no login
                             runcard=args.runcard, unit=unit, handoff=st.handoff_id)
   text = prompt_text(number, unit, issue_body, core.read_text(ORDERS).replace("{{gh}}", launched_gh), orient_text, comments, reviews, pr, builder, audit, pr_block,
-                     spec_range=range_text)
+                     spec_range=range_text, owners=config.get("owners") or [], foreman=core.load_foreman(st, unit))
   worktree = add_worktree(handoff.repo_root, st, unit, rnd, branch, pr)
   prompt = st.path("launches", f"{unit}_r{rnd}_prompt.md")
   core.atomic_write(prompt, text)
@@ -256,12 +257,30 @@ def filed_body(state, unit):
   return body.fill_numbers(filed, numbers, (state.get("tracking") or {}).get("number"))
 
 
-def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr, builder, audit, pr_block=None, spec_range=None):
+def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr, builder, audit, pr_block=None, spec_range=None,
+                owners=(), foreman=None):
   """Exactly what spec section 3's anti-goal 3 allows: the issue body, the audit-trail line, the orders, the repository's
   PR block when `pr_block_file` is set, the unit's orient file, the frozen spec range the body cites, every Deviation
-  comment, every Decision and Ruling comment not by the builder account, and from round 2 the foreman's reviews on the PR."""
-  kept = [c for c in comments if PROMPT_COMMENT_RE.match(c["body"])
-          and (c["body"].startswith("**Deviation") or c["user"]["login"] != builder)]
+  comment, every Decision comment by a `config.owners` login, every Ruling comment by one in a form the one grammar
+  reads (`parse_form`; the judges' post under the elephant's token kept, a typo or a stranger's dropped, one the
+  unit's record overrides dropped, and a recorded one edited after its record, whatever the edit, shown as its
+  record: `overridden_comments` of `foreman`; a recorded one deleted shown as its record in its place:
+  `deleted_rulings`), and from round 2 the foreman's reviews on the PR."""
+  overridden = overridden_comments(comments, list(owners), foreman or {})
+
+  def keep(c):
+    if overridden.get(c["id"]) is not None:  # the record stands in for its comment's edit
+      return True
+    if not PROMPT_COMMENT_RE.match(c["body"]) or c["id"] in overridden:
+      return False
+    if c["body"].startswith("**Deviation"):
+      return True
+    return c["user"]["login"] in owners and (not c["body"].startswith("**Ruling:**") or parse_form(c["body"]) is not None
+                                             or overridden.get(c["id"]) is not None)
+  # an edited recorded ruling is shown as its record (spec section 13.2: a later comment never changes it)
+  kept = [c | {"body": overridden[c["id"]]} if overridden.get(c["id"]) else c for c in comments if keep(c)]
+  for gone in deleted_rulings(comments, foreman or {}):  # in its place among the comments, by id
+    kept.insert(next((i for i, c in enumerate(kept) if int(c["id"]) > gone["id"]), len(kept)), gone)
   parts = [f"# Issue #{issue_number} — {unit}\n\n{body}", f"# Audit trail\n\n{audit}", f"# Builder orders\n\n{orders}"]
   if pr_block is not None:
     parts.append(f"# PR block\n\n{pr_block}")
