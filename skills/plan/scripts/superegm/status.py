@@ -82,7 +82,8 @@ def post_board(handoff, card: dict, status: dict) -> bool:
   """The board's one write (spec section 11.1), under a `wave` card only: `board_table` over the pass's
   snapshot spliced into the tracking issue's body, read once; `apply.edit_issue` and `board_changed_at` set
   to the pass time when the rows changed. A failed read or write is journaled and never fails the pass,
-  `board_changed_at` kept so the next pass writes again. True when `board_changed_at` changed."""
+  `board_changed_at` kept so the next pass writes again; on equal rows the held board's header time is
+  adopted when the state's differs (a landed write whose save was lost). True when `board_changed_at` changed."""
   number = (handoff.state.get("tracking") or {}).get("number")
   if card.get("skill") != "wave" or not number:
     return False
@@ -92,6 +93,12 @@ def post_board(handoff, card: dict, status: dict) -> bool:
     body = (core.gh_json(["api", f"repos/{repo}/issues/{number}"]) or {}).get("body") or ""
     spliced = apply.splice_board(body, block)
     if spliced == body:
+      # Equal rows. A write that landed with its response lost, or before its save, left the issue's time
+      # unrecorded: the held board's time is the one copy, so the state takes it.
+      held = apply.board_changed_at(body)
+      if held and held != handoff.state.get("board_changed_at"):
+        handoff.state["board_changed_at"] = held
+        return True
       return False
     apply.edit_issue(repo, number, spliced, handoff.artifact_dir)
   except core.GhError as error:

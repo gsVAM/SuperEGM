@@ -66,15 +66,15 @@ is one `superegm: <reason>` line, exit 1.
 2. Run `python3 '<HELPER>' status --wait 1 --runcard '<CARD>'` as a batch
    runs its wait (`run_in_background: true`, Bash timeout 1,800,000 ms: the
    first pass reads every unit's issue, PR and checks). It reads GitHub
-   once, saves the snapshot `report` derives from (`report` reads the store
-   alone: on the previous invocation's snapshot it sees an empty ready set
+   once, saves the snapshot `report` derives from (`report` reads GitHub
+   never: on the previous invocation's snapshot it sees an empty ready set
    and ends the loop before any batch) and returns every event since that
    invocation's last save, or `deadline`. Handle every line as a batch's
    steps 1–3 before going on.
    Every `status` pass under this card rewrites the board (the `## Units` table `report` prints) between `<!-- superegm:board -->` and `<!-- /superegm:board -->` in the tracking issue's body:
    one GitHub write per pass and none when the rows are unchanged; the inbox stays the action list.
 3. Run `python3 '<HELPER>' report --runcard '<CARD>'`. Everything is derived
-   from the store: pending decisions from `decisions[]` minus `rulings[]`,
+   from the store, the plan and the spec (`report` opens the card's handoff as `status` does, and refuses as it does when the spec changed since its approval): pending decisions from `decisions[]` minus `rulings[]`,
    launches in flight from `launches[].status`, rounds from `rounds[]`, idle
    units from this card alone (idle never carries over). Its lines: the
    report path, the board, `idle:`, `pending:`, `loop:`.
@@ -170,7 +170,8 @@ dispatch):
   prompt carries the review).
 - `contested: <ids>` → Decision point 1.
 - `cap-reached` → Decision point 2.
-- `error`, `target-moved`, or a return that is none of the six words →
+- `owner: <ids>` → `decision open` on each finding: no relaunch, no slot; the inbox lists them.
+- `error`, `target-moved`, or a return that is none of these words →
   redispatch: nothing runs now; the head is reviewed again at the next
   batch's step 4, unless `review status` exits 5 (stalled) →
   `python3 '<HELPER>' report --idle '<U>=review stalled' --runcard '<CARD>'`.

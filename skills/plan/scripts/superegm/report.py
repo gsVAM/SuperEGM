@@ -112,8 +112,9 @@ def board_table(handoff, state: dict, card: dict, now: float) -> str:
   foremen = {uid: core.load_foreman(st, uid) for uid in handoff.graph.order}
   launches = {uid: load_launches(st, uid) for uid in handoff.graph.order}
   states = {uid: unit_state(uid, views[uid], foremen[uid], launches[uid], card, config, now) for uid in handoff.graph.order}
-  # The card's reason, else the CI bound without its growing minute count, so an idle row stays equal across passes.
-  reasons = dict(reversed([(e["unit"], e["reason"]) for e in card.get("idle") or [] if e["unit"] in views]))
+  # The card's latest reason for the unit (a later `--idle` replaces the cell; `## Idle` lists them all), else the
+  # CI bound without its growing minute count, so an idle row stays equal across passes.
+  reasons = dict((e["unit"], e["reason"]) for e in card.get("idle") or [] if e["unit"] in views)
   for uid in handoff.graph.order:
     reasons.setdefault(uid, f"ci {views[uid]['ci'] or 'absent'} (ci_wait_minutes {config.get('ci_wait_minutes', 30)})")
   open_blocking = (state.get("status") or {}).get("open_blocking") or {}
