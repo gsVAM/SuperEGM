@@ -57,7 +57,11 @@ def test_the_notify_call_follows_the_report_before_its_branches(needle):
 
 @pytest.mark.parametrize("needle", ["`**Ruling:** (<comment id>) <option> — <reason>`", "(<a> | <b>)", "`/superegm:plan <spec>`",
                                     "`superegm review rule --review <id>", "`superegm review settle --review <id>",
-                                    "`/superegm:wave <spec>`", "not yet listed"])
+                                    "`/superegm:wave <spec>`", "not yet listed",
+                                    # round 7 (astra-6-1, astra-6-3): one form per choice; leavemealone's `--posted`
+                                    "`**Ruling:** one more round | **Ruling:** stop | **Ruling:** redesign — <reason>`",
+                                    "`**Ruling:** <fid> finding upheld | **Ruling:** <fid> finding overruled — <reason>`",
+                                    "--owner --posted <comment id>"])
 def test_the_inbox_skill_names_each_kinds_action(needle):
   """Round 2 (codebase-details-1-3, -1-4, -1-5): every action the module prints is named in the skill."""
   assert needle in (ROOT / "skills/inbox/SKILL.md").read_text(encoding="utf-8"), needle

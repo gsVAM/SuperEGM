@@ -16,6 +16,7 @@ from superegm import atomic_write, handoff_store
 from superegm.decision import ruling_form
 from superegm.inbox import inbox_items, notify_lines
 from superegm.review import parse_findings
+from superegm.decision import parse_form
 from test_wave import open_wave_card, wave_store
 
 ISSUE, PULL = f"https://github.com/{REPO}/issues/2", f"https://github.com/{REPO}/pull/70"
@@ -42,9 +43,10 @@ def seed(world, escalated=(), **units):
 
 
 ALLOWED = lambda fid: f"**Ruling:** {fid} allowed — <reason>"
-CONTESTED = lambda fid: f"**Ruling:** {fid} finding upheld | finding overruled — <reason>"
+# round 7 (foreman-6-1 upheld, comment 6727690269): each choice is its own form, the reason on the forms that take one
+CONTESTED = lambda fid: f"**Ruling:** {fid} finding upheld | **Ruling:** {fid} finding overruled — <reason>"
 OPTION = lambda did, menu="": f"**Ruling:** ({did}) <option> — <reason>{menu}"
-CAP = "**Ruling:** one more round | stop | redesign — <reason>"
+CAP = "**Ruling:** one more round | **Ruling:** stop | **Ruling:** redesign — <reason>"
 F = lambda *sevs: parse_findings("\n".join(f"foreman-1-{i} | {s} | src/x.py:3 | regression: no | c" for i, s in enumerate(sevs, 1)), "foreman", 1)
 ROUND = lambda n, findings, **more: {"round": n, "runcard": "wave-1", "artifact_sha256": "a" * 40, "what_ran": "completed", "reviewers": {"foreman": {"findings": findings}}, **more}
 REVIEW = lambda kind, rid, rounds, **more: {rid: ({"kind": kind, "artifact": "U01", "cycle": 1, "reviewers": ["foreman"], "runcard": "wave-1", "converged": "no", "rulings": [], **more}, rounds)}
@@ -306,3 +308,56 @@ def test_a_spec_review_is_listed_under_its_own_specs_handoff_alone(world, tmp_pa
   caps = lambda ids: [i["subject"] for i in inbox_items(s, ids) if i["kind"] == "cap"]
   assert caps([s.handoff_id]) == [] and caps(["sample-ffffff"]) == [rid]
   assert caps(sorted([s.handoff_id, "sample-ffffff"])) == [rid]
+
+
+@pytest.mark.parametrize("menu", [CAP, CONTESTED("foreman-1-1")])
+def test_each_choice_of_a_menu_is_a_form_ruling_of_reads(menu):
+  """Round 7 (astra-6-1, foreman-6-1 upheld): a choice copied from a menu, its reason filled in, is a ruling."""
+  for choice in menu.split(" | "):
+    assert parse_form(choice.replace("<reason>", "why")) is not None, choice
+
+
+def legacy_handoff(world, s, hid="sample-legacy"):
+  """A flat 1.0/1.1 handoff of the spec at the store's root, its unit U01 copied from the first handoff's."""
+  state = json.loads(s.path("state").read_text(encoding="utf-8"))
+  atomic_write(s.root / "state.json", state | {"handoff_id": hid, "design": {"path": str(world.spec)}})
+  b = handoff_store(s, hid)
+  atomic_write(b.path("foreman", "U01"), json.loads(s.path("foreman", "U01").read_text(encoding="utf-8")))
+  return b
+
+
+def capped_spec_review(s, rid, artifact):
+  review, rounds = REVIEW("spec", rid, {n: ROUND(n, F("high")) for n in range(1, 6)}, artifact=str(artifact))[rid]
+  atomic_write(s.root / "reviews" / rid / "review.json", review)
+  for n, rnd in rounds.items():
+    atomic_write(s.root / "reviews" / rid / f"round-{n}.json", rnd)
+
+
+def test_a_legacy_handoff_lists_its_own_specs_reviews_alone(world, tmp_path):
+  """Round 7 (astra-6-2, codebase-details-6-1): a flat store's `reviews/` is the store's own: a legacy handoff lists
+  its spec's review and never another spec's, and a spec's review read under two handoffs is listed once."""
+  open_wave_card(world)
+  s = seed(world, **U())
+  other = tmp_path / "other.md"
+  other.write_text(world.spec.read_text(encoding="utf-8"), encoding="utf-8")
+  atomic_write(s.path("handoffs", s.handoff_id), {"id": s.handoff_id, "spec": str(other), "opened_at": "t", "closed_at": None})
+  legacy = legacy_handoff(world, s)
+  assert legacy.legacy and legacy.path("reviews") == s.root / "reviews"
+  capped_spec_review(s, "spec-other-c1", other)
+  capped_spec_review(s, "spec-sample-c1", world.spec)
+  caps = lambda ids: sorted(i["subject"] for i in inbox_items(s, ids) if i["kind"] == "cap")
+  assert caps(["sample-legacy"]) == ["spec-sample-c1"] and caps([s.handoff_id]) == ["spec-other-c1"]
+  assert caps(sorted(["sample-legacy", s.handoff_id])) == ["spec-other-c1", "spec-sample-c1"]
+
+
+@pytest.mark.parametrize("mode, severity, flags", [("normal", "high", "--owner"), ("leavemealone", "low", "--owner"),
+                                                   ("leavemealone", "high", "--owner --posted <comment id>")])
+def test_an_escalated_integrate_findings_settle_line_carries_what_its_mode_needs(world, mode, severity, flags):
+  """Round 7 (astra-6-3): in leavemealone a blocking finding is declined by the owner only with the comment id of
+  their `**Ruling:** <fid> finding overruled — <reason>` (review.check_settle), so the line carries `--posted`."""
+  set_config(world, repo=REPO, mode=mode)
+  open_wave_card(world)
+  rid = "spec-sample-integrate-c1"
+  s = seed(world, **U(reviews=REVIEW("integrate", rid, {1: ROUND(1, [{**F(severity)[0], "disposition": "escalated"}])})))
+  [line] = [i["action"] for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "escalated"]
+  assert line == f"superegm review settle --review {rid} --finding foreman-1-1 --disposition fixed | declined {flags} --runcard <card>"
