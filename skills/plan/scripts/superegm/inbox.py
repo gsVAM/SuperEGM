@@ -7,6 +7,7 @@ store's open handoffs, read-only and with no run card; superegm notify --runcard
 
 import calendar
 import json
+import subprocess
 import time
 from pathlib import Path
 
@@ -215,4 +216,38 @@ def run(args):
     for i in inbox_items(st, ids):
       print(json.dumps(i) if args.json else line_of(i))
     return 0
+  card = core.require_runcard(args, SKILLS)
+  st = core.STORE
+  items = inbox_items(st, [card.get("handoff_id") or st.handoff_id])
+  new = notify_lines(st, card, items)
+  if new:
+    word = run_hook("".join(line_of(i) + "\n" for i in new), st.config)  # a failing or slow hook never stops the wave
+    core.journal(st, f"notify: {word} ({len(new)} new)")
+  state = core.load_state(st.root)
+  state["notified"] = sorted(i["fingerprint"] for i in items)  # replaced whole: a settled line leaves the set
+  core.save_state(st.root, state)
   return 0
+
+
+def notify_lines(store: core.Store, card: dict, items=None) -> list:
+  """The `inbox_items` of the card's handoff whose `fingerprint` its `state.json.notified` lacks."""
+  hid = card.get("handoff_id") or store.handoff_id
+  if items is None:
+    items = inbox_items(store, [hid])
+  seen = set(approve_spec.handoff_state(store, hid).get("notified") or [])
+  return [i for i in items if i["fingerprint"] not in seen]
+
+
+def run_hook(text: str, config: dict) -> str:
+  """Run `~/.superegm/notify` once with `text` on stdin, bounded by `notify_timeout_seconds`; the journal word."""
+  hook = Path.home() / ".superegm" / "notify"
+  if not hook.is_file():
+    return "no hook"
+  try:
+    done = subprocess.run([str(hook)], input=text, capture_output=True, text=True,
+                          timeout=config.get("notify_timeout_seconds", 30))
+  except subprocess.TimeoutExpired:
+    return "hook timeout"
+  except OSError as exc:
+    return f"hook failed: {exc.strerror}"
+  return f"hook exit {done.returncode}"
