@@ -1198,9 +1198,11 @@ def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[
   findings into the latest round of `review`'s cycle, closed by an `accept` or not; a thread whose root id is in
   any cycle's `ingested[]`, or on any external finding of any cycle's round (a write the `ingested[]` one never
   followed, backfilled), is skipped by the reader. Every unsettled external high or medium of an earlier round is
-  carried into the round first, so a new thread's id is numbered after it. Recorded outside the panel and the
-  round's byte and scope checks, so `what_ran` is untouched; each finding keeps its PR's `number` as `pr`. Then the
-  reply pass posts `**Reply <fid>:** fixed` on GitHub (`reply_fixed`). A gh failure is a one-line Refusal. Returns
+  carried into the round first, and a new thread's id is numbered after every id of its reviewer and round number
+  in any cycle, so no fid is reused. Recorded outside the panel and the round's byte and scope checks, so `what_ran`
+  is untouched; each finding keeps its PR's `number` as `pr`. Then the reply pass posts `**Reply <fid>:** fixed` on
+  GitHub (`reply_fixed`, whose failures are named and retried, never refused). A gh failure of the read is a
+  one-line Refusal. Returns
   the count and that round's unsettled external high and medium fids."""
   rid = review_id(st, "spec", review["artifact"], review["cycle"])
   numbers = round_numbers(st, rid)
@@ -1223,11 +1225,17 @@ def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[
         roles[thread["login"]] = collaborator_role(config["repo"], thread["login"])
   except core.GhError as error:
     raise Refusal(f"review ingest: {error}")
+  # a new id is numbered after every `<ext>-<n>-k` any round of any cycle holds (round numbers restart per cycle),
+  # so no fid is ever reused, carried or settled
+  held = [f["id"] for r in [rnd] + [load_round(st, other_rid, m) for other_rid, _ in cycles
+                                     for m in round_numbers(st, other_rid) if (other_rid, m) != (rid, n)]
+          for f in findings_of(r)]
   added = []
   for thread in threads:
     ext = f"external:{thread['login']}"
     record = external_record(rnd, ext)
-    top = max((int(f["id"].rsplit("-", 1)[1]) for f in record["findings"]), default=0)
+    top = max((int(m.group(1)) for fid in held + [f["id"] for f in record["findings"]]
+               if (m := re.fullmatch(rf"{re.escape(ext)}-{n}-(\d+)", fid))), default=0)
     severity = thread_severity(thread, config, None if thread["bot"] else roles[thread["login"]])
     [finding] = parse_findings(thread_line(ext, n, top + 1, thread, severity, config), ext, n)
     record["findings"].append({**finding, "thread": thread["id"], "review_body": thread["review_body"], "pr": number})
@@ -1251,8 +1259,11 @@ def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[
 def reply_fixed(st: core.Store, artifact: str, number: int, runcard: str) -> list[int]:
   """One `**Reply <fid>:** fixed` on each thread of the spec PR settled `fixed` and not yet replied to, in any round
   of any cycle of the spec, under the session's own token, on the PR the thread came from (`pr`, else `number`); a
-  review body has no replies endpoint, so its reply is a PR comment. The reply's id is written as `replied` on every
-  copy of the finding right after its post, so a later failed post never repeats it. The thread ids replied to."""
+  review body has no replies endpoint, so its reply is a PR comment. Before posting, the PR's comments are read once:
+  a reply already there (a post whose answer was lost) is recorded, never posted again. The reply's id is written as
+  `replied` on every copy of the finding right after its post, so a later failed post never repeats it. A failed read
+  or post is named on stderr (`review ingest: reply <fid> not posted: <error>`) and retried on the next run, never a
+  refusal: the reply is a courtesy of the ingest, not a condition of the approval. The thread ids replied to."""
   rounds_ = [(other_rid, m, load_round(st, other_rid, m)) for other_rid, _ in spec_cycles(st, artifact)
              for m in round_numbers(st, other_rid)]
   copies = {}
@@ -1261,22 +1272,32 @@ def reply_fixed(st: core.Store, artifact: str, number: int, runcard: str) -> lis
       for f in record["findings"] if name.startswith("external:") else []:
         if f.get("thread") is not None:
           copies.setdefault(f["thread"], []).append(f)
-  replied = []
+  replied, posted_on = [], {}
+  repo = st.config["repo"]
   for thread, found in sorted(copies.items()):
     if any(f.get("replied") for f in found) or not any(f["disposition"] == "fixed" for f in found):
       continue
     fixed = next(f for f in found if f["disposition"] == "fixed")
-    pr = fixed.get("pr") or number
-    endpoint = (f"repos/{st.config['repo']}/issues/{pr}/comments" if fixed.get("review_body")
-                else f"repos/{st.config['repo']}/pulls/{pr}/comments/{thread}/replies")
+    pr, text = fixed.get("pr") or number, f"**Reply {fixed['id']}:** fixed"
     try:
-      _, body = core.gh_post(endpoint, {"body": f"**Reply {fixed['id']}:** fixed"})
+      if pr not in posted_on:  # the PR's comments, read once: a reply posted but never recorded
+        posted_on[pr] = ([(c.get("in_reply_to_id"), c) for c in core.gh_pages(f"repos/{repo}/pulls/{pr}/comments")]
+                         + [(None, c) for c in core.gh_pages(f"repos/{repo}/issues/{pr}/comments")])
+      there = next((c for to, c in posted_on[pr] if (c.get("body") or "").strip() == text
+                    and (fixed.get("review_body") or to == thread)), None)
+      if there is not None:
+        reply_id = there.get("id") or True
+      else:
+        endpoint = (f"repos/{repo}/issues/{pr}/comments" if fixed.get("review_body")
+                    else f"repos/{repo}/pulls/{pr}/comments/{thread}/replies")
+        _, body = core.gh_post(endpoint, {"body": text})
+        try:
+          reply_id = json.loads(body)["id"]
+        except (ValueError, KeyError, TypeError):
+          reply_id = True  # posted; its id unread
     except core.GhError as error:
-      raise Refusal(f"review ingest: {error}")
-    try:
-      reply_id = json.loads(body)["id"]
-    except (ValueError, KeyError, TypeError):
-      reply_id = True  # posted; its id unread
+      print(f"review ingest: reply {fixed['id']} not posted: {error}", file=sys.stderr)
+      continue
     for f in found:
       f["replied"] = reply_id
     for other_rid, m, rnd in rounds_:

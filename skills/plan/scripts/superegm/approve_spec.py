@@ -15,7 +15,7 @@ import subprocess
 
 import superegm as core
 from superegm import close
-from superegm.review import evaluate, findings_of, ingest_pr, latest_cycle, load_review, load_round, review_id, round_numbers
+from superegm.review import Refusal, evaluate, findings_of, ingest_pr, latest_cycle, load_review, load_round, review_id, round_numbers
 
 WRITES = frozenset(["approvals", "handoffs", "state", "reviews"])  # the store kinds this subcommand writes
 SKILLS = frozenset(["review-spec", "review-plan", "integrate"])  # the skills whose card this subcommand accepts
@@ -167,12 +167,18 @@ def run(args):
   if review is None:
     raise core.HandoffError(f"approve-spec: no spec review for {slug}")
   rid = review_id(st, "spec", str(spec), review["cycle"])
+  if not (root / CONFIG).is_file():  # before any GitHub call: the config names the repository
+    raise core.HandoffError(f"approve-spec: {CONFIG} missing: run superegm init")
   number = spec_pr(st.config["repo"], core.run_git(["rev-parse", "--abbrev-ref", "HEAD"], root).strip())
   # U26: one `review ingest --pr` before the refusals: it reads the spec PR's threads, writes them, and the carried
-  # findings, into the latest round and posts the fixed replies; no open PR, or a cycle with no round yet to take
-  # the threads, reads nothing (the latter is refused below as not converged); a gh failure refuses in one line.
+  # findings, into the latest round and posts the fixed replies (a failed reply is named and retried next time, never
+  # a refusal); no open PR, or a cycle with no round yet to take the threads, reads nothing (the latter is refused
+  # below as not converged); a gh failure of the read refuses in one line, as `approve-spec:`.
   if number is not None and round_numbers(st, rid):
-    _, unsettled = ingest_pr(st, review, number, card.get("parent") or args.runcard)
+    try:
+      _, unsettled = ingest_pr(st, review, number, card.get("parent") or args.runcard)
+    except Refusal as error:
+      raise core.HandoffError(f"approve-spec: {str(error).removeprefix('review ingest: ')}") from None
     if unsettled:
       fid = unsettled[0]
       raise core.HandoffError(f"approve-spec: {fid.rsplit('-', 2)[0]} {fid} unsettled on PR {number}")
@@ -184,8 +190,6 @@ def run(args):
     raise core.HandoffError("approve-spec: spec bytes differ from the converged round's")
   if not units_is_last_h2(core.read_text(spec)):
     raise core.HandoffError("approve-spec: last H2 must be `Units`")
-  if not (root / CONFIG).is_file():
-    raise core.HandoffError(f"approve-spec: {CONFIG} missing: run superegm init")
   last = core.load_approval(st, spec)
   if last:
     require_branch_holds(st, root, spec.relative_to(root).as_posix(), last)

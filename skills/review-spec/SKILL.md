@@ -160,7 +160,7 @@ after a blank line), and writes `approvals/<spec-slug>.json` (`commit`, `sha256`
 cycles since the last approval that no `## Units` row names; each needs a row there or a
 `blocking: yes` decision in the plan before `graph` accepts the plan.
 
-The helper ingests the spec PR once before its refusals (never under `--amend-units`; with no open PR on the current branch, or no round in the cycle yet, it reads nothing); an unsettled external high or medium there refuses with `approve-spec: external:<login> <fid> unsettled on PR <n>`, ruled or not: settle it and go back to step 3 (the next round). When the cycle was closed by an `accept` and settling it edits the spec, the edit opens the next cycle with a fresh cap: run step 2's `review open` first, then back to step 3.
+The helper ingests the spec PR once before its refusals (never under `--amend-units`; with no open PR on the current branch, or no round in the cycle yet, it reads nothing); an unsettled external high or medium there refuses with `approve-spec: external:<login> <fid> unsettled on PR <n>`, ruled or not. Settle it: `declined` or `escalated` edits nothing, so run `approve-spec` again; `contested` goes to its ruler (decision point 1); `fixed` edits the spec, so go back to step 3 (the next round), and when the cycle was closed by an `accept` the edit opens the next cycle with a fresh cap: run step 2's `review open` first, then back to step 3. A reply the ingest could not post is named (`review ingest: reply <fid> not posted: <error>`) and retried on the next ingest; it never refuses.
 After the approval commit, `git push origin <branch>`, so the PR's head is the approved commit.
 
 Tell the owner, in one line: push the approval commit to `origin/<base>` (only the owner updates
