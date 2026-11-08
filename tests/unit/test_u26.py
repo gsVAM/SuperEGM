@@ -105,3 +105,74 @@ def test_approve_spec_ingests_once_and_refuses_an_unsettled_external(world, monk
   assert approve(world, spec, cid, flag)[0] == 0 and len(seen) == 2 and approval(world)["entries"][-1]["review"] == rid
   spec.write_text(spec.read_text(encoding="utf-8") + "| U02 | more | U01 | S |\n", encoding="utf-8")
   assert approve(world, spec, cid, "--amend-units")[0] == 0 and len(seen) == 2             # never under --amend-units
+
+
+def test_ingest_pr_numbers_a_new_thread_after_the_findings_it_carries(world, monkeypatch):
+  reader(monkeypatch)
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [HIGH(k) for k in range(1, 6)])
+  assert ingest(world, cid)[0] == 0 and rule(world, rid, "stop", cid)[0] == 0
+  later = {**THREADS[0], "id": 14, "body": "**bug** another claim", "line": 6}
+  reader(monkeypatch, threads=THREADS + [later])
+  _, cid2, rid2 = opened(world)
+  rounds(world, rid2, cid2, [HIGH(k) for k in range(1, 6)])
+  assert ingest(world, cid2)[1].strip() == "1 ingested"
+  found = rjson(world, rid2, "round-5.json")["reviewers"][BOT]["findings"]
+  assert [(f["id"], f["thread"]) for f in found] == [(f"{BOT}-5-1", 11), (f"{BOT}-5-2", 14)]   # the carried id taken first, never twice in a round
+  assert settle(world, rid2, f"{BOT}-5-2", "declined", cid2, "--owner")[0] == 0
+  assert [f["disposition"] for f in rjson(world, rid2, "round-5.json")["reviewers"][BOT]["findings"]] == [None, "declined"]
+
+
+def test_ingest_pr_skips_a_thread_recorded_before_its_ingested_write(world, monkeypatch):
+  seen = reader(monkeypatch)
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [[]])
+  assert ingest(world, cid)[0] == 0
+  path = store(world.repo).path("reviews", rid, "review.json")
+  path.write_text(json.dumps({**rjson(world, rid), "ingested": []}), encoding="utf-8")   # interrupted between the round's write and review.json's
+  assert (ingest(world, cid)[1].strip(), seen[-1]) == ("0 ingested", {11, 12})
+  assert rjson(world, rid)["ingested"] == [11, 12] and len(rjson(world, rid, "round-1.json")["reviewers"][BOT]["findings"]) == 1
+
+
+def test_ingest_pr_records_each_reply_as_it_posts_on_the_threads_own_pr(world, monkeypatch):
+  reader(monkeypatch, threads=THREADS + [REVIEW])
+  posted, failing = [], {"issues/7/comments"}
+  def api(args, cwd, token=None):
+    endpoint = world.gh.endpoint_of(args)
+    if args[1:4] == ["-i", "-X", "POST"] and re.fullmatch(rf"repos/{REPO}/(pulls/\d+/comments/\d+/replies|issues/\d+/comments)", endpoint):
+      if endpoint.split(f"{REPO}/", 1)[1] in failing:
+        return 1, "", "gh: Server Error (HTTP 500)"
+      posted.append(endpoint)
+      return world.gh.ok(text="HTTP/2.0 201 Created\n\n" + json.dumps({"id": 90 + len(posted)}))
+    return world.gh.do_api(args)
+  world.gh.extend("api", api)
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [[]])
+  assert ingest(world, cid)[0] == 0
+  move(world, "spec", spec)
+  for fid in (f"{BOT}-1-1", f"{HUMAN}-1-2"):
+    assert settle(world, rid, fid, "fixed", cid)[0] == 0
+  code, out = ingest(world, cid)
+  assert code == 1 and out.strip().startswith("review ingest: ") and "Traceback" not in out
+  assert posted == [f"repos/{REPO}/pulls/7/comments/11/replies"] and rjson(world, rid, "round-1.json")["reviewers"][BOT]["findings"][0]["replied"] == 91
+  failing.clear()
+  assert ingest(world, cid, number=8)[0] == 0   # a later PR of the spec: each reply on its own thread's PR
+  assert posted == [f"repos/{REPO}/pulls/7/comments/11/replies", f"repos/{REPO}/issues/7/comments"]
+
+
+def test_ingest_pr_refuses_a_failed_read_in_one_line(world, monkeypatch):
+  def broken(repo, number, skip):
+    raise review_mod.core.GhError(["api"], 1, "", "gh: Server Error (HTTP 502)")
+  monkeypatch.setattr(review_mod, "read_threads", broken)
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [[]])
+  code, out = ingest(world, cid)
+  assert code == 1 and out.strip().startswith("review ingest: gh api: exit 1") and "Traceback" not in out
+
+
+def test_approve_spec_with_no_round_reads_nothing_and_refuses_as_unconverged(world, monkeypatch):
+  seen = reader(monkeypatch)
+  make_pr(world.gh, 7, "c" * 40, branch="main")
+  spec, cid, rid = opened(world)
+  code, out = approve(world, spec, cid, "--yes")
+  assert code == 1 and f"approve-spec: review {rid} is not converged" in out and seen == []
