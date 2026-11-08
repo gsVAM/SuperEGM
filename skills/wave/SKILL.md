@@ -170,7 +170,9 @@ dispatch):
   prompt carries the review).
 - `contested: <ids>` → Decision point 1.
 - `cap-reached` → Decision point 2.
-- `owner: <ids>` → `decision open` on each finding: no relaunch, no slot; the inbox lists them.
+- `owner: <ids>` → `decision open` for the owner's findings: no relaunch, no slot; the inbox lists them. Write the findings (ids, claims) to a question file and run
+  `python3 '<HELPER>' decision open --unit <U> --point 1 --question '<file>' --source 'review <head-review-id> round <n>' --runcard '<CARD>'`, the option the owner's `<fid> allowed — <reason>` (point 1's `<fid> finding overruled — <reason>` is read as the same).
+  Apply it as Decision point 1 does, settling with `--disposition declined --owner` and recording `--ruling '<fid> finding overruled — <reason>'`; `<fid> finding upheld` is the `revise` row.
 - `error`, `target-moved`, or a return that is none of these words →
   redispatch: nothing runs now; the head is reviewed again at the next
   batch's step 4, unless `review status` exits 5 (stalled) →

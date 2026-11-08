@@ -2,8 +2,10 @@
 # Added by SuperEGM (gsVAM), 2026: the report subcommand (spec section 11): the per-batch wave report, the idle rules
 # and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30).
 
-"""superegm report: rewrite `wave_<n>_report.md` from the store and print its path, the board and the idle,
-pending and loop lines."""
+"""superegm report: rewrite `wave_<n>_report.md` from the store, the plan and the spec and print its path, the
+board and the idle, pending and loop lines. It opens the card's handoff as `status` does (`core.locate`,
+`core.Handoff`), so it refuses as `status` does: `state holds no plan path`, `design file ... does not exist`,
+`spec changed since the approval: run approve-spec again`. It reads GitHub never."""
 
 import json
 
