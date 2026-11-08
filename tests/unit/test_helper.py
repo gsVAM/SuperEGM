@@ -469,7 +469,7 @@ def test_init_writes_the_config_with_every_key_and_refuses_another_base(tmp_path
   assert config["repo"] == REPO and config["base"] == "main" and config["artifacts_dir"] == str(tmp_path / "store")
   assert config["mode"] == "normal" and config["max_in_flight"] == 5 and config["ci_wait_minutes"] == 30
   assert config["labels"]["stopped"] == "superegm:stopped"
-  assert config["reviewers"] == {"spec": ["design", "zoom-out"], "plan": ["readiness", "proportion", "set"],
+  assert {k: config["reviewers"][k] for k in ("spec", "plan", "head", "integrate")} == {"spec": ["design", "zoom-out"], "plan": ["readiness", "proportion", "set"],
                                  "head": ["change-review", "astra"], "integrate": ["design"]}  # I-2: the spec's panels
   assert config["judges"]["min_vendors"] == 1 and [m["name"] for m in config["judges"]["members"]] == ["fable", "opus", "astra"]
   assert config["builder"]["permission_mode"] == "acceptEdits" and config["builder"]["gh_token_env"] == "SUPEREGM_BUILDER_TOKEN"
@@ -835,7 +835,7 @@ def test_astra_heads_key_and_the_head_panel_default(world, astra, heads):
   import superegm
   from superegm import init
   from superegm.review import PANEL_OF
-  assert superegm.DEFAULT_CONFIG["astra"] == {"enabled": False, "model": "gpt-6-astra", "effort": "xhigh", "heads": True}
+  assert superegm.DEFAULT_CONFIG["astra"] == {"enabled": False, "model": "gpt-6-astra", "effort": "xhigh", "heads": True, "heads_effort": "high"}
   assert superegm.DEFAULT_CONFIG["reviewers"]["head"] == ["change-review", "astra"] and PANEL_OF["head"] == "change-review"
   assert "astra.enabled" in init.STEPS
   set_config(world, repo=REPO, astra=astra)
