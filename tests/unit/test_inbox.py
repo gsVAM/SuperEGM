@@ -80,3 +80,18 @@ def test_inbox_items_lists_what_needs_the_owner(world, seeded, expect):
       [(sub, kind, act.replace("<spec>", str(world.spec)), fp) for sub, kind, act, fp in expect] + [(card, "wave", "information: open 0 min", card)]
   assert all(i["repo"] == REPO for i in items) and {i["kind"] for i in items} <= KINDS
   assert ALLOWED("f-1") == ruling_form(1, "f-1", "allowed")
+
+
+def test_inbox_prints_one_line_per_item(world):
+  assert world.run("inbox") == (0, "")
+  card = open_wave_card(world)
+  s = seed(world, **U(decisions=D(3, "comment 77")))
+  hid, line = s.handoff_id, f"{REPO} U01 | decision | {OPTION('77')} on {ISSUE}"
+  assert world.run("inbox") == (0, f"{line}\n{REPO} {card} | wave | information: open 0 min\n")
+  assert json.loads(world.run("inbox", "--json")[1].splitlines()[0]) == {"repo": REPO, "subject": "U01", "kind": "decision", "action": line.split(" | ", 2)[2], "fingerprint": "U01/decision/q1"}
+  assert world.run("inbox", "--all")[1] == "registry: none\n" + world.run("inbox")[1]
+  atomic_write(s.path("handoffs", hid), json.loads(s.path("handoffs", hid).read_text(encoding="utf-8")) | {"closed_at": "t"})
+  assert world.run("inbox") == (0, "") and "notified" not in json.loads(s.path("state").read_text(encoding="utf-8"))
+  atomic_write(s.path("handoffs", "sample-ffffff"), {"id": "sample-ffffff", "spec": str(world.spec), "opened_at": "t", "closed_at": None})  # approved, never planned: no state.json
+  atomic_write(s.path("approvals", "sample"), {"path": str(world.spec), "entries": [{"escalated": ["spec-sample-c1:design-1-1"]}]})
+  assert world.run("inbox") == (0, f"{REPO} spec-sample-c1 | escalated | /superegm:plan {world.spec}\n")
