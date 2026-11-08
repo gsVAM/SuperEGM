@@ -281,3 +281,28 @@ def test_an_escalation_a_plan_decision_routes_leaves_once_answered(world):
   assert esc() == [("spec-sample-c1", "superegm decide --unit U03 --decision D2 --answer <option> --runcard <card>")]
   atomic_write(s.path("state"), state | {"decisions": answers})
   assert "U03/D2" in answers and esc() == []
+
+
+@pytest.fixture(autouse=True)
+def no_owner_hook(tmp_path, monkeypatch):
+  """Round 4 (astra-3-2): every test here runs with HOME under `tmp_path`, so no owner's ~/.superegm/notify runs."""
+  monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+
+def test_a_spec_review_is_listed_under_its_own_specs_handoff_alone(world, tmp_path):
+  """Round 4 (astra-3-3): the store's `reviews/spec-*` are the spec's: a capped review of spec B is listed under B's
+  handoff and never under A's, whether one handoff or both are read."""
+  open_wave_card(world)
+  s = seed(world, **U())
+  second_handoff(world, s)
+  other = tmp_path / "other.md"
+  other.write_text(world.spec.read_text(encoding="utf-8"), encoding="utf-8")
+  atomic_write(s.path("handoffs", "sample-ffffff"), {"id": "sample-ffffff", "spec": str(other), "opened_at": "t", "closed_at": None})
+  rid = "spec-other-c1"
+  review, rounds = REVIEW("spec", rid, {n: ROUND(n, F("high")) for n in range(1, 6)}, artifact=str(other))[rid]
+  atomic_write(s.root / "reviews" / rid / "review.json", review)
+  for n, rnd in rounds.items():
+    atomic_write(s.root / "reviews" / rid / f"round-{n}.json", rnd)
+  caps = lambda ids: [i["subject"] for i in inbox_items(s, ids) if i["kind"] == "cap"]
+  assert caps([s.handoff_id]) == [] and caps(["sample-ffffff"]) == [rid]
+  assert caps(sorted([s.handoff_id, "sample-ffffff"])) == [rid]
