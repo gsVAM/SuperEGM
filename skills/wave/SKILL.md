@@ -172,7 +172,11 @@ dispatch):
 - `cap-reached` → Decision point 2.
 - `owner: <ids>` → `decision open` for the owner's findings: no relaunch, no slot; the inbox lists them. Write the findings (ids, claims) to a question file and run
   `python3 '<HELPER>' decision open --unit <U> --point 1 --question '<file>' --source 'review <head-review-id> round <n>' --runcard '<CARD>'`, the option the owner's `<fid> allowed — <reason>` (point 1's `<fid> finding overruled — <reason>` is read as the same).
-  Apply it as Decision point 1 does, settling with `--disposition declined --owner` and recording `--ruling '<fid> finding overruled — <reason>'`; `<fid> finding upheld` is the `revise` row.
+  The owner rules it, no judge panel, in leavemealone-mode too (the judges never see an owner-only finding). On `allowed` run
+  `python3 '<HELPER>' review settle --review <head-review-id> --finding <fid> --disposition declined --owner --runcard '<CARD>'`; in leavemealone-mode only the owner's by-hand comment
+  `**Ruling:** <fid> finding overruled — <reason>` on the issue settles it, with `--disposition declined --owner --posted <comment-id>`. Record it with `decision rule … --ruling '<fid> finding overruled — <reason>' --by <login>`,
+  then by `review status` as Decision point 1 proceeds (0 → awaits merge; 2 → Decision point 2; else `launch-builder`). `<fid> finding upheld` below the cap is the `revise` row;
+  at the cap (`review status` exit 2) it is Decision point 2 (`cap-reached`), never a relaunch.
 - `error`, `target-moved`, or a return that is none of these words →
   redispatch: nothing runs now; the head is reviewed again at the next
   batch's step 4, unless `review status` exits 5 (stalled) →
