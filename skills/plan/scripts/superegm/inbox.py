@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 import superegm as core
-from superegm import approve_spec, report, review
+from superegm import approve_spec, decision, report, review
 from superegm.decision import ruling_form
 from superegm.launch import latest_clean, load_launches
 
@@ -61,7 +61,7 @@ def review_dirs(hs: core.Store, root_specs: bool) -> list:
   return dirs
 
 
-def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict) -> list:
+def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, mode: str = "normal") -> list:
   """The decisions, test-delta, owner-only and merge-ready lines of one unit neither stopped nor landed."""
   out = []
   number = (state["units"].get(uid) or {}).get("number")
@@ -94,13 +94,21 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict) 
   if entry:
     n, rid = entry["round"], review.head_review_id(hs, uid)
     rnd = (review.load_round(hs, rid, n) if rid else None) or {}
+    book = {"decisions": foreman.get("decisions") or [], "rulings": foreman.get("rulings") or []}
+    settled = {f["id"] for f in (review.findings_of(rnd) if rnd else []) if f.get("disposition") is not None}
+    # the outcome keeps naming a fid settled since until the round converges (review.settle_finding)
+    open_fid = lambda fid: fid not in settled and not decision.fid_ruled(book, fid)
+    # in leavemealone-mode `decision rule` refuses an allowance naming an open point-1 decision (refuse_allowance)
+    form = lambda fid: ruling_form(1, fid, "finding overruled" if mode == "leavemealone"
+                                   and decision.fid_decisions(book, fid, strict=True) else "allowed") + on_issue
     deltas = [f["id"] for f in ((rnd.get("reviewers") or {}).get("foreman") or {}).get("findings") or []
               if f["disposition"] is None and f["claim"].startswith("test-delta")]
-    out += [item(repo, uid, "test-delta", ruling_form(1, fid, "allowed") + on_issue, f"{n}/{fid}") for fid in deltas]
+    out += [item(repo, uid, "test-delta", form(fid), f"{n}/{fid}") for fid in deltas if open_fid(fid)]
     outcome = entry.get("outcome") or ""
     if outcome.startswith("owner: "):  # a finding the test-delta line names already is one line, not two
-      out += [item(repo, uid, "owner", ruling_form(1, fid, "allowed") + on_issue, f"{n}/{fid}")
-              for fid in (x.strip() for x in outcome.removeprefix("owner: ").split(",")) if fid and fid not in deltas]
+      out += [item(repo, uid, "owner", form(fid), f"{n}/{fid}")
+              for fid in (x.strip() for x in outcome.removeprefix("owner: ").split(","))
+              if fid and fid not in deltas and open_fid(fid)]
   if latest_clean(foreman, load_launches(hs, uid)):
     pr = report.unit_view(state, uid)["pr"] or ((state["units"].get(uid) or {}).get("pr") or {}).get("number")
     rounds = foreman.get("rounds") or []
@@ -135,8 +143,8 @@ def review_items(hs: core.Store, repo: str, spec: str, rid: str, rev: dict, fore
   return out
 
 
-def wave_items(hs: core.Store, repo: str, hid: str) -> list:
-  """The handoff's open top-level `wave` card, as information, with its age in minutes."""
+def wave_cards(hs: core.Store, hid: str) -> list:
+  """(card id, card) of the handoff's open top-level `wave` cards."""
   folder = (hs.root if hs.legacy else hs.base()) / "runcards"
   out = []
   for path in sorted(folder.glob("*.json")):
@@ -144,10 +152,18 @@ def wave_items(hs: core.Store, repo: str, hid: str) -> list:
     if card.get("handoff", hid) != hid:
       continue
     if card.get("skill") == "wave" and not card.get("parent") and not card.get("closed_at") and not card.get("interrupted_at"):
-      opened = calendar.timegm(time.strptime(card["opened_at"], "%Y-%m-%dT%H:%M:%SZ"))
-      minutes = int((core.NOW() - opened) // 60)
-      out.append({"repo": repo, "subject": path.stem, "kind": "wave", "action": f"information: open {minutes} min",
-                  "fingerprint": path.stem})
+      out.append((path.stem, card))
+  return out
+
+
+def wave_items(hs: core.Store, repo: str, hid: str) -> list:
+  """The handoff's open top-level `wave` card, as information, with its age in minutes."""
+  out = []
+  for cid, card in wave_cards(hs, hid):
+    opened = calendar.timegm(time.strptime(card["opened_at"], "%Y-%m-%dT%H:%M:%SZ"))
+    minutes = int((core.NOW() - opened) // 60)
+    out.append({"repo": repo, "subject": cid, "kind": "wave", "action": f"information: open {minutes} min",
+                "fingerprint": cid})
   return out
 
 
@@ -161,7 +177,11 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
     state = approve_spec.handoff_state(store, hid)
     units = state.get("units") or {}
     foremen = {uid: core.load_foreman(hs, uid) for uid in units}
-    found = escalations(hs, repo, hid, spec, foremen)
+    # an escalation is the spec's: two handoffs of one spec list it once; unit ids repeat across handoffs
+    found = [i for i in escalations(hs, repo, hid, spec, foremen, state) if i["fingerprint"] not in seen]
+    seen |= {i["fingerprint"] for i in found}
+    cards = wave_cards(hs, hid)
+    mode = (cards[-1][1].get("mode") if cards else None) or store.config.get("mode", "normal")
     live = set()
     for uid, foreman in foremen.items():
       stopped = foreman.get("stopped")
@@ -172,7 +192,7 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
       if report.unit_view(state, uid)["landed"]:
         continue
       live.add(uid)
-      found += unit_items(hs, repo, state, uid, foreman)
+      found += unit_items(hs, repo, state, uid, foreman, mode)
     if units:
       for path in review_dirs(hs, root_specs):
         rev = json.loads(core.read_text(path / "review.json"))
@@ -181,15 +201,15 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
         found += review_items(hs, repo, spec, path.name, rev, foremen)
       root_specs = False
     found.sort(key=lambda i: (i["subject"], KINDS.index(i["kind"])))
-    out += [i for i in found if i["fingerprint"] not in seen] + wave_items(hs, repo, hid)
-    seen |= {i["fingerprint"] for i in found}
+    out += found + wave_items(hs, repo, hid)
   return out
 
 
-def escalations(hs: core.Store, repo: str, hid: str, spec, foremen: dict) -> list:
+def escalations(hs: core.Store, repo: str, hid: str, spec, foremen: dict, state: dict) -> list:
   """The `escalated[]` pairs of the latest approval entry the handoff owns (the spec's latest when no entry names
   a handoff) that the owner has not handled: a pair the spec's `## Units` section names, or a unit's decision
-  carries in its question, is handled (graph's reading of the same list)."""
+  carries in its question, is handled; a pair a plan's `blocking: yes` D<n> line names (graph's other route) is
+  handled once `decide` records its answer in `state.decisions`, and until then the line is that `decide` call."""
   entries = core.load_approvals(hs, Path(spec)) if spec else []
   owned = [e for e in entries if e.get("handoff_id") == hid]
   if not owned and not any(e.get("handoff_id") for e in entries):
@@ -202,12 +222,23 @@ def escalations(hs: core.Store, repo: str, hid: str, spec, foremen: dict) -> lis
   except OSError:
     named = ""
   asked = [d.get("question") or "" for f in foremen.values() for d in f.get("decisions") or []]
+  try:
+    plan = core.parse_plan(Path(state["plan"])).units if state.get("plan") else {}
+  except (core.HandoffError, OSError):
+    plan = {}
+  routed = [(uid, d) for uid, unit in plan.items() for d in unit.decisions if d["blocking"]]
+  answered = state.get("decisions") or {}
   out = []
   for pair in pairs:
     if pair in named or any(pair in q for q in asked):
       continue
     rid, _, fid = pair.partition(":")
-    out.append(item(repo, rid, "escalated", f"/superegm:plan {spec}", fid))
+    plan_ds = [(uid, d) for uid, d in routed if pair in d["question"]]
+    if any(f"{uid}/{d['id']}" in answered for uid, d in plan_ds):
+      continue
+    action = (f"superegm decide --unit {plan_ds[0][0]} --decision {plan_ds[0][1]['id']} --answer <option> --runcard <card>"
+              if plan_ds else f"/superegm:plan {spec}")
+    out.append(item(repo, rid, "escalated", action, fid))
   return out
 
 
@@ -249,14 +280,16 @@ def run(args):
     return 0
   card = core.require_runcard(args, SKILLS)
   st = core.STORE
-  items = inbox_items(st, [card.get("handoff") or st.handoff_id])
+  hid = card.get("handoff") or st.handoff_id
+  hs = core.handoff_store(st, hid)  # the card's handoff, whichever `--handoff` resolved: its lines, journal and set
+  items = inbox_items(st, [hid])
   new = notify_lines(st, card, items)
   if new:
     word = run_hook("".join(line_of(i) + "\n" for i in new), st.config)  # a failing or slow hook never stops the wave
-    core.journal(st, f"notify: {word} ({len(new)} new)")
-  state = core.load_state(st.root)
+    core.journal(hs, f"notify: {word} ({len(new)} new)")
+  state = approve_spec.handoff_state(st, hid)
   state["notified"] = sorted(i["fingerprint"] for i in items)  # replaced whole: a settled line leaves the set
-  core.save_state(st.root, state)
+  core.atomic_write(hs.path("state"), state)
   return 0
 
 
@@ -274,8 +307,10 @@ def run_hook(text: str, config: dict) -> str:
   hook = Path.home() / ".superegm" / "notify"
   if not hook.is_file():
     return "no hook"
-  try:  # its own process group, so the timeout ends whatever the hook started; its output is bytes, never decoded
-    proc = subprocess.Popen([str(hook)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+  # its own process group, so the timeout ends whatever the hook started there; its output is unused and goes to
+  # /dev/null, so no child that leaves the group holds a pipe notify waits on
+  try:
+    proc = subprocess.Popen([str(hook)], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                             start_new_session=True)
   except OSError as exc:
     return f"hook failed: {exc.strerror}"
@@ -296,4 +331,4 @@ def kill_group(proc) -> None:
     os.killpg(proc.pid, signal.SIGKILL)
   except (ProcessLookupError, PermissionError):
     pass
-  proc.communicate()
+  proc.wait()
