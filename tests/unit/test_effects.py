@@ -206,7 +206,8 @@ def test_brainstorming_path_gate_and_removals() -> None:
                  "/superegm:review-spec", "the last H2"):
     assert needle in text, needle
   for banned in ("docs/superpowers", "Builder check", "builder-check-prompt", "Visual Companion",
-                 "visual-companion", "visual companion", "writing-plans", "subagent",
+                 "visual-companion", "visual companion", "writing-plans",
+                 "dispatch a fresh subagent", "Without a subagent tool",
                  "browser tab", "throwaway prototypes"):
     assert banned not in text, banned
   for name in ("builder-check-prompt.md", "visual-companion.md", "scripts"):

@@ -59,3 +59,19 @@ def test_teammates_reference_briefs():
   for section, needle in BRIEFS:
     assert needle in sections[section], (section, needle)
   assert not re.search(r"Blocker|Major|Nit", text)
+
+
+SKILL = ("`/superegm:brainstorming --team`", "`brainstorm.team`", "`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`", "never in `settings.json`",
+         "`references/teammates.md`", "`superegm:cartographer`", "`name: cartographer`", "within ten minutes", "shutdown request", "`Mode: BRAINSTORM`",
+         "`superegm:design`", "`superegm:zoom-out`", "`superegm:comprehension`", "one approach", "`## Alternatives Considered`", "`team: on`",
+         "`team: off (subagents)`", "`saw:`", "one at a time", "no mailbox", "without `name`", "under `-p`", "returns in the same turn", "split-pane", "not asked for",
+         "the cartographer's notes", "`name: architect`", "`name: skeptic`", "`name: advocate`", "one Bash `date`", "at its next turn",
+         "the cartographer's `saw:` line answers the probe", "`not reported`")
+
+
+@pytest.mark.parametrize("needle", SKILL)
+def test_brainstorming_team_mode_prose(needle):
+  text = (ROOT / "skills/brainstorming/SKILL.md").read_text(encoding="utf-8")
+  assert needle in text, needle
+  assert text.index("## Think Wide With a Team") < text.index("## Play It Back")
+  assert len(text.split("---", 2)[2].strip().encode("utf-8")) <= 24_000
