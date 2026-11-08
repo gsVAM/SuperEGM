@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the board's one write per `wave` pass, `post_board` (U30).
 
 """superegm status: landed and ready sets, PRs, CI; refuses without a complete receipt.
 `--wait <s>` polls, reading only, and prints every unreported event line, or `deadline`."""
@@ -9,7 +9,9 @@ import re
 from pathlib import Path
 
 import superegm as core
+from superegm import apply
 from superegm.launch import load_launches, terminal
+from superegm.report import board_table
 
 WRITES = frozenset(['state'])  # the store kinds this subcommand writes
 SKILLS = frozenset(['wave', 'integrate'])  # the skills whose card this subcommand accepts
@@ -55,7 +57,7 @@ def run(args):
     record["pr"] = pr
     record["status"] = None
   if args.wait:
-    print("\n".join(wait_events(handoff, args.wait)))
+    print("\n".join(wait_events(handoff, args.wait, card)))
     return 0
   for uid in args.confirm_landed or []:
     view = unit_view(handoff, uid)
@@ -67,11 +69,36 @@ def run(args):
     target["landed_confirmed"] = core.now_iso()
     target.pop("landed_confirmation_void", None)
   summary, open_blocking = core.status_pass(handoff)
+  if post_board(handoff, card, {**summary, "units": {uid: fingerprint(unit) for uid, unit in summary["units"].items()}}):
+    core.save_state(handoff.artifact_dir, handoff.state)
   core.print_status(handoff, summary, open_blocking)
   return 0
 
 
-def wait_events(handoff, seconds: int) -> list:
+def post_board(handoff, card: dict, status: dict) -> bool:
+  """The board's one write (spec section 11.1), under a `wave` card only: `board_table` over the pass's
+  snapshot spliced into the tracking issue's body, read once; `apply.edit_issue` and `board_changed_at` set
+  to the pass time when the rows changed. A failed read or write is journaled and never fails the pass,
+  `board_changed_at` kept so the next pass writes again. True when `board_changed_at` changed."""
+  number = (handoff.state.get("tracking") or {}).get("number")
+  if card.get("skill") != "wave" or not number:
+    return False
+  repo, at = handoff.config["repo"], core.now_iso()
+  block = board_table(handoff, {**handoff.state, "status": status, "board_changed_at": at}, card, core.NOW())
+  try:
+    body = (core.gh_json(["api", f"repos/{repo}/issues/{number}"]) or {}).get("body") or ""
+    spliced = apply.splice_board(body, block)
+    if spliced == body:
+      return False
+    apply.edit_issue(repo, number, spliced, handoff.artifact_dir)
+  except core.GhError as error:
+    core.journal(handoff.store, f"board write failed: {error}")
+    return False
+  handoff.state["board_changed_at"] = at
+  return True
+
+
+def wait_events(handoff, seconds: int, card: dict) -> list:
   """Poll `status_pass` (reading only) until a unit has an unreported event or the deadline
   passes; the event lines, or `deadline`; one state write on return."""
   state = handoff.state
@@ -87,6 +114,7 @@ def wait_events(handoff, seconds: int) -> list:
   # One write, when the wait is over, the only writer of `status.units`: while it waits it only
   # reads, so no other command can be overwritten by a sleeping watcher.
   state["status"] = {**summary, "units": {uid: fingerprint(unit) for uid, unit in summary["units"].items()}}
+  post_board(handoff, card, state["status"])
   core.save_state(handoff.artifact_dir, state)
   return lines or ["deadline"]
 
