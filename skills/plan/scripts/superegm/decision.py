@@ -551,7 +551,7 @@ def check_ruling(point: int, options: list, ruling: str, by: str = "") -> str:
     said = text.partition(" — ")[0].strip()
     option = next((o for o in options if o.split(" ")[0] == fid and said in ("allowed", "finding overruled", "finding upheld")), None)
     if option and by.startswith("judges:"):
-      raise Refusal(f"decision: {option} is the owner's alone")
+      raise Refusal(f"decision: {fid} {said} is the owner's alone")  # the ruling the panel gave, not the option it matched
     if option:
       return f"{fid} finding upheld" if said == "finding upheld" else option
   for option in options:

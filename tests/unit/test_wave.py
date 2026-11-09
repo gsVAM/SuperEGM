@@ -180,7 +180,7 @@ def test_an_owner_only_decision_offers_the_allowed_form():
   assert decision.check_ruling(1, ALLOWED, "foreman-1-2 finding overruled — fine") == "foreman-1-2 allowed"  # read as allowed
   for upheld in ("foreman-1-2 finding upheld", "foreman-1-2 finding upheld — restore it"):  # an uphold is never an allowance
     assert decision.check_ruling(1, ALLOWED, upheld) == "foreman-1-2 finding upheld"
-  with pytest.raises(decision.Refusal, match="decision: foreman-1-2 allowed is the owner's alone"):
+  with pytest.raises(decision.Refusal, match="decision: foreman-1-2 finding upheld is the owner's alone"):
     decision.check_ruling(1, ALLOWED, "foreman-1-2 finding upheld", by="judges:p1")
   with pytest.raises(decision.Refusal, match="decision: ruling is none of the options"):
     decision.check_ruling(1, ALLOWED, "foreman-1-2 anything")
@@ -209,6 +209,28 @@ def test_an_owner_only_decision_takes_the_owners_by_hand_uphold_and_file_allowan
   assert [(r["decision"], r["ruling"]) for r in foreman_of(s, "U01")["rulings"]] == [
     (q, "foreman-1-1 allowed"), (q, "foreman-1-2 allowed"), (q, "foreman-1-3 finding upheld")]
   assert pending_decisions(foreman_of(s, "U01")) == []
+
+
+def test_a_file_allowance_is_refused_off_its_own_text_and_without_an_open_finding_of_its_file(world):
+  """Round 3 (PR #103 review): `rule_file` refuses a `--ruling` other than the comment's own `test-delta <file>
+  allowed`, and a file comment no open owner-only decision asks about is refused, the decision left pending."""
+  card = world.run("runcard", "open", "--skill", "wave", "--artifact", world.spec, "--mode", "leavemealone", card=None)[1].strip()
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "rounds": [{"round": 1, "phase": "posted", "outcome": "owner: foreman-1-1"}]})
+  set_config(world, repo=REPO, owners=["owner"])
+  fake_gh(world, {f"repos/{REPO}/issues/comments/{cid}": {"id": cid, "user": {"login": "owner"}, "body": f"**Ruling:** {body}\n",
+                                                          "created_at": "2026-11-03T10:00:00Z"}
+                  for cid, body in ((73, "test-delta tests/unit/test_q.py allowed — by design"), (75, "test-delta tests/unit/test_z.py allowed — no"))})
+  q = world.run("decision", "open", "--unit", "U01", "--point", 1, "--question", question(world, TD("foreman-1-1", 3)),
+                "--source", "review head-U01-c1 round 1", "--runcard", card)[1].splitlines()[0]
+  code, out = world.run("decision", "rule", "--unit", "U01", "--ruling", "test-delta tests/unit/test_z.py allowed", "--by", "owner", "--posted", "73", "--runcard", card)
+  assert (code, out.strip()) == (1, "decision: comment 73 rules test-delta tests/unit/test_q.py allowed, not test-delta tests/unit/test_z.py allowed"), out
+  code, out = world.run("decision", "rule", "--unit", "U01", "--ruling", "test-delta tests/unit/test_z.py allowed", "--by", "owner", "--posted", "75", "--runcard", card)
+  assert (code, out.strip()) == (1, "decision: comment 75 allows tests/unit/test_z.py; no open decision names it"), out
+  code, out = world.run("decision", "rule", "--unit", "U01", "--decision", q, "--ruling", "test-delta tests/unit/test_z.py allowed", "--by", "owner",
+                        "--posted", "75", "--runcard", card)
+  assert (code, out.strip()) == (1, "decision: comment 75 names no open finding of tests/unit/test_z.py"), out
+  assert foreman_of(s, "U01")["rulings"] == [] and [d["id"] for d in pending_decisions(foreman_of(s, "U01"))] == [q]
+  assert "ruling dropped (owner, comment 75): comment 75 names no open finding of tests/unit/test_z.py" in s.path("journal").read_text()
 
 
 def test_an_owner_only_decision_records_the_owners_posted_allowance_in_leavemealone(world):

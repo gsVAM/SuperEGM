@@ -231,20 +231,35 @@ def allowed_tools(configured, branch, body_text, gh):
 
 def segment_heads(command: str) -> list:
   """The first word of every `&&`/`;` segment of `command`, split as the shell splits it (a `;` or `&&` inside
-  quotes separates nothing); a line the shell grammar cannot split (an unclosed quote) gives its first word alone."""
-  try:
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|")
-    lexer.whitespace_split = True
-    tokens = list(lexer)
-  except ValueError:
+  quotes or after a backslash separates nothing, a quoted `;` argument included); a line the shell grammar cannot
+  split (an unclosed quote) gives its first word alone."""
+  segments, start, quote, i = [], 0, None, 0
+  while i < len(command):
+    ch = command[i]
+    if quote:
+      if ch == quote:
+        quote = None
+      elif ch == "\\" and quote == '"':
+        i += 1
+    elif ch == "\\":
+      i += 1
+    elif ch in "'\"":
+      quote = ch
+    elif ch == ";" or command.startswith("&&", i):
+      segments.append(command[start:i])
+      i += 1 if ch == ";" else 2
+      start = i
+      continue
+    i += 1
+  if quote:
     return command.split()[:1]
-  heads, start = [], True
-  for token in tokens:
-    if token in (";", "&&"):
-      start = True
-    elif start:
-      heads.append(token)
-      start = False
+  heads = []
+  for segment in segments + [command[start:]]:
+    try:
+      words = shlex.split(segment)
+    except ValueError:
+      return command.split()[:1]
+    heads += words[:1]
   return heads
 
 

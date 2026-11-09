@@ -594,11 +594,19 @@ DELTA = {"removed-from-base": ({Q: THREE}, [("chore: trim", Q, TWO)], {}, [E(Q, 
   "allowed-other-base": ({Q: THREE}, [("chore: trim", Q, TWO)], {"comments": RULED("**Ruling:** foreman-1-1 allowed — approved"), "seed_base": "0" * 40},
                          [E(Q, 3, 3)], [CLAIM(Q, 3)]),
   "allowed-file": ({Q: THREE}, [("chore: gut", Q, T("def test_a():", "  pass"))], {"comments": RULED("**Ruling:** test-delta tests/unit/test_q.py allowed — by design")}, [], []),
-  "judges-overruled": ({Q: THREE}, [("chore: trim", Q, TWO)], {"comments": {}, "decisions": [{"id": "q1", "point": 1, "source": "review r round 1"}],
+  "allowed-file-recorded": ({Q: THREE}, [("chore: gut", Q, T("def test_a():", "  pass"))],
+                            {"comments": RULED("**Ruling:** test-delta tests/unit/test_q.py allowed — by design"),
+                             "decisions": [{"id": "q1", "point": 1, "source": "review r round 1", "options": ["foreman-1-1 allowed"],
+                                            "question": f"foreman-1-1 | high | {CLAIM(Q, 3)}\n"}],
+                             "rulings": [{"decision": "q1", "ruling": "foreman-1-1 allowed", "by": "owner", "reason": "by design",
+                                          "posted": "comment 13", "posted_at": "t"}]}, [], []),
+  "judges-overruled":({Q: THREE}, [("chore: trim", Q, TWO)], {"comments": {}, "decisions": [{"id": "q1", "point": 1, "source": "review r round 1"}],
                        "rulings": [{"decision": "q1", "ruling": "foreman-1-1 finding overruled", "by": "judges:p-1", "reason": "r",
                                     "posted": "comment 13", "posted_at": "t"}]}, [E(Q, 3, 3)], [CLAIM(Q, 3)]),
   "renamed-then-deleted": ({Q: THREE}, [("chore: move", {Q: None, R: THREE}), ("chore: drop", {R: None})], {},
-                           [E(R, n, n) for n in (1, 2, 3)], [CLAIM(R, n) for n in (1, 2, 3)])}
+                           [E(R, n, n) for n in (1, 2, 3)], [CLAIM(R, n) for n in (1, 2, 3)]),
+  "renamed-out-then-deleted": ({Q: THREE}, [("chore: archive", {Q: None, "archive/q.txt": THREE}), ("chore: drop", {"archive/q.txt": None})], {},
+                               [E(Q, n, n) for n in (1, 2, 3)], [CLAIM(Q, n) for n in (1, 2, 3)])}
 
 
 @pytest.mark.parametrize("name", list(DELTA))

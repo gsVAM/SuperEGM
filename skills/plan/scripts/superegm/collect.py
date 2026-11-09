@@ -19,7 +19,7 @@ from pathlib import Path
 
 import superegm as core
 from superegm import body as body_mod, review, tdd_order
-from superegm.decision import binding_rulings, recorded_rulings
+from superegm.decision import binding_rulings, recorded_rulings, ruling_of
 from superegm.foreman import head_review_id
 from superegm.launch_builder import DOD_RESULT_RE, SENTINEL, launched_pairs
 from superegm.orient import TEST_RE
@@ -114,6 +114,7 @@ def dod_runs(items, worktree: Path, env: dict, deadline: float, out_dir: Path) -
 
 OPERATORS = ("==", " in ", "raises", "match=")  # a paired head line lacking one of its base line's is weakened
 MARKER_RE = re.compile(r"@pytest\.mark\.(?:skip|skipif|xfail)\b")
+DEF_RE = re.compile(r"\s*(?:async\s+)?def (test_\w+)\s*\(")  # a test function, by name
 
 
 def assertion_lines(lines: list) -> set:
@@ -170,6 +171,11 @@ def test_delta(base_files: dict, head_files: dict, named: set) -> list:
     stripped = {line.strip() for line in head}
     ops = difflib.SequenceMatcher(None, base, head, autojunk=False).get_opcodes()
     to_base = {j1 + k: i1 + k for tag, i1, i2, j1, j2 in ops if tag == "equal" for k in range(i2 - i1)}
+    defs = {m.group(1): i for i, line in enumerate(base) if (m := DEF_RE.match(line))}
+
+    def base_def(d):  # the base line of the test head line `d` defines: unchanged, else the base `def` of its name
+      m = DEF_RE.match(head[d])
+      return None if not m else to_base[d] if d in to_base else defs.get(m.group(1))
     for tag, i1, i2, j1, j2 in ops:
       if tag == "equal":
         continue
@@ -182,8 +188,8 @@ def test_delta(base_files: dict, head_files: dict, named: set) -> list:
         d = decorated(head, j)
         if j - j1 < paired and MARKER_RE.search(base[i1 + j - j1]):
           continue
-        if MARKER_RE.search(head[j]) and d < len(head) and head[d].strip().startswith("def test_") and d in to_base:
-          delta.append(entry(j + 1, to_base[d] + 1, "weakened"))
+        if MARKER_RE.search(head[j]) and d < len(head) and (b := base_def(d)) is not None:
+          delta.append(entry(j + 1, b + 1, "weakened"))
       for i in range(i1 + paired, i2):
         if i in guarded and base[i].strip() not in stripped:
           delta.append(entry(j1 + 1, i + 1, "removed"))
@@ -214,9 +220,11 @@ def delta_files(worktree: Path, base: str, head: str, commits: list, named: set)
   at_base, at_head = tree(base), tree(head)
   show = lambda rev, path: core.run_git(["show", f"{rev}:{path}"], worktree)
   base_files, head_files = {}, {}
+  candidates = set(touched)
+  through = {old for new, old in [*renames.items(), *back.items()] if new in candidates and new != old}
   for path in touched:
-    if path not in at_head and (path in renames.values() or path in back.values()):
-      continue  # compared through the file it was renamed to
+    if path not in at_head and path in through:
+      continue  # compared through the test file it was renamed to; renamed out of test naming, it compares alone
     old = renames.get(path, path)
     if old not in at_base and first(path) in at_base:  # renamed from a base file, then deleted in the range
       old = first(path)
@@ -487,7 +495,9 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
     owners_own = [r for r in rulings if not r.login.startswith("judges:")]  # the owner's alone: never the judges' rulings
     settled = set().union(*(chain(r.subject) for r in owners_own if r.kind in ("overruled", "allowed")))
     keys = {key for fid, key in (prior_delta or {}).items() if fid in settled}
-    files = {r.subject for r in owners_own if r.kind == "allowed-file"}
+    # a file allowance binds whole even once `decision rule` recorded its per-fid allowances under the comment's id
+    files = {r.subject for r in owners_own if r.kind == "allowed-file"} | {
+      r.subject for c in comments if c["kind"] == "issue" and (r := ruling_of(c, owners)) and r.kind == "allowed-file"}
     delta[:] = [e for e in delta if e["file"] not in files and (e["file"], e["base_commit"], e["base_line"], e["kind"]) not in keys]
     found += [(f"{e['file']}:{e['line']}", f"test-delta: {e['file']}:{e['line']} {e['kind']}") for e in delta]
   widened = {path for fid, path in (prior_scope or {}).items() if fid in overruled}  # an owner's overrule widens the Scope
