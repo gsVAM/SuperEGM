@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
-# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23).
+# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); a head's fifth point, `accept` or `revise` (U35).
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
@@ -266,7 +266,7 @@ def register(subparsers):
   action = p.add_subparsers(dest="action", required=True)
   o = core.add_parser(action, "open", "record a point-1/2/3 question and print its id and options")
   o.add_argument("--unit", required=True)
-  o.add_argument("--point", type=int, choices=(1, 2, 3), required=True)
+  o.add_argument("--point", type=int, choices=(1, 2, 3, 5), required=True)
   o.add_argument("--question", required=True, help="the question file (the builder's comment, the contested findings)")
   o.add_argument("--source", required=True,
                  help="comment <id> | launch <n> | closed <n> | review <id> round <n> | review <id> cap")
@@ -322,7 +322,9 @@ def open_decision(args) -> int:
 def options_for(point: int, source: str, question: str, foreman: dict, head: str) -> list:
   """Spec section 13.2's options: point 1 upheld|overruled; point 2 one more round|stop; point 3 the
   comment's own `- (a)` lines plus `stop the unit`, or `relaunch; stop the unit` for a launch, a close,
-  or a third `blocked` comment on the same head."""
+  or a third `blocked` comment on the same head; point 5 (a head's accept below the cap) accept|revise."""
+  if point == 5:
+    return ["accept", "revise"]
   if point == 1:
     return ["finding upheld", "finding overruled"]
   if point == 2:
