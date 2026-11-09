@@ -1091,12 +1091,14 @@ def test_review_ingest_that_finds_nothing_writes_nothing(world):
   assert (st.path("foreman", UNIT).read_text(encoding="utf-8"), st.path("journal").read_text(encoding="utf-8")) == before
 
 
-@pytest.mark.parametrize("status_exit, contested, word", [
-    (3, ["foreman-2-1", "foreman-2-3"], "contested: foreman-2-1, foreman-2-3"),
-    (2, ["foreman-2-1"], "contested: foreman-2-1"),
-    (0, [], "clean"), (2, [], "cap-reached"), (3, [], "revise"), (5, [], "revise")])
-def test_outcome_word_order(status_exit, contested, word):
-  assert review_mod.outcome_word(status_exit, contested) == word
+@pytest.mark.parametrize("status_exit, contested, owner, word", [
+    (3, ["foreman-2-1", "foreman-2-3"], [], "contested: foreman-2-1, foreman-2-3"),
+    (2, ["foreman-2-1"], [], "contested: foreman-2-1"),
+    (0, [], [], "clean"), (2, [], [], "cap-reached"), (3, [], [], "revise"), (5, [], [], "revise"),
+    (3, ["foreman-2-1"], ["foreman-2-2"], "contested: foreman-2-1"),
+    (3, [], ["foreman-2-2"], "owner: foreman-2-2"), (2, [], ["foreman-2-2", "foreman-2-3"], "owner: foreman-2-2, foreman-2-3"), (2, [], [], "cap-reached")])
+def test_outcome_word_order(status_exit, contested, owner, word):
+  assert review_mod.outcome_word(status_exit, contested, owner) == word
 
 
 def test_foreman_adapter_frontmatter_and_tools():
