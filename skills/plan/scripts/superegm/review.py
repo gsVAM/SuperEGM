@@ -1359,10 +1359,13 @@ def carry_externals(st: core.Store, artifact: str, rid: str, rnd: dict) -> list[
   return carried
 
 
-def outcome_word(status_exit: int, contested: list) -> str:
-  """The posted round's return word (section 11), in this order."""
+def outcome_word(status_exit: int, contested: list, owner=()) -> str:
+  """The posted round's return word (section 11), in this order: an owner-only remainder (`owner_only_fids`)
+  comes after a contest and before `revise` and `cap-reached` (U25)."""
   if contested:
     return "contested: " + ", ".join(contested)
+  if owner:
+    return "owner: " + ", ".join(owner)
   return {0: "clean", 2: "cap-reached"}.get(status_exit, "revise")
 
 
