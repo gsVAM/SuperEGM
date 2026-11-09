@@ -207,7 +207,7 @@ def test_an_owner_only_decision_takes_the_owners_by_hand_uphold_and_file_allowan
   code, out = world.run("decision", "rule", "--unit", "U01", "--ruling", "foreman-1-3 finding upheld", "--by", "owner", "--posted", "74", "--runcard", card)
   assert code == 0, out
   assert [(r["decision"], r["ruling"]) for r in foreman_of(s, "U01")["rulings"]] == [
-    (q, "foreman-1-1 allowed"), (q, "foreman-1-2 allowed"), (q, "foreman-1-3 finding upheld")]
+    (q, "test-delta tests/unit/test_q.py allowed"), (q, "foreman-1-1 allowed"), (q, "foreman-1-2 allowed"), (q, "foreman-1-3 finding upheld")]
   assert pending_decisions(foreman_of(s, "U01")) == []
 
 

@@ -34,7 +34,8 @@ FORM_RES = (
   ("redesign", re.compile(rf"redesign{REASON}")),
   ("allowed", re.compile(rf"(?P<subject>{FID}) allowed{REASON}")),
 )
-JUDGES_MARK_RE = re.compile(r"^\(judges \S+, leavemealone\)$", re.M)
+FILE_RULING_RE = re.compile(r"test-delta (\S+) allowed")  # a recorded whole-file allowance's text
+JUDGES_MARK_RE =re.compile(r"^\(judges \S+, leavemealone\)$", re.M)
 
 
 @dataclass(frozen=True)
@@ -104,6 +105,8 @@ def recorded_rulings(foreman: dict) -> list:
     option, subject = None, ""
     if text == "redesign" and decision["point"] in (1, 2):  # a head's third ruling; a point-3 option may begin with the word
       kind = "redesign"
+    elif decision["point"] == 1 and (m := FILE_RULING_RE.fullmatch(text)):  # `rule_file`'s whole-file entry
+      kind, subject = "allowed-file", m.group(1)
     elif decision["point"] == 1:
       kind, subject = ("upheld" if text.endswith("upheld") else "overruled"), text.split(" ")[0]
     elif decision["point"] == 2:
@@ -526,8 +529,10 @@ def rule_file(st, unit: str, data: dict, args, comment: dict, found, decisions: 
   if not targets:
     dropped(st, args, f"comment {args.posted} names no open finding of {found.subject}")
   posted_at = comment.get("updated_at") or comment.get("created_at") or core.now_iso()
-  data["rulings"] += [{"decision": d["id"], "ruling": f"{fid} allowed", "by": args.by, "reason": found.reason or None,
-                       "posted": f"comment {args.posted}", "posted_at": posted_at} for d, fid in targets]
+  entry = lambda d, text: {"decision": d["id"], "ruling": text, "by": args.by, "reason": found.reason or None,
+                           "posted": f"comment {args.posted}", "posted_at": posted_at}
+  # the whole-file allowance itself first, so `recorded_rulings` keeps it after the comment is edited or deleted
+  data["rulings"] += [entry(targets[0][0], said)] + [entry(d, f"{fid} allowed") for d, fid in targets]
   core.save_foreman(st, unit, data)
   for d, fid in targets:
     core.journal(st, f"Ruling ({args.by}, comment {args.posted}): {unit} {d['id']} allowed-file {found.subject} {fid}"
