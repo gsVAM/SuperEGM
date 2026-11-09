@@ -1,6 +1,6 @@
 <!-- Copyright 2026 Google LLC. SPDX-License-Identifier: Apache-2.0. -->
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: Astra lane, per-reviewer model and effort, persisted dispositions. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: EGM's review-loop skill rewritten as the one review loop over the helper's `superegm review` subcommands (spec section 8); the stages, the report files and the second clean round are gone; a spec round's scope, `out_of_scope[]` and the batch settle (U19). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: EGM's review-loop skill rewritten as the one review loop over the helper's `superegm review` subcommands (spec section 8); the stages, the report files and the second clean round are gone; a spec round's scope, `out_of_scope[]` and the batch settle (U19); the accept below the cap and its `acceptable:` line (U35). -->
 
 # The review loop
 
@@ -183,12 +183,14 @@ R<n>>, cap <yes|no>, stalled <yes|no>, sha256 <hex of the converged round|none>`
 line `rounds: a -> b -> c (regressions x, y, z)`: the findings per round and the regressions
 among them. A third line, `fixed: re-review on the current bytes`, follows when the latest completed
 round is clean but the artifact's bytes moved since it (exit 3, or 2 at the cap): the next round
-reviews the current bytes. The exit code is the verdict, and the skill's next action follows from it alone:
+reviews the current bytes. On a round below the cap that the owner may accept (section 6) the line
+`acceptable: yes (<n> medium, <m> low)` follows the trend line; nothing otherwise.
+The exit code is the verdict, and the skill's next action follows from it alone:
 
 | Exit | Meaning | The skill |
 | --- | --- | --- |
 | exit 0 | converged (section 6), or `accept` ruled | spec: `superegm approve-spec` (the SKILL.md); plan: the unit's body is reviewed at the printed sha; head: the helper wrote `clean` on the posted round and journaled `<unit> awaiting merge`; integrate: close the handoff when nothing was escalated |
-| exit 3 | open: not clean, a regression, no completed round yet, or a clean round whose bytes moved since (the `fixed:` line) | fix and settle (section 4), then the next round; also `not opened` for an unknown id |
+| exit 3 | open: not clean, a regression, no completed round yet, or a clean round whose bytes moved since (the `fixed:` line) | with an `acceptable:` line, section 6's accept below the cap first; else fix and settle (section 4), then the next round; also `not opened` for an unknown id |
 | exit 2 | at the cap without an `accept`, or `stop` was ruled | no further round starts; request the ruling of spec section 13.2 point 2 (continue one bounded round, accept the remainder, stop; a head has no `accept`) and record it with `superegm review rule --review <id> --ruling continue|accept|stop (--owner | --judges <id>) --runcard <id>`; after `stop` the cycle stays at exit 2 and a new invocation starts the next cycle |
 | exit 4 | a `fix-design` finding in any round | the defect is in the frozen spec: `superegm approve-spec --spec <path> --void --review <id>`, then spec review reopens as a new cycle |
 | exit 5 | stalled: the two latest rounds are not `completed` and both ran under this run card | end this invocation for the artifact with the record (the round file names the reviewer and reason); a re-typed skill opens a new run card and resumes the same cycle |
@@ -215,6 +217,15 @@ foreman and integrate:
   R<n>`, never on a head, and never while the reviewed bytes moved: then `continue` or `stop`, and
   `stop` alone, ruled by no one, once `continue` is spent), and after `stop` no ruling is accepted and the cycle stays at its cap
   until `superegm review open` starts the next one. No review has a second kind of cap.
+- **Accept below the cap**, the one rule: when `review status` prints `acceptable: yes (<n> medium, <m> low)`
+  (the latest completed round, at unmoved bytes, holds unsettled mediums and lows alone: no high, no
+  `regression: yes`, no unsettled external high or medium, no other decision open on the round; never kind
+  `integrate`, whose mediums escalate into unit rows), ask the owner once, before a fix moves the bytes: accept, or
+  fix as today. `superegm review rule --review <id> --ruling accept --owner --runcard <id>` converges the review by
+  ruling with nothing settled and journals `accepted before the cap by the owner (<n> medium, <m> low)`; otherwise it
+  is refused with the blockers listed (`review rule: accept refused: high <fid>, …`). A head's accept is Decision
+  point 5 of the wave skill (`--decision <id>`). The owner's word alone: the judges never accept below the cap,
+  and in leavemealone-mode nothing pauses for it.
 - A review may instead be **stalled** (section 5), which ends the invocation for that artifact
   and nothing else.
 

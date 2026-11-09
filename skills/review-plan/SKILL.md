@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Reviews a handoff plan against its design through the judge panel before any issue is filed.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the body: plan review over the helper's review-plan and review subcommands (U06); `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the body: plan review over the helper's review-plan and review subcommands (U06); `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the accept below the cap's one question per round (U35). -->
 
 # Plan review (phase 3)
 
@@ -82,6 +82,11 @@ command carries no flag), and drop the units this invocation already ended. Then
   follows; `accept` converges the unit; `stop` ends the invocation for that unit. When the
   helper answers `review rule: cycle stopped`, a stop was ruled earlier: run `review open` as
   for `due - 1`; it starts the next cycle with a fresh cap.
+- Below the cap, before the `due <id> <n>` rows run, run `python3 '<HELPER>' review status --review '<id>' --runcard '<card>'` per
+  such row and read its `acceptable:` line. In normal mode ask the owner one question, once per round, naming every acceptable unit
+  with its counts (`acceptable: yes (<n> medium, <m> low)`); the owner names the units accepted, recorded with
+  `review rule --review '<id>' --ruling accept --owner --runcard '<card>'` (the unit converges by ruling), and the rest are fixed.
+  The judges never accept below the cap: in leavemealone-mode nothing is asked.
 - `fix-design`: Step 4.
 
 No `due` row left after this: Step 5. Otherwise Step 2 with the due units.
@@ -147,7 +152,7 @@ on the exit code alone:
 | Exit | Then |
 | --- | --- |
 | 0 | converged at the printed sha: nothing more for this unit |
-| 3 | open: fix and settle below, then Step 1 |
+| 3 | open: fix and settle below, then Step 1; an acceptable unit (an `acceptable:` line) gets the Step 1 question before any fix moves its bytes, so it goes to Step 1 unfixed |
 | 2 | at the cap: Step 1 lists it `cap` |
 | 4 | a `fix-design` finding: Step 4 |
 | 5 | stalled: Step 1 lists it `stalled` |

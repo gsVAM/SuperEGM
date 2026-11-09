@@ -11,7 +11,7 @@ description: >-
   Zoom Out Review, and Implementation Readiness.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: renamed to review-spec; the body is spec section 8's one review loop over the helper (the stages, presets, semantic split, checkpoint gates and report files are gone); persona path agents/zoom-out.md; the amendment scope, the branch sentence and the batch settle (U19); the spec PR, the pushes and the PR's ingest (U26). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: renamed to review-spec; the body is spec section 8's one review loop over the helper (the stages, presets, semantic split, checkpoint gates and report files are gone); persona path agents/zoom-out.md; the amendment scope, the branch sentence and the batch settle (U19); the spec PR, the pushes and the PR's ingest (U26); step 3's accept below the cap (U35). -->
 
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: run card, panel presets, Astra lane. -->
 
@@ -134,7 +134,7 @@ Act on the exit code and nothing else:
 | Exit | Then |
 | --- | --- |
 | 0 | converged: step 4 |
-| 3 | open: the next round (from round 2, each goldfish also receives the prior round's findings with their dispositions) |
+| 3 | open: with an `acceptable: yes` line, ask the owner first (accept, or fix as today; `references/review_loop.md` section 6): an accept is exit 0; else the next round (from round 2, each goldfish also receives the prior round's findings with their dispositions) |
 | 2 | at the cap: step 5 |
 | 4 | a `fix-design` finding: `superegm approve-spec --void --review <id> --spec <spec-path>` voids the earlier approval (when there is none the defect is this spec's own: settle it `fixed` instead); fix the spec, then the next round |
 | 5 | stalled: step 6 |

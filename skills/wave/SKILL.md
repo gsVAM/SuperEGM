@@ -13,7 +13,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30); the batch's `notify` (U23); the decision points, rulings and leavemealone-mode moved to `references/`. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30); the batch's `notify` (U23); the decision points, rulings and leavemealone-mode moved to `references/`; a head's Decision point 5 and `clean` by accept (U35). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the wave skill. Not part of google/elephant-goldfish-model. -->
 
@@ -51,7 +51,7 @@ Every writing call carries `--runcard '<CARD>'`; a refusal is one
 Open a reference only when this file sends you to it:
 
 - `references/foreman_brief.md`: the brief every foreman is dispatched with (batch step 5).
-- `references/decision_points.md`: the `owner:` row and Decision points 1–3 (`decision open`, then
+- `references/decision_points.md`: the `owner:` row and Decision points 1–3 and 5 (`decision open`, then
   `decision rule`, `review settle` or `review rule`), whenever a word, a step or a `pending:` item names one.
 - `references/rulings.md`: a `ruling` line (batch step 4), an owner's `**Ruling:**` already posted
   (entry step 4), and the stops.
@@ -88,7 +88,7 @@ Open a reference only when this file sends you to it:
 4. Rule every `pending:` item first, at its decision point in
    `references/decision_points.md` (the source names the point: `comment <id>`,
    `launch <n>` and `closed <n>` are point 3; `review <id> round <n>` is point 1;
-   `review <id> cap` is point 2). Before asking any of them, read the issue's comments
+   `review <id> cap` is point 2; an item reading `(point 5, …)` is point 5, by its `point`). Before asking any of them, read the issue's comments
    (`GH_HOST=github.com gh api repos/<repo>/issues/<n>/comments --paginate`): an owner's
    `**Ruling:**` already posted binds once `decision rule --posted <comment id>` records it,
    as the `ruling` bullet of `references/rulings.md` says.
@@ -177,9 +177,10 @@ saw it is idle and holds no slot; a new head restarts the clock.
 dispatch):
 
 - `clean` → await-merge: nothing runs; the unit awaits the owner's merge and
-  its slot is free.
-- `revise` → `launch-builder` and `record-launch` for the next round (the
-  prompt carries the review).
+  its slot is free. A head made `clean` by accept (Decision point 5) awaits merge the same way.
+- `revise` → in normal mode, when `review status` printed `acceptable: yes` → Decision point 5 first (no launch
+  while it is pending). Otherwise, and on a ruled `revise`, `launch-builder` and `record-launch` for the next
+  round as today (the prompt carries the review); a ruled `revise` spends no relaunch.
 - `contested: <ids>` → Decision point 1.
 - `cap-reached` → Decision point 2.
 - `owner: <ids>` → `decision open` for the owner's findings, ruled by the owner alone (no judge panel):
