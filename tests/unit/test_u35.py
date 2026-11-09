@@ -248,3 +248,51 @@ def test_a_revise_after_a_failed_accept_withdraws_the_accept(world, monkeypatch)
   assert status(world, rid, card)[0] == 3
   assert json.loads(s.path("reviews", rid, "review.json").read_text(encoding="utf-8"))["converged"] == "no"
   assert "R1 accept lapsed" in s.path("journal").read_text(encoding="utf-8")
+
+
+def test_a_fix_design_settle_lapses_an_accept_below_the_cap(world):
+  """PR #105 round 3 (astra-3-1): a `fix-design` on the accepted round stores the open verdict, so the gate never
+  reads the accept as a converged review; the lapse is journaled."""
+  spec, cid, rid = opened(world, "plan")
+  recorded(world, rid, cid, [F("readiness", 1, 1, "medium")])
+  assert rule(world, rid, "accept", cid)[0] == 0
+  code, out = world.run("review", "settle", "--review", rid, "--finding", "readiness-1-1", "--disposition", "fix-design", "--runcard", cid)
+  assert code == 0, out
+  assert status(world, rid, cid)[0] == 4
+  assert (rjson(world, rid)["converged"], rjson(world, rid)["converged_round"]) == ("no", None)
+  assert "R1 accept lapsed" in hstore(world).path("journal").read_text(encoding="utf-8")
+
+
+def test_a_rerun_accept_refused_on_a_moved_head_withdraws_the_accept(world, monkeypatch):
+  """PR #105 round 3 (astra-3-2): the accept a failed post left given is withdrawn when the rerun is refused: the
+  review is open again, the round's word is `revise`, and no merge is advertised."""
+  from conftest import make_pr
+  from test_wave import fifth_point_open, foreman_of
+  s, card, rid = fifth_point_open(world)
+  failed_accept(world, monkeypatch, card)
+  make_pr(world.gh, 70, "b" * 40)
+  assert rule_fifth(world, card)[0] == 1
+  f = foreman_of(s, "U01")
+  assert f["rulings"] == [] and f["rounds"][-1]["outcome"] == "revise"
+  assert status(world, rid, card)[0] == 3
+  assert json.loads(s.path("reviews", rid, "review.json").read_text(encoding="utf-8"))["converged"] == "no"
+  assert "R1 accept lapsed" in s.path("journal").read_text(encoding="utf-8")
+
+
+def test_a_posted_head_round_journals_the_lapse_of_an_accept(world):
+  """PR #105 round 3 (codebase-details-3-1): a later head round posted after a point-5 accept stores its verdict, so
+  the accept's lapse is journaled and the review converges by the later round."""
+  from superegm import review
+  from superegm import atomic_write
+  from test_wave import fifth_point_open, foreman_of
+  s, card, rid = fifth_point_open(world)
+  assert rule_fifth(world, card)[0] == 0
+  f = foreman_of(s, "U01")
+  f["rounds"].append({"round": 2, "phase": "launched", "launch": 2, "head": "a" * 40, "outcome": None})
+  atomic_write(s.path("foreman", "U01"), f)
+  assert record(world, rid, 2, "change-review", [], card, sha="a" * 40)[0] == 0
+  entry = dict(foreman_of(s, "U01")["rounds"][-1])
+  assert review.count_posted(s, "U01", entry, "2026-11-09T00:00:00Z", rid, card) == "clean"
+  stored = json.loads(s.path("reviews", rid, "review.json").read_text(encoding="utf-8"))
+  assert (stored["converged"], stored["converged_round"]) == ("yes", 2)
+  assert "R1 accept lapsed" in s.path("journal").read_text(encoding="utf-8")
