@@ -13,7 +13,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30); the decision points, rulings and leavemealone-mode moved to `references/`. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30); the batch's `notify` (U23); the decision points, rulings and leavemealone-mode moved to `references/`. -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the wave skill. Not part of google/elephant-goldfish-model. -->
 
@@ -156,7 +156,8 @@ ignored except `landed`:
    `python3 '<HELPER>' record-launch --unit <U> --runcard '<CARD>'`. A
    `launch-builder` refusal makes the unit idle for this invocation, no retry:
    `python3 '<HELPER>' report --idle '<U>=launch-builder: <reason>' --runcard '<CARD>'`.
-7. `superegm report`: `python3 '<HELPER>' report --runcard '<CARD>'`. If a
+7. `superegm report`: `python3 '<HELPER>' report --runcard '<CARD>'`, then `python3 '<HELPER>' notify --runcard '<CARD>'`
+   (the owner's `~/.superegm/notify` hook gets the inbox lines new since the last notify; a failing or slow hook never stops the wave). If a
    decision was opened this batch, pause: ask the owner at its decision
    point and run `report` again once ruled. Else `loop: ended` → The end;
    otherwise the next batch.
