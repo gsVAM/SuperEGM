@@ -14,12 +14,15 @@ from superegm.launch_builder import HELPER
 from test_u27 import elephant, PONY, MCP, THREE
 
 DRIVER_NONE = ["driver: not installed", "sleep: not reported", "root: not registered", "env: absent", "notify: absent"]
+# U28: the role table at init's defaults, after U24's `notify:` line
+ROLES = ["model: builder doable claude-opus-5-5 medium", "model: goldfish opus xhigh", "model: astra lanes gpt-6-astra xhigh",
+         "model: astra head lane gpt-6-astra high", "model: judge fable fable xhigh", "model: judge opus opus max", "model: judge astra gpt-6-astra xhigh"]
 
 OK = ["config: ok", "owner: ok (owner)", "origin: ok", "token: ok", "builder: ok (builder-bot)", "role: ok (write)",
       "scopes: ok (classic: repo, read:org)", "protection: ok",
       "merge: gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset restricts updates to config.owners)", "profile: ok", "plugins: none", "mcp: none", "gh: ok (/usr/local/bin/gh)", "environment: ok",
       "graphify: not on PATH (informational)", "astra: not installed (heads will record not run)",
-      "python3.12: not on PATH (informational)", "hooks: none", "core.hooksPath: unset", *DRIVER_NONE]
+      "python3.12: not on PATH (informational)", "hooks: none", "core.hooksPath: unset", *DRIVER_NONE, *ROLES]
 NAMES = [line.split(":")[0] for line in OK]
 
 
@@ -104,7 +107,7 @@ OK_APP = ["config: ok", "owner: ok (owner)", "origin: ok", "credential: ok (app 
           "app: ok (superegm-builder #12345)", f"permissions: ok ({FOUR[1:-1]})", "token: ok", "installation: ok (example-org/webhooks)",
           "scanning: push protection enabled, non-provider patterns enabled", "protection: ok",
           "merge: gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset restricts updates to config.owners)", "profile: ok", "plugins: none", "mcp: none", "gh: ok ({gh})", "environment: ok", "graphify: not on PATH (informational)", "astra: not installed (heads will record not run)",
-          "python3.12: not on PATH (informational)", "hooks: none", "core.hooksPath: unset", *DRIVER_NONE]
+          "python3.12: not on PATH (informational)", "hooks: none", "core.hooksPath: unset", *DRIVER_NONE, *ROLES]
 
 
 @pytest.mark.parametrize("case, code, expected, skipped", [
@@ -201,3 +204,17 @@ def test_doctor_names_a_registry_it_cannot_read(world, monkeypatch, tmp_path):
 def test_doctor_driver_lines(world, monkeypatch, tmp_path, setup, lines):
   arranged(world, monkeypatch, tmp_path, setup); got, out = world.run("doctor")
   assert got == 0 and all(l.format(root=HELPER.parents[3], tmp=tmp_path, sha=hashlib.sha256(b"#!/bin/sh\n").hexdigest()) in out.splitlines() for l in lines), out
+
+
+def test_doctor_prints_the_role_table(world, monkeypatch, tmp_path):
+  s, card, hid, _ = seed(world)
+  cfg = json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))
+  configure(world, builder={**cfg["builder"], "model": "claude-sonnet-5-5", "effort": "high"}, reviewers={"model": "fable", "effort": "max"},
+            astra={"enabled": True, "heads_effort": "xhigh"},
+            judges={"min_vendors": 1, "members": [{"name": "fable", "via": "adapter", "effort": "max", "model": "sonnet"}, {"name": "astra", "via": "runner"}]})
+  monkeypatch.setenv("CLAUDE_CODE_PLUGIN_CACHE_DIR", str(tmp_path / "plugins")); monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder"); monkeypatch.setenv("HOME", str(tmp_path))
+  monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: {"gh": "/usr/local/bin/gh", "python3.12": "/usr/local/bin/python3.12"}.get(cmd))
+  git(["remote", "set-url", "--push", "origin", f"git@github.com:{REPO}.git"], world.repo)
+  code, out = world.run("doctor")
+  assert code == 0 and out.splitlines()[-6:] == ["model: builder doable claude-sonnet-5-5 high", "model: goldfish fable max", "model: astra lanes gpt-6-astra xhigh",
+                                                 "model: astra head lane gpt-6-astra xhigh", "model: judge fable sonnet max", "model: judge astra gpt-6-astra xhigh"], out
