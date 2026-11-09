@@ -1133,7 +1133,7 @@ def test_foreman_adapter_frontmatter_and_tools():
     "superegm collect --unit <unit-id> --dispatch <dispatch-id> --runcard <child-card>",
     "--not-run \"<reason>\"",
     "superegm review post --unit <unit-id> --round <n> --dispatch <dispatch-id> --runcard <child-card>",
-    "clean | revise | contested: <ids> | cap-reached | target-moved | error",
+    "clean | revise | contested: <ids> | owner: <ids> | cap-reached | target-moved | error",
     "`target-moved` when `review post` exited 3",
     "`error` otherwise",
     "never merges, never approves, never edits the owner's working tree, never removes a worktree, never launches a session (the head's Astra lane excepted: one bounded foreground runner call), never convenes the judges, never infers that a builder died",

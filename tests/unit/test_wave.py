@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U10b's tests of the driver: report, decision open|rule, the wave skill body; the by-hand ruling read through `ruling_of` (U22).
+# Added by SuperEGM (gsVAM), 2026: U10b's tests of the driver: report, decision open|rule, the wave skill body; the by-hand ruling read through `ruling_of` (U22); the foreman-verifies prose and the owner-only decision's allowed form (U25).
 
 """U10b: the pure functions the wave skill cites, `report`, `decision open|rule` and the skill body.
 Fixtures: conftest's `world`, `applied` and `make_pr` (U03/U07)."""
@@ -11,7 +11,7 @@ from conftest import applied, make_pr, set_config
 import superegm  # the harness reloads the package per test: read load_config at call time
 from superegm import store, atomic_write, DEFAULT_CONFIG, decision, launch
 from test_builder_token import APP
-from superegm.report import unit_state, unit_view, loop_ended, word_action
+from superegm.report import unit_state, unit_view, loop_ended, word_action, pending_decisions
 from superegm.review import parse_findings
 from superegm.apply import board_changed_at, splice_board
 from test_builders import seed as filed, launched, foreman as foreman_file
@@ -142,10 +142,41 @@ def test_loop_ended_is_the_end_condition(states, ready, slots, expected):
   ("error", 5, "idle: review stalled"), ("target-moved", 5, "idle: review stalled"), ("blocked", 3, "decision 3"),
   ("recovered clean", 0, "await-merge"), ("recovered contested: f-2-1", 3, "decision 1"),
   ("recovered cap-reached", 2, "decision 2"), ("a sentence instead of a word", 3, "redispatch"),
-  ("owner: f-1-2", 3, "decision open"),
+  ("owner: f-1-2", 3, "decision open"), ("owner: foreman-2-2", 3, "decision open"),
 ])
 def test_word_action_is_the_word_table(word, review_exit, action):
   assert word_action(word, review_exit) == action
+
+
+# U25: the word table's `owner:` row lives in references/decision_points.md since the owner's split of the
+# wave skill (ruling on #83): its needles are pinned there; the SKILL.md row keeps its pointer.
+VERIFIES = [("skills/wave/references/foreman_brief.md", n) for n in ("both gates ran", "timeout: 600000", "post: gates not run",
+                                                                      "clean | revise | contested: <ids> | owner: <ids> | cap-reached | target-moved | error")] + [
+            ("skills/wave/SKILL.md", n) for n in ("`owner: <ids>` →", "no relaunch, no slot")] + [
+            ("skills/wave/references/decision_points.md", n) for n in ("options `<fid> allowed`, one per id",
+                                                                        "one `**Ruling:** <fid> allowed — <reason>` comment per id", "--disposition declined --owner",
+                                                                        "`owner: <ids>` decision convenes no panel")] + [
+            ("resources/review_panels.md", "`dod-<n>`"), ("resources/review_panels.md", "`test-delta`")]
+
+
+@pytest.mark.parametrize("path, needle", VERIFIES)
+def test_the_foreman_verifies_prose(path, needle):
+  assert needle in (SKILL.parents[2] / path).read_text(encoding="utf-8"), (path, needle)
+
+
+OWNER = {"rounds": [{"round": 1, "phase": "posted", "outcome": "owner: foreman-1-1, foreman-1-2"}]}
+TD = lambda fid, line: f"{fid} | high | tests/unit/test_q.py:{line} | regression: no | test-delta: tests/unit/test_q.py:{line} removed\n"
+ALLOWED = ["foreman-1-1 allowed", "foreman-1-2 allowed"]
+
+
+def test_an_owner_only_decision_offers_the_allowed_form():
+  assert decision.options_for(1, "review head-U01-c1 round 1", TD("foreman-1-1", 3) + TD("foreman-1-2", 5), OWNER, "a" * 40) == ALLOWED
+  assert decision.check_ruling(1, ALLOWED, "foreman-1-2 allowed") == "foreman-1-2 allowed"
+  with pytest.raises(decision.Refusal, match="decision: foreman-1-2 allowed is the owner's alone"):
+    decision.check_ruling(1, ALLOWED, "foreman-1-2 allowed", by="judges:p1")
+  one = {"decisions": [{"id": "q1", "point": 1, "options": ALLOWED}], "rulings": [{"decision": "q1", "ruling": "foreman-1-1 allowed"}]}
+  assert [d["id"] for d in pending_decisions(one)] == ["q1"]
+  assert pending_decisions(one | {"rulings": one["rulings"] + [{"decision": "q1", "ruling": "foreman-1-2 allowed — fine"}]}) == []
 
 
 @pytest.mark.parametrize("unit,state,why", [
