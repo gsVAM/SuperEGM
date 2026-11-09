@@ -256,6 +256,18 @@ def test_a_tick_runs_the_spec_of_the_registered_root(world, monkeypatch, tmp_pat
   code, out = world.run("report", "--runcard", out.strip()); assert code == 0, out
 
 
+def test_one_spec_is_one_artifact_in_every_worktree(world, monkeypatch, tmp_path):
+  """change-review-3-1: a card on worktree A's spec answers a `--spec` naming A's path from worktree B, and a `wave`
+  re-typed on B's path interrupts the open `wave` card on A's path, as `require_runcard` reads the two as one."""
+  s, hid = registered(world, monkeypatch, tmp_path); wt2 = tmp_path / "wt2"; rel = world.spec.resolve().relative_to(world.repo.resolve())
+  a_card = world.run("runcard", "open", "--skill", "wave", "--artifact", str(world.spec))[1].strip()
+  subprocess.run(["git", "worktree", "add", "-q", str(wt2), "-b", "wt2"], cwd=world.repo, check=True); monkeypatch.chdir(wt2)
+  args = superegm.argparse.Namespace(runcard=a_card, design=str(world.spec.resolve()))
+  monkeypatch.setattr(superegm, "STORE", s); assert superegm.require_runcard(args, {"wave"})["artifact"] == str(world.spec.resolve())
+  code, out = world.run("runcard", "open", "--skill", "wave", "--artifact", str(wt2.resolve() / rel)); assert code == 0, out
+  assert card_of(s, a_card)["interrupted_at"]
+
+
 def trigger(s):
   state = state_of(s); return status.tick_trigger(superegm.Handoff(Path(state["plan"]), s, state))
 
