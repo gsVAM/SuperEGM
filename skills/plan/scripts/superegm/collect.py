@@ -7,6 +7,7 @@ round that could not complete with `--not-run`."""
 
 import argparse
 import contextlib
+import difflib
 import io
 import json
 import os
@@ -99,6 +100,68 @@ def dod_runs(items, worktree: Path, env: dict, deadline: float, out_dir: Path) -
     summary = last_line(out.read_text(encoding="utf-8", errors="replace"))
     runs[str(n)] = {"exit": code, "summary": summary, "paste_summary": paste, "timed_out": timed_out}
   return runs
+
+
+OPERATORS = ("==", " in ", "raises", "match=")  # a paired head line lacking one of its base line's is weakened
+MARKER_RE = re.compile(r"@pytest\.mark\.(?:skip|xfail)\b")
+
+
+def assertion_lines(lines: list) -> set:
+  """The 0-based indexes of `lines` the gate guards: an `assert`, a `pytest.raises`, a `def test_` and a
+  `parametrize` row (a line strictly between one holding `@pytest.mark.parametrize(` and the next whose stripped
+  text starts with `]`)."""
+  out, inside = set(), False
+  for i, line in enumerate(lines):
+    s = line.strip()
+    if inside:
+      if s.startswith("]"):
+        inside = False
+      else:
+        out.add(i)
+        continue
+    if "@pytest.mark.parametrize(" in line:
+      inside = True
+    elif s.startswith("assert ") or s == "assert" or "pytest.raises" in s or s.startswith("def test_"):
+      out.add(i)
+  return out
+
+
+def test_delta(base_files: dict, head_files: dict, named: set) -> list:
+  """The removed or weakened assertions of each test file `base_files` maps to `(base_commit, text)`, its head
+  text in `head_files` (absent: zero assertions), a file in `named` or not `.py` skipped. Lines pair as git pairs
+  them: positionally within each `difflib.SequenceMatcher` `replace` block, the rest unpaired; a pair whose head
+  line lacks one of the base line's `OPERATORS` is `weakened` at the head line, an unpaired head skip or xfail
+  marker directly above a `def test_` is `weakened`, and an unpaired base assertion whose stripped text is in no
+  head line is `removed`."""
+  delta = []
+  for path, (base_commit, base_text) in sorted(base_files.items()):
+    if path in named or not path.endswith(".py"):
+      continue
+    entry = lambda line, base_line, kind: {"file": path, "line": line, "base_line": base_line, "kind": kind, "base_commit": base_commit}
+    base, guarded = base_text.splitlines(), assertion_lines(base_text.splitlines())
+    head_text = head_files.get(path)
+    if head_text is None:
+      delta += [entry(i + 1, i + 1, "removed") for i in sorted(guarded)]
+      continue
+    head = head_text.splitlines()
+    stripped = {line.strip() for line in head}
+    ops = difflib.SequenceMatcher(None, base, head, autojunk=False).get_opcodes()
+    to_base = {j1 + k: i1 + k for tag, i1, i2, j1, j2 in ops if tag == "equal" for k in range(i2 - i1)}
+    for tag, i1, i2, j1, j2 in ops:
+      if tag == "equal":
+        continue
+      paired = min(i2 - i1, j2 - j1) if tag == "replace" else 0
+      for k in range(paired):
+        i, j = i1 + k, j1 + k
+        if i in guarded and any(op in base[i] and op not in head[j] for op in OPERATORS):
+          delta.append(entry(j + 1, i + 1, "weakened"))
+      for j in range(j1 + paired, j2):
+        if MARKER_RE.search(head[j]) and j + 1 < len(head) and head[j + 1].strip().startswith("def test_") and j + 1 in to_base:
+          delta.append(entry(j + 1, to_base[j + 1] + 1, "weakened"))
+      for i in range(i1 + paired, i2):
+        if i in guarded and base[i].strip() not in stripped:
+          delta.append(entry(j1 + 1, i + 1, "removed"))
+  return delta
 
 
 def register(subparsers):
