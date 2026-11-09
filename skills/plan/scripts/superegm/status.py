@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the `ruling` event and a status line after a comment's deviation headings (U22); the board's one write per `wave` pass, `post_board` (U30).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the `ruling` event and a status line after a comment's deviation headings (U22); the board's one write per `wave` pass, `post_board` (U30); the tick's read, `tick_trigger` (U24).
 
 """superegm status: landed and ready sets, PRs, CI; refuses without a complete receipt.
 `--wait <s>` polls, reading only, and prints every unreported event line, or `deadline`. Under a `wave` card
@@ -15,6 +15,7 @@ from superegm import apply
 from superegm.decision import edited_after_record, ruling_of
 from superegm.launch import load_launches, terminal
 from superegm.report import board_table
+from superegm.review import collaborator_role, read_threads, thread_severity  # bound here: a test patches status's names
 
 WRITES = frozenset(['state'])  # the store kinds this subcommand writes
 SKILLS = frozenset(['wave', 'integrate'])  # the skills whose card this subcommand accepts
@@ -237,6 +238,44 @@ def unit_events(uid: str, previous, current: dict) -> list:
       what = " ".join(part for part in (kind, subject, option) if part)
       lines.append(f"{uid} ruling by {login}: {what} (comment {cid})")
   return lines
+
+
+def tick_trigger(handoff) -> str | None:
+  """What a tick's session would have to do (spec section 11.2), from one `status_pass` that saves nothing, in order:
+  the proof the tick applied to the handoff's newest tick launch (`reboot <n>` for one recorded `interrupted (reboot)`,
+  `exit-file <card>` for one whose exit file exists and whose top-level `wave` card is `interrupted`); the first event
+  line against `state.status.units`; an un-ingested thread above `low` on the latest posted round's head, by U21's
+  reader; `first launch` while `state.status` is absent; else None, the nothing-to-do predicate."""
+  st, state = handoff.store, handoff.state
+  launches = core.load_driver(st).get("launches") or []
+  if launches:
+    last = launches[-1]
+    if last.get("status") == "interrupted (reboot)":
+      return f"reboot {last['round']}"
+    if Path(last["exit_file"]).is_file():
+      mine = [(p.stem, c) for p, c in core.top_wave_cards(st) if c.get("driver_card") == last["card"]]
+      if mine and mine[-1][1].get("interrupted_at"):
+        return f"exit-file {mine[-1][0]}"
+  saved = state.get("status")
+  previous = (saved or {}).get("units") or {}
+  summary, _ = core.status_pass(handoff, save=False)
+  for uid in handoff.graph.order:
+    lines = unit_events(uid, previous.get(uid), summary["units"][uid])
+    if lines:
+      return lines[0]
+  repo, config = handoff.config["repo"], handoff.config
+  for uid in handoff.graph.order:
+    foreman = core.load_foreman(st, uid)
+    posted = [e for e in foreman.get("rounds") or [] if e.get("phase") == "posted" and e.get("head")]
+    pr = ((state.get("units") or {}).get(uid) or {}).get("pr") or {}
+    if not posted or not pr.get("number") or summary["units"][uid].get("landed"):
+      continue
+    head = max(posted, key=lambda e: e["round"])["head"]
+    threads = [t for t in read_threads(repo, pr["number"], set(foreman.get("ingested") or []))
+               if t.get("commit_id") == head and thread_severity(t, config, collaborator_role(repo, t["login"])) != "low"]
+    if threads:
+      return f"{uid} threads {len(threads)} un-ingested"
+  return None if saved else "first launch"
 
 
 def unit_view(handoff, uid):
