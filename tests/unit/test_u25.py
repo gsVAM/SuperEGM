@@ -14,7 +14,8 @@ import pytest
 import superegm
 from conftest import REPO, set_config
 from superegm import init, kill_group
-from superegm.collect import KILL_WAIT, dod_runs, run_env, test_delta
+from superegm.collect import KILL_WAIT, delta_files, dod_runs, run_env, test_delta, unquote
+from superegm.tdd_order import commits_of
 from superegm.launch_builder import SENTINEL, add_worktree, allowed_tools
 from test_foreman import PR, UNIT, builder_token, prepared  # noqa: F401  builder_token: the autouse token `prepare` reads
 
@@ -82,6 +83,49 @@ ONE = T("import pytest", "@pytest.mark.parametrize('x', [1, 2])", "# a note", "d
   (ONE.replace("# a note\ndef test_b(x):", "@pytest.mark.skip\ndef test_b(x, tmp_path):"), [E(3, 4, "weakened")])])
 def test_a_one_line_parametrize_opens_no_rows_and_a_marker_written_over_a_line_is_weakened(head, expect):
   assert test_delta({F: ("b", ONE)}, {F: head}, set()) == expect
+
+
+PLAIN = T("import pytest", "def test_c():", "  assert 1 == 1")
+SKIPPED = T("import pytest", "", "@pytest.mark.skip", "@pytest.mark.slow", "def test_c():", "  assert 1 == 1", "", "def test_d():", "  assert 2 == 2")
+
+
+@pytest.mark.parametrize("base, head, expect", [
+  (PLAIN, PLAIN.replace("def test_c", "@pytest.mark.skip\n# temporarily disabled\ndef test_c"), [E(2, 2, "weakened")]),
+  (SKIPPED, SKIPPED.replace("@pytest.mark.skip\n@pytest.mark.slow", "@pytest.mark.slow\n@pytest.mark.skip"), []),
+  (SKIPPED, T("import pytest", "", "def test_d():", "  assert 2 == 2", "", "@pytest.mark.skip", "@pytest.mark.slow", "def test_c():", "  assert 1 == 1"), [])])
+def test_a_marker_past_a_comment_is_weakened_and_one_the_base_test_carried_is_not(base, head, expect):
+  """Round 4 (PR #103 review, astra-4-6, change-review-4-2): a comment between the marker and its `def` is read
+  past; a marker the same base test already carried (decorators reordered, a skipped test moved) is no addition."""
+  assert test_delta({F: ("b", base)}, {F: head}, set()) == expect
+
+
+def test_delta_files_reads_a_merge_a_rename_out_of_test_naming_and_a_quoted_path(tmp_path):
+  """Round 4 (PR #103 review, astra-4-4, astra-4-5, astra-4-7): a test file a merge creates takes the merge as its
+  base; a base test file renamed to a path no longer test-named compares with that path; a path git would C-quote
+  is read whole."""
+  three, two = T("def test_a():", "  assert 1 == 1", "  assert 2 == 2"), T("def test_a():", "  assert 1 == 1")
+  q, cafe, n = "tests/unit/test_q.py", "tests/unit/test_café.py", "tests/unit/test_n.py"
+  g = lambda *a: subprocess.run(["git", "-C", str(tmp_path), *a], check=True, capture_output=True, text=True).stdout.strip()
+
+  def write(files, subject):
+    for path, content in files.items():
+      (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+      (tmp_path / path).unlink() if content is None else (tmp_path / path).write_text(content, encoding="utf-8")
+    g("add", "-A"); g("commit", "-qm", subject)
+  g("init", "-q", "-b", "main"); g("config", "user.email", "t@example.invalid"); g("config", "user.name", "T")
+  write({"README.md": "base\n", q: three, cafe: three}, "base")
+  base = g("rev-parse", "HEAD")
+  g("checkout", "-qb", "side"); write({"side.txt": "s\n"}, "side")
+  g("checkout", "-q", "main"); write({"main.txt": "m\n"}, "main")
+  g("merge", "-q", "--no-commit", "--no-ff", "side")
+  write({n: three}, "merge side")  # the merge itself creates the test file, in neither parent
+  merge = g("rev-parse", "HEAD")
+  write({n: two, q: None, "archive/q.py": two, cafe: two}, "chore: trim, archive and trim")
+  head = g("rev-parse", "HEAD")
+  base_files, head_files = delta_files(tmp_path, base, head, commits_of(tmp_path, base), set())
+  assert base_files == {q: (base, three), cafe: (base, three), n: (merge, three)}
+  assert head_files == {q: two, cafe: two, n: two}
+  assert unquote('"tests/unit/test_caf\\303\\251.py"') == cafe and unquote("tests/unit/test_q.py") == q
 
 
 def test_allowed_tools_splits_segments_as_the_shell_does():

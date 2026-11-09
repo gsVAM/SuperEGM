@@ -19,7 +19,7 @@ from pathlib import Path
 
 import superegm as core
 from superegm import body as body_mod, review, tdd_order
-from superegm.decision import binding_rulings, recorded_rulings, ruling_of
+from superegm.decision import binding_rulings, recorded_rulings
 from superegm.foreman import head_review_id
 from superegm.launch_builder import DOD_RESULT_RE, SENTINEL, launched_pairs
 from superegm.orient import TEST_RE
@@ -139,13 +139,13 @@ def assertion_lines(lines: list) -> set:
 
 def decorated(lines: list, j: int) -> int:
   """The index of the `def` line decorator line `j` decorates, past any stacked decorator and its continuation
-  lines, or `len(lines)` when a statement at the decorator's own indentation comes first."""
+  lines and comments, or `len(lines)` when a statement at the decorator's own indentation comes first."""
   indent = len(lines[j]) - len(lines[j].lstrip())
   for d in range(j + 1, len(lines)):
     s = lines[d].strip()
     if s.startswith(("def ", "async def ")):
       return d
-    if s and len(lines[d]) - len(lines[d].lstrip()) <= indent and not s.startswith(("@", ")", "]", "}")):
+    if s and len(lines[d]) - len(lines[d].lstrip()) <= indent and not s.startswith(("@", ")", "]", "}", "#")):
       break
   return len(lines)
 
@@ -172,6 +172,8 @@ def test_delta(base_files: dict, head_files: dict, named: set) -> list:
     ops = difflib.SequenceMatcher(None, base, head, autojunk=False).get_opcodes()
     to_base = {j1 + k: i1 + k for tag, i1, i2, j1, j2 in ops if tag == "equal" for k in range(i2 - i1)}
     defs = {m.group(1): i for i, line in enumerate(base) if (m := DEF_RE.match(line))}
+    # the markers each base test already carried: one the head keeps (a skipped test moved, decorators reordered) is no addition
+    had = {(decorated(base, i), m.group(0)) for i, line in enumerate(base) if (m := MARKER_RE.search(line))}
 
     def base_def(d):  # the base line of the test head line `d` defines: unchanged, else the base `def` of its name
       m = DEF_RE.match(head[d])
@@ -188,7 +190,7 @@ def test_delta(base_files: dict, head_files: dict, named: set) -> list:
         d = decorated(head, j)
         if j - j1 < paired and MARKER_RE.search(base[i1 + j - j1]):
           continue
-        if MARKER_RE.search(head[j]) and d < len(head) and (b := base_def(d)) is not None:
+        if (m := MARKER_RE.search(head[j])) and d < len(head) and (b := base_def(d)) is not None and (b, m.group(0)) not in had:
           delta.append(entry(j + 1, b + 1, "weakened"))
       for i in range(i1 + paired, i2):
         if i in guarded and base[i].strip() not in stripped:
@@ -202,13 +204,15 @@ def delta_files(worktree: Path, base: str, head: str, commits: list, named: set)
   its rename source, by `git diff -M`) exists there, else the commit that creates it; a rename source is compared
   through its pair, never alone. The range's own `git diff` adds a file only a merge changed; a file the range
   creates then renames chains back, commit by commit (`git log -M`), to the path it was created under."""
-  touched = [p for _, paths in commits for p in paths]
-  touched += core.run_git(["diff", "--name-only", base, head], worktree).split()  # a change a merge alone made
+  # every path NUL-delimited (`-z`), never C-quoted; `-m` reads a merge's own changes against each parent
+  log = name_status(core.run_git(["log", "-m", "-M", "--reverse", "--name-status", "-z", "--format=", f"{base}..{head}"], worktree))
+  diff = name_status(core.run_git(["diff", "-M", "--name-status", "-z", base, head], worktree))
+  touched = [unquote(p) for _, paths in commits for p in paths]  # `commits_of` reads `--name-only`, C-quoted
+  touched += [p for _, paths in log + diff for p in paths]  # a rename's source among them, and a change a merge alone made
   touched = list(dict.fromkeys(p for p in touched if TEST_RE.search(p) and p not in named))
-  pairs = lambda argv: [parts[1:] for line in core.run_git(argv, worktree).splitlines()
-                        if (parts := line.split("\t"))[0].startswith("R") and len(parts) == 3]
-  renames = {new: old for old, new in pairs(["diff", "-M", "--name-status", base, head])}
-  back = {new: old for old, new in pairs(["log", "-M", "--reverse", "--name-status", "--format=", f"{base}..{head}"])}
+  renames = {paths[1]: paths[0] for status, paths in diff if status.startswith("R")}
+  back = {paths[1]: paths[0] for status, paths in log if status.startswith("R")}
+  ahead = {old: new for new, old in renames.items()}  # a test file renamed, base to head, to a path no longer test-named
 
   def first(path):  # the path a file was created under in the range, down its renames
     seen = {path}
@@ -216,7 +220,7 @@ def delta_files(worktree: Path, base: str, head: str, commits: list, named: set)
       path = back[path]
       seen.add(path)
     return path
-  tree = lambda rev: set(core.run_git(["ls-tree", "-r", "--name-only", rev], worktree).splitlines())
+  tree = lambda rev: set(core.run_git(["ls-tree", "-r", "-z", "--name-only", rev], worktree).split("\0")) - {""}
   at_base, at_head = tree(base), tree(head)
   show = lambda rev, path: core.run_git(["show", f"{rev}:{path}"], worktree)
   base_files, head_files = {}, {}
@@ -232,13 +236,53 @@ def delta_files(worktree: Path, base: str, head: str, commits: list, named: set)
       base_files[path] = (base, show(base, old))
     else:
       old = first(path)
-      created = core.run_git(["log", "--reverse", "--format=%H", "--diff-filter=A", f"{base}..{head}", "--", old], worktree).split()
+      # `-m`: a file a merge introduces, in neither parent, is created by that merge
+      created = core.run_git(["log", "-m", "--reverse", "--format=%H", "--diff-filter=A", f"{base}..{head}", "--", old], worktree).split()
       if not created:
         continue
       base_files[path] = (created[0], show(created[0], old))
     if path in at_head:
       head_files[path] = show(head, path)
+    elif ahead.get(path) in at_head and ahead[path] not in candidates:  # renamed out of test naming: compared with its new path
+      head_files[path] = show(head, ahead[path])
   return base_files, head_files
+
+
+def name_status(out: str) -> list:
+  """`(status, paths)` per entry of a `--name-status -z` output: a rename or copy carries two paths, any other one."""
+  tokens, entries = out.split("\0"), []
+  i = 0
+  while i < len(tokens):
+    status = tokens[i].strip()
+    if not status:
+      i += 1
+      continue
+    n = 2 if status[0] in "RC" else 1
+    entries.append((status, tokens[i + 1:i + 1 + n]))
+    i += 1 + n
+  return entries
+
+
+ESCAPES = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13, '"': 34, "\\": 92}
+
+
+def unquote(path: str) -> str:
+  """A path as git's `core.quotePath` C-quotes it (`"tests/caf\\303\\251.py"`), unquoted; any other path as given."""
+  if not (len(path) > 1 and path[0] == path[-1] == '"'):
+    return path
+  s, out, i = path[1:-1], bytearray(), 0
+  while i < len(s):
+    if s[i] == "\\" and i + 1 < len(s):
+      if s[i + 1] in "01234567":
+        out.append(int(s[i + 1:i + 4], 8))
+        i += 4
+        continue
+      out.append(ESCAPES.get(s[i + 1], ord(s[i + 1])))
+      i += 2
+      continue
+    out += s[i].encode("utf-8")
+    i += 1
+  return out.decode("utf-8", "surrogateescape")
 
 
 def register(subparsers):
@@ -495,9 +539,9 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
     owners_own = [r for r in rulings if not r.login.startswith("judges:")]  # the owner's alone: never the judges' rulings
     settled = set().union(*(chain(r.subject) for r in owners_own if r.kind in ("overruled", "allowed")))
     keys = {key for fid, key in (prior_delta or {}).items() if fid in settled}
-    # a file allowance binds whole even once `decision rule` recorded its per-fid allowances under the comment's id
-    files = {r.subject for r in owners_own if r.kind == "allowed-file"} | {
-      r.subject for c in comments if c["kind"] == "issue" and (r := ruling_of(c, owners)) and r.kind == "allowed-file"}
+    # a file allowance binds whole: unrecorded, its comment; recorded (`decision rule` keeps `test-delta <file> allowed`
+    # beside the per-fid ones), the record, whatever a later edit or deletion of the comment does
+    files = {r.subject for r in owners_own if r.kind == "allowed-file"}
     delta[:] = [e for e in delta if e["file"] not in files and (e["file"], e["base_commit"], e["base_line"], e["kind"]) not in keys]
     found += [(f"{e['file']}:{e['line']}", f"test-delta: {e['file']}:{e['line']} {e['kind']}") for e in delta]
   widened = {path for fid, path in (prior_scope or {}).items() if fid in overruled}  # an owner's overrule widens the Scope
