@@ -153,7 +153,9 @@ def test_review_status_reads_the_stall_under_the_cards_own_rounds_after_its_post
 
 @pytest.mark.parametrize("path, needle", [("skills/wave/SKILL.md", "If a decision was opened this batch outside SUPEREGM_ROLE=driver, pause"),
                                           ("skills/wave/references/leavemealone_mode.md", "the batch ends as its step 7 says (under SUPEREGM_ROLE=driver it goes on"),
-                                          ("skills/wave/references/leavemealone_mode.md", "ask the owner (under SUPEREGM_ROLE=driver an inbox line, never a question)")])
+                                          ("skills/wave/references/leavemealone_mode.md", "ask the owner (under SUPEREGM_ROLE=driver an inbox line, never a question)"),
+                                          ("skills/driver/SKILL.md", "sets the two failures aside (`set_aside`, the second one's round)"),
+                                          ("skills/plan/scripts/superegm/__init__.py", "`launches[]`, `notified`, `refused`, `set_aside`")])
 def test_no_wave_passage_asks_under_the_driver_role(path, needle):
   text = " ".join((ROOT / path).read_text().split()); assert needle in text, (path, needle)
 
