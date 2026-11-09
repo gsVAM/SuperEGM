@@ -1332,7 +1332,7 @@ def test_the_wave_skill_and_the_orders_quote_the_ruling_forms(path, needle):
 
 
 @pytest.mark.parametrize("needle", [  # round 3 (PR #96 review): a ruling by comment continues as its point's typed section does
-    "then, for `finding upheld` too, by `review status`: 0 → the unit awaits\n  merge; 2 → Decision point 2; else `launch-builder`",
+    "then, for `finding upheld` too, by `review status`: 0 → the unit awaits\n  merge; 2 → Decision point 2; in normal mode `acceptable: yes` → Decision point 5; else `launch-builder`",
     "a spent `one more round` is refused before anything is recorded",
     "(a `redesign` at point 1 runs no `review rule`)",
     "option on a `BLOCKED` comment → `launch-builder` now"])
