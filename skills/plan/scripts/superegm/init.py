@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the init subcommand; `owners` from `gh api user` and the pointer to the README's token recipe and to `doctor` (spec section 11); the astra.enabled and astra.heads sentence (U17); the ingest sentence (U21); the ~/.superegm/notify sentence (U23); the foreman.run_timeout_minutes sentence (U25).
+# Added by SuperEGM (gsVAM), 2026: the init subcommand; `owners` from `gh api user` and the pointer to the README's token recipe and to `doctor` (spec section 11); the astra.enabled and astra.heads sentence (U17); the ingest sentence (U21); the ~/.superegm/notify sentence (U23); the foreman.run_timeout_minutes sentence (U25); step 2's disableClaudeAiConnectors, builder.plugins and builder.mcp (U27).
 
 """superegm init: write .superegm/config.json with every key's default; print the owner's by-hand steps."""
 
@@ -14,8 +14,12 @@ STEPS = """wrote {path}
 By hand, before the first typed skill runs:
 1. Create the builder account and its token as README.md, "Before the first run" step 1 says; put the token in SUPEREGM_BUILDER_TOKEN (config key builder.gh_token_env), never in the repository or the config, or register a GitHub App as that step says and set builder.app (SUPEREGM_BUILDER_TOKEN then stays unset: one identity per repository).
 2. Create the builder's empty profile at {profile_dir} (config key builder.profile_dir):
-   no hooks, no plugins, only the login (`CLAUDE_CONFIG_DIR={profile_dir} claude`, `/login`, exit) and a
-   settings.json with "syncClaudeAiPlugins": false, written before the login.
+   no hooks, no plugins, no skills/ or commands/ directory, only the login (`CLAUDE_CONFIG_DIR={profile_dir} claude`,
+   `/login`, exit) and a settings.json with "syncClaudeAiPlugins": false and "disableClaudeAiConnectors": true,
+   written before the login. A plugin the builder is to load is named in builder.plugins (its <name>@<marketplace>
+   id, installed once into this session's profile, disabled there) and passed by --plugin-dir per launch; the
+   builder's MCP servers go in builder.mcp (mcpServers form, a secret by ${{VAR}} reference, never its value),
+   passed by --mcp-config --strict-mcp-config.
 3. Set the branch protection of spec section 11 on `{base}`: updates restricted to the logins in
    config.owners (a classic restriction) or, by a ruleset, with no bypass for the builder account's
    role and no team but config.owner_team; `superegm/**` protected from force-push and deletion by a
