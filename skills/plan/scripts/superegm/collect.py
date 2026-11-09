@@ -11,6 +11,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -26,6 +27,7 @@ WRITES = frozenset(['foreman', 'review', 'reviews'])  # the store kinds this sub
 SKILLS = frozenset(['wave'])  # the skills whose card this subcommand accepts
 DEVIATION_RE = re.compile(r"^\*\*Deviation \((interface|dod|test|other)\):\*\*")
 REPLY_RE = re.compile(r"^\*\*Reply (\S+):\*\* (fixed|contested)(?:\s*[—-]\s*(.*))?", re.S)
+COUNTS_RE = re.compile(r"(\d+) passed|(\d+) failed")  # a pytest summary line's pass and fail counts
 KILL_WAIT = 5  # seconds waited after `kill_group` at the bound before `exit: none` is recorded
 
 
@@ -40,6 +42,35 @@ def run_env(gh, worktree) -> dict:
 
 def last_line(text: str) -> str:
   return next((l.strip() for l in reversed(text.splitlines()) if l.strip()), "")
+
+
+def counts(text) -> tuple | None:
+  """`(passed, failed)` from the last line of `text` matching `COUNTS_RE` (an absent word 0), or None: no such line."""
+  line = next((l for l in reversed((text or "").splitlines()) if COUNTS_RE.search(l)), None)
+  if line is None:
+    return None
+  found = COUNTS_RE.findall(line)
+  return (next((int(p) for p, _ in found if p), 0), next((int(f) for _, f in found if f), 0))
+
+
+def dod_findings(body: str, runs: dict, ruled: set) -> list:
+  """The `dod-<n>` highs of the re-run, in item order, skipping an item number in `ruled`: a run cut by the bound
+  `ran red (timeout)`, an item the bound left unreached `not run (timeout)`, a non-zero exit `ran red (<line>)` alone,
+  and a green run whose pass or fail counts differ from the builder's paste `paste differs from the run`."""
+  found = []
+  for n, kind, _ in body_mod.dod_items(body):
+    run = runs.get(str(n))
+    if kind != "run" or run is None or n in ruled:
+      continue
+    if run["summary"] is None:
+      found.append(("pr_body.md", f"dod-{n}: not run (timeout)"))
+    elif run["timed_out"]:
+      found.append((f"dod/{n}.txt", f"dod-{n}: ran red (timeout)"))
+    elif run["exit"] != 0:
+      found.append((f"dod/{n}.txt", f"dod-{n}: ran red ({run['summary']})"))
+    elif None not in (ran := counts(run["summary"]), pasted := counts(run["paste_summary"])) and ran != pasted:
+      found.append((f"dod/{n}.txt", f"dod-{n}: paste differs from the run"))
+  return found
 
 
 def dod_runs(items, worktree: Path, env: dict, deadline: float, out_dir: Path) -> dict:
@@ -89,6 +120,7 @@ def run(args):
 def collect(args, card):
   plan, st = core.locate(args)
   handoff = core.Handoff(plan, st)
+  deadline = time.time() + 60 * handoff.config["foreman"]["run_timeout_minutes"]  # the whole call's bound, from its entry
   unit = args.unit
   data = core.load_foreman(st, unit)
   entry = review.require_dispatch(unit, data, args.dispatch)
@@ -112,6 +144,7 @@ def collect(args, card):
   rid = head_review_id(st, unit)
   prior = max((e["round"] for e in data["rounds"] if e.get("phase") == "posted"), default=None)
   prior_ci_fid, prior_tdd, prior_scope, contest_of, external, earlier, disposed = None, {}, {}, {}, [], set(), set()
+  prior_dod = {}
   posted = {e["round"]: e.get("posted_at") or "" for e in data["rounds"] if e.get("phase") == "posted"}
   for e in data["rounds"]:  # every posted round: an overruled out-of-Scope finding widens the Scope for good;
     if e.get("phase") == "posted":  # a contest or carried finding names the finding a reply may answer under
@@ -120,6 +153,8 @@ def collect(args, card):
           prior_scope[f["id"]] = f["location"]
         if f["claim"].startswith("tdd-order: "):  # a ruled tdd-order failure stays ruled in every later round
           prior_tdd[f["id"]] = f["claim"].removeprefix("tdd-order: ")
+        if (m := re.match(r"dod-(\d+): ", f["claim"])):  # a ruled `dod-<n>` finding stays ruled on its item number
+          prior_dod[f["id"]] = int(m.group(1))
         if (m := re.match(r"(?:contested|unreplied) (\S+):", f["claim"])):
           contest_of[f["id"]] = m.group(1)
           if f.get("disposition") is not None:  # a settled copy settles what it carries
@@ -132,12 +167,32 @@ def collect(args, card):
   for f in prior_foreman_findings(st, rid, prior):
     if f["location"] == "ci":
       prior_ci_fid = f["id"]
-  lines, contested = foreman_findings(n, json.loads(core.read_text(r / "ci.json"))["verdict"], text, scope, worktree, changed,
-                                      core.read_text(r / "pr_body.md"), comments, login, prior, prior_ci_fid,
-                                      tdd_order.commits_of(worktree, entry["merge_base"]), prior_tdd, prior_scope, contest_of,
+  verdict, pr_body = json.loads(core.read_text(r / "ci.json"))["verdict"], core.read_text(r / "pr_body.md")
+  commits = tdd_order.commits_of(worktree, entry["merge_base"])
+  items = body_mod.dod_items(text)
+  present = {path for _, kind, path in items if kind == "exists" and (worktree / path).exists()}
+  # every input is read; the three files a run could edit are held whole, then the DoD `Run` items run
+  config = worktree / core.run_git(["rev-parse", "--git-common-dir"], worktree).strip() / "config"
+  held = [st.path("foreman", unit), config] + ([st.path("reviews", rid, f"round-{n}.json")] if rid else [])
+  held = {path: path.read_bytes() if path.is_file() else None for path in held}
+  pastes = {int(m.group(1)): last_line(m.group(2)) for m in DOD_RESULT_RE.finditer(pr_body)}
+  runs = dod_runs([(i, cmd, pastes[i]) for i, kind, cmd in items if kind == "run" and i in pastes], worktree,
+                  run_env(shutil.which("gh") or "gh", worktree), deadline, r / "dod")
+  for path, raw in held.items():  # written back whole: an edit a run made to them is overwritten
+    if raw is None:
+      path.unlink(missing_ok=True)
+    else:
+      core.atomic_write(path, raw)
+  for i, run in runs.items():
+    if run["summary"] is not None:
+      core.atomic_write(r / "dod" / f"{i}.txt", f"exit: {'none' if run['exit'] is None else run['exit']}\n"
+                        f"summary: {run['summary']}\ntimed_out: {'yes' if run['timed_out'] else 'no'}\n")
+  lines, contested = foreman_findings(n, verdict, text, scope, worktree, changed, pr_body, comments, login, prior, prior_ci_fid,
+                                      commits, prior_tdd, prior_scope, contest_of,
                                       external, earlier, disposed, posted, handoff.config.get("owners") or [],
                                       recorded_rulings(data), data.get("decisions") or [], recorded_times(data),
-                                      handoff.state["units"][unit].get("number"))
+                                      handoff.state["units"][unit].get("number"), runs=runs, prior_dod=prior_dod, present=present)
+  entry.update(dod_runs=runs, test_delta=[])
   findings = r / "foreman.findings"
   core.atomic_write(findings, "".join(line + "\n" for line in lines))
   with contextlib.redirect_stdout(io.StringIO()):
@@ -215,7 +270,7 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
                      prior_scope: dict = None, contest_of: dict = None, external: list = (),
                      earlier: set = frozenset(), disposed: set = frozenset(), posted: dict = None,
                      owners: list = (), recorded: list = (), decisions: list = (), recorded_at: dict = None,
-                     issue_number: int = None) -> tuple:
+                     issue_number: int = None, runs: dict = None, prior_dod: dict = None, present: set = None) -> tuple:
   """The foreman's high findings of spec section 11 in this order: CI, the DoD items, scope, tdd-order,
   deviations, contested, upheld, unreplied external; and `builder_contested[]` for the contested ones. Rulings
   and replies count only from the right author: a ruling is a `config.owners` login's comment `ruling_of` reads
@@ -236,7 +291,10 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
   counts). A reply
   to a carried copy `foreman-<r>-<k>`, `fixed` or `contested`, counts (toward the carry, or as a contest) only
   when it comes after round r was posted (`posted`, each posted round's `posted_at`): before that the copy did
-  not exist."""
+  not exist. The DoD re-run's `dod-<n>` highs (`runs`, `dod_runs`' record) follow the fenced-output check; an item
+  number stays ruled by the owner's `dod-<n> allowed` or by an overrule or allowance of a posted `dod-<n>` fid
+  (`prior_dod`, fid to item number), a contest's copy followed back to it. `present`, when given, is the `Exists`
+  paths found before the runs."""
   found, contested = [], []
   links = contest_of or {}
 
@@ -258,7 +316,7 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
     found.append(("ci", f"CI not green on this head: {ci_verdict}"))
   results = {int(m.group(1)) for m in DOD_RESULT_RE.finditer(pr_body)}
   for n, kind, text in body_mod.dod_items(body):
-    if kind == "exists" and not (worktree / text).exists():
+    if kind == "exists" and not (text in present if present is not None else (worktree / text).exists()):
       found.append((text, f"Exists item {n}: path absent"))
     elif kind == "run" and n not in results:
       found.append(("pr_body.md", f"Run item {n}: no fenced output"))
@@ -275,6 +333,8 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
     return out
   overruled = set().union(*(chain(r.subject) for r in rulings if r.kind == "overruled"))
   allowed = set().union(*(chain(r.subject) for r in rulings if r.kind == "allowed"))
+  ruled = {int(r.subject[4:]) for r in rulings if r.kind == "allowed" and re.fullmatch(r"dod-\d+", r.subject)}
+  found += dod_findings(body, runs or {}, ruled | {item for fid, item in (prior_dod or {}).items() if fid in overruled | allowed})
   widened = {path for fid, path in (prior_scope or {}).items() if fid in overruled}  # an owner's overrule widens the Scope
   in_scope = lambda path: any(path == s or path.startswith(s.rstrip("/") + "/") for s in scope)  # a directory covers its files
   found += [(path, "changed path outside Scope paths") for path in changed if not in_scope(path) and path not in widened]
