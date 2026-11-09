@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U10b's tests of the driver: report, decision open|rule, the wave skill body; the by-hand ruling read through `ruling_of` (U22); the foreman-verifies prose and the owner-only decision's allowed form (U25); the head's fifth decision point and the accept below the cap's skill texts (U35).
+# Added by SuperEGM (gsVAM), 2026: U10b's tests of the driver: report, decision open|rule, the wave skill body; the by-hand ruling read through `ruling_of` (U22); the foreman-verifies prose and the owner-only decision's allowed form (U25); the head's fifth decision point and the accept below the cap's skill texts (U35); the watchdog's stalled line, carve-out and skill lines (U31).
 
 """U10b: the pure functions the wave skill cites, `report`, `decision open|rule` and the skill body.
 Fixtures: conftest's `world`, `applied` and `make_pr` (U03/U07)."""
@@ -1577,3 +1577,33 @@ def test_the_fifth_decision_point_is_ruled_by_word_or_comment(world, monkeypatch
   ("skills/wave/references/decision_points.md", "no head is accepted early"), ("skills/wave/SKILL.md", "printed `acceptable: yes` → Decision point 5"), ("skills/integrate/SKILL.md", "accepted before the cap")])
 def test_the_skill_texts_carry_the_accept_below_the_cap(path, needle):
   assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
+
+
+from test_events import seed as events_seed, WAIT, comment  # noqa: E402
+import time  # noqa: E402
+iso = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+
+
+@pytest.mark.parametrize("extra, head, exit_text, minutes, word, lines", [
+  ({}, NOW - 1800, None, None, "DONE_WITH_CONCERNS", ["U01 stalled (30 min; last commit 2023-11-14T21:43:20Z) pr=none status=DONE_WITH_CONCERNS"]),
+  ({}, NOW - 3600, None, None, None, ["U01 stalled (31 min; last commit none) pr=none status=none"]),
+  ({}, NOW - 3600, "0", None, None, ["U01 exit code=0 pr=none status=none"]),
+  ({}, None, None, 45, None, ["deadline"]),
+  ({"kill_failed": "no exit file"}, None, None, None, None, ["deadline"]),
+  ({"kill_failed": "no exit file"}, None, "stalled", None, None, ["U01 exit code=stalled pr=none status=none"]),
+  ({"status": "exited (stalled)"}, None, "stalled", None, None, ["deadline"])])
+def test_every_pass_reports_a_stalled_launch(world, monkeypatch, tmp_path, extra, head, exit_text, minutes, word, lines):
+  """The watchdog (spec section 11.1, U31): a `running` launch with no `kill_failed` mark and no exit file, whose
+  worktree shows no commit newer than its own newest (or its `started_at`) for `builder.stall_minutes`, is reported
+  stalled at every pass, the predicate and no fingerprint; an `exited (stalled)` launch masks its exit and status."""
+  from superegm import status as status_mod
+  gh, st, card = events_seed(world, monkeypatch)
+  minutes and set_config(world, repo=REPO, builder={**DEFAULT_CONFIG["builder"], "stall_minutes": minutes})
+  word and comment(gh, f"**Builder status:** {word}")
+  atomic_write(st.path("launches", "U01"), {"launches": [{"round": 1, "status": "running", "started_at": iso(NOW - 31 * 60), "worktree": str(tmp_path), "result_file": str(tmp_path / "r1.json"), **extra}]})
+  exit_text and (tmp_path / "r1.json.exit").write_text(exit_text + "\n", encoding="utf-8")
+  monkeypatch.setattr(status_mod, "head_time", lambda worktree: head)
+  code, out = world.run(*WAIT, card)
+  assert code == 0 and out.splitlines() == lines, out
+  assert " stalled (" not in lines[0] or world.run(*WAIT, card)[1].splitlines() == lines   # the predicate, no fingerprint
+  assert " stalled (" not in lines[0] or status_mod.tick_trigger(status_mod.core.Handoff(world.plan, st)) == lines[0]   # the tick wakes on it
