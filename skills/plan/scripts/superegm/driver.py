@@ -10,6 +10,7 @@ import json
 import os
 import plistlib
 import subprocess
+import sys
 from pathlib import Path
 
 import superegm as core
@@ -18,6 +19,8 @@ WRITES = frozenset({"driver", "runcards", "launches"})
 SKILLS = frozenset({"driver"})
 ACTIONS = ("tick", "install", "uninstall", "status", "reset")
 LABEL = "com.superegm.driver"
+RUN = subprocess.run  # launchctl and systemctl: a test fakes it
+PLATFORM = sys.platform
 
 
 def plist_path() -> Path:
@@ -79,10 +82,14 @@ def run(args):
   try:
     if args.action == "tick":
       return tick()
-    if args.action == "reset":
-      core.require_runcard(args, SKILLS)
-      return reset()
-    raise core.HandoffError(f"{args.action} is not available yet")
+    if args.action == "status":
+      return status()
+    core.require_runcard(args, SKILLS)
+    if args.action == "install":
+      return install(args.interval or 15)
+    if args.action == "uninstall":
+      return uninstall()
+    return reset()
   except core.HandoffError as error:
     message = str(error)
     raise core.HandoffError(message if message.startswith("driver: ") else f"driver: {message}") from None
@@ -307,6 +314,95 @@ def tick() -> int:
   finally:
     os.environ.clear()
     os.environ.update(saved)
+  return 0
+
+
+# ---------------------------------------------------------------- install, uninstall, status
+
+
+def service_path() -> Path:
+  return systemd_dir() / "superegm-driver.service"
+
+
+def timer_path() -> Path:
+  return systemd_dir() / "superegm-driver.timer"
+
+
+def call(argv: list, check=True) -> None:
+  """One `launchctl` or `systemctl` call; a non-zero exit refused when `check`."""
+  result = RUN(argv, capture_output=True, text=True)
+  if check and result.returncode != 0:
+    raise core.HandoffError(f"{' '.join(argv)} exited {result.returncode}")
+
+
+def install(minutes: int) -> int:
+  """The timer that runs `superegm driver tick` through the absolute interpreter and this plugin root's helper
+  every `minutes`: a launchd agent bootstrapped at once on darwin, else a systemd user timer enabled at once.
+  The plist carries no secret and no environment: the tick reads `~/.superegm/env`."""
+  from superegm.launch_builder import HELPER
+  if minutes < 1:
+    raise core.HandoffError(f"--interval {minutes} is not a positive number of minutes")
+  argv = [sys.executable, str(HELPER), "driver", "tick"]
+  if PLATFORM == "darwin":
+    plist, log, domain = plist_path(), str(Path.home() / ".superegm" / "driver.log"), f"gui/{os.getuid()}"
+    core.atomic_write(plist, plistlib.dumps({"Label": LABEL, "ProgramArguments": argv, "StartInterval": minutes * 60,
+                                             "AbandonProcessGroup": True, "StandardOutPath": log, "StandardErrorPath": log}))
+    call(["launchctl", "bootout", domain, str(plist)], check=False)
+    call(["launchctl", "bootstrap", domain, str(plist)])
+    print(f"installed ({minutes} min): {plist}")
+    return 0
+  core.atomic_write(service_path(), "[Unit]\nDescription=SuperEGM driver tick\n\n[Service]\nType=oneshot\n"
+                    f"ExecStart={' '.join(argv)}\nKillMode=process\n")
+  core.atomic_write(timer_path(), "[Unit]\nDescription=SuperEGM driver timer\n\n[Timer]\nOnBootSec=1min\n"
+                    f"OnUnitActiveSec={minutes}min\n\n[Install]\nWantedBy=timers.target\n")
+  call(["systemctl", "--user", "daemon-reload"])
+  call(["systemctl", "--user", "enable", "--now", timer_path().name])
+  print(f"installed ({minutes} min): {timer_path()}")
+  return 0
+
+
+def uninstall() -> int:
+  if PLATFORM == "darwin":
+    plist = plist_path()
+    if not plist.is_file():
+      print("not installed")
+      return 0
+    call(["launchctl", "bootout", f"gui/{os.getuid()}", str(plist)], check=False)
+    plist.unlink()
+    print(f"uninstalled: {plist}")
+    return 0
+  if not timer_path().is_file() and not service_path().is_file():
+    print("not installed")
+    return 0
+  call(["systemctl", "--user", "disable", "--now", timer_path().name], check=False)
+  for path in (timer_path(), service_path()):
+    if path.is_file():
+      path.unlink()
+  call(["systemctl", "--user", "daemon-reload"], check=False)
+  print(f"uninstalled: {timer_path()}")
+  return 0
+
+
+def status() -> int:
+  """`driver status`, read-only and under no card: per open handoff of each registered store, the last tick launch
+  (`started_at`, the wrapper's `pid`, whether its exit file exists), the open top-level `wave` card with its age and
+  the last refusal; an absent part's clause dropped."""
+  from superegm.inbox import minutes_since  # inbox imports this module
+  for entry in core.load_registry():
+    st, _ = registered_store(entry)
+    for hid in open_ids(st):
+      hs = core.handoff_store(st, hid)
+      data, parts = core.load_driver(hs), []
+      if data["launches"]:
+        last = data["launches"][-1]
+        parts.append(f"launch {last['round']} started {last['started_at']} pid {last.get('pid', '-')} "
+                     f"exit file {'yes' if Path(last['exit_file']).is_file() else 'no'}")
+      for path, card in core.top_wave_cards(hs):
+        if is_open(card):
+          parts.append(f"wave card {path.stem} open {minutes_since(card['opened_at'])} min")
+      if data.get("refused"):
+        parts.append(f"refused: {data['refused']['reason']}")
+      print(f"{hid}: {'; '.join(parts) or 'no tick launch'}")
   return 0
 
 
