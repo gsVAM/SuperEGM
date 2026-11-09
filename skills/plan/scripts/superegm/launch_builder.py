@@ -207,6 +207,56 @@ def plugins_held(plugins):
       for bucket in synced.iterdir())
 
 
+def elephant_profile() -> Path:
+  """The elephant's own Claude Code profile: `CLAUDE_CONFIG_DIR` when set, else `~/.claude`."""
+  configured = os.environ.get("CLAUDE_CONFIG_DIR")
+  return Path(configured).expanduser() if configured else Path.home() / ".claude"
+
+
+def hook_events(plugin_dir: Path) -> list:
+  """The sorted union of the `hooks` keys of the hook files the plugin's manifest names (a path or a list of paths
+  relative to its directory, or an inline object), of `hooks/hooks.json` when no manifest names one; an absent or
+  non-JSON file is ignored."""
+  def load(path):
+    try:
+      data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+      return None
+    return data
+  manifest = load(plugin_dir / ".claude-plugin/plugin.json")
+  named = manifest.get("hooks") if isinstance(manifest, dict) else None
+  if not named:
+    named = "./hooks/hooks.json"
+  events = set()
+  for item in named if isinstance(named, list) else [named]:
+    data = item if isinstance(item, dict) else load(plugin_dir / item) if isinstance(item, str) else None
+    hooks = data.get("hooks") if isinstance(data, dict) else None
+    if isinstance(hooks, dict):
+      events.update(hooks)
+  return sorted(events)
+
+
+def plugin_dirs(plugins: list, profile_dir: Path) -> list:
+  """One `{id, version, dir, hooks}` per listed plugin id, in order, from the first `scope: user` entry of
+  `<profile_dir>/plugins/installed_plugins.json` (enabled there or not; spec section 11.1); `dir` is its
+  `installPath`, `hooks` its hook events. A listed id with no `user` entry is refused; `[]` reads no file."""
+  if not plugins:
+    return []
+  try:
+    data = json.loads((Path(profile_dir) / "plugins/installed_plugins.json").read_text(encoding="utf-8"))
+  except (OSError, ValueError):
+    data = {}
+  entries = data.get("plugins") if isinstance(data, dict) else None
+  entries = entries if isinstance(entries, dict) else {}
+  found = []
+  for pid in plugins:
+    user = next((e for e in entries.get(pid) or [] if isinstance(e, dict) and e.get("scope") == "user" and isinstance(e.get("installPath"), str)), None)
+    if user is None:
+      raise core.HandoffError(f"plugin {pid} not installed")
+    found.append({"id": pid, "version": user.get("version"), "dir": user["installPath"], "hooks": hook_events(Path(user["installPath"]))})
+  return found
+
+
 def profile_problem(profile_dir):
   """Spec sections 4 and 11: the builder profile exists, holds no CLAUDE.md, no plugins (`plugins_held`) and no
   hooks (a `settings.json` with a `hooks` key)."""
