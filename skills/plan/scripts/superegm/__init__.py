@@ -15,11 +15,13 @@ Every `gh` call goes through `gh()`; tests inject `GH`, `SLEEP` and `NOW` here.
 import argparse
 import importlib
 import calendar
+import contextlib
 import difflib
 import hashlib
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import urllib.parse
@@ -560,9 +562,21 @@ def canonical(obj) -> str:
   return json.dumps(obj, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
 
 
+@contextlib.contextmanager
+def hook_free():
+  """The `-c` pairs that keep a git call from running a hook or an fsmonitor the repository names: `core.hooksPath`
+  at a fresh empty directory (spec section 4.1), removed on exit (U25)."""
+  folder = tempfile.mkdtemp(prefix="superegm-no-hooks-")
+  try:
+    yield ["-c", f"core.hooksPath={folder}", "-c", "core.fsmonitor=false"]
+  finally:
+    shutil.rmtree(folder, ignore_errors=True)
+
+
 def run_git(args, cwd: Path, check=True) -> str:
-  result = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True,
-                          text=True, encoding="utf-8")
+  with hook_free() as pairs:
+    result = subprocess.run(["git", *pairs, *args], cwd=str(cwd), capture_output=True,
+                            text=True, encoding="utf-8")
   if not check:
     return result.stdout if result.returncode == 0 else ""
   if result.returncode != 0:
@@ -1854,13 +1868,18 @@ def registered_worktrees(root: Path):
   return paths
 
 
-def remove_worktree(root: Path, tree: Path) -> None:
-  """Remove a review worktree only when it is clean.
+def remove_worktree(root: Path, tree: Path, force=False) -> None:
+  """Remove a review worktree only when it is clean, unless `force`.
 
-  `--force` deletes tracked modifications and untracked files. The foreman
-  removes a worktree after every round, so a person editing it during a review
-  would lose that work without being asked."""
+  `--force` deletes tracked modifications and untracked files. By default the
+  foreman would not take a person's edits without asking; `prepare` passes
+  `force` (U25): the review worktree is the store's, and a DoD `Run` line may
+  leave it dirty."""
   if not tree.exists():
+    run_git(["worktree", "prune"], root, check=False)
+    return
+  if force:
+    run_git(["worktree", "remove", "--force", str(tree)], root)
     run_git(["worktree", "prune"], root, check=False)
     return
   dirty = run_git(["status", "--porcelain"], tree, check=False).strip()

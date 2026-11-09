@@ -205,7 +205,8 @@ def profile_problem(profile_dir):
 
 def pr_block_text(repo_root, ref, path):
   """`config.pr_block_file`'s bytes at the launch's ref, verbatim (spec section 11); absent, the launch is refused."""
-  result = subprocess.run(["git", "cat-file", "-p", f"{ref}:{path}"], cwd=str(repo_root), capture_output=True)
+  with core.hook_free() as pairs:
+    result = subprocess.run(["git", *pairs, "cat-file", "-p", f"{ref}:{path}"], cwd=str(repo_root), capture_output=True)
   if result.returncode:
     raise core.HandoffError(f"pr_block_file {path} is absent at {ref}")
   return result.stdout.decode("utf-8")
@@ -236,7 +237,9 @@ def spec_range_text(repo_root: Path, store, body_text: str, ref: str) -> str:
   if not marker or not match:
     raise core.HandoffError("spec range: the body carries no marker or no `Spec:` range")
   sha, rel, start, end = marker.group(3), match.group(1), int(match.group(2)), int(match.group(3))
-  show = lambda commit: subprocess.run(["git", "show", f"{commit}:{rel}"], cwd=str(repo_root), capture_output=True)
+  def show(commit):
+    with core.hook_free() as pairs:
+      return subprocess.run(["git", *pairs, "show", f"{commit}:{rel}"], cwd=str(repo_root), capture_output=True)
   holds = lambda blob: blob.returncode == 0 and hashlib.sha256(blob.stdout).hexdigest() == sha
   text = None
   for entry in core.load_approvals(store, Path(rel)):
