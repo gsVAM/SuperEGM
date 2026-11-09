@@ -2,7 +2,7 @@
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: panel presets,
 routing table, run card and configuration. Not part of google/elephant-goldfish-model.
 Modified by SuperEGM (gsVAM), 2026: section 7's convergence rule and cap live in
-skills/review-spec/references/review_loop.md; the second clean round for document reviews is gone; the head review's panel row (U17); the external reviewer id of `review ingest` (U21); the foreman's own gate findings (U25). -->
+skills/review-spec/references/review_loop.md; the second clean round for document reviews is gone; the head review's panel row (U17); the external reviewer id of `review ingest` (U21); the foreman's own gate findings (U25); section 6 points at review_loop.md's one model and effort rule (U28). -->
 
 # Review panels, run card and configuration
 
@@ -222,6 +222,14 @@ Rules that apply to every row:
   which it did not complete is not clean.
 
 ## 6. Per-reviewer model and effort for Claude goldfish
+
+SuperEGM's one rule is `skills/review-spec/references/review_loop.md` section 2
+(`Model and effort, one rule:`): the config pair, the session variables over it,
+and what the record says. This section is the mechanics that rule points at.
+Under SuperEGM read `EGM_GOLDFISH_MODEL` and `EGM_GOLDFISH_EFFORT` below as
+that rule's pair: `config.reviewers.model` and `config.reviewers.effort`, or
+`SUPEREGM_GOLDFISH_MODEL` and `SUPEREGM_GOLDFISH_EFFORT` when set (section 1's
+`inherit` defaults are EGM's, not SuperEGM's).
 
 The adapters in `.claude-plugin/agents/` keep `model: inherit`; do not edit
 them. The elephant passes the user's choice per call:

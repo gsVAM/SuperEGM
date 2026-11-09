@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch, started
 detached and recorded `running`."""
@@ -29,7 +29,8 @@ DOD_RESULT_RE = re.compile(r"^### DoD (\d+)\n```[^\n]*\n(.*?)\n```", re.M | re.S
 ORDERS = Path(__file__).resolve().parents[4] / "skills/wave/references/builder_orders.md"
 HELPER = Path(__file__).resolve().parents[1] / "superegm.py"  # the plugin's own helper, run by `superegm-token`
 SENTINEL = "superegm-no-token"  # the launched `GH_TOKEN` on the App path: no token; the shim overrides it with the mint
-UNSET = ("GIT_ASKPASS", "SSH_ASKPASS", "GITHUB_TOKEN")  # the owner's prompts and token, unset in the launched environment
+# the owner's prompts and token, and the session effort level that would beat `--effort` (U28), unset in the launched environment
+UNSET = ("GIT_ASKPASS", "SSH_ASKPASS", "GITHUB_TOKEN", "CLAUDE_CODE_EFFORT_LEVEL")
 # The PR body's line 2 (owner ruling 2026-11-04): the login of the session that ran `launch`, no `@`, so it mentions nobody.
 AUDIT_LINE = "Launched by {owner} · run card {runcard} · unit {unit} · handoff {handoff}"
 
@@ -60,7 +61,7 @@ def prepare(args, card):
     raise core.HandoffError(problem)
   dirs = plugin_dirs(builder_config["plugins"], elephant_profile())  # each listed plugin's user-scope directory, version and hooks
   mcp_file = st.path("launches", f"{unit}_r{rnd}_mcp.json")
-  for value in (*(d["dir"] for d in dirs), mcp_file):  # command_line's quote check, before any worktree or store write
+  for value in (*(d["dir"] for d in dirs), mcp_file, builder_config["model"], builder_config["effort"]):  # command_line's quote check, before any worktree or store write
     if "'" in str(value):
       raise core.HandoffError(f"{value} holds a quote and cannot go on the command line")
   gh, app = tool("gh"), builder_config["app"]
@@ -114,6 +115,7 @@ def prepare(args, card):
   pid = start_detached(["/bin/sh", "-c", line], st.path("launches", f"{unit}_r{rnd}.log"), dict(os.environ))
   launches = load_launches(st, unit)
   launches.append({"round": rnd, "worktree": str(worktree), "branch": branch, "started_at": core.now_iso(), "status": "running",
+                   "model": builder_config["model"], "effort": builder_config["effort"],  # the requested pair (U28)
                    "result_file": str(result), "prompt_sha256": core.sha256_file(prompt), "boot_id": core.boot_id(), "pid": pid, "command": line, "session_id": session_id})
   core.atomic_write(st.path("launches", unit), {"launches": launches})
   done = f"{unit} launch {rnd} running (pid {pid})"
@@ -510,18 +512,19 @@ def launched_pairs(gh: str, name: str, email: str) -> list:
 
 def command_line(config, worktree, prompt, result, runcard, tools, gh, login, email, plugin_dirs: list, mcp_file: Path,
                  session_id: str | None = None) -> str:
-  """The launched command (spec section 11): the owner's prompts and token unset, the builder profile,
+  """The launched command (spec section 11): the owner's prompts and token and `CLAUDE_CODE_EFFORT_LEVEL`
+  (which would beat `--effort`, U28) unset, the builder profile,
   `ENABLE_CLAUDEAI_MCP_SERVERS=false` (belt and braces over the profile's `disableClaudeAiConnectors`),
   `GH_TOKEN` as the shell variable expands (never its value) or, on the App path, the sentinel the shim
   overrides, the role and card, the launched git pairs (`gh`, the shim on the App path, as the credential
   helper by absolute path; the identity `login` and `email` from the wave card), `claude -p` on the prompt
-  file (with `--session-id` when given) with `--setting-sources user` (the builder sits in the target repository,
+  file (with `--session-id` when given), `--model` and `--effort` from `builder` (U28), with `--setting-sources user` (the builder sits in the target repository,
   whose project settings and SessionStart hooks it must not run: the profile's settings alone), one `--plugin-dir`
   per listed plugin's directory, `--mcp-config <mcp_file> --strict-mcp-config` (no other MCP configuration loads),
   the result and exit files."""
   b = config["builder"]
   pairs = launched_pairs(gh, login, email)
-  for value in (worktree, prompt, result, b["profile_dir"], b["model"], b["permission_mode"], runcard, *tools, *(v for _, v in pairs),
+  for value in (worktree, prompt, result, b["profile_dir"], b["model"], b["effort"], b["permission_mode"], runcard, *tools, *(v for _, v in pairs),
                 *plugin_dirs, mcp_file, session_id or ""):
     if "'" in str(value):
       raise core.HandoffError(f"{value} holds a quote and cannot go on the command line")
@@ -531,6 +534,6 @@ def command_line(config, worktree, prompt, result, runcard, tools, gh, login, em
   dirs = "".join(f"--plugin-dir '{d}' " for d in plugin_dirs)
   return (f"cd '{worktree}' && env {unset} CLAUDE_CONFIG_DIR='{b['profile_dir']}' ENABLE_CLAUDEAI_MCP_SERVERS=false {token} "
           f"SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{runcard}' {env} "
-          f"claude -p \"$(cat '{prompt}')\"{session} --model '{b['model']}' --permission-mode '{b['permission_mode']}' --setting-sources user "
+          f"claude -p \"$(cat '{prompt}')\"{session} --model '{b['model']}' --effort '{b['effort']}' --permission-mode '{b['permission_mode']}' --setting-sources user "
           f"{dirs}--mcp-config '{mcp_file}' --strict-mcp-config "
           f"--allowedTools '{','.join(tools)}' --output-format json > '{result}'; echo $? > '{result}.exit'")

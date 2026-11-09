@@ -1,9 +1,10 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_record_launch` as the record-launch module; it records a builder launch in `launches/<unit>.json` and, with --exit, the exit its exit file proves; the flagless form refused, launch-builder recording the launch (U24); `subagent_calls` read from the session's transcript at the exit (U27).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_record_launch` as the record-launch module; it records a builder launch in `launches/<unit>.json` and, with --exit, the exit its exit file proves; the flagless form refused, launch-builder recording the launch (U24); `subagent_calls` read from the session's transcript at the exit (U27); the effective model and `total_cost_usd` read from the result file at the exit (U28).
 
 """superegm record-launch: record a builder launch's exit as `exited <code>`; `launch-builder` records it `running`."""
 
+import json
 from pathlib import Path
 
 import superegm as core
@@ -51,8 +52,26 @@ def record(args):
   # loaded (`load_config` expands it), so a plan or spec edited during the launch cannot stop the exit's record
   profile = Path(st.config["builder"]["profile_dir"])
   latest["subagent_calls"] = subagent_calls(profile, latest["session_id"]) if latest.get("session_id") else {"count": 0, "calls": []}
+  latest["effective_model"], latest["total_cost_usd"] = result_usage(Path(latest["result_file"]))
   line = f"{unit} launch {latest['round']} exited {args.exit}"
   core.atomic_write(st.path("launches", unit), {"launches": launches})
   core.journal(st, line)
   print(line)
   return 0
+
+
+def result_usage(result_file: Path):
+  """U28: the effective model and the cost from the launch's `--output-format json` result file: every key of
+  `modelUsage`, joined `, `, else `requested only`; `total_cost_usd` as the file holds it, `unrecorded` for a file
+  that does not parse (a killed launch's partial file), else `None` (no file, or no number in it)."""
+  if not result_file.is_file():
+    return "requested only", None
+  try:
+    data = json.loads(core.read_text(result_file))
+  except ValueError:
+    return "requested only", "unrecorded"
+  if not isinstance(data, dict):
+    return "requested only", None
+  usage, cost = data.get("modelUsage"), data.get("total_cost_usd")
+  effective = ", ".join(usage) if isinstance(usage, dict) and usage else "requested only"
+  return effective, cost if isinstance(cost, (int, float)) and not isinstance(cost, bool) else None

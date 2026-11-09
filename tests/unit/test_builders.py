@@ -452,9 +452,9 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   cfg = json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]
   result = s.path("launches", f"{UNIT}_r1_result.json")
   pairs = " ".join(f"{k}='{v.format(gh='/usr/local/bin/gh', login='builder-bot', email='1001+builder-bot@users.noreply.github.com')}'" for k, v in PAIRS)
-  assert line.startswith(f"cd '{wt}' && env -u GIT_ASKPASS -u SSH_ASKPASS -u GITHUB_TOKEN CLAUDE_CONFIG_DIR='{cfg['profile_dir']}' ENABLE_CLAUDEAI_MCP_SERVERS=false GH_TOKEN=\"$SUPEREGM_BUILDER_TOKEN\" SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{card}' {pairs} claude -p "), line
+  assert line.startswith(f"cd '{wt}' && env -u GIT_ASKPASS -u SSH_ASKPASS -u GITHUB_TOKEN -u CLAUDE_CODE_EFFORT_LEVEL CLAUDE_CONFIG_DIR='{cfg['profile_dir']}' ENABLE_CLAUDEAI_MCP_SERVERS=false GH_TOKEN=\"$SUPEREGM_BUILDER_TOKEN\" SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{card}' {pairs} claude -p "), line
   mcp_file = s.path("launches", f"{UNIT}_r1_mcp.json")
-  assert f" claude -p \"$(cat '{prompt_file}')\" --session-id '{launches_of(s)[-1]['session_id']}' --model '{cfg['model']}' --permission-mode '{cfg['permission_mode']}' --setting-sources user --mcp-config '{mcp_file}' --strict-mcp-config --allowedTools '" in line, line
+  assert f" claude -p \"$(cat '{prompt_file}')\" --session-id '{launches_of(s)[-1]['session_id']}' --model '{cfg['model']}' --effort '{cfg['effort']}' --permission-mode '{cfg['permission_mode']}' --setting-sources user --mcp-config '{mcp_file}' --strict-mcp-config --allowedTools '" in line, line
   tools = line.split("--allowedTools '")[1].split("'")[0].split(",")
   assert tools == [t.replace("Bash(gh ", "Bash(/usr/local/bin/gh ") for t in cfg["allowed_tools"]] + [f"Bash(git push origin {branch}:*)"]
   assert line.endswith(f"' --output-format json > '{result}'; echo $? > '{result}.exit'")
@@ -491,10 +491,32 @@ def test_launch_builder_starts_the_launch_as_its_one_behaviour(world, monkeypatc
   s, card, hid, _ = seed(world); monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder"); monkeypatch.setattr(superegm, "boot_id", lambda: "boot-1")
   assert world.run("launch", "--runcard", card)[0] == 0 and world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)[1].strip().endswith("U07 launch 1 running (pid 4242)")
   entry, (command, log, env) = launches_of(s)[0], SPAWNED[0]
-  assert command == ["/bin/sh", "-c", entry["command"]] and log == s.path("launches", f"{UNIT}_r1.log") and (entry["boot_id"], entry["pid"], entry["status"]) == ("boot-1", 4242, "running")
+  assert command == ["/bin/sh", "-c", entry["command"]] and log == s.path("launches", f"{UNIT}_r1.log") and (entry["boot_id"], entry["pid"], entry["status"], entry["model"], entry["effort"]) == ("boot-1", 4242, "running", "claude-opus-5-5", "medium")
   assert "record-launch: --exit is required: launch-builder records the launch" in world.run("record-launch", "--unit", UNIT, "--runcard", card)[1]
   monkeypatch.setattr(superegm, "boot_id", lambda: "boot-2"); assert world.run("launch-builder", "--unit", UNIT, "--round", 2, "--runcard", card)[0] == 0
   assert [e["status"] for e in launches_of(s)] == ["interrupted (reboot)", "running"]
+
+
+@pytest.mark.parametrize("result, effective, cost", [
+  ('{"modelUsage": {"claude-opus-5-5": {"inputTokens": 1}}, "total_cost_usd": 1.25}', "claude-opus-5-5", 1.25),
+  ('{"modelUsage": {"claude-opus-5-5": {}, "claude-haiku-4-5": {}}, "total_cost_usd": 0.5}', "claude-opus-5-5, claude-haiku-4-5", 0.5),
+  ('{"result": "no usage"}', "requested only", None),
+  ('{"modelUsage": {"claude-opus-5-5": {', "requested only", "unrecorded"),   # a killed launch's partial file: the board marks the sum partial (U30)
+  ('["claude-opus-5-5"]', "requested only", None),   # JSON, not an object
+  ('{"modelUsage": {"claude-opus-5-5": {}}, "total_cost_usd": true}', "claude-opus-5-5", None),   # a bool is no cost
+  ('{"modelUsage": {"claude-opus-5-5": {}}, "total_cost_usd": "1.25"}', "claude-opus-5-5", None),   # nor a string
+  (None, "requested only", None)])   # no result file
+def test_record_launch_writes_the_requested_pair_then_the_effective_model_and_cost(world, monkeypatch, result, effective, cost):
+  s, card, hid, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder"); monkeypatch.setattr(launch_builder, "start_detached", lambda command, log, env: 4242)
+  assert world.run("launch", "--runcard", card)[0] == 0 and world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)[0] == 0
+  entry = launches_of(s)[0]
+  assert (entry["model"], entry["effort"]) == ("claude-opus-5-5", "medium") and "effective_model" not in entry and "total_cost_usd" not in entry
+  result is not None and Path(entry["result_file"]).write_text(result, encoding="utf-8")
+  Path(entry["result_file"] + ".exit").write_text("0\n", encoding="utf-8")
+  assert world.run("record-launch", "--unit", UNIT, "--exit", 0, "--runcard", card)[0] == 0
+  entry = launches_of(s)[0]
+  assert (entry["status"], entry["effective_model"], entry["total_cost_usd"]) == ("exited 0", effective, cost)
 
 
 @pytest.mark.parametrize("case, reason", [
@@ -665,6 +687,26 @@ def test_command_line_carries_the_dirs_the_mcp_file_and_the_switch():
   assert " --setting-sources user --plugin-dir '/c/ponytail/5.3.3' --plugin-dir '/c/x/1' --mcp-config '/l/U07_r1_mcp.json' --strict-mcp-config --allowedTools 'Read' " in line, line
   assert " --setting-sources user --mcp-config '/m.json' --strict-mcp-config --allowedTools 'Read' " in call([], "/m.json")
   assert " --session-id 's' " in call([], "/m.json", session_id="s") and " --session-id" not in call([], "/m.json")
+
+
+def test_launch_carries_the_effort_flag_and_unsets_the_session_level():
+  from superegm.launch_builder import command_line
+  cfg = {"builder": {**DEFAULT_CONFIG["builder"], "profile_dir": "/p", "model": "claude-opus-5-5", "effort": "medium"}}
+  line = command_line(cfg, "/wt", "/prompt.md", "/result.json", "wave-0001", ["Read"], "/usr/local/bin/gh", "b", "b@x", [], Path("/m.json"))
+  assert " -u GITHUB_TOKEN -u CLAUDE_CODE_EFFORT_LEVEL " in line and " --model 'claude-opus-5-5' --effort 'medium' " in line, line
+
+
+@pytest.mark.parametrize("key", ["model", "effort"])
+def test_launch_builder_refuses_a_quoted_model_or_effort_before_any_write(world, monkeypatch, key):
+  """Round 3 (change-review-2-1): a quoted `builder.model` or `builder.effort` is refused before the worktree and the files."""
+  s, card, _, _ = seed(world)
+  cfg = json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]
+  configure(world, builder={**cfg, key: "it's"})
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder"); monkeypatch.setattr(launch_builder, "start_detached", lambda command, log, env: 4242)
+  assert world.run("launch", "--runcard", card)[0] == 0
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)
+  assert code == 1 and "it's holds a quote" in out and not s.path("worktrees", UNIT).exists(), out
+  assert not s.path("launches", f"{UNIT}_r1_prompt.md").exists() and not s.path("launches", f"{UNIT}_r1_mcp.json").exists()
 
 
 @pytest.mark.parametrize("case", ["none", "listed", "missing"])

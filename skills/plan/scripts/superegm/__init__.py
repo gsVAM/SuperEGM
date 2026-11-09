@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27).
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
@@ -84,12 +84,12 @@ DEFAULT_CONFIG = {
     "fix_request_mention": None,
     "allowed_mentions": [],
     "reviewers": None,  # the spec's panels, from review.PANEL_OF at the end of this module
-    "astra": {"enabled": False, "model": "gpt-6-astra", "effort": "xhigh", "heads": True},
+    "astra": {"enabled": False, "model": "gpt-6-astra", "effort": "xhigh", "heads": True, "heads_effort": "high"},
     "judges": {"min_vendors": 1,
                "members": [{"name": "fable", "via": "adapter", "effort": "xhigh"},
                            {"name": "opus", "via": "adapter", "effort": "max"},
-                           {"name": "astra", "via": "runner"}]},
-    "builder": {"profile_dir": "~/.superegm/builder-profile", "model": "claude-opus-5-5",
+                           {"name": "astra", "via": "runner", "effort": "xhigh"}]},
+    "builder": {"profile_dir": "~/.superegm/builder-profile", "model": "claude-opus-5-5", "effort": "medium",
                 "permission_mode": "acceptEdits", "gh_token_env": "SUPEREGM_BUILDER_TOKEN",
                 "allowed_tools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git add:*)", "Bash(git commit:*)",
                                   "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git mv:*)",
@@ -940,7 +940,7 @@ def load_config(repo_root: Path) -> dict:
         if unknown:
           raise HandoffError(f"{path}: unknown label keys {sorted(unknown)}")
         config["labels"].update(value)
-      elif key in ("astra", "ingest", "foreman") and isinstance(value, dict):
+      elif key in ("astra", "ingest", "foreman", "builder", "reviewers") and isinstance(value, dict):
         config[key] = {**config[key], **value}
       else:
         config[key] = value
@@ -2186,3 +2186,4 @@ def build_parser():
 from .review import PANEL_OF, ROLES  # noqa: E402  review.py imports this package, so it loads after the names it uses
 DEFAULT_CONFIG["reviewers"] = {kind: panel.split(",") for kind, panel in PANEL_OF.items()}  # one source: the spec's panels
 DEFAULT_CONFIG["reviewers"]["head"].append("astra")  # informational: the lane is seated by astra.enabled and astra.heads
+DEFAULT_CONFIG["reviewers"].update(model="opus", effort="xhigh")  # every review goldfish dispatch, in the Agent tool's alias and level forms (amendment 8)

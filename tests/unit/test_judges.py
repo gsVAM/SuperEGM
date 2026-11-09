@@ -119,6 +119,15 @@ def test_judge_members_forms(members):
   assert judges.judge_members({})["fable"]["effort"] == "xhigh"
 
 
+def test_judge_members_default_efforts_from_the_one_source(world):
+  assert not hasattr(judges, "DEFAULT_MEMBERS")
+  assert {j: (m["model"], m["effort"]) for j, m in judges.judge_members({}).items()} == {"fable": ("fable", "xhigh"), "opus": ("opus", "max"), "astra": ("gpt-6-astra", "xhigh")}
+  pre = {"judges": {"members": [{"name": "fable", "via": "adapter", "effort": "max", "model": "sonnet"}, {"name": "astra", "via": "runner"}]}, "astra": {"effort": "high"}}
+  assert {j: (m["model"], m["effort"]) for j, m in judges.judge_members(pre).items()} == {"fable": ("sonnet", "max"), "astra": ("gpt-6-astra", "high")}
+  pid, card, _ = open_panel(world)
+  assert {j: m["effort"] for j, m in panel_json(world, pid)["judges"].items()} == {"fable": "xhigh", "opus": "max", "astra": "xhigh"}
+
+
 def test_open_records_panel_and_round_one_brief(world):
   evidence = world.repo / "evidence.md"
   evidence.write_text("the finding's location\n", encoding="utf-8")
