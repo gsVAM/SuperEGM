@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23).
+# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24).
 
 """superegm inbox [--all] [--json] [--handoff <id>]: one line per item that needs the owner across the
 store's open handoffs, read-only and with no run card; superegm notify --runcard <id>: the owner's
@@ -19,10 +19,10 @@ from superegm import approve_spec, decision, report, review
 from superegm.decision import ruling_form
 from superegm.launch import latest_clean, load_launches
 
-WRITES = frozenset({"state"})  # notify's `notified`; inbox writes nothing
-SKILLS = frozenset({"wave"})
+WRITES = frozenset({"state", "driver"})  # notify's `notified` (a driver card's in `driver/`); inbox writes nothing
+SKILLS = frozenset({"wave", "driver"})
 KINDS = ("decision", "cap", "contested", "merge", "stalled", "escalated", "redesign", "test-delta", "owner",
-         "kill_failed", "wave")
+         "kill_failed", "wave", "driver")
 GITHUB = "https://github.com"
 
 
@@ -193,9 +193,35 @@ def wave_items(hs: core.Store, repo: str, hid: str) -> list:
   return out
 
 
+def minutes_since(stamp: str) -> int:
+  return int((core.NOW() - calendar.timegm(time.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ"))) // 60)
+
+
+def driver_items(hs: core.Store, repo: str, hid: str) -> list:
+  """The handoff's driver lines (spec section 11.2): the tick's refusal, its newest launch while it has no exit
+  file (information, with its age, sent once by the launch's id), and a timer whose plist names another plugin
+  root than this helper's (`install` re-typed after every plugin update)."""
+  from superegm import driver, launch_builder  # driver imports this module
+  data, out = core.load_driver(hs), []
+  line = lambda action, key: {"repo": repo, "subject": hid, "kind": "driver", "action": action, "fingerprint": key}
+  if data.get("refused"):
+    out.append(line(f"refused: {data['refused']['reason']}; /superegm:driver status, then re-type /superegm:wave or "
+                    "/superegm:driver reset", f"refused:{hid}"))
+  launches = data.get("launches") or []
+  if launches and not core.tick_terminal(launches[-1]):
+    n = launches[-1]["round"]
+    out.append(line(f"tick launch {n} live {minutes_since(launches[-1]['started_at'])} min, no exit file (information)",
+                    f"launch:{hid}:{n}"))
+  helper = driver.plist_helper()
+  if helper is not None and Path(helper) != launch_builder.HELPER:
+    out.append(line(f"stale: {driver.helper_root(helper)}; /superegm:driver install", f"stale:{hid}"))
+  return out
+
+
 def inbox_items(store: core.Store, handoff_ids: list) -> list:
   """What needs the owner across the handoffs `handoff_ids` (spec section 11.2), one dict per item: `repo`,
-  `subject`, `kind`, `action`, `fingerprint`; ordered by handoff id, subject, then kind, the `wave` card last."""
+  `subject`, `kind`, `action`, `fingerprint`; ordered by handoff id, subject, then kind, the `wave` card and the
+  driver's lines last."""
   repo, rows = store.config["repo"], {r["id"]: r for r in core.handoffs(store.root)}
   out, read_specs, seen = [], set(), set()  # a spec's store-level reviews are read once, under its first handoff
   for hid in sorted(handoff_ids):
@@ -227,8 +253,24 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
         found += review_items(hs, repo, spec, path.name, rev, foremen, mode)
       read_specs.add(spec)
     found.sort(key=lambda i: (i["subject"], KINDS.index(i["kind"])))
-    out += found + wave_items(hs, repo, hid)
+    out += found + wave_items(hs, repo, hid) + driver_items(hs, repo, hid)
   return out
+
+
+def registry_items(entry: dict) -> list:
+  """`inbox_items` of a registered store's open handoffs: the store as its `root`'s config names it, else (a `root`
+  that is not a worktree of the store's repository) on the defaults, with the bad-root line per open handoff."""
+  from superegm import driver  # driver imports this module
+  root, adir = entry["root"], entry["artifacts_dir"]
+  ok = driver.root_ok(root, adir)
+  config = core.load_config(Path(root)) if ok else {**core.DEFAULT_CONFIG, "repo": entry["repo"], "artifacts_dir": adir}
+  st = core.Store(Path(adir), config=config)
+  ids = [r["id"] for r in core.handoffs(st.root) if r["id"] and not r.get("closed_at")]
+  items = inbox_items(st, ids)
+  if not ok:
+    items += [{"repo": entry["repo"], "subject": hid, "kind": "driver", "fingerprint": f"root:{hid}",
+               "action": f"root {root} is not a worktree of {entry['repo']}; /superegm:driver register"} for hid in sorted(ids)]
+  return items
 
 
 def escalations(hs: core.Store, repo: str, hid: str, spec, foremen: dict, state: dict) -> list:
@@ -298,12 +340,23 @@ def open_store(args) -> tuple:
 
 def run(args):
   if args.command == "inbox":
-    st, ids = open_store(args)
-    if args.all and not args.json:  # --json prints one object per line and nothing else
-      print("registry: none")  # U24 builds the registry; until then the one store
-    for i in inbox_items(st, ids):
+    entries = core.load_registry() if args.all else []
+    if entries:
+      items = [i for entry in entries for i in registry_items(entry)]
+    else:
+      st, ids = open_store(args)
+      if args.all and not args.json:  # --json prints one object per line and nothing else
+        print("registry: none")  # then this store's items
+      items = inbox_items(st, ids)
+    for i in items:
       print(json.dumps(i) if args.json else line_of(i))
     return 0
+  return run_notify(args)
+
+
+def run_notify(args):
+  """`notify`: the hook run once with the card's handoff's new lines; the set rewritten as every current line's
+  fingerprint, `state.json`'s under a `wave` card, `driver/<handoff>.json`'s under a `driver` card (U24)."""
   card = core.require_runcard(args, SKILLS)
   st = core.STORE
   hid = card.get("handoff") or st.handoff_id
@@ -313,18 +366,28 @@ def run(args):
   if new:
     word = run_hook("".join(line_of(i) + "\n" for i in new), st.config)  # a failing or slow hook never stops the wave
     core.journal(hs, f"notify: {word} ({len(new)} new)")
+  fingerprints = sorted(i["fingerprint"] for i in items)  # replaced whole: a settled line leaves the set
+  if card.get("skill") == "driver":
+    data = core.load_driver(hs)
+    data["notified"] = fingerprints
+    core.atomic_write(hs.path("driver", hs.handoff_id), data)
+    return 0
   state = approve_spec.handoff_state(st, hid)
-  state["notified"] = sorted(i["fingerprint"] for i in items)  # replaced whole: a settled line leaves the set
+  state["notified"] = fingerprints
   core.atomic_write(hs.path("state"), state)
   return 0
 
 
 def notify_lines(store: core.Store, card: dict, items=None) -> list:
-  """The `inbox_items` of the card's handoff whose `fingerprint` its `state.json.notified` lacks."""
+  """The `inbox_items` of the card's handoff whose `fingerprint` its caller's set lacks: `state.json.notified`
+  under a `wave` card, `driver/<handoff>.json`'s `notified` under a `driver` card."""
   hid = card.get("handoff") or store.handoff_id
   if items is None:
     items = inbox_items(store, [hid])
-  seen = set(approve_spec.handoff_state(store, hid).get("notified") or [])
+  if card.get("skill") == "driver":
+    seen = set(core.load_driver(core.handoff_store(store, hid)).get("notified") or [])
+  else:
+    seen = set(approve_spec.handoff_state(store, hid).get("notified") or [])
   return [i for i in items if i["fingerprint"] not in seen]
 
 
