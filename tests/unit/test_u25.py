@@ -4,12 +4,17 @@
 """U25: the `foreman` config key, `kill_group`, `dod_runs`, `test_delta`, the forced removal and the hook-free checkouts."""
 
 import re
+import signal
+import subprocess
+import time
 
 import pytest
 
 import superegm
 from conftest import REPO, set_config
-from superegm import init
+from superegm import init, kill_group
+from superegm.collect import KILL_WAIT, dod_runs, run_env
+from superegm.launch_builder import SENTINEL, allowed_tools
 
 
 @pytest.mark.parametrize("given, expect", [(None, 8), ({"run_timeout_minutes": 0.02}, 0.02), ({"run_timeout_minutes": 10}, None)])
@@ -21,3 +26,20 @@ def test_foreman_config_key_and_the_init_sentence(world, given, expect):
       superegm.load_config(world.repo)
   else:
     assert superegm.load_config(world.repo)["foreman"] == {"run_timeout_minutes": expect}
+
+
+def test_dod_runs_kills_each_items_group_on_return_and_at_the_bound(tmp_path, monkeypatch):
+  p = subprocess.Popen(["/bin/sh", "-c", "sleep 30"], start_new_session=True)
+  kill_group(p.pid)
+  assert p.wait(timeout=5) == -signal.SIGTERM and kill_group(p.pid) is None
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "x")
+  env = run_env("/usr/local/bin/gh", tmp_path)
+  assert "SUPEREGM_BUILDER_TOKEN" not in env and (env["GH_TOKEN"], env["PIP_REQUIRE_VIRTUALENV"], env["npm_config_prefix"], env["GIT_CONFIG_GLOBAL"]) == (SENTINEL, "1", str(tmp_path), "/dev/null")
+  assert "Bash(.v/bin/pytest:*)" in allowed_tools([], "b", "## Definition of done\n2. Run `python3 -m venv .v && .v/bin/pytest -q` — passes\n", "/usr/local/bin/gh")
+  start = time.time()
+  runs = dod_runs([(3, "printf 'x\\n== 1 passed in 0.01s ==\\n'", "1 passed"), (4, "echo boom; exit 1", None), (5, "sleep 30 &", None), (6, "sleep 30", None), (7, "true", "ok")], tmp_path, env, start + 1, tmp_path / "dod")
+  assert time.time() - start < 1 + KILL_WAIT
+  assert runs == {"3": {"exit": 0, "summary": "== 1 passed in 0.01s ==", "paste_summary": "1 passed", "timed_out": False},
+                  "4": {"exit": 1, "summary": "boom", "paste_summary": None, "timed_out": False}, "5": {"exit": 0, "summary": "", "paste_summary": None, "timed_out": False},
+                  "6": {"exit": None, "summary": "", "paste_summary": None, "timed_out": True}, "7": {"exit": None, "summary": None, "paste_summary": "ok", "timed_out": True}}
+  assert sorted(p.name for p in (tmp_path / "dod").iterdir()) == ["3.out", "4.out", "5.out", "6.out"] and (tmp_path / "dod/4.out").read_text() == "boom\n"
