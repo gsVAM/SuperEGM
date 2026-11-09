@@ -11,6 +11,7 @@ import pytest
 
 import superegm  # the harness reloads the package per test: read its names at call time
 from superegm import init
+from superegm.launch_builder import plugin_dirs, elephant_profile
 from conftest import ROOT, REPO, set_config
 
 PONY, MCP = "ponytail@ponytail", {"context7": {"type": "http", "url": "https://mcp.context7.com/mcp"}}
@@ -32,6 +33,44 @@ def test_builder_plugins_and_mcp_keys(world, key, value, message):
     return
   loaded, expect = superegm.load_config(world.repo)["builder"], {"plugins": [], "mcp": {}, "max_subagent_calls": 12, key: value}
   assert {k: loaded[k] for k in expect} == expect
+
+
+def elephant(tmp_path, monkeypatch, scopes, hooks=None, manifest=False):
+  """The elephant's profile under `tmp_path` (`CLAUDE_CONFIG_DIR`): PONY installed at `scopes`, disabled, its hook files
+  `rel: events` under its directory, named by its manifest when `manifest`. Returns `(home, dir)`."""
+  home = tmp_path / "elephant"
+  monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
+  d = home / "plugins/cache/ponytail/ponytail/5.3.3"
+  d.mkdir(parents=True, exist_ok=True)
+  (home / "plugins/installed_plugins.json").write_text(json.dumps(
+    {"version": 2, "plugins": {PONY: [{"scope": s, "version": "5.3.3", "installPath": str(d)} for s in scopes]}}), encoding="utf-8")
+  (home / "settings.json").write_text(json.dumps({"enabledPlugins": {PONY: False}}), encoding="utf-8")
+  for rel, events in (hooks or {}).items():
+    (d / rel).parent.mkdir(parents=True, exist_ok=True)
+    (d / rel).write_text(json.dumps({"hooks": {event: [] for event in events}}), encoding="utf-8")
+  if manifest:
+    (d / ".claude-plugin").mkdir(exist_ok=True)
+    (d / ".claude-plugin/plugin.json").write_text(json.dumps({"hooks": [f"./{rel}" for rel in hooks or {}]}), encoding="utf-8")
+  return home, d
+
+
+THREE = ["SessionStart", "SubagentStart", "UserPromptSubmit"]
+
+
+@pytest.mark.parametrize("scopes, hooks, manifest, expect", [
+  (["user", "project"], {"hooks/hooks.json": THREE}, False, THREE),
+  (["user"], {"hooks/claude-codex-hooks.json": THREE, "hooks/claude-band.json": []}, True, THREE), (["user"], {}, False, []),
+  (["project"], {}, False, "plugin ponytail@ponytail not installed"), ([], {}, False, "plugin ponytail@ponytail not installed")])
+def test_plugin_dirs_resolves_the_user_entry_and_hook_events(tmp_path, monkeypatch, scopes, hooks, manifest, expect):
+  home, d = elephant(tmp_path, monkeypatch, scopes, hooks, manifest)
+  assert elephant_profile() == home
+  if isinstance(expect, str):
+    with pytest.raises(superegm.HandoffError, match=re.escape(expect)):
+      plugin_dirs([PONY], home)
+    return
+  assert plugin_dirs([PONY], home) == [{"id": PONY, "version": "5.3.3", "dir": str(d), "hooks": expect}]
+  monkeypatch.delenv("CLAUDE_CONFIG_DIR"); monkeypatch.setenv("HOME", str(tmp_path))
+  assert elephant_profile() == tmp_path / ".claude"
 
 
 from test_builders import no_graphify, which  # noqa: F401
