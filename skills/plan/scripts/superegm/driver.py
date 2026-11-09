@@ -199,15 +199,14 @@ def exit_file_proof(hs: core.Store, launches: list) -> None:
       core.interrupt_card(hs, path, card, f"tick launch {launches[-1]['round']} exited")
 
 
-def refuse(hs: core.Store, data: dict, reason: str) -> bool:
-  """The tick's refusal, written once per reason: journaled, recorded in `refused`; True when written now."""
+def refuse(hs: core.Store, data: dict, reason: str) -> None:
+  """The tick's refusal, written once per reason: journaled, recorded in `refused`."""
   if (data.get("refused") or {}).get("reason") == reason:
-    return False
+    return
   data["refused"] = {"at": core.now_iso(), "reason": reason}
   core.atomic_write(hs.path("driver", hs.handoff_id), data)
   core.journal(hs, f"tick: refused ({hs.handoff_id}: {reason})")
   print(f"tick: refused ({hs.handoff_id}: {reason})")
-  return True
 
 
 def close_card(hs: core.Store, cid: str) -> None:
@@ -288,6 +287,7 @@ def tick_store(entry: dict) -> None:
     units = list(state.get("units") or {})
     saved = ((state.get("status") or {}).get("units") or {})
     if not [u for u in units if not (saved.get(u) or {}).get("landed") and not core.load_foreman(hs, u).get("stopped")]:
+      notify(hs, spec)  # nothing to launch, but its typed `wave` card may block the store's other handoffs
       continue
     data = core.load_driver(hs)
     if (any(not core.tick_terminal(e) for h in stores for e in core.load_driver(h)["launches"])
@@ -295,13 +295,9 @@ def tick_store(entry: dict) -> None:
         or any(c.get("skill") in PHASES and is_open(c) for _, c in card_files(hs))):
       notify(hs, spec)  # a skip, silent unless `notify`'s own predicate holds (a typed `wave` card, a launch)
       continue
-    if not ok:
-      if refuse(hs, data, f"root {entry['root']} is not a worktree of {entry['repo']}"):
-        notify(hs, spec)
-      continue
-    if twice_failed(hs, data, state):
-      if refuse(hs, data, TWICE):
-        notify(hs, spec)
+    if not ok or twice_failed(hs, data, state):  # `notify`'s own predicate decides: a refusal recorded and never sent
+      refuse(hs, data, TWICE if ok else f"root {entry['root']} is not a worktree of {entry['repo']}")
+      notify(hs, spec)
       continue
     if data.get("refused"):  # the refusal no longer holds: the owner re-typed `wave` or re-registered the root
       core.journal(hs, f"tick: {hid} refusal cleared ({data['refused']['reason']})")
