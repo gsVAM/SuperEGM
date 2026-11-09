@@ -160,7 +160,7 @@ def refusal(store, state, config, unit, rnd, builder):
       return f"{unit} launch {entry['round']} is not terminal"
   if rnd != len(launches) + 1:
     return f"--round {rnd} is not the next launch count ({len(launches) + 1})"
-  problem = profile_problem(Path(config["builder"]["profile_dir"]).expanduser())
+  problem = profile_problem(Path(config["builder"]["profile_dir"]).expanduser(), config["builder"]["plugins"])
   if problem:
     return problem
   issue = core.gh_json(["api", f"repos/{config['repo']}/issues/{record['number']}"]) or {}
@@ -257,9 +257,36 @@ def plugin_dirs(plugins: list, profile_dir: Path) -> list:
   return found
 
 
-def profile_problem(profile_dir):
-  """Spec sections 4 and 11: the builder profile exists, holds no CLAUDE.md, no plugins (`plugins_held`) and no
-  hooks (a `settings.json` with a `hooks` key)."""
+def profile_problem(profile_dir, plugins=(), elephant=None):
+  """Spec sections 4 and 11: the builder profile exists, holds no CLAUDE.md, no plugins (`plugins_held`), no
+  hooks (a `settings.json` with a `hooks` key), no `skills/` or `commands/` directory, and a `settings.json` with
+  `disableClaudeAiConnectors` exactly true (amendment 7); each listed plugin id has a `user` entry in the elephant
+  profile (`elephant`, else `elephant_profile()`) and is not among the builder profile's managed plugins."""
+  problem = landed_problem(profile_dir)
+  if problem:
+    return problem
+  for folder in ("skills", "commands"):
+    if (profile_dir / folder).is_dir():
+      return f"builder profile {profile_dir} holds {folder}/"
+  try:
+    data = json.loads((profile_dir / "settings.json").read_text(encoding="utf-8"))
+  except (OSError, ValueError):
+    data = None
+  if not isinstance(data, dict) or data.get("disableClaudeAiConnectors") is not True:
+    return f"builder profile {profile_dir} lacks disableClaudeAiConnectors"
+  managed = managed_plugins(profile_dir / "plugins") if plugins else []
+  for pid in plugins:
+    try:
+      plugin_dirs([pid], elephant or elephant_profile())
+    except core.HandoffError as error:
+      return str(error)
+    if pid in managed:
+      return f"plugin {pid} managed in the builder profile"
+  return None
+
+
+def landed_problem(profile_dir):
+  """The checks before amendment 7: the profile exists and holds no CLAUDE.md, plugins or hooks."""
   plugins, settings = profile_dir / "plugins", profile_dir / "settings.json"
   if not profile_dir.is_dir():
     return f"builder profile {profile_dir} does not exist"
