@@ -36,11 +36,18 @@ KILL_WAIT = 5  # seconds waited after `kill_group` at the bound before `exit: no
 def run_env(gh, worktree) -> dict:
   """The DoD runs' environment, an allow-list (spec section 11.1): `PATH`, `HOME`, `LANG`, `TMPDIR`, the sentinel
   `GH_TOKEN`, the builder's git shut-out pairs, `PIP_REQUIRE_VIRTUALENV=1` and `npm_config_prefix` at the worktree.
-  The pairs are `launched_pairs`' own: they empty `credential.helper` and `core.askPass`, then set `!<gh> auth
-  git-credential` as github.com's helper, as the builder's are; that helper answers with the sentinel `GH_TOKEN`,
-  never a real credential."""
+  The pairs are `launched_pairs`' own, after one entry of the gate's: an empty `credential.helper`, so a generic
+  helper the checkout's `.git/config` names answers no host; then `launched_pairs` empty github.com's helper and
+  `core.askPass` and set `!<gh> auth git-credential` as github.com's helper, as the builder's are; that helper
+  answers with the sentinel `GH_TOKEN`, never a real credential."""
   env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG", "TMPDIR") if k in os.environ}
-  env.update(launched_pairs(gh, "superegm", "superegm"))
+  pairs = dict(launched_pairs(gh, "superegm", "superegm"))
+  count = int(pairs.pop("GIT_CONFIG_COUNT"))
+  entries = [("credential.helper", "")] + [(pairs.pop(f"GIT_CONFIG_KEY_{i}"), pairs.pop(f"GIT_CONFIG_VALUE_{i}")) for i in range(count)]
+  pairs["GIT_CONFIG_COUNT"] = str(len(entries))
+  for i, (key, value) in enumerate(entries):
+    pairs.update({f"GIT_CONFIG_KEY_{i}": key, f"GIT_CONFIG_VALUE_{i}": value})
+  env.update(pairs)
   env.update(GH_TOKEN=SENTINEL, PIP_REQUIRE_VIRTUALENV="1", npm_config_prefix=str(worktree))
   return env
 
@@ -114,6 +121,11 @@ def dod_runs(items, worktree: Path, env: dict, deadline: float, out_dir: Path) -
 
 OPERATORS = ("==", " in ", "raises", "match=")  # a paired head line lacking one of its base line's is weakened
 MARKER_RE = re.compile(r"@pytest\.mark\.(?:skip|skipif|xfail)\b")
+
+
+def marker(line: str):
+  """The `skip`, `skipif` or `xfail` decorator `line` opens with, never one a comment or a string holds."""
+  return MARKER_RE.match(line.strip())
 DEF_RE = re.compile(r"\s*(?:async\s+)?def (test_\w+)\s*\(")  # a test function, by name
 
 
@@ -132,7 +144,7 @@ def assertion_lines(lines: list) -> set:
         continue
     if "@pytest.mark.parametrize(" in line:  # a decorator that closes its brackets on its own line opens no rows
       inside = line.count("(") > line.count(")") or line.count("[") > line.count("]")
-    elif s.startswith("assert ") or s == "assert" or "pytest.raises" in s or s.startswith("def test_"):
+    elif re.match(r"assert\b", s) or "pytest.raises" in s or s.startswith("def test_"):  # `assert(x)` too
       out.add(i)
   return out
 
@@ -173,7 +185,7 @@ def test_delta(base_files: dict, head_files: dict, named: set) -> list:
     to_base = {j1 + k: i1 + k for tag, i1, i2, j1, j2 in ops if tag == "equal" for k in range(i2 - i1)}
     defs = {m.group(1): i for i, line in enumerate(base) if (m := DEF_RE.match(line))}
     # the markers each base test already carried: one the head keeps (a skipped test moved, decorators reordered) is no addition
-    had = {(decorated(base, i), m.group(0)) for i, line in enumerate(base) if (m := MARKER_RE.search(line))}
+    had = {(decorated(base, i), m.group(0)) for i, line in enumerate(base) if (m := marker(line))}
 
     def base_def(d):  # the base line of the test head line `d` defines: unchanged, else the base `def` of its name
       m = DEF_RE.match(head[d])
@@ -188,9 +200,9 @@ def test_delta(base_files: dict, head_files: dict, named: set) -> list:
           delta.append(entry(j + 1, i + 1, "weakened"))
       for j in range(j1, j2):  # a marker added, or written over a paired base line that was no marker
         d = decorated(head, j)
-        if j - j1 < paired and MARKER_RE.search(base[i1 + j - j1]):
+        if j - j1 < paired and marker(base[i1 + j - j1]):
           continue
-        if (m := MARKER_RE.search(head[j])) and d < len(head) and (b := base_def(d)) is not None and (b, m.group(0)) not in had:
+        if (m := marker(head[j])) and d < len(head) and (b := base_def(d)) is not None and (b, m.group(0)) not in had:
           delta.append(entry(j + 1, b + 1, "weakened"))
       for i in range(i1 + paired, i2):
         if i in guarded and base[i].strip() not in stripped:
@@ -203,7 +215,8 @@ def delta_files(worktree: Path, base: str, head: str, commits: list, named: set)
   range touches that no `Write` line names, keyed by its head path; its base the range's base when the file (or
   its rename source, by `git diff -M`) exists there, else the commit that creates it; a rename source is compared
   through its pair, never alone. The range's own `git diff` adds a file only a merge changed; a file the range
-  creates then renames chains back, commit by commit (`git log -M`), to the path it was created under."""
+  creates then renames chains back, commit by commit (`git log -M`), to the path it was created under, and forward
+  to the path it ends under at the head, test-named or not."""
   # every path NUL-delimited (`-z`), never C-quoted; `-m` reads a merge's own changes against each parent
   log = name_status(core.run_git(["log", "-m", "-M", "--reverse", "--name-status", "-z", "--format=", f"{base}..{head}"], worktree))
   diff = name_status(core.run_git(["diff", "-M", "--name-status", "-z", base, head], worktree))
@@ -218,6 +231,14 @@ def delta_files(worktree: Path, base: str, head: str, commits: list, named: set)
     seen = {path}
     while path in back and back[path] not in seen:
       path = back[path]
+      seen.add(path)
+    return path
+  fwd = {old: new for new, old in back.items()}
+
+  def last(path):  # the path a file ends under in the range, up its renames commit by commit
+    seen = {path}
+    while path in fwd and fwd[path] not in seen:
+      path = fwd[path]
       seen.add(path)
     return path
   tree = lambda rev: set(core.run_git(["ls-tree", "-r", "-z", "--name-only", rev], worktree).split("\0")) - {""}
@@ -243,8 +264,8 @@ def delta_files(worktree: Path, base: str, head: str, commits: list, named: set)
       base_files[path] = (created[0], show(created[0], old))
     if path in at_head:
       head_files[path] = show(head, path)
-    elif ahead.get(path) in at_head and ahead[path] not in candidates:  # renamed out of test naming: compared with its new path
-      head_files[path] = show(head, ahead[path])
+    elif (new := ahead.get(path) or last(path)) in at_head and new not in candidates:  # renamed out of test naming
+      head_files[path] = show(head, new)  # compared with its new path, base to head or, for a file the range creates, commit by commit
   return base_files, head_files
 
 
@@ -467,8 +488,9 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
                      owners: list = (), recorded: list = (), decisions: list = (), recorded_at: dict = None,
                      issue_number: int = None, runs: dict = None, prior_dod: dict = None, present: set = None,
                      delta: list = None, prior_delta: dict = None, texts: dict = None, config: dict = None) -> tuple:
-  """The foreman's high findings of spec section 11 in this order: CI, the DoD items, scope, tdd-order,
-  deviations, contested, upheld, unreplied external; and `builder_contested[]` for the contested ones. Rulings
+  """The foreman's high findings of spec section 11 in this order, which numbers the `foreman-<r>-<k>` ids: CI,
+  the DoD items' fenced-output and `Exists` checks, the `dod-<n>` re-runs, the `test-delta:` entries, scope,
+  tdd-order, deviations, contested, upheld, unreplied external; and `builder_contested[]` for the contested ones. Rulings
   and replies count only from the right author: a ruling is a `config.owners` login's comment `ruling_of` reads
   (spec section 13.2's one grammar) on the unit's issue, never the PR, or an entry of the record (`recorded`,
   `recorded_rulings`), replies come from the builder. Every `**Deviation**` line of a comment is one deviation; an `allowed` ruling on a posted
@@ -493,7 +515,7 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
   paths found before the runs; `texts`, item number to `(output, paste)`, the whole texts the counts are read from.
   `delta`, `test_delta`'s entries, is trimmed in place of every entry an owner's ruling allows (a posted fid's,
   through `prior_delta`, fid to `(file, base_commit, base_line, kind)`, or `test-delta <file> allowed`; a judges'
-  recorded ruling never settles one) and each entry left is a `test-delta:` high, after the `dod-<n>` ones."""
+  recorded ruling never settles one) and each entry left is a `test-delta:` high, after the `dod-<n>` ones and before scope."""
   found, contested = [], []
   links = contest_of or {}
 

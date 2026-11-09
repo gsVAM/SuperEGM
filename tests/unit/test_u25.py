@@ -128,6 +128,50 @@ def test_delta_files_reads_a_merge_a_rename_out_of_test_naming_and_a_quoted_path
   assert unquote('"tests/unit/test_caf\\303\\251.py"') == cafe and unquote("tests/unit/test_q.py") == q
 
 
+def test_delta_files_follows_a_created_file_renamed_out_of_test_naming(tmp_path):
+  """Round 5 (PR #103 review, astra-5-3): a test file the range creates and a later commit renames, unchanged, to a
+  path no longer test-named compares with that path at the head, not as deleted."""
+  three = T("def test_a():", "  assert 1 == 1", "  assert 2 == 2")
+  g = lambda *a: subprocess.run(["git", "-C", str(tmp_path), *a], check=True, capture_output=True, text=True).stdout.strip()
+  g("init", "-q", "-b", "main"); g("config", "user.email", "t@example.invalid"); g("config", "user.name", "T")
+  (tmp_path / "README.md").write_text("base\n"); g("add", "-A"); g("commit", "-qm", "base")
+  base = g("rev-parse", "HEAD")
+  (tmp_path / "tests").mkdir(); (tmp_path / "tests/test_new.py").write_text(three); g("add", "-A"); g("commit", "-qm", "add")
+  created = g("rev-parse", "HEAD")
+  (tmp_path / "archive").mkdir(); g("mv", "tests/test_new.py", "archive/new.py"); g("commit", "-qm", "move")
+  head = g("rev-parse", "HEAD")
+  base_files, head_files = delta_files(tmp_path, base, head, commits_of(tmp_path, base), set())
+  assert base_files == {"tests/test_new.py": (created, three)} and head_files == {"tests/test_new.py": three}
+  assert test_delta(base_files, head_files, set()) == []
+
+
+def test_run_env_empties_a_generic_credential_helper_the_checkout_names(tmp_path):
+  """Round 5 (PR #103 review, astra-5-1): a `credential.helper` in the checkout's `.git/config` answers no host under
+  `run_env`; github.com's helper, the launched `gh`, is still the last one set."""
+  helper = tmp_path / "leak.sh"
+  helper.write_text("#!/bin/sh\necho username=u\necho password=leaked\n"); helper.chmod(0o755)
+  repo = tmp_path / "repo"
+  subprocess.run(["git", "init", "-q", str(repo)], check=True)
+  subprocess.run(["git", "-C", str(repo), "config", "credential.helper", str(helper)], check=True)
+  env = run_env("/nonexistent/gh", repo)
+  fill = subprocess.run(["git", "-C", str(repo), "credential", "fill"], input="protocol=https\nhost=example.com\n\n",
+                        env=env, capture_output=True, text=True)
+  assert "leaked" not in fill.stdout, fill
+  helpers = subprocess.run(["git", "-C", str(repo), "config", "--get-all", "credential.https://github.com.helper"],
+                           env=env, capture_output=True, text=True).stdout.splitlines()
+  assert helpers[-1] == "!/nonexistent/gh auth git-credential", helpers
+
+
+PAREN = T("import pytest", "def test_c():", "  assert(1 == 1)", "  assert 2")
+
+
+@pytest.mark.parametrize("base, head, expect", [(PAREN, PAREN.replace("  assert(1 == 1)\n", ""), [E(3, 3)]),
+  (PLAIN, PLAIN.replace("def test_c", "# @pytest.mark.skip\ndef test_c"), [])])
+def test_a_parenthesised_assert_is_guarded_and_a_commented_marker_is_no_marker(base, head, expect):
+  """Round 5 (PR #103 review, astra-5-4, astra-5-5): `assert(…)` is an assertion; a commented-out marker adds none."""
+  assert test_delta({F: ("b", base)}, {F: head}, set()) == expect
+
+
 def test_allowed_tools_splits_segments_as_the_shell_does():
   text = "## Definition of done\n2. Run `python3 -c \"print('a'); print('b')\" && .v/bin/pytest -q` — passes\n"
   assert [t for t in allowed_tools([], "b", text, "/g") if t.startswith("Bash(") and "git push" not in t] == ["Bash(python3:*)", "Bash(.v/bin/pytest:*)"]
