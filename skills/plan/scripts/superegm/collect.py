@@ -22,6 +22,7 @@ from superegm import body as body_mod, review, tdd_order
 from superegm.decision import binding_rulings, recorded_rulings
 from superegm.foreman import head_review_id
 from superegm.launch_builder import DOD_RESULT_RE, SENTINEL, launched_pairs
+from superegm.orient import TEST_RE
 from superegm.prepare import HEADER_RE
 
 WRITES = frozenset(['foreman', 'review', 'reviews'])  # the store kinds this subcommand writes
@@ -164,6 +165,37 @@ def test_delta(base_files: dict, head_files: dict, named: set) -> list:
   return delta
 
 
+def delta_files(worktree: Path, base: str, head: str, commits: list, named: set) -> tuple:
+  """`(base_files, head_files)` for `test_delta`, read from git objects: every test file by name a commit of the
+  range touches that no `Write` line names, keyed by its head path; its base the range's base when the file (or
+  its rename source, by `git diff -M`) exists there, else the commit that creates it; a rename source is compared
+  through its pair, never alone."""
+  touched = list(dict.fromkeys(p for _, paths in commits for p in paths if TEST_RE.search(p) and p not in named))
+  renames = {}
+  for line in core.run_git(["diff", "-M", "--name-status", base, head], worktree).splitlines():
+    parts = line.split("\t")
+    if parts[0].startswith("R") and len(parts) == 3:
+      renames[parts[2]] = parts[1]
+  tree = lambda rev: set(core.run_git(["ls-tree", "-r", "--name-only", rev], worktree).splitlines())
+  at_base, at_head = tree(base), tree(head)
+  show = lambda rev, path: core.run_git(["show", f"{rev}:{path}"], worktree)
+  base_files, head_files = {}, {}
+  for path in touched:
+    if path in renames.values() and path not in at_head:
+      continue  # compared through the file it was renamed to
+    old = renames.get(path, path)
+    if old in at_base:
+      base_files[path] = (base, show(base, old))
+    else:
+      created = core.run_git(["log", "--reverse", "--format=%H", "--diff-filter=A", f"{base}..{head}", "--", path], worktree).split()
+      if not created:
+        continue
+      base_files[path] = (created[0], show(created[0], path))
+    if path in at_head:
+      head_files[path] = show(head, path)
+  return base_files, head_files
+
+
 def register(subparsers):
   p = core.add_parser(subparsers, "collect", "record the foreman's findings of a round, or a round that did not run")
   p.add_argument("--unit", required=True)
@@ -207,10 +239,12 @@ def collect(args, card):
   rid = head_review_id(st, unit)
   prior = max((e["round"] for e in data["rounds"] if e.get("phase") == "posted"), default=None)
   prior_ci_fid, prior_tdd, prior_scope, contest_of, external, earlier, disposed = None, {}, {}, {}, [], set(), set()
-  prior_dod = {}
+  prior_dod, prior_delta = {}, {}
   posted = {e["round"]: e.get("posted_at") or "" for e in data["rounds"] if e.get("phase") == "posted"}
   for e in data["rounds"]:  # every posted round: an overruled out-of-Scope finding widens the Scope for good;
     if e.get("phase") == "posted":  # a contest or carried finding names the finding a reply may answer under
+      deltas = [f["id"] for f in prior_foreman_findings(st, rid, e["round"]) if f["claim"].startswith("test-delta: ")]
+      prior_delta.update({fid: (d["file"], d["base_line"], d["kind"]) for fid, d in zip(deltas, e.get("test_delta") or [])})
       for f in prior_foreman_findings(st, rid, e["round"]):
         if f["claim"] == "changed path outside Scope paths":
           prior_scope[f["id"]] = f["location"]
@@ -234,6 +268,8 @@ def collect(args, card):
   commits = tdd_order.commits_of(worktree, entry["merge_base"])
   items = body_mod.dod_items(text)
   present = {path for _, kind, path in items if kind == "exists" and (worktree / path).exists()}
+  named = {test_path for _, test_path, _ in body_mod.step_paths(text) if test_path}
+  delta = test_delta(*delta_files(worktree, entry["merge_base"], entry["head"], commits, named), named)
   # every input is read; the three files a run could edit are held whole, then the DoD `Run` items run
   config = worktree / core.run_git(["rev-parse", "--git-common-dir"], worktree).strip() / "config"
   held = [st.path("foreman", unit), config] + ([st.path("reviews", rid, f"round-{n}.json")] if rid else [])
@@ -254,8 +290,9 @@ def collect(args, card):
                                       commits, prior_tdd, prior_scope, contest_of,
                                       external, earlier, disposed, posted, handoff.config.get("owners") or [],
                                       recorded_rulings(data), data.get("decisions") or [], recorded_times(data),
-                                      handoff.state["units"][unit].get("number"), runs=runs, prior_dod=prior_dod, present=present)
-  entry.update(dod_runs=runs, test_delta=[])
+                                      handoff.state["units"][unit].get("number"), runs=runs, prior_dod=prior_dod, present=present,
+                                      delta=delta, prior_delta=prior_delta)
+  entry.update(dod_runs=runs, test_delta=delta)
   findings = r / "foreman.findings"
   core.atomic_write(findings, "".join(line + "\n" for line in lines))
   with contextlib.redirect_stdout(io.StringIO()):
@@ -333,7 +370,8 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
                      prior_scope: dict = None, contest_of: dict = None, external: list = (),
                      earlier: set = frozenset(), disposed: set = frozenset(), posted: dict = None,
                      owners: list = (), recorded: list = (), decisions: list = (), recorded_at: dict = None,
-                     issue_number: int = None, runs: dict = None, prior_dod: dict = None, present: set = None) -> tuple:
+                     issue_number: int = None, runs: dict = None, prior_dod: dict = None, present: set = None,
+                     delta: list = None, prior_delta: dict = None) -> tuple:
   """The foreman's high findings of spec section 11 in this order: CI, the DoD items, scope, tdd-order,
   deviations, contested, upheld, unreplied external; and `builder_contested[]` for the contested ones. Rulings
   and replies count only from the right author: a ruling is a `config.owners` login's comment `ruling_of` reads
@@ -357,7 +395,9 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
   not exist. The DoD re-run's `dod-<n>` highs (`runs`, `dod_runs`' record) follow the fenced-output check; an item
   number stays ruled by the owner's `dod-<n> allowed` or by an overrule or allowance of a posted `dod-<n>` fid
   (`prior_dod`, fid to item number), a contest's copy followed back to it. `present`, when given, is the `Exists`
-  paths found before the runs."""
+  paths found before the runs. `delta`, `test_delta`'s entries, is trimmed in place of every entry an owner's ruling
+  allows (a posted fid's, through `prior_delta`, fid to `(file, base_line, kind)`, or `test-delta <file> allowed`)
+  and each entry left is a `test-delta:` high, after the `dod-<n>` ones."""
   found, contested = [], []
   links = contest_of or {}
 
@@ -398,6 +438,11 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
   allowed = set().union(*(chain(r.subject) for r in rulings if r.kind == "allowed"))
   ruled = {int(r.subject[4:]) for r in rulings if r.kind == "allowed" and re.fullmatch(r"dod-\d+", r.subject)}
   found += dod_findings(body, runs or {}, ruled | {item for fid, item in (prior_dod or {}).items() if fid in overruled | allowed})
+  if delta is not None:  # the test delta: an allowed entry or file is dropped from the round's record, then each left is a high
+    keys = {key for fid, key in (prior_delta or {}).items() if fid in overruled | allowed}
+    files = {r.subject for r in rulings if r.kind == "allowed-file"}
+    delta[:] = [e for e in delta if e["file"] not in files and (e["file"], e["base_line"], e["kind"]) not in keys]
+    found += [(f"{e['file']}:{e['line']}", f"test-delta: {e['file']}:{e['line']} {e['kind']}") for e in delta]
   widened = {path for fid, path in (prior_scope or {}).items() if fid in overruled}  # an owner's overrule widens the Scope
   in_scope = lambda path: any(path == s or path.startswith(s.rstrip("/") + "/") for s in scope)  # a directory covers its files
   found += [(path, "changed path outside Scope paths") for path in changed if not in_scope(path) and path not in widened]
