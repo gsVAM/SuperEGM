@@ -42,3 +42,25 @@ def test_accept_below_the_cap_converges_by_ruling(world):
   assert all(f["disposition"] is None for f in rjson(world, rid, "round-1.json")["reviewers"]["readiness"]["findings"])
   assert "accepted before the cap by the owner (2 medium, 1 low)" in hstore(world).path("journal").read_text(encoding="utf-8")
   assert status(world, rid, cid)[0] == 0
+
+
+@pytest.mark.parametrize("kind, findings, extra, expect", [
+  ("plan", [F("readiness", 1, 1, "high"), F("readiness", 1, 2, "medium")], (), "review rule: accept refused: high readiness-1-1"),
+  ("plan", [F("readiness", 1, 1, "medium", "yes"), F("readiness", 1, 2, "medium")], (), "review rule: accept refused: regression readiness-1-1"),
+  ("head", [F("external:devin[bot]", 1, 1, "medium")], (), "review rule: accept refused: external external:devin[bot]-1-1"),
+  ("head", [F("change-review", 1, 1, "medium")], ("decision",), "review rule: accept refused: decision q1"),
+  ("head", [F("change-review", 1, 1, "medium")], (), "review rule: accept on a head needs --decision"),
+  ("integrate", [F("design", 1, 1, "medium")], (), "review rule: accept refused: kind integrate"),
+  ("plan", [F("readiness", 1, 1, "medium")], ("judges",), "review rule: accept refused: judges"),
+  ("plan", [F("readiness", 1, 1, "medium")], ("moved",), "review rule: the reviewed bytes moved: continue or stop"),
+  ("plan", [F("readiness", 1, 1, "low")], (), "review rule: not at the cap"),
+  ("plan", [F("readiness", 1, 1, "low")], ("moved",), "review rule: accept refused: no medium to accept"),
+  ("head", [F("change-review", 1, 1, "medium")], ("cap",), "review rule: accept is refused on a head")])
+def test_accept_below_the_cap_is_refused_with_its_blockers(world, kind, findings, extra, expect):
+  spec, cid, rid = opened(world, kind)
+  for n in range(1, 6 if "cap" in extra else 2):
+    recorded(world, rid, cid, [F("change-review", n, 1)] if "cap" in extra else findings, n)
+  "decision" in extra and pending(world, cid, "U07", rid)
+  "moved" in extra and move(world, kind, spec)
+  code, out = rule(world, rid, "accept", cid, by=("--judges", "j1") if "judges" in extra else ("--owner",))
+  assert code == 1 and expect in out and rjson(world, rid)["rulings"] == []
