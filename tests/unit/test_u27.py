@@ -89,4 +89,17 @@ def test_profile_problem_refuses_the_amendment_7_layouts(tmp_path, monkeypatch, 
   assert profile_problem(profile, plugins, home) == expect and (layout != "ok" or profile_problem(profile) is None)
 
 
+PROSE = [("skills/wave/references/builder_orders.md", n) for n in ("Your skills, named by your allow-list: {{skills}}.", "invokes no skill its allow-list does not name",
+          "refresh the PR body (`{{gh}} pr edit <n> --body-file <file>`) before every push")] + [
+         ("skills/using-superegm/references/claude-code-tools.md", n) for n in ("`Skill(<name>)` and `Skill(<name> *)`", "`mcp__<server>__<tool>` or `mcp__<server>__*`",
+          "`--plugin-dir <dir>` loads a plugin for the session", "`--mcp-config <file> --strict-mcp-config` loads that file's servers")] + [
+         ("docs/getting_started.md", n) for n in ('"disableClaudeAiConnectors": true', "no `skills/` or `commands/` directory", "`builder.plugins`", "`builder.mcp`")]
+ABSENT = [("skills/wave/references/builder_orders.md", n) for n in ("You have no skills", "and update the existing pull request's body")]
+
+
+@pytest.mark.parametrize("path, needle, present", [(p, n, True) for p, n in PROSE] + [(p, n, False) for p, n in ABSENT])
+def test_the_amendment_7_prose(path, needle, present):
+  assert (needle in (ROOT / path).read_text(encoding="utf-8")) is present, (path, needle)
+
+
 from test_builders import no_graphify, which  # noqa: F401
