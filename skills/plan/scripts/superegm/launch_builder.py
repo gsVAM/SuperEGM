@@ -90,7 +90,7 @@ def prepare(args, card):
   reviews = core.gh_pages(f"repos/{repo}/pulls/{pr}/reviews") if pr else []
   audit = AUDIT_LINE.format(owner=record["launched"].get("by", "unknown"),  # a pre-upgrade mark records no login
                             runcard=args.runcard, unit=unit, handoff=st.handoff_id)
-  text = prompt_text(number, unit, issue_body, orders_text(tools, launched_gh), orient_text, comments, reviews, pr, builder, audit, pr_block,
+  text = prompt_text(number, unit, issue_body, orders_text(tools, launched_gh, builder_config["max_subagent_calls"]), orient_text, comments, reviews, pr, builder, audit, pr_block,
                      spec_range=range_text, owners=config.get("owners") or [], foreman=core.load_foreman(st, unit))
   worktree = add_worktree(handoff.repo_root, st, unit, rnd, branch, pr)
   prompt = st.path("launches", f"{unit}_r{rnd}_prompt.md")
@@ -132,10 +132,19 @@ def skill_names(tools: list) -> list[str]:
   return names
 
 
-def orders_text(tools: list, gh: str) -> str:
+SUBAGENTS_RE = re.compile(r"(?:\n<!-- subagents(?: Agent)?: [^\n]* -->)+\n")  # the two delegation lines (amendment 15)
+
+
+def orders_text(tools: list, gh: str, cap: int) -> str:
   """`references/builder_orders.md` as one launch reads it: `{{gh}}` the launched `gh`, `{{skills}}` the skills
-  the allow-list names, `none` when it names none."""
-  return core.read_text(ORDERS).replace("{{gh}}", gh).replace("{{skills}}", ", ".join(skill_names(tools)) or "none")
+  the allow-list names, `none` when it names none, and `{{subagents}}` the sentence of the `<!-- subagents Agent: -->`
+  line, `{{cap}}` filled, when the list carries `Agent`, else that of the `<!-- subagents: -->` line; both lines removed."""
+  text = core.read_text(ORDERS)
+  marker = "<!-- subagents Agent: " if "Agent" in tools else "<!-- subagents: "
+  line = next(l for l in text.splitlines() if l.startswith(marker))
+  sentence = line[len(marker):].removesuffix(" -->").replace("{{cap}}", str(cap))
+  text = SUBAGENTS_RE.sub("", text, count=1).replace("{{subagents}}", sentence)
+  return text.replace("{{gh}}", gh).replace("{{skills}}", ", ".join(skill_names(tools)) or "none")
 
 
 def start_detached(command: list, log: Path, env: dict) -> int:
@@ -343,10 +352,10 @@ def allowed_tools(configured, branch, body_text, gh):
   """The configured allow-list with its `gh` prefixes rewritten to `gh`'s absolute path (a bare `gh …`
   is refused, so no PATH order is assumed), plus a push prefix for the unit's own branch and
   `Bash(<first word>:*)` for the first word of every `&&`/`;` segment of every command the body runs (U25's D1 (a));
-  `Agent`, `Skill` and unrestricted Bash are refused."""
-  for entry in ("Agent", "Skill", "Bash", "Bash(*)"):
+  a bare `Skill` and unrestricted Bash are refused; `Agent` passes, the owner's opt-in (amendment 15, U27)."""
+  for entry in ("Skill", "Bash", "Bash(*)"):
     if entry in configured:
-      raise core.HandoffError(f"allowed_tools carries {entry}: a builder never spawns, never invokes skills, never runs unrestricted Bash")
+      raise core.HandoffError(f"allowed_tools carries {entry}: a builder invokes no skill bare, never runs unrestricted Bash")
   tools = [f"Bash({gh} {t[8:]}" if t.startswith("Bash(gh ") else t for t in configured] + [f"Bash(git push origin {branch}:*)"]
   for command in body.run_commands(body_text):
     for first in segment_heads(command):

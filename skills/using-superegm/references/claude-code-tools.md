@@ -36,6 +36,11 @@ relies on, from the live probes; do not re-derive them.
   text and cannot exclude a refspec, the skill rules `Skill(<name>)` and `Skill(<name> *)`
   (amendment 7: a headless session invokes only the skills its `Skill` rules name, none
   without one) and the MCP rules `mcp__<server>__<tool>` or `mcp__<server>__*`.
+  `Agent` in a builder's allow-list admits the platform's default subagents, each inheriting the session's allow-list, profile and worktree
+  (amendment 15: the owner's opt-in, absent from the default list; a plugin-shipped or worktree
+  `.claude/agents/` definition is the owner's own, its `permissionMode` and `model` theirs).
+  `--session-id <uuid>` names the session, its transcript `projects/<slug>/<uuid>.jsonl` under the profile,
+  the subagents' beside it in `<uuid>/subagents/agent-*.jsonl`.
   `--plugin-dir <dir>` loads a plugin for the session (its hooks, skills and bundled servers),
   enabled in the profile or not, one flag per directory.
   `--mcp-config <file> --strict-mcp-config` loads that file's servers and no other MCP configuration;

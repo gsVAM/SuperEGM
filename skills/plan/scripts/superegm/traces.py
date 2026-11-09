@@ -1,12 +1,64 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the builder transcript reader
+# `trace_directory` and `assert_child_probe` moved from tests/integration/test_claude.py (Copyright 2026 Google LLC,
+# Apache-2.0); modified by SuperEGM (gsVAM), 2026: `trace_directory` takes the profile directory first.
 
 """The builder's session transcript under its profile (U27): the platform's default subagents a launch spawned
-through the `Agent` tool, read at the exit onto the launch entry as `subagent_calls`. Defines no subcommand."""
+through the `Agent` tool, read at the exit onto the launch entry as `subagent_calls`; the transcript directory and
+the native child probe the integration probe checks. Defines no subcommand."""
 
 import json
 from datetime import datetime
 from pathlib import Path
+
+
+def trace_directory(profile_dir: Path, workspace: Path) -> Path:
+  """Locates native transcripts under Claude's configured directory."""
+  config = Path(profile_dir)
+  project = "".join(c if c.isalnum() else "-" for c in str(workspace.resolve()))
+  return config / "projects" / project
+
+
+def assert_child_probe(
+    raw: str, persona: Path, markers: list[str], deny_persona: bool = False,
+) -> None:
+  """Check the native child's answer, tool restrictions, and completed read."""
+  assert all(marker not in raw for marker in markers)
+  answers = []
+  child_reads = []
+  read_results = []
+  for line in raw.split("\n"):
+    if not line.strip():
+      continue
+    event = json.loads(line)
+    content = event.get("message", {}).get("content", [])
+    for block in content if isinstance(content, list) else []:
+      if event.get("type") == "assistant":
+        if block["type"] == "tool_use":
+          assert block["name"] == "Read"
+          child_reads.append((block["id"], block["input"]["file_path"]))
+        if block["type"] == "text":
+          answers.append(block["text"])
+      if event.get("type") == "user" and block["type"] == "tool_result":
+        result = block.get("content", "")
+        if isinstance(result, list):
+          result = "".join(
+              part["text"] for part in result
+              if part.get("type") == "text" and isinstance(part.get("text"), str)
+          )
+        read_results.append((
+            block["tool_use_id"], bool(block.get("is_error")),
+            isinstance(result, str) and bool(result.strip()),
+        ))
+  # Preserve the native probe's allowance for an explanation before the sentinel.
+  assert answers and answers[-1].strip().splitlines()[-1:] == [
+      "RESOURCE_UNREADABLE" if deny_persona else "UNKNOWN"
+  ]
+  assert [path for _, path in child_reads] == [str(persona)]
+  assert read_results == [(child_reads[0][0], deny_persona, True)], (
+      "Persona read has no correlated native denial result" if deny_persona
+      else "Persona read has no successful native tool result"
+  )
 
 
 def events(path: Path) -> list:

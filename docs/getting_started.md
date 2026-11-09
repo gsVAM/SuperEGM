@@ -48,6 +48,11 @@ the first typed skill runs it when the file is missing. The steps:
    and hook events, the managed plugins and the MCP file's server names. A plugin's skills are
    invoked only through the allow-list's `Skill(<name>)` rules, its servers' tools through
    `mcp__<server>__*` rules; `superegm doctor` prints both sets on its `plugins:` and `mcp:` lines.
+   `Agent` in `builder.allowed_tools` is your opt-in, absent from the default list: a builder may
+   then delegate to the platform's default subagents, each confined to its session's allow-list,
+   profile and worktree, up to `builder.max_subagent_calls` (12) calls a launch, a budget the
+   orders state, not a gate; `record-launch` reads the calls from the session's transcript and
+   writes their count on the launch entry as `subagent_calls`.
 3. Set the branch protection of design section 11 on `<base>`: updates restricted to the owner
    (the logins in `owners`) with no bypass for the builder account's role and no team but
    `owner_team`; `superegm/**` protected from force-push and deletion by a ruleset whose

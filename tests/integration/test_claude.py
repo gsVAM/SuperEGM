@@ -1,6 +1,7 @@
 # Copyright 2026 Google LLC.
 # SPDX-License-Identifier: Apache-2.0
-# Modified by SuperEGM (gsVAM), 2026: review-spec and zoom-out names; one-host build.
+# Modified by SuperEGM (gsVAM), 2026: review-spec and zoom-out names; one-host build; trace_directory and
+# assert_child_probe moved to the helper package's traces module (U27).
 
 """Opt-in Claude plugin-path and native reviewer isolation probe."""
 
@@ -9,63 +10,19 @@ import os
 from pathlib import Path
 import runpy
 import subprocess
+import sys
 import uuid
 
 import pytest
+
+root = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(root / "skills/plan/scripts"))
+from superegm.traces import trace_directory, assert_child_probe
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("EGM_CLAUDE_LIVE") != "1",
     reason="Set EGM_CLAUDE_LIVE=1 to use an authenticated Claude CLI",
 )
-
-
-def trace_directory(workspace: Path) -> Path:
-  """Locates native transcripts under Claude's configured directory."""
-  config = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
-  project = "".join(c if c.isalnum() else "-" for c in str(workspace.resolve()))
-  return config / "projects" / project
-
-
-def assert_child_probe(
-    raw: str, persona: Path, markers: list[str], deny_persona: bool = False,
-) -> None:
-  """Check the native child's answer, tool restrictions, and completed read."""
-  assert all(marker not in raw for marker in markers)
-  answers = []
-  child_reads = []
-  read_results = []
-  for line in raw.split("\n"):
-    if not line.strip():
-      continue
-    event = json.loads(line)
-    content = event.get("message", {}).get("content", [])
-    for block in content if isinstance(content, list) else []:
-      if event.get("type") == "assistant":
-        if block["type"] == "tool_use":
-          assert block["name"] == "Read"
-          child_reads.append((block["id"], block["input"]["file_path"]))
-        if block["type"] == "text":
-          answers.append(block["text"])
-      if event.get("type") == "user" and block["type"] == "tool_result":
-        result = block.get("content", "")
-        if isinstance(result, list):
-          result = "".join(
-              part["text"] for part in result
-              if part.get("type") == "text" and isinstance(part.get("text"), str)
-          )
-        read_results.append((
-            block["tool_use_id"], bool(block.get("is_error")),
-            isinstance(result, str) and bool(result.strip()),
-        ))
-  # Preserve the native probe's allowance for an explanation before the sentinel.
-  assert answers and answers[-1].strip().splitlines()[-1:] == [
-      "RESOURCE_UNREADABLE" if deny_persona else "UNKNOWN"
-  ]
-  assert [path for _, path in child_reads] == [str(persona)]
-  assert read_results == [(child_reads[0][0], deny_persona, True)], (
-      "Persona read has no correlated native denial result" if deny_persona
-      else "Persona read has no successful native tool result"
-  )
 
 
 @pytest.mark.parametrize("deny_persona", [False, True], ids=["scoped-read", "denied-persona"])
@@ -119,7 +76,7 @@ Do not read other plugins or logs, use MCP, or modify files.
   )
   assert result.returncode == 0, result.stderr
   assert not json.loads(result.stdout).get("is_error")
-  traces = trace_directory(workspace)
+  traces = trace_directory(Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude"), workspace)
   parent = [json.loads(line) for line in
             (traces / f"{session}.jsonl").read_text().split("\n") if line.strip()]
   calls, successful = {}, set()
