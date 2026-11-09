@@ -324,7 +324,7 @@ def tick() -> int:
     for entry in core.load_registry():
       try:
         tick_store(entry)
-      except (core.HandoffError, OSError, ValueError, KeyError) as error:  # one store's error never stops the next
+      except (core.HandoffError, core.GhError, OSError, ValueError, KeyError) as error:  # one store's error never stops the next
         print(f"driver: {entry.get('artifacts_dir')}: {error}")
         code = 1
   finally:
