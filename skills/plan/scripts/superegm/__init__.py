@@ -597,10 +597,32 @@ def tick_live(store: Store, skill: str) -> bool:
   return False
 
 
+def rebased(path, root) -> Path:
+  """A path the handoff recorded from another worktree of the repository, read under `root`: the longest suffix of it
+  that exists there (`register` from a second worktree moves a tick's root, never the state's paths, U24)."""
+  path, root = Path(path), Path(root).resolve()
+  if not path.is_absolute() or path.resolve().is_relative_to(root):
+    return path
+  for i in range(1, len(path.parts)):
+    candidate = root.joinpath(*path.parts[i:])
+    if candidate.exists():
+      return candidate
+  return path
+
+
+def here(path) -> Path:
+  """`rebased` onto the working directory's checkout (the path unchanged outside a repository)."""
+  try:
+    return rebased(path, git_toplevel(Path.cwd()))
+  except HandoffError:
+    return Path(path)
+
+
 def handoff_spec(args, store: Store) -> str:
-  """The handoff's spec: the state's `design.path`, else (before the first
+  """The handoff's spec: the state's `design.path` (read under this checkout, `here`), else (before the first
   `graph`) the `Design:` line of `--plan`."""
   spec = (load_state(store.root).get("design") or {}).get("path")
+  spec = str(here(spec)) if spec else spec
   plan = Path(args.plan).expanduser().resolve() if getattr(args, "plan", None) else None
   if not spec and plan and plan.is_file():
     match = re.search(r"^Design: `([^`]+)`", read_text(plan), re.M)
@@ -638,8 +660,8 @@ def require_runcard(args, skills) -> dict:
     raise HandoffError(f"runcard: {rid} is interrupted")
   if card["skill"] not in skills:
     raise HandoffError(f"runcard: {rid} belongs to {card['skill']}, not {'|'.join(sorted(skills))}")
-  ours = subcommand_artifact(args, st)
-  if card["artifact"] != ours and not (getattr(args, "unit", None) and card["artifact"] == handoff_spec(args, st)):
+  ours, theirs = subcommand_artifact(args, st), str(here(card["artifact"]))
+  if theirs != ours and not (getattr(args, "unit", None) and theirs == handoff_spec(args, st)):
     raise HandoffError(f"runcard: {rid} is for {card['artifact']}, not {ours}")
   return card
 
@@ -1665,7 +1687,7 @@ def locate(args):
     recorded = load_state(st.root).get("plan")
     if not recorded:
       raise HandoffError("state holds no plan path: run `graph --plan <file>` first")
-    plan = Path(recorded)
+    plan = here(recorded)
   if not plan.is_file():
     raise HandoffError(f"plan {plan} does not exist")
   return plan, st

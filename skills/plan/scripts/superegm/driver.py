@@ -188,19 +188,6 @@ def twice_failed(hs: core.Store, data: dict, state: dict) -> bool:
   return bool(counted_failures(hs, data["launches"], state, data.get("set_aside") or 0))
 
 
-def rebased(path, root) -> Path:
-  """A path the handoff recorded from another worktree, read under the registered `root`: the longest suffix of it
-  that exists there (`register` from a second worktree moves the root, never the state's paths)."""
-  path, root = Path(path), Path(root).resolve()
-  if not path.is_absolute() or path.resolve().is_relative_to(root):
-    return path
-  for i in range(1, len(path.parts)):
-    candidate = root.joinpath(*path.parts[i:])
-    if candidate.exists():
-      return candidate
-  return path
-
-
 def exit_file_proof(hs: core.Store, launches: list) -> None:
   """A launch of the tick's own whose exit file exists while its top-level `wave` card is still open: a session that
   ended without closing its card; that card, and no other, marked `interrupted`."""
@@ -252,7 +239,7 @@ def launch(hs: core.Store, entry: dict, spec: str, reason: str) -> bool:
   record = {"round": n, "card": None, "started_at": core.now_iso(), "boot_id": core.boot_id(), "status": "running",
             "reason": reason, "result_file": str(base("_result.json")), "exit_file": str(base(".exit")),
             "log": str(base(".log"))}
-  record["command"] = tick_command(Path(entry["root"]).resolve(), tick_prompt(rebased(spec, entry["root"]), hid),
+  record["command"] = tick_command(Path(entry["root"]).resolve(), tick_prompt(core.rebased(spec, entry["root"]), hid),
                                    record["result_file"], record["exit_file"])
   record["card"] = cid = core.open_runcard(hs, "driver", spec)
   data["launches"].append(record)
@@ -319,8 +306,7 @@ def tick_store(entry: dict) -> None:
       core.journal(hs, f"tick: {hid} refusal cleared ({data['refused']['reason']})")
       data["refused"] = None
       core.atomic_write(hs.path("driver", hid), data)
-    plan = rebased(state["plan"], entry["root"]) if ok else Path(state["plan"])
-    reason = status.tick_trigger(core.Handoff(plan, hs))
+    reason = status.tick_trigger(core.Handoff(core.rebased(state["plan"], entry["root"]), hs))
     if reason is None:
       notify(hs, spec)
       continue
