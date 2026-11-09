@@ -24,12 +24,12 @@ SECTION = """### U01: Hooks
 | Field | Value |
 | --- | --- |
 | Objective | The hook exists. |
-| Scope paths | `src/hooks.py` (create), `tests/unit/test_hooks.py` (create) |
+| Scope paths | `src/hooks.py` (create), `tests/unit/test_hooks.py` (create), `tests/unit/test_q.py` (modify), `tests/unit/test_n.py` (create), `tests/unit/test_r.py` (create) |
 | Design range | `docs/designs/sample.md:13-15 (#### 1. src/webhooks/queue.ts)` |
 | Blocked by | none |
 | Shared files | none |
 | Risk | low: small |
-| Size | S |
+| Size | M |
 
 Interfaces
 - Produces: hook() -> None
@@ -250,16 +250,24 @@ def test_dispatch_recovers_a_collected_round_already_on_the_pr(world, on_pr):
     assert saved == entry
 
 
-def pr_repo(world, tmp_path, monkeypatch, commits=(("test(S1): hook", "tests/unit/test_hooks.py"), ("feat(S1): hook", "src/hooks.py"))):
-  """A remote with `main` and `refs/pull/70/head`; world.repo's `origin` points at it."""
+def pr_repo(world, tmp_path, monkeypatch, commits=(("test(S1): hook", "tests/unit/test_hooks.py"), ("feat(S1): hook", "src/hooks.py")), base_files=None):
+  """A remote with `main` and `refs/pull/70/head`; world.repo's `origin` points at it. `base_files` are written
+  beside `README.md` in the base commit; a commit is `(subject, path)` (the subject as content),
+  `(subject, path, content)` or `(subject, {path: content | None})` (None deletes the path)."""
   target = tmp_path / "target"
   def g(*a, cwd=target):
     return subprocess.run(["git", "-C", str(cwd), *a], check=True, capture_output=True, text=True).stdout.strip()
+  def write(files):
+    for path, content in files.items():
+      if content is None:
+        (target / path).unlink()
+      else:
+        (target / path).parent.mkdir(parents=True, exist_ok=True); (target / path).write_text(content, encoding="utf-8")
   target.mkdir(); g("init", "-q", "-b", "main"); g("config", "user.email", "t@example.invalid"); g("config", "user.name", "T")
-  (target / "README.md").write_text("base\n", encoding="utf-8"); g("add", "-A"); g("commit", "-qm", "base")
+  write({"README.md": "base\n", **(base_files or {})}); g("add", "-A"); g("commit", "-qm", "base")
   base = g("rev-parse", "HEAD"); g("checkout", "-qb", "superegm/sample-42aff4/U01")
-  for subject, path in commits:
-    (target / path).parent.mkdir(parents=True, exist_ok=True); (target / path).write_text(subject + "\n", encoding="utf-8")
+  for subject, *rest in commits:
+    write(rest[0] if isinstance(rest[0], dict) else {rest[0]: rest[1] if len(rest) > 1 else subject + "\n"})
     g("add", "-A"); g("commit", "-qm", subject)
   head = g("rev-parse", "HEAD"); g("update-ref", f"refs/pull/{PR}/head", head); g("checkout", "-q", "main")
   g("remote", "set-url", "origin", str(target), cwd=world.repo)
@@ -267,8 +275,8 @@ def pr_repo(world, tmp_path, monkeypatch, commits=(("test(S1): hook", "tests/uni
   return target, base, head, g
 
 
-def prepared(world, tmp_path, monkeypatch, commits=None, incomplete=0, **kw):
-  target, base, head, g = pr_repo(world, tmp_path, monkeypatch, **({"commits": commits} if commits else {}))
+def prepared(world, tmp_path, monkeypatch, commits=None, incomplete=0, base_files=None, **kw):
+  target, base, head, g = pr_repo(world, tmp_path, monkeypatch, **({"commits": commits} if commits else {}), base_files=base_files)
   st, card, child, did, posted = dispatched(world, head=head, **kw)
   if incomplete:  # the lane's incomplete runs so far, as `review record` counts them
     path = st.path("reviews", head_rid(st)) / "review.json"
@@ -564,6 +572,38 @@ def test_collect_reruns_the_dod_items_and_records_the_gate(world, tmp_path, monk
   if name == "forge":
     assert subprocess.run(["git", "config", "--get", "credential.helper"], cwd=world.repo, capture_output=True, text=True,
                           env=dict(os.environ, GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null")).stdout == ""
+
+
+Q, N, R, T = "tests/unit/test_q.py", "tests/unit/test_n.py", "tests/unit/test_r.py", lambda *l: "\n".join(l) + "\n"
+THREE, TWO = T("def test_a():", "  assert 1 == 1", "  assert 2 == 2"), T("def test_a():", "  assert 1 == 1")
+S1 = [("test(S1): hook", "tests/unit/test_hooks.py"), ("feat(S1): hook", "src/hooks.py")]
+E = lambda file, line, base_line, base="base": {"file": file, "line": line, "base_line": base_line, "kind": "removed", "base_commit": base}
+CLAIM = lambda file, line: f"{file}:{line} | regression: no | test-delta: {file}:{line} removed"
+DELTA = {"removed-from-base": ({Q: THREE}, [("chore: trim", Q, TWO)], {}, [E(Q, 3, 3)], [CLAIM(Q, 3)]),
+  "created-then-trimmed": ({}, [("chore: add", N, THREE), ("chore: trim", N, TWO)], {}, [E(N, 3, 3, "created")], [CLAIM(N, 3)]),
+  "renamed": ({Q: THREE}, [("chore: move", {Q: None, R: TWO})], {}, [E(R, 3, 3)], [CLAIM(R, 3)]),
+  "allowed-entry": ({Q: THREE}, [("chore: trim", Q, TWO)], {"comments": RULED("**Ruling:** foreman-1-1 allowed — approved")}, [], []),
+  "allowed-file": ({Q: THREE}, [("chore: gut", Q, T("def test_a():", "  pass"))], {"comments": RULED("**Ruling:** test-delta tests/unit/test_q.py allowed — by design")}, [], [])}
+
+
+@pytest.mark.parametrize("name", list(DELTA))
+def test_collect_records_the_test_delta_from_git_objects(world, tmp_path, monkeypatch, name):
+  """U25: `collect` compares every test file the range touches that no `Write` line names, base to head from git
+  objects, records `test_delta` and a `test-delta:` high per entry, and skips an entry or a file a ruling allows."""
+  base_files, commits, kw, delta, claims = DELTA[name][0], DELTA[name][1], dict(DELTA[name][2]), DELTA[name][3], DELTA[name][4]
+  r = 1
+  if "comments" in kw:  # a posted round 1 whose foreman-1-1 is the trimmed assertion of test_q.py
+    kw.update(rounds=[{**POSTED_R1, "test_delta": [E(Q, 3, 3)]}], launches=TWO_LAUNCHES)
+    st0, card0, _ = seed(world, **kw)
+    open_head_review(world, st0, card0, "0" * 40, {"change-review": "", "foreman": f"foreman-1-1 | high | {CLAIM(Q, 3)}\n"})
+    r = 2
+  w = prepared(world, tmp_path, monkeypatch, commits=S1 + commits, base_files=base_files, **kw)
+  created = w.g("log", "--format=%H", "--diff-filter=A", w.head, "--", N) or None
+  record(world, w.st, w.rid, r, w.head, w.child, {"change-review": ""})
+  code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
+  assert code == 0 and [l.split(" | ", 2)[2] for l in (w.dir / f"r{r}/foreman.findings").read_text().splitlines()] == claims, out
+  entry = json.loads(w.st.path("foreman", UNIT).read_text())["rounds"][-1]
+  assert entry["test_delta"] == [{**e, "base_commit": {"base": w.base, "created": created}[e["base_commit"]]} for e in delta]
 
 
 EXT = "external:alice-1-1 | high | src/hooks.py:3 at 0000000 | regression: no | the hook never fires\n"
