@@ -518,9 +518,12 @@ def read_back(store, comment_id) -> dict:
 
 
 def rule_file(st, unit: str, data: dict, args, comment: dict, found, decisions: list) -> int:
-  """The owner's by-hand `**Ruling:** test-delta <file> allowed — <reason>` (spec section 11.1): one `<fid> allowed`
-  ruling recorded per unruled `test-delta:` finding of that file each of `decisions` asks about, all on the comment;
-  `--ruling` must be the comment's own `test-delta <file> allowed`."""
+  """The owner's by-hand `**Ruling:** test-delta <file> allowed — <reason>` (spec section 11.1), all on the comment:
+  first the whole-file `test-delta <file> allowed` entry itself (which `recorded_rulings`, and `collect`'s allowed
+  files through it, keep after the comment is edited or deleted), then one entry per unruled `test-delta:` finding
+  of that file each of `decisions` asks about: `<fid> allowed` on an `owner: <ids>` decision, `<copy fid> finding
+  overruled` on a decision about a contest copy (options upheld or overruled). `--ruling` must be the comment's own
+  `test-delta <file> allowed`."""
   said = f"test-delta {found.subject} allowed"
   if args.ruling.partition(" — ")[0].strip() != said:
     raise Refusal(f"decision: comment {args.posted} rules {said}, not {args.ruling.partition(' — ')[0].strip()}")
@@ -740,12 +743,15 @@ def file_targets(foreman: dict, path: str, st=None) -> list:
   `owner: <ids>` decision's (each option `<fid> allowed`) by its finding line's claim, and any other's contest copy
   (`contested <fid>: …`) whose original, reached down the chain in the decision's review (`st`'s record,
   `review.delta_claim`), is one: what `**Ruling:** test-delta <path> allowed — <reason>` rules at once (spec
-  sections 8 and 11.1: every open decision whose `test_delta` entry is in that file)."""
+  sections 8 and 11.1: every open decision whose `test_delta` entry is in that file). A point-1 decision takes one
+  ruling per finding, so it is open on each fid not yet ruled, whatever `pending_decisions` says once its first
+  ruling is recorded; a `redesign` closes it whole."""
   line = re.compile(rf"^({FID_PAT})\s*\|.*\|\s*test-delta: {re.escape(path)}:\d+ ", re.M)
+  redesigned = {r.get("decision") for r in foreman.get("rulings") or [] if str(r.get("ruling") or "").startswith("redesign")}
   out = []
-  for d in pending_decisions(foreman):
+  for d in foreman.get("decisions") or []:
     options = d.get("options") or []
-    if d["point"] != 1 or not options:
+    if d["point"] != 1 or not options or d["id"] in redesigned:
       continue
     if all(o.endswith(" allowed") for o in options):
       out += [(d, fid) for fid in line.findall(d.get("question") or "")

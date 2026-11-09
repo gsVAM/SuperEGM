@@ -501,6 +501,41 @@ def test_a_file_allowance_closes_the_decision_on_a_contested_test_delta_copy(wor
   assert (code, out.strip().splitlines()[0]) == (0, "foreman-2-1 contested"), out
 
 
+def test_a_file_allowance_reaches_a_contested_copy_of_its_file_after_another_copy_of_the_decision_was_ruled(world):
+  """Round 5 (PR #103 review, astra-5-2): a point-1 decision on two contest copies of `test-delta:` findings of two
+  files leaves `pending_decisions` at its first ruling, yet the other copy is still unruled: the second file's
+  `**Ruling:** test-delta <file> allowed` names that decision and records its copy."""
+  spec, cid, rid = opened(world, "head", mode="leavemealone")
+  set_config(world, repo=REPO, owners=["owner"])
+  head_round(world, 1, "posted", cid, "revise")
+  assert record(world, rid, 1, "foreman", [f"foreman-1-{k} | high | tests/unit/test_{f}.py:3 | regression: no | test-delta: tests/unit/test_{f}.py:3 removed"
+                                           for k, f in ((1, "q"), (2, "z"))], cid, sha=A)[0] == 0
+  head_round(world, 2, "posted", cid, "contested: foreman-2-1, foreman-2-2")
+  copies = [f"foreman-2-{k} | high | pr #70 comment {k + 4} | regression: no | contested foreman-1-{k}: the assertion moved" for k in (1, 2)]
+  assert record(world, rid, 2, "foreman", copies, cid, sha="b" * 64)[0] == 0
+  served = {n: {"id": n, "user": {"login": "owner"}, "body": f"**Ruling:** test-delta tests/unit/test_{f}.py allowed — by design\n",
+                "created_at": "2026-11-09T10:00:00Z", "issue_url": f"https://api.github.com/repos/{REPO}/issues/7"} for n, f in ((13, "q"), (14, "z"))}
+  by_endpoint = {f"repos/{REPO}/issues/comments/{n}": c for n, c in served.items()}
+  world.gh.extend("api", lambda args, cwd, token=None: world.gh.ok(by_endpoint[world.gh.endpoint_of(args)])
+                  if world.gh.endpoint_of(args) in by_endpoint else world.gh.do_api(args))
+  state = hstore(world).path("state")
+  data = json.loads(state.read_text(encoding="utf-8")) if state.exists() else {}
+  data.setdefault("units", {}).setdefault("U07", {})["number"] = 7
+  atomic_write(state, data)
+  path = world.repo.parent / "q.md"
+  path.write_text("## Q1 foreman-2-1 (high)\n" + copies[0] + "\n## Q2 foreman-2-2 (high)\n" + copies[1] + "\n", encoding="utf-8")
+  code, out = world.run("decision", "open", "--unit", "U07", "--point", "1", "--question", str(path), "--source", f"review {rid} round 2", "--runcard", cid)
+  assert code == 0, out
+  q = out.splitlines()[0]
+  for n, f in ((13, "q"), (14, "z")):
+    code, out = world.run("decision", "rule", "--unit", "U07", "--ruling", f"test-delta tests/unit/test_{f}.py allowed", "--by", "owner", "--posted", str(n), "--runcard", cid)
+    assert code == 0 and "recorded" in out, out
+  data = json.loads(hstore(world).path("foreman", "U07").read_text())
+  assert [(r["decision"], r["ruling"]) for r in data["rulings"]] == [
+    (q, "test-delta tests/unit/test_q.py allowed"), (q, "foreman-2-1 finding overruled"),
+    (q, "test-delta tests/unit/test_z.py allowed"), (q, "foreman-2-2 finding overruled")]
+
+
 # ---------------------------------------------------------------- S9: `review status`
 
 def s_unopened(w, c, r): return f"spec-{SLUG}-c9"
