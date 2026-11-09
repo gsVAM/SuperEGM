@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 import superegm  # the harness reloads the package per test: read its names at call time
-from superegm import driver, status
+from superegm import driver, launch_builder, status
 from superegm.launch_builder import HELPER
 from conftest import REPO, make_pr
 from test_builders import seed, put, spawn_fake, SPAWNED, UNIT  # noqa: F401  (spawn_fake: a fixture)
@@ -125,6 +125,13 @@ def test_tick_predicate(world, monkeypatch, tmp_path, spawn_fake, case, expect):
   if expect == "refuse":
     reason = f"root {tmp_path / 'x'} is not a worktree of {REPO}" if case == "bad-root" else "two launches failed before the loop ran"; data = json.loads((s.root / hid / "driver" / f"{hid}.json").read_text())
     assert f"tick: refused ({hid}: {reason})" in journal and data["refused"]["reason"] == reason and f"refused:{hid}" in data["notified"]
+
+
+def test_a_systemd_unit_quotes_a_helper_path_with_a_space(world, monkeypatch, tmp_path):
+  s, hid = registered(world, monkeypatch, tmp_path); dcard, helper = world.open_card("driver", world.spec), tmp_path / "my plugins/skills/plan/scripts/superegm.py"
+  monkeypatch.setattr(driver, "RUN", lambda argv, **k: subprocess.CompletedProcess(argv, 0)); monkeypatch.setattr(driver, "PLATFORM", "linux")
+  monkeypatch.setattr(launch_builder, "HELPER", helper); assert world.run("driver", "install", "--runcard", dcard)[0] == 0
+  assert f"ExecStart={sys.executable} '{helper}' driver tick\n" in (tmp_path / ".config/systemd/user/superegm-driver.service").read_text() and driver.plist_helper() == str(helper)
 
 
 @pytest.mark.parametrize("platform, interval", [("darwin", None), ("darwin", 5), ("linux", None)])
