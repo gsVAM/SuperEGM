@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24); the informational `plugins` and `mcp` lines and the profile line's plugin refusals (U27); the informational `model:` role table (U28).
+# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24); the informational `plugins` and `mcp` lines and the profile line's plugin refusals (U27); the informational `model:` role table (U28); the informational `stall:` line (U31).
 
 """superegm doctor: one line per wave prerequisite, `ok` or the refusal `launch` or `launch-builder`
 would give; read-only, no run card."""
@@ -19,7 +19,7 @@ from superegm.launch_builder import SENTINEL, UNSET, elephant_profile, launched_
 
 WRITES = frozenset()  # doctor writes nothing
 INFORMATIONAL = ("graphify", "scanning", "astra", "merge", "python3.12", "hooks", "core.hooksPath", "driver", "sleep", "root", "env",
-                 "notify", "plugins", "mcp", "model")  # lines that never fail the exit
+                 "notify", "plugins", "mcp", "model", "stall")  # lines that never fail the exit
 MERGE = ("gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset "
          "restricts updates to config.owners)")
 
@@ -52,7 +52,8 @@ def checks(config, repo_root, token):
   installation, scanning, protection, merge, profile, plugins, mcp, gh, environment, graphify, astra; the four App lines are
   absent after a failing key or openssl. The environment line is absent after a failing gh line; graphify,
   astra, scanning and merge are informational and never fail, as are python3.12, hooks and core.hooksPath (U25)
-  and plugins and mcp (U27, the profile line carrying a listed plugin's refusal).
+  and plugins and mcp (U27, the profile line carrying a listed plugin's refusal), and stall, the watchdog's
+  `builder.stall_minutes` after astra (U31).
   The five driver lines (driver, sleep, root, env, notify) follow, informational too, and the `model:`
   role table (U28) closes every form, informational."""
   repo, base, owners, team, app = config["repo"], config["base"], config["owners"], config["owner_team"], config["builder"]["app"]
@@ -161,6 +162,7 @@ def checks(config, repo_root, token):
   lines.append(("graphify", f"ok ({graphify})" if graphify else "not on PATH (informational)"))
   runner = runner_path()
   lines.append(("astra", f"ok ({runner})" if runner else "not installed (heads will record not run)"))
+  lines.append(("stall", f"{config['builder']['stall_minutes']} min"))  # the watchdog's bound (U31)
   python = shutil.which("python3.12")  # this repository's own prerequisite, not the gate's (U25)
   lines.append(("python3.12", f"ok ({python})" if python else "not on PATH (informational)"))
   hooks_path, hooks = hooks_of(repo_root)
