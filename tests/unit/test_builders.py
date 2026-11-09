@@ -58,6 +58,12 @@ def which(monkeypatch):
   monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: {"gh": "/usr/local/bin/gh", "openssl": OPENSSL}.get(cmd))
 
 
+# U27's helpers; imported after the two autouse fixtures, which `test_u27` imports back
+from test_u27 import elephant, PONY, MCP, THREE  # noqa: E402
+from superegm import launch_builder  # noqa: E402
+from superegm.launch_builder import skill_names, orders_text  # noqa: E402
+
+
 SPAWNED = []  # (command, log, env) of every launch `spawn_fake` stood in for
 
 
@@ -438,7 +444,7 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   assert git(["rev-parse", "HEAD"], wt).strip() == git(["rev-parse", "refs/superegm/base"], world.repo).strip()
   prompt_file = s.path("launches", f"{UNIT}_r1_prompt.md")
   prompt = prompt_file.read_text(encoding="utf-8")
-  orders = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8").replace("{{gh}}", "/usr/local/bin/gh")
+  orders = orders_text(DEFAULT_CONFIG["builder"]["allowed_tools"], "/usr/local/bin/gh")
   assert prompt.startswith(f"# Issue #{ISSUE} — U07\n\n{world.gh.issues[ISSUE]['body']}")
   assert f"\n\n---\n\n# Builder orders\n\n{orders}" in prompt
   assert f"\n\n---\n\n# Comments on issue #{ISSUE}\n\n## owner · comment 1\n**Decision D1:** (a) five\n\n## builder-bot · comment 3\n**Deviation (other):** renamed a fixture\n\n## owner · comment 4\n**Ruling:** (3) (a) — proceed\n" in prompt
@@ -547,7 +553,7 @@ def test_launch_builder_appends_the_pr_block(world, monkeypatch, key, spawn_fake
     assert not s.path("worktrees", UNIT).exists() and not s.path("launches", f"{UNIT}_r1_prompt.md").exists()
     return
   assert code == 0, out
-  orders = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8").replace("{{gh}}", "/usr/local/bin/gh")
+  orders = orders_text(DEFAULT_CONFIG["builder"]["allowed_tools"], "/usr/local/bin/gh")
   prompt = s.path("launches", f"{UNIT}_r1_prompt.md").read_text(encoding="utf-8")
   if key:
     assert f"\n\n---\n\n# Builder orders\n\n{orders}\n\n---\n\n# PR block\n\n<!-- coord/v1 task=7 -->\n\n\n---\n\n# " in prompt
@@ -659,6 +665,27 @@ def test_command_line_carries_the_dirs_the_mcp_file_and_the_switch():
   assert " --setting-sources user --plugin-dir '/c/ponytail/5.3.3' --plugin-dir '/c/x/1' --mcp-config '/l/U07_r1_mcp.json' --strict-mcp-config --allowedTools 'Read' " in line, line
   assert " --setting-sources user --mcp-config '/m.json' --strict-mcp-config --allowedTools 'Read' " in call([], "/m.json")
   assert " --session-id 's' " in call([], "/m.json", session_id="s") and " --session-id" not in call([], "/m.json")
+
+
+@pytest.mark.parametrize("case", ["none", "listed", "missing"])
+def test_launch_builder_writes_the_mcp_file_and_the_plugins_record(world, monkeypatch, tmp_path, case):
+  s, card, hid, _ = seed(world)
+  home, d = elephant(tmp_path, monkeypatch, ["user"] if case == "listed" else ["project"], {"hooks/hooks.json": THREE})
+  cfg = json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]
+  rules = ["Skill(ponytail:ponytail)", "Skill(ponytail:ponytail *)", "mcp__context7__*"]
+  case != "none" and configure(world, builder={**cfg, "plugins": [PONY], "mcp": MCP, "allowed_tools": [*cfg["allowed_tools"], *rules]})
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder"); monkeypatch.setattr(launch_builder, "start_detached", lambda command, log, env: 4242)
+  assert world.run("launch", "--runcard", card)[0] == 0
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)
+  record, mcp, managed = (s.path("launches", f"{UNIT}_r1_{n}.json") for n in ("plugins", "mcp", "managed"))
+  if case == "missing":
+    assert code == 1 and f"launch-builder: plugin {PONY} not installed" in out and not record.exists() and not mcp.exists() and not s.path("worktrees", UNIT).exists(), out
+    return
+  listed = case == "listed"
+  assert code == 0 and not managed.exists() and json.loads(mcp.read_text(encoding="utf-8")) == {"mcpServers": MCP if listed else {}}, out
+  assert json.loads(record.read_text(encoding="utf-8")) == {"plugins": [{"id": PONY, "version": "5.3.3", "dir": str(d), "hooks": THREE}] if listed else [], "managed": [], "mcp": ["context7"] if listed else []}
+  assert f"Your skills, named by your allow-list: {'ponytail:ponytail' if listed else 'none'}. You have no subagents" in s.path("launches", f"{UNIT}_r1_prompt.md").read_text(encoding="utf-8")
+  assert skill_names(["Read", *rules, "Skill(superegm:orient)"]) == ["ponytail:ponytail", "superegm:orient"]
 
 
 @pytest.mark.parametrize("path", ["app", "account"])
