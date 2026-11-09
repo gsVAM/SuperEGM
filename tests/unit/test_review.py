@@ -425,6 +425,138 @@ def test_settle_takes_the_owners_posted_overrule_in_leavemealone(world, author, 
     assert (code, out.strip()) == (0, expect) and (finding["disposition"], finding["ruling"]) == ("declined", "owner")
 
 
+from superegm.review import owner_only_fids
+
+
+@pytest.mark.parametrize("mode, extra, expect", [("leavemealone", ("--judges", "j1"), "review settle: foreman-1-1 is the owner's alone: --owner required"), (None, ("--owner",), "foreman-1-1 declined")])
+def test_a_test_delta_finding_is_settled_by_the_owner_alone(world, mode, extra, expect):
+  """U25: a `test-delta:` finding is the owner's alone, in either mode: the judges cannot settle it."""
+  spec, cid, rid = opened(world, "head", mode=mode)
+  head_round(world, 1, "posted", cid, "revise")
+  assert record(world, rid, 1, "foreman", ["foreman-1-1 | high | tests/unit/test_q.py:3 | regression: no | test-delta: tests/unit/test_q.py:3 removed"], cid, sha=A)[0] == 0
+  code, out = settle(world, rid, "foreman-1-1", "declined", cid, *extra)
+  assert (code == 1 and expect in out) if code else (code, out.strip()) == (0, expect), out
+  assert owner_only_fids(rjson(world, rid, "round-1.json")) == (["foreman-1-1"] if code else [])
+
+
+def test_a_settle_that_leaves_an_owner_only_remainder_writes_the_owner_word(world):
+  """Round 4 (PR #103 review, astra-4-3): settling the round's other finding after the post leaves its remainder
+  owner-only, and the posted round's outcome becomes `owner: <ids>`, not the `revise` it was posted with."""
+  spec, cid, rid = opened(world, "head")
+  head_round(world, 1, "posted", cid, "revise")
+  lines = ["foreman-1-1 | high | src/a.py:1 | regression: no | claim 1",
+           "foreman-1-2 | high | tests/unit/test_q.py:3 | regression: no | test-delta: tests/unit/test_q.py:3 removed"]
+  assert record(world, rid, 1, "foreman", lines, cid, sha=A)[0] == 0
+  code, out = settle(world, rid, "foreman-1-1", "declined", cid, "--owner")
+  assert (code, out.strip().splitlines()) == (0, ["foreman-1-1 declined", "owner: foreman-1-2"]), out
+  assert json.loads(hstore(world).path("foreman", "U07").read_text())["rounds"][0]["outcome"] == "owner: foreman-1-2"
+
+
+@pytest.mark.parametrize("upheld, lines, outcome", [(False, ["foreman-1-1 declined"], "owner: foreman-1-1, foreman-1-2"),
+                                                     (True, ["foreman-1-1 declined", "revise"], "revise")])
+def test_a_settle_on_the_owner_row_keeps_its_word_until_only_upheld_ids_are_left(world, upheld, lines, outcome):
+  """Round 5 (PR #103 review, codebase-details-5-1): on a round whose word is already `owner: <ids>`, settling one
+  id the owner allowed keeps the word (its decision stays open on the other id) and prints no second owner word;
+  when every id left is one the owner upheld, the word becomes `revise` (or `cap-reached` at the cap)."""
+  spec, cid, rid = opened(world, "head")
+  head_round(world, 1, "posted", cid, "owner: foreman-1-1, foreman-1-2")
+  lines_ = [f"foreman-1-{k} | high | tests/unit/test_q.py:{k + 2} | regression: no | test-delta: tests/unit/test_q.py:{k + 2} removed" for k in (1, 2)]
+  assert record(world, rid, 1, "foreman", lines_, cid, sha=A)[0] == 0
+  if upheld:
+    path = hstore(world).path("foreman", "U07")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["decisions"].append({"id": "q1", "point": 1, "options": ["foreman-1-1 allowed", "foreman-1-2 allowed"], "question": "", "source": f"review {rid} round 1"})
+    data["rulings"].append({"decision": "q1", "ruling": "foreman-1-2 finding upheld", "by": "owner"})
+    atomic_write(path, data)
+  code, out = settle(world, rid, "foreman-1-1", "declined", cid, "--owner")
+  assert (code, out.strip().splitlines()) == (0, lines), out
+  assert json.loads(hstore(world).path("foreman", "U07").read_text())["rounds"][0]["outcome"] == outcome
+
+
+@pytest.mark.parametrize("body, ok", [("test-delta tests/unit/test_q.py allowed — by design", True), ("test-delta tests/unit/test_z.py allowed — by design", False),
+                                      ("foreman-1-1 allowed — fine", True), ("foreman-1-1 finding overruled — fine", True), ("foreman-1-1 finding upheld", False)])
+def test_the_owners_file_allowance_settles_a_test_delta_finding_of_that_file(monkeypatch, body, ok):
+  """Round 3 (PR #103 review): `**Ruling:** test-delta <file> allowed` settles each `test-delta:` finding of that file."""
+  from superegm import review as review_mod
+  comment = {"id": 9, "user": {"login": "owner"}, "body": f"**Ruling:** {body}\n", "created_at": "t"}
+  monkeypatch.setattr(review_mod.core, "gh_json", lambda argv: comment)
+  finding = {"id": "foreman-1-1", "claim": "test-delta: tests/unit/test_q.py:3 removed"}
+  call = lambda: review_mod.verify_owner_ruling({"repo": "o/r", "owners": ["owner"]}, finding, "9")
+  if ok:
+    call()
+  else:
+    with pytest.raises(review_mod.core.HandoffError, match="does not rule foreman-1-1 overruled"):
+      call()
+
+
+def test_a_file_allowance_closes_the_decision_on_a_contested_test_delta_copy(world):
+  """Round 4 (PR #103 review, foreman-4-1, astra-3-6, astra-4-2; spec lines 1918-1919): the owner's one `**Ruling:**
+  test-delta <file> allowed` names an open decision on a contest copy of a `test-delta:` finding of that file, reached
+  down the contest chain: `decision rule` records it there, and `review settle --owner --posted` takes it on the copy."""
+  spec, cid, rid = opened(world, "head", mode="leavemealone")
+  set_config(world, repo=REPO, owners=["owner"])
+  head_round(world, 1, "posted", cid, "revise")
+  assert record(world, rid, 1, "foreman", ["foreman-1-1 | high | tests/unit/test_q.py:3 | regression: no | test-delta: tests/unit/test_q.py:3 removed"], cid, sha=A)[0] == 0
+  head_round(world, 2, "posted", cid, "contested: foreman-2-1")
+  copy = "foreman-2-1 | high | pr #70 comment 5 | regression: no | contested foreman-1-1: the assertion moved to test_r"
+  assert record(world, rid, 2, "foreman", [copy], cid, sha="b" * 64)[0] == 0
+  served = {"id": 13, "user": {"login": "owner"}, "body": "**Ruling:** test-delta tests/unit/test_q.py allowed — by design\n",
+            "created_at": "2026-11-09T10:00:00Z", "issue_url": f"https://api.github.com/repos/{REPO}/issues/7"}
+  world.gh.extend("api", lambda args, cwd, token=None: world.gh.ok(served) if world.gh.endpoint_of(args) == f"repos/{REPO}/issues/comments/13" else world.gh.do_api(args))
+  state = hstore(world).path("state")
+  data = json.loads(state.read_text(encoding="utf-8")) if state.exists() else {}
+  data.setdefault("units", {}).setdefault("U07", {})["number"] = 7  # the unit's issue, the comment's `issue_url`
+  atomic_write(state, data)
+  path = world.repo.parent / "q.md"
+  path.write_text(f"## Q1 foreman-2-1 (high)\n{copy}\n", encoding="utf-8")
+  code, out = world.run("decision", "open", "--unit", "U07", "--point", "1", "--question", str(path), "--source", f"review {rid} round 2", "--runcard", cid)
+  assert code == 0, out
+  q = out.splitlines()[0]
+  code, out = world.run("decision", "rule", "--unit", "U07", "--ruling", "test-delta tests/unit/test_q.py allowed", "--by", "owner", "--posted", "13", "--runcard", cid)
+  assert code == 0, out
+  data = json.loads(hstore(world).path("foreman", "U07").read_text())
+  assert [(r["decision"], r["ruling"]) for r in data["rulings"]] == [(q, "test-delta tests/unit/test_q.py allowed"), (q, "foreman-2-1 finding overruled")]
+  from superegm.report import pending_decisions
+  assert pending_decisions(data) == []
+  code, out = settle(world, rid, "foreman-2-1", "contested", cid, "--owner", "--posted", "13")
+  assert (code, out.strip().splitlines()[0]) == (0, "foreman-2-1 contested"), out
+
+
+def test_a_file_allowance_reaches_a_contested_copy_of_its_file_after_another_copy_of_the_decision_was_ruled(world):
+  """Round 5 (PR #103 review, astra-5-2): a point-1 decision on two contest copies of `test-delta:` findings of two
+  files leaves `pending_decisions` at its first ruling, yet the other copy is still unruled: the second file's
+  `**Ruling:** test-delta <file> allowed` names that decision and records its copy."""
+  spec, cid, rid = opened(world, "head", mode="leavemealone")
+  set_config(world, repo=REPO, owners=["owner"])
+  head_round(world, 1, "posted", cid, "revise")
+  assert record(world, rid, 1, "foreman", [f"foreman-1-{k} | high | tests/unit/test_{f}.py:3 | regression: no | test-delta: tests/unit/test_{f}.py:3 removed"
+                                           for k, f in ((1, "q"), (2, "z"))], cid, sha=A)[0] == 0
+  head_round(world, 2, "posted", cid, "contested: foreman-2-1, foreman-2-2")
+  copies = [f"foreman-2-{k} | high | pr #70 comment {k + 4} | regression: no | contested foreman-1-{k}: the assertion moved" for k in (1, 2)]
+  assert record(world, rid, 2, "foreman", copies, cid, sha="b" * 64)[0] == 0
+  served = {n: {"id": n, "user": {"login": "owner"}, "body": f"**Ruling:** test-delta tests/unit/test_{f}.py allowed — by design\n",
+                "created_at": "2026-11-09T10:00:00Z", "issue_url": f"https://api.github.com/repos/{REPO}/issues/7"} for n, f in ((13, "q"), (14, "z"))}
+  by_endpoint = {f"repos/{REPO}/issues/comments/{n}": c for n, c in served.items()}
+  world.gh.extend("api", lambda args, cwd, token=None: world.gh.ok(by_endpoint[world.gh.endpoint_of(args)])
+                  if world.gh.endpoint_of(args) in by_endpoint else world.gh.do_api(args))
+  state = hstore(world).path("state")
+  data = json.loads(state.read_text(encoding="utf-8")) if state.exists() else {}
+  data.setdefault("units", {}).setdefault("U07", {})["number"] = 7
+  atomic_write(state, data)
+  path = world.repo.parent / "q.md"
+  path.write_text("## Q1 foreman-2-1 (high)\n" + copies[0] + "\n## Q2 foreman-2-2 (high)\n" + copies[1] + "\n", encoding="utf-8")
+  code, out = world.run("decision", "open", "--unit", "U07", "--point", "1", "--question", str(path), "--source", f"review {rid} round 2", "--runcard", cid)
+  assert code == 0, out
+  q = out.splitlines()[0]
+  for n, f in ((13, "q"), (14, "z")):
+    code, out = world.run("decision", "rule", "--unit", "U07", "--ruling", f"test-delta tests/unit/test_{f}.py allowed", "--by", "owner", "--posted", str(n), "--runcard", cid)
+    assert code == 0 and "recorded" in out, out
+  data = json.loads(hstore(world).path("foreman", "U07").read_text())
+  assert [(r["decision"], r["ruling"]) for r in data["rulings"]] == [
+    (q, "test-delta tests/unit/test_q.py allowed"), (q, "foreman-2-1 finding overruled"),
+    (q, "test-delta tests/unit/test_z.py allowed"), (q, "foreman-2-2 finding overruled")]
+
+
 # ---------------------------------------------------------------- S9: `review status`
 
 def s_unopened(w, c, r): return f"spec-{SLUG}-c9"

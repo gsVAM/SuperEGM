@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U14's tests of `superegm doctor` (spec section 11); the App lines and the launched environment (U15); the informational `merge:` line (U19); the five driver lines (U24).
+# Added by SuperEGM (gsVAM), 2026: U14's tests of `superegm doctor` (spec section 11); the App lines and the launched environment (U15); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five driver lines (U24).
 
 """`superegm doctor`: one line per wave prerequisite, `ok` or the refusal `launch` or `launch-builder`
 would give, in a pinned order; no run card, no store write."""
@@ -17,7 +17,8 @@ DRIVER_NONE = ["driver: not installed", "sleep: not reported", "root: not regist
 OK = ["config: ok", "owner: ok (owner)", "origin: ok", "token: ok", "builder: ok (builder-bot)", "role: ok (write)",
       "scopes: ok (classic: repo, read:org)", "protection: ok",
       "merge: gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset restricts updates to config.owners)", "profile: ok", "gh: ok (/usr/local/bin/gh)", "environment: ok",
-      "graphify: not on PATH (informational)", "astra: not installed (heads will record not run)", *DRIVER_NONE]
+      "graphify: not on PATH (informational)", "astra: not installed (heads will record not run)",
+      "python3.12: not on PATH (informational)", "hooks: none", "core.hooksPath: unset", *DRIVER_NONE]
 NAMES = [line.split(":")[0] for line in OK]
 
 
@@ -38,6 +39,8 @@ NAMES = [line.split(":")[0] for line in OK]
   ("graphify", 0, ["graphify: ok (/usr/local/bin/graphify)"]),
   ("no-gh", 1, ["gh: gh is not on this machine's PATH"]),
   ("astra", 0, ["astra: ok ({runner})"]),
+  ("python3.12", 0, ["python3.12: ok (/usr/local/bin/python3.12)"]),
+  ("hooks", 0, ["hooks: post-checkout, pre-push", "core.hooksPath: {hooks}"]),
 ])
 def test_doctor_lines(world, monkeypatch, tmp_path, case, code, expected):
   monkeypatch.setenv("HOME", str(tmp_path)); s, card, hid, _ = seed(world)
@@ -45,9 +48,16 @@ def test_doctor_lines(world, monkeypatch, tmp_path, case, code, expected):
   if case == "astra":
     runner.parent.mkdir(parents=True)
     runner.write_text("", encoding="utf-8")
+  hooks = tmp_path / "hooks"
+  if case == "hooks":  # two executables, a `.sample` skipped, at core.hooksPath
+    hooks.mkdir()
+    for name in ("pre-push", "post-checkout", "pre-commit.sample"):
+      (hooks / name).write_text("#!/bin/sh\n", encoding="utf-8"); (hooks / name).chmod(0o755)
+    git(["config", "core.hooksPath", str(hooks)], world.repo)
   monkeypatch.setenv("CLAUDE_CODE_PLUGIN_CACHE_DIR", str(tmp_path / "plugins"))
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
   monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: {"graphify": "/usr/local/bin/graphify" if case == "graphify" else None,
+                                                             "python3.12": "/usr/local/bin/python3.12" if case == "python3.12" else None,
                                                              "gh": None if case == "no-gh" else "/usr/local/bin/gh"}.get(cmd))
   config = world.repo / ".superegm/config.json"
   profile = json.loads(config.read_text(encoding="utf-8"))["builder"]["profile_dir"]
@@ -68,7 +78,7 @@ def test_doctor_lines(world, monkeypatch, tmp_path, case, code, expected):
   assert got == code, out
   lines = out.splitlines()
   for line in expected:
-    assert line.format(config=config, profile=profile, runner=runner) in lines, out
+    assert line.format(config=config, profile=profile, runner=runner, hooks=hooks) in lines, out
   skipped = {"config": set(NAMES) - {"config"}, "no-token": {"builder", "role", "scopes", "protection"}, "no-gh": {"environment"}}.get(case, set())
   assert [line.split(":")[0] for line in lines] == [name for name in NAMES if name not in skipped]
   assert "ghp_builder" not in out and not s.path("launches", f"{UNIT}.json").parent.exists()
@@ -77,7 +87,8 @@ def test_doctor_lines(world, monkeypatch, tmp_path, case, code, expected):
 OK_APP = ["config: ok", "owner: ok (owner)", "origin: ok", "credential: ok (app superegm-builder)", "key: ok ({key})", "openssl: ok ({openssl})", "artifacts_dir: ok",
           "app: ok (superegm-builder #12345)", f"permissions: ok ({FOUR[1:-1]})", "token: ok", "installation: ok (example-org/webhooks)",
           "scanning: push protection enabled, non-provider patterns enabled", "protection: ok",
-          "merge: gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset restricts updates to config.owners)", "profile: ok", "gh: ok ({gh})", "environment: ok", "graphify: not on PATH (informational)", "astra: not installed (heads will record not run)", *DRIVER_NONE]
+          "merge: gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset restricts updates to config.owners)", "profile: ok", "gh: ok ({gh})", "environment: ok", "graphify: not on PATH (informational)", "astra: not installed (heads will record not run)",
+          "python3.12: not on PATH (informational)", "hooks: none", "core.hooksPath: unset", *DRIVER_NONE]
 
 
 @pytest.mark.parametrize("case, code, expected, skipped", [
@@ -98,7 +109,7 @@ def test_doctor_app_lines(world, monkeypatch, key, tmp_path, case, code, expecte
     (tmp_path / "gitconfig").write_text('[credential]\n\thelper = !echo password=p\n[url "git@github.com:"]\n\tpushInsteadOf = https://github.com/\n', encoding="utf-8")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
   got, out = world.run("doctor")
-  assert got == code and all(l.format(key=key, openssl=OPENSSL, gh=gh, origin=world.repo.parent / "origin.git") in out.splitlines() for l in expected), out
+  assert got == code and all(l.format(key=key, openssl=OPENSSL, gh=gh, origin=world.repo.parent / "origin.git", hooks=tmp_path / "hooks") in out.splitlines() for l in expected), out
   assert [l.split(":")[0] for l in out.splitlines()] == [l.split(":")[0] for l in OK_APP if l.split(":")[0] not in skipped]
 
 

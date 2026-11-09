@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U10b's tests of the driver: report, decision open|rule, the wave skill body; the by-hand ruling read through `ruling_of` (U22).
+# Added by SuperEGM (gsVAM), 2026: U10b's tests of the driver: report, decision open|rule, the wave skill body; the by-hand ruling read through `ruling_of` (U22); the foreman-verifies prose and the owner-only decision's allowed form (U25).
 
 """U10b: the pure functions the wave skill cites, `report`, `decision open|rule` and the skill body.
 Fixtures: conftest's `world`, `applied` and `make_pr` (U03/U07)."""
@@ -11,7 +11,7 @@ from conftest import applied, make_pr, set_config
 import superegm  # the harness reloads the package per test: read load_config at call time
 from superegm import store, atomic_write, DEFAULT_CONFIG, decision, launch
 from test_builder_token import APP
-from superegm.report import unit_state, unit_view, loop_ended, word_action
+from superegm.report import unit_state, unit_view, loop_ended, word_action, pending_decisions
 from superegm.review import parse_findings
 from superegm.apply import board_changed_at, splice_board
 from test_builders import seed as filed, launched, foreman as foreman_file
@@ -142,10 +142,110 @@ def test_loop_ended_is_the_end_condition(states, ready, slots, expected):
   ("error", 5, "idle: review stalled"), ("target-moved", 5, "idle: review stalled"), ("blocked", 3, "decision 3"),
   ("recovered clean", 0, "await-merge"), ("recovered contested: f-2-1", 3, "decision 1"),
   ("recovered cap-reached", 2, "decision 2"), ("a sentence instead of a word", 3, "redispatch"),
-  ("owner: f-1-2", 3, "decision open"),
+  ("owner: f-1-2", 3, "decision open"), ("owner: foreman-2-2", 3, "decision open"),
 ])
 def test_word_action_is_the_word_table(word, review_exit, action):
   assert word_action(word, review_exit) == action
+
+
+# U25: the word table's `owner:` row lives in references/decision_points.md since the owner's split of the
+# wave skill (ruling on #83): its needles are pinned there; the SKILL.md row keeps its pointer.
+VERIFIES = [("skills/wave/references/foreman_brief.md", n) for n in ("both gates ran", "timeout: 600000", "post: gates not run",
+                                                                      "clean | revise | contested: <ids> | owner: <ids> | cap-reached | target-moved | error")] + [
+            ("skills/wave/SKILL.md", n) for n in ("`owner: <ids>` →", "no relaunch, no slot")] + [
+            ("skills/wave/references/decision_points.md", n) for n in ("options `<fid> allowed`, one per id",
+                                                                        "one `**Ruling:** <fid> allowed — <reason>` comment per id", "--disposition declined --owner",
+                                                                        "`owner: <ids>` decision convenes no panel")] + [
+            ("resources/review_panels.md", "`dod-<n>`"), ("resources/review_panels.md", "`test-delta`")]
+
+
+@pytest.mark.parametrize("path, needle", VERIFIES)
+def test_the_foreman_verifies_prose(path, needle):
+  assert needle in (SKILL.parents[2] / path).read_text(encoding="utf-8"), (path, needle)
+
+
+OWNER = {"rounds": [{"round": 1, "phase": "posted", "outcome": "owner: foreman-1-1, foreman-1-2"}]}
+TD = lambda fid, line: f"{fid} | high | tests/unit/test_q.py:{line} | regression: no | test-delta: tests/unit/test_q.py:{line} removed\n"
+ALLOWED = ["foreman-1-1 allowed", "foreman-1-2 allowed"]
+
+
+def test_an_owner_only_decision_offers_the_allowed_form():
+  assert decision.options_for(1, "review head-U01-c1 round 1", TD("foreman-1-1", 3) + TD("foreman-1-2", 5), OWNER, "a" * 40) == ALLOWED
+  assert decision.check_ruling(1, ALLOWED, "foreman-1-2 allowed") == "foreman-1-2 allowed"
+  with pytest.raises(decision.Refusal, match="decision: foreman-1-2 allowed is the owner's alone"):
+    decision.check_ruling(1, ALLOWED, "foreman-1-2 allowed", by="judges:p1")
+  one = {"decisions": [{"id": "q1", "point": 1, "options": ALLOWED}], "rulings": [{"decision": "q1", "ruling": "foreman-1-1 allowed"}]}
+  assert [d["id"] for d in pending_decisions(one)] == ["q1"]
+  assert pending_decisions(one | {"rulings": one["rulings"] + [{"decision": "q1", "ruling": "foreman-1-2 allowed — fine"}]}) == []
+  assert decision.check_ruling(1, ALLOWED, "foreman-1-2 finding overruled — fine") == "foreman-1-2 allowed"  # read as allowed
+  for upheld in ("foreman-1-2 finding upheld", "foreman-1-2 finding upheld — restore it"):  # an uphold is never an allowance
+    assert decision.check_ruling(1, ALLOWED, upheld) == "foreman-1-2 finding upheld"
+  with pytest.raises(decision.Refusal, match="decision: foreman-1-2 finding upheld is the owner's alone"):
+    decision.check_ruling(1, ALLOWED, "foreman-1-2 finding upheld", by="judges:p1")
+  with pytest.raises(decision.Refusal, match="decision: ruling is none of the options"):
+    decision.check_ruling(1, ALLOWED, "foreman-1-2 anything")
+  upheld = one["rulings"] + [{"decision": "q1", "ruling": "foreman-1-2 finding upheld"}]
+  assert pending_decisions(one | {"rulings": upheld}) == []  # an uphold releases its fid: the builder restores it
+  assert pending_decisions(one | {"rulings": [{"decision": "q1", "ruling": "redesign — re-plan"}]}) == []  # a redesign rules it whole
+
+
+def test_an_owner_only_decision_takes_the_owners_by_hand_uphold_and_file_allowance(world):
+  """Round 3 (PR #103 review): the owner's posted `<fid> finding upheld` is recorded on an `owner: <ids>` decision,
+  and `**Ruling:** test-delta <file> allowed` records one allowance per open finding of that file."""
+  card = world.run("runcard", "open", "--skill", "wave", "--artifact", world.spec, "--mode", "leavemealone", card=None)[1].strip()
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green",
+                             "rounds": [{"round": 1, "phase": "posted", "outcome": "owner: foreman-1-1, foreman-1-2, foreman-1-3"}]})
+  set_config(world, repo=REPO, owners=["owner"])
+  other = "foreman-1-3 | high | tests/unit/test_z.py:2 | regression: no | test-delta: tests/unit/test_z.py:2 removed\n"
+  fake_gh(world, {f"repos/{REPO}/issues/comments/{cid}": {"id": cid, "user": {"login": "owner"}, "body": f"**Ruling:** {body}\n",
+                                                          "created_at": "2026-11-03T10:00:00Z"}
+                  for cid, body in ((73, "test-delta tests/unit/test_q.py allowed — by design"), (74, "foreman-1-3 finding upheld"))})
+  q = world.run("decision", "open", "--unit", "U01", "--point", 1, "--question", question(world, TD("foreman-1-1", 3) + TD("foreman-1-2", 5) + other),
+                "--source", "review head-U01-c1 round 1", "--runcard", card)[1].splitlines()[0]
+  code, out = world.run("decision", "rule", "--unit", "U01", "--ruling", "test-delta tests/unit/test_q.py allowed", "--by", "owner", "--posted", "73", "--runcard", card)
+  assert code == 0, out
+  code, out = world.run("decision", "rule", "--unit", "U01", "--ruling", "foreman-1-3 finding upheld", "--by", "owner", "--posted", "74", "--runcard", card)
+  assert code == 0, out
+  assert [(r["decision"], r["ruling"]) for r in foreman_of(s, "U01")["rulings"]] == [
+    (q, "test-delta tests/unit/test_q.py allowed"), (q, "foreman-1-1 allowed"), (q, "foreman-1-2 allowed"), (q, "foreman-1-3 finding upheld")]
+  assert pending_decisions(foreman_of(s, "U01")) == []
+
+
+def test_a_file_allowance_is_refused_off_its_own_text_and_without_an_open_finding_of_its_file(world):
+  """Round 3 (PR #103 review): `rule_file` refuses a `--ruling` other than the comment's own `test-delta <file>
+  allowed`, and a file comment no open owner-only decision asks about is refused, the decision left pending."""
+  card = world.run("runcard", "open", "--skill", "wave", "--artifact", world.spec, "--mode", "leavemealone", card=None)[1].strip()
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "rounds": [{"round": 1, "phase": "posted", "outcome": "owner: foreman-1-1"}]})
+  set_config(world, repo=REPO, owners=["owner"])
+  fake_gh(world, {f"repos/{REPO}/issues/comments/{cid}": {"id": cid, "user": {"login": "owner"}, "body": f"**Ruling:** {body}\n",
+                                                          "created_at": "2026-11-03T10:00:00Z"}
+                  for cid, body in ((73, "test-delta tests/unit/test_q.py allowed — by design"), (75, "test-delta tests/unit/test_z.py allowed — no"))})
+  q = world.run("decision", "open", "--unit", "U01", "--point", 1, "--question", question(world, TD("foreman-1-1", 3)),
+                "--source", "review head-U01-c1 round 1", "--runcard", card)[1].splitlines()[0]
+  code, out = world.run("decision", "rule", "--unit", "U01", "--ruling", "test-delta tests/unit/test_z.py allowed", "--by", "owner", "--posted", "73", "--runcard", card)
+  assert (code, out.strip()) == (1, "decision: comment 73 rules test-delta tests/unit/test_q.py allowed, not test-delta tests/unit/test_z.py allowed"), out
+  code, out = world.run("decision", "rule", "--unit", "U01", "--ruling", "test-delta tests/unit/test_z.py allowed", "--by", "owner", "--posted", "75", "--runcard", card)
+  assert (code, out.strip()) == (1, "decision: comment 75 allows tests/unit/test_z.py; no open decision names it"), out
+  code, out = world.run("decision", "rule", "--unit", "U01", "--decision", q, "--ruling", "test-delta tests/unit/test_z.py allowed", "--by", "owner",
+                        "--posted", "75", "--runcard", card)
+  assert (code, out.strip()) == (1, "decision: comment 75 names no open finding of tests/unit/test_z.py"), out
+  assert foreman_of(s, "U01")["rulings"] == [] and [d["id"] for d in pending_decisions(foreman_of(s, "U01"))] == [q]
+  assert "ruling dropped (owner, comment 75): comment 75 names no open finding of tests/unit/test_z.py" in s.path("journal").read_text()
+
+
+def test_an_owner_only_decision_records_the_owners_posted_allowance_in_leavemealone(world):
+  """Round 2 (PR #103 review): the allowance an `owner: <ids>` decision asks for is not refused as the overrule
+  form a contested decision takes in leavemealone-mode."""
+  card = world.run("runcard", "open", "--skill", "wave", "--artifact", world.spec, "--mode", "leavemealone", card=None)[1].strip()
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "rounds": [{"round": 1, "phase": "posted", "outcome": "owner: foreman-1-2"}]})
+  set_config(world, repo=REPO, owners=["owner"])
+  fake_gh(world, {f"repos/{REPO}/issues/comments/73": {"id": 73, "user": {"login": "owner"}, "body": "**Ruling:** foreman-1-2 allowed — adopted\n",
+                                                       "created_at": "2026-11-03T10:00:00Z"}})
+  q = world.run("decision", "open", "--unit", "U01", "--point", 1, "--question", question(world, TD("foreman-1-2", 5)),
+                "--source", "review head-U01-c1 round 1", "--runcard", card)[1].splitlines()[0]
+  code, out = world.run("decision", "rule", "--unit", "U01", "--ruling", "foreman-1-2 allowed", "--by", "owner", "--posted", "73", "--runcard", card)
+  assert code == 0, out
+  assert [(r["decision"], r["ruling"].partition(" — ")[0]) for r in foreman_of(s, "U01")["rulings"]] == [(q, "foreman-1-2 allowed")]
 
 
 @pytest.mark.parametrize("unit,state,why", [

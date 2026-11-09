@@ -5,7 +5,7 @@
 """U10: foreman dispatch, prepare, collect, tdd-order, review post. This file replaces U03's nine moved
 prepare/collect tests (they pin `--round`, `--run-folder`, `--verdict`, `head-moved`, `launched` and `--remove`:
 forms S4, S7 and S16 remove). Fixtures: conftest's `world` and `make_pr` (U03)."""
-import json, re, subprocess
+import json, os, re, subprocess
 from pathlib import Path
 from types import SimpleNamespace
 import pytest
@@ -24,19 +24,19 @@ SECTION = """### U01: Hooks
 | Field | Value |
 | --- | --- |
 | Objective | The hook exists. |
-| Scope paths | `src/hooks.py` (create), `tests/unit/test_hooks.py` (create) |
+| Scope paths | `src/hooks.py` (create), `tests/unit/test_hooks.py` (create), `tests/unit/test_q.py` (modify), `tests/unit/test_n.py` (create), `tests/unit/test_r.py` (create) |
 | Design range | `docs/designs/sample.md:13-15 (#### 1. src/webhooks/queue.ts)` |
 | Blocked by | none |
 | Shared files | none |
 | Risk | low: small |
-| Size | S |
+| Size | M |
 
 Interfaces
 - Produces: hook() -> None
 
 Definition of done
 1. The test for each Step was committed before its implementation (checked by superegm tdd-order)
-2. Run `pytest tests/unit/test_hooks.py -q` — passes
+2. Run `true` — passes
 3. Exists `src/hooks.py`
 4. CI green on the head
 
@@ -111,7 +111,7 @@ def builder_token(monkeypatch):
 
 def seed(world, *, head="a" * 40, ci="success", launches=({"round": 1, "status": "exited 0"},),
          rounds=(), base_ref="main", comments=None, reviews=(), login="builder-bot", pr_body=PR_BODY, builder=None, astra=None, marker=True, owners=None,
-         decisions=(), rulings=()):
+         decisions=(), rulings=(), foreman=None):
   """Through U03's `store`, `Store.path` and `atomic_write`, what `locate`, `Handoff` and `require_frozen_units`
   read: the plan (conftest's heading, a `Design:` line naming `world.spec` in backticks, `## Global constraints`,
   `## Units`, SECTION) written to `world.plan` and
@@ -134,7 +134,7 @@ def seed(world, *, head="a" * 40, ci="success", launches=({"round": 1, "status":
   set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"],
              reviewers={"spec": [], "plan": [], "head": ["change-review"], "integrate": []},
              **({"builder": builder} if builder else {}), **({"astra": astra} if astra else {}),
-             owners=owners or ["owner"])
+             **({"foreman": foreman} if foreman else {}), owners=owners or ["owner"])
   plan = (f"# Handoff plan: Webhook delivery\n\nDesign: `{spec}`\n\n## Global constraints\n- none\n\n"
           f"## Units\n\n{SECTION}")
   world.plan.write_text(plan, encoding="utf-8")
@@ -250,16 +250,24 @@ def test_dispatch_recovers_a_collected_round_already_on_the_pr(world, on_pr):
     assert saved == entry
 
 
-def pr_repo(world, tmp_path, monkeypatch, commits=(("test(S1): hook", "tests/unit/test_hooks.py"), ("feat(S1): hook", "src/hooks.py"))):
-  """A remote with `main` and `refs/pull/70/head`; world.repo's `origin` points at it."""
+def pr_repo(world, tmp_path, monkeypatch, commits=(("test(S1): hook", "tests/unit/test_hooks.py"), ("feat(S1): hook", "src/hooks.py")), base_files=None):
+  """A remote with `main` and `refs/pull/70/head`; world.repo's `origin` points at it. `base_files` are written
+  beside `README.md` in the base commit; a commit is `(subject, path)` (the subject as content),
+  `(subject, path, content)` or `(subject, {path: content | None})` (None deletes the path)."""
   target = tmp_path / "target"
   def g(*a, cwd=target):
     return subprocess.run(["git", "-C", str(cwd), *a], check=True, capture_output=True, text=True).stdout.strip()
+  def write(files):
+    for path, content in files.items():
+      if content is None:
+        (target / path).unlink()
+      else:
+        (target / path).parent.mkdir(parents=True, exist_ok=True); (target / path).write_text(content, encoding="utf-8")
   target.mkdir(); g("init", "-q", "-b", "main"); g("config", "user.email", "t@example.invalid"); g("config", "user.name", "T")
-  (target / "README.md").write_text("base\n", encoding="utf-8"); g("add", "-A"); g("commit", "-qm", "base")
+  write({"README.md": "base\n", **(base_files or {})}); g("add", "-A"); g("commit", "-qm", "base")
   base = g("rev-parse", "HEAD"); g("checkout", "-qb", "superegm/sample-42aff4/U01")
-  for subject, path in commits:
-    (target / path).parent.mkdir(parents=True, exist_ok=True); (target / path).write_text(subject + "\n", encoding="utf-8")
+  for subject, *rest in commits:
+    write(rest[0] if isinstance(rest[0], dict) else {rest[0]: rest[1] if len(rest) > 1 else subject + "\n"})
     g("add", "-A"); g("commit", "-qm", subject)
   head = g("rev-parse", "HEAD"); g("update-ref", f"refs/pull/{PR}/head", head); g("checkout", "-q", "main")
   g("remote", "set-url", "origin", str(target), cwd=world.repo)
@@ -267,8 +275,8 @@ def pr_repo(world, tmp_path, monkeypatch, commits=(("test(S1): hook", "tests/uni
   return target, base, head, g
 
 
-def prepared(world, tmp_path, monkeypatch, commits=None, incomplete=0, **kw):
-  target, base, head, g = pr_repo(world, tmp_path, monkeypatch, **({"commits": commits} if commits else {}))
+def prepared(world, tmp_path, monkeypatch, commits=None, incomplete=0, base_files=None, **kw):
+  target, base, head, g = pr_repo(world, tmp_path, monkeypatch, **({"commits": commits} if commits else {}), base_files=base_files)
   st, card, child, did, posted = dispatched(world, head=head, **kw)
   if incomplete:  # the lane's incomplete runs so far, as `review record` counts them
     path = st.path("reviews", head_rid(st)) / "review.json"
@@ -529,6 +537,105 @@ def test_collect_carries_an_overruled_scope_finding_forward(world, tmp_path, mon
   assert (code, out.strip()) == (0, "collected: 0 foreman findings"), out
 
 
+RED, RULED, D = "echo boom; exit 1", lambda body: {2: [c(13, "owner", body)]}, lambda n, what, at=None: f"{at or f'dod/{n}.txt'} | regression: no | dod-{n}: {what}"
+GATE = {"red": ([RED], ["ok"], {}, [D(2, "ran red (boom)")]), "forge": (["git config credential.helper evil"], ["ok"], {}, []),
+  "paste-differs": (["printf '== 2 passed, 1 failed in 0.1s ==\\n'"], ["3 passed"], {}, [D(2, "paste differs from the run")]),
+  "no-counts": (["echo ok"], ["ok"], {}, []), "red-differs": (["printf '1 failed\\n'; exit 1"], ["1 passed"], {}, [D(2, "ran red (1 failed)")]),
+  "timeout": (["sleep 30", "true"], ["ok", "ok"], {"foreman": {"run_timeout_minutes": 0.05}}, [D(2, "ran red (timeout)"), D(3, "not run (timeout)", "pr_body.md")]),
+  "allowed-item": ([RED], ["ok"], {"comments": RULED("**Ruling:** dod-2 allowed — needs a service")}, []),
+  "overruled-fid": ([RED], ["ok"], {"comments": RULED("**Ruling:** foreman-1-1 finding overruled — flaky")}, []),
+  "pipe-in-line": (["printf 'FAIL | expected 2\\n'; exit 1"], ["ok"], {}, [D(2, "ran red (FAIL ¦ expected 2)")]),
+  "silent-red": (["exit 3"], ["ok"], {}, [D(2, "ran red (exit 3)")]),
+  "count-above-footer": (["printf '== 2 passed in 0.1s ==\\nreport saved\\n'"], ["== 3 passed in 0.1s ==\nreport saved"], {},
+                         [D(2, "paste differs from the run")]),
+  "forge-and-unlink": (["git config credential.helper evil; rm -f ../r1/dod/2.out"], ["ok"], {}, []),
+  "masked-line": (["echo 'missing @acme/plugin in secret-codename'; exit 1"], ["ok"], {},
+                  [D(2, "ran red (missing @ acme/plugin in s ecret-codename)")])}
+
+
+@pytest.mark.parametrize("name", list(GATE))
+def test_collect_reruns_the_dod_items_and_records_the_gate(world, tmp_path, monkeypatch, name):
+  """U25: `collect` re-runs every DoD `Run` item in the review worktree, compares the builder's paste, records
+  `dod_runs` and `dod/<n>.txt`, writes the checkout's config back and skips an item a ruling allows."""
+  cmds, pastes, kw, claims = GATE[name][0], GATE[name][1], dict(GATE[name][2]), GATE[name][3]
+  items = "".join(f"{i}. Run `{cmd}` — passes\n" for i, cmd in enumerate(cmds, 2))
+  monkeypatch.setitem(globals(), "BODY", BODY.replace("2. Run `true` — passes\n", items)
+                      .replace("3. Exists", f"{2 + len(cmds)}. Exists").replace("4. CI", f"{3 + len(cmds)}. CI"))
+  pr_body = "U01\n\n" + "".join(f"### DoD {i}\n```\n$ {cmd}\n{paste}\n```\n\n" for i, (cmd, paste) in enumerate(zip(cmds, pastes), 2)) + "Closes #2\n"
+  r = 1
+  if "comments" in kw:  # a posted round 1 whose foreman-1-1 is item 2's red run
+    kw.update(rounds=[POSTED_R1], launches=TWO_LAUNCHES)
+    st0, card0, _ = seed(world, **kw)
+    open_head_review(world, st0, card0, "0" * 40, {"change-review": "", "foreman": f"foreman-1-1 | high | {D(2, 'ran red (boom)')}\n"})
+    r = 2
+  w = prepared(world, tmp_path, monkeypatch, pr_body=pr_body, **kw)
+  record(world, w.st, w.rid, r, w.head, w.child, {"change-review": ""})
+  code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
+  assert code == 0 and [l.split(" | ", 2)[2] for l in (w.dir / f"r{r}/foreman.findings").read_text().splitlines()] == claims, out
+  entry = json.loads(w.st.path("foreman", UNIT).read_text())["rounds"][-1]
+  assert entry["test_delta"] == [] and list(entry["dod_runs"]) == [str(i) for i in range(2, 2 + len(cmds))]
+  if name == "timeout":
+    assert (w.dir / "r1/dod/2.txt").read_text() == "exit: none\nsummary: \ntimed_out: yes\n" and not (w.dir / "r1/dod/3.txt").exists()
+  if name.startswith("forge"):
+    assert subprocess.run(["git", "config", "--get", "credential.helper"], cwd=world.repo, capture_output=True, text=True,
+                          env=dict(os.environ, GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null")).stdout == ""
+
+
+Q, N, R, T = "tests/unit/test_q.py", "tests/unit/test_n.py", "tests/unit/test_r.py", lambda *l: "\n".join(l) + "\n"
+THREE, TWO = T("def test_a():", "  assert 1 == 1", "  assert 2 == 2"), T("def test_a():", "  assert 1 == 1")
+S1 = [("test(S1): hook", "tests/unit/test_hooks.py"), ("feat(S1): hook", "src/hooks.py")]
+E = lambda file, line, base_line, base="base": {"file": file, "line": line, "base_line": base_line, "kind": "removed", "base_commit": base}
+CLAIM = lambda file, line: f"{file}:{line} | regression: no | test-delta: {file}:{line} removed"
+DELTA = {"removed-from-base": ({Q: THREE}, [("chore: trim", Q, TWO)], {}, [E(Q, 3, 3)], [CLAIM(Q, 3)]),
+  "created-then-trimmed": ({}, [("chore: add", N, THREE), ("chore: trim", N, TWO)], {}, [E(N, 3, 3, "created")], [CLAIM(N, 3)]),
+  "renamed": ({Q: THREE}, [("chore: move", {Q: None, R: TWO})], {}, [E(R, 3, 3)], [CLAIM(R, 3)]),
+  "created-then-renamed": ({}, [("chore: add", N, THREE), ("chore: move", {N: None, R: TWO})], {}, [E(R, 3, 3, "created")], [CLAIM(R, 3)]),
+  "allowed-entry": ({Q: THREE}, [("chore: trim", Q, TWO)], {"comments": RULED("**Ruling:** foreman-1-1 allowed — approved")}, [], []),
+  "allowed-other-base": ({Q: THREE}, [("chore: trim", Q, TWO)], {"comments": RULED("**Ruling:** foreman-1-1 allowed — approved"), "seed_base": "0" * 40},
+                         [E(Q, 3, 3)], [CLAIM(Q, 3)]),
+  "allowed-file": ({Q: THREE}, [("chore: gut", Q, T("def test_a():", "  pass"))], {"comments": RULED("**Ruling:** test-delta tests/unit/test_q.py allowed — by design")}, [], []),
+  # round 4 (astra-4-1): a recorded file allowance binds from the record, its comment kept, edited to another file or deleted
+  **{f"allowed-file-recorded-{how}": ({Q: THREE}, [("chore: gut", Q, T("def test_a():", "  pass"))],
+                                      {"comments": comments,
+                                       "decisions": [{"id": "q1", "point": 1, "source": "review r round 1", "options": ["foreman-1-1 allowed"],
+                                                      "question": f"foreman-1-1 | high | {CLAIM(Q, 3)}\n"}],
+                                       "rulings": [{"decision": "q1", "ruling": text, "by": "owner", "reason": "by design", "posted": "comment 13",
+                                                    "posted_at": "t"} for text in ("test-delta tests/unit/test_q.py allowed", "foreman-1-1 allowed")]}, [], [])
+     for how, comments in (("kept", RULED("**Ruling:** test-delta tests/unit/test_q.py allowed — by design")),
+                           ("edited", RULED("**Ruling:** test-delta tests/unit/test_z.py allowed — by design")), ("deleted", {}))},
+  "judges-overruled":({Q: THREE}, [("chore: trim", Q, TWO)], {"comments": {}, "decisions": [{"id": "q1", "point": 1, "source": "review r round 1"}],
+                       "rulings": [{"decision": "q1", "ruling": "foreman-1-1 finding overruled", "by": "judges:p-1", "reason": "r",
+                                    "posted": "comment 13", "posted_at": "t"}]}, [E(Q, 3, 3)], [CLAIM(Q, 3)]),
+  "renamed-then-deleted": ({Q: THREE}, [("chore: move", {Q: None, R: THREE}), ("chore: drop", {R: None})], {},
+                           [E(R, n, n) for n in (1, 2, 3)], [CLAIM(R, n) for n in (1, 2, 3)]),
+  "renamed-out-then-deleted": ({Q: THREE}, [("chore: archive", {Q: None, "archive/q.txt": THREE}), ("chore: drop", {"archive/q.txt": None})], {},
+                               [E(Q, n, n) for n in (1, 2, 3)], [CLAIM(Q, n) for n in (1, 2, 3)])}
+
+
+@pytest.mark.parametrize("name", list(DELTA))
+def test_collect_records_the_test_delta_from_git_objects(world, tmp_path, monkeypatch, name):
+  """U25: `collect` compares every test file the range touches that no `Write` line names, base to head from git
+  objects, records `test_delta` and a `test-delta:` high per entry, and skips an entry or a file a ruling allows."""
+  base_files, commits, kw, delta, claims = DELTA[name][0], DELTA[name][1], dict(DELTA[name][2]), DELTA[name][3], DELTA[name][4]
+  r, seed_base = 1, kw.pop("seed_base", None)
+  if "comments" in kw:  # a posted round 1 whose foreman-1-1 is the trimmed assertion of test_q.py
+    kw.update(rounds=[{**POSTED_R1, "test_delta": [E(Q, 3, 3)]}], launches=TWO_LAUNCHES)
+    st0, card0, _ = seed(world, **kw)
+    open_head_review(world, st0, card0, "0" * 40, {"change-review": "", "foreman": f"foreman-1-1 | high | {CLAIM(Q, 3)}\n"})
+    r = 2
+  w = prepared(world, tmp_path, monkeypatch, commits=S1 + commits, base_files=base_files, **kw)
+  if r == 2:  # round 1's entry was taken at this base, or (`seed_base`) at another: an allowance binds its base commit
+    data = json.loads(w.st.path("foreman", UNIT).read_text())
+    data["rounds"][0]["test_delta"][0]["base_commit"] = seed_base or w.base
+    w.st.path("foreman", UNIT).write_text(json.dumps(data))
+  created = w.g("log", "--format=%H", "--diff-filter=A", w.head, "--", N) or None
+  record(world, w.st, w.rid, r, w.head, w.child, {"change-review": ""})
+  code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
+  assert code == 0 and [l.split(" | ", 2)[2] for l in (w.dir / f"r{r}/foreman.findings").read_text().splitlines()] == claims, out
+  entry = json.loads(w.st.path("foreman", UNIT).read_text())["rounds"][-1]
+  assert entry["test_delta"] == [{**e, "base_commit": {"base": w.base, "created": created}[e["base_commit"]]} for e in delta]
+
+
 EXT = "external:alice-1-1 | high | src/hooks.py:3 at 0000000 | regression: no | the hook never fires\n"
 CARRIED = "src/hooks.py:3 at 0000000 | regression: no | unreplied external:alice-1-1: the hook never fires"
 R2 = {**POSTED_R1, "round": 2, "launch": 2, "dispatch_id": "d2"}
@@ -719,10 +826,25 @@ def test_review_post_binds_the_review_to_the_reviewed_commit(world, tmp_path, mo
   assert (f"{UNIT} awaiting merge" in w.st.path("journal").read_text(encoding="utf-8")) is (word == "clean")
 
 
-@pytest.mark.parametrize("case", ["header-present", "header-after-mention", "stale-dispatch", "mention", "commit-differs"])
+def test_review_post_writes_the_owner_word_before_revise_and_cap(world, tmp_path, monkeypatch):
+  """U25: a round whose only unsettled blocking findings are `test-delta:` ones posts `owner: <ids>`, never `revise`."""
+  base_files, commits = DELTA["removed-from-base"][0], DELTA["removed-from-base"][1]
+  w = prepared(world, tmp_path, monkeypatch, commits=S1 + commits, base_files=base_files)
+  assert world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)[0] == 0
+  record(world, w.st, w.rid, 1, w.head, w.child, {"change-review": ""})
+  code, out = world.run("review", "post", "--unit", UNIT, "--round", 1, "--dispatch", w.did, "--runcard", w.child)
+  entry = json.loads(w.st.path("foreman", UNIT).read_text())["rounds"][0]
+  assert (code, out.strip(), len(w.posted), entry["outcome"]) == (0, "posted owner: foreman-1-1", 1, "owner: foreman-1-1"), out
+  assert f"{UNIT} awaiting merge" not in w.st.path("journal").read_text()
+
+
+@pytest.mark.parametrize("case", ["header-present", "header-after-mention", "stale-dispatch", "mention", "commit-differs", "gates-not-run", "re-prepared"])
 def test_review_post_guards(world, tmp_path, monkeypatch, case):
   w = prepared(world, tmp_path, monkeypatch)
-  assert world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)[0] == 0
+  if case != "gates-not-run":
+    assert world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)[0] == 0
+  if case == "re-prepared":  # a later prepare under the same dispatch drops the gates an earlier head's collect recorded
+    assert world.run("prepare", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)[0] == 0
   claim = "ping @alice" if case == "mention" else "no hook"
   record(world, w.st, w.rid, 1, w.head, w.child, {"change-review": f"change-review-1-1 | high | src/hooks.py:1 | regression: no | {claim}\n"})
   if case == "header-present":
@@ -740,7 +862,8 @@ def test_review_post_guards(world, tmp_path, monkeypatch, case):
               "header-after-mention": (0, "posted revise (already on the PR)", "posted", 0),
               "stale-dispatch": (1, "dispatch: d9 is not U01's current dispatch (d1)", "collected", 0),
               "mention": (1, "comment:3: bare mention @alice", "collected", 0),
-              "commit-differs": (1, f"posted on {'f' * 7}, not {w.head[:7]}: round 1 not counted", "collected", 1)}[case]
+              "commit-differs": (1, f"posted on {'f' * 7}, not {w.head[:7]}: round 1 not counted", "collected", 1),
+              "gates-not-run": (1, "post: gates not run", "prepared", 0), "re-prepared": (1, "post: gates not run", "prepared", 0)}[case]
   assert (code, entry["phase"], len(w.posted)) == (expected[0], expected[2], expected[3]), out
   assert out.strip().splitlines()[0].startswith(expected[1]), out
   if case in ("header-present", "header-after-mention"):
@@ -807,6 +930,26 @@ def ingest_world(world, threads, roles=(), outcome="clean"):
                           for i, who, body in threads]
   world.gh.roles.update(roles)
   return st, card, posted, rid, head
+
+
+@pytest.mark.parametrize("cap, word", [(None, "revise"), (1, "cap-reached")])
+def test_review_ingest_rewrites_an_owner_word_a_new_external_high_makes_mixed(world, monkeypatch, cap, word):
+  """Round 5 (PR #103 review, astra-5-6): an external high ingested beside a posted `owner: <ids>` round's owner-only
+  remainder leaves it mixed: the word becomes `revise`, or `cap-reached` at the cap, never the stale owner word."""
+  head = subprocess.run(["git", "-C", str(world.repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+  st, card, posted = seed(world, head=head, rounds=[{**POSTED_R1, "head": head, "outcome": "owner: foreman-1-1"}], owners=["owner"])
+  assert world.run("review", "open", "--kind", "head", "--artifact", UNIT, "--reviewers", "change-review", "--runcard", card)[0] == 0
+  rid = head_rid(st)
+  record(world, st, rid, 1, head, card, {"change-review": "", "foreman": "foreman-1-1 | high | tests/unit/test_q.py:3 | regression: no | test-delta: tests/unit/test_q.py:3 removed\n"})
+  atomic_write(st.path("review", UNIT, f"pr{PR}") / "r1/ci.json", json.dumps({"verdict": "ci green"}))
+  world.gh.threads[PR] = [{"id": 1, "user": {"login": "alice"}, "body": "bug: the hook never fires", "path": "src/hooks.py", "line": 3, "commit_id": head, "created_at": "t"}]
+  world.gh.roles.update({"alice": {"role_name": "write"}})
+  if cap:
+    monkeypatch.setattr(review_mod, "CAP", cap)
+  code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
+  assert (code, out.split()) == (0, ["1", "ingested", "outcome:", word]), out
+  entry = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][0]
+  assert (entry["outcome"], entry["rewritten_from"]) == (word, "owner: foreman-1-1")
 
 
 def test_review_ingest_at_the_cap_rewrites_clean_to_cap_reached(world, monkeypatch):
@@ -1014,12 +1157,14 @@ def test_review_ingest_that_finds_nothing_writes_nothing(world):
   assert (st.path("foreman", UNIT).read_text(encoding="utf-8"), st.path("journal").read_text(encoding="utf-8")) == before
 
 
-@pytest.mark.parametrize("status_exit, contested, word", [
-    (3, ["foreman-2-1", "foreman-2-3"], "contested: foreman-2-1, foreman-2-3"),
-    (2, ["foreman-2-1"], "contested: foreman-2-1"),
-    (0, [], "clean"), (2, [], "cap-reached"), (3, [], "revise"), (5, [], "revise")])
-def test_outcome_word_order(status_exit, contested, word):
-  assert review_mod.outcome_word(status_exit, contested) == word
+@pytest.mark.parametrize("status_exit, contested, owner, word", [
+    (3, ["foreman-2-1", "foreman-2-3"], [], "contested: foreman-2-1, foreman-2-3"),
+    (2, ["foreman-2-1"], [], "contested: foreman-2-1"),
+    (0, [], [], "clean"), (2, [], [], "cap-reached"), (3, [], [], "revise"), (5, [], [], "revise"),
+    (3, ["foreman-2-1"], ["foreman-2-2"], "contested: foreman-2-1"),
+    (3, [], ["foreman-2-2"], "owner: foreman-2-2"), (2, [], ["foreman-2-2", "foreman-2-3"], "owner: foreman-2-2, foreman-2-3"), (2, [], [], "cap-reached")])
+def test_outcome_word_order(status_exit, contested, owner, word):
+  assert review_mod.outcome_word(status_exit, contested, owner) == word
 
 
 def test_foreman_adapter_frontmatter_and_tools():
@@ -1040,7 +1185,7 @@ def test_foreman_adapter_frontmatter_and_tools():
     "superegm collect --unit <unit-id> --dispatch <dispatch-id> --runcard <child-card>",
     "--not-run \"<reason>\"",
     "superegm review post --unit <unit-id> --round <n> --dispatch <dispatch-id> --runcard <child-card>",
-    "clean | revise | contested: <ids> | cap-reached | target-moved | error",
+    "clean | revise | contested: <ids> | owner: <ids> | cap-reached | target-moved | error",
     "`target-moved` when `review post` exited 3",
     "`error` otherwise",
     "never merges, never approves, never edits the owner's working tree, never removes a worktree, never launches a session (the head's Astra lane excepted: one bounded foreground runner call), never convenes the judges, never infers that a builder died",

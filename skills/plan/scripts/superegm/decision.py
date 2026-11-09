@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
-# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23).
+# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25).
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
@@ -34,7 +34,8 @@ FORM_RES = (
   ("redesign", re.compile(rf"redesign{REASON}")),
   ("allowed", re.compile(rf"(?P<subject>{FID}) allowed{REASON}")),
 )
-JUDGES_MARK_RE = re.compile(r"^\(judges \S+, leavemealone\)$", re.M)
+FILE_RULING_RE = re.compile(r"test-delta (\S+) allowed")  # a recorded whole-file allowance's text
+JUDGES_MARK_RE =re.compile(r"^\(judges \S+, leavemealone\)$", re.M)
 
 
 @dataclass(frozen=True)
@@ -104,6 +105,8 @@ def recorded_rulings(foreman: dict) -> list:
     option, subject = None, ""
     if text == "redesign" and decision["point"] in (1, 2):  # a head's third ruling; a point-3 option may begin with the word
       kind = "redesign"
+    elif decision["point"] == 1 and (m := FILE_RULING_RE.fullmatch(text)):  # `rule_file`'s whole-file entry
+      kind, subject = "allowed-file", m.group(1)
     elif decision["point"] == 1:
       kind, subject = ("upheld" if text.endswith("upheld") else "overruled"), text.split(" ")[0]
     elif decision["point"] == 2:
@@ -322,8 +325,15 @@ def open_decision(args) -> int:
 def options_for(point: int, source: str, question: str, foreman: dict, head: str) -> list:
   """Spec section 13.2's options: point 1 upheld|overruled; point 2 one more round|stop; point 3 the
   comment's own `- (a)` lines plus `stop the unit`, or `relaunch; stop the unit` for a launch, a close,
-  or a third `blocked` comment on the same head."""
+  or a third `blocked` comment on the same head. Point 1 on an `owner: <ids>` word (the latest posted round's
+  outcome) offers `<fid> allowed`, one per id the question names (U25)."""
   if point == 1:
+    posted = [e for e in foreman.get("rounds") or [] if e.get("phase") == "posted"]
+    word = str(posted[-1].get("outcome") or "") if posted else ""
+    if word.startswith("owner: "):
+      named = [f"{fid} allowed" for fid in word[len("owner: "):].split(", ") if re.search(rf"(?<!\S){re.escape(fid)}(?!\S)", question)]
+      if named:
+        return named
     return ["finding upheld", "finding overruled"]
   if point == 2:
     return ["one more round", "stop"]
@@ -380,6 +390,8 @@ def rule(args) -> int:
   found = comment = None
   if args.posted and not closed:  # a by-hand ruling: read through the one grammar (spec section 13.2, U22)
     comment, found, decisions = verify_posted(st, unit, data, args, number, card.get("mode"))
+    if found.kind == "allowed-file":
+      return rule_file(st, unit, data, args, comment, found, decisions)
   else:
     decision = next((d for d in data["decisions"] if d["id"] == args.decision), None)
     if decision is None:
@@ -395,20 +407,20 @@ def rule(args) -> int:
       dropped(st, args, f"{d['id']} already ruled")
   decision = decisions[0]
   basis = next((d for d in decisions if d["point"] in (1, 2)), decision) if found and found.kind == "redesign" else decision
-  chosen = check_ruling(basis["point"], basis["options"], head.strip())
+  chosen = check_ruling(basis["point"], basis["options"], head.strip(), args.by)
   brief = None
   if found:  # the record is the comment's ruling: a `--ruling` that resolves to another option is refused
     said = {"upheld": f"{found.subject} finding upheld", "overruled": f"{found.subject} finding overruled",
             "round": "one more round", "stop": "stop", "option": found.option, "redesign": "redesign",
             "allowed": f"{found.subject} finding overruled"}.get(found.kind) or ""  # an allowance is recorded as an overrule (§13.2)
     try:
-      ruled_by_comment = check_ruling(basis["point"], basis["options"], said)
+      ruled_by_comment = check_ruling(basis["point"], basis["options"], said, args.by)
     except Refusal:
       ruled_by_comment = None
     if ruled_by_comment != chosen:
       raise Refusal(f"decision: comment {args.posted} rules {said}, not {head.strip()}")
     reason = found.reason or ""
-  elif not reason.strip() and (decision["point"] == 3 or chosen.endswith(" finding overruled")):
+  elif not reason.strip() and (decision["point"] == 3 or chosen.endswith((" finding overruled", " allowed"))):
     # a ruling typed without the reason its form carries: the session's, or the panel's, named as such
     reason = f"ruled by judges {args.by[7:]}" if args.by.startswith("judges:") else "ruled in the session"
   if chosen == "redesign" and basis["point"] in (1, 2):  # a head's third ruling; a point-3 option named `redesign` is an option
@@ -486,7 +498,7 @@ def rule(args) -> int:
   return 0
 
 
-KIND_POINTS = {"upheld": (1,), "overruled": (1,), "allowed": (1,), "round": (2,), "stop": (2,), "option": (3,), "redesign": (1, 2)}
+KIND_POINTS = {"upheld": (1,), "overruled": (1,), "allowed": (1,), "allowed-file": (1,), "round": (2,), "stop": (2,), "option": (3,), "redesign": (1, 2)}
 
 
 def dropped(store, args, reason: str):
@@ -505,13 +517,53 @@ def read_back(store, comment_id) -> dict:
     return {}
 
 
-def check_ruling(point: int, options: list, ruling: str) -> str:
+def rule_file(st, unit: str, data: dict, args, comment: dict, found, decisions: list) -> int:
+  """The owner's by-hand `**Ruling:** test-delta <file> allowed — <reason>` (spec section 11.1), all on the comment:
+  first the whole-file `test-delta <file> allowed` entry itself (which `recorded_rulings`, and `collect`'s allowed
+  files through it, keep after the comment is edited or deleted), then one entry per unruled `test-delta:` finding
+  of that file each of `decisions` asks about: `<fid> allowed` on an `owner: <ids>` decision, `<copy fid> finding
+  overruled` on a decision about a contest copy (options upheld or overruled). `--ruling` must be the comment's own
+  `test-delta <file> allowed`."""
+  said = f"test-delta {found.subject} allowed"
+  if args.ruling.partition(" — ")[0].strip() != said:
+    raise Refusal(f"decision: comment {args.posted} rules {said}, not {args.ruling.partition(' — ')[0].strip()}")
+  ids = {d["id"] for d in decisions}
+  targets = [(d, fid) for d, fid in file_targets(data, found.subject, st) if d["id"] in ids]
+  if not targets:
+    dropped(st, args, f"comment {args.posted} names no open finding of {found.subject}")
+  posted_at = comment.get("updated_at") or comment.get("created_at") or core.now_iso()
+  entry = lambda d, text: {"decision": d["id"], "ruling": text, "by": args.by, "reason": found.reason or None,
+                           "posted": f"comment {args.posted}", "posted_at": posted_at}
+  # the whole-file allowance itself first, so `recorded_rulings` keeps it after the comment is edited or deleted
+  # a contest copy's decision (options upheld or overruled) takes the allowance as `<fid> finding overruled`, as `rule` does
+  allowed = lambda d, fid: f"{fid} allowed" if f"{fid} allowed" in (d.get("options") or []) else f"{fid} finding overruled"
+  data["rulings"] += [entry(targets[0][0], said)] + [entry(d, allowed(d, fid)) for d, fid in targets]
+  core.save_foreman(st, unit, data)
+  for d, fid in targets:
+    core.journal(st, f"Ruling ({args.by}, comment {args.posted}): {unit} {d['id']} allowed-file {found.subject} {fid}"
+                     + (f" — {found.reason}" if found.reason else ""))
+  print(f"recorded (comment {args.posted})")
+  return 0
+
+
+def check_ruling(point: int, options: list, ruling: str, by: str = "") -> str:
   """The option `ruling` names (its letter, its text, or both; point 1 as `<fid> <option>`), resolved
   to the option's text; refused when it is none of them. At points 1 and 2 the bare word `redesign` (its ` — <why>`
-  is checked by `rule`; no letter, no finding id) is the third ruling, in no option list."""
+  is checked by `rule`; no letter, no finding id) is the third ruling, in no option list. An `owner: <ids>`
+  decision's options are `<fid> allowed`: a `<fid> allowed` ruling, or `<fid> finding overruled` (read as allowed),
+  answers the option carrying its fid, and `<fid> finding upheld` rules that fid upheld (spec section 8: the builder
+  restores it, or at the cap point 2 asks); either is refused to the judges, the owner's alone (U25); any other text
+  is none of its options."""
   if ruling == "redesign" and point in (1, 2):  # a head's third ruling: no letter, no finding id
     return "redesign"
   fid, _, text = ruling.partition(" ") if point == 1 else ("", "", ruling)
+  if point == 1 and options and all(o.endswith(" allowed") for o in options):
+    said = text.partition(" — ")[0].strip()
+    option = next((o for o in options if o.split(" ")[0] == fid and said in ("allowed", "finding overruled", "finding upheld")), None)
+    if option and by.startswith("judges:"):
+      raise Refusal(f"decision: {fid} {said} is the owner's alone")  # the ruling the panel gave, not the option it matched
+    if option:
+      return f"{fid} finding upheld" if said == "finding upheld" else option
   for option in options:
     letter, _, rest = option.partition(" ") if option.startswith("(") else ("", "", option)
     if text and text in (option, letter, rest) and (point != 1 or fid):
@@ -586,7 +638,8 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int, mode=None)
   latest point-1 decision whose question names the fid (else the latest naming no finding) with no ruling on that
   fid (an `allowed` one: only a decision naming it, recorded as `<fid> finding overruled`), the open point-2 one, the point-3 one on its comment or decision id, or for `redesign` every pending
   decision of the unit. In leavemealone-mode (`mode`) an allowance naming a decision is refused before anything is
-  recorded: `review settle --owner --posted` there reads only `<fid> finding overruled — <reason>`. Returns
+  recorded: `review settle --owner --posted` there reads only `<fid> finding overruled — <reason>`, except on an
+  `owner: <ids>` decision (every option `<fid> allowed`), where verify_owner_ruling reads the allowance. Returns
   (comment, ruling, decisions)."""
   cid = args.posted
   comment = core.gh_json(["api", f"repos/{store.config['repo']}/issues/comments/{cid}"]) or {}
@@ -631,7 +684,9 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int, mode=None)
       return comment, found, [decision] + [d for d in pending_decisions(foreman) if d["id"] != decision["id"]]
     return comment, found, [decision]
   pending = pending_decisions(foreman)
-  if found.kind == "redesign":
+  if found.kind == "allowed-file":  # every open decision with an entry of that file, a contest copy's too (`rule` records each fid)
+    decisions = list({d["id"]: d for d, _ in file_targets(foreman, found.subject, store)}.values())
+  elif found.kind == "redesign":
     decisions = pending if any(d["point"] in points for d in pending) else []
   elif found.kind in ("upheld", "overruled", "allowed"):
     decisions = [d for d in fid_decisions(foreman, found.subject, strict=found.kind == "allowed") if not fid_ruled(foreman, found.subject)][-1:]
@@ -658,8 +713,10 @@ def option_name(decision: dict) -> str:
 
 def refuse_allowance(store, args, found: "Ruling", decisions: list, cid, mode) -> None:
   """In leavemealone-mode an allowance naming an open point-1 decision is refused, journaled as dropped (the owner's
-  notice, the event being spent): the decision's `review settle --owner --posted` reads only the overrule form."""
-  if found.kind == "allowed" and decisions and mode == "leavemealone":
+  notice, the event being spent): the decision's `review settle --owner --posted` reads only the overrule form. An
+  `owner: <ids>` decision (every option `<fid> allowed`, U25) asks for the allowance itself and is never refused."""
+  owner_only = decisions and decisions[0].get("options") and all(o.endswith(" allowed") for o in decisions[0]["options"])
+  if found.kind == "allowed" and decisions and mode == "leavemealone" and not owner_only:
     dropped(store, args, f"comment {cid} allows {found.subject}; in leavemealone-mode {decisions[0]['id']} takes "
                          f"`**Ruling:** {found.subject} finding overruled — <reason>`")
 
@@ -679,6 +736,37 @@ def fid_decisions(foreman: dict, fid: str, strict: bool = False) -> list:
   asked = lambda d: {a or b for a, b in FINDING_LINE_RE.findall(d.get("question") or "")}
   named = [d for d in point1 if fid in asked(d)]
   return named or ([] if strict else [d for d in point1 if not asked(d)][-1:])
+
+
+def file_targets(foreman: dict, path: str, st=None) -> list:
+  """`(decision, fid)` for every unruled `test-delta:` finding of `path` an open point-1 decision asks about: an
+  `owner: <ids>` decision's (each option `<fid> allowed`) by its finding line's claim, and any other's contest copy
+  (`contested <fid>: …`) whose original, reached down the chain in the decision's review (`st`'s record,
+  `review.delta_claim`), is one: what `**Ruling:** test-delta <path> allowed — <reason>` rules at once (spec
+  sections 8 and 11.1: every open decision whose `test_delta` entry is in that file). A point-1 decision takes one
+  ruling per finding, so it is open on each fid not yet ruled, whatever `pending_decisions` says once its first
+  ruling is recorded; a `redesign` closes it whole."""
+  line = re.compile(rf"^({FID_PAT})\s*\|.*\|\s*test-delta: {re.escape(path)}:\d+ ", re.M)
+  redesigned = {r.get("decision") for r in foreman.get("rulings") or [] if str(r.get("ruling") or "").startswith("redesign")}
+  out = []
+  for d in foreman.get("decisions") or []:
+    options = d.get("options") or []
+    if d["point"] != 1 or not options or d["id"] in redesigned:
+      continue
+    if all(o.endswith(" allowed") for o in options):
+      out += [(d, fid) for fid in line.findall(d.get("question") or "")
+              if f"{fid} allowed" in options and not fid_ruled(foreman, fid)]
+    elif st is not None and str(d.get("source") or "").startswith("review "):
+      rid = d["source"].split()[1]
+      for fid in dict.fromkeys(a or b for a, b in FINDING_LINE_RE.findall(d.get("question") or "")):
+        try:
+          claim = review.locate_finding(st, rid, fid)[3]["claim"]
+        except core.HandoffError:
+          continue
+        if (claim != (original := review.delta_claim(st, rid, claim)) and original.startswith(f"test-delta: {path}:")
+            and not fid_ruled(foreman, fid)):
+          out.append((d, fid))
+  return out
 
 
 def fid_ruled(foreman: dict, fid: str, but: str = "") -> bool:
