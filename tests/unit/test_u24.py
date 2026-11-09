@@ -147,6 +147,8 @@ def test_review_status_reads_the_stall_under_the_cards_own_rounds_after_its_post
   world.advance(60); c = wave_of(world, monkeypatch, "driver-abc-0001", "boot-1"); world.advance(60); posted(world, 1, c, "revise"); world.advance(60)
   head_round(world, 2, "collected", c, "not run (error)"); head_round(world, 3, "collected", c, "not run (error)")
   assert world.run("review", "status", "--review", rid, "--runcard", c)[0] == 5
+  world.advance(60); b = wave_of(world, monkeypatch, "driver-abc-0002", "boot-1")  # astra-2-5: a later session reads them too
+  assert world.run("review", "status", "--review", rid, "--runcard", b)[0] == 5
 
 
 def test_a_failed_boot_id_lookup_is_no_reboot():
