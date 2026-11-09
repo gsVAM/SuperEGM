@@ -64,3 +64,95 @@ def test_accept_below_the_cap_is_refused_with_its_blockers(world, kind, findings
   "moved" in extra and move(world, kind, spec)
   code, out = rule(world, rid, "accept", cid, by=("--judges", "j1") if "judges" in extra else ("--owner",))
   assert code == 1 and expect in out and rjson(world, rid)["rulings"] == []
+
+
+def test_a_settled_regression_still_bars_the_accept_below_the_cap(world):
+  """PR #105 round 1 (astra-1-4, change-review-1-1): `regressions_of` counts a blocking `regression: yes` whatever
+  its disposition, so one settled `declined` keeps the round unacceptable."""
+  from test_review import settle
+  spec, cid, rid = opened(world, "plan")
+  recorded(world, rid, cid, [F("readiness", 1, 1, "medium", "yes"), F("readiness", 1, 2, "medium")])
+  assert settle(world, rid, "readiness-1-1", "declined", cid, "--owner")[0] == 0
+  assert "acceptable:" not in world.run("review", "status", "--review", rid, "--runcard", cid)[1]
+  code, out = rule(world, rid, "accept", cid)
+  assert code == 1 and "review rule: accept refused: regression readiness-1-1" in out and rjson(world, rid)["rulings"] == []
+
+
+def test_an_accept_below_the_cap_lapses_on_a_later_round(world):
+  """PR #105 round 1 (astra-1-7): an early accept holds its round alone: a later completed round (a set finding
+  recorded into a converged unit's next round) puts the review back to open."""
+  spec, cid, rid = opened(world, "plan")
+  recorded(world, rid, cid, [F("readiness", 1, 1, "medium")])
+  assert rule(world, rid, "accept", cid)[0] == 0 and status(world, rid, cid)[0] == 0
+  recorded(world, rid, cid, [F("readiness", 2, 1, "medium")], n=2)
+  assert status(world, rid, cid)[0] == 3
+
+
+def test_a_head_accept_lapses_on_an_ingested_external_high(world):
+  """PR #105 round 1 (astra-1-2): an external high recorded into the accepted round after the accept bars it: the
+  head review is open again, so `review ingest` rewrites the round's `clean`."""
+  from test_wave import fifth_point_open
+  s, card, rid = fifth_point_open(world)
+  assert rule_fifth(world, card)[0] == 0 and status(world, rid, card)[0] == 0
+  code, out = record(world, rid, 1, "external:devin[bot]", [F("external:devin[bot]", 1, 1, "high")], card, sha="a" * 40)
+  assert code == 0, out
+  assert status(world, rid, card)[0] == 3
+
+
+def test_a_point_one_decision_stays_open_until_each_contested_finding_is_ruled(world, monkeypatch):
+  """PR #105 round 1 (astra-1-5): point 1 takes one ruling per contested finding, so its decision blocks the accept
+  until the last one is ruled."""
+  from superegm import review
+  findings = [{"id": f"foreman-1-{i}", "disposition": None} for i in (1, 2)]
+  rnd = {"reviewers": {"foreman": {"findings": findings}}, "builder_contested": [{"fid": "foreman-1-1"}, {"fid": "foreman-1-2"}]}
+  monkeypatch.setattr(review, "load_round", lambda st, rid, n: rnd)
+  d = {"id": "q1", "point": 1, "source": "review head-U01-c1 round 1"}
+  one = {"decisions": [d], "rulings": [{"decision": "q1", "ruling": "foreman-1-1 finding upheld"}]}
+  both = {"decisions": [d], "rulings": one["rulings"] + [{"decision": "q1", "ruling": "foreman-1-2 finding overruled"}]}
+  assert review.point_one_open(None, one, d) and not review.point_one_open(None, both, d)
+
+
+def head_rulings(s, rid):
+  import json
+  return json.loads(s.path("reviews", rid, "review.json").read_text(encoding="utf-8"))["rulings"]
+
+
+def rule_fifth(world, card):
+  return world.run("decision", "rule", "--unit", "U01", "--decision", "q1", "--ruling", "accept — fine", "--by", "owner", "--runcard", card)
+
+
+def test_a_head_accept_is_refused_once_the_pull_request_moved(world):
+  """PR #105 round 1 (astra-1-1, change-review-1-5): the point-5 accept binds the head its round reviewed."""
+  import json
+  from test_wave import fifth_point_open, foreman_of
+  s, card, rid = fifth_point_open(world)
+  state = json.loads(s.path("state").read_text(encoding="utf-8"))
+  state["status"]["units"]["U01"]["head"] = "b" * 40
+  s.path("state").write_text(json.dumps(state), encoding="utf-8")
+  code, out = rule_fifth(world, card)
+  assert code == 1 and "review rule: the reviewed head moved: revise" in out
+  assert foreman_of(s, "U01")["rulings"] == [] and head_rulings(s, rid) == []
+
+
+def test_a_head_accept_whose_post_failed_reruns(world, monkeypatch):
+  """PR #105 round 1 (astra-1-3, change-review-1-2, codebase-details-1-1): the accept is applied before the post;
+  a failed post leaves the decision pending and the same call completes it, the accept given once."""
+  import superegm
+  from test_wave import fifth_point_open, foreman_of
+  s, card, rid = fifth_point_open(world)
+  real = superegm.gh
+
+  def failing(args, *a, **kw):
+    if args[:2] == ["issue", "comment"]:
+      raise superegm.GhError(args, 1, "", "HTTP 502")
+    return real(args, *a, **kw)
+  monkeypatch.setattr(superegm, "gh", failing)
+  with pytest.raises(superegm.GhError):
+    rule_fifth(world, card)
+  assert foreman_of(s, "U01")["rulings"] == []
+  monkeypatch.setattr(superegm, "gh", real)
+  assert rule_fifth(world, card)[0] == 0
+  f = foreman_of(s, "U01")
+  assert [r["decision"] for r in f["rulings"]] == ["q1"] and f["rounds"][-1]["outcome"] == "clean"
+  assert [r["ruling"] for r in head_rulings(s, rid)] == ["accept"]
+  assert s.path("journal").read_text(encoding="utf-8").count("U01 awaiting merge") == 1
