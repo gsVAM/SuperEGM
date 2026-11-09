@@ -774,7 +774,7 @@ def evaluate(st: core.Store, review: dict, runcard: str) -> Status:
   clean = latest is not None and not any(blocking(f) and f["disposition"] is None for f in findings_of(latest))
   regressions = regressions_of(latest) if latest else 0
   accept = next((r for r in reversed(review["rulings"]) if r["ruling"] == "accept"), None)
-  if accept and early_accept_lapsed(review, completed, rulings):
+  if accept and early_accept_lapsed(review, accept, completed, rulings):
     accept = None
   latest_sha = latest["artifact_sha256"] if latest else None
   moved = latest is not None and review["kind"] != "head" \
@@ -827,13 +827,17 @@ def finding_blockers(rnd: dict) -> list[str]:
           + [f"external {f['id']}" for f in external])
 
 
-def early_accept_lapsed(review: dict, completed: list[dict], rulings: list[str]) -> bool:
+def early_accept_lapsed(review: dict, accept: dict, completed: list[dict], rulings: list[str]) -> bool:
   """An accept given below the cap holds its round alone: it lapses once a later round completes or a finding
-  recorded into its round since (an ingested external one, a set finding) bars the accept; the cap's accept stands."""
+  recorded into its round since (an ingested external one, a set finding) bars the accept; the cap's accept stands.
+  The stored `converged: by ruling <id>` is the accept's mark: once a verdict overwrote it (the lapse, `store_verdict`)
+  the accept never comes back, neither at the cap nor as the verdict of a later clean round."""
+  if review.get("converged") != f"by ruling {accept['id']}":
+    return True
   accepted = review.get("converged_round")
-  upto = [r for r in completed if accepted is not None and r["round"] <= accepted]
   if accepted is None:
-    return len(completed) < CAP + rulings.count("continue")
+    return False
+  upto = [r for r in completed if r["round"] <= accepted]
   if len(upto) >= CAP + rulings.count("continue"):
     return False
   rnd = next((r for r in completed if r["round"] == accepted), None)
@@ -869,10 +873,16 @@ def names_review(decision: dict, rid: str) -> bool:
 
 
 def store_verdict(st: core.Store, rid: str, review: dict, runcard: str) -> Status:
-  """Re-derive `converged` and `converged_round` into `review.json` after a record or a settle."""
+  """Re-derive `converged` and `converged_round` into `review.json` after a record or a settle. A `fix-design`
+  suspends an accept's mark (it is kept, the exit is 4); any other verdict replacing it is the accept's lapse,
+  journaled `review <id> R<n> accept lapsed` (integrate quotes no lapsed accept)."""
   status = evaluate(st, review, runcard)
-  review["converged"], review["converged_round"] = status.converged, status.converged_round
+  prior = review.get("converged") or ""
+  if not (status.code == 4 and prior.startswith("by ruling ")):
+    review["converged"], review["converged_round"] = status.converged, status.converged_round
   save_review(st, rid, review)
+  if prior.startswith("by ruling ") and review["converged"] != prior:
+    core.journal(st, f"review {rid} {prior.removeprefix('by ruling ')} accept lapsed under {runcard}")
   return status
 
 
@@ -887,7 +897,7 @@ def status_review(args) -> int:
   status = evaluate(st, review, card.get("parent") or args.runcard)
   print(status.line)
   print(status.trend)
-  if status.code in (3, 5) and not status.moved:  # below the cap, unconverged, at the reviewed bytes
+  if status.code in (3, 5) and not status.moved and not head_moved(st, review, status.latest_sha):  # at the reviewed bytes
     blockers, mediums, lows = acceptable(st, review, args.runcard)
     if not blockers and mediums:
       print(f"acceptable: yes ({mediums} medium, {lows} low)")
@@ -1559,13 +1569,27 @@ def refuse_early_accept(st: core.Store, rid: str, review: dict, status: Status, 
 
 def refuse_moved_head(st: core.Store, rid: str, review: dict, qid: str) -> None:
   """A head's accept binds the round its point-5 decision names, at the head that round reviewed: the decision's
-  round is the latest completed one, and the decision's `head` and the pull request's saved head are its bytes."""
-  from superegm.report import unit_view
+  round is the latest completed one, and the decision's `head`, the pull request's saved head and its head read
+  afresh from GitHub are its bytes."""
   decision = next(d for d in core.load_foreman(st, review["artifact"])["decisions"] if d["id"] == qid)
   completed = [r for r in rounds_of(st, rid, review) if r["what_ran"] == "completed"]
   words = (decision.get("source") or "").split()
   reviewed = completed[-1]["artifact_sha256"] if completed else None
-  current = unit_view(core.load_state(st.root), review["artifact"])["head"]
   if (len(words) != 4 or words[2] != "round" or not completed or words[3] != str(completed[-1]["round"])
-      or decision.get("head") != reviewed or current != reviewed):
+      or decision.get("head") != reviewed or head_moved(st, review, reviewed, fresh=True)):
     raise core.HandoffError("review rule: the reviewed head moved: revise")
+
+
+def head_moved(st: core.Store, review: dict, reviewed: str | None, fresh: bool = False) -> bool:
+  """A head review whose pull request's saved head (`status --wait`'s snapshot) is not the reviewed one, or with
+  `fresh`, whose head read from GitHub now is not; never on another kind."""
+  from superegm.report import unit_view
+  if review["kind"] != "head":
+    return False
+  saved = unit_view(core.load_state(st.root), review["artifact"])
+  if saved["head"] != reviewed:
+    return True
+  if not fresh:
+    return False
+  number = saved["pr"]["number"] if isinstance(saved["pr"], dict) else saved["pr"]
+  return number is None or core.read_pr(st.config["repo"], int(number))["head"] != reviewed

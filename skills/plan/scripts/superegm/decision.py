@@ -511,6 +511,13 @@ def fifth_point(st, unit: str, decision: dict, chosen: str, runcard: str) -> Non
     with contextlib.redirect_stdout(io.StringIO()):
       review.rule_review(argparse.Namespace(review=rid, ruling="accept", owner=True, judges=None, posted=None,
                                             decision=decision["id"], runcard=runcard, unit=None, design=None, plan=None))
+  elif chosen == "accept":
+    review.refuse_moved_head(st, rid, head, decision["id"])  # the rerun binds the reviewed head as the first call did
+  elif given:  # `revise` after an accept whose post failed: the accept is withdrawn, journaled as a lapse
+    accepted = head["converged"].removeprefix("by ruling ")
+    head["converged"], head["converged_round"] = "no", None
+    review.store_verdict(st, rid, head, runcard)
+    core.journal(st, f"review {rid} {accepted} accept lapsed under {runcard}")
   outcome = "clean" if chosen == "accept" else "revise"
   posted = [e for e in core.load_foreman(st, unit)["rounds"] if e.get("phase") == "posted"]
   if not (given and posted and max(posted, key=lambda e: e["round"]).get("outcome") == outcome):
