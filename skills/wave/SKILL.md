@@ -162,7 +162,7 @@ ignored except `landed`:
    `python3 '<HELPER>' report --idle '<U>=launch-builder: <reason>' --runcard '<CARD>'`.
 7. `superegm report`: `python3 '<HELPER>' report --runcard '<CARD>'`, then `python3 '<HELPER>' notify --runcard '<CARD>'`
    (the owner's `~/.superegm/notify` hook gets the inbox lines new since the last notify; a failing or slow hook never stops the wave). If a
-   decision was opened this batch, pause: ask the owner at its decision
+   decision was opened this batch outside SUPEREGM_ROLE=driver, pause: ask the owner at its decision
    point and run `report` again once ruled. Else `loop: ended` → The end;
    otherwise the next batch.
 
