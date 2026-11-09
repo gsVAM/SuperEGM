@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the init subcommand; `owners` from `gh api user` and the pointer to the README's token recipe and to `doctor` (spec section 11); the astra.enabled and astra.heads sentence (U17); the ingest sentence (U21); the ~/.superegm/notify sentence (U23).
+# Added by SuperEGM (gsVAM), 2026: the init subcommand; `owners` from `gh api user` and the pointer to the README's token recipe and to `doctor` (spec section 11); the astra.enabled and astra.heads sentence (U17); the ingest sentence (U21); the ~/.superegm/notify sentence (U23); the foreman.run_timeout_minutes sentence (U25).
 
 """superegm init: write .superegm/config.json with every key's default; print the owner's by-hand steps."""
 
@@ -27,6 +27,7 @@ The store is {artifacts_dir} (config key artifacts_dir); it is never committed.
 The Astra lane is off until you set astra.enabled to true; astra.heads (default true) then seats it on every head review.
 `review ingest` reads PR review threads with ingest.severity_words (Devin's words by default) and counts a human's thread from ingest.human_role (default write) up.
 An executable ~/.superegm/notify, written outside every repository, is run by `wave` with the inbox lines new since the last notify on its stdin, bounded by config key notify_timeout_seconds; absent means no hook.
+`collect` re-runs every DoD `Run` item in the review worktree, the whole call bounded by foreman.run_timeout_minutes (default 8, at most 9, under the Bash tool's 10-minute cap).
 then run `superegm doctor`"""
 
 
