@@ -452,9 +452,9 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   cfg = json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]
   result = s.path("launches", f"{UNIT}_r1_result.json")
   pairs = " ".join(f"{k}='{v.format(gh='/usr/local/bin/gh', login='builder-bot', email='1001+builder-bot@users.noreply.github.com')}'" for k, v in PAIRS)
-  assert line.startswith(f"cd '{wt}' && env -u GIT_ASKPASS -u SSH_ASKPASS -u GITHUB_TOKEN CLAUDE_CONFIG_DIR='{cfg['profile_dir']}' ENABLE_CLAUDEAI_MCP_SERVERS=false GH_TOKEN=\"$SUPEREGM_BUILDER_TOKEN\" SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{card}' {pairs} claude -p "), line
+  assert line.startswith(f"cd '{wt}' && env -u GIT_ASKPASS -u SSH_ASKPASS -u GITHUB_TOKEN -u CLAUDE_CODE_EFFORT_LEVEL CLAUDE_CONFIG_DIR='{cfg['profile_dir']}' ENABLE_CLAUDEAI_MCP_SERVERS=false GH_TOKEN=\"$SUPEREGM_BUILDER_TOKEN\" SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{card}' {pairs} claude -p "), line
   mcp_file = s.path("launches", f"{UNIT}_r1_mcp.json")
-  assert f" claude -p \"$(cat '{prompt_file}')\" --session-id '{launches_of(s)[-1]['session_id']}' --model '{cfg['model']}' --permission-mode '{cfg['permission_mode']}' --setting-sources user --mcp-config '{mcp_file}' --strict-mcp-config --allowedTools '" in line, line
+  assert f" claude -p \"$(cat '{prompt_file}')\" --session-id '{launches_of(s)[-1]['session_id']}' --model '{cfg['model']}' --effort '{cfg['effort']}' --permission-mode '{cfg['permission_mode']}' --setting-sources user --mcp-config '{mcp_file}' --strict-mcp-config --allowedTools '" in line, line
   tools = line.split("--allowedTools '")[1].split("'")[0].split(",")
   assert tools == [t.replace("Bash(gh ", "Bash(/usr/local/bin/gh ") for t in cfg["allowed_tools"]] + [f"Bash(git push origin {branch}:*)"]
   assert line.endswith(f"' --output-format json > '{result}'; echo $? > '{result}.exit'")
@@ -665,6 +665,13 @@ def test_command_line_carries_the_dirs_the_mcp_file_and_the_switch():
   assert " --setting-sources user --plugin-dir '/c/ponytail/5.3.3' --plugin-dir '/c/x/1' --mcp-config '/l/U07_r1_mcp.json' --strict-mcp-config --allowedTools 'Read' " in line, line
   assert " --setting-sources user --mcp-config '/m.json' --strict-mcp-config --allowedTools 'Read' " in call([], "/m.json")
   assert " --session-id 's' " in call([], "/m.json", session_id="s") and " --session-id" not in call([], "/m.json")
+
+
+def test_launch_carries_the_effort_flag_and_unsets_the_session_level():
+  from superegm.launch_builder import command_line
+  cfg = {"builder": {**DEFAULT_CONFIG["builder"], "profile_dir": "/p", "model": "claude-opus-5-5", "effort": "medium"}}
+  line = command_line(cfg, "/wt", "/prompt.md", "/result.json", "wave-0001", ["Read"], "/usr/local/bin/gh", "b", "b@x", [], Path("/m.json"))
+  assert " -u GITHUB_TOKEN -u CLAUDE_CODE_EFFORT_LEVEL " in line and " --model 'claude-opus-5-5' --effort 'medium' " in line, line
 
 
 @pytest.mark.parametrize("case", ["none", "listed", "missing"])
