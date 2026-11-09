@@ -498,14 +498,15 @@ def rule(args) -> int:
 
 def fifth_point(st, unit: str, decision: dict, chosen: str, runcard: str) -> None:
   """A head's fifth point ruled (U35): `accept` is `review rule --ruling accept --owner --decision <id>` on the
-  unit's head review, in-process (its refusal is raised as `review rule`'s own), then the round's word, `clean` with
-  its awaiting-merge line or `revise` (no point-3 relaunch spent)."""
+  unit's head review, in-process (its refusal is raised as `review rule`'s own; it writes the round's `clean` with its
+  awaiting-merge line), else the round's word `revise` (no point-3 relaunch spent). An accept `review rule` typed
+  alone already gave is recorded here, not given twice."""
   rid = review.head_review_id(st, unit)
   if rid is None:
     raise Refusal(f"decision: {unit} has no head review")
   head = review.load_review(st, rid)
   done = review.evaluate(st, head, runcard)
-  # a rerun after a failed post: the accept this decision gave stands, and is not given twice
+  # a rerun after a failed post, or an accept `review rule` gave: it stands, and is not given twice
   given = done.converged.startswith("by ruling") and str(done.converged_round) == decision["source"].split()[-1]
   if chosen == "accept" and not given:
     with contextlib.redirect_stdout(io.StringIO()):
@@ -520,9 +521,9 @@ def fifth_point(st, unit: str, decision: dict, chosen: str, runcard: str) -> Non
       raise
   elif given:  # `revise` after an accept whose post failed: the accept is withdrawn, journaled as a lapse
     withdraw_accept(st, rid, head, runcard)
-  outcome = "clean" if chosen == "accept" else "revise"
+  outcome = "clean" if chosen == "accept" else "revise"  # an accept's `clean` is `review rule`'s, written once
   posted = [e for e in core.load_foreman(st, unit)["rounds"] if e.get("phase") == "posted"]
-  if not (given and posted and max(posted, key=lambda e: e["round"]).get("outcome") == outcome):
+  if not (posted and max(posted, key=lambda e: e["round"]).get("outcome") == outcome):
     review.write_head_outcome(st, review.load_review(st, rid), runcard, outcome=outcome)
 
 

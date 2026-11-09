@@ -720,8 +720,9 @@ def settle_external_copies(st: core.Store, review: dict, reviewer: str, finding:
 
 def write_head_outcome(st: core.Store, review: dict, runcard: str, outcome: str = "clean") -> None:
   """`outcome: clean` on the unit's latest posted round and `<unit> awaiting merge` in the journal:
-  whichever of `review post` (U10) and `review settle` leaves `review status` at 0 writes it. A head's fifth point
-  writes `revise` as the round's word instead (U35), with no journal line."""
+  whichever of `review post` (U10), `review settle` and a head's accept below the cap (`review rule`, which a head's
+  fifth point runs, U35) leaves `review status` at 0 writes it. A head's fifth point writes `revise` as the round's
+  word instead (its `revise`, or a rerun accept refused on a moved head), with no journal line."""
   unit = review["artifact"]
   data = core.load_foreman(st, unit)
   posted = sorted((e for e in data["rounds"] if e.get("phase") == "posted"), key=lambda e: e["round"])
@@ -811,12 +812,19 @@ def acceptable(st: core.Store, review: dict, runcard: str) -> tuple[list[str], i
   """The accept below the cap's predicate, beside the cap's: what blocks it on the latest completed round
   (`kind integrate`, then each unsettled `high <fid>`, `regression <fid>`, `external <fid>`, then each pending
   `decision <id>` of a head's unit naming this review at any point but 5), with that round's unsettled medium
-  and low counts."""
+  and low counts. A later round, complete or not, holding an unsettled high or medium (a set finding review-plan
+  records into a unit's next round) bars it as `early_accept_lapsed` lapses one: its `high`, `regression` and
+  `external` fids, then each other unsettled `medium <fid>`."""
   blockers = ["kind integrate"] if review["kind"] == "integrate" else []
   rid = review_id(st, review["kind"], review["artifact"], review["cycle"])
-  completed = [r for r in rounds_of(st, rid, review) if r["what_ran"] == "completed"]
+  rounds = rounds_of(st, rid, review)
+  completed = [r for r in rounds if r["what_ran"] == "completed"]
   unsettled = [f for f in findings_of(completed[-1]) if f["disposition"] is None] if completed else []
   blockers += finding_blockers(completed[-1]) if completed else []
+  for rnd in (r for r in rounds if completed and r["round"] > completed[-1]["round"]):
+    named = finding_blockers(rnd)
+    blockers += named + [f"medium {f['id']}" for f in findings_of(rnd) if f["severity"] == "medium"
+                         and f["disposition"] is None and not any(b.endswith(f" {f['id']}") for b in named)]
   if review["kind"] == "head":
     blockers += [f"decision {d['id']}" for d in open_decisions(st, review["artifact"])
                  if d.get("point") != 5 and names_review(d, rid)]
@@ -1555,6 +1563,8 @@ def rule_review(args) -> int:
                else f"review rule {rid} {ruling['id']} {args.ruling} by {by} under {args.runcard}")
   if early:
     core.journal(st, f"review {rid} accepted before the cap by the owner ({counts[0]} medium, {counts[1]} low)")
+    if review["kind"] == "head":  # the round's `clean` and its awaiting-merge line, however the accept was typed
+      write_head_outcome(st, review, args.runcard)
   print(f"ruling {ruling['id']} {args.ruling}")
   return 0
 
