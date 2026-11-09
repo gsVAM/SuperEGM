@@ -57,6 +57,7 @@ def prepare(args, card):
   problem = refusal(st, state, config, unit, rnd, builder)
   if problem:
     raise core.HandoffError(problem)
+  dirs = plugin_dirs(builder_config["plugins"], elephant_profile())  # each listed plugin's user-scope directory, version and hooks
   gh, app = tool("gh"), builder_config["app"]
   if app:  # the App path: the scripts bake openssl and the key variable; the bin directory reaches the unquotable allow-list
     openssl = tool("openssl")
@@ -88,7 +89,7 @@ def prepare(args, card):
   reviews = core.gh_pages(f"repos/{repo}/pulls/{pr}/reviews") if pr else []
   audit = AUDIT_LINE.format(owner=record["launched"].get("by", "unknown"),  # a pre-upgrade mark records no login
                             runcard=args.runcard, unit=unit, handoff=st.handoff_id)
-  text = prompt_text(number, unit, issue_body, core.read_text(ORDERS).replace("{{gh}}", launched_gh), orient_text, comments, reviews, pr, builder, audit, pr_block,
+  text = prompt_text(number, unit, issue_body, orders_text(tools, launched_gh), orient_text, comments, reviews, pr, builder, audit, pr_block,
                      spec_range=range_text, owners=config.get("owners") or [], foreman=core.load_foreman(st, unit))
   worktree = add_worktree(handoff.repo_root, st, unit, rnd, branch, pr)
   prompt = st.path("launches", f"{unit}_r{rnd}_prompt.md")
@@ -96,11 +97,14 @@ def prepare(args, card):
   if app:
     write_bin(st, unit, rnd, config, openssl, gh)
   managed = managed_plugins(Path(config["builder"]["profile_dir"]).expanduser() / "plugins")
-  core.atomic_write(st.path("launches", f"{unit}_r{rnd}_managed.json"), json.dumps(managed) + "\n")
+  mcp_file = st.path("launches", f"{unit}_r{rnd}_mcp.json")
+  core.atomic_write(mcp_file, json.dumps({"mcpServers": builder_config["mcp"]}, indent=2) + "\n")
+  core.atomic_write(st.path("launches", f"{unit}_r{rnd}_plugins.json"),
+                    json.dumps({"plugins": dirs, "managed": managed, "mcp": sorted(builder_config["mcp"])}, indent=2) + "\n")
   core.journal(st, f"{unit} launch {rnd} prepared" + (f" (managed plugins: {', '.join(managed)})" if managed else ""))
   result = st.path("launches", f"{unit}_r{rnd}_result.json")
   line = command_line(config, worktree, prompt, result, args.runcard, tools, launched_gh, identity["login"], identity["email"],
-                      [], st.path("launches", f"{unit}_r{rnd}_mcp.json"))
+                      [d["dir"] for d in dirs], mcp_file)
   # the one behaviour (amendment 10): the wrapper started detached, then the launch recorded `running`
   pid = start_detached(["/bin/sh", "-c", line], st.path("launches", f"{unit}_r{rnd}.log"), dict(os.environ))
   launches = load_launches(st, unit)
@@ -111,6 +115,25 @@ def prepare(args, card):
   core.journal(st, done)
   print(done)
   return 0
+
+
+SKILL_RULE_RE = re.compile(r"^Skill\(([^\s()]+)(?: \*)?\)$")  # `Skill(<name>)` or `Skill(<name> *)` (amendment 7)
+
+
+def skill_names(tools: list) -> list[str]:
+  """The skills an allow-list's `Skill(...)` rules name, once each, in the list's order."""
+  names = []
+  for entry in tools:
+    match = SKILL_RULE_RE.match(entry)
+    if match and match.group(1) not in names:
+      names.append(match.group(1))
+  return names
+
+
+def orders_text(tools: list, gh: str) -> str:
+  """`references/builder_orders.md` as one launch reads it: `{{gh}}` the launched `gh`, `{{skills}}` the skills
+  the allow-list names, `none` when it names none."""
+  return core.read_text(ORDERS).replace("{{gh}}", gh).replace("{{skills}}", ", ".join(skill_names(tools)) or "none")
 
 
 def start_detached(command: list, log: Path, env: dict) -> int:
