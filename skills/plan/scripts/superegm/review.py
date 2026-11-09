@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest: the one review loop (spec section 8)."""
 
@@ -646,24 +646,30 @@ def check_settle(st: core.Store, rid: str, review: dict, card: dict, args, fid: 
     raise core.HandoffError("review settle: the CI finding is settled by no one")
   if disposition == "fixed" and rnd["artifact_sha256"] == current_sha(st, review["kind"], review["artifact"]):
     raise core.HandoffError("review settle: fixed needs changed bytes")  # a head's current bytes are unknown: never
+  if finding["claim"].startswith("test-delta:") and not args.owner:  # U25: the owner's alone, in either mode
+    raise core.HandoffError(f"review settle: {fid} is the owner's alone: --owner required")
   if blocking(finding) and disposition in ("contested", "declined"):
     if card["mode"] == "leavemealone" and not args.judges:
       if not (args.owner and getattr(args, "posted", None)):
         raise core.HandoffError(f"review settle: {fid} is {finding['severity']}: --judges required in leavemealone-mode")
-      verify_owner_ruling(st.config, fid, args.posted)
+      verify_owner_ruling(st.config, finding, args.posted)
     if card["mode"] != "leavemealone" and not args.owner:
       raise core.HandoffError(f"review settle: {fid} is {finding['severity']}: --owner required in normal mode")
   return n
 
 
-def verify_owner_ruling(config: dict, fid: str, comment_id: str) -> None:
+def verify_owner_ruling(config: dict, finding: dict, comment_id: str) -> None:
   """In leavemealone the owner's word still counts, by hand (1.1.3; U22 reads such comments itself): one GitHub
-  read of the comment, by a `config.owners` login, starting `**Ruling:** <fid> finding overruled`."""
+  read of the comment, by a `config.owners` login, carrying a ruling `ruling_of` reads: `<fid> finding overruled`,
+  or `<fid> allowed` on a `test-delta:` finding (U25)."""
+  from superegm.decision import ruling_of  # inside: `decision` imports `review`
+  fid = finding["id"]
   comment = core.gh_json(["api", f"repos/{config['repo']}/issues/comments/{comment_id}"]) or {}
   author = (comment.get("user") or {}).get("login")
   if author not in (config.get("owners") or []):
     raise core.HandoffError(f"review settle: comment {comment_id} is by {author}, not a login in config.owners")
-  if not (comment.get("body") or "").startswith(f"**Ruling:** {fid} finding overruled"):
+  found = ruling_of({**comment, "id": comment.get("id") or comment_id}, config.get("owners") or [])
+  if not (found and found.subject == fid and (found.kind == "overruled" or (found.kind == "allowed" and finding["claim"].startswith("test-delta:")))):
     raise core.HandoffError(f"review settle: comment {comment_id} does not rule {fid} overruled")
 
 
@@ -949,6 +955,8 @@ def post(args) -> int:
   config, head = st.config, entry["head"]
   repo, number = config["repo"], core.load_state(st.root)["units"][unit]["pr"]["number"]
   runcard = card.get("parent") or args.runcard
+  if "dod_runs" not in entry or "test_delta" not in entry:  # U25: the word only after both gates ran (empty is not absent)
+    raise Refusal("post: gates not run")
   present = next((r for r in core.gh_pages(f"repos/{repo}/pulls/{number}/reviews")
                   if carries_header(r.get("body"), n, head)), None)
   if present:  # never posted twice: counted when bound to the reviewed sha, refused otherwise
@@ -1376,6 +1384,15 @@ def contested_fids(round_json: dict) -> list:
   return [c["fid"] for c in round_json.get("builder_contested") or [] if c["fid"] in open_fids]
 
 
+def owner_only_fids(round_json: dict) -> list:
+  """The unsettled `test-delta:` fids of the round when every unsettled high or medium of it is one of them, else
+  []: a remainder the owner alone can settle (U25)."""
+  open_blocking = [f for record in (round_json.get("reviewers") or {}).values() for f in record.get("findings") or []
+                   if f["disposition"] is None and blocking(f)]
+  owner = [f["id"] for f in open_blocking if f["claim"].startswith("test-delta:")]
+  return owner if owner and len(owner) == len(open_blocking) else []
+
+
 def count_posted(st: core.Store, unit: str, entry: dict, posted_at: str, review_id: str, runcard: str) -> str:
   """The round is `posted` at `posted_at`; its `what_ran` is re-derived, its `outcome` is the word `review
   status` and `builder_contested[]` imply, and `clean` journals `<unit> awaiting merge`."""
@@ -1387,7 +1404,7 @@ def count_posted(st: core.Store, unit: str, entry: dict, posted_at: str, review_
   if rnd:
     rnd["what_ran"] = derive_what_ran(review, rnd, saved)
     core.atomic_write(st.path("reviews", review_id, f"round-{entry['round']}.json"), rnd)
-  word = outcome_word(status_code(review_id, runcard), contested_fids(rnd or {}))
+  word = outcome_word(status_code(review_id, runcard), contested_fids(rnd or {}), owner_only_fids(rnd or {}))
   saved["outcome"] = word
   entry.update(saved)
   core.save_foreman(st, unit, data)
