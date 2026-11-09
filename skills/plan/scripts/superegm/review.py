@@ -709,17 +709,19 @@ def settle_external_copies(st: core.Store, review: dict, reviewer: str, finding:
   return copies
 
 
-def write_head_outcome(st: core.Store, review: dict, runcard: str) -> None:
+def write_head_outcome(st: core.Store, review: dict, runcard: str, outcome: str = "clean") -> None:
   """`outcome: clean` on the unit's latest posted round and `<unit> awaiting merge` in the journal:
-  whichever of `review post` (U10) and `review settle` leaves `review status` at 0 writes it."""
+  whichever of `review post` (U10) and `review settle` leaves `review status` at 0 writes it. A head's fifth point
+  writes `revise` as the round's word instead (U35), with no journal line."""
   unit = review["artifact"]
   data = core.load_foreman(st, unit)
   posted = sorted((e for e in data["rounds"] if e.get("phase") == "posted"), key=lambda e: e["round"])
   if not posted:
     return
-  posted[-1]["outcome"] = "clean"
+  posted[-1]["outcome"] = outcome
   core.save_foreman(st, unit, data)
-  core.journal(st, f"{unit} awaiting merge under {runcard}")
+  if outcome == "clean":
+    core.journal(st, f"{unit} awaiting merge under {runcard}")
 
 
 # ---------------------------------------------------------------- status: the predicates live here alone

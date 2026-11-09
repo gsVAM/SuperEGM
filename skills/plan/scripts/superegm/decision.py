@@ -6,6 +6,9 @@
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
+import argparse
+import contextlib
+import io
 import os
 import re
 from dataclasses import dataclass
@@ -17,7 +20,7 @@ from superegm.report import pending_decisions, unit_view
 from superegm import review
 from superegm.review import Refusal
 
-WRITES = frozenset({"foreman"})  # the store kinds this subcommand writes
+WRITES = frozenset({"foreman", "reviews"})  # the store kinds this subcommand writes (`reviews`: a fifth point's accept, U35)
 SKILLS = frozenset({"wave"})  # the skills whose card this subcommand accepts
 RELAUNCH = ["relaunch", "stop the unit"]
 
@@ -420,6 +423,11 @@ def rule(args) -> int:
       raise Refusal(f"decision: redesign by {args.by} needs a high finding behind it")
     chosen = f"redesign — {reason.strip()}"
     brief = brief_path(st, unit, decision["id"])  # written after the comment is posted: a refusal leaves no brief
+  if decision["point"] == 5:  # a head's fifth point (U35): the owner's alone, applied before anything is posted
+    if args.by.startswith("judges:"):
+      raise Refusal("decision: point 5 is the owner's alone")
+    fifth_point(st, unit, decision, chosen, args.runcard)
+    data = core.load_foreman(st, unit)  # the round's outcome is written: the record is reloaded before the append
   # the effect is the point's, never the option's wording: point 2's `stop`, point 3's `stop the unit`, a redesign.
   # The label goes first, so a failed request records nothing and the same call reruns (round 9); a session post
   # that then fails takes off again only a label this call put on (rounds 10 and 11).
@@ -488,7 +496,21 @@ def rule(args) -> int:
   return 0
 
 
-KIND_POINTS = {"upheld": (1,), "overruled": (1,), "allowed": (1,), "round": (2,), "stop": (2,), "option": (3,), "redesign": (1, 2)}
+def fifth_point(st, unit: str, decision: dict, chosen: str, runcard: str) -> None:
+  """A head's fifth point ruled (U35): `accept` is `review rule --ruling accept --owner --decision <id>` on the
+  unit's head review, in-process (its refusal is raised as `review rule`'s own), then the round's word, `clean` with
+  its awaiting-merge line or `revise` (no point-3 relaunch spent)."""
+  rid = review.head_review_id(st, unit)
+  if rid is None:
+    raise Refusal(f"decision: {unit} has no head review")
+  if chosen == "accept":
+    with contextlib.redirect_stdout(io.StringIO()):
+      review.rule_review(argparse.Namespace(review=rid, ruling="accept", owner=True, judges=None, posted=None,
+                                            decision=decision["id"], runcard=runcard, unit=None, design=None, plan=None))
+  review.write_head_outcome(st, review.load_review(st, rid), runcard, outcome="clean" if chosen == "accept" else "revise")
+
+
+KIND_POINTS = {"upheld": (1,), "overruled": (1,), "allowed": (1,), "round": (2,), "stop": (2,), "option": (3, 5), "redesign": (1, 2)}
 
 
 def dropped(store, args, reason: str):
@@ -537,6 +559,8 @@ def ruling_comment(point: int, source: str, ruling: str, question: str, brief=No
     line = ruling.replace("finding upheld", "finding upheld (fix it)", 1)
   elif point == 2:
     line = ruling
+  elif point == 5:  # a head's fifth point takes the point-3 form over its decision id (U35)
+    line = ruling_form(3, qid, ruling).removeprefix("**Ruling:** ").removesuffix(" — <reason>")
   else:
     line = f"({source.removeprefix('comment ') if source.startswith('comment ') else qid}) {ruling}"
   return f"**Ruling:** {line}{marker}\n\n{quoted}\n"
@@ -640,7 +664,7 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int, mode=None)
   elif found.kind in ("round", "stop"):
     decisions = [d for d in pending if d["point"] == 2][-1:]
   elif found.kind == "option":
-    decisions = [d for d in foreman["decisions"] if d["point"] == 3 and found.subject == option_name(d)][-1:]
+    decisions = [d for d in foreman["decisions"] if d["point"] in (3, 5) and found.subject == option_name(d)][-1:]
   else:
     decisions = []
   if not decisions and found.kind in ("allowed", "allowed-file"):  # an allowance no decision asks about: `collect` reads it
