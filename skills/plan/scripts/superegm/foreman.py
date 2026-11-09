@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the foreman subcommand (spec section 11); `runner_path`, the claudex-loop runner's lookup (U17).
+# Added by SuperEGM (gsVAM), 2026: the foreman subcommand (spec section 11); `runner_path`, the claudex-loop runner's lookup (U17); a launch `interrupted (reboot)` is terminal (U24).
 
 """superegm foreman dispatch: one evaluation of the dispatch predicate, the supersede of a non-terminal
 round, the head review and the child card of a round."""
@@ -111,7 +111,7 @@ def dispatch_refusal(pr: dict, ci: dict, launches: list, rounds: list, decisions
   if not launches:
     return "no launch"
   latest = launches[-1]
-  if not (latest["status"].startswith("exited") or latest["status"] == "interrupted"):
+  if not latest["status"].startswith(("exited", "interrupted")):  # `interrupted (reboot)`: the boot-id proof (U24)
     return f"launch {latest['round']} not terminal"
   for entry in rounds:
     if entry.get("phase") == "posted" and entry.get("launch") == latest["round"]:

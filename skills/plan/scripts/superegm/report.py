@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the report subcommand (spec section 11): the per-batch wave report, the idle rules
-# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25).
+# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24).
 
 """superegm report: rewrite `wave_<n>_report.md` from the store, the plan and the spec and print its path, the
 board and the idle, pending and loop lines. It opens the card's handoff as `status` does (`core.locate`,
@@ -39,7 +39,7 @@ def run(args):
   card = record_heads(st, args.runcard, {uid: views[uid] for uid in launched}, now)
   foremen = {uid: core.load_foreman(st, uid) for uid in launched}
   states = {uid: unit_state(uid, views[uid], foremen[uid], load_launches(st, uid), card, config, now) for uid in launched}
-  free = config["max_in_flight"] - sum(states[uid] in ("active", "pending") for uid in launched)
+  free = config["max_in_flight"] - sum(states[uid] == "active" for uid in launched)  # a pending unit holds no slot (amendment 5)
   named_idle = {entry["unit"] for entry in card.get("idle") or []}  # holds no slot, launched or not
   ready = [uid for uid in (state.get("status") or {}).get("ready") or [] if uid not in launched and uid not in named_idle]
   ended, why = loop_ended(states, ready, free)
@@ -52,8 +52,7 @@ def run(args):
   idle = [uid for uid in units if uid in named_idle or states.get(uid) == "idle"]
   pending = [(uid, d) for uid in launched for d in pending_decisions(foremen[uid])]
   lines += section("Non-terminal launches", [f"{uid} launch {e['round']} {e['status']}" for uid in launched
-                                              for e in load_launches(st, uid) if not e["status"].startswith("exited")
-                                              and e["status"] != "interrupted"])
+                                              for e in load_launches(st, uid) if not e["status"].startswith(("exited", "interrupted"))])
   lines += section("Heads with pending or absent CI", [f"{uid} {views[uid]['head'][:7]} waiting-for-ci" for uid in launched
                                                        if views[uid]["head"] and views[uid]["ci"] in (None, "pending")])
   lines += section("Idle", [f"{uid}: {reason}" for uid, reason in idle_reasons(card, states, views, config, now)])
@@ -172,7 +171,7 @@ def next_action(word: str, latest, launch, decisions: list, reason) -> str:
   if (latest and latest.get("phase") == "posted" and latest.get("outcome")
       and not (launch and launch["round"] > (latest.get("launch") or 0))):
     return word_action(latest["outcome"], 0)
-  if launch and not (launch["status"].startswith("exited") or launch["status"] == "interrupted"):
+  if launch and not launch["status"].startswith(("exited", "interrupted")):
     return "none"
   return "foreman dispatch"
 
