@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the judges subcommand (spec section 13.1) and `judges question`, the
-# leavemealone-mode question renderer of section 13.2 (U11); the cap question names a spec review's scope (U19); the default members read from `DEFAULT_CONFIG` (U28).
+# leavemealone-mode question renderer of section 13.2 (U11); the cap question names a spec review's scope (U19); the default members read from `DEFAULT_CONFIG` (U28); a `launch <n>` or `closed <n>` question renders its pending decision's options, a stall's heading its facts (U31).
 
 """superegm judges open|record|diff|verdict|question: the judge panel over a question file, and the
 question file rendered from the record at a decision point."""
@@ -595,14 +595,22 @@ def blocked_question(st, unit: str, what: list) -> tuple[str, list[int]]:
     n = int(what[1])
     if not 1 <= n <= len(launches):
       raise core.HandoffError(f"question: {unit} has no launch {n}")
-    heading = f"{unit} launch {n} ({launches[n - 1]['status']}) ended with no pull request"
+    entry = launches[n - 1]
+    if entry["status"] == "exited (stalled)":  # the stall facts (U31)
+      heading = f"{unit} launch {n} stalled (last commit {entry.get('last_commit_at') or 'none'})"
+    else:
+      heading = f"{unit} launch {n} ({entry['status']}) ended with no pull request"
   elif len(what) == 2 and what[0] == "closed" and what[1].isdigit():
     heading = f"{unit}: #{what[1]} was closed by the builder account"
   else:
     raise core.HandoffError("question: --blocked takes <comment-id> | launch <n> | closed <n>")
-  if any(r["ruling"].partition(" — ")[0].strip() == "relaunch" for r in core.load_foreman(st, unit)["rulings"]):
-    raise core.HandoffError(f"question: relaunch already used on {unit}")  # section 11: offered once per unit
-  return f"## Q1 {heading}\n" + options_text(RELAUNCH), []
+  # the options are the pending point-3 decision's, `decision open` having applied the carve-out (U31)
+  from superegm.report import pending_decisions
+  source = " ".join(what)
+  pending = next((d for d in pending_decisions(core.load_foreman(st, unit)) if d.get("point") == 3 and d.get("source") == source), None)
+  if pending is None:
+    raise core.HandoffError(f"question: {unit} has no pending decision on {source}")
+  return f"## Q1 {heading}\n" + options_text(pending.get("options") or RELAUNCH), []
 
 
 def fan_out(st, unit: str) -> list[int]:
