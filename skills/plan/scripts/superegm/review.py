@@ -764,8 +764,8 @@ def write_owner_outcome(st: core.Store, rid: str, review: dict, runcard: str, co
   rnd = load_round(st, rid, posted[-1]["round"]) if posted else None
   if not rnd or contested_fids(rnd) or not (owner := owner_only_fids(rnd)):
     return None
-  upheld = {str(r.get("ruling") or "").split(" ")[0] for r in data.get("rulings") or []
-            if str(r.get("ruling") or "").endswith(" finding upheld")}
+  upheld = {str(r.get("ruling") or "").split(" ")[0] for r in data.get("rulings") or []  # `--ruling` is stored raw, reason and all
+            if str(r.get("ruling") or "").partition(" — ")[0].strip().endswith(" finding upheld")}
   if set(owner) <= upheld:
     word = {3: "revise", 2: "cap-reached"}.get(code)
   elif str(posted[-1].get("outcome") or "").startswith("owner:"):
