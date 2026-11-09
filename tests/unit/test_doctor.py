@@ -11,12 +11,13 @@ from conftest import REPO
 from test_builders import UNIT, RULESET, SUPEREGM_RULESET, seed, app_seed, github, configure, push_to_origin, git
 from test_builder_token import key, OPENSSL, FOUR  # noqa: F401  the key fixture
 from superegm.launch_builder import HELPER
+from test_u27 import elephant, PONY, MCP, THREE
 
 DRIVER_NONE = ["driver: not installed", "sleep: not reported", "root: not registered", "env: absent", "notify: absent"]
 
 OK = ["config: ok", "owner: ok (owner)", "origin: ok", "token: ok", "builder: ok (builder-bot)", "role: ok (write)",
       "scopes: ok (classic: repo, read:org)", "protection: ok",
-      "merge: gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset restricts updates to config.owners)", "profile: ok", "gh: ok (/usr/local/bin/gh)", "environment: ok",
+      "merge: gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset restricts updates to config.owners)", "profile: ok", "plugins: none", "mcp: none", "gh: ok (/usr/local/bin/gh)", "environment: ok",
       "graphify: not on PATH (informational)", "astra: not installed (heads will record not run)",
       "python3.12: not on PATH (informational)", "hooks: none", "core.hooksPath: unset", *DRIVER_NONE]
 NAMES = [line.split(":")[0] for line in OK]
@@ -84,10 +85,25 @@ def test_doctor_lines(world, monkeypatch, tmp_path, case, code, expected):
   assert "ghp_builder" not in out and not s.path("launches", f"{UNIT}.json").parent.exists()
 
 
+@pytest.mark.parametrize("scope, code, expected", [
+  ("user", 0, [f"plugins: {PONY} 5.3.3 [SessionStart, SubagentStart, UserPromptSubmit]", "mcp: context7", "profile: ok"]),
+  ("project", 1, [f"profile: plugin {PONY} not installed", f"plugins: plugin {PONY} not installed", "mcp: context7"])])
+def test_doctor_prints_the_plugins_and_mcp_lines(world, monkeypatch, tmp_path, scope, code, expected):
+  seed(world); git(["remote", "set-url", "--push", "origin", f"git@github.com:{REPO}.git"], world.repo)
+  elephant(tmp_path, monkeypatch, [scope], {"hooks/hooks.json": THREE})
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: {"gh": "/usr/local/bin/gh"}.get(cmd))
+  cfg = json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]
+  configure(world, builder={**cfg, "plugins": [PONY], "mcp": MCP})
+  got, out = world.run("doctor")
+  assert got == code and all(line in out.splitlines() for line in expected), out
+  assert [l.split(":")[0] for l in out.splitlines()] == NAMES
+
+
 OK_APP = ["config: ok", "owner: ok (owner)", "origin: ok", "credential: ok (app superegm-builder)", "key: ok ({key})", "openssl: ok ({openssl})", "artifacts_dir: ok",
           "app: ok (superegm-builder #12345)", f"permissions: ok ({FOUR[1:-1]})", "token: ok", "installation: ok (example-org/webhooks)",
           "scanning: push protection enabled, non-provider patterns enabled", "protection: ok",
-          "merge: gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset restricts updates to config.owners)", "profile: ok", "gh: ok ({gh})", "environment: ok", "graphify: not on PATH (informational)", "astra: not installed (heads will record not run)",
+          "merge: gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset restricts updates to config.owners)", "profile: ok", "plugins: none", "mcp: none", "gh: ok ({gh})", "environment: ok", "graphify: not on PATH (informational)", "astra: not installed (heads will record not run)",
           "python3.12: not on PATH (informational)", "hooks: none", "core.hooksPath: unset", *DRIVER_NONE]
 
 
