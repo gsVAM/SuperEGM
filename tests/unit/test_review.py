@@ -452,6 +452,27 @@ def test_a_settle_that_leaves_an_owner_only_remainder_writes_the_owner_word(worl
   assert json.loads(hstore(world).path("foreman", "U07").read_text())["rounds"][0]["outcome"] == "owner: foreman-1-2"
 
 
+@pytest.mark.parametrize("upheld, lines, outcome", [(False, ["foreman-1-1 declined"], "owner: foreman-1-1, foreman-1-2"),
+                                                     (True, ["foreman-1-1 declined", "revise"], "revise")])
+def test_a_settle_on_the_owner_row_keeps_its_word_until_only_upheld_ids_are_left(world, upheld, lines, outcome):
+  """Round 5 (PR #103 review, codebase-details-5-1): on a round whose word is already `owner: <ids>`, settling one
+  id the owner allowed keeps the word (its decision stays open on the other id) and prints no second owner word;
+  when every id left is one the owner upheld, the word becomes `revise` (or `cap-reached` at the cap)."""
+  spec, cid, rid = opened(world, "head")
+  head_round(world, 1, "posted", cid, "owner: foreman-1-1, foreman-1-2")
+  lines_ = [f"foreman-1-{k} | high | tests/unit/test_q.py:{k + 2} | regression: no | test-delta: tests/unit/test_q.py:{k + 2} removed" for k in (1, 2)]
+  assert record(world, rid, 1, "foreman", lines_, cid, sha=A)[0] == 0
+  if upheld:
+    path = hstore(world).path("foreman", "U07")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["decisions"].append({"id": "q1", "point": 1, "options": ["foreman-1-1 allowed", "foreman-1-2 allowed"], "question": "", "source": f"review {rid} round 1"})
+    data["rulings"].append({"decision": "q1", "ruling": "foreman-1-2 finding upheld", "by": "owner"})
+    atomic_write(path, data)
+  code, out = settle(world, rid, "foreman-1-1", "declined", cid, "--owner")
+  assert (code, out.strip().splitlines()) == (0, lines), out
+  assert json.loads(hstore(world).path("foreman", "U07").read_text())["rounds"][0]["outcome"] == outcome
+
+
 @pytest.mark.parametrize("body, ok", [("test-delta tests/unit/test_q.py allowed — by design", True), ("test-delta tests/unit/test_z.py allowed — by design", False),
                                       ("foreman-1-1 allowed — fine", True), ("foreman-1-1 finding overruled — fine", True), ("foreman-1-1 finding upheld", False)])
 def test_the_owners_file_allowance_settles_a_test_delta_finding_of_that_file(monkeypatch, body, ok):

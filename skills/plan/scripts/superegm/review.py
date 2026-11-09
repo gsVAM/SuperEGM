@@ -632,7 +632,7 @@ def settle_finding(args) -> int:
   if review["kind"] == "head" and status.code == 0:
     write_head_outcome(st, review, runcard)
   elif review["kind"] == "head":
-    word = write_owner_outcome(st, rid, review, runcard)
+    word = write_owner_outcome(st, rid, review, runcard, status.code)
   for fid, disposition, _, _ in checked:
     print(f"{fid} {disposition}")
   if word:
@@ -751,17 +751,29 @@ def write_head_outcome(st: core.Store, review: dict, runcard: str) -> None:
   core.journal(st, f"{unit} awaiting merge under {runcard}")
 
 
-def write_owner_outcome(st: core.Store, rid: str, review: dict, runcard: str) -> str | None:
+def write_owner_outcome(st: core.Store, rid: str, review: dict, runcard: str, code: int = 3) -> str | None:
   """Round 4 (PR #103 review, astra-4-3): a settle that leaves the latest posted round's remainder owner-only
   (`owner_only_fids`, no open contest) rewrites its outcome to `owner: <ids>`, so a contest settled after the post
-  routes to the owner row, not to `revise` or the cap; the word, when written."""
+  routes to the owner row, not to `revise` or the cap; the word, when written. Round 5 (codebase-details-5-1): a
+  settle on the owner row itself (the round's word already `owner: <ids>`) leaves that word, its decision still
+  open on the ids left, unless every id left is one the owner upheld (a recorded `<fid> finding upheld`): then the
+  word is `revise`, or `cap-reached` at the cap (`code`, the status `review status` gives), as an uphold is."""
   unit = review["artifact"]
   data = core.load_foreman(st, unit)
   posted = sorted((e for e in data["rounds"] if e.get("phase") == "posted"), key=lambda e: e["round"])
   rnd = load_round(st, rid, posted[-1]["round"]) if posted else None
   if not rnd or contested_fids(rnd) or not (owner := owner_only_fids(rnd)):
     return None
-  word = outcome_word(3, [], owner)
+  upheld = {str(r.get("ruling") or "").split(" ")[0] for r in data.get("rulings") or []
+            if str(r.get("ruling") or "").endswith(" finding upheld")}
+  if set(owner) <= upheld:
+    word = {3: "revise", 2: "cap-reached"}.get(code)
+  elif str(posted[-1].get("outcome") or "").startswith("owner:"):
+    return None
+  else:
+    word = outcome_word(3, [], owner)
+  if not word:
+    return None
   if posted[-1].get("outcome") != word:
     posted[-1]["outcome"] = word
     core.save_foreman(st, unit, data)
@@ -1217,6 +1229,11 @@ def ingest(args) -> int:
     word = {3: "revise", 2: "cap-reached"}.get(status_code(rid, wave))
     if word:
       saved_entry.update({"outcome": word, "rewritten_from": "clean"})
+  elif str(saved_entry.get("outcome") or "").startswith("owner:") and not owner_only_fids(load_round(st, rid, latest["round"]) or {"reviewers": {}}):
+    # an external high or medium beside the owner's own leaves the remainder mixed: `revise`, or `cap-reached` at the cap
+    word = {3: "revise", 2: "cap-reached"}.get(status_code(rid, wave))
+    if word:
+      saved_entry.update({"outcome": word, "rewritten_from": saved_entry["outcome"]})
   # point 2 opened since the round was posted: `decision open` records the PR's head then, not the round's
   routed = any(d.get("point") == 2 and d.get("source") == f"review {rid} cap" and d.get("asked_at", "") >= saved_entry.get("posted_at", "")
                for d in data.get("decisions") or [])

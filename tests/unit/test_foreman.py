@@ -932,6 +932,26 @@ def ingest_world(world, threads, roles=(), outcome="clean"):
   return st, card, posted, rid, head
 
 
+@pytest.mark.parametrize("cap, word", [(None, "revise"), (1, "cap-reached")])
+def test_review_ingest_rewrites_an_owner_word_a_new_external_high_makes_mixed(world, monkeypatch, cap, word):
+  """Round 5 (PR #103 review, astra-5-6): an external high ingested beside a posted `owner: <ids>` round's owner-only
+  remainder leaves it mixed: the word becomes `revise`, or `cap-reached` at the cap, never the stale owner word."""
+  head = subprocess.run(["git", "-C", str(world.repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+  st, card, posted = seed(world, head=head, rounds=[{**POSTED_R1, "head": head, "outcome": "owner: foreman-1-1"}], owners=["owner"])
+  assert world.run("review", "open", "--kind", "head", "--artifact", UNIT, "--reviewers", "change-review", "--runcard", card)[0] == 0
+  rid = head_rid(st)
+  record(world, st, rid, 1, head, card, {"change-review": "", "foreman": "foreman-1-1 | high | tests/unit/test_q.py:3 | regression: no | test-delta: tests/unit/test_q.py:3 removed\n"})
+  atomic_write(st.path("review", UNIT, f"pr{PR}") / "r1/ci.json", json.dumps({"verdict": "ci green"}))
+  world.gh.threads[PR] = [{"id": 1, "user": {"login": "alice"}, "body": "bug: the hook never fires", "path": "src/hooks.py", "line": 3, "commit_id": head, "created_at": "t"}]
+  world.gh.roles.update({"alice": {"role_name": "write"}})
+  if cap:
+    monkeypatch.setattr(review_mod, "CAP", cap)
+  code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
+  assert (code, out.split()) == (0, ["1", "ingested", "outcome:", word]), out
+  entry = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][0]
+  assert (entry["outcome"], entry["rewritten_from"]) == (word, "owner: foreman-1-1")
+
+
 def test_review_ingest_at_the_cap_rewrites_clean_to_cap_reached(world, monkeypatch):
   st, card, posted, rid, head = ingest_world(world, [(1, "alice", "bug: the hook never fires")], {"alice": {"role_name": "write"}})
   monkeypatch.setattr(review_mod, "CAP", 1)
