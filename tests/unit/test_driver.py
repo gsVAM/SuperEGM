@@ -170,6 +170,19 @@ def test_a_skip_still_sends_a_new_typed_wave_card(world, monkeypatch, tmp_path, 
   assert world.run("driver", "tick")[0] == 0 and not SPAWNED and live in json.loads(driver_file(s, hid).read_text())["notified"]
 
 
+def test_a_handoff_with_nothing_left_still_sends_its_typed_wave_card(world, monkeypatch, tmp_path, spawn_fake):
+  s, hid, _ = arranged(world, monkeypatch, tmp_path, "first"); state = json.loads(s.path("state").read_text())
+  state["status"] = {"at": superegm.now_iso(), "units": {u: {"landed": True} for u in state["units"]}}; put(s.path("state"), json.dumps(state))
+  live = world.open_card("wave", str(world.spec))
+  assert world.run("driver", "tick")[0] == 0 and not SPAWNED and live in json.loads(driver_file(s, hid).read_text())["notified"]
+
+
+def test_a_refusal_recorded_and_never_sent_is_sent_by_the_next_tick(world, monkeypatch, tmp_path, spawn_fake):
+  s, hid, _ = arranged(world, monkeypatch, tmp_path, "twice-failed"); data = json.loads(driver_file(s, hid).read_text())
+  put(driver_file(s, hid), json.dumps({**data, "refused": {"at": superegm.now_iso(), "reason": "two launches failed before the loop ran"}}))
+  assert world.run("driver", "tick")[0] == 0 and not SPAWNED and f"refused:{hid}" in json.loads(driver_file(s, hid).read_text())["notified"]
+
+
 def test_a_refusal_the_tick_no_longer_makes_is_cleared(world, monkeypatch, tmp_path, spawn_fake):
   s, hid, _ = arranged(world, monkeypatch, tmp_path, "stale-refusal")
   assert world.run("driver", "tick")[0] == 0 and not SPAWNED and json.loads(driver_file(s, hid).read_text())["refused"] is None
