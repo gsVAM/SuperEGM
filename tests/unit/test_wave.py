@@ -1401,3 +1401,44 @@ def test_the_fifth_decision_point_opens_on_a_head(world):
   assert f"pending: U01 q1 (point 5, review {rid} round 1)" in world.run("report", "--runcard", card)[1]
   [item] = [i for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "decision"]
   assert item["action"].startswith("**Ruling:** (q1) ") and "accept" in item["action"] and "revise" in item["action"]
+
+
+def fifth_point_open(world):
+  """Step 4's arrangement through its `decision open --point 5`: the store, the wave card and the head review's id."""
+  card = open_wave_card(world); s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "launches": [{"round": 1, "status": "exited 0"}]})
+  rid = head_review(world, s, card)
+  code, out = world.run("decision", "open", "--unit", "U01", "--point", "5", "--question", question(world, "one medium remains"), "--source", f"review {rid} round 1", "--runcard", card)
+  assert code == 0, out
+  return s, card, rid
+
+
+def by_hand(world, monkeypatch, body, n):
+  """The owner's by-hand comment `n` holding `body`, read as `test_a_by_hand_ruling_naming_the_blocked_comment_rules_its_decision`
+  reads its comments (`config.owners` naming `owner`, `ruling_of` reading that login alone)."""
+  set_config(world, repo=REPO, owners=["owner"])
+  fake_gh(world, {f"repos/{REPO}/issues/comments/{n}": {"id": n, "user": {"login": "owner"}, "body": body + "\n"}})
+  return n
+
+
+@pytest.mark.parametrize("ruling, posted, extra, outcome, comment", [
+  ("accept — fine", None, None, "clean", "**Ruling:** (q1) accept — fine"),
+  ("accept", None, None, "clean", "**Ruling:** (q1) accept"),
+  ("revise — once more", None, None, "revise", "**Ruling:** (q1) revise — once more"),
+  ("accept — by phone", "**Ruling:** (q1) accept — by phone", None, "clean", None),
+  ("stop", None, None, None, "decision: ruling is none of the options: accept; revise"),
+  ("accept — fine", None, "external", None, "superegm: review rule: accept refused: external external:devin[bot]-1-1"),
+  ("accept — fine", None, "judges", None, "decision: point 5 is the owner's alone")])
+def test_the_fifth_decision_point_is_ruled_by_word_or_comment(world, monkeypatch, ruling, posted, extra, outcome, comment):
+  from test_review import record, F
+  s, card, rid = fifth_point_open(world)
+  extra == "external" and record(world, rid, 1, "external:devin[bot]", [F("external:devin[bot]", 1, 1, "medium")], card, sha="a" * 40)
+  args = ["--posted", str(by_hand(world, monkeypatch, posted, 78))] if posted else []
+  by = "judges:j1" if extra == "judges" else "owner"
+  code, out = world.run("decision", "rule", "--unit", "U01", "--decision", "q1", "--ruling", ruling, "--by", by, *args, "--runcard", card)
+  if outcome is None:
+    assert code == 1 and comment in out and foreman_of(s, "U01")["rulings"] == [] and 2 not in world.gh.comments; return
+  f = foreman_of(s, "U01")
+  assert code == 0 and f["rounds"][-1]["outcome"] == outcome and not [r for r in f["rulings"] if r["ruling"].startswith("relaunch")]
+  assert (comment is None) or world.gh.comments[2][-1]["body"].startswith(comment + "\n")
+  converged = json.loads(s.path("reviews", rid, "review.json").read_text(encoding="utf-8"))["converged"]
+  assert (converged == "by ruling R1") is (outcome == "clean") and ("U01 awaiting merge" in s.path("journal").read_text(encoding="utf-8")) is (outcome == "clean")
