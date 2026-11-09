@@ -111,7 +111,9 @@ and put the lines it prints in every goldfish's brief with the scope sentence of
 the Astra lane alongside when it is on, every reviewer recorded with `superegm review record`
 (an empty file is a record; one retry, then `--not-run`). A finding citing a line outside the
 scope is out of scope: the helper refuses it, keeps it in the round's `out_of_scope[]`, and you
-neither fix nor settle it. Between rounds, `references/resolve.md`: fix the spec, write the
+neither fix nor settle it. In normal mode, once every reviewer is recorded and before any fix,
+run `superegm review status` (below): an `acceptable: yes` line takes its exit-3 row first, while the
+bytes are the reviewed ones. Between rounds, `references/resolve.md`: fix the spec, write the
 round's dispositions in one call (one `<fid> | <disposition> | <note>` per line; a refused line
 writes nothing and is named),
 
@@ -134,7 +136,7 @@ Act on the exit code and nothing else:
 | Exit | Then |
 | --- | --- |
 | 0 | converged: step 4 |
-| 3 | open: with an `acceptable: yes` line, ask the owner first (accept, or fix as today; `references/review_loop.md` section 6): an accept is exit 0; else the next round (from round 2, each goldfish also receives the prior round's findings with their dispositions) |
+| 3 | open: with an `acceptable: yes` line in normal mode (leavemealone-mode never pauses for it), ask the owner first, before the fix (accept, or fix as today; `references/review_loop.md` section 6): an accept is exit 0; else the next round (from round 2, each goldfish also receives the prior round's findings with their dispositions) |
 | 2 | at the cap: step 5 |
 | 4 | a `fix-design` finding: `superegm approve-spec --void --review <id> --spec <spec-path>` voids the earlier approval (when there is none the defect is this spec's own: settle it `fixed` instead); fix the spec, then the next round |
 | 5 | stalled: step 6 |

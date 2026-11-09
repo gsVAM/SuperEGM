@@ -85,7 +85,8 @@ command carries no flag), and drop the units this invocation already ended. Then
 - Below the cap, before the `due <id> <n>` rows run, run `python3 '<HELPER>' review status --review '<id>' --runcard '<card>'` per
   such row and read its `acceptable:` line. In normal mode ask the owner one question, once per round, naming every acceptable unit
   with its counts (`acceptable: yes (<n> medium, <m> low)`); the owner names the units accepted, recorded with
-  `review rule --review '<id>' --ruling accept --owner --runcard '<card>'` (the unit converges by ruling), and the rest are fixed.
+  `python3 '<HELPER>' review rule --review '<id>' --ruling accept --owner --runcard '<card>'` (the unit converges by ruling);
+  the rest go to Step 3's fixing and settle before Step 2 dispatches their next round.
   The judges never accept below the cap: in leavemealone-mode nothing is asked.
 - `fix-design`: Step 4.
 

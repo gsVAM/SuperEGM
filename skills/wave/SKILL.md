@@ -86,9 +86,9 @@ Open a reference only when this file sends you to it:
    its approval); idle units come from this card alone (idle never carries over). Its lines: the
    report path, the board, `idle:`, `pending:`, `loop:`.
 4. Rule every `pending:` item first, at its decision point in
-   `references/decision_points.md` (the source names the point: `comment <id>`,
-   `launch <n>` and `closed <n>` are point 3; `review <id> round <n>` is point 1;
-   `review <id> cap` is point 2; an item reading `(point 5, …)` is point 5, by its `point`). Before asking any of them, read the issue's comments
+   `references/decision_points.md`: the record's `point`, printed as `(point <p>, <source>)`, names
+   the point, never the source's words (a point-5 decision's source is `review <id> round <n>`,
+   as point 1's is). Before asking any of them, read the issue's comments
    (`GH_HOST=github.com gh api repos/<repo>/issues/<n>/comments --paginate`): an owner's
    `**Ruling:**` already posted binds once `decision rule --posted <comment id>` records it,
    as the `ruling` bullet of `references/rulings.md` says.

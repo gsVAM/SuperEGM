@@ -174,7 +174,8 @@ findings is refused, so settle them per finding, each with its own `--posted`.
 
 ## 5. Status
 
-Ask the helper after every settle and before every round:
+Ask the helper after every settle and before every round, and in normal mode also once every
+reviewer of a round is recorded, before any fix (an `acceptable:` line is asked about at the reviewed bytes):
 
     superegm review status --review <id> --runcard <id>
 
@@ -223,8 +224,9 @@ foreman and integrate:
   `integrate`, whose mediums escalate into unit rows), ask the owner once, before a fix moves the bytes: accept, or
   fix as today. `superegm review rule --review <id> --ruling accept --owner --runcard <id>` converges the review by
   ruling with nothing settled and journals `accepted before the cap by the owner (<n> medium, <m> low)`; otherwise it
-  is refused with the blockers listed (`review rule: accept refused: high <fid>, …`). A head's accept is Decision
-  point 5 of the wave skill (`--decision <id>`). The owner's word alone: the judges never accept below the cap,
+  is refused with the blockers listed (`review rule: accept refused: high <fid>, …`). A head's accept is applied
+  only through the wave skill's Decision point 5 (`decision rule`), never by `review rule` typed alone. An early
+  accept holds its round alone: a later round, or a blocker recorded into it since, reopens the review. The owner's word alone: the judges never accept below the cap,
   and in leavemealone-mode nothing pauses for it.
 - A review may instead be **stalled** (section 5), which ends the invocation for that artifact
   and nothing else.
