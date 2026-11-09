@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23).
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
@@ -193,7 +193,7 @@ class Store:
            "units": "handoff_units.json", "bodies": "handoff_bodies.md"}
   # The Interfaces block's longer names for the same kinds.
   ALIASES = {"handoff_plan": "plan", "handoff_units": "units", "handoff_bodies": "bodies", "wave_report": "report"}
-  KEYED = ("unit", "foreman", "launches", "worktrees", "review", "orient_unit")
+  KEYED = ("unit", "foreman", "launches", "worktrees", "review", "orient_unit", "driver")
   LEVEL = ("approvals", "handoffs")  # always at the store level
   SHARED = ("reviews", "judges", "questions")  # at the store level for a spec review's id, else the handoff's
 
@@ -263,6 +263,9 @@ class Store:
     if kind == "launches":  # `<unit>.json`, a `<unit>_r<n>_<file>` or the `<unit>_r<n>_bin/` directory
       name = parts[0] if "." in parts[0] or parts[0].endswith("_bin") else f"{parts[0]}.json"
       return base.joinpath("launches", name, *parts[1:])
+    if kind == "driver":  # `<handoff>.json`, a tick's launches, or a `<handoff>_r<n>.log` file
+      name = parts[0] if "." in parts[0] else f"{parts[0]}.json"
+      return base.joinpath("driver", name, *parts[1:])
     if kind == "review":
       number = parts[1] if parts[1].startswith("pr") else f"pr{parts[1]}"
       return base.joinpath("review", parts[0], number, *parts[2:])
@@ -572,6 +575,50 @@ def run_git(args, cwd: Path, check=True) -> str:
 def git_toplevel(path: Path) -> Path:
   folder = path if path.is_dir() else path.parent
   return Path(run_git(["rev-parse", "--show-toplevel"], folder).strip())
+
+
+REGISTRY_KEYS = ("repo", "root", "artifacts_dir")
+
+
+def registry_path() -> Path:
+  return Path.home() / ".superegm" / "registry.json"
+
+
+def load_registry() -> list:
+  """`~/.superegm/registry.json` (spec section 11.2): one `{repo, root, artifacts_dir}` per registered store;
+  [] when absent. Unknown keys stop."""
+  path = registry_path()
+  if not path.is_file():
+    return []
+  try:
+    entries = json.loads(read_text(path))
+  except ValueError as error:
+    raise HandoffError(f"registry: {path} is not JSON ({error})") from None
+  if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
+    raise HandoffError(f"registry: {path} is not a list of entries")
+  for entry in entries:
+    unknown = sorted(set(entry) - set(REGISTRY_KEYS))
+    if unknown:
+      raise HandoffError(f"registry: unknown key {unknown[0]}")
+  return entries
+
+
+def boot_id() -> str:
+  """The machine's boot id (spec section 11.2): `kern.bootsessionuuid`, else Linux's `boot_id`, else `unknown`;
+  never the boot time, which a clock step moves."""
+  try:
+    done = subprocess.run(["sysctl", "-n", "kern.bootsessionuuid"], capture_output=True, text=True, timeout=10)
+    if done.returncode == 0 and done.stdout.strip():
+      return done.stdout.strip()
+  except (OSError, subprocess.SubprocessError):
+    pass
+  try:
+    held = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
+    if held:
+      return held
+  except OSError:
+    pass
+  return "unknown"
 
 
 class GhError(Exception):
@@ -1882,7 +1929,7 @@ def run_terminated(folder) -> bool:
 SUBCOMMANDS = ("init", "runcard", "approve_spec", "graph", "scan", "review", "gate", "dry_run", "apply",
                "verify", "status", "launch", "launch_builder", "record_launch", "foreman", "prepare",
                "collect", "tdd_order", "decide", "decision", "interrupt", "clean", "report", "close", "judges",
-               "review_plan", "orient", "doctor", "builder_token", "inbox")
+               "review_plan", "orient", "doctor", "builder_token", "inbox", "register", "driver")
 
 
 def add_parser(subparsers, name, help_text, *, runcard=True):
