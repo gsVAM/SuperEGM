@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19).
+# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the five informational driver lines (U24).
 
 """superegm doctor: one line per wave prerequisite, `ok` or the refusal `launch` or `launch-builder`
 would give; read-only, no run card."""
@@ -17,7 +17,7 @@ from superegm.launch import app_login, builder_login, origin_problems, protectio
 from superegm.launch_builder import SENTINEL, UNSET, launched_pairs, profile_problem
 
 WRITES = frozenset()  # doctor writes nothing
-INFORMATIONAL = ("graphify", "scanning", "astra", "merge")  # lines that never fail the exit
+INFORMATIONAL = ("graphify", "scanning", "astra", "merge", "driver", "sleep", "root", "env", "notify")  # lines that never fail the exit
 MERGE = ("gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset "
          "restricts updates to config.owners)")
 
@@ -49,7 +49,8 @@ def checks(config, repo_root, token):
   On the App path: owner, origin, credential, key, openssl, artifacts_dir, app, permissions, token,
   installation, scanning, protection, merge, profile, gh, environment, graphify, astra; the four App lines are
   absent after a failing key or openssl. The environment line is absent after a failing gh line; graphify,
-  astra, scanning and merge are informational and never fail."""
+  astra, scanning and merge are informational and never fail. The five driver lines (driver, sleep, root, env,
+  notify) close every form, informational too."""
   repo, base, owners, team, app = config["repo"], config["base"], config["owners"], config["owner_team"], config["builder"]["app"]
   lines, found = [], {}
 
@@ -150,7 +151,84 @@ def checks(config, repo_root, token):
   lines.append(("graphify", f"ok ({graphify})" if graphify else "not on PATH (informational)"))
   runner = runner_path()
   lines.append(("astra", f"ok ({runner})" if runner else "not installed (heads will record not run)"))
+  lines.extend(driver_lines(config))
   return lines
+
+
+def driver_lines(config):
+  """The five informational lines of the owner's timer (spec section 11.2): `driver:`, `sleep:`, `root:`, `env:`
+  and `notify:`."""
+  from superegm import driver
+  from superegm.launch_builder import HELPER
+  lines, helper, mine = [], driver.plist_helper(), str(HELPER.parents[3])
+  if helper is None:
+    lines.append(("driver", "not installed"))
+  elif helper != str(HELPER):
+    lines.append(("driver", f"stale ({driver.helper_root(helper)}; the env profile's root {mine})"))
+  else:
+    lines.append(("driver", f"installed ({timer_minutes(driver)} min) at {mine}"))
+  lines.append(("sleep", sleep_setting()))
+  entry = next((e for e in registry_entries() if Path(e["artifacts_dir"]).expanduser().resolve()
+                == Path(config["artifacts_dir"]).expanduser().resolve()), None)
+  if entry is None:
+    lines.append(("root", "not registered"))
+  else:
+    lines.append(("root", "ok" if driver.root_ok(entry["root"], entry["artifacts_dir"])
+                  else f"{entry['root']} is not a worktree of {entry['repo']}"))
+  lines.append(("env", env_setting(driver.env_file())))
+  hook = Path.home() / ".superegm" / "notify"
+  lines.append(("notify", f"ok ({core.sha256_file(hook)})" if hook.is_file() else "absent"))
+  return lines
+
+
+def timer_minutes(driver):
+  """The installed interval: the plist's `StartInterval` or the timer's `OnUnitActiveSec`, in minutes."""
+  import plistlib
+  try:
+    if driver.plist_path().is_file():
+      return int(plistlib.loads(driver.plist_path().read_bytes()).get("StartInterval", 0)) // 60
+    for line in core.read_text(driver.timer_path()).splitlines():
+      if line.startswith("OnUnitActiveSec="):
+        return int(line.split("=", 1)[1].strip().removesuffix("min"))
+  except (OSError, ValueError, plistlib.InvalidFileException):
+    pass
+  return "?"
+
+
+def sleep_setting():
+  pmset = shutil.which("pmset")
+  if not pmset:
+    return "not reported"
+  try:
+    out = subprocess.run([pmset, "-g"], capture_output=True, text=True, timeout=10).stdout
+  except (OSError, subprocess.SubprocessError):
+    return "not reported"
+  for line in out.splitlines():
+    words = line.split(None, 1)
+    if words and words[0] == "sleep":
+      return words[1].strip() if len(words) > 1 else "not reported"
+  return "not reported"
+
+
+def registry_entries():
+  try:
+    return core.load_registry()
+  except core.HandoffError:
+    return []
+
+
+def env_setting(path: Path) -> str:
+  if not path.is_file():
+    return "absent"
+  if path.stat().st_mode & 0o077:
+    return "readable by others"
+  keys = {line.split("=", 1)[0].strip() for line in core.read_text(path).splitlines() if "=" in line and not line.lstrip().startswith("#")}
+  for key in ("PATH", "CLAUDE_CONFIG_DIR"):
+    if key not in keys:
+      return f"missing {key}"
+  if not keys & {"SUPEREGM_APP_KEY", "SUPEREGM_BUILDER_TOKEN"}:
+    return "missing SUPEREGM_APP_KEY or SUPEREGM_BUILDER_TOKEN"
+  return "ok"
 
 
 def environment_problem(repo_root: Path, gh: str, app: bool):
