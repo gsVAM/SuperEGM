@@ -3,6 +3,7 @@
 
 """U35: accept below the cap (`review rule --ruling accept --owner` on an acceptable round, its refusals)."""
 
+import json
 import pytest
 
 from test_review import opened, record, head_round, F, A, rule, status, rjson, hstore, move
@@ -156,3 +157,94 @@ def test_a_head_accept_whose_post_failed_reruns(world, monkeypatch):
   assert [r["decision"] for r in f["rulings"]] == ["q1"] and f["rounds"][-1]["outcome"] == "clean"
   assert [r["ruling"] for r in head_rulings(s, rid)] == ["accept"]
   assert s.path("journal").read_text(encoding="utf-8").count("U01 awaiting merge") == 1
+
+
+def test_a_lapsed_accept_stays_lapsed_at_the_cap(world):
+  """PR #105 round 2 (astra-2-1, change-review-2-1, codebase-details-2-1): an early accept a later round lapsed never
+  comes back: at the cap the landed point-2 question stands, `continue` is ruled, and the lapse is journaled."""
+  spec, cid, rid = opened(world, "plan")
+  recorded(world, rid, cid, [F("readiness", 1, 1, "medium")])
+  assert rule(world, rid, "accept", cid)[0] == 0
+  for n in range(2, 6):
+    recorded(world, rid, cid, [F("readiness", n, 1, "high")], n)
+  assert status(world, rid, cid)[0] == 2
+  assert rule(world, rid, "continue", cid)[0] == 0
+  assert "R1 accept lapsed" in hstore(world).path("journal").read_text(encoding="utf-8")
+
+
+def test_a_lapsed_accept_is_not_the_verdict_of_a_later_clean_round(world):
+  """PR #105 round 2 (codebase-details-2-2): a later clean round converges by itself, never by the lapsed accept."""
+  spec, cid, rid = opened(world, "plan")
+  recorded(world, rid, cid, [F("readiness", 1, 1, "medium")])
+  assert rule(world, rid, "accept", cid)[0] == 0
+  recorded(world, rid, cid, [], n=2)
+  assert status(world, rid, cid)[0] == 0
+  assert "converged yes" in world.run("review", "status", "--review", rid, "--runcard", cid)[1]
+  assert (rjson(world, rid)["converged"], rjson(world, rid)["converged_round"]) == ("yes", 2)
+
+
+def moved_snapshot(s, head):
+  import json
+  state = json.loads(s.path("state").read_text(encoding="utf-8"))
+  state["status"]["units"]["U01"]["head"] = head
+  s.path("state").write_text(json.dumps(state), encoding="utf-8")
+
+
+def test_review_status_prints_no_acceptable_line_on_a_moved_head(world):
+  """PR #105 round 2 (astra-2-4, codebase-details-2-4): the line is printed at the reviewed head alone."""
+  from test_wave import fifth_point_open
+  s, card, rid = fifth_point_open(world)
+  assert "acceptable: yes (1 medium, 0 low)" in world.run("review", "status", "--review", rid, "--runcard", card)[1]
+  moved_snapshot(s, "b" * 40)
+  assert "acceptable:" not in world.run("review", "status", "--review", rid, "--runcard", card)[1]
+
+
+def test_a_head_accept_reads_the_pull_requests_head_afresh(world):
+  """PR #105 round 2 (astra-2-2): the saved snapshot still says the reviewed head, the pull request has moved."""
+  from conftest import make_pr
+  from test_wave import fifth_point_open, foreman_of
+  s, card, rid = fifth_point_open(world)
+  make_pr(world.gh, 70, "b" * 40)
+  code, out = rule_fifth(world, card)
+  assert code == 1 and "review rule: the reviewed head moved: revise" in out
+  assert foreman_of(s, "U01")["rulings"] == [] and head_rulings(s, rid) == []
+
+
+def failed_accept(world, monkeypatch, card):
+  import superegm
+  real = superegm.gh
+
+  def failing(args, *a, **kw):
+    if args[:2] == ["issue", "comment"]:
+      raise superegm.GhError(args, 1, "", "HTTP 502")
+    return real(args, *a, **kw)
+  monkeypatch.setattr(superegm, "gh", failing)
+  with pytest.raises(superegm.GhError):
+    rule_fifth(world, card)
+  monkeypatch.setattr(superegm, "gh", real)
+
+
+def test_a_rerun_accept_is_refused_once_the_pull_request_moved(world, monkeypatch):
+  """PR #105 round 2 (astra-2-3): the accept a failed post left given is checked against the head again on the rerun."""
+  from conftest import make_pr
+  from test_wave import fifth_point_open, foreman_of
+  s, card, rid = fifth_point_open(world)
+  failed_accept(world, monkeypatch, card)
+  make_pr(world.gh, 70, "b" * 40)
+  code, out = rule_fifth(world, card)
+  assert code == 1 and "review rule: the reviewed head moved: revise" in out and foreman_of(s, "U01")["rulings"] == []
+
+
+def test_a_revise_after_a_failed_accept_withdraws_the_accept(world, monkeypatch):
+  """PR #105 round 2 (change-review-2-2): the owner's rerun with `revise` lapses the accept the failed call gave."""
+  from test_wave import fifth_point_open, foreman_of
+  s, card, rid = fifth_point_open(world)
+  failed_accept(world, monkeypatch, card)
+  code, out = world.run("decision", "rule", "--unit", "U01", "--decision", "q1", "--ruling", "revise — once more",
+                        "--by", "owner", "--runcard", card)
+  assert code == 0, out
+  f = foreman_of(s, "U01")
+  assert [r["decision"] for r in f["rulings"]] == ["q1"] and f["rounds"][-1]["outcome"] == "revise"
+  assert status(world, rid, card)[0] == 3
+  assert json.loads(s.path("reviews", rid, "review.json").read_text(encoding="utf-8"))["converged"] == "no"
+  assert "R1 accept lapsed" in s.path("journal").read_text(encoding="utf-8")

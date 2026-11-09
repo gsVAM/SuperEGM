@@ -1406,6 +1406,7 @@ def test_the_fifth_decision_point_opens_on_a_head(world):
 def fifth_point_open(world):
   """Step 4's arrangement through its `decision open --point 5`: the store, the wave card and the head review's id."""
   card = open_wave_card(world); s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "launches": [{"round": 1, "status": "exited 0"}]})
+  make_pr(world.gh, 70, "a" * 40)
   rid = head_review(world, s, card)
   code, out = world.run("decision", "open", "--unit", "U01", "--point", "5", "--question", question(world, "one medium remains"), "--source", f"review {rid} round 1", "--runcard", card)
   assert code == 0, out
