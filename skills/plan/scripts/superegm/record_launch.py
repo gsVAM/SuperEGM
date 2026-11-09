@@ -14,9 +14,9 @@ SKILLS = frozenset(["wave"])  # the skills whose card this subcommand accepts
 
 
 def register(subparsers):
-  p = core.add_parser(subparsers, "record-launch", "record a builder launch, or with --exit the exit its exit file holds")
+  p = core.add_parser(subparsers, "record-launch", "record a builder launch's exit, the code its exit file holds (launch-builder records the launch)")
   p.add_argument("--unit", required=True)
-  p.add_argument("--exit", type=int, help="the code the launched command's exit file holds")
+  p.add_argument("--exit", type=int, help="the code the launched command's exit file holds; required")
   p.set_defaults(run=run, writes=WRITES)
 
 

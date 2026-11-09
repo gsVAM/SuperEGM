@@ -450,9 +450,14 @@ def load_card(store: Store, id: str) -> dict:
 def open_runcard(store: Store, skill: str, artifact: str, parent=None, mode=None) -> str:
   """Open `<skill>-<6 hex>-<n>` (spec section 7): the hex is the store's handoff's, else (a card
   preceding any handoff, at the store level) the 6 hex of the spec slug (the parent card's, else
-  the artifact's stem), counted per skill and hex; a legacy store keeps `<skill>-<n>`. Every open
-  card of the same skill and artifact is marked interrupted first. `artifact` is stored resolved
-  when it is a file; the card records the handoff it resolved."""
+  the artifact's stem), counted per skill and hex; a legacy store keeps `<skill>-<n>`. `artifact` is
+  stored resolved when it is a file; the card records the handoff it resolved, and a top-level `wave`
+  card also its `boot_id` and `driver_card` (`SUPEREGM_RUNCARD` under `SUPEREGM_ROLE=driver`, else
+  None). The card is written first; then a top-level card of the six `GUARDED_SKILLS` (a `wave` under
+  `SUPEREGM_ROLE=driver` excepted) is refused with `TICK_LIVE` while `tick_live` holds, its own card
+  marked interrupted and every other card left untouched (spec section 11.2, U24); only after that is
+  every open card of the same skill and artifact marked interrupted, the artifacts compared rebased
+  onto the working directory's checkout, one spec being one artifact in every worktree."""
   if parent is not None and not store.path("runcards", parent).is_file():
     raise HandoffError(f"runcard: parent {parent} not found")
   path = Path(artifact).expanduser()

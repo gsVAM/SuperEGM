@@ -92,12 +92,13 @@ def unit_view(state: dict, uid: str) -> dict:
 
 
 def wave_number(st, rid: str, card: dict) -> int:
-  """The card's ordinal by `opened_at` among its handoff's top-level `wave` cards on the same artifact."""
+  """The card's ordinal by `opened_at` among its handoff's top-level `wave` cards on the same artifact, one spec
+  being one artifact in every worktree of the repository (`core.here`, as `require_runcard` reads it, U24)."""
   folder = st.path("runcards", rid).parent  # the card's own `runcards/`: its handoff's (spec section 7)
-  cards = []
+  cards, mine = [], str(core.here(card["artifact"]))
   for other in folder.glob("*.json"):
     data = json.loads(core.read_text(other))
-    if data["skill"] == "wave" and data["artifact"] == card["artifact"] and not data["parent"]:
+    if data["skill"] == "wave" and str(core.here(data["artifact"])) == mine and not data["parent"]:
       cards.append((data["opened_at"], other.stem))
   return sorted(cards).index((card["opened_at"], rid)) + 1
 

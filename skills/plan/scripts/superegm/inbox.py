@@ -3,7 +3,9 @@
 
 """superegm inbox [--all] [--json] [--handoff <id>]: one line per item that needs the owner across the
 store's open handoffs, read-only and with no run card; superegm notify --runcard <id>: the owner's
-~/.superegm/notify hook run once with the lines new since `state.json.notified`."""
+~/.superegm/notify hook run once with the lines new since the last notify, a line being new when neither
+`state.json.notified` nor `driver/<handoff>.json`'s `notified` holds it; the caller's set is rewritten,
+`state.json`'s under a `wave` card, `driver/<handoff>.json`'s under a `driver` card (U24)."""
 
 import calendar
 import json
