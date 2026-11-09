@@ -409,6 +409,16 @@ def test_launch_frees_the_slot_of_a_unit_pending_a_decision(world, monkeypatch):
   put(s.path("foreman", "U07"), json.dumps({**data, "rulings": [{"decision": "q1", "ruling": "relaunch"}]})); assert "in flight: U07, U08" in world.run("launch", "--runcard", card)[1]
 
 
+def test_launch_reads_a_partly_ruled_owner_decision_as_pending(world, monkeypatch):
+  s, card, hid, _ = seed(world, units=("U07", "U08"), max_in_flight=1); monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert "marked: U07" in world.run("launch", "--runcard", card)[1]; launched(s, "U07", "exited 0")
+  owner = {"id": "q1", "point": 1, "source": "launch 1", "question": "owner: f1 f2", "options": ["f1 allowed", "f2 allowed"]}
+  data = {"dispatch_id": "d1", "rounds": [], "decisions": [owner], "rulings": [{"decision": "q1", "ruling": "f1 — fine"}]}; put(s.path("foreman", "U07"), json.dumps(data))
+  out = world.run("launch", "--runcard", card)[1]; assert "in flight: none" in out and "marked: U08" in out
+  put(s.path("foreman", "U07"), json.dumps({**data, "rulings": data["rulings"] + [{"decision": "q1", "ruling": "f2 — fine"}]}))
+  assert "in flight: U07, U08" in world.run("launch", "--runcard", card)[1]
+
+
 def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monkeypatch, spawn_fake):
   s, card, hid, bodies = seed(world)
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
