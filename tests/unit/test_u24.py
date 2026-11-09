@@ -160,6 +160,21 @@ def test_no_wave_passage_asks_under_the_driver_role(path, needle):
   text = " ".join((ROOT / path).read_text().split()); assert needle in text, (path, needle)
 
 
+@pytest.mark.parametrize("path, needle", [
+  ("skills/plan/scripts/superegm/launch.py", "its exit file, the owner's typed `interrupted` or the boot-id proof's `interrupted (reboot)`"),  # codebase-details-3-1
+  ("skills/plan/scripts/superegm/status.py", "`<uid> ready` for a unit the read finds ready and the saved `ready` lacks"),  # codebase-details-3-2
+  ("skills/plan/scripts/superegm/status.py", "a `status word=` event by a login no card records as a builder"),
+  ("skills/plan/scripts/superegm/status.py", "a stopped unit's threads"),
+  ("skills/plan/scripts/superegm/status.py", "backed-off launches dropped first"),
+  ("skills/plan/scripts/superegm/driver.py", "an open top-level `wave` card of any open handoff of the store, typed or a tick's, or an open `plan`, `file`, `integrate`, `review-plan` or `orient` card of this handoff"),  # codebase-details-3-3
+  ("skills/driver/SKILL.md", "--permission-mode bypassPermissions --output-format json"),  # codebase-details-3-4
+  ("skills/driver/SKILL.md", "no allow-list and no prompt, under the credential `~/.superegm/env` names"),
+  ("skills/driver/SKILL.md", "each value literal: no quotes, no `$VAR`, no `~`"),  # codebase-details-3-5
+  ("skills/plan/scripts/superegm/driver.py", "each value literal (no quotes stripped, no `$VAR` or `~` expanded)")])
+def test_the_round_3_docs_name_what_the_code_does(path, needle):
+  text = " ".join((ROOT / path).read_text().split()); assert needle in text, (path, needle)
+
+
 def test_a_failed_boot_id_lookup_is_no_reboot():
   assert superegm.rebooted({"boot_id": "boot-1"}, "unknown") is False and superegm.rebooted({"boot_id": "boot-0"}, "boot-1") is True
 
