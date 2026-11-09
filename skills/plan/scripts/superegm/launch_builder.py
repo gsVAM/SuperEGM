@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch, started
 detached and recorded `running`."""
@@ -11,6 +11,7 @@ import re
 import shlex
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 import superegm as core
@@ -57,6 +58,11 @@ def prepare(args, card):
   problem = refusal(st, state, config, unit, rnd, builder)
   if problem:
     raise core.HandoffError(problem)
+  dirs = plugin_dirs(builder_config["plugins"], elephant_profile())  # each listed plugin's user-scope directory, version and hooks
+  mcp_file = st.path("launches", f"{unit}_r{rnd}_mcp.json")
+  for value in (*(d["dir"] for d in dirs), mcp_file):  # command_line's quote check, before any worktree or store write
+    if "'" in str(value):
+      raise core.HandoffError(f"{value} holds a quote and cannot go on the command line")
   gh, app = tool("gh"), builder_config["app"]
   if app:  # the App path: the scripts bake openssl and the key variable; the bin directory reaches the unquotable allow-list
     openssl = tool("openssl")
@@ -88,7 +94,7 @@ def prepare(args, card):
   reviews = core.gh_pages(f"repos/{repo}/pulls/{pr}/reviews") if pr else []
   audit = AUDIT_LINE.format(owner=record["launched"].get("by", "unknown"),  # a pre-upgrade mark records no login
                             runcard=args.runcard, unit=unit, handoff=st.handoff_id)
-  text = prompt_text(number, unit, issue_body, core.read_text(ORDERS).replace("{{gh}}", launched_gh), orient_text, comments, reviews, pr, builder, audit, pr_block,
+  text = prompt_text(number, unit, issue_body, orders_text(tools, launched_gh, builder_config["max_subagent_calls"]), orient_text, comments, reviews, pr, builder, audit, pr_block,
                      spec_range=range_text, owners=config.get("owners") or [], foreman=core.load_foreman(st, unit))
   worktree = add_worktree(handoff.repo_root, st, unit, rnd, branch, pr)
   prompt = st.path("launches", f"{unit}_r{rnd}_prompt.md")
@@ -96,20 +102,52 @@ def prepare(args, card):
   if app:
     write_bin(st, unit, rnd, config, openssl, gh)
   managed = managed_plugins(Path(config["builder"]["profile_dir"]).expanduser() / "plugins")
-  core.atomic_write(st.path("launches", f"{unit}_r{rnd}_managed.json"), json.dumps(managed) + "\n")
+  core.atomic_write(mcp_file, json.dumps({"mcpServers": builder_config["mcp"]}, indent=2) + "\n")
+  core.atomic_write(st.path("launches", f"{unit}_r{rnd}_plugins.json"),
+                    json.dumps({"plugins": dirs, "managed": managed, "mcp": sorted(builder_config["mcp"])}, indent=2) + "\n")
   core.journal(st, f"{unit} launch {rnd} prepared" + (f" (managed plugins: {', '.join(managed)})" if managed else ""))
   result = st.path("launches", f"{unit}_r{rnd}_result.json")
-  line = command_line(config, worktree, prompt, result, args.runcard, tools, launched_gh, identity["login"], identity["email"])
+  session_id = str(uuid.uuid4())  # the session's transcript `projects/<slug>/<id>.jsonl`, read at the exit (U27)
+  line = command_line(config, worktree, prompt, result, args.runcard, tools, launched_gh, identity["login"], identity["email"],
+                      [d["dir"] for d in dirs], mcp_file, session_id=session_id)
   # the one behaviour (amendment 10): the wrapper started detached, then the launch recorded `running`
   pid = start_detached(["/bin/sh", "-c", line], st.path("launches", f"{unit}_r{rnd}.log"), dict(os.environ))
   launches = load_launches(st, unit)
   launches.append({"round": rnd, "worktree": str(worktree), "branch": branch, "started_at": core.now_iso(), "status": "running",
-                   "result_file": str(result), "prompt_sha256": core.sha256_file(prompt), "boot_id": core.boot_id(), "pid": pid, "command": line})
+                   "result_file": str(result), "prompt_sha256": core.sha256_file(prompt), "boot_id": core.boot_id(), "pid": pid, "command": line, "session_id": session_id})
   core.atomic_write(st.path("launches", unit), {"launches": launches})
   done = f"{unit} launch {rnd} running (pid {pid})"
   core.journal(st, done)
   print(done)
   return 0
+
+
+SKILL_RULE_RE = re.compile(r"^Skill\(([^\s()]+)(?: \*)?\)$")  # `Skill(<name>)` or `Skill(<name> *)` (amendment 7)
+
+
+def skill_names(tools: list) -> list[str]:
+  """The skills an allow-list's `Skill(...)` rules name, once each, in the list's order."""
+  names = []
+  for entry in tools:
+    match = SKILL_RULE_RE.match(entry)
+    if match and match.group(1) not in names:
+      names.append(match.group(1))
+  return names
+
+
+SUBAGENTS_RE = re.compile(r"(?:\n<!-- subagents(?: Agent)?: [^\n]* -->)+\n")  # the two delegation lines (amendment 15)
+
+
+def orders_text(tools: list, gh: str, cap: int) -> str:
+  """`references/builder_orders.md` as one launch reads it: `{{gh}}` the launched `gh`, `{{skills}}` the skills
+  the allow-list names, `none` when it names none, and `{{subagents}}` the sentence of the `<!-- subagents Agent: -->`
+  line, `{{cap}}` filled, when the list carries `Agent`, else that of the `<!-- subagents: -->` line; both lines removed."""
+  text = core.read_text(ORDERS)
+  marker = "<!-- subagents Agent: " if "Agent" in tools else "<!-- subagents: "
+  line = next(l for l in text.splitlines() if l.startswith(marker))
+  sentence = line[len(marker):].removesuffix(" -->").replace("{{cap}}", str(cap))
+  text = SUBAGENTS_RE.sub("", text, count=1).replace("{{subagents}}", sentence)
+  return text.replace("{{gh}}", gh).replace("{{skills}}", ", ".join(skill_names(tools)) or "none")
 
 
 def start_detached(command: list, log: Path, env: dict) -> int:
@@ -160,7 +198,7 @@ def refusal(store, state, config, unit, rnd, builder):
       return f"{unit} launch {entry['round']} is not terminal"
   if rnd != len(launches) + 1:
     return f"--round {rnd} is not the next launch count ({len(launches) + 1})"
-  problem = profile_problem(Path(config["builder"]["profile_dir"]).expanduser())
+  problem = profile_problem(Path(config["builder"]["profile_dir"]).expanduser(), config["builder"]["plugins"])
   if problem:
     return problem
   issue = core.gh_json(["api", f"repos/{config['repo']}/issues/{record['number']}"]) or {}
@@ -207,9 +245,85 @@ def plugins_held(plugins):
       for bucket in synced.iterdir())
 
 
-def profile_problem(profile_dir):
-  """Spec sections 4 and 11: the builder profile exists, holds no CLAUDE.md, no plugins (`plugins_held`) and no
-  hooks (a `settings.json` with a `hooks` key)."""
+def elephant_profile() -> Path:
+  """The elephant's own Claude Code profile: `CLAUDE_CONFIG_DIR` when set, else `~/.claude`."""
+  configured = os.environ.get("CLAUDE_CONFIG_DIR")
+  return Path(configured).expanduser() if configured else Path.home() / ".claude"
+
+
+def hook_events(plugin_dir: Path) -> list:
+  """The sorted union of the `hooks` keys of the plugin's `hooks/hooks.json` (Claude Code loads it by default) and of
+  the hook files its manifest names besides (a path or a list of paths relative to its directory, or an inline
+  object); an absent or non-JSON file is ignored."""
+  def load(path):
+    try:
+      data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+      return None
+    return data
+  manifest = load(plugin_dir / ".claude-plugin/plugin.json")
+  named = manifest.get("hooks") if isinstance(manifest, dict) else None
+  named = named if isinstance(named, list) else [named] if named else []
+  events = set()
+  for item in ["./hooks/hooks.json", *named]:
+    data = item if isinstance(item, dict) else load(plugin_dir / item) if isinstance(item, str) else None
+    hooks = data.get("hooks") if isinstance(data, dict) else None
+    if isinstance(hooks, dict):
+      events.update(hooks)
+  return sorted(events)
+
+
+def plugin_dirs(plugins: list, profile_dir: Path) -> list[dict]:
+  """One `{id, version, dir, hooks}` per listed plugin id, in order, from the first `scope: user` entry of
+  `<profile_dir>/plugins/installed_plugins.json` (enabled there or not; spec section 11.1); `dir` is its
+  `installPath`, `hooks` its hook events. A listed id with no `user` entry is refused; `[]` reads no file."""
+  if not plugins:
+    return []
+  try:
+    data = json.loads((Path(profile_dir) / "plugins/installed_plugins.json").read_text(encoding="utf-8"))
+  except (OSError, ValueError):
+    data = {}
+  entries = data.get("plugins") if isinstance(data, dict) else None
+  entries = entries if isinstance(entries, dict) else {}
+  found = []
+  for pid in plugins:
+    user = next((e for e in entries.get(pid) or [] if isinstance(e, dict) and e.get("scope") == "user" and isinstance(e.get("installPath"), str)), None)
+    if user is None:
+      raise core.HandoffError(f"plugin {pid} not installed")
+    found.append({"id": pid, "version": user.get("version"), "dir": user["installPath"], "hooks": hook_events(Path(user["installPath"]))})
+  return found
+
+
+def profile_problem(profile_dir: Path, plugins=(), elephant: Path | None = None) -> str | None:
+  """Spec sections 4 and 11: the builder profile exists, holds no CLAUDE.md, no plugins (`plugins_held`), no
+  hooks (a `settings.json` with a `hooks` key), no `skills/` or `commands/` directory, and a `settings.json` with
+  `disableClaudeAiConnectors` exactly true (amendment 7); each listed plugin id has a `user` entry in the elephant
+  profile (`elephant`, else `elephant_profile()`) and is not among the builder profile's managed plugins."""
+  problem = landed_problem(profile_dir)
+  if problem:
+    return problem
+  for folder in ("skills", "commands"):
+    if (profile_dir / folder).is_dir():
+      return f"builder profile {profile_dir} holds {folder}/"
+  try:
+    data = json.loads((profile_dir / "settings.json").read_text(encoding="utf-8"))
+  except (OSError, ValueError):
+    data = None
+  if not isinstance(data, dict) or data.get("disableClaudeAiConnectors") is not True:
+    return f"builder profile {profile_dir} lacks disableClaudeAiConnectors"
+  managed = managed_plugins(profile_dir / "plugins") if plugins else []
+  for pid in plugins:
+    try:
+      plugin_dirs([pid], elephant or elephant_profile())
+    except core.HandoffError as error:
+      return str(error)
+    if pid in managed:
+      return f"plugin {pid} managed in the builder profile"
+  return None
+
+
+def landed_problem(profile_dir):
+  """The checks before amendment 7: the profile exists and holds no CLAUDE.md, plugins or hooks."""
   plugins, settings = profile_dir / "plugins", profile_dir / "settings.json"
   if not profile_dir.is_dir():
     return f"builder profile {profile_dir} does not exist"
@@ -240,10 +354,10 @@ def allowed_tools(configured, branch, body_text, gh):
   """The configured allow-list with its `gh` prefixes rewritten to `gh`'s absolute path (a bare `gh …`
   is refused, so no PATH order is assumed), plus a push prefix for the unit's own branch and
   `Bash(<first word>:*)` for the first word of every `&&`/`;` segment of every command the body runs (U25's D1 (a));
-  `Agent`, `Skill` and unrestricted Bash are refused."""
-  for entry in ("Agent", "Skill", "Bash", "Bash(*)"):
+  a bare `Skill` and unrestricted Bash are refused; `Agent` passes, the owner's opt-in (amendment 15, U27)."""
+  for entry in ("Skill", "Bash", "Bash(*)"):
     if entry in configured:
-      raise core.HandoffError(f"allowed_tools carries {entry}: a builder never spawns, never invokes skills, never runs unrestricted Bash")
+      raise core.HandoffError(f"allowed_tools carries {entry}: a builder invokes no skill bare, never runs unrestricted Bash")
   tools = [f"Bash({gh} {t[8:]}" if t.startswith("Bash(gh ") else t for t in configured] + [f"Bash(git push origin {branch}:*)"]
   for command in body.run_commands(body_text):
     for first in segment_heads(command):
@@ -394,21 +508,29 @@ def launched_pairs(gh: str, name: str, email: str) -> list:
   return pairs
 
 
-def command_line(config, worktree, prompt, result, runcard, tools, gh, login, email):
+def command_line(config, worktree, prompt, result, runcard, tools, gh, login, email, plugin_dirs: list, mcp_file: Path,
+                 session_id: str | None = None) -> str:
   """The launched command (spec section 11): the owner's prompts and token unset, the builder profile,
+  `ENABLE_CLAUDEAI_MCP_SERVERS=false` (belt and braces over the profile's `disableClaudeAiConnectors`),
   `GH_TOKEN` as the shell variable expands (never its value) or, on the App path, the sentinel the shim
   overrides, the role and card, the launched git pairs (`gh`, the shim on the App path, as the credential
   helper by absolute path; the identity `login` and `email` from the wave card), `claude -p` on the prompt
-  file with `--setting-sources user` (the builder sits in the target repository, whose project settings
-  and SessionStart hooks it must not run: the profile's settings alone), the result and exit files."""
+  file (with `--session-id` when given) with `--setting-sources user` (the builder sits in the target repository,
+  whose project settings and SessionStart hooks it must not run: the profile's settings alone), one `--plugin-dir`
+  per listed plugin's directory, `--mcp-config <mcp_file> --strict-mcp-config` (no other MCP configuration loads),
+  the result and exit files."""
   b = config["builder"]
   pairs = launched_pairs(gh, login, email)
-  for value in (worktree, prompt, result, b["profile_dir"], b["model"], b["permission_mode"], runcard, *tools, *(v for _, v in pairs)):
+  for value in (worktree, prompt, result, b["profile_dir"], b["model"], b["permission_mode"], runcard, *tools, *(v for _, v in pairs),
+                *plugin_dirs, mcp_file, session_id or ""):
     if "'" in str(value):
       raise core.HandoffError(f"{value} holds a quote and cannot go on the command line")
   token = f"GH_TOKEN={SENTINEL}" if b["app"] else f"GH_TOKEN=\"${b['gh_token_env']}\""
   unset, env = " ".join(f"-u {k}" for k in UNSET), " ".join(f"{k}='{v}'" for k, v in pairs)
-  return (f"cd '{worktree}' && env {unset} CLAUDE_CONFIG_DIR='{b['profile_dir']}' {token} "
+  session = f" --session-id '{session_id}'" if session_id else ""
+  dirs = "".join(f"--plugin-dir '{d}' " for d in plugin_dirs)
+  return (f"cd '{worktree}' && env {unset} CLAUDE_CONFIG_DIR='{b['profile_dir']}' ENABLE_CLAUDEAI_MCP_SERVERS=false {token} "
           f"SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{runcard}' {env} "
-          f"claude -p \"$(cat '{prompt}')\" --model '{b['model']}' --permission-mode '{b['permission_mode']}' --setting-sources user "
+          f"claude -p \"$(cat '{prompt}')\"{session} --model '{b['model']}' --permission-mode '{b['permission_mode']}' --setting-sources user "
+          f"{dirs}--mcp-config '{mcp_file}' --strict-mcp-config "
           f"--allowedTools '{','.join(tools)}' --output-format json > '{result}'; echo $? > '{result}.exit'")

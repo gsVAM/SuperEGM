@@ -91,8 +91,11 @@
       "Bash(gh pr create:*)",
       "Bash(gh pr edit:*)",
       "Bash(gh pr comment:*)",
-      "Bash(gh issue comment:*)"
+      "Bash(gh issue comment:*)",
+      "Bash(gh pr view:*)",
+      "Bash(pytest:*)"
     ],
+    "max_subagent_calls": 12,
     "app": {
       "app_id": 5621384,
       "slug": "superegm-builder",

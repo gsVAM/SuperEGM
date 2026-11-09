@@ -58,6 +58,12 @@ def which(monkeypatch):
   monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: {"gh": "/usr/local/bin/gh", "openssl": OPENSSL}.get(cmd))
 
 
+# U27's helpers; imported after the two autouse fixtures, which `test_u27` imports back
+from test_u27 import elephant, PONY, MCP, THREE  # noqa: E402
+from superegm import launch_builder  # noqa: E402
+from superegm.launch_builder import skill_names, orders_text  # noqa: E402
+
+
 SPAWNED = []  # (command, log, env) of every launch `spawn_fake` stood in for
 
 
@@ -127,6 +133,7 @@ def seed(world, units=(UNIT,), max_in_flight=5, workflow="on: [push, pull_reques
   repo, s = world.repo, store(world.repo)
   spec = next(repo.glob("docs/**/*.md")).resolve()
   profile = repo.parent / "profile"; profile.mkdir(exist_ok=True)
+  (profile / "settings.json").write_text(json.dumps({"disableClaudeAiConnectors": True, "syncClaudeAiPlugins": False}), encoding="utf-8")
   cfg = json.loads((repo / ".superegm/config.json").read_text(encoding="utf-8"))
   cfg["max_in_flight"], cfg["builder"], cfg["owners"] = max_in_flight, {**DEFAULT_CONFIG["builder"], "profile_dir": str(profile)}, ["owner"]
   (repo / ".superegm/config.json").write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
@@ -437,7 +444,7 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   assert git(["rev-parse", "HEAD"], wt).strip() == git(["rev-parse", "refs/superegm/base"], world.repo).strip()
   prompt_file = s.path("launches", f"{UNIT}_r1_prompt.md")
   prompt = prompt_file.read_text(encoding="utf-8")
-  orders = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8").replace("{{gh}}", "/usr/local/bin/gh")
+  orders = orders_text(DEFAULT_CONFIG["builder"]["allowed_tools"], "/usr/local/bin/gh", 12)
   assert prompt.startswith(f"# Issue #{ISSUE} — U07\n\n{world.gh.issues[ISSUE]['body']}")
   assert f"\n\n---\n\n# Builder orders\n\n{orders}" in prompt
   assert f"\n\n---\n\n# Comments on issue #{ISSUE}\n\n## owner · comment 1\n**Decision D1:** (a) five\n\n## builder-bot · comment 3\n**Deviation (other):** renamed a fixture\n\n## owner · comment 4\n**Ruling:** (3) (a) — proceed\n" in prompt
@@ -445,10 +452,11 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   cfg = json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]
   result = s.path("launches", f"{UNIT}_r1_result.json")
   pairs = " ".join(f"{k}='{v.format(gh='/usr/local/bin/gh', login='builder-bot', email='1001+builder-bot@users.noreply.github.com')}'" for k, v in PAIRS)
-  assert line.startswith(f"cd '{wt}' && env -u GIT_ASKPASS -u SSH_ASKPASS -u GITHUB_TOKEN CLAUDE_CONFIG_DIR='{cfg['profile_dir']}' GH_TOKEN=\"$SUPEREGM_BUILDER_TOKEN\" SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{card}' {pairs} claude -p "), line
-  assert f" claude -p \"$(cat '{prompt_file}')\" --model '{cfg['model']}' --permission-mode '{cfg['permission_mode']}' --setting-sources user --allowedTools '" in line, line
+  assert line.startswith(f"cd '{wt}' && env -u GIT_ASKPASS -u SSH_ASKPASS -u GITHUB_TOKEN CLAUDE_CONFIG_DIR='{cfg['profile_dir']}' ENABLE_CLAUDEAI_MCP_SERVERS=false GH_TOKEN=\"$SUPEREGM_BUILDER_TOKEN\" SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{card}' {pairs} claude -p "), line
+  mcp_file = s.path("launches", f"{UNIT}_r1_mcp.json")
+  assert f" claude -p \"$(cat '{prompt_file}')\" --session-id '{launches_of(s)[-1]['session_id']}' --model '{cfg['model']}' --permission-mode '{cfg['permission_mode']}' --setting-sources user --mcp-config '{mcp_file}' --strict-mcp-config --allowedTools '" in line, line
   tools = line.split("--allowedTools '")[1].split("'")[0].split(",")
-  assert tools == [t.replace("Bash(gh ", "Bash(/usr/local/bin/gh ") for t in cfg["allowed_tools"]] + [f"Bash(git push origin {branch}:*)", "Bash(pytest:*)"]
+  assert tools == [t.replace("Bash(gh ", "Bash(/usr/local/bin/gh ") for t in cfg["allowed_tools"]] + [f"Bash(git push origin {branch}:*)"]
   assert line.endswith(f"' --output-format json > '{result}'; echo $? > '{result}.exit'")
   assert "ghp_builder" not in out
   tree = git(["rev-parse", "refs/superegm/base^{tree}"], world.repo).strip()
@@ -515,7 +523,7 @@ def test_launch_builder_refuses_each_precondition(world, monkeypatch, spawn_fake
   if case == "own-login":
     github(world, builder="owner")
   if case == "profile-missing":
-    profile.rmdir()
+    shutil.rmtree(profile)
   if case == "profile-claude-md":
     (profile / "CLAUDE.md").write_text("x\n", encoding="utf-8")
   if case == "profile-plugins":
@@ -545,7 +553,7 @@ def test_launch_builder_appends_the_pr_block(world, monkeypatch, key, spawn_fake
     assert not s.path("worktrees", UNIT).exists() and not s.path("launches", f"{UNIT}_r1_prompt.md").exists()
     return
   assert code == 0, out
-  orders = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8").replace("{{gh}}", "/usr/local/bin/gh")
+  orders = orders_text(DEFAULT_CONFIG["builder"]["allowed_tools"], "/usr/local/bin/gh", 12)
   prompt = s.path("launches", f"{UNIT}_r1_prompt.md").read_text(encoding="utf-8")
   if key:
     assert f"\n\n---\n\n# Builder orders\n\n{orders}\n\n---\n\n# PR block\n\n<!-- coord/v1 task=7 -->\n\n\n---\n\n# " in prompt
@@ -644,8 +652,40 @@ def test_launch_builder_loads_the_builder_profile_settings_only():
   SessionStart hooks; the launched command carries `--setting-sources user`: the builder profile's settings alone (spec section 11)."""
   from superegm.launch_builder import command_line
   cfg = {"builder": {**DEFAULT_CONFIG["builder"], "profile_dir": "/p"}}
-  line = command_line(cfg, "/wt", "/prompt.md", "/result.json", "wave-0001", ["Read"], "/usr/local/bin/gh", "b", "b@x")
-  assert " --permission-mode 'acceptEdits' --setting-sources user --allowedTools 'Read' " in line, line
+  line = command_line(cfg, "/wt", "/prompt.md", "/result.json", "wave-0001", ["Read"], "/usr/local/bin/gh", "b", "b@x", [], "/m.json")
+  assert " --permission-mode 'acceptEdits' --setting-sources user --mcp-config '/m.json' --strict-mcp-config --allowedTools 'Read' " in line, line
+
+
+def test_command_line_carries_the_dirs_the_mcp_file_and_the_switch():
+  from superegm.launch_builder import command_line
+  cfg = {"builder": {**DEFAULT_CONFIG["builder"], "profile_dir": "/p"}}
+  call = lambda dirs, mcp, **kw: command_line(cfg, "/wt", "/prompt.md", "/result.json", "wave-0001", ["Read"], "/usr/local/bin/gh", "b", "b@x", dirs, mcp, **kw)
+  line = call(["/c/ponytail/5.3.3", "/c/x/1"], "/l/U07_r1_mcp.json")
+  assert " CLAUDE_CONFIG_DIR='/p' ENABLE_CLAUDEAI_MCP_SERVERS=false GH_TOKEN=" in line, line
+  assert " --setting-sources user --plugin-dir '/c/ponytail/5.3.3' --plugin-dir '/c/x/1' --mcp-config '/l/U07_r1_mcp.json' --strict-mcp-config --allowedTools 'Read' " in line, line
+  assert " --setting-sources user --mcp-config '/m.json' --strict-mcp-config --allowedTools 'Read' " in call([], "/m.json")
+  assert " --session-id 's' " in call([], "/m.json", session_id="s") and " --session-id" not in call([], "/m.json")
+
+
+@pytest.mark.parametrize("case", ["none", "listed", "missing"])
+def test_launch_builder_writes_the_mcp_file_and_the_plugins_record(world, monkeypatch, tmp_path, case):
+  s, card, hid, _ = seed(world)
+  home, d = elephant(tmp_path, monkeypatch, ["user"] if case == "listed" else ["project"], {"hooks/hooks.json": THREE})
+  cfg = json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]
+  rules = ["Skill(ponytail:ponytail)", "Skill(ponytail:ponytail *)", "mcp__context7__*"]
+  case != "none" and configure(world, builder={**cfg, "plugins": [PONY], "mcp": MCP, "allowed_tools": [*cfg["allowed_tools"], *rules]})
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder"); monkeypatch.setattr(launch_builder, "start_detached", lambda command, log, env: 4242)
+  assert world.run("launch", "--runcard", card)[0] == 0
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)
+  record, mcp, managed = (s.path("launches", f"{UNIT}_r1_{n}.json") for n in ("plugins", "mcp", "managed"))
+  if case == "missing":
+    assert code == 1 and f"launch-builder: plugin {PONY} not installed" in out and not record.exists() and not mcp.exists() and not s.path("worktrees", UNIT).exists(), out
+    return
+  listed = case == "listed"
+  assert code == 0 and not managed.exists() and json.loads(mcp.read_text(encoding="utf-8")) == {"mcpServers": MCP if listed else {}}, out
+  assert json.loads(record.read_text(encoding="utf-8")) == {"plugins": [{"id": PONY, "version": "5.3.3", "dir": str(d), "hooks": THREE}] if listed else [], "managed": [], "mcp": ["context7"] if listed else []}
+  assert f"Your skills, named by your allow-list: {'ponytail:ponytail' if listed else 'none'}. You have no subagents" in s.path("launches", f"{UNIT}_r1_prompt.md").read_text(encoding="utf-8")
+  assert skill_names(["Read", *rules, "Skill(superegm:orient)"]) == ["ponytail:ponytail", "superegm:orient"]
 
 
 @pytest.mark.parametrize("path", ["app", "account"])
@@ -673,7 +713,7 @@ from superegm.launch_builder import allowed_tools
 @pytest.mark.parametrize("configured, expect", [
   (["Read", "Edit", "Bash(git add:*)"], ["Read", "Edit", "Bash(git add:*)", "Bash(git push origin superegm/h/U07:*)", "Bash(pytest:*)"]),
   (["Bash(pytest:*)", "Read"], ["Bash(pytest:*)", "Read", "Bash(git push origin superegm/h/U07:*)"]),
-  (["Read", "Agent"], "Agent"),
+  (["Read", "Agent", "Workflow"], ["Read", "Agent", "Workflow", "Bash(git push origin superegm/h/U07:*)", "Bash(pytest:*)"]),
   (["Read", "Skill"], "Skill"),
   (["Read", "Bash"], "Bash"),
   (["Read", "Bash(*)"], "Bash(*)"),
@@ -681,7 +721,7 @@ from superegm.launch_builder import allowed_tools
 def test_allowed_tools_composition(configured, expect):
   body = BODY.replace("HID", "h").replace("UID", "U07")
   if isinstance(expect, str):
-    with pytest.raises(superegm.HandoffError, match=re.escape(f"allowed_tools carries {expect}: a builder never spawns, never invokes skills, never runs unrestricted Bash")):
+    with pytest.raises(superegm.HandoffError, match=re.escape(f"allowed_tools carries {expect}: a builder invokes no skill bare, never runs unrestricted Bash")):
       allowed_tools(configured, "superegm/h/U07", body, "/usr/local/bin/gh")
   else:
     assert allowed_tools(configured, "superegm/h/U07", body, "/usr/local/bin/gh") == expect

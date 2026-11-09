@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24).
+# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24); the informational `plugins` and `mcp` lines and the profile line's plugin refusals (U27).
 
 """superegm doctor: one line per wave prerequisite, `ok` or the refusal `launch` or `launch-builder`
 would give; read-only, no run card."""
@@ -14,11 +14,11 @@ import superegm as core
 from superegm.builder_token import app_lines, key_path, tool
 from superegm.foreman import runner_path
 from superegm.launch import app_login, builder_login, origin_problems, protection_problems
-from superegm.launch_builder import SENTINEL, UNSET, launched_pairs, profile_problem
+from superegm.launch_builder import SENTINEL, UNSET, elephant_profile, launched_pairs, plugin_dirs, profile_problem
 
 WRITES = frozenset()  # doctor writes nothing
 INFORMATIONAL = ("graphify", "scanning", "astra", "merge", "python3.12", "hooks", "core.hooksPath", "driver", "sleep", "root", "env",
-                 "notify")  # lines that never fail the exit
+                 "notify", "plugins", "mcp")  # lines that never fail the exit
 MERGE = ("gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset "
          "restricts updates to config.owners)")
 
@@ -45,12 +45,13 @@ def run(args):
 def checks(config, repo_root, token):
   """The lines after `config`: `launch`'s and `launch-builder`'s own predicates, each line `ok…` or the
   refusal they would give (a check's HandoffError or GhError text is its line). On the machine-account
-  path the order is owner, origin, token, builder, role, scopes, protection, merge, profile, gh, environment,
-  graphify, astra; the builder, role, scopes and protection lines need the token and are absent without it.
+  path the order is owner, origin, token, builder, role, scopes, protection, merge, profile, plugins, mcp, gh,
+  environment, graphify, astra; the builder, role, scopes and protection lines need the token and are absent without it.
   On the App path: owner, origin, credential, key, openssl, artifacts_dir, app, permissions, token,
-  installation, scanning, protection, merge, profile, gh, environment, graphify, astra; the four App lines are
+  installation, scanning, protection, merge, profile, plugins, mcp, gh, environment, graphify, astra; the four App lines are
   absent after a failing key or openssl. The environment line is absent after a failing gh line; graphify,
-  astra, scanning and merge are informational and never fail, as are python3.12, hooks and core.hooksPath (U25).
+  astra, scanning and merge are informational and never fail, as are python3.12, hooks and core.hooksPath (U25)
+  and plugins and mcp (U27, the profile line carrying a listed plugin's refusal).
   The five driver lines (driver, sleep, root, env, notify) close every form, informational too."""
   repo, base, owners, team, app = config["repo"], config["base"], config["owners"], config["owner_team"], config["builder"]["app"]
   lines, found = [], {}
@@ -128,6 +129,10 @@ def checks(config, repo_root, token):
     found["gh"] = tool("gh")
     return f"ok ({found['gh']})"
 
+  def plugins():  # what each launch passes by `--plugin-dir` (U27): id, version and hook events, `; `-joined
+    dirs = plugin_dirs(config["builder"]["plugins"], elephant_profile())
+    return "; ".join(f"{d['id']} {d['version']} [{', '.join(d['hooks'])}]" for d in dirs) or "none"
+
   check("owner", owner)
   check("origin", origin)
   if app:
@@ -144,7 +149,9 @@ def checks(config, repo_root, token):
     for name, fn in (("builder", builder), ("role", role), ("scopes", scopes), ("protection", protection)):
       check(name, fn)
   lines.append(("merge", MERGE))
-  check("profile", lambda: profile_problem(Path(config["builder"]["profile_dir"]).expanduser()) or "ok")
+  check("profile", lambda: profile_problem(Path(config["builder"]["profile_dir"]).expanduser(), config["builder"]["plugins"]) or "ok")
+  check("plugins", plugins)
+  check("mcp", lambda: ", ".join(sorted(config["builder"]["mcp"])) or "none")
   check("gh", gh)
   if "gh" in found:
     check("environment", lambda: environment_problem(repo_root, found["gh"], bool(app)) or "ok")

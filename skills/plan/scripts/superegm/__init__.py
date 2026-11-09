@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24).
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
@@ -94,7 +94,11 @@ DEFAULT_CONFIG = {
                 "allowed_tools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git add:*)", "Bash(git commit:*)",
                                   "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git mv:*)",
                                   "Bash(git rm:*)", "Bash(gh pr create:*)", "Bash(gh pr edit:*)",
-                                  "Bash(gh pr comment:*)", "Bash(gh issue comment:*)"],
+                                  "Bash(gh pr comment:*)", "Bash(gh issue comment:*)", "Bash(gh pr view:*)",
+                                  "Bash(pytest:*)"],
+                "plugins": [],  # <name>@<marketplace> ids, each passed by --plugin-dir (U27)
+                "mcp": {},  # mcpServers form, written to launches/<unit>_r<n>_mcp.json (U27)
+                "max_subagent_calls": 12,  # the orders' budget when allowed_tools carries Agent (U27)
                 "app": None},  # or {app_id, slug, private_key_env}: the builder as a GitHub App (spec section 11)
     "ci_wait_minutes": 30,
     "commit_trailer": "",  # appended, after a blank line, to every commit the helper makes
@@ -980,6 +984,21 @@ def load_config(repo_root: Path) -> dict:
         or not isinstance(app["private_key_env"], str):
       raise HandoffError(f"{path}: builder.app must be null or {{app_id: <int>, slug: <slug>, private_key_env: <name>}}")
     builder["app"] = app
+  if isinstance(builder, dict):
+    for key, default in (("plugins", []), ("mcp", {}), ("max_subagent_calls", 12)):
+      builder.setdefault(key, default)  # a file written before U27 lacks them
+    tools = builder.get("allowed_tools")
+    if not isinstance(tools, list) or not all(isinstance(t, str) for t in tools):
+      raise HandoffError(f"{path}: builder.allowed_tools must be a list of strings")
+    plugins = builder["plugins"]
+    if not isinstance(plugins, list) or not all(isinstance(p, str) and re.fullmatch(r"[^@\s]+@[^@\s]+", p) for p in plugins):
+      raise HandoffError(f"{path}: builder.plugins must be a list of <name>@<marketplace> ids")
+    mcp = builder["mcp"]  # the server map that goes under `mcpServers`, never a whole `.mcp.json`
+    if not isinstance(mcp, dict) or "mcpServers" in mcp or not all(isinstance(v, dict) for v in mcp.values()):
+      raise HandoffError(f"{path}: builder.mcp must be an object in mcpServers form: the server map, name to server object")
+    cap = builder["max_subagent_calls"]
+    if isinstance(cap, bool) or not isinstance(cap, int) or cap < 1:
+      raise HandoffError("config: builder.max_subagent_calls: a positive integer")
   artifacts = config["artifacts_dir"]
   if not artifacts or not Path(artifacts).is_absolute() \
       or Path(artifacts).resolve().is_relative_to(repo_root.resolve()):
