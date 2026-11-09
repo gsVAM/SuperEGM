@@ -205,6 +205,10 @@ def test_a_tick_runs_the_spec_of_the_registered_root(world, monkeypatch, tmp_pat
   assert world.run("register", "--runcard", world.open_card("driver", world.spec))[0] == 0 and world.run("driver", "tick")[0] == 0
   rel = world.spec.resolve().relative_to(world.repo.resolve())
   assert f"cd '{wt2.resolve()}' && claude -p '/superegm:wave {wt2.resolve() / rel} --handoff {hid}" in SPAWNED[-1][0][2]
+  # astra-2-3: the session in that root opens its card on the prompt's spec, and its helper calls take the card
+  monkeypatch.setenv("SUPEREGM_ROLE", "driver"); monkeypatch.setenv("SUPEREGM_RUNCARD", SPAWNED[-1][2]["SUPEREGM_RUNCARD"])
+  code, out = world.run("runcard", "open", "--skill", "wave", "--artifact", str(wt2.resolve() / rel)); assert code == 0, out
+  code, out = world.run("report", "--runcard", out.strip()); assert code == 0, out
 
 
 def trigger(s):
