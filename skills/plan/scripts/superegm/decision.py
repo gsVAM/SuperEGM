@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3
+# Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3/5
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
 # `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); a head's fifth point, `accept` or `revise` (U35).
@@ -138,7 +138,7 @@ def binding_rulings(comments: list, owners: list, recorded: list, decisions=None
   always binds: section 13.2 reads an overrule on a `tdd-order`, `test-delta` or `dod-<n>` fid that no decision asks
   about as an allowance, which `collect` applies without a record."""
   recorded = list(recorded)
-  point3 = [d for d in decisions or [] if d.get("point") == 3]
+  point3 = [d for d in decisions or [] if d.get("point") in (3, 5)]
   point1 = any(d.get("point") == 1 for d in decisions or [])
 
   def asked_for(r):
@@ -166,7 +166,7 @@ def offered(r: "Ruling", comments: list, decisions: list) -> bool:
   is nothing to check it against: a numeric id this issue's comments lack (a ruling copied from a producer's
   issue, or a mistyped id: both bind, unchecked) and a named comment with no `- (` lines (any option binds); a
   decision id the record lacks binds nothing."""
-  decision = next((d for d in decisions if d.get("point") == 3 and r.subject == option_name(d)), None)
+  decision = next((d for d in decisions if d.get("point") in (3, 5) and r.subject == option_name(d)), None)
   if decision is not None:
     options = decision.get("options") or []
   else:
@@ -256,7 +256,7 @@ def record_text(foreman: dict, entry: dict, note: str = "the comment was edited 
   decision = next((d for d in foreman.get("decisions") or [] if d["id"] == entry.get("decision")), {})
   text, reason = (entry.get("ruling") or "").partition(" — ")[0].strip(), entry.get("reason")
   source, point = str(decision.get("source") or ""), decision.get("point")
-  if point == 3:
+  if point in (3, 5):
     text = recorded_option(foreman, entry) or text
     text = f"({source.removeprefix('comment ') if source.startswith('comment ') else decision.get('id')}) {text}"
   bare = point == 2 and text != "redesign" or point == 1 and text.endswith(" finding upheld")
@@ -267,7 +267,7 @@ def record_text(foreman: dict, entry: dict, note: str = "the comment was edited 
 def register(subparsers):
   p = subparsers.add_parser("decision", help="decision open|rule")
   action = p.add_subparsers(dest="action", required=True)
-  o = core.add_parser(action, "open", "record a point-1/2/3 question and print its id and options")
+  o = core.add_parser(action, "open", "record a point-1/2/3/5 question and print its id and options")
   o.add_argument("--unit", required=True)
   o.add_argument("--point", type=int, choices=(1, 2, 3, 5), required=True)
   o.add_argument("--question", required=True, help="the question file (the builder's comment, the contested findings)")
@@ -503,11 +503,18 @@ def fifth_point(st, unit: str, decision: dict, chosen: str, runcard: str) -> Non
   rid = review.head_review_id(st, unit)
   if rid is None:
     raise Refusal(f"decision: {unit} has no head review")
-  if chosen == "accept":
+  head = review.load_review(st, rid)
+  done = review.evaluate(st, head, runcard)
+  # a rerun after a failed post: the accept this decision gave stands, and is not given twice
+  given = done.converged.startswith("by ruling") and str(done.converged_round) == decision["source"].split()[-1]
+  if chosen == "accept" and not given:
     with contextlib.redirect_stdout(io.StringIO()):
       review.rule_review(argparse.Namespace(review=rid, ruling="accept", owner=True, judges=None, posted=None,
                                             decision=decision["id"], runcard=runcard, unit=None, design=None, plan=None))
-  review.write_head_outcome(st, review.load_review(st, rid), runcard, outcome="clean" if chosen == "accept" else "revise")
+  outcome = "clean" if chosen == "accept" else "revise"
+  posted = [e for e in core.load_foreman(st, unit)["rounds"] if e.get("phase") == "posted"]
+  if not (given and posted and max(posted, key=lambda e: e["round"]).get("outcome") == outcome):
+    review.write_head_outcome(st, review.load_review(st, rid), runcard, outcome=outcome)
 
 
 KIND_POINTS = {"upheld": (1,), "overruled": (1,), "allowed": (1,), "round": (2,), "stop": (2,), "option": (3, 5), "redesign": (1, 2)}
@@ -559,9 +566,7 @@ def ruling_comment(point: int, source: str, ruling: str, question: str, brief=No
     line = ruling.replace("finding upheld", "finding upheld (fix it)", 1)
   elif point == 2:
     line = ruling
-  elif point == 5:  # a head's fifth point takes the point-3 form over its decision id (U35)
-    line = ruling_form(3, qid, ruling).removeprefix("**Ruling:** ").removesuffix(" — <reason>")
-  else:
+  else:  # point 3, and a head's fifth point in the point-3 form over its decision id (U35)
     line = f"({source.removeprefix('comment ') if source.startswith('comment ') else qid}) {ruling}"
   return f"**Ruling:** {line}{marker}\n\n{quoted}\n"
 

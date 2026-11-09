@@ -773,7 +773,9 @@ def evaluate(st: core.Store, review: dict, runcard: str) -> Status:
   fix_design = any(f["disposition"] == "fix-design" for r in rounds for f in findings_of(r))
   clean = latest is not None and not any(blocking(f) and f["disposition"] is None for f in findings_of(latest))
   regressions = regressions_of(latest) if latest else 0
-  accept = next((r for r in review["rulings"] if r["ruling"] == "accept"), None)
+  accept = next((r for r in reversed(review["rulings"]) if r["ruling"] == "accept"), None)
+  if accept and early_accept_lapsed(review, completed, rulings):
+    accept = None
   latest_sha = latest["artifact_sha256"] if latest else None
   moved = latest is not None and review["kind"] != "head" \
       and latest_sha != current_sha(st, review["kind"], review["artifact"])
@@ -805,21 +807,59 @@ def acceptable(st: core.Store, review: dict, runcard: str) -> tuple[list[str], i
   rid = review_id(st, review["kind"], review["artifact"], review["cycle"])
   completed = [r for r in rounds_of(st, rid, review) if r["what_ran"] == "completed"]
   unsettled = [f for f in findings_of(completed[-1]) if f["disposition"] is None] if completed else []
-  blockers += [f"high {f['id']}" for f in unsettled if f["severity"] == "high"]
-  blockers += [f"regression {f['id']}" for f in unsettled if f["severity"] == "medium" and f["regression"] == "yes"]
-  blockers += [f"external {f['id']}" for f in unsettled
-               if f["severity"] == "medium" and f["regression"] != "yes" and f["id"].startswith("external:")]
+  blockers += finding_blockers(completed[-1]) if completed else []
   if review["kind"] == "head":
     blockers += [f"decision {d['id']}" for d in open_decisions(st, review["artifact"])
                  if d.get("point") != 5 and names_review(d, rid)]
   return blockers, sum(f["severity"] == "medium" for f in unsettled), sum(f["severity"] == "low" for f in unsettled)
 
 
+def finding_blockers(rnd: dict) -> list[str]:
+  """A round's findings that bar an accept below the cap: each unsettled `high <fid>`, each `regression <fid>` the
+  landed `regressions_of` counts (a blocking `regression: yes` whatever its disposition, an unsettled high listed
+  under `high` alone), each unsettled `external <fid>` medium."""
+  found = findings_of(rnd)
+  high = [f for f in found if f["severity"] == "high" and f["disposition"] is None]
+  regression = [f for f in found if blocking(f) and f["regression"] == "yes" and f not in high]
+  external = [f for f in found if f["severity"] == "medium" and f["disposition"] is None
+              and f not in regression and f["id"].startswith("external:")]
+  return ([f"high {f['id']}" for f in high] + [f"regression {f['id']}" for f in regression]
+          + [f"external {f['id']}" for f in external])
+
+
+def early_accept_lapsed(review: dict, completed: list[dict], rulings: list[str]) -> bool:
+  """An accept given below the cap holds its round alone: it lapses once a later round completes or a finding
+  recorded into its round since (an ingested external one, a set finding) bars the accept; the cap's accept stands."""
+  accepted = review.get("converged_round")
+  upto = [r for r in completed if accepted is not None and r["round"] <= accepted]
+  if accepted is None:
+    return len(completed) < CAP + rulings.count("continue")
+  if len(upto) >= CAP + rulings.count("continue"):
+    return False
+  rnd = next((r for r in completed if r["round"] == accepted), None)
+  return rnd is None or any(r["round"] > accepted for r in completed) or bool(finding_blockers(rnd))
+
+
 def open_decisions(st: core.Store, unit: str) -> list[dict]:
-  """The unit's `decisions[]` no `rulings[]` entry names."""
+  """The unit's pending decisions (`report.pending_decisions`), and a point-1 decision while a contested finding of
+  its round has no ruling yet (point 1 takes one ruling per finding, `decision rule`)."""
+  from superegm.report import pending_decisions
   data = core.load_foreman(st, unit)
-  ruled = {r.get("decision") for r in data.get("rulings") or []}
-  return [d for d in data.get("decisions") or [] if d["id"] not in ruled]
+  pending = pending_decisions(data)
+  return pending + [d for d in data.get("decisions") or [] if d.get("point") == 1 and d not in pending
+                    and point_one_open(st, data, d)]
+
+
+def point_one_open(st: core.Store, foreman: dict, decision: dict) -> bool:
+  """A point-1 decision some contested fid of its `review <id> round <n>` round names no ruling of."""
+  words = (decision.get("source") or "").split()
+  if len(words) != 4 or words[0] != "review" or words[2] != "round" or not words[3].isdigit():
+    return False
+  rnd = load_round(st, words[1], int(words[3])) or {}
+  fids = contested_fids(rnd) or [c["fid"] for c in rnd.get("builder_contested") or []]
+  ruled = {r["ruling"].partition(" — ")[0].strip().split(" ")[0]
+           for r in foreman.get("rulings") or [] if r.get("decision") == decision["id"]}
+  return any(fid not in ruled for fid in fids)
 
 
 def names_review(decision: dict, rid: str) -> bool:
@@ -1513,4 +1553,19 @@ def refuse_early_accept(st: core.Store, rid: str, review: dict, status: Status, 
       raise core.HandoffError(f"review rule: accept on a head needs --decision {fifth[0] if fifth else 'none'}")
     if args.decision not in fifth:
       raise core.HandoffError(f"review rule: --decision {args.decision} names no pending point-5 decision of {review['artifact']}")
+    refuse_moved_head(st, rid, review, args.decision)
   return mediums, lows
+
+
+def refuse_moved_head(st: core.Store, rid: str, review: dict, qid: str) -> None:
+  """A head's accept binds the round its point-5 decision names, at the head that round reviewed: the decision's
+  round is the latest completed one, and the decision's `head` and the pull request's saved head are its bytes."""
+  from superegm.report import unit_view
+  decision = next(d for d in core.load_foreman(st, review["artifact"])["decisions"] if d["id"] == qid)
+  completed = [r for r in rounds_of(st, rid, review) if r["what_ran"] == "completed"]
+  words = (decision.get("source") or "").split()
+  reviewed = completed[-1]["artifact_sha256"] if completed else None
+  current = unit_view(core.load_state(st.root), review["artifact"])["head"]
+  if (len(words) != 4 or words[2] != "round" or not completed or words[3] != str(completed[-1]["round"])
+      or decision.get("head") != reviewed or current != reviewed):
+    raise core.HandoffError("review rule: the reviewed head moved: revise")
