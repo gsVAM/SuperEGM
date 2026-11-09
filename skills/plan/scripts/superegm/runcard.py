@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the runcard subcommand.
+# Added by SuperEGM (gsVAM), 2026: the runcard subcommand; open's boot-id proof writes (U24).
 
 """superegm runcard open|close: the run card every effect runs under (spec section 6)."""
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import superegm as core
 
-WRITES = frozenset(["runcards"])  # the store kinds this subcommand writes
+WRITES = frozenset(["runcards", "launches", "driver"])  # the store kinds this subcommand writes; the boot-id proof's (U24)
 
 
 def register(subparsers):

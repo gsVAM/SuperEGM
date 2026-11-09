@@ -14,7 +14,7 @@ IDS = ("design", "zoom-out", "comprehension", "codebase-details", "readiness", "
 SKILLS = ("brainstorming", "draft", "review-spec", "plan", "review-plan", "file", "wave", "interrupt",
           "clean", "finishing-a-development-branch", "integrate", "judges", "test-driven-development",
           "systematic-debugging", "verification-before-completion", "writing-skills",
-          "using-superegm", "drift-report", "orient")
+          "using-superegm", "drift-report", "orient", "inbox", "driver")
 
 
 def frontmatter(path: Path) -> dict:
@@ -112,6 +112,7 @@ STUBS = {  # §14 effects of the new typed skills
     "integrate": ["state-store", "start-session"],
     "judges": ["start-session", "state-store", "github-write"],
     "orient": ["state-store"],
+    "driver": ["start-session", "state-store"],
 }
 HARNESS = "In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first."
 

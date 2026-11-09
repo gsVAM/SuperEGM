@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PACKER = runpy.run_path(str(ROOT / "scripts/pack_plugin.py"))
 SKILLS = sorted(p.parent.name for p in (ROOT / "skills").glob("*/SKILL.md"))
 EXTERNAL = {
-    "review-spec": ("state-store", "start-session"),
+    "review-spec": ("state-store", "start-session", "github-write", "remote-branch"),
     "plan": ("state-store", "start-session", "github-write"),
     "review-plan": ("state-store", "start-session"),
     "file": ("github-write", "state-store"),
@@ -25,6 +25,7 @@ EXTERNAL = {
     "integrate": ("state-store", "start-session"),
     "judges": ("start-session", "state-store", "github-write"),
     "orient": ("state-store",),
+    "driver": ("start-session", "state-store"),
 }
 WORKING_TREE = {"brainstorming", "draft", "drift-report", "test-driven-development",
                 "systematic-debugging", "verification-before-completion", "writing-skills"}
@@ -42,7 +43,7 @@ def skill_text(skill: str) -> str:
 
 
 def test_skill_set_is_section_14() -> None:
-  assert set(SKILLS) == set(EXTERNAL) | WORKING_TREE | {"using-superegm"}
+  assert set(SKILLS) == set(EXTERNAL) | WORKING_TREE | {"using-superegm", "inbox"}
 
 
 @pytest.mark.parametrize("skill", SKILLS)
@@ -51,7 +52,7 @@ def test_frontmatter_order_and_opening_line(skill: str) -> None:
   assert text.startswith("---\n"), f"{skill}: the frontmatter must open the file"
   fm = PACKER["read_frontmatter"](ROOT / "skills" / skill / "SKILL.md")
   effects = ("external" if skill in EXTERNAL
-             else "none" if skill == "using-superegm" else "working-tree")
+             else "none" if skill in ("using-superegm", "inbox") else "working-tree")
   expected = ["name", "license", "effects"]
   if effects == "external":
     expected.append("effect_kinds")

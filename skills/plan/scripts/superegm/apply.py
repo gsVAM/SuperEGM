@@ -1,10 +1,11 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_apply`, `Budget`, `apply_writes`, `create_issue` and `post_link` on the confirmed write list of unfiled units; `filings[]` and `base_at_start` before the first write; the labels of spec section 10; an adopted issue re-read before any write (U13).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_apply`, `Budget`, `apply_writes`, `create_issue` and `post_link` on the confirmed write list of unfiled units; `filings[]` and `base_at_start` before the first write; the labels of spec section 10; an adopted issue re-read before any write (U13); `splice_board`, the board between the tracking body's markers (U30).
 
 """superegm apply: create labels, issues and links (needs --yes)."""
 
 import os
+import re
 import tempfile
 import time
 import urllib.parse
@@ -289,6 +290,55 @@ def edit_issue(repo, number, body, artifact_dir) -> None:
     core.gh_retry(["issue", "edit", str(number), "-R", repo, "--body-file", path])
   finally:
     os.unlink(path)
+
+
+BOARD_OPEN, BOARD_CLOSE = "<!-- superegm:board -->", "<!-- /superegm:board -->"
+CHANGED_RE = re.compile(r" · changed \S+$")
+
+
+def splice_board(body: str, block: str) -> str:
+  """The one splice of the board (spec section 11.1): `block` between the tracking body's two markers, the
+  text around them untouched; appended once after the text when the markers are absent; the body kept as
+  it is when the block it holds equals `block`, the header's change time aside. The board is the last open
+  marker with a close marker after it, so an orphan marker left by a hand edit stays text and is never paired.
+  The held block is read with `\r\n` as `\n` (GitHub returns a body edited on the web that way)."""
+  start, end = board_span(body)
+  if end < 0:
+    return body.rstrip("\n") + f"\n\n{BOARD_OPEN}\n{block}\n{BOARD_CLOSE}\n"
+  held = held_block(body, start, end)
+  if held == block or same_rows(held, block):
+    return body
+  return body[:start] + f"{BOARD_OPEN}\n{block}\n{BOARD_CLOSE}" + body[end + len(BOARD_CLOSE):]
+
+
+def board_span(body: str) -> tuple:
+  """`(start, end)` of the board's open and close markers, the last open marker with a close after it;
+  `end` is -1 when the body holds no board."""
+  start, end = body.rfind(BOARD_OPEN), -1
+  while start >= 0 and (end := body.find(BOARD_CLOSE, start)) < 0:
+    start = body.rfind(BOARD_OPEN, 0, start)
+  return start, end
+
+
+def held_block(body: str, start: int, end: int) -> str:
+  return body[start + len(BOARD_OPEN):end].replace("\r\n", "\n").strip("\n")
+
+
+def board_changed_at(body: str):
+  """The header's change time of the board the body holds, else None (`none` reads as None)."""
+  start, end = board_span(body)
+  if end < 0:
+    return None
+  found = CHANGED_RE.search(held_block(body, start, end).partition("\n")[0])
+  time = found.group(0).removeprefix(" · changed ") if found else None
+  return None if time == "none" else time
+
+
+def same_rows(held: str, block: str) -> bool:
+  """Two blocks equal but for the header line's ` · changed <time>`."""
+  first_held, _, rest_held = held.partition("\n")
+  first, _, rest = block.partition("\n")
+  return bool(held and block) and rest_held == rest and CHANGED_RE.sub("", first_held) == CHANGED_RE.sub("", first)
 
 
 def create_issue(repo, title, body, labels, artifact_dir):

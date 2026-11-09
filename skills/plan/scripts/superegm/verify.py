@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `run_verify` and `cmd_verify` over the union of every filing's list, the receipt keyed to the latest.
+# Modified by SuperEGM (gsVAM), 2026: EGM's `run_verify` and `cmd_verify` over the union of every filing's list, the receipt keyed to the latest; the tracking body compared outside the board's markers (U30).
 
 """superegm verify: read every write of every filing back and record the receipt."""
 
@@ -36,6 +36,7 @@ def checkable_union(state, writes) -> list:
 
 
 def run_verify(handoff, writes=None):
+  from superegm import apply  # here, not at the top: `apply` imports this module at its own top
   state, repo = handoff.state, core.require_repo(handoff)
   confirmed = state.get("confirmed") or {}
   if not confirmed.get("sha256"):
@@ -67,8 +68,10 @@ def run_verify(handoff, writes=None):
           continue
         live = core.gh_json(["issue", "view", str(target["number"]), "-R", repo, "--json", "body,labels"])
         numbers = {u: d["number"] for u, d in units.items() if d.get("number")}
-        expected = core.body.fill_numbers(item[4], numbers, tracking.get("number"))
-        if core.body.normalise(live.get("body") or "") != core.body.normalise(expected):
+        expected, body = core.body.fill_numbers(item[4], numbers, tracking.get("number")), live.get("body") or ""
+        if item[1] == "tracking":  # the board between the markers is `status`'s, never the filing's (U30)
+          body, expected = apply.splice_board(body, ""), apply.splice_board(expected, "")
+        if core.body.normalise(body) != core.body.normalise(expected):
           problems.append(f"MISMATCH body of #{target['number']} ({item[1]}) differs from the rendered body")
         live_labels = {l["name"] for l in live.get("labels", [])}
         expected_labels = set(item[3])

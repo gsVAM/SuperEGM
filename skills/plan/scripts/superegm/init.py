@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the init subcommand; `owners` from `gh api user` and the pointer to the README's token recipe and to `doctor` (spec section 11); the astra.enabled and astra.heads sentence (U17); the ingest sentence (U21).
+# Added by SuperEGM (gsVAM), 2026: the init subcommand; `owners` from `gh api user` and the pointer to the README's token recipe and to `doctor` (spec section 11); the astra.enabled and astra.heads sentence (U17); the ingest sentence (U21); the ~/.superegm/notify sentence (U23); the foreman.run_timeout_minutes sentence (U25); step 2's disableClaudeAiConnectors, builder.plugins and builder.mcp (U27).
 
 """superegm init: write .superegm/config.json with every key's default; print the owner's by-hand steps."""
 
@@ -14,8 +14,12 @@ STEPS = """wrote {path}
 By hand, before the first typed skill runs:
 1. Create the builder account and its token as README.md, "Before the first run" step 1 says; put the token in SUPEREGM_BUILDER_TOKEN (config key builder.gh_token_env), never in the repository or the config, or register a GitHub App as that step says and set builder.app (SUPEREGM_BUILDER_TOKEN then stays unset: one identity per repository).
 2. Create the builder's empty profile at {profile_dir} (config key builder.profile_dir):
-   no hooks, no plugins, only the login (`CLAUDE_CONFIG_DIR={profile_dir} claude`, `/login`, exit) and a
-   settings.json with "syncClaudeAiPlugins": false, written before the login.
+   no hooks, no plugins, no skills/ or commands/ directory, only the login (`CLAUDE_CONFIG_DIR={profile_dir} claude`,
+   `/login`, exit) and a settings.json with "syncClaudeAiPlugins": false and "disableClaudeAiConnectors": true,
+   written before the login. A plugin the builder is to load is named in builder.plugins (its <name>@<marketplace>
+   id, installed once into this session's profile, disabled there) and passed by --plugin-dir per launch; the
+   builder's MCP servers go in builder.mcp (mcpServers form: the server map under that key, a secret by ${{VAR}} reference, never its value),
+   passed by --mcp-config --strict-mcp-config.
 3. Set the branch protection of spec section 11 on `{base}`: updates restricted to the logins in
    config.owners (a classic restriction) or, by a ruleset, with no bypass for the builder account's
    role and no team but config.owner_team; `superegm/**` protected from force-push and deletion by a
@@ -26,6 +30,8 @@ By hand, before the first typed skill runs:
 The store is {artifacts_dir} (config key artifacts_dir); it is never committed.
 The Astra lane is off until you set astra.enabled to true; astra.heads (default true) then seats it on every head review.
 `review ingest` reads PR review threads with ingest.severity_words (Devin's words by default) and counts a human's thread from ingest.human_role (default write) up.
+An executable ~/.superegm/notify, written outside every repository, is run by `wave` with the inbox lines new since the last notify on its stdin, bounded by config key notify_timeout_seconds; absent means no hook.
+`collect` re-runs every DoD `Run` item the PR body pastes under its `### DoD <n>` fence in the review worktree (an item without one is the `Run item <n>: no fenced output` high, not run), the whole call bounded by foreman.run_timeout_minutes (default 8, at most 9, under the Bash tool's 10-minute cap).
 then run `superegm doctor`"""
 
 

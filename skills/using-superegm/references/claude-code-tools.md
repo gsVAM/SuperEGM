@@ -31,7 +31,23 @@ relies on, from the live probes; do not re-derive them.
   per-dispatch `effort` is passed only when the Agent tool offers that
   parameter. `claude -p` takes the prompt as text (`claude -p "$(cat <file>)"`);
   `--output-format json` writes one result object; `--permission-mode` takes
-  `acceptEdits` or `bypassPermissions`; `--allowedTools` entries are tool names
-  or the one prefix form `Bash(<prefix>:*)`, which matches on the command's
-  text and cannot exclude a refspec; a headless session with no `Skill` entry
-  invokes no skill.
+  `acceptEdits` or `bypassPermissions`; `--allowedTools` entries are tool names,
+  the prefix form `Bash(<prefix>:*)`, which matches on the command's
+  text and cannot exclude a refspec, the skill rules `Skill(<name>)` and `Skill(<name> *)`
+  (amendment 7: a headless session invokes only the skills its `Skill` rules name, none
+  without one) and the MCP rules `mcp__<server>__<tool>` or `mcp__<server>__*`.
+  `Agent` in a builder's allow-list admits the platform's default subagents, each inheriting the session's allow-list, profile and worktree
+  (amendment 15: the owner's opt-in, absent from the default list; a plugin-shipped or worktree
+  `.claude/agents/` definition is the owner's own, its `permissionMode` and `model` theirs);
+  unprobed: whether a subagent's allow-list equals the builder's (U27's D2, the owner's hand run
+  after the merge to settle; until then the inheritance is the default this sentence states).
+  `--session-id <uuid>` names the session, its transcript `projects/<slug>/<uuid>.jsonl` under the profile,
+  the subagents' beside it in `<uuid>/subagents/agent-*.jsonl`.
+  `--plugin-dir <dir>` loads a plugin for the session (its hooks, skills and bundled servers),
+  enabled in the profile or not, one flag per directory.
+  `--mcp-config <file> --strict-mcp-config` loads that file's servers and no other MCP configuration;
+  unprobed: whether the flag keeps a `--plugin-dir` plugin's bundled servers (U27's D1, its default
+  that they come with the plugin, the owner's hand run to settle; until then name in the MCP file a
+  bundled server a builder must reach);
+  `ENABLE_CLAUDEAI_MCP_SERVERS=false` keeps the account's connectors out beside the profile's
+  `disableClaudeAiConnectors`.

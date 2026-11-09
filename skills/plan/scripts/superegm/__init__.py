@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the default models and efforts per role and the builder and reviewers merge (U28).
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
@@ -15,11 +15,14 @@ Every `gh` call goes through `gh()`; tests inject `GH`, `SLEEP` and `NOW` here.
 import argparse
 import importlib
 import calendar
+import contextlib
 import difflib
 import hashlib
 import json
 import os
 import re
+import shutil
+import signal
 import subprocess
 import urllib.parse
 import sys
@@ -91,7 +94,11 @@ DEFAULT_CONFIG = {
                 "allowed_tools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git add:*)", "Bash(git commit:*)",
                                   "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git mv:*)",
                                   "Bash(git rm:*)", "Bash(gh pr create:*)", "Bash(gh pr edit:*)",
-                                  "Bash(gh pr comment:*)", "Bash(gh issue comment:*)"],
+                                  "Bash(gh pr comment:*)", "Bash(gh issue comment:*)", "Bash(gh pr view:*)",
+                                  "Bash(pytest:*)"],
+                "plugins": [],  # <name>@<marketplace> ids, each passed by --plugin-dir (U27)
+                "mcp": {},  # mcpServers form, written to launches/<unit>_r<n>_mcp.json (U27)
+                "max_subagent_calls": 12,  # the orders' budget when allowed_tools carries Agent (U27)
                 "app": None},  # or {app_id, slug, private_key_env}: the builder as a GitHub App (spec section 11)
     "ci_wait_minutes": 30,
     "commit_trailer": "",  # appended, after a blank line, to every commit the helper makes
@@ -100,6 +107,8 @@ DEFAULT_CONFIG = {
     "pr_block_file": None,  # a path relative to the repository root whose text every builder PR body carries
     "ingest": {"severity_words": {"bug": "high", "issue": "medium", "nit": "low", "suggestion": "low"},
                "human_role": "write"},  # `review ingest`: a thread's word map and the role a human's thread counts from
+    "notify_timeout_seconds": 30,  # how long `notify` waits on the owner's ~/.superegm/notify hook (spec section 11.2)
+    "foreman": {"run_timeout_minutes": 8},  # the bound on one whole `collect` call, under the Bash tool's 10 (spec section 11.1)
 }
 
 DEFAULT_TEMPLATE = """<!-- superegm:handoff={{handoff_id}} unit={{unit_id}} spec={{spec_sha256}} -->
@@ -192,7 +201,7 @@ class Store:
            "units": "handoff_units.json", "bodies": "handoff_bodies.md"}
   # The Interfaces block's longer names for the same kinds.
   ALIASES = {"handoff_plan": "plan", "handoff_units": "units", "handoff_bodies": "bodies", "wave_report": "report"}
-  KEYED = ("unit", "foreman", "launches", "worktrees", "review", "orient_unit")
+  KEYED = ("unit", "foreman", "launches", "worktrees", "review", "orient_unit", "driver")
   LEVEL = ("approvals", "handoffs")  # always at the store level
   SHARED = ("reviews", "judges", "questions")  # at the store level for a spec review's id, else the handoff's
 
@@ -262,6 +271,9 @@ class Store:
     if kind == "launches":  # `<unit>.json`, a `<unit>_r<n>_<file>` or the `<unit>_r<n>_bin/` directory
       name = parts[0] if "." in parts[0] or parts[0].endswith("_bin") else f"{parts[0]}.json"
       return base.joinpath("launches", name, *parts[1:])
+    if kind == "driver":  # `<handoff>.json`, a tick's launches, or a `<handoff>_r<n>.log` file
+      name = parts[0] if "." in parts[0] else f"{parts[0]}.json"
+      return base.joinpath("driver", name, *parts[1:])
     if kind == "review":
       number = parts[1] if parts[1].startswith("pr") else f"pr{parts[1]}"
       return base.joinpath("review", parts[0], number, *parts[2:])
@@ -442,9 +454,17 @@ def load_card(store: Store, id: str) -> dict:
 def open_runcard(store: Store, skill: str, artifact: str, parent=None, mode=None) -> str:
   """Open `<skill>-<6 hex>-<n>` (spec section 7): the hex is the store's handoff's, else (a card
   preceding any handoff, at the store level) the 6 hex of the spec slug (the parent card's, else
-  the artifact's stem), counted per skill and hex; a legacy store keeps `<skill>-<n>`. Every open
-  card of the same skill and artifact is marked interrupted first. `artifact` is stored resolved
-  when it is a file; the card records the handoff it resolved."""
+  the artifact's stem), counted per skill and hex; a legacy store keeps `<skill>-<n>`. `artifact` is
+  stored resolved when it is a file; the card records the handoff it resolved, and a top-level `wave`
+  card also its `boot_id` and `driver_card` (`SUPEREGM_RUNCARD` under `SUPEREGM_ROLE=driver`, else
+  None). The card is written first; then a top-level card of the six `GUARDED_SKILLS` (a `wave` under
+  `SUPEREGM_ROLE=driver` excepted) is refused with `TICK_LIVE` while `tick_live` holds, its own card
+  marked interrupted and no other open card of its skill touched (spec section 11.2, U24); for `wave`,
+  `tick_live` first applies the boot-id proof to every open handoff (`reboot_proof`), which may record
+  `driver/<handoff>.json` and `launches/<unit>.json` entries `interrupted (reboot)` and mark rebooted top-level
+  `wave` cards interrupted, on the refusal path too (`runcard`'s `WRITES`); only after that is
+  every open card of the same skill and artifact marked interrupted, the artifacts compared rebased
+  onto the working directory's checkout, one spec being one artifact in every worktree."""
   if parent is not None and not store.path("runcards", parent).is_file():
     raise HandoffError(f"runcard: parent {parent} not found")
   path = Path(artifact).expanduser()
@@ -462,27 +482,172 @@ def open_runcard(store: Store, skill: str, artifact: str, parent=None, mode=None
     folder.mkdir(parents=True, exist_ok=True)
     rid = f"{skill}-{hexa}-{len(list(folder.glob(f'{skill}-{hexa}-*.json'))) + 1:04d}"
     existing = sorted(folder.glob("*.json"))
-  for other in existing:
-    card = json.loads(read_text(other))
-    if (card["skill"], card["artifact"]) == (skill, artifact) and not card["closed_at"] and not card["interrupted_at"]:
-      card["interrupted_at"] = now_iso()
-      atomic_write(other, card)
-      journal(store, f"runcard interrupted {other.stem} by {rid}")
   config = store.config or {}
   card = {"skill": skill, "artifact": artifact, "artifact_sha256": sha,
           "reviewers": list((config.get("reviewers") or {}).get(RUNCARD_REVIEWERS.get(skill, ""), [])),
           "tiering": None, "mode": mode or config.get("mode", "normal"), "parent": parent,
           "opened_at": now_iso(), "closed_at": None, "interrupted_at": None, "produced": [],
           "handoff": store.handoff_id}
+  driven = os.environ.get("SUPEREGM_ROLE") == "driver"
+  if skill == "wave" and parent is None:
+    card["boot_id"] = boot_id()
+    card["driver_card"] = os.environ.get("SUPEREGM_RUNCARD") if driven else None
+  # the card is written before the read for a tick's launch, so a tick racing this open sees it (spec section 11.2)
   atomic_write(store.path("runcards", rid), card)
   journal(store, f"runcard open {rid} {skill} {artifact}")
+  if parent is None and skill in GUARDED_SKILLS and not (skill == "wave" and driven) and tick_live(store, skill):
+    card["interrupted_at"] = now_iso()
+    atomic_write(store.path("runcards", rid), card)
+    journal(store, f"runcard interrupted {rid}: a tick's session may be live")
+    raise HandoffError(TICK_LIVE)
+  # one spec is one artifact in every worktree of the repository, as `require_runcard` reads it (`here`)
+  try:
+    top = git_toplevel(Path.cwd())
+  except HandoffError:
+    top = None
+  same = (lambda p: str(rebased(p, top))) if top else str
+  mine = same(artifact)
+  for other in existing:
+    held = json.loads(read_text(other))
+    if held["skill"] == skill and same(held["artifact"]) == mine and not held["closed_at"] and not held["interrupted_at"]:
+      held["interrupted_at"] = now_iso()
+      atomic_write(other, held)
+      journal(store, f"runcard interrupted {other.stem} by {rid}")
   return rid
 
 
+GUARDED_SKILLS = ("wave", "plan", "file", "integrate", "review-plan", "orient")
+TICK_LIVE = "driver: a tick's session may be live; /superegm:driver reset is the owner's interrupt"
+
+
+def rebooted(entry: dict, current: str | None = None) -> bool:
+  """A launch or card whose recorded boot id is neither `unknown` nor the machine's current one: no process
+  survives a reboot (spec section 11.2). No proof while the current id cannot be read (`unknown`): a failed lookup
+  is never a reboot."""
+  recorded, current = entry.get("boot_id"), current or boot_id()
+  return bool(recorded) and "unknown" not in (recorded, current) and recorded != current
+
+
+def tick_terminal(entry: dict) -> bool:
+  """A tick's launch that is over: `interrupted` (by reset, a back-off or a reboot) or its exit file written."""
+  return str(entry.get("status") or "").startswith("interrupted") or Path(entry["exit_file"]).is_file()
+
+
+def backed_off(entry: dict) -> bool:
+  """A tick's launch recorded and never started: the tick found a card opened since its read and backed off."""
+  return entry.get("status") == "interrupted" and "pid" not in entry
+
+
+def load_driver(hs: Store) -> dict:
+  """The handoff's `driver/<handoff>.json`: `launches[]`, `notified`, `refused`, `set_aside` (the round up to which
+  `driver reset` set the failures aside)."""
+  path = hs.path("driver", hs.handoff_id)
+  data = json.loads(read_text(path)) if path.is_file() else {}
+  return {"launches": [], "notified": [], "refused": None, **data}
+
+
+def top_wave_cards(hs: Store) -> list:
+  """(path, card) of the handoff's top-level `wave` cards, open or not; a child card counts nowhere."""
+  folder = (hs.root if hs.legacy else hs.base()) / "runcards"
+  out = []
+  for path in sorted(folder.glob("wave-*.json")):
+    card = json.loads(read_text(path))
+    if card.get("skill") == "wave" and not card.get("parent") and card.get("handoff", hs.handoff_id) == hs.handoff_id:
+      out.append((path, card))
+  return out
+
+
+def interrupt_card(hs: Store, path: Path, card: dict, why: str) -> None:
+  card["interrupted_at"] = now_iso()
+  atomic_write(path, card)
+  journal(hs, f"runcard interrupted {path.stem}: {why}")
+
+
+def reboot_launches(hs: Store, unit: str, current: str) -> None:
+  """`launches/<unit>.json`'s running launches with no exit file and a boot id not the current one, recorded
+  `interrupted (reboot)` (spec section 11.2: one more proof beside the exit file)."""
+  path = hs.path("launches", unit)
+  if not path.is_file():
+    return
+  data = json.loads(read_text(path))
+  changed = False
+  for entry in data.get("launches") or []:
+    if entry.get("status") == "running" and rebooted(entry, current) and not Path(entry["result_file"] + ".exit").is_file():
+      entry["status"] = "interrupted (reboot)"
+      journal(hs, f"{unit} launch {entry['round']} interrupted (reboot)")
+      changed = True
+  if changed:
+    atomic_write(path, data)
+
+
+def reboot_proof(hs: Store, current: str) -> None:
+  """The boot-id proof over one handoff: its tick launches and builders that a reboot ended recorded
+  `interrupted (reboot)`, the open top-level `wave` cards of those launches, or recording a former boot id
+  themselves, marked `interrupted`."""
+  data, changed = load_driver(hs), False
+  ended = set()
+  for entry in data["launches"]:
+    if not tick_terminal(entry) and rebooted(entry, current):
+      entry["status"] = "interrupted (reboot)"
+      journal(hs, f"tick: {hs.handoff_id} launch {entry['round']} interrupted (reboot)")
+      ended.add(entry.get("card"))
+      changed = True
+  if changed:
+    atomic_write(hs.path("driver", hs.handoff_id), data)
+  for path, card in top_wave_cards(hs):
+    if not card.get("closed_at") and not card.get("interrupted_at") and (card.get("driver_card") in ended - {None} or rebooted(card, current)):
+      interrupt_card(hs, path, card, "interrupted (reboot)")
+  folder = hs.base(need=False) / "launches" if not hs.legacy else None
+  if folder is not None and folder.is_dir():
+    for path in sorted(folder.glob("*.json")):
+      if "_" not in path.stem:
+        reboot_launches(hs, path.stem, current)
+
+
+def tick_live(store: Store, skill: str) -> bool:
+  """Whether a tick's launch may be live where `skill` would run: any open handoff of the store for `wave` (one
+  `.git`), the card's own handoff for the other five. Under `wave` the boot-id proof is written first; the other
+  five read it and write nothing."""
+  current = boot_id()
+  for row in handoffs(store.root):
+    if not row.get("id") or row.get("closed_at"):
+      continue
+    if skill != "wave" and row["id"] != store.handoff_id:
+      continue
+    hs = handoff_store(store, row["id"])
+    if skill == "wave":
+      reboot_proof(hs, current)
+    if any(not tick_terminal(e) and not rebooted(e, current) for e in load_driver(hs)["launches"]):
+      return True
+  return False
+
+
+def rebased(path, root) -> Path:
+  """A path the handoff recorded from another worktree of the repository, read under `root`: the longest suffix of it
+  that exists there (`register` from a second worktree moves a tick's root, never the state's paths, U24)."""
+  path, root = Path(path), Path(root).resolve()
+  if not path.is_absolute() or path.resolve().is_relative_to(root):
+    return path
+  for i in range(1, len(path.parts)):
+    candidate = root.joinpath(*path.parts[i:])
+    if candidate.exists():
+      return candidate
+  return path
+
+
+def here(path) -> Path:
+  """`rebased` onto the working directory's checkout (the path unchanged outside a repository)."""
+  try:
+    return rebased(path, git_toplevel(Path.cwd()))
+  except HandoffError:
+    return Path(path)
+
+
 def handoff_spec(args, store: Store) -> str:
-  """The handoff's spec: the state's `design.path`, else (before the first
+  """The handoff's spec: the state's `design.path` (read under this checkout, `here`), else (before the first
   `graph`) the `Design:` line of `--plan`."""
   spec = (load_state(store.root).get("design") or {}).get("path")
+  spec = str(here(spec)) if spec else spec
   plan = Path(args.plan).expanduser().resolve() if getattr(args, "plan", None) else None
   if not spec and plan and plan.is_file():
     match = re.search(r"^Design: `([^`]+)`", read_text(plan), re.M)
@@ -494,11 +659,11 @@ def handoff_spec(args, store: Store) -> str:
 
 def subcommand_artifact(args, store: Store) -> str:
   """What the running subcommand acts on: its unit, else its spec, else the
-  handoff's spec."""
+  handoff's spec; a spec read under this checkout (`here`), as the card's side is."""
   if getattr(args, "unit", None):
     return args.unit
   if getattr(args, "design", None):
-    return str(Path(args.design).expanduser().resolve())
+    return str(here(Path(args.design).expanduser().resolve()))
   return handoff_spec(args, store)
 
 
@@ -520,8 +685,8 @@ def require_runcard(args, skills) -> dict:
     raise HandoffError(f"runcard: {rid} is interrupted")
   if card["skill"] not in skills:
     raise HandoffError(f"runcard: {rid} belongs to {card['skill']}, not {'|'.join(sorted(skills))}")
-  ours = subcommand_artifact(args, st)
-  if card["artifact"] != ours and not (getattr(args, "unit", None) and card["artifact"] == handoff_spec(args, st)):
+  ours, theirs = subcommand_artifact(args, st), str(here(card["artifact"]))
+  if theirs != ours and not (getattr(args, "unit", None) and theirs == handoff_spec(args, st)):
     raise HandoffError(f"runcard: {rid} is for {card['artifact']}, not {ours}")
   return card
 
@@ -557,9 +722,21 @@ def canonical(obj) -> str:
   return json.dumps(obj, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
 
 
+@contextlib.contextmanager
+def hook_free():
+  """The `-c` pairs that keep a git call from running a hook or an fsmonitor the repository names: `core.hooksPath`
+  at a fresh empty directory (spec section 4.1), removed on exit (U25)."""
+  folder = tempfile.mkdtemp(prefix="superegm-no-hooks-")
+  try:
+    yield ["-c", f"core.hooksPath={folder}", "-c", "core.fsmonitor=false"]
+  finally:
+    shutil.rmtree(folder, ignore_errors=True)
+
+
 def run_git(args, cwd: Path, check=True) -> str:
-  result = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True,
-                          text=True, encoding="utf-8")
+  with hook_free() as pairs:
+    result = subprocess.run(["git", *pairs, *args], cwd=str(cwd), capture_output=True,
+                            text=True, encoding="utf-8")
   if not check:
     return result.stdout if result.returncode == 0 else ""
   if result.returncode != 0:
@@ -568,9 +745,62 @@ def run_git(args, cwd: Path, check=True) -> str:
   return result.stdout
 
 
+def kill_group(pgid: int) -> None:
+  """SIGTERM to the process group `pgid`, no escalation; a group already gone is no error."""
+  try:
+    os.killpg(pgid, signal.SIGTERM)
+  except (ProcessLookupError, PermissionError):
+    pass
+
+
 def git_toplevel(path: Path) -> Path:
   folder = path if path.is_dir() else path.parent
   return Path(run_git(["rev-parse", "--show-toplevel"], folder).strip())
+
+
+REGISTRY_KEYS = ("repo", "root", "artifacts_dir")
+
+
+def registry_path() -> Path:
+  return Path.home() / ".superegm" / "registry.json"
+
+
+def load_registry() -> list:
+  """`~/.superegm/registry.json` (spec section 11.2): one `{repo, root, artifacts_dir}` per registered store;
+  [] when absent. Unknown keys stop."""
+  path = registry_path()
+  if not path.is_file():
+    return []
+  try:
+    entries = json.loads(read_text(path))
+  except ValueError as error:
+    raise HandoffError(f"registry: {path} is not JSON ({error})") from None
+  if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
+    raise HandoffError(f"registry: {path} is not a list of entries")
+  for entry in entries:
+    unknown = sorted(set(entry) - set(REGISTRY_KEYS))
+    if unknown:
+      raise HandoffError(f"registry: unknown key {unknown[0]}")
+  return entries
+
+
+def boot_id() -> str:
+  """The machine's boot id (spec section 11.2): `kern.bootsessionuuid`, else Linux's `boot_id`, else `unknown`;
+  never the boot time, which a clock step moves."""
+  for sysctl in ("/usr/sbin/sysctl", "sysctl"):  # the absolute path first: a timer's PATH is not the shell's
+    try:
+      done = subprocess.run([sysctl, "-n", "kern.bootsessionuuid"], capture_output=True, text=True, timeout=10)
+      if done.returncode == 0 and done.stdout.strip():
+        return done.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+      pass
+  try:
+    held = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
+    if held:
+      return held
+  except OSError:
+    pass
+  return "unknown"
 
 
 class GhError(Exception):
@@ -710,7 +940,7 @@ def load_config(repo_root: Path) -> dict:
         if unknown:
           raise HandoffError(f"{path}: unknown label keys {sorted(unknown)}")
         config["labels"].update(value)
-      elif key in ("astra", "ingest", "builder", "reviewers") and isinstance(value, dict):
+      elif key in ("astra", "ingest", "foreman", "builder", "reviewers") and isinstance(value, dict):
         config[key] = {**config[key], **value}
       else:
         config[key] = value
@@ -725,6 +955,13 @@ def load_config(repo_root: Path) -> dict:
     raise HandoffError("ingest.severity_words must map words to high|medium|low")
   if config["ingest"].get("human_role") not in ROLES[1:]:
     raise HandoffError(f"ingest.human_role must be one of {', '.join(ROLES[1:])}")
+  if not isinstance(config["foreman"], dict):
+    raise HandoffError("foreman must be an object")
+  if set(config["foreman"]) - {"run_timeout_minutes"}:
+    raise HandoffError(f"foreman: unknown keys {sorted(set(config['foreman']) - {'run_timeout_minutes'})}")
+  bound = config["foreman"].get("run_timeout_minutes")
+  if isinstance(bound, bool) or not isinstance(bound, (int, float)) or not 0 < bound <= 9:
+    raise HandoffError("foreman.run_timeout_minutes must be a number above 0 and at most 9")
   if not config["repo"]:
     origin = run_git(["remote", "get-url", "origin"], repo_root)
     config["repo"] = parse_remote_url(origin)
@@ -747,6 +984,21 @@ def load_config(repo_root: Path) -> dict:
         or not isinstance(app["private_key_env"], str):
       raise HandoffError(f"{path}: builder.app must be null or {{app_id: <int>, slug: <slug>, private_key_env: <name>}}")
     builder["app"] = app
+  if isinstance(builder, dict):
+    for key, default in (("plugins", []), ("mcp", {}), ("max_subagent_calls", 12)):
+      builder.setdefault(key, default)  # a file written before U27 lacks them
+    tools = builder.get("allowed_tools")
+    if not isinstance(tools, list) or not all(isinstance(t, str) for t in tools):
+      raise HandoffError(f"{path}: builder.allowed_tools must be a list of strings")
+    plugins = builder["plugins"]
+    if not isinstance(plugins, list) or not all(isinstance(p, str) and re.fullmatch(r"[^@\s]+@[^@\s]+", p) for p in plugins):
+      raise HandoffError(f"{path}: builder.plugins must be a list of <name>@<marketplace> ids")
+    mcp = builder["mcp"]  # the server map that goes under `mcpServers`, never a whole `.mcp.json`
+    if not isinstance(mcp, dict) or "mcpServers" in mcp or not all(isinstance(v, dict) for v in mcp.values()):
+      raise HandoffError(f"{path}: builder.mcp must be an object in mcpServers form: the server map, name to server object")
+    cap = builder["max_subagent_calls"]
+    if isinstance(cap, bool) or not isinstance(cap, int) or cap < 1:
+      raise HandoffError("config: builder.max_subagent_calls: a positive integer")
   artifacts = config["artifacts_dir"]
   if not artifacts or not Path(artifacts).is_absolute() \
       or Path(artifacts).resolve().is_relative_to(repo_root.resolve()):
@@ -759,6 +1011,9 @@ def load_config(repo_root: Path) -> dict:
   for key in ("max_in_flight", "ci_wait_minutes"):
     if isinstance(config[key], bool) or not isinstance(config[key], int) or config[key] < 1:
       raise HandoffError(f"{path}: {key} must be a positive integer")
+  timeout = config["notify_timeout_seconds"]
+  if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0 < timeout < float("inf"):
+    raise HandoffError(f"{path}: notify_timeout_seconds must be a positive number")
   if not isinstance(config["commit_trailer"], str):
     raise HandoffError(f"{path}: commit_trailer must be a string")
   # shortcut: the nested keys of reviewers/judges/builder are not validated here, the unit that
@@ -1472,7 +1727,7 @@ def locate(args):
     recorded = load_state(st.root).get("plan")
     if not recorded:
       raise HandoffError("state holds no plan path: run `graph --plan <file>` first")
-    plan = Path(recorded)
+    plan = here(recorded)
   if not plan.is_file():
     raise HandoffError(f"plan {plan} does not exist")
   return plan, st
@@ -1836,13 +2091,18 @@ def registered_worktrees(root: Path):
   return paths
 
 
-def remove_worktree(root: Path, tree: Path) -> None:
-  """Remove a review worktree only when it is clean.
+def remove_worktree(root: Path, tree: Path, force=False) -> None:
+  """Remove a review worktree only when it is clean, unless `force`.
 
-  `--force` deletes tracked modifications and untracked files. The foreman
-  removes a worktree after every round, so a person editing it during a review
-  would lose that work without being asked."""
+  `--force` deletes tracked modifications and untracked files. By default the
+  foreman would not take a person's edits without asking; `prepare` passes
+  `force` (U25): the review worktree is the store's, and a DoD `Run` line may
+  leave it dirty."""
   if not tree.exists():
+    run_git(["worktree", "prune"], root, check=False)
+    return
+  if force:
+    run_git(["worktree", "remove", "--force", str(tree)], root)
     run_git(["worktree", "prune"], root, check=False)
     return
   dirty = run_git(["status", "--porcelain"], tree, check=False).strip()
@@ -1878,7 +2138,7 @@ def run_terminated(folder) -> bool:
 SUBCOMMANDS = ("init", "runcard", "approve_spec", "graph", "scan", "review", "gate", "dry_run", "apply",
                "verify", "status", "launch", "launch_builder", "record_launch", "foreman", "prepare",
                "collect", "tdd_order", "decide", "decision", "interrupt", "clean", "report", "close", "judges",
-               "review_plan", "orient", "doctor", "builder_token")
+               "review_plan", "orient", "doctor", "builder_token", "inbox", "register", "driver")
 
 
 def add_parser(subparsers, name, help_text, *, runcard=True):

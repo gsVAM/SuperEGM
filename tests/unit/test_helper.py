@@ -188,10 +188,7 @@ def test_helper_runs_under_its_new_name(world):
     assert "egm_handoff.py" not in (ROOT / skill).read_text(encoding="utf-8"), skill
 
 
-MODULES = ("init", "runcard", "approve_spec", "graph", "scan", "review", "gate", "dry_run", "apply",
-           "verify", "status", "launch", "launch_builder", "record_launch", "foreman", "prepare",
-           "collect", "tdd_order", "decide", "decision", "interrupt", "clean", "report", "close", "judges",
-           "review_plan", "orient", "doctor", "builder_token")
+MODULES = tuple(sorted(p.stem for p in (SCRIPTS / "superegm").glob("*.py") if p.stem not in ("__init__", "body", "traces")))
 
 
 @pytest.mark.parametrize("name", MODULES)
@@ -390,14 +387,15 @@ def test_the_handoff_flag_and_store_layout_prose(path, needle):
   assert "<6 hex>/" not in (ROOT / "skills/wave/references/foreman_brief.md").read_text(encoding="utf-8")
 
 
-WRITES = {"approve_spec":{"approvals", "handoffs", "state"},"graph": {"state", "plan", "units", "unit", "bodies"},
+WRITES = {"approve_spec":{"approvals", "handoffs", "state", "reviews"},"graph": {"state", "plan", "units", "unit", "bodies"},
           "scan": {"file"}, "gate": {"state"},
           "dry_run": {"file", "state"}, "apply": {"state", "file"},
           "verify": {"state"}, "status": {"state"}, "launch": {"state", "runcards"}, "decide": {"state", "plan", "units", "unit", "bodies", "file"},
           "record_launch": {"launches"}, "collect": {"foreman", "review", "reviews"}, "prepare": {"foreman", "review"},
           "launch_builder": {"launches", "orient_unit"}, "interrupt": {"launches", "foreman"}, "clean": set(),
           "orient": {"orient", "orient_unit"},
-          "runcard": {"runcards"}, "init": set(), "doctor": set(), "builder_token": set()}
+          "runcard": {"runcards", "launches", "driver"}, "init": set(), "doctor": set(), "builder_token": set(), "inbox": {"state", "driver"},
+          "driver": {"driver", "runcards", "launches"}, "register": set()}
 
 
 @pytest.mark.parametrize("name, kinds", sorted(WRITES.items()))
@@ -464,7 +462,7 @@ def test_init_writes_the_config_with_every_key_and_refuses_another_base(tmp_path
   assert set(config) == {"repo", "base", "artifacts_dir", "mode", "max_in_flight", "labels", "issue_template",
                          "tracking_issue_title", "banned_terms", "fix_request_mention", "allowed_mentions",
                          "reviewers", "astra", "judges", "builder", "ci_wait_minutes", "commit_trailer", "owners", "owner_team",
-                         "pr_block_file", "ingest"}
+                         "pr_block_file", "ingest", "notify_timeout_seconds", "foreman"}
   assert config["owners"] == ["octocat"] and config["owner_team"] is None and config["pr_block_file"] is None
   assert config["repo"] == REPO and config["base"] == "main" and config["artifacts_dir"] == str(tmp_path / "store")
   assert config["mode"] == "normal" and config["max_in_flight"] == 5 and config["ci_wait_minutes"] == 30
@@ -764,7 +762,7 @@ MOVED = [("test_plan.py", "test_scan_banned_terms_mentions_and_size"),
          ("test_file.py", "test_subprocess_command_shape_with_fake_gh_on_path"),
          ("test_file.py", "test_apply_recovers_issues_by_the_new_marker_after_a_crash"),
          ("test_builders.py", "test_launch_refuses_each_precondition"),
-         ("test_builders.py", "test_record_launch_appends_running_then_records_the_exit"),
+         ("test_builders.py", "test_launch_builder_starts_the_launch_as_its_one_behaviour"),
          ("test_events.py", "test_wait_prints_deadline_only_and_saves_once"),
          ("test_events.py", "test_status_pr_matching_rules"),
          ("test_events.py", "test_the_helper_is_single_writer_by_design"),

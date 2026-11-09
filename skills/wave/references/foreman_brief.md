@@ -1,7 +1,7 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 From the elephant-goldfish-model (gsVAM), 2026. Modified by SuperEGM (gsVAM), 2026: EGM's two-step brief
 rewritten as spec section 11's one round, every write through the helper, one return word; Step 2b, the Astra lane on every head review (U17);
-the handoff's directory, `--handoff <handoff-id>` on every call and `spec_range.md` (U20); the goldfish pair from `config.reviewers` and the head lane at `astra.heads_effort` (U28). -->
+the handoff's directory, `--handoff <handoff-id>` on every call and `spec_range.md` (U20); the two gates before the word and the `owner:` word (U25); the goldfish pair from `config.reviewers` and the head lane at `astra.heads_effort` (U28). -->
 
 # The foreman brief
 
@@ -52,6 +52,7 @@ Run it only when the `prepared:` line of step 1 ends `astra: ok <RUNNER>`. It en
 Step 3, collect
 1. Run: superegm collect --unit <unit-id> --dispatch <dispatch-id> --runcard <child-card> --handoff <handoff-id>
    It records the foreman's own findings (CI not green; a DoD `Exists` path absent or a `Run` item without its fenced output in pr_body.md; a changed path outside the unit's Scope paths; a tdd-order failure; an unruled deviation; a contested or upheld prior finding) and the builder's contested replies.
+   It verifies before the word, both gates ran in the one call: it re-runs every DoD `Run` item with its `### DoD <n>` fence in the PR body in the review worktree (an item without one is not run: `Run item <n>: no fenced output`) (`dod-<n>: ran red (<line>)`, `ran red (timeout)`, `not run (timeout)`, `paste differs from the run`) and computes the test delta of the test files the plan's `Write` lines do not name (`test-delta: <file>:<line> removed | weakened`; a repository whose tests are not Python records `test_delta: []`). Give this Bash call `timeout: 600000` (the tool's default is 2 minutes; `foreman.run_timeout_minutes` bounds the call under it).
 2. When the round cannot complete (the fetch, prepare or a dispatch failed, or a panel goldfish is still not run after its one re-dispatch), run instead:
    superegm collect --unit <unit-id> --dispatch <dispatch-id> --runcard <child-card> --handoff <handoff-id> --not-run "<reason>"
    and return `error` with that reason.
@@ -59,10 +60,11 @@ Step 3, collect
 Step 4, post
 1. Run: superegm review post --unit <unit-id> --round <n> --dispatch <dispatch-id> --runcard <child-card> --handoff <handoff-id>
    It renders the comment (the configured mention, the header, the finding lines, the CI verdict), scans it, never posts a header already on the pull request, posts through the pull-request reviews API bound to the reviewed commit as a COMMENT (never approve, never request changes), refuses with exit 3 `target-moved` when the merge base moved since prepare, and counts the round posted only when the response names the reviewed commit. Its line is `posted <outcome>`.
+   It refuses with exit 1 `post: gates not run` when the round's entry lacks either gate (collect did not complete): return `error`.
 
 Step 5, return
 One word, then one line: `foreman <unit-id> <dispatch-id>: pr #<pr> head <sha7> round <n> <what happened>`.
-The word is one of: clean | revise | contested: <ids> | cap-reached | target-moved | error
+The word is one of: clean | revise | contested: <ids> | owner: <ids> | cap-reached | target-moved | error
 - the round's `outcome` as `review post` printed it, when the round is `posted`;
 - `target-moved` when `review post` exited 3;
 - `error` otherwise (the round recorded with --not-run, a refused helper call, a stale dispatch id).

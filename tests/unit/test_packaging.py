@@ -28,9 +28,9 @@ BANNED = tuple("".join(parts) for parts in (
 PALETTES = [(skill, *BLUE) for skill in (
     "brainstorming", "draft", "plan", "file", "writing-skills", "using-superegm",
     "test-driven-development", "systematic-debugging", "verification-before-completion",
-    "finishing-a-development-branch", "orient",
+    "finishing-a-development-branch", "orient", "inbox",
 )] + [(skill, *ORANGE) for skill in (
-    "review-spec", "review-plan", "wave", "interrupt", "clean", "integrate", "judges", "drift-report",
+    "review-spec", "review-plan", "wave", "interrupt", "clean", "integrate", "judges", "drift-report", "driver",
 )]
 
 
@@ -58,7 +58,7 @@ def test_runtime_bundle_ships_exactly_the_kept_files(source: Path, tmp_path: Pat
   with zipfile.ZipFile(archive) as bundle:
     assert bundle.testzip() is None
     names = set(bundle.namelist())
-    assert len([p for p in names if p.endswith("/SKILL.md")]) == 19
+    assert len([p for p in names if p.endswith("/SKILL.md")]) == 21
     for skill in source.glob("skills/*/SKILL.md"):
       icon = skill.parent / "assets/icon.svg"
       data = bundle.read(icon.relative_to(source).as_posix())
@@ -77,6 +77,9 @@ def test_runtime_bundle_ships_exactly_the_kept_files(source: Path, tmp_path: Pat
                "prepare", "record_launch", "report", "review", "review_plan", "runcard", "scan", "status", "tdd_order",
                "verify")
     package += ("orient", "builder_token")
+    package += ("inbox",)
+    package += ("driver", "register")
+    package += ("traces",)
     assert sorted(p for p in names if p.endswith(".py")) == sorted(
         ["skills/plan/scripts/superegm.py", *(f"skills/plan/scripts/superegm/{m}.py" for m in package)])
     assert not any(p.startswith(("tests/", ".github/", ".agents/", "docs/designs/"))

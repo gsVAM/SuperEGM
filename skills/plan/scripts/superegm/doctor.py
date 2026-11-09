@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19).
+# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24); the informational `plugins` and `mcp` lines and the profile line's plugin refusals (U27).
 
 """superegm doctor: one line per wave prerequisite, `ok` or the refusal `launch` or `launch-builder`
 would give; read-only, no run card."""
@@ -14,10 +14,11 @@ import superegm as core
 from superegm.builder_token import app_lines, key_path, tool
 from superegm.foreman import runner_path
 from superegm.launch import app_login, builder_login, origin_problems, protection_problems
-from superegm.launch_builder import SENTINEL, UNSET, launched_pairs, profile_problem
+from superegm.launch_builder import SENTINEL, UNSET, elephant_profile, launched_pairs, plugin_dirs, profile_problem
 
 WRITES = frozenset()  # doctor writes nothing
-INFORMATIONAL = ("graphify", "scanning", "astra", "merge")  # lines that never fail the exit
+INFORMATIONAL = ("graphify", "scanning", "astra", "merge", "python3.12", "hooks", "core.hooksPath", "driver", "sleep", "root", "env",
+                 "notify", "plugins", "mcp")  # lines that never fail the exit
 MERGE = ("gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset "
          "restricts updates to config.owners)")
 
@@ -44,12 +45,14 @@ def run(args):
 def checks(config, repo_root, token):
   """The lines after `config`: `launch`'s and `launch-builder`'s own predicates, each line `ok…` or the
   refusal they would give (a check's HandoffError or GhError text is its line). On the machine-account
-  path the order is owner, origin, token, builder, role, scopes, protection, merge, profile, gh, environment,
-  graphify, astra; the builder, role, scopes and protection lines need the token and are absent without it.
+  path the order is owner, origin, token, builder, role, scopes, protection, merge, profile, plugins, mcp, gh,
+  environment, graphify, astra; the builder, role, scopes and protection lines need the token and are absent without it.
   On the App path: owner, origin, credential, key, openssl, artifacts_dir, app, permissions, token,
-  installation, scanning, protection, merge, profile, gh, environment, graphify, astra; the four App lines are
+  installation, scanning, protection, merge, profile, plugins, mcp, gh, environment, graphify, astra; the four App lines are
   absent after a failing key or openssl. The environment line is absent after a failing gh line; graphify,
-  astra, scanning and merge are informational and never fail."""
+  astra, scanning and merge are informational and never fail, as are python3.12, hooks and core.hooksPath (U25)
+  and plugins and mcp (U27, the profile line carrying a listed plugin's refusal).
+  The five driver lines (driver, sleep, root, env, notify) close every form, informational too."""
   repo, base, owners, team, app = config["repo"], config["base"], config["owners"], config["owner_team"], config["builder"]["app"]
   lines, found = [], {}
 
@@ -126,6 +129,10 @@ def checks(config, repo_root, token):
     found["gh"] = tool("gh")
     return f"ok ({found['gh']})"
 
+  def plugins():  # what each launch passes by `--plugin-dir` (U27): id, version and hook events, `; `-joined
+    dirs = plugin_dirs(config["builder"]["plugins"], elephant_profile())
+    return "; ".join(f"{d['id']} {d['version']} [{', '.join(d['hooks'])}]" for d in dirs) or "none"
+
   check("owner", owner)
   check("origin", origin)
   if app:
@@ -142,7 +149,9 @@ def checks(config, repo_root, token):
     for name, fn in (("builder", builder), ("role", role), ("scopes", scopes), ("protection", protection)):
       check(name, fn)
   lines.append(("merge", MERGE))
-  check("profile", lambda: profile_problem(Path(config["builder"]["profile_dir"]).expanduser()) or "ok")
+  check("profile", lambda: profile_problem(Path(config["builder"]["profile_dir"]).expanduser(), config["builder"]["plugins"]) or "ok")
+  check("plugins", plugins)
+  check("mcp", lambda: ", ".join(sorted(config["builder"]["mcp"])) or "none")
   check("gh", gh)
   if "gh" in found:
     check("environment", lambda: environment_problem(repo_root, found["gh"], bool(app)) or "ok")
@@ -150,7 +159,108 @@ def checks(config, repo_root, token):
   lines.append(("graphify", f"ok ({graphify})" if graphify else "not on PATH (informational)"))
   runner = runner_path()
   lines.append(("astra", f"ok ({runner})" if runner else "not installed (heads will record not run)"))
+  python = shutil.which("python3.12")  # this repository's own prerequisite, not the gate's (U25)
+  lines.append(("python3.12", f"ok ({python})" if python else "not on PATH (informational)"))
+  hooks_path, hooks = hooks_of(repo_root)
+  lines.append(("hooks", ", ".join(hooks) or "none"))
+  lines.append(("core.hooksPath", hooks_path or "unset"))
+  lines.extend(driver_lines(config))
   return lines
+
+
+def hooks_of(repo_root: Path):
+  """`core.hooksPath` as configured (None when unset) and the sorted hook names of its directory, else of
+  `<git-common-dir>/hooks`, `.sample` files skipped. Read by a direct `subprocess.run`, never `run_git`, whose
+  `hook_free()` pair would answer its own empty directory (U25)."""
+  got = subprocess.run(["git", "config", "--get", "core.hooksPath"], cwd=str(repo_root), capture_output=True, text=True)
+  hooks_path = got.stdout.strip() or None
+  if hooks_path:
+    folder = repo_root / Path(hooks_path).expanduser()
+  else:
+    folder = repo_root / core.run_git(["rev-parse", "--git-common-dir"], repo_root).strip() / "hooks"
+  names = sorted(p.name for p in folder.iterdir() if p.is_file() and not p.name.endswith(".sample")) if folder.is_dir() else []
+  return hooks_path, names
+
+
+def driver_lines(config):
+  """The five informational lines of the owner's timer (spec section 11.2): `driver:`, `sleep:`, `root:`, `env:`
+  and `notify:`."""
+  from superegm import driver
+  from superegm.launch_builder import HELPER
+  lines, helper, mine = [], driver.plist_helper(), str(HELPER.parents[3])
+  if helper is None:
+    lines.append(("driver", "not installed"))
+  elif helper != str(HELPER):
+    lines.append(("driver", f"stale ({driver.helper_root(helper)}; the env profile's root {mine})"))
+  else:
+    lines.append(("driver", f"installed ({timer_minutes(driver)} min) at {mine}"))
+  lines.append(("sleep", sleep_setting()))
+  entries = registry_entries()
+  entry = None if isinstance(entries, str) else next(
+    (e for e in entries if Path(e["artifacts_dir"]).expanduser().resolve()
+     == Path(config["artifacts_dir"]).expanduser().resolve()), None)
+  if isinstance(entries, str):
+    lines.append(("root", entries))
+  elif entry is None:
+    lines.append(("root", "not registered"))
+  else:
+    lines.append(("root", "ok" if driver.root_ok(entry["root"], entry["artifacts_dir"])
+                  else f"{entry['root']} is not a worktree of {entry['repo']}"))
+  lines.append(("env", env_setting(driver.env_file())))
+  hook = Path.home() / ".superegm" / "notify"
+  lines.append(("notify", f"ok ({core.sha256_file(hook)})" if hook.is_file() else "absent"))
+  return lines
+
+
+def timer_minutes(driver):
+  """The installed interval: the plist's `StartInterval` or the timer's `OnUnitActiveSec`, in minutes."""
+  import plistlib
+  try:
+    if driver.plist_path().is_file():
+      return int(plistlib.loads(driver.plist_path().read_bytes()).get("StartInterval", 0)) // 60
+    for line in core.read_text(driver.timer_path()).splitlines():
+      if line.startswith("OnUnitActiveSec="):
+        return int(line.split("=", 1)[1].strip().removesuffix("min"))
+  except (OSError, ValueError, plistlib.InvalidFileException):
+    pass
+  return "?"
+
+
+def sleep_setting():
+  pmset = shutil.which("pmset")
+  if not pmset:
+    return "not reported"
+  try:
+    out = subprocess.run([pmset, "-g"], capture_output=True, text=True, timeout=10).stdout
+  except (OSError, subprocess.SubprocessError):
+    return "not reported"
+  for line in out.splitlines():
+    words = line.split(None, 1)
+    if words and words[0] == "sleep":
+      return words[1].strip() if len(words) > 1 else "not reported"
+  return "not reported"
+
+
+def registry_entries():
+  """The registry's entries, or the error that refuses it (shown on the `root:` line, as `tick` would fail)."""
+  try:
+    return core.load_registry()
+  except core.HandoffError as error:
+    return str(error)
+
+
+def env_setting(path: Path) -> str:
+  if not path.is_file():
+    return "absent"
+  if path.stat().st_mode & 0o077:
+    return "readable by others"
+  keys = {line.split("=", 1)[0].strip() for line in core.read_text(path).splitlines() if "=" in line and not line.lstrip().startswith("#")}
+  for key in ("PATH", "CLAUDE_CONFIG_DIR"):
+    if key not in keys:
+      return f"missing {key}"
+  if not keys & {"SUPEREGM_APP_KEY", "SUPEREGM_BUILDER_TOKEN"}:
+    return "missing SUPEREGM_APP_KEY or SUPEREGM_BUILDER_TOKEN"
+  return "ok"
 
 
 def environment_problem(repo_root: Path, gh: str, app: bool):
