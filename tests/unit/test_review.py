@@ -453,11 +453,13 @@ def test_a_settle_that_leaves_an_owner_only_remainder_writes_the_owner_word(worl
 
 
 @pytest.mark.parametrize("upheld, lines, outcome", [(False, ["foreman-1-1 declined"], "owner: foreman-1-1, foreman-1-2"),
-                                                     (True, ["foreman-1-1 declined", "revise"], "revise")])
+                                                     (True, ["foreman-1-1 declined", "revise"], "revise"),
+                                                     ("reason", ["foreman-1-1 declined", "revise"], "revise")])
 def test_a_settle_on_the_owner_row_keeps_its_word_until_only_upheld_ids_are_left(world, upheld, lines, outcome):
   """Round 5 (PR #103 review, codebase-details-5-1): on a round whose word is already `owner: <ids>`, settling one
   id the owner allowed keeps the word (its decision stays open on the other id) and prints no second owner word;
-  when every id left is one the owner upheld, the word becomes `revise` (or `cap-reached` at the cap)."""
+  when every id left is one the owner upheld, the word becomes `revise` (or `cap-reached` at the cap), a reasoned
+  uphold (`<fid> finding upheld — <reason>`) too (PR #103 round 6, codebase-details-6-1)."""
   spec, cid, rid = opened(world, "head")
   head_round(world, 1, "posted", cid, "owner: foreman-1-1, foreman-1-2")
   lines_ = [f"foreman-1-{k} | high | tests/unit/test_q.py:{k + 2} | regression: no | test-delta: tests/unit/test_q.py:{k + 2} removed" for k in (1, 2)]
@@ -466,7 +468,8 @@ def test_a_settle_on_the_owner_row_keeps_its_word_until_only_upheld_ids_are_left
     path = hstore(world).path("foreman", "U07")
     data = json.loads(path.read_text(encoding="utf-8"))
     data["decisions"].append({"id": "q1", "point": 1, "options": ["foreman-1-1 allowed", "foreman-1-2 allowed"], "question": "", "source": f"review {rid} round 1"})
-    data["rulings"].append({"decision": "q1", "ruling": "foreman-1-2 finding upheld", "by": "owner"})
+    ruling = "foreman-1-2 finding upheld" + (" — the test stays" if upheld == "reason" else "")  # `decision rule` stores --ruling raw
+    data["rulings"].append({"decision": "q1", "ruling": ruling, "by": "owner"})
     atomic_write(path, data)
   code, out = settle(world, rid, "foreman-1-1", "declined", cid, "--owner")
   assert (code, out.strip().splitlines()) == (0, lines), out
