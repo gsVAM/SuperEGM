@@ -7,6 +7,7 @@ import re
 import signal
 import subprocess
 import time
+from pathlib import Path
 
 import pytest
 
@@ -14,7 +15,8 @@ import superegm
 from conftest import REPO, set_config
 from superegm import init, kill_group
 from superegm.collect import KILL_WAIT, dod_runs, run_env, test_delta
-from superegm.launch_builder import SENTINEL, allowed_tools
+from superegm.launch_builder import SENTINEL, add_worktree, allowed_tools
+from test_foreman import PR, UNIT, builder_token, prepared  # noqa: F401  builder_token: the autouse token `prepare` reads
 
 
 @pytest.mark.parametrize("given, expect", [(None, 8), ({"run_timeout_minutes": 0.02}, 0.02), ({"run_timeout_minutes": 10}, None)])
@@ -58,3 +60,24 @@ E = lambda line, base_line, kind="removed": {"file": F, "line": line, "base_line
   (BASE.replace("def test_a", "@pytest.mark.skip\ndef test_a"), set(), [E(6, 6, "weakened")]), (None, set(), [E(n, n) for n in (3, 4, 6, 7, 8, 9)])])
 def test_test_delta_pairs_assertions_as_git_does(head, named, expect):
   assert test_delta({F: ("b", BASE)}, {F: head} if head is not None else {}, named) == expect
+
+
+def test_prepare_removes_the_review_worktree_by_force_and_checks_out_without_hooks(world, tmp_path, monkeypatch):
+  hooks = tmp_path / "hooks"; hooks.mkdir()
+  (hooks / "post-checkout").write_text(f"#!/bin/sh\ntouch '{tmp_path / 'ran'}'\n"); (hooks / "post-checkout").chmod(0o755)
+  subprocess.run(["git", "config", "core.hooksPath", str(hooks)], cwd=world.repo, check=True)
+  w = prepared(world, tmp_path, monkeypatch)
+  (w.dir / "worktree/scratch.txt").write_text("left by a Run item\n")
+  seen, real = [], subprocess.run
+  def spy(argv, *a, **kw):
+    if argv[0] == "git":
+      d = Path(argv[2].removeprefix("core.hooksPath="))
+      assert argv[1] == "-c" and argv[3:5] == ["-c", "core.fsmonitor=false"] and d.name.startswith("superegm-no-hooks-"), argv
+      assert d.is_dir() and not any(d.iterdir()) and d.stat().st_mode & 0o777 == 0o700
+      seen.append(d)
+    return real(argv, *a, **kw)
+  monkeypatch.setattr(subprocess, "run", spy)
+  assert world.run("prepare", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)[0] == 0
+  assert not (w.dir / "worktree/scratch.txt").exists() and (w.dir / "worktree").is_dir()
+  assert add_worktree(world.repo, w.st, UNIT, 2, f"superegm/{w.st.handoff_id}/{UNIT}", PR).is_dir()
+  assert seen and not (tmp_path / "ran").exists() and not any(d.exists() for d in seen)
