@@ -205,6 +205,19 @@ def test_a_phase_card_written_after_the_read_backs_the_tick_off(world, monkeypat
   assert "driver: tick backed off: plan card plan-abc-0099 open" in s.path("journal").read_text()
 
 
+def test_a_back_off_hides_neither_the_proof_nor_the_failures_before_it(world, monkeypatch, tmp_path, spawn_fake):
+  s, hid, _ = arranged(world, monkeypatch, tmp_path, "reboot"); real, card = driver.tick_command, s.root / hid / "runcards" / "plan-abc-0099.json"
+  def racing(*a):
+    put(card, json.dumps({"id": "plan-abc-0099", "skill": "plan", "artifact": str(world.spec.resolve()), "handoff": hid, "opened_at": superegm.now_iso()})); return real(*a)
+  monkeypatch.setattr(driver, "tick_command", racing); assert world.run("driver", "tick")[0] == 0 and not SPAWNED
+  monkeypatch.setattr(driver, "tick_command", real); card.unlink()
+  assert world.run("driver", "tick")[0] == 0 and tick_launches(s, hid)[-1]["reason"] == "reboot 1"
+  backed = tick_launches(s, hid)[-2]; failed = tmp_path / "failed.exit"; failed.write_text("1\n")
+  fail = lambda n: {"round": n, "card": f"driver-abc-000{n}", "started_at": f"2026-11-03T0{n}:00:00Z", "status": "running", "exit_file": str(failed)}
+  assert backed["status"] == "interrupted" and "pid" not in backed  # a back-off neither resets the count nor counts
+  assert driver.counted_failures(s, [fail(1), backed, fail(3)], {}) and not driver.counted_failures(s, [fail(1), backed], {})
+
+
 def test_install_refuses_an_interval_of_zero(world, monkeypatch, tmp_path):
   s, hid = registered(world, monkeypatch, tmp_path); monkeypatch.setattr(driver, "RUN", lambda argv, **k: subprocess.CompletedProcess(argv, 0))
   code, out = world.run("driver", "install", "--interval", 0, "--runcard", world.open_card("driver", world.spec))
