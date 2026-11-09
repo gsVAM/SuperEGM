@@ -17,6 +17,13 @@ from conftest import REPO
 from test_builders import seed, put, git, launched, launches_of, UNIT  # noqa: F401
 from test_review import opened, head_round, hstore
 
+
+def test_a_strangers_builder_status_comment_is_no_builders(world, monkeypatch):
+  s, card, hid, _ = seed(world); monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0; launched(s, UNIT, "exited 0"); from superegm import status
+  say = lambda cid, login, word: {"id": cid, "body": f"**Builder status:** {word}", "created_at": "2026-11-03T01:00:00Z", "user": {"login": login}}
+  assert status.builder_facts(s, UNIT, [say(1, "builder-bot", "DONE"), say(2, "stranger", "BLOCKED")])[1] == [1, "DONE", "builder-bot"]
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
