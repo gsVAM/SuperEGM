@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_record_launch` as the record-launch module; it records a builder launch in `launches/<unit>.json` and, with --exit, the exit its exit file proves; the flagless form refused, launch-builder recording the launch (U24).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_record_launch` as the record-launch module; it records a builder launch in `launches/<unit>.json` and, with --exit, the exit its exit file proves; the flagless form refused, launch-builder recording the launch (U24); `subagent_calls` read from the session's transcript at the exit (U27).
 
 """superegm record-launch: record a builder launch's exit as `exited <code>`; `launch-builder` records it `running`."""
 
@@ -8,6 +8,7 @@ from pathlib import Path
 
 import superegm as core
 from superegm.launch import load_launches
+from superegm.traces import subagent_calls
 
 WRITES = frozenset(["launches"])  # the store kinds this subcommand writes
 SKILLS = frozenset(["wave"])  # the skills whose card this subcommand accepts
@@ -45,6 +46,11 @@ def record(args):
   if held != str(args.exit):
     raise core.HandoffError(f"the exit file of {unit} launch {latest['round']} says {held}, not {args.exit}")
   latest["status"] = f"exited {args.exit}"
+  # U27: the platform's default subagents the session spawned, from its transcript under the builder profile;
+  # a pre-U27 entry, without `session_id`, records the no-file value
+  config = core.Handoff(*core.locate(args)).config
+  profile = Path(config["builder"]["profile_dir"]).expanduser()
+  latest["subagent_calls"] = subagent_calls(profile, latest["session_id"]) if latest.get("session_id") else {"count": 0, "calls": []}
   line = f"{unit} launch {latest['round']} exited {args.exit}"
   core.atomic_write(st.path("launches", unit), {"launches": launches})
   core.journal(st, line)
