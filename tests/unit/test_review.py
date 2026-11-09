@@ -425,6 +425,20 @@ def test_settle_takes_the_owners_posted_overrule_in_leavemealone(world, author, 
     assert (code, out.strip()) == (0, expect) and (finding["disposition"], finding["ruling"]) == ("declined", "owner")
 
 
+from superegm.review import owner_only_fids
+
+
+@pytest.mark.parametrize("mode, extra, expect", [("leavemealone", ("--judges", "j1"), "review settle: foreman-1-1 is the owner's alone: --owner required"), (None, ("--owner",), "foreman-1-1 declined")])
+def test_a_test_delta_finding_is_settled_by_the_owner_alone(world, mode, extra, expect):
+  """U25: a `test-delta:` finding is the owner's alone, in either mode: the judges cannot settle it."""
+  spec, cid, rid = opened(world, "head", mode=mode)
+  head_round(world, 1, "posted", cid, "revise")
+  assert record(world, rid, 1, "foreman", ["foreman-1-1 | high | tests/unit/test_q.py:3 | regression: no | test-delta: tests/unit/test_q.py:3 removed"], cid, sha=A)[0] == 0
+  code, out = settle(world, rid, "foreman-1-1", "declined", cid, *extra)
+  assert (code == 1 and expect in out) if code else (code, out.strip()) == (0, expect), out
+  assert owner_only_fids(rjson(world, rid, "round-1.json")) == (["foreman-1-1"] if code else [])
+
+
 # ---------------------------------------------------------------- S9: `review status`
 
 def s_unopened(w, c, r): return f"spec-{SLUG}-c9"

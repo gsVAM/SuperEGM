@@ -796,10 +796,23 @@ def test_review_post_binds_the_review_to_the_reviewed_commit(world, tmp_path, mo
   assert (f"{UNIT} awaiting merge" in w.st.path("journal").read_text(encoding="utf-8")) is (word == "clean")
 
 
-@pytest.mark.parametrize("case", ["header-present", "header-after-mention", "stale-dispatch", "mention", "commit-differs"])
+def test_review_post_writes_the_owner_word_before_revise_and_cap(world, tmp_path, monkeypatch):
+  """U25: a round whose only unsettled blocking findings are `test-delta:` ones posts `owner: <ids>`, never `revise`."""
+  base_files, commits = DELTA["removed-from-base"][0], DELTA["removed-from-base"][1]
+  w = prepared(world, tmp_path, monkeypatch, commits=S1 + commits, base_files=base_files)
+  assert world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)[0] == 0
+  record(world, w.st, w.rid, 1, w.head, w.child, {"change-review": ""})
+  code, out = world.run("review", "post", "--unit", UNIT, "--round", 1, "--dispatch", w.did, "--runcard", w.child)
+  entry = json.loads(w.st.path("foreman", UNIT).read_text())["rounds"][0]
+  assert (code, out.strip(), len(w.posted), entry["outcome"]) == (0, "posted owner: foreman-1-1", 1, "owner: foreman-1-1"), out
+  assert f"{UNIT} awaiting merge" not in w.st.path("journal").read_text()
+
+
+@pytest.mark.parametrize("case", ["header-present", "header-after-mention", "stale-dispatch", "mention", "commit-differs", "gates-not-run"])
 def test_review_post_guards(world, tmp_path, monkeypatch, case):
   w = prepared(world, tmp_path, monkeypatch)
-  assert world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)[0] == 0
+  if case != "gates-not-run":
+    assert world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)[0] == 0
   claim = "ping @alice" if case == "mention" else "no hook"
   record(world, w.st, w.rid, 1, w.head, w.child, {"change-review": f"change-review-1-1 | high | src/hooks.py:1 | regression: no | {claim}\n"})
   if case == "header-present":
@@ -817,7 +830,8 @@ def test_review_post_guards(world, tmp_path, monkeypatch, case):
               "header-after-mention": (0, "posted revise (already on the PR)", "posted", 0),
               "stale-dispatch": (1, "dispatch: d9 is not U01's current dispatch (d1)", "collected", 0),
               "mention": (1, "comment:3: bare mention @alice", "collected", 0),
-              "commit-differs": (1, f"posted on {'f' * 7}, not {w.head[:7]}: round 1 not counted", "collected", 1)}[case]
+              "commit-differs": (1, f"posted on {'f' * 7}, not {w.head[:7]}: round 1 not counted", "collected", 1),
+              "gates-not-run": (1, "post: gates not run", "prepared", 0)}[case]
   assert (code, entry["phase"], len(w.posted)) == (expected[0], expected[2], expected[3]), out
   assert out.strip().splitlines()[0].startswith(expected[1]), out
   if case in ("header-present", "header-after-mention"):
