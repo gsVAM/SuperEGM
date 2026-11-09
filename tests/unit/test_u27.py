@@ -12,6 +12,7 @@ import pytest
 import superegm  # the harness reloads the package per test: read its names at call time
 from superegm import init
 from superegm.launch_builder import plugin_dirs, elephant_profile
+from superegm.launch_builder import profile_problem
 from conftest import ROOT, REPO, set_config
 
 PONY, MCP = "ponytail@ponytail", {"context7": {"type": "http", "url": "https://mcp.context7.com/mcp"}}
@@ -71,6 +72,21 @@ def test_plugin_dirs_resolves_the_user_entry_and_hook_events(tmp_path, monkeypat
   assert plugin_dirs([PONY], home) == [{"id": PONY, "version": "5.3.3", "dir": str(d), "hooks": expect}]
   monkeypatch.delenv("CLAUDE_CONFIG_DIR"); monkeypatch.setenv("HOME", str(tmp_path))
   assert elephant_profile() == tmp_path / ".claude"
+
+
+@pytest.mark.parametrize("layout, plugins, problem", [
+  ("ok", [], None), ("ok", [PONY], None), ("skills", [], "holds skills/"), ("commands", [], "holds commands/"),
+  ("no-settings", [], "lacks disableClaudeAiConnectors"), ("connectors-false", [], "lacks disableClaudeAiConnectors"),
+  ("managed", [PONY], "plugin ponytail@ponytail managed in the builder profile")])
+def test_profile_problem_refuses_the_amendment_7_layouts(tmp_path, monkeypatch, layout, plugins, problem):
+  home, _ = elephant(tmp_path, monkeypatch, ["user"])
+  profile = tmp_path / "profile"; profile.mkdir()
+  layout != "no-settings" and (profile / "settings.json").write_text(json.dumps({"disableClaudeAiConnectors": layout != "connectors-false"}), encoding="utf-8")
+  layout in ("skills", "commands") and (profile / layout).mkdir()
+  if layout == "managed":
+    (profile / "plugins").mkdir(); (profile / "plugins/installed_plugins.json").write_text(json.dumps({"version": 2, "plugins": {PONY: [{"scope": "managed"}]}}), encoding="utf-8")
+  expect = f"builder profile {profile} {problem}" if problem and problem.startswith(("holds", "lacks")) else problem
+  assert profile_problem(profile, plugins, home) == expect and (layout != "ok" or profile_problem(profile) is None)
 
 
 from test_builders import no_graphify, which  # noqa: F401
