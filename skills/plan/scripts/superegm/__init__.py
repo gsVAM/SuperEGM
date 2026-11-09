@@ -514,6 +514,11 @@ def tick_terminal(entry: dict) -> bool:
   return str(entry.get("status") or "").startswith("interrupted") or Path(entry["exit_file"]).is_file()
 
 
+def backed_off(entry: dict) -> bool:
+  """A tick's launch recorded and never started: the tick found a card opened since its read and backed off."""
+  return entry.get("status") == "interrupted" and "pid" not in entry
+
+
 def load_driver(hs: Store) -> dict:
   """The handoff's `driver/<handoff>.json`: `launches[]`, `notified`, `refused`."""
   path = hs.path("driver", hs.handoff_id)

@@ -169,6 +169,7 @@ def counted_failures(hs: core.Store, launches: list, state: dict, set_aside: int
   absent: no `status --wait` ever saved)."""
   at = (state.get("status") or {}).get("at")
   cards = [c for _, c in core.top_wave_cards(hs)]
+  launches = [e for e in launches if not core.backed_off(e)]  # never started: no failure, no reset
   start = max((i + 1 for i, e in enumerate(launches) if str(e.get("status") or "").startswith("interrupted")
                or e.get("round", 0) <= set_aside), default=0)
   typed = [c["opened_at"] for c in cards if not c.get("driver_card") and at and c["opened_at"] <= at]
@@ -312,8 +313,7 @@ def tick_store(entry: dict) -> None:
       continue
     if launch(hs, entry, spec, reason):
       notify(hs, spec)
-      return
-  return
+    return  # one launch per store, and a back-off ends the tick (spec section 11.2)
 
 
 def tick() -> int:

@@ -259,7 +259,7 @@ def tick_trigger(handoff) -> str | None:
   line against `state.status.units`; an un-ingested thread above `low` on the latest posted round's head, by U21's
   reader; `first launch` while `state.status` is absent; else None, the nothing-to-do predicate."""
   st, state = handoff.store, handoff.state
-  launches = core.load_driver(st).get("launches") or []
+  launches = [e for e in core.load_driver(st).get("launches") or [] if not core.backed_off(e)]
   if launches:
     last = launches[-1]
     if last.get("status") == "interrupted (reboot)":
