@@ -519,6 +519,45 @@ def test_record_launch_writes_the_requested_pair_then_the_effective_model_and_co
   assert (entry["status"], entry["effective_model"], entry["total_cost_usd"]) == ("exited 0", effective, cost)
 
 
+NOW = 1_700_000_000.0
+iso = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+NX = "no exit file"
+KF = "U07 launch 1 kill_failed ("
+RL = "superegm: record-launch: "
+
+
+@pytest.mark.parametrize("before, exit, file, group, trap, head, code, after, signalled, out", [
+  ({}, "stalled", None, "own", "stalled", None, 0, ("exited (stalled)", None, None), True, "U07 launch 1 stalled (31 min; last commit none)"),
+  ({}, "stalled", None, "own", "stalled", NOW - 3600, 0, ("exited (stalled)", None, None), True, "U07 launch 1 stalled (31 min; last commit none)"),
+  ({}, "stalled", None, "own", None, None, 0, ("running", NX, None), True, KF + NX + ")"),
+  ({"kill_failed": NX}, "stalled", None, "own", None, None, 1, ("running", NX, None), False, RL + KF + NX + ")"),
+  ({"kill_failed": NX}, "stalled", "stalled", "gone", None, None, 0, ("exited (stalled)", None, None), False, "U07 launch 1 stalled (31 min; last commit none)"),
+  ({}, "stalled", None, "own", "1", None, 1, ("running", None, None), True, RL + "the exit file of U07 launch 1 says 1, not stalled"),
+  ({}, "stalled", None, "reused", "stalled", None, 0, ("running", "pid reused", None), False, KF + "pid reused)"),
+  ({}, "stalled", None, "gone", "stalled", None, 0, ("running", "no process", None), False, KF + "no process)"),
+  ({}, "stalled", None, "orphan", None, None, 0, ("running", NX, None), True, KF + NX + ")"),
+  ({"kill_failed": NX}, "1", "1", "gone", None, NOW - 60, 0, ("exited 1", None, "2023-11-14T22:12:20Z"), False, "U07 launch 1 exited 1")])
+def test_exit_stalled_records_the_proof_or_kill_failed(world, monkeypatch, before, exit, file, group, trap, head, code, after, signalled, out):
+  """`record-launch --exit stalled` (spec section 11.1, U31): the group the recorded `pid` names signalled once when it
+  is the launch's own (or leaderless), the wrapper's exit file `stalled` the one proof, else `kill_failed`; a file
+  already present read with no group check and no signal; `last_commit_at` on every exit it records."""
+  from superegm import record_launch as record_launch_mod
+  s, card, *_ = seed(world)
+  result = s.path("launches", f"{UNIT}_r1_result.json")
+  put(s.path("launches", f"{UNIT}.json"), json.dumps({"launches": [{"round": 1, "worktree": "/w", "started_at": iso(NOW - 31 * 60), "status": "running",
+      "result_file": str(result), "pid": 4242, **before}]}))
+  file and Path(f"{result}.exit").write_text(f"{file}\n", encoding="utf-8")
+  leader, members = {"own": (f"/bin/sh -c claude -p x > '{result}'\n", "4242 4242\n"), "reused": ("other\n", "4242 7\n"), "orphan": ("", "4243 4242\n"), "gone": ("", "1 1\n")}[group]
+  monkeypatch.setattr(record_launch_mod, "PS", lambda args: leader if "-p" in args else members)
+  monkeypatch.setattr(record_launch_mod, "head_time", lambda worktree: head)
+  sent = []
+  world.ns["kill_group"] = lambda pgid: (sent.append(pgid), trap and Path(f"{result}.exit").write_text(f"{trap}\n", encoding="utf-8"))
+  got, printed = world.run("record-launch", "--unit", UNIT, "--exit", exit, "--runcard", card)
+  entry = launches_of(s)[0]
+  assert (got, printed.strip(), sent == [4242], entry["status"], entry.get("kill_failed"), entry.get("last_commit_at")) == (code, out, signalled, *after), printed
+  assert not (signalled and not trap) or sum(world.sleeps) >= 30
+
+
 @pytest.mark.parametrize("case, reason", [
   ("unmarked", "U07 is not marked by launch"),
   ("running", "U07 launch 1 is not terminal"),
