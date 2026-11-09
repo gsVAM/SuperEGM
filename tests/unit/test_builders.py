@@ -448,7 +448,7 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   assert line.startswith(f"cd '{wt}' && env -u GIT_ASKPASS -u SSH_ASKPASS -u GITHUB_TOKEN CLAUDE_CONFIG_DIR='{cfg['profile_dir']}' GH_TOKEN=\"$SUPEREGM_BUILDER_TOKEN\" SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{card}' {pairs} claude -p "), line
   assert f" claude -p \"$(cat '{prompt_file}')\" --model '{cfg['model']}' --permission-mode '{cfg['permission_mode']}' --setting-sources user --allowedTools '" in line, line
   tools = line.split("--allowedTools '")[1].split("'")[0].split(",")
-  assert tools == [t.replace("Bash(gh ", "Bash(/usr/local/bin/gh ") for t in cfg["allowed_tools"]] + [f"Bash(git push origin {branch}:*)", "Bash(pytest:*)"]
+  assert tools == [t.replace("Bash(gh ", "Bash(/usr/local/bin/gh ") for t in cfg["allowed_tools"]] + [f"Bash(git push origin {branch}:*)"]
   assert line.endswith(f"' --output-format json > '{result}'; echo $? > '{result}.exit'")
   assert "ghp_builder" not in out
   tree = git(["rev-parse", "refs/superegm/base^{tree}"], world.repo).strip()
