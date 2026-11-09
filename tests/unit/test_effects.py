@@ -18,7 +18,7 @@ EXTERNAL = {
     "plan": ("state-store", "start-session", "github-write"),
     "review-plan": ("state-store", "start-session"),
     "file": ("github-write", "state-store"),
-    "wave": ("start-session", "github-write", "remote-branch", "state-store"),
+    "wave": ("start-session", "github-write", "remote-branch", "state-store", "destructive-local"),
     "interrupt": ("state-store",),
     "clean": ("destructive-local", "state-store"),
     "finishing-a-development-branch": ("github-write", "remote-branch", "state-store"),

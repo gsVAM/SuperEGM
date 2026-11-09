@@ -915,7 +915,8 @@ def test_the_wave_entry_refreshes_the_snapshot_before_report():
   "Codex", "ChatGPT", "Astra `inspect`", "claudex", "defer", "--published", "--watch", "--confirm-landed", "Candidate PR",
   "wave_<n>_plan.md", "foreman_<id>_state.json", "egm-handoff", "**`Panel`**", "astra_lane", "review_panels",
   "marking a PR ready", "head-moved", "merge locally", "egm/<handoff-id>", "`--wait 1500`", "two consecutive `deadline`s",
-  "--not-run <reason>", "ask the user whether to re-review", "max 1 re-audit", "Blocker or Major"])
+  "--not-run <reason>", "ask the user whether to re-review", "max 1 re-audit", "Blocker or Major",
+  "A refusal (`relaunch` already used)"])
 def test_the_wave_skill_names_no_removed_mechanism(removed):
   for path in (SKILL, POINTS, RULINGS, SKILL.parent / "references/leavemealone_mode.md"):
     assert removed not in path.read_text(encoding="utf-8"), (path.name, removed)
@@ -1628,3 +1629,21 @@ def test_a_launch_with_no_commit_spends_no_relaunch_and_a_second_is_stop(world, 
   if expect.startswith("ruled"):
     f = foreman_of(s, "U01")
     assert f["rulings"][-1]["reason"] == expect[22:-1] and f["stopped"]["reason"] == "stop the unit"
+
+
+# U31: by the owner's ruling (issue #89, comment 6752372220) each needle is pinned where its section now lives: the
+# batch, its step 3 and Entry step 4 in SKILL.md, point 3's options and carve-out in references/decision_points.md,
+# the leavemealone `launch <n>` line in references/leavemealone_mode.md.
+LEAVE = SKILL.parent / "references/leavemealone_mode.md"
+PROSE = [("ignored except `landed` and `stalled`", (SKILL,)), ("record-launch --unit <U> --exit stalled --runcard '<CARD>'", (SKILL,)),
+         ("Decision point 3 with the stall facts", (SKILL,)),
+         ("an `interrupted` launch with no decision on it", (SKILL,)), ("an interrupted or a stalled launch", (POINTS, LEAVE)),
+         ("spends no `relaunch`", (POINTS,)),
+         ("effect_kinds: [start-session, github-write, remote-branch, state-store, destructive-local]", (SKILL,))]
+
+
+@pytest.mark.parametrize("needle, paths", PROSE)
+def test_the_wave_skill_records_a_stalled_launch(needle, paths):
+  for path in paths:
+    assert needle in path.read_text(encoding="utf-8"), (path.name, needle)
+  assert len(SKILL.read_bytes()) < 15_000   # the owner's ruling: the body stays under 15,000 bytes
