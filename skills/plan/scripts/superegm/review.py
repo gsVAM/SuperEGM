@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest: the one review loop (spec section 8)."""
 
@@ -76,9 +76,10 @@ def register(subparsers):
   t.add_argument("--review", required=True)
   c = core.add_parser(action, "scope", "a spec review's scope this round: one line per section, for the brief")
   c.add_argument("--review", required=True)
-  u = core.add_parser(action, "rule", "record a ruling at the cap")
+  u = core.add_parser(action, "rule", "record a ruling at the cap, or the owner's accept below it on an acceptable round")
   u.add_argument("--review", required=True)
   u.add_argument("--ruling", choices=RULINGS, required=True)
+  u.add_argument("--decision", metavar="ID", help="on a head below the cap: the unit's pending point-5 decision naming this review")
   by_whom(u, required=False)  # `stop` alone needs no ruler once `continue` is spent and the bytes moved
   v = core.add_parser(action, "post", "post a head round's review to its pull request, bound to the reviewed commit")
   v.add_argument("--unit", required=True)
@@ -793,6 +794,38 @@ def evaluate(st: core.Store, review: dict, runcard: str) -> Status:
   return Status(code, line, trend, converged, converged_round, sha, moved, latest_sha, fixed)
 
 
+def acceptable(st: core.Store, review: dict, runcard: str) -> tuple[list[str], int, int]:
+  """The accept below the cap's predicate, beside the cap's: what blocks it on the latest completed round
+  (`kind integrate`, then each unsettled `high <fid>`, `regression <fid>`, `external <fid>`, then each pending
+  `decision <id>` of a head's unit naming this review at any point but 5), with that round's unsettled medium
+  and low counts."""
+  blockers = ["kind integrate"] if review["kind"] == "integrate" else []
+  rid = review_id(st, review["kind"], review["artifact"], review["cycle"])
+  completed = [r for r in rounds_of(st, rid, review) if r["what_ran"] == "completed"]
+  unsettled = [f for f in findings_of(completed[-1]) if f["disposition"] is None] if completed else []
+  blockers += [f"high {f['id']}" for f in unsettled if f["severity"] == "high"]
+  blockers += [f"regression {f['id']}" for f in unsettled if f["severity"] == "medium" and f["regression"] == "yes"]
+  blockers += [f"external {f['id']}" for f in unsettled
+               if f["severity"] == "medium" and f["regression"] != "yes" and f["id"].startswith("external:")]
+  if review["kind"] == "head":
+    blockers += [f"decision {d['id']}" for d in open_decisions(st, review["artifact"])
+                 if d.get("point") != 5 and names_review(d, rid)]
+  return blockers, sum(f["severity"] == "medium" for f in unsettled), sum(f["severity"] == "low" for f in unsettled)
+
+
+def open_decisions(st: core.Store, unit: str) -> list[dict]:
+  """The unit's `decisions[]` no `rulings[]` entry names."""
+  data = core.load_foreman(st, unit)
+  ruled = {r.get("decision") for r in data.get("rulings") or []}
+  return [d for d in data.get("decisions") or [] if d["id"] not in ruled]
+
+
+def names_review(decision: dict, rid: str) -> bool:
+  """A decision whose `source` is `review <id> round <n>` or `review <id> cap`, this review's."""
+  words = (decision.get("source") or "").split()
+  return len(words) >= 3 and words[:2] == ["review", rid] and words[2] in ("round", "cap")
+
+
 def store_verdict(st: core.Store, rid: str, review: dict, runcard: str) -> Status:
   """Re-derive `converged` and `converged_round` into `review.json` after a record or a settle."""
   status = evaluate(st, review, runcard)
@@ -1424,10 +1457,13 @@ def rule_review(args) -> int:
     raise core.HandoffError("review rule: cycle stopped")
   if args.ruling == "continue" and "continue" in rulings:
     raise core.HandoffError("review rule: continue already ruled this cycle")
-  if args.ruling == "accept" and review["kind"] == "head":
-    raise core.HandoffError("review rule: accept is refused on a head")
   status = evaluate(st, review, card.get("parent") or args.runcard)
-  if status.code != 2:
+  early = args.ruling == "accept" and status.code != 2
+  if early:
+    counts = refuse_early_accept(st, rid, review, status, args)
+  elif args.ruling == "accept" and review["kind"] == "head":
+    raise core.HandoffError("review rule: accept is refused on a head")
+  elif status.code != 2:
     raise core.HandoffError("review rule: not at the cap")
   if args.ruling == "accept" and status.moved:
     raise core.HandoffError("review rule: the reviewed bytes moved: continue or stop")
@@ -1447,5 +1483,28 @@ def rule_review(args) -> int:
   save_review(st, rid, review)
   core.journal(st, f"review rule {rid} {ruling['id']} stop: the one option under {args.runcard}" if by == "helper"
                else f"review rule {rid} {ruling['id']} {args.ruling} by {by} under {args.runcard}")
+  if early:
+    core.journal(st, f"review {rid} accepted before the cap by the owner ({counts[0]} medium, {counts[1]} low)")
   print(f"ruling {ruling['id']} {args.ruling}")
   return 0
+
+
+def refuse_early_accept(st: core.Store, rid: str, review: dict, status: Status, args) -> tuple[int, int]:
+  """An accept below the cap is the owner's alone, on an acceptable round with a medium unsettled, and on a head
+  it names the unit's pending point-5 decision; the round's unsettled medium and low counts when honoured."""
+  if args.judges:
+    raise core.HandoffError("review rule: accept refused: judges")
+  if status.code in (0, 4):
+    raise core.HandoffError("review rule: not at the cap")
+  blockers, mediums, lows = acceptable(st, review, args.runcard)
+  if blockers:
+    raise core.HandoffError("review rule: accept refused: " + ", ".join(blockers))
+  if not mediums:
+    raise core.HandoffError("review rule: accept refused: no medium to accept")
+  if review["kind"] == "head":
+    fifth = [d["id"] for d in open_decisions(st, review["artifact"]) if d.get("point") == 5 and names_review(d, rid)]
+    if not getattr(args, "decision", None):
+      raise core.HandoffError(f"review rule: accept on a head needs --decision {fifth[0] if fifth else 'none'}")
+    if args.decision not in fifth:
+      raise core.HandoffError(f"review rule: --decision {args.decision} names no pending point-5 decision of {review['artifact']}")
+  return mediums, lows
