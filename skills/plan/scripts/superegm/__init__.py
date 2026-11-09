@@ -542,7 +542,7 @@ def reboot_launches(hs: Store, unit: str, current: str) -> None:
   data = json.loads(read_text(path))
   changed = False
   for entry in data.get("launches") or []:
-    if entry.get("status") == "running" and not Path(entry["result_file"] + ".exit").is_file() and rebooted(entry, current):
+    if entry.get("status") == "running" and rebooted(entry, current) and not Path(entry["result_file"] + ".exit").is_file():
       entry["status"] = "interrupted (reboot)"
       journal(hs, f"{unit} launch {entry['round']} interrupted (reboot)")
       changed = True

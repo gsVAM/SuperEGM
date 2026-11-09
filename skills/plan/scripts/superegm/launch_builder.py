@@ -1,7 +1,8 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24).
 
-"""superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch."""
+"""superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch, started
+detached and recorded `running`."""
 
 import hashlib
 import json
@@ -96,9 +97,30 @@ def prepare(args, card):
   managed = managed_plugins(Path(config["builder"]["profile_dir"]).expanduser() / "plugins")
   core.atomic_write(st.path("launches", f"{unit}_r{rnd}_managed.json"), json.dumps(managed) + "\n")
   core.journal(st, f"{unit} launch {rnd} prepared" + (f" (managed plugins: {', '.join(managed)})" if managed else ""))
-  print(command_line(config, worktree, prompt, st.path("launches", f"{unit}_r{rnd}_result.json"), args.runcard, tools, launched_gh,
-                     identity["login"], identity["email"]))
+  result = st.path("launches", f"{unit}_r{rnd}_result.json")
+  line = command_line(config, worktree, prompt, result, args.runcard, tools, launched_gh, identity["login"], identity["email"])
+  # the one behaviour (amendment 10): the wrapper started detached, then the launch recorded `running`
+  pid = start_detached(["/bin/sh", "-c", line], st.path("launches", f"{unit}_r{rnd}.log"), dict(os.environ))
+  launches = load_launches(st, unit)
+  launches.append({"round": rnd, "worktree": str(worktree), "branch": branch, "started_at": core.now_iso(), "status": "running",
+                   "result_file": str(result), "prompt_sha256": core.sha256_file(prompt), "boot_id": core.boot_id(), "pid": pid, "command": line})
+  core.atomic_write(st.path("launches", unit), {"launches": launches})
+  done = f"{unit} launch {rnd} running (pid {pid})"
+  core.journal(st, done)
+  print(done)
   return 0
+
+
+def start_detached(command: list, log: Path, env: dict) -> int:
+  """Start `command` in its own session and process group (`start_new_session=True`, never `setsid(1)`, which macOS
+  lacks), stdin from /dev/null, stdout and stderr into `log`, and return its pid at once: the caller's pipe is not
+  held for the launch's hours, and the session that called it may end while the launch runs (spec section 11.2)."""
+  log = Path(log)
+  log.parent.mkdir(parents=True, exist_ok=True)
+  with open(os.devnull, "rb") as stdin, open(log, "ab") as out:
+    process = subprocess.Popen(command, stdin=stdin, stdout=out, stderr=subprocess.STDOUT, env=env, start_new_session=True, close_fds=True)
+  process.returncode = 0  # never waited here: the detached wrapper outlives this helper and writes its own exit file
+  return process.pid
 
 
 def write_bin(store, unit: str, rnd: int, config: dict, openssl: str, gh: str) -> Path:
@@ -130,6 +152,7 @@ def refusal(store, state, config, unit, rnd, builder):
   record = (state.get("units") or {}).get(unit) or {}
   if not record.get("launched"):
     return f"{unit} is not marked by launch"
+  core.reboot_launches(store, unit, core.boot_id())  # the boot-id proof: a launch a reboot ended is terminal (spec section 11.2)
   launches = load_launches(store, unit)
   for entry in launches:
     if not terminal(entry):

@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_launch` as the launch module; it marks the ready units up to `max_in_flight` after the protection checks of spec section 11, the owners set and the team bypass included; the builder as a GitHub App (U15); a unit whose `clean` outcome an ingest rewrote is ready again (U21).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_launch` as the launch module; it marks the ready units up to `max_in_flight` after the protection checks of spec section 11, the owners set and the team bypass included; the builder as a GitHub App (U15); a unit whose `clean` outcome an ingest rewrote is ready again (U21); `interrupted (reboot)` terminal (U24).
 
 """superegm launch: check what the launch needs, then mark the ready units up to `max_in_flight`."""
 
@@ -124,7 +124,7 @@ def load_launches(store, unit):
 
 def terminal(entry):
   """Spec section 4: a launch is terminal only with its exit file or the owner's typed `interrupted`."""
-  return entry.get("status") == "interrupted" or Path(entry["result_file"] + ".exit").is_file()
+  return str(entry.get("status") or "").startswith("interrupted") or Path(entry["result_file"] + ".exit").is_file()
 
 
 def app_login(config):
