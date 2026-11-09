@@ -488,9 +488,16 @@ def open_runcard(store: Store, skill: str, artifact: str, parent=None, mode=None
     atomic_write(store.path("runcards", rid), card)
     journal(store, f"runcard interrupted {rid}: a tick's session may be live")
     raise HandoffError(TICK_LIVE)
+  # one spec is one artifact in every worktree of the repository, as `require_runcard` reads it (`here`)
+  try:
+    top = git_toplevel(Path.cwd())
+  except HandoffError:
+    top = None
+  same = (lambda p: str(rebased(p, top))) if top else str
+  mine = same(artifact)
   for other in existing:
     held = json.loads(read_text(other))
-    if (held["skill"], held["artifact"]) == (skill, artifact) and not held["closed_at"] and not held["interrupted_at"]:
+    if held["skill"] == skill and same(held["artifact"]) == mine and not held["closed_at"] and not held["interrupted_at"]:
       held["interrupted_at"] = now_iso()
       atomic_write(other, held)
       journal(store, f"runcard interrupted {other.stem} by {rid}")
@@ -640,11 +647,11 @@ def handoff_spec(args, store: Store) -> str:
 
 def subcommand_artifact(args, store: Store) -> str:
   """What the running subcommand acts on: its unit, else its spec, else the
-  handoff's spec."""
+  handoff's spec; a spec read under this checkout (`here`), as the card's side is."""
   if getattr(args, "unit", None):
     return args.unit
   if getattr(args, "design", None):
-    return str(Path(args.design).expanduser().resolve())
+    return str(here(Path(args.design).expanduser().resolve()))
   return handoff_spec(args, store)
 
 
