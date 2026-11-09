@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U10b's tests of the driver: report, decision open|rule, the wave skill body; the by-hand ruling read through `ruling_of` (U22); the foreman-verifies prose and the owner-only decision's allowed form (U25).
+# Added by SuperEGM (gsVAM), 2026: U10b's tests of the driver: report, decision open|rule, the wave skill body; the by-hand ruling read through `ruling_of` (U22); the foreman-verifies prose and the owner-only decision's allowed form (U25); the head's fifth decision point and the accept below the cap's skill texts (U35).
 
 """U10b: the pure functions the wave skill cites, `report`, `decision open|rule` and the skill body.
 Fixtures: conftest's `world`, `applied` and `make_pr` (U03/U07)."""
@@ -1432,7 +1432,7 @@ def test_the_wave_skill_and_the_orders_quote_the_ruling_forms(path, needle):
 
 
 @pytest.mark.parametrize("needle", [  # round 3 (PR #96 review): a ruling by comment continues as its point's typed section does
-    "then, for `finding upheld` too, by `review status`: 0 → the unit awaits\n  merge; 2 → Decision point 2; else `launch-builder`",
+    "then, for `finding upheld` too, by `review status`: 0 → the unit awaits\n  merge; 2 → Decision point 2; in normal mode `acceptable: yes` → Decision point 5; else `launch-builder`",
     "a spent `one more round` is refused before anything is recorded",
     "(a `redesign` at point 1 runs no `review rule`)",
     "option on a `BLOCKED` comment → `launch-builder` now"])
@@ -1470,4 +1470,88 @@ def test_a_ruling_by_comment_continues_as_its_point_does(needle):
     ("skills/wave/SKILL.md", "`<U> <qid>: label superegm:stopped left on issue #<n>`"),
     ("skills/wave/SKILL.md", "--remove-label superegm:stopped")])
 def test_the_ruling_prose_names_how_a_ruling_is_applied_and_read(path, needle):
+  assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
+
+
+# ---------------------------------------------------------------- U35: a head's fifth decision point (accept, revise)
+
+
+def head_review(world, s, card):
+  """U01's head review opened under the card, its round 1 posted at the head and recorded with one medium."""
+  from test_review import record, F
+  code, out = world.run("review", "open", "--kind", "head", "--artifact", "U01", "--reviewers", "change-review", "--runcard", card)
+  assert code == 0, out
+  rid = out.strip()
+  f = foreman_of(s, "U01")
+  f["rounds"].append({"round": 1, "phase": "posted", "launch": 1, "head": "a" * 40, "outcome": None})
+  atomic_write(s.path("foreman", "U01"), f)
+  code, out = record(world, rid, 1, "change-review", [F("change-review", 1, 1, "medium")], card, sha="a" * 40)
+  assert code == 0, out
+  return rid
+
+
+def test_the_fifth_decision_point_opens_on_a_head(world):
+  from superegm.inbox import inbox_items
+  card = open_wave_card(world); s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "launches": [{"round": 1, "status": "exited 0"}]})
+  rid = head_review(world, s, card)
+  code, out = world.run("decision", "open", "--unit", "U01", "--point", "5", "--question", question(world, "one medium remains"), "--source", f"review {rid} round 1", "--runcard", card)
+  assert (code, out.splitlines()) == (0, ["q1", "options: accept; revise"])
+  entry = foreman_of(s, "U01")["decisions"][0]
+  assert (entry["point"], entry["source"], entry["options"]) == (5, f"review {rid} round 1", ["accept", "revise"])
+  assert f"pending: U01 q1 (point 5, review {rid} round 1)" in world.run("report", "--runcard", card)[1]
+  [item] = [i for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "decision"]
+  assert item["action"].startswith("**Ruling:** (q1) ") and "accept" in item["action"] and "revise" in item["action"]
+
+
+def fifth_point_open(world):
+  """Step 4's arrangement through its `decision open --point 5`: the store, the wave card and the head review's id."""
+  card = open_wave_card(world); s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "launches": [{"round": 1, "status": "exited 0"}]})
+  make_pr(world.gh, 70, "a" * 40)
+  rid = head_review(world, s, card)
+  code, out = world.run("decision", "open", "--unit", "U01", "--point", "5", "--question", question(world, "one medium remains"), "--source", f"review {rid} round 1", "--runcard", card)
+  assert code == 0, out
+  return s, card, rid
+
+
+def by_hand(world, monkeypatch, body, n):
+  """The owner's by-hand comment `n` holding `body`, read as `test_a_by_hand_ruling_naming_the_blocked_comment_rules_its_decision`
+  reads its comments (`config.owners` naming `owner`, `ruling_of` reading that login alone)."""
+  set_config(world, repo=REPO, owners=["owner"])
+  fake_gh(world, {f"repos/{REPO}/issues/comments/{n}": {"id": n, "user": {"login": "owner"}, "body": body + "\n"}})
+  return n
+
+
+@pytest.mark.parametrize("ruling, posted, extra, outcome, comment", [
+  ("accept — fine", None, None, "clean", "**Ruling:** (q1) accept — fine"),
+  ("accept", None, None, "clean", "**Ruling:** (q1) accept"),
+  ("revise — once more", None, None, "revise", "**Ruling:** (q1) revise — once more"),
+  ("accept — by phone", "**Ruling:** (q1) accept — by phone", None, "clean", None),
+  ("stop", None, None, None, "decision: ruling is none of the options: accept; revise"),
+  ("accept — fine", None, "external", None, "superegm: review rule: accept refused: external external:devin[bot]-1-1"),
+  ("accept — fine", None, "judges", None, "decision: point 5 is the owner's alone")])
+def test_the_fifth_decision_point_is_ruled_by_word_or_comment(world, monkeypatch, ruling, posted, extra, outcome, comment):
+  from test_review import record, F
+  s, card, rid = fifth_point_open(world)
+  extra == "external" and record(world, rid, 1, "external:devin[bot]", [F("external:devin[bot]", 1, 1, "medium")], card, sha="a" * 40)
+  args = ["--posted", str(by_hand(world, monkeypatch, posted, 78))] if posted else []
+  by = "judges:j1" if extra == "judges" else "owner"
+  code, out = world.run("decision", "rule", "--unit", "U01", "--decision", "q1", "--ruling", ruling, "--by", by, *args, "--runcard", card)
+  if outcome is None:
+    assert code == 1 and comment in out and foreman_of(s, "U01")["rulings"] == [] and 2 not in world.gh.comments; return
+  f = foreman_of(s, "U01")
+  assert code == 0 and f["rounds"][-1]["outcome"] == outcome and not [r for r in f["rulings"] if r["ruling"].startswith("relaunch")]
+  assert (comment is None) or world.gh.comments[2][-1]["body"].startswith(comment + "\n")
+  converged = json.loads(s.path("reviews", rid, "review.json").read_text(encoding="utf-8"))["converged"]
+  assert (converged == "by ruling R1") is (outcome == "clean") and ("U01 awaiting merge" in s.path("journal").read_text(encoding="utf-8")) is (outcome == "clean")
+
+
+# The owner's ruling on #93 (comment 6733268467): the wave skill's decision points live in
+# `skills/wave/references/decision_points.md` since #102, so the fifth point's needles are read there.
+@pytest.mark.parametrize("path, needle", [
+  ("skills/review-spec/references/review_loop.md", "acceptable: yes"), ("skills/review-spec/references/review_loop.md", "the judges never accept below the cap"),
+  ("skills/review-spec/SKILL.md", "accept, or fix"), ("skills/review-plan/SKILL.md", "once per round, naming every acceptable unit"),
+  ("skills/review-plan/SKILL.md", "gets the Step 1 question before any fix moves its bytes"),
+  ("skills/wave/references/decision_points.md", "decision open --point 5"), ("skills/wave/SKILL.md", "`revise` spends no relaunch"), ("skills/wave/SKILL.md", "`clean` by accept"),
+  ("skills/wave/references/decision_points.md", "no head is accepted early"), ("skills/wave/SKILL.md", "printed `acceptable: yes` → Decision point 5"), ("skills/integrate/SKILL.md", "accepted before the cap")])
+def test_the_skill_texts_carry_the_accept_below_the_cap(path, needle):
   assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)

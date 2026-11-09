@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03); the review loop and approve-spec (U04).
+# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03); the review loop and approve-spec (U04); the `acceptable:` line (U35).
 
 """U04: the review loop (`review open|record|settle|status|rule`) and `approve-spec` (spec section 8)."""
 
@@ -661,6 +661,19 @@ def test_review_rule(world):
     head_round(world, n, "posted", wcid, "revise")
     assert record(world, hid, n, "change-review", [F("change-review", n, 1)], wcid, sha=A)[0] == 0
   assert "review rule: accept is refused on a head" in rule(world, hid, "accept", wcid)[1]
+
+
+@pytest.mark.parametrize("findings, moved, line", [
+  ([F("design", 1, 1, "medium"), F("design", 1, 2, "low")], False, "acceptable: yes (1 medium, 1 low)"),
+  ([F("design", 1, 1, "medium"), F("design", 1, 2, "low")], True, None),
+  ([F("design", 1, 1, "medium"), F("design", 1, 2, "medium", "yes")], False, None),
+  ([F("design", 1, 1, "high"), F("design", 1, 2, "medium")], False, None), ([F("design", 1, 1, "low")], False, None), ([], False, None)])
+def test_review_status_prints_the_acceptable_line(world, findings, moved, line):
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [findings])
+  moved and move(world, "spec", spec)
+  out = world.run("review", "status", "--review", rid, "--runcard", cid)[1]
+  assert ("acceptable:" in out) is (line is not None) and (line is None or out.splitlines()[2] == line)
 
 
 def test_rule_refuses_accept_while_the_bytes_moved_and_stop_needs_no_ruler(world):

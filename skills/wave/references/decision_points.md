@@ -1,5 +1,5 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
-Added by SuperEGM (gsVAM), 2026: the `owner:` row of the word table and the three decision points, moved out of the wave skill's SKILL.md (the owner's ruling: a 24K skill body is context bloat); the `owner: <ids>` decision's allowed options, one per id, and its leavemealone sentence (U25). -->
+Added by SuperEGM (gsVAM), 2026: the `owner:` row of the word table and the three decision points, moved out of the wave skill's SKILL.md (the owner's ruling: a 24K skill body is context bloat); the `owner: <ids>` decision's allowed options, one per id, and its leavemealone sentence (U25); Decision point 5, a head's accept below the cap (U35). -->
 
 # The decision points
 
@@ -42,7 +42,7 @@ then `review status`; record it with
 `python3 '<HELPER>' decision rule --unit <U> --decision <qid> --ruling '<fid> finding upheld' --by <login> --runcard '<CARD>'`
 or `--ruling '<fid> finding overruled — <reason>'`, which posts the
 `**Ruling:**` comment on the issue. Then by `review status`: 0 → the unit
-awaits merge; 2 → Decision point 2; else `launch-builder`.
+awaits merge; 2 → Decision point 2; in normal mode `acceptable: yes` → Decision point 5; else `launch-builder`.
 A third ruling, on a head, is `redesign — <one sentence why>` (the sentence the owner's, typed after the dash; a bare `redesign` is refused):
 `python3 '<HELPER>' decision rule --unit <U> --decision <qid> --ruling 'redesign — <one sentence why>' --by <login> --runcard '<CARD>'`.
 It stops the unit by `stop`'s own path (the issue labelled `superegm:stopped`, never relaunched) and writes the
@@ -86,3 +86,21 @@ question; the next launch's prompt carries it). `relaunch` →
 `launch-builder` now; `stop the unit` → the unit is labelled and never
 relaunched.
 Leavemealone-mode: U11 wires §13.2 here.
+
+### Decision point 5
+
+A head's round below the cap that the owner may accept: the foreman returned `revise` and `review status`
+printed `acceptable: yes (<n> medium, <m> low)` (unsettled mediums and lows alone). Write that line and the
+findings to a question file and run
+`python3 '<HELPER>' decision open --point 5 --unit <U> --question '<file>' --source 'review <head-review-id> round <n>' --runcard '<CARD>'`
+(options `accept; revise`). The unit is pending, so no launch follows; the inbox and the board list it by its `point`.
+Ask the owner, then
+`python3 '<HELPER>' decision rule --unit <U> --decision <qid> --ruling 'accept — <reason>' --by <login> --runcard '<CARD>'`
+or `--ruling 'revise — <reason>'` (it posts `**Ruling:** (<qid>) <option> — <reason>`; an owner's comment in that
+form rules it with `--posted <comment-id>`). `accept` converges the head review by ruling: the round is `clean` and the
+unit awaits merge. A refused accept (`review rule: accept refused: <blockers>`) records nothing: ask again with `revise`.
+An accept on a pull request whose head moved since the round is refused `review rule: the reviewed head moved: revise`;
+on a rerun after a failed post it first withdraws the accept it gave (journaled `review <id> R<n> accept lapsed`, the
+round's word `revise`), the decision staying pending: rule it `revise`.
+`revise` is the round's own word: `launch-builder` as the `revise` row does; it spends no point-3 relaunch.
+The owner's alone (`--by judges:<id>` is refused): in leavemealone-mode no point 5 opens and no head is accepted early.

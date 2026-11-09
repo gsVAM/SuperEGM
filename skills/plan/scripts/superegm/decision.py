@@ -1,11 +1,14 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3
+# Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3/5
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
-# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25).
+# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35).
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
+import argparse
+import contextlib
+import io
 import os
 import re
 from dataclasses import dataclass
@@ -17,7 +20,7 @@ from superegm.report import pending_decisions, unit_view
 from superegm import review
 from superegm.review import Refusal
 
-WRITES = frozenset({"foreman"})  # the store kinds this subcommand writes
+WRITES = frozenset({"foreman", "reviews"})  # the store kinds this subcommand writes (`reviews`: a fifth point's accept, U35)
 SKILLS = frozenset({"wave"})  # the skills whose card this subcommand accepts
 RELAUNCH = ["relaunch", "stop the unit"]
 
@@ -138,7 +141,7 @@ def binding_rulings(comments: list, owners: list, recorded: list, decisions=None
   always binds: section 13.2 reads an overrule on a `tdd-order`, `test-delta` or `dod-<n>` fid that no decision asks
   about as an allowance, which `collect` applies without a record."""
   recorded = list(recorded)
-  point3 = [d for d in decisions or [] if d.get("point") == 3]
+  point3 = [d for d in decisions or [] if d.get("point") in (3, 5)]
   point1 = any(d.get("point") == 1 for d in decisions or [])
 
   def asked_for(r):
@@ -166,7 +169,7 @@ def offered(r: "Ruling", comments: list, decisions: list) -> bool:
   is nothing to check it against: a numeric id this issue's comments lack (a ruling copied from a producer's
   issue, or a mistyped id: both bind, unchecked) and a named comment with no `- (` lines (any option binds); a
   decision id the record lacks binds nothing."""
-  decision = next((d for d in decisions if d.get("point") == 3 and r.subject == option_name(d)), None)
+  decision = next((d for d in decisions if d.get("point") in (3, 5) and r.subject == option_name(d)), None)
   if decision is not None:
     options = decision.get("options") or []
   else:
@@ -256,7 +259,7 @@ def record_text(foreman: dict, entry: dict, note: str = "the comment was edited 
   decision = next((d for d in foreman.get("decisions") or [] if d["id"] == entry.get("decision")), {})
   text, reason = (entry.get("ruling") or "").partition(" — ")[0].strip(), entry.get("reason")
   source, point = str(decision.get("source") or ""), decision.get("point")
-  if point == 3:
+  if point in (3, 5):
     text = recorded_option(foreman, entry) or text
     text = f"({source.removeprefix('comment ') if source.startswith('comment ') else decision.get('id')}) {text}"
   bare = point == 2 and text != "redesign" or point == 1 and text.endswith(" finding upheld")
@@ -267,9 +270,9 @@ def record_text(foreman: dict, entry: dict, note: str = "the comment was edited 
 def register(subparsers):
   p = subparsers.add_parser("decision", help="decision open|rule")
   action = p.add_subparsers(dest="action", required=True)
-  o = core.add_parser(action, "open", "record a point-1/2/3 question and print its id and options")
+  o = core.add_parser(action, "open", "record a point-1/2/3/5 question and print its id and options")
   o.add_argument("--unit", required=True)
-  o.add_argument("--point", type=int, choices=(1, 2, 3), required=True)
+  o.add_argument("--point", type=int, choices=(1, 2, 3, 5), required=True)
   o.add_argument("--question", required=True, help="the question file (the builder's comment, the contested findings)")
   o.add_argument("--source", required=True,
                  help="comment <id> | launch <n> | closed <n> | review <id> round <n> | review <id> cap")
@@ -325,8 +328,10 @@ def open_decision(args) -> int:
 def options_for(point: int, source: str, question: str, foreman: dict, head: str) -> list:
   """Spec section 13.2's options: point 1 upheld|overruled; point 2 one more round|stop; point 3 the
   comment's own `- (a)` lines plus `stop the unit`, or `relaunch; stop the unit` for a launch, a close,
-  or a third `blocked` comment on the same head. Point 1 on an `owner: <ids>` word (the latest posted round's
-  outcome) offers `<fid> allowed`, one per id the question names (U25)."""
+  or a third `blocked` comment on the same head; point 5 (a head's accept below the cap) accept|revise. Point 1 on
+  an `owner: <ids>` word (the latest posted round's outcome) offers `<fid> allowed`, one per id the question names (U25)."""
+  if point == 5:
+    return ["accept", "revise"]
   if point == 1:
     posted = [e for e in foreman.get("rounds") or [] if e.get("phase") == "posted"]
     word = str(posted[-1].get("outcome") or "") if posted else ""
@@ -430,6 +435,11 @@ def rule(args) -> int:
       raise Refusal(f"decision: redesign by {args.by} needs a high finding behind it")
     chosen = f"redesign — {reason.strip()}"
     brief = brief_path(st, unit, decision["id"])  # written after the comment is posted: a refusal leaves no brief
+  if decision["point"] == 5:  # a head's fifth point (U35): the owner's alone, applied before anything is posted
+    if args.by.startswith("judges:"):
+      raise Refusal("decision: point 5 is the owner's alone")
+    fifth_point(st, unit, decision, chosen, args.runcard)
+    data = core.load_foreman(st, unit)  # the round's outcome is written: the record is reloaded before the append
   # the effect is the point's, never the option's wording: point 2's `stop`, point 3's `stop the unit`, a redesign.
   # The label goes first, so a failed request records nothing and the same call reruns (round 9); a session post
   # that then fails takes off again only a label this call put on (rounds 10 and 11).
@@ -498,7 +508,47 @@ def rule(args) -> int:
   return 0
 
 
-KIND_POINTS = {"upheld": (1,), "overruled": (1,), "allowed": (1,), "allowed-file": (1,), "round": (2,), "stop": (2,), "option": (3,), "redesign": (1, 2)}
+def fifth_point(st, unit: str, decision: dict, chosen: str, runcard: str) -> None:
+  """A head's fifth point ruled (U35): `accept` is `review rule --ruling accept --owner --decision <id>` on the
+  unit's head review, in-process (its refusal is raised as `review rule`'s own; it writes the round's `clean` with its
+  awaiting-merge line), else the round's word `revise` (no point-3 relaunch spent). An accept `review rule` typed
+  alone already gave is recorded here, not given twice."""
+  rid = review.head_review_id(st, unit)
+  if rid is None:
+    raise Refusal(f"decision: {unit} has no head review")
+  head = review.load_review(st, rid)
+  done = review.evaluate(st, head, runcard)
+  # a rerun after a failed post, or an accept `review rule` gave: it stands, and is not given twice
+  given = done.converged.startswith("by ruling") and str(done.converged_round) == decision["source"].split()[-1]
+  if chosen == "accept" and not given:
+    with contextlib.redirect_stdout(io.StringIO()):
+      review.rule_review(argparse.Namespace(review=rid, ruling="accept", owner=True, judges=None, posted=None,
+                                            decision=decision["id"], runcard=runcard, unit=None, design=None, plan=None))
+  elif chosen == "accept":
+    try:  # the rerun binds the reviewed head as the first call did
+      review.refuse_moved_head(st, rid, head, decision["id"])
+    except core.HandoffError:  # refused: the accept the failed call gave is withdrawn, the round's word `revise`
+      withdraw_accept(st, rid, head, runcard)
+      review.write_head_outcome(st, review.load_review(st, rid), runcard, outcome="revise")
+      raise
+  elif given:  # `revise` after an accept whose post failed: the accept is withdrawn, journaled as a lapse
+    withdraw_accept(st, rid, head, runcard)
+  outcome = "clean" if chosen == "accept" else "revise"  # an accept's `clean` is `review rule`'s, written once
+  posted = [e for e in core.load_foreman(st, unit)["rounds"] if e.get("phase") == "posted"]
+  if not (posted and max(posted, key=lambda e: e["round"]).get("outcome") == outcome):
+    review.write_head_outcome(st, review.load_review(st, rid), runcard, outcome=outcome)
+
+
+def withdraw_accept(st, rid: str, head: dict, runcard: str) -> None:
+  """The accept a call whose post failed gave, withdrawn: the review's verdict re-derived without it,
+  journaled as a lapse, `review <id> R<n> accept lapsed`)."""
+  accepted = head["converged"].removeprefix("by ruling ")
+  head["converged"], head["converged_round"] = "no", None
+  review.store_verdict(st, rid, head, runcard)
+  core.journal(st, f"review {rid} {accepted} accept lapsed under {runcard}")
+
+
+KIND_POINTS = {"upheld": (1,), "overruled": (1,), "allowed": (1,), "allowed-file": (1,), "round": (2,), "stop": (2,), "option": (3, 5), "redesign": (1, 2)}
 
 
 def dropped(store, args, reason: str):
@@ -587,7 +637,7 @@ def ruling_comment(point: int, source: str, ruling: str, question: str, brief=No
     line = ruling.replace("finding upheld", "finding upheld (fix it)", 1)
   elif point == 2:
     line = ruling
-  else:
+  else:  # point 3, and a head's fifth point in the point-3 form over its decision id (U35)
     line = f"({source.removeprefix('comment ') if source.startswith('comment ') else qid}) {ruling}"
   return f"**Ruling:** {line}{marker}\n\n{quoted}\n"
 
@@ -693,7 +743,7 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int, mode=None)
   elif found.kind in ("round", "stop"):
     decisions = [d for d in pending if d["point"] == 2][-1:]
   elif found.kind == "option":
-    decisions = [d for d in foreman["decisions"] if d["point"] == 3 and found.subject == option_name(d)][-1:]
+    decisions = [d for d in foreman["decisions"] if d["point"] in (3, 5) and found.subject == option_name(d)][-1:]
   else:
     decisions = []
   if not decisions and found.kind in ("allowed", "allowed-file"):  # an allowance no decision asks about: `collect` reads it
