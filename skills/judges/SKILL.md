@@ -7,6 +7,8 @@ disable-model-invocation: true
 description: Runs one judge panel over a review round and posts the settled findings.
 ---
 
+<!-- Added by SuperEGM (gsVAM), 2026: the judges skill; each judge's model and effort read from the panel's `panel.json` (U28). -->
+
 # judges
 
 In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.

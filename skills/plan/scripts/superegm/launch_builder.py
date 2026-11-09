@@ -512,7 +512,8 @@ def launched_pairs(gh: str, name: str, email: str) -> list:
 
 def command_line(config, worktree, prompt, result, runcard, tools, gh, login, email, plugin_dirs: list, mcp_file: Path,
                  session_id: str | None = None) -> str:
-  """The launched command (spec section 11): the owner's prompts and token unset, the builder profile,
+  """The launched command (spec section 11): the owner's prompts and token and `CLAUDE_CODE_EFFORT_LEVEL`
+  (which would beat `--effort`, U28) unset, the builder profile,
   `ENABLE_CLAUDEAI_MCP_SERVERS=false` (belt and braces over the profile's `disableClaudeAiConnectors`),
   `GH_TOKEN` as the shell variable expands (never its value) or, on the App path, the sentinel the shim
   overrides, the role and card, the launched git pairs (`gh`, the shim on the App path, as the credential

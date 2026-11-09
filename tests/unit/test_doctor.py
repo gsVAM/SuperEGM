@@ -218,3 +218,13 @@ def test_doctor_prints_the_role_table(world, monkeypatch, tmp_path):
   code, out = world.run("doctor")
   assert code == 0 and out.splitlines()[-6:] == ["model: builder doable claude-sonnet-5-5 high", "model: goldfish fable max", "model: astra lanes gpt-6-astra xhigh",
                                                  "model: astra head lane gpt-6-astra xhigh", "model: judge fable sonnet max", "model: judge astra gpt-6-astra xhigh"], out
+
+
+def test_doctor_role_table_reads_a_malformed_member_as_one_informational_line(world, monkeypatch, tmp_path):
+  s, card, hid, _ = seed(world)
+  configure(world, judges={"min_vendors": 1, "members": [{"name": "fable", "via": "pigeon"}]})
+  monkeypatch.setenv("CLAUDE_CODE_PLUGIN_CACHE_DIR", str(tmp_path / "plugins")); monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder"); monkeypatch.setenv("HOME", str(tmp_path))
+  monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: {"gh": "/usr/local/bin/gh", "python3.12": "/usr/local/bin/python3.12"}.get(cmd))
+  git(["remote", "set-url", "--push", "origin", f"git@github.com:{REPO}.git"], world.repo)
+  code, out = world.run("doctor")
+  assert code == 0 and out.splitlines()[-1] == "model: unreadable (KeyError: 'pigeon')" and "token: ok" in out, out

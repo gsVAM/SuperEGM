@@ -167,7 +167,10 @@ def checks(config, repo_root, token):
   lines.append(("hooks", ", ".join(hooks) or "none"))
   lines.append(("core.hooksPath", hooks_path or "unset"))
   lines.extend(driver_lines(config))
-  lines.extend(role_lines(config))
+  try:
+    lines.extend(role_lines(config))
+  except (KeyError, TypeError, AttributeError) as error:  # a malformed role key: informational, the other lines still print
+    lines.append(("model", f"unreadable ({type(error).__name__}: {error})"))
   return lines
 
 

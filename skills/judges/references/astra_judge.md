@@ -65,7 +65,7 @@ conversation. Never start it from a subagent or a workflow agent: a background
 command dies with the agent that started it. If you are a subagent or workflow
 agent, do not launch; record `not run (subagent)`. Use one command. Put
 absolute paths in single quotes. Do not chain, pipe, redirect or add flags.
-Model and effort are the config's literals, written by you, never a variable.
+Model and effort are the `astra` member's pair in `<STORE>/judges/<PANEL>/panel.json`, written by you as literals, never a variable.
 
 Always a fresh session: the brief carries every prior verdict and every diff,
 so round n never resumes round n-1. `--feedback` is the round's brief, which

@@ -502,6 +502,9 @@ def test_launch_builder_starts_the_launch_as_its_one_behaviour(world, monkeypatc
   ('{"modelUsage": {"claude-opus-5-5": {}, "claude-haiku-4-5": {}}, "total_cost_usd": 0.5}', "claude-opus-5-5, claude-haiku-4-5", 0.5),
   ('{"result": "no usage"}', "requested only", None),
   ('{"modelUsage": {"claude-opus-5-5": {', "requested only", "unrecorded"),   # a killed launch's partial file: the board marks the sum partial (U30)
+  ('["claude-opus-5-5"]', "requested only", None),   # JSON, not an object
+  ('{"modelUsage": {"claude-opus-5-5": {}}, "total_cost_usd": true}', "claude-opus-5-5", None),   # a bool is no cost
+  ('{"modelUsage": {"claude-opus-5-5": {}}, "total_cost_usd": "1.25"}', "claude-opus-5-5", None),   # nor a string
   (None, "requested only", None)])   # no result file
 def test_record_launch_writes_the_requested_pair_then_the_effective_model_and_cost(world, monkeypatch, result, effective, cost):
   s, card, hid, _ = seed(world)
