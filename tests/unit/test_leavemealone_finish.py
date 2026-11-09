@@ -90,6 +90,11 @@ def test_judges_question_forms(world, tmp_path, form):
     put(world, spent, "reviews", review, "review.json")
   comment(world, 123, INTERFACE_COMMENT)
   put(world, {"launches": [{"round": 1, "status": "exited 0"}]}, "launches", "U07")
+  if form in ("blocked-launch", "blocked-closed"):  # the pending point-3 decision the form renders (U31)
+    f = json.loads(store(world.repo).path("foreman", "U07").read_text(encoding="utf-8"))
+    f["decisions"].append({"id": "q1", "point": 3, "source": "launch 1" if form == "blocked-launch" else "closed 41",
+                           "options": ["relaunch", "stop the unit"]})
+    put(world, f, "foreman", "U07")
   args, expected = {
       "round": (["--review", review, "--round", "1", "--reason", "change-review-1-1=the test covers it"],
                 "## Q1 change-review-1-1 (high, src/x.py:3): the retry loop never backs off\n"
@@ -136,17 +141,12 @@ def test_a_cap_redesign_with_no_unsettled_claim_names_the_rounds_alone(world, tm
      "question: change-review-1-2 is low"),
     ("unknown", ["--review", "{review}", "--round", "1", "--reason", "design-1-9=x"],
      "question: design-1-9 is not in round 1"),
-    ("relaunch-used", ["--unit", "U07", "--blocked", "launch", "1"],
-     "question: relaunch already used on U07"),
 ])
 def test_judges_question_refusals(world, tmp_path, case, args, message):
   seed(world)
   runcard = world.card("wave")
   review = head_review(world, runcard, tmp_path)
   put(world, {"launches": [{"round": 1, "status": "exited 1"}]}, "launches", "U07")
-  if case == "relaunch-used":
-    put(world, {"dispatch_id": None, "rounds": [], "decisions": [{"id": "d1", "point": 3}],
-                "rulings": [{"decision": "d1", "ruling": "relaunch", "by": "judges:p1"}]}, "foreman", "U07")
   before = sorted(str(p) for p in world.artifacts.rglob("*.md"))
   code, out = world.run("judges", "question", *[a.format(review=review) for a in args], "--runcard", runcard)
   assert code == 1 and message.format(review=review) in out, out
