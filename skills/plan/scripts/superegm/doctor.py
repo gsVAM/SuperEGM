@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24); the informational `plugins` and `mcp` lines and the profile line's plugin refusals (U27).
+# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24); the informational `plugins` and `mcp` lines and the profile line's plugin refusals (U27); the informational `model:` role table (U28).
 
 """superegm doctor: one line per wave prerequisite, `ok` or the refusal `launch` or `launch-builder`
 would give; read-only, no run card."""
@@ -13,12 +13,13 @@ from pathlib import Path
 import superegm as core
 from superegm.builder_token import app_lines, key_path, tool
 from superegm.foreman import runner_path
+from superegm.judges import judge_members
 from superegm.launch import app_login, builder_login, origin_problems, protection_problems
 from superegm.launch_builder import SENTINEL, UNSET, elephant_profile, launched_pairs, plugin_dirs, profile_problem
 
 WRITES = frozenset()  # doctor writes nothing
 INFORMATIONAL = ("graphify", "scanning", "astra", "merge", "python3.12", "hooks", "core.hooksPath", "driver", "sleep", "root", "env",
-                 "notify", "plugins", "mcp")  # lines that never fail the exit
+                 "notify", "plugins", "mcp", "model")  # lines that never fail the exit
 MERGE = ("gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset "
          "restricts updates to config.owners)")
 
@@ -52,7 +53,8 @@ def checks(config, repo_root, token):
   absent after a failing key or openssl. The environment line is absent after a failing gh line; graphify,
   astra, scanning and merge are informational and never fail, as are python3.12, hooks and core.hooksPath (U25)
   and plugins and mcp (U27, the profile line carrying a listed plugin's refusal).
-  The five driver lines (driver, sleep, root, env, notify) close every form, informational too."""
+  The five driver lines (driver, sleep, root, env, notify) follow, informational too, and the `model:`
+  role table (U28) closes every form, informational."""
   repo, base, owners, team, app = config["repo"], config["base"], config["owners"], config["owner_team"], config["builder"]["app"]
   lines, found = [], {}
 
@@ -165,7 +167,17 @@ def checks(config, repo_root, token):
   lines.append(("hooks", ", ".join(hooks) or "none"))
   lines.append(("core.hooksPath", hooks_path or "unset"))
   lines.extend(driver_lines(config))
+  lines.extend(role_lines(config))
   return lines
+
+
+def role_lines(config):
+  """The role table (U28): one informational `model:` line per role, the configured model and effort."""
+  b, r, a = config["builder"], config["reviewers"], config["astra"]
+  rows = [f"builder doable {b['model']} {b['effort']}", f"goldfish {r['model']} {r['effort']}",
+          f"astra lanes {a['model']} {a['effort']}", f"astra head lane {a['model']} {a['heads_effort']}"]
+  rows += [f"judge {jid} {m['model']} {m['effort']}" for jid, m in judge_members(config).items()]
+  return [("model", row) for row in rows]
 
 
 def hooks_of(repo_root: Path):
