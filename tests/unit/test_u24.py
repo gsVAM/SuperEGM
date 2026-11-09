@@ -6,11 +6,13 @@ live, `start_detached`, the stall read across a tick's `wave` cards and the driv
 `HOME` is `tmp_path` in every test here."""
 
 import json
+import os
 from pathlib import Path
 
 import pytest
 
 import superegm  # the harness reloads the package per test: read its names at call time
+from superegm import launch_builder
 from conftest import REPO
 from test_builders import seed, put, git, launched, launches_of, UNIT  # noqa: F401
 
@@ -109,3 +111,7 @@ def test_runcard_open_refuses_while_a_tick_launch_may_be_live(world, monkeypatch
   if expect == "refused": assert code == 1 and LIVE in out and mine["interrupted_at"] and (where == "other" or not card_of(s, live)["interrupted_at"]); return
   assert code == 0 and mine.get("driver_card") == ("driver-abc-0002" if role else None) and mine.get("boot_id") == ("boot-1" if skill == "wave" else None)
   if expect == "reboot": assert tick_launches(s, hid)[0]["status"] == launches_of(s)[0]["status"] == "interrupted (reboot)" and card_of(s, live)["interrupted_at"]
+
+
+def test_start_detached_runs_the_wrapper_in_its_own_session(tmp_path):
+  pid = launch_builder.start_detached(["/bin/sh", "-c", "echo started"], tmp_path / "log", {}); assert os.getpgid(pid) == pid and os.waitpid(pid, 0)[0] == pid and (tmp_path / "log").read_text() == "started\n"
