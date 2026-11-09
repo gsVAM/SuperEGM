@@ -1442,3 +1442,15 @@ def test_the_fifth_decision_point_is_ruled_by_word_or_comment(world, monkeypatch
   assert (comment is None) or world.gh.comments[2][-1]["body"].startswith(comment + "\n")
   converged = json.loads(s.path("reviews", rid, "review.json").read_text(encoding="utf-8"))["converged"]
   assert (converged == "by ruling R1") is (outcome == "clean") and ("U01 awaiting merge" in s.path("journal").read_text(encoding="utf-8")) is (outcome == "clean")
+
+
+# The owner's ruling on #93 (comment 6733268467): the wave skill's decision points live in
+# `skills/wave/references/decision_points.md` since #102, so the fifth point's needles are read there.
+@pytest.mark.parametrize("path, needle", [
+  ("skills/review-spec/references/review_loop.md", "acceptable: yes"), ("skills/review-spec/references/review_loop.md", "the judges never accept below the cap"),
+  ("skills/review-spec/SKILL.md", "accept, or fix"), ("skills/review-plan/SKILL.md", "once per round, naming every acceptable unit"),
+  ("skills/review-plan/SKILL.md", "gets the Step 1 question before any fix moves its bytes"),
+  ("skills/wave/references/decision_points.md", "decision open --point 5"), ("skills/wave/SKILL.md", "`revise` spends no relaunch"), ("skills/wave/SKILL.md", "`clean` by accept"),
+  ("skills/wave/references/decision_points.md", "no head is accepted early"), ("skills/wave/SKILL.md", "printed `acceptable: yes` → Decision point 5"), ("skills/integrate/SKILL.md", "accepted before the cap")])
+def test_the_skill_texts_carry_the_accept_below_the_cap(path, needle):
+  assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
