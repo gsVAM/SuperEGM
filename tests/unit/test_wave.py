@@ -1607,3 +1607,24 @@ def test_every_pass_reports_a_stalled_launch(world, monkeypatch, tmp_path, extra
   assert code == 0 and out.splitlines() == lines, out
   assert " stalled (" not in lines[0] or world.run(*WAIT, card)[1].splitlines() == lines   # the predicate, no fingerprint
   assert " stalled (" not in lines[0] or status_mod.tick_trigger(status_mod.core.Handoff(world.plan, st)) == lines[0]   # the tick wakes on it
+
+
+L = lambda n, s, c: {"round": n, "status": s, "last_commit_at": c}
+Q1 = {**PRIOR, "source": "launch 1", "options": decision.RELAUNCH}
+USED = [{"decision": "q1", "ruling": "relaunch", "by": "owner"}]
+
+
+@pytest.mark.parametrize("launches, decisions, rulings, source, expect", [
+  ([L(1, "exited (stalled)", None), L(2, "exited 1", None)], [Q1], USED, "launch 2", "ruled: stop the unit (second launch with no commit of its own)"),
+  ([L(1, "exited (stalled)", None), L(2, "exited (stalled)", "t")], [Q1], USED, "launch 2", "options: relaunch; stop the unit"),
+  ([L(1, "exited (stalled)", None), L(2, "interrupted", None)], [Q1], USED, "launch 2", "options: relaunch; stop the unit"),
+  ([L(1, "exited (stalled)", None), L(2, "exited 1", None)], [Q1], USED, "closed 70", "options: relaunch; stop the unit"),
+  ([L(1, "exited 1", "t"), L(2, "exited (stalled)", None), L(3, "exited 1", None)], [Q1], USED, "launch 3", "ruled: stop the unit (relaunch already used)")])
+def test_a_launch_with_no_commit_spends_no_relaunch_and_a_second_is_stop(world, launches, decisions, rulings, source, expect):
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "launches": launches, "decisions": decisions, "rulings": rulings})
+  code, out = world.run("decision", "open", "--unit", "U01", "--point", 3, "--question", question(world, "U01 stalled\n"), "--source", source, "--runcard", card)
+  assert code == 0 and out.splitlines()[1] == expect, out
+  if expect.startswith("ruled"):
+    f = foreman_of(s, "U01")
+    assert f["rulings"][-1]["reason"] == expect[22:-1] and f["stopped"]["reason"] == "stop the unit"
