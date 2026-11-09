@@ -135,6 +135,23 @@ def test_review_status_reads_the_stall_across_a_ticks_wave_cards(world, monkeypa
   world.advance(60); posted(world, 3, c, "revise"); world.advance(60); assert status(wave_of(world, monkeypatch, "driver-abc-0002", "boot-1")) == 3
 
 
+def test_review_status_reads_the_stall_under_the_cards_own_rounds_after_its_post(world, monkeypatch):
+  monkeypatch.setattr(superegm, "boot_id", lambda: "boot-1"); spec, a, rid = opened(world, "head", reviewers="change-review", astra=None)
+  world.advance(60); c = wave_of(world, monkeypatch, "driver-abc-0001", "boot-1"); world.advance(60); posted(world, 1, c, "revise"); world.advance(60)
+  head_round(world, 2, "collected", c, "not run (error)"); head_round(world, 3, "collected", c, "not run (error)")
+  assert world.run("review", "status", "--review", rid, "--runcard", c)[0] == 5
+
+
+def test_a_failed_boot_id_lookup_is_no_reboot():
+  assert superegm.rebooted({"boot_id": "boot-1"}, "unknown") is False and superegm.rebooted({"boot_id": "boot-0"}, "boot-1") is True
+
+
+def test_a_line_either_notified_set_holds_is_not_new(world, tmp_path):
+  s, card, hid, _ = seed(world); tick_launch(s, hid); hook, sent = tmp_path / ".superegm/notify", tmp_path / "sent.txt"
+  put(hook, f"#!/bin/sh\ncat >> '{sent}'\n"); hook.chmod(0o755)
+  assert world.run("notify", "--runcard", card)[0] == 0 and f"tick launch 1" not in (sent.read_text() if sent.is_file() else "")
+
+
 PROSE = [("skills/driver/SKILL.md", n, True) for n in ("/superegm:driver install", "--interval", "register", "reset", "~/.superegm/env", "0600", "loginctl enable-linger",
                                                         "runcard open --skill driver --artifact", "after every plugin update", "pmset")] + \
         [("skills/wave/SKILL.md", n, True) for n in ("SUPEREGM_ROLE=driver", "never ask", "pending a decision", "`launch-builder` starts the builder and records the launch")] + \

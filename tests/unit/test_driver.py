@@ -143,3 +143,90 @@ def test_driver_install_status_and_reset(world, monkeypatch, tmp_path, platform,
   assert world.run("driver", "status")[1] == f"{hid}: launch 1 started {entry['started_at']} pid 4242 exit file no; wave card {live} open 10 min; refused: two launches failed before the loop ran\n"
   assert world.run("driver", "reset", "--runcard", dcard)[1].strip() == f"reset {hid}: launch 1 interrupted; card {live} interrupted" and tick_launches(s, hid)[0]["status"] == "interrupted"
   assert card_of(s, live)["interrupted_at"] and f"driver: {hid} has no live tick launch or open wave card" in world.run("driver", "reset", "--runcard", dcard)[1]
+
+
+# ---------------------------------------------------------------- round 2: the review findings of round 1
+
+CASES["stale-refusal"] = {"tick": {"exit": 0, "refused": {"at": "2026-11-03T00:00:00Z", "reason": "two launches failed before the loop ran"}},
+                          "wave": "closed", "status_at": "2026-11-03T02:00:00Z"}
+
+
+def test_reset_lifts_a_refusal_of_two_exited_failures(world, monkeypatch, tmp_path, spawn_fake):
+  s, hid, _ = arranged(world, monkeypatch, tmp_path, "twice-failed"); assert world.run("driver", "tick")[0] == 0 and not SPAWNED
+  out = world.run("driver", "reset", "--runcard", world.open_card("driver", world.spec))[1]
+  assert out.strip() == f"reset {hid}: refusal cleared; failures 1-2 set aside" and f"driver: {hid} failures 1-2 set aside by reset" in s.path("journal").read_text()
+  assert world.run("driver", "tick")[0] == 0 and tick_launches(s, hid)[-1]["status"] == "running" and len(SPAWNED) == 1
+
+
+def test_the_proofs_run_for_a_handoff_with_nothing_left_to_build(world, monkeypatch, tmp_path, spawn_fake):
+  s, hid = registered(world, monkeypatch, tmp_path); other = "other-abcdef"
+  put(s.path("handoffs", other), json.dumps({"id": other, "spec": str(world.spec), "opened_at": "2026-11-03T00:00:00Z", "closed_at": None}))
+  tick_launch(s, other, boot="boot-0")
+  assert world.run("driver", "tick")[0] == 0 and tick_launches(s, other)[0]["status"] == "interrupted (reboot)" and tick_launches(s, hid)[-1]["status"] == "running"
+
+
+def test_a_skip_still_sends_a_new_typed_wave_card(world, monkeypatch, tmp_path, spawn_fake):
+  s, hid, _ = arranged(world, monkeypatch, tmp_path, "first"); live = world.open_card("wave", str(world.spec))
+  assert world.run("driver", "tick")[0] == 0 and not SPAWNED and live in json.loads(driver_file(s, hid).read_text())["notified"]
+
+
+def test_a_refusal_the_tick_no_longer_makes_is_cleared(world, monkeypatch, tmp_path, spawn_fake):
+  s, hid, _ = arranged(world, monkeypatch, tmp_path, "stale-refusal")
+  assert world.run("driver", "tick")[0] == 0 and not SPAWNED and json.loads(driver_file(s, hid).read_text())["refused"] is None
+  assert f"tick: {hid} refusal cleared (two launches failed before the loop ran)" in s.path("journal").read_text()
+
+
+def test_one_stores_error_never_stops_the_tick_for_the_next(world, monkeypatch, tmp_path, spawn_fake):
+  s, hid = registered(world, monkeypatch, tmp_path); registry = tmp_path / ".superegm/registry.json"; bad = tmp_path / "bad"
+  put(bad / "handoffs" / "x.json", "{")
+  put(registry, json.dumps([{"repo": REPO, "root": str(tmp_path / "x"), "artifacts_dir": str(bad)}, *json.loads(registry.read_text())]))
+  code, out = world.run("driver", "tick")
+  assert code == 1 and f"driver: {bad}:" in out and tick_launches(s, hid)[-1]["status"] == "running"
+
+
+def test_a_phase_card_written_after_the_read_backs_the_tick_off(world, monkeypatch, tmp_path, spawn_fake):
+  s, hid, _ = arranged(world, monkeypatch, tmp_path, "first"); real = driver.tick_command
+  def racing(*a):
+    put(s.root / hid / "runcards" / "plan-abc-0099.json", json.dumps({"id": "plan-abc-0099", "skill": "plan", "artifact": str(world.spec.resolve()), "handoff": hid, "opened_at": superegm.now_iso()})); return real(*a)
+  monkeypatch.setattr(driver, "tick_command", racing)
+  assert world.run("driver", "tick")[0] == 0 and not SPAWNED and tick_launches(s, hid)[-1]["status"] == "interrupted"
+  assert "driver: tick backed off: plan card plan-abc-0099 open" in s.path("journal").read_text()
+
+
+def test_install_refuses_an_interval_of_zero(world, monkeypatch, tmp_path):
+  s, hid = registered(world, monkeypatch, tmp_path); monkeypatch.setattr(driver, "RUN", lambda argv, **k: subprocess.CompletedProcess(argv, 0))
+  code, out = world.run("driver", "install", "--interval", 0, "--runcard", world.open_card("driver", world.spec))
+  assert code == 1 and "driver: --interval must be at least 1 minute" in out
+
+
+def test_a_tick_runs_the_spec_of_the_registered_root(world, monkeypatch, tmp_path, spawn_fake):
+  s, hid = registered(world, monkeypatch, tmp_path); wt2 = tmp_path / "wt2"
+  subprocess.run(["git", "worktree", "add", "-q", str(wt2), "-b", "wt2"], cwd=world.repo, check=True); monkeypatch.chdir(wt2)
+  assert world.run("register", "--runcard", world.open_card("driver", world.spec))[0] == 0 and world.run("driver", "tick")[0] == 0
+  rel = world.spec.resolve().relative_to(world.repo.resolve())
+  assert f"cd '{wt2.resolve()}' && claude -p '/superegm:wave {wt2.resolve() / rel} --handoff {hid}" in SPAWNED[-1][0][2]
+
+
+def trigger(s):
+  state = state_of(s); return status.tick_trigger(superegm.Handoff(Path(state["plan"]), s, state))
+
+
+def test_tick_trigger_reads_the_builders_status_alone(world, monkeypatch, tmp_path):
+  s, hid, _ = arranged(world, monkeypatch, tmp_path, "nothing"); real, login = superegm.status_pass, ["mallory"]
+  def stranger(handoff, save=True):
+    summary, rest = real(handoff, save=save); summary["units"][UNIT]["builder_status"] = [9, "DONE", login[0]]; return summary, rest
+  monkeypatch.setattr(superegm, "status_pass", stranger); assert trigger(s) is None
+  card = sorted((s.root / hid / "runcards").glob("wave-*.json"))[0].stem; superegm.card_add(s, card, "builder", {"login": "builder-bot"})
+  login[0] = "builder-bot"; assert trigger(s) == f"{UNIT} status word=DONE comment=9 by=builder-bot"
+
+
+def test_tick_trigger_skips_a_stopped_units_threads(world, monkeypatch, tmp_path):
+  s, hid, _ = arranged(world, monkeypatch, tmp_path, "thread"); assert trigger(s) == f"{UNIT} threads 1 un-ingested"
+  data = json.loads(s.path("foreman", UNIT).read_text()); data["stopped"] = {"at": superegm.now_iso()}; put(s.path("foreman", UNIT), json.dumps(data))
+  assert trigger(s) is None
+
+
+def test_tick_trigger_counts_a_unit_ready_since_the_fingerprint(world, monkeypatch, tmp_path):
+  s, hid, _ = arranged(world, monkeypatch, tmp_path, "nothing"); assert trigger(s) is None
+  state = state_of(s); state["status"]["ready"] = []; put(s.path("state"), json.dumps(state))
+  assert trigger(s) == f"{UNIT} ready"

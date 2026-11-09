@@ -160,6 +160,11 @@ def arranged(world, monkeypatch, tmp_path, setup):
 
 
 KEYS, BASE = ("PATH", "CLAUDE_CONFIG_DIR", "SUPEREGM_BUILDER_TOKEN"), {"plist": HELPER}
+
+
+def test_doctor_names_a_registry_it_cannot_read(world, monkeypatch, tmp_path):
+  arranged(world, monkeypatch, tmp_path, BASE); (tmp_path / ".superegm/registry.json").write_text('[{"mode": "x"}]', encoding="utf-8")
+  got, out = world.run("doctor"); assert got == 0 and "root: registry: unknown key mode" in out.splitlines(), out
 @pytest.mark.parametrize("setup, lines", [
   (None, ["driver: not installed", "sleep: not reported", "root: not registered", "env: absent", "notify: absent"]),
   (BASE, ["driver: installed (15 min) at {root}", "sleep: 1 (sleep prevented by caffeinate)", "root: ok", "env: ok", "notify: ok ({sha})"]),
