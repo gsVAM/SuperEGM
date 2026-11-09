@@ -79,7 +79,7 @@ Model and effort, one rule: every panel goldfish of the four kinds runs on
 passed on each dispatch as the adapter's `model:` and `effort:` override (the adapters stay `model: inherit`),
 and the round record stores requested -> effective (`review record`'s `--model` and `--effort`, section 3).
 `SUPEREGM_GOLDFISH_MODEL` and `SUPEREGM_GOLDFISH_EFFORT`, when set, override the config's values for the session,
-`inherit` meaning pass nothing; they are read once with `printenv` and validated against
+`inherit` meaning pass nothing; this session pair stops at the review panels and never reaches a judge; they are read once with `printenv` and validated against
 (`inherit`, `sonnet`, `opus`, `haiku`, `fable`) and (`inherit`, `low`, `medium`, `high`, `xhigh`, `max`).
 An exported `CLAUDE_CODE_EFFORT_LEVEL` is the effective effort of every goldfish, and with
 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` on no per-call `model` is passed and the forced model is the

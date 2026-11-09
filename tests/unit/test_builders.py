@@ -696,6 +696,19 @@ def test_launch_carries_the_effort_flag_and_unsets_the_session_level():
   assert " -u GITHUB_TOKEN -u CLAUDE_CODE_EFFORT_LEVEL " in line and " --model 'claude-opus-5-5' --effort 'medium' " in line, line
 
 
+@pytest.mark.parametrize("key", ["model", "effort"])
+def test_launch_builder_refuses_a_quoted_model_or_effort_before_any_write(world, monkeypatch, key):
+  """Round 3 (change-review-2-1): a quoted `builder.model` or `builder.effort` is refused before the worktree and the files."""
+  s, card, _, _ = seed(world)
+  cfg = json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]
+  configure(world, builder={**cfg, key: "it's"})
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder"); monkeypatch.setattr(launch_builder, "start_detached", lambda command, log, env: 4242)
+  assert world.run("launch", "--runcard", card)[0] == 0
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)
+  assert code == 1 and "it's holds a quote" in out and not s.path("worktrees", UNIT).exists(), out
+  assert not s.path("launches", f"{UNIT}_r1_prompt.md").exists() and not s.path("launches", f"{UNIT}_r1_mcp.json").exists()
+
+
 @pytest.mark.parametrize("case", ["none", "listed", "missing"])
 def test_launch_builder_writes_the_mcp_file_and_the_plugins_record(world, monkeypatch, tmp_path, case):
   s, card, hid, _ = seed(world)

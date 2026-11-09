@@ -70,7 +70,11 @@ config's `artifacts_dir`.
         `${TMPDIR:-/tmp}/superegm-judges/<PANEL>/r<n>-<judge>.md` (outside
         the store; the helper copies it in) and run `superegm judges record
         --panel <PANEL> --round <n> --judge <judge> --verdict '<that file>'
-        --isolation <clean | exposed:<what>> --runcard <CARD>`. The isolation
+        --isolation <clean | exposed:<what>> --model <requested>:<effective>
+        --effort <requested>:<effective> --runcard <CARD>`, the requested pair
+        the panel's and the effective one the one rule's (an exported
+        `CLAUDE_CODE_EFFORT_LEVEL` or `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`
+        said there, never the configured value shown as observed). The isolation
         comes from the reply's `saw:` line, first or last (the helper stores its
         text as the record's `saw`): `saw: none` is `clean`,
         anything else is `exposed:<what it saw>`. A reply with no `saw:` line

@@ -226,6 +226,10 @@ Rules that apply to every row:
 SuperEGM's one rule is `skills/review-spec/references/review_loop.md` section 2
 (`Model and effort, one rule:`): the config pair, the session variables over it,
 and what the record says. This section is the mechanics that rule points at.
+Under SuperEGM read `EGM_GOLDFISH_MODEL` and `EGM_GOLDFISH_EFFORT` below as
+that rule's pair: `config.reviewers.model` and `config.reviewers.effort`, or
+`SUPEREGM_GOLDFISH_MODEL` and `SUPEREGM_GOLDFISH_EFFORT` when set (section 1's
+`inherit` defaults are EGM's, not SuperEGM's).
 
 The adapters in `.claude-plugin/agents/` keep `model: inherit`; do not edit
 them. The elephant passes the user's choice per call:

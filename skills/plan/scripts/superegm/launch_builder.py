@@ -61,7 +61,7 @@ def prepare(args, card):
     raise core.HandoffError(problem)
   dirs = plugin_dirs(builder_config["plugins"], elephant_profile())  # each listed plugin's user-scope directory, version and hooks
   mcp_file = st.path("launches", f"{unit}_r{rnd}_mcp.json")
-  for value in (*(d["dir"] for d in dirs), mcp_file):  # command_line's quote check, before any worktree or store write
+  for value in (*(d["dir"] for d in dirs), mcp_file, builder_config["model"], builder_config["effort"]):  # command_line's quote check, before any worktree or store write
     if "'" in str(value):
       raise core.HandoffError(f"{value} holds a quote and cannot go on the command line")
   gh, app = tool("gh"), builder_config["app"]
