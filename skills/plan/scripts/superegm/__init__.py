@@ -2027,7 +2027,8 @@ def status_pass(handoff: Handoff, save=True):
                     and u not in landed]
   summary = {"landed": sorted(landed), "ready": ready, "in_flight": in_flight,
              "unlaunched_with_pr": unlaunched_prs, "open_blocking": {u: [d["id"] for d in ds] for u, ds in open_blocking.items()},
-             "units": {u: {**events.fingerprint(v), "status": v["status"]} for u, v in views.items()},
+             # `stalled` rides the pass, never the saved fingerprint (U31: the predicate, derived afresh at every pass)
+             "units": {u: {**events.fingerprint(v), "status": v["status"], "stalled": v.get("stalled")} for u, v in views.items()},
              "at": now_iso()}
   if save:
     save_state(handoff.artifact_dir, state)
