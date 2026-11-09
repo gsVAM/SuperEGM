@@ -133,3 +133,12 @@ def test_review_status_reads_the_stall_across_a_ticks_wave_cards(world, monkeypa
   assert status(a) == 5 and status(world.run("runcard", "open", "--skill", "wave", "--artifact", str(spec))[1].strip()) == 3
   world.advance(60); c = wave_of(world, monkeypatch, "driver-abc-0001", "boot-1"); assert status(c) == 5
   world.advance(60); posted(world, 3, c, "revise"); world.advance(60); assert status(wave_of(world, monkeypatch, "driver-abc-0002", "boot-1")) == 3
+
+
+PROSE = [("skills/driver/SKILL.md", n, True) for n in ("/superegm:driver install", "--interval", "register", "reset", "~/.superegm/env", "0600", "loginctl enable-linger",
+                                                        "runcard open --skill driver --artifact", "after every plugin update", "pmset")] + \
+        [("skills/wave/SKILL.md", n, True) for n in ("SUPEREGM_ROLE=driver", "never ask", "pending a decision", "`launch-builder` starts the builder and records the launch")] + \
+        [("skills/wave/SKILL.md", "record-launch --unit <U> --runcard '<CARD>'", False), ("skills/wave/SKILL.md", "`launch-builder` and `record-launch`", False), ("skills/using-superegm/SKILL.md", "`/superegm:driver`", True)]
+@pytest.mark.parametrize("path, needle, present", PROSE)
+def test_the_driver_skill_and_the_prose(path, needle, present):
+  assert (needle in (ROOT / path).read_text()) is present, (path, needle)
