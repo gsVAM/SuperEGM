@@ -835,7 +835,7 @@ def store_verdict(st: core.Store, rid: str, review: dict, runcard: str) -> Statu
 
 
 def status_review(args) -> int:
-  """Prints the state line and the trend; writes nothing; the exit code is the verdict."""
+  """Prints the state line, the trend and, on an acceptable round, its `acceptable:` line; writes nothing; the exit code is the verdict."""
   st = core.store(core.git_toplevel(Path.cwd()))
   review = load_review(st, args.review)
   if review is None:
@@ -845,6 +845,10 @@ def status_review(args) -> int:
   status = evaluate(st, review, card.get("parent") or args.runcard)
   print(status.line)
   print(status.trend)
+  if status.code in (3, 5) and not status.moved:  # below the cap, unconverged, at the reviewed bytes
+    blockers, mediums, lows = acceptable(st, review, args.runcard)
+    if not blockers and mediums:
+      print(f"acceptable: yes ({mediums} medium, {lows} low)")
   if status.fixed:
     print("fixed: re-review on the current bytes")
   return status.code
