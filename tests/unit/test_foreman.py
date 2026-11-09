@@ -548,7 +548,9 @@ GATE = {"red": ([RED], ["ok"], {}, [D(2, "ran red (boom)")]), "forge": (["git co
   "silent-red": (["exit 3"], ["ok"], {}, [D(2, "ran red (exit 3)")]),
   "count-above-footer": (["printf '== 2 passed in 0.1s ==\\nreport saved\\n'"], ["== 3 passed in 0.1s ==\nreport saved"], {},
                          [D(2, "paste differs from the run")]),
-  "forge-and-unlink": (["git config credential.helper evil; rm -f ../r1/dod/2.out"], ["ok"], {}, [])}
+  "forge-and-unlink": (["git config credential.helper evil; rm -f ../r1/dod/2.out"], ["ok"], {}, []),
+  "masked-line": (["echo 'missing @acme/plugin in secret-codename'; exit 1"], ["ok"], {},
+                  [D(2, "ran red (missing @ acme/plugin in s ecret-codename)")])}
 
 
 @pytest.mark.parametrize("name", list(GATE))
@@ -591,7 +593,12 @@ DELTA = {"removed-from-base": ({Q: THREE}, [("chore: trim", Q, TWO)], {}, [E(Q, 
   "allowed-entry": ({Q: THREE}, [("chore: trim", Q, TWO)], {"comments": RULED("**Ruling:** foreman-1-1 allowed — approved")}, [], []),
   "allowed-other-base": ({Q: THREE}, [("chore: trim", Q, TWO)], {"comments": RULED("**Ruling:** foreman-1-1 allowed — approved"), "seed_base": "0" * 40},
                          [E(Q, 3, 3)], [CLAIM(Q, 3)]),
-  "allowed-file": ({Q: THREE}, [("chore: gut", Q, T("def test_a():", "  pass"))], {"comments": RULED("**Ruling:** test-delta tests/unit/test_q.py allowed — by design")}, [], [])}
+  "allowed-file": ({Q: THREE}, [("chore: gut", Q, T("def test_a():", "  pass"))], {"comments": RULED("**Ruling:** test-delta tests/unit/test_q.py allowed — by design")}, [], []),
+  "judges-overruled": ({Q: THREE}, [("chore: trim", Q, TWO)], {"comments": {}, "decisions": [{"id": "q1", "point": 1, "source": "review r round 1"}],
+                       "rulings": [{"decision": "q1", "ruling": "foreman-1-1 finding overruled", "by": "judges:p-1", "reason": "r",
+                                    "posted": "comment 13", "posted_at": "t"}]}, [E(Q, 3, 3)], [CLAIM(Q, 3)]),
+  "renamed-then-deleted": ({Q: THREE}, [("chore: move", {Q: None, R: THREE}), ("chore: drop", {R: None})], {},
+                           [E(R, n, n) for n in (1, 2, 3)], [CLAIM(R, n) for n in (1, 2, 3)])}
 
 
 @pytest.mark.parametrize("name", list(DELTA))

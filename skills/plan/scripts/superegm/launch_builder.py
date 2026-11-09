@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -222,11 +223,29 @@ def allowed_tools(configured, branch, body_text, gh):
       raise core.HandoffError(f"allowed_tools carries {entry}: a builder never spawns, never invokes skills, never runs unrestricted Bash")
   tools = [f"Bash({gh} {t[8:]}" if t.startswith("Bash(gh ") else t for t in configured] + [f"Bash(git push origin {branch}:*)"]
   for command in body.run_commands(body_text):
-    for segment in re.split(r"&&|;", command):
-      words = segment.split()
-      if words and f"Bash({words[0]}:*)" not in tools:
-        tools.append(f"Bash({words[0]}:*)")
+    for first in segment_heads(command):
+      if f"Bash({first}:*)" not in tools:
+        tools.append(f"Bash({first}:*)")
   return tools
+
+
+def segment_heads(command: str) -> list:
+  """The first word of every `&&`/`;` segment of `command`, split as the shell splits it (a `;` or `&&` inside
+  quotes separates nothing); a line the shell grammar cannot split (an unclosed quote) gives its first word alone."""
+  try:
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|")
+    lexer.whitespace_split = True
+    tokens = list(lexer)
+  except ValueError:
+    return command.split()[:1]
+  heads, start = [], True
+  for token in tokens:
+    if token in (";", "&&"):
+      start = True
+    elif start:
+      heads.append(token)
+      start = False
+  return heads
 
 
 def spec_range_text(repo_root: Path, store, body_text: str, ref: str) -> str:

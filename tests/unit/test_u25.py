@@ -74,6 +74,20 @@ def test_test_delta_pairs_assertions_as_git_does(head, named, expect):
   assert test_delta({F: ("b", BASE)}, {F: head} if head is not None else {}, named) == expect
 
 
+ONE = T("import pytest", "@pytest.mark.parametrize('x', [1, 2])", "# a note", "def test_b(x):", "  assert x")
+
+
+@pytest.mark.parametrize("head, expect", [(ONE.replace("# a note\n", ""), []),
+  (ONE.replace("# a note", "@pytest.mark.skip"), [E(3, 4, "weakened")]), (ONE.replace("# a note", "@pytest.mark.slow"), [])])
+def test_a_one_line_parametrize_opens_no_rows_and_a_marker_written_over_a_line_is_weakened(head, expect):
+  assert test_delta({F: ("b", ONE)}, {F: head}, set()) == expect
+
+
+def test_allowed_tools_splits_segments_as_the_shell_does():
+  text = "## Definition of done\n2. Run `python3 -c \"print('a'); print('b')\" && .v/bin/pytest -q` — passes\n"
+  assert [t for t in allowed_tools([], "b", text, "/g") if t.startswith("Bash(") and "git push" not in t] == ["Bash(python3:*)", "Bash(.v/bin/pytest:*)"]
+
+
 def test_prepare_removes_the_review_worktree_by_force_and_checks_out_without_hooks(world, tmp_path, monkeypatch):
   hooks = tmp_path / "hooks"; hooks.mkdir()
   (hooks / "post-checkout").write_text(f"#!/bin/sh\ntouch '{tmp_path / 'ran'}'\n"); (hooks / "post-checkout").chmod(0o755)

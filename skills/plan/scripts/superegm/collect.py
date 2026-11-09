@@ -58,10 +58,11 @@ def counts(text) -> tuple | None:
   return (next((int(p) for p, _ in found if p), 0), next((int(f) for _, f in found if f), 0))
 
 
-def dod_findings(body: str, runs: dict, ruled: set, texts: dict = None) -> list:
+def dod_findings(body: str, runs: dict, ruled: set, texts: dict = None, config: dict = None) -> list:
   """The `dod-<n>` highs of the re-run, in item order, skipping an item number in `ruled`: a run cut by the bound
   `ran red (timeout)`, an item the bound left unreached `not run (timeout)`, a non-zero exit `ran red (<line>)` alone
-  (`<line>` the summary with ` | ` written ` ¦ `, so the finding keeps its five fields; a red run that printed
+  (`<line>` the summary with ` | ` written ` ¦ `, so the finding keeps its five fields, then `review.mask`ed with
+  `config`, so a mention or a banned term in the output cannot make the review unpostable; a red run that printed
   nothing `ran red (exit <code>)`), and a green run whose pass or fail counts differ from the builder's paste
   `paste differs from the run`. `texts`, when given, maps an item number to `(output, paste)`, the whole texts
   whose last `COUNTS_RE` lines are compared; else the summary lines are."""
@@ -75,7 +76,7 @@ def dod_findings(body: str, runs: dict, ruled: set, texts: dict = None) -> list:
     elif run["timed_out"]:
       found.append((f"dod/{n}.txt", f"dod-{n}: ran red (timeout)"))
     elif run["exit"] != 0:
-      line = run["summary"].replace(" | ", " ¦ ") or f"exit {run['exit']}"
+      line = review.mask(run["summary"].replace(" | ", " ¦ "), config or {}) or f"exit {run['exit']}"
       found.append((f"dod/{n}.txt", f"dod-{n}: ran red ({line})"))
     elif None not in (ran := counts((texts or {}).get(n, (run["summary"], None))[0]),
                       pasted := counts((texts or {}).get(n, (None, run["paste_summary"]))[1])) and ran != pasted:
@@ -128,8 +129,8 @@ def assertion_lines(lines: list) -> set:
       else:
         out.add(i)
         continue
-    if "@pytest.mark.parametrize(" in line:
-      inside = True
+    if "@pytest.mark.parametrize(" in line:  # a decorator that closes its brackets on its own line opens no rows
+      inside = line.count("(") > line.count(")") or line.count("[") > line.count("]")
     elif s.startswith("assert ") or s == "assert" or "pytest.raises" in s or s.startswith("def test_"):
       out.add(i)
   return out
@@ -152,8 +153,8 @@ def test_delta(base_files: dict, head_files: dict, named: set) -> list:
   """The removed or weakened assertions of each test file `base_files` maps to `(base_commit, text)`, its head
   text in `head_files` (absent: zero assertions), a file in `named` or not `.py` skipped. Lines pair as git pairs
   them: positionally within each `difflib.SequenceMatcher` `replace` block, the rest unpaired; a pair whose head
-  line lacks one of the base line's `OPERATORS` is `weakened` at the head line, an unpaired head `skip`, `skipif`
-  or `xfail` marker above a `def test_`, past any stacked decorator, is `weakened`, and an unpaired base assertion whose stripped text is in no
+  line lacks one of the base line's `OPERATORS` is `weakened` at the head line, a head `skip`, `skipif` or `xfail`
+  marker, unpaired or paired with a base line that was no marker, above a `def test_`, past any stacked decorator, is `weakened`, and an unpaired base assertion whose stripped text is in no
   head line is `removed`."""
   delta = []
   for path, (base_commit, base_text) in sorted(base_files.items()):
@@ -177,8 +178,10 @@ def test_delta(base_files: dict, head_files: dict, named: set) -> list:
         i, j = i1 + k, j1 + k
         if i in guarded and any(op in base[i] and op not in head[j] for op in OPERATORS):
           delta.append(entry(j + 1, i + 1, "weakened"))
-      for j in range(j1 + paired, j2):
+      for j in range(j1, j2):  # a marker added, or written over a paired base line that was no marker
         d = decorated(head, j)
+        if j - j1 < paired and MARKER_RE.search(base[i1 + j - j1]):
+          continue
         if MARKER_RE.search(head[j]) and d < len(head) and head[d].strip().startswith("def test_") and d in to_base:
           delta.append(entry(j + 1, to_base[d] + 1, "weakened"))
       for i in range(i1 + paired, i2):
@@ -215,6 +218,8 @@ def delta_files(worktree: Path, base: str, head: str, commits: list, named: set)
     if path not in at_head and (path in renames.values() or path in back.values()):
       continue  # compared through the file it was renamed to
     old = renames.get(path, path)
+    if old not in at_base and first(path) in at_base:  # renamed from a base file, then deleted in the range
+      old = first(path)
     if old in at_base:
       base_files[path] = (base, show(base, old))
     else:
@@ -329,7 +334,7 @@ def collect(args, card):
                                       external, earlier, disposed, posted, handoff.config.get("owners") or [],
                                       recorded_rulings(data), data.get("decisions") or [], recorded_times(data),
                                       handoff.state["units"][unit].get("number"), runs=runs, prior_dod=prior_dod, present=present,
-                                      delta=delta, prior_delta=prior_delta, texts=texts)
+                                      delta=delta, prior_delta=prior_delta, texts=texts, config=handoff.config)
   entry.update(dod_runs=runs, test_delta=delta)
   findings = r / "foreman.findings"
   core.atomic_write(findings, "".join(line + "\n" for line in lines))
@@ -409,7 +414,7 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
                      earlier: set = frozenset(), disposed: set = frozenset(), posted: dict = None,
                      owners: list = (), recorded: list = (), decisions: list = (), recorded_at: dict = None,
                      issue_number: int = None, runs: dict = None, prior_dod: dict = None, present: set = None,
-                     delta: list = None, prior_delta: dict = None, texts: dict = None) -> tuple:
+                     delta: list = None, prior_delta: dict = None, texts: dict = None, config: dict = None) -> tuple:
   """The foreman's high findings of spec section 11 in this order: CI, the DoD items, scope, tdd-order,
   deviations, contested, upheld, unreplied external; and `builder_contested[]` for the contested ones. Rulings
   and replies count only from the right author: a ruling is a `config.owners` login's comment `ruling_of` reads
@@ -477,7 +482,7 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
   allowed = set().union(*(chain(r.subject) for r in rulings if r.kind == "allowed"))
   ruled = {int(r.subject[4:]) for r in rulings if r.kind == "allowed" and re.fullmatch(r"dod-\d+", r.subject)}
   found += dod_findings(body, runs or {}, ruled | {item for fid, item in (prior_dod or {}).items() if fid in overruled | allowed},
-                        texts)
+                        texts, config)
   if delta is not None:  # the test delta: an allowed entry or file is dropped from the round's record, then each left is a high
     owners_own = [r for r in rulings if not r.login.startswith("judges:")]  # the owner's alone: never the judges' rulings
     settled = set().union(*(chain(r.subject) for r in owners_own if r.kind in ("overruled", "allowed")))
