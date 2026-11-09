@@ -104,7 +104,7 @@ DEFAULT_CONFIG = {
     "ingest": {"severity_words": {"bug": "high", "issue": "medium", "nit": "low", "suggestion": "low"},
                "human_role": "write"},  # `review ingest`: a thread's word map and the role a human's thread counts from
     "notify_timeout_seconds": 30,  # how long `notify` waits on the owner's ~/.superegm/notify hook (spec section 11.2)
-  "foreman": {"run_timeout_minutes": 8},  # the bound on one `collect` call's DoD re-run, under the Bash tool's 10 (spec section 11.1)
+    "foreman": {"run_timeout_minutes": 8},  # the bound on one whole `collect` call, under the Bash tool's 10 (spec section 11.1)
 }
 
 DEFAULT_TEMPLATE = """<!-- superegm:handoff={{handoff_id}} unit={{unit_id}} spec={{spec_sha256}} -->
@@ -750,9 +750,12 @@ def load_config(repo_root: Path) -> dict:
     raise HandoffError("ingest.severity_words must map words to high|medium|low")
   if config["ingest"].get("human_role") not in ROLES[1:]:
     raise HandoffError(f"ingest.human_role must be one of {', '.join(ROLES[1:])}")
-  bound = config["foreman"].get("run_timeout_minutes") if isinstance(config["foreman"], dict) else None
-  if not isinstance(config["foreman"], dict) or set(config["foreman"]) != {"run_timeout_minutes"} or isinstance(bound, bool) \
-      or not isinstance(bound, (int, float)) or not 0 < bound <= 9:
+  if not isinstance(config["foreman"], dict):
+    raise HandoffError("foreman must be an object")
+  if set(config["foreman"]) - {"run_timeout_minutes"}:
+    raise HandoffError(f"foreman: unknown keys {sorted(set(config['foreman']) - {'run_timeout_minutes'})}")
+  bound = config["foreman"].get("run_timeout_minutes")
+  if isinstance(bound, bool) or not isinstance(bound, (int, float)) or not 0 < bound <= 9:
     raise HandoffError("foreman.run_timeout_minutes must be a number above 0 and at most 9")
   if not config["repo"]:
     origin = run_git(["remote", "get-url", "origin"], repo_root)

@@ -98,6 +98,8 @@ def prepare(args, card):
   since = max((e["posted_at"] for e in data["rounds"] if e.get("posted_at")), default=None)
   write_comments(r / "comments.md", (issue, core.gh_pages(f"repos/{repo}/issues/{issue}/comments")),
                  (number, core.gh_pages(f"repos/{repo}/issues/{number}/comments")), since, login)
+  for key in ("dod_runs", "test_delta"):  # an earlier head's gates never stand for this one: `post` refuses until `collect`
+    entry.pop(key, None)
   entry.update({"head": head, "phase": "prepared", "merge_base": merge_base, "worktree": str(tree)})
   core.save_foreman(st, unit, data)
   previous = max((e["round"] for e in data["rounds"] if e.get("phase") == "posted"), default=None)

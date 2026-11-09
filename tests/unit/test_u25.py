@@ -30,6 +30,14 @@ def test_foreman_config_key_and_the_init_sentence(world, given, expect):
     assert superegm.load_config(world.repo)["foreman"] == {"run_timeout_minutes": expect}
 
 
+@pytest.mark.parametrize("given, message", [({"run_timeout_minutes": 5, "extra": 1}, "foreman: unknown keys ['extra']"), ("8", "foreman must be an object")])
+def test_the_foreman_key_names_its_own_fault(world, given, message):
+  """Round 2 (PR #103 review): an extra key or a non-object is refused under its own name, not the bound's."""
+  set_config(world, repo=REPO, foreman=given)
+  with pytest.raises(superegm.HandoffError, match=re.escape(message)):
+    superegm.load_config(world.repo)
+
+
 def test_dod_runs_kills_each_items_group_on_return_and_at_the_bound(tmp_path, monkeypatch):
   p = subprocess.Popen(["/bin/sh", "-c", "sleep 30"], start_new_session=True)
   kill_group(p.pid)
@@ -45,6 +53,8 @@ def test_dod_runs_kills_each_items_group_on_return_and_at_the_bound(tmp_path, mo
                   "4": {"exit": 1, "summary": "boom", "paste_summary": None, "timed_out": False}, "5": {"exit": 0, "summary": "", "paste_summary": None, "timed_out": False},
                   "6": {"exit": None, "summary": "", "paste_summary": None, "timed_out": True}, "7": {"exit": None, "summary": None, "paste_summary": "ok", "timed_out": True}}
   assert sorted(p.name for p in (tmp_path / "dod").iterdir()) == ["3.out", "4.out", "5.out", "6.out"] and (tmp_path / "dod/4.out").read_text() == "boom\n"
+  gone = dod_runs([(2, f"echo x; rm -f '{tmp_path / 'gone/2.out'}'", None)], tmp_path, env, time.time() + 5, tmp_path / "gone")
+  assert gone == {"2": {"exit": 0, "summary": "", "paste_summary": None, "timed_out": False}}  # a run that unlinks its output
 
 
 test_delta.__test__ = False  # the helper's name starts `test_`: pytest must not collect it here
@@ -57,7 +67,9 @@ E = lambda line, base_line, kind="removed": {"file": F, "line": line, "base_line
   (BASE.replace("assert x == x", "assert x == 1"), set(), []), (BASE.replace("  assert 1 in [1]\n", ""), set(), [E(8, 8)]), (BASE.replace("  assert 1 in [1]\n", ""), {F}, []),
   (BASE.replace("assert x == x", "assert x"), set(), [E(7, 7, "weakened")]), (BASE.replace("pytest.raises", "contextlib.suppress"), set(), [E(9, 9, "weakened")]),
   (BASE.replace("  (2,),\n", ""), set(), [E(4, 4)]), (BASE.replace("  (1,),\n  (2,),\n", "  (2,),\n  (1,),\n"), set(), []),
-  (BASE.replace("def test_a", "@pytest.mark.skip\ndef test_a"), set(), [E(6, 6, "weakened")]), (None, set(), [E(n, n) for n in (3, 4, 6, 7, 8, 9)])])
+  (BASE.replace("def test_a", "@pytest.mark.skip\ndef test_a"), set(), [E(6, 6, "weakened")]), (None, set(), [E(n, n) for n in (3, 4, 6, 7, 8, 9)]),
+  (BASE.replace("def test_a", "@pytest.mark.skipif(True, reason='x')\ndef test_a"), set(), [E(6, 6, "weakened")]),
+  (BASE.replace("@pytest.mark.parametrize", "@pytest.mark.skip\n@pytest.mark.parametrize"), set(), [E(2, 6, "weakened")])])
 def test_test_delta_pairs_assertions_as_git_does(head, named, expect):
   assert test_delta({F: ("b", BASE)}, {F: head} if head is not None else {}, named) == expect
 

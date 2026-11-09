@@ -27,7 +27,7 @@ The store is {artifacts_dir} (config key artifacts_dir); it is never committed.
 The Astra lane is off until you set astra.enabled to true; astra.heads (default true) then seats it on every head review.
 `review ingest` reads PR review threads with ingest.severity_words (Devin's words by default) and counts a human's thread from ingest.human_role (default write) up.
 An executable ~/.superegm/notify, written outside every repository, is run by `wave` with the inbox lines new since the last notify on its stdin, bounded by config key notify_timeout_seconds; absent means no hook.
-`collect` re-runs every DoD `Run` item in the review worktree, the whole call bounded by foreman.run_timeout_minutes (default 8, at most 9, under the Bash tool's 10-minute cap).
+`collect` re-runs every DoD `Run` item the PR body pastes under its `### DoD <n>` fence in the review worktree (an item without one is the `Run item <n>: no fenced output` high, not run), the whole call bounded by foreman.run_timeout_minutes (default 8, at most 9, under the Bash tool's 10-minute cap).
 then run `superegm doctor`"""
 
 

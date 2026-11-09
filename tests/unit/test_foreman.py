@@ -543,7 +543,12 @@ GATE = {"red": ([RED], ["ok"], {}, [D(2, "ran red (boom)")]), "forge": (["git co
   "no-counts": (["echo ok"], ["ok"], {}, []), "red-differs": (["printf '1 failed\\n'; exit 1"], ["1 passed"], {}, [D(2, "ran red (1 failed)")]),
   "timeout": (["sleep 30", "true"], ["ok", "ok"], {"foreman": {"run_timeout_minutes": 0.05}}, [D(2, "ran red (timeout)"), D(3, "not run (timeout)", "pr_body.md")]),
   "allowed-item": ([RED], ["ok"], {"comments": RULED("**Ruling:** dod-2 allowed — needs a service")}, []),
-  "overruled-fid": ([RED], ["ok"], {"comments": RULED("**Ruling:** foreman-1-1 finding overruled — flaky")}, [])}
+  "overruled-fid": ([RED], ["ok"], {"comments": RULED("**Ruling:** foreman-1-1 finding overruled — flaky")}, []),
+  "pipe-in-line": (["printf 'FAIL | expected 2\\n'; exit 1"], ["ok"], {}, [D(2, "ran red (FAIL ¦ expected 2)")]),
+  "silent-red": (["exit 3"], ["ok"], {}, [D(2, "ran red (exit 3)")]),
+  "count-above-footer": (["printf '== 2 passed in 0.1s ==\\nreport saved\\n'"], ["== 3 passed in 0.1s ==\nreport saved"], {},
+                         [D(2, "paste differs from the run")]),
+  "forge-and-unlink": (["git config credential.helper evil; rm -f ../r1/dod/2.out"], ["ok"], {}, [])}
 
 
 @pytest.mark.parametrize("name", list(GATE))
@@ -569,7 +574,7 @@ def test_collect_reruns_the_dod_items_and_records_the_gate(world, tmp_path, monk
   assert entry["test_delta"] == [] and list(entry["dod_runs"]) == [str(i) for i in range(2, 2 + len(cmds))]
   if name == "timeout":
     assert (w.dir / "r1/dod/2.txt").read_text() == "exit: none\nsummary: \ntimed_out: yes\n" and not (w.dir / "r1/dod/3.txt").exists()
-  if name == "forge":
+  if name.startswith("forge"):
     assert subprocess.run(["git", "config", "--get", "credential.helper"], cwd=world.repo, capture_output=True, text=True,
                           env=dict(os.environ, GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null")).stdout == ""
 
@@ -582,7 +587,10 @@ CLAIM = lambda file, line: f"{file}:{line} | regression: no | test-delta: {file}
 DELTA = {"removed-from-base": ({Q: THREE}, [("chore: trim", Q, TWO)], {}, [E(Q, 3, 3)], [CLAIM(Q, 3)]),
   "created-then-trimmed": ({}, [("chore: add", N, THREE), ("chore: trim", N, TWO)], {}, [E(N, 3, 3, "created")], [CLAIM(N, 3)]),
   "renamed": ({Q: THREE}, [("chore: move", {Q: None, R: TWO})], {}, [E(R, 3, 3)], [CLAIM(R, 3)]),
+  "created-then-renamed": ({}, [("chore: add", N, THREE), ("chore: move", {N: None, R: TWO})], {}, [E(R, 3, 3, "created")], [CLAIM(R, 3)]),
   "allowed-entry": ({Q: THREE}, [("chore: trim", Q, TWO)], {"comments": RULED("**Ruling:** foreman-1-1 allowed — approved")}, [], []),
+  "allowed-other-base": ({Q: THREE}, [("chore: trim", Q, TWO)], {"comments": RULED("**Ruling:** foreman-1-1 allowed — approved"), "seed_base": "0" * 40},
+                         [E(Q, 3, 3)], [CLAIM(Q, 3)]),
   "allowed-file": ({Q: THREE}, [("chore: gut", Q, T("def test_a():", "  pass"))], {"comments": RULED("**Ruling:** test-delta tests/unit/test_q.py allowed — by design")}, [], [])}
 
 
@@ -591,13 +599,17 @@ def test_collect_records_the_test_delta_from_git_objects(world, tmp_path, monkey
   """U25: `collect` compares every test file the range touches that no `Write` line names, base to head from git
   objects, records `test_delta` and a `test-delta:` high per entry, and skips an entry or a file a ruling allows."""
   base_files, commits, kw, delta, claims = DELTA[name][0], DELTA[name][1], dict(DELTA[name][2]), DELTA[name][3], DELTA[name][4]
-  r = 1
+  r, seed_base = 1, kw.pop("seed_base", None)
   if "comments" in kw:  # a posted round 1 whose foreman-1-1 is the trimmed assertion of test_q.py
     kw.update(rounds=[{**POSTED_R1, "test_delta": [E(Q, 3, 3)]}], launches=TWO_LAUNCHES)
     st0, card0, _ = seed(world, **kw)
     open_head_review(world, st0, card0, "0" * 40, {"change-review": "", "foreman": f"foreman-1-1 | high | {CLAIM(Q, 3)}\n"})
     r = 2
   w = prepared(world, tmp_path, monkeypatch, commits=S1 + commits, base_files=base_files, **kw)
+  if r == 2:  # round 1's entry was taken at this base, or (`seed_base`) at another: an allowance binds its base commit
+    data = json.loads(w.st.path("foreman", UNIT).read_text())
+    data["rounds"][0]["test_delta"][0]["base_commit"] = seed_base or w.base
+    w.st.path("foreman", UNIT).write_text(json.dumps(data))
   created = w.g("log", "--format=%H", "--diff-filter=A", w.head, "--", N) or None
   record(world, w.st, w.rid, r, w.head, w.child, {"change-review": ""})
   code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
@@ -808,11 +820,13 @@ def test_review_post_writes_the_owner_word_before_revise_and_cap(world, tmp_path
   assert f"{UNIT} awaiting merge" not in w.st.path("journal").read_text()
 
 
-@pytest.mark.parametrize("case", ["header-present", "header-after-mention", "stale-dispatch", "mention", "commit-differs", "gates-not-run"])
+@pytest.mark.parametrize("case", ["header-present", "header-after-mention", "stale-dispatch", "mention", "commit-differs", "gates-not-run", "re-prepared"])
 def test_review_post_guards(world, tmp_path, monkeypatch, case):
   w = prepared(world, tmp_path, monkeypatch)
   if case != "gates-not-run":
     assert world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)[0] == 0
+  if case == "re-prepared":  # a later prepare under the same dispatch drops the gates an earlier head's collect recorded
+    assert world.run("prepare", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)[0] == 0
   claim = "ping @alice" if case == "mention" else "no hook"
   record(world, w.st, w.rid, 1, w.head, w.child, {"change-review": f"change-review-1-1 | high | src/hooks.py:1 | regression: no | {claim}\n"})
   if case == "header-present":
@@ -831,7 +845,7 @@ def test_review_post_guards(world, tmp_path, monkeypatch, case):
               "stale-dispatch": (1, "dispatch: d9 is not U01's current dispatch (d1)", "collected", 0),
               "mention": (1, "comment:3: bare mention @alice", "collected", 0),
               "commit-differs": (1, f"posted on {'f' * 7}, not {w.head[:7]}: round 1 not counted", "collected", 1),
-              "gates-not-run": (1, "post: gates not run", "prepared", 0)}[case]
+              "gates-not-run": (1, "post: gates not run", "prepared", 0), "re-prepared": (1, "post: gates not run", "prepared", 0)}[case]
   assert (code, entry["phase"], len(w.posted)) == (expected[0], expected[2], expected[3]), out
   assert out.strip().splitlines()[0].startswith(expected[1]), out
   if case in ("header-present", "header-after-mention"):
