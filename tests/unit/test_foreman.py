@@ -5,7 +5,7 @@
 """U10: foreman dispatch, prepare, collect, tdd-order, review post. This file replaces U03's nine moved
 prepare/collect tests (they pin `--round`, `--run-folder`, `--verdict`, `head-moved`, `launched` and `--remove`:
 forms S4, S7 and S16 remove). Fixtures: conftest's `world` and `make_pr` (U03)."""
-import json, re, subprocess
+import json, os, re, subprocess
 from pathlib import Path
 from types import SimpleNamespace
 import pytest
@@ -36,7 +36,7 @@ Interfaces
 
 Definition of done
 1. The test for each Step was committed before its implementation (checked by superegm tdd-order)
-2. Run `pytest tests/unit/test_hooks.py -q` — passes
+2. Run `true` — passes
 3. Exists `src/hooks.py`
 4. CI green on the head
 
@@ -111,7 +111,7 @@ def builder_token(monkeypatch):
 
 def seed(world, *, head="a" * 40, ci="success", launches=({"round": 1, "status": "exited 0"},),
          rounds=(), base_ref="main", comments=None, reviews=(), login="builder-bot", pr_body=PR_BODY, builder=None, astra=None, marker=True, owners=None,
-         decisions=(), rulings=()):
+         decisions=(), rulings=(), foreman=None):
   """Through U03's `store`, `Store.path` and `atomic_write`, what `locate`, `Handoff` and `require_frozen_units`
   read: the plan (conftest's heading, a `Design:` line naming `world.spec` in backticks, `## Global constraints`,
   `## Units`, SECTION) written to `world.plan` and
@@ -134,7 +134,7 @@ def seed(world, *, head="a" * 40, ci="success", launches=({"round": 1, "status":
   set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"],
              reviewers={"spec": [], "plan": [], "head": ["change-review"], "integrate": []},
              **({"builder": builder} if builder else {}), **({"astra": astra} if astra else {}),
-             owners=owners or ["owner"])
+             **({"foreman": foreman} if foreman else {}), owners=owners or ["owner"])
   plan = (f"# Handoff plan: Webhook delivery\n\nDesign: `{spec}`\n\n## Global constraints\n- none\n\n"
           f"## Units\n\n{SECTION}")
   world.plan.write_text(plan, encoding="utf-8")
@@ -527,6 +527,43 @@ def test_collect_carries_an_overruled_scope_finding_forward(world, tmp_path, mon
   w = prepared(world, tmp_path, monkeypatch, commits=commits, **kw)
   code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
   assert (code, out.strip()) == (0, "collected: 0 foreman findings"), out
+
+
+RED, RULED, D = "echo boom; exit 1", lambda body: {2: [c(13, "owner", body)]}, lambda n, what, at=None: f"{at or f'dod/{n}.txt'} | regression: no | dod-{n}: {what}"
+GATE = {"red": ([RED], ["ok"], {}, [D(2, "ran red (boom)")]), "forge": (["git config credential.helper evil"], ["ok"], {}, []),
+  "paste-differs": (["printf '== 2 passed, 1 failed in 0.1s ==\\n'"], ["3 passed"], {}, [D(2, "paste differs from the run")]),
+  "no-counts": (["echo ok"], ["ok"], {}, []), "red-differs": (["printf '1 failed\\n'; exit 1"], ["1 passed"], {}, [D(2, "ran red (1 failed)")]),
+  "timeout": (["sleep 30", "true"], ["ok", "ok"], {"foreman": {"run_timeout_minutes": 0.05}}, [D(2, "ran red (timeout)"), D(3, "not run (timeout)", "pr_body.md")]),
+  "allowed-item": ([RED], ["ok"], {"comments": RULED("**Ruling:** dod-2 allowed — needs a service")}, []),
+  "overruled-fid": ([RED], ["ok"], {"comments": RULED("**Ruling:** foreman-1-1 finding overruled — flaky")}, [])}
+
+
+@pytest.mark.parametrize("name", list(GATE))
+def test_collect_reruns_the_dod_items_and_records_the_gate(world, tmp_path, monkeypatch, name):
+  """U25: `collect` re-runs every DoD `Run` item in the review worktree, compares the builder's paste, records
+  `dod_runs` and `dod/<n>.txt`, writes the checkout's config back and skips an item a ruling allows."""
+  cmds, pastes, kw, claims = GATE[name][0], GATE[name][1], dict(GATE[name][2]), GATE[name][3]
+  items = "".join(f"{i}. Run `{cmd}` — passes\n" for i, cmd in enumerate(cmds, 2))
+  monkeypatch.setitem(globals(), "BODY", BODY.replace("2. Run `true` — passes\n", items)
+                      .replace("3. Exists", f"{2 + len(cmds)}. Exists").replace("4. CI", f"{3 + len(cmds)}. CI"))
+  pr_body = "U01\n\n" + "".join(f"### DoD {i}\n```\n$ {cmd}\n{paste}\n```\n\n" for i, (cmd, paste) in enumerate(zip(cmds, pastes), 2)) + "Closes #2\n"
+  r = 1
+  if "comments" in kw:  # a posted round 1 whose foreman-1-1 is item 2's red run
+    kw.update(rounds=[POSTED_R1], launches=TWO_LAUNCHES)
+    st0, card0, _ = seed(world, **kw)
+    open_head_review(world, st0, card0, "0" * 40, {"change-review": "", "foreman": f"foreman-1-1 | high | {D(2, 'ran red (boom)')}\n"})
+    r = 2
+  w = prepared(world, tmp_path, monkeypatch, pr_body=pr_body, **kw)
+  record(world, w.st, w.rid, r, w.head, w.child, {"change-review": ""})
+  code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
+  assert code == 0 and [l.split(" | ", 2)[2] for l in (w.dir / f"r{r}/foreman.findings").read_text().splitlines()] == claims, out
+  entry = json.loads(w.st.path("foreman", UNIT).read_text())["rounds"][-1]
+  assert entry["test_delta"] == [] and list(entry["dod_runs"]) == [str(i) for i in range(2, 2 + len(cmds))]
+  if name == "timeout":
+    assert (w.dir / "r1/dod/2.txt").read_text() == "exit: none\nsummary: \ntimed_out: yes\n" and not (w.dir / "r1/dod/3.txt").exists()
+  if name == "forge":
+    assert subprocess.run(["git", "config", "--get", "credential.helper"], cwd=world.repo, capture_output=True, text=True,
+                          env=dict(os.environ, GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null")).stdout == ""
 
 
 EXT = "external:alice-1-1 | high | src/hooks.py:3 at 0000000 | regression: no | the hook never fires\n"
