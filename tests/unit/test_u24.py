@@ -151,6 +151,13 @@ def test_review_status_reads_the_stall_under_the_cards_own_rounds_after_its_post
   assert world.run("review", "status", "--review", rid, "--runcard", b)[0] == 5
 
 
+@pytest.mark.parametrize("path, needle", [("skills/wave/SKILL.md", "If a decision was opened this batch outside SUPEREGM_ROLE=driver, pause"),
+                                          ("skills/wave/references/leavemealone_mode.md", "the batch ends as its step 7 says (under SUPEREGM_ROLE=driver it goes on"),
+                                          ("skills/wave/references/leavemealone_mode.md", "ask the owner (under SUPEREGM_ROLE=driver an inbox line, never a question)")])
+def test_no_wave_passage_asks_under_the_driver_role(path, needle):
+  text = " ".join((ROOT / path).read_text().split()); assert needle in text, (path, needle)
+
+
 def test_a_failed_boot_id_lookup_is_no_reboot():
   assert superegm.rebooted({"boot_id": "boot-1"}, "unknown") is False and superegm.rebooted({"boot_id": "boot-0"}, "boot-1") is True
 
