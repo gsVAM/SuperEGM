@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import plistlib
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -42,7 +43,7 @@ def plist_helper():
     if unit.is_file():
       for line in core.read_text(unit).splitlines():
         if line.startswith("ExecStart="):
-          words = line[len("ExecStart="):].split()
+          words = shlex.split(line[len("ExecStart="):])
           return words[1] if len(words) > 1 else None
   except (OSError, ValueError, plistlib.InvalidFileException):
     return None
@@ -364,7 +365,7 @@ def install(minutes: int) -> int:
     print(f"installed ({minutes} min): {plist}")
     return 0
   core.atomic_write(service_path(), "[Unit]\nDescription=SuperEGM driver tick\n\n[Service]\nType=oneshot\n"
-                    f"ExecStart={' '.join(argv)}\nKillMode=process\n")
+                    f"ExecStart={shlex.join(argv)}\nKillMode=process\n")
   core.atomic_write(timer_path(), "[Unit]\nDescription=SuperEGM driver timer\n\n[Timer]\nOnBootSec=1min\n"
                     f"OnUnitActiveSec={minutes}min\n\n[Install]\nWantedBy=timers.target\n")
   call(["systemctl", "--user", "daemon-reload"])
