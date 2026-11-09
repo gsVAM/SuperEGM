@@ -89,9 +89,10 @@ def test_an_accept_below_the_cap_lapses_on_a_later_round(world):
   assert status(world, rid, cid)[0] == 3
 
 
-def test_a_head_accept_lapses_on_an_ingested_external_high(world):
+def test_a_head_accept_lapses_on_a_recorded_external_high(world):
   """PR #105 round 1 (astra-1-2): an external high recorded into the accepted round after the accept bars it: the
-  head review is open again, so `review ingest` rewrites the round's `clean`."""
+  head review is open again, and the record rewrites the round's `clean` (round 4; `review ingest` rewrites its own
+  by the landed path, round 6's change-review-5-1)."""
   from test_wave import fifth_point_open
   s, card, rid = fifth_point_open(world)
   assert rule_fifth(world, card)[0] == 0 and status(world, rid, card)[0] == 0
@@ -112,6 +113,23 @@ def test_a_set_high_recorded_into_an_incomplete_later_round_lapses_the_accept(wo
   assert code == 0, out
   assert status(world, rid, cid)[0] == 3 and rjson(world, rid)["converged"] == "no"
   assert f"review {rid} R1 accept lapsed" in hstore(world).path("journal").read_text(encoding="utf-8")
+  # PR #105 round 5 (astra-5-1): the incomplete later round's high bars a second accept and its acceptable line
+  assert "acceptable:" not in world.run("review", "status", "--review", rid, "--runcard", cid)[1]
+  code, out = rule(world, rid, "accept", cid)
+  assert code == 1 and "review rule: accept refused: high set-2-1" in out and len(rjson(world, rid)["rulings"]) == 1
+
+
+def test_a_head_accept_typed_alone_writes_the_rounds_clean(world):
+  """PR #105 round 5 (codebase-details-5-2): `review rule --decision <qid>` typed on a head converges it and writes the
+  round's `clean` with its awaiting-merge line, as `review status` 0 says; `decision rule` then records the decision."""
+  from test_wave import fifth_point_open, foreman_of
+  s, card, rid = fifth_point_open(world)
+  code, out = world.run("review", "rule", "--review", rid, "--ruling", "accept", "--owner", "--decision", "q1", "--runcard", card)
+  assert code == 0, out
+  assert foreman_of(s, "U01")["rounds"][-1]["outcome"] == "clean" and status(world, rid, card)[0] == 0
+  assert s.path("journal").read_text(encoding="utf-8").count("U01 awaiting merge") == 1
+  assert rule_fifth(world, card)[0] == 0 and [r["decision"] for r in foreman_of(s, "U01")["rulings"]] == ["q1"]
+  assert s.path("journal").read_text(encoding="utf-8").count("U01 awaiting merge") == 1 and len(head_rulings(s, rid)) == 1
 
 
 def test_a_point_one_decision_stays_open_until_each_contested_finding_is_ruled(world, monkeypatch):
@@ -310,3 +328,17 @@ def test_a_posted_head_round_journals_the_lapse_of_an_accept(world):
   stored = json.loads(s.path("reviews", rid, "review.json").read_text(encoding="utf-8"))
   assert (stored["converged"], stored["converged_round"]) == ("yes", 2)
   assert "R1 accept lapsed" in s.path("journal").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("path, needle", [
+  ("skills/wave/references/decision_points.md", "0 → the unit\nawaits merge; 2 → Decision point 2; in normal mode `acceptable: yes` → Decision point 5; else `launch-builder`."),
+  ("skills/wave/references/rulings.md", "in normal mode `acceptable: yes` → Decision point 5; else `launch-builder`"),
+  ("skills/wave/references/decision_points.md", "`review rule: the reviewed head moved: revise`"),
+  ("skills/review-spec/references/review_loop.md", "writes the round's `clean`"),
+  ("skills/review-spec/references/review_loop.md", "any round of this review"),
+  ("skills/review-spec/references/review_loop.md", "a blocking (high or medium) finding marked `regression: yes`")])
+def test_round_six_prose(path, needle):
+  """PR #105 round 5 (astra-5-3, codebase-details-5-1, 5-2, 5-3): a settled point 1 routes an acceptable head to point
+  5, point 5 names the moved-head refusal, and review_loop.md states the head accept typed alone and the predicate as coded."""
+  from conftest import ROOT
+  assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
