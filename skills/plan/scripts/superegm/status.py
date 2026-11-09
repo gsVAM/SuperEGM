@@ -7,6 +7,7 @@
 every pass, `--wait` included, also reads the tracking issue once and rewrites its board when the rows changed
 (`post_board`, the one GitHub write, its `board_changed_at` save and a failed write's journal line, spec 11.1)."""
 
+import json
 import re
 from pathlib import Path
 
@@ -240,6 +241,17 @@ def unit_events(uid: str, previous, current: dict) -> list:
   return lines
 
 
+def builder_logins(st) -> set:
+  """The builder logins `launch` recorded on the handoff's cards (`builder[].login`)."""
+  folder = (st.root if st.legacy else st.base()) / "runcards"
+  logins = set()
+  for path in folder.glob("*.json"):
+    card = json.loads(core.read_text(path))
+    if card.get("handoff", st.handoff_id) == st.handoff_id:
+      logins |= {b.get("login") for b in card.get("builder") or [] if isinstance(b, dict)}
+  return logins - {None}
+
+
 def tick_trigger(handoff) -> str | None:
   """What a tick's session would have to do (spec section 11.2), from one `status_pass` that saves nothing, in order:
   the proof the tick applied to the handoff's newest tick launch (`reboot <n>` for one recorded `interrupted (reboot)`,
@@ -259,13 +271,21 @@ def tick_trigger(handoff) -> str | None:
   saved = state.get("status")
   previous = (saved or {}).get("units") or {}
   summary, _ = core.status_pass(handoff, save=False)
+  builders = builder_logins(st)
   for uid in handoff.graph.order:
-    lines = unit_events(uid, previous.get(uid), summary["units"][uid])
-    if lines:
-      return lines[0]
+    for line in unit_events(uid, previous.get(uid), summary["units"][uid]):
+      if " status word=" in line and line.rsplit(" by=", 1)[-1] not in builders:
+        continue  # a `**Builder status:**` comment a stranger wrote buys no session
+      return line
+  if saved:
+    for uid in summary.get("ready") or []:
+      if uid not in (saved.get("ready") or []):
+        return f"{uid} ready"
   repo, config = handoff.config["repo"], handoff.config
   for uid in handoff.graph.order:
     foreman = core.load_foreman(st, uid)
+    if foreman.get("stopped"):
+      continue  # the session skips a stopped unit's threads, so they buy no session
     posted = [e for e in foreman.get("rounds") or [] if e.get("phase") == "posted" and e.get("head")]
     pr = ((state.get("units") or {}).get(uid) or {}).get("pr") or {}
     if not posted or not pr.get("number") or summary["units"][uid].get("landed"):

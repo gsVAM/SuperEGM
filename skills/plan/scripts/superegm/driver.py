@@ -86,7 +86,7 @@ def run(args):
       return status()
     core.require_runcard(args, SKILLS)
     if args.action == "install":
-      return install(args.interval or 15)
+      return install(15 if args.interval is None else args.interval)
     if args.action == "uninstall":
       return uninstall()
     return reset()
@@ -161,14 +161,16 @@ def exit_code(entry: dict):
   return core.read_text(path).strip() if path.is_file() else None
 
 
-def twice_failed(hs: core.Store, launches: list, state: dict) -> bool:
-  """Two consecutive launches of the tick's own that failed before the loop ran (spec section 11.2), counted after
-  the last `interrupted` one and after the last typed top-level `wave` card opened at or before `state.status.at`
-  (the intervening success): a non-zero exit, no top-level `wave` card naming the launch's card, or one opened
-  after `state.status.at` (or with it absent: no `status --wait` ever saved)."""
+def counted_failures(hs: core.Store, launches: list, state: dict, set_aside: int = 0) -> list:
+  """The two consecutive launches of the tick's own that failed before the loop ran (spec section 11.2), or []:
+  counted after the last `interrupted` one, after the rounds `driver reset` set aside, and after the last typed
+  top-level `wave` card opened at or before `state.status.at` (the intervening success); a failure is a non-zero
+  exit, no top-level `wave` card naming the launch's card, or one opened after `state.status.at` (or with it
+  absent: no `status --wait` ever saved)."""
   at = (state.get("status") or {}).get("at")
   cards = [c for _, c in core.top_wave_cards(hs)]
-  start = max((i + 1 for i, e in enumerate(launches) if str(e.get("status") or "").startswith("interrupted")), default=0)
+  start = max((i + 1 for i, e in enumerate(launches) if str(e.get("status") or "").startswith("interrupted")
+               or e.get("round", 0) <= set_aside), default=0)
   typed = [c["opened_at"] for c in cards if not c.get("driver_card") and at and c["opened_at"] <= at]
   since = max(typed, default=None)
   counted = [e for e in launches[start:] if since is None or e["started_at"] > since]
@@ -179,7 +181,24 @@ def twice_failed(hs: core.Store, launches: list, state: dict) -> bool:
     mine = [c for c in cards if c.get("driver_card") == entry.get("card")]
     return not mine or any(at is None or c["opened_at"] > at for c in mine)
 
-  return len(counted) >= 2 and failed(counted[-1]) and failed(counted[-2])
+  return counted[-2:] if len(counted) >= 2 and failed(counted[-1]) and failed(counted[-2]) else []
+
+
+def twice_failed(hs: core.Store, data: dict, state: dict) -> bool:
+  return bool(counted_failures(hs, data["launches"], state, data.get("set_aside") or 0))
+
+
+def rebased(path, root) -> Path:
+  """A path the handoff recorded from another worktree, read under the registered `root`: the longest suffix of it
+  that exists there (`register` from a second worktree moves the root, never the state's paths)."""
+  path, root = Path(path), Path(root).resolve()
+  if not path.is_absolute() or path.resolve().is_relative_to(root):
+    return path
+  for i in range(1, len(path.parts)):
+    candidate = root.joinpath(*path.parts[i:])
+    if candidate.exists():
+      return candidate
+  return path
 
 
 def exit_file_proof(hs: core.Store, launches: list) -> None:
@@ -229,22 +248,23 @@ def launch(hs: core.Store, entry: dict, spec: str, reason: str) -> bool:
   from superegm import launch_builder
   hid, data = hs.handoff_id, core.load_driver(hs)
   n = len(data["launches"]) + 1
-  cid = core.open_runcard(hs, "driver", spec)
   base = lambda suffix: hs.path("driver", f"{hid}_r{n}{suffix}")
-  record = {"round": n, "card": cid, "started_at": core.now_iso(), "boot_id": core.boot_id(), "status": "running",
+  record = {"round": n, "card": None, "started_at": core.now_iso(), "boot_id": core.boot_id(), "status": "running",
             "reason": reason, "result_file": str(base("_result.json")), "exit_file": str(base(".exit")),
             "log": str(base(".log"))}
-  record["command"] = tick_command(Path(entry["root"]).resolve(), tick_prompt(spec, hid), record["result_file"],
-                                   record["exit_file"])
+  record["command"] = tick_command(Path(entry["root"]).resolve(), tick_prompt(rebased(spec, entry["root"]), hid),
+                                   record["result_file"], record["exit_file"])
+  record["card"] = cid = core.open_runcard(hs, "driver", spec)
   data["launches"].append(record)
   data["refused"] = None
   core.atomic_write(hs.path("driver", hid), data)
-  typed = [path.stem for h in open_ids(core.Store(hs.root, config=hs.config))
+  found = [("wave", path.stem) for h in open_ids(core.Store(hs.root, config=hs.config))
            for path, card in core.top_wave_cards(core.handoff_store(hs, h)) if is_open(card)]
-  if typed:
+  found += [(card["skill"], path.stem) for path, card in card_files(hs) if card.get("skill") in PHASES and is_open(card)]
+  if found:
     record["status"] = "interrupted"
     core.atomic_write(hs.path("driver", hid), data)
-    core.journal(hs, f"driver: tick backed off: wave card {typed[0]} open")
+    core.journal(hs, f"driver: tick backed off: {found[0][0]} card {found[0][1]} open")
     close_card(hs, cid)
     return False
   env = {**os.environ, "SUPEREGM_ROLE": "driver", "SUPEREGM_RUNCARD": cid}
@@ -267,6 +287,11 @@ def tick_store(entry: dict) -> None:
   from superegm import status
   st, ok = registered_store(entry)
   current, ids = core.boot_id(), open_ids(st)
+  stores = [core.handoff_store(st, h) for h in ids]
+  for hs in stores:  # the proofs first, for every open handoff: a store-wide skip below reads them all
+    core.STORE = hs
+    core.reboot_proof(hs, current)
+    exit_file_proof(hs, core.load_driver(hs)["launches"])
   for hid in sorted(ids, key=lambda h: last_started(st, h)):
     hs = core.handoff_store(st, hid)
     core.STORE = hs
@@ -276,25 +301,26 @@ def tick_store(entry: dict) -> None:
     saved = ((state.get("status") or {}).get("units") or {})
     if not [u for u in units if not (saved.get(u) or {}).get("landed") and not core.load_foreman(hs, u).get("stopped")]:
       continue
-    core.reboot_proof(hs, current)
     data = core.load_driver(hs)
-    exit_file_proof(hs, data["launches"])
-    stores = [core.handoff_store(st, h) for h in ids]
-    if any(not core.tick_terminal(e) for h in stores for e in core.load_driver(h)["launches"]):
-      continue
-    if any(is_open(c) for h in stores for _, c in core.top_wave_cards(h)):
-      continue
-    if any(c.get("skill") in PHASES and is_open(c) for _, c in card_files(hs)):
+    if (any(not core.tick_terminal(e) for h in stores for e in core.load_driver(h)["launches"])
+        or any(is_open(c) for h in stores for _, c in core.top_wave_cards(h))
+        or any(c.get("skill") in PHASES and is_open(c) for _, c in card_files(hs))):
+      notify(hs, spec)  # a skip, silent unless `notify`'s own predicate holds (a typed `wave` card, a launch)
       continue
     if not ok:
       if refuse(hs, data, f"root {entry['root']} is not a worktree of {entry['repo']}"):
         notify(hs, spec)
       continue
-    if twice_failed(hs, data["launches"], state):
+    if twice_failed(hs, data, state):
       if refuse(hs, data, TWICE):
         notify(hs, spec)
       continue
-    reason = status.tick_trigger(core.Handoff(Path(state["plan"]), hs))
+    if data.get("refused"):  # the refusal no longer holds: the owner re-typed `wave` or re-registered the root
+      core.journal(hs, f"tick: {hid} refusal cleared ({data['refused']['reason']})")
+      data["refused"] = None
+      core.atomic_write(hs.path("driver", hid), data)
+    plan = rebased(state["plan"], entry["root"]) if ok else Path(state["plan"])
+    reason = status.tick_trigger(core.Handoff(plan, hs))
     if reason is None:
       notify(hs, spec)
       continue
@@ -306,15 +332,19 @@ def tick_store(entry: dict) -> None:
 
 def tick() -> int:
   """`driver tick`: `~/.superegm/env` applied first (restored after), then every registered store."""
-  saved = dict(os.environ)
+  saved, code = dict(os.environ), 0
   os.environ.update(read_env())
   try:
     for entry in core.load_registry():
-      tick_store(entry)
+      try:
+        tick_store(entry)
+      except (core.HandoffError, OSError, ValueError, KeyError) as error:  # one store's error never stops the next
+        print(f"driver: {entry.get('artifacts_dir')}: {error}")
+        code = 1
   finally:
     os.environ.clear()
     os.environ.update(saved)
-  return 0
+  return code
 
 
 # ---------------------------------------------------------------- install, uninstall, status
@@ -341,7 +371,7 @@ def install(minutes: int) -> int:
   The plist carries no secret and no environment: the tick reads `~/.superegm/env`."""
   from superegm.launch_builder import HELPER
   if minutes < 1:
-    raise core.HandoffError(f"--interval {minutes} is not a positive number of minutes")
+    raise core.HandoffError("--interval must be at least 1 minute")
   argv = [sys.executable, str(HELPER), "driver", "tick"]
   if PLATFORM == "darwin":
     plist, log, domain = plist_path(), str(Path.home() / ".superegm" / "driver.log"), f"gui/{os.getuid()}"
@@ -411,14 +441,22 @@ def status() -> int:
 
 def reset() -> int:
   """`driver reset`, the owner's interrupt for the card's handoff: its launch without an exit file recorded
-  `interrupted`, its open top-level `wave` card marked `interrupted`, the refusal cleared; each journaled."""
+  `interrupted`, its open top-level `wave` card marked `interrupted`, the refusal cleared and, with no live launch,
+  the two failures it counted set aside (`set_aside`: the next tick counts from the launch after them); each
+  journaled."""
   hs = core.STORE
   hid, data = hs.handoff_id, core.load_driver(hs)
   live = [e for e in data["launches"] if not core.tick_terminal(e)]
   cards = [(path, card) for path, card in core.top_wave_cards(hs) if is_open(card)]
-  if not live and not cards and not data.get("refused"):
+  failures = [] if live else counted_failures(hs, data["launches"], core.load_state(hs.root), data.get("set_aside") or 0)
+  if not live and not cards and not data.get("refused") and not failures:
     raise core.HandoffError(f"{hid} has no live tick launch or open wave card")
-  parts = []
+  parts = [] if live or cards else ["refusal cleared"] * bool(data.get("refused"))
+  if failures:
+    rounds = f"{failures[0]['round']}-{failures[1]['round']}"
+    data["set_aside"] = failures[1]["round"]
+    core.journal(hs, f"driver: {hid} failures {rounds} set aside by reset")
+    parts.append(f"failures {rounds} set aside")
   for e in live:
     e["status"] = "interrupted"
     core.journal(hs, f"driver: {hid} launch {e['round']} interrupted by reset")
@@ -430,5 +468,5 @@ def reset() -> int:
   for path, card in cards:
     core.interrupt_card(hs, path, card, "driver reset")
     parts.append(f"card {path.stem} interrupted")
-  print(f"reset {hid}: {'; '.join(parts) or 'refusal cleared'}")
+  print(f"reset {hid}: {'; '.join(parts)}")
   return 0

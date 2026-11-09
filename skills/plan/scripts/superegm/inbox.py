@@ -379,15 +379,13 @@ def run_notify(args):
 
 
 def notify_lines(store: core.Store, card: dict, items=None) -> list:
-  """The `inbox_items` of the card's handoff whose `fingerprint` its caller's set lacks: `state.json.notified`
-  under a `wave` card, `driver/<handoff>.json`'s `notified` under a `driver` card."""
+  """The `inbox_items` of the card's handoff whose `fingerprint` neither `notified` set holds (spec section 11.2):
+  `state.json.notified`, the `wave` sessions' set, and `driver/<handoff>.json`'s, the tick's."""
   hid = card.get("handoff") or store.handoff_id
   if items is None:
     items = inbox_items(store, [hid])
-  if card.get("skill") == "driver":
-    seen = set(core.load_driver(core.handoff_store(store, hid)).get("notified") or [])
-  else:
-    seen = set(approve_spec.handoff_state(store, hid).get("notified") or [])
+  seen = (set(core.load_driver(core.handoff_store(store, hid)).get("notified") or [])
+          | set(approve_spec.handoff_state(store, hid).get("notified") or []))
   return [i for i in items if i["fingerprint"] not in seen]
 
 

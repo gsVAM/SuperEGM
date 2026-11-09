@@ -763,7 +763,7 @@ def rounds_of(st: core.Store, rid: str, review: dict) -> list[dict]:
 def stall_cards(st: core.Store, review: dict, runcard: str) -> set:
   """The card set the stall rule reads (spec section 11.2): the given card alone when it records no `driver_card`;
   a tick's session's card reads every `wave` card of the handoff, typed included, opened at or after the last
-  posted round's `posted_at` (every one when none is posted), so a tick's session is no fresh retry."""
+  posted round's `posted_at` (every one when none is posted), and itself, so a tick's session is no fresh retry."""
   path = st.path("runcards", runcard) if runcard else None
   card = json.loads(core.read_text(path)) if path and path.is_file() else {}
   if not card.get("driver_card"):
@@ -771,7 +771,7 @@ def stall_cards(st: core.Store, review: dict, runcard: str) -> set:
   posted = [r.get("posted_at") for r in core.load_foreman(st, review["artifact"])["rounds"]
             if r.get("phase") == "posted" and r.get("posted_at")] if review["kind"] == "head" else []
   since = max(posted, default=None)
-  cards = set()
+  cards = {runcard}  # the session's own card: its rounds after its own post count against it
   for other in sorted(st.card_dir(runcard).glob("wave-*.json")):
     data = json.loads(core.read_text(other))
     if data.get("skill") == "wave" and (since is None or (data.get("opened_at") or "") >= since):

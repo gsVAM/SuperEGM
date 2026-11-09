@@ -499,9 +499,10 @@ TICK_LIVE = "driver: a tick's session may be live; /superegm:driver reset is the
 
 def rebooted(entry: dict, current: str | None = None) -> bool:
   """A launch or card whose recorded boot id is neither `unknown` nor the machine's current one: no process
-  survives a reboot (spec section 11.2)."""
-  recorded = entry.get("boot_id")
-  return bool(recorded) and recorded != "unknown" and recorded != (current or boot_id())
+  survives a reboot (spec section 11.2). No proof while the current id cannot be read (`unknown`): a failed lookup
+  is never a reboot."""
+  recorded, current = entry.get("boot_id"), current or boot_id()
+  return bool(recorded) and "unknown" not in (recorded, current) and recorded != current
 
 
 def tick_terminal(entry: dict) -> bool:
@@ -715,12 +716,13 @@ def load_registry() -> list:
 def boot_id() -> str:
   """The machine's boot id (spec section 11.2): `kern.bootsessionuuid`, else Linux's `boot_id`, else `unknown`;
   never the boot time, which a clock step moves."""
-  try:
-    done = subprocess.run(["sysctl", "-n", "kern.bootsessionuuid"], capture_output=True, text=True, timeout=10)
-    if done.returncode == 0 and done.stdout.strip():
-      return done.stdout.strip()
-  except (OSError, subprocess.SubprocessError):
-    pass
+  for sysctl in ("/usr/sbin/sysctl", "sysctl"):  # the absolute path first: a timer's PATH is not the shell's
+    try:
+      done = subprocess.run([sysctl, "-n", "kern.bootsessionuuid"], capture_output=True, text=True, timeout=10)
+      if done.returncode == 0 and done.stdout.strip():
+        return done.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+      pass
   try:
     held = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
     if held:

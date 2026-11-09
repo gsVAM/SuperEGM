@@ -168,9 +168,13 @@ def driver_lines(config):
   else:
     lines.append(("driver", f"installed ({timer_minutes(driver)} min) at {mine}"))
   lines.append(("sleep", sleep_setting()))
-  entry = next((e for e in registry_entries() if Path(e["artifacts_dir"]).expanduser().resolve()
-                == Path(config["artifacts_dir"]).expanduser().resolve()), None)
-  if entry is None:
+  entries = registry_entries()
+  entry = None if isinstance(entries, str) else next(
+    (e for e in entries if Path(e["artifacts_dir"]).expanduser().resolve()
+     == Path(config["artifacts_dir"]).expanduser().resolve()), None)
+  if isinstance(entries, str):
+    lines.append(("root", entries))
+  elif entry is None:
     lines.append(("root", "not registered"))
   else:
     lines.append(("root", "ok" if driver.root_ok(entry["root"], entry["artifacts_dir"])
@@ -211,10 +215,11 @@ def sleep_setting():
 
 
 def registry_entries():
+  """The registry's entries, or the error that refuses it (shown on the `root:` line, as `tick` would fail)."""
   try:
     return core.load_registry()
-  except core.HandoffError:
-    return []
+  except core.HandoffError as error:
+    return str(error)
 
 
 def env_setting(path: Path) -> str:
