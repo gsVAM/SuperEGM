@@ -2,7 +2,7 @@
 name: wave
 license: Apache-2.0
 effects: external
-effect_kinds: [start-session, github-write, remote-branch, state-store]
+effect_kinds: [start-session, github-write, remote-branch, state-store, destructive-local]
 disable-model-invocation: true
 description: >-
   Launches the next wave of a handoff's GitHub issues, watches each in-flight
@@ -13,7 +13,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30); the batch's `notify` (U23); the decision points, rulings and leavemealone-mode moved to `references/`; a head's Decision point 5 and `clean` by accept (U35); `launch-builder` alone and the driver role (U24). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30); the batch's `notify` (U23); the decision points, rulings and leavemealone-mode moved to `references/`; a head's Decision point 5 and `clean` by accept (U35); `launch-builder` alone and the driver role (U24); `stalled` (U31). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the wave skill. Not part of google/elephant-goldfish-model. -->
 
@@ -96,7 +96,7 @@ Open a reference only when this file sends you to it:
    as point 1's is). Before asking any of them, read the issue's comments
    (`GH_HOST=github.com gh api repos/<repo>/issues/<n>/comments --paginate`): an owner's
    `**Ruling:**` already posted binds once `decision rule --posted <comment id>` records it,
-   as the `ruling` bullet of `references/rulings.md` says.
+   as the `ruling` bullet of `references/rulings.md` says; then an `interrupted` launch with no decision on it → Decision point 3.
 5. Run `report` again. `loop: ended` → The end. Otherwise run batches, the
    first from its step 5: step 2 was its wait, and its lines are handled.
 
@@ -110,9 +110,9 @@ a refusal as the fact it states, never as an error to retry.
 Run `python3 '<HELPER>' status --wait 1500 --runcard '<CARD>'` from this
 main conversation with `run_in_background: true` (Bash timeout 1,800,000
 ms). It returns every unreported event since its last save, one line each
-(`head`, `exit`, `status`, `landed`, `closed`, `ruling`), or `deadline`. Handle every
+(`head`, `exit`, `status`, `landed`, `closed`, `ruling`, `stalled`), or `deadline`. Handle every
 line before calling it again, in this order; lines for a stopped unit are
-ignored except `landed`:
+ignored except `landed` and `stalled`:
 
 1. `landed` lines: the unit is done; its dependants become ready (`launch`
    sees them at step 6).
@@ -125,6 +125,7 @@ ignored except `landed`:
    Then: `DONE` and `DONE_WITH_CONCERNS` need nothing (the head is reviewed
    at step 5); `BLOCKED` or `NEEDS_CONTEXT`, an exit with no PR
    (`pr=none`), or an interrupted launch → Decision point 3.
+   `stalled`: `python3 '<HELPER>' record-launch --unit <U> --exit stalled --runcard '<CARD>'`; `exited (stalled)` → Decision point 3 with the stall facts, `kill_failed` idle.
 3b. `superegm review ingest` for every unit with an open PR (never a landed unit),
    awaiting-merge units included, stopped units excluded:
    `python3 '<HELPER>' review ingest --unit <U> --runcard '<CARD>'` records

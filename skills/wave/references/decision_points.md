@@ -1,5 +1,5 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
-Added by SuperEGM (gsVAM), 2026: the `owner:` row of the word table and the three decision points, moved out of the wave skill's SKILL.md (the owner's ruling: a 24K skill body is context bloat); the `owner: <ids>` decision's allowed options, one per id, and its leavemealone sentence (U25); Decision point 5, a head's accept below the cap (U35). -->
+Added by SuperEGM (gsVAM), 2026: the `owner:` row of the word table and the three decision points, moved out of the wave skill's SKILL.md (the owner's ruling: a 24K skill body is context bloat); the `owner: <ids>` decision's allowed options, one per id, and its leavemealone sentence (U25); Decision point 5, a head's accept below the cap (U35); a stalled launch at point 3 and the carve-out (U31). -->
 
 # The decision points
 
@@ -76,9 +76,10 @@ builder's comment (or the exit, interrupt or close facts) to a question file
 and run
 `python3 '<HELPER>' decision open --unit <U> --point 3 --question '<file>' --source '<comment <id> | launch <n> | closed <n>>' --runcard '<CARD>'`.
 Its second line is the options: the comment's own `- (a)` lines plus
-`stop the unit`; `relaunch; stop the unit` for an exit with no PR, an
-interrupted launch, a builder's close, or a third blocked comment on one
-head; or `ruled: stop the unit (relaunch already used)`, already applied.
+`stop the unit`; `relaunch; stop the unit` for an exit with no PR, an interrupted or a stalled launch, a builder's close, or a third blocked comment on one
+head; or `ruled: stop the unit (relaunch already used)` or `ruled: stop the unit (second launch with no commit of its own)`, already applied.
+A stalled launch's question carries the stall facts (`U<n> stalled (<minutes> min; last commit <time | none>)`, source `launch <n>`).
+A launch with no commit of its own (an `exited …` entry whose `last_commit_at` is none: the host's stall, not the builder's) spends no `relaunch`; a second such launch on the unit is `stop the unit`, with no question.
 Ask the owner, then
 `python3 '<HELPER>' decision rule --unit <U> --decision <qid> --ruling '(<letter>) — <reason>' --by <login> --runcard '<CARD>'`
 (it posts `**Ruling:** (<comment-id>) <option> — <reason>` quoting the
