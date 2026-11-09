@@ -512,16 +512,27 @@ def fifth_point(st, unit: str, decision: dict, chosen: str, runcard: str) -> Non
       review.rule_review(argparse.Namespace(review=rid, ruling="accept", owner=True, judges=None, posted=None,
                                             decision=decision["id"], runcard=runcard, unit=None, design=None, plan=None))
   elif chosen == "accept":
-    review.refuse_moved_head(st, rid, head, decision["id"])  # the rerun binds the reviewed head as the first call did
+    try:  # the rerun binds the reviewed head as the first call did
+      review.refuse_moved_head(st, rid, head, decision["id"])
+    except core.HandoffError:  # refused: the accept the failed call gave is withdrawn, the round's word `revise`
+      withdraw_accept(st, rid, head, runcard)
+      review.write_head_outcome(st, review.load_review(st, rid), runcard, outcome="revise")
+      raise
   elif given:  # `revise` after an accept whose post failed: the accept is withdrawn, journaled as a lapse
-    accepted = head["converged"].removeprefix("by ruling ")
-    head["converged"], head["converged_round"] = "no", None
-    review.store_verdict(st, rid, head, runcard)
-    core.journal(st, f"review {rid} {accepted} accept lapsed under {runcard}")
+    withdraw_accept(st, rid, head, runcard)
   outcome = "clean" if chosen == "accept" else "revise"
   posted = [e for e in core.load_foreman(st, unit)["rounds"] if e.get("phase") == "posted"]
   if not (given and posted and max(posted, key=lambda e: e["round"]).get("outcome") == outcome):
     review.write_head_outcome(st, review.load_review(st, rid), runcard, outcome=outcome)
+
+
+def withdraw_accept(st, rid: str, head: dict, runcard: str) -> None:
+  """The accept a call whose post failed gave, withdrawn: the review's verdict re-derived without it,
+  journaled as a lapse, `review <id> R<n> accept lapsed`)."""
+  accepted = head["converged"].removeprefix("by ruling ")
+  head["converged"], head["converged_round"] = "no", None
+  review.store_verdict(st, rid, head, runcard)
+  core.journal(st, f"review {rid} {accepted} accept lapsed under {runcard}")
 
 
 KIND_POINTS = {"upheld": (1,), "overruled": (1,), "allowed": (1,), "round": (2,), "stop": (2,), "option": (3, 5), "redesign": (1, 2)}

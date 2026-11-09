@@ -873,13 +873,12 @@ def names_review(decision: dict, rid: str) -> bool:
 
 
 def store_verdict(st: core.Store, rid: str, review: dict, runcard: str) -> Status:
-  """Re-derive `converged` and `converged_round` into `review.json` after a record or a settle. A `fix-design`
-  suspends an accept's mark (it is kept, the exit is 4); any other verdict replacing it is the accept's lapse,
-  journaled `review <id> R<n> accept lapsed` (integrate quotes no lapsed accept)."""
+  """Re-derive `converged` and `converged_round` into `review.json` after a record, a settle or a head round's post.
+  A verdict replacing an accept's mark (a later round, a `fix-design`) is the accept's lapse, journaled
+  `review <id> R<n> accept lapsed` (integrate quotes no lapsed accept)."""
   status = evaluate(st, review, runcard)
   prior = review.get("converged") or ""
-  if not (status.code == 4 and prior.startswith("by ruling ")):
-    review["converged"], review["converged_round"] = status.converged, status.converged_round
+  review["converged"], review["converged_round"] = status.converged, status.converged_round
   save_review(st, rid, review)
   if prior.startswith("by ruling ") and review["converged"] != prior:
     core.journal(st, f"review {rid} {prior.removeprefix('by ruling ')} accept lapsed under {runcard}")
@@ -1473,6 +1472,7 @@ def count_posted(st: core.Store, unit: str, entry: dict, posted_at: str, review_
   if rnd:
     rnd["what_ran"] = derive_what_ran(review, rnd, saved)
     core.atomic_write(st.path("reviews", review_id, f"round-{entry['round']}.json"), rnd)
+  store_verdict(st, review_id, review, runcard)  # the round now completed: an early accept it lapses is journaled
   word = outcome_word(status_code(review_id, runcard), contested_fids(rnd or {}))
   saved["outcome"] = word
   entry.update(saved)
