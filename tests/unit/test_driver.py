@@ -184,6 +184,18 @@ def test_one_stores_error_never_stops_the_tick_for_the_next(world, monkeypatch, 
   assert code == 1 and f"driver: {bad}:" in out and tick_launches(s, hid)[-1]["status"] == "running"
 
 
+def test_one_stores_gh_failure_never_stops_the_tick_for_the_next(world, monkeypatch, tmp_path, spawn_fake):
+  s, hid = registered(world, monkeypatch, tmp_path); registry = tmp_path / ".superegm/registry.json"; other = tmp_path / "other"
+  put(registry, json.dumps([{"repo": REPO, "root": str(world.repo.resolve()), "artifacts_dir": str(other)}, *json.loads(registry.read_text())]))
+  real = driver.tick_store
+  def failing(entry):
+    if entry["artifacts_dir"] == str(other):
+      raise superegm.GhError(["api", "repos"], 1, "", "HTTP 403")
+    return real(entry)
+  monkeypatch.setattr(driver, "tick_store", failing); code, out = world.run("driver", "tick")
+  assert code == 1 and f"driver: {other}: gh api repos: exit 1: HTTP 403" in out and tick_launches(s, hid)[-1]["status"] == "running"
+
+
 def test_a_phase_card_written_after_the_read_backs_the_tick_off(world, monkeypatch, tmp_path, spawn_fake):
   s, hid, _ = arranged(world, monkeypatch, tmp_path, "first"); real = driver.tick_command
   def racing(*a):
