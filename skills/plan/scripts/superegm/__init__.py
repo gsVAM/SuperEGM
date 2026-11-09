@@ -466,21 +466,130 @@ def open_runcard(store: Store, skill: str, artifact: str, parent=None, mode=None
     folder.mkdir(parents=True, exist_ok=True)
     rid = f"{skill}-{hexa}-{len(list(folder.glob(f'{skill}-{hexa}-*.json'))) + 1:04d}"
     existing = sorted(folder.glob("*.json"))
-  for other in existing:
-    card = json.loads(read_text(other))
-    if (card["skill"], card["artifact"]) == (skill, artifact) and not card["closed_at"] and not card["interrupted_at"]:
-      card["interrupted_at"] = now_iso()
-      atomic_write(other, card)
-      journal(store, f"runcard interrupted {other.stem} by {rid}")
   config = store.config or {}
   card = {"skill": skill, "artifact": artifact, "artifact_sha256": sha,
           "reviewers": list((config.get("reviewers") or {}).get(RUNCARD_REVIEWERS.get(skill, ""), [])),
           "tiering": None, "mode": mode or config.get("mode", "normal"), "parent": parent,
           "opened_at": now_iso(), "closed_at": None, "interrupted_at": None, "produced": [],
           "handoff": store.handoff_id}
+  driven = os.environ.get("SUPEREGM_ROLE") == "driver"
+  if skill == "wave" and parent is None:
+    card["boot_id"] = boot_id()
+    card["driver_card"] = os.environ.get("SUPEREGM_RUNCARD") if driven else None
+  # the card is written before the read for a tick's launch, so a tick racing this open sees it (spec section 11.2)
   atomic_write(store.path("runcards", rid), card)
   journal(store, f"runcard open {rid} {skill} {artifact}")
+  if parent is None and skill in GUARDED_SKILLS and not (skill == "wave" and driven) and tick_live(store, skill):
+    card["interrupted_at"] = now_iso()
+    atomic_write(store.path("runcards", rid), card)
+    journal(store, f"runcard interrupted {rid}: a tick's session may be live")
+    raise HandoffError(TICK_LIVE)
+  for other in existing:
+    held = json.loads(read_text(other))
+    if (held["skill"], held["artifact"]) == (skill, artifact) and not held["closed_at"] and not held["interrupted_at"]:
+      held["interrupted_at"] = now_iso()
+      atomic_write(other, held)
+      journal(store, f"runcard interrupted {other.stem} by {rid}")
   return rid
+
+
+GUARDED_SKILLS = ("wave", "plan", "file", "integrate", "review-plan", "orient")
+TICK_LIVE = "driver: a tick's session may be live; /superegm:driver reset is the owner's interrupt"
+
+
+def rebooted(entry: dict, current: str | None = None) -> bool:
+  """A launch or card whose recorded boot id is neither `unknown` nor the machine's current one: no process
+  survives a reboot (spec section 11.2)."""
+  recorded = entry.get("boot_id")
+  return bool(recorded) and recorded != "unknown" and recorded != (current or boot_id())
+
+
+def tick_terminal(entry: dict) -> bool:
+  """A tick's launch that is over: `interrupted` (by reset, a back-off or a reboot) or its exit file written."""
+  return str(entry.get("status") or "").startswith("interrupted") or Path(entry["exit_file"]).is_file()
+
+
+def load_driver(hs: Store) -> dict:
+  """The handoff's `driver/<handoff>.json`: `launches[]`, `notified`, `refused`."""
+  path = hs.path("driver", hs.handoff_id)
+  data = json.loads(read_text(path)) if path.is_file() else {}
+  return {"launches": [], "notified": [], "refused": None, **data}
+
+
+def top_wave_cards(hs: Store) -> list:
+  """(path, card) of the handoff's top-level `wave` cards, open or not; a child card counts nowhere."""
+  folder = (hs.root if hs.legacy else hs.base()) / "runcards"
+  out = []
+  for path in sorted(folder.glob("wave-*.json")):
+    card = json.loads(read_text(path))
+    if card.get("skill") == "wave" and not card.get("parent") and card.get("handoff", hs.handoff_id) == hs.handoff_id:
+      out.append((path, card))
+  return out
+
+
+def interrupt_card(hs: Store, path: Path, card: dict, why: str) -> None:
+  card["interrupted_at"] = now_iso()
+  atomic_write(path, card)
+  journal(hs, f"runcard interrupted {path.stem}: {why}")
+
+
+def reboot_launches(hs: Store, unit: str, current: str) -> None:
+  """`launches/<unit>.json`'s running launches with no exit file and a boot id not the current one, recorded
+  `interrupted (reboot)` (spec section 11.2: one more proof beside the exit file)."""
+  path = hs.path("launches", unit)
+  if not path.is_file():
+    return
+  data = json.loads(read_text(path))
+  changed = False
+  for entry in data.get("launches") or []:
+    if entry.get("status") == "running" and not Path(entry["result_file"] + ".exit").is_file() and rebooted(entry, current):
+      entry["status"] = "interrupted (reboot)"
+      journal(hs, f"{unit} launch {entry['round']} interrupted (reboot)")
+      changed = True
+  if changed:
+    atomic_write(path, data)
+
+
+def reboot_proof(hs: Store, current: str) -> None:
+  """The boot-id proof over one handoff: its tick launches and builders that a reboot ended recorded
+  `interrupted (reboot)`, the open top-level `wave` cards of those launches, or recording a former boot id
+  themselves, marked `interrupted`."""
+  data, changed = load_driver(hs), False
+  ended = set()
+  for entry in data["launches"]:
+    if not tick_terminal(entry) and rebooted(entry, current):
+      entry["status"] = "interrupted (reboot)"
+      journal(hs, f"tick: {hs.handoff_id} launch {entry['round']} interrupted (reboot)")
+      ended.add(entry.get("card"))
+      changed = True
+  if changed:
+    atomic_write(hs.path("driver", hs.handoff_id), data)
+  for path, card in top_wave_cards(hs):
+    if not card.get("closed_at") and not card.get("interrupted_at") and (card.get("driver_card") in ended - {None} or rebooted(card, current)):
+      interrupt_card(hs, path, card, "interrupted (reboot)")
+  folder = hs.base(need=False) / "launches" if not hs.legacy else None
+  if folder is not None and folder.is_dir():
+    for path in sorted(folder.glob("*.json")):
+      if "_" not in path.stem:
+        reboot_launches(hs, path.stem, current)
+
+
+def tick_live(store: Store, skill: str) -> bool:
+  """Whether a tick's launch may be live where `skill` would run: any open handoff of the store for `wave` (one
+  `.git`), the card's own handoff for the other five. Under `wave` the boot-id proof is written first; the other
+  five read it and write nothing."""
+  current = boot_id()
+  for row in handoffs(store.root):
+    if not row.get("id") or row.get("closed_at"):
+      continue
+    if skill != "wave" and row["id"] != store.handoff_id:
+      continue
+    hs = handoff_store(store, row["id"])
+    if skill == "wave":
+      reboot_proof(hs, current)
+    if any(not tick_terminal(e) and not rebooted(e, current) for e in load_driver(hs)["launches"]):
+      return True
+  return False
 
 
 def handoff_spec(args, store: Store) -> str:
