@@ -1,6 +1,7 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U11's tests: `judges question`, the leavemealone routing, `close`, the
-# integrate skill, the docs, the README and the removed-mechanism sweep.
+# integrate skill, the docs, the README and the removed-mechanism sweep; the `blocked-launch` and `blocked-closed`
+# forms read the pending point-3 decision (U31).
 
 """U11: leavemealone routing and finish (design sections 12, 13.2 and 15)."""
 

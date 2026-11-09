@@ -558,6 +558,30 @@ def test_exit_stalled_records_the_proof_or_kill_failed(world, monkeypatch, befor
   assert not (signalled and not trap) or sum(world.sleeps) >= 30
 
 
+@pytest.mark.parametrize("word", ["stall", "1.5", ""])
+def test_exit_refuses_a_word_that_is_neither_a_code_nor_stalled(world, word):
+  """`--exit` takes an integer code or `stalled` (U31); any other word is refused before the store is read."""
+  s, card, *_ = seed(world)
+  got, printed = world.run("record-launch", "--unit", UNIT, "--exit", word, "--runcard", card)
+  assert (got, printed.strip()) == (1, f"superegm: record-launch: --exit {word}: a code or stalled"), printed
+
+
+def test_exit_stalled_keeps_an_interrupted_written_during_the_wait(world, monkeypatch):
+  """`record-launch --exit stalled` re-reads the entry after its wait (spec section 11.1, U31): an `interrupted` the
+  owner's interrupt wrote meanwhile is kept, refused exit 1, and no `kill_failed` is written over it."""
+  from superegm import record_launch as record_launch_mod
+  s, card, *_ = seed(world)
+  result = s.path("launches", f"{UNIT}_r1_result.json")
+  entry = {"round": 1, "worktree": "/w", "started_at": iso(NOW - 31 * 60), "status": "running", "result_file": str(result), "pid": 4242}
+  put(s.path("launches", f"{UNIT}.json"), json.dumps({"launches": [entry]}))
+  monkeypatch.setattr(record_launch_mod, "PS", lambda args: f"/bin/sh -c claude -p x > '{result}'\n" if "-p" in args else "4242 4242\n")
+  monkeypatch.setattr(record_launch_mod, "head_time", lambda worktree: None)
+  world.ns["kill_group"] = lambda pgid: put(s.path("launches", f"{UNIT}.json"), json.dumps({"launches": [{**entry, "status": "interrupted"}]}))
+  got, printed = world.run("record-launch", "--unit", UNIT, "--exit", "stalled", "--runcard", card)
+  assert (got, printed.strip()) == (1, "superegm: record-launch: U07 launch 1 is interrupted now: kept"), printed
+  assert (launches_of(s)[0]["status"], launches_of(s)[0].get("kill_failed")) == ("interrupted", None)
+
+
 @pytest.mark.parametrize("case, reason", [
   ("unmarked", "U07 is not marked by launch"),
   ("running", "U07 launch 1 is not terminal"),

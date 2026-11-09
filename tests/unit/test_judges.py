@@ -1,4 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
+# Modified by SuperEGM (gsVAM), 2026: the launch question's pending options (U31).
 """U08: the judge panel (judges open|record|diff|verdict, the grammars, the adapter, persona and skill)."""
 import hashlib
 import json

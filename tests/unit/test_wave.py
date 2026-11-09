@@ -1636,7 +1636,8 @@ def test_a_launch_with_no_commit_spends_no_relaunch_and_a_second_is_stop(world, 
 # the leavemealone `launch <n>` line in references/leavemealone_mode.md.
 LEAVE = SKILL.parent / "references/leavemealone_mode.md"
 PROSE = [("ignored except `landed` and `stalled`", (SKILL,)), ("record-launch --unit <U> --exit stalled --runcard '<CARD>'", (SKILL,)),
-         ("Decision point 3 with the stall facts", (SKILL,)),
+         ("Decision point 3 with the stall facts", (SKILL,)), ("Decision point 3 with the stall facts unless stopped; `kill_failed` idle", (SKILL,)),
+         ("A stopped unit's stall is recorded and asks nothing", (POINTS,)),
          ("an `interrupted` launch with no decision on it", (SKILL,)), ("an interrupted or a stalled launch", (POINTS, LEAVE)),
          ("spends no `relaunch`", (POINTS,)),
          ("effect_kinds: [start-session, github-write, remote-branch, state-store, destructive-local]", (SKILL,))]
