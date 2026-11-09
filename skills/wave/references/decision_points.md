@@ -12,12 +12,12 @@ In leavemealone-mode each point's last line hands the question to the judge pane
 
 ## The owner's findings
 
-- `owner: <ids>` → `decision open` for the owner's findings: no relaunch, no slot; the inbox lists them. Write the findings (ids, claims) to a question file and run
+- `owner: <ids>` → `decision open` for the owner's findings: no relaunch, no slot; the inbox lists them. Write the findings (ids, claims) to a question file, each on a line of its own starting `<fid> |` (a fid in any other form is not read, and the decision falls back to upheld or overruled, which the judges may rule), and run
   `python3 '<HELPER>' decision open --unit <U> --point 1 --question '<file>' --source 'review <head-review-id> round <n>' --runcard '<CARD>'`, the option the owner's `<fid> allowed — <reason>` (point 1's `<fid> finding overruled — <reason>` is read as the same).
   The owner rules it, no judge panel, in leavemealone-mode too. On `allowed` run
   `python3 '<HELPER>' review settle --review <head-review-id> --finding <fid> --disposition declined --owner --runcard '<CARD>'`; in leavemealone-mode only the owner's by-hand comment
-  `**Ruling:** <fid> finding overruled — <reason>` on the issue settles it, with `--disposition declined --owner --posted <comment-id>`. Record it with `decision rule … --ruling '<fid> finding overruled — <reason>' --by <login>`,
-  then by `review status` as Decision point 1 proceeds. `<fid> finding upheld` below the cap is the `revise` row;
+  `**Ruling:** <fid> allowed — <reason>` (or `**Ruling:** <fid> finding overruled — <reason>`, read as the same) on the issue settles it, with `--disposition declined --owner --posted <comment-id>`. Record it with `decision rule … --ruling '<fid> allowed — <reason>' --by <login> --posted <comment-id>`,
+  then by `review status` as Decision point 1 proceeds. `<fid> finding upheld` is no option of this decision (`decision rule` refuses it): the owner posts it by hand and `collect` reads it; `<fid> finding upheld` below the cap is the `revise` row;
   at the cap (`review status` exit 2) it is Decision point 2 (`cap-reached`), never a relaunch.
   `decision open` prints the options `<fid> allowed`, one per id; the owner posts one `**Ruling:** <fid> allowed — <reason>` comment per id, and the decision stays pending until each id is ruled.
   In leavemealone-mode an `owner: <ids>` decision convenes no panel: the owner rules it by hand and the inbox lists it until then.

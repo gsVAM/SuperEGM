@@ -516,13 +516,15 @@ def check_ruling(point: int, options: list, ruling: str, by: str = "") -> str:
   """The option `ruling` names (its letter, its text, or both; point 1 as `<fid> <option>`), resolved
   to the option's text; refused when it is none of them. At points 1 and 2 the bare word `redesign` (its ` — <why>`
   is checked by `rule`; no letter, no finding id) is the third ruling, in no option list. An `owner: <ids>`
-  decision's options are `<fid> allowed`: any `<fid> <text>` ruling answers the option carrying its fid, and is
-  refused to the judges, the owner's alone (U25)."""
+  decision's options are `<fid> allowed`: a `<fid> allowed` ruling, or `<fid> finding overruled` (read as allowed),
+  answers the option carrying its fid, and is refused to the judges, the owner's alone (U25); any other text, an
+  upheld among them, is none of its options."""
   if ruling == "redesign" and point in (1, 2):  # a head's third ruling: no letter, no finding id
     return "redesign"
   fid, _, text = ruling.partition(" ") if point == 1 else ("", "", ruling)
   if point == 1 and options and all(o.endswith(" allowed") for o in options):
-    option = next((o for o in options if o.split(" ")[0] == fid and text), None)
+    allows = text.partition(" — ")[0].strip() in ("allowed", "finding overruled")
+    option = next((o for o in options if o.split(" ")[0] == fid and allows), None)
     if option and by.startswith("judges:"):
       raise Refusal(f"decision: {option} is the owner's alone")
     if option:
@@ -601,7 +603,8 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int, mode=None)
   latest point-1 decision whose question names the fid (else the latest naming no finding) with no ruling on that
   fid (an `allowed` one: only a decision naming it, recorded as `<fid> finding overruled`), the open point-2 one, the point-3 one on its comment or decision id, or for `redesign` every pending
   decision of the unit. In leavemealone-mode (`mode`) an allowance naming a decision is refused before anything is
-  recorded: `review settle --owner --posted` there reads only `<fid> finding overruled — <reason>`. Returns
+  recorded: `review settle --owner --posted` there reads only `<fid> finding overruled — <reason>`, except on an
+  `owner: <ids>` decision (every option `<fid> allowed`), where verify_owner_ruling reads the allowance. Returns
   (comment, ruling, decisions)."""
   cid = args.posted
   comment = core.gh_json(["api", f"repos/{store.config['repo']}/issues/comments/{cid}"]) or {}
@@ -673,8 +676,10 @@ def option_name(decision: dict) -> str:
 
 def refuse_allowance(store, args, found: "Ruling", decisions: list, cid, mode) -> None:
   """In leavemealone-mode an allowance naming an open point-1 decision is refused, journaled as dropped (the owner's
-  notice, the event being spent): the decision's `review settle --owner --posted` reads only the overrule form."""
-  if found.kind == "allowed" and decisions and mode == "leavemealone":
+  notice, the event being spent): the decision's `review settle --owner --posted` reads only the overrule form. An
+  `owner: <ids>` decision (every option `<fid> allowed`, U25) asks for the allowance itself and is never refused."""
+  owner_only = decisions and decisions[0].get("options") and all(o.endswith(" allowed") for o in decisions[0]["options"])
+  if found.kind == "allowed" and decisions and mode == "leavemealone" and not owner_only:
     dropped(store, args, f"comment {cid} allows {found.subject}; in leavemealone-mode {decisions[0]['id']} takes "
                          f"`**Ruling:** {found.subject} finding overruled — <reason>`")
 

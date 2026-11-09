@@ -177,6 +177,25 @@ def test_an_owner_only_decision_offers_the_allowed_form():
   one = {"decisions": [{"id": "q1", "point": 1, "options": ALLOWED}], "rulings": [{"decision": "q1", "ruling": "foreman-1-1 allowed"}]}
   assert [d["id"] for d in pending_decisions(one)] == ["q1"]
   assert pending_decisions(one | {"rulings": one["rulings"] + [{"decision": "q1", "ruling": "foreman-1-2 allowed — fine"}]}) == []
+  assert decision.check_ruling(1, ALLOWED, "foreman-1-2 finding overruled — fine") == "foreman-1-2 allowed"  # read as allowed
+  for upheld in ("foreman-1-2 finding upheld", "foreman-1-2 finding upheld — restore it", "foreman-1-2 anything"):
+    with pytest.raises(decision.Refusal, match="decision: ruling is none of the options"):  # an uphold is never an allowance
+      decision.check_ruling(1, ALLOWED, upheld)
+
+
+def test_an_owner_only_decision_records_the_owners_posted_allowance_in_leavemealone(world):
+  """Round 2 (PR #103 review): the allowance an `owner: <ids>` decision asks for is not refused as the overrule
+  form a contested decision takes in leavemealone-mode."""
+  card = world.run("runcard", "open", "--skill", "wave", "--artifact", world.spec, "--mode", "leavemealone", card=None)[1].strip()
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "rounds": [{"round": 1, "phase": "posted", "outcome": "owner: foreman-1-2"}]})
+  set_config(world, repo=REPO, owners=["owner"])
+  fake_gh(world, {f"repos/{REPO}/issues/comments/73": {"id": 73, "user": {"login": "owner"}, "body": "**Ruling:** foreman-1-2 allowed — adopted\n",
+                                                       "created_at": "2026-11-03T10:00:00Z"}})
+  q = world.run("decision", "open", "--unit", "U01", "--point", 1, "--question", question(world, TD("foreman-1-2", 5)),
+                "--source", "review head-U01-c1 round 1", "--runcard", card)[1].splitlines()[0]
+  code, out = world.run("decision", "rule", "--unit", "U01", "--ruling", "foreman-1-2 allowed", "--by", "owner", "--posted", "73", "--runcard", card)
+  assert code == 0, out
+  assert [(r["decision"], r["ruling"].partition(" — ")[0]) for r in foreman_of(s, "U01")["rulings"]] == [(q, "foreman-1-2 allowed")]
 
 
 @pytest.mark.parametrize("unit,state,why", [

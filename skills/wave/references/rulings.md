@@ -24,7 +24,9 @@ point's section" below is the point's section of `references/decision_points.md`
   `<fid> allowed` as `--ruling '<fid> finding overruled'`, though
   in leavemealone-mode an allowance naming an open decision is refused (its
   `review settle --posted` reads only `<fid> finding overruled — <reason>`,
-  the form the journal's dropped line names for the owner). Only on
+  the form the journal's dropped line names for the owner), except on an
+  `owner: <ids>` decision, whose options are `<fid> allowed`: there the
+  allowance is recorded, as Decision point 1's owner row says. Only on
   exit 0 continue as that point's section does. Point 1: `finding overruled`
   → `review settle … --disposition contested --owner --posted <comment id>`;
   then, for `finding upheld` too, by `review status`: 0 → the unit awaits
