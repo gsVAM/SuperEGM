@@ -219,13 +219,17 @@ foreman and integrate:
   `stop` alone, ruled by no one, once `continue` is spent), and after `stop` no ruling is accepted and the cycle stays at its cap
   until `superegm review open` starts the next one. No review has a second kind of cap.
 - **Accept below the cap**, the one rule: when `review status` prints `acceptable: yes (<n> medium, <m> low)`
-  (the latest completed round, at unmoved bytes, holds unsettled mediums and lows alone: no high, no
-  `regression: yes`, no unsettled external high or medium, no other decision open on the round; never kind
+  (the latest completed round, at unmoved bytes, holds unsettled mediums and lows alone: no high, never
+  a blocking (high or medium) finding marked `regression: yes`, settled or not (a low so marked does not bar it), no
+  unsettled external high or medium, no unsettled high or medium in a later round, complete or not, and no other
+  decision pending on the unit that names any round of this review or its cap; never kind
   `integrate`, whose mediums escalate into unit rows), ask the owner once, before a fix moves the bytes: accept, or
   fix as today. `superegm review rule --review <id> --ruling accept --owner --runcard <id>` converges the review by
   ruling with nothing settled and journals `accepted before the cap by the owner (<n> medium, <m> low)`; otherwise it
-  is refused with the blockers listed (`review rule: accept refused: high <fid>, …`). A head's accept is applied
-  only through the wave skill's Decision point 5 (`decision rule`), never by `review rule` typed alone. An early
+  is refused with the blockers listed (`review rule: accept refused: high <fid>, …`). A head's accept is the
+  wave skill's Decision point 5 (`decision rule`, which runs this `review rule` with `--decision <id>`); either way the
+  accept on a head writes the round's `clean` and journals `<unit> awaiting merge`, and typed alone it leaves the
+  decision pending until `decision rule` records it. An early
   accept holds its round alone: a later completed round, an unsettled high or medium recorded into a later round (complete or not), a blocker recorded into its own round since, or a `fix-design` settled on any round of the review reopens it for good,
   journaled `review <id> R<n> accept lapsed` (integrate quotes no lapsed accept). The owner's word alone: the judges never accept below the cap,
   and in leavemealone-mode nothing pauses for it.

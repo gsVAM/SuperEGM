@@ -36,7 +36,7 @@ then `review status`; record it with
 `python3 '<HELPER>' decision rule --unit <U> --decision <qid> --ruling '<fid> finding upheld' --by <login> --runcard '<CARD>'`
 or `--ruling '<fid> finding overruled — <reason>'`, which posts the
 `**Ruling:**` comment on the issue. Then by `review status`: 0 → the unit
-awaits merge; 2 → Decision point 2; else `launch-builder`.
+awaits merge; 2 → Decision point 2; in normal mode `acceptable: yes` → Decision point 5; else `launch-builder`.
 A third ruling, on a head, is `redesign — <one sentence why>` (the sentence the owner's, typed after the dash; a bare `redesign` is refused):
 `python3 '<HELPER>' decision rule --unit <U> --decision <qid> --ruling 'redesign — <one sentence why>' --by <login> --runcard '<CARD>'`.
 It stops the unit by `stop`'s own path (the issue labelled `superegm:stopped`, never relaunched) and writes the
@@ -93,5 +93,8 @@ Ask the owner, then
 or `--ruling 'revise — <reason>'` (it posts `**Ruling:** (<qid>) <option> — <reason>`; an owner's comment in that
 form rules it with `--posted <comment-id>`). `accept` converges the head review by ruling: the round is `clean` and the
 unit awaits merge. A refused accept (`review rule: accept refused: <blockers>`) records nothing: ask again with `revise`.
+An accept on a pull request whose head moved since the round is refused `review rule: the reviewed head moved: revise`;
+on a rerun after a failed post it first withdraws the accept it gave (journaled `review <id> R<n> accept lapsed`, the
+round's word `revise`), the decision staying pending: rule it `revise`.
 `revise` is the round's own word: `launch-builder` as the `revise` row does; it spends no point-3 relaunch.
 The owner's alone (`--by judges:<id>` is refused): in leavemealone-mode no point 5 opens and no head is accepted early.
