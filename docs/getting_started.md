@@ -31,9 +31,23 @@ the first typed skill runs it when the file is missing. The steps:
    `<base>`.
 2. Create the builder's empty profile at `config.builder.profile_dir`: no hooks, no plugins, no
    `CLAUDE.md`, only the login (`CLAUDE_CONFIG_DIR=<profile_dir> claude`, `/login`, exit) and a
-   `settings.json` with `"syncClaudeAiPlugins": false`, written before the login so the account's
-   plugins are not synced into the profile (Claude Code 2.1.273 or later). `launch-builder` refuses a
-   profile with anything else in it; the files Claude Code writes on its own are not plugins.
+   `settings.json` with `"syncClaudeAiPlugins": false` and `"disableClaudeAiConnectors": true`,
+   written before the login so the account's plugins are not synced into the profile and its
+   connectors stay out (Claude Code 2.1.273 or later); no `skills/` or `commands/` directory.
+   `launch-builder` refuses a profile with anything else in it; the files Claude Code writes on its
+   own are not plugins.
+
+   The plugins and MCP servers a builder gets are named in the config, never installed in its
+   profile. `builder.plugins` lists `<name>@<marketplace>` ids, each installed once into your own
+   session's profile (`user` scope) and disabled there; each launch passes its directory by
+   `--plugin-dir <dir>`, and a listed plugin's hooks, skills and bundled servers come with it.
+   `builder.mcp` is an object in `mcpServers` form, a secret by `${VAR}` reference, written to
+   `launches/<unit>_r<n>_mcp.json` at each launch and passed by
+   `--mcp-config <file> --strict-mcp-config`, so no other MCP configuration loads. Each launch
+   records the set in `launches/<unit>_r<n>_plugins.json`: each plugin's id, version, directory
+   and hook events, the managed plugins and the MCP file's server names. A plugin's skills are
+   invoked only through the allow-list's `Skill(<name>)` rules, its servers' tools through
+   `mcp__<server>__*` rules; `superegm doctor` prints both sets on its `plugins:` and `mcp:` lines.
 3. Set the branch protection of design section 11 on `<base>`: updates restricted to the owner
    (the logins in `owners`) with no bypass for the builder account's role and no team but
    `owner_team`; `superegm/**` protected from force-push and deletion by a ruleset whose
