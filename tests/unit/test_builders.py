@@ -491,10 +491,29 @@ def test_launch_builder_starts_the_launch_as_its_one_behaviour(world, monkeypatc
   s, card, hid, _ = seed(world); monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder"); monkeypatch.setattr(superegm, "boot_id", lambda: "boot-1")
   assert world.run("launch", "--runcard", card)[0] == 0 and world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)[1].strip().endswith("U07 launch 1 running (pid 4242)")
   entry, (command, log, env) = launches_of(s)[0], SPAWNED[0]
-  assert command == ["/bin/sh", "-c", entry["command"]] and log == s.path("launches", f"{UNIT}_r1.log") and (entry["boot_id"], entry["pid"], entry["status"]) == ("boot-1", 4242, "running")
+  assert command == ["/bin/sh", "-c", entry["command"]] and log == s.path("launches", f"{UNIT}_r1.log") and (entry["boot_id"], entry["pid"], entry["status"], entry["model"], entry["effort"]) == ("boot-1", 4242, "running", "claude-opus-5-5", "medium")
   assert "record-launch: --exit is required: launch-builder records the launch" in world.run("record-launch", "--unit", UNIT, "--runcard", card)[1]
   monkeypatch.setattr(superegm, "boot_id", lambda: "boot-2"); assert world.run("launch-builder", "--unit", UNIT, "--round", 2, "--runcard", card)[0] == 0
   assert [e["status"] for e in launches_of(s)] == ["interrupted (reboot)", "running"]
+
+
+@pytest.mark.parametrize("result, effective, cost", [
+  ('{"modelUsage": {"claude-opus-5-5": {"inputTokens": 1}}, "total_cost_usd": 1.25}', "claude-opus-5-5", 1.25),
+  ('{"modelUsage": {"claude-opus-5-5": {}, "claude-haiku-4-5": {}}, "total_cost_usd": 0.5}', "claude-opus-5-5, claude-haiku-4-5", 0.5),
+  ('{"result": "no usage"}', "requested only", None),
+  ('{"modelUsage": {"claude-opus-5-5": {', "requested only", "unrecorded"),   # a killed launch's partial file: the board marks the sum partial (U30)
+  (None, "requested only", None)])   # no result file
+def test_record_launch_writes_the_requested_pair_then_the_effective_model_and_cost(world, monkeypatch, result, effective, cost):
+  s, card, hid, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder"); monkeypatch.setattr(launch_builder, "start_detached", lambda command, log, env: 4242)
+  assert world.run("launch", "--runcard", card)[0] == 0 and world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)[0] == 0
+  entry = launches_of(s)[0]
+  assert (entry["model"], entry["effort"]) == ("claude-opus-5-5", "medium") and "effective_model" not in entry and "total_cost_usd" not in entry
+  result is not None and Path(entry["result_file"]).write_text(result, encoding="utf-8")
+  Path(entry["result_file"] + ".exit").write_text("0\n", encoding="utf-8")
+  assert world.run("record-launch", "--unit", UNIT, "--exit", 0, "--runcard", card)[0] == 0
+  entry = launches_of(s)[0]
+  assert (entry["status"], entry["effective_model"], entry["total_cost_usd"]) == ("exited 0", effective, cost)
 
 
 @pytest.mark.parametrize("case, reason", [
