@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19).
+# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25).
 
 """superegm doctor: one line per wave prerequisite, `ok` or the refusal `launch` or `launch-builder`
 would give; read-only, no run card."""
@@ -17,7 +17,7 @@ from superegm.launch import app_login, builder_login, origin_problems, protectio
 from superegm.launch_builder import SENTINEL, UNSET, launched_pairs, profile_problem
 
 WRITES = frozenset()  # doctor writes nothing
-INFORMATIONAL = ("graphify", "scanning", "astra", "merge")  # lines that never fail the exit
+INFORMATIONAL = ("graphify", "scanning", "astra", "merge", "python3.12", "hooks", "core.hooksPath")  # lines that never fail the exit
 MERGE = ("gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset "
          "restricts updates to config.owners)")
 
@@ -49,7 +49,8 @@ def checks(config, repo_root, token):
   On the App path: owner, origin, credential, key, openssl, artifacts_dir, app, permissions, token,
   installation, scanning, protection, merge, profile, gh, environment, graphify, astra; the four App lines are
   absent after a failing key or openssl. The environment line is absent after a failing gh line; graphify,
-  astra, scanning and merge are informational and never fail."""
+  astra, scanning and merge are informational and never fail, as are python3.12, hooks and core.hooksPath,
+  which close either path (U25)."""
   repo, base, owners, team, app = config["repo"], config["base"], config["owners"], config["owner_team"], config["builder"]["app"]
   lines, found = [], {}
 
@@ -150,7 +151,26 @@ def checks(config, repo_root, token):
   lines.append(("graphify", f"ok ({graphify})" if graphify else "not on PATH (informational)"))
   runner = runner_path()
   lines.append(("astra", f"ok ({runner})" if runner else "not installed (heads will record not run)"))
+  python = shutil.which("python3.12")  # this repository's own prerequisite, not the gate's (U25)
+  lines.append(("python3.12", f"ok ({python})" if python else "not on PATH (informational)"))
+  hooks_path, hooks = hooks_of(repo_root)
+  lines.append(("hooks", ", ".join(hooks) or "none"))
+  lines.append(("core.hooksPath", hooks_path or "unset"))
   return lines
+
+
+def hooks_of(repo_root: Path):
+  """`core.hooksPath` as configured (None when unset) and the sorted hook names of its directory, else of
+  `<git-common-dir>/hooks`, `.sample` files skipped. Read by a direct `subprocess.run`, never `run_git`, whose
+  `hook_free()` pair would answer its own empty directory (U25)."""
+  got = subprocess.run(["git", "config", "--get", "core.hooksPath"], cwd=str(repo_root), capture_output=True, text=True)
+  hooks_path = got.stdout.strip() or None
+  if hooks_path:
+    folder = repo_root / Path(hooks_path).expanduser()
+  else:
+    folder = repo_root / core.run_git(["rev-parse", "--git-common-dir"], repo_root).strip() / "hooks"
+  names = sorted(p.name for p in folder.iterdir() if p.is_file() and not p.name.endswith(".sample")) if folder.is_dir() else []
+  return hooks_path, names
 
 
 def environment_problem(repo_root: Path, gh: str, app: bool):

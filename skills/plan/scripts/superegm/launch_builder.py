@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch."""
 
@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -205,7 +206,8 @@ def profile_problem(profile_dir):
 
 def pr_block_text(repo_root, ref, path):
   """`config.pr_block_file`'s bytes at the launch's ref, verbatim (spec section 11); absent, the launch is refused."""
-  result = subprocess.run(["git", "cat-file", "-p", f"{ref}:{path}"], cwd=str(repo_root), capture_output=True)
+  with core.hook_free() as pairs:
+    result = subprocess.run(["git", *pairs, "cat-file", "-p", f"{ref}:{path}"], cwd=str(repo_root), capture_output=True)
   if result.returncode:
     raise core.HandoffError(f"pr_block_file {path} is absent at {ref}")
   return result.stdout.decode("utf-8")
@@ -214,15 +216,51 @@ def pr_block_text(repo_root, ref, path):
 def allowed_tools(configured, branch, body_text, gh):
   """The configured allow-list with its `gh` prefixes rewritten to `gh`'s absolute path (a bare `gh …`
   is refused, so no PATH order is assumed), plus a push prefix for the unit's own branch and
-  `Bash(<first word>:*)` for every command the body runs; `Agent`, `Skill` and unrestricted Bash are refused."""
+  `Bash(<first word>:*)` for the first word of every `&&`/`;` segment of every command the body runs (U25's D1 (a));
+  `Agent`, `Skill` and unrestricted Bash are refused."""
   for entry in ("Agent", "Skill", "Bash", "Bash(*)"):
     if entry in configured:
       raise core.HandoffError(f"allowed_tools carries {entry}: a builder never spawns, never invokes skills, never runs unrestricted Bash")
   tools = [f"Bash({gh} {t[8:]}" if t.startswith("Bash(gh ") else t for t in configured] + [f"Bash(git push origin {branch}:*)"]
   for command in body.run_commands(body_text):
-    if f"Bash({command.split()[0]}:*)" not in tools:
-      tools.append(f"Bash({command.split()[0]}:*)")
+    for first in segment_heads(command):
+      if f"Bash({first}:*)" not in tools:
+        tools.append(f"Bash({first}:*)")
   return tools
+
+
+def segment_heads(command: str) -> list:
+  """The first word of every `&&`/`;` segment of `command`, split as the shell splits it (a `;` or `&&` inside
+  quotes or after a backslash separates nothing, a quoted `;` argument included); a line the shell grammar cannot
+  split (an unclosed quote) gives its first word alone."""
+  segments, start, quote, i = [], 0, None, 0
+  while i < len(command):
+    ch = command[i]
+    if quote:
+      if ch == quote:
+        quote = None
+      elif ch == "\\" and quote == '"':
+        i += 1
+    elif ch == "\\":
+      i += 1
+    elif ch in "'\"":
+      quote = ch
+    elif ch == ";" or command.startswith("&&", i):
+      segments.append(command[start:i])
+      i += 1 if ch == ";" else 2
+      start = i
+      continue
+    i += 1
+  if quote:
+    return command.split()[:1]
+  heads = []
+  for segment in segments + [command[start:]]:
+    try:
+      words = shlex.split(segment)
+    except ValueError:
+      return command.split()[:1]
+    heads += words[:1]
+  return heads
 
 
 def spec_range_text(repo_root: Path, store, body_text: str, ref: str) -> str:
@@ -233,7 +271,9 @@ def spec_range_text(repo_root: Path, store, body_text: str, ref: str) -> str:
   if not marker or not match:
     raise core.HandoffError("spec range: the body carries no marker or no `Spec:` range")
   sha, rel, start, end = marker.group(3), match.group(1), int(match.group(2)), int(match.group(3))
-  show = lambda commit: subprocess.run(["git", "show", f"{commit}:{rel}"], cwd=str(repo_root), capture_output=True)
+  def show(commit):
+    with core.hook_free() as pairs:
+      return subprocess.run(["git", *pairs, "show", f"{commit}:{rel}"], cwd=str(repo_root), capture_output=True)
   holds = lambda blob: blob.returncode == 0 and hashlib.sha256(blob.stdout).hexdigest() == sha
   text = None
   for entry in core.load_approvals(store, Path(rel)):

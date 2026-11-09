@@ -24,7 +24,17 @@ point's section" below is the point's section of `references/decision_points.md`
   `<fid> allowed` as `--ruling '<fid> finding overruled'`, though
   in leavemealone-mode an allowance naming an open decision is refused (its
   `review settle --posted` reads only `<fid> finding overruled — <reason>`,
-  the form the journal's dropped line names for the owner). Only on
+  the form the journal's dropped line names for the owner), except on an
+  `owner: <ids>` decision, whose options are `<fid> allowed`: there it is
+  `--ruling '<fid> allowed'`, and `test-delta <file> allowed` is
+  `--ruling 'test-delta <file> allowed'` (any other text is refused); each id
+  it allows is then settled `review settle … --disposition declined --owner
+  --posted <comment id>`, never `contested`, as the `owner: <ids>` row under
+  `## The owner's findings` of `references/decision_points.md` says. The
+  same `test-delta <file> allowed` also rules an open decision on a contest's
+  copy (`contested <fid>: …`) of a `test-delta:` finding of that file, recorded
+  there as `<copy fid> finding overruled` and settled as `finding overruled`
+  is below. Only on
   exit 0 continue as that point's section does. Point 1: `finding overruled`
   → `review settle … --disposition contested --owner --posted <comment id>`;
   then, for `finding upheld` too, by `review status`: 0 → the unit awaits
@@ -36,7 +46,8 @@ point's section" below is the point's section of `references/decision_points.md`
   option on a `BLOCKED` comment → `launch-builder` now, as for any option on a
   `BLOCKED` or `NEEDS_CONTEXT` comment; `stop the unit` stops it. An `allowed`
   ruling refused with `no open decision names it` needs nothing more: `collect` reads a prior round's
-  `tdd-order` one; a `dod-<n>` or `test-delta` one the owner weighs.
+  `tdd-order` one, the owner's `dod-<n> allowed`, a `<fid> allowed` on a posted
+  `test-delta:` fid and a `test-delta <file> allowed` itself.
   Nothing is posted; the journal says `ruling edited after record, ignored`
   for a recorded comment re-read, and `ruling dropped (<by>, comment <id>): …`
   for one naming no open decision or an already ruled one, or a refused allowance (not one refused with `no open decision names it`); take either as the fact it states, and
