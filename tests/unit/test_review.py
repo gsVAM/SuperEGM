@@ -439,6 +439,19 @@ def test_a_test_delta_finding_is_settled_by_the_owner_alone(world, mode, extra, 
   assert owner_only_fids(rjson(world, rid, "round-1.json")) == (["foreman-1-1"] if code else [])
 
 
+def test_a_settle_that_leaves_an_owner_only_remainder_writes_the_owner_word(world):
+  """Round 4 (PR #103 review, astra-4-3): settling the round's other finding after the post leaves its remainder
+  owner-only, and the posted round's outcome becomes `owner: <ids>`, not the `revise` it was posted with."""
+  spec, cid, rid = opened(world, "head")
+  head_round(world, 1, "posted", cid, "revise")
+  lines = ["foreman-1-1 | high | src/a.py:1 | regression: no | claim 1",
+           "foreman-1-2 | high | tests/unit/test_q.py:3 | regression: no | test-delta: tests/unit/test_q.py:3 removed"]
+  assert record(world, rid, 1, "foreman", lines, cid, sha=A)[0] == 0
+  code, out = settle(world, rid, "foreman-1-1", "declined", cid, "--owner")
+  assert (code, out.strip().splitlines()) == (0, ["foreman-1-1 declined", "owner: foreman-1-2"]), out
+  assert json.loads(hstore(world).path("foreman", "U07").read_text())["rounds"][0]["outcome"] == "owner: foreman-1-2"
+
+
 @pytest.mark.parametrize("body, ok", [("test-delta tests/unit/test_q.py allowed — by design", True), ("test-delta tests/unit/test_z.py allowed — by design", False),
                                       ("foreman-1-1 allowed — fine", True), ("foreman-1-1 finding overruled — fine", True), ("foreman-1-1 finding upheld", False)])
 def test_the_owners_file_allowance_settles_a_test_delta_finding_of_that_file(monkeypatch, body, ok):

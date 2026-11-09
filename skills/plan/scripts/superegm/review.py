@@ -628,10 +628,15 @@ def settle_finding(args) -> int:
     core.journal(st, f"review settle {rid} {fid} {disposition} by {finding['ruling'] or 'the elephant'}"
                  + (f" copied to {', '.join(copies)}" if copies else "") + f" under {args.runcard}")
   status = store_verdict(st, rid, review, runcard)
+  word = None
   if review["kind"] == "head" and status.code == 0:
     write_head_outcome(st, review, runcard)
+  elif review["kind"] == "head":
+    word = write_owner_outcome(st, rid, review, runcard)
   for fid, disposition, _, _ in checked:
     print(f"{fid} {disposition}")
+  if word:
+    print(word)
   return 0
 
 
@@ -728,6 +733,24 @@ def write_head_outcome(st: core.Store, review: dict, runcard: str) -> None:
   posted[-1]["outcome"] = "clean"
   core.save_foreman(st, unit, data)
   core.journal(st, f"{unit} awaiting merge under {runcard}")
+
+
+def write_owner_outcome(st: core.Store, rid: str, review: dict, runcard: str) -> str | None:
+  """Round 4 (PR #103 review, astra-4-3): a settle that leaves the latest posted round's remainder owner-only
+  (`owner_only_fids`, no open contest) rewrites its outcome to `owner: <ids>`, so a contest settled after the post
+  routes to the owner row, not to `revise` or the cap; the word, when written."""
+  unit = review["artifact"]
+  data = core.load_foreman(st, unit)
+  posted = sorted((e for e in data["rounds"] if e.get("phase") == "posted"), key=lambda e: e["round"])
+  rnd = load_round(st, rid, posted[-1]["round"]) if posted else None
+  if not rnd or contested_fids(rnd) or not (owner := owner_only_fids(rnd)):
+    return None
+  word = outcome_word(3, [], owner)
+  if posted[-1].get("outcome") != word:
+    posted[-1]["outcome"] = word
+    core.save_foreman(st, unit, data)
+    core.journal(st, f"{unit} round {posted[-1]['round']} outcome {word} under {runcard}")
+  return word
 
 
 # ---------------------------------------------------------------- status: the predicates live here alone
