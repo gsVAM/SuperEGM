@@ -55,8 +55,13 @@ the first typed skill runs it when the file is missing. The steps:
    `Agent` in `builder.allowed_tools` is your opt-in, absent from the default list: a builder may
    then delegate to the platform's default subagents, each confined to its session's allow-list,
    profile and worktree, up to `builder.max_subagent_calls` (12) calls a launch, a budget the
-   orders state, not a gate; `record-launch` reads the calls from the session's transcript and
-   writes their count on the launch entry as `subagent_calls`.
+   orders state, not a gate. That confinement is not yet probed (decision D2 of U27: whether a
+   subagent's allow-list equals the builder's; your hand run after the merge settles it). The
+   orders also ask each call to stay under `builder.stall_minutes`, the key a later unit adds with
+   its watchdog; until it lands no config bounds a call. `record-launch` reads the calls from the
+   session's transcript and writes them on the launch entry as `subagent_calls`: `count` and
+   `calls[]`, each with its `role`, `description`, `model` and `duration_s`;
+   `{"count": 0, "calls": []}` when the transcript is missing or the entry has no `session_id`.
 3. Set the branch protection of design section 11 on `<base>`: updates restricted to the owner
    (the logins in `owners`) with no bypass for the builder account's role and no team but
    `owner_team`; `superegm/**` protected from force-push and deletion by a ruleset whose
