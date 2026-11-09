@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # From the elephant-goldfish-model (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17); an unreplied external high or medium carried forward (U21); rulings read through `ruling_of` and the record, every folded deviation heading (U22).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17); an unreplied external high or medium carried forward (U21); rulings read through `ruling_of` and the record, every folded deviation heading (U22); the DoD re-run and the test delta, two gates before the word (U25).
 
 """superegm collect: the foreman's findings of a round through one `review record --reviewer foreman`, or a
 round that could not complete with `--not-run`."""
@@ -9,20 +9,65 @@ import argparse
 import contextlib
 import io
 import json
+import os
 import re
+import subprocess
+import time
 from pathlib import Path
 
 import superegm as core
 from superegm import body as body_mod, review, tdd_order
 from superegm.decision import binding_rulings, recorded_rulings
 from superegm.foreman import head_review_id
-from superegm.launch_builder import DOD_RESULT_RE
+from superegm.launch_builder import DOD_RESULT_RE, SENTINEL, launched_pairs
 from superegm.prepare import HEADER_RE
 
 WRITES = frozenset(['foreman', 'review', 'reviews'])  # the store kinds this subcommand writes
 SKILLS = frozenset(['wave'])  # the skills whose card this subcommand accepts
 DEVIATION_RE = re.compile(r"^\*\*Deviation \((interface|dod|test|other)\):\*\*")
 REPLY_RE = re.compile(r"^\*\*Reply (\S+):\*\* (fixed|contested)(?:\s*[—-]\s*(.*))?", re.S)
+KILL_WAIT = 5  # seconds waited after `kill_group` at the bound before `exit: none` is recorded
+
+
+def run_env(gh, worktree) -> dict:
+  """The DoD runs' environment, an allow-list (spec section 11.1): `PATH`, `HOME`, `LANG`, `TMPDIR`, the sentinel
+  `GH_TOKEN`, the builder's git shut-out pairs, `PIP_REQUIRE_VIRTUALENV=1` and `npm_config_prefix` at the worktree."""
+  env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG", "TMPDIR") if k in os.environ}
+  env.update(launched_pairs(gh, "superegm", "superegm"))
+  env.update(GH_TOKEN=SENTINEL, PIP_REQUIRE_VIRTUALENV="1", npm_config_prefix=str(worktree))
+  return env
+
+
+def last_line(text: str) -> str:
+  return next((l.strip() for l in reversed(text.splitlines()) if l.strip()), "")
+
+
+def dod_runs(items, worktree: Path, env: dict, deadline: float, out_dir: Path) -> dict:
+  """Run each `(n, command, paste_summary)` through `/bin/sh` in `worktree`, in its own process group, its output
+  to `out_dir/<n>.out`; the group is killed on the item's return and at `deadline`, and an item reached after
+  the deadline is not run (`exit` and `summary` None, `timed_out` true)."""
+  out_dir.mkdir(parents=True, exist_ok=True)
+  runs = {}
+  for n, command, paste in items:
+    left = deadline - time.time()
+    if left <= 0:
+      runs[str(n)] = {"exit": None, "summary": None, "paste_summary": paste, "timed_out": True}
+      continue
+    out = out_dir / f"{n}.out"
+    with open(out, "wb") as sink:
+      p = subprocess.Popen(["/bin/sh", "-c", command], cwd=str(worktree), env=env, stdin=subprocess.DEVNULL,
+                           stdout=sink, stderr=subprocess.STDOUT, start_new_session=True)
+      try:
+        code, timed_out = p.wait(timeout=left), False
+        core.kill_group(p.pid)
+      except subprocess.TimeoutExpired:
+        core.kill_group(p.pid)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+          p.wait(timeout=KILL_WAIT)
+        code, timed_out = None, True
+    summary = last_line(out.read_text(encoding="utf-8", errors="replace"))
+    runs[str(n)] = {"exit": code, "summary": summary, "paste_summary": paste, "timed_out": timed_out}
+  return runs
 
 
 def register(subparsers):

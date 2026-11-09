@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 import re
+import signal
 import subprocess
 import urllib.parse
 import sys
@@ -568,6 +569,14 @@ def run_git(args, cwd: Path, check=True) -> str:
     raise HandoffError(f"git {' '.join(args)} failed in {cwd}: "
                        f"{result.stderr.strip() or result.stdout.strip()}")
   return result.stdout
+
+
+def kill_group(pgid: int) -> None:
+  """SIGTERM to the process group `pgid`, no escalation; a group already gone is no error."""
+  try:
+    os.killpg(pgid, signal.SIGTERM)
+  except (ProcessLookupError, PermissionError):
+    pass
 
 
 def git_toplevel(path: Path) -> Path:

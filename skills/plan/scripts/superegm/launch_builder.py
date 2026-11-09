@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch."""
 
@@ -214,14 +214,17 @@ def pr_block_text(repo_root, ref, path):
 def allowed_tools(configured, branch, body_text, gh):
   """The configured allow-list with its `gh` prefixes rewritten to `gh`'s absolute path (a bare `gh …`
   is refused, so no PATH order is assumed), plus a push prefix for the unit's own branch and
-  `Bash(<first word>:*)` for every command the body runs; `Agent`, `Skill` and unrestricted Bash are refused."""
+  `Bash(<first word>:*)` for the first word of every `&&`/`;` segment of every command the body runs (U25's D1 (a));
+  `Agent`, `Skill` and unrestricted Bash are refused."""
   for entry in ("Agent", "Skill", "Bash", "Bash(*)"):
     if entry in configured:
       raise core.HandoffError(f"allowed_tools carries {entry}: a builder never spawns, never invokes skills, never runs unrestricted Bash")
   tools = [f"Bash({gh} {t[8:]}" if t.startswith("Bash(gh ") else t for t in configured] + [f"Bash(git push origin {branch}:*)"]
   for command in body.run_commands(body_text):
-    if f"Bash({command.split()[0]}:*)" not in tools:
-      tools.append(f"Bash({command.split()[0]}:*)")
+    for segment in re.split(r"&&|;", command):
+      words = segment.split()
+      if words and f"Bash({words[0]}:*)" not in tools:
+        tools.append(f"Bash({words[0]}:*)")
   return tools
 
 
