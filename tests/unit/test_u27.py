@@ -95,6 +95,11 @@ PROSE = [("skills/wave/references/builder_orders.md", n) for n in ("Your skills,
           "`--plugin-dir <dir>` loads a plugin for the session", "`--mcp-config <file> --strict-mcp-config` loads that file's servers")] + [
          ("docs/getting_started.md", n) for n in ('"disableClaudeAiConnectors": true', "no `skills/` or `commands/` directory", "`builder.plugins`", "`builder.mcp`")]
 ABSENT = [("skills/wave/references/builder_orders.md", n) for n in ("You have no skills", "and update the existing pull request's body")]
+PROSE += [("skills/using-superegm/references/claude-code-tools.md", n) for n in ("`Agent` in a builder's allow-list admits the platform's default subagents, each inheriting the session's allow-list, profile and worktree",
+          "`--session-id <uuid>` names the session, its transcript `projects/<slug>/<uuid>.jsonl` under the profile")] + [("docs/getting_started.md", "`builder.max_subagent_calls` (12)")] + [
+         ("skills/wave/references/builder_orders.md", n) for n in ("{{subagents}}", "<!-- subagents: You have no subagents: a builder never spawns. -->",
+          "<!-- subagents Agent: You may delegate through the Agent tool, at most {{cap}} calls in this launch: a budget, not a gate; past it you finish your Steps yourself. Delegate a long test run, a wide read or a second opinion on a Step, after the Step's first commit, and keep each call under your config's `builder.stall_minutes`: the watchdog's clock runs on while a subagent works. You, never a subagent, commit and post. -->")] + [
+         (p, "from superegm.traces import trace_directory, assert_child_probe") for p in ("tests/integration/test_claude.py", "tests/unit/test_claude_traces.py")]
 
 
 @pytest.mark.parametrize("path, needle, present", [(p, n, True) for p, n in PROSE] + [(p, n, False) for p, n in ABSENT])
@@ -139,6 +144,15 @@ def test_record_launch_reads_the_subagent_calls_from_the_transcript(world, monke
   Path(entry["result_file"]).write_text("{}\n", encoding="utf-8"); Path(entry["result_file"] + ".exit").write_text("0\n", encoding="utf-8")
   assert world.run("record-launch", "--unit", UNIT, "--exit", 0, "--runcard", card)[0] == 0
   assert launches_of(s)[0]["subagent_calls"] == expect and Path(entry["result_file"]).read_text(encoding="utf-8") == "{}\n"
+
+
+@pytest.mark.parametrize("tools, present, absent", [
+  (["Read"], ["Your skills, named by your allow-list: none. You have no subagents: a builder never spawns."], ["Agent tool", "{{"]),
+  (["Read", "Agent"], ["at most 12 calls in this launch: a budget, not a gate"], ["You have no subagents", "{{"])])
+def test_the_agent_rule_and_the_delegation_paragraph(tools, present, absent):
+  from superegm.launch_builder import orders_text
+  text = orders_text(tools, "/usr/local/bin/gh", 12)
+  assert all(n in text for n in present) and not any(n in text for n in absent), text
 
 
 from test_builders import no_graphify, which  # noqa: F401

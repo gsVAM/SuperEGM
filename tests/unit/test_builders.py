@@ -444,7 +444,7 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   assert git(["rev-parse", "HEAD"], wt).strip() == git(["rev-parse", "refs/superegm/base"], world.repo).strip()
   prompt_file = s.path("launches", f"{UNIT}_r1_prompt.md")
   prompt = prompt_file.read_text(encoding="utf-8")
-  orders = orders_text(DEFAULT_CONFIG["builder"]["allowed_tools"], "/usr/local/bin/gh")
+  orders = orders_text(DEFAULT_CONFIG["builder"]["allowed_tools"], "/usr/local/bin/gh", 12)
   assert prompt.startswith(f"# Issue #{ISSUE} — U07\n\n{world.gh.issues[ISSUE]['body']}")
   assert f"\n\n---\n\n# Builder orders\n\n{orders}" in prompt
   assert f"\n\n---\n\n# Comments on issue #{ISSUE}\n\n## owner · comment 1\n**Decision D1:** (a) five\n\n## builder-bot · comment 3\n**Deviation (other):** renamed a fixture\n\n## owner · comment 4\n**Ruling:** (3) (a) — proceed\n" in prompt
@@ -553,7 +553,7 @@ def test_launch_builder_appends_the_pr_block(world, monkeypatch, key, spawn_fake
     assert not s.path("worktrees", UNIT).exists() and not s.path("launches", f"{UNIT}_r1_prompt.md").exists()
     return
   assert code == 0, out
-  orders = orders_text(DEFAULT_CONFIG["builder"]["allowed_tools"], "/usr/local/bin/gh")
+  orders = orders_text(DEFAULT_CONFIG["builder"]["allowed_tools"], "/usr/local/bin/gh", 12)
   prompt = s.path("launches", f"{UNIT}_r1_prompt.md").read_text(encoding="utf-8")
   if key:
     assert f"\n\n---\n\n# Builder orders\n\n{orders}\n\n---\n\n# PR block\n\n<!-- coord/v1 task=7 -->\n\n\n---\n\n# " in prompt
@@ -713,7 +713,7 @@ from superegm.launch_builder import allowed_tools
 @pytest.mark.parametrize("configured, expect", [
   (["Read", "Edit", "Bash(git add:*)"], ["Read", "Edit", "Bash(git add:*)", "Bash(git push origin superegm/h/U07:*)", "Bash(pytest:*)"]),
   (["Bash(pytest:*)", "Read"], ["Bash(pytest:*)", "Read", "Bash(git push origin superegm/h/U07:*)"]),
-  (["Read", "Agent"], "Agent"),
+  (["Read", "Agent", "Workflow"], ["Read", "Agent", "Workflow", "Bash(git push origin superegm/h/U07:*)", "Bash(pytest:*)"]),
   (["Read", "Skill"], "Skill"),
   (["Read", "Bash"], "Bash"),
   (["Read", "Bash(*)"], "Bash(*)"),
@@ -721,7 +721,7 @@ from superegm.launch_builder import allowed_tools
 def test_allowed_tools_composition(configured, expect):
   body = BODY.replace("HID", "h").replace("UID", "U07")
   if isinstance(expect, str):
-    with pytest.raises(superegm.HandoffError, match=re.escape(f"allowed_tools carries {expect}: a builder never spawns, never invokes skills, never runs unrestricted Bash")):
+    with pytest.raises(superegm.HandoffError, match=re.escape(f"allowed_tools carries {expect}: a builder invokes no skill bare, never runs unrestricted Bash")):
       allowed_tools(configured, "superegm/h/U07", body, "/usr/local/bin/gh")
   else:
     assert allowed_tools(configured, "superegm/h/U07", body, "/usr/local/bin/gh") == expect
