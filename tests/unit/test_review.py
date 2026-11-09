@@ -439,6 +439,22 @@ def test_a_test_delta_finding_is_settled_by_the_owner_alone(world, mode, extra, 
   assert owner_only_fids(rjson(world, rid, "round-1.json")) == (["foreman-1-1"] if code else [])
 
 
+@pytest.mark.parametrize("body, ok", [("test-delta tests/unit/test_q.py allowed — by design", True), ("test-delta tests/unit/test_z.py allowed — by design", False),
+                                      ("foreman-1-1 allowed — fine", True), ("foreman-1-1 finding overruled — fine", True), ("foreman-1-1 finding upheld", False)])
+def test_the_owners_file_allowance_settles_a_test_delta_finding_of_that_file(monkeypatch, body, ok):
+  """Round 3 (PR #103 review): `**Ruling:** test-delta <file> allowed` settles each `test-delta:` finding of that file."""
+  from superegm import review as review_mod
+  comment = {"id": 9, "user": {"login": "owner"}, "body": f"**Ruling:** {body}\n", "created_at": "t"}
+  monkeypatch.setattr(review_mod.core, "gh_json", lambda argv: comment)
+  finding = {"id": "foreman-1-1", "claim": "test-delta: tests/unit/test_q.py:3 removed"}
+  call = lambda: review_mod.verify_owner_ruling({"repo": "o/r", "owners": ["owner"]}, finding, "9")
+  if ok:
+    call()
+  else:
+    with pytest.raises(review_mod.core.HandoffError, match="does not rule foreman-1-1 overruled"):
+      call()
+
+
 # ---------------------------------------------------------------- S9: `review status`
 
 def s_unopened(w, c, r): return f"spec-{SLUG}-c9"

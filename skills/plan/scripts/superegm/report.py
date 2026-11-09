@@ -249,7 +249,7 @@ def unit_state(uid: str, view: dict, foreman: dict, launches: list, card: dict, 
 
 def pending_decisions(foreman: dict) -> list:
   """`decisions[]` minus `rulings[]` (spec section 7); a point-1 decision whose options end ` allowed` (an
-  `owner: <ids>` decision, U25) stays pending until every option's fid has a ruling."""
+  `owner: <ids>` decision, U25) stays pending until every option's fid has a ruling or a `redesign` rules it whole."""
   rulings = foreman.get("rulings") or []
   ruled = {r.get("decision") for r in rulings}
 
@@ -257,7 +257,7 @@ def pending_decisions(foreman: dict) -> list:
     options = d.get("options") or []
     if d.get("point") == 1 and options and all(o.endswith(" allowed") for o in options):
       fids = {str(r.get("ruling") or "").split(" ")[0] for r in rulings if r.get("decision") == d["id"]}
-      return any(o.split(" ")[0] not in fids for o in options)
+      return "redesign" not in fids and any(o.split(" ")[0] not in fids for o in options)
     return d["id"] not in ruled
 
   return [d for d in foreman.get("decisions") or [] if pending(d)]

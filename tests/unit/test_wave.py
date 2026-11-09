@@ -178,9 +178,37 @@ def test_an_owner_only_decision_offers_the_allowed_form():
   assert [d["id"] for d in pending_decisions(one)] == ["q1"]
   assert pending_decisions(one | {"rulings": one["rulings"] + [{"decision": "q1", "ruling": "foreman-1-2 allowed — fine"}]}) == []
   assert decision.check_ruling(1, ALLOWED, "foreman-1-2 finding overruled — fine") == "foreman-1-2 allowed"  # read as allowed
-  for upheld in ("foreman-1-2 finding upheld", "foreman-1-2 finding upheld — restore it", "foreman-1-2 anything"):
-    with pytest.raises(decision.Refusal, match="decision: ruling is none of the options"):  # an uphold is never an allowance
-      decision.check_ruling(1, ALLOWED, upheld)
+  for upheld in ("foreman-1-2 finding upheld", "foreman-1-2 finding upheld — restore it"):  # an uphold is never an allowance
+    assert decision.check_ruling(1, ALLOWED, upheld) == "foreman-1-2 finding upheld"
+  with pytest.raises(decision.Refusal, match="decision: foreman-1-2 allowed is the owner's alone"):
+    decision.check_ruling(1, ALLOWED, "foreman-1-2 finding upheld", by="judges:p1")
+  with pytest.raises(decision.Refusal, match="decision: ruling is none of the options"):
+    decision.check_ruling(1, ALLOWED, "foreman-1-2 anything")
+  upheld = one["rulings"] + [{"decision": "q1", "ruling": "foreman-1-2 finding upheld"}]
+  assert pending_decisions(one | {"rulings": upheld}) == []  # an uphold releases its fid: the builder restores it
+  assert pending_decisions(one | {"rulings": [{"decision": "q1", "ruling": "redesign — re-plan"}]}) == []  # a redesign rules it whole
+
+
+def test_an_owner_only_decision_takes_the_owners_by_hand_uphold_and_file_allowance(world):
+  """Round 3 (PR #103 review): the owner's posted `<fid> finding upheld` is recorded on an `owner: <ids>` decision,
+  and `**Ruling:** test-delta <file> allowed` records one allowance per open finding of that file."""
+  card = world.run("runcard", "open", "--skill", "wave", "--artifact", world.spec, "--mode", "leavemealone", card=None)[1].strip()
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green",
+                             "rounds": [{"round": 1, "phase": "posted", "outcome": "owner: foreman-1-1, foreman-1-2, foreman-1-3"}]})
+  set_config(world, repo=REPO, owners=["owner"])
+  other = "foreman-1-3 | high | tests/unit/test_z.py:2 | regression: no | test-delta: tests/unit/test_z.py:2 removed\n"
+  fake_gh(world, {f"repos/{REPO}/issues/comments/{cid}": {"id": cid, "user": {"login": "owner"}, "body": f"**Ruling:** {body}\n",
+                                                          "created_at": "2026-11-03T10:00:00Z"}
+                  for cid, body in ((73, "test-delta tests/unit/test_q.py allowed — by design"), (74, "foreman-1-3 finding upheld"))})
+  q = world.run("decision", "open", "--unit", "U01", "--point", 1, "--question", question(world, TD("foreman-1-1", 3) + TD("foreman-1-2", 5) + other),
+                "--source", "review head-U01-c1 round 1", "--runcard", card)[1].splitlines()[0]
+  code, out = world.run("decision", "rule", "--unit", "U01", "--ruling", "test-delta tests/unit/test_q.py allowed", "--by", "owner", "--posted", "73", "--runcard", card)
+  assert code == 0, out
+  code, out = world.run("decision", "rule", "--unit", "U01", "--ruling", "foreman-1-3 finding upheld", "--by", "owner", "--posted", "74", "--runcard", card)
+  assert code == 0, out
+  assert [(r["decision"], r["ruling"]) for r in foreman_of(s, "U01")["rulings"]] == [
+    (q, "foreman-1-1 allowed"), (q, "foreman-1-2 allowed"), (q, "foreman-1-3 finding upheld")]
+  assert pending_decisions(foreman_of(s, "U01")) == []
 
 
 def test_an_owner_only_decision_records_the_owners_posted_allowance_in_leavemealone(world):
