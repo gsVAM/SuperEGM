@@ -98,6 +98,20 @@ def test_a_head_accept_lapses_on_an_ingested_external_high(world):
   code, out = record(world, rid, 1, "external:devin[bot]", [F("external:devin[bot]", 1, 1, "high")], card, sha="a" * 40)
   assert code == 0, out
   assert status(world, rid, card)[0] == 3
+  from test_wave import foreman_of
+  assert foreman_of(s, "U01")["rounds"][-1]["outcome"] == "revise"   # PR #105 round 4 (astra-4-1): no merge advertised
+
+
+def test_a_set_high_recorded_into_an_incomplete_later_round_lapses_the_accept(world):
+  """PR #105 round 4 (astra-4-2): review-plan reopens an accepted unit by recording the set's finding alone into its
+  next round; that round is incomplete, yet its high lapses the accept, so the gate never reads the stored mark."""
+  spec, cid, rid = opened(world, "plan")
+  recorded(world, rid, cid, [F("readiness", 1, 1, "medium")])
+  assert rule(world, rid, "accept", cid)[0] == 0 and status(world, rid, cid)[0] == 0
+  code, out = record(world, rid, 2, "set", [F("set", 2, 1, loc="U07 Interfaces")], cid)
+  assert code == 0, out
+  assert status(world, rid, cid)[0] == 3 and rjson(world, rid)["converged"] == "no"
+  assert f"review {rid} R1 accept lapsed" in hstore(world).path("journal").read_text(encoding="utf-8")
 
 
 def test_a_point_one_decision_stays_open_until_each_contested_finding_is_ruled(world, monkeypatch):
