@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
-# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23).
+# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25).
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
@@ -322,8 +322,15 @@ def open_decision(args) -> int:
 def options_for(point: int, source: str, question: str, foreman: dict, head: str) -> list:
   """Spec section 13.2's options: point 1 upheld|overruled; point 2 one more round|stop; point 3 the
   comment's own `- (a)` lines plus `stop the unit`, or `relaunch; stop the unit` for a launch, a close,
-  or a third `blocked` comment on the same head."""
+  or a third `blocked` comment on the same head. Point 1 on an `owner: <ids>` word (the latest posted round's
+  outcome) offers `<fid> allowed`, one per id the question names (U25)."""
   if point == 1:
+    posted = [e for e in foreman.get("rounds") or [] if e.get("phase") == "posted"]
+    word = str(posted[-1].get("outcome") or "") if posted else ""
+    if word.startswith("owner: "):
+      named = [f"{fid} allowed" for fid in word[len("owner: "):].split(", ") if re.search(rf"(?<!\S){re.escape(fid)}(?!\S)", question)]
+      if named:
+        return named
     return ["finding upheld", "finding overruled"]
   if point == 2:
     return ["one more round", "stop"]
@@ -395,20 +402,20 @@ def rule(args) -> int:
       dropped(st, args, f"{d['id']} already ruled")
   decision = decisions[0]
   basis = next((d for d in decisions if d["point"] in (1, 2)), decision) if found and found.kind == "redesign" else decision
-  chosen = check_ruling(basis["point"], basis["options"], head.strip())
+  chosen = check_ruling(basis["point"], basis["options"], head.strip(), args.by)
   brief = None
   if found:  # the record is the comment's ruling: a `--ruling` that resolves to another option is refused
     said = {"upheld": f"{found.subject} finding upheld", "overruled": f"{found.subject} finding overruled",
             "round": "one more round", "stop": "stop", "option": found.option, "redesign": "redesign",
             "allowed": f"{found.subject} finding overruled"}.get(found.kind) or ""  # an allowance is recorded as an overrule (§13.2)
     try:
-      ruled_by_comment = check_ruling(basis["point"], basis["options"], said)
+      ruled_by_comment = check_ruling(basis["point"], basis["options"], said, args.by)
     except Refusal:
       ruled_by_comment = None
     if ruled_by_comment != chosen:
       raise Refusal(f"decision: comment {args.posted} rules {said}, not {head.strip()}")
     reason = found.reason or ""
-  elif not reason.strip() and (decision["point"] == 3 or chosen.endswith(" finding overruled")):
+  elif not reason.strip() and (decision["point"] == 3 or chosen.endswith((" finding overruled", " allowed"))):
     # a ruling typed without the reason its form carries: the session's, or the panel's, named as such
     reason = f"ruled by judges {args.by[7:]}" if args.by.startswith("judges:") else "ruled in the session"
   if chosen == "redesign" and basis["point"] in (1, 2):  # a head's third ruling; a point-3 option named `redesign` is an option
@@ -505,13 +512,21 @@ def read_back(store, comment_id) -> dict:
     return {}
 
 
-def check_ruling(point: int, options: list, ruling: str) -> str:
+def check_ruling(point: int, options: list, ruling: str, by: str = "") -> str:
   """The option `ruling` names (its letter, its text, or both; point 1 as `<fid> <option>`), resolved
   to the option's text; refused when it is none of them. At points 1 and 2 the bare word `redesign` (its ` — <why>`
-  is checked by `rule`; no letter, no finding id) is the third ruling, in no option list."""
+  is checked by `rule`; no letter, no finding id) is the third ruling, in no option list. An `owner: <ids>`
+  decision's options are `<fid> allowed`: any `<fid> <text>` ruling answers the option carrying its fid, and is
+  refused to the judges, the owner's alone (U25)."""
   if ruling == "redesign" and point in (1, 2):  # a head's third ruling: no letter, no finding id
     return "redesign"
   fid, _, text = ruling.partition(" ") if point == 1 else ("", "", ruling)
+  if point == 1 and options and all(o.endswith(" allowed") for o in options):
+    option = next((o for o in options if o.split(" ")[0] == fid and text), None)
+    if option and by.startswith("judges:"):
+      raise Refusal(f"decision: {option} is the owner's alone")
+    if option:
+      return option
   for option in options:
     letter, _, rest = option.partition(" ") if option.startswith("(") else ("", "", option)
     if text and text in (option, letter, rest) and (point != 1 or fid):

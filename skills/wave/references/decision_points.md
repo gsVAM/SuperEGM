@@ -1,5 +1,5 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
-Added by SuperEGM (gsVAM), 2026: the `owner:` row of the word table and the three decision points, moved out of the wave skill's SKILL.md (the owner's ruling: a 24K skill body is context bloat). -->
+Added by SuperEGM (gsVAM), 2026: the `owner:` row of the word table and the three decision points, moved out of the wave skill's SKILL.md (the owner's ruling: a 24K skill body is context bloat); the `owner: <ids>` decision's allowed options, one per id, and its leavemealone sentence (U25). -->
 
 # The decision points
 
@@ -19,6 +19,8 @@ In leavemealone-mode each point's last line hands the question to the judge pane
   `**Ruling:** <fid> finding overruled — <reason>` on the issue settles it, with `--disposition declined --owner --posted <comment-id>`. Record it with `decision rule … --ruling '<fid> finding overruled — <reason>' --by <login>`,
   then by `review status` as Decision point 1 proceeds. `<fid> finding upheld` below the cap is the `revise` row;
   at the cap (`review status` exit 2) it is Decision point 2 (`cap-reached`), never a relaunch.
+  `decision open` prints the options `<fid> allowed`, one per id; the owner posts one `**Ruling:** <fid> allowed — <reason>` comment per id, and the decision stays pending until each id is ruled.
+  In leavemealone-mode an `owner: <ids>` decision convenes no panel: the owner rules it by hand and the inbox lists it until then.
 
 ## The three points
 

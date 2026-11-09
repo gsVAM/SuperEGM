@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the report subcommand (spec section 11): the per-batch wave report, the idle rules
-# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30).
+# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25).
 
 """superegm report: rewrite `wave_<n>_report.md` from the store, the plan and the spec and print its path, the
 board and the idle, pending and loop lines. It opens the card's handoff as `status` does (`core.locate`,
@@ -248,9 +248,19 @@ def unit_state(uid: str, view: dict, foreman: dict, launches: list, card: dict, 
 
 
 def pending_decisions(foreman: dict) -> list:
-  """`decisions[]` minus `rulings[]` (spec section 7)."""
-  ruled = {r.get("decision") for r in foreman.get("rulings") or []}
-  return [d for d in foreman.get("decisions") or [] if d["id"] not in ruled]
+  """`decisions[]` minus `rulings[]` (spec section 7); a point-1 decision whose options end ` allowed` (an
+  `owner: <ids>` decision, U25) stays pending until every option's fid has a ruling."""
+  rulings = foreman.get("rulings") or []
+  ruled = {r.get("decision") for r in rulings}
+
+  def pending(d):
+    options = d.get("options") or []
+    if d.get("point") == 1 and options and all(o.endswith(" allowed") for o in options):
+      fids = {str(r.get("ruling") or "").split(" ")[0] for r in rulings if r.get("decision") == d["id"]}
+      return any(o.split(" ")[0] not in fids for o in options)
+    return d["id"] not in ruled
+
+  return [d for d in foreman.get("decisions") or [] if pending(d)]
 
 
 def ci_seen_at(uid: str, view: dict, card: dict):
