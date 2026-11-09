@@ -6,6 +6,8 @@ Fixtures: conftest's `world`; `wave_store` and `open_wave_card` from test_wave.p
 
 import json
 import os
+import plistlib
+import sys
 import time
 from pathlib import Path
 
@@ -18,6 +20,8 @@ from superegm.inbox import inbox_items, notify_lines
 from superegm.review import parse_findings
 from superegm.decision import parse_form
 from test_wave import open_wave_card, wave_store
+from test_u24 import tick_launch
+import superegm  # the harness reloads the package per test: read its names at call time
 
 ISSUE, PULL = f"https://github.com/{REPO}/issues/2", f"https://github.com/{REPO}/pull/70"
 
@@ -426,3 +430,20 @@ def test_inbox_all_json_prints_json_lines_alone(world):
   seed(world, **U(decisions=D(3, "comment 77")))
   out = world.run("inbox", "--all", "--json")[1]
   assert out == world.run("inbox", "--json")[1] and all(json.loads(line) for line in out.splitlines())
+
+
+def test_inbox_all_the_driver_items_and_notify_under_a_driver_card(world, monkeypatch, tmp_path):
+  from test_builders import seed, put  # U24: the builders' store and a tick's launch, `HOME` patched to `tmp_path`
+  monkeypatch.setenv("HOME", str(tmp_path))
+  s, card, hid, _ = seed(world); dcard, lines = world.open_card("driver", world.spec), lambda *argv: world.run(*argv)[1].splitlines()
+  assert lines("inbox", "--all")[0] == "registry: none" and world.run("register", "--runcard", dcard)[0] == 0
+  tick_launch(s, hid, card=dcard, refused={"at": superegm.now_iso(), "reason": "two launches failed before the loop ran"}); world.advance(600)
+  put(tmp_path / "Library/LaunchAgents/com.superegm.driver.plist", plistlib.dumps({"ProgramArguments": [sys.executable, "/old/root/skills/plan/scripts/superegm.py", "driver", "tick"]}).decode())
+  assert f"{REPO} {hid} | driver | refused: two launches failed before the loop ran; /superegm:driver status, then re-type /superegm:wave or /superegm:driver reset" in lines("inbox", "--all")
+  assert f"{REPO} {hid} | driver | tick launch 1 live 10 min, no exit file (information)" in lines("inbox", "--all") and f"{REPO} {hid} | driver | stale: /old/root; /superegm:driver install" in lines("inbox", "--all")
+  assert {i["fingerprint"] for i in map(json.loads, lines("inbox", "--all", "--json")) if i["kind"] == "driver"} == {f"refused:{hid}", f"launch:{hid}:1", f"stale:{hid}"}
+  hook, sent = tmp_path / ".superegm/notify", tmp_path / "sent.txt"; hook.write_text(f"#!/bin/sh\ncat >> '{sent}'\n"); hook.chmod(0o755)
+  assert world.run("notify", "--runcard", dcard)[0] == 0 and "refused:" in (first := sent.read_text()) and "notified" not in json.loads(s.path("state").read_text())
+  assert world.run("notify", "--runcard", dcard)[0] == 0 and sent.read_text() == first
+  put(tmp_path / ".superegm/registry.json", json.dumps([{**superegm.load_registry()[0], "root": str(tmp_path / "x")}]))
+  assert f"{REPO} {hid} | driver | root {tmp_path / 'x'} is not a worktree of {REPO}; /superegm:driver register" in lines("inbox", "--all")

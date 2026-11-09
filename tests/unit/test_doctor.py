@@ -1,21 +1,24 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U14's tests of `superegm doctor` (spec section 11); the App lines and the launched environment (U15); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25).
+# Added by SuperEGM (gsVAM), 2026: U14's tests of `superegm doctor` (spec section 11); the App lines and the launched environment (U15); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five driver lines (U24).
 
 """`superegm doctor`: one line per wave prerequisite, `ok` or the refusal `launch` or `launch-builder`
 would give, in a pinned order; no run card, no store write."""
 
-import json, shutil
+import hashlib, json, plistlib, shutil, sys
 from pathlib import Path
 import pytest
 from conftest import REPO
 from test_builders import UNIT, RULESET, SUPEREGM_RULESET, seed, app_seed, github, configure, push_to_origin, git
 from test_builder_token import key, OPENSSL, FOUR  # noqa: F401  the key fixture
+from superegm.launch_builder import HELPER
+
+DRIVER_NONE = ["driver: not installed", "sleep: not reported", "root: not registered", "env: absent", "notify: absent"]
 
 OK = ["config: ok", "owner: ok (owner)", "origin: ok", "token: ok", "builder: ok (builder-bot)", "role: ok (write)",
       "scopes: ok (classic: repo, read:org)", "protection: ok",
       "merge: gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset restricts updates to config.owners)", "profile: ok", "gh: ok (/usr/local/bin/gh)", "environment: ok",
       "graphify: not on PATH (informational)", "astra: not installed (heads will record not run)",
-      "python3.12: not on PATH (informational)", "hooks: none", "core.hooksPath: unset"]
+      "python3.12: not on PATH (informational)", "hooks: none", "core.hooksPath: unset", *DRIVER_NONE]
 NAMES = [line.split(":")[0] for line in OK]
 
 
@@ -40,7 +43,7 @@ NAMES = [line.split(":")[0] for line in OK]
   ("hooks", 0, ["hooks: post-checkout, pre-push", "core.hooksPath: {hooks}"]),
 ])
 def test_doctor_lines(world, monkeypatch, tmp_path, case, code, expected):
-  s, card, hid, _ = seed(world)
+  monkeypatch.setenv("HOME", str(tmp_path)); s, card, hid, _ = seed(world)
   runner = tmp_path / "plugins/cache/claudex-loop/claudex-loop/1.0.0/skills/claudex-loop/scripts/runner.py"
   if case == "astra":
     runner.parent.mkdir(parents=True)
@@ -85,7 +88,7 @@ OK_APP = ["config: ok", "owner: ok (owner)", "origin: ok", "credential: ok (app 
           "app: ok (superegm-builder #12345)", f"permissions: ok ({FOUR[1:-1]})", "token: ok", "installation: ok (example-org/webhooks)",
           "scanning: push protection enabled, non-provider patterns enabled", "protection: ok",
           "merge: gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset restricts updates to config.owners)", "profile: ok", "gh: ok ({gh})", "environment: ok", "graphify: not on PATH (informational)", "astra: not installed (heads will record not run)",
-          "python3.12: not on PATH (informational)", "hooks: none", "core.hooksPath: unset"]
+          "python3.12: not on PATH (informational)", "hooks: none", "core.hooksPath: unset", *DRIVER_NONE]
 
 
 @pytest.mark.parametrize("case, code, expected, skipped", [
@@ -95,7 +98,7 @@ OK_APP = ["config: ok", "owner: ok (owner)", "origin: ok", "credential: ok (app 
   ("push-url", 1, ["environment: push URL of origin under the launched environment is {origin}, not https://"], ()),
 ])
 def test_doctor_app_lines(world, monkeypatch, key, tmp_path, case, code, expected, skipped):
-  *_, gh = app_seed(world, monkeypatch, key, tmp_path, rulesets=[RULESET, SUPEREGM_RULESET])
+  monkeypatch.setenv("HOME", str(tmp_path)); *_, gh = app_seed(world, monkeypatch, key, tmp_path, rulesets=[RULESET, SUPEREGM_RULESET])
   monkeypatch.setenv("CLAUDE_CODE_PLUGIN_CACHE_DIR", str(tmp_path / "plugins"))
   if case == "both-set": monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
   if case == "no-key": monkeypatch.delenv("SUPEREGM_APP_KEY")
@@ -135,3 +138,50 @@ def test_runner_path_skips_non_numeric_names_and_falls_back_to_the_config_dir(tm
   monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
   monkeypatch.setenv(env, str(tmp_path / ("plugins" if env == "CLAUDE_CODE_PLUGIN_CACHE_DIR" else "config")))
   assert runner_path() == str(tmp_path / base / f"cache/claudex-loop/claudex-loop/{expect}/skills/claudex-loop/scripts/runner.py")
+
+
+def arranged(world, monkeypatch, tmp_path, setup):
+  """`test_doctor_lines`'s ok case and, `setup` given, the timer, `~/.superegm/env`, the notify hook, the registry's
+  entry and a fake `pmset`."""
+  monkeypatch.setenv("HOME", str(tmp_path)); s, card, hid, _ = seed(world)
+  monkeypatch.setenv("CLAUDE_CODE_PLUGIN_CACHE_DIR", str(tmp_path / "plugins")); monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  pmset = tmp_path / "bin/pmset"
+  tools = {"gh": "/usr/local/bin/gh", **({"pmset": str(pmset)} if setup else {})}
+  monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: tools.get(cmd))
+  git(["remote", "set-url", "--push", "origin", f"git@github.com:{REPO}.git"], world.repo)
+  if not setup:
+    return s
+  pmset.parent.mkdir(parents=True)
+  pmset.write_text("#!/bin/sh\necho 'System-wide power settings:'\necho ' sleep                1 (sleep prevented by caffeinate)'\n", encoding="utf-8"); pmset.chmod(0o755)
+  argv = [sys.executable, str(setup.get("plist", HELPER)), "driver", "tick"]
+  if setup.get("systemd"):
+    units = tmp_path / ".config/systemd/user"; units.mkdir(parents=True)
+    (units / "superegm-driver.service").write_text(f"[Service]\nType=oneshot\nExecStart={' '.join(argv)}\nKillMode=process\n", encoding="utf-8")
+    (units / "superegm-driver.timer").write_text("[Timer]\nOnBootSec=1min\nOnUnitActiveSec=15min\n", encoding="utf-8")
+  else:
+    plist = tmp_path / "Library/LaunchAgents/com.superegm.driver.plist"; plist.parent.mkdir(parents=True)
+    plist.write_bytes(plistlib.dumps({"Label": "com.superegm.driver", "ProgramArguments": argv, "StartInterval": 900}))
+  home = tmp_path / ".superegm"; home.mkdir(exist_ok=True)
+  values = {"PATH": str(tmp_path / "bin"), "CLAUDE_CONFIG_DIR": str(tmp_path / "profile"), "SUPEREGM_BUILDER_TOKEN": "ghp_builder"}
+  (home / "env").write_text("".join(f"{k}={values[k]}\n" for k in setup.get("env", KEYS)), encoding="utf-8"); (home / "env").chmod(setup.get("mode", 0o600))
+  (home / "notify").write_text("#!/bin/sh\n", encoding="utf-8")
+  root = tmp_path / setup["root"] if "root" in setup else world.repo.resolve()
+  (home / "registry.json").write_text(json.dumps([{"repo": REPO, "root": str(root), "artifacts_dir": str(s.root)}]), encoding="utf-8")
+  return s
+
+
+KEYS, BASE = ("PATH", "CLAUDE_CONFIG_DIR", "SUPEREGM_BUILDER_TOKEN"), {"plist": HELPER}
+
+
+def test_doctor_names_a_registry_it_cannot_read(world, monkeypatch, tmp_path):
+  arranged(world, monkeypatch, tmp_path, BASE); (tmp_path / ".superegm/registry.json").write_text('[{"mode": "x"}]', encoding="utf-8")
+  got, out = world.run("doctor"); assert got == 0 and "root: registry: unknown key mode" in out.splitlines(), out
+@pytest.mark.parametrize("setup, lines", [
+  (None, ["driver: not installed", "sleep: not reported", "root: not registered", "env: absent", "notify: absent"]),
+  (BASE, ["driver: installed (15 min) at {root}", "sleep: 1 (sleep prevented by caffeinate)", "root: ok", "env: ok", "notify: ok ({sha})"]),
+  ({"plist": "/old/root/skills/plan/scripts/superegm.py"}, ["driver: stale (/old/root; the env profile's root {root})"]), ({"systemd": True}, ["driver: installed (15 min) at {root}"]),
+  ({**BASE, "env": KEYS[::2]}, ["env: missing CLAUDE_CONFIG_DIR"]), ({**BASE, "mode": 0o644}, ["env: readable by others"]),
+  ({**BASE, "root": "elsewhere"}, ["root: {tmp}/elsewhere is not a worktree of example-org/webhooks"])])
+def test_doctor_driver_lines(world, monkeypatch, tmp_path, setup, lines):
+  arranged(world, monkeypatch, tmp_path, setup); got, out = world.run("doctor")
+  assert got == 0 and all(l.format(root=HELPER.parents[3], tmp=tmp_path, sha=hashlib.sha256(b"#!/bin/sh\n").hexdigest()) in out.splitlines() for l in lines), out

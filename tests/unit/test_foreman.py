@@ -229,6 +229,12 @@ def test_dispatch_predicate_refuses(world, setup, reason):
   assert st.path("foreman", UNIT).read_text(encoding="utf-8") == before
 
 
+def test_dispatch_takes_a_launch_a_reboot_interrupted_as_terminal(world):
+  """U24 (foreman-2-1): the boot-id proof records `interrupted (reboot)`, a terminal launch the foreman dispatches."""
+  st, card, child, did, _ = dispatched(world, launches=[{"round": 1, "status": "interrupted (reboot)"}])
+  assert did == "d1" and json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][-1]["launch"] == 1
+
+
 @pytest.mark.parametrize("on_pr", [True, False])
 def test_dispatch_recovers_a_collected_round_already_on_the_pr(world, on_pr):
   """design-c2r5-1, readiness-c2r5-1: the recovery runs before the predicate (CI is pending here)."""

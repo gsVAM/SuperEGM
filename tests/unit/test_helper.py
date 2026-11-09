@@ -394,7 +394,8 @@ WRITES = {"approve_spec":{"approvals", "handoffs", "state", "reviews"},"graph": 
           "record_launch": {"launches"}, "collect": {"foreman", "review", "reviews"}, "prepare": {"foreman", "review"},
           "launch_builder": {"launches", "orient_unit"}, "interrupt": {"launches", "foreman"}, "clean": set(),
           "orient": {"orient", "orient_unit"},
-          "runcard": {"runcards"}, "init": set(), "doctor": set(), "builder_token": set(), "inbox": {"state"}}
+          "runcard": {"runcards", "launches", "driver"}, "init": set(), "doctor": set(), "builder_token": set(), "inbox": {"state", "driver"},
+          "driver": {"driver", "runcards", "launches"}, "register": set()}
 
 
 @pytest.mark.parametrize("name, kinds", sorted(WRITES.items()))
@@ -761,7 +762,7 @@ MOVED = [("test_plan.py", "test_scan_banned_terms_mentions_and_size"),
          ("test_file.py", "test_subprocess_command_shape_with_fake_gh_on_path"),
          ("test_file.py", "test_apply_recovers_issues_by_the_new_marker_after_a_crash"),
          ("test_builders.py", "test_launch_refuses_each_precondition"),
-         ("test_builders.py", "test_record_launch_appends_running_then_records_the_exit"),
+         ("test_builders.py", "test_launch_builder_starts_the_launch_as_its_one_behaviour"),
          ("test_events.py", "test_wait_prints_deadline_only_and_saves_once"),
          ("test_events.py", "test_status_pr_matching_rules"),
          ("test_events.py", "test_the_helper_is_single_writer_by_design"),

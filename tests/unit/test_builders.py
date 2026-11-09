@@ -58,6 +58,19 @@ def which(monkeypatch):
   monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: {"gh": "/usr/local/bin/gh", "openssl": OPENSSL}.get(cmd))
 
 
+SPAWNED = []  # (command, log, env) of every launch `spawn_fake` stood in for
+
+
+@pytest.fixture
+def spawn_fake(world, monkeypatch):
+  """`launch-builder` starts the wrapper itself (U24): no test starts a builder, so `start_detached` appends its
+  arguments to `SPAWNED` (cleared first) and returns the pid 4242."""
+  from superegm import launch_builder
+  SPAWNED.clear()
+  monkeypatch.setattr(launch_builder, "start_detached", lambda command, log, env: (SPAWNED.append((command, log, env)), 4242)[1])
+  return SPAWNED
+
+
 def put(path, text):
   """A store file as a subcommand left it (the store's folders do not exist before the first write)."""
   path.parent.mkdir(parents=True, exist_ok=True); path.write_text(text, encoding="utf-8")
@@ -317,7 +330,7 @@ def test_launch_accepts_the_approved_bytes_or_a_later_link(world, monkeypatch, a
 
 
 @pytest.mark.parametrize("case", ["entry", "rewritten", "none"])
-def test_launch_builder_copies_the_cited_range_at_the_markers_sha(world, monkeypatch, case):
+def test_launch_builder_copies_the_cited_range_at_the_markers_sha(world, monkeypatch, spawn_fake, case):
   s, card, hid, bodies = seed(world)
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
   assert world.run("launch", "--runcard", card)[0] == 0
@@ -388,7 +401,25 @@ PAIRS = [("GIT_CONFIG_GLOBAL", "/dev/null"), ("GIT_CONFIG_SYSTEM", "/dev/null"),
          *(p for i, (k, v) in enumerate(ENTRIES) for p in ((f"GIT_CONFIG_KEY_{i}", k), (f"GIT_CONFIG_VALUE_{i}", v)))]
 
 
-def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monkeypatch):
+def test_launch_frees_the_slot_of_a_unit_pending_a_decision(world, monkeypatch):
+  s, card, hid, _ = seed(world, units=("U07", "U08"), max_in_flight=1); monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert "marked: U07" in world.run("launch", "--runcard", card)[1]; launched(s, "U07", "exited 0")
+  data = {"dispatch_id": "d1", "rounds": [], "decisions": [{"id": "q1", "point": 3, "source": "launch 1", "question": "x"}], "rulings": []}; put(s.path("foreman", "U07"), json.dumps(data))
+  out = world.run("launch", "--runcard", card)[1]; assert "in flight: none" in out and "marked: U08" in out
+  put(s.path("foreman", "U07"), json.dumps({**data, "rulings": [{"decision": "q1", "ruling": "relaunch"}]})); assert "in flight: U07, U08" in world.run("launch", "--runcard", card)[1]
+
+
+def test_launch_reads_a_partly_ruled_owner_decision_as_pending(world, monkeypatch):
+  s, card, hid, _ = seed(world, units=("U07", "U08"), max_in_flight=1); monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert "marked: U07" in world.run("launch", "--runcard", card)[1]; launched(s, "U07", "exited 0")
+  owner = {"id": "q1", "point": 1, "source": "launch 1", "question": "owner: f1 f2", "options": ["f1 allowed", "f2 allowed"]}
+  data = {"dispatch_id": "d1", "rounds": [], "decisions": [owner], "rulings": [{"decision": "q1", "ruling": "f1 — fine"}]}; put(s.path("foreman", "U07"), json.dumps(data))
+  out = world.run("launch", "--runcard", card)[1]; assert "in flight: none" in out and "marked: U08" in out
+  put(s.path("foreman", "U07"), json.dumps({**data, "rulings": data["rulings"] + [{"decision": "q1", "ruling": "f2 — fine"}]}))
+  assert "in flight: U07, U08" in world.run("launch", "--runcard", card)[1]
+
+
+def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monkeypatch, spawn_fake):
   s, card, hid, bodies = seed(world)
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
   assert world.run("launch", "--runcard", card)[0] == 0
@@ -400,7 +431,7 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
     {"id": 5, "user": {"login": "owner"}, "body": "looks good"}]
   code, out = world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)
   assert code == 0, out
-  line = out.strip().splitlines()[-1]
+  line = launches_of(s)[-1]["command"]
   wt, branch = s.path("worktrees", UNIT, "r1"), f"superegm/{hid}/U07"
   assert wt.is_dir() and git(["branch", "--show-current"], wt).strip() == branch
   assert git(["rev-parse", "HEAD"], wt).strip() == git(["rev-parse", "refs/superegm/base"], world.repo).strip()
@@ -420,7 +451,6 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   assert tools == [t.replace("Bash(gh ", "Bash(/usr/local/bin/gh ") for t in cfg["allowed_tools"]] + [f"Bash(git push origin {branch}:*)", "Bash(pytest:*)"]
   assert line.endswith(f"' --output-format json > '{result}'; echo $? > '{result}.exit'")
   assert "ghp_builder" not in out
-  assert not s.path("launches", f"{UNIT}.json").exists()           # the record is record-launch's
   tree = git(["rev-parse", "refs/superegm/base^{tree}"], world.repo).strip()
   unit_file = s.path("orient_unit", f"{UNIT}.md").read_text(encoding="utf-8")
   assert unit_file.startswith(f"orient: tree {tree} · graphify: not installed · trimmed: nothing\n## src/worker.py (create)\nsiblings: none\ntests: none\n")
@@ -430,7 +460,7 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
 
 
 @pytest.mark.parametrize("case, reason", [("scripts", None), ("whitespace", "artifacts_dir {store} holds whitespace")])
-def test_launch_builder_writes_the_token_helper_and_the_gh_shim(world, monkeypatch, key, tmp_path, case, reason):
+def test_launch_builder_writes_the_token_helper_and_the_gh_shim(world, monkeypatch, key, tmp_path, spawn_fake, case, reason):
   s, card, hid, _, _ = app_seed(world, monkeypatch, key, tmp_path)
   assert world.run("launch", "--runcard", card)[0] == 0
   if case == "whitespace": s.root.rename(tmp_path / "art ifacts"); configure(world, artifacts_dir=str(tmp_path / "art ifacts")); s = store(world.repo)
@@ -439,7 +469,7 @@ def test_launch_builder_writes_the_token_helper_and_the_gh_shim(world, monkeypat
   if reason:
     assert code == 1 and f"launch-builder: {reason.format(store=s.root)}" in out and not s.path("worktrees", UNIT).exists() and not shim.parent.exists(), out
     return
-  helper, line = shim.parent / "superegm-token", out.strip().splitlines()[-1]
+  helper, line = shim.parent / "superegm-token", launches_of(s)[-1]["command"]
   assert code == 0 and f" builder-token --repo '{REPO}' --app-id 12345 --key-env 'SUPEREGM_APP_KEY' --openssl '{OPENSSL}'" in helper.read_text(encoding="utf-8"), out
   assert " GH_TOKEN=superegm-no-token " in line and f"'!{shim} auth git-credential'" in line
   run = lambda *a: subprocess.run([str(shim), *a], capture_output=True, text=True, env={**os.environ, "GH_TOKEN": "superegm-no-token"})
@@ -449,30 +479,14 @@ def test_launch_builder_writes_the_token_helper_and_the_gh_shim(world, monkeypat
   assert run("pr", "create").returncode == 1 and run("auth", "git-credential", "store").stdout == "superegm-no-token auth git-credential store\n"
 
 
-def test_record_launch_appends_running_then_records_the_exit(world, monkeypatch):
-  s, card, hid, _ = seed(world)
-  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
-  assert world.run("launch", "--runcard", card)[0] == 0
-  code, out = world.run("record-launch", "--unit", UNIT, "--runcard", card)
-  assert code == 1 and "record-launch: U07 launch 1 has no prompt file: run launch-builder first" in out
-  assert world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)[0] == 0
-  code, out = world.run("record-launch", "--unit", UNIT, "--runcard", card)
-  assert code == 0 and out.strip() == "U07 launch 1 running"
-  entry = launches_of(s)[0]
-  prompt = s.path("launches", f"{UNIT}_r1_prompt.md")
-  assert entry == {"round": 1, "worktree": str(s.path("worktrees", UNIT, "r1")), "branch": f"superegm/{hid}/U07", "started_at": entry["started_at"],
-                   "status": "running", "result_file": str(s.path("launches", f"{UNIT}_r1_result.json")),
-                   "prompt_sha256": hashlib.sha256(prompt.read_bytes()).hexdigest()}
-  code, out = world.run("record-launch", "--unit", UNIT, "--runcard", card)
-  assert code == 1 and "record-launch: U07 launch 1 is already recorded (running)" in out
-  code, out = world.run("record-launch", "--unit", UNIT, "--exit", 0, "--runcard", card)
-  assert code == 1 and "record-launch: U07 launch 1 has no exit file" in out
-  Path(entry["result_file"] + ".exit").write_text("1\n", encoding="utf-8")
-  code, out = world.run("record-launch", "--unit", UNIT, "--exit", 0, "--runcard", card)
-  assert code == 1 and "record-launch: the exit file of U07 launch 1 says 1, not 0" in out
-  code, out = world.run("record-launch", "--unit", UNIT, "--exit", 1, "--runcard", card)
-  assert code == 0 and out.strip() == "U07 launch 1 exited 1" and launches_of(s)[0]["status"] == "exited 1"
-  assert "U07 launch 1 exited 1" in s.path("journal").read_text(encoding="utf-8")
+def test_launch_builder_starts_the_launch_as_its_one_behaviour(world, monkeypatch, spawn_fake):
+  s, card, hid, _ = seed(world); monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder"); monkeypatch.setattr(superegm, "boot_id", lambda: "boot-1")
+  assert world.run("launch", "--runcard", card)[0] == 0 and world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)[1].strip().endswith("U07 launch 1 running (pid 4242)")
+  entry, (command, log, env) = launches_of(s)[0], SPAWNED[0]
+  assert command == ["/bin/sh", "-c", entry["command"]] and log == s.path("launches", f"{UNIT}_r1.log") and (entry["boot_id"], entry["pid"], entry["status"]) == ("boot-1", 4242, "running")
+  assert "record-launch: --exit is required: launch-builder records the launch" in world.run("record-launch", "--unit", UNIT, "--runcard", card)[1]
+  monkeypatch.setattr(superegm, "boot_id", lambda: "boot-2"); assert world.run("launch-builder", "--unit", UNIT, "--round", 2, "--runcard", card)[0] == 0
+  assert [e["status"] for e in launches_of(s)] == ["interrupted (reboot)", "running"]
 
 
 @pytest.mark.parametrize("case, reason", [
@@ -487,7 +501,7 @@ def test_record_launch_appends_running_then_records_the_exit(world, monkeypatch)
   ("body", "issue #7 body differs from the filed body"),
   ("orient", "orient: U07 is not in the plan: run graph --plan first"),
 ])
-def test_launch_builder_refuses_each_precondition(world, monkeypatch, case, reason):
+def test_launch_builder_refuses_each_precondition(world, monkeypatch, spawn_fake, case, reason):
   s, card, hid, _ = seed(world)
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
   profile = Path(json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]["profile_dir"])
@@ -518,7 +532,7 @@ def test_launch_builder_refuses_each_precondition(world, monkeypatch, case, reas
 
 
 @pytest.mark.parametrize("key, present", [(".github/PR_BLOCK.md", True), (".github/PR_BLOCK.md", False), (None, False)])
-def test_launch_builder_appends_the_pr_block(world, monkeypatch, key, present):
+def test_launch_builder_appends_the_pr_block(world, monkeypatch, key, spawn_fake, present):
   if present:
     (world.repo / ".github").mkdir(exist_ok=True); (world.repo / ".github/PR_BLOCK.md").write_text("<!-- coord/v1 task=7 -->\n", encoding="utf-8")
   s, card, hid, _ = seed(world)                       # commits the tree and clones origin from it
@@ -540,7 +554,7 @@ def test_launch_builder_appends_the_pr_block(world, monkeypatch, key, present):
   assert "paste the `# PR block` section into the PR body right after the audit-trail line, before the DoD results" in orders
 
 
-def test_launch_builder_carries_the_audit_trail_line(world, monkeypatch):
+def test_launch_builder_carries_the_audit_trail_line(world, monkeypatch, spawn_fake):
   """Owner ruling 2026-11-04: the PR body's line after the unit id is `Launched by <owner login> · run card <id>
   · unit U<n> · handoff <handoff id>`, the login of the session that ran `launch` (not the builder's), with no `@`
   so it mentions nobody; the prompt carries it under `# Audit trail`, the orders keep it verbatim, the mention scan passes it."""
@@ -562,7 +576,6 @@ def test_launch_builder_carries_the_audit_trail_line(world, monkeypatch):
   orders = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8")
   assert "line 2 is the `Launched by` line of your prompt's `# Audit trail` section, kept verbatim" in orders
   # A unit marked by a pre-upgrade `launch` (no `launched.by`): the line says `unknown`; launch-builder does not raise.
-  assert world.run("record-launch", "--unit", UNIT, "--runcard", card)[0] == 0
   Path(launches_of(s)[0]["result_file"] + ".exit").write_text("0\n", encoding="utf-8")
   head = git(["rev-parse", "refs/superegm/base"], world.repo).strip()
   git(["update-ref", f"refs/pull/{PR}/head", head], world.repo.parent / "origin.git")
@@ -573,12 +586,11 @@ def test_launch_builder_carries_the_audit_trail_line(world, monkeypatch):
   assert f"# Audit trail\n\nLaunched by unknown · run card {card} · unit U07 · handoff {hid}\n" in s.path("launches", f"{UNIT}_r2_prompt.md").read_text(encoding="utf-8")
 
 
-def test_launch_builder_round_2_detaches_the_earlier_worktree_and_carries_the_review(world, monkeypatch):
+def test_launch_builder_round_2_detaches_the_earlier_worktree_and_carries_the_review(world, monkeypatch, spawn_fake):
   s, card, hid, _ = seed(world)
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
   assert world.run("launch", "--runcard", card)[0] == 0
   assert world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)[0] == 0
-  assert world.run("record-launch", "--unit", UNIT, "--runcard", card)[0] == 0
   r1, branch = s.path("worktrees", UNIT, "r1"), f"superegm/{hid}/U07"
   (r1 / "src").mkdir(); (r1 / "src/worker.py").write_text("def w(): pass\n", encoding="utf-8")
   git(["add", "-A"], r1); git(["commit", "-qm", "feat(S1): w"], r1); git(["push", "-q", "origin", branch], r1)
@@ -601,10 +613,10 @@ def test_launch_builder_round_2_detaches_the_earlier_worktree_and_carries_the_re
   unit_file = s.path("orient_unit", f"{UNIT}.md").read_text(encoding="utf-8")
   assert unit_file.startswith(f"orient: tree {git(['rev-parse', head + '^{tree}'], world.repo).strip()}") and "## src/worker.py (create)\ndef w(): pass\ntests: none\n" in unit_file
   assert f"\n\n---\n\n# Review comments on PR #{PR}\n\n## owner · review 9 on {head[:7]}\n**Review round 1" in prompt and "self review" not in prompt
-  assert out.strip().splitlines()[-1].startswith(f"cd '{r2}' && env ")
+  assert launches_of(s)[-1]["command"].startswith(f"cd '{r2}' && env ")
 
 
-def test_launch_builder_relaunches_from_the_local_branch_when_no_pr_is_recorded(world, monkeypatch):
+def test_launch_builder_relaunches_from_the_local_branch_when_no_pr_is_recorded(world, monkeypatch, spawn_fake):
   """Decision point 3's `relaunch` after an exit with no PR (spec sections 11, 13.2): round 2 is accepted without a
   recorded PR and starts from the retained local unit branch (the earlier worktree detached, nothing removed), the
   orient covering that tree, so the new launch opens the first PR."""
@@ -612,7 +624,6 @@ def test_launch_builder_relaunches_from_the_local_branch_when_no_pr_is_recorded(
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
   assert world.run("launch", "--runcard", card)[0] == 0
   assert world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)[0] == 0
-  assert world.run("record-launch", "--unit", UNIT, "--runcard", card)[0] == 0
   r1, branch = s.path("worktrees", UNIT, "r1"), f"superegm/{hid}/U07"
   (r1 / "src").mkdir(); (r1 / "src/worker.py").write_text("def w(): pass\n", encoding="utf-8")
   git(["add", "-A"], r1); git(["commit", "-qm", "feat(S1): w"], r1)      # committed, never pushed: the builder exited before its PR
@@ -638,7 +649,7 @@ def test_launch_builder_loads_the_builder_profile_settings_only():
 
 
 @pytest.mark.parametrize("path", ["app", "account"])
-def test_launch_builder_derives_the_app_identity_on_a_fresh_card(world, monkeypatch, key, tmp_path, path):
+def test_launch_builder_derives_the_app_identity_on_a_fresh_card(world, monkeypatch, key, tmp_path, spawn_fake, path):
   """A re-typed `wave` relaunching while `launch` is held off (a capacity gate): its card has no `builder` entry. On the
   App path the identity is derived from the config as every reader does (spec section 11): `<slug>[bot]` and the bot
   user's noreply address; the token path still refuses, its login being read by `launch` alone."""
@@ -653,7 +664,7 @@ def test_launch_builder_derives_the_app_identity_on_a_fresh_card(world, monkeypa
     assert code == 1 and "launch-builder: the wave card records no builder: run launch first" in out, out
     return
   assert code == 0, out
-  assert f"GIT_CONFIG_KEY_5='user.name' GIT_CONFIG_VALUE_5='{BOT}' GIT_CONFIG_KEY_6='user.email' GIT_CONFIG_VALUE_6='{EMAIL}'" in out.strip().splitlines()[-1], out
+  assert f"GIT_CONFIG_KEY_5='user.name' GIT_CONFIG_VALUE_5='{BOT}' GIT_CONFIG_KEY_6='user.email' GIT_CONFIG_VALUE_6='{EMAIL}'" in launches_of(s)[-1]["command"], out
 
 
 import superegm  # the harness reloads the package per test: read HandoffError at call time
@@ -698,12 +709,11 @@ def test_interrupt_records_a_launch_or_marks_a_prepared_round(world):
   assert "U07 launch 1 interrupted" in journal and "U07 round 1 interrupted: owner" in journal
 
 
-def test_clean_refuses_until_terminal_then_removes_what_it_can_prove(world, monkeypatch):
+def test_clean_refuses_until_terminal_then_removes_what_it_can_prove(world, monkeypatch, spawn_fake):
   s, card, hid, _ = seed(world)
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
   assert world.run("launch", "--runcard", card)[0] == 0
   assert world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)[0] == 0
-  assert world.run("record-launch", "--unit", UNIT, "--runcard", card)[0] == 0
   r1 = s.path("worktrees", UNIT, "r1")
   code, out = world.run("runcard", "open", "--skill", "clean", "--artifact", UNIT)
   ccard = out.split()[-1]
@@ -784,7 +794,7 @@ def test_no_removed_mechanism_is_named_in_this_units_files(path):
   ["launch"], ["launch-builder", "--unit", UNIT, "--round", "1"], ["record-launch", "--unit", UNIT],
   ["interrupt", "--unit", UNIT, "--launch", "1"], ["clean", "--unit", UNIT],
 ])
-def test_every_writing_subcommand_refuses_without_its_card(world, monkeypatch, argv):
+def test_every_writing_subcommand_refuses_without_its_card(world, monkeypatch, spawn_fake, argv):
   s, card, hid, _ = seed(world)
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
   launched(s, UNIT, "running")

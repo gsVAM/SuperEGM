@@ -13,7 +13,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30); the batch's `notify` (U23); the decision points, rulings and leavemealone-mode moved to `references/`; a head's Decision point 5 and `clean` by accept (U35). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30); the batch's `notify` (U23); the decision points, rulings and leavemealone-mode moved to `references/`; a head's Decision point 5 and `clean` by accept (U35); `launch-builder` alone and the driver role (U24). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the wave skill. Not part of google/elephant-goldfish-model. -->
 
@@ -28,8 +28,8 @@ This skill runs in Claude Code only. In any other host reply with one line,
 
 You, the elephant, drive one loop from this conversation over a filed
 handoff's units (design section 11). `superegm launch` marks the ready units
-up to `max_in_flight`; you launch one builder per marked unit as the builder
-account; the builder pushes its unit branch and opens a draft pull request it can never merge. Every head
+up to `max_in_flight` (a unit pending a decision holds no slot); you launch one
+builder per marked unit as the builder account (`launch-builder` starts the builder and records the launch); the builder pushes its unit branch and opens a draft pull request it can never merge. Every head
 with concluded CI gets one review round from a **foreman**: a per-unit
 elephant dispatched through its own adapter (`superegm:foreman`,
 `omitClaudeMd: true`), which dispatches the head's goldfish panel
@@ -47,6 +47,11 @@ as one Bash call, `python3 '<HELPER>' <subcommand> …`, absolute paths in
 single quotes, no chaining; `superegm <subcommand>` below stands for that.
 Every writing call carries `--runcard '<CARD>'`; a refusal is one
 `superegm: <reason>` line, exit 1.
+
+Under SUPEREGM_ROLE=driver (a tick of `/superegm:driver` started this session, always
+`--leavemealone`), never ask: a decision the judges did not converge on is a journal line and
+an inbox line, its unit is `pending a decision` (no slot) and the batch goes on; the session
+ends on the loop's condition alone and the next tick resumes the rest.
 
 Open a reference only when this file sends you to it:
 
@@ -151,14 +156,13 @@ ignored except `landed`:
    (omit `--idle` when the list is `none`) marks the ready units up to the
    free slots and prints `in flight:` and `marked:`. Per marked unit:
    `python3 '<HELPER>' launch-builder --unit <U> --round <n> --runcard '<CARD>'`
-   (`<n>` is the launch count; its last line is the command: run it with
-   `run_in_background: true`), then
-   `python3 '<HELPER>' record-launch --unit <U> --runcard '<CARD>'`. A
+   (`<n>` is the launch count) alone: `launch-builder` starts the builder and records the launch,
+   detached in its own session, and returns at once. A
    `launch-builder` refusal makes the unit idle for this invocation, no retry:
    `python3 '<HELPER>' report --idle '<U>=launch-builder: <reason>' --runcard '<CARD>'`.
 7. `superegm report`: `python3 '<HELPER>' report --runcard '<CARD>'`, then `python3 '<HELPER>' notify --runcard '<CARD>'`
    (the owner's `~/.superegm/notify` hook gets the inbox lines new since the last notify; a failing or slow hook never stops the wave). If a
-   decision was opened this batch, pause: ask the owner at its decision
+   decision was opened this batch, pause (outside SUPEREGM_ROLE=driver, above): ask the owner at its decision
    point and run `report` again once ruled. Else `loop: ended` → The end;
    otherwise the next batch.
 
@@ -179,7 +183,7 @@ dispatch):
 - `clean` → await-merge: nothing runs; the unit awaits the owner's merge and
   its slot is free. A head made `clean` by accept (Decision point 5) awaits merge the same way.
 - `revise` → in normal mode, when `review status` printed `acceptable: yes` → Decision point 5 first (no launch
-  while it is pending). Otherwise, and on a ruled `revise`, `launch-builder` and `record-launch` for the next
+  while it is pending). Otherwise, and on a ruled `revise`, `launch-builder` for the next
   round as today (the prompt carries the review); a ruled `revise` spends no relaunch.
 - `contested: <ids>` → Decision point 1.
 - `cap-reached` → Decision point 2.

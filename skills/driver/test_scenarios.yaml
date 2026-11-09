@@ -1,0 +1,17 @@
+# Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
+
+skill: "driver"
+description: "Behavioral evaluation scenario suite for the driver skill."
+
+scenarios:
+  - scenario_id: "driver_reads_its_skill"
+    description: "The agent follows the driver skill when asked."
+    eval_type: "deterministic"
+    system_prompt:
+      skill_file: "skills/driver/SKILL.md"
+    turns:
+      - user_input: "Run the waves overnight on a timer while I sleep."
+        assertions:
+          - type: "required_pattern"
+            pattern: "(?i)driver"
+            message: "The response must name the driver skill."

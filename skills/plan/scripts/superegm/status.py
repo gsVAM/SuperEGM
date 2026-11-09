@@ -1,12 +1,13 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the `ruling` event and a status line after a comment's deviation headings (U22); the board's one write per `wave` pass, `post_board` (U30).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the `ruling` event and a status line after a comment's deviation headings (U22); the board's one write per `wave` pass, `post_board` (U30); the tick's read, `tick_trigger` (U24).
 
 """superegm status: landed and ready sets, PRs, CI; refuses without a complete receipt.
 `--wait <s>` polls, reading only, and prints every unreported event line, or `deadline`. Under a `wave` card
 every pass, `--wait` included, also reads the tracking issue once and rewrites its board when the rows changed
 (`post_board`, the one GitHub write, its `board_changed_at` save and a failed write's journal line, spec 11.1)."""
 
+import json
 import re
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from superegm import apply
 from superegm.decision import edited_after_record, ruling_of
 from superegm.launch import load_launches, terminal
 from superegm.report import board_table
+from superegm.review import collaborator_role, read_threads, thread_severity  # bound here: a test patches status's names
 
 WRITES = frozenset(['state'])  # the store kinds this subcommand writes
 SKILLS = frozenset(['wave', 'integrate'])  # the skills whose card this subcommand accepts
@@ -156,8 +158,10 @@ def builder_facts(st, uid: str, comments: list) -> tuple:
     exit_file = Path(latest["result_file"] + ".exit")
     exit = [latest["round"], core.read_text(exit_file).strip()] if exit_file.is_file() else None
   since = latest["started_at"] if latest else ""
-  status = None
+  status, builders = None, builder_logins(st)
   for comment in comments:
+    if builders and (comment.get("user") or {}).get("login") not in builders:
+      continue  # a stranger's status line is no builder's (spec section 11.2); a store whose `launch` recorded no login reads all
     body = comment.get("body") or ""
     # a status comment opens with its status line or its `**Deviation**` headings (the orders' shapes); a status
     # line quoted below another comment's first line, such as an owner's ruling, is not one
@@ -237,6 +241,65 @@ def unit_events(uid: str, previous, current: dict) -> list:
       what = " ".join(part for part in (kind, subject, option) if part)
       lines.append(f"{uid} ruling by {login}: {what} (comment {cid})")
   return lines
+
+
+def builder_logins(st) -> set:
+  """The builder logins `launch` recorded on the handoff's cards (`builder[].login`)."""
+  folder = (st.root if st.legacy else st.base()) / "runcards"
+  logins = set()
+  for path in folder.glob("*.json"):
+    card = json.loads(core.read_text(path))
+    if card.get("handoff", st.handoff_id) == st.handoff_id:
+      logins |= {b.get("login") for b in card.get("builder") or [] if isinstance(b, dict)}
+  return logins - {None}
+
+
+def tick_trigger(handoff) -> str | None:
+  """What a tick's session would have to do (spec section 11.2), from one `status_pass` that saves nothing, in order:
+  the proof the tick applied to the handoff's newest tick launch, backed-off launches dropped first (`reboot <n>` for
+  one recorded `interrupted (reboot)`, `exit-file <card>` for one whose exit file exists and whose top-level `wave`
+  card is `interrupted`); the first event line against `state.status.units`, a `status word=` event by a login no card
+  records as a builder skipped; `<uid> ready` for a unit the read finds ready and the saved `ready` lacks; an
+  un-ingested thread above `low` on the latest posted round's head, by U21's reader, a stopped unit's threads skipped;
+  `first launch` while `state.status` is absent; else None, the nothing-to-do predicate."""
+  st, state = handoff.store, handoff.state
+  launches = [e for e in core.load_driver(st).get("launches") or [] if not core.backed_off(e)]
+  if launches:
+    last = launches[-1]
+    if last.get("status") == "interrupted (reboot)":
+      return f"reboot {last['round']}"
+    if Path(last["exit_file"]).is_file():
+      mine = [(p.stem, c) for p, c in core.top_wave_cards(st) if c.get("driver_card") == last["card"]]
+      if mine and mine[-1][1].get("interrupted_at"):
+        return f"exit-file {mine[-1][0]}"
+  saved = state.get("status")
+  previous = (saved or {}).get("units") or {}
+  summary, _ = core.status_pass(handoff, save=False)
+  builders = builder_logins(st)
+  for uid in handoff.graph.order:
+    for line in unit_events(uid, previous.get(uid), summary["units"][uid]):
+      if " status word=" in line and line.rsplit(" by=", 1)[-1] not in builders:
+        continue  # a `**Builder status:**` comment a stranger wrote buys no session
+      return line
+  if saved:
+    for uid in summary.get("ready") or []:
+      if uid not in (saved.get("ready") or []):
+        return f"{uid} ready"
+  repo, config = handoff.config["repo"], handoff.config
+  for uid in handoff.graph.order:
+    foreman = core.load_foreman(st, uid)
+    if foreman.get("stopped"):
+      continue  # the session skips a stopped unit's threads, so they buy no session
+    posted = [e for e in foreman.get("rounds") or [] if e.get("phase") == "posted" and e.get("head")]
+    pr = ((state.get("units") or {}).get(uid) or {}).get("pr") or {}
+    if not posted or not pr.get("number") or summary["units"][uid].get("landed"):
+      continue
+    head = max(posted, key=lambda e: e["round"])["head"]
+    threads = [t for t in read_threads(repo, pr["number"], set(foreman.get("ingested") or []))
+               if t.get("commit_id") == head and thread_severity(t, config, collaborator_role(repo, t["login"])) != "low"]
+    if threads:
+      return f"{uid} threads {len(threads)} un-ingested"
+  return None if saved else "first launch"
 
 
 def unit_view(handoff, uid):

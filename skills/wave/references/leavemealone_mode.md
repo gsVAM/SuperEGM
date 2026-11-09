@@ -1,5 +1,5 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
-Added by SuperEGM (gsVAM), 2026: the wave skill's leavemealone-mode wiring, moved out of the wave skill's SKILL.md (the owner's ruling: a 24K skill body is context bloat); the owner's-alone sentence (U23). -->
+Added by SuperEGM (gsVAM), 2026: the wave skill's leavemealone-mode wiring, moved out of the wave skill's SKILL.md (the owner's ruling: a 24K skill body is context bloat); the owner's-alone sentence (U23); the driver role's no-ask clauses (U24). -->
 
 # Leavemealone-mode
 
@@ -40,6 +40,6 @@ main conversation: a foreman never convenes the judges), and
 converged answer through its row as it converges (`decision rule … --by judges:<panel>`
 posts the `**Ruling:**` comment; `review settle … --judges`; `review rule … --judges`).
 An unconverged question leaves its decision pending: the batch ends as its step 7
-says, `report` lists it, and the owner rules by hand with `judges/<id>/verdict.json`
+says (under SUPEREGM_ROLE=driver it goes on, the unit `pending a decision`), `report` lists it, and the owner rules by hand with `judges/<id>/verdict.json`
 in front of them. A judges' `redesign` refused, a pending decision whose panel answered is the owner's alone
-(`judges/<panel>/verdict.json` converged on it): ask the owner, never the panel again. Nothing here changes who updates `<base>`: the owner alone.
+(`judges/<panel>/verdict.json` converged on it): ask the owner (under SUPEREGM_ROLE=driver an inbox line, never a question), never the panel again. Nothing here changes who updates `<base>`: the owner alone.

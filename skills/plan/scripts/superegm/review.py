@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest: the one review loop (spec section 8)."""
 
@@ -833,6 +833,26 @@ def rounds_of(st: core.Store, rid: str, review: dict) -> list[dict]:
   return rounds
 
 
+def stall_cards(st: core.Store, review: dict, runcard: str) -> set:
+  """The card set the stall rule reads (spec section 11.2): the given card alone when it records no `driver_card`;
+  a tick's session's card reads every `wave` card of the handoff, typed included, opened at or after the last
+  posted round's `posted_at` (every one when none is posted), every card that ran a round after that post (an
+  earlier session's rounds since its own post), and itself, so a tick's session is no fresh retry."""
+  path = st.path("runcards", runcard) if runcard else None
+  card = json.loads(core.read_text(path)) if path and path.is_file() else {}
+  if not card.get("driver_card"):
+    return {runcard}
+  rounds = core.load_foreman(st, review["artifact"])["rounds"] if review["kind"] == "head" else []
+  last = max((i for i, r in enumerate(rounds) if r.get("phase") == "posted" and r.get("posted_at")), default=None)
+  since = rounds[last]["posted_at"] if last is not None else None
+  cards = {runcard} | {r["runcard"] for r in (rounds[last + 1:] if last is not None else []) if r.get("runcard")}
+  for other in sorted(st.card_dir(runcard).glob("wave-*.json")):
+    data = json.loads(core.read_text(other))
+    if data.get("skill") == "wave" and (since is None or (data.get("opened_at") or "") >= since):
+      cards.add(other.stem)
+  return cards
+
+
 def evaluate(st: core.Store, review: dict, runcard: str) -> Status:
   """The one convergence rule (section 5), the cap and the stall rule (section 8); exit order 4, 0, 5, 2, 3."""
   rid = review_id(st, review["kind"], review["artifact"], review["cycle"])
@@ -857,7 +877,8 @@ def evaluate(st: core.Store, review: dict, runcard: str) -> Status:
   elif clean and not regressions and not moved:
     converged, converged_round = "yes", latest["round"]
   cap = "stop" in rulings or len(completed) >= CAP + rulings.count("continue")
-  stalled = len(rounds) >= 2 and all(r["what_ran"] != "completed" and r.get("runcard") == runcard for r in rounds[-2:])
+  cards = stall_cards(st, review, runcard)
+  stalled = len(rounds) >= 2 and all(r["what_ran"] != "completed" and r.get("runcard") in cards for r in rounds[-2:])
   sha = next((r["artifact_sha256"] for r in rounds if r["round"] == converged_round), None)
   code = 4 if fix_design else 0 if converged != "no" else 5 if stalled else 2 if cap else 3
   line = (f"round {latest['round'] if latest else 0}: {'clean' if clean else 'not clean'}, regressions {regressions}, "
