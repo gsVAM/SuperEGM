@@ -12,7 +12,7 @@ In leavemealone-mode each point's last line hands the question to the judge pane
 
 ## The owner's findings
 
-- `owner: <ids>` → `decision open` for the owner's findings: no relaunch, no slot; the inbox lists them. Write the findings (ids, claims) to a question file, each on a line of its own in the full finding-line shape `<fid> | <severity> | <location> | regression: <yes|no> | test-delta: <file>:<line> <kind>`, as the review posted it (only such a line is a finding of the decision: the owner's posted `<fid> allowed` and the file form below read no other, and a fid written only in a heading, a bullet or prose still offers `<fid> allowed` but leaves the owner's posted allowance refused), and run
+- `owner: <ids>` → `decision open` for the owner's findings: no relaunch, no slot; the inbox lists them. Write the findings (ids, claims) to a question file, each on a line of its own in the full finding-line shape `<fid> | <severity> | <location> | regression: <yes|no> | test-delta: <file>:<line> <kind>`, as the review posted it (`decision open` offers `<fid> allowed` only for a fid standing in the question as its own word, so a fid written only as `<fid>:`, `(<fid>)` or `<fid>,` offers none and the options fall back to `finding upheld; finding overruled`; the owner's posted `<fid> allowed` finds its decision by any line starting `<fid> |` or a `## Q<n> <fid> (` heading, as Decision point 1's; only the file form below needs the full shape), and run
   `python3 '<HELPER>' decision open --unit <U> --point 1 --question '<file>' --source 'review <head-review-id> round <n>' --runcard '<CARD>'`, the option the owner's `<fid> allowed — <reason>` (point 1's `<fid> finding overruled — <reason>` is read as the same).
   The owner rules it, no judge panel, in leavemealone-mode too. On `allowed` run
   `python3 '<HELPER>' review settle --review <head-review-id> --finding <fid> --disposition declined --owner --runcard '<CARD>'`; in leavemealone-mode only the owner's by-hand comment
@@ -21,7 +21,8 @@ In leavemealone-mode each point's last line hands the question to the judge pane
   `**Ruling:** test-delta <file> allowed — <reason>` rules every id of that file at once: record it with `--ruling 'test-delta <file> allowed' --posted <comment-id>`, then settle each id of that file with `review settle … --finding <fid> --disposition declined --owner --posted <comment-id>`, the same file comment's id for every one.
   Record it, then by `review status` as Decision point 1 proceeds. The owner may instead rule `<fid> finding upheld`, recorded the same way and the owner's alone; `<fid> finding upheld` below the cap is the `revise` row, the builder restoring it;
   at the cap (`review status` exit 2) it is Decision point 2 (`cap-reached`), never a relaunch.
-  `decision open` prints the options `<fid> allowed`, one per id; the owner posts one `**Ruling:** <fid> allowed — <reason>` comment per id, and the decision stays pending until each id is ruled.
+  `decision open` prints the options `<fid> allowed`, one per id; the owner posts one `**Ruling:** <fid> allowed — <reason>` comment per id, or the one file comment above for every id of its file, and the decision stays pending until each id is ruled.
+  A `review settle` that leaves a posted round's remainder owner-only prints `owner: <ids>` and rewrites the round's outcome to it: go to this row, not by `review status`.
   In leavemealone-mode an `owner: <ids>` decision convenes no panel: the owner rules it by hand and the inbox lists it until then.
 
 ## The three points
