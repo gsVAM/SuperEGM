@@ -446,8 +446,9 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   cfg = json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]
   result = s.path("launches", f"{UNIT}_r1_result.json")
   pairs = " ".join(f"{k}='{v.format(gh='/usr/local/bin/gh', login='builder-bot', email='1001+builder-bot@users.noreply.github.com')}'" for k, v in PAIRS)
-  assert line.startswith(f"cd '{wt}' && env -u GIT_ASKPASS -u SSH_ASKPASS -u GITHUB_TOKEN CLAUDE_CONFIG_DIR='{cfg['profile_dir']}' GH_TOKEN=\"$SUPEREGM_BUILDER_TOKEN\" SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{card}' {pairs} claude -p "), line
-  assert f" claude -p \"$(cat '{prompt_file}')\" --model '{cfg['model']}' --permission-mode '{cfg['permission_mode']}' --setting-sources user --allowedTools '" in line, line
+  assert line.startswith(f"cd '{wt}' && env -u GIT_ASKPASS -u SSH_ASKPASS -u GITHUB_TOKEN CLAUDE_CONFIG_DIR='{cfg['profile_dir']}' ENABLE_CLAUDEAI_MCP_SERVERS=false GH_TOKEN=\"$SUPEREGM_BUILDER_TOKEN\" SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{card}' {pairs} claude -p "), line
+  mcp_file = s.path("launches", f"{UNIT}_r1_mcp.json")
+  assert f" claude -p \"$(cat '{prompt_file}')\" --model '{cfg['model']}' --permission-mode '{cfg['permission_mode']}' --setting-sources user --mcp-config '{mcp_file}' --strict-mcp-config --allowedTools '" in line, line
   tools = line.split("--allowedTools '")[1].split("'")[0].split(",")
   assert tools == [t.replace("Bash(gh ", "Bash(/usr/local/bin/gh ") for t in cfg["allowed_tools"]] + [f"Bash(git push origin {branch}:*)"]
   assert line.endswith(f"' --output-format json > '{result}'; echo $? > '{result}.exit'")
@@ -645,8 +646,19 @@ def test_launch_builder_loads_the_builder_profile_settings_only():
   SessionStart hooks; the launched command carries `--setting-sources user`: the builder profile's settings alone (spec section 11)."""
   from superegm.launch_builder import command_line
   cfg = {"builder": {**DEFAULT_CONFIG["builder"], "profile_dir": "/p"}}
-  line = command_line(cfg, "/wt", "/prompt.md", "/result.json", "wave-0001", ["Read"], "/usr/local/bin/gh", "b", "b@x")
-  assert " --permission-mode 'acceptEdits' --setting-sources user --allowedTools 'Read' " in line, line
+  line = command_line(cfg, "/wt", "/prompt.md", "/result.json", "wave-0001", ["Read"], "/usr/local/bin/gh", "b", "b@x", [], "/m.json")
+  assert " --permission-mode 'acceptEdits' --setting-sources user --mcp-config '/m.json' --strict-mcp-config --allowedTools 'Read' " in line, line
+
+
+def test_command_line_carries_the_dirs_the_mcp_file_and_the_switch():
+  from superegm.launch_builder import command_line
+  cfg = {"builder": {**DEFAULT_CONFIG["builder"], "profile_dir": "/p"}}
+  call = lambda dirs, mcp, **kw: command_line(cfg, "/wt", "/prompt.md", "/result.json", "wave-0001", ["Read"], "/usr/local/bin/gh", "b", "b@x", dirs, mcp, **kw)
+  line = call(["/c/ponytail/5.3.3", "/c/x/1"], "/l/U07_r1_mcp.json")
+  assert " CLAUDE_CONFIG_DIR='/p' ENABLE_CLAUDEAI_MCP_SERVERS=false GH_TOKEN=" in line, line
+  assert " --setting-sources user --plugin-dir '/c/ponytail/5.3.3' --plugin-dir '/c/x/1' --mcp-config '/l/U07_r1_mcp.json' --strict-mcp-config --allowedTools 'Read' " in line, line
+  assert " --setting-sources user --mcp-config '/m.json' --strict-mcp-config --allowedTools 'Read' " in call([], "/m.json")
+  assert " --session-id 's' " in call([], "/m.json", session_id="s") and " --session-id" not in call([], "/m.json")
 
 
 @pytest.mark.parametrize("path", ["app", "account"])
