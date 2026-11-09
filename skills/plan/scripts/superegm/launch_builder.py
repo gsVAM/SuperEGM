@@ -59,6 +59,10 @@ def prepare(args, card):
   if problem:
     raise core.HandoffError(problem)
   dirs = plugin_dirs(builder_config["plugins"], elephant_profile())  # each listed plugin's user-scope directory, version and hooks
+  mcp_file = st.path("launches", f"{unit}_r{rnd}_mcp.json")
+  for value in (*(d["dir"] for d in dirs), mcp_file):  # command_line's quote check, before any worktree or store write
+    if "'" in str(value):
+      raise core.HandoffError(f"{value} holds a quote and cannot go on the command line")
   gh, app = tool("gh"), builder_config["app"]
   if app:  # the App path: the scripts bake openssl and the key variable; the bin directory reaches the unquotable allow-list
     openssl = tool("openssl")
@@ -98,7 +102,6 @@ def prepare(args, card):
   if app:
     write_bin(st, unit, rnd, config, openssl, gh)
   managed = managed_plugins(Path(config["builder"]["profile_dir"]).expanduser() / "plugins")
-  mcp_file = st.path("launches", f"{unit}_r{rnd}_mcp.json")
   core.atomic_write(mcp_file, json.dumps({"mcpServers": builder_config["mcp"]}, indent=2) + "\n")
   core.atomic_write(st.path("launches", f"{unit}_r{rnd}_plugins.json"),
                     json.dumps({"plugins": dirs, "managed": managed, "mcp": sorted(builder_config["mcp"])}, indent=2) + "\n")
@@ -249,9 +252,9 @@ def elephant_profile() -> Path:
 
 
 def hook_events(plugin_dir: Path) -> list:
-  """The sorted union of the `hooks` keys of the hook files the plugin's manifest names (a path or a list of paths
-  relative to its directory, or an inline object), of `hooks/hooks.json` when no manifest names one; an absent or
-  non-JSON file is ignored."""
+  """The sorted union of the `hooks` keys of the plugin's `hooks/hooks.json` (Claude Code loads it by default) and of
+  the hook files its manifest names besides (a path or a list of paths relative to its directory, or an inline
+  object); an absent or non-JSON file is ignored."""
   def load(path):
     try:
       data = json.loads(path.read_text(encoding="utf-8"))
@@ -260,10 +263,9 @@ def hook_events(plugin_dir: Path) -> list:
     return data
   manifest = load(plugin_dir / ".claude-plugin/plugin.json")
   named = manifest.get("hooks") if isinstance(manifest, dict) else None
-  if not named:
-    named = "./hooks/hooks.json"
+  named = named if isinstance(named, list) else [named] if named else []
   events = set()
-  for item in named if isinstance(named, list) else [named]:
+  for item in ["./hooks/hooks.json", *named]:
     data = item if isinstance(item, dict) else load(plugin_dir / item) if isinstance(item, str) else None
     hooks = data.get("hooks") if isinstance(data, dict) else None
     if isinstance(hooks, dict):
@@ -271,7 +273,7 @@ def hook_events(plugin_dir: Path) -> list:
   return sorted(events)
 
 
-def plugin_dirs(plugins: list, profile_dir: Path) -> list:
+def plugin_dirs(plugins: list, profile_dir: Path) -> list[dict]:
   """One `{id, version, dir, hooks}` per listed plugin id, in order, from the first `scope: user` entry of
   `<profile_dir>/plugins/installed_plugins.json` (enabled there or not; spec section 11.1); `dir` is its
   `installPath`, `hooks` its hook events. A listed id with no `user` entry is refused; `[]` reads no file."""
@@ -292,7 +294,7 @@ def plugin_dirs(plugins: list, profile_dir: Path) -> list:
   return found
 
 
-def profile_problem(profile_dir, plugins=(), elephant=None):
+def profile_problem(profile_dir: Path, plugins=(), elephant: Path | None = None) -> str | None:
   """Spec sections 4 and 11: the builder profile exists, holds no CLAUDE.md, no plugins (`plugins_held`), no
   hooks (a `settings.json` with a `hooks` key), no `skills/` or `commands/` directory, and a `settings.json` with
   `disableClaudeAiConnectors` exactly true (amendment 7); each listed plugin id has a `user` entry in the elephant

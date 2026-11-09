@@ -993,8 +993,9 @@ def load_config(repo_root: Path) -> dict:
     plugins = builder["plugins"]
     if not isinstance(plugins, list) or not all(isinstance(p, str) and re.fullmatch(r"[^@\s]+@[^@\s]+", p) for p in plugins):
       raise HandoffError(f"{path}: builder.plugins must be a list of <name>@<marketplace> ids")
-    if not isinstance(builder["mcp"], dict):
-      raise HandoffError(f"{path}: builder.mcp must be an object in mcpServers form")
+    mcp = builder["mcp"]  # the server map that goes under `mcpServers`, never a whole `.mcp.json`
+    if not isinstance(mcp, dict) or "mcpServers" in mcp or not all(isinstance(v, dict) for v in mcp.values()):
+      raise HandoffError(f"{path}: builder.mcp must be an object in mcpServers form: the server map, name to server object")
     cap = builder["max_subagent_calls"]
     if isinstance(cap, bool) or not isinstance(cap, int) or cap < 1:
       raise HandoffError("config: builder.max_subagent_calls: a positive integer")

@@ -8,7 +8,7 @@ through the `Agent` tool, read at the exit onto the launch entry as `subagent_ca
 the native child probe the integration probe checks. Defines no subcommand."""
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -62,9 +62,10 @@ def assert_child_probe(
 
 
 def events(path: Path) -> list:
-  """The JSON objects of one `.jsonl` file, a bad line skipped; `[]` for an absent or unreadable file."""
+  """The JSON objects of one `.jsonl` file, a bad line skipped; `[]` for an absent or unreadable file. Records are
+  split on newline alone: a JSON string may hold U+0085, U+2028 or U+2029, which `str.splitlines` would split on."""
   try:
-    lines = Path(path).read_text(encoding="utf-8").splitlines()
+    lines = Path(path).read_text(encoding="utf-8").split("\n")
   except (OSError, UnicodeDecodeError):
     return []
   found = []
@@ -79,21 +80,37 @@ def events(path: Path) -> list:
 
 
 def stamp(event: dict):
-  """An event's `timestamp` as a datetime, or None."""
+  """An event's `timestamp` as an aware datetime (a naive one read as UTC), or None."""
   try:
-    return datetime.fromisoformat(str(event["timestamp"]).replace("Z", "+00:00"))
-  except (KeyError, ValueError):
+    when = datetime.fromisoformat(str(event["timestamp"]).replace("Z", "+00:00"))
+  except (KeyError, TypeError, ValueError):
     return None
+  return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+
+
+def blocks(event: dict) -> list:
+  """The content blocks of an event's message that are objects; `[]` when the message or its content is not."""
+  message = event.get("message")
+  content = message.get("content") if isinstance(message, dict) else None
+  return [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
 
 
 def agent_calls(transcript: list) -> list:
-  """The `input` of every assistant `tool_use` block named `Agent`, in the transcript's order."""
+  """`(tool_use id, input, agent id)` for every assistant `tool_use` block named `Agent`, in the transcript's
+  order; the agent id is the one the paired `tool_result` event's `toolUseResult.agentId` names, else None."""
+  agents = {}
+  for event in transcript:
+    result = event.get("toolUseResult") if event.get("type") == "user" else None
+    agent = result.get("agentId") if isinstance(result, dict) else None
+    for block in blocks(event) if isinstance(agent, str) else []:
+      if block.get("type") == "tool_result" and isinstance(block.get("tool_use_id"), str):
+        agents[block["tool_use_id"]] = agent
   calls = []
   for event in transcript:
-    content = (event.get("message") or {}).get("content") if event.get("type") == "assistant" else None
-    for block in content if isinstance(content, list) else []:
-      if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name") == "Agent":
-        calls.append(block.get("input") if isinstance(block.get("input"), dict) else {})
+    for block in blocks(event) if event.get("type") == "assistant" else []:
+      if block.get("type") == "tool_use" and block.get("name") == "Agent":
+        tid = block.get("id") if isinstance(block.get("id"), str) else None
+        calls.append((tid, block.get("input") if isinstance(block.get("input"), dict) else {}, agents.get(tid)))
   return calls
 
 
@@ -102,26 +119,28 @@ def subagent_calls(profile_dir: Path, session_id: str) -> dict:
   (a uuid4 needs no slug), one call per `Agent` tool use with `role` (`general-purpose` when absent), `description`
   (`""` when absent), `model` (else the paired child's first `message.model`, else None) and `duration_s` (the
   paired child's last timestamp minus its first, to one decimal; `0.0` unpaired). The children are
-  `<session id>/subagents/agent-*.jsonl` beside the transcript, paired with the calls in order of first timestamp.
-  No transcript: no calls."""
+  `<session id>/subagents/agent-*.jsonl` beside the transcript: a call takes the child `agent-<id>.jsonl` its
+  result's `agentId` or its own tool-use id names, and the calls linked to none take the children left over, in
+  order of first timestamp. No transcript: no calls."""
   found = sorted(Path(profile_dir).glob(f"projects/*/{session_id}.jsonl"))
   if not found:
     return {"count": 0, "calls": []}
   transcript = found[0]
-  children = []
+  children = {}
   for path in (transcript.parent / session_id / "subagents").glob("agent-*.jsonl"):
     child = events(path)
-    times = [t for t in map(stamp, child) if t is not None]
-    children.append((min(times) if times else None, str(path), child, times))
-  children.sort(key=lambda c: (c[0] is None, c[0] or datetime.min, c[1]))
+    children[path.stem[len("agent-"):]] = (child, sorted(t for t in map(stamp, child) if t is not None))
+  given = agent_calls(events(transcript))
+  linked = [next((k for k in (agent, tid) if k in children), None) for tid, _, agent in given]
+  spare = sorted((k for k in children if k not in linked), key=lambda k: (not children[k][1], children[k][1][:1], k))
   calls = []
-  for n, given in enumerate(agent_calls(events(transcript))):
-    child = children[n] if n < len(children) else None
-    model = given.get("model")
-    if not model and child:
-      model = next((e["message"]["model"] for e in child[2] if isinstance(e.get("message"), dict) and e["message"].get("model")), None)
-    times = child[3] if child else []
-    duration = round((max(times) - min(times)).total_seconds(), 1) if times else 0.0
-    calls.append({"role": given.get("subagent_type") or "general-purpose", "description": given.get("description") or "",
-                  "model": model or None, "duration_s": duration})
+  for (_, call, _), key in zip(given, linked):
+    key = key if key is not None else (spare.pop(0) if spare else None)
+    child, times = children[key] if key is not None else ([], [])
+    model = call.get("model")
+    if not model:
+      model = next((e["message"]["model"] for e in child if isinstance(e.get("message"), dict) and e["message"].get("model")), None)
+    duration = round((times[-1] - times[0]).total_seconds(), 1) if times else 0.0
+    calls.append({"role": call.get("subagent_type") or "general-purpose", "description": call.get("description") or "",
+                  "model": model if isinstance(model, str) and model else None, "duration_s": duration})
   return {"count": len(calls), "calls": calls}

@@ -134,7 +134,7 @@ def seed(world, units=(UNIT,), max_in_flight=5, workflow="on: [push, pull_reques
   spec = next(repo.glob("docs/**/*.md")).resolve()
   profile = repo.parent / "profile"; profile.mkdir(exist_ok=True)
   (profile / "settings.json").write_text(json.dumps({"disableClaudeAiConnectors": True, "syncClaudeAiPlugins": False}), encoding="utf-8")
-  cfg =json.loads((repo / ".superegm/config.json").read_text(encoding="utf-8"))
+  cfg = json.loads((repo / ".superegm/config.json").read_text(encoding="utf-8"))
   cfg["max_in_flight"], cfg["builder"], cfg["owners"] = max_in_flight, {**DEFAULT_CONFIG["builder"], "profile_dir": str(profile)}, ["owner"]
   (repo / ".superegm/config.json").write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
   (repo / ".github/workflows").mkdir(parents=True, exist_ok=True)

@@ -146,6 +146,92 @@ def test_record_launch_reads_the_subagent_calls_from_the_transcript(world, monke
   assert launches_of(s)[0]["subagent_calls"] == expect and Path(entry["result_file"]).read_text(encoding="utf-8") == "{}\n"
 
 
+def jsonl(path, items):
+  """`items` as a `.jsonl` file at `path`, a dict as its JSON line, a string written as is."""
+  path.parent.mkdir(parents=True, exist_ok=True)
+  path.write_text("".join((json.dumps(i, ensure_ascii=False) if isinstance(i, dict) else i) + "\n" for i in items), encoding="utf-8")
+
+
+def agent(tid, **given):
+  return {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": tid, "name": "Agent", "input": {"prompt": "p", **given}}]}}
+
+
+def test_subagent_calls_pairs_by_id_with_the_defaults_and_skips_bad_lines(tmp_path):
+  """Round 2 (astra-1-3, astra-1-4, change-review-1-1, change-review-1-3): a call takes the child its result's
+  `agentId` or its own id names, wherever that child sorts; an unlinked call takes a spare child, else none;
+  a prompt holding U+2028 stays one record; a naive timestamp reads as UTC; a non-object message is skipped."""
+  from superegm import traces
+  sid, folder = str(uuid.uuid4()), tmp_path / "p/projects/-wt"
+  jsonl(folder / f"{sid}.jsonl", [
+    agent("b1", prompt="one two\u0085three"), "not json", {"type": "assistant", "message": "text"},
+    agent("b2", subagent_type="Explore", description="d", model="haiku"),
+    {"type": "user", "toolUseResult": {"agentId": "x2"}, "message": {"content": [{"type": "tool_result", "tool_use_id": "b2"}]}},
+    agent("b3")])
+  jsonl(folder / sid / "subagents/agent-b1.jsonl", [{"timestamp": "2026-11-06T10:00:01Z"}, {"timestamp": "2026-11-06T10:00:03"},
+                                                   {"timestamp": "2026-11-06T10:00:05Z", "message": {"model": "claude-sonnet-4-5"}}])
+  jsonl(folder / sid / "subagents/agent-x2.jsonl", [{"timestamp": "2026-11-06T09:59:58Z"}, {"timestamp": "2026-11-06T10:00:00Z"}])
+  assert traces.subagent_calls(tmp_path / "p", sid) == {"count": 3, "calls": [
+    {"role": "general-purpose", "description": "", "model": "claude-sonnet-4-5", "duration_s": 4.0},
+    {"role": "Explore", "description": "d", "model": "haiku", "duration_s": 2.0},
+    {"role": "general-purpose", "description": "", "model": None, "duration_s": 0.0}]}
+  other = str(uuid.uuid4())
+  jsonl(folder / f"{other}.jsonl", [agent("q1")])
+  jsonl(folder / other / "subagents/agent-zz.jsonl", [{"timestamp": "2026-11-06T10:00:00Z"}, {"timestamp": "2026-11-06T10:00:01.25Z"}])
+  assert traces.subagent_calls(tmp_path / "p", other)["calls"] == [{"role": "general-purpose", "description": "", "model": None, "duration_s": 1.2}]
+
+
+def test_record_launch_records_no_calls_for_an_entry_without_a_session_id(world, monkeypatch):
+  """Round 2 (change-review-1-2): a launch entry written before U27 carries no `session_id`: the no-file value."""
+  from superegm import launch_builder
+  from test_builders import seed, launches_of, UNIT
+  s, card, _, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder"); monkeypatch.setattr(launch_builder, "start_detached", lambda command, log, env: 4242)
+  assert world.run("launch", "--runcard", card)[0] == 0 and world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)[0] == 0
+  entries = launches_of(s)
+  del entries[0]["session_id"]
+  s.path("launches", UNIT).write_text(json.dumps({"launches": entries}), encoding="utf-8")
+  Path(entries[0]["result_file"] + ".exit").write_text("0\n", encoding="utf-8")
+  assert world.run("record-launch", "--unit", UNIT, "--exit", 0, "--runcard", card)[0] == 0
+  assert launches_of(s)[0]["subagent_calls"] == NONE and launches_of(s)[0]["status"] == "exited 0"
+
+
+@pytest.mark.parametrize("named, expect", [
+  ("./hooks/extra.json", ["PreToolUse", "SessionStart"]), ({"hooks": {"Stop": []}}, ["SessionStart", "Stop"]), ([], ["SessionStart"])])
+def test_hook_events_reads_hooks_json_and_the_manifest_s_string_or_inline_object(tmp_path, monkeypatch, named, expect):
+  """Round 2 (change-review-1-4, codebase-details-1-5): `hooks/hooks.json` always, the manifest's files besides."""
+  home, d = elephant(tmp_path, monkeypatch, ["user"], {"hooks/hooks.json": ["SessionStart"], "hooks/extra.json": ["PreToolUse"]})
+  (d / ".claude-plugin").mkdir()
+  (d / ".claude-plugin/plugin.json").write_text(json.dumps({"hooks": named}), encoding="utf-8")
+  assert plugin_dirs([PONY], home)[0]["hooks"] == expect
+
+
+@pytest.mark.parametrize("mcp", [{"mcpServers": MCP}, {"context7": "https://mcp.context7.com/mcp"}])
+def test_builder_mcp_is_the_server_map_alone(world, mcp):
+  """Round 2 (codebase-details-1-6): a whole `.mcp.json` or a non-object server is refused."""
+  builder = {k: v for k, v in superegm.DEFAULT_CONFIG["builder"].items() if k not in ("plugins", "mcp", "max_subagent_calls")}
+  set_config(world, repo=REPO, builder={**builder, "mcp": mcp})
+  with pytest.raises(superegm.HandoffError, match=re.escape("builder.mcp must be an object in mcpServers form")):
+    superegm.load_config(world.repo)
+
+
+def test_launch_builder_refuses_a_quoted_plugin_dir_before_any_write(world, monkeypatch, tmp_path):
+  """Round 2 (change-review-1-5): a plugin directory holding a quote is refused before the worktree and the files."""
+  from superegm import launch_builder
+  from test_builders import seed, configure, UNIT
+  s, card, _, _ = seed(world)
+  home, _ = elephant(tmp_path, monkeypatch, ["user"])
+  quoted = tmp_path / "it's"; quoted.mkdir()
+  (home / "plugins/installed_plugins.json").write_text(json.dumps(
+    {"version": 2, "plugins": {PONY: [{"scope": "user", "version": "5.3.3", "installPath": str(quoted)}]}}), encoding="utf-8")
+  cfg = json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]
+  configure(world, builder={**cfg, "plugins": [PONY]})
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder"); monkeypatch.setattr(launch_builder, "start_detached", lambda command, log, env: 4242)
+  assert world.run("launch", "--runcard", card)[0] == 0
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)
+  assert code == 1 and "holds a quote" in out and not s.path("worktrees", UNIT).exists(), out
+  assert not s.path("launches", f"{UNIT}_r1_mcp.json").exists() and not s.path("launches", f"{UNIT}_r1_plugins.json").exists()
+
+
 @pytest.mark.parametrize("tools, present, absent", [
   (["Read"], ["Your skills, named by your allow-list: none. You have no subagents: a builder never spawns."], ["Agent tool", "{{"]),
   (["Read", "Agent"], ["at most 12 calls in this launch: a budget, not a gate"], ["You have no subagents", "{{"])])

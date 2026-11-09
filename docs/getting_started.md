@@ -43,7 +43,11 @@ the first typed skill runs it when the file is missing. The steps:
    `--plugin-dir <dir>`, and a listed plugin's hooks, skills and bundled servers come with it.
    `builder.mcp` is an object in `mcpServers` form, a secret by `${VAR}` reference, written to
    `launches/<unit>_r<n>_mcp.json` at each launch and passed by
-   `--mcp-config <file> --strict-mcp-config`, so no other MCP configuration loads. Each launch
+   `--mcp-config <file> --strict-mcp-config`, so no other MCP configuration loads. `builder.mcp` is
+   the server map that goes under the file's `mcpServers` key (name to server object), never a whole
+   `.mcp.json`. Whether `--strict-mcp-config` keeps a listed plugin's bundled servers is not yet
+   probed (decision D1 of U27: the default reads that they come with the plugin, your hand run
+   settles it); name in `builder.mcp` a bundled server a builder must reach. Each launch
    records the set in `launches/<unit>_r<n>_plugins.json`: each plugin's id, version, directory
    and hook events, the managed plugins and the MCP file's server names. A plugin's skills are
    invoked only through the allow-list's `Skill(<name>)` rules, its servers' tools through

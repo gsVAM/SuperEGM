@@ -47,9 +47,9 @@ def record(args):
     raise core.HandoffError(f"the exit file of {unit} launch {latest['round']} says {held}, not {args.exit}")
   latest["status"] = f"exited {args.exit}"
   # U27: the platform's default subagents the session spawned, from its transcript under the builder profile;
-  # a pre-U27 entry, without `session_id`, records the no-file value
-  config = core.Handoff(*core.locate(args)).config
-  profile = Path(config["builder"]["profile_dir"]).expanduser()
+  # a pre-U27 entry, without `session_id`, records the no-file value; the profile from the config the store
+  # loaded (`load_config` expands it), so a plan or spec edited during the launch cannot stop the exit's record
+  profile = Path(st.config["builder"]["profile_dir"])
   latest["subagent_calls"] = subagent_calls(profile, latest["session_id"]) if latest.get("session_id") else {"count": 0, "calls": []}
   line = f"{unit} launch {latest['round']} exited {args.exit}"
   core.atomic_write(st.path("launches", unit), {"launches": launches})

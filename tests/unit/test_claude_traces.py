@@ -12,10 +12,8 @@ import pytest
 
 from superegm.traces import trace_directory, assert_child_probe
 
-ROOT = Path(__file__).resolve().parents[2]
 
-
-@pytest.mark.parametrize("config_mode", ["unset", "default", "custom"])
+@pytest.mark.parametrize("config_mode", ["default", "custom"])
 @pytest.mark.parametrize(
     ("workspace_path", "project_name"),
     [
@@ -24,18 +22,11 @@ ROOT = Path(__file__).resolve().parents[2]
     ],
 )
 def test_trace_directory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config_mode: str,
+    tmp_path: Path, config_mode: str,
     workspace_path: PurePosixPath | PureWindowsPath, project_name: str,
 ) -> None:
-  monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
-  config = tmp_path / "home" / ".claude"
-  if config_mode == "unset":
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
-  else:
-    if config_mode == "custom":
-      config = tmp_path / "custom config"
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
-
+  # the profile is the caller's argument (U27): `elephant_profile()`'s env-or-home fallback is tested in test_u27.py
+  config = tmp_path / ("home/.claude" if config_mode == "default" else "custom config")
   workspace = Mock(spec=Path)
   workspace.resolve.return_value = workspace_path
   assert trace_directory(config, workspace) == (

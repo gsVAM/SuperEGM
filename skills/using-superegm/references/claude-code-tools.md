@@ -44,5 +44,8 @@ relies on, from the live probes; do not re-derive them.
   `--plugin-dir <dir>` loads a plugin for the session (its hooks, skills and bundled servers),
   enabled in the profile or not, one flag per directory.
   `--mcp-config <file> --strict-mcp-config` loads that file's servers and no other MCP configuration;
+  unprobed: whether the flag keeps a `--plugin-dir` plugin's bundled servers (U27's D1, its default
+  that they come with the plugin, the owner's hand run to settle; until then name in the MCP file a
+  bundled server a builder must reach);
   `ENABLE_CLAUDEAI_MCP_SERVERS=false` keeps the account's connectors out beside the profile's
   `disableClaudeAiConnectors`.

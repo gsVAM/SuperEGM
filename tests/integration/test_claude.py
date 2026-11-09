@@ -18,6 +18,7 @@ import pytest
 root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(root / "skills/plan/scripts"))
 from superegm.traces import trace_directory, assert_child_probe
+from superegm.launch_builder import elephant_profile
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("EGM_CLAUDE_LIVE") != "1",
@@ -27,7 +28,6 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.mark.parametrize("deny_persona", [False, True], ids=["scoped-read", "denied-persona"])
 def test_native_reviewer_isolation(tmp_path: Path, deny_persona: bool) -> None:
-  root = Path(__file__).resolve().parents[2]
   build = runpy.run_path(str(root / "scripts/pack_plugin.py"))["build"]
   plugin, _ = build(root, tmp_path / "runtime")
   workspace = tmp_path / "workspace"
@@ -76,7 +76,7 @@ Do not read other plugins or logs, use MCP, or modify files.
   )
   assert result.returncode == 0, result.stderr
   assert not json.loads(result.stdout).get("is_error")
-  traces = trace_directory(Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude"), workspace)
+  traces = trace_directory(elephant_profile(), workspace)
   parent = [json.loads(line) for line in
             (traces / f"{session}.jsonl").read_text().split("\n") if line.strip()]
   calls, successful = {}, set()

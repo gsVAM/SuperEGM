@@ -18,7 +18,7 @@ By hand, before the first typed skill runs:
    `/login`, exit) and a settings.json with "syncClaudeAiPlugins": false and "disableClaudeAiConnectors": true,
    written before the login. A plugin the builder is to load is named in builder.plugins (its <name>@<marketplace>
    id, installed once into this session's profile, disabled there) and passed by --plugin-dir per launch; the
-   builder's MCP servers go in builder.mcp (mcpServers form, a secret by ${{VAR}} reference, never its value),
+   builder's MCP servers go in builder.mcp (mcpServers form: the server map under that key, a secret by ${{VAR}} reference, never its value),
    passed by --mcp-config --strict-mcp-config.
 3. Set the branch protection of spec section 11 on `{base}`: updates restricted to the logins in
    config.owners (a classic restriction) or, by a ruleset, with no bypass for the builder account's
