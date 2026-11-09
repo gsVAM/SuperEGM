@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3/5
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
-# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35).
+# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31).
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
@@ -16,6 +16,7 @@ from pathlib import Path
 
 import superegm as core
 from superegm.apply import body_file
+from superegm.launch import load_launches
 from superegm.report import pending_decisions, unit_view
 from superegm import review
 from superegm.review import Refusal
@@ -308,21 +309,54 @@ def open_decision(args) -> int:
   qid, now = f"q{len(data['decisions']) + 1}", core.now_iso()
   data["decisions"].append({"id": qid, "point": args.point, "source": args.source, "head": head,
                             "question": question, "asked_at": now, "options": options})
-  used = any(r["ruling"].partition(" — ")[0].strip() == "relaunch" for r in data["rulings"])
-  ruled = options == RELAUNCH and used
-  if ruled:
+  reason = stop_reason(data, load_launches(st, unit), args.source) if options == RELAUNCH else None
+  if reason:
     data["rulings"].append({"decision": qid, "ruling": "stop the unit", "by": "superegm",
-                            "reason": "relaunch already used", "posted": None, "posted_at": now})
+                            "reason": reason, "posted": None, "posted_at": now})
   core.save_foreman(st, unit, data)
   core.journal(st, f"Decision {qid} (point {args.point}, {args.source}): {unit}")
   print(qid)
-  if ruled:
-    core.journal(st, f"Ruling (superegm): {unit} {qid} stop the unit — relaunch already used")
+  if reason:
+    core.journal(st, f"Ruling (superegm): {unit} {qid} stop the unit — {reason}")
     stop_unit(st, unit, "superegm", "stop the unit", state["units"][unit]["number"], now)
-    print("ruled: stop the unit (relaunch already used)")
+    print(f"ruled: stop the unit ({reason})")
   else:
     print("options: " + "; ".join(options))
   return 0
+
+
+def no_commit(entry) -> bool:
+  """U31: a launch with no commit of its own: an `exited …` or `exited (stalled)` entry whose `last_commit_at` is
+  absent or None (an `interrupted` or `running` entry, or none, is not)."""
+  return bool(entry) and str(entry.get("status") or "").startswith("exited") and not entry.get("last_commit_at")
+
+
+def launch_of(launches: list, source):
+  """The entry a `launch <n>` source names, else None."""
+  words = str(source or "").split()
+  if len(words) == 2 and words[0] == "launch" and words[1].isdigit():
+    return next((e for e in launches if e.get("round") == int(words[1])), None)
+  return None
+
+
+def stop_reason(foreman: dict, launches: list, source: str):
+  """The carve-out (spec section 11.1, U31): a relaunch question stopped without asking when a `relaunch` was
+  already used (ruled on a `comment`, a `closed`, or a `launch <n>` whose entry has a commit of its own; a
+  host-caused stall spends none), or when the source launch and an earlier one both have no commit of their own."""
+  sources = {d["id"]: str(d.get("source") or "") for d in foreman.get("decisions") or []}
+
+  def spends(r) -> bool:
+    src = sources.get(r.get("decision"))
+    if src is None or src.startswith(("comment", "closed")):
+      return True
+    return src.startswith("launch") and not no_commit(launch_of(launches, src))
+
+  if any(r["ruling"].partition(" — ")[0].strip() == "relaunch" and spends(r) for r in foreman.get("rulings") or []):
+    return "relaunch already used"
+  entry = launch_of(launches, source)
+  if no_commit(entry) and any(no_commit(e) for e in launches if (e.get("round") or 0) < entry["round"]):
+    return "second launch with no commit of its own"
+  return None
 
 
 def options_for(point: int, source: str, question: str, foreman: dict, head: str) -> list:
