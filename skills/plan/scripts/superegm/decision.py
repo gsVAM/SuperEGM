@@ -525,14 +525,16 @@ def rule_file(st, unit: str, data: dict, args, comment: dict, found, decisions: 
   if args.ruling.partition(" — ")[0].strip() != said:
     raise Refusal(f"decision: comment {args.posted} rules {said}, not {args.ruling.partition(' — ')[0].strip()}")
   ids = {d["id"] for d in decisions}
-  targets = [(d, fid) for d, fid in file_targets(data, found.subject) if d["id"] in ids]
+  targets = [(d, fid) for d, fid in file_targets(data, found.subject, st) if d["id"] in ids]
   if not targets:
     dropped(st, args, f"comment {args.posted} names no open finding of {found.subject}")
   posted_at = comment.get("updated_at") or comment.get("created_at") or core.now_iso()
   entry = lambda d, text: {"decision": d["id"], "ruling": text, "by": args.by, "reason": found.reason or None,
                            "posted": f"comment {args.posted}", "posted_at": posted_at}
   # the whole-file allowance itself first, so `recorded_rulings` keeps it after the comment is edited or deleted
-  data["rulings"] += [entry(targets[0][0], said)] + [entry(d, f"{fid} allowed") for d, fid in targets]
+  # a contest copy's decision (options upheld or overruled) takes the allowance as `<fid> finding overruled`, as `rule` does
+  allowed = lambda d, fid: f"{fid} allowed" if f"{fid} allowed" in (d.get("options") or []) else f"{fid} finding overruled"
+  data["rulings"] += [entry(targets[0][0], said)] + [entry(d, allowed(d, fid)) for d, fid in targets]
   core.save_foreman(st, unit, data)
   for d, fid in targets:
     core.journal(st, f"Ruling ({args.by}, comment {args.posted}): {unit} {d['id']} allowed-file {found.subject} {fid}"
@@ -679,8 +681,8 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int, mode=None)
       return comment, found, [decision] + [d for d in pending_decisions(foreman) if d["id"] != decision["id"]]
     return comment, found, [decision]
   pending = pending_decisions(foreman)
-  if found.kind == "allowed-file":  # every open owner-only decision with an entry of that file (`rule` records each fid)
-    decisions = list({d["id"]: d for d, _ in file_targets(foreman, found.subject)}.values())
+  if found.kind == "allowed-file":  # every open decision with an entry of that file, a contest copy's too (`rule` records each fid)
+    decisions = list({d["id"]: d for d, _ in file_targets(foreman, found.subject, store)}.values())
   elif found.kind == "redesign":
     decisions = pending if any(d["point"] in points for d in pending) else []
   elif found.kind in ("upheld", "overruled", "allowed"):
@@ -733,17 +735,31 @@ def fid_decisions(foreman: dict, fid: str, strict: bool = False) -> list:
   return named or ([] if strict else [d for d in point1 if not asked(d)][-1:])
 
 
-def file_targets(foreman: dict, path: str) -> list:
-  """`(decision, fid)` for every unruled `test-delta:` finding of `path` an open `owner: <ids>` decision asks about
-  (each option `<fid> allowed`): what `**Ruling:** test-delta <path> allowed — <reason>` rules at once (spec section 11.1)."""
+def file_targets(foreman: dict, path: str, st=None) -> list:
+  """`(decision, fid)` for every unruled `test-delta:` finding of `path` an open point-1 decision asks about: an
+  `owner: <ids>` decision's (each option `<fid> allowed`) by its finding line's claim, and any other's contest copy
+  (`contested <fid>: …`) whose original, reached down the chain in the decision's review (`st`'s record,
+  `review.delta_claim`), is one: what `**Ruling:** test-delta <path> allowed — <reason>` rules at once (spec
+  sections 8 and 11.1: every open decision whose `test_delta` entry is in that file)."""
   line = re.compile(rf"^({FID_PAT})\s*\|.*\|\s*test-delta: {re.escape(path)}:\d+ ", re.M)
   out = []
   for d in pending_decisions(foreman):
     options = d.get("options") or []
-    if d["point"] != 1 or not options or not all(o.endswith(" allowed") for o in options):
+    if d["point"] != 1 or not options:
       continue
-    out += [(d, fid) for fid in line.findall(d.get("question") or "")
-            if f"{fid} allowed" in options and not fid_ruled(foreman, fid)]
+    if all(o.endswith(" allowed") for o in options):
+      out += [(d, fid) for fid in line.findall(d.get("question") or "")
+              if f"{fid} allowed" in options and not fid_ruled(foreman, fid)]
+    elif st is not None and str(d.get("source") or "").startswith("review "):
+      rid = d["source"].split()[1]
+      for fid in dict.fromkeys(a or b for a, b in FINDING_LINE_RE.findall(d.get("question") or "")):
+        try:
+          claim = review.locate_finding(st, rid, fid)[3]["claim"]
+        except core.HandoffError:
+          continue
+        if (claim != (original := review.delta_claim(st, rid, claim)) and original.startswith(f"test-delta: {path}:")
+            and not fid_ruled(foreman, fid)):
+          out.append((d, fid))
   return out
 
 

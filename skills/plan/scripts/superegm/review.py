@@ -657,19 +657,35 @@ def check_settle(st: core.Store, rid: str, review: dict, card: dict, args, fid: 
     if card["mode"] == "leavemealone" and not args.judges:
       if not (args.owner and getattr(args, "posted", None)):
         raise core.HandoffError(f"review settle: {fid} is {finding['severity']}: --judges required in leavemealone-mode")
-      verify_owner_ruling(st.config, finding, args.posted)
+      verify_owner_ruling(st.config, finding, args.posted, delta_claim(st, rid, finding["claim"]))
     if card["mode"] != "leavemealone" and not args.owner:
       raise core.HandoffError(f"review settle: {fid} is {finding['severity']}: --owner required in normal mode")
   return n
 
 
-def verify_owner_ruling(config: dict, finding: dict, comment_id: str) -> None:
+def delta_claim(st: core.Store, rid: str, claim: str) -> str:
+  """The claim a contest's copy (`contested <fid>: …`, `unreplied <fid>: …`) stands for, followed down the chain to
+  the original finding of this review (bounded; an id no round holds ends the walk): what the owner's whole-file
+  `test-delta <file> allowed` reads on a contested `test-delta:` finding (U25)."""
+  for _ in range(32):
+    m = re.match(r"(?:contested|unreplied) (\S+):", claim)
+    if not m:
+      break
+    try:
+      claim = locate_finding(st, rid, m.group(1))[3]["claim"]
+    except core.HandoffError:
+      break
+  return claim
+
+
+def verify_owner_ruling(config: dict, finding: dict, comment_id: str, original: str = None) -> None:
   """In leavemealone the owner's word still counts, by hand (1.1.3; U22 reads such comments itself): one GitHub
   read of the comment, by a `config.owners` login, carrying a ruling `ruling_of` reads: `<fid> finding overruled`,
   or `<fid> allowed` on a `test-delta:` finding, or `test-delta <file> allowed` on a `test-delta:` finding of that
-  file (U25)."""
+  file or on a contest's copy whose `original` claim (`delta_claim`'s) is one (U25)."""
   from superegm.decision import ruling_of  # inside: `decision` imports `review`
   fid, claim = finding["id"], finding["claim"]
+  original = claim if original is None else original
   comment = core.gh_json(["api", f"repos/{config['repo']}/issues/comments/{comment_id}"]) or {}
   author = (comment.get("user") or {}).get("login")
   if author not in (config.get("owners") or []):
@@ -677,7 +693,7 @@ def verify_owner_ruling(config: dict, finding: dict, comment_id: str) -> None:
   found = ruling_of({**comment, "id": comment.get("id") or comment_id}, config.get("owners") or [])
   delta = claim.startswith("test-delta:")
   if not (found and ((found.subject == fid and (found.kind == "overruled" or (found.kind == "allowed" and delta)))
-                     or (found.kind == "allowed-file" and delta and claim.startswith(f"test-delta: {found.subject}:")))):
+                     or (found.kind == "allowed-file" and original.startswith(f"test-delta: {found.subject}:")))):
     raise core.HandoffError(f"review settle: comment {comment_id} does not rule {fid} overruled")
 
 

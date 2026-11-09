@@ -468,6 +468,39 @@ def test_the_owners_file_allowance_settles_a_test_delta_finding_of_that_file(mon
       call()
 
 
+def test_a_file_allowance_closes_the_decision_on_a_contested_test_delta_copy(world):
+  """Round 4 (PR #103 review, foreman-4-1, astra-3-6, astra-4-2; spec lines 1918-1919): the owner's one `**Ruling:**
+  test-delta <file> allowed` names an open decision on a contest copy of a `test-delta:` finding of that file, reached
+  down the contest chain: `decision rule` records it there, and `review settle --owner --posted` takes it on the copy."""
+  spec, cid, rid = opened(world, "head", mode="leavemealone")
+  set_config(world, repo=REPO, owners=["owner"])
+  head_round(world, 1, "posted", cid, "revise")
+  assert record(world, rid, 1, "foreman", ["foreman-1-1 | high | tests/unit/test_q.py:3 | regression: no | test-delta: tests/unit/test_q.py:3 removed"], cid, sha=A)[0] == 0
+  head_round(world, 2, "posted", cid, "contested: foreman-2-1")
+  copy = "foreman-2-1 | high | pr #70 comment 5 | regression: no | contested foreman-1-1: the assertion moved to test_r"
+  assert record(world, rid, 2, "foreman", [copy], cid, sha="b" * 64)[0] == 0
+  served = {"id": 13, "user": {"login": "owner"}, "body": "**Ruling:** test-delta tests/unit/test_q.py allowed — by design\n",
+            "created_at": "2026-11-09T10:00:00Z", "issue_url": f"https://api.github.com/repos/{REPO}/issues/7"}
+  world.gh.extend("api", lambda args, cwd, token=None: world.gh.ok(served) if world.gh.endpoint_of(args) == f"repos/{REPO}/issues/comments/13" else world.gh.do_api(args))
+  state = hstore(world).path("state")
+  data = json.loads(state.read_text(encoding="utf-8")) if state.exists() else {}
+  data.setdefault("units", {}).setdefault("U07", {})["number"] = 7  # the unit's issue, the comment's `issue_url`
+  atomic_write(state, data)
+  path = world.repo.parent / "q.md"
+  path.write_text(f"## Q1 foreman-2-1 (high)\n{copy}\n", encoding="utf-8")
+  code, out = world.run("decision", "open", "--unit", "U07", "--point", "1", "--question", str(path), "--source", f"review {rid} round 2", "--runcard", cid)
+  assert code == 0, out
+  q = out.splitlines()[0]
+  code, out = world.run("decision", "rule", "--unit", "U07", "--ruling", "test-delta tests/unit/test_q.py allowed", "--by", "owner", "--posted", "13", "--runcard", cid)
+  assert code == 0, out
+  data = json.loads(hstore(world).path("foreman", "U07").read_text())
+  assert [(r["decision"], r["ruling"]) for r in data["rulings"]] == [(q, "test-delta tests/unit/test_q.py allowed"), (q, "foreman-2-1 finding overruled")]
+  from superegm.report import pending_decisions
+  assert pending_decisions(data) == []
+  code, out = settle(world, rid, "foreman-2-1", "contested", cid, "--owner", "--posted", "13")
+  assert (code, out.strip().splitlines()[0]) == (0, "foreman-2-1 contested"), out
+
+
 # ---------------------------------------------------------------- S9: `review status`
 
 def s_unopened(w, c, r): return f"spec-{SLUG}-c9"

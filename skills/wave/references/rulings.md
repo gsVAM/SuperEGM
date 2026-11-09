@@ -30,7 +30,11 @@ point's section" below is the point's section of `references/decision_points.md`
   `--ruling 'test-delta <file> allowed'` (any other text is refused); each id
   it allows is then settled `review settle … --disposition declined --owner
   --posted <comment id>`, never `contested`, as the `owner: <ids>` row under
-  `## The owner's findings` of `references/decision_points.md` says. Only on
+  `## The owner's findings` of `references/decision_points.md` says. The
+  same `test-delta <file> allowed` also rules an open decision on a contest's
+  copy (`contested <fid>: …`) of a `test-delta:` finding of that file, recorded
+  there as `<copy fid> finding overruled` and settled as `finding overruled`
+  is below. Only on
   exit 0 continue as that point's section does. Point 1: `finding overruled`
   → `review settle … --disposition contested --owner --posted <comment id>`;
   then, for `finding upheld` too, by `review status`: 0 → the unit awaits
