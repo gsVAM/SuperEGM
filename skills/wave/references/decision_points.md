@@ -78,8 +78,9 @@ and run
 Its second line is the options: the comment's own `- (a)` lines plus
 `stop the unit`; `relaunch; stop the unit` for an exit with no PR, an interrupted or a stalled launch, a builder's close, or a third blocked comment on one
 head; or `ruled: stop the unit (relaunch already used)` or `ruled: stop the unit (second launch with no commit of its own)`, already applied.
-A stalled launch's question carries the stall facts (`U<n> stalled (<minutes> min; last commit <time | none>)`, source `launch <n>`).
-A launch with no commit of its own (an `exited …` entry whose `last_commit_at` is none: the host's stall, not the builder's) spends no `relaunch`; a second such launch on the unit is `stop the unit`, with no question.
+A stalled launch's question carries the stall facts (the event line `U<n> stalled (<minutes> min; last commit <time | none>)`, source `launch <n>`); leavemealone's panel renders it `<U> launch <n> stalled (last commit <time | none>)`.
+A stopped unit's stall is recorded and asks nothing: the kill is the one thing left to do.
+A launch with no commit of its own (an `exited …` entry whose `last_commit_at` is absent or none, a launch recorded before U31 included) spends no `relaunch`; a second such launch on the unit is `stop the unit`, with no question.
 Ask the owner, then
 `python3 '<HELPER>' decision rule --unit <U> --decision <qid> --ruling '(<letter>) — <reason>' --by <login> --runcard '<CARD>'`
 (it posts `**Ruling:** (<comment-id>) <option> — <reason>` quoting the

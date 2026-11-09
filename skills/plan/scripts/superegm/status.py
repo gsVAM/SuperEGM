@@ -10,7 +10,6 @@ every pass, `--wait` included, also reads the tracking issue once and rewrites i
 import calendar
 import json
 import re
-import subprocess
 import time
 from pathlib import Path
 
@@ -157,11 +156,10 @@ def epoch(stamp: str) -> float:
 def head_time(worktree) -> float | None:
   """The committer time of the worktree's `HEAD` (`git log -1 --format=%ct`), a local read; None when git fails."""
   try:
-    done = subprocess.run(["git", "log", "-1", "--format=%ct"], cwd=worktree, capture_output=True, text=True, check=False)
-  except OSError:
+    out = core.run_git(["log", "-1", "--format=%ct"], Path(worktree), check=False).strip()
+  except (OSError, TypeError):
     return None
-  out = done.stdout.strip()
-  return float(out) if done.returncode == 0 and out.isdigit() else None
+  return float(out) if out.isdigit() else None
 
 
 def own_commit(entry: dict, worktree_head_time: float | None) -> float | None:
@@ -211,11 +209,16 @@ def builder_facts(st, uid: str, comments: list, config: dict | None = None) -> t
     if match and (comment.get("created_at") or "") >= since:
       status = [comment["id"], match.group(1), (comment.get("user") or {}).get("login")]
   stall = None
-  if latest and config and latest.get("worktree"):
-    head = head_time(latest["worktree"])
-    waited = stalled(latest, head, core.NOW(), config["builder"]["stall_minutes"])
+  # the git read only for a launch the predicate can hold of (running, unmarked, a worktree, no exit file); a
+  # `started_at` that does not parse is no stall, as record-launch reads it
+  if latest and config and latest.get("worktree") and latest.get("status") == "running" and not latest.get("kill_failed") and not exit:
+    try:
+      head = head_time(latest["worktree"])
+      waited = stalled(latest, head, core.NOW(), config["builder"]["stall_minutes"])
+      last = own_commit(latest, head) if waited is not None else None
+    except (ValueError, TypeError):
+      waited = None
     if waited is not None:
-      last = own_commit(latest, head)
       stall = [waited, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(last)) if last else None, status[1] if status else None]
   if latest and latest.get("status") == "exited (stalled)":
     return None, None, stall

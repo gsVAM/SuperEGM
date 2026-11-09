@@ -125,7 +125,7 @@ ignored except `landed` and `stalled`:
    Then: `DONE` and `DONE_WITH_CONCERNS` need nothing (the head is reviewed
    at step 5); `BLOCKED` or `NEEDS_CONTEXT`, an exit with no PR
    (`pr=none`), or an interrupted launch → Decision point 3.
-   `stalled`: `python3 '<HELPER>' record-launch --unit <U> --exit stalled --runcard '<CARD>'`; `exited (stalled)` → Decision point 3 with the stall facts, `kill_failed` idle.
+   `stalled`: `python3 '<HELPER>' record-launch --unit <U> --exit stalled --runcard '<CARD>'`, then Decision point 3 with the stall facts unless stopped; `kill_failed` idle.
 3b. `superegm review ingest` for every unit with an open PR (never a landed unit),
    awaiting-merge units included, stopped units excluded:
    `python3 '<HELPER>' review ingest --unit <U> --runcard '<CARD>'` records

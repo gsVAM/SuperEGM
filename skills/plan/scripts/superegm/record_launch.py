@@ -92,6 +92,11 @@ def record_stalled(st, unit, launches, entry, exit_file, last):
       while not exit_file.is_file() and core.NOW() - start < 30:
         core.SLEEP(1)
       owner = "no exit file"
+      # the entry re-read after the wait: an `interrupted` the owner wrote meanwhile is kept, never overwritten
+      launches = load_launches(st, unit)
+      entry = launches[-1] if launches else {}
+      if entry.get("round") != rnd or entry.get("status") != "running":
+        raise core.HandoffError(f"{unit} launch {rnd} is {entry.get('status') or 'gone'} now: kept")
     if not exit_file.is_file():
       entry["kill_failed"] = owner
       failed = f"{unit} launch {rnd} kill_failed ({owner})"
