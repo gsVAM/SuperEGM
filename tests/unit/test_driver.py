@@ -6,13 +6,17 @@
 
 import json
 import os
+import plistlib
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 import superegm  # the harness reloads the package per test: read its names at call time
-from superegm import status
+from superegm import driver, status
+from superegm.launch_builder import HELPER
 from conftest import REPO, make_pr
 from test_builders import seed, put, spawn_fake, SPAWNED, UNIT  # noqa: F401  (spawn_fake: a fixture)
 from test_u24 import tick_launch, wave_of, card_of, tick_launches, driver_file
@@ -121,3 +125,21 @@ def test_tick_predicate(world, monkeypatch, tmp_path, spawn_fake, case, expect):
   if expect == "refuse":
     reason = f"root {tmp_path / 'x'} is not a worktree of {REPO}" if case == "bad-root" else "two launches failed before the loop ran"; data = json.loads((s.root / hid / "driver" / f"{hid}.json").read_text())
     assert f"tick: refused ({hid}: {reason})" in journal and data["refused"]["reason"] == reason and f"refused:{hid}" in data["notified"]
+
+
+@pytest.mark.parametrize("platform, interval", [("darwin", None), ("darwin", 5), ("linux", None)])
+def test_driver_install_status_and_reset(world, monkeypatch, tmp_path, platform, interval):
+  s, hid = registered(world, monkeypatch, tmp_path); dcard, uid, minutes, calls = world.open_card("driver", world.spec), os.getuid(), interval or 15, []
+  monkeypatch.setattr(driver, "RUN", lambda argv, **k: (calls.append(argv), subprocess.CompletedProcess(argv, 0))[1]); monkeypatch.setattr(driver, "PLATFORM", platform)
+  code, out = world.run("driver", "install", *(["--interval", interval] if interval else []), "--runcard", dcard); plist = tmp_path / "Library/LaunchAgents/com.superegm.driver.plist"
+  if platform == "darwin":
+    assert code == 0 and out.strip() == f"installed ({minutes} min): {plist}" and calls == [["launchctl", "bootout", f"gui/{uid}", str(plist)], ["launchctl", "bootstrap", f"gui/{uid}", str(plist)]]
+    assert plistlib.loads(plist.read_bytes()).items() >= {"Label": "com.superegm.driver", "ProgramArguments": [sys.executable, str(HELPER), "driver", "tick"], "StartInterval": minutes * 60, "AbandonProcessGroup": True}.items()
+    assert world.run("driver", "uninstall", "--runcard", dcard)[0] == 0 and not plist.exists()
+  else:
+    unit = (tmp_path / ".config/systemd/user/superegm-driver.service").read_text(); timer = (tmp_path / ".config/systemd/user/superegm-driver.timer").read_text()
+    assert code == 0 and f"ExecStart={sys.executable} {HELPER} driver tick\n" in unit and "KillMode=process\n" in unit and f"OnUnitActiveSec={minutes}min\n" in timer
+  entry = tick_launch(s, hid, card=dcard, refused={"at": superegm.now_iso(), "reason": "two launches failed before the loop ran"}); live = wave_of(world, monkeypatch, dcard, "boot-1"); world.advance(600)
+  assert world.run("driver", "status")[1] == f"{hid}: launch 1 started {entry['started_at']} pid 4242 exit file no; wave card {live} open 10 min; refused: two launches failed before the loop ran\n"
+  assert world.run("driver", "reset", "--runcard", dcard)[1].strip() == f"reset {hid}: launch 1 interrupted; card {live} interrupted" and tick_launches(s, hid)[0]["status"] == "interrupted"
+  assert card_of(s, live)["interrupted_at"] and f"driver: {hid} has no live tick launch or open wave card" in world.run("driver", "reset", "--runcard", dcard)[1]
