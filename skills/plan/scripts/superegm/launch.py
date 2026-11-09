@@ -93,14 +93,14 @@ def in_flight(store, uid, view, idle):
   """True from the unit's mark (the mark reserves the slot) until its latest round is posted
   `clean`, it has landed, it carries the stopped label, or this invocation names it idle; a
   launch recorded after the clean round holds the slot again. A unit whose `clean` an ingest rewrote
-  (`ready_again`) holds no slot until its relaunch records a launch, nor does a unit pending a decision
-  (amendment 5: the batch goes on while the owner rules)."""
+  (`ready_again`) holds no slot until its relaunch records a launch, nor does a unit with a decision
+  `report.pending_decisions` reads as pending, the read `report`'s free-slot count makes (amendment 5: the batch
+  goes on while the owner rules)."""
+  from superegm.report import pending_decisions  # imported here: `report` imports this module
   if not view.get("launched") or view.get("landed") or view.get("stopped") or uid in idle:
     return False
   foreman, launches = core.load_foreman(store, uid), load_launches(store, uid)
-  # `report.pending_decisions`'s read, repeated: `report` imports this module
-  ruled = {r.get("decision") for r in foreman.get("rulings") or []}
-  if any(d["id"] not in ruled for d in foreman.get("decisions") or []):
+  if pending_decisions(foreman):
     return False
   return not latest_clean(foreman, launches) and not ready_again(foreman, launches)
 

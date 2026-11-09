@@ -8,6 +8,7 @@ board and the idle, pending and loop lines. It opens the card's handoff as `stat
 `spec changed since the approval: run approve-spec again`. It reads GitHub never."""
 
 import json
+from pathlib import Path
 
 import superegm as core
 from superegm.launch import latest_clean, load_launches
@@ -95,10 +96,15 @@ def wave_number(st, rid: str, card: dict) -> int:
   """The card's ordinal by `opened_at` among its handoff's top-level `wave` cards on the same artifact, one spec
   being one artifact in every worktree of the repository (`core.here`, as `require_runcard` reads it, U24)."""
   folder = st.path("runcards", rid).parent  # the card's own `runcards/`: its handoff's (spec section 7)
-  cards, mine = [], str(core.here(card["artifact"]))
+  try:  # the checkout resolved once, as `open_runcard` does, not once per card
+    top = core.git_toplevel(Path.cwd())
+  except core.HandoffError:
+    top = None
+  same = (lambda p: str(core.rebased(p, top))) if top else (lambda p: str(Path(p)))
+  cards, mine = [], same(card["artifact"])
   for other in folder.glob("*.json"):
     data = json.loads(core.read_text(other))
-    if data["skill"] == "wave" and str(core.here(data["artifact"])) == mine and not data["parent"]:
+    if data["skill"] == "wave" and same(data["artifact"]) == mine and not data["parent"]:
       cards.append((data["opened_at"], other.stem))
   return sorted(cards).index((card["opened_at"], rid)) + 1
 

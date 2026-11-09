@@ -455,7 +455,10 @@ def open_runcard(store: Store, skill: str, artifact: str, parent=None, mode=None
   card also its `boot_id` and `driver_card` (`SUPEREGM_RUNCARD` under `SUPEREGM_ROLE=driver`, else
   None). The card is written first; then a top-level card of the six `GUARDED_SKILLS` (a `wave` under
   `SUPEREGM_ROLE=driver` excepted) is refused with `TICK_LIVE` while `tick_live` holds, its own card
-  marked interrupted and every other card left untouched (spec section 11.2, U24); only after that is
+  marked interrupted and no other open card of its skill touched (spec section 11.2, U24); for `wave`,
+  `tick_live` first applies the boot-id proof to every open handoff (`reboot_proof`), which may record
+  `driver/<handoff>.json` and `launches/<unit>.json` entries `interrupted (reboot)` and mark rebooted top-level
+  `wave` cards interrupted, on the refusal path too (`runcard`'s `WRITES`); only after that is
   every open card of the same skill and artifact marked interrupted, the artifacts compared rebased
   onto the working directory's checkout, one spec being one artifact in every worktree."""
   if parent is not None and not store.path("runcards", parent).is_file():

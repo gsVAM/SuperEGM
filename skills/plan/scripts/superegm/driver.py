@@ -274,7 +274,9 @@ def last_started(st: core.Store, hid: str) -> str:
 
 def tick_store(entry: dict) -> None:
   """One store's tick: per open handoff, the one that waited longest first, the proofs, then the spec's conditions
-  in order; at most one launch (one `.git`), a skip silent and writing nothing."""
+  in order; at most one launch (one `.git`). The reboot and exit-file proofs may write before any skip; a skip
+  (the store's live launch or open `wave` card, a phase card, nothing left, `tick_trigger` None) prints nothing and
+  writes nothing unless `notify`'s own predicate holds, a new line then sent under a `driver` card opened for that."""
   from superegm import status
   st, ok = registered_store(entry)
   current, ids = core.boot_id(), open_ids(st)
