@@ -13,7 +13,7 @@ import pytest
 import superegm
 from conftest import REPO, set_config
 from superegm import init, kill_group
-from superegm.collect import KILL_WAIT, dod_runs, run_env
+from superegm.collect import KILL_WAIT, dod_runs, run_env, test_delta
 from superegm.launch_builder import SENTINEL, allowed_tools
 
 
@@ -43,3 +43,18 @@ def test_dod_runs_kills_each_items_group_on_return_and_at_the_bound(tmp_path, mo
                   "4": {"exit": 1, "summary": "boom", "paste_summary": None, "timed_out": False}, "5": {"exit": 0, "summary": "", "paste_summary": None, "timed_out": False},
                   "6": {"exit": None, "summary": "", "paste_summary": None, "timed_out": True}, "7": {"exit": None, "summary": None, "paste_summary": "ok", "timed_out": True}}
   assert sorted(p.name for p in (tmp_path / "dod").iterdir()) == ["3.out", "4.out", "5.out", "6.out"] and (tmp_path / "dod/4.out").read_text() == "boom\n"
+
+
+test_delta.__test__ = False  # the helper's name starts `test_`: pytest must not collect it here
+F, T = "tests/unit/test_a.py", lambda *lines: "\n".join(lines) + "\n"
+BASE = T("import pytest", "@pytest.mark.parametrize('x', [", "  (1,),", "  (2,),", "])", "def test_a(x):", "  assert x == x", "  assert 1 in [1]", "  with pytest.raises(ValueError):", "    int('a')")
+E = lambda line, base_line, kind="removed": {"file": F, "line": line, "base_line": base_line, "kind": kind, "base_commit": "b"}
+
+
+@pytest.mark.parametrize("head, named, expect", [
+  (BASE.replace("assert x == x", "assert x == 1"), set(), []), (BASE.replace("  assert 1 in [1]\n", ""), set(), [E(8, 8)]), (BASE.replace("  assert 1 in [1]\n", ""), {F}, []),
+  (BASE.replace("assert x == x", "assert x"), set(), [E(7, 7, "weakened")]), (BASE.replace("pytest.raises", "contextlib.suppress"), set(), [E(9, 9, "weakened")]),
+  (BASE.replace("  (2,),\n", ""), set(), [E(4, 4)]), (BASE.replace("  (1,),\n  (2,),\n", "  (2,),\n  (1,),\n"), set(), []),
+  (BASE.replace("def test_a", "@pytest.mark.skip\ndef test_a"), set(), [E(6, 6, "weakened")]), (None, set(), [E(n, n) for n in (3, 4, 6, 7, 8, 9)])])
+def test_test_delta_pairs_assertions_as_git_does(head, named, expect):
+  assert test_delta({F: ("b", BASE)}, {F: head} if head is not None else {}, named) == expect
