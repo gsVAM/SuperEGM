@@ -563,7 +563,16 @@ def record_round(args) -> int:
     review["astra_incomplete"] += 1
   rnd["what_ran"] = derive_what_ran(review, rnd, entry)
   core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
-  store_verdict(st, rid, review, rnd["runcard"])
+  prior = review.get("converged") or ""
+  status = store_verdict(st, rid, review, rnd["runcard"])
+  if kind == "head" and prior.startswith("by ruling ") and review["converged"] != prior \
+      and getattr(args, "threads", None) is None:  # a lapsed accept's `clean` rewritten (`review ingest` rewrites its own)
+    data = core.load_foreman(st, review["artifact"])
+    posted = sorted((e for e in data["rounds"] if e.get("phase") == "posted"), key=lambda e: e["round"])
+    word = {3: "revise", 2: "cap-reached"}.get(status.code)
+    if posted and posted[-1].get("outcome") == "clean" and word:
+      posted[-1].update({"outcome": word, "rewritten_from": "clean"})
+      core.save_foreman(st, review["artifact"], data)
   for fid, _, section in refused:
     core.journal(st, f"review record {rid} round {n} out of scope: {fid} ({section}) under {args.runcard}")
     print(f"record: {fid} out of scope ({section}): not recorded")
@@ -774,7 +783,7 @@ def evaluate(st: core.Store, review: dict, runcard: str) -> Status:
   clean = latest is not None and not any(blocking(f) and f["disposition"] is None for f in findings_of(latest))
   regressions = regressions_of(latest) if latest else 0
   accept = next((r for r in reversed(review["rulings"]) if r["ruling"] == "accept"), None)
-  if accept and early_accept_lapsed(review, accept, completed, rulings):
+  if accept and early_accept_lapsed(review, accept, rounds, rulings):
     accept = None
   latest_sha = latest["artifact_sha256"] if latest else None
   moved = latest is not None and review["kind"] != "head" \
@@ -827,9 +836,11 @@ def finding_blockers(rnd: dict) -> list[str]:
           + [f"external {f['id']}" for f in external])
 
 
-def early_accept_lapsed(review: dict, accept: dict, completed: list[dict], rulings: list[str]) -> bool:
-  """An accept given below the cap holds its round alone: it lapses once a later round completes or a finding
-  recorded into its round since (an ingested external one, a set finding) bars the accept; the cap's accept stands.
+def early_accept_lapsed(review: dict, accept: dict, rounds: list[dict], rulings: list[str]) -> bool:
+  """An accept given below the cap holds its round alone: it lapses once a later round completes, once a later
+  round, complete or not, holds an unsettled high or medium (a set finding review-plan records into an accepted
+  unit's next round), or once a finding recorded into its round since (an ingested external one, a set finding)
+  bars the accept; the cap's accept stands.
   The stored `converged: by ruling <id>` is the accept's mark: once a verdict overwrote it (the lapse, `store_verdict`)
   the accept never comes back, neither at the cap nor as the verdict of a later clean round."""
   if review.get("converged") != f"by ruling {accept['id']}":
@@ -837,11 +848,14 @@ def early_accept_lapsed(review: dict, accept: dict, completed: list[dict], rulin
   accepted = review.get("converged_round")
   if accepted is None:
     return False
+  completed = [r for r in rounds if r["what_ran"] == "completed"]
   upto = [r for r in completed if r["round"] <= accepted]
   if len(upto) >= CAP + rulings.count("continue"):
     return False
   rnd = next((r for r in completed if r["round"] == accepted), None)
-  return rnd is None or any(r["round"] > accepted for r in completed) or bool(finding_blockers(rnd))
+  later = [f for r in rounds if r["round"] > accepted for f in findings_of(r)]
+  return rnd is None or any(r["round"] > accepted for r in completed) or bool(finding_blockers(rnd)) \
+      or any(blocking(f) and f["disposition"] is None for f in later)
 
 
 def open_decisions(st: core.Store, unit: str) -> list[dict]:
