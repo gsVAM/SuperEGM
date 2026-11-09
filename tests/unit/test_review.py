@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03); the review loop and approve-spec (U04).
+# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03); the review loop and approve-spec (U04); the `acceptable:` line (U35).
 
 """U04: the review loop (`review open|record|settle|status|rule`) and `approve-spec` (spec section 8)."""
 
@@ -453,11 +453,13 @@ def test_a_settle_that_leaves_an_owner_only_remainder_writes_the_owner_word(worl
 
 
 @pytest.mark.parametrize("upheld, lines, outcome", [(False, ["foreman-1-1 declined"], "owner: foreman-1-1, foreman-1-2"),
-                                                     (True, ["foreman-1-1 declined", "revise"], "revise")])
+                                                     (True, ["foreman-1-1 declined", "revise"], "revise"),
+                                                     ("reason", ["foreman-1-1 declined", "revise"], "revise")])
 def test_a_settle_on_the_owner_row_keeps_its_word_until_only_upheld_ids_are_left(world, upheld, lines, outcome):
   """Round 5 (PR #103 review, codebase-details-5-1): on a round whose word is already `owner: <ids>`, settling one
   id the owner allowed keeps the word (its decision stays open on the other id) and prints no second owner word;
-  when every id left is one the owner upheld, the word becomes `revise` (or `cap-reached` at the cap)."""
+  when every id left is one the owner upheld, the word becomes `revise` (or `cap-reached` at the cap), a reasoned
+  uphold (`<fid> finding upheld — <reason>`) too (PR #103 round 6, codebase-details-6-1)."""
   spec, cid, rid = opened(world, "head")
   head_round(world, 1, "posted", cid, "owner: foreman-1-1, foreman-1-2")
   lines_ = [f"foreman-1-{k} | high | tests/unit/test_q.py:{k + 2} | regression: no | test-delta: tests/unit/test_q.py:{k + 2} removed" for k in (1, 2)]
@@ -466,7 +468,8 @@ def test_a_settle_on_the_owner_row_keeps_its_word_until_only_upheld_ids_are_left
     path = hstore(world).path("foreman", "U07")
     data = json.loads(path.read_text(encoding="utf-8"))
     data["decisions"].append({"id": "q1", "point": 1, "options": ["foreman-1-1 allowed", "foreman-1-2 allowed"], "question": "", "source": f"review {rid} round 1"})
-    data["rulings"].append({"decision": "q1", "ruling": "foreman-1-2 finding upheld", "by": "owner"})
+    ruling = "foreman-1-2 finding upheld" + (" — the test stays" if upheld == "reason" else "")  # `decision rule` stores --ruling raw
+    data["rulings"].append({"decision": "q1", "ruling": ruling, "by": "owner"})
     atomic_write(path, data)
   code, out = settle(world, rid, "foreman-1-1", "declined", cid, "--owner")
   assert (code, out.strip().splitlines()) == (0, lines), out
@@ -661,6 +664,19 @@ def test_review_rule(world):
     head_round(world, n, "posted", wcid, "revise")
     assert record(world, hid, n, "change-review", [F("change-review", n, 1)], wcid, sha=A)[0] == 0
   assert "review rule: accept is refused on a head" in rule(world, hid, "accept", wcid)[1]
+
+
+@pytest.mark.parametrize("findings, moved, line", [
+  ([F("design", 1, 1, "medium"), F("design", 1, 2, "low")], False, "acceptable: yes (1 medium, 1 low)"),
+  ([F("design", 1, 1, "medium"), F("design", 1, 2, "low")], True, None),
+  ([F("design", 1, 1, "medium"), F("design", 1, 2, "medium", "yes")], False, None),
+  ([F("design", 1, 1, "high"), F("design", 1, 2, "medium")], False, None), ([F("design", 1, 1, "low")], False, None), ([], False, None)])
+def test_review_status_prints_the_acceptable_line(world, findings, moved, line):
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [findings])
+  moved and move(world, "spec", spec)
+  out = world.run("review", "status", "--review", rid, "--runcard", cid)[1]
+  assert ("acceptable:" in out) is (line is not None) and (line is None or out.splitlines()[2] == line)
 
 
 def test_rule_refuses_accept_while_the_bytes_moved_and_stop_needs_no_ruler(world):
