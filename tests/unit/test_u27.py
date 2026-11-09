@@ -102,4 +102,43 @@ def test_the_amendment_7_prose(path, needle, present):
   assert (needle in (ROOT / path).read_text(encoding="utf-8")) is present, (path, needle)
 
 
+CALL = {"type": "assistant", "timestamp": "2026-11-06T10:00:00.000Z", "message": {"content": [{"type": "tool_use", "id": "a1", "name": "Agent",
+        "input": {"subagent_type": "Explore", "description": "a wide read", "model": "haiku", "prompt": "list the callers"}}]}}
+READ = {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "r1", "name": "Read", "input": {"file_path": "/x"}}]}}
+NONE = {"count": 0, "calls": []}
+
+
+def transcript(profile, sid, case):
+  """A builder session's transcript under `profile`: none for `missing`; else `projects/-wt/<sid>.jsonl` holding one
+  `Agent` call (`one`) or one `Read` (`none`), and for `one` the paired child's two events 12.5 s apart."""
+  if case == "missing":
+    return
+  folder = Path(profile) / "projects/-wt"
+  folder.mkdir(parents=True, exist_ok=True)
+  (folder / f"{sid}.jsonl").write_text(json.dumps(CALL if case == "one" else READ) + "\n", encoding="utf-8")
+  if case == "one":
+    child = folder / sid / "subagents/agent-a1.jsonl"
+    child.parent.mkdir(parents=True)
+    events = [{"type": "user", "timestamp": "2026-11-06T10:00:01.000Z", "message": {"role": "user", "content": "list the callers"}},
+              {"type": "assistant", "timestamp": "2026-11-06T10:00:13.500Z", "message": {"model": "claude-haiku-4-5", "content": []}}]
+    child.write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
+
+
+@pytest.mark.parametrize("case, expect", [("one", {"count": 1, "calls": [{"role": "Explore", "description": "a wide read", "model": "haiku", "duration_s": 12.5}]}), ("none", NONE), ("missing", NONE)])
+def test_record_launch_reads_the_subagent_calls_from_the_transcript(world, monkeypatch, tmp_path, case, expect):
+  from superegm import launch_builder, traces
+  from test_builders import seed, launches_of, UNIT
+  sid = str(uuid.uuid4()); transcript(tmp_path / "p", sid, case)
+  assert traces.subagent_calls(tmp_path / "p", sid) == expect
+  s, card, _, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder"); monkeypatch.setattr(launch_builder, "start_detached", lambda command, log, env: 4242)
+  assert world.run("launch", "--runcard", card)[0] == 0 and world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)[0] == 0
+  entry = launches_of(s)[0]
+  assert uuid.UUID(entry["session_id"]).version == 4 and "subagent_calls" not in entry
+  transcript(Path(json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]["profile_dir"]), entry["session_id"], case)
+  Path(entry["result_file"]).write_text("{}\n", encoding="utf-8"); Path(entry["result_file"] + ".exit").write_text("0\n", encoding="utf-8")
+  assert world.run("record-launch", "--unit", UNIT, "--exit", 0, "--runcard", card)[0] == 0
+  assert launches_of(s)[0]["subagent_calls"] == expect and Path(entry["result_file"]).read_text(encoding="utf-8") == "{}\n"
+
+
 from test_builders import no_graphify, which  # noqa: F401

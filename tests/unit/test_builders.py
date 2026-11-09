@@ -454,7 +454,7 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   pairs = " ".join(f"{k}='{v.format(gh='/usr/local/bin/gh', login='builder-bot', email='1001+builder-bot@users.noreply.github.com')}'" for k, v in PAIRS)
   assert line.startswith(f"cd '{wt}' && env -u GIT_ASKPASS -u SSH_ASKPASS -u GITHUB_TOKEN CLAUDE_CONFIG_DIR='{cfg['profile_dir']}' ENABLE_CLAUDEAI_MCP_SERVERS=false GH_TOKEN=\"$SUPEREGM_BUILDER_TOKEN\" SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{card}' {pairs} claude -p "), line
   mcp_file = s.path("launches", f"{UNIT}_r1_mcp.json")
-  assert f" claude -p \"$(cat '{prompt_file}')\" --model '{cfg['model']}' --permission-mode '{cfg['permission_mode']}' --setting-sources user --mcp-config '{mcp_file}' --strict-mcp-config --allowedTools '" in line, line
+  assert f" claude -p \"$(cat '{prompt_file}')\" --session-id '{launches_of(s)[-1]['session_id']}' --model '{cfg['model']}' --permission-mode '{cfg['permission_mode']}' --setting-sources user --mcp-config '{mcp_file}' --strict-mcp-config --allowedTools '" in line, line
   tools = line.split("--allowedTools '")[1].split("'")[0].split(",")
   assert tools == [t.replace("Bash(gh ", "Bash(/usr/local/bin/gh ") for t in cfg["allowed_tools"]] + [f"Bash(git push origin {branch}:*)"]
   assert line.endswith(f"' --output-format json > '{result}'; echo $? > '{result}.exit'")

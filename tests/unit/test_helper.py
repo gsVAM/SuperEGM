@@ -188,7 +188,7 @@ def test_helper_runs_under_its_new_name(world):
     assert "egm_handoff.py" not in (ROOT / skill).read_text(encoding="utf-8"), skill
 
 
-MODULES = tuple(sorted(p.stem for p in (SCRIPTS / "superegm").glob("*.py") if p.stem not in ("__init__", "body")))
+MODULES = tuple(sorted(p.stem for p in (SCRIPTS / "superegm").glob("*.py") if p.stem not in ("__init__", "body", "traces")))
 
 
 @pytest.mark.parametrize("name", MODULES)
