@@ -128,7 +128,8 @@ def load_launches(store, unit):
 
 
 def terminal(entry):
-  """Spec section 4: a launch is terminal only with its exit file or the owner's typed `interrupted`."""
+  """Spec sections 4 and 11.2: a launch is terminal only with its exit file, the owner's typed `interrupted` or the
+  boot-id proof's `interrupted (reboot)` (no process survives a reboot)."""
   return str(entry.get("status") or "").startswith("interrupted") or Path(entry["result_file"] + ".exit").is_file()
 
 

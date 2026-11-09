@@ -104,7 +104,8 @@ def env_file() -> Path:
 
 
 def read_env() -> dict:
-  """`~/.superegm/env`'s `KEY=value` lines (a timer has no shell); blank and `#` lines skipped."""
+  """`~/.superegm/env`'s `KEY=value` lines (a timer has no shell); blank and `#` lines skipped; each value literal
+  (no quotes stripped, no `$VAR` or `~` expanded)."""
   path, out = env_file(), {}
   if path.is_file():
     for line in core.read_text(path).splitlines():
@@ -231,8 +232,10 @@ def notify(hs: core.Store, spec: str) -> None:
 
 def launch(hs: core.Store, entry: dict, spec: str, reason: str) -> bool:
   """Record the launch, then start it: the card opened, the entry written before the start (a crash between the
-  two leaves a launch without an exit file), the store's cards re-read once (a typed `wave` card opened since: the
-  launch `interrupted`, the tick backs off), the wrapper started detached, its `pid` written, the card closed."""
+  two leaves a launch without an exit file), the store's cards re-read once (an open top-level `wave` card of any open
+  handoff of the store, typed or a tick's, or an open `plan`, `file`, `integrate`, `review-plan` or `orient` card of
+  this handoff: the launch `interrupted`, journaled `driver: tick backed off: <skill> card <id> open`, the tick backs
+  off), the wrapper started detached, its `pid` written, the card closed."""
   from superegm import launch_builder
   hid, data = hs.handoff_id, core.load_driver(hs)
   n = len(data["launches"]) + 1

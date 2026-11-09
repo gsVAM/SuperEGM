@@ -17,7 +17,10 @@ Typed by the owner, never invoked by a model: `/superegm:driver install [--inter
 The driver runs on the owner's machine alone. A timer runs `superegm driver tick` every interval (15 minutes
 by default; the machine's, never a repository's key); each tick reads one `status` per open handoff of each
 registered store and, when there is something to do and no session of that store is live, starts one
-`claude -p '/superegm:wave <spec> --handoff <id> --leavemealone'` under `SUPEREGM_ROLE=driver`. A tick that
+`claude -p '/superegm:wave <spec> --handoff <id> --leavemealone' --permission-mode bypassPermissions --output-format json`
+in the registered root under `SUPEREGM_ROLE=driver`, its result and exit code written to files the tick names.
+That session is unattended: it runs with no allow-list and no prompt, under the credential `~/.superegm/env` names,
+so install the driver only on a machine and for repositories you would let a session act on alone. A tick that
 finds nothing writes nothing. It never merges, and never types `plan`, `file`, `integrate` or `review-plan`.
 
 `<HELPER>` is `${CLAUDE_PLUGIN_ROOT}/skills/plan/scripts/superegm.py`; pass `--handoff <id>` to every call
@@ -33,7 +36,8 @@ refusal included. `status` is read-only and takes no card.
 ## Before the first install (by hand, once)
 
 1. Write `~/.superegm/env`, mode `0600` (`chmod 600 ~/.superegm/env`), as `KEY=value` lines: a timer has no
-   shell. `PATH` (where `claude`, `gh`, `python3` and `openssl` resolve), `CLAUDE_CONFIG_DIR` (the profile the
+   shell, so each value literal: no quotes, no `$VAR`, no `~` (write `PATH=/opt/homebrew/bin:/usr/bin:/bin`, absolute
+   paths alone). `PATH` (where `claude`, `gh`, `python3` and `openssl` resolve), `CLAUDE_CONFIG_DIR` (the profile the
    tick's session runs under, one without SubagentStart hooks) and the credential the shell holds today,
    `SUPEREGM_APP_KEY` (a path; the App is the driver's credential of choice) or `SUPEREGM_BUILDER_TOKEN`. The
    timer file carries no secret and no environment of its own.

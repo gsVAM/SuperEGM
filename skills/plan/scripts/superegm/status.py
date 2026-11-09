@@ -256,10 +256,12 @@ def builder_logins(st) -> set:
 
 def tick_trigger(handoff) -> str | None:
   """What a tick's session would have to do (spec section 11.2), from one `status_pass` that saves nothing, in order:
-  the proof the tick applied to the handoff's newest tick launch (`reboot <n>` for one recorded `interrupted (reboot)`,
-  `exit-file <card>` for one whose exit file exists and whose top-level `wave` card is `interrupted`); the first event
-  line against `state.status.units`; an un-ingested thread above `low` on the latest posted round's head, by U21's
-  reader; `first launch` while `state.status` is absent; else None, the nothing-to-do predicate."""
+  the proof the tick applied to the handoff's newest tick launch, backed-off launches dropped first (`reboot <n>` for
+  one recorded `interrupted (reboot)`, `exit-file <card>` for one whose exit file exists and whose top-level `wave`
+  card is `interrupted`); the first event line against `state.status.units`, a `status word=` event by a login no card
+  records as a builder skipped; `<uid> ready` for a unit the read finds ready and the saved `ready` lacks; an
+  un-ingested thread above `low` on the latest posted round's head, by U21's reader, a stopped unit's threads skipped;
+  `first launch` while `state.status` is absent; else None, the nothing-to-do predicate."""
   st, state = handoff.store, handoff.state
   launches = [e for e in core.load_driver(st).get("launches") or [] if not core.backed_off(e)]
   if launches:
