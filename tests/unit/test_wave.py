@@ -278,6 +278,28 @@ def test_the_loop_never_reviews_what_dispatch_refuses(world, unit, state, why):
   assert foreman_of(s, "U01")["rounds"] == unit.get("rounds", []), "a refusal writes no round"
 
 
+def test_report_frees_the_slot_of_a_pending_unit_and_dispatches_a_rebooted_launch(world):
+  """U24 (foreman-2-2, foreman-2-1): a unit pending a decision holds no slot, as amendment 5 gives `launch`;
+  a launch the boot-id proof recorded `interrupted (reboot)` is terminal: its action is the foreman's dispatch."""
+  card = open_wave_card(world)
+  set_config(world, max_in_flight=1)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "launches": [{"round": 1, "status": "exited 0"}],
+                             "decisions": [{"id": "q1", "point": 3, "source": "launch 1", "question": "x"}]},
+                 U02={"pr": 71, "head": "b" * 40, "ci": "green", "launches": [{"round": 1, "status": "interrupted (reboot)"}]},
+                 U03={"launched": False, "ready": True})
+  code, out = world.run("report", "--runcard", card)
+  text = s.path("wave_report", 1).read_text(encoding="utf-8")
+  assert code == 0 and "loop: continuing (in flight: U02)" in out, out
+  assert "## Ready, unlaunched\n- U03 (no free slot)" in text, "U02 in flight holds the one slot"
+  assert "| 1 interrupted (reboot) |" in text and "foreman dispatch" in text.split("U02 #")[1].splitlines()[0]
+  assert "U02 launch 1" not in text.split("## Non-terminal launches")[1].split("##")[0]
+  atomic_write(s.path("launches", "U02"), {"launches": [{"round": 1, "status": "exited 0"}]})
+  atomic_write(s.path("foreman", "U02"), {"dispatch_id": None, "rounds": [{"round": 1, "phase": "posted", "outcome": "clean", "launch": 1, "head": "b" * 40}],
+                                          "decisions": [], "rulings": []})
+  code, out = world.run("report", "--runcard", card)
+  assert "loop: continuing (ready, unlaunched: U03)" in out and "- U03 (slot free)" in s.path("wave_report", 1).read_text(encoding="utf-8"), out
+
+
 def test_a_launch_after_a_clean_round_keeps_the_unit_active(world):
   """Defect 2: a clean verdict is bound to its launch (§11.1's predicate names the launch count); a launch
   recorded after it is in flight again, so the loop neither ends on the unit nor frees its slot."""
