@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U10b's tests of the driver: report, decision open|rule, the wave skill body; the by-hand ruling read through `ruling_of` (U22).
+# Added by SuperEGM (gsVAM), 2026: U10b's tests of the driver: report, decision open|rule, the wave skill body; the by-hand ruling read through `ruling_of` (U22); the head's fifth decision point and the accept below the cap's skill texts (U35).
 
 """U10b: the pure functions the wave skill cites, `report`, `decision open|rule` and the skill body.
 Fixtures: conftest's `world`, `applied` and `make_pr` (U03/U07)."""
@@ -1371,3 +1371,33 @@ def test_a_ruling_by_comment_continues_as_its_point_does(needle):
     ("skills/wave/SKILL.md", "--remove-label superegm:stopped")])
 def test_the_ruling_prose_names_how_a_ruling_is_applied_and_read(path, needle):
   assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
+
+
+# ---------------------------------------------------------------- U35: a head's fifth decision point (accept, revise)
+
+
+def head_review(world, s, card):
+  """U01's head review opened under the card, its round 1 posted at the head and recorded with one medium."""
+  from test_review import record, F
+  code, out = world.run("review", "open", "--kind", "head", "--artifact", "U01", "--reviewers", "change-review", "--runcard", card)
+  assert code == 0, out
+  rid = out.strip()
+  f = foreman_of(s, "U01")
+  f["rounds"].append({"round": 1, "phase": "posted", "launch": 1, "head": "a" * 40, "outcome": None})
+  atomic_write(s.path("foreman", "U01"), f)
+  code, out = record(world, rid, 1, "change-review", [F("change-review", 1, 1, "medium")], card, sha="a" * 40)
+  assert code == 0, out
+  return rid
+
+
+def test_the_fifth_decision_point_opens_on_a_head(world):
+  from superegm.inbox import inbox_items
+  card = open_wave_card(world); s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "launches": [{"round": 1, "status": "exited 0"}]})
+  rid = head_review(world, s, card)
+  code, out = world.run("decision", "open", "--unit", "U01", "--point", "5", "--question", question(world, "one medium remains"), "--source", f"review {rid} round 1", "--runcard", card)
+  assert (code, out.splitlines()) == (0, ["q1", "options: accept; revise"])
+  entry = foreman_of(s, "U01")["decisions"][0]
+  assert (entry["point"], entry["source"], entry["options"]) == (5, f"review {rid} round 1", ["accept", "revise"])
+  assert f"pending: U01 q1 (point 5, review {rid} round 1)" in world.run("report", "--runcard", card)[1]
+  [item] = [i for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "decision"]
+  assert item["action"].startswith("**Ruling:** (q1) ") and "accept" in item["action"] and "revise" in item["action"]
