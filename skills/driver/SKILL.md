@@ -56,7 +56,9 @@ refusal included. `status` is read-only and takes no card.
   last refusal. A launch without an exit file is a live session, never guessed dead.
 - `reset`: `python3 '<HELPER>' driver reset --runcard '<CARD>'` is the owner's interrupt for a tick launch the
   owner knows is dead (a kill, a crash): it records the launch `interrupted`, marks the handoff's open `wave`
-  card `interrupted` and clears the tick's refusal. A reboot needs no reset: the boot-id proof records it.
+  card `interrupted` and clears the tick's refusal; after two failed launches that both exited, it sets the two
+  failures aside (`set_aside`, the second one's round), so the next tick counts afresh. A reboot needs no reset:
+  the boot-id proof records it.
 
 ## What the tick refuses
 

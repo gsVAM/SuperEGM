@@ -520,7 +520,8 @@ def backed_off(entry: dict) -> bool:
 
 
 def load_driver(hs: Store) -> dict:
-  """The handoff's `driver/<handoff>.json`: `launches[]`, `notified`, `refused`."""
+  """The handoff's `driver/<handoff>.json`: `launches[]`, `notified`, `refused`, `set_aside` (the round up to which
+  `driver reset` set the failures aside)."""
   path = hs.path("driver", hs.handoff_id)
   data = json.loads(read_text(path)) if path.is_file() else {}
   return {"launches": [], "notified": [], "refused": None, **data}
