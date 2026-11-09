@@ -1,12 +1,12 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the builders' tests (U09): launch, launch-builder, record-launch, interrupt, clean, the orders and the two skill bodies; the App path (U15).
+# Modified by SuperEGM (gsVAM), 2026: the builders' tests (U09): launch, launch-builder, record-launch, interrupt, clean, the orders and the two skill bodies; the App path (U15); the watchdog's trap and `--exit stalled` (U31).
 
 """The builders (spec section 11): `launch` and its preconditions, `launch-builder`'s worktree,
 prompt file and command line, `record-launch`, `interrupt`, `clean`, the builder orders and the
 `interrupt` and `clean` skill bodies."""
 
-import hashlib, json, os, re, shutil, subprocess
+import hashlib, json, os, re, shutil, signal, subprocess, time
 from pathlib import Path
 import pytest
 from superegm import store, spec_slug, DEFAULT_CONFIG
@@ -452,7 +452,7 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   cfg = json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]
   result = s.path("launches", f"{UNIT}_r1_result.json")
   pairs = " ".join(f"{k}='{v.format(gh='/usr/local/bin/gh', login='builder-bot', email='1001+builder-bot@users.noreply.github.com')}'" for k, v in PAIRS)
-  assert line.startswith(f"cd '{wt}' && env -u GIT_ASKPASS -u SSH_ASKPASS -u GITHUB_TOKEN -u CLAUDE_CODE_EFFORT_LEVEL CLAUDE_CONFIG_DIR='{cfg['profile_dir']}' ENABLE_CLAUDEAI_MCP_SERVERS=false GH_TOKEN=\"$SUPEREGM_BUILDER_TOKEN\" SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{card}' {pairs} claude -p "), line
+  assert line.startswith(f"SUPEREGM_EXIT='{result}.exit'; trap 'echo stalled > \"$SUPEREGM_EXIT\"; exit' TERM; cd '{wt}' && env -u GIT_ASKPASS -u SSH_ASKPASS -u GITHUB_TOKEN -u CLAUDE_CODE_EFFORT_LEVEL CLAUDE_CONFIG_DIR='{cfg['profile_dir']}' ENABLE_CLAUDEAI_MCP_SERVERS=false GH_TOKEN=\"$SUPEREGM_BUILDER_TOKEN\" SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{card}' {pairs} claude -p "), line
   mcp_file = s.path("launches", f"{UNIT}_r1_mcp.json")
   assert f" claude -p \"$(cat '{prompt_file}')\" --session-id '{launches_of(s)[-1]['session_id']}' --model '{cfg['model']}' --effort '{cfg['effort']}' --permission-mode '{cfg['permission_mode']}' --setting-sources user --mcp-config '{mcp_file}' --strict-mcp-config --allowedTools '" in line, line
   tools = line.split("--allowedTools '")[1].split("'")[0].split(",")
@@ -643,7 +643,8 @@ def test_launch_builder_round_2_detaches_the_earlier_worktree_and_carries_the_re
   unit_file = s.path("orient_unit", f"{UNIT}.md").read_text(encoding="utf-8")
   assert unit_file.startswith(f"orient: tree {git(['rev-parse', head + '^{tree}'], world.repo).strip()}") and "## src/worker.py (create)\ndef w(): pass\ntests: none\n" in unit_file
   assert f"\n\n---\n\n# Review comments on PR #{PR}\n\n## owner · review 9 on {head[:7]}\n**Review round 1" in prompt and "self review" not in prompt
-  assert launches_of(s)[-1]["command"].startswith(f"cd '{r2}' && env ")
+  r2_result = s.path("launches", f"{UNIT}_r2_result.json")
+  assert launches_of(s)[-1]["command"].startswith(f"SUPEREGM_EXIT='{r2_result}.exit'; trap 'echo stalled > \"$SUPEREGM_EXIT\"; exit' TERM; cd '{r2}' && env ")
 
 
 def test_launch_builder_relaunches_from_the_local_branch_when_no_pr_is_recorded(world, monkeypatch, spawn_fake):
@@ -687,6 +688,22 @@ def test_command_line_carries_the_dirs_the_mcp_file_and_the_switch():
   assert " --setting-sources user --plugin-dir '/c/ponytail/5.3.3' --plugin-dir '/c/x/1' --mcp-config '/l/U07_r1_mcp.json' --strict-mcp-config --allowedTools 'Read' " in line, line
   assert " --setting-sources user --mcp-config '/m.json' --strict-mcp-config --allowedTools 'Read' " in call([], "/m.json")
   assert " --session-id 's' " in call([], "/m.json", session_id="s") and " --session-id" not in call([], "/m.json")
+
+
+def test_the_wrapper_traps_term_and_writes_stalled(tmp_path, monkeypatch):
+  """The watchdog's one proof (spec section 11.1, U31): the wrapper traps TERM, and the trap writes `stalled` to the
+  exit file and ends the wrapper, no code written after it."""
+  from superegm.launch_builder import command_line
+  fake = tmp_path / "bin"; fake.mkdir()
+  c = fake / "claude"; c.write_text("#!/bin/sh\nexec sleep 30\n", encoding="utf-8"); c.chmod(0o755)
+  monkeypatch.setenv("PATH", f"{fake}:{os.environ['PATH']}")
+  result = tmp_path / "r.json"
+  line = command_line({"builder": {**DEFAULT_CONFIG["builder"], "profile_dir": str(tmp_path)}}, tmp_path, tmp_path / "p.md", result, "wave-1", ["Read"], "/usr/local/bin/gh", "b", "b@x", [], tmp_path / "m.json")
+  wrapper = subprocess.Popen(["/bin/sh", "-c", line], start_new_session=True)
+  time.sleep(1)
+  os.killpg(wrapper.pid, signal.SIGTERM)
+  wrapper.wait(timeout=10)
+  assert Path(f"{result}.exit").read_text(encoding="utf-8") == "stalled\n"
 
 
 def test_launch_carries_the_effort_flag_and_unsets_the_session_level():
