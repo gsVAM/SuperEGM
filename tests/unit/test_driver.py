@@ -268,6 +268,17 @@ def test_one_spec_is_one_artifact_in_every_worktree(world, monkeypatch, tmp_path
   assert card_of(s, a_card)["interrupted_at"]
 
 
+def test_a_wave_typed_from_another_worktree_numbers_after_the_ticks(world, monkeypatch, tmp_path):
+  """change-review-4-1: `wave_number` counts the wave cards on one spec, whichever worktree's path each records,
+  so a wave typed from worktree B after one on A's path is wave 2 and never overwrites wave_1_report.md."""
+  s, hid = registered(world, monkeypatch, tmp_path); wt2 = tmp_path / "wt2"; rel = world.spec.resolve().relative_to(world.repo.resolve())
+  a_card = world.run("runcard", "open", "--skill", "wave", "--artifact", str(world.spec))[1].strip()
+  subprocess.run(["git", "worktree", "add", "-q", str(wt2), "-b", "wt2"], cwd=world.repo, check=True); monkeypatch.chdir(wt2)
+  world.advance(60); b_card = world.run("runcard", "open", "--skill", "wave", "--artifact", str(wt2.resolve() / rel))[1].strip()
+  from superegm import report
+  assert report.wave_number(s, b_card, card_of(s, b_card)) == report.wave_number(s, a_card, card_of(s, a_card)) + 1
+
+
 def trigger(s):
   state = state_of(s); return status.tick_trigger(superegm.Handoff(Path(state["plan"]), s, state))
 
