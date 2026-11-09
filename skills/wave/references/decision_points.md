@@ -1,5 +1,5 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
-Added by SuperEGM (gsVAM), 2026: the `owner:` row of the word table and the three decision points, moved out of the wave skill's SKILL.md (the owner's ruling: a 24K skill body is context bloat). -->
+Added by SuperEGM (gsVAM), 2026: the `owner:` row of the word table and the three decision points, moved out of the wave skill's SKILL.md (the owner's ruling: a 24K skill body is context bloat); the `owner: <ids>` decision's allowed options, one per id, and its leavemealone sentence (U25). -->
 
 # The decision points
 
@@ -12,13 +12,19 @@ In leavemealone-mode each point's last line hands the question to the judge pane
 
 ## The owner's findings
 
-- `owner: <ids>` → `decision open` for the owner's findings: no relaunch, no slot; the inbox lists them. Write the findings (ids, claims) to a question file and run
+- `owner: <ids>` → `decision open` for the owner's findings: no relaunch, no slot; the inbox lists them. Write the findings (ids, claims) to a question file, each on a line of its own in the full finding-line shape `<fid> | <severity> | <location> | regression: <yes|no> | test-delta: <file>:<line> <kind>`, as the review posted it (`decision open` offers `<fid> allowed` only for an id of the word standing in the question as its own word: an id written only as `<fid>:`, `(<fid>)` or `<fid>,` gets no option, and `decision rule` refuses its `<fid> allowed` as none of the options; only when no id of the word stands as its own word do the options fall back to `finding upheld; finding overruled`; the owner's posted `<fid> allowed` finds its decision by any line starting `<fid> |` or a `## Q<n> <fid> (` heading, as Decision point 1's; only the file form below needs the full shape), and run
   `python3 '<HELPER>' decision open --unit <U> --point 1 --question '<file>' --source 'review <head-review-id> round <n>' --runcard '<CARD>'`, the option the owner's `<fid> allowed — <reason>` (point 1's `<fid> finding overruled — <reason>` is read as the same).
   The owner rules it, no judge panel, in leavemealone-mode too. On `allowed` run
   `python3 '<HELPER>' review settle --review <head-review-id> --finding <fid> --disposition declined --owner --runcard '<CARD>'`; in leavemealone-mode only the owner's by-hand comment
-  `**Ruling:** <fid> finding overruled — <reason>` on the issue settles it, with `--disposition declined --owner --posted <comment-id>`. Record it with `decision rule … --ruling '<fid> finding overruled — <reason>' --by <login>`,
-  then by `review status` as Decision point 1 proceeds. `<fid> finding upheld` below the cap is the `revise` row;
+  `**Ruling:** <fid> allowed — <reason>` (or `**Ruling:** <fid> finding overruled — <reason>`, read as the same) on the issue settles it, with `--disposition declined --owner --posted <comment-id>`. Record it with `decision rule --unit <U> --decision <qid> --ruling '<fid> allowed — <reason>' --by <login> --runcard '<CARD>'`, which posts the comment
+  when the owner rules in the session; on a by-hand comment add `--posted <comment-id>` (`--decision` may then be left out). The owner's
+  `**Ruling:** test-delta <file> allowed — <reason>` rules every id of that file at once: record it with `--ruling 'test-delta <file> allowed' --posted <comment-id>`, then settle each id of that file with `review settle … --finding <fid> --disposition declined --owner --posted <comment-id>`, the same file comment's id for every one.
+  Record it, then by `review status` as Decision point 1 proceeds. The owner may instead rule `<fid> finding upheld`, recorded the same way and the owner's alone; `<fid> finding upheld` below the cap is the `revise` row, the builder restoring it;
   at the cap (`review status` exit 2) it is Decision point 2 (`cap-reached`), never a relaunch.
+  `decision open` prints the options `<fid> allowed`, one per id; the owner posts one `**Ruling:** <fid> allowed — <reason>` comment per id, or the one file comment above for every id of its file, and the decision stays pending until each id is ruled.
+  A `review settle` made outside this row (the round's word not yet `owner: <ids>`) that leaves a posted round's remainder owner-only prints `owner: <ids>` and rewrites the round's outcome to it: go to this row, not by `review status`.
+  A settle on this row's own ids keeps the word and prints none while the decision is open on the ids left; when every id left is one the owner upheld, it prints `revise` (or `cap-reached` at the cap) and rewrites the outcome to it: the `revise` row, or Decision point 2.
+  In leavemealone-mode an `owner: <ids>` decision convenes no panel: the owner rules it by hand and the inbox lists it until then.
 
 ## The three points
 

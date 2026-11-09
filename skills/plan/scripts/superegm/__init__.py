@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23).
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
@@ -15,11 +15,14 @@ Every `gh` call goes through `gh()`; tests inject `GH`, `SLEEP` and `NOW` here.
 import argparse
 import importlib
 import calendar
+import contextlib
 import difflib
 import hashlib
 import json
 import os
 import re
+import shutil
+import signal
 import subprocess
 import urllib.parse
 import sys
@@ -101,6 +104,7 @@ DEFAULT_CONFIG = {
     "ingest": {"severity_words": {"bug": "high", "issue": "medium", "nit": "low", "suggestion": "low"},
                "human_role": "write"},  # `review ingest`: a thread's word map and the role a human's thread counts from
     "notify_timeout_seconds": 30,  # how long `notify` waits on the owner's ~/.superegm/notify hook (spec section 11.2)
+    "foreman": {"run_timeout_minutes": 8},  # the bound on one whole `collect` call, under the Bash tool's 10 (spec section 11.1)
 }
 
 DEFAULT_TEMPLATE = """<!-- superegm:handoff={{handoff_id}} unit={{unit_id}} spec={{spec_sha256}} -->
@@ -558,15 +562,35 @@ def canonical(obj) -> str:
   return json.dumps(obj, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
 
 
+@contextlib.contextmanager
+def hook_free():
+  """The `-c` pairs that keep a git call from running a hook or an fsmonitor the repository names: `core.hooksPath`
+  at a fresh empty directory (spec section 4.1), removed on exit (U25)."""
+  folder = tempfile.mkdtemp(prefix="superegm-no-hooks-")
+  try:
+    yield ["-c", f"core.hooksPath={folder}", "-c", "core.fsmonitor=false"]
+  finally:
+    shutil.rmtree(folder, ignore_errors=True)
+
+
 def run_git(args, cwd: Path, check=True) -> str:
-  result = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True,
-                          text=True, encoding="utf-8")
+  with hook_free() as pairs:
+    result = subprocess.run(["git", *pairs, *args], cwd=str(cwd), capture_output=True,
+                            text=True, encoding="utf-8")
   if not check:
     return result.stdout if result.returncode == 0 else ""
   if result.returncode != 0:
     raise HandoffError(f"git {' '.join(args)} failed in {cwd}: "
                        f"{result.stderr.strip() or result.stdout.strip()}")
   return result.stdout
+
+
+def kill_group(pgid: int) -> None:
+  """SIGTERM to the process group `pgid`, no escalation; a group already gone is no error."""
+  try:
+    os.killpg(pgid, signal.SIGTERM)
+  except (ProcessLookupError, PermissionError):
+    pass
 
 
 def git_toplevel(path: Path) -> Path:
@@ -711,7 +735,7 @@ def load_config(repo_root: Path) -> dict:
         if unknown:
           raise HandoffError(f"{path}: unknown label keys {sorted(unknown)}")
         config["labels"].update(value)
-      elif key in ("astra", "ingest") and isinstance(value, dict):
+      elif key in ("astra", "ingest", "foreman") and isinstance(value, dict):
         config[key] = {**config[key], **value}
       else:
         config[key] = value
@@ -726,6 +750,13 @@ def load_config(repo_root: Path) -> dict:
     raise HandoffError("ingest.severity_words must map words to high|medium|low")
   if config["ingest"].get("human_role") not in ROLES[1:]:
     raise HandoffError(f"ingest.human_role must be one of {', '.join(ROLES[1:])}")
+  if not isinstance(config["foreman"], dict):
+    raise HandoffError("foreman must be an object")
+  if set(config["foreman"]) - {"run_timeout_minutes"}:
+    raise HandoffError(f"foreman: unknown keys {sorted(set(config['foreman']) - {'run_timeout_minutes'})}")
+  bound = config["foreman"].get("run_timeout_minutes")
+  if isinstance(bound, bool) or not isinstance(bound, (int, float)) or not 0 < bound <= 9:
+    raise HandoffError("foreman.run_timeout_minutes must be a number above 0 and at most 9")
   if not config["repo"]:
     origin = run_git(["remote", "get-url", "origin"], repo_root)
     config["repo"] = parse_remote_url(origin)
@@ -1840,13 +1871,18 @@ def registered_worktrees(root: Path):
   return paths
 
 
-def remove_worktree(root: Path, tree: Path) -> None:
-  """Remove a review worktree only when it is clean.
+def remove_worktree(root: Path, tree: Path, force=False) -> None:
+  """Remove a review worktree only when it is clean, unless `force`.
 
-  `--force` deletes tracked modifications and untracked files. The foreman
-  removes a worktree after every round, so a person editing it during a review
-  would lose that work without being asked."""
+  `--force` deletes tracked modifications and untracked files. By default the
+  foreman would not take a person's edits without asking; `prepare` passes
+  `force` (U25): the review worktree is the store's, and a DoD `Run` line may
+  leave it dirty."""
   if not tree.exists():
+    run_git(["worktree", "prune"], root, check=False)
+    return
+  if force:
+    run_git(["worktree", "remove", "--force", str(tree)], root)
     run_git(["worktree", "prune"], root, check=False)
     return
   dirty = run_git(["status", "--porcelain"], tree, check=False).strip()
