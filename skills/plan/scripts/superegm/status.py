@@ -158,8 +158,10 @@ def builder_facts(st, uid: str, comments: list) -> tuple:
     exit_file = Path(latest["result_file"] + ".exit")
     exit = [latest["round"], core.read_text(exit_file).strip()] if exit_file.is_file() else None
   since = latest["started_at"] if latest else ""
-  status = None
+  status, builders = None, builder_logins(st)
   for comment in comments:
+    if builders and (comment.get("user") or {}).get("login") not in builders:
+      continue  # a stranger's status line is no builder's (spec section 11.2); a store whose `launch` recorded no login reads all
     body = comment.get("body") or ""
     # a status comment opens with its status line or its `**Deviation**` headings (the orders' shapes); a status
     # line quoted below another comment's first line, such as an owner's ruling, is not one
