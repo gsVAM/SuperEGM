@@ -29,7 +29,8 @@ DOD_RESULT_RE = re.compile(r"^### DoD (\d+)\n```[^\n]*\n(.*?)\n```", re.M | re.S
 ORDERS = Path(__file__).resolve().parents[4] / "skills/wave/references/builder_orders.md"
 HELPER = Path(__file__).resolve().parents[1] / "superegm.py"  # the plugin's own helper, run by `superegm-token`
 SENTINEL = "superegm-no-token"  # the launched `GH_TOKEN` on the App path: no token; the shim overrides it with the mint
-UNSET = ("GIT_ASKPASS", "SSH_ASKPASS", "GITHUB_TOKEN")  # the owner's prompts and token, unset in the launched environment
+# the owner's prompts and token, and the session effort level that would beat `--effort` (U28), unset in the launched environment
+UNSET = ("GIT_ASKPASS", "SSH_ASKPASS", "GITHUB_TOKEN", "CLAUDE_CODE_EFFORT_LEVEL")
 # The PR body's line 2 (owner ruling 2026-11-04): the login of the session that ran `launch`, no `@`, so it mentions nobody.
 AUDIT_LINE = "Launched by {owner} · run card {runcard} · unit {unit} · handoff {handoff}"
 
@@ -515,13 +516,13 @@ def command_line(config, worktree, prompt, result, runcard, tools, gh, login, em
   `GH_TOKEN` as the shell variable expands (never its value) or, on the App path, the sentinel the shim
   overrides, the role and card, the launched git pairs (`gh`, the shim on the App path, as the credential
   helper by absolute path; the identity `login` and `email` from the wave card), `claude -p` on the prompt
-  file (with `--session-id` when given) with `--setting-sources user` (the builder sits in the target repository,
+  file (with `--session-id` when given), `--model` and `--effort` from `builder` (U28), with `--setting-sources user` (the builder sits in the target repository,
   whose project settings and SessionStart hooks it must not run: the profile's settings alone), one `--plugin-dir`
   per listed plugin's directory, `--mcp-config <mcp_file> --strict-mcp-config` (no other MCP configuration loads),
   the result and exit files."""
   b = config["builder"]
   pairs = launched_pairs(gh, login, email)
-  for value in (worktree, prompt, result, b["profile_dir"], b["model"], b["permission_mode"], runcard, *tools, *(v for _, v in pairs),
+  for value in (worktree, prompt, result, b["profile_dir"], b["model"], b["effort"], b["permission_mode"], runcard, *tools, *(v for _, v in pairs),
                 *plugin_dirs, mcp_file, session_id or ""):
     if "'" in str(value):
       raise core.HandoffError(f"{value} holds a quote and cannot go on the command line")
@@ -531,6 +532,6 @@ def command_line(config, worktree, prompt, result, runcard, tools, gh, login, em
   dirs = "".join(f"--plugin-dir '{d}' " for d in plugin_dirs)
   return (f"cd '{worktree}' && env {unset} CLAUDE_CONFIG_DIR='{b['profile_dir']}' ENABLE_CLAUDEAI_MCP_SERVERS=false {token} "
           f"SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{runcard}' {env} "
-          f"claude -p \"$(cat '{prompt}')\"{session} --model '{b['model']}' --permission-mode '{b['permission_mode']}' --setting-sources user "
+          f"claude -p \"$(cat '{prompt}')\"{session} --model '{b['model']}' --effort '{b['effort']}' --permission-mode '{b['permission_mode']}' --setting-sources user "
           f"{dirs}--mcp-config '{mcp_file}' --strict-mcp-config "
           f"--allowedTools '{','.join(tools)}' --output-format json > '{result}'; echo $? > '{result}.exit'")
