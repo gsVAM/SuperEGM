@@ -99,4 +99,5 @@ are untouched: each has its own directory.
 `superegm runcard close <card>` is the last action of every path, including an error you cannot
 recover from. In chat: the review id and its `review status` line, the escalated findings with
 their new unit rows, or the `closed` line, and the handoff journal's `accepted before the cap` lines quoted
-verbatim (the one source for the owner's by-hand release notes); never a report pasted.
+verbatim (the one source for the owner's by-hand release notes), skipping a review's line that a later
+`review <id> R<n> accept lapsed` line of the same review names; never a report pasted.
