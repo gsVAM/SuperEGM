@@ -73,6 +73,9 @@ evidence. One finding per unit, `medium`, on the Scope line, naming every reason
 
     proportion-<round>-<n> | medium | U<nn> Scope | regression: no | split candidate: <Steps | bytes | paths | subsystems>: <the split>
 
+The template's `<Steps | bytes | paths | subsystems>` lists the four reasons to choose from; the
+line names the ones met joined by a comma (`split candidate: Steps, subsystems: …`), never by ` | `,
+the findings line's field separator (`review record` refuses a line of more than five fields).
 The claim names the split: the two units it would make and the edge between them, a `Blocked by`
 only where one consumes the other's interface. A unit whose Scope crosses subsystems is reported
 even under every number. Read the tier as the tier check reads it, from the body's own `Tier:` line
