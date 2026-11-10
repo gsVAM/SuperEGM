@@ -113,7 +113,8 @@ conversation.
 ## Think Wide With a Team
 
 This section runs only when the owner asks for it: they typed `/superegm:brainstorming --team`, or `brainstorm.team` is true in `.superegm/config.json`.
-Reading the config yourself, a missing key reads false; any value but `true` (a string such as `"yes"`, which the helper's `load_config` refuses) is no ask: tell the owner and go on without the team unless they typed `--team`.
+Reading the config yourself, a missing key reads false; `false` or a missing key is no ask, and you say nothing.
+Only a value neither `true` nor `false` (a string such as `"yes"`, which the helper's `load_config` refuses) is worth a word: tell the owner it is malformed and go on without the team unless they typed `--team`.
 A brainstorm not asked for runs neither teammates nor subagents: the skill as above, nothing more.
 Run it once you know the topic well enough to state it in one line, before you propose anything.
 
@@ -129,11 +130,16 @@ the architect as `superegm:design` with `name: architect`, the skeptic as `super
 Each works one approach in its own context and reports it to you by message; they may message each other to challenge a claim, and ask the cartographer, never the code.
 
 **The wait.** The same for each spawn: note one Bash `date` at the spawn and end your turn, with no `sleep`.
-Before ending it, tell the owner you are waiting on the cartographer (or on the three), and that their next message, or `fallback` typed, after ten minutes takes the fallback: a split-pane mode sends you nothing, so only the owner's message starts your next turn.
+Before ending it, tell the owner what you are waiting on: a split-pane mode sends you nothing, so only the owner's message starts your next turn.
+After the cartographer's spawn, tell the owner you are waiting on the cartographer: if its notes are not in, their message ten minutes or more after the spawn takes the fallback, and `fallback` typed takes it at once.
+After the three's spawn, tell the owner you are waiting on the three: their message ten minutes or more after the spawn has you ask each silent one once, then write its approach `not reported`; there is no fallback once the three run.
 Read your inbox at its next turn, with a second Bash `date` to tell how long it has been: the mailbox shows no arrival time, so a report in your inbox at that turn is merged, whenever it came: ten minutes counts only when the inbox holds none (a report within ten minutes is the ordinary case; one found later still proves the mailbox).
+At a next turn less than ten minutes after the `date` with nothing in the inbox, answer what the owner asked, repeat the one-line notice and end your turn again.
+`fallback` typed while waiting on the cartographer takes the fallback at once, whatever the time: send it a shutdown request first.
 A next turn ten minutes or more after the `date` with no message from the cartographer means the mailbox is not working (a split-pane mode): send it a shutdown request and take the fallback.
 After the shutdown request, once you take the fallback, a teammate's later message is not merged: the subagents' returns stand in its place.
 A next turn ten minutes or more after the `date` with none from one of the three means one message asking it; still none at the turn after, write that approach `not reported`.
+`fallback` typed while waiting on the three counts as the ten minutes passed: ask each silent one once now; it starts no fallback.
 Until the design is written, a report found after an approach is written `not reported` replaces that line.
 A `name: cartographer` spawn that returns in the same turn ran as a subagent: its return is the fallback's first return, so do not wait; go on with the fallback.
 

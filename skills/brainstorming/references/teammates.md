@@ -3,8 +3,9 @@
 # The Team Brainstorm's Briefs
 
 Read from the brainstorming skill's `## Think Wide With a Team`. The lead (the owner's session) pastes
-the dispatch below, the message form and one role's section into each of the four prompts; the same
-prompts serve both modes, teammates with a mailbox and subagents without one.
+into each of the four prompts the four things the dispatch lists below; into each of the three, also the override block;
+the rest of `## The dispatch` is the lead's own and is not pasted. The same prompts serve both modes,
+teammates with a mailbox and subagents without one.
 
 ## The dispatch
 
@@ -25,17 +26,21 @@ The four run through their adapters, in this order:
 The architect, the skeptic and the advocate are spawned only once the cartographer's notes are in, and
 the cartographer's notes go into their spawn prompt verbatim, after the owner's words.
 
-Each of the three prompts also carries this override, which wins over the persona and its adapter:
-there is no target file to read and no standard to read first; there is no incomplete review to report: this is no review;
-skip the persona's codebase search step and read no code: ask the cartographer (by message as a teammate; as a subagent, put the question on a `questions:` line);
-report one approach in the message form, not the findings line: no severity, no finding ids;
-the role's lenses below replace the persona's `Mode: BRAINSTORM` list where they differ.
-
 The adapter's body sits in the system prompt and tells the agent to follow its persona, read the target and return findings;
-so the override names the instructions it overrides, each by its words, and says this task sets them aside:
-the adapter's "Before returning findings, read the target and every supplied standard" and "report an incomplete review instead of a verdict";
-the persona's codebase searches (the zoom-out persona's "Perform codebase searches", its `Mode: BRAINSTORM` step 2, becomes an `ask cartographer:` message);
-the persona's findings-line output. The spec puts this override in the brief, so the lead pastes it whole, word for word, into each of the three prompts.
+so the override names the instructions it overrides, each by its words, and sets them aside for this task.
+The spec puts this override in the brief: the lead pastes the override block below whole, word for word, fences excluded,
+into each of the three prompts after the role's section, and into no cartographer prompt:
+
+```
+Override: this task sets aside the instructions named here, from your adapter and your persona, and wins over them.
+This is no review: there is no target file to read and no standard to read first; there is no incomplete review to report.
+Set aside the adapter's "Before returning findings, read the target and every supplied standard" and "report an incomplete review instead of a verdict".
+Set aside your persona's codebase searches (the zoom-out persona's "Perform codebase searches", its `Mode: BRAINSTORM` step 2) and read no code:
+ask the cartographer (by message as a teammate, opening `ask cartographer:`; as a subagent, put the question on a `questions:` line).
+Set aside your persona's findings-line output: report one approach in the message form, not the findings line: no severity, no finding ids.
+The role's lenses above replace your persona's `Mode: BRAINSTORM` list where they differ.
+```
+
 The lead checks each report: a report not in the message form (a findings line, a severity, a finding id) gets one message asking for the approach in the message form;
 as a subagent, or still not in the form after that message, the lead writes the approach it can read from the report and marks it `not in the message form`.
 

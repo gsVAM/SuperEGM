@@ -27,7 +27,8 @@ relies on, from the live probes; do not re-derive them.
   The variable is set for the brainstorm session alone, never in `settings.json`; the fallback's four and every goldfish are
   dispatched without `name`, so no team forms unasked.
 - `omitClaudeMd` tracks the agent definition, never the name, while agent teams are off: an adapter
-  subagent does not load CLAUDE.md or the memory index. With the variable set, a name makes the call a teammate, to which it is not applied.
+  subagent does not load CLAUDE.md or the memory index. With the variable set, a name makes the call a teammate in an interactive session, to which it is not applied;
+  under `-p` a named call is a subagent, to which it is applied.
   SessionStart hooks run for sessions, not for Agent-tool subagents, so this
   plugin's hook never reaches a goldfish. SubagentStart hooks in the owner's own profile do reach
   adapter subagents; the plugin cannot suppress them, so every dispatch record
