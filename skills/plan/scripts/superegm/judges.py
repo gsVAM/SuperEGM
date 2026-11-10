@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the judges subcommand (spec section 13.1) and `judges question`, the
-# leavemealone-mode question renderer of section 13.2 (U11); the cap question names a spec review's scope (U19).
+# leavemealone-mode question renderer of section 13.2 (U11); the cap question names a spec review's scope (U19); the default members read from `DEFAULT_CONFIG` (U28); a `launch <n>` or `closed <n>` question renders its pending decision's options, a stall's heading its facts (U31); its own `judges` config key, moved from `__init__` (U32).
 
 """superegm judges open|record|diff|verdict|question: the judge panel over a question file, and the
 question file rendered from the record at a decision point."""
@@ -12,6 +12,11 @@ from pathlib import Path
 import superegm as core
 
 WRITES = frozenset(["judges", "runcards", "questions"])  # the store kinds this subcommand writes
+CONFIG_DEFAULTS = {"judges": {"min_vendors": 1,  # its own config key (U32)
+                              "members": [{"name": "fable", "via": "adapter", "effort": "xhigh"},
+                                          {"name": "opus", "via": "adapter", "effort": "max"},
+                                          {"name": "astra", "via": "runner", "effort": "xhigh"}]}}
+INIT_STEP, DOCTOR_CHECKS = "", None
 SKILLS = frozenset(["judges"])  # the skills whose card this subcommand accepts
 PARENT_SKILLS = ("review-spec", "review-plan", "plan", "wave", "integrate")
 QUESTION_SKILLS = frozenset(["review-spec", "review-plan", "plan", "wave"])  # the cards `judges question` accepts
@@ -25,7 +30,6 @@ OPTION_RE = re.compile(r"^- \(([a-z])\) (.+)$")
 ANSWER_RE = re.compile(r"^Q(\d+): \(([a-z])\)\s*$")
 SAW_RE = re.compile(r"^saw:\s*(.*)$")  # the judge's isolation report, first or last line of the reply
 NOTE_KEYS = {"reason": "reason", "would change my mind": "would_change"}
-DEFAULT_MEMBERS = {"fable": {"via": "adapter", "effort": "xhigh"}, "opus": {"via": "adapter"}, "astra": {"via": "runner"}}
 VENDOR_OF = {"adapter": "anthropic", "runner": "openai"}
 
 
@@ -90,7 +94,7 @@ def judge_members(config: dict) -> dict[str, dict]:
   dicts (keyed `id`, or `name` as `init` writes it) or of ids is normalised."""
   judges_cfg = config.get("judges") or {}
   astra = config.get("astra") or {}
-  members = judges_cfg.get("members") or DEFAULT_MEMBERS
+  members = judges_cfg.get("members") or core.DEFAULT_CONFIG["judges"]["members"]
   if isinstance(members, list):
     members = {(m if isinstance(m, str) else m.get("id") or m.get("name")): ({} if isinstance(m, str) else m)
                for m in members}
@@ -596,14 +600,22 @@ def blocked_question(st, unit: str, what: list) -> tuple[str, list[int]]:
     n = int(what[1])
     if not 1 <= n <= len(launches):
       raise core.HandoffError(f"question: {unit} has no launch {n}")
-    heading = f"{unit} launch {n} ({launches[n - 1]['status']}) ended with no pull request"
+    entry = launches[n - 1]
+    if entry["status"] == "exited (stalled)":  # the stall facts (U31)
+      heading = f"{unit} launch {n} stalled (last commit {entry.get('last_commit_at') or 'none'})"
+    else:
+      heading = f"{unit} launch {n} ({entry['status']}) ended with no pull request"
   elif len(what) == 2 and what[0] == "closed" and what[1].isdigit():
     heading = f"{unit}: #{what[1]} was closed by the builder account"
   else:
     raise core.HandoffError("question: --blocked takes <comment-id> | launch <n> | closed <n>")
-  if any(r["ruling"].partition(" — ")[0].strip() == "relaunch" for r in core.load_foreman(st, unit)["rulings"]):
-    raise core.HandoffError(f"question: relaunch already used on {unit}")  # section 11: offered once per unit
-  return f"## Q1 {heading}\n" + options_text(RELAUNCH), []
+  # the options are the pending point-3 decision's, `decision open` having applied the carve-out (U31)
+  from superegm.report import pending_decisions
+  source = " ".join(what)
+  pending = next((d for d in pending_decisions(core.load_foreman(st, unit)) if d.get("point") == 3 and d.get("source") == source), None)
+  if pending is None:
+    raise core.HandoffError(f"question: {unit} has no pending decision on {source}")
+  return f"## Q1 {heading}\n" + options_text(pending.get("options") or RELAUNCH), []
 
 
 def fan_out(st, unit: str) -> list[int]:

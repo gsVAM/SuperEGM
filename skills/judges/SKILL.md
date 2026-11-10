@@ -7,6 +7,8 @@ disable-model-invocation: true
 description: Runs one judge panel over a review round and posts the settled findings.
 ---
 
+<!-- Added by SuperEGM (gsVAM), 2026: the judges skill; each judge's model and effort read from the panel's `panel.json` (U28). -->
+
 # judges
 
 In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.
@@ -58,8 +60,9 @@ config's `artifacts_dir`.
         astra --not-run '<reason>' --runcard <CARD>`.
     2.  **The two Claude judges**, dispatched in one message, concurrently,
         each through the `superegm:judge` adapter (`omitClaudeMd: true`,
-        tools `[Read, Grep, Glob]`) with the model override `model: fable`
-        and `model: opus`, effort `max` where the Agent tool offers it, and
+        tools `[Read, Grep, Glob]`) with the override read per judge from `<STORE>/judges/<PANEL>/panel.json`:
+        `judges.<id>.model` as `model:` and `judges.<id>.effort` as `effort:`
+        (the effective pair by `review_loop.md`'s one rule), and
         the prompt: Read `<STORE>/judges/<PANEL>/round-<n>/brief.md` and
         answer as it says. Nothing else goes in the prompt: no summary of
         the question, no opinion, no history.
@@ -67,7 +70,11 @@ config's `artifacts_dir`.
         `${TMPDIR:-/tmp}/superegm-judges/<PANEL>/r<n>-<judge>.md` (outside
         the store; the helper copies it in) and run `superegm judges record
         --panel <PANEL> --round <n> --judge <judge> --verdict '<that file>'
-        --isolation <clean | exposed:<what>> --runcard <CARD>`. The isolation
+        --isolation <clean | exposed:<what>> --model <requested>:<effective>
+        --effort <requested>:<effective> --runcard <CARD>`, the requested pair
+        the panel's and the effective one the one rule's (an exported
+        `CLAUDE_CODE_EFFORT_LEVEL` or `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`
+        said there, never the configured value shown as observed). The isolation
         comes from the reply's `saw:` line, first or last (the helper stores its
         text as the record's `saw`): `saw: none` is `clean`,
         anything else is `exposed:<what it saw>`. A reply with no `saw:` line

@@ -31,9 +31,37 @@ the first typed skill runs it when the file is missing. The steps:
    `<base>`.
 2. Create the builder's empty profile at `config.builder.profile_dir`: no hooks, no plugins, no
    `CLAUDE.md`, only the login (`CLAUDE_CONFIG_DIR=<profile_dir> claude`, `/login`, exit) and a
-   `settings.json` with `"syncClaudeAiPlugins": false`, written before the login so the account's
-   plugins are not synced into the profile (Claude Code 2.1.273 or later). `launch-builder` refuses a
-   profile with anything else in it; the files Claude Code writes on its own are not plugins.
+   `settings.json` with `"syncClaudeAiPlugins": false` and `"disableClaudeAiConnectors": true`,
+   written before the login so the account's plugins are not synced into the profile and its
+   connectors stay out (Claude Code 2.1.273 or later); no `skills/` or `commands/` directory.
+   `launch-builder` refuses a profile with anything else in it; the files Claude Code writes on its
+   own are not plugins.
+
+   The plugins and MCP servers a builder gets are named in the config, never installed in its
+   profile. `builder.plugins` lists `<name>@<marketplace>` ids, each installed once into your own
+   session's profile (`user` scope) and disabled there; each launch passes its directory by
+   `--plugin-dir <dir>`, and a listed plugin's hooks, skills and bundled servers come with it.
+   `builder.mcp` is an object in `mcpServers` form, a secret by `${VAR}` reference, written to
+   `launches/<unit>_r<n>_mcp.json` at each launch and passed by
+   `--mcp-config <file> --strict-mcp-config`, so no other MCP configuration loads. `builder.mcp` is
+   the server map that goes under the file's `mcpServers` key (name to server object), never a whole
+   `.mcp.json`. Whether `--strict-mcp-config` keeps a listed plugin's bundled servers is not yet
+   probed (decision D1 of U27: the default reads that they come with the plugin, your hand run
+   settles it); name in `builder.mcp` a bundled server a builder must reach. Each launch
+   records the set in `launches/<unit>_r<n>_plugins.json`: each plugin's id, version, directory
+   and hook events, the managed plugins and the MCP file's server names. A plugin's skills are
+   invoked only through the allow-list's `Skill(<name>)` rules, its servers' tools through
+   `mcp__<server>__*` rules; `superegm doctor` prints both sets on its `plugins:` and `mcp:` lines.
+   `Agent` in `builder.allowed_tools` is your opt-in, absent from the default list: a builder may
+   then delegate to the platform's default subagents, each confined to its session's allow-list,
+   profile and worktree, up to `builder.max_subagent_calls` (12) calls a launch, a budget the
+   orders state, not a gate. That confinement is not yet probed (decision D2 of U27: whether a
+   subagent's allow-list equals the builder's; your hand run after the merge settles it). The
+   orders also ask each call to stay under `builder.stall_minutes`, the key a later unit adds with
+   its watchdog; until it lands no config bounds a call. `record-launch` reads the calls from the
+   session's transcript and writes them on the launch entry as `subagent_calls`: `count` and
+   `calls[]`, each with its `role`, `description`, `model` and `duration_s`;
+   `{"count": 0, "calls": []}` when the transcript is missing or the entry has no `session_id`.
 3. Set the branch protection of design section 11 on `<base>`: updates restricted to the owner
    (the logins in `owners`) with no bypass for the builder account's role and no team but
    `owner_team`; `superegm/**` protected from force-push and deletion by a ruleset whose

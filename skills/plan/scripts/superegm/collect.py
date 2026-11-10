@@ -1,29 +1,316 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # From the elephant-goldfish-model (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17); an unreplied external high or medium carried forward (U21).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17); an unreplied external high or medium carried forward (U21); rulings read through `ruling_of` and the record, every folded deviation heading (U22); the DoD re-run and the test delta, two gates before the word (U25); its own `foreman` config key and `init` line, moved from `__init__` and `init` (U32).
 
 """superegm collect: the foreman's findings of a round through one `review record --reviewer foreman`, or a
 round that could not complete with `--not-run`."""
 
 import argparse
 import contextlib
+import difflib
 import io
 import json
+import os
 import re
+import shutil
+import subprocess
+import time
 from pathlib import Path
 
 import superegm as core
 from superegm import body as body_mod, review, tdd_order
+from superegm.decision import binding_rulings, recorded_rulings
 from superegm.foreman import head_review_id
-from superegm.launch_builder import DOD_RESULT_RE
+from superegm.launch_builder import DOD_RESULT_RE, SENTINEL, launched_pairs
+from superegm.orient import TEST_RE
 from superegm.prepare import HEADER_RE
 
 WRITES = frozenset(['foreman', 'review', 'reviews'])  # the store kinds this subcommand writes
+CONFIG_DEFAULTS = {  # its own config key and init line (U32)
+    "foreman": {"run_timeout_minutes": 8},  # the bound on one whole `collect` call, under the Bash tool's 10 (spec section 11.1)
+}
+INIT_STEP = ("`collect` re-runs every DoD `Run` item the PR body pastes under its `### DoD <n>` fence in the review worktree "
+             "(an item without one is the `Run item <n>: no fenced output` high, not run), the whole call bounded by "
+             "foreman.run_timeout_minutes (default 8, at most 9, under the Bash tool's 10-minute cap).")
+DOCTOR_CHECKS = None
 SKILLS = frozenset(['wave'])  # the skills whose card this subcommand accepts
 DEVIATION_RE = re.compile(r"^\*\*Deviation \((interface|dod|test|other)\):\*\*")
-RULED_RE = re.compile(r"^\*\*Ruling:\*\* \((\d+)\)")  # a ruling on a deviation comment, by its id (section 10)
-RULING_RE = re.compile(r"^\*\*Ruling:\*\* (\S+) finding (upheld|overruled)")
 REPLY_RE = re.compile(r"^\*\*Reply (\S+):\*\* (fixed|contested)(?:\s*[—-]\s*(.*))?", re.S)
+COUNTS_RE = re.compile(r"(\d+) passed|(\d+) failed")  # a pytest summary line's pass and fail counts
+KILL_WAIT = 5  # seconds waited after `kill_group` at the bound before `exit: none` is recorded
+
+
+def run_env(gh, worktree) -> dict:
+  """The DoD runs' environment, an allow-list (spec section 11.1): `PATH`, `HOME`, `LANG`, `TMPDIR`, the sentinel
+  `GH_TOKEN`, the builder's git shut-out pairs, `PIP_REQUIRE_VIRTUALENV=1` and `npm_config_prefix` at the worktree.
+  The pairs are `launched_pairs`' own, after one entry of the gate's: an empty `credential.helper`, so a generic
+  helper the checkout's `.git/config` names answers no host; then `launched_pairs` empty github.com's helper and
+  `core.askPass` and set `!<gh> auth git-credential` as github.com's helper, as the builder's are; that helper
+  answers with the sentinel `GH_TOKEN`, never a real credential."""
+  env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG", "TMPDIR") if k in os.environ}
+  pairs = dict(launched_pairs(gh, "superegm", "superegm"))
+  count = int(pairs.pop("GIT_CONFIG_COUNT"))
+  entries = [("credential.helper", "")] + [(pairs.pop(f"GIT_CONFIG_KEY_{i}"), pairs.pop(f"GIT_CONFIG_VALUE_{i}")) for i in range(count)]
+  pairs["GIT_CONFIG_COUNT"] = str(len(entries))
+  for i, (key, value) in enumerate(entries):
+    pairs.update({f"GIT_CONFIG_KEY_{i}": key, f"GIT_CONFIG_VALUE_{i}": value})
+  env.update(pairs)
+  env.update(GH_TOKEN=SENTINEL, PIP_REQUIRE_VIRTUALENV="1", npm_config_prefix=str(worktree))
+  return env
+
+
+def last_line(text: str) -> str:
+  return next((l.strip() for l in reversed(text.splitlines()) if l.strip()), "")
+
+
+def counts(text) -> tuple | None:
+  """`(passed, failed)` from the last line of `text` matching `COUNTS_RE` (an absent word 0), or None: no such line."""
+  line = next((l for l in reversed((text or "").splitlines()) if COUNTS_RE.search(l)), None)
+  if line is None:
+    return None
+  found = COUNTS_RE.findall(line)
+  return (next((int(p) for p, _ in found if p), 0), next((int(f) for _, f in found if f), 0))
+
+
+def dod_findings(body: str, runs: dict, ruled: set, texts: dict = None, config: dict = None) -> list:
+  """The `dod-<n>` highs of the re-run, in item order, skipping an item number in `ruled`: a run cut by the bound
+  `ran red (timeout)`, an item the bound left unreached `not run (timeout)`, a non-zero exit `ran red (<line>)` alone
+  (`<line>` the summary with ` | ` written ` ¦ `, so the finding keeps its five fields, then `review.mask`ed with
+  `config`, so a mention or a banned term in the output cannot make the review unpostable; a red run that printed
+  nothing `ran red (exit <code>)`), and a green run whose pass or fail counts differ from the builder's paste
+  `paste differs from the run`. `texts`, when given, maps an item number to `(output, paste)`, the whole texts
+  whose last `COUNTS_RE` lines are compared; else the summary lines are."""
+  found = []
+  for n, kind, _ in body_mod.dod_items(body):
+    run = runs.get(str(n))
+    if kind != "run" or run is None or n in ruled:
+      continue
+    if run["summary"] is None:
+      found.append(("pr_body.md", f"dod-{n}: not run (timeout)"))
+    elif run["timed_out"]:
+      found.append((f"dod/{n}.txt", f"dod-{n}: ran red (timeout)"))
+    elif run["exit"] != 0:
+      line = review.mask(run["summary"].replace(" | ", " ¦ "), config or {}) or f"exit {run['exit']}"
+      found.append((f"dod/{n}.txt", f"dod-{n}: ran red ({line})"))
+    elif None not in (ran := counts((texts or {}).get(n, (run["summary"], None))[0]),
+                      pasted := counts((texts or {}).get(n, (None, run["paste_summary"]))[1])) and ran != pasted:
+      found.append((f"dod/{n}.txt", f"dod-{n}: paste differs from the run"))
+  return found
+
+
+def dod_runs(items, worktree: Path, env: dict, deadline: float, out_dir: Path) -> dict:
+  """Run each `(n, command, paste_summary)` through `/bin/sh` in `worktree`, in its own process group, its output
+  to `out_dir/<n>.out`; the group is killed on the item's return and at `deadline`, and an item reached after
+  the deadline is not run (`exit` and `summary` None, `timed_out` true)."""
+  out_dir.mkdir(parents=True, exist_ok=True)
+  runs = {}
+  for n, command, paste in items:
+    left = deadline - time.time()
+    if left <= 0:
+      runs[str(n)] = {"exit": None, "summary": None, "paste_summary": paste, "timed_out": True}
+      continue
+    out = out_dir / f"{n}.out"
+    with open(out, "wb") as sink:
+      p = subprocess.Popen(["/bin/sh", "-c", command], cwd=str(worktree), env=env, stdin=subprocess.DEVNULL,
+                           stdout=sink, stderr=subprocess.STDOUT, start_new_session=True)
+      try:
+        code, timed_out = p.wait(timeout=left), False
+        core.kill_group(p.pid)
+      except subprocess.TimeoutExpired:
+        core.kill_group(p.pid)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+          p.wait(timeout=KILL_WAIT)
+        code, timed_out = None, True
+    summary = last_line(out.read_text(encoding="utf-8", errors="replace") if out.is_file() else "")  # a run may unlink it
+    runs[str(n)] = {"exit": code, "summary": summary, "paste_summary": paste, "timed_out": timed_out}
+  return runs
+
+
+OPERATORS = ("==", " in ", "raises", "match=")  # a paired head line lacking one of its base line's is weakened
+MARKER_RE = re.compile(r"@pytest\.mark\.(?:skip|skipif|xfail)\b")
+
+
+def marker(line: str):
+  """The `skip`, `skipif` or `xfail` decorator `line` opens with, never one a comment or a string holds."""
+  return MARKER_RE.match(line.strip())
+DEF_RE = re.compile(r"\s*(?:async\s+)?def (test_\w+)\s*\(")  # a test function, by name
+
+
+def assertion_lines(lines: list) -> set:
+  """The 0-based indexes of `lines` the gate guards: an `assert`, a `pytest.raises`, a `def test_` and a
+  `parametrize` row (a line strictly between one holding `@pytest.mark.parametrize(` and the next whose stripped
+  text starts with `]`)."""
+  out, inside = set(), False
+  for i, line in enumerate(lines):
+    s = line.strip()
+    if inside:
+      if s.startswith("]"):
+        inside = False
+      else:
+        out.add(i)
+        continue
+    if "@pytest.mark.parametrize(" in line:  # a decorator that closes its brackets on its own line opens no rows
+      inside = line.count("(") > line.count(")") or line.count("[") > line.count("]")
+    elif re.match(r"assert\b", s) or "pytest.raises" in s or s.startswith("def test_"):  # `assert(x)` too
+      out.add(i)
+  return out
+
+
+def decorated(lines: list, j: int) -> int:
+  """The index of the `def` line decorator line `j` decorates, past any stacked decorator and its continuation
+  lines and comments, or `len(lines)` when a statement at the decorator's own indentation comes first."""
+  indent = len(lines[j]) - len(lines[j].lstrip())
+  for d in range(j + 1, len(lines)):
+    s = lines[d].strip()
+    if s.startswith(("def ", "async def ")):
+      return d
+    if s and len(lines[d]) - len(lines[d].lstrip()) <= indent and not s.startswith(("@", ")", "]", "}", "#")):
+      break
+  return len(lines)
+
+
+def test_delta(base_files: dict, head_files: dict, named: set) -> list:
+  """The removed or weakened assertions of each test file `base_files` maps to `(base_commit, text)`, its head
+  text in `head_files` (absent: zero assertions), a file in `named` or not `.py` skipped. Lines pair as git pairs
+  them: positionally within each `difflib.SequenceMatcher` `replace` block, the rest unpaired; a pair whose head
+  line lacks one of the base line's `OPERATORS` is `weakened` at the head line, a head `skip`, `skipif` or `xfail`
+  marker, unpaired or paired with a base line that was no marker, above a `def test_`, past any stacked decorator, is `weakened`, and an unpaired base assertion whose stripped text is in no
+  head line is `removed`."""
+  delta = []
+  for path, (base_commit, base_text) in sorted(base_files.items()):
+    if path in named or not path.endswith(".py"):
+      continue
+    entry = lambda line, base_line, kind: {"file": path, "line": line, "base_line": base_line, "kind": kind, "base_commit": base_commit}
+    base, guarded = base_text.splitlines(), assertion_lines(base_text.splitlines())
+    head_text = head_files.get(path)
+    if head_text is None:
+      delta += [entry(i + 1, i + 1, "removed") for i in sorted(guarded)]
+      continue
+    head = head_text.splitlines()
+    stripped = {line.strip() for line in head}
+    ops = difflib.SequenceMatcher(None, base, head, autojunk=False).get_opcodes()
+    to_base = {j1 + k: i1 + k for tag, i1, i2, j1, j2 in ops if tag == "equal" for k in range(i2 - i1)}
+    defs = {m.group(1): i for i, line in enumerate(base) if (m := DEF_RE.match(line))}
+    # the markers each base test already carried: one the head keeps (a skipped test moved, decorators reordered) is no addition
+    had = {(decorated(base, i), m.group(0)) for i, line in enumerate(base) if (m := marker(line))}
+
+    def base_def(d):  # the base line of the test head line `d` defines: unchanged, else the base `def` of its name
+      m = DEF_RE.match(head[d])
+      return None if not m else to_base[d] if d in to_base else defs.get(m.group(1))
+    for tag, i1, i2, j1, j2 in ops:
+      if tag == "equal":
+        continue
+      paired = min(i2 - i1, j2 - j1) if tag == "replace" else 0
+      for k in range(paired):
+        i, j = i1 + k, j1 + k
+        if i in guarded and any(op in base[i] and op not in head[j] for op in OPERATORS):
+          delta.append(entry(j + 1, i + 1, "weakened"))
+      for j in range(j1, j2):  # a marker added, or written over a paired base line that was no marker
+        d = decorated(head, j)
+        if j - j1 < paired and marker(base[i1 + j - j1]):
+          continue
+        if (m := marker(head[j])) and d < len(head) and (b := base_def(d)) is not None and (b, m.group(0)) not in had:
+          delta.append(entry(j + 1, b + 1, "weakened"))
+      for i in range(i1 + paired, i2):
+        if i in guarded and base[i].strip() not in stripped:
+          delta.append(entry(j1 + 1, i + 1, "removed"))
+  return delta
+
+
+def delta_files(worktree: Path, base: str, head: str, commits: list, named: set) -> tuple:
+  """`(base_files, head_files)` for `test_delta`, read from git objects: every test file by name a commit of the
+  range touches that no `Write` line names, keyed by its head path; its base the range's base when the file (or
+  its rename source, by `git diff -M`) exists there, else the commit that creates it; a rename source is compared
+  through its pair, never alone. The range's own `git diff` adds a file only a merge changed; a file the range
+  creates then renames chains back, commit by commit (`git log -M`), to the path it was created under, and forward
+  to the path it ends under at the head, test-named or not."""
+  # every path NUL-delimited (`-z`), never C-quoted; `-m` reads a merge's own changes against each parent
+  log = name_status(core.run_git(["log", "-m", "-M", "--reverse", "--name-status", "-z", "--format=", f"{base}..{head}"], worktree))
+  diff = name_status(core.run_git(["diff", "-M", "--name-status", "-z", base, head], worktree))
+  touched = [unquote(p) for _, paths in commits for p in paths]  # `commits_of` reads `--name-only`, C-quoted
+  touched += [p for _, paths in log + diff for p in paths]  # a rename's source among them, and a change a merge alone made
+  touched = list(dict.fromkeys(p for p in touched if TEST_RE.search(p) and p not in named))
+  renames = {paths[1]: paths[0] for status, paths in diff if status.startswith("R")}
+  back = {paths[1]: paths[0] for status, paths in log if status.startswith("R")}
+  ahead = {old: new for new, old in renames.items()}  # a test file renamed, base to head, to a path no longer test-named
+
+  def first(path):  # the path a file was created under in the range, down its renames
+    seen = {path}
+    while path in back and back[path] not in seen:
+      path = back[path]
+      seen.add(path)
+    return path
+  fwd = {old: new for new, old in back.items()}
+
+  def last(path):  # the path a file ends under in the range, up its renames commit by commit
+    seen = {path}
+    while path in fwd and fwd[path] not in seen:
+      path = fwd[path]
+      seen.add(path)
+    return path
+  tree = lambda rev: set(core.run_git(["ls-tree", "-r", "-z", "--name-only", rev], worktree).split("\0")) - {""}
+  at_base, at_head = tree(base), tree(head)
+  show = lambda rev, path: core.run_git(["show", f"{rev}:{path}"], worktree)
+  base_files, head_files = {}, {}
+  candidates = set(touched)
+  through = {old for new, old in [*renames.items(), *back.items()] if new in candidates and new != old}
+  for path in touched:
+    if path not in at_head and path in through:
+      continue  # compared through the test file it was renamed to; renamed out of test naming, it compares alone
+    old = renames.get(path, path)
+    if old not in at_base and first(path) in at_base:  # renamed from a base file, then deleted in the range
+      old = first(path)
+    if old in at_base:
+      base_files[path] = (base, show(base, old))
+    else:
+      old = first(path)
+      # `-m`: a file a merge introduces, in neither parent, is created by that merge
+      created = core.run_git(["log", "-m", "--reverse", "--format=%H", "--diff-filter=A", f"{base}..{head}", "--", old], worktree).split()
+      if not created:
+        continue
+      base_files[path] = (created[0], show(created[0], old))
+    if path in at_head:
+      head_files[path] = show(head, path)
+    elif (new := ahead.get(path) or last(path)) in at_head and new not in candidates:  # renamed out of test naming
+      head_files[path] = show(head, new)  # compared with its new path, base to head or, for a file the range creates, commit by commit
+  return base_files, head_files
+
+
+def name_status(out: str) -> list:
+  """`(status, paths)` per entry of a `--name-status -z` output: a rename or copy carries two paths, any other one."""
+  tokens, entries = out.split("\0"), []
+  i = 0
+  while i < len(tokens):
+    status = tokens[i].strip()
+    if not status:
+      i += 1
+      continue
+    n = 2 if status[0] in "RC" else 1
+    entries.append((status, tokens[i + 1:i + 1 + n]))
+    i += 1 + n
+  return entries
+
+
+ESCAPES = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13, '"': 34, "\\": 92}
+
+
+def unquote(path: str) -> str:
+  """A path as git's `core.quotePath` C-quotes it (`"tests/caf\\303\\251.py"`), unquoted; any other path as given."""
+  if not (len(path) > 1 and path[0] == path[-1] == '"'):
+    return path
+  s, out, i = path[1:-1], bytearray(), 0
+  while i < len(s):
+    if s[i] == "\\" and i + 1 < len(s):
+      if s[i + 1] in "01234567":
+        out.append(int(s[i + 1:i + 4], 8))
+        i += 4
+        continue
+      out.append(ESCAPES.get(s[i + 1], ord(s[i + 1])))
+      i += 2
+      continue
+    out += s[i].encode("utf-8")
+    i += 1
+  return out.decode("utf-8", "surrogateescape")
 
 
 def register(subparsers):
@@ -45,6 +332,7 @@ def run(args):
 def collect(args, card):
   plan, st = core.locate(args)
   handoff = core.Handoff(plan, st)
+  deadline = time.time() + 60 * handoff.config["foreman"]["run_timeout_minutes"]  # the whole call's bound, from its entry
   unit = args.unit
   data = core.load_foreman(st, unit)
   entry = review.require_dispatch(unit, data, args.dispatch)
@@ -67,13 +355,21 @@ def collect(args, card):
   login, comments = parse_comments(core.read_text(r / "comments.md"))
   rid = head_review_id(st, unit)
   prior = max((e["round"] for e in data["rounds"] if e.get("phase") == "posted"), default=None)
-  prior_ci_fid, prior_tdd, prior_scope, contest_of, external, earlier, disposed = None, [], {}, {}, [], set(), set()
+  prior_ci_fid, prior_tdd, prior_scope, contest_of, external, earlier, disposed = None, {}, {}, {}, [], set(), set()
+  prior_dod, prior_delta = {}, {}
   posted = {e["round"]: e.get("posted_at") or "" for e in data["rounds"] if e.get("phase") == "posted"}
   for e in data["rounds"]:  # every posted round: an overruled out-of-Scope finding widens the Scope for good;
     if e.get("phase") == "posted":  # a contest or carried finding names the finding a reply may answer under
+      deltas = [f["id"] for f in prior_foreman_findings(st, rid, e["round"]) if f["claim"].startswith("test-delta: ")]
+      prior_delta.update({fid: (d["file"], d["base_commit"], d["base_line"], d["kind"])
+                          for fid, d in zip(deltas, e.get("test_delta") or [])})
       for f in prior_foreman_findings(st, rid, e["round"]):
         if f["claim"] == "changed path outside Scope paths":
           prior_scope[f["id"]] = f["location"]
+        if f["claim"].startswith("tdd-order: "):  # a ruled tdd-order failure stays ruled in every later round
+          prior_tdd[f["id"]] = f["claim"].removeprefix("tdd-order: ")
+        if (m := re.match(r"dod-(\d+): ", f["claim"])):  # a ruled `dod-<n>` finding stays ruled on its item number
+          prior_dod[f["id"]] = int(m.group(1))
         if (m := re.match(r"(?:contested|unreplied) (\S+):", f["claim"])):
           contest_of[f["id"]] = m.group(1)
           if f.get("disposition") is not None:  # a settled copy settles what it carries
@@ -86,12 +382,40 @@ def collect(args, card):
   for f in prior_foreman_findings(st, rid, prior):
     if f["location"] == "ci":
       prior_ci_fid = f["id"]
-    if f["claim"].startswith("tdd-order:"):
-      prior_tdd.append(f["id"])
-  lines, contested = foreman_findings(n, json.loads(core.read_text(r / "ci.json"))["verdict"], text, scope, worktree, changed,
-                                      core.read_text(r / "pr_body.md"), comments, login, prior, prior_ci_fid,
-                                      tdd_order.commits_of(worktree, entry["merge_base"]), prior_tdd, prior_scope, contest_of,
-                                      external, earlier, disposed, posted)
+  verdict, pr_body = json.loads(core.read_text(r / "ci.json"))["verdict"], core.read_text(r / "pr_body.md")
+  commits = tdd_order.commits_of(worktree, entry["merge_base"])
+  items = body_mod.dod_items(text)
+  present = {path for _, kind, path in items if kind == "exists" and (worktree / path).exists()}
+  named = {test_path for _, test_path, _ in body_mod.step_paths(text) if test_path}
+  delta = test_delta(*delta_files(worktree, entry["merge_base"], entry["head"], commits, named), named)
+  # every input is read; the three files a run could edit are held whole, then the DoD `Run` items run
+  config = worktree / core.run_git(["rev-parse", "--git-common-dir"], worktree).strip() / "config"
+  held = [st.path("foreman", unit), config] + ([st.path("reviews", rid, f"round-{n}.json")] if rid else [])
+  held = {path: path.read_bytes() if path.is_file() else None for path in held}
+  pasted = {int(m.group(1)): m.group(2) for m in DOD_RESULT_RE.finditer(pr_body)}
+  try:
+    runs = dod_runs([(i, cmd, last_line(pasted[i])) for i, kind, cmd in items if kind == "run" and i in pasted], worktree,
+                    run_env(shutil.which("gh") or "gh", worktree), deadline, r / "dod")
+  finally:  # written back whole, whatever a run did: an edit a run made to them is overwritten
+    for path, raw in held.items():
+      if raw is None:
+        path.unlink(missing_ok=True)
+      else:
+        core.atomic_write(path, raw)
+  out = lambda i: r / "dod" / f"{i}.out"
+  texts = {int(i): (out(i).read_text(encoding="utf-8", errors="replace") if out(i).is_file() else "", pasted[int(i)])
+           for i in runs}  # each side's whole text: its last count line is compared, not its last line
+  for i, run in runs.items():
+    if run["summary"] is not None:
+      core.atomic_write(r / "dod" / f"{i}.txt", f"exit: {'none' if run['exit'] is None else run['exit']}\n"
+                        f"summary: {run['summary']}\ntimed_out: {'yes' if run['timed_out'] else 'no'}\n")
+  lines, contested = foreman_findings(n, verdict, text, scope, worktree, changed, pr_body, comments, login, prior, prior_ci_fid,
+                                      commits, prior_tdd, prior_scope, contest_of,
+                                      external, earlier, disposed, posted, handoff.config.get("owners") or [],
+                                      recorded_rulings(data), data.get("decisions") or [], recorded_times(data),
+                                      handoff.state["units"][unit].get("number"), runs=runs, prior_dod=prior_dod, present=present,
+                                      delta=delta, prior_delta=prior_delta, texts=texts, config=handoff.config)
+  entry.update(dod_runs=runs, test_delta=delta)
   findings = r / "foreman.findings"
   core.atomic_write(findings, "".join(line + "\n" for line in lines))
   with contextlib.redirect_stdout(io.StringIO()):
@@ -156,13 +480,28 @@ def parse_comments(text: str) -> tuple:
   return login, comments
 
 
+def recorded_times(foreman: dict) -> dict:
+  """Each recorded ruling's comment id to `(posted_at, unread)`: the entry's time (the comment as recorded) and
+  whether it is an `unread` entry, whose `posted_at` is the host's clock, not GitHub's, so the comment's own
+  creation time stands while the comment is there and the host's time only once it is gone."""
+  return {int(cid): (e.get("posted_at") or "", bool(e.get("unread"))) for e in foreman.get("rulings") or []
+          if (cid := str(e.get("posted") or "").removeprefix("comment ")).isdigit()}
+
+
 def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, worktree: Path, changed: list, pr_body: str,
-                     comments: list, login: str, prior_round, prior_ci_fid, commits: list = (), prior_tdd_fids: list = (),
+                     comments: list, login: str, prior_round, prior_ci_fid, commits: list = (), prior_tdd: dict = None,
                      prior_scope: dict = None, contest_of: dict = None, external: list = (),
-                     earlier: set = frozenset(), disposed: set = frozenset(), posted: dict = None) -> tuple:
-  """The foreman's high findings of spec section 11 in this order: CI, the DoD items, scope, tdd-order,
-  deviations, contested, upheld, unreplied external; and `builder_contested[]` for the contested ones. Rulings
-  and replies count only from the right author: rulings from anyone but the builder, replies from the builder.
+                     earlier: set = frozenset(), disposed: set = frozenset(), posted: dict = None,
+                     owners: list = (), recorded: list = (), decisions: list = (), recorded_at: dict = None,
+                     issue_number: int = None, runs: dict = None, prior_dod: dict = None, present: set = None,
+                     delta: list = None, prior_delta: dict = None, texts: dict = None, config: dict = None) -> tuple:
+  """The foreman's high findings of spec section 11 in this order, which numbers the `foreman-<r>-<k>` ids: CI,
+  the DoD items' fenced-output and `Exists` checks, the `dod-<n>` re-runs, the `test-delta:` entries, scope,
+  tdd-order, deviations, contested, upheld, unreplied external; and `builder_contested[]` for the contested ones. Rulings
+  and replies count only from the right author: a ruling is a `config.owners` login's comment `ruling_of` reads
+  (spec section 13.2's one grammar) on the unit's issue, never the PR, or an entry of the record (`recorded`,
+  `recorded_rulings`), replies come from the builder. Every `**Deviation**` line of a comment is one deviation; an `allowed` ruling on a posted
+  round's tdd-order fid (`prior_tdd`, fid to failure) skips that failure as an overrule does, and no other.
   An external high or medium with no disposition is carried until a reply names it, or names a posted carried
   copy of it, in this round's comments or an earlier round's (`earlier`, the builder's reply ids there), or
   until one of its copies is settled (`disposed`, the copies whose disposition is set). Its group is the
@@ -170,10 +509,20 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
   external id). A `contested` reply to such a finding is recorded in the round it comes in, a round late
   included, when no earlier round's comments hold a builder reply to any id of its group (`late`) and no
   ruling in this round's comments names it: a contest is recorded once (spec section 8, External review). An
-  upheld ruling is answered by a later `fixed` reply under the ruled id or under any id of its group. A reply
+  upheld ruling is answered by a `fixed` reply later than it (than its record's `posted_at`, `recorded_at`, when recorded) under the ruled id or under any id of its group;
+  a recorded one binds whether or not its comment is still in `comments` (edited into prose or deleted), located
+  on the unit's issue (`issue_number`). An `unread` entry's `posted_at` is the host's clock, so its comment's own
+  time is the bound, and when that comment is gone the host's time is (a fixed reply before the ruling never
+  counts). A reply
   to a carried copy `foreman-<r>-<k>`, `fixed` or `contested`, counts (toward the carry, or as a contest) only
   when it comes after round r was posted (`posted`, each posted round's `posted_at`): before that the copy did
-  not exist."""
+  not exist. The DoD re-run's `dod-<n>` highs (`runs`, `dod_runs`' record) follow the fenced-output check; an item
+  number stays ruled by the owner's `dod-<n> allowed` or by an overrule or allowance of a posted `dod-<n>` fid
+  (`prior_dod`, fid to item number), a contest's copy followed back to it. `present`, when given, is the `Exists`
+  paths found before the runs; `texts`, item number to `(output, paste)`, the whole texts the counts are read from.
+  `delta`, `test_delta`'s entries, is trimmed in place of every entry an owner's ruling allows (a posted fid's,
+  through `prior_delta`, fid to `(file, base_commit, base_line, kind)`, or `test-delta <file> allowed`; a judges'
+  recorded ruling never settles one) and each entry left is a `test-delta:` high, after the `dod-<n>` ones and before scope."""
   found, contested = [], []
   links = contest_of or {}
 
@@ -195,28 +544,54 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
     found.append(("ci", f"CI not green on this head: {ci_verdict}"))
   results = {int(m.group(1)) for m in DOD_RESULT_RE.finditer(pr_body)}
   for n, kind, text in body_mod.dod_items(body):
-    if kind == "exists" and not (worktree / text).exists():
+    if kind == "exists" and not (text in present if present is not None else (worktree / text).exists()):
       found.append((text, f"Exists item {n}: path absent"))
     elif kind == "run" and n not in results:
       found.append(("pr_body.md", f"Run item {n}: no fenced output"))
-  others = [c for c in comments if c["login"] != login]
-  rulings = [(c, m) for c in others if (m := RULING_RE.match(c["body"]))]
-  overruled = {m.group(1) for _, m in rulings if m.group(2) == "overruled"}
+  # The rulings: an owner's form comment read by `ruling_of`, and the record (`rulings[]`, the judges' post included)
+  # (spec section 13.2: a recorded ruling is never changed by a later comment, so the record wins on its comment ids and subjects)
+  rulings = binding_rulings([c for c in comments if c["kind"] == "issue"], owners, recorded, decisions)  # an issue comment alone rules
+  by_id = {c["id"]: c for c in comments}
+  # a ruling on a contest's copy (`contested <fid>: …`) rules the finding it contests, down the chain to the original
+  def chain(fid):
+    out = {fid}
+    while fid in links and links[fid] not in out:
+      fid = links[fid]
+      out.add(fid)
+    return out
+  overruled = set().union(*(chain(r.subject) for r in rulings if r.kind == "overruled"))
+  allowed = set().union(*(chain(r.subject) for r in rulings if r.kind == "allowed"))
+  ruled = {int(r.subject[4:]) for r in rulings if r.kind == "allowed" and re.fullmatch(r"dod-\d+", r.subject)}
+  found += dod_findings(body, runs or {}, ruled | {item for fid, item in (prior_dod or {}).items() if fid in overruled | allowed},
+                        texts, config)
+  if delta is not None:  # the test delta: an allowed entry or file is dropped from the round's record, then each left is a high
+    owners_own = [r for r in rulings if not r.login.startswith("judges:")]  # the owner's alone: never the judges' rulings
+    settled = set().union(*(chain(r.subject) for r in owners_own if r.kind in ("overruled", "allowed")))
+    keys = {key for fid, key in (prior_delta or {}).items() if fid in settled}
+    # a file allowance binds whole: unrecorded, its comment; recorded (`decision rule` keeps `test-delta <file> allowed`
+    # beside the per-fid ones), the record, whatever a later edit or deletion of the comment does
+    files = {r.subject for r in owners_own if r.kind == "allowed-file"}
+    delta[:] = [e for e in delta if e["file"] not in files and (e["file"], e["base_commit"], e["base_line"], e["kind"]) not in keys]
+    found += [(f"{e['file']}:{e['line']}", f"test-delta: {e['file']}:{e['line']} {e['kind']}") for e in delta]
   widened = {path for fid, path in (prior_scope or {}).items() if fid in overruled}  # an owner's overrule widens the Scope
   in_scope = lambda path: any(path == s or path.startswith(s.rstrip("/") + "/") for s in scope)  # a directory covers its files
   found += [(path, "changed path outside Scope paths") for path in changed if not in_scope(path) and path not in widened]
-  if not set(prior_tdd_fids) & overruled:
-    tests = {n: t for n, t, _ in body_mod.step_paths(body)}
-    for failure in tdd_order.check(body, list(commits)):
-      step = re.match(r"S(\d+):", failure) or re.search(r"test\(S(\d+)\)", failure)
-      found.append((tests.get(int(step.group(1)), "tests/") if step else "tests/", f"tdd-order: {failure}"))
-  ruled = {int(m.group(1)) for c in others if (m := RULED_RE.match(c["body"]))}
-  for c in comments:
-    kind = DEVIATION_RE.match(c["body"])
-    if kind and kind.group(1) != "other" and c["id"] not in ruled:
-      found.append((where(c), f"deviation ({kind.group(1)}) unruled"))
+  # a tdd-order failure a posted round raised and a ruling overruled or allowed is skipped; any other failure is raised
+  skipped = {text for fid, text in (prior_tdd or {}).items() if fid in overruled | allowed}
+  tests = {n: t for n, t, _ in body_mod.step_paths(body)}
+  for failure in tdd_order.check(body, list(commits)):
+    if failure in skipped:
+      continue
+    step = re.match(r"S(\d+):", failure) or re.search(r"test\(S(\d+)\)", failure)
+    found.append((tests.get(int(step.group(1)), "tests/") if step else "tests/", f"tdd-order: {failure}"))
+  ruled = {int(r.subject) for r in rulings if r.kind == "option" and r.subject.isdigit()}
+  for c in comments:  # every `**Deviation**` heading a comment folds; one ruling naming the comment rules them all
+    for line in c["body"].splitlines():
+      kind = DEVIATION_RE.match(line)
+      if kind and kind.group(1) != "other" and c["id"] not in ruled:
+        found.append((where(c), f"deviation ({kind.group(1)}) unruled"))
   if prior_round:
-    settled = {m.group(1) for _, m in rulings}
+    settled = {r.subject for r in rulings if r.kind in ("upheld", "overruled", "allowed")}
     for c in comments:
       reply = REPLY_RE.match(c["body"])
       if not reply or c["login"] != login or reply.group(2) != "contested":
@@ -229,12 +604,20 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
       reason = (reply.group(3) or "").strip()
       found.append((where(c), f"contested {fid}: {reason}"))
       contested.append({"fid": f"foreman-{round_n}-{len(found)}", "reason": reason})
-    for c, ruling in rulings:
-      fid = ruling.group(1)
+    times = recorded_at or {}
+    for ruling in rulings:
+      c = by_id.get(ruling.comment_id)  # the comment the ruling names: its time bounds the `fixed` reply
+      at, unread = times.get(ruling.comment_id, ("", False))
+      if c is None and ruling.comment_id in times:  # a recorded ruling whose comment is gone or no longer a form:
+        c = {"kind": "issue", "number": issue_number, "id": ruling.comment_id, "at": at if unread else ""}  # an unread
+      if ruling.kind not in ("upheld", "overruled") or c is None:  # one's stand-in takes the host's time, the only one left
+        continue
+      fid = ruling.subject
       answers = {fid, links.get(fid, fid)} | groups.get(origin(fid), set())  # the ruled finding, or any id of its group
-      fixed = any(o["login"] == login and o["at"] > c["at"] and (m := REPLY_RE.match(o["body"]))
+      since = max(c["at"], "" if unread else at)  # from its record's time; an unread one from the comment's
+      fixed = any(o["login"] == login and o["at"] > since and (m := REPLY_RE.match(o["body"]))
                   and m.group(1) in answers and m.group(2) == "fixed" for o in comments)
-      if ruling.group(2) == "upheld" and not fixed:
+      if ruling.kind == "upheld" and not fixed:
         found.append((where(c), f"upheld {fid}: no `fixed` reply"))
   replied = {m.group(1) for c in comments if c["login"] == login and (m := REPLY_RE.match(c["body"]))
              and (posted is None or timely(m.group(1), c["at"], posted))} | set(earlier)

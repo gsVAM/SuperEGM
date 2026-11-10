@@ -13,6 +13,7 @@ from superegm import body as body_mod, review
 from superegm.orient import TEST_RE
 
 WRITES = frozenset()  # the store kinds this subcommand writes: none, it reads
+CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 
 
 def register(subparsers):

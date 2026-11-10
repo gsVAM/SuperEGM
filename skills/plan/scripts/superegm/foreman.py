@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the foreman subcommand (spec section 11); `runner_path`, the claudex-loop runner's lookup (U17).
+# Added by SuperEGM (gsVAM), 2026: the foreman subcommand (spec section 11); `runner_path`, the claudex-loop runner's lookup (U17); a launch `interrupted (reboot)` is terminal (U24); doctor's `astra:` line as its DOCTOR_CHECKS (U32).
 
 """superegm foreman dispatch: one evaluation of the dispatch predicate, the supersede of a non-terminal
 round, the head review and the child card of a round."""
@@ -36,6 +36,15 @@ def runner_path(environ=None) -> str | None:
     if runner.is_file() and (best is None or key > best[0]):
       best = (key, runner)
   return str(best[1]) if best else None
+
+
+CONFIG_DEFAULTS, INIT_STEP = {}, ""
+
+
+def DOCTOR_CHECKS(config, repo_root, token):  # noqa: N802 (the registration name, U32)
+  """doctor's informational `astra:` line: the claudex-loop runner the head lane would run."""
+  runner = runner_path()
+  return [("astra", f"ok ({runner})" if runner else "not installed (heads will record not run)")]
 
 
 def register(subparsers):
@@ -111,7 +120,7 @@ def dispatch_refusal(pr: dict, ci: dict, launches: list, rounds: list, decisions
   if not launches:
     return "no launch"
   latest = launches[-1]
-  if not (latest["status"].startswith("exited") or latest["status"] == "interrupted"):
+  if not latest["status"].startswith(("exited", "interrupted")):  # `interrupted (reboot)`: the boot-id proof (U24)
     return f"launch {latest['round']} not terminal"
   for entry in rounds:
     if entry.get("phase") == "posted" and entry.get("launch") == latest["round"]:

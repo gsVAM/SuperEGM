@@ -1,7 +1,7 @@
 # Copyright 2026 Google LLC.
 # SPDX-License-Identifier: Apache-2.0
 # Modified by SuperEGM (gsVAM), 2026: one host, the allow-list of section 15 and the three-file hook rule;
-# three-file hook rule, hook hash, effects checks.
+# three-file hook rule, hook hash, effects checks; the inbox skill (U23); the driver skill (U24).
 
 """Build the runtime folder and a reproducible ZIP without development files."""
 
@@ -37,7 +37,7 @@ SKILLS = (
     "brainstorming", "draft", "review-spec", "plan", "review-plan", "file", "wave",
     "interrupt", "clean", "finishing-a-development-branch", "integrate", "judges",
     "test-driven-development", "systematic-debugging", "verification-before-completion",
-    "writing-skills", "using-superegm", "drift-report", "orient",
+    "writing-skills", "using-superegm", "drift-report", "orient", "inbox", "driver",
 )
 IDS = (
     "design", "zoom-out", "comprehension", "codebase-details", "readiness",
@@ -78,7 +78,7 @@ FRONTMATTER_KEY = re.compile(r"^([A-Za-z_-]+):\s?(.*)$")
 EFFECT_KINDS = ("github-write", "remote-branch", "start-session", "state-store", "destructive-local")
 TYPED_SKILLS = frozenset((  # section 14: every external skill, the two gates, draft, drift-report
     "review-spec", "plan", "review-plan", "file", "wave", "interrupt", "clean",
-    "finishing-a-development-branch", "integrate", "judges", "draft", "drift-report", "orient",
+    "finishing-a-development-branch", "integrate", "judges", "draft", "drift-report", "orient", "driver",
 ))
 
 

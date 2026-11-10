@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Copies what the repository's own files say about a unit into the store, an extractor that never summarizes.
 ---
 
-<!-- Added by SuperEGM (gsVAM), 2026: the orient skill (spec section 9.3). -->
+<!-- Added by SuperEGM (gsVAM), 2026: the orient skill (spec section 9.3); the per-handoff orient path (U32). -->
 
 # orient
 
@@ -17,10 +17,12 @@ In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.
 
 ## What it does
 
-An extractor, never a summarizer: a helper subcommand with no model call that copies what the repository's own files say and invents nothing. It exports the tracked files at `--ref` (default `HEAD`) with one `git archive` into the store's `orient/export/`, so an uncommitted edit, an untracked or an ignored file never reaches it, and writes:
+An extractor, never a summarizer: a helper subcommand with no model call that copies what the repository's own files say and invents nothing. It exports the tracked files at `--ref` (default `HEAD`) with one `git archive` into `<handoff id>/orient/export/` (the store's `orient/export/` while no handoff resolves), so an uncommitted edit, an untracked or an ignored file never reaches it, and writes:
 
-- `orient/map.md`: one line per directory to depth 4 (path, file count, dominant extension, entry points, the first heading of any `README.md`, `AGENTS.md`, `CLAUDE.md` or `context.md`), after graphify's community summary when that CLI is installed; 24,576 bytes at most.
-- `<6 hex>/orient/<unit>.md`, one per unit: for every Scope path its module docstring, public signatures and the test files that name it, wherever they live (a path to be created: its siblings' signatures), the `## Graph` projection of graphify's `graph.json` per path, then `## Read first`, every section of those four documentation files (at the root and up the Scope paths' directories) that names the unit, verbatim; 16,384 bytes at most, trimmed in the design's sequence.
+- `<handoff id>/orient/map.md`: one line per directory to depth 4 (path, file count, dominant extension, entry points, the first heading of any `README.md`, `AGENTS.md`, `CLAUDE.md` or `context.md`), after graphify's community summary when that CLI is installed; 24,576 bytes at most.
+- `<handoff id>/orient/<unit>.md`, one per unit: for every Scope path its module docstring, public signatures and the test files that name it, wherever they live (a path to be created: its siblings' signatures), the `## Graph` projection of graphify's `graph.json` per path, then `## Read first`, every section of those four documentation files (at the root and up the Scope paths' directories) that names the unit, verbatim; 16,384 bytes at most, trimmed in the design's sequence.
+
+A flat 1.0/1.1 store keeps the export and the map in its own root `orient/` and each unit's file under the handoff's hex directory.
 
 Each file's first line records the tree, the graph and the cuts: `orient: tree <sha> · graphify: <graph.json sha256 | not installed | failed: <reason>> · trimmed: <what | nothing>`. Without `--unit` it writes the map and, when a handoff is open, every unfiled unit's file; with `--unit` the named units' files only, never the map. graphify is optional: `references/graphify.md` says how it is invoked and what is read from `graph.json`; absent, failing or timing out, the extractor alone writes the files minus `## Graph`.
 

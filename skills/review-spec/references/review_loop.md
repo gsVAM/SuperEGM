@@ -1,6 +1,6 @@
 <!-- Copyright 2026 Google LLC. SPDX-License-Identifier: Apache-2.0. -->
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: Astra lane, per-reviewer model and effort, persisted dispositions. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: EGM's review-loop skill rewritten as the one review loop over the helper's `superegm review` subcommands (spec section 8); the stages, the report files and the second clean round are gone; a spec round's scope, `out_of_scope[]` and the batch settle (U19). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: EGM's review-loop skill rewritten as the one review loop over the helper's `superegm review` subcommands (spec section 8); the stages, the report files and the second clean round are gone; a spec round's scope, `out_of_scope[]` and the batch settle (U19); the accept below the cap and its `acceptable:` line (U35); section 2's model and effort paragraph is the one rule, the config pair before the session pair (U28); a lineless finding out of scope and the per-handoff review ids (U32). -->
 
 # The review loop
 
@@ -36,8 +36,9 @@ other grammar (`review record: <file>:<line>: <reason>`).
    why in one line; the review runs on the Claude panel alone.
 4. `superegm review open --kind spec|plan|head|integrate --artifact <path or unit id>
    [--sha256 <hex>] --reviewers a,b,c [--astra on|off] --runcard <id>` prints the review id
-   (`spec-<slug>-c<n>`, `spec-<slug>-integrate-c<n>`, `<6 hex>-plan-<unit>-c<n>`,
-   `<6 hex>-head-<unit>-c<n>`). An artifact whose latest cycle is still open resumes it: a
+   (`spec-<slug>-c<n>`, `spec-<slug>-integrate-c<n>`, `plan-<unit>-c<n>`,
+   `head-<unit>-c<n>`, under the handoff's own directory; a flat 1.0/1.1 store keeps its 6-hex prefix
+   before the plan and head ids). An artifact whose latest cycle is still open resumes it: a
    re-typed skill continues where the last invocation stopped, with the stored panel. A closed
    cycle (an `accept` or `stop` ruling, a spec edited after the approval that names it, or an
    integrate review whose handoff closed or whose `## Units` were amended past the bytes it
@@ -74,13 +75,21 @@ Each goldfish receives only:
   an empty file when it found nothing, and to end its report with what it saw besides the
   brief (nothing, or the text a hook or an instruction file injected).
 
-Model and effort: the rules of `resources/review_panels.md` section 6 with the variables
-renamed. `SUPEREGM_GOLDFISH_MODEL` (`inherit`, `sonnet`, `opus`, `haiku`, `fable`; default
-`inherit`) and `SUPEREGM_GOLDFISH_EFFORT` (`inherit`, `low`, `medium`, `high`, `xhigh`, `max`;
-default `inherit`), read once with `printenv`, validated against those lists, and passed per
-Agent call as `model:` and `effort:` only when not `inherit` and the tool offers the parameter;
-`CLAUDE_CODE_SUBAGENT_MODEL_FORCE` on means no per-call model. Never put an environment value
-into a shell command.
+Model and effort, one rule: every panel goldfish of the four kinds runs on
+`config.reviewers.model` at `config.reviewers.effort` (`opus` / `xhigh` by default, the Agent tool's alias and level),
+passed on each dispatch as the adapter's `model:` and `effort:` override (the adapters stay `model: inherit`),
+and the round record stores requested -> effective (`review record`'s `--model` and `--effort`, section 3).
+`SUPEREGM_GOLDFISH_MODEL` and `SUPEREGM_GOLDFISH_EFFORT`, when set, override the config's values for the session,
+`inherit` meaning pass nothing; this session pair stops at the review panels and never reaches a judge; they are read once with `printenv` and validated against
+(`inherit`, `sonnet`, `opus`, `haiku`, `fable`) and (`inherit`, `low`, `medium`, `high`, `xhigh`, `max`).
+An exported `CLAUDE_CODE_EFFORT_LEVEL` is the effective effort of every goldfish, and with
+`CLAUDE_CODE_SUBAGENT_MODEL_FORCE` on no per-call `model` is passed and the forced model is the
+effective one; the record says so in both cases. An `effort:` is passed only where the Agent tool
+offers the parameter. The judges use their member's model and effort (`skills/judges/SKILL.md`);
+builders use `config.builder`; the foreman's Astra lane runs at `astra.heads_effort`
+(`skills/wave/references/foreman_brief.md`), the elephant's lanes at `astra.effort`.
+The elephant is the session's model, never in config. `resources/review_panels.md` section 6
+holds the per-call mechanics. Never put an environment value into a shell command.
 
 The Astra lane (kinds `spec`, `plan`, `integrate`, when the review opened with it):
 
@@ -141,8 +150,9 @@ Record every reviewer of the round, the lane included, as its result arrives:
   ranges) and every record checks against it: a finding whose cited line (the first number after
   `line `, `lines `, `L` or `:` in its location) falls outside every changed section and neighbour
   is refused, `record: <fid> out of scope (<section>): not recorded`, and kept verbatim in the round's
-  `out_of_scope[]` with one journal line: no disposition, never counted, never a fix round. A
-  location citing no line, or a line past the spec's end (another file's), is recorded. The record
+  `out_of_scope[]` with one journal line: no disposition, never counted, never a fix round. A location
+  citing no line, or a line the spec does not hold, takes the same path under section `none`, journaled
+  `<fid>: no line number`; a `whole` round refuses nothing. The record
   still succeeds for the reviewer's other lines; a reviewer recorded again in the same round
   replaces its own earlier `out_of_scope[]` lines. The round's `note` is the `whole` row's reason
   (`whole`, `no approval`, `no change`, `no commit holds <sha7>`), else null. `review scope` writes
@@ -174,7 +184,8 @@ findings is refused, so settle them per finding, each with its own `--posted`.
 
 ## 5. Status
 
-Ask the helper after every settle and before every round:
+Ask the helper after every settle and before every round, and in normal mode also once every
+reviewer of a round is recorded, before any fix (an `acceptable:` line is asked about at the reviewed bytes):
 
     superegm review status --review <id> --runcard <id>
 
@@ -183,12 +194,14 @@ R<n>>, cap <yes|no>, stalled <yes|no>, sha256 <hex of the converged round|none>`
 line `rounds: a -> b -> c (regressions x, y, z)`: the findings per round and the regressions
 among them. A third line, `fixed: re-review on the current bytes`, follows when the latest completed
 round is clean but the artifact's bytes moved since it (exit 3, or 2 at the cap): the next round
-reviews the current bytes. The exit code is the verdict, and the skill's next action follows from it alone:
+reviews the current bytes. On a round below the cap that the owner may accept (section 6) the line
+`acceptable: yes (<n> medium, <m> low)` follows the trend line; nothing otherwise.
+The exit code is the verdict, and the skill's next action follows from it alone:
 
 | Exit | Meaning | The skill |
 | --- | --- | --- |
 | exit 0 | converged (section 6), or `accept` ruled | spec: `superegm approve-spec` (the SKILL.md); plan: the unit's body is reviewed at the printed sha; head: the helper wrote `clean` on the posted round and journaled `<unit> awaiting merge`; integrate: close the handoff when nothing was escalated |
-| exit 3 | open: not clean, a regression, no completed round yet, or a clean round whose bytes moved since (the `fixed:` line) | fix and settle (section 4), then the next round; also `not opened` for an unknown id |
+| exit 3 | open: not clean, a regression, no completed round yet, or a clean round whose bytes moved since (the `fixed:` line) | with an `acceptable:` line, section 6's accept below the cap first; else fix and settle (section 4), then the next round; also `not opened` for an unknown id |
 | exit 2 | at the cap without an `accept`, or `stop` was ruled | no further round starts; request the ruling of spec section 13.2 point 2 (continue one bounded round, accept the remainder, stop; a head has no `accept`) and record it with `superegm review rule --review <id> --ruling continue|accept|stop (--owner | --judges <id>) --runcard <id>`; after `stop` the cycle stays at exit 2 and a new invocation starts the next cycle |
 | exit 4 | a `fix-design` finding in any round | the defect is in the frozen spec: `superegm approve-spec --spec <path> --void --review <id>`, then spec review reopens as a new cycle |
 | exit 5 | stalled: the two latest rounds are not `completed` and both ran under this run card | end this invocation for the artifact with the record (the round file names the reviewer and reason); a re-typed skill opens a new run card and resumes the same cycle |
@@ -215,6 +228,21 @@ foreman and integrate:
   R<n>`, never on a head, and never while the reviewed bytes moved: then `continue` or `stop`, and
   `stop` alone, ruled by no one, once `continue` is spent), and after `stop` no ruling is accepted and the cycle stays at its cap
   until `superegm review open` starts the next one. No review has a second kind of cap.
+- **Accept below the cap**, the one rule: when `review status` prints `acceptable: yes (<n> medium, <m> low)`
+  (the latest completed round, at unmoved bytes, holds unsettled mediums and lows alone: no high, never
+  a blocking (high or medium) finding marked `regression: yes`, settled or not (a low so marked does not bar it), no
+  unsettled external high or medium, no unsettled high or medium in a later round, complete or not, and no other
+  decision pending on the unit that names any round of this review or its cap; never kind
+  `integrate`, whose mediums escalate into unit rows), ask the owner once, before a fix moves the bytes: accept, or
+  fix as today. `superegm review rule --review <id> --ruling accept --owner --runcard <id>` converges the review by
+  ruling with nothing settled and journals `accepted before the cap by the owner (<n> medium, <m> low)`; otherwise it
+  is refused with the blockers listed (`review rule: accept refused: high <fid>, …`). A head's accept is the
+  wave skill's Decision point 5 (`decision rule`, which runs this `review rule` with `--decision <id>`); either way the
+  accept on a head writes the round's `clean` and journals `<unit> awaiting merge`, and typed alone it leaves the
+  decision pending until `decision rule` records it. An early
+  accept holds its round alone: a later completed round, an unsettled high or medium recorded into a later round (complete or not), a blocker recorded into its own round since, or a `fix-design` settled on any round of the review reopens it for good,
+  journaled `review <id> R<n> accept lapsed` (integrate quotes no lapsed accept). The owner's word alone: the judges never accept below the cap,
+  and in leavemealone-mode nothing pauses for it.
 - A review may instead be **stalled** (section 5), which ends the invocation for that artifact
   and nothing else.
 
@@ -226,7 +254,7 @@ with `requested -> effective`:
 | Role | Model: requested -> effective | Effort: requested -> effective |
 | --- | --- | --- |
 | Elephant | the session's model -> same | session setting -> session setting |
-| Claude goldfish | `SUPEREGM_GOLDFISH_MODEL` -> the alias passed, or the session's model for `inherit`, or the forced model | `SUPEREGM_GOLDFISH_EFFORT` -> the value passed, or `inherit` |
+| Claude goldfish | `config.reviewers.model`, or `SUPEREGM_GOLDFISH_MODEL` when set -> the alias passed, or the session's model for `inherit`, or the forced model | `config.reviewers.effort`, or `SUPEREGM_GOLDFISH_EFFORT` when set -> the value passed, `CLAUDE_CODE_EFFORT_LEVEL` when exported, or `inherit` |
 | Astra goldfish | `config.astra.model` -> `result.json`'s `effective_model`, `requested only` before the run | `config.astra.effort` -> `effective_effort`, `requested only` before the run |
 
 Any value you cannot know is `unknown`; never present a configuration value as an observed

@@ -1,6 +1,6 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: the section 9.1 body layout and markers replace EGM's template. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the section 9.1 body layout and markers replace EGM's template; the per-handoff scan path (U32); the `{{tier}}` placeholder (U33). -->
 
 # The issue body
 
@@ -40,7 +40,7 @@ Spec: `{{spec}}` @ {{sha7}} · `{{design}}`
 {{decisions}}
 
 ## Scope, order and risk
-Scope: {{scope}} · Blocked by: {{blocked_by}} · Shared files: {{shared}} · Risk: {{risk}} · Size: {{size}}
+Scope: {{scope}} · Blocked by: {{blocked_by}} · Shared files: {{shared}} · Risk: {{risk}} · Size: {{size}} · Tier: {{tier}}
 Branch: `{{branch}}` · Part of #{{tracking}}
 ```
 
@@ -67,8 +67,11 @@ lets a rerun of `apply` find the issue instead of creating it twice.
 | `{{blocked_by}}` | `#<n>` of each blocker (a placeholder `#<U01>` until `apply` fills the number; blockers exist by then because issues are created in topological order), or `none`. |
 | `{{shared}}` | The shared-file items, `after` references as `#<n>`, `before` references as the unit id and title (that issue does not exist yet when this body is posted), or `none`. |
 | `{{risk}}`, `{{size}}` | From the unit. |
+| `{{tier}}` | The unit's tier, `doable` when the section has no `Tier:` row. |
 | `{{branch}}` | `superegm/<handoff id>/<unit id>`: the branch the builder pushes and `status` recognises. |
 | `{{tracking}}` | The tracking issue's number (`<tracking>` until `apply`). |
+
+A repository `issue_template` written before 1.2 lacks `{{tier}}`: its next `graph --plan` refuses it with `issue template lacks {{tier}}` until the line gains one.
 
 `body_sha256` in `handoff_units.json` and `state.json` is the sha256 of this
 rendered text with its `#<U01>` and `#<tracking>` placeholders, as EGM hashes
@@ -88,7 +91,7 @@ Every unit issue is added as its sub-issue.
 
 A body over 49,152 bytes is refused with "split it". `scan` warns, without
 blocking, when a body passes 32,768 bytes, twenty Steps or a fenced share of
-0.40; the numbers go to `<6hex>/plan/scan/<unit>.json` for the proportion
+0.40; the numbers go to `<handoff id>/plan/scan/<unit>.json` (a flat 1.0/1.1 store keeps `<6 hex>/`) for the proportion
 reviewer. No checklist item, no placeholder line (`TBD`, `handle edge cases`,
 `add appropriate validation`, `write tests for the above`), no Consumes no
 sibling produces or whose producer is not a blocker, global constraints and

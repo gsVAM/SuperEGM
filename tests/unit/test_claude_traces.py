@@ -1,19 +1,19 @@
 # Copyright 2026 Google LLC.
 # SPDX-License-Identifier: Apache-2.0
+# Modified by SuperEGM (gsVAM), 2026: the helpers imported from the helper package's traces module (U27).
 
 """Offline regression coverage for Claude's native transcript directory."""
 
 import json
 from pathlib import Path, PurePosixPath, PureWindowsPath
-import runpy
 from unittest.mock import Mock
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[2]
+from superegm.traces import trace_directory, assert_child_probe
 
 
-@pytest.mark.parametrize("config_mode", ["unset", "default", "custom"])
+@pytest.mark.parametrize("config_mode", ["default", "custom"])
 @pytest.mark.parametrize(
     ("workspace_path", "project_name"),
     [
@@ -22,24 +22,14 @@ ROOT = Path(__file__).resolve().parents[2]
     ],
 )
 def test_trace_directory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config_mode: str,
+    tmp_path: Path, config_mode: str,
     workspace_path: PurePosixPath | PureWindowsPath, project_name: str,
 ) -> None:
-  trace_directory = runpy.run_path(str(ROOT / "tests/integration/test_claude.py"))[
-      "trace_directory"
-  ]
-  monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
-  config = tmp_path / "home" / ".claude"
-  if config_mode == "unset":
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
-  else:
-    if config_mode == "custom":
-      config = tmp_path / "custom config"
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
-
+  # the profile is the caller's argument (U27): `elephant_profile()`'s env-or-home fallback is tested in test_u27.py
+  config = tmp_path / ("home/.claude" if config_mode == "default" else "custom config")
   workspace = Mock(spec=Path)
   workspace.resolve.return_value = workspace_path
-  assert trace_directory(workspace) == (
+  assert trace_directory(config, workspace) == (
       config / "projects" / project_name
   )
 
@@ -49,9 +39,7 @@ def test_trace_directory(
     "empty_text_block", "whitespace_text_block", "valid_text_blocks",
 ])
 def test_child_probe_requires_successful_read(result: str) -> None:
-  check = runpy.run_path(str(ROOT / "tests/integration/test_claude.py"))[
-      "assert_child_probe"
-  ]
+  check = assert_child_probe
   persona = Path("/plugin/agents/zoom_out.md")
   events = [{"type": "assistant", "message": {"content": [{
       "type": "tool_use", "id": "read-persona", "name": "Read",
@@ -87,9 +75,7 @@ def test_child_probe_requires_successful_read(result: str) -> None:
 
 @pytest.mark.parametrize("separator", ["\u0085", "\u2028", "\u2029"])
 def test_child_probe_keeps_unicode_inside_json_records(separator: str) -> None:
-  check = runpy.run_path(str(ROOT / "tests/integration/test_claude.py"))[
-      "assert_child_probe"
-  ]
+  check = assert_child_probe
   persona = Path("/plugin/agents/zoom_out.md")
   events = [
       {"type": "assistant", "message": {"content": [{
@@ -115,9 +101,7 @@ def test_child_probe_keeps_unicode_inside_json_records(separator: str) -> None:
     "wrong_sentinel", "extra_read",
 ])
 def test_denied_persona_requires_correlated_error(result: str) -> None:
-  check = runpy.run_path(str(ROOT / "tests/integration/test_claude.py"))[
-      "assert_child_probe"
-  ]
+  check = assert_child_probe
   persona = Path("/plugin/agents/zoom_out.md")
   read = {"type": "tool_use", "id": "persona", "name": "Read",
           "input": {"file_path": str(persona)}}

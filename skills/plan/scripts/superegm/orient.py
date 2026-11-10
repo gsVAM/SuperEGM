@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the orient subcommand (spec section 9.3).
+# Added by SuperEGM (gsVAM), 2026: the orient subcommand (spec section 9.3); doctor's `graphify:` line as its DOCTOR_CHECKS (U32).
 
 """superegm orient: copy what the repository's own files say about a unit into the store.
 
@@ -24,6 +24,13 @@ SKILLS = frozenset(["orient", "plan", "review-plan", "wave"])  # the skills whos
 CAP_UNIT, CAP_MAP, MAP_DEPTH = 16_384, 24_576, 4
 GRAPHIFY = "graphify"  # the command looked up on PATH; tests point it at a fake
 TIMEOUT = 600  # seconds for one graphify build
+CONFIG_DEFAULTS, INIT_STEP = {}, ""
+
+
+def DOCTOR_CHECKS(config, repo_root, token):  # noqa: N802 (the registration name, U32)
+  """doctor's informational `graphify:` line: the CLI on PATH, or none."""
+  path = shutil.which("graphify")
+  return [("graphify", f"ok ({path})" if path else "not on PATH (informational)")]
 DOCS = ("README.md", "AGENTS.md", "CLAUDE.md", "context.md")
 SKIPPED = {"dist", "build", "vendor", "target", "scratchpad"}
 TEST_RE = re.compile(r"(^|/)(tests?|__tests__|spec)/|(^|/)test_[^/]+$|[_.](test|spec)\.[^/.]+$|(^|/)conftest\.py$")  # a test file by name, wherever it lives

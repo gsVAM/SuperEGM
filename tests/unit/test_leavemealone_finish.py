@@ -1,6 +1,7 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U11's tests: `judges question`, the leavemealone routing, `close`, the
-# integrate skill, the docs, the README and the removed-mechanism sweep.
+# integrate skill, the docs, the README and the removed-mechanism sweep; the `blocked-launch` and `blocked-closed`
+# forms read the pending point-3 decision (U31); `close` closes a merged unit's open issue and the tracking issue, `--note` (U32).
 
 """U11: leavemealone routing and finish (design sections 12, 13.2 and 15)."""
 
@@ -43,6 +44,34 @@ def seed(world):
                                                 "default": "a", "blocking": True}]}}}, "units")
   put(world, "### U08: Admin\n\n## Interfaces\n- Consumes: deliver (U07)\n", "unit", "U08")
   put(world, "### U09: Queue\n\n## Interfaces\n- Consumes: enqueue (U01)\n", "unit", "U09")
+
+
+ISSUES = {"U07": (410, 510), "U08": (412, 512), "U09": (415, 515)}   # unit: (issue, PR); the tracking issue is #400
+
+
+def closable(world, saved, before):
+  """`seed`, the tracking issue #400, each unit's saved fingerprint (`landed`, `merged`: a PR merged since, `open`:
+  a PR not merged, `none`: no PR) and its issue's state on GitHub; `gh issue close` and `gh api .../pulls/<n>` served."""
+  seed(world)
+  state = json.loads(store(world.repo).path("state").read_text(encoding="utf-8"))
+  state["tracking"] = {"number": 400}
+  state["status"] = {"units": {u: {"landed": w == "landed", "pr": None if w == "none" else ISSUES[u][1]} for u, w in saved.items()}}
+  put(world, state, "state")
+  for n, st in zip([400, *(i for i, _ in ISSUES.values())], ("open", *before)):
+    world.gh.issues[n] = {"number": n, "state": st, "labels": []}
+  merged = {ISSUES[u][1]: w == "merged" for u, w in saved.items()}
+
+  def issue(args, cwd, token=None):
+    if args[1] != "close":
+      return world.gh.do_issue(args)
+    assert args[3:] == ["--reason", "completed", "-R", REPO], args
+    world.gh.issues[int(args[2])]["state"] = "closed"
+    return world.gh.ok(text="")
+
+  def api(args, cwd, token=None):
+    match = re.fullmatch(rf"repos/{REPO}/pulls/(\d+)", world.gh.endpoint_of(args))
+    return world.gh.ok({"merged": merged[int(match.group(1))]}) if match else world.gh.do_api(args)
+  world.gh.extend("issue", issue); world.gh.extend("api", api)
 
 
 def comment(world, cid, body):
@@ -90,6 +119,11 @@ def test_judges_question_forms(world, tmp_path, form):
     put(world, spent, "reviews", review, "review.json")
   comment(world, 123, INTERFACE_COMMENT)
   put(world, {"launches": [{"round": 1, "status": "exited 0"}]}, "launches", "U07")
+  if form in ("blocked-launch", "blocked-closed"):  # the pending point-3 decision the form renders (U31)
+    f = json.loads(store(world.repo).path("foreman", "U07").read_text(encoding="utf-8"))
+    f["decisions"].append({"id": "q1", "point": 3, "source": "launch 1" if form == "blocked-launch" else "closed 41",
+                           "options": ["relaunch", "stop the unit"]})
+    put(world, f, "foreman", "U07")
   args, expected = {
       "round": (["--review", review, "--round", "1", "--reason", "change-review-1-1=the test covers it"],
                 "## Q1 change-review-1-1 (high, src/x.py:3): the retry loop never backs off\n"
@@ -136,17 +170,12 @@ def test_a_cap_redesign_with_no_unsettled_claim_names_the_rounds_alone(world, tm
      "question: change-review-1-2 is low"),
     ("unknown", ["--review", "{review}", "--round", "1", "--reason", "design-1-9=x"],
      "question: design-1-9 is not in round 1"),
-    ("relaunch-used", ["--unit", "U07", "--blocked", "launch", "1"],
-     "question: relaunch already used on U07"),
 ])
 def test_judges_question_refusals(world, tmp_path, case, args, message):
   seed(world)
   runcard = world.card("wave")
   review = head_review(world, runcard, tmp_path)
   put(world, {"launches": [{"round": 1, "status": "exited 1"}]}, "launches", "U07")
-  if case == "relaunch-used":
-    put(world, {"dispatch_id": None, "rounds": [], "decisions": [{"id": "d1", "point": 3}],
-                "rulings": [{"decision": "d1", "ruling": "relaunch", "by": "judges:p1"}]}, "foreman", "U07")
   before = sorted(str(p) for p in world.artifacts.rglob("*.md"))
   code, out = world.run("judges", "question", *[a.format(review=review) for a in args], "--runcard", runcard)
   assert code == 1 and message.format(review=review) in out, out
@@ -225,11 +254,17 @@ COMMON = ["judges open --question <path> --evidence <paths> --parent <card>",
           "`--leavemealone`", "`config.mode`", "unconverged"]
 
 
+# the wave skill's section moved to its own reference (the owner's ruling: a 24K skill body is context bloat)
+WIRING_FILE = {"wave": "skills/wave/references/leavemealone_mode.md"}
+
+
 @pytest.mark.parametrize("skill", sorted(WIRING))
 def test_leavemealone_wiring(skill):
-  text = (ROOT / f"skills/{skill}/SKILL.md").read_text(encoding="utf-8")
-  body = text.split("---", 2)[2]
-  section = body[body.index("## Leavemealone-mode"):]
+  body = (ROOT / f"skills/{skill}/SKILL.md").read_text(encoding="utf-8").split("---", 2)[2]
+  if skill in WIRING_FILE:
+    section = (ROOT / WIRING_FILE[skill]).read_text(encoding="utf-8")
+  else:
+    section = body[body.index("## Leavemealone-mode"):]
   for snippet in WIRING[skill] + COMMON:
     assert snippet in section, (skill, snippet)
   assert "merge" not in section.lower().replace("awaiting merge", "")
@@ -254,6 +289,7 @@ def test_close_refuses_a_wave_card_journals_each_unlanded_unit_and_says_already_
   state = json.loads(store(world.repo).path("state").read_text(encoding="utf-8"))
   state["status"] = {"units": {"U07": {"landed": True}, "U08": {"landed": False}, "U09": {"landed": False}}}
   put(world, state, "state")
+  world.gh.issues[410] = {"number": 410, "state": "closed", "labels": []}  # a landed unit's issue is read at close (U32)
   assert world.run("close", "--runcard", world.card("wave"))[0] == 1
   runcard = world.card("integrate")
   code, out = world.run("close", "--runcard", runcard)
@@ -265,6 +301,21 @@ def test_close_refuses_a_wave_card_journals_each_unlanded_unit_and_says_already_
   assert f"closed sample-design-abc123 at {closed_at}\n" in journal
   code, out = world.run("close", "--runcard", runcard)
   assert code == 1 and f"close: already closed at {closed_at}" in out
+
+
+@pytest.mark.parametrize("saved, before, after, lines, unlanded", [
+  ({"U07": "merged", "U08": "open", "U09": "none"}, ("open", "open", "open"), ("closed", "open", "open", "open"),
+   ["close: U07 #410 closed completed", "close: U08 unlanded", "close: U09 unlanded"], "U08, U09"),
+  ({"U07": "landed", "U08": "merged", "U09": "merged"}, ("closed", "open", "open"), ("closed", "closed", "closed", "closed"),
+   ["close: U07 #410 already closed", "close: U08 #412 closed completed", "close: U09 #415 closed completed", "close: tracking #400 closed completed"], "none")])
+def test_close_closes_merged_units_open_issues_and_the_tracking_issue_last(world, saved, before, after, lines, unlanded):
+  closable(world, saved, before)
+  cid = world.card("integrate")
+  code, out = world.run("close", "--note", "patch release", "--runcard", cid)
+  assert (code, out.strip()) == (0, f"closed sample-design-abc123; unlanded: {unlanded}") and tuple(world.gh.issues[n]["state"] for n in (410, 412, 415, 400)) == after
+  assert world.run("runcard", "close", cid, "--note", "done")[0] == 0
+  tail = [l.split(" ", 1)[1] for l in (world.artifacts / "journal.md").read_text(encoding="utf-8").splitlines()][-(len(lines) + 3):]
+  assert tail[:-2] == lines + ["close: note patch release"] and tail[-2].startswith("closed sample-design-abc123 at ") and tail[-1] == f"runcard close {cid} note done"
 
 
 @pytest.mark.parametrize("state, code, line", [
@@ -282,7 +333,7 @@ def test_close_refuses_while_a_redesign_units_issue_is_open(world, state, code, 
 def test_integrate_skill_body():
   text = (ROOT / "skills/integrate/SKILL.md").read_text(encoding="utf-8")
   front, body = text.split("---", 2)[1:]
-  assert "disable-model-invocation: true" in front and "effect_kinds: [state-store, start-session]" in front
+  assert "disable-model-invocation: true" in front and "effect_kinds: [state-store, start-session, github-write]" in front
   for snippet in [
       "runcard open --skill integrate --artifact <spec-path>",
       # `status` serves the integrate card (I-4): no wave card, so `wave_number` never counts one.
@@ -385,6 +436,8 @@ REMOVED = ["egm-bootstrap", "synthesizer", "bootstrap_orchestrator", "distributi
 MINE = ["README.md", "docs/index.md", "docs/getting_started.md", "docs/claude.md", "docs/faq.md", "docs/privacy.md",
         "docs/releases.md", "scripts/prepare_release.py", "tests/unit/test_releases.py", "skills/review-spec/SKILL.md",
         "skills/review-plan/SKILL.md", "skills/plan/SKILL.md", "skills/wave/SKILL.md", "skills/integrate/SKILL.md",
+        "skills/wave/references/decision_points.md", "skills/wave/references/rulings.md",
+        "skills/wave/references/leavemealone_mode.md",
         "skills/judges/references/leavemealone.md", "skills/plan/scripts/superegm/judges.py",
         "skills/plan/scripts/superegm/close.py", "skills/plan/references/handoff_config.md"]
 
@@ -413,7 +466,8 @@ def test_the_app_path_prose(path, needle, present):
   assert (needle in (ROOT / path).read_text(encoding="utf-8")) is present, (path, needle)
 
 
-REDESIGN_PROSE = [("skills/wave/SKILL.md", "redesign — <one sentence why>"), ("skills/wave/SKILL.md", ".brainstorm.md"), ("skills/wave/SKILL.md", "stopped for redesign"),
+REDESIGN_PROSE = [("skills/wave/references/decision_points.md", "redesign — <one sentence why>"), ("skills/wave/references/decision_points.md", ".brainstorm.md"),
+                  ("skills/wave/references/decision_points.md", "stopped for redesign"),
                   ("skills/integrate/SKILL.md", "stopped for redesign"), ("skills/integrate/SKILL.md", "closes it by hand"),
                   ("skills/brainstorming/SKILL.md", "brainstorm brief"), ("skills/brainstorming/SKILL.md", "whose issue is still open"),
                   ("skills/brainstorming/SKILL.md", "naming the handoff"), ("skills/brainstorming/SKILL.md", "never offered")]
@@ -427,5 +481,5 @@ def test_the_redesign_prose(path, needle):
 def test_the_point_one_redesign_waits_for_the_verdict_and_the_by_hand_ruling_is_told():
   panel = (ROOT / "skills/judges/references/leavemealone.md").read_text(encoding="utf-8")
   assert "held until the verdict" in panel and "the first question converged on `redesign`" in panel
-  assert "ruled by hand with `--posted`" in (ROOT / "skills/wave/SKILL.md").read_text(encoding="utf-8")
+  assert "ruled by hand with `--posted`" in (ROOT / "skills/wave/references/decision_points.md").read_text(encoding="utf-8")
   assert "the `Spec:` range" in (ROOT / "skills/brainstorming/SKILL.md").read_text(encoding="utf-8")

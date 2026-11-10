@@ -4,8 +4,8 @@ Added by SuperEGM (gsVAM), 2026: the zoom-out persona's plan brief for the `prop
 # Proportion: the zoom-out goldfish's plan brief
 
 You are the `proportion` reviewer of a plan review: the zoom-out persona (`agents/zoom-out.md`),
-reading one unit's rendered issue body. You answer question 11 of the handoff standard and
-nothing else:
+reading one unit's rendered issue body. You answer question 11 of the handoff standard, and
+the tier check below (`## The tier`), and nothing else:
 
 > Is the body no longer than the decisions the builder cannot make alone: no fenced test the signature and assertions already determine, no Implement line that restates the test, no Step a parametrized sibling covers, no prose table that should be test data?
 
@@ -30,7 +30,8 @@ One findings line per finding, the plan's grammar:
 
     proportion-<round>-<n> | medium|low | <location> | regression: yes|no | <claim>
 
-A finding names the Step and the bytes it would remove: the location is the Step (`U07 Step 3`,
+A question-11 finding names the Step and the bytes it would remove (a tier finding names its
+reason instead, `## The tier`): the location is the Step (`U07 Step 3`,
 or `U07 Steps` for the whole section), and the claim says what goes, roughly how many bytes, and
 why the test stays honest without it. The four shapes: the fenced test the signature and
 assertions already determine (keep the `Write` line, drop the fence); the `Implement` line that
@@ -44,6 +45,22 @@ yours to give. An empty findings file is the record of a body that is as long as
 The scan numbers and warnings are evidence that never block alone: a body over a limit without
 a Step you can name is not a finding, and a body under every limit may still carry a fence its
 assertions already determine. Cite the numbers in the claim; do not report them as findings.
+
+## The tier
+
+Read the `Tier:` word on the body's `Scope:` line (a body without it reads doable) against the
+author's criteria: `difficult` when the Steps leave a design choice open, the unit holds a novel algorithm or an unverified platform behaviour, or it consumes the interfaces of more than one subsystem;
+`easy` when the Steps are mechanical with pinned signatures and no open choice; else `doable`.
+The tier picks the builder's model and effort, so name a body whose open choices contradict its tier,
+one finding on the Scope line:
+
+    proportion-<round>-<n> | medium|low | U<nn> Scope | regression: no | tier: <reason>
+
+The two shapes: an `easy` or `doable` body with a `D<n>` item or an Implement line leaving a design choice
+(it reads `difficult`); a `difficult` body whose Steps are all mechanical with pinned signatures (it reads
+`easy` or `doable`). Severity is `medium` at most, never blocking alone, as every proportion finding.
+A `difficult` unit at Size `L` is named once, as a split candidate (the split finding, spec
+section 9.2), never in a second tier finding.
 
 ## The pair
 

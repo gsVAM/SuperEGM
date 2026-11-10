@@ -5,7 +5,7 @@ effects: none
 description: Use when starting any conversation - establishes how to find and use skills, requiring skill invocation before ANY response including clarifying questions
 ---
 
-<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: renamed to using-superegm; superegm names, the typed and auto-invoked lists, the phase rule; the Claude Code reference only; the four rules of design section 5 (U19). -->
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: renamed to using-superegm; superegm names, the typed and auto-invoked lists, the phase rule; the Claude Code reference only; the four rules of design section 5 (U19); the inbox line (U23); the driver in the typed list (U24). -->
 
 In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.
 
@@ -36,7 +36,7 @@ When multiple skills apply, process skills come first — they set the approach,
 
 These skills run only when your human partner types the command. Never invoke them yourself:
 
-- `/superegm:review-spec`, `/superegm:plan`, `/superegm:review-plan`, `/superegm:file`, `/superegm:wave`, `/superegm:interrupt`, `/superegm:clean`, `/superegm:finishing-a-development-branch`, `/superegm:integrate`, `/superegm:judges`, `/superegm:orient`: every skill with external effects (the store, a session, GitHub, a remote branch, a local deletion).
+- `/superegm:review-spec`, `/superegm:plan`, `/superegm:review-plan`, `/superegm:file`, `/superegm:wave`, `/superegm:interrupt`, `/superegm:clean`, `/superegm:finishing-a-development-branch`, `/superegm:integrate`, `/superegm:judges`, `/superegm:orient`, `/superegm:driver`: every skill with external effects (the store, a session, GitHub, a remote branch, a local deletion).
 - `/superegm:review-spec` and `/superegm:review-plan`: the two review gates.
 - `/superegm:draft` and `/superegm:drift-report`: the two EGM entry skills.
 
@@ -45,6 +45,7 @@ These skills run only when your human partner types the command. Never invoke th
 - `superegm:brainstorming`, `superegm:writing-skills`: `brainstorming` and `writing-skills` run on the owner's request outside any unit.
 - `superegm:test-driven-development`, `superegm:systematic-debugging`, `superegm:verification-before-completion`: Only for a filed unit on its branch or for an owner-requested fix on a branch; never during brainstorm, spec or plan.
 - `superegm:using-superegm`: this skill, injected at session start.
+- `superegm:inbox`: lists what needs the owner from the store; no run card, never notifies.
 
 ## Four rules
 

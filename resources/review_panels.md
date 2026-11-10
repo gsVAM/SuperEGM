@@ -2,7 +2,7 @@
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: panel presets,
 routing table, run card and configuration. Not part of google/elephant-goldfish-model.
 Modified by SuperEGM (gsVAM), 2026: section 7's convergence rule and cap live in
-skills/review-spec/references/review_loop.md; the second clean round for document reviews is gone; the head review's panel row (U17); the external reviewer id of `review ingest` (U21). -->
+skills/review-spec/references/review_loop.md; the second clean round for document reviews is gone; the head review's panel row (U17); the external reviewer id of `review ingest` (U21); the foreman's own gate findings (U25); section 6 points at review_loop.md's one model and effort rule (U28). -->
 
 # Review panels, run card and configuration
 
@@ -171,6 +171,7 @@ Two reviews of the fork's handoff and wave skills reuse the same panels:
 | PR review (one pull request against one build unit) | - | Astra inspect (interactive flow only) | `egm-change-review` + Astra inspect (interactive flow only) | `egm-change-review`, `egm-codebase-details` + Astra inspect (interactive flow only) |
 
 A SuperEGM wave's head review panel is `change-review, astra`: the lane is seated by `astra.enabled` and `astra.heads`, and the foreman runs it once per round (`resources/astra_lane.md` section 8).
+Beside the panel, the foreman records its own findings, outside any goldfish: among them `dod-<n>` (a DoD `Run` item re-run red, cut by the bound, or whose counts differ from the builder's paste) and `test-delta` (an assertion of a test file the plan does not name removed or weakened, the owner's alone to allow).
 
 A review thread a person or a bot leaves on the unit's PR is recorded by the wave's `review ingest` under the reviewer id `external:<login>`, outside the panel, into the latest posted round; an unsettled external high or medium blocks `clean` as a panel finding does.
 
@@ -221,6 +222,14 @@ Rules that apply to every row:
   which it did not complete is not clean.
 
 ## 6. Per-reviewer model and effort for Claude goldfish
+
+SuperEGM's one rule is `skills/review-spec/references/review_loop.md` section 2
+(`Model and effort, one rule:`): the config pair, the session variables over it,
+and what the record says. This section is the mechanics that rule points at.
+Under SuperEGM read `EGM_GOLDFISH_MODEL` and `EGM_GOLDFISH_EFFORT` below as
+that rule's pair: `config.reviewers.model` and `config.reviewers.effort`, or
+`SUPEREGM_GOLDFISH_MODEL` and `SUPEREGM_GOLDFISH_EFFORT` when set (section 1's
+`inherit` defaults are EGM's, not SuperEGM's).
 
 The adapters in `.claude-plugin/agents/` keep `model: inherit`; do not edit
 them. The elephant passes the user's choice per call:

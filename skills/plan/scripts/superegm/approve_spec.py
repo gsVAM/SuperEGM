@@ -2,22 +2,26 @@
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
 # Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_approve` as the approve-spec module (U03); the section 8 form: a converged
 # review, the `Units` check, the commit by path, `--void` and `--amend-units` (U04); the escalated pairs recorded (U16);
-# the approval history, one handoff per opening, the latest-entry rule and the branch check (U20).
+# the approval history, one handoff per opening, the latest-entry rule and the branch check (U20); the spec PR's
+# ingest once before the refusals, the refusal of an unsettled external finding, an external finding's carried copies
+# as one escalated pair discharged by its latest copy alone, and a re-approval of the same cycle reading that cycle
+# again and keeping the replaced entry's unnamed pairs (U26); `--amend-units` typed by hand opens and closes its own
+# card, the branch check reading `spec_blob` (U32).
 
 """superegm approve-spec: record the owner's approval of a converged spec (spec section 8)."""
 
-import hashlib
+import argparse
 import json
 from pathlib import Path
 import re
-import subprocess
 
 import superegm as core
-from superegm import close
-from superegm.review import evaluate, findings_of, latest_cycle, load_review, load_round, review_id, round_numbers
+from superegm import close, runcard
+from superegm.review import Refusal, evaluate, findings_of, ingest_pr, latest_cycle, load_review, load_round, review_id, round_numbers
 
-WRITES = frozenset(["approvals", "handoffs", "state"])  # the store kinds this subcommand writes
-SKILLS = frozenset(["review-spec", "review-plan", "integrate"])  # the skills whose card this subcommand accepts
+WRITES = frozenset(["approvals", "handoffs", "state", "reviews", "runcards"])  # the store kinds this subcommand writes
+CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
+SKILLS = frozenset(["review-spec", "review-plan", "integrate", "approve-spec"])  # the skills whose card this subcommand accepts
 CONFIG = ".superegm/config.json"
 UNITS_H2 = re.compile(r"^## (?:\d+\.?\s+)?Units\s*$")
 
@@ -30,7 +34,8 @@ def register(subparsers):
   p.add_argument("--void", action="store_true", help="void the approval after a fix-design finding")
   p.add_argument("--review", help="with --void: the review holding the fix-design finding")
   p.add_argument("--amend-units", dest="amend_units", action="store_true",
-                 help="re-approve rows appended to ## Units without a review round")
+                 help="re-approve rows appended to ## Units without a review round; typed without "
+                      "--runcard it opens and closes its own approve-spec-<6 hex>-<n> card")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -96,13 +101,21 @@ def units_section(text: str) -> str:
 
 def escalated_pairs(st: core.Store, spec: Path, since: int) -> list:
   """Every `escalated` finding of the spec's review cycles above `since`, as `<review id>:<finding id>`
-  in round order, less the pairs the spec's `## Units` section names (D2 (a))."""
-  named, pairs, cycle = units_section(core.read_text(spec)), [], since + 1
+  in round order, less the pairs the spec's `## Units` section names (D2 (a)). One finding is one pair: an
+  external finding's carried copies (U26: the same reviewer, id and claim in later rounds or cycles) are one
+  finding, named by its latest copy and discharged by a Units mention of that copy alone (the pair recorded and
+  the one `graph` discharges)."""
+  named, found, cycle = units_section(core.read_text(spec)), {}, since + 1
   while load_review(st, rid := review_id(st, "spec", str(spec), cycle)) is not None:
-    pairs += [f"{rid}:{f['id']}" for n in round_numbers(st, rid) for f in findings_of(load_round(st, rid, n))
-              if f["disposition"] == "escalated"]
+    for n in round_numbers(st, rid):
+      for reviewer, record in load_round(st, rid, n)["reviewers"].items():
+        for f in record["findings"]:
+          if f["disposition"] == "escalated":
+            pair = f"{rid}:{f['id']}"
+            key = (reviewer, f["id"], f["claim"]) if reviewer.startswith("external:") else pair
+            found[key] = found.pop(key, []) + [pair]
     cycle += 1
-  return [pair for pair in pairs if pair not in named]
+  return [pairs[-1] for pairs in found.values() if pairs[-1] not in named]
 
 
 def before_units(text: str) -> str:
@@ -112,18 +125,9 @@ def before_units(text: str) -> str:
   return "".join(lines[:last + 1])
 
 
-def branch_holds(repo_root: Path, rel: str, sha256: str) -> bool:
-  """Whether a commit of the current branch's `git log -- <rel>` holds a blob of `rel` hashing to `sha256`."""
-  for commit in core.run_git(["log", "--format=%H", "--", rel], repo_root, check=False).split():
-    blob = subprocess.run(["git", "show", f"{commit}:{rel}"], cwd=str(repo_root), capture_output=True)
-    if blob.returncode == 0 and hashlib.sha256(blob.stdout).hexdigest() == sha256:
-      return True
-  return False
-
-
 def require_branch_holds(st: core.Store, repo_root: Path, rel: str, entry: dict) -> None:
   """Refuse a branch that never folded the history's last entry: no commit of it holds that entry's bytes."""
-  if not branch_holds(repo_root, rel, entry["sha256"]):
+  if core.spec_blob(repo_root, rel, entry["sha256"]) is None:
     raise core.HandoffError(f"approve-spec: fold {st.config['base']} first: approval {entry['sha256'][:7]} is not in this branch")
 
 
@@ -135,13 +139,33 @@ def commit_by_path(repo_root: Path, paths: list[str], message: str, trailer: str
   return core.run_git(["rev-parse", "HEAD"], repo_root).strip()
 
 
+def spec_pr(repo: str, branch: str) -> int | None:
+  """The open PR whose head is `branch` (the elephant's spec PR, spec section 8), or None: none means nothing to read."""
+  try:
+    prs = json.loads(core.gh(["pr", "list", "-R", repo, "--head", branch, "--state", "open", "--limit", "1000",
+                              "--json", "number,headRefOid"]) or "[]")
+  except core.GhError as error:
+    raise core.HandoffError(f"approve-spec: {error}") from None
+  return prs[0]["number"] if prs else None
+
+
 def run(args):
-  card = core.require_runcard(args, SKILLS)
   spec = Path(args.design).expanduser().resolve()
   if not spec.is_file():
     raise core.HandoffError(f"approve-spec: spec {spec} does not exist")
   root = core.git_toplevel(spec)
   st = core.store(root)
+  if not (args.amend_units and not args.runcard):
+    return approve(args, st, spec, root, core.require_runcard(args, SKILLS))
+  # U32: `--amend-units` typed outside a skill opens and closes its own card (spec section 12)
+  args.runcard = core.open_runcard(st, "approve-spec", str(spec))
+  try:
+    return approve(args, st, spec, root, core.require_runcard(args, SKILLS))
+  finally:
+    runcard.run(argparse.Namespace(action="close", id=args.runcard, note=None))
+
+
+def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   slug = core.spec_slug(spec)
   if args.void or args.amend_units:  # an older handoff is frozen (spec section 7)
     try:
@@ -156,6 +180,23 @@ def run(args):
   if review is None:
     raise core.HandoffError(f"approve-spec: no spec review for {slug}")
   rid = review_id(st, "spec", str(spec), review["cycle"])
+  if not (root / CONFIG).is_file():  # before any GitHub call: the config names the repository
+    raise core.HandoffError(f"approve-spec: {CONFIG} missing: run superegm init")
+  number = spec_pr(st.config["repo"], core.run_git(["rev-parse", "--abbrev-ref", "HEAD"], root).strip())
+  # U26: one `review ingest --pr` before the refusals: it reads the spec PR's threads, writes them, and the carried
+  # findings, into the latest round and posts the fixed replies (a failed reply is named and retried next time, never
+  # a refusal); no open PR, or a cycle with no round yet to take the threads, reads nothing (the latter is refused
+  # below as not converged); a gh failure of the read refuses in one line, as `approve-spec:`.
+  if number is not None and round_numbers(st, rid):
+    try:
+      _, unsettled = ingest_pr(st, review, number, card.get("parent") or args.runcard)
+    except Refusal as error:
+      raise core.HandoffError(f"approve-spec: {str(error).removeprefix('review ingest: ')}") from None
+    if unsettled:  # named on the PR its thread came from: a carried finding's may be an earlier PR's
+      fid = unsettled[0]
+      latest = load_round(st, rid, round_numbers(st, rid)[-1])
+      pr = next((f.get("pr") for f in findings_of(latest) if f["id"] == fid and f.get("pr")), number)
+      raise core.HandoffError(f"approve-spec: {fid.rsplit('-', 2)[0]} {fid} unsettled on PR {pr}")
   status = evaluate(st, review, card.get("parent") or args.runcard)
   if status.code != 0:
     raise core.HandoffError(f"approve-spec: review {rid} is not converged (review status exit {status.code})")
@@ -164,12 +205,19 @@ def run(args):
     raise core.HandoffError("approve-spec: spec bytes differ from the converged round's")
   if not units_is_last_h2(core.read_text(spec)):
     raise core.HandoffError("approve-spec: last H2 must be `Units`")
-  if not (root / CONFIG).is_file():
-    raise core.HandoffError(f"approve-spec: {CONFIG} missing: run superegm init")
   last = core.load_approval(st, spec)
   if last:
     require_branch_holds(st, root, spec.relative_to(root).as_posix(), last)
-  escalated =escalated_pairs(st, spec, int(last["review"].rsplit("-c", 1)[1]) if last and last.get("review") else 0)
+  # the cycles past the last approval's; a re-approval of that same cycle (its bytes unmoved, U26: a thread ingested
+  # and escalated after the approval) reads that cycle again and keeps the replaced entry's pairs the `## Units`
+  # section does not name (that entry may cover earlier cycles too), since `graph` reads the latest entry's list alone
+  since = int(last["review"].rsplit("-c", 1)[1]) if last and last.get("review") else 0
+  if last and last.get("review") == rid:
+    named = units_section(core.read_text(spec))
+    kept = [pair for pair in last.get("escalated") or [] if pair not in named]
+    escalated = kept + [pair for pair in escalated_pairs(st, spec, since - 1) if pair not in kept]
+  else:
+    escalated = escalated_pairs(st, spec, since)
   if escalated:
     print(f"approve-spec: {len(escalated)} escalated finding(s) await the owner: {', '.join(escalated)}")
   if not (args.yes or args.leavemealone or card["mode"] == "leavemealone"):

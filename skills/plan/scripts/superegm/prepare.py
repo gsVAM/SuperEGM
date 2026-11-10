@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # From the elephant-goldfish-model (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_prepare` as the prepare module, keyed by the dispatch id; the fetched tip is the round's head; `pr_body.md` and `comments.md` beside the diff and the CI file; the App path's builder login (U15); the Astra brief and the lane's word on the `prepared:` line (U17); `r<n>/spec_range.md` at the marker's sha, the brief's range read from it (U20).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_prepare` as the prepare module, keyed by the dispatch id; the fetched tip is the round's head; `pr_body.md` and `comments.md` beside the diff and the CI file; the App path's builder login (U15); the Astra brief and the lane's word on the `prepared:` line (U17); `r<n>/spec_range.md` at the marker's sha, the brief's range read from it (U20); the review worktree removed by force and its git calls hook-free (U25).
 
 """superegm prepare: fetch the PR into refs/superegm, add the review worktree, write the diff, CI, PR body and comments."""
 
@@ -15,6 +15,7 @@ from superegm import foreman, launch_builder, review
 from superegm.launch import app_login
 
 WRITES = frozenset(['foreman', 'review'])  # the store kinds this subcommand writes
+CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset(['wave'])  # the skills whose card this subcommand accepts
 AGED = ("**Deviation", "**Decision D", "**Ruling:**", "**Reply ")  # the comment kinds kept regardless of age (section 11; a reply answers a ruling that may be older than the last posted round)
 HEADER_RE = re.compile(r"^### (issue|pr) #(\d+) comment (\d+) by (\S+) at (\S+)$")  # comments.md's entry header
@@ -53,9 +54,10 @@ def prepare(args, card):
   tree = folder / "worktree"
   if args.clean:
     if tree.exists():
-      core.remove_worktree(root, tree)
+      core.remove_worktree(root, tree, force=True)
     for ref in (f"refs/superegm/pr/{number}", f"refs/superegm/pr-base/{number}"):
-      subprocess.run(["git", "-C", str(root), "update-ref", "-d", ref], capture_output=True)
+      with core.hook_free() as pairs:
+        subprocess.run(["git", *pairs, "-C", str(root), "update-ref", "-d", ref], capture_output=True)
     core.run_git(["worktree", "prune"], root, check=False)
     entry["phase"] = "cleaned"
     core.save_foreman(st, unit, data)
@@ -77,13 +79,14 @@ def prepare(args, card):
   if tree.exists():
     if tree.resolve() not in core.registered_worktrees(root):
       raise core.HandoffError(f"{tree} exists but is not a registered worktree: remove it by hand")
-    core.remove_worktree(root, tree)  # refuses a dirty one
+    core.remove_worktree(root, tree, force=True)  # the store's worktree: a DoD `Run` line may have left it dirty (U25)
   tree.parent.mkdir(parents=True, exist_ok=True)
   core.run_git(["worktree", "add", "--detach", str(tree), head], root)
   n = entry["round"]
   r = folder / f"r{n}"
-  diff = subprocess.run(["git", "-C", str(tree), "diff", "--no-ext-diff", "--no-textconv", "--binary", merge_base, "--"],
-                        capture_output=True, check=True).stdout
+  with core.hook_free() as pairs:
+    diff = subprocess.run(["git", *pairs, "-C", str(tree), "diff", "--no-ext-diff", "--no-textconv", "--binary", merge_base, "--"],
+                          capture_output=True, check=True).stdout
   core.atomic_write(r / "diff", diff)
   core.atomic_write(r / "spec_range.md", cited)
   ci = core.read_ci(repo, head)
@@ -96,6 +99,8 @@ def prepare(args, card):
   since = max((e["posted_at"] for e in data["rounds"] if e.get("posted_at")), default=None)
   write_comments(r / "comments.md", (issue, core.gh_pages(f"repos/{repo}/issues/{issue}/comments")),
                  (number, core.gh_pages(f"repos/{repo}/issues/{number}/comments")), since, login)
+  for key in ("dod_runs", "test_delta"):  # an earlier head's gates never stand for this one: `post` refuses until `collect`
+    entry.pop(key, None)
   entry.update({"head": head, "phase": "prepared", "merge_base": merge_base, "worktree": str(tree)})
   core.save_foreman(st, unit, data)
   previous = max((e["round"] for e in data["rounds"] if e.get("phase") == "posted"), default=None)

@@ -1,6 +1,6 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema (interfaces, review focus, Steps, decisions with options), the plan file outside the store, the files and commands of the plan skill only. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema (interfaces, review focus, Steps, decisions with options), the plan file outside the store, the files and commands of the plan skill only; one directory per handoff (U32); the optional Tier field (U33). -->
 
 # The plan file: schema, the unit's Steps, files and commands
 
@@ -36,8 +36,9 @@ Design: `/absolute/path/to/docs/specs/2026-11-03-webhooks-design.md`
 The `Design:` line names the approved spec (absolute, or relative to the
 plan's folder). `graph` reads `approvals/<spec-slug>.json` in the store: the
 spec's sha256 must equal the approval's, the handoff id is the approval's
-(`<slug>-<6 hex>`, kept across a re-approval), and the store may hold only
-one handoff until `closed_at` is written. The `## Global constraints` lines
+(`<slug>-<6 hex>`, kept across a re-approval), and the store holds one
+`<handoff id>/` directory per handoff, several side by side (a flat
+1.0/1.1 store keeps its own layout, section 4). The `## Global constraints` lines
 are rendered verbatim into every body.
 
 ## 2. One unit
@@ -53,6 +54,7 @@ are rendered verbatim into every body.
 | Shared files | `src/webhooks/queue.ts`: after U01, before U05 |
 | Risk | medium: touches the request path |
 | Size | M |
+| Tier | doable |
 
 Interfaces
 - Consumes: enqueue(event) -> Job (U01)
@@ -88,6 +90,7 @@ Decide before build
 | Shared files | `none` or `` `path`: after U01, before U05 `` items separated by `; `. `after` adds an edge from that unit to this one; `before` from this one to that unit. |
 | Risk | `low\|medium\|high: reason`. |
 | Size | `S` (up to 3 scope paths), `M` (up to 8), `L` (more; about twenty Step groups, the most a body holds). |
+| Tier | Optional; `difficult`, `doable` or `easy`, set by the author: `difficult` when the Steps leave a design choice open, the unit holds a novel algorithm or an unverified platform behaviour, or it consumes the interfaces of more than one subsystem; `easy` when the Steps are mechanical with pinned signatures and no open choice; else `doable`. A difficult unit keeps a small Scope and few Steps. The tier picks the builder's model and effort (`builder.tiers`; doable is `builder.model` and `builder.effort`); a section without it is doable; another word is refused as a bad `Size` is. |
 | Issue | Optional; `#<n>`, an open issue in `config.repo` that `file` adopts instead of creating one; `graph` refuses a `#<n>` the spec's `## Units` section does not name; the dry run heads such a unit `### edit #<n> <unit> (old body sha256 <hex>)` where a created unit reads `### issue <unit>`. |
 | Interfaces | One item per line: `- Consumes: <name> (U<nn>)` names what this unit uses and the producing unit; `- Produces: <name>` what later units rely on. A name is `fn(params) -> type` for a Python interface, `superegm <sub> <flags> → <stdout shape>; exit <codes>` for a helper subcommand, or `<file> key <path>` for a store field; `scan` matches on the identifier before `(`, the subcommand words, or the key path, and refuses a Consumes no sibling produces or whose producer is not a direct or transitive blocker. |
 | Definition of done | Numbered items. Item 1 is always `The test for each Step was committed before its implementation (checked by superegm tdd-order)`; every other item is ``Run `<command>` — <what passing means>``, ``Exists `<path>` `` or `CI green on the head`. Only `Run` items are commands. |
@@ -148,13 +151,15 @@ longer than the decisions the builder cannot make alone (compare `scan`'s
 
 | File | Written by | Content |
 | --- | --- | --- |
-| `handoff_plan.md` | `graph`, `decide` | The store's copy of the plan file; a filed unit's section here is the one the plan file must still carry. |
-| `handoff_units.json` | `graph`, `decide` | The parsed units (interfaces, review focus, decisions with options and answers, `body_sha256` per unit) with waves and predecessors, the `order`, the edges, the critical path. Derived; never hand-edited. |
-| `<6hex>/unit_<id>.md` | `graph`, `decide` | The unit's section plus its issue body as it will be posted, in a four-backtick `markdown` fence under `## Issue body as posted`. Written for unfiled units only; a filed unit's file is frozen. |
-| `handoff_bodies.md` | `graph`, `decide` | Every title, label set and body in creation order, with placeholders `#<U01>` for blockers and `#<tracking>` for the tracking issue. |
-| `state.json` | `graph`, `decide` | `handoff_id`, `repo`, `remote`, `repo_root`, `plan` (the plan file's path), `design`, `units[<id>].body_sha256`, `decisions` (section 5). |
-| `<6hex>/plan/scan/<unit>.json` | `scan` | `bytes`, `fenced_share`, `steps`, `spec_range_bytes`, `ratio`, `warnings[]`: the proportion reviewer's evidence. A derived report, written without a card. |
-| `<6hex>/decision_comment_<unit>_D<n>.md` | `decide` | For a filed unit only: the comment headed `**Decision D<n>:**` the skill posts on the issue under a `github-write` card. |
+| `<handoff id>/handoff_plan.md` | `graph`, `decide` | The store's copy of the plan file; a filed unit's section here is the one the plan file must still carry. |
+| `<handoff id>/handoff_units.json` | `graph`, `decide` | The parsed units (interfaces, review focus, decisions with options and answers, `body_sha256` per unit) with waves and predecessors, the `order`, the edges, the critical path. Derived; never hand-edited. |
+| `<handoff id>/unit_<id>.md` | `graph`, `decide` | The unit's section plus its issue body as it will be posted, in a four-backtick `markdown` fence under `## Issue body as posted`. Written for unfiled units only; a filed unit's file is frozen. |
+| `<handoff id>/handoff_bodies.md` | `graph`, `decide` | Every title, label set and body in creation order, with placeholders `#<U01>` for blockers and `#<tracking>` for the tracking issue. |
+| `<handoff id>/state.json` | `graph`, `decide` | `handoff_id`, `repo`, `remote`, `repo_root`, `plan` (the plan file's path), `design`, `units[<id>].body_sha256`, `decisions` (section 5). |
+| `<handoff id>/plan/scan/<unit>.json` | `scan` | `bytes`, `fenced_share`, `steps`, `spec_range_bytes`, `ratio`, `warnings[]`: the proportion reviewer's evidence. A derived report, written without a card. |
+| `<handoff id>/decision_comment_<unit>_D<n>.md` | `decide` | For a filed unit only: the comment headed `**Decision D<n>:**` the skill posts on the issue under a `github-write` card. |
+
+A flat 1.0/1.1 store keeps `handoff_plan.md`, `handoff_units.json`, `handoff_bodies.md` and `state.json` at its root and the unit-keyed files (`unit_<id>.md`, `plan/scan/<unit>.json`, `decision_comment_<unit>_D<n>.md`) under `<6 hex>/`.
 
 ## 5. The state file
 
@@ -174,5 +179,5 @@ absolute paths in single quotes, no chaining. `<HELPER>` is
 | Command | Writes | What it does |
 | --- | --- | --- |
 | `graph [--plan P] --runcard C` | the store | Parses the plan under its approval, builds the graph, renders and hashes the unfiled bodies, writes the files above; prints `handoff <id> on <repo>: <n> units, <w> waves`, one `wave <n>: …` line per wave, the critical path and what it wrote. Exit 1 with `graph: <reason>`. |
-| `scan [--plan P] [--comment FILE]` | `<6hex>/plan/scan/<unit>.json` | Prints the numbers table, then one `<rule>: <unit>: <line>` per problem, then `scan: clean` or `scan: <n> problem(s)`; exit 1 on a problem. With `--comment` it scans that file as a comment (the configured `fix_request_mention` may open it). |
+| `scan [--plan P] [--comment FILE]` | `<handoff id>/plan/scan/<unit>.json` | Prints the numbers table, then one `<rule>: <unit>: <line>` per problem, then `scan: clean` or `scan: <n> problem(s)`; exit 1 on a problem. With `--comment` it scans that file as a comment (the configured `fix_request_mention` may open it). |
 | `decide --unit U --decision D<n> (--answer "(x)" \| --default) [--judges ID] --runcard C` | the store, the plan file | Records the answer, one of the item's own options: an unfiled unit's plan line gains `; answer: (x)` and its body is re-rendered; a filed unit keeps its line, body and file and gets the comment file. Exit 1 with `decide: <reason>`. |
