@@ -135,3 +135,15 @@ def test_teammates_override_is_one_fenced_block_quoting_what_it_overrides():
                  "Before returning findings, read the target and every supplied standard",
                  "report an incomplete review instead of a verdict", "Perform codebase searches", "ask the cartographer"):
     assert needle in blocks[0], needle
+
+
+ROUND_3 = [("skills/brainstorming/SKILL.md", n) for n in (
+             "after the asking message, tell the owner again", "with some of the three's reports in",
+             "a cartographer message that is not its notes", "ten minutes or more after the `date` with the cartographer's notes not in",
+             "notes already in your inbox win over `fallback`", "the owner's answers to the ranked questions",
+             "- the owner's answers to the team's questions")]
+
+
+@pytest.mark.parametrize("path, needle", ROUND_3)
+def test_round_3_review_prose(path, needle):
+  assert needle in (ROOT / path).read_text(encoding="utf-8"), needle
