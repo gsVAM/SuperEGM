@@ -764,6 +764,34 @@ def test_launch_builder_re_run_reuses_a_detached_worktree_and_refuses_one_on_the
   assert again()[0] == 0 and git(["branch", "--show-current"], r2).strip() == branch and git(["branch", "--show-current"], r1).strip() == ""
 
 
+def test_launch_builder_round_1_re_run_restarts_the_branch_at_the_base(world, monkeypatch, spawn_fake):
+  """A round-1 re-run after a failure before the spawn (U32): `r1` refuses while on the branch; detached by hand, it is
+  reused and the branch is moved to `refs/superegm/base` again (where `worktree add -b` starts it), not left where the
+  failed run put it."""
+  import superegm
+  from superegm import launch_builder
+  s, card, hid, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0
+  r1, branch = s.path("worktrees", UNIT, "r1"), f"superegm/{hid}/U07"
+  again = lambda: world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)
+  def no_spawn(*a, **k):
+    raise superegm.HandoffError("no spawn")
+  line = launch_builder.command_line
+  monkeypatch.setattr(launch_builder, "command_line", no_spawn)
+  assert again()[0] == 1 and git(["branch", "--show-current"], r1).strip() == branch and not s.path("launches", f"{UNIT}.json").exists()
+  monkeypatch.setattr(launch_builder, "command_line", line)
+  code, out = again()
+  assert code == 1 and f"launch-builder: worktree {r1} is on {branch}: detach it by hand once no builder runs there" in out
+  git(["switch", "--detach"], r1)
+  base = git(["rev-parse", "refs/superegm/base"], world.repo).strip()
+  moved = git(["commit-tree", f"{base}^{{tree}}", "-p", base, "-m", "base fetched again"], world.repo).strip()
+  git(["update-ref", "refs/superegm/base", moved], world.repo)
+  code, out = again()
+  assert code == 0, out
+  assert git(["branch", "--show-current"], r1).strip() == branch and git(["rev-parse", "HEAD"], r1).strip() == moved
+
+
 def test_launch_builder_loads_the_builder_profile_settings_only():
   """A builder is a session in the target repository, so `claude -p` would run that repository's project settings and
   SessionStart hooks; the launched command carries `--setting-sources user`: the builder profile's settings alone (spec section 11)."""
