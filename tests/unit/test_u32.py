@@ -3,16 +3,19 @@
 
 """U32: the subcommand modules register their config defaults, `init` steps and `doctor` checks."""
 
+import argparse
+import hashlib
 import json
 import shutil
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
 import superegm  # the harness reloads the package per test: read its names at call time
 from superegm import discover
-from conftest import ROOT, make_repo, Harness
+from conftest import ROOT, git, make_repo, Harness
 
 
 def fresh(tmp_path, capsys, monkeypatch):
@@ -62,3 +65,16 @@ def test_discover_names_a_module_without_defaults_or_failing_import(tmp_path, ca
     monkeypatch.setitem(sys.modules, f"superegm.{name}", module)
   code, out = harness.run("init", "--artifacts-dir", str(tmp_path / "store"))
   assert code == 1 and f"superegm: {message}" in out, out
+
+
+# ---------------------------------------------------------------- S7: spec_blob and store's explicit inputs
+
+def test_spec_blob_and_store_take_their_inputs_explicitly(world):
+  from superegm import approve_spec, launch_builder, review, spec_blob, store
+  first = world.spec.read_bytes(); sha = hashlib.sha256(first).hexdigest()
+  world.spec.write_text("changed\n", encoding="utf-8"); git(["commit", "-qam", "edit"], world.repo)
+  assert spec_blob(world.repo, "docs/designs/sample.md", sha) == first.decode("utf-8") and spec_blob(world.repo, "docs/designs/sample.md", "0" * 64) is None
+  assert not hasattr(approve_spec, "branch_holds") and all("hashlib.sha256(blob" not in Path(m.__file__).read_text(encoding="utf-8") for m in (approve_spec, launch_builder, review))
+  superegm.CURRENT_ARGS = argparse.Namespace(design=str(world.spec))
+  with pytest.raises(superegm.HandoffError, match="store: nope: no such handoff"):
+    store(world.repo, argparse.Namespace(handoff="nope"))
