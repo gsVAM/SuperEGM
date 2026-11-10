@@ -87,3 +87,18 @@ def test_head_time_reads_the_worktree_head_or_none(tmp_path):
   git("-c", "user.name=b", "-c", "user.email=b@x", "commit", "-q", "--allow-empty", "-m", "c", GIT_COMMITTER_DATE="@1700000000 +0000")
   assert head_time(repo) == 1_700_000_000.0 and head_time(str(repo)) == 1_700_000_000.0
   assert head_time(tmp_path / "gone") is None and head_time(None) is None
+
+
+@pytest.mark.parametrize("stopped", [None, {"by": "owner", "reason": "stop the unit"}])
+def test_a_kill_failed_launch_whose_exit_file_arrived_offers_no_interrupt(world, tmp_path, stopped):
+  """A late exit file makes a `kill_failed` launch terminal (the interrupt would refuse it): the board reads no
+  `kill_failed` idle reason and the inbox carries no `kill_failed` item, a stopped unit's included (U31)."""
+  from superegm.inbox import inbox_items
+  card = open_wave_card(world)
+  result = tmp_path / "r1.json"
+  s = wave_store(world, U01={"launches": [{"round": 1, "status": "running", "started_at": "t", "result_file": str(result), "pid": 4242, "kill_failed": "no exit file"}]})
+  stopped and atomic_write(s.path("foreman", "U01"), {**json.loads(s.path("foreman", "U01").read_text(encoding="utf-8")), "stopped": stopped})
+  (tmp_path / "r1.json.exit").write_text("stalled\n", encoding="utf-8")
+  code, out = world.run("report", "--runcard", card)
+  assert code == 0 and "kill_failed (" not in out and "kill_failed (" not in s.path("wave_report", 1).read_text(encoding="utf-8"), out
+  assert not [i for i in inbox_items(s, [state_of(world)["handoff_id"]]) if i["kind"].startswith("kill_failed")]
