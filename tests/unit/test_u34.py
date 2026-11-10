@@ -147,3 +147,14 @@ ROUND_3 = [("skills/brainstorming/SKILL.md", n) for n in (
 @pytest.mark.parametrize("path, needle", ROUND_3)
 def test_round_3_review_prose(path, needle):
   assert needle in (ROOT / path).read_text(encoding="utf-8"), needle
+
+
+ROUND_4 = [("skills/brainstorming/SKILL.md", n) for n in (
+             "if it has sent you nothing at all", "with no message of any kind from the cartographer",
+             "the mailbox works, so ask it once for its notes and keep waiting", "ten minutes counts per teammate",
+             "rank no question and ask the owner nothing until all three are in or written `not reported`")]
+
+
+@pytest.mark.parametrize("path, needle", ROUND_4)
+def test_round_4_review_prose(path, needle):
+  assert needle in (ROOT / path).read_text(encoding="utf-8"), needle
