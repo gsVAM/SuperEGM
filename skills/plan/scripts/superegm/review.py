@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope (U32).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest: the one review loop (spec section 8)."""
 
@@ -236,12 +236,16 @@ def cited_line(location: str) -> int | None:
 
 
 def out_of_scope(rows: list, spans: list, location: str):
-  """The heading of the section a finding cites when no scope row holds its line, else None: a location
-  naming no line, or a line past the spec's end (another file's), is kept (D1 (a): the goldfish was briefed
-  to cite lines, and an unplaceable finding is not lost)."""
+  """The heading of the section a finding cites when no scope row holds its line, else None; in a scoped
+  round a location naming no line, or a line the spec does not hold, answers `none` (U32); a `whole` round
+  exempts every finding."""
+  if rows and rows[0][0] == "whole":
+    return None
   line = cited_line(location)
   index = None if line is None else section_of(spans, line)
-  if index is None or any(start <= line <= end for _, _, start, end in rows):
+  if index is None:
+    return "none"
+  if any(start <= line <= end for _, _, start, end in rows):
     return None
   return spans[index][0]
 
@@ -574,7 +578,8 @@ def record_round(args) -> int:
       posted[-1].update({"outcome": word, "rewritten_from": "clean"})
       core.save_foreman(st, review["artifact"], data)
   for fid, _, section in refused:
-    core.journal(st, f"review record {rid} round {n} out of scope: {fid} ({section}) under {args.runcard}")
+    where = ": no line number" if section == "none" else f" ({section})"
+    core.journal(st, f"review record {rid} round {n} out of scope: {fid}{where} under {args.runcard}")
     print(f"record: {fid} out of scope ({section}): not recorded")
   core.journal(st, f"review record {rid} round {n} {reviewer} what_ran {rnd['what_ran']} under {args.runcard}")
   print(f"round {n} {reviewer} recorded, what_ran {rnd['what_ran']}")
