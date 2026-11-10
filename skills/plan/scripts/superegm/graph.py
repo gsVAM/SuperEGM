@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema and issue body; the handoff id comes from the approval record; the plan is copied into the store; the optional `Issue` field checked against the spec's `## Units` section (U13); every escalated pair needs a `## Units` row or a blocking decision (U16); `filed_elsewhere[]`, an older handoff frozen, one store of many handoffs (U20); the body's `· Tier:` (U33).
+# Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema and issue body; the handoff id comes from the approval record; the plan is copied into the store; the optional `Issue` field checked against the spec's `## Units` section (U13); every escalated pair needs a `## Units` row or a blocking decision (U16); `filed_elsewhere[]`, an older handoff frozen, one store of many handoffs (U20); the body's `· Tier:` (U33); the `width:` line (U29).
 
 """superegm graph: parse the plan under its approval; write the store's plan copy,
 units, unit files and bodies."""
@@ -342,6 +342,40 @@ class Handoff(core.Handoff):
     core.journal(self.store, f"graph {self.handoff_id}: {len(g.order)} units, {len(g.waves)} waves")
 
 
+def width_line(units: dict) -> str:
+  """The `width:` line over `handoff_units.json` (spec section 9.1, amendment 9): every maximal shared-file chain
+  of three or more units, `<path>: U<a> > U<b> > … > U<n> (after U<b>)`, paths sorted, the chains of one path in
+  the first-seen order of their units; a `before` edge is the same link read from the other side."""
+  units = units.get("units") or {}
+  seen = {uid: i for i, uid in enumerate(units)}
+  links = {}  # path -> {unit: [the units after it]}
+  for uid, unit in units.items():
+    for item in unit.get("shared") or []:
+      nexts = links.setdefault(item["path"], {})
+      for order in item.get("order") or []:
+        a, b = (order["unit"], uid) if order["kind"] == "after" else (uid, order["unit"])
+        if b not in nexts.setdefault(a, []):
+          nexts[a].append(b)
+  key = lambda chain: [seen.get(u, len(seen)) for u in chain]
+  entries = []
+  for path in sorted(links):
+    nexts = links[path]
+    later = {b for bs in nexts.values() for b in bs}
+    chains = []
+
+    def walk(chain):
+      ahead = [b for b in nexts.get(chain[-1], []) if b not in chain]
+      if not ahead:
+        chains.append(chain)
+      for b in ahead:
+        walk(chain + [b])
+
+    for start in sorted((a for a in nexts if a not in later), key=lambda u: seen.get(u, len(seen))):
+      walk([start])
+    entries += [f"{path}: {' > '.join(c)} (after {c[1]})" for c in sorted(chains, key=key) if len(c) > 2]
+  return "width: chains " + "; ".join(entries) if entries else "width: none"
+
+
 def load(store: core.Store, plan) -> Handoff:
   """The handoff of `--plan`, or of the plan `state.json` recorded."""
   if plan is None:
@@ -369,6 +403,7 @@ def run(args):
   print(f"handoff {handoff.handoff_id} on {handoff.config['repo']}: {len(g.order)} units, {len(g.waves)} waves")
   for wave in sorted(g.waves):
     print(f"wave {wave}: {', '.join(g.waves[wave])}")
+  print(width_line(json.loads(handoff.store.path("units").read_text(encoding="utf-8"))))
   print("critical path: " + " -> ".join(g.critical_path))
   print(f"wrote handoff_plan.md, handoff_units.json, {len(g.order)} unit_*.md, handoff_bodies.md in {handoff.artifact_dir}")
   return 0
