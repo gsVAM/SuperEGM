@@ -15,6 +15,7 @@ from superegm.status import head_time, own_commit
 from superegm.traces import subagent_calls
 
 WRITES = frozenset(["launches"])  # the store kinds this subcommand writes
+CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset(["wave"])  # the skills whose card this subcommand accepts
 
 

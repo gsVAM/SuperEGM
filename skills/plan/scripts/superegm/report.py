@@ -14,6 +14,7 @@ import superegm as core
 from superegm.launch import latest_clean, load_launches
 
 WRITES = frozenset({"report", "runcards"})  # the store kinds this subcommand writes
+CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {"ci_wait_minutes": 30}, "", None  # its own config key (U32)
 SKILLS = frozenset({"wave"})  # the skills whose card this subcommand accepts
 
 

@@ -16,6 +16,7 @@ from superegm import body, review
 from superegm.approve_spec import UNITS_H2
 
 WRITES = frozenset()  # the store kinds this subcommand writes: none
+CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset({"review-plan"})  # the skills whose card this subcommand accepts
 SPEC_LINE_RE = re.compile(r"^Spec: `[^`]+` @ \S+ · `([^`:]+):(\d+)-(\d+) \((.+)\)`$", re.M)  # the body's Design range
 

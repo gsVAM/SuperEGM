@@ -9,6 +9,7 @@ from pathlib import Path
 import superegm as core
 
 WRITES = frozenset(["runcards", "launches", "driver"])  # the store kinds this subcommand writes; the boot-id proof's (U24)
+CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 
 
 def register(subparsers):

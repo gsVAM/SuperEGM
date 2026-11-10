@@ -16,6 +16,7 @@ import superegm as core
 from superegm.builder_token import app_lines, key_path, tool
 
 WRITES = frozenset(["state", "runcards"])  # the store kinds this subcommand writes
+CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset(["wave"])  # the skills whose card this subcommand accepts
 ROLE_IDS = {"write": 4, "maintain": 2, "admin": 5}  # GitHub's RepositoryRole actor ids
 

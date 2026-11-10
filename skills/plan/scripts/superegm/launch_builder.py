@@ -22,6 +22,21 @@ from superegm.launch import builder_email, builder_login, load_launches, termina
 from superegm.review_plan import SPEC_LINE_RE
 
 WRITES = frozenset(["launches", "orient_unit"])  # the store kinds this subcommand writes
+CONFIG_DEFAULTS = {  # its own config key (U32)
+    "builder": {"profile_dir": "~/.superegm/builder-profile", "model": "claude-opus-5-5", "effort": "medium",
+                "permission_mode": "acceptEdits", "gh_token_env": "SUPEREGM_BUILDER_TOKEN",
+                "allowed_tools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git add:*)", "Bash(git commit:*)",
+                                  "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git mv:*)",
+                                  "Bash(git rm:*)", "Bash(gh pr create:*)", "Bash(gh pr edit:*)",
+                                  "Bash(gh pr comment:*)", "Bash(gh issue comment:*)", "Bash(gh pr view:*)",
+                                  "Bash(pytest:*)"],
+                "plugins": [],  # <name>@<marketplace> ids, each passed by --plugin-dir (U27)
+                "mcp": {},  # mcpServers form, written to launches/<unit>_r<n>_mcp.json (U27)
+                "max_subagent_calls": 12,  # the orders' budget when allowed_tools carries Agent (U27)
+                "stall_minutes": 30,  # a running launch with no newer commit of its own this long is stalled (U31)
+                "app": None},  # or {app_id, slug, private_key_env}: the builder as a GitHub App (spec section 11)
+}
+INIT_STEP, DOCTOR_CHECKS = "", None  # its init lines stay numbered in init's own text (U32)
 SKILLS = frozenset(["wave"])  # the skills whose card this subcommand accepts
 PROMPT_COMMENT_RE = re.compile(r"^\*\*(Deviation \([a-z]+\)|Decision D\d+|Ruling):\*\*")
 # The PR body's DoD-results form (the orders): `### DoD <n>` then one fenced block per item.

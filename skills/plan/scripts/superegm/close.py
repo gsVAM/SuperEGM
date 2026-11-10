@@ -12,6 +12,7 @@ from pathlib import Path
 import superegm as core
 
 WRITES = frozenset({"state", "handoffs"})  # the store kinds this subcommand writes
+CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset({"integrate"})  # the skills whose card this subcommand accepts
 
 

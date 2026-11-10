@@ -12,6 +12,11 @@ from pathlib import Path
 import superegm as core
 
 WRITES = frozenset(["judges", "runcards", "questions"])  # the store kinds this subcommand writes
+CONFIG_DEFAULTS = {"judges": {"min_vendors": 1,  # its own config key (U32)
+                              "members": [{"name": "fable", "via": "adapter", "effort": "xhigh"},
+                                          {"name": "opus", "via": "adapter", "effort": "max"},
+                                          {"name": "astra", "via": "runner", "effort": "xhigh"}]}}
+INIT_STEP, DOCTOR_CHECKS = "", None
 SKILLS = frozenset(["judges"])  # the skills whose card this subcommand accepts
 PARENT_SKILLS = ("review-spec", "review-plan", "plan", "wave", "integrate")
 QUESTION_SKILLS = frozenset(["review-spec", "review-plan", "plan", "wave"])  # the cards `judges question` accepts

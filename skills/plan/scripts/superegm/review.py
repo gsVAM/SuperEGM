@@ -19,6 +19,15 @@ import sys
 import superegm as core
 
 WRITES = frozenset({"reviews", "foreman", "runcards", "review"})  # the store kinds this subcommand writes
+CONFIG_DEFAULTS = {  # its own config keys and init lines (U32)
+    "astra": {"enabled": False, "model": "gpt-6-astra", "effort": "xhigh", "heads": True, "heads_effort": "high"},
+    "ingest": {"severity_words": {"bug": "high", "issue": "medium", "nit": "low", "suggestion": "low"},
+               "human_role": "write"},  # `review ingest`: a thread's word map and the role a human's thread counts from
+}
+INIT_STEP = ("The Astra lane is off until you set astra.enabled to true; astra.heads (default true) then seats it on every head review.\n"
+             "`review ingest` reads PR review threads with ingest.severity_words (Devin's words by default) and counts a human's "
+             "thread from ingest.human_role (default write) up.")
+DOCTOR_CHECKS = None
 SKILLS = frozenset({"review-spec", "review-plan", "wave", "integrate"})  # the skills whose card this subcommand accepts
 KINDS = ("spec", "plan", "head", "integrate")
 REVIEWERS = ("design", "zoom-out", "comprehension", "readiness", "structural", "style",

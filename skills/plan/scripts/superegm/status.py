@@ -19,6 +19,7 @@ from superegm.report import board_table
 from superegm.review import collaborator_role, read_threads, thread_severity  # bound here: a test patches status's names
 
 WRITES = frozenset(['state'])  # the store kinds this subcommand writes
+CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset(['wave', 'integrate'])  # the skills whose card this subcommand accepts
 # a status line anywhere in the comment: a deviation's `**Deviation**` headings come before it (the builder orders)
 STATUS_RE = re.compile(r"^\*\*Builder status:\*\*\s*(DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT)\b", re.M)

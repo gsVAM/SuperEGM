@@ -26,6 +26,13 @@ from superegm.orient import TEST_RE
 from superegm.prepare import HEADER_RE
 
 WRITES = frozenset(['foreman', 'review', 'reviews'])  # the store kinds this subcommand writes
+CONFIG_DEFAULTS = {  # its own config key and init line (U32)
+    "foreman": {"run_timeout_minutes": 8},  # the bound on one whole `collect` call, under the Bash tool's 10 (spec section 11.1)
+}
+INIT_STEP = ("`collect` re-runs every DoD `Run` item the PR body pastes under its `### DoD <n>` fence in the review worktree "
+             "(an item without one is the `Run item <n>: no fenced output` high, not run), the whole call bounded by "
+             "foreman.run_timeout_minutes (default 8, at most 9, under the Bash tool's 10-minute cap).")
+DOCTOR_CHECKS = None
 SKILLS = frozenset(['wave'])  # the skills whose card this subcommand accepts
 DEVIATION_RE = re.compile(r"^\*\*Deviation \((interface|dod|test|other)\):\*\*")
 REPLY_RE = re.compile(r"^\*\*Reply (\S+):\*\* (fixed|contested)(?:\s*[—-]\s*(.*))?", re.S)

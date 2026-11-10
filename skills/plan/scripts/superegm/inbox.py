@@ -20,6 +20,12 @@ from superegm.decision import ruling_form
 from superegm.launch import latest_clean, load_launches
 
 WRITES = frozenset({"state", "driver"})  # notify's `notified` (a driver card's in `driver/`); inbox writes nothing
+CONFIG_DEFAULTS = {  # its own config key and init line (U32)
+    "notify_timeout_seconds": 30,  # how long `notify` waits on the owner's ~/.superegm/notify hook (spec section 11.2)
+}
+INIT_STEP = ("An executable ~/.superegm/notify, written outside every repository, is run by `wave` with the inbox lines new "
+             "since the last notify on its stdin, bounded by config key notify_timeout_seconds; absent means no hook.")
+DOCTOR_CHECKS = None
 SKILLS = frozenset({"wave", "driver"})
 KINDS = ("decision", "cap", "contested", "merge", "stalled", "escalated", "redesign", "test-delta", "owner",
          "kill_failed", "wave", "driver")
