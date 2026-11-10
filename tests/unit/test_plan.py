@@ -781,3 +781,23 @@ SPLIT = [
 @pytest.mark.parametrize("path, needle, present", SPLIT, ids=[f"{p.rsplit('/', 1)[1]}:{n[:30]}" for p, n, _ in SPLIT])
 def test_the_split_rules_in_the_plan_skill_and_its_references(path, needle, present):
   assert (needle in (ROOT / path).read_text(encoding="utf-8")) is present, (path, needle)
+
+
+DOCS = [("docs/claude.md", n, True) for n in (
+          "SUPEREGM_ROLE=driver", "AbandonProcessGroup", "`~/.superegm/env`", "`~/.superegm/registry.json`", "`~/.superegm/notify`",
+          "--plugin-dir", "--strict-mcp-config", "ENABLE_CLAUDEAI_MCP_SERVERS=false", "disableClaudeAiConnectors",
+          "`--effort <level>`", "CLAUDE_CODE_EFFORT_LEVEL", "`driver/<handoff>.json`", "`launches/<unit>_r<n>_plugins.json`",
+          "`launches/<unit>_r<n>_mcp.json`", "references/claude-code-tools.md", "accepted before the cap", "`acceptable:`",
+          "`decision open --point 5`")] + \
+       [("README.md", n, True) for n in (
+          "ingested as findings", "`**Ruling:**`", "`/superegm:inbox`", "`~/.superegm/notify`", "`/superegm:driver`",
+          "superegm driver install", "`~/.superegm/env`", "superegm register", "caffeinate", "re-runs every DoD `Run` item",
+          "test delta", "`review ingest --pr`", "`config.builder.plugins`", "`config.builder.mcp`", "`launches/<unit>_r<n>_plugins.json`",
+          "`builder.effort`", "<!-- superegm:board -->", "`builder.stall_minutes`", "closes the tracking issue", "`Tier:`",
+          "`builder.tiers`", "`--team`", "accepted before the cap", "`acceptable:`", "`decision open --point 5`")] + \
+       [("README.md", "_managed.json", False)]
+
+
+@pytest.mark.parametrize("path, needle, present", DOCS, ids=[f"{Path(p).name}:{n[:30]}" for p, n, _ in DOCS])
+def test_the_1_2_docs_sweep(path, needle, present):
+  assert (needle in (ROOT / path).read_text(encoding="utf-8")) is present, (path, needle)
