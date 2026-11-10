@@ -301,3 +301,19 @@ TIER_CHECK = ["## The tier", "the `Tier:` word on the body's `Scope:` line", "a 
 @pytest.mark.parametrize("needle", TIER_CHECK)
 def test_the_proportion_brief_names_the_tier_check(needle):
     assert needle in PROPORTION.read_text(encoding="utf-8"), needle
+
+
+WIDTH = [
+  (SKILL, "the `width:` line", True), (SKILL, "## Plan header", True), (SKILL, "wave plan", True),
+  (SKILL, "chains at U<n>: <path> U<a> > U<b> > … > U<n> (after U<b>); <path> …", True),
+  (SKILL, "`low` when the header names every chain", True), (SKILL, "question 11 only", False),
+  (PROPORTION, "split candidate: <Steps | bytes | paths | subsystems>", True),
+  (PROPORTION, "over 10 Steps, 24,576 bytes or eight Scope paths", True), (PROPORTION, "crosses subsystems", True),
+  (PROPORTION, "a `difficult` unit at Size `L`", True), (PROPORTION, "`bytes` over 24,576, `steps` over 10", True),
+  (PROPORTION, "32,768", False),
+]
+
+
+@pytest.mark.parametrize("path, needle, present", WIDTH, ids=[f"{p.name}:{n[:30]}" for p, n, _ in WIDTH])
+def test_the_chain_check_and_the_split_check_prose(path, needle, present):
+  assert (needle in path.read_text(encoding="utf-8")) is present, (path, needle)
