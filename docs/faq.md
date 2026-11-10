@@ -1,6 +1,6 @@
 # FAQ
 
-<!-- Modified by SuperEGM (gsVAM), 2026: EGM's philosophy questions replaced by SuperEGM's: modes, the builder account, the judges, what stays human. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: EGM's philosophy questions replaced by SuperEGM's: modes, the builder account, the judges, what stays human; 1.2's driver, rulings by comment, outside reviews and acceptance below the cap. -->
 
 #### Q: What does the owner actually do?
 
@@ -54,3 +54,27 @@ area mean the capability should be deleted, the contract narrowed or the surface
 
 **A**: No. The answer is the same as when you built things without AI: one unit, one branch, one
 pull request.
+
+#### Q: Can I leave it running while I am away?
+
+**A**: Yes. Register the repository with `superegm register`, write `~/.superegm/env`, and type
+`/superegm:driver install`: a launchd or systemd timer runs `wave --leavemealone` for every
+registered handoff. It launches builders, runs reviews and judges, and stops at every merge.
+`/superegm:inbox` lists what waits on you, and an executable `~/.superegm/notify` hears each new line.
+
+#### Q: Can I rule without opening a terminal?
+
+**A**: Yes. A comment on the unit's issue that starts `**Ruling:**`, from a login in
+`config.owners`, is a ruling: the wave reads it on its next pass. Anyone else's comment is read as
+a comment.
+
+#### Q: Do reviews from colleagues or review bots count?
+
+**A**: Yes. A review on a builder's pull request, or on the spec's own pull request, is ingested as
+findings (`review ingest`, `review ingest --pr`) and enters the same loop: a high or medium turns a
+clean head back into a revise until the builder answers it.
+
+#### Q: Must I wait five rounds to accept a few mediums?
+
+**A**: No. When only mediums and lows stand, `review status` prints an `acceptable:` line and you
+can accept then and there.

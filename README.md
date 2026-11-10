@@ -1,14 +1,52 @@
 # SuperEGM
 
-<!-- Modified by SuperEGM (gsVAM), 2026: U01's skeleton filled in by U11; U11's README restructured for the public with diagrams; the 1.2 docs sweep (U29). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: U01's skeleton filled in by U11; U11's README restructured for the public with diagrams; the 1.2 docs sweep (U29); the 1.2.0 release README: what's new, install from GitHub and why, the setup map, the documentation table. -->
 
 <p align="center"><img src="docs/assets/logo.png" width="420" alt="SuperEGM: a caped elephant and a masked goldfish"></p>
 
-**The Super Elephant-Goldfish Model**
+<p align="center"><strong>The Super Elephant-Goldfish Model</strong><br>From idea to merged pull requests, with fresh eyes on every step and a human on every merge.</p>
+
+<p align="center">
+  <a href="https://github.com/gsVAM/superegm/releases/latest"><img src="https://img.shields.io/github/v/release/gsVAM/superegm?label=release" alt="Latest release"></a>
+  <a href="https://github.com/gsVAM/superegm/actions/workflows/tests.yml"><img src="https://github.com/gsVAM/superegm/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
+  <img src="https://img.shields.io/badge/Claude%20Code-plugin-d97757" alt="A Claude Code plugin">
+  <img src="https://img.shields.io/badge/licence-Apache--2.0%20%2B%20MIT-blue" alt="Licence: Apache-2.0 and MIT">
+</p>
 
 SuperEGM is one Claude Code plugin that takes an idea to merged pull requests. It brainstorms the design with you, has isolated reviewers review that design before anything is planned, cuts the approved design into units, files one GitHub issue per unit, and launches a fresh, isolated builder per unit that commits test-first and opens a draft pull request. A foreman reviews every pull request head with CI as its evidence. The human approves the design, rules when a review asks, and merges. The spec is not the plan: the spec is the design document, and the plan belongs to the GitHub issue, one per unit.
 
 It is superpowers' unit of work (a brainstormed design, a TDD-shaped plan per unit) inside EGM's orchestration (isolated reviewers, an adversarial gate before anything is written, a dependency graph cut into waves, a foreman per unit reviewing every PR head with CI as evidence, a merge that stays human).
+
+## What's new in 1.2
+
+1.2 takes SuperEGM from a workflow you sit with to a fleet you can leave running. It was built by its own workflow: 15 units, each built by a fresh builder, reviewed by isolated goldfish and merged by hand.
+
+**Run it while you are away**
+
+- **The driver** (`/superegm:driver`): a launchd or systemd timer that runs `wave --leavemealone` for every registered handoff, one at a time per store, and never merges.
+- **The inbox** (`/superegm:inbox`): one list of everything waiting on you, across every repository you registered (`--all`). An executable `~/.superegm/notify` gets each new line, so a phone notification is one script away.
+- **The watchdog**: a builder with no new commit of its own for `builder.stall_minutes` (30) is reported stalled instead of silently burning time.
+- **The board**: the tracking issue carries a live table of every unit, its pull request and its state.
+
+**Rule from anywhere, hear from everyone**
+
+- **Rulings by comment**: an owner's `**Ruling:**` comment on the unit's issue is a ruling, so you can decide from the GitHub app on your phone.
+- **Outside reviews count**: a review by a colleague or a review bot on a builder's pull request, or on the spec's own pull request (`review ingest --pr`), is ingested as findings and enters the same loop.
+- **Accept below the cap**: when only mediums and lows stand, `review status` prints an `acceptable:` line and the owner may accept without waiting out five rounds.
+
+**Trust, but verify**
+
+- **The foreman verifies**: it re-runs every definition-of-done `Run` item on the head itself and checks the test delta; a removed or weakened test is a high finding only the owner can allow.
+- **Models per role**: builders, reviewers, judges and the Astra lane each get a model and an effort (`doctor` prints one `model:` line per role), and a unit's `Tier:` (`difficult`, `doable`, `easy`) picks its builder's model.
+- **Builder tooling per launch**: `config.builder.plugins` and `config.builder.mcp` give builders exactly the plugins and MCP servers you list, recorded per launch.
+
+**Plan bigger, in parallel**
+
+- **Team brainstorm** (`--team`): a cartographer, an architect, a skeptic and an advocate argue the design before it is written.
+- **Units cut for parallel waves**: the plan rules now keep units off each other's files, so more of a wave runs at once.
+- **Cleaner endings**: `close` closes the tracking issue and the landed units' issues, `--close --patch` closes a patch release without the integrate round, and every subcommand module is discovered rather than listed.
+
+The full design is in [docs/specs/2026-11-03-superegm-design.md](https://github.com/gsVAM/superegm/blob/main/docs/specs/2026-11-03-superegm-design.md).
 
 ## Elephants and goldfish
 
@@ -29,6 +67,8 @@ The philosophy:
 - The spec is reviewed before anything is planned. Reviewers who see only the spec find the holes while they are cheap, and the approval freezes the spec at a sha256.
 - Every unit is a TDD plan a fresh builder can follow alone. A builder's brief is its issue body, the builder orders and the rulings on its issue; it never sees the planning conversation.
 - Nothing merges without a human. Builders push and open draft pull requests as their own account; only the owner can update the base branch.
+- You do not have to sit with it. The driver runs waves while you are away, the inbox lists only what needs you, and a `**Ruling:**` comment from your phone is a ruling.
+- Two vendors check each other. With the optional Codex lane, a GPT reviewer sits on every panel beside the Claude goldfish and judges.
 
 ## The workflow at a glance
 
@@ -53,7 +93,11 @@ The approval commit is the one human step between phases 1 and 5: `launch` refus
 
 ## Install
 
-Disable the two plugins SuperEGM absorbs first, then install from the marketplace:
+**You need** Claude Code, `git`, the GitHub CLI (`gh`) logged in, and `python3` (CI runs 3.11). That is the whole runtime: the helper is standard-library Python and every store is plain JSON on your disk.
+
+**Why install from the GitHub repository.** This repository is its own Claude Code marketplace: `marketplace add gsVAM/superegm` points Claude Code at it, and `plugin install` takes the latest tagged release. Every release is cut from a reviewed, merged pull request, tagged and never moved, and ships a ZIP with its `SHA256SUMS` ([docs/releases.md](docs/releases.md)). So what you install is exactly what the tag says, and `claude plugin update superegm@superegm` moves you to the next one. Your projects live in their own GitHub repositories, too: SuperEGM files its plan as issues, its builders open pull requests there, and your merge is the only way code reaches your base branch.
+
+Disable the two plugins SuperEGM absorbs first. Their skills have the same names and would fight over which one runs. Then install from the marketplace:
 
 ```sh
 claude plugin disable egm@egm-astra
@@ -65,11 +109,34 @@ claude plugin marketplace add gsVAM/superegm
 claude plugin install superegm@superegm
 ```
 
+Optional, and recommended: the second vendor. With [claudex-loop](https://github.com/chaseai-yt/claudex-loop) and a logged-in Codex CLI, a GPT reviewer (Astra) joins every review panel and every judges' panel, so no single model grades its own work:
+
+```sh
+claude plugin marketplace add chaseai-yt/claudex-loop
+claude plugin install claudex-loop@claudex-loop
+codex login
+```
+
+Without it, or with `"astra": {"enabled": false}` in `.superegm/config.json`, the lane records `not run` and reviews run Claude-only. What leaves your machine, and to whom, is in [docs/privacy.md](docs/privacy.md).
+
 The workflow is in [docs/getting_started.md](docs/getting_started.md); the platform facts in [docs/claude.md](docs/claude.md).
 
 ## Before the first run
 
 <!-- superegm:u11 -->
+
+**Why this is on GitHub, and why it takes a few minutes.** SuperEGM works where your code already lives. The plan becomes GitHub issues you can read, builders work on branches and open draft pull requests, CI runs on every push, and rulings can be comments. What it asks you to set up once is the safety it relies on: a second login so a builder can never be you, a ruleset so nothing but your merge reaches the base branch, and a clean profile so a builder sees its orders and nothing else.
+
+| Step | What | Why |
+|------|------|-----|
+| 1 | The builder account | Builders push as a separate login with a token scoped to this repository and without `workflow`, so they can never update the base branch or the CI that judges them |
+| 2 | An empty builder profile | A builder starts fresh: no plugins and no `CLAUDE.md` it did not get from its orders |
+| 3 | A ruleset on the base branch | Only owners update it; unit branches cannot be force-pushed or deleted |
+| 4 | CI on `pull_request` | `clean` means CI green on the head; no CI means nothing is ever clean |
+| 5 | Commit the config | Every session and every builder reads the same `.superegm/config.json` |
+| 6 | Review from a profile without `SubagentStart` hooks | Such a hook reaches every goldfish, and a goldfish is meant to see the artifact and nothing else |
+| 7–9 | Builder tooling, the driver, keeping the machine awake | Only when you want them: plugins for builders, waves while you are away, a laptop that does not sleep mid-wave |
+
 
 Six things need a human once, before the first wave, and three more as you need them: the builder's own tooling (step 7) and the driver's unattended waves (steps 8 and 9). `superegm init` (run by the first typed skill when `.superegm/config.json` is missing) writes the config and prints the first five by-hand steps; steps 6 to 9 are yours to remember:
 
@@ -216,6 +283,18 @@ SuperEGM aims to unite these workflows under one plugin with cross-provider adve
 
 SuperEGM runs in Claude Code only; there is no Codex host.
 
+## Documentation
+
+| Document | Read it when |
+|----------|--------------|
+| [Getting started](docs/getting_started.md) | You are installing, setting up a repository, or want the phases and modes in one place |
+| [Claude Code](docs/claude.md) | You want the platform facts: adapters, hooks, isolation, what a builder can and cannot do |
+| [FAQ](docs/faq.md) | You have a question about merging, the builder account, leaving it running, or reviews that do not converge |
+| [Privacy](docs/privacy.md) | You need to know what leaves your machine, and to whom |
+| [Releases](docs/releases.md) | You are cutting or verifying a release |
+| [The design](https://github.com/gsVAM/superegm/blob/main/docs/specs/2026-11-03-superegm-design.md) | You want the whole design, every unit and every amendment |
+| [Index](docs/index.md) | You want everything else, including the shared runtime resources |
+
 ## Licence
 
 The full list of files carrying a notice:
@@ -225,4 +304,4 @@ The full list of files carrying a notice:
 
 ---
 
-Built by its own workflow: 13 units, 6 waves, 1284 tests. The documentation index is [docs/index.md](docs/index.md).
+Built by its own workflow. 1.1: 13 units in 6 waves. 1.2: 15 more units, each built by a fresh builder, reviewed by isolated goldfish and merged by its owner; 2734 tests. The documentation index is [docs/index.md](docs/index.md).
