@@ -418,36 +418,36 @@ def test_report_refuses_a_changed_spec_and_a_state_without_its_plan(world):
 
 PRIOR = {"id": "q1", "point": 3, "source": "comment 60", "head": "a" * 40, "question": BLOCKED, "asked_at": "t"}
 A = "a" * 40
-HEAD = "| unit | state | round | launch | head | PR | waits on | next action | cost |"
+HEAD = "| unit | state | round | launch | head | PR | waits on | next action | cost | tier |"
 
 
 @pytest.mark.parametrize("units, idle, row", [
   ({"U01": {"pr": 70, "head": A, "ci": "green", "launches": [{"round": 1, "status": "exited 0", "total_cost_usd": 1.5}],
             "rounds": [{"round": 1, "phase": "posted", "outcome": "clean", "launch": 1, "head": A}]}}, None,
-   "| U01 #2 | clean | r1 posted clean | 1 exited 0 | aaaaaaa | #70 | none | await-merge | 1.50 |"),
+   "| U01 #2 | clean | r1 posted clean | 1 exited 0 | aaaaaaa | #70 | none | await-merge | 1.50 | doable |"),
   ({"U01": {"pr": 70, "head": A, "ci": "green", "launches": [{"round": 1, "status": "exited 0", "total_cost_usd": 0.5}],
             "rounds": [{"round": 1, "phase": "posted", "outcome": "revise", "launch": 1, "head": A}]}}, None,
-   "| U01 #2 | active | r1 posted revise | 1 exited 0 | aaaaaaa | #70 | none | launch-builder | 0.50 |"),
+   "| U01 #2 | active | r1 posted revise | 1 exited 0 | aaaaaaa | #70 | none | launch-builder | 0.50 | doable |"),
   ({"U01": {"pr": 70, "head": A, "ci": "green", "launches": [{"round": 1, "status": "exited 0"}, {"round": 2, "status": "running"}],
             "rounds": [{"round": 1, "phase": "posted", "outcome": "revise", "launch": 1, "head": A}]}}, None,
-   "| U01 #2 | active | r1 posted revise | 2 running | aaaaaaa | #70 | none | none | none |"),
+   "| U01 #2 | active | r1 posted revise | 2 running | aaaaaaa | #70 | none | none | none | doable |"),
   ({"U01": {"pr": 70, "head": A, "ci": "green", "launches": [{"round": 1, "status": "exited 0", "total_cost_usd": 1.0},
                                                             {"round": 2, "status": "exited 137", "total_cost_usd": "unrecorded"}]}}, None,
-   "| U01 #2 | active | none | 2 exited 137 | aaaaaaa | #70 | none | foreman dispatch | 1.00 (partial) |"),
+   "| U01 #2 | active | none | 2 exited 137 | aaaaaaa | #70 | none | foreman dispatch | 1.00 (partial) | doable |"),
   ({"U01": {"pr": 70, "head": A, "ci": "green", "launches": [{"round": 1, "status": "interrupted", "total_cost_usd": 2.0}]}}, None,
-   "| U01 #2 | active | none | 1 interrupted | aaaaaaa | #70 | none | foreman dispatch | 2.00 |"),
+   "| U01 #2 | active | none | 1 interrupted | aaaaaaa | #70 | none | foreman dispatch | 2.00 | doable |"),
   ({"U01": {"pr": 70, "head": A, "ci": "green", "launches": [{"round": 1, "status": "exited 0"}],
             "rounds": [{"round": 1, "phase": "posted", "outcome": "owner: f-1-2", "launch": 1, "head": A}]}}, None,
-   "| U01 #2 | active | r1 posted owner: f-1-2 | 1 exited 0 | aaaaaaa | #70 | none | decision open | none |"),
-  ({"U01": {"launches": []}}, None, "| U01 #2 | active | none | none | none | none | none | foreman dispatch | none |"),
-  ({"U01": {"pr": 70, "head": A, "ci": "pending"}}, None, "| U01 #2 | active | none | 1 running | aaaaaaa | #70 | ci | none | none |"),
-  ({"U01": {"pr": 70, "head": A, "ci": "green", "decisions": [PRIOR]}}, None, "| U01 #2 | pending | none | 1 running | aaaaaaa | #70 | q1 | decision 3 | none |"),
+   "| U01 #2 | active | r1 posted owner: f-1-2 | 1 exited 0 | aaaaaaa | #70 | none | decision open | none | doable |"),
+  ({"U01": {"launches": []}}, None, "| U01 #2 | active | none | none | none | none | none | foreman dispatch | none | doable |"),
+  ({"U01": {"pr": 70, "head": A, "ci": "pending"}}, None, "| U01 #2 | active | none | 1 running | aaaaaaa | #70 | ci | none | none | doable |"),
+  ({"U01": {"pr": 70, "head": A, "ci": "green", "decisions": [PRIOR]}}, None, "| U01 #2 | pending | none | 1 running | aaaaaaa | #70 | q1 | decision 3 | none | doable |"),
   ({"U01": {"pr": 70, "head": A, "ci": "green"}}, "U01=launch-builder: no token",
-   "| U01 #2 | idle | none | 1 running | aaaaaaa | #70 | none | launch-builder: no token | none |"),
-  ({"U01": {"pr": 70, "head": A, "ci": None, "landed": True}}, None, "| U01 #2 | landed | none | 1 running | aaaaaaa | #70 | none | none | none |"),
-  ({"U01": {"launched": False, "ready": True, "launches": []}}, None, "| U01 #2 | ready | none | none | none | none | none | launch-builder | none |"),
+   "| U01 #2 | idle | none | 1 running | aaaaaaa | #70 | none | launch-builder: no token | none | doable |"),
+  ({"U01": {"pr": 70, "head": A, "ci": None, "landed": True}}, None, "| U01 #2 | landed | none | 1 running | aaaaaaa | #70 | none | none | none | doable |"),
+  ({"U01": {"launched": False, "ready": True, "launches": []}}, None, "| U01 #2 | ready | none | none | none | none | none | launch-builder | none | doable |"),
   ({"U01": {"pr": 70, "head": A, "ci": "green"}, "U02": {"launched": False, "launches": []}}, None,
-   "| U02 #3 | waiting | none | none | none | none | U01 | none | none |")])
+   "| U02 #3 | waiting | none | none | none | none | U01 | none | none | doable |")])
 def test_the_board_row_per_unit(world, units, idle, row):
   card = open_wave_card(world)
   s = wave_store(world, **units)
@@ -456,7 +456,7 @@ def test_the_board_row_per_unit(world, units, idle, row):
   text = s.path("wave_report", 1).read_text(encoding="utf-8")
   header = (f"handoff {s.handoff_id} · base main · spec {hashlib.sha256(world.spec.read_bytes()).hexdigest()[:12]}"
             " · waves {U01} → {U02} → {U03} · changed none")
-  assert f"## Units\n{header}\n{HEAD}\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n" in text
+  assert f"## Units\n{header}\n{HEAD}\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n" in text
   assert row in text and row in out and out.splitlines()[0] == str(s.path("wave_report", 1)) and "- U01 #2:" not in text
 
 
