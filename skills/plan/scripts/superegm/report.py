@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the report subcommand (spec section 11): the per-batch wave report, the idle rules
-# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31); its own `ci_wait_minutes` config key, moved from `__init__` (U32).
+# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31); its own `ci_wait_minutes` config key, moved from `__init__` (U32); the board's tier column (U33).
 
 """superegm report: rewrite `wave_<n>_report.md` from the store, the plan and the spec and print its path, the
 board and the idle, pending and loop lines. It opens the card's handoff as `status` does (`core.locate`,
@@ -111,7 +111,7 @@ def wave_number(st, rid: str, card: dict) -> int:
   return sorted(cards).index((card["opened_at"], rid)) + 1
 
 
-BOARD_COLUMNS = ("unit", "state", "round", "launch", "head", "PR", "waits on", "next action", "cost")
+BOARD_COLUMNS = ("unit", "state", "round", "launch", "head", "PR", "waits on", "next action", "cost", "tier")  # tier last (U33)
 
 
 def board_table(handoff, state: dict, card: dict, now: float) -> str:
@@ -149,7 +149,7 @@ def board_table(handoff, state: dict, card: dict, now: float) -> str:
     cells =[f"{uid} #{(units.get(uid) or {}).get('number')}", word, round_cell(latest),
              f"{launch['round']} {launch['status']}" if launch else "none", view["head"][:7] if view["head"] else "none",
              f"#{view['pr']}" if view["pr"] else "none", ", ".join(waits) or "none",
-             next_action(word, latest, launch, decisions, reasons.get(uid)), cost_cell(entries)]
+             next_action(word, latest, launch, decisions, reasons.get(uid)), cost_cell(entries), core.unit_tier(st, uid)]
     lines.append("| " + " | ".join(map(board_cell, cells)) + " |")
   return "\n".join(lines)
 
