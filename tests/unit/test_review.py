@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03); the review loop and approve-spec (U04); the `acceptable:` line (U35).
+# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03); the review loop and approve-spec (U04); the `acceptable:` line (U35); the by-hand card and the lineless path (U32).
 
 """U04: the review loop (`review open|record|settle|status|rule`) and `approve-spec` (spec section 8)."""
 
@@ -882,6 +882,24 @@ def test_approve_spec_amend_units(world):
   assert code == 1 and "approve-spec: a line outside ## Units changed" in out and approval(world) == whole
   store(world.repo).path("approvals", SLUG).unlink()
   assert "approve-spec: no approval to amend" in approve(world, spec, icid, "--amend-units")[1]
+
+
+def test_amend_units_typed_by_hand_opens_and_closes_its_own_card(world):
+  """Typed outside a skill, `--amend-units` opens and closes its own card, `approve-spec-<6 hex>-<n>` (U32)."""
+  spec, cid, rid = converged_spec(world)
+  assert approve(world, spec, cid, "--yes")[0] == 0
+  first = approval(world)["entries"][-1]
+  spec.write_text(SPEC + "| U02 | more (from integrate, review spec-x-integrate-c1) | U01 | S |\n", encoding="utf-8")
+  hid = first["handoff_id"]
+  card_of = lambda n: json.loads(hstore(world).path("runcards", f"approve-spec-{hid[-6:]}-000{n}").read_text(encoding="utf-8"))
+  code, out = world.run("approve-spec", "--spec", str(spec), "--amend-units", card=None)
+  last = approval(world)["entries"][-1]
+  assert code == 0 and (last["kind"], last["runcard"]) == ("amend-units", f"approve-spec-{hid[-6:]}-0001"), out
+  assert (card_of(1)["skill"], card_of(1)["artifact"]) == ("approve-spec", str(spec)) and card_of(1)["closed_at"]
+  spec.write_text(spec.read_text(encoding="utf-8").replace("Text.", "Changed."), encoding="utf-8")
+  code, out = world.run("approve-spec", "--spec", str(spec), "--amend-units", card=None)
+  assert code == 1 and "a line outside ## Units changed" in out and card_of(2)["closed_at"]
+  assert "runcard: --runcard is required" in world.run("approve-spec", "--spec", str(spec), "--yes", card=None)[1]
 
 
 def test_amend_units_and_void_act_on_the_latest_entry_alone(world):
