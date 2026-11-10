@@ -108,3 +108,30 @@ ROUND_1 = [("skills/brainstorming/SKILL.md", n) for n in (
 @pytest.mark.parametrize("path, needle", ROUND_1)
 def test_round_1_review_prose(path, needle):
   assert needle in (ROOT / path).read_text(encoding="utf-8"), needle
+
+
+ROUND_2 = [("skills/brainstorming/SKILL.md", n) for n in (
+             "a value neither `true` nor `false`", "`false` or a missing key is no ask, and you say nothing", "tell the owner you are waiting on the three",
+             "there is no fallback once the three run", "`fallback` typed while waiting on the cartographer takes the fallback at once",
+             "a next turn less than ten minutes after the `date` with nothing in the inbox", "`fallback` typed while waiting on the three")] + [
+           ("skills/brainstorming/references/teammates.md", n) for n in (
+             "the lead pastes the override block below", "## The dispatch` is the lead's own and is not pasted",
+             "Set aside the adapter's \"Before returning findings, read the target and every supplied standard\"",
+             "the zoom-out persona's \"Perform codebase searches\"")] + [
+           ("skills/using-superegm/references/claude-code-tools.md", "under `-p` a named call is a subagent, to which it is applied")]
+
+
+@pytest.mark.parametrize("path, needle", ROUND_2)
+def test_round_2_review_prose(path, needle):
+  assert needle in (ROOT / path).read_text(encoding="utf-8"), needle
+
+
+def test_teammates_override_is_one_fenced_block_quoting_what_it_overrides():
+  text = TEAMMATES.read_text(encoding="utf-8")
+  dispatch = text.split("## The dispatch", 1)[1].split("## The message form", 1)[0]
+  blocks = re.findall(r"^```\n(.*?)^```$", dispatch, re.M | re.S)
+  assert len(blocks) == 1, blocks
+  for needle in ("no target file to read", "no incomplete review to report", "not the findings line",
+                 "Before returning findings, read the target and every supplied standard",
+                 "report an incomplete review instead of a verdict", "Perform codebase searches", "ask the cartographer"):
+    assert needle in blocks[0], needle
