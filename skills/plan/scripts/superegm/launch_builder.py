@@ -478,19 +478,27 @@ def add_worktree(repo_root, store, unit, rnd, branch, pr):
   """A fresh worktree for the launch on the unit's branch: round 1 from `refs/superegm/base`,
   later rounds at the PR tip (`refs/superegm/pr/<n>`, fetched by `prepare`) or, with no PR yet
   (decision point 3's `relaunch` after an exit without one), at the retained local branch, after
-  detaching the earlier launches' worktrees (nothing in them is removed; that is `clean`'s)."""
+  detaching the earlier launches' worktrees (nothing in them is removed; that is `clean`'s).
+  A re-run after a failure before the spawn (U32): an `r<n>` already on the branch refuses before any
+  switch (a builder may run there); a detached one is switched to the branch, no `worktree add`."""
   path = store.path("worktrees", unit, f"r{rnd}")
   path.parent.mkdir(parents=True, exist_ok=True)
-  if rnd == 1:
+  reuse = path.is_dir() and path.resolve() in core.registered_worktrees(repo_root)
+  if reuse and core.run_git(["branch", "--show-current"], path).strip() == branch:
+    raise core.HandoffError(f"worktree {path} is on {branch}: detach it by hand once no builder runs there")
+  if rnd == 1 and not reuse:
     core.run_git(["worktree", "add", "-b", branch, str(path), "refs/superegm/base"], repo_root)
     return path
   for earlier in core.registered_worktrees(repo_root):
-    if earlier.is_relative_to(path.parent.resolve()) and earlier.is_dir():
+    if earlier.is_relative_to(path.parent.resolve()) and earlier.is_dir() and earlier != path.resolve():
       core.run_git(["switch", "--detach"], earlier)
   core.run_git(["worktree", "prune"], repo_root, check=False)
   if pr:
     core.run_git(["branch", "-f", branch, f"refs/superegm/pr/{pr}"], repo_root)
-  core.run_git(["worktree", "add", str(path), branch], repo_root)
+  if reuse:
+    core.run_git(["switch", branch], path)
+  else:
+    core.run_git(["worktree", "add", str(path), branch], repo_root)
   return path
 
 
