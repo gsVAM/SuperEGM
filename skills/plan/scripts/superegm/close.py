@@ -3,8 +3,12 @@
 # it refuses while a redesign-stopped unit's issue is open (one GitHub read per such unit); `write_closed`, `closed_at` in the state and handoffs/<id>.json (U20).
 # a merged unit's open issue and, all landed, the tracking issue closed as completed; `--note` (U32).
 
-"""superegm close: close the handoff under an integrate card; writes `closed_at` once, in its `state.json` and
-its `handoffs/<id>.json` (`write_closed`, spec section 7; a legacy handoff's file is written the first time)."""
+"""superegm close [--note <text>]: close the handoff under an integrate card. GitHub reads: each redesign-stopped
+unit's issue (open, it refuses before any write), each unlanded unit's recorded PR through `gh api repos/<repo>/pulls/<n>` (merged lands it for this close) and each landed unit's issue;
+GitHub writes: `gh issue close --reason completed` of each landed unit's open issue and, every unit landed, of
+the tracking issue, each journaled (an already-closed issue reads as done); `--note` journaled as
+`close: note <text>`; then `closed_at` written last, once, in its `state.json` and its `handoffs/<id>.json`
+(`write_closed`, spec section 7; a legacy handoff's file is written the first time)."""
 
 import json
 from pathlib import Path
@@ -17,7 +21,8 @@ SKILLS = frozenset({"integrate"})  # the skills whose card this subcommand accep
 
 
 def register(subparsers):
-  p = core.add_parser(subparsers, "close", "close the handoff: write closed_at and journal every unlanded unit")
+  p = core.add_parser(subparsers, "close", "close the handoff: close each merged unit's open issue and, all landed, the tracking issue "
+                       "on GitHub (completed), journal every unlanded unit, write closed_at last")
   p.add_argument("--note", help="a note journaled as `close: note <text>`")
   p.set_defaults(run=run, writes=WRITES)
 

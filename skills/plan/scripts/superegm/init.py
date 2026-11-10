@@ -33,7 +33,8 @@ CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # its own text is OWN 
 
 
 def steps() -> str:
-  """Its own text, the modules' non-empty INIT_STEPs in discovery order, then the doctor line (U32)."""
+  """Its own text, the modules' non-empty INIT_STEPs in discovery order, then the doctor line (U32).
+  `run` passes the result through `.format`, so a module's INIT_STEP doubles any literal brace (`{{`, `}}`)."""
   return "\n".join([OWN, *(m.INIT_STEP for m in core.discover().values() if m.INIT_STEP), LAST])
 
 

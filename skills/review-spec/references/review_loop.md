@@ -37,7 +37,8 @@ other grammar (`review record: <file>:<line>: <reason>`).
 4. `superegm review open --kind spec|plan|head|integrate --artifact <path or unit id>
    [--sha256 <hex>] --reviewers a,b,c [--astra on|off] --runcard <id>` prints the review id
    (`spec-<slug>-c<n>`, `spec-<slug>-integrate-c<n>`, `plan-<unit>-c<n>`,
-   `head-<unit>-c<n>`, under the handoff's own directory). An artifact whose latest cycle is still open resumes it: a
+   `head-<unit>-c<n>`, under the handoff's own directory; a flat 1.0/1.1 store keeps its 6-hex prefix
+   before the plan and head ids). An artifact whose latest cycle is still open resumes it: a
    re-typed skill continues where the last invocation stopped, with the stored panel. A closed
    cycle (an `accept` or `stop` ruling, a spec edited after the approval that names it, or an
    integrate review whose handoff closed or whose `## Units` were amended past the bytes it

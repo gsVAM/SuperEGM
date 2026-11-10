@@ -38,7 +38,8 @@ every writing call carries `--runcard`.
    and `closed` facts.
 3. From `state.json`'s `status.units`, list every unit that is neither `landed` nor closed by a
    non-builder login (`closed`'s issue entry); a unit whose PR is merged, its issue still open, is
-   not listed: `close` lands it and closes its issue. Without `--close`, one listed unit ends the
+   not listed: `close` lands it and closes its issue. The saved snapshot has no merged field: a
+   merged PR is a unit with `pr` set and `ci` null (`status` reads no CI of a merged PR). Without `--close`, one listed unit ends the
    invocation here: print the list, say that the owner merges, closes or re-types
    `/superegm:wave`, and go to Step 4. With `--close` (`--patch` or not), go to Step 3.
    Where the base ruleset restricts updates to config.owners, say that the owner merges with the admin bypass: `gh pr merge --admin`.
