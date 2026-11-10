@@ -2135,13 +2135,34 @@ def run_terminated(folder) -> bool:
 
 def discover() -> dict:
   """The subcommand modules, `{name: module}` sorted by name: every module of this package that defines
-  `register` (U32). `SUBCOMMANDS` and `DEFAULT_CONFIG` are derived from it at import."""
+  `register` (U32). `SUBCOMMANDS` and `DEFAULT_CONFIG` are derived from it at import. A module that fails to
+  import or exposes no `CONFIG_DEFAULTS` is skipped and kept on `FAULTS` as `(name, message)`, the list
+  cleared and refilled by each call; `build_parser()` turns the first into every command's refusal."""
   modules = {}
+  FAULTS.clear()
   for entry in sorted(pkgutil.iter_modules(__path__), key=lambda e: e.name):
-    module = importlib.import_module(f"superegm.{entry.name}")
-    if hasattr(module, "register"):
-      modules[entry.name] = module
+    try:
+      module = importlib.import_module(f"superegm.{entry.name}")
+    except Exception as error:  # noqa: BLE001  any import failure is named, never raised
+      FAULTS.append((entry.name, f"superegm.{entry.name}: {error}"))
+      continue
+    if not hasattr(module, "register"):
+      continue
+    if not hasattr(module, "CONFIG_DEFAULTS"):
+      FAULTS.append((entry.name, f"superegm.{entry.name} exposes no CONFIG_DEFAULTS"))
+      continue
+    modules[entry.name] = module
   return modules
+
+
+FAULTS = []  # discover()'s skipped modules, `(name, message)` (U32)
+
+
+def fault_run(message):
+  """A subcommand's `run` while a module is faulty: the fault, before the command's own `run`."""
+  def run(args):
+    raise HandoffError(message)
+  return run
 
 
 def add_parser(subparsers, name, help_text, *, runcard=True):
@@ -2182,8 +2203,21 @@ def build_parser():
   sub = parser.add_subparsers(dest="command", required=True)
   for module in discover().values():
     module.register(sub)
+  if FAULTS:  # every command exits 1 naming the first faulty module (U32)
+    run = fault_run(FAULTS[0][1])
+    for child in dict.fromkeys(sub.choices.values()):
+      set_run(child, run)
   add_handoff_flag(parser)
   return parser
+
+
+def set_run(parser, run) -> None:
+  """`run` as the default of `parser` and every nested subparser."""
+  parser.set_defaults(run=run)
+  for action in parser._actions:
+    if isinstance(action, argparse._SubParsersAction):
+      for child in dict.fromkeys(action.choices.values()):
+        set_run(child, run)
 
 
 _MODULES = discover()  # every subcommand module, imported once the names they use are defined (U32)
