@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema and issue body; the handoff id comes from the approval record; the plan is copied into the store; the optional `Issue` field checked against the spec's `## Units` section (U13); every escalated pair needs a `## Units` row or a blocking decision (U16); `filed_elsewhere[]`, an older handoff frozen, one store of many handoffs (U20).
+# Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema and issue body; the handoff id comes from the approval record; the plan is copied into the store; the optional `Issue` field checked against the spec's `## Units` section (U13); every escalated pair needs a `## Units` row or a blocking decision (U16); `filed_elsewhere[]`, an older handoff frozen, one store of many handoffs (U20); the body's `· Tier:` (U33).
 
 """superegm graph: parse the plan under its approval; write the store's plan copy,
 units, unit files and bodies."""
@@ -51,7 +51,7 @@ Spec: `{{spec}}` @ {{sha7}} · `{{design}}`
 {{decisions}}
 
 ## Scope, order and risk
-Scope: {{scope}} · Blocked by: {{blocked_by}} · Shared files: {{shared}} · Risk: {{risk}} · Size: {{size}}
+Scope: {{scope}} · Blocked by: {{blocked_by}} · Shared files: {{shared}} · Risk: {{risk}} · Size: {{size}} · Tier: {{tier}}
 Branch: `{{branch}}` · Part of #{{tracking}}
 """
 PLACEHOLDERS = sorted(set(re.findall(r"\{\{\w+\}\}", BODY_TEMPLATE)))
@@ -300,7 +300,7 @@ class Handoff(core.Handoff):
         "review_focus": "\n".join(unit.review_focus), "steps": unit.steps, "decisions": "\n".join(unit.decide),
         "scope": ", ".join(f"`{p}` ({a})" for p, a in unit.scope),
         "blocked_by": ", ".join(self.ref(b) for b in unit.blockers) or "none", "shared": shared or "none",
-        "risk": f"{unit.risk[0]}: {unit.risk[1]}", "size": unit.size, "branch": self.branch(uid), "tracking": "<tracking>",
+        "risk": f"{unit.risk[0]}: {unit.risk[1]}", "size": unit.size, "tier": unit.tier, "branch": self.branch(uid), "tracking": "<tracking>",
     }
     return core.substitute(self.template, values)
 

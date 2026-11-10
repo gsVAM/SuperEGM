@@ -272,3 +272,16 @@ def test_proportion_input(planned):
     assert code == 0, out
     assert out.index(body("U02", "U01")) < out.index('"spec_range_bytes": 300') < out.index("| U02 | the worker | U01 | S |")
     assert "## 1. Intent" not in out and "| U03 | the admin | U02 | S |" not in out
+
+
+TIER_CHECK = ["## The tier", "the `Tier:` word on the body's `Scope:` line", "a body without it reads doable",
+              "whose open choices contradict its tier", "| U<nn> Scope | regression: no | tier: <reason>",
+              "an `easy` or `doable` body with a `D<n>` item or an Implement line leaving a design choice",
+              "a `difficult` body whose Steps are all mechanical with pinned signatures", "`medium` at most, never blocking alone",
+              "`difficult` when the Steps leave a design choice open, the unit holds a novel algorithm or an unverified platform behaviour, or it consumes the interfaces of more than one subsystem",
+              "`easy` when the Steps are mechanical with pinned signatures and no open choice"]
+
+
+@pytest.mark.parametrize("needle", TIER_CHECK)
+def test_the_proportion_brief_names_the_tier_check(needle):
+    assert needle in PROPORTION.read_text(encoding="utf-8"), needle

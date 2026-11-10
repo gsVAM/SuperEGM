@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24); the informational `plugins` and `mcp` lines and the profile line's plugin refusals (U27); the informational `model:` role table (U28); the informational `stall:` line (U31); the modules' DOCTOR_CHECKS lines after its own (U32).
+# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24); the informational `plugins` and `mcp` lines and the profile line's plugin refusals (U27); the informational `model:` role table (U28); the informational `stall:` line (U31); the modules' DOCTOR_CHECKS lines after its own (U32); the three `model: builder <tier>` lines (U33).
 
 """superegm doctor: one line per wave prerequisite, `ok` or the refusal `launch` or `launch-builder`
 would give; read-only, no run card."""
@@ -177,9 +177,11 @@ def checks(config, repo_root, token):
 
 
 def role_lines(config):
-  """The role table (U28): one informational `model:` line per role, the configured model and effort."""
-  b, r, a = config["builder"], config["reviewers"], config["astra"]
-  rows = [f"builder doable {b['model']} {b['effort']}", f"goldfish {r['model']} {r['effort']}",
+  """The role table (U28): one informational `model:` line per role, the configured model and effort; the
+  builder's one line per tier, through `tier_pair` (U33)."""
+  r, a = config["reviewers"], config["astra"]
+  rows = [f"builder {tier} {' '.join(core.tier_pair(config, tier))}" for tier in core.TIERS]
+  rows += [f"goldfish {r['model']} {r['effort']}",
           f"astra lanes {a['model']} {a['effort']}", f"astra head lane {a['model']} {a['heads_effort']}"]
   rows += [f"judge {jid} {m['model']} {m['effort']}" for jid, m in judge_members(config).items()]
   return [("model", row) for row in rows]

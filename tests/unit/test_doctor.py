@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U14's tests of `superegm doctor` (spec section 11); the App lines and the launched environment (U15); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five driver lines (U24); the informational `stall:` line (U31); the modules' `astra:` and `graphify:` lines last (U32).
+# Added by SuperEGM (gsVAM), 2026: U14's tests of `superegm doctor` (spec section 11); the App lines and the launched environment (U15); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five driver lines (U24); the informational `stall:` line (U31); the modules' `astra:` and `graphify:` lines last (U32); the three `model: builder` lines (U33).
 
 """`superegm doctor`: one line per wave prerequisite, `ok` or the refusal `launch` or `launch-builder`
 would give, in a pinned order; no run card, no store write."""
@@ -14,8 +14,10 @@ from superegm.launch_builder import HELPER
 from test_u27 import elephant, PONY, MCP, THREE
 
 DRIVER_NONE = ["driver: not installed", "sleep: not reported", "root: not registered", "env: absent", "notify: absent"]
+# U33: one `model: builder` line per tier, through `tier_pair`, in place of U28's one
+MODEL = ["model: builder difficult claude-opus-5-5 high", "model: builder doable claude-opus-5-5 medium", "model: builder easy claude-sonnet-5-5 medium"]
 # U28: the role table at init's defaults, after U24's `notify:` line
-ROLES = ["model: builder doable claude-opus-5-5 medium", "model: goldfish opus xhigh", "model: astra lanes gpt-6-astra xhigh",
+ROLES = [*MODEL, "model: goldfish opus xhigh", "model: astra lanes gpt-6-astra xhigh",
          "model: astra head lane gpt-6-astra high", "model: judge fable fable xhigh", "model: judge opus opus max", "model: judge astra gpt-6-astra xhigh"]
 # U32: the modules' DOCTOR_CHECKS lines close every form, in discovery order (foreman, orient)
 MODULES = ["astra: not installed (heads will record not run)", "graphify: not on PATH (informational)"]
@@ -48,6 +50,8 @@ NAMES = [line.split(":")[0] for line in OK]
   ("astra", 0, ["astra: ok ({runner})"]),
   ("python3.12", 0, ["python3.12: ok (/usr/local/bin/python3.12)"]),
   ("hooks", 0, ["hooks: post-checkout, pre-push", "core.hooksPath: {hooks}"]),
+  ("no-easy-row", 0, ["model: builder easy claude-opus-5-5 medium"]),
+  ("tier-key", 1, ["config: {config}: builder.tiers keys must be difficult or easy"]),
 ])
 def test_doctor_lines(world, monkeypatch, tmp_path, case, code, expected):
   monkeypatch.setenv("HOME", str(tmp_path)); s, card, hid, _ = seed(world)
@@ -82,12 +86,15 @@ def test_doctor_lines(world, monkeypatch, tmp_path, case, code, expected):
   if case == "protection": github(world, rulesets=[])
   if case == "profile": (Path(profile) / "settings.json").write_text('{"hooks": {"SessionStart": []}}', encoding="utf-8")
   if case == "stall": configure(world, builder={**json.loads(config.read_text(encoding="utf-8"))["builder"], "stall_minutes": 45})
+  tiers = {"no-easy-row": {"difficult": {"model": "claude-opus-5-5", "effort": "high"}},
+           "tier-key": {"hard": {"model": "claude-opus-5-5", "effort": "high"}}}.get(case)
+  if tiers: configure(world, builder={**json.loads(config.read_text(encoding="utf-8"))["builder"], "tiers": tiers})
   got, out = world.run("doctor")
   assert got == code, out
   lines = out.splitlines()
   for line in expected:
     assert line.format(config=config, profile=profile, runner=runner, hooks=hooks) in lines, out
-  skipped = {"config": set(NAMES) - {"config"}, "no-token": {"builder", "role", "scopes", "protection"}, "no-gh": {"environment"}}.get(case, set())
+  skipped = {"config": set(NAMES) - {"config"}, "tier-key": set(NAMES) - {"config"}, "no-token": {"builder", "role", "scopes", "protection"}, "no-gh": {"environment"}}.get(case, set())
   assert [line.split(":")[0] for line in lines] == [name for name in NAMES if name not in skipped]
   assert "ghp_builder" not in out and not s.path("launches", f"{UNIT}.json").parent.exists()
 
@@ -220,7 +227,8 @@ def test_doctor_prints_the_role_table(world, monkeypatch, tmp_path):
   monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: {"gh": "/usr/local/bin/gh", "python3.12": "/usr/local/bin/python3.12"}.get(cmd))
   git(["remote", "set-url", "--push", "origin", f"git@github.com:{REPO}.git"], world.repo)
   code, out = world.run("doctor")
-  assert code == 0 and out.splitlines()[-8:-2] == ["model: builder doable claude-sonnet-5-5 high", "model: goldfish fable max", "model: astra lanes gpt-6-astra xhigh",
+  assert code == 0 and out.splitlines()[-10:-2] == ["model: builder difficult claude-opus-5-5 high", "model: builder doable claude-sonnet-5-5 high",
+                                                  "model: builder easy claude-sonnet-5-5 medium", "model: goldfish fable max", "model: astra lanes gpt-6-astra xhigh",
                                                  "model: astra head lane gpt-6-astra xhigh", "model: judge fable sonnet max", "model: judge astra gpt-6-astra xhigh"], out
 
 
