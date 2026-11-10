@@ -3,7 +3,7 @@ Copyright 2026 Google LLC.
 SPDX-License-Identifier: Apache-2.0
 -->
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: fork install commands, Astra lane section, panel stage order. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: the platform facts of design section 4 in SuperEGM's names; EGM's install, stage, review-orchestrator and environment-variable text removed; the Astra head lane's foreground exception (U17); the store layout of one directory per handoff (U20). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the platform facts of design section 4 in SuperEGM's names; EGM's install, stage, review-orchestrator and environment-variable text removed; the Astra head lane's foreground exception (U17); the store layout of one directory per handoff (U20); the 1.2 docs sweep: the driver role, the fleet, the builder's plugins, servers and effort, the accept below the cap and agent teams (U29). -->
 
 # Claude Code: the platform facts
 
@@ -17,11 +17,15 @@ the skills and the helper rely on; do not re-derive it in a session.
   `superegm:change-review`, …, `superegm:judge`). The adapter sets `omitClaudeMd: true`,
   `model: inherit` and the read-only tools `[Read, Grep, Glob]`, and reads its persona from
   `${CLAUDE_PLUGIN_ROOT}/agents/<id>.md`. `omitClaudeMd` tracks the agent definition, never the
-  name: an adapter subagent does not load `CLAUDE.md` or the memory index, whether or not the
-  dispatch passed `name`. A reviewer spawned any other way loads `CLAUDE.md` and is not a goldfish.
-- `name` on the Agent tool makes an agent addressable and resumable; it is not a distinct kind of
-  agent. Several agents may be dispatched in one message and run concurrently in the foreground;
-  their returns arrive together.
+  name, while agent teams are off: an adapter subagent does not load `CLAUDE.md` or the memory
+  index. With `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` set, a named call in an interactive session
+  is a team-mode member, to which `omitClaudeMd` is not applied (under `-p` a named call stays a
+  subagent, to which it is); so every goldfish is dispatched without `name`. A reviewer spawned
+  any other way loads `CLAUDE.md` and is not a goldfish.
+- `name` on the Agent tool makes an agent addressable and resumable; while agent teams are off it
+  is not a distinct kind of agent. Several agents may be dispatched in one message and run
+  concurrently in the foreground; their returns arrive together.
+- The agent-teams facts (team mode, the brainstorm's `--team`) are in `skills/using-superegm/references/claude-code-tools.md`.
 - SessionStart hooks run for sessions, not for Agent-tool subagents, so this plugin's hook never
   reaches a goldfish. **SubagentStart hooks in the owner's own profile do reach adapter
   subagents**; the plugin cannot suppress them. Every dispatch is therefore recorded as `clean`
@@ -29,12 +33,18 @@ the skills and the helper rely on; do not re-derive it in a session.
   profile without SubagentStart hooks.
 - The foreman (`superegm:foreman`, tools `[Agent, Bash, Read, Grep, Glob]`, `omitClaudeMd: true`)
   is a **per-unit elephant**: it carries one unit's context across rounds and dispatches that
-  head's goldfish, which stay zero-context and read-only. Goldfish never spawn; builders never
-  spawn; a foreman dispatches goldfish and nothing else.
+  head's goldfish, which stay zero-context and read-only. Goldfish never spawn; a builder never
+  spawns unless `config.builder.allowed_tools` carries `Agent` (the owner's opt-in, below); a
+  foreman dispatches goldfish and nothing else.
 - A per-dispatch `model` override on a `model: inherit` adapter is honoured; `effort` is passed
-  only where the Agent tool offers it. The panel goldfish run on `SUPEREGM_GOLDFISH_MODEL` at
-  `SUPEREGM_GOLDFISH_EFFORT` (`skills/review-spec/references/review_loop.md`); each record keeps
-  the requested and the effective pair.
+  only where the Agent tool offers it. The panel goldfish run on `config.reviewers.model` at
+  `config.reviewers.effort` (`opus` / `xhigh` by default, passed on each dispatch as the adapter's
+  override); `SUPEREGM_GOLDFISH_MODEL` and `SUPEREGM_GOLDFISH_EFFORT`, when set, override those for
+  the session and never reach a judge, `inherit` meaning pass nothing
+  (`skills/review-spec/references/review_loop.md`); each record keeps the requested and the
+  effective pair. The judges run on their member's model and effort (`judges.members`: `fable` at
+  `xhigh`, `astra` at `xhigh`, `opus` at `max`), the foreman's Astra lane at `astra.heads_effort`
+  (`high`), the elephant's Astra lanes at `astra.effort`; `doctor` prints one `model:` line per role.
 
 ## Background commands
 
@@ -57,11 +67,29 @@ call (`--timeout 540` under a 600000 ms limit) and waits for it, so nothing outl
   whole command line; `record-launch` records it and, later, its exit.
 - Headless sessions SuperEGM starts set `SUPEREGM_ROLE` to `builder` or `goldfish` and
   `SUPEREGM_RUNCARD` to the run card they run under; the session hook prints nothing for those
-  roles.
+  roles. The third role is the driver's: a `driver tick` launches its `wave --leavemealone`
+  session with `SUPEREGM_ROLE=driver`, and the hook prints its text for it as for any role but
+  `builder` and `goldfish`.
+- A builder launch loads the plugins of `config.builder.plugins` with one `--plugin-dir` each
+  (each resolved to its `user`-scope entry in the elephant profile's `plugins/installed_plugins.json`)
+  and the servers of `config.builder.mcp`, written to `launches/<unit>_r<n>_mcp.json`, with `--mcp-config <that file> --strict-mcp-config`,
+  which loads that file's servers and no other configuration's; the record of the plugins, their
+  hook events, the managed plugins and the server names is `launches/<unit>_r<n>_plugins.json`.
+  The launched environment carries `ENABLE_CLAUDEAI_MCP_SERVERS=false`, belt and braces over the
+  builder profile's `settings.json`, which holds `syncClaudeAiPlugins` false and must hold `disableClaudeAiConnectors` true.
+- A builder's model and effort come from its tier (`builder.tiers`, or `builder.model` and
+  `builder.effort` for a doable unit); the effort is passed as `--effort <level>`, the session flag `-p` honours,
+  and `CLAUDE_CODE_EFFORT_LEVEL`, which would beat the flag, is unset in the launched environment.
 - The builder profile (`config.builder.profile_dir`) is created empty by the owner, with no
-  plugins, no `CLAUDE.md` and no hooks (a `settings.json` with a `hooks` key); `launch-builder`
-  and `superegm doctor` refuse otherwise. The builder's allow-list is
-  `config.builder.allowed_tools`; `Agent`, `Skill` and a bare `Bash` are refused.
+  plugins, no `CLAUDE.md`, no hooks (a `settings.json` with a `hooks` key), no `skills/` or
+  `commands/` directory, and a `settings.json` with `disableClaudeAiConnectors` set to true; each
+  plugin of `config.builder.plugins` needs a `user` entry in the elephant profile and must not be
+  managed in the builder profile; `launch-builder` and `superegm doctor` refuse otherwise. The builder's allow-list is
+  `config.builder.allowed_tools`; a bare `Skill` and an unrestricted `Bash` are refused. `Agent`
+  is the owner's opt-in (absent from the default list): with it, the builder may spawn the
+  platform's default subagents, each under the builder's own allow-list and at the builder's model
+  unless the call names one, and the orders budget them at `builder.max_subagent_calls` (12), a
+  budget the orders state and the helper does not enforce.
 - `gh` acts as the account whose token `GH_TOKEN` holds; `git push` does so only over an HTTPS
   remote with `gh` as the credential helper, which `launch-builder` passes in the launched
   command's environment (`SUPEREGM_BUILDER_TOKEN`, the builder account's token made as the
@@ -80,6 +108,37 @@ call (`--timeout 540` under a 600000 ms limit) and waits for it, so nothing outl
 - `git worktree add` refuses a branch another worktree has checked out: `launch-builder` detaches
   the earlier launch's worktree before adding a fresh one, and `clean` removes a unit's worktrees
   only once every launch and round of it is terminal.
+
+## The fleet: notify, registry and driver
+
+- `~/.superegm/notify` is an executable the owner writes outside every repository: the wave runs it
+  after each batch's report and a tick after its read, the new inbox lines on its stdin, bounded by
+  `notify_timeout_seconds`. Nothing in a repository chooses what runs as the owner.
+- `~/.superegm/registry.json` lists the stores on this machine, outside every store, written by
+  `superegm register [--remove]` alone; `inbox --all` and `driver tick` read it.
+- The driver is a launchd agent (on Linux a systemd user timer) that runs `superegm driver tick`
+  in the environment of `~/.superegm/env` (`KEY=value` lines, mode 0600: `PATH`, `CLAUDE_CONFIG_DIR`
+  and the builder identity's variable). A tick records each launch in `driver/<handoff>.json` before
+  starting it, and launches `claude -p` with `/superegm:wave <spec> --handoff <id> --leavemealone`
+  in its own session and process group; the plist sets `AbandonProcessGroup` (the systemd unit
+  `KillMode=process`), so the reaping of the exited tick leaves the session alive. That session runs
+  `--permission-mode bypassPermissions` with no allow-list and no prompt, under the credential the
+  env file names (the accepted residual: the driver goes only on a machine and repositories the
+  owner would let a session act on alone). A tick starts at most one session per registered store
+  and loops over every store, so several stores' sessions may run at once. A tick chains nothing
+  and merges nothing.
+
+## Accepting below the cap
+
+- The owner may accept a review below the cap when only mediums and lows stand: `review rule
+  --ruling accept --owner`. It is refused with `--judges`, on an `integrate` review, when no
+  medium stands to accept, and for an unsettled high, a regression, an unsettled external medium,
+  an unsettled high or medium in a later round, or, on a head, a pending decision of the unit at
+  any point but 5. The journal records `accepted before the cap by the owner (<n> medium, <m> low)`, and
+  `review status` prints an `acceptable:` line (`yes (<n> medium, <m> low)`) while it is allowed. On a pull
+  request head the wave asks it as the fifth decision point, `decision open --point 5` (options
+  `accept` and `revise`), and the ruling names that decision, `review rule --ruling accept --owner
+  --decision <id>`, refused without it.
 
 ## Paths and permissions
 

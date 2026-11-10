@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Reviews a handoff plan against its design through the judge panel before any issue is filed.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the body: plan review over the helper's review-plan and review subcommands (U06); `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the accept below the cap's one question per round (U35). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the body: plan review over the helper's review-plan and review subcommands (U06); `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the accept below the cap's one question per round (U35); the `width:` line, the plan header, the chain check and the split check (U29). -->
 
 # Plan review (phase 3)
 
@@ -100,8 +100,9 @@ goldfish and the one set read, each through its adapter `superegm:<id>` with the
 this invocation's round count, 1 at its first Step 2.
 
 1. Once per round, `python3 '<HELPER>' review-plan set-input --spec '<spec>'` prints the set
-   text: the spec's `## Units`, then per unfiled unit `## <id>` with its Interfaces block and
-   Scope line. Save it to `${TMPDIR:-/tmp}/superegm-review-plan/<card>_set_r<k>.md`, outside
+   text: the `width:` line (`graph`'s, from `handoff_units.json`), the `## Plan header` section
+   (the plan header's wave plan and singleton reasons, its `Waves:` line), the spec's `## Units`,
+   then per unfiled unit `## <id>` with its Interfaces block and Scope line. Save it to `${TMPDIR:-/tmp}/superegm-review-plan/<card>_set_r<k>.md`, outside
    the store.
 2. Per due unit, each panel reviewer except `set` and `proportion` receives, by absolute path:
    the body; the spec path with the approval's sha256 (`approvals/<spec-slug>.json`);
@@ -122,12 +123,19 @@ this invocation's round count, 1 at its first Step 2.
    text, the text `python3 '<HELPER>' review-plan proportion-input --unit '<unit>' --spec '<spec>'`
    prints (the body, its `plan/scan/<unit>.json`, the spec lines of its Design range), saved
    beside the set text as `<card>_proportion_<unit>_r<k>.md`. When the scan files are missing
-   or older than the bodies, run `python3 '<HELPER>' scan --plan '<plan>'` first. It answers question 11 only;
-   its findings are `medium` at most and name the Step and the bytes they would remove.
+   or older than the bodies, run `python3 '<HELPER>' scan --plan '<plan>'` first. It answers question 11, the per-unit split check and the tier check;
+   its findings are `medium` at most and name the Step and the bytes they would remove, the
+   split, or the tier's reason. The helper enforces neither check.
 4. One `set` dispatch through `superegm:readiness` with the set text and the standard;
    questions 1 to 4 and 8 are its lens (coverage of the spec's `## Units`, contradictions,
    blockers, shared-file order, interfaces; a row the section's `Landed:` line names counts as covered).
    So does a row `handoff_units.json`'s `filed_elsewhere` lists: a unit filed in another handoff of the spec, planned there.
+   It also runs the chain check on the `width:` line: every shared-file chain longer than two
+   units is a `medium` finding with its forcing edges, the chains ending at one unit folded into
+   one finding whose location names that unit, the claim
+   `chains at U<n>: <path> U<a> > U<b> > … > U<n> (after U<b>); <path> …`; a fold is `low` when the header names every chain
+   of it with its reason (one line, one severity: a kept chain is one decision, settled once). It reads the
+   `## Plan header`'s wave plan only to grade a named chain, and checks it not; the helper enforces neither check.
    Its ids are `set-<k>-<n>`; each location names the
    unit or units it concerns, or none; its one findings file is `<card>_set_r<k>.txt` beside the
    set text.

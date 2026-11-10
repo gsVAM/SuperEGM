@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: U05's tests of graph, scan, decide and the plan skill; EGM's moved tests re-pointed at the spec-section-9.1 plan.
+# Modified by SuperEGM (gsVAM), 2026: U05's tests of graph, scan, decide and the plan skill; EGM's moved tests re-pointed at the spec-section-9.1 plan; U29's `width:` line, amendment 9's scan values, the split rules and the 1.2 docs sweep.
 
 """U05's tests: `graph --plan`, `scan`, `decide`, the body parsers' Step defaults and
 the `plan` skill's prose; EGM's graph/scan tests, moved here by U03, re-pointed."""
@@ -564,10 +564,10 @@ def test_step_defaults_derived_from_the_write_line():
 
 U02_STEP_END = "   Implement `u02_fn(x: int) -> int` in `src/u02.ts`.\n   Run the same command; expected: PASS. Commit `test(S1): u02 empty` then `feat(S1): u02 empty`.\n"
 MORE_STEPS = "".join(f"{n}. Write the failing test `test_u02_{n}` in `tests/test_u02.py`:\n   {FENCE}python\n   def test_u02_{n}(): assert u02_fn({n}) == {n}\n   {FENCE}\n"
-                     f"   Implement the `{n}` case of `u02_fn(x: int) -> int` in `src/u02.ts`, returning its input unchanged.\n" for n in range(2, 23))
+                     f"   Implement the `{n}` case of `u02_fn(x: int) -> int` in `src/u02.ts`, returning its input unchanged.\n" for n in range(2, 12))
 NUMBERS = [
-  pytest.param("| Objective | Worker exists. |", "| Objective | Worker " + "x" * 33_000 + " exists. |", "bytes", "32,768", id="bytes"),
-  pytest.param(U02_STEP_END, U02_STEP_END + MORE_STEPS, "steps", "20", id="steps"),
+  pytest.param("| Objective | Worker exists. |", "| Objective | Worker " + "x" * 25_000 + " exists. |", "bytes", "24,576", id="bytes"),
+  pytest.param(U02_STEP_END, U02_STEP_END + MORE_STEPS, "steps", "10", id="steps"),
   pytest.param("def test_u02_empty(): assert u02_fn(0) == 0", "def test_u02_empty(): assert u02_fn(0) == 0  # " + "x" * 3_000, "fenced_share", "0.40", id="fenced-share"),
 ]
 
@@ -743,3 +743,61 @@ def test_every_scan_call_in_the_plan_skills_names_the_plan():
   for path in ("skills/plan/SKILL.md", "skills/review-plan/SKILL.md"):
     calls = re.findall(r"'<HELPER>' scan [^`]*", (ROOT / path).read_text(encoding="utf-8"))
     assert calls and all(call.startswith("'<HELPER>' scan --plan ") for call in calls), (path, calls)
+
+
+from superegm.graph import width_line
+
+@pytest.mark.parametrize("shared, line", [
+  ({}, "width: none"),
+  ({"U02": "`src/u01.ts`: after U01"}, "width: none"),
+  ({"U02": "`src/u01.ts`: after U01", "U03": "`src/u01.ts`: after U02"}, "width: chains src/u01.ts: U01 > U02 > U03 (after U02)"),
+  ({"U01": "`src/u01.ts`: before U02, before U03"}, "width: none"),
+  ({"U02": "`src/u01.ts`: after U01; `src/u02.ts`: before U03", "U03": "`src/u01.ts`: after U02"}, "width: chains src/u01.ts: U01 > U02 > U03 (after U02)"),
+  ({"U02": "`src/u01.ts`: after U01; `src/u02.ts`: after U01", "U03": "`src/u01.ts`: after U02; `src/u02.ts`: after U02"},
+   "width: chains src/u01.ts: U01 > U02 > U03 (after U02); src/u02.ts: U01 > U02 > U03 (after U02)")])
+def test_graph_prints_the_width_line_after_the_waves(world, shared, line):
+  units = tuple(s.replace("| Shared files | none |", f"| Shared files | {shared.get(u, 'none')} |") for u, s in zip(("U01", "U02", "U03"), UNITS))
+  spec, sha, plan, card = planned(world, units)
+  code, out = graph(world, plan, card)
+  assert code == 0 and out.index("wave 3: U03\n") < out.index(line + "\n") < out.index("critical path:"), out
+  assert width_line(json.loads(find(world, "handoff_units.json").read_text(encoding="utf-8"))) == line
+  chain = lambda *edges: {"units": {u: {"shared": [{"path": "x.py", "order": [{"kind": "after", "unit": p}]}] if p else []} for u, p in edges}}
+  assert width_line(chain(("U01", None), ("U02", "U01"), ("U03", "U02"), ("U04", "U03"))) == "width: chains x.py: U01 > U02 > U03 > U04 (after U02)"
+  assert width_line(chain(("U01", None), ("U02", "U01"), ("U03", "U02"), ("U04", "U02"))) == "width: chains x.py: U01 > U02 > U03 (after U02); x.py: U01 > U02 > U04 (after U02)"
+
+
+PLAN_SKILL, PLAN_REF, TEMPLATE = PROSE
+SPLIT = [
+  (PLAN_SKILL, "A unit's Scope stays within one subsystem", True), (PLAN_SKILL, "written as two units", True),
+  (PLAN_SKILL, "one closing unit per release", True), (PLAN_SKILL, "`docs: see U<n>`", True), (PLAN_SKILL, "`test_helper.py`", True),
+  (PLAN_SKILL, "Size `L` is a split candidate", True), (PLAN_SKILL, "Read the `width:` line before `scan`", True),
+  (PLAN_SKILL, "wave plan", True), (PLAN_SKILL, "singleton", True), (PLAN_SKILL, "`approve-spec --amend-units`", True),
+  (PLAN_REF, "which the per-unit check reports as a split candidate", True), (PLAN_REF, "about twenty Step groups", False),
+  (PLAN_REF, "`width: none`", True), (PLAN_REF, "(after U<b>)", True), (PLAN_REF, "Waves:", True),
+  (TEMPLATE, "24,576 bytes, ten Steps", True), (TEMPLATE, "32,768", False), (TEMPLATE, "twenty Steps", False),
+]
+
+
+@pytest.mark.parametrize("path, needle, present", SPLIT, ids=[f"{p.rsplit('/', 1)[1]}:{n[:30]}" for p, n, _ in SPLIT])
+def test_the_split_rules_in_the_plan_skill_and_its_references(path, needle, present):
+  assert (needle in (ROOT / path).read_text(encoding="utf-8")) is present, (path, needle)
+
+
+DOCS = [("docs/claude.md", n, True) for n in (
+          "SUPEREGM_ROLE=driver", "AbandonProcessGroup", "`~/.superegm/env`", "`~/.superegm/registry.json`", "`~/.superegm/notify`",
+          "--plugin-dir", "--strict-mcp-config", "ENABLE_CLAUDEAI_MCP_SERVERS=false", "disableClaudeAiConnectors",
+          "`--effort <level>`", "CLAUDE_CODE_EFFORT_LEVEL", "`driver/<handoff>.json`", "`launches/<unit>_r<n>_plugins.json`",
+          "`launches/<unit>_r<n>_mcp.json`", "references/claude-code-tools.md", "accepted before the cap", "`acceptable:`",
+          "`decision open --point 5`")] + \
+       [("README.md", n, True) for n in (
+          "ingested as findings", "`**Ruling:**`", "`/superegm:inbox`", "`~/.superegm/notify`", "`/superegm:driver`",
+          "superegm driver install", "`~/.superegm/env`", "superegm register", "caffeinate", "re-runs every DoD `Run` item",
+          "test delta", "`review ingest --pr`", "`config.builder.plugins`", "`config.builder.mcp`", "`launches/<unit>_r<n>_plugins.json`",
+          "`builder.effort`", "<!-- superegm:board -->", "`builder.stall_minutes`", "closes the tracking issue", "`Tier:`",
+          "`builder.tiers`", "`--team`", "accepted before the cap", "`acceptable:`", "`decision open --point 5`")] + \
+       [("README.md", "_managed.json", False)]
+
+
+@pytest.mark.parametrize("path, needle, present", DOCS, ids=[f"{Path(p).name}:{n[:30]}" for p, n, _ in DOCS])
+def test_the_1_2_docs_sweep(path, needle, present):
+  assert (needle in (ROOT / path).read_text(encoding="utf-8")) is present, (path, needle)

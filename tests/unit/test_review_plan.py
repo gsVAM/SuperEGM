@@ -1,4 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
+# Modified by SuperEGM (gsVAM), 2026: the `width:` line and the plan header in `set-input`, the chain check and the split check prose (U29).
 """U06: plan review — the dispatch set, the set reviewer, fix-design, the skill file."""
 import argparse
 import hashlib
@@ -42,7 +43,9 @@ def body(uid, blocked):
             f"Risk: low: new · Size: S\nBranch: `superegm/{HANDOFF}/{uid}` · Part of #<tracking>\n")
 
 
-SHA = {u: hashlib.sha256(body(u, b).encode("utf-8")).hexdigest() for u, b in (("U01", None), ("U02", "U01"), ("U03", "U02"))}
+HEADER = ("# Handoff plan: Sample\n\nDesign: `docs/specs/sample.md`\n\nWaves: {U01} → {U02} → {U03}; U02 a singleton: it consumes `u01_fn`.\n\n"
+          "## 1. Issue template\n\n(the layout)\n\n## Global constraints\n- none\n\n## 2. Units\n")
+SHA = {u:hashlib.sha256(body(u, b).encode("utf-8")).hexdigest() for u, b in (("U01", None), ("U02", "U01"), ("U03", "U02"))}
 
 
 @pytest.fixture
@@ -57,8 +60,11 @@ def planned(world):
     for uid, blocked in (("U01", None), ("U02", "U01"), ("U03", "U02")):
         write(st.path("unit", uid), f"### {uid}: Title\n\n## Issue body as posted\n\n```markdown\n"
                                     f"{body(uid, blocked)}```\n")
+    shared = {"U01": [], "U02": [{"path": "src/u01.py", "order": [{"kind": "after", "unit": "U01"}]}],
+              "U03": [{"path": "src/u01.py", "order": [{"kind": "after", "unit": "U02"}]}]}
     write(st.path("units"), json.dumps({"handoff_id": HANDOFF, "order": ["U01", "U02", "U03"],
-                                        "units": {u: {"body_sha256": SHA[u]} for u in SHA}}))
+                                        "units": {u: {"body_sha256": SHA[u], "shared": shared[u]} for u in SHA}}))
+    write(st.path("plan"), HEADER)
     world.review_card, world.spec, world.store = world.open_card("review-plan", str(spec)), spec, st
     return world
 
@@ -137,6 +143,29 @@ def test_set_input_carries_the_units_table_and_each_unfiled_body_interfaces_only
     assert "## U03" not in out and "u03_fn" not in out                 # filed: not in the set
     assert "## Steps" not in out and "test_x" not in out and "Definition of done" not in out
     assert out.index("| U01 | the queue") < out.index("## U01") < out.index("## U02")
+
+
+def test_set_input_carries_the_width_line_and_the_plan_header(planned):
+    w = planned
+    code, out = w.run("review-plan", "set-input", "--spec", str(w.spec))
+    assert code == 0, out
+    assert "\nwidth: chains src/u01.py: U01 > U02 > U03 (after U02)\n" in out
+    assert "\n## Plan header\n\nWaves: {U01} → {U02} → {U03}; U02 a singleton: it consumes `u01_fn`.\n" in out
+    assert "# Handoff plan" not in out and "## 1. Issue template" not in out
+    assert out.index("width:") < out.index("## Plan header") < out.index("| U01 | the queue") < out.index("## U01")
+
+
+@pytest.mark.parametrize("plan", [None, "# Handoff plan: Sample\n\nDesign: `docs/specs/sample.md`\n\n## 2. Units\n"],
+                         ids=["missing", "no-waves-line"])
+def test_set_input_plan_header_reads_none_without_a_waves_line(planned, plan):
+    w = planned
+    if plan is None:
+        w.store.path("plan").unlink()
+    else:
+        write(w.store.path("plan"), plan)
+    code, out = w.run("review-plan", "set-input", "--spec", str(w.spec))
+    assert code == 0, out
+    assert "\n## Plan header\n\nnone\n" in out and "Waves:" not in out and "Design:" not in out
 
 
 def round_text(w, rid, rnd):
@@ -285,3 +314,19 @@ TIER_CHECK = ["## The tier", "the `Tier:` word on the body's `Scope:` line", "a 
 @pytest.mark.parametrize("needle", TIER_CHECK)
 def test_the_proportion_brief_names_the_tier_check(needle):
     assert needle in PROPORTION.read_text(encoding="utf-8"), needle
+
+
+WIDTH = [
+  (SKILL, "the `width:` line", True), (SKILL, "## Plan header", True), (SKILL, "wave plan", True),
+  (SKILL, "chains at U<n>: <path> U<a> > U<b> > … > U<n> (after U<b>); <path> …", True),
+  (SKILL, "`low` when the header names every chain", True), (SKILL, "question 11 only", False),
+  (PROPORTION, "split candidate: <Steps | bytes | paths | subsystems>", True),
+  (PROPORTION, "over 10 Steps, 24,576 bytes or eight Scope paths", True), (PROPORTION, "crosses subsystems", True),
+  (PROPORTION, "a `difficult` unit at Size `L`", True), (PROPORTION, "`bytes` over 24,576, `steps` over 10", True),
+  (PROPORTION, "32,768", False),
+]
+
+
+@pytest.mark.parametrize("path, needle, present", WIDTH, ids=[f"{p.name}:{n[:30]}" for p, n, _ in WIDTH])
+def test_the_chain_check_and_the_split_check_prose(path, needle, present):
+  assert (needle in path.read_text(encoding="utf-8")) is present, (path, needle)

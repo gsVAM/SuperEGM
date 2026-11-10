@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the section 9.1 body rules, one named rule per line, over the graph module's bodies.
+# Modified by SuperEGM (gsVAM), 2026: the section 9.1 body rules, one named rule per line, over the graph module's bodies; amendment 9's warning values (U29).
 
 """superegm scan: the body rules of spec section 9.1, one `<rule>: <unit>: <line>` per problem."""
 
@@ -13,7 +13,7 @@ from superegm import graph
 WRITES = frozenset(['file'])  # the store kinds this subcommand writes: the derived `plan/scan/<unit>.json`
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 scan_text, BODY_LIMIT = core.scan_text, core.BODY_LIMIT  # the one raw-text scan, the package's
-WARN = {"bytes": (32_768, "32,768"), "steps": (20, "20"), "fenced_share": (0.40, "0.40")}  # limit, as printed
+WARN = {"bytes": (24_576, "24,576"), "steps": (10, "10"), "fenced_share": (0.40, "0.40")}  # limit, as printed
 FENCE_LINE = re.compile(r"^\s*`{3,}")
 NAME_RE = re.compile(r"^[A-Za-z_][\w.]*")
 CHECKBOX_RE = re.compile(r"^\s*- \[[ xX]\]")

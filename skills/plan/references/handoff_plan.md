@@ -1,6 +1,6 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema (interfaces, review focus, Steps, decisions with options), the plan file outside the store, the files and commands of the plan skill only; one directory per handoff (U32); the optional Tier field (U33). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema (interfaces, review focus, Steps, decisions with options), the plan file outside the store, the files and commands of the plan skill only; one directory per handoff (U32); the optional Tier field (U33); the `Waves:` line, the Size row's split candidate and the `width:` line (U29). -->
 
 # The plan file: schema, the unit's Steps, files and commands
 
@@ -18,6 +18,8 @@ unit and `handoff_bodies.md`, and never writes the plan file itself.
 
 Design: `/absolute/path/to/docs/specs/2026-11-03-webhooks-design.md`
 
+Waves: {U01, U02} → {U03}; U03 a singleton: it consumes both.
+
 ## 1. Issue template
 
 (the layout of references/issue_template.md, or the repository's
@@ -34,7 +36,9 @@ Design: `/absolute/path/to/docs/specs/2026-11-03-webhooks-design.md`
 ```
 
 The `Design:` line names the approved spec (absolute, or relative to the
-plan's folder). `graph` reads `approvals/<spec-slug>.json` in the store: the
+plan's folder). The `Waves:` line, the author's alone and checked by no
+helper, states the wave plan and why any wave is a singleton; the `set`
+reviewer reads it to grade a chain it names `low`. `graph` reads `approvals/<spec-slug>.json` in the store: the
 spec's sha256 must equal the approval's, the handoff id is the approval's
 (`<slug>-<6 hex>`, kept across a re-approval), and the store holds one
 `<handoff id>/` directory per handoff, several side by side (a flat
@@ -89,7 +93,7 @@ Decide before build
 | Blocked by | `none` or unit ids, comma-separated. A blocker is a unit that creates or changes a file or symbol this unit uses. |
 | Shared files | `none` or `` `path`: after U01, before U05 `` items separated by `; `. `after` adds an edge from that unit to this one; `before` from this one to that unit. |
 | Risk | `low\|medium\|high: reason`. |
-| Size | `S` (up to 3 scope paths), `M` (up to 8), `L` (more; about twenty Step groups, the most a body holds). |
+| Size | `S` (up to 3 scope paths), `M` (up to 8), `L` (more, which the per-unit check reports as a split candidate: over 10 Steps, 24,576 bytes or eight Scope paths, or a Scope crossing subsystems). |
 | Tier | Optional; `difficult`, `doable` or `easy`, set by the author: `difficult` when the Steps leave a design choice open, the unit holds a novel algorithm or an unverified platform behaviour, or it consumes the interfaces of more than one subsystem; `easy` when the Steps are mechanical with pinned signatures and no open choice; else `doable`. A difficult unit keeps a small Scope and few Steps. The tier picks the builder's model and effort (`builder.tiers`; doable is `builder.model` and `builder.effort`); a section without it is doable; another word is refused as a bad `Size` is. |
 | Issue | Optional; `#<n>`, an open issue in `config.repo` that `file` adopts instead of creating one; `graph` refuses a `#<n>` the spec's `## Units` section does not name; the dry run heads such a unit `### edit #<n> <unit> (old body sha256 <hex>)` where a created unit reads `### issue <unit>`. |
 | Interfaces | One item per line: `- Consumes: <name> (U<nn>)` names what this unit uses and the producing unit; `- Produces: <name>` what later units rely on. A name is `fn(params) -> type` for a Python interface, `superegm <sub> <flags> → <stdout shape>; exit <codes>` for a helper subcommand, or `<file> key <path>` for a store field; `scan` matches on the identifier before `(`, the subcommand words, or the key path, and refuses a Consumes no sibling produces or whose producer is not a direct or transitive blocker. |
@@ -178,6 +182,6 @@ absolute paths in single quotes, no chaining. `<HELPER>` is
 
 | Command | Writes | What it does |
 | --- | --- | --- |
-| `graph [--plan P] --runcard C` | the store | Parses the plan under its approval, builds the graph, renders and hashes the unfiled bodies, writes the files above; prints `handoff <id> on <repo>: <n> units, <w> waves`, one `wave <n>: …` line per wave, the critical path and what it wrote. Exit 1 with `graph: <reason>`. |
+| `graph [--plan P] --runcard C` | the store | Parses the plan under its approval, builds the graph, renders and hashes the unfiled bodies, writes the files above; prints `handoff <id> on <repo>: <n> units, <w> waves`, one `wave <n>: …` line per wave, the `width:` line (`width: none`, or `width: chains <path>: U<a> > U<b> > … > U<n> (after U<b>); …`, every shared-file chain longer than two units with its forcing edge), the critical path and what it wrote. Exit 1 with `graph: <reason>`. |
 | `scan [--plan P] [--comment FILE]` | `<handoff id>/plan/scan/<unit>.json` | Prints the numbers table, then one `<rule>: <unit>: <line>` per problem, then `scan: clean` or `scan: <n> problem(s)`; exit 1 on a problem. With `--comment` it scans that file as a comment (the configured `fix_request_mention` may open it). |
 | `decide --unit U --decision D<n> (--answer "(x)" \| --default) [--judges ID] --runcard C` | the store, the plan file | Records the answer, one of the item's own options: an unfiled unit's plan line gains `; answer: (x)` and its body is re-rendered; a filed unit keeps its line, body and file and gets the comment file. Exit 1 with `decide: <reason>`. |
