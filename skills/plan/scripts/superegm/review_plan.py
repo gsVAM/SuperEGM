@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 
 import superegm as core
-from superegm import body, review
+from superegm import body, graph, review
 from superegm.approve_spec import UNITS_H2
 
 WRITES = frozenset()  # the store kinds this subcommand writes: none
@@ -94,11 +94,15 @@ def interfaces_and_scope(text: str) -> str:
 
 
 def set_input(st: core.Store, spec_path: Path) -> str:
-  """`# Plan review: the set`, the spec from its last `## … Units` H2 to the end, then per unfiled unit
+  """`# Plan review: the set`, the `width:` line over `handoff_units.json`, `## Plan header` with the plan's
+  `Waves:` line(s) (`none` without one), the spec from its last `## … Units` H2 to the end, then per unfiled unit
   `## <id>` and its Interfaces block and Scope line: what every sibling reviewer also receives."""
   lines = core.read_text(spec_path).splitlines()
   start = max((i for i, line in enumerate(lines) if UNITS_H2.match(line)), default=0)
-  parts = ["# Plan review: the set", "", *lines[start:], ""]
+  width = graph.width_line(json.loads(core.read_text(st.path("units"))))
+  plan = st.path("plan")
+  waves = [l for l in core.read_text(plan).splitlines() if l.startswith("Waves:")] if plan.is_file() else []
+  parts = ["# Plan review: the set", "", width, "", "## Plan header", "", *(waves or ["none"]), "", *lines[start:], ""]
   for uid, _ in unfiled(st):
     parts += [f"## {uid}", "", interfaces_and_scope(core.unit_file_body(st.path("unit", uid)))]
   return "\n".join(parts)
