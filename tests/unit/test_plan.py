@@ -564,10 +564,10 @@ def test_step_defaults_derived_from_the_write_line():
 
 U02_STEP_END = "   Implement `u02_fn(x: int) -> int` in `src/u02.ts`.\n   Run the same command; expected: PASS. Commit `test(S1): u02 empty` then `feat(S1): u02 empty`.\n"
 MORE_STEPS = "".join(f"{n}. Write the failing test `test_u02_{n}` in `tests/test_u02.py`:\n   {FENCE}python\n   def test_u02_{n}(): assert u02_fn({n}) == {n}\n   {FENCE}\n"
-                     f"   Implement the `{n}` case of `u02_fn(x: int) -> int` in `src/u02.ts`, returning its input unchanged.\n" for n in range(2, 23))
+                     f"   Implement the `{n}` case of `u02_fn(x: int) -> int` in `src/u02.ts`, returning its input unchanged.\n" for n in range(2, 12))
 NUMBERS = [
-  pytest.param("| Objective | Worker exists. |", "| Objective | Worker " + "x" * 33_000 + " exists. |", "bytes", "32,768", id="bytes"),
-  pytest.param(U02_STEP_END, U02_STEP_END + MORE_STEPS, "steps", "20", id="steps"),
+  pytest.param("| Objective | Worker exists. |", "| Objective | Worker " + "x" * 25_000 + " exists. |", "bytes", "24,576", id="bytes"),
+  pytest.param(U02_STEP_END, U02_STEP_END + MORE_STEPS, "steps", "10", id="steps"),
   pytest.param("def test_u02_empty(): assert u02_fn(0) == 0", "def test_u02_empty(): assert u02_fn(0) == 0  # " + "x" * 3_000, "fenced_share", "0.40", id="fenced-share"),
 ]
 
