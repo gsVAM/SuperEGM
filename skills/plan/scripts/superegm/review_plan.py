@@ -25,7 +25,7 @@ def register(subparsers):
   p = subparsers.add_parser("review-plan", help="plan review: the dispatch set and the set and proportion inputs")
   action = p.add_subparsers(dest="action", required=True)
   core.add_parser(action, "due", "one line per unfiled unit: what this round dispatches")
-  s = core.add_parser(action, "set-input", "the set reviewer's text: the spec's Units and every unfiled Interfaces block",
+  s = core.add_parser(action, "set-input", "the set reviewer's text: the width: line, the plan header, the spec's Units and every unfiled Interfaces block",
                       runcard=False)
   s.add_argument("--spec", required=True)
   q = core.add_parser(action, "proportion-input", "the proportion reviewer's text for one unit", runcard=False)
