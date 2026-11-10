@@ -5,7 +5,7 @@ effects: working-tree
 description: "You MUST use this before any creative work - creating features, building components, adding functionality, modifying behavior, or planning anything new, in software or out of it (a talk, a business, a renovation)."
 ---
 
-<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: spec path docs/specs, the Units section, the review-spec gate, the brainstorm-brief lookup; builder check and the mockups section removed; the brief in the handoff's own directory (U32). -->
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: spec path docs/specs, the Units section, the review-spec gate, the brainstorm-brief lookup; builder check and the mockups section removed; the brief in the handoff's own directory (U32); the team brainstorm (U34). -->
 
 # Brainstorming
 
@@ -110,6 +110,57 @@ or minimal ones, aren't bulletproof, and skip the plan, implementation,
 and review process. Bring what the spike taught you back into the
 conversation.
 
+## Think Wide With a Team
+
+This section runs only when the owner asks for it: they typed `/superegm:brainstorming --team`, or `brainstorm.team` is true in `.superegm/config.json`.
+Reading the config yourself, a missing key reads false; `false` or a missing key is no ask, and you say nothing.
+Only a value neither `true` nor `false` (a string such as `"yes"`, which the helper's `load_config` refuses) is worth a word: tell the owner it is malformed and go on without the team unless they typed `--team`.
+A brainstorm not asked for runs neither teammates nor subagents: the skill as above, nothing more.
+Run it once you know the topic well enough to state it in one line, before you propose anything.
+
+**Teams or the fallback.** Read the variable with one Bash `echo "$CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"`.
+The owner sets `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` for the brainstorm session alone, never in `settings.json`; you never set it.
+Teams are on when it reads `1` in an interactive session; a headless session gets none (teams spawn no teammate under `-p`), and a split-pane teammate mode gives the teammates no mailbox.
+Teams on: spawn the four as teammates. Teams off, under `-p`, or a split-pane mode that leaves you waiting: take the fallback below.
+
+**The spawn.** Brief each as `references/teammates.md` says: the topic, the owner's words so far, the message form and its role's section.
+First the cartographer: the Agent tool with `superegm:cartographer` and `name: cartographer`; it reads the code and sends you its notes.
+Once the cartographer's notes are in, spawn the three in one message, the cartographer's notes in each prompt, each in `Mode: BRAINSTORM`:
+the architect as `superegm:design` with `name: architect`, the skeptic as `superegm:zoom-out` with `name: skeptic`, the advocate as `superegm:comprehension` with `name: advocate`.
+Each works one approach in its own context and reports it to you by message; they may message each other to challenge a claim, and ask the cartographer, never the code.
+
+**The wait.** The same for each spawn: note one Bash `date` at the spawn and end your turn, with no `sleep`.
+Before ending it, tell the owner what you are waiting on: a split-pane mode sends you nothing, so only the owner's message starts your next turn.
+After the cartographer's spawn, tell the owner you are waiting on the cartographer: if it has sent you nothing at all, their message ten minutes or more after the spawn takes the fallback; if it has written but its notes are late, you ask it once and keep waiting; `fallback` typed takes it at once.
+After the three's spawn, tell the owner you are waiting on the three: their message ten minutes or more after the spawn has you ask each silent one once, then write its approach `not reported`; there is no fallback once the three run.
+Read your inbox at its next turn, with a second Bash `date` to tell how long it has been: the mailbox shows no arrival time, so a report in your inbox at that turn is merged, whenever it came: ten minutes counts per teammate, only for one whose report is not in (a report within ten minutes is the ordinary case; one found later still proves the mailbox).
+At a next turn less than ten minutes after the `date` with nothing in the inbox, answer what the owner asked, repeat the one-line notice and end your turn again.
+At such a turn with some of the three's reports in, merge the reports that are in, repeat the notice naming the silent ones, and end your turn again.
+That partial merge only holds the reports side by side: rank no question and ask the owner nothing until all three are in or written `not reported`.
+While you wait, a cartographer message that is not its notes (a question, a progress line) is no report: answer it if it asks, and keep waiting on its notes as above.
+`fallback` typed while waiting on the cartographer takes the fallback at once, whatever the time, if its notes are not in your inbox: send it a shutdown request first.
+The cartographer's notes already in your inbox win over `fallback` typed: merge them and spawn the three, and tell the owner the mailbox works.
+A next turn ten minutes or more after the `date` with no message of any kind from the cartographer means the mailbox is not working (a split-pane mode): send it a shutdown request and take the fallback.
+A next turn ten minutes or more after the `date` with the cartographer's notes not in but another message from it received: the mailbox works, so ask it once for its notes and keep waiting, with no fallback but `fallback` typed; tell the owner so.
+After the shutdown request, once you take the fallback, a teammate's later message is not merged: the subagents' returns stand in its place.
+A next turn ten minutes or more after the `date` with none from one of the three means one message asking it; still none at the turn after, write that approach `not reported`.
+Then, after the asking message, tell the owner again: you have asked the silent ones, and their next message writes each still silent `not reported`; then end your turn.
+`fallback` typed while waiting on the three counts as the ten minutes passed: ask each silent one once now; it starts no fallback.
+Until the design is written, a report found after an approach is written `not reported` replaces that line.
+A `name: cartographer` spawn that returns in the same turn ran as a subagent: its return is the fallback's first return, so do not wait; go on with the fallback.
+
+**The fallback.** With teams off, under `-p` or in a split-pane mode, the same four run as subagents with no mailbox: each dispatched without `name`, so no team forms.
+The cartographer first; its returned notes go into the other three's prompts, which run in one message and return together.
+A question the notes do not answer goes on that subagent's `questions:` lines for the owner; no subagent but the cartographer reads code.
+
+**The merge.** Put the approaches side by side, and make one deduplicated question list ranked by how much the answer changes the build.
+Ask the owner those questions one at a time, as the conversation does; the written design records the owner's answers to the ranked questions beside the approaches.
+The written design records the approaches under its `## Alternatives Considered`, with one line there: `team: on` or `team: off (subagents)`, and what the teammates or subagents reported seeing from their `saw:` lines.
+Under `team: on` the cartographer's `saw:` line answers the probe: whether a teammate sees the project context and this plugin's SessionStart hook; write what it reported.
+The cartographer's notes go in the design's current-state ground; the approach the owner chooses is the design's input.
+When the brainstorm closes, send each teammate a shutdown request; a teammate may reject it, and the session's end ends it then. A resumed session has no teammates.
+No teammate or subagent writes a file: the design is yours to write.
+
 ## Play It Back
 
 Play back as you go. As soon as you understand one part well enough to
@@ -147,6 +198,13 @@ could plan from without going back to your human partner. Cover:
 - constraints
 - the parts of the how they decided, as they decided them
 - what's left to the builder
+- the current state: what exists now, with the cartographer's notes
+  when the team or its fallback ran
+- `## Alternatives Considered`, ahead of `## Units`: the approaches weighed
+  and why the chosen one won, with the `team:` line
+  when the team or its fallback ran
+- the owner's answers to the team's questions, under `## Alternatives Considered`,
+  when the team or its fallback ran
 - a final `## Units` section, the last H2 of the document: one row per
   buildable unit (id, title, blocked by)
 

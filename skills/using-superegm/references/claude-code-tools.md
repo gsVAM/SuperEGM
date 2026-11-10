@@ -3,7 +3,7 @@ name: claude-code-tools
 description: The Claude Code platform facts SuperEGM relies on (design section 4), read from using-superegm.
 ---
 
-<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the section 4 platform facts replace the orchestration notes. -->
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the section 4 platform facts replace the orchestration notes; the agent-teams facts (U34). -->
 
 # Claude Code Platform Notes
 
@@ -12,10 +12,23 @@ subagent dispatch, todos, `Skill`). These are the platform facts SuperEGM
 relies on, from the live probes; do not re-derive them.
 
 - `name` on the Agent tool makes an agent addressable and resumable; it is not
-  a distinct teammate. Several agents may be dispatched in one message and run
+  a distinct teammate while agent teams are off: with the variable set, every named call launches a teammate
+  in an interactive session; under `-p` a named one runs as an ordinary subagent.
+  Several agents may be dispatched in one message and run
   concurrently in the foreground; their returns arrive together.
-- `omitClaudeMd` tracks the agent definition, never the name: an adapter
-  subagent does not load CLAUDE.md or the memory index.
+- Agent teams (the brainstorm's team mode, U34) need `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` and an interactive session
+  in the in-process teammate mode, the default; a split-pane mode gives an adapter teammate no mailbox, and `-p` spawns none.
+  In the in-process teammate mode `SendMessage` is added to the definition's tools, and nowhere else.
+  A definition lends a teammate its tools, model, effort and body, the body appended to the default system prompt.
+  A teammate loads the project context as a session does: `omitClaudeMd` is not applied to it.
+  Whether a teammate runs this plugin's SessionStart hook is assumed yes until the probe answers it:
+  the cartographer's `saw:` line in the first team brainstorm's `team: on` entry confirms or corrects it.
+  A teammate may reject a shutdown request, the session's end ending it then; a resumed lead has none.
+  The variable is set for the brainstorm session alone, never in `settings.json`; the fallback's four and every goldfish are
+  dispatched without `name`, so no team forms unasked.
+- `omitClaudeMd` tracks the agent definition, never the name, while agent teams are off: an adapter
+  subagent does not load CLAUDE.md or the memory index. With the variable set, a name makes the call a teammate in an interactive session, to which it is not applied;
+  under `-p` a named call is a subagent, to which it is applied.
   SessionStart hooks run for sessions, not for Agent-tool subagents, so this
   plugin's hook never reaches a goldfish. SubagentStart hooks in the owner's own profile do reach
   adapter subagents; the plugin cannot suppress them, so every dispatch record

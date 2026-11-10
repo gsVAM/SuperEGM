@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes and the one stamp formatter and parser (U31); `discover()`, CORE_CONFIG and SUBCOMMANDS and DEFAULT_CONFIG derived from the modules (U32); the `Tier:` field, `builder.tiers`, `tier_pair` and `unit_tier` (U33).
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes and the one stamp formatter and parser (U31); `discover()`, CORE_CONFIG and SUBCOMMANDS and DEFAULT_CONFIG derived from the modules (U32); the `Tier:` field, `builder.tiers`, `tier_pair` and `unit_tier` (U33); the brainstorm.team key (U34).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
@@ -92,6 +92,7 @@ CORE_CONFIG = {  # the keys no subcommand owns; each module's CONFIG_DEFAULTS fo
     "owners": [],  # the GitHub logins that may update <base> (spec section 11); init writes `gh api user`'s
     "owner_team": None,  # `<org>/<slug>`: the one team a ruleset's bypass actors may name
     "pr_block_file": None,  # a path relative to the repository root whose text every builder PR body carries
+    "brainstorm": {"team": False},  # true: the owner asks for brainstorming's team mode by config, as `--team` does (spec section 6, U34)
 }
 
 DEFAULT_TEMPLATE = """<!-- superegm:handoff={{handoff_id}} unit={{unit_id}} spec={{spec_sha256}} -->
@@ -948,7 +949,9 @@ def load_config(repo_root: Path) -> dict:
         if unknown:
           raise HandoffError(f"{path}: unknown label keys {sorted(unknown)}")
         config["labels"].update(value)
-      elif key in ("astra", "ingest", "foreman", "builder", "reviewers") and isinstance(value, dict):
+      elif key == "brainstorm" and isinstance(value, dict) and set(value) - set(DEFAULT_CONFIG["brainstorm"]):
+        raise HandoffError(f"{path}: unknown brainstorm keys {sorted(set(value) - set(DEFAULT_CONFIG['brainstorm']))}")
+      elif key in ("astra", "ingest", "foreman", "builder", "reviewers", "brainstorm") and isinstance(value, dict):
         config[key] = {**config[key], **value}
       else:
         config[key] = value
@@ -956,6 +959,10 @@ def load_config(repo_root: Path) -> dict:
     raise HandoffError("astra must be an object")
   if not isinstance(config["astra"].get("heads"), bool):
     raise HandoffError("astra.heads must be true or false")
+  if not isinstance(config["brainstorm"], dict):
+    raise HandoffError("brainstorm must be an object")
+  if not isinstance(config["brainstorm"].get("team"), bool):
+    raise HandoffError("brainstorm.team must be true or false")
   if not isinstance(config["ingest"], dict):
     raise HandoffError("ingest must be an object")
   words = config["ingest"].get("severity_words")

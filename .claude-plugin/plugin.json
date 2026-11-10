@@ -21,6 +21,7 @@
   "privacyPolicyUrl": "https://github.com/gsVAM/superegm/blob/main/docs/privacy.md",
   "termsOfServiceUrl": "https://github.com/gsVAM/superegm/blob/main/LICENSE",
   "agents": [
+    "./.claude-plugin/agents/cartographer.md",
     "./.claude-plugin/agents/change-review.md",
     "./.claude-plugin/agents/codebase-details.md",
     "./.claude-plugin/agents/comprehension.md",
