@@ -1,7 +1,7 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U11's tests: `judges question`, the leavemealone routing, `close`, the
 # integrate skill, the docs, the README and the removed-mechanism sweep; the `blocked-launch` and `blocked-closed`
-# forms read the pending point-3 decision (U31).
+# forms read the pending point-3 decision (U31); `close` closes a merged unit's open issue and the tracking issue, `--note` (U32).
 
 """U11: leavemealone routing and finish (design sections 12, 13.2 and 15)."""
 
@@ -44,6 +44,34 @@ def seed(world):
                                                 "default": "a", "blocking": True}]}}}, "units")
   put(world, "### U08: Admin\n\n## Interfaces\n- Consumes: deliver (U07)\n", "unit", "U08")
   put(world, "### U09: Queue\n\n## Interfaces\n- Consumes: enqueue (U01)\n", "unit", "U09")
+
+
+ISSUES = {"U07": (410, 510), "U08": (412, 512), "U09": (415, 515)}   # unit: (issue, PR); the tracking issue is #400
+
+
+def closable(world, saved, before):
+  """`seed`, the tracking issue #400, each unit's saved fingerprint (`landed`, `merged`: a PR merged since, `open`:
+  a PR not merged, `none`: no PR) and its issue's state on GitHub; `gh issue close` and `gh api .../pulls/<n>` served."""
+  seed(world)
+  state = json.loads(store(world.repo).path("state").read_text(encoding="utf-8"))
+  state["tracking"] = {"number": 400}
+  state["status"] = {"units": {u: {"landed": w == "landed", "pr": None if w == "none" else ISSUES[u][1]} for u, w in saved.items()}}
+  put(world, state, "state")
+  for n, st in zip([400, *(i for i, _ in ISSUES.values())], ("open", *before)):
+    world.gh.issues[n] = {"number": n, "state": st, "labels": []}
+  merged = {ISSUES[u][1]: w == "merged" for u, w in saved.items()}
+
+  def issue(args, cwd, token=None):
+    if args[1] != "close":
+      return world.gh.do_issue(args)
+    assert args[3:] == ["--reason", "completed", "-R", REPO], args
+    world.gh.issues[int(args[2])]["state"] = "closed"
+    return world.gh.ok(text="")
+
+  def api(args, cwd, token=None):
+    match = re.fullmatch(rf"repos/{REPO}/pulls/(\d+)", world.gh.endpoint_of(args))
+    return world.gh.ok({"merged": merged[int(match.group(1))]}) if match else world.gh.do_api(args)
+  world.gh.extend("issue", issue); world.gh.extend("api", api)
 
 
 def comment(world, cid, body):
@@ -261,6 +289,7 @@ def test_close_refuses_a_wave_card_journals_each_unlanded_unit_and_says_already_
   state = json.loads(store(world.repo).path("state").read_text(encoding="utf-8"))
   state["status"] = {"units": {"U07": {"landed": True}, "U08": {"landed": False}, "U09": {"landed": False}}}
   put(world, state, "state")
+  world.gh.issues[410] = {"number": 410, "state": "closed", "labels": []}  # a landed unit's issue is read at close (U32)
   assert world.run("close", "--runcard", world.card("wave"))[0] == 1
   runcard = world.card("integrate")
   code, out = world.run("close", "--runcard", runcard)
@@ -272,6 +301,21 @@ def test_close_refuses_a_wave_card_journals_each_unlanded_unit_and_says_already_
   assert f"closed sample-design-abc123 at {closed_at}\n" in journal
   code, out = world.run("close", "--runcard", runcard)
   assert code == 1 and f"close: already closed at {closed_at}" in out
+
+
+@pytest.mark.parametrize("saved, before, after, lines, unlanded", [
+  ({"U07": "merged", "U08": "open", "U09": "none"}, ("open", "open", "open"), ("closed", "open", "open", "open"),
+   ["close: U07 #410 closed completed", "close: U08 unlanded", "close: U09 unlanded"], "U08, U09"),
+  ({"U07": "landed", "U08": "merged", "U09": "merged"}, ("closed", "open", "open"), ("closed", "closed", "closed", "closed"),
+   ["close: U07 #410 already closed", "close: U08 #412 closed completed", "close: U09 #415 closed completed", "close: tracking #400 closed completed"], "none")])
+def test_close_closes_merged_units_open_issues_and_the_tracking_issue_last(world, saved, before, after, lines, unlanded):
+  closable(world, saved, before)
+  cid = world.card("integrate")
+  code, out = world.run("close", "--note", "patch release", "--runcard", cid)
+  assert (code, out.strip()) == (0, f"closed sample-design-abc123; unlanded: {unlanded}") and tuple(world.gh.issues[n]["state"] for n in (410, 412, 415, 400)) == after
+  assert world.run("runcard", "close", cid, "--note", "done")[0] == 0
+  tail = [l.split(" ", 1)[1] for l in (world.artifacts / "journal.md").read_text(encoding="utf-8").splitlines()][-(len(lines) + 3):]
+  assert tail[:-2] == lines + ["close: note patch release"] and tail[-2].startswith("closed sample-design-abc123 at ") and tail[-1] == f"runcard close {cid} note done"
 
 
 @pytest.mark.parametrize("state, code, line", [
