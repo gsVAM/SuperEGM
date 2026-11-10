@@ -96,7 +96,7 @@ drafting.
     Nor does a row filed in another handoff of the spec: `graph` lists them in `handoff_units.json`'s `filed_elsewhere` and refuses a section for one.
     Keep every section already there; a filed unit's section (one with an
     issue number in `state.json`) is frozen and stays byte-identical.
-    Set `Tier:` on every section by section 2's criteria (`difficult`, `doable` or `easy`): it picks the builder's model and effort, and a wrong tier costs rounds.
+    Set `Tier:` on every section not yet filed (a filed one stays as it is, doable without the row) by section 2's criteria (`difficult`, `doable` or `easy`): it picks the builder's model and effort, and a wrong tier costs rounds.
 2.  Nothing is committed under the repository's docs: the plan file stays
     outside the tree, and the store keeps its copy.
 

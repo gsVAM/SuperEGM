@@ -1086,11 +1086,11 @@ def tier_pair(config: dict, tier: str) -> tuple[str, str]:
 
 def unit_tier(store: Store, uid: str) -> str:
   """The unit's tier from `handoff_units.json`'s `units[*].tier`: doable when the file, the unit or the key is
-  absent (a 1.2 store's), no body parse."""
+  absent (a 1.2 store's) or holds a word outside `TIERS` (a hand edit), no body parse."""
   path = store.path("units")
   units = json.loads(read_text(path)).get("units") if path.is_file() else None
   tier = ((units or {}).get(uid) or {}).get("tier")
-  return tier if isinstance(tier, str) else "doable"
+  return tier if tier in TIERS else "doable"
 
 
 def check_template(template: str) -> None:
