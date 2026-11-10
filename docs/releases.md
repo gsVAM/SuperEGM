@@ -17,11 +17,11 @@ under the same tag.
 3. From the tagged checkout, build the candidate into a fresh directory:
 
 ```sh
-python3 scripts/prepare_release.py --tag v1.1.4 --commit "$(git rev-parse HEAD)" --output /tmp/superegm-1.1.4-candidate
+python3 scripts/prepare_release.py --tag v1.2.0 --commit "$(git rev-parse HEAD)" --output /tmp/superegm-1.2.0-candidate
 ```
 
 It checks both manifests against the tag, packs the runtime with `scripts/pack_plugin.py` (the
-same packer the tests run) into `superegm-1.1.4.zip`, writes `SHA256SUMS` and a draft
+same packer the tests run) into `superegm-1.2.0.zip`, writes `SHA256SUMS` and a draft
 `RELEASE_NOTES.md` naming the declared source commit and the install commands. It does not verify
 the caller-supplied commit, tag ancestry or tests; an existing output directory is never replaced.
 
