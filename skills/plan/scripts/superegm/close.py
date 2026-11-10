@@ -1,6 +1,7 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the close subcommand (spec section 12): `closed_at`, every unlanded unit journaled;
 # it refuses while a redesign-stopped unit's issue is open (one GitHub read per such unit); `write_closed`, `closed_at` in the state and handoffs/<id>.json (U20).
+# a merged unit's open issue and, all landed, the tracking issue closed as completed; `--note` (U32).
 
 """superegm close: close the handoff under an integrate card; writes `closed_at` once, in its `state.json` and
 its `handoffs/<id>.json` (`write_closed`, spec section 7; a legacy handoff's file is written the first time)."""
@@ -16,6 +17,7 @@ SKILLS = frozenset({"integrate"})  # the skills whose card this subcommand accep
 
 def register(subparsers):
   p = core.add_parser(subparsers, "close", "close the handoff: write closed_at and journal every unlanded unit")
+  p.add_argument("--note", help="a note journaled as `close: note <text>`")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -42,14 +44,40 @@ def run(args):
   if refusals:
     print("\n".join(refusals))
     return 1
-  # The landed set is `status --wait`'s last snapshot (the integrate skill refreshes it first); no GitHub read here.
+  # The landed set is `status --wait`'s last snapshot; an unlanded unit's recorded PR is read once, a merged one
+  # landing it for this close (the saved `landed` stays as saved), and a landed unit's open issue is closed.
+  repo = st.config["repo"]
   saved = (state.get("status") or {}).get("units") or {}
-  unlanded = sorted(uid for uid in state.get("units") or {} if not (saved.get(uid) or {}).get("landed"))
-  for uid in unlanded:
-    core.journal(st, f"close: {uid} unlanded")
+  unlanded = []
+  for uid, record in sorted((state.get("units") or {}).items()):
+    unit = saved.get(uid) or {}
+    landed = bool(unit.get("landed"))
+    if not landed and unit.get("pr"):
+      landed = bool((core.gh_json(["api", f"repos/{repo}/pulls/{unit['pr']}"]) or {}).get("merged"))
+    if not landed:
+      unlanded.append(uid)
+      core.journal(st, f"close: {uid} unlanded")
+    elif record.get("number"):
+      close_issue(st, repo, uid, record["number"])
+  tracking = (state.get("tracking") or {}).get("number")
+  if tracking and not unlanded:
+    close_issue(st, repo, "tracking", tracking)
+  if args.note:
+    core.journal(st, f"close: note {args.note}")
   write_closed(st, state, None)
   print(f"closed {state['handoff_id']}; unlanded: {', '.join(unlanded) or 'none'}")
   return 0
+
+
+def close_issue(store: core.Store, repo: str, label: str, number: int) -> None:
+  """Read issue `number` once and, open, close it as completed; journaled either way (a re-run reads a
+  closed issue as done)."""
+  issue = core.gh_json(["api", f"repos/{repo}/issues/{number}"]) or {}
+  if issue.get("state") == "open":
+    core.gh_retry(["issue", "close", str(number), "--reason", "completed", "-R", repo])
+    core.journal(store, f"close: {label} #{number} closed completed")
+  else:
+    core.journal(store, f"close: {label} #{number} already closed")
 
 
 def write_closed(store: core.Store, state: dict, reason: str | None) -> None:

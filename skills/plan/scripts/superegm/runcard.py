@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the runcard subcommand; open's boot-id proof writes (U24).
+# Added by SuperEGM (gsVAM), 2026: the runcard subcommand; open's boot-id proof writes (U24);
+# `runcard close --note` (U32).
 
 """superegm runcard open|close: the run card every effect runs under (spec section 6)."""
 
@@ -20,6 +21,7 @@ def register(subparsers):
   o.add_argument("--mode", choices=("normal", "leavemealone"), help="default: the config's mode")
   c = action.add_parser("close", help="close a card")
   c.add_argument("id")
+  c.add_argument("--note", help="a note journaled with the close")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -33,6 +35,6 @@ def run(args):
     raise core.HandoffError(f"runcard: {args.id} is closed")
   card["closed_at"] = core.now_iso()
   core.atomic_write(st.path("runcards", args.id), card)
-  core.journal(st, f"runcard close {args.id}")
+  core.journal(st, f"runcard close {args.id}" + (f" note {args.note}" if getattr(args, "note", None) else ""))
   print(f"closed {args.id}")
   return 0
