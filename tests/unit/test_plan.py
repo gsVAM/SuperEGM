@@ -764,3 +764,20 @@ def test_graph_prints_the_width_line_after_the_waves(world, shared, line):
   chain = lambda *edges: {"units": {u: {"shared": [{"path": "x.py", "order": [{"kind": "after", "unit": p}]}] if p else []} for u, p in edges}}
   assert width_line(chain(("U01", None), ("U02", "U01"), ("U03", "U02"), ("U04", "U03"))) == "width: chains x.py: U01 > U02 > U03 > U04 (after U02)"
   assert width_line(chain(("U01", None), ("U02", "U01"), ("U03", "U02"), ("U04", "U02"))) == "width: chains x.py: U01 > U02 > U03 (after U02); x.py: U01 > U02 > U04 (after U02)"
+
+
+PLAN_SKILL, PLAN_REF, TEMPLATE = PROSE
+SPLIT = [
+  (PLAN_SKILL, "A unit's Scope stays within one subsystem", True), (PLAN_SKILL, "written as two units", True),
+  (PLAN_SKILL, "one closing unit per release", True), (PLAN_SKILL, "`docs: see U<n>`", True), (PLAN_SKILL, "`test_helper.py`", True),
+  (PLAN_SKILL, "Size `L` is a split candidate", True), (PLAN_SKILL, "Read the `width:` line before `scan`", True),
+  (PLAN_SKILL, "wave plan", True), (PLAN_SKILL, "singleton", True), (PLAN_SKILL, "`approve-spec --amend-units`", True),
+  (PLAN_REF, "which the per-unit check reports as a split candidate", True), (PLAN_REF, "about twenty Step groups", False),
+  (PLAN_REF, "`width: none`", True), (PLAN_REF, "(after U<b>)", True), (PLAN_REF, "Waves:", True),
+  (TEMPLATE, "24,576 bytes, ten Steps", True), (TEMPLATE, "32,768", False), (TEMPLATE, "twenty Steps", False),
+]
+
+
+@pytest.mark.parametrize("path, needle, present", SPLIT, ids=[f"{p.rsplit('/', 1)[1]}:{n[:30]}" for p, n, _ in SPLIT])
+def test_the_split_rules_in_the_plan_skill_and_its_references(path, needle, present):
+  assert (needle in (ROOT / path).read_text(encoding="utf-8")) is present, (path, needle)
