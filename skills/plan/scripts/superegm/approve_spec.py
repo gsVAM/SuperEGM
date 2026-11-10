@@ -34,7 +34,8 @@ def register(subparsers):
   p.add_argument("--void", action="store_true", help="void the approval after a fix-design finding")
   p.add_argument("--review", help="with --void: the review holding the fix-design finding")
   p.add_argument("--amend-units", dest="amend_units", action="store_true",
-                 help="re-approve rows appended to ## Units without a review round")
+                 help="re-approve rows appended to ## Units without a review round; typed without "
+                      "--runcard it opens and closes its own approve-spec-<6 hex>-<n> card")
   p.set_defaults(run=run, writes=WRITES)
 
 

@@ -33,9 +33,9 @@ every writing call carries `--runcard`.
 
 1. `superegm runcard open --skill integrate --artifact <spec-path>` prints `<card>`; a card still
    open on this spec is marked interrupted by it.
-2. The landed set `close` reads is the snapshot `status --wait` saves:
+2. The landed set `close` starts from is the snapshot `status --wait` saves:
    `superegm status --wait 1 --runcard <card>` reads GitHub once and saves every unit's `landed`
-   and `closed` facts.
+   and `closed` facts; `close` adds each unlanded unit whose recorded PR it reads merged (Step 3).
 3. From `state.json`'s `status.units`, list every unit that is neither `landed` nor closed by a
    non-builder login (`closed`'s issue entry); a unit whose PR is merged, its issue still open, is
    not listed: `close` lands it and closes its issue. The saved snapshot has no merged field: a

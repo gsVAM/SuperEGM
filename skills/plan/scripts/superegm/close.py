@@ -4,7 +4,7 @@
 # a merged unit's open issue and, all landed, the tracking issue closed as completed; `--note` (U32).
 
 """superegm close [--note <text>]: close the handoff under an integrate card. GitHub reads: each redesign-stopped
-unit's issue (open, it refuses before any write), each unlanded unit's recorded PR through `gh api repos/<repo>/pulls/<n>` (merged lands it for this close) and each landed unit's issue;
+unit's issue (each read journaled; one open, it refuses with `state.json` untouched and nothing closed), each unlanded unit's recorded PR through `gh api repos/<repo>/pulls/<n>` (merged lands it for this close) and each landed unit's issue;
 GitHub writes: `gh issue close --reason completed` of each landed unit's open issue and, every unit landed, of
 the tracking issue, each journaled (an already-closed issue reads as done); `--note` journaled as
 `close: note <text>`; then `closed_at` written last, once, in its `state.json` and its `handoffs/<id>.json`

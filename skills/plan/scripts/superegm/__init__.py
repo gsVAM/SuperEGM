@@ -7,11 +7,11 @@
 Standard library only. Run as `python3 '<absolute path>' <subcommand> ...` from
 the `plan`, `file`, `wave`, `integrate` and `judges` skills; this package holds
 the shared names and one module per subcommand (found by `discover()`; `SUBCOMMANDS`
-is its import-time snapshot). Every subcommand writes only the store under the
-config's `artifacts_dir`, through `atomic_write` and under an open run card, except
-`apply --yes` (GitHub writes), `close` (a merged unit's open issue and the tracking
-issue closed as completed, U32) and `prepare` (refs under `refs/egm/` and worktrees
-under `${TMPDIR:-/tmp}/egm-wave`).
+is its import-time snapshot). Store writes go under the config's `artifacts_dir`,
+through `atomic_write` and under an open run card; what a subcommand writes beyond
+the store (GitHub, git refs, worktrees, files outside the store) its own module
+docstring and `--help` name, `apply --yes`, `close`, `decision`, `status` under a
+wave card, `init` and `prepare` among them.
 Every `gh` call goes through `gh()`; tests inject `GH`, `SLEEP` and `NOW` here.
 """
 import argparse
@@ -2151,9 +2151,10 @@ def discover() -> dict:
   """The subcommand modules, `{name: module}` sorted by name: every module of this package that defines
   `register` (U32). `SUBCOMMANDS` and `DEFAULT_CONFIG` are derived from it at import. A module that fails to
   import or exposes no `CONFIG_DEFAULTS` is skipped and kept on `FAULTS` as `(name, message)`, the list
-  cleared and refilled by each call; `build_parser()` turns the first into every command's refusal. Two
-  limits: a failure raised through another module's import is named under the importing module (`doctor`
-  importing a broken `launch` reads `superegm.doctor: ...`, and `launch` itself after it), and `review`,
+  cleared and refilled by each call in name order; `build_parser()` turns the first, by name, into every
+  command's refusal. Two limits: a failure raised through another module's import is recorded under the
+  importing module, so the refusal names the first importer by name (a broken `launch` reads
+  `superegm.clean: ...`, `clean` importing it and sorting first), and `review`,
   which the package's foot imports directly for `PANEL_OF`, raises at package import when it cannot load."""
   modules = {}
   FAULTS.clear()

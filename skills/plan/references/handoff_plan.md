@@ -37,7 +37,8 @@ The `Design:` line names the approved spec (absolute, or relative to the
 plan's folder). `graph` reads `approvals/<spec-slug>.json` in the store: the
 spec's sha256 must equal the approval's, the handoff id is the approval's
 (`<slug>-<6 hex>`, kept across a re-approval), and the store holds one
-`<handoff id>/` directory per handoff, several side by side. The `## Global constraints` lines
+`<handoff id>/` directory per handoff, several side by side (a flat
+1.0/1.1 store keeps its own layout, section 4). The `## Global constraints` lines
 are rendered verbatim into every body.
 
 ## 2. One unit
@@ -148,13 +149,15 @@ longer than the decisions the builder cannot make alone (compare `scan`'s
 
 | File | Written by | Content |
 | --- | --- | --- |
-| `handoff_plan.md` | `graph`, `decide` | The store's copy of the plan file; a filed unit's section here is the one the plan file must still carry. |
-| `handoff_units.json` | `graph`, `decide` | The parsed units (interfaces, review focus, decisions with options and answers, `body_sha256` per unit) with waves and predecessors, the `order`, the edges, the critical path. Derived; never hand-edited. |
+| `<handoff id>/handoff_plan.md` | `graph`, `decide` | The store's copy of the plan file; a filed unit's section here is the one the plan file must still carry. |
+| `<handoff id>/handoff_units.json` | `graph`, `decide` | The parsed units (interfaces, review focus, decisions with options and answers, `body_sha256` per unit) with waves and predecessors, the `order`, the edges, the critical path. Derived; never hand-edited. |
 | `<handoff id>/unit_<id>.md` | `graph`, `decide` | The unit's section plus its issue body as it will be posted, in a four-backtick `markdown` fence under `## Issue body as posted`. Written for unfiled units only; a filed unit's file is frozen. |
-| `handoff_bodies.md` | `graph`, `decide` | Every title, label set and body in creation order, with placeholders `#<U01>` for blockers and `#<tracking>` for the tracking issue. |
-| `state.json` | `graph`, `decide` | `handoff_id`, `repo`, `remote`, `repo_root`, `plan` (the plan file's path), `design`, `units[<id>].body_sha256`, `decisions` (section 5). |
+| `<handoff id>/handoff_bodies.md` | `graph`, `decide` | Every title, label set and body in creation order, with placeholders `#<U01>` for blockers and `#<tracking>` for the tracking issue. |
+| `<handoff id>/state.json` | `graph`, `decide` | `handoff_id`, `repo`, `remote`, `repo_root`, `plan` (the plan file's path), `design`, `units[<id>].body_sha256`, `decisions` (section 5). |
 | `<handoff id>/plan/scan/<unit>.json` | `scan` | `bytes`, `fenced_share`, `steps`, `spec_range_bytes`, `ratio`, `warnings[]`: the proportion reviewer's evidence. A derived report, written without a card. |
 | `<handoff id>/decision_comment_<unit>_D<n>.md` | `decide` | For a filed unit only: the comment headed `**Decision D<n>:**` the skill posts on the issue under a `github-write` card. |
+
+A flat 1.0/1.1 store keeps `handoff_plan.md`, `handoff_units.json`, `handoff_bodies.md` and `state.json` at its root and the unit-keyed files (`unit_<id>.md`, `plan/scan/<unit>.json`, `decision_comment_<unit>_D<n>.md`) under `<6 hex>/`.
 
 ## 5. The state file
 
