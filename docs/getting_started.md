@@ -24,10 +24,11 @@ In the target repository, `python3 '<plugin root>/skills/plan/scripts/superegm.p
 `banned_terms`, `owners`, `owner_team`, `pr_block_file`, …) and prints the owner's by-hand steps;
 the first typed skill runs it when the file is missing. The steps:
 
-1. Create the **builder account** and its token as the README's "Before the first run" step 1
-   says (the one place the token recipe is written), and put the token in
+1. Register the builder's **GitHub App** (recommended: no second GitHub account), or create the
+   **builder account** and its token, as the README's "Before the first run" step 1
+   says (the one place both recipes are written). For the account, put the token in
    `SUPEREGM_BUILDER_TOKEN` (config key `builder.gh_token_env`), never in the repository or the
-   config. Builders push and open draft pull requests as that account and can never update
+   config. Builders push and open draft pull requests as that identity and can never update
    `<base>`.
 2. Create the builder's empty profile at `config.builder.profile_dir`: no hooks, no plugins, no
    `CLAUDE.md`, only the login (`CLAUDE_CONFIG_DIR=<profile_dir> claude`, `/login`, exit) and a

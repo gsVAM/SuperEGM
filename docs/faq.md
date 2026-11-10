@@ -27,8 +27,9 @@ ends with merge-ready drafts and a report, and `integrate` runs after the owner 
 
 #### Q: What is the builder account?
 
-**A**: A second GitHub login, with its token in `SUPEREGM_BUILDER_TOKEN`, under which every
-builder session pushes its unit branch and opens its draft pull request. Its comments on an
+**A**: The GitHub identity under which every builder session pushes its unit branch and opens its draft pull request:
+a GitHub App (recommended, no second login; see the next question) or a second GitHub login with its token in
+`SUPEREGM_BUILDER_TOKEN`. Its comments on an
 issue are never taken for the owner's: a `**Ruling:**` written by the builder account rules
 nothing, and a close by the builder account is a decision point, not a stop.
 
@@ -36,7 +37,7 @@ nothing, and a close by the builder account is a decision point, not a stop.
 
 **A**: Yes: set `builder.app` (README step 1 says how to register it) and leave `SUPEREGM_BUILDER_TOKEN` unset.
 The builder then acts as `<slug>[bot]` under one-hour installation tokens minted per `gh` call from the App's private key, which only the path in `SUPEREGM_APP_KEY` names; `superegm doctor` prints the App's lines.
-It is the recommended path for an organization; the machine account is the quick path for a personal repository.
+It is the recommended path, for a personal repository or an organization's; the machine account is the fallback when you cannot register an App.
 
 #### Q: Why a fresh session for every builder launch?
 

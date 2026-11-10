@@ -49,7 +49,7 @@ The philosophy:
 1. **Monday, 9:00.** You open Claude Code in your repository and describe a feature in a paragraph. With `--team`, four agents work the idea with you: a cartographer reads your code, then an architect, a skeptic and an advocate each argue an approach and challenge one another. Out comes a design document that ends in a list of units of work.
 2. **9:40.** You type `/superegm:review-spec`. Reviewers who see only the document, never your chat, find the gaps: a missing error path, two sections that disagree, a unit too big to build alone. The spec is fixed and reviewed again until nothing serious is left. You approve it, and its hash is frozen.
 3. **10:15.** `/superegm:plan` and `/superegm:file` turn the design into GitHub issues, one per unit. Each issue is a test-first plan a stranger could follow, with the links between units that depend on each other.
-4. **10:30.** `/superegm:wave` starts the builders, or you hand the run to the driver and go home. Each builder is a fresh session on its own branch, pushing as a separate GitHub account. A foreman reviews every pull request, re-runs its checks and sends back anything that is not right.
+4. **10:30.** `/superegm:wave` starts the builders, or you hand the run to the driver and go home. Each builder is a fresh session on its own branch, pushing as your SuperEGM GitHub App, never as you. A foreman reviews every pull request, re-runs its checks and sends back anything that is not right.
 5. **Overnight.** In leave-me-alone mode a panel of judges rules on contested findings instead of you. One question splits the panel, so it waits for you. Your inbox lists it, and you answer with a `**Ruling:**` comment on the issue, from your phone.
 6. **Tuesday, 8:00.** You open the live board on the tracking issue. Six pull requests are clean and waiting. You read them and you merge. Nothing merged itself.
 
@@ -68,7 +68,7 @@ The philosophy:
 
 ### Builders you do not have to trust
 
-- **Fresh, isolated builders.** A builder is a new Claude Code session with an empty profile. It sees its issue, its orders and the rulings on its issue, never your planning conversation. It writes the failing test first, commits on its own branch, and opens a draft pull request as a separate GitHub account that cannot touch your base branch. It loads exactly the plugins and MCP servers you list for builders, and each launch records them.
+- **Fresh, isolated builders.** A builder is a new Claude Code session with an empty profile. It sees its issue, its orders and the rulings on its issue, never your planning conversation. It writes the failing test first, commits on its own branch, and opens a draft pull request under its own GitHub identity, a GitHub App with one-hour tokens (no second account needed), that cannot touch your base branch. It loads exactly the plugins and MCP servers you list for builders, and each launch records them.
 - **A foreman that checks the work.** Every pull request head gets a foreman, another goldfish. It waits for CI, re-runs the definition-of-done commands itself rather than trusting pasted output, and checks the test delta, so a deleted or weakened test is a high finding. It then reviews the head with the panel, posts one review on the pull request and returns one word: `clean`, `revise`, or `contested` when a finding needs a ruling.
 - **Two vendors, not one.** With the optional Codex lane, a GPT reviewer (Astra) sits beside the Claude reviewers on every panel and every judges' panel, so no single model grades its own work.
 - **Judges for the hard calls.** In leave-me-alone mode, isolated judges on more than one model rule on contested findings, one question at a time, and a panel that does not converge waits for you.
@@ -97,7 +97,7 @@ The philosophy:
 
 ### A human on every merge
 
-Builders push as their own account and open draft pull requests. A repository ruleset lets only you update the base branch. The foreman never merges or approves, and neither does the driver. SuperEGM brings you work that is reviewed, tested and clean, and the merge stays yours.
+Builders push under their own GitHub identity, never yours, and open draft pull requests. A repository ruleset lets only you update the base branch. The foreman never merges or approves, and neither does the driver. SuperEGM brings you work that is reviewed, tested and clean, and the merge stays yours.
 
 ## Built by SuperEGM
 
@@ -162,7 +162,7 @@ The workflow is in [docs/getting_started.md](docs/getting_started.md); the platf
 
 | Step | What | Why |
 |------|------|-----|
-| 1 | The builder account | Builders push as a separate login with a token scoped to this repository and without `workflow`, so they can never update the base branch or the CI that judges them |
+| 1 | The builder identity: a GitHub App (recommended) or a machine account | Builders push under their own identity, scoped to this repository and without `workflow`, so they can never update the base branch or the CI that judges them. A GitHub App needs no second login and mints a one-hour token per call |
 | 2 | An empty builder profile | A builder starts fresh: no plugins and no `CLAUDE.md` it did not get from its orders |
 | 3 | A ruleset on the base branch | Only owners update it; unit branches cannot be force-pushed or deleted |
 | 4 | CI on `pull_request` | `clean` means CI green on the head; no CI means nothing is ever clean |
@@ -170,12 +170,14 @@ The workflow is in [docs/getting_started.md](docs/getting_started.md); the platf
 | 6 | Review from a profile without `SubagentStart` hooks | Such a hook reaches every goldfish, and a goldfish is meant to see the artifact and nothing else |
 | 7–9 | Builder tooling, the driver, keeping the machine awake | Only when you want them: plugins for builders, waves while you are away, a laptop that does not sleep mid-wave |
 
+Step 1 offers two identities. Most people want the **GitHub App**: no second GitHub account, no long-lived token, and it is how SuperEGM's own repository is built. Its recipe follows the machine account's below.
+
 
 Six things need a human once, before the first wave, and three more as you need them: the builder's own tooling (step 7) and the driver's unattended waves (steps 8 and 9). `superegm init` (run by the first typed skill when `.superegm/config.json` is missing) writes the config and prints the first five by-hand steps; steps 6 to 9 are yours to remember:
 
 1. Create the **builder account**: a second GitHub login, a machine account the owner controls (one is allowed per person), added to the repository as a collaborator with Write. Its token is a fine-grained personal access token when the repository belongs to an organization the builder account is a member of (resource owner that organization, repository access limited to this repository, permissions Contents read and write, Pull requests read and write, Issues read and write, Metadata read, no Workflows permission, expiration 90 days), and otherwise a classic token (a fine-grained token's resource owner is the holder's own account or an organization it belongs to, so a collaborator on a personal account's repository has no such token) with the `repo` scope and without `workflow`; either way a builder push that touches `.github/workflows` is refused by GitHub itself, and an organization's token policies may block either kind, which the owner checks. Put the token in `SUPEREGM_BUILDER_TOKEN` (config key `builder.gh_token_env`) in the shell that runs the wave, never in the repository or the config. Builders push and open draft pull requests as that account and can never update the base branch.
 
-   Or register a **GitHub App** instead, the recommended path for an organization (the machine account is the quick path for a personal repository): a name, no webhook, visibility `Only on this account` (a public App is installable by anyone, and the key would mint for them), repository permissions `contents: write`, `pull_requests: write`, `issues: write`, `metadata: read` and no other (`doctor` checks exactly these four), installed on this repository (the installation may reach other repositories too: every token is minted for this repository alone, and `doctor` checks that the token reaches no other); note the App ID and slug, generate a private key and keep the `.pem` file outside the repository at the path the variable `SUPEREGM_APP_KEY` names (config key `builder.app.private_key_env`); set `builder.app` to `{"app_id": <id>, "slug": "<slug>", "private_key_env": "SUPEREGM_APP_KEY"}` and leave `SUPEREGM_BUILDER_TOKEN` unset, one identity per repository. Builders then push and comment as `<slug>[bot]` under one-hour tokens minted per call; no token is ever written anywhere.
+   Or register a **GitHub App** instead, the recommended path for a personal repository or an organization's: no second login and no long-lived token, the machine account above being the fallback when you cannot register an App: a name, no webhook, visibility `Only on this account` (a public App is installable by anyone, and the key would mint for them), repository permissions `contents: write`, `pull_requests: write`, `issues: write`, `metadata: read` and no other (`doctor` checks exactly these four), installed on this repository (the installation may reach other repositories too: every token is minted for this repository alone, and `doctor` checks that the token reaches no other); note the App ID and slug, generate a private key and keep the `.pem` file outside the repository at the path the variable `SUPEREGM_APP_KEY` names (config key `builder.app.private_key_env`); set `builder.app` to `{"app_id": <id>, "slug": "<slug>", "private_key_env": "SUPEREGM_APP_KEY"}` and leave `SUPEREGM_BUILDER_TOKEN` unset, one identity per repository. Builders then push and comment as `<slug>[bot]` under one-hour tokens minted per call; no token is ever written anywhere.
 
 2. Create the builder's empty profile at `config.builder.profile_dir`: no hooks, no plugins and no `CLAUDE.md`, only the login (`CLAUDE_CONFIG_DIR=<profile_dir> claude`, then `/login`, then exit) and a `settings.json` with `"syncClaudeAiPlugins": false` and `"disableClaudeAiConnectors": true`, set before the login, so the account's plugins are not synced into the profile on every start (Claude Code 2.1.273 or later) and its claude.ai connectors are not loaded; `launch-builder` refuses anything else (the files Claude Code writes on its own, `plugins/installed_plugins.json` with no entry, `known_marketplaces.json`, its default marketplace clones under `marketplaces/`, `store/`, are not plugins; the plugins your organization's claude.ai policy installs, `scope: managed` in `installed_plugins.json`, are policy you cannot refuse from a profile: they are not refused, and every launch records them in the store's `launches/<unit>_r<n>_plugins.json`).
 3. Set the branch protection of design section 11 on the base branch: restrict updates to the owner, the logins in `config.owners` (`init` writes your own): a classic restriction naming a non-empty subset of them, or a ruleset whose bypass names neither the builder account's role nor a team other than `config.owner_team`, which the builder account is outside; block force-push and deletion on `superegm/**` with a repository ruleset whose target pattern is exactly `refs/heads/superegm/**/*` (GitHub's ruleset matcher takes `refs/heads/superegm/**` as matching no branch, and `doctor` then reports `superegm/**` unprotected), the only form `launch` reads for that pattern. `launch` reads the protection and refuses the first wave without it.
@@ -231,7 +233,7 @@ sequenceDiagram
   participant G as GitHub
   Note over O: the wave loop runs in the owner's session
   O->>B: launch a fresh builder, its issue body as the brief
-  B->>G: TDD commits on its own branch, a draft pull request as the builder account
+  B->>G: TDD commits on its own branch, a draft pull request as the builder identity
   G->>CI: pull_request
   CI-->>F: CI concluded, the head is ready
   F->>G: reviews the head, posts the review comment
