@@ -1084,6 +1084,15 @@ def tier_pair(config: dict, tier: str) -> tuple[str, str]:
   return (row["model"], row["effort"]) if row else (builder["model"], builder["effort"])
 
 
+def unit_tier(store: Store, uid: str) -> str:
+  """The unit's tier from `handoff_units.json`'s `units[*].tier`: doable when the file, the unit or the key is
+  absent (a 1.2 store's), no body parse."""
+  path = store.path("units")
+  units = json.loads(read_text(path)).get("units") if path.is_file() else None
+  tier = ((units or {}).get(uid) or {}).get("tier")
+  return tier if isinstance(tier, str) else "doable"
+
+
 def check_template(template: str) -> None:
   first = template.splitlines()[0] if template else ""
   if first != "<!-- superegm:handoff={{handoff_id}} unit={{unit_id}} spec={{spec_sha256}} -->":

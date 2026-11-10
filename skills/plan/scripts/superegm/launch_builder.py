@@ -79,7 +79,9 @@ def prepare(args, card):
     raise core.HandoffError(problem)
   dirs = plugin_dirs(builder_config["plugins"], elephant_profile())  # each listed plugin's user-scope directory, version and hooks
   mcp_file = st.path("launches", f"{unit}_r{rnd}_mcp.json")
-  for value in (*(d["dir"] for d in dirs), mcp_file, builder_config["model"], builder_config["effort"]):  # command_line's quote check, before any worktree or store write
+  tier = core.unit_tier(st, unit)
+  pair = core.tier_pair(config, tier)  # the model and effort the unit's tier picks (U33)
+  for value in (*(d["dir"] for d in dirs), mcp_file, *pair):  # command_line's quote check, before any worktree or store write
     if "'" in str(value):
       raise core.HandoffError(f"{value} holds a quote and cannot go on the command line")
   gh, app = tool("gh"), builder_config["app"]
@@ -128,12 +130,12 @@ def prepare(args, card):
   result = st.path("launches", f"{unit}_r{rnd}_result.json")
   session_id = str(uuid.uuid4())  # the session's transcript `projects/<slug>/<id>.jsonl`, read at the exit (U27)
   line = command_line(config, worktree, prompt, result, args.runcard, tools, launched_gh, identity["login"], identity["email"],
-                      [d["dir"] for d in dirs], mcp_file, session_id=session_id)
+                      [d["dir"] for d in dirs], mcp_file, pair, session_id=session_id)
   # the one behaviour (amendment 10): the wrapper started detached, then the launch recorded `running`
   pid = start_detached(["/bin/sh", "-c", line], st.path("launches", f"{unit}_r{rnd}.log"), dict(os.environ))
   launches = load_launches(st, unit)
   launches.append({"round": rnd, "worktree": str(worktree), "branch": branch, "started_at": core.now_iso(), "status": "running",
-                   "model": builder_config["model"], "effort": builder_config["effort"],  # the requested pair (U28)
+                   "model": pair[0], "effort": pair[1], "tier": tier,  # the requested pair (U28), picked by the tier (U33)
                    "result_file": str(result), "prompt_sha256": core.sha256_file(prompt), "boot_id": core.boot_id(), "pid": pid, "command": line, "session_id": session_id})
   core.atomic_write(st.path("launches", unit), {"launches": launches})
   done = f"{unit} launch {rnd} running (pid {pid})"
@@ -536,21 +538,21 @@ def launched_pairs(gh: str, name: str, email: str) -> list:
 
 
 def command_line(config, worktree, prompt, result, runcard, tools, gh, login, email, plugin_dirs: list, mcp_file: Path,
-                 session_id: str | None = None) -> str:
+                 pair: tuple[str, str], session_id: str | None = None) -> str:
   """The launched command (spec section 11): the owner's prompts and token and `CLAUDE_CODE_EFFORT_LEVEL`
   (which would beat `--effort`, U28) unset, the builder profile,
   `ENABLE_CLAUDEAI_MCP_SERVERS=false` (belt and braces over the profile's `disableClaudeAiConnectors`),
   `GH_TOKEN` as the shell variable expands (never its value) or, on the App path, the sentinel the shim
   overrides, the role and card, the launched git pairs (`gh`, the shim on the App path, as the credential
   helper by absolute path; the identity `login` and `email` from the wave card), `claude -p` on the prompt
-  file (with `--session-id` when given), `--model` and `--effort` from `builder` (U28), with `--setting-sources user` (the builder sits in the target repository,
+  file (with `--session-id` when given), `--model` and `--effort` from `pair`, the unit's tier's (U28, U33), with `--setting-sources user` (the builder sits in the target repository,
   whose project settings and SessionStart hooks it must not run: the profile's settings alone), one `--plugin-dir`
   per listed plugin's directory, `--mcp-config <mcp_file> --strict-mcp-config` (no other MCP configuration loads),
   the result and exit files; prefixed by the watchdog's trap (U31): TERM writes `stalled` to the exit file and ends
   the wrapper, no code written after it."""
-  b = config["builder"]
+  b, (model, effort) = config["builder"], pair
   pairs = launched_pairs(gh, login, email)
-  for value in (worktree, prompt, result, b["profile_dir"], b["model"], b["effort"], b["permission_mode"], runcard, *tools, *(v for _, v in pairs),
+  for value in (worktree, prompt, result, b["profile_dir"], model, effort, b["permission_mode"], runcard, *tools, *(v for _, v in pairs),
                 *plugin_dirs, mcp_file, session_id or ""):
     if "'" in str(value):
       raise core.HandoffError(f"{value} holds a quote and cannot go on the command line")
@@ -561,6 +563,6 @@ def command_line(config, worktree, prompt, result, runcard, tools, gh, login, em
   return (f"SUPEREGM_EXIT='{result}.exit'; trap 'echo stalled > \"$SUPEREGM_EXIT\"; exit' TERM; "
           f"cd '{worktree}' && env {unset} CLAUDE_CONFIG_DIR='{b['profile_dir']}' ENABLE_CLAUDEAI_MCP_SERVERS=false {token} "
           f"SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{runcard}' {env} "
-          f"claude -p \"$(cat '{prompt}')\"{session} --model '{b['model']}' --effort '{b['effort']}' --permission-mode '{b['permission_mode']}' --setting-sources user "
+          f"claude -p \"$(cat '{prompt}')\"{session} --model '{model}' --effort '{effort}' --permission-mode '{b['permission_mode']}' --setting-sources user "
           f"{dirs}--mcp-config '{mcp_file}' --strict-mcp-config "
           f"--allowedTools '{','.join(tools)}' --output-format json > '{result}'; echo $? > '{result}.exit'")
