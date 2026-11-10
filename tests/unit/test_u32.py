@@ -6,6 +6,7 @@
 import argparse
 import hashlib
 import json
+import re
 import shutil
 import sys
 import types
@@ -78,3 +79,20 @@ def test_spec_blob_and_store_take_their_inputs_explicitly(world):
   superegm.CURRENT_ARGS = argparse.Namespace(design=str(world.spec))
   with pytest.raises(superegm.HandoffError, match="store: nope: no such handoff"):
     store(world.repo, argparse.Namespace(handoff="nope"))
+
+
+# ---------------------------------------------------------------- S8: the prose
+
+PROSE = [("skills/wave/references/builder_orders.md", "HEAD detached", True), ("skills/integrate/SKILL.md", "[--close [--patch]]", True),
+         ("skills/integrate/SKILL.md", "effect_kinds: [state-store, start-session, github-write]", True),
+         ("skills/integrate/SKILL.md", "of every unit whose PR merged, its issue open or not", True),
+         ("skills/review-spec/references/review_loop.md", "citing no line, or a line the spec does not hold, takes the same path", True),
+         ("skills/review-spec/references/review_loop.md", "<6 hex>-plan-<unit>", False), ("skills/plan/references/handoff_plan.md", "may hold only", False),
+         ("skills/plan/references/handoff_plan.md", "<6hex>/", False), ("skills/plan/references/issue_template.md", "<6hex>/", False),
+         ("skills/orient/SKILL.md", "<6 hex>/orient", False), ("skills/brainstorming/SKILL.md", "layer in the flat store", False)]
+
+@pytest.mark.parametrize("path, needle, present", PROSE)
+def test_the_prose_of_u32(path, needle, present):
+  text = (ROOT / path).read_text(encoding="utf-8")
+  assert (needle in text) is present, (path, needle)
+  assert re.search(r"(Added|[Mm]odified) by SuperEGM \(gsVAM\), 2026: ", text), path

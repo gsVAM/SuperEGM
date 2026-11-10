@@ -333,7 +333,7 @@ def test_close_refuses_while_a_redesign_units_issue_is_open(world, state, code, 
 def test_integrate_skill_body():
   text = (ROOT / "skills/integrate/SKILL.md").read_text(encoding="utf-8")
   front, body = text.split("---", 2)[1:]
-  assert "disable-model-invocation: true" in front and "effect_kinds: [state-store, start-session]" in front
+  assert "disable-model-invocation: true" in front and "effect_kinds: [state-store, start-session, github-write]" in front
   for snippet in [
       "runcard open --skill integrate --artifact <spec-path>",
       # `status` serves the integrate card (I-4): no wave card, so `wave_number` never counts one.
