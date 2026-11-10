@@ -1,6 +1,6 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema (interfaces, review focus, Steps, decisions with options), the plan file outside the store, the files and commands of the plan skill only; one directory per handoff (U32). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema (interfaces, review focus, Steps, decisions with options), the plan file outside the store, the files and commands of the plan skill only; one directory per handoff (U32); the optional Tier field (U33). -->
 
 # The plan file: schema, the unit's Steps, files and commands
 
@@ -54,6 +54,7 @@ are rendered verbatim into every body.
 | Shared files | `src/webhooks/queue.ts`: after U01, before U05 |
 | Risk | medium: touches the request path |
 | Size | M |
+| Tier | doable |
 
 Interfaces
 - Consumes: enqueue(event) -> Job (U01)
@@ -89,6 +90,7 @@ Decide before build
 | Shared files | `none` or `` `path`: after U01, before U05 `` items separated by `; `. `after` adds an edge from that unit to this one; `before` from this one to that unit. |
 | Risk | `low\|medium\|high: reason`. |
 | Size | `S` (up to 3 scope paths), `M` (up to 8), `L` (more; about twenty Step groups, the most a body holds). |
+| Tier | Optional; `difficult`, `doable` or `easy`, set by the author: `difficult` when the Steps leave a design choice open, the unit holds a novel algorithm or an unverified platform behaviour, or it consumes the interfaces of more than one subsystem; `easy` when the Steps are mechanical with pinned signatures and no open choice; else `doable`. A difficult unit keeps a small Scope and few Steps. The tier picks the builder's model and effort (`builder.tiers`; doable is `builder.model` and `builder.effort`); a section without it is doable; another word is refused as a bad `Size` is. |
 | Issue | Optional; `#<n>`, an open issue in `config.repo` that `file` adopts instead of creating one; `graph` refuses a `#<n>` the spec's `## Units` section does not name; the dry run heads such a unit `### edit #<n> <unit> (old body sha256 <hex>)` where a created unit reads `### issue <unit>`. |
 | Interfaces | One item per line: `- Consumes: <name> (U<nn>)` names what this unit uses and the producing unit; `- Produces: <name>` what later units rely on. A name is `fn(params) -> type` for a Python interface, `superegm <sub> <flags> → <stdout shape>; exit <codes>` for a helper subcommand, or `<file> key <path>` for a store field; `scan` matches on the identifier before `(`, the subcommand words, or the key path, and refuses a Consumes no sibling produces or whose producer is not a direct or transitive blocker. |
 | Definition of done | Numbered items. Item 1 is always `The test for each Step was committed before its implementation (checked by superegm tdd-order)`; every other item is ``Run `<command>` — <what passing means>``, ``Exists `<path>` `` or `CI green on the head`. Only `Run` items are commands. |

@@ -12,7 +12,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: phase 2 of the SuperEGM loop (the plan file, graph, scan, decide); EGM's approval, review gate, dry run and filing steps live in review-spec, review-plan and file; `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: phase 2 of the SuperEGM loop (the plan file, graph, scan, decide); EGM's approval, review gate, dry run and filing steps live in review-spec, review-plan and file; `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the `Tier:` field (U33). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the handoff skill. Not part of google/elephant-goldfish-model. -->
 
@@ -96,6 +96,7 @@ drafting.
     Nor does a row filed in another handoff of the spec: `graph` lists them in `handoff_units.json`'s `filed_elsewhere` and refuses a section for one.
     Keep every section already there; a filed unit's section (one with an
     issue number in `state.json`) is frozen and stays byte-identical.
+    Set `Tier:` on every section by section 2's criteria (`difficult`, `doable` or `easy`): it picks the builder's model and effort, and a wrong tier costs rounds.
 2.  Nothing is committed under the repository's docs: the plan file stays
     outside the tree, and the store keeps its copy.
 
