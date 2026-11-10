@@ -155,6 +155,19 @@ def test_set_input_carries_the_width_line_and_the_plan_header(planned):
     assert out.index("width:") < out.index("## Plan header") < out.index("| U01 | the queue") < out.index("## U01")
 
 
+@pytest.mark.parametrize("plan", [None, "# Handoff plan: Sample\n\nDesign: `docs/specs/sample.md`\n\n## 2. Units\n"],
+                         ids=["missing", "no-waves-line"])
+def test_set_input_plan_header_reads_none_without_a_waves_line(planned, plan):
+    w = planned
+    if plan is None:
+        w.store.path("plan").unlink()
+    else:
+        write(w.store.path("plan"), plan)
+    code, out = w.run("review-plan", "set-input", "--spec", str(w.spec))
+    assert code == 0, out
+    assert "\n## Plan header\n\nnone\n" in out and "Waves:" not in out and "Design:" not in out
+
+
 def round_text(w, rid, rnd):
     return w.store.path("reviews", rid, f"round-{rnd}.json").read_text(encoding="utf-8")
 
