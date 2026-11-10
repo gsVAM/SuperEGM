@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: renamed from test_egm_handoff.py; helper and skill paths under skills/plan and skills/wave.
+# Modified by SuperEGM (gsVAM), 2026: renamed from test_egm_handoff.py; helper and skill paths under skills/plan and skills/wave; approve_spec's runcards and init.steps() (U32).
 
 """U03's tests: the helper package, the store, run cards, the gating, init, the body
 parsers, the schemas, the renames and the removals; EGM's tests of the shared names."""
@@ -835,7 +835,7 @@ def test_astra_heads_key_and_the_head_panel_default(world, astra, heads):
   from superegm.review import PANEL_OF
   assert superegm.DEFAULT_CONFIG["astra"] == {"enabled": False, "model": "gpt-6-astra", "effort": "xhigh", "heads": True, "heads_effort": "high"}
   assert superegm.DEFAULT_CONFIG["reviewers"]["head"] == ["change-review", "astra"] and PANEL_OF["head"] == "change-review"
-  assert "astra.enabled" in init.STEPS
+  assert "astra.enabled" in init.steps()
   set_config(world, repo=REPO, astra=astra)
   if heads is None:
     with pytest.raises(superegm.HandoffError, match=re.escape("astra.heads must be true or false")):
