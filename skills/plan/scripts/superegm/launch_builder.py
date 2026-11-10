@@ -419,8 +419,10 @@ def segment_heads(command: str) -> list:
 
 def spec_range_text(repo_root: Path, store, body_text: str, ref: str) -> str:
   """The spec range the body cites (spec section 7): its `Spec:` line's `start..end` read at the commit
-  holding the bytes the marker's sha256 names: the history entry carrying that sha, else the first commit
-  of `git log <ref> -- <rel>` whose blob hashes to it; no such commit refuses."""
+  holding the bytes the marker's sha256 names, through `core.spec_blob`: first searched from each history
+  entry carrying that sha (the first commit of `git log <entry commit> -- <rel>` holding those bytes, which
+  may be an earlier commit than the entry's own; the bytes are the same), else from `<ref>`; no such
+  commit refuses."""
   marker, match = body.MARKER_RE.match(body_text), SPEC_LINE_RE.search(body_text)
   if not marker or not match:
     raise core.HandoffError("spec range: the body carries no marker or no `Spec:` range")
@@ -489,7 +491,8 @@ def add_worktree(repo_root, store, unit, rnd, branch, pr):
   (decision point 3's `relaunch` after an exit without one), at the retained local branch, after
   detaching the earlier launches' worktrees (nothing in them is removed; that is `clean`'s).
   A re-run after a failure before the spawn (U32): an `r<n>` already on the branch refuses before any
-  switch (a builder may run there); a detached one is switched to the branch, no `worktree add`."""
+  switch (a builder may run there); a detached one is switched to the branch, no `worktree add`, the
+  branch moved first to where a fresh launch would start it (round 1 `refs/superegm/base`, later the PR tip)."""
   path = store.path("worktrees", unit, f"r{rnd}")
   path.parent.mkdir(parents=True, exist_ok=True)
   reuse = path.is_dir() and path.resolve() in core.registered_worktrees(repo_root)
@@ -502,7 +505,9 @@ def add_worktree(repo_root, store, unit, rnd, branch, pr):
     if earlier.is_relative_to(path.parent.resolve()) and earlier.is_dir() and earlier != path.resolve():
       core.run_git(["switch", "--detach"], earlier)
   core.run_git(["worktree", "prune"], repo_root, check=False)
-  if pr:
+  if rnd == 1:
+    core.run_git(["branch", "-f", branch, "refs/superegm/base"], repo_root)
+  elif pr:
     core.run_git(["branch", "-f", branch, f"refs/superegm/pr/{pr}"], repo_root)
   if reuse:
     core.run_git(["switch", branch], path)
