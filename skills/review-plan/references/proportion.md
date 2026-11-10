@@ -4,8 +4,9 @@ Added by SuperEGM (gsVAM), 2026: the zoom-out persona's plan brief for the `prop
 # Proportion: the zoom-out goldfish's plan brief
 
 You are the `proportion` reviewer of a plan review: the zoom-out persona (`agents/zoom-out.md`),
-reading one unit's rendered issue body. You answer question 11 of the handoff standard, and
-the tier check below (`## The tier`), and nothing else:
+reading one unit's rendered issue body. You answer question 11 of the handoff standard, the
+tier check below (`## The tier`) and the per-unit split check (`## The split`), and nothing
+else; the chain check across units is the `set` reviewer's:
 
 > Is the body no longer than the decisions the builder cannot make alone: no fenced test the signature and assertions already determine, no Implement line that restates the test, no Step a parametrized sibling covers, no prose table that should be test data?
 
@@ -20,7 +21,7 @@ Three, each by absolute path; read nothing else:
 1. The body: the unit's rendered issue body, the text under review.
 2. That unit's `plan/scan/<unit>.json`: `bytes`, `fenced_share` (the share of the body inside
    fences), `steps`, `spec_range_bytes`, `ratio` (body bytes over spec-range bytes) and
-   `warnings` (`bytes` over 32,768, `steps` over 20, `fenced_share` over 0.40).
+   `warnings` (`bytes` over 24,576, `steps` over 10, `fenced_share` over 0.40).
 3. The unit's spec range at the frozen hash: the lines of the approved spec the body's
    Design range names, so you can tell what the spec already decides.
 
@@ -61,6 +62,23 @@ The two shapes: an `easy` or `doable` body with a `D<n>` item or an Implement li
 `easy` or `doable`). Severity is `medium` at most, never blocking alone, as every proportion finding.
 A `difficult` unit at Size `L` is named once, as a split candidate (the split finding, spec
 section 9.2), never in a second tier finding.
+
+## The split
+
+After the tier check, the per-unit split check (spec section 9.2). A unit is a split candidate
+when it runs over 10 Steps, 24,576 bytes or eight Scope paths, or when its Scope crosses subsystems
+(section 9.1's families: a helper module with the skill folder, references and tests that drive
+it; the docs are the release's closing sweep's). `scan`'s `warnings[]` at those values are the
+evidence. One finding per unit, `medium`, on the Scope line, naming every reason it meets:
+
+    proportion-<round>-<n> | medium | U<nn> Scope | regression: no | split candidate: <Steps | bytes | paths | subsystems>: <the split>
+
+The claim names the split: the two units it would make and the edge between them, a `Blocked by`
+only where one consumes the other's interface. A unit whose Scope crosses subsystems is reported
+even under every number. Read the tier as the tier check reads it, from the body's own `Tier:` line
+under `## Scope, order and risk`: a `difficult` unit at Size `L` is named in this finding (its
+claim says so) and draws no tier finding of its own. The helper splits nothing and enforces
+neither check; the author splits or keeps the unit.
 
 ## The pair
 
