@@ -5,6 +5,10 @@
 
 import json
 import shutil
+import sys
+import types
+
+import pytest
 
 import superegm  # the harness reloads the package per test: read its names at call time
 from superegm import discover
@@ -42,3 +46,19 @@ def test_modules_register_their_defaults_init_steps_and_doctor_checks(tmp_path, 
   monkeypatch.setattr(foreman, "runner_path", lambda: None); monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: None)
   assert foreman.DOCTOR_CHECKS({}, ROOT, None) == [("astra", "not installed (heads will record not run)")]
   assert orient.DOCTOR_CHECKS({}, ROOT, None) == [("graphify", "not on PATH (informational)")] and [m for m in modules.values() if m.DOCTOR_CHECKS] == [foreman, orient]
+
+
+# ---------------------------------------------------------------- S6: a faulty module is named, every command exits 1
+
+@pytest.mark.parametrize("name, present, message", [("nodefaults", True, "superegm.nodefaults exposes no CONFIG_DEFAULTS"),
+                                                     ("bogus", False, "superegm.bogus: No module named 'superegm.bogus'")])
+def test_discover_names_a_module_without_defaults_or_failing_import(tmp_path, capsys, monkeypatch, name, present, message):
+  harness = fresh(tmp_path, capsys, monkeypatch)
+  real = superegm.pkgutil.iter_modules
+  monkeypatch.setattr(superegm.pkgutil, "iter_modules", lambda path: [*real(path), types.SimpleNamespace(name=name)])
+  if present:
+    module = types.ModuleType(f"superegm.{name}")
+    vars(module).update(register=lambda s: None, run=lambda a: 0, WRITES=frozenset(), INIT_STEP="", DOCTOR_CHECKS=None)
+    monkeypatch.setitem(sys.modules, f"superegm.{name}", module)
+  code, out = harness.run("init", "--artifacts-dir", str(tmp_path / "store"))
+  assert code == 1 and f"superegm: {message}" in out, out
