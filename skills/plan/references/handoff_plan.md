@@ -1,6 +1,6 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema (interfaces, review focus, Steps, decisions with options), the plan file outside the store, the files and commands of the plan skill only. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema (interfaces, review focus, Steps, decisions with options), the plan file outside the store, the files and commands of the plan skill only; one directory per handoff (U32). -->
 
 # The plan file: schema, the unit's Steps, files and commands
 
@@ -36,8 +36,8 @@ Design: `/absolute/path/to/docs/specs/2026-11-03-webhooks-design.md`
 The `Design:` line names the approved spec (absolute, or relative to the
 plan's folder). `graph` reads `approvals/<spec-slug>.json` in the store: the
 spec's sha256 must equal the approval's, the handoff id is the approval's
-(`<slug>-<6 hex>`, kept across a re-approval), and the store may hold only
-one handoff until `closed_at` is written. The `## Global constraints` lines
+(`<slug>-<6 hex>`, kept across a re-approval), and the store holds one
+`<handoff id>/` directory per handoff, several side by side. The `## Global constraints` lines
 are rendered verbatim into every body.
 
 ## 2. One unit
@@ -150,11 +150,11 @@ longer than the decisions the builder cannot make alone (compare `scan`'s
 | --- | --- | --- |
 | `handoff_plan.md` | `graph`, `decide` | The store's copy of the plan file; a filed unit's section here is the one the plan file must still carry. |
 | `handoff_units.json` | `graph`, `decide` | The parsed units (interfaces, review focus, decisions with options and answers, `body_sha256` per unit) with waves and predecessors, the `order`, the edges, the critical path. Derived; never hand-edited. |
-| `<6hex>/unit_<id>.md` | `graph`, `decide` | The unit's section plus its issue body as it will be posted, in a four-backtick `markdown` fence under `## Issue body as posted`. Written for unfiled units only; a filed unit's file is frozen. |
+| `<handoff id>/unit_<id>.md` | `graph`, `decide` | The unit's section plus its issue body as it will be posted, in a four-backtick `markdown` fence under `## Issue body as posted`. Written for unfiled units only; a filed unit's file is frozen. |
 | `handoff_bodies.md` | `graph`, `decide` | Every title, label set and body in creation order, with placeholders `#<U01>` for blockers and `#<tracking>` for the tracking issue. |
 | `state.json` | `graph`, `decide` | `handoff_id`, `repo`, `remote`, `repo_root`, `plan` (the plan file's path), `design`, `units[<id>].body_sha256`, `decisions` (section 5). |
-| `<6hex>/plan/scan/<unit>.json` | `scan` | `bytes`, `fenced_share`, `steps`, `spec_range_bytes`, `ratio`, `warnings[]`: the proportion reviewer's evidence. A derived report, written without a card. |
-| `<6hex>/decision_comment_<unit>_D<n>.md` | `decide` | For a filed unit only: the comment headed `**Decision D<n>:**` the skill posts on the issue under a `github-write` card. |
+| `<handoff id>/plan/scan/<unit>.json` | `scan` | `bytes`, `fenced_share`, `steps`, `spec_range_bytes`, `ratio`, `warnings[]`: the proportion reviewer's evidence. A derived report, written without a card. |
+| `<handoff id>/decision_comment_<unit>_D<n>.md` | `decide` | For a filed unit only: the comment headed `**Decision D<n>:**` the skill posts on the issue under a `github-write` card. |
 
 ## 5. The state file
 
@@ -174,5 +174,5 @@ absolute paths in single quotes, no chaining. `<HELPER>` is
 | Command | Writes | What it does |
 | --- | --- | --- |
 | `graph [--plan P] --runcard C` | the store | Parses the plan under its approval, builds the graph, renders and hashes the unfiled bodies, writes the files above; prints `handoff <id> on <repo>: <n> units, <w> waves`, one `wave <n>: …` line per wave, the critical path and what it wrote. Exit 1 with `graph: <reason>`. |
-| `scan [--plan P] [--comment FILE]` | `<6hex>/plan/scan/<unit>.json` | Prints the numbers table, then one `<rule>: <unit>: <line>` per problem, then `scan: clean` or `scan: <n> problem(s)`; exit 1 on a problem. With `--comment` it scans that file as a comment (the configured `fix_request_mention` may open it). |
+| `scan [--plan P] [--comment FILE]` | `<handoff id>/plan/scan/<unit>.json` | Prints the numbers table, then one `<rule>: <unit>: <line>` per problem, then `scan: clean` or `scan: <n> problem(s)`; exit 1 on a problem. With `--comment` it scans that file as a comment (the configured `fix_request_mention` may open it). |
 | `decide --unit U --decision D<n> (--answer "(x)" \| --default) [--judges ID] --runcard C` | the store, the plan file | Records the answer, one of the item's own options: an unfiled unit's plan line gains `; answer: (x)` and its body is re-rendered; a filed unit keeps its line, body and file and gets the comment file. Exit 1 with `decide: <reason>`. |

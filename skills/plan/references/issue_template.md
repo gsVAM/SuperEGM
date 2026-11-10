@@ -1,6 +1,6 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: the section 9.1 body layout and markers replace EGM's template. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the section 9.1 body layout and markers replace EGM's template; the per-handoff scan path (U32). -->
 
 # The issue body
 
@@ -88,7 +88,7 @@ Every unit issue is added as its sub-issue.
 
 A body over 49,152 bytes is refused with "split it". `scan` warns, without
 blocking, when a body passes 32,768 bytes, twenty Steps or a fenced share of
-0.40; the numbers go to `<6hex>/plan/scan/<unit>.json` for the proportion
+0.40; the numbers go to `<handoff id>/plan/scan/<unit>.json` (a flat 1.0/1.1 store keeps `<6 hex>/`) for the proportion
 reviewer. No checklist item, no placeholder line (`TBD`, `handle edge cases`,
 `add appropriate validation`, `write tests for the above`), no Consumes no
 sibling produces or whose producer is not a blocker, global constraints and

@@ -1,6 +1,6 @@
 <!-- Copyright 2026 Google LLC. SPDX-License-Identifier: Apache-2.0. -->
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: Astra lane, per-reviewer model and effort, persisted dispositions. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: EGM's review-loop skill rewritten as the one review loop over the helper's `superegm review` subcommands (spec section 8); the stages, the report files and the second clean round are gone; a spec round's scope, `out_of_scope[]` and the batch settle (U19); the accept below the cap and its `acceptable:` line (U35); section 2's model and effort paragraph is the one rule, the config pair before the session pair (U28). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: EGM's review-loop skill rewritten as the one review loop over the helper's `superegm review` subcommands (spec section 8); the stages, the report files and the second clean round are gone; a spec round's scope, `out_of_scope[]` and the batch settle (U19); the accept below the cap and its `acceptable:` line (U35); section 2's model and effort paragraph is the one rule, the config pair before the session pair (U28); a lineless finding out of scope and the per-handoff review ids (U32). -->
 
 # The review loop
 
@@ -36,8 +36,8 @@ other grammar (`review record: <file>:<line>: <reason>`).
    why in one line; the review runs on the Claude panel alone.
 4. `superegm review open --kind spec|plan|head|integrate --artifact <path or unit id>
    [--sha256 <hex>] --reviewers a,b,c [--astra on|off] --runcard <id>` prints the review id
-   (`spec-<slug>-c<n>`, `spec-<slug>-integrate-c<n>`, `<6 hex>-plan-<unit>-c<n>`,
-   `<6 hex>-head-<unit>-c<n>`). An artifact whose latest cycle is still open resumes it: a
+   (`spec-<slug>-c<n>`, `spec-<slug>-integrate-c<n>`, `plan-<unit>-c<n>`,
+   `head-<unit>-c<n>`, under the handoff's own directory). An artifact whose latest cycle is still open resumes it: a
    re-typed skill continues where the last invocation stopped, with the stored panel. A closed
    cycle (an `accept` or `stop` ruling, a spec edited after the approval that names it, or an
    integrate review whose handoff closed or whose `## Units` were amended past the bytes it
@@ -149,8 +149,9 @@ Record every reviewer of the round, the lane included, as its result arrives:
   ranges) and every record checks against it: a finding whose cited line (the first number after
   `line `, `lines `, `L` or `:` in its location) falls outside every changed section and neighbour
   is refused, `record: <fid> out of scope (<section>): not recorded`, and kept verbatim in the round's
-  `out_of_scope[]` with one journal line: no disposition, never counted, never a fix round. A
-  location citing no line, or a line past the spec's end (another file's), is recorded. The record
+  `out_of_scope[]` with one journal line: no disposition, never counted, never a fix round. A location
+  citing no line, or a line the spec does not hold, takes the same path under section `none`, journaled
+  `<fid>: no line number`; a `whole` round refuses nothing. The record
   still succeeds for the reviewer's other lines; a reviewer recorded again in the same round
   replaces its own earlier `out_of_scope[]` lines. The round's `note` is the `whole` row's reason
   (`whole`, `no approval`, `no change`, `no commit holds <sha7>`), else null. `review scope` writes
