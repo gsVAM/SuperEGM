@@ -6,16 +6,14 @@
 # ingest once before the refusals, the refusal of an unsettled external finding, an external finding's carried copies
 # as one escalated pair discharged by its latest copy alone, and a re-approval of the same cycle reading that cycle
 # again and keeping the replaced entry's unnamed pairs (U26); `--amend-units` typed by hand opens and closes its own
-# card (U32).
+# card, the branch check reading `spec_blob` (U32).
 
 """superegm approve-spec: record the owner's approval of a converged spec (spec section 8)."""
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import re
-import subprocess
 
 import superegm as core
 from superegm import close, runcard

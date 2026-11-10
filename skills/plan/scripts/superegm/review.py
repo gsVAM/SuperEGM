@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope (U32).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest: the one review loop (spec section 8)."""
 
@@ -7,13 +7,11 @@ import argparse
 import contextlib
 from dataclasses import dataclass
 import difflib
-import hashlib
 import io
 import json
 import os
 from pathlib import Path
 import re
-import subprocess
 import sys
 
 import superegm as core
@@ -260,13 +258,12 @@ def out_of_scope(rows: list, spans: list, location: str):
 
 
 def approved_text(spec: Path, approval: dict):
-  """The approved bytes as text: the spec at the approval's `commit` (voided or not), else at the first commit
-  of the current branch's `git log -- <spec>` whose blob hashes to its `sha256`; None when no commit holds them."""
+  """The approved bytes as text, through `core.spec_blob`: searched first from the approval's `commit` (voided
+  or not) when set, then from the current branch's `HEAD`; None when no commit holds them."""
   root = core.git_toplevel(spec.parent)
   rel = spec.resolve().relative_to(root.resolve()).as_posix()
-  if approval.get("commit") and (at := subprocess.run(["git", "show", f"{approval['commit']}:{rel}"], cwd=str(root),
-                                                      capture_output=True)).returncode == 0:
-    return at.stdout.decode("utf-8")
+  if approval.get("commit") and (text := core.spec_blob(root, rel, approval["sha256"], ref=approval["commit"])) is not None:
+    return text
   return core.spec_blob(root, rel, approval["sha256"])
 
 
