@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from superegm import atomic_write, open_runcard, store
 from superegm.body import MARKER_RE, fill_numbers
+from superegm.graph import BODY_TEMPLATE
 from superegm.scan import scan_text
 
 from conftest import REPO, set_config
@@ -21,9 +22,10 @@ SPEC = ("# Webhooks\n\nDelivery.\n\n## Units\n\n| Unit | Scope | Blocked by | Si
 D1 = "- D1 Retry ceiling? options: (a) 5 attempts; (b) 10 attempts; owner: the owner; default: (a); blocking: no"
 
 
-def section(uid, title, blocked="none", consumes=(), decide="- none", issue=None):
+def section(uid, title, blocked="none", consumes=(), decide="- none", issue=None, tier=None):
   n = uid.lower()
   issue_row = f"\n| Issue | {issue} |" if issue is not None else ""
+  tier_row = f"\n| Tier | {tier} |" if tier is not None else ""
   interfaces = "\n".join([f"- Consumes: {c}" for c in consumes] + [f"- Produces: {n}_fn(x: int) -> int"])
   return f"""### {uid}: {title}
 | Field | Value |
@@ -34,7 +36,7 @@ def section(uid, title, blocked="none", consumes=(), decide="- none", issue=None
 | Blocked by | {blocked} |
 | Shared files | none |
 | Risk | low: new module |
-| Size | S |{issue_row}
+| Size | S |{tier_row}{issue_row}
 
 Interfaces
 {interfaces}
@@ -359,7 +361,7 @@ def test_body_layout_markers_and_placeholders(world):
   assert "1. Write the failing test `test_u02_empty` in `tests/test_u02.py`:\n   " + FENCE + "python\n" in body
   assert "\n" + D1 + "\n" in body
   assert ("Scope: `src/u02.ts` (create), `tests/test_u02.py` (create) · Blocked by: #<U01> · "
-          "Shared files: none · Risk: low: new module · Size: S\n") in body
+          "Shared files: none · Risk: low: new module · Size: S · Tier: doable\n") in body
   assert body.endswith(f"Branch: `superegm/2026-11-03-webhooks-{sha[:6]}/U02` · Part of #<tracking>\n")
   filled = fill_numbers(body, {"U01": 11}, tracking=10)
   assert "Blocked by: #11 ·" in filled and "Part of #10" in filled
@@ -619,10 +621,29 @@ def test_graph_parses_the_optional_issue_field_against_the_spec(world, issue, na
   parsed = json.loads(find(world, "handoff_units.json").read_text(encoding="utf-8"))["units"]
   assert parsed["U02"]["issue"] == 7 and parsed["U01"]["issue"] is None
   assert "| Issue |" not in body_of(world, "U02") and "#7" not in body_of(world, "U02")
-  assert "Issue" not in world.ns["FIELDS"] and world.ns["OPTIONAL_FIELDS"] == ("Issue",)
+  assert "Issue" not in world.ns["FIELDS"] and world.ns["OPTIONAL_FIELDS"] == ("Issue", "Tier")
 
 
-PAIR, CLAIM = "spec-2026-11-03-webhooks-design-c1:design-1-2", "the cap is unstated"
+@pytest.mark.parametrize("tier, message", [(None, None), ("difficult", None), ("easy", None), ("hard", "U02: tier must be difficult, doable or easy")])
+def test_graph_parses_the_optional_tier_field_into_the_units_and_the_body(world, tier, message):
+  units = (UNITS[0], section("U02", "Worker", "U01", ["u01_fn(x: int) -> int (U01)"], D1, tier=tier), UNITS[2])
+  spec, sha, plan, card = planned(world, units)
+  code, out = graph(world, plan, card)
+  if message:
+    assert code == 1 and f"{plan}:" in out and message in out, out
+    return
+  assert code == 0, out
+  parsed = json.loads(find(world, "handoff_units.json").read_text(encoding="utf-8"))["units"]
+  assert parsed["U02"]["tier"] == (tier or "doable") and parsed["U01"]["tier"] == "doable"
+  assert f"· Risk: low: new module · Size: S · Tier: {tier or 'doable'}\n" in body_of(world, "U02")
+  assert world.ns["OPTIONAL_FIELDS"] == ("Issue", "Tier") and world.ns["TIERS"] == ("difficult", "doable", "easy")
+  (world.repo / ".superegm/body.md").write_text(BODY_TEMPLATE.replace(" · Tier: {{tier}}", ""), encoding="utf-8")
+  set_config(world, repo=REPO, issue_template=".superegm/body.md")
+  code, out = graph(world, plan, card)
+  assert code == 1 and "issue template lacks {{tier}}" in out, out
+
+
+PAIR, CLAIM ="spec-2026-11-03-webhooks-design-c1:design-1-2", "the cap is unstated"
 D_ESC = f"- D2 {PAIR}: {CLAIM} options: (a) cap at 5; (b) cap at 8; owner: the owner; default: (a); blocking: yes"
 MSG = f"graph: {PAIR} needs a `## Units` row or a `blocking: yes` D<n> line naming it with the finding's claim verbatim"
 
