@@ -7,12 +7,11 @@ after signalling its group (or `kill_failed`); `launch-builder` records it `runn
 
 import json
 import subprocess
-import time
 from pathlib import Path
 
 import superegm as core
 from superegm.launch import load_launches
-from superegm.status import epoch, head_time, own_commit
+from superegm.status import head_time, own_commit
 from superegm.traces import subagent_calls
 
 WRITES = frozenset(["launches"])  # the store kinds this subcommand writes
@@ -78,10 +77,10 @@ def record_stalled(st, unit, launches, entry, exit_file, last):
   exit file `stalled` awaited 30 s, the one proof; `kill_failed` with the reason otherwise."""
   rnd = entry["round"]
   try:
-    waited = int((core.NOW() - (last or epoch(entry["started_at"]))) // 60)
+    waited = int((core.NOW() - (last or core.epoch(entry["started_at"]))) // 60)
   except (KeyError, ValueError, TypeError):
     waited = 0
-  line = f"{unit} launch {rnd} stalled ({waited} min; last commit {iso(last) or 'none'})"
+  line = f"{unit} launch {rnd} stalled ({waited} min; last commit {core.iso(last) or 'none'})"
   if not exit_file.is_file():
     if entry.get("kill_failed"):
       raise core.HandoffError(f"{unit} launch {rnd} kill_failed ({entry['kill_failed']})")
@@ -114,7 +113,7 @@ def finish(st, unit, launches, latest, status, last, line):
   """Record an exit: the status, the `kill_failed` mark cleared, `last_commit_at` (U31), the subagent calls and the usage."""
   latest["status"] = status
   latest.pop("kill_failed", None)
-  latest["last_commit_at"] = iso(last)
+  latest["last_commit_at"] = core.iso(last)
   # U27: the platform's default subagents the session spawned, from its transcript under the builder profile;
   # a pre-U27 entry, without `session_id`, records the no-file value; the profile from the config the store
   # loaded (`load_config` expands it), so a plan or spec edited during the launch cannot stop the exit's record
@@ -125,11 +124,6 @@ def finish(st, unit, launches, latest, status, last, line):
   core.journal(st, line)
   print(line)
   return 0
-
-
-def iso(seconds):
-  """A `%Y-%m-%dT%H:%M:%SZ` stamp of these seconds, or None."""
-  return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(seconds)) if seconds is not None else None
 
 
 def PS(args):

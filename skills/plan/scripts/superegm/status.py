@@ -7,10 +7,8 @@
 every pass, `--wait` included, also reads the tracking issue once and rewrites its board when the rows changed
 (`post_board`, the one GitHub write, its `board_changed_at` save and a failed write's journal line, spec 11.1)."""
 
-import calendar
 import json
 import re
-import time
 from pathlib import Path
 
 import superegm as core
@@ -148,11 +146,6 @@ def ci_word(verdict: str):
   return "pending"
 
 
-def epoch(stamp: str) -> float:
-  """The seconds of a `%Y-%m-%dT%H:%M:%SZ` stamp."""
-  return float(calendar.timegm(time.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ")))
-
-
 def head_time(worktree) -> float | None:
   """The committer time of the worktree's `HEAD` (`git log -1 --format=%ct`), a local read; None when git fails."""
   try:
@@ -167,7 +160,7 @@ def own_commit(entry: dict, worktree_head_time: float | None) -> float | None:
   (a base commit older than the launch is none of its own)."""
   if worktree_head_time is None or not entry.get("started_at"):
     return None
-  return worktree_head_time if worktree_head_time > epoch(entry["started_at"]) else None
+  return worktree_head_time if worktree_head_time > core.epoch(entry["started_at"]) else None
 
 
 def stalled(entry: dict, worktree_head_time: float | None, now: float, minutes: int) -> int | None:
@@ -178,7 +171,7 @@ def stalled(entry: dict, worktree_head_time: float | None, now: float, minutes: 
     return None
   if Path(entry["result_file"] + ".exit").is_file():
     return None
-  since = own_commit(entry, worktree_head_time) or epoch(entry["started_at"])
+  since = own_commit(entry, worktree_head_time) or core.epoch(entry["started_at"])
   waited = int((now - since) // 60)
   return waited if waited >= minutes else None
 
@@ -219,7 +212,7 @@ def builder_facts(st, uid: str, comments: list, config: dict | None = None) -> t
     except (ValueError, TypeError):
       waited = None
     if waited is not None:
-      stall = [waited, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(last)) if last else None, status[1] if status else None]
+      stall = [waited, core.iso(last) if last else None, status[1] if status else None]
   if latest and latest.get("status") == "exited (stalled)":
     return None, None, stall
   return exit, None if latest and not terminal(latest) else status, stall

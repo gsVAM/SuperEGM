@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes (U31).
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes and the one stamp formatter and parser (U31).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
@@ -715,8 +715,21 @@ def journal(store: Store, line: str) -> None:
     os.close(fd)
 
 
+STAMP = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def iso(seconds):
+  """The store's `%Y-%m-%dT%H:%M:%SZ` stamp of these seconds, or None (the one formatter, U31)."""
+  return time.strftime(STAMP, time.gmtime(seconds)) if seconds is not None else None
+
+
+def epoch(stamp: str) -> float:
+  """The seconds of a store stamp (the one parser, U31); ValueError or TypeError for any other form."""
+  return float(calendar.timegm(time.strptime(stamp, STAMP)))
+
+
 def now_iso() -> str:
-  return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(NOW()))
+  return iso(NOW())
 
 
 def canonical(obj) -> str:

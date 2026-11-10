@@ -200,9 +200,12 @@ def section(title: str, items: list) -> list:
 
 
 def kill_failed(launches: list):
-  """U31: the latest launch when it is `running` with the `kill_failed` mark, else None."""
+  """U31: the latest launch when it is `running` with the `kill_failed` mark and no exit file, else None (a late exit
+  file makes it terminal, `launch.terminal`'s reading, and the interrupt would refuse it)."""
   latest = launches[-1] if launches else None
-  return latest if latest and latest.get("status") == "running" and latest.get("kill_failed") else None
+  if not (latest and latest.get("status") == "running" and latest.get("kill_failed")):
+    return None
+  return None if Path(str(latest.get("result_file")) + ".exit").is_file() else latest
 
 
 def kill_failed_reason(uid: str, entry: dict) -> str:
