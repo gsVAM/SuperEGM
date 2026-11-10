@@ -11,6 +11,7 @@ import superegm as core
 from superegm import graph
 
 WRITES = frozenset(['file'])  # the store kinds this subcommand writes: the derived `plan/scan/<unit>.json`
+CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 scan_text, BODY_LIMIT = core.scan_text, core.BODY_LIMIT  # the one raw-text scan, the package's
 WARN = {"bytes": (32_768, "32,768"), "steps": (20, "20"), "fenced_share": (0.40, "0.40")}  # limit, as printed
 FENCE_LINE = re.compile(r"^\s*`{3,}")

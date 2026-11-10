@@ -1,15 +1,17 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes and the one stamp formatter and parser (U31).
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes and the one stamp formatter and parser (U31); `discover()`, CORE_CONFIG and SUBCOMMANDS and DEFAULT_CONFIG derived from the modules (U32).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
 Standard library only. Run as `python3 '<absolute path>' <subcommand> ...` from
 the `plan`, `file`, `wave`, `integrate` and `judges` skills; this package holds
-the shared names and one module per subcommand (`SUBCOMMANDS`). Every subcommand
-writes only the store under the config's `artifacts_dir`, through `atomic_write`
-and under an open run card, except `apply --yes` (GitHub writes) and `prepare`
-(refs under `refs/egm/` and worktrees under `${TMPDIR:-/tmp}/egm-wave`).
+the shared names and one module per subcommand (found by `discover()`; `SUBCOMMANDS`
+is its import-time snapshot). Store writes go under the config's `artifacts_dir`,
+through `atomic_write` and under an open run card; what a subcommand writes beyond
+the store (GitHub, git refs, worktrees, files outside the store) its own module
+docstring and `--help` name, `apply --yes`, `close`, `decision`, `status` under a
+wave card, `init` and `prepare` among them.
 Every `gh` call goes through `gh()`; tests inject `GH`, `SLEEP` and `NOW` here.
 """
 import argparse
@@ -20,6 +22,7 @@ import difflib
 import hashlib
 import json
 import os
+import pkgutil
 import re
 import shutil
 import signal
@@ -69,7 +72,7 @@ WAIT_INTERVAL = 90
 EFFORTS = ("low", "medium", "high", "xhigh")
 MODEL_RE = re.compile(r"^[a-z0-9][a-z0-9.\-]{1,63}$")
 
-DEFAULT_CONFIG = {
+CORE_CONFIG = {  # the keys no subcommand owns; each module's CONFIG_DEFAULTS follow, in discovery order (U32)
     "repo": None,
     "base": "main",
     "artifacts_dir": None,
@@ -84,32 +87,10 @@ DEFAULT_CONFIG = {
     "fix_request_mention": None,
     "allowed_mentions": [],
     "reviewers": None,  # the spec's panels, from review.PANEL_OF at the end of this module
-    "astra": {"enabled": False, "model": "gpt-6-astra", "effort": "xhigh", "heads": True, "heads_effort": "high"},
-    "judges": {"min_vendors": 1,
-               "members": [{"name": "fable", "via": "adapter", "effort": "xhigh"},
-                           {"name": "opus", "via": "adapter", "effort": "max"},
-                           {"name": "astra", "via": "runner", "effort": "xhigh"}]},
-    "builder": {"profile_dir": "~/.superegm/builder-profile", "model": "claude-opus-5-5", "effort": "medium",
-                "permission_mode": "acceptEdits", "gh_token_env": "SUPEREGM_BUILDER_TOKEN",
-                "allowed_tools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git add:*)", "Bash(git commit:*)",
-                                  "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git mv:*)",
-                                  "Bash(git rm:*)", "Bash(gh pr create:*)", "Bash(gh pr edit:*)",
-                                  "Bash(gh pr comment:*)", "Bash(gh issue comment:*)", "Bash(gh pr view:*)",
-                                  "Bash(pytest:*)"],
-                "plugins": [],  # <name>@<marketplace> ids, each passed by --plugin-dir (U27)
-                "mcp": {},  # mcpServers form, written to launches/<unit>_r<n>_mcp.json (U27)
-                "max_subagent_calls": 12,  # the orders' budget when allowed_tools carries Agent (U27)
-                "stall_minutes": 30,  # a running launch with no newer commit of its own this long is stalled (U31)
-                "app": None},  # or {app_id, slug, private_key_env}: the builder as a GitHub App (spec section 11)
-    "ci_wait_minutes": 30,
     "commit_trailer": "",  # appended, after a blank line, to every commit the helper makes
     "owners": [],  # the GitHub logins that may update <base> (spec section 11); init writes `gh api user`'s
     "owner_team": None,  # `<org>/<slug>`: the one team a ruleset's bypass actors may name
     "pr_block_file": None,  # a path relative to the repository root whose text every builder PR body carries
-    "ingest": {"severity_words": {"bug": "high", "issue": "medium", "nit": "low", "suggestion": "low"},
-               "human_role": "write"},  # `review ingest`: a thread's word map and the role a human's thread counts from
-    "notify_timeout_seconds": 30,  # how long `notify` waits on the owner's ~/.superegm/notify hook (spec section 11.2)
-    "foreman": {"run_timeout_minutes": 8},  # the bound on one whole `collect` call, under the Bash tool's 10 (spec section 11.1)
 }
 
 DEFAULT_TEMPLATE = """<!-- superegm:handoff={{handoff_id}} unit={{unit_id}} spec={{spec_sha256}} -->
@@ -417,17 +398,29 @@ def resolve_handoff(st: Store, args):
   return None
 
 
-def store(repo_root: Path) -> Store:
-  """The store `.superegm/config.json` names and the handoff, resolved once from `CURRENT_ARGS`;
+def spec_blob(repo_root: Path, rel: str, sha256: str, ref: str = "HEAD") -> str | None:
+  """The text of `rel` at the first commit of `git log <ref> -- <rel>` whose blob hashes to `sha256`, or None
+  when no commit holds those bytes (U32: the one spec-blob search). The git calls are hook-free."""
+  for commit in run_git(["log", "--format=%H", ref, "--", rel], repo_root, check=False).split():
+    with hook_free() as pairs:
+      shown = subprocess.run(["git", *pairs, "show", f"{commit}:{rel}"], cwd=str(repo_root), capture_output=True)
+    if shown.returncode == 0 and hashlib.sha256(shown.stdout).hexdigest() == sha256:
+      return shown.stdout.decode("utf-8")
+  return None
+
+
+def store(repo_root: Path, args=None) -> Store:
+  """The store `.superegm/config.json` names and the handoff, resolved once from `args`, else `CURRENT_ARGS`;
   a flat store (`state.json` at the root) is read in place as its one `legacy` handoff, unless the
   resolution names a handoff opened beside it (one with its own `handoffs/<id>.json`)."""
   global STORE
+  args = CURRENT_ARGS if args is None else args
   config = load_config(repo_root)
   root = Path(config["artifacts_dir"])
   flat = root / "state.json"
   st = Store(root, config=config)
-  hid = resolve_handoff(st, CURRENT_ARGS)
-  named = getattr(CURRENT_ARGS, "handoff", None)
+  hid = resolve_handoff(st, args)
+  named = getattr(args, "handoff", None)
   if named and named != flat_handoff_id(root) and not st.path("handoffs", named).is_file():
     raise HandoffError(f"store: {named}: no such handoff")
   if flat.is_file():
@@ -675,7 +668,7 @@ def require_runcard(args, skills) -> dict:
   rid = getattr(args, "runcard", None)
   if not rid:
     raise HandoffError("runcard: --runcard is required")
-  st = STORE or store(git_toplevel(Path.cwd()))
+  st = STORE or store(git_toplevel(Path.cwd()), args)
   card = load_card(st, rid)
   if card["closed_at"]:
     raise HandoffError(f"runcard: {rid} is closed")
@@ -1738,7 +1731,7 @@ CURRENT_SUBCOMMAND = None
 
 def locate(args):
   """The store of the repository the working directory is in, and the plan."""
-  st = store(git_toplevel(Path.cwd()))
+  st = store(git_toplevel(Path.cwd()), args)
   if getattr(args, "plan", None):
     plan = Path(args.plan).expanduser().resolve()
   else:
@@ -2154,10 +2147,40 @@ def run_terminated(folder) -> bool:
 # ---------------------------------------------------------------- main
 
 
-SUBCOMMANDS = ("init", "runcard", "approve_spec", "graph", "scan", "review", "gate", "dry_run", "apply",
-               "verify", "status", "launch", "launch_builder", "record_launch", "foreman", "prepare",
-               "collect", "tdd_order", "decide", "decision", "interrupt", "clean", "report", "close", "judges",
-               "review_plan", "orient", "doctor", "builder_token", "inbox", "register", "driver")
+def discover() -> dict:
+  """The subcommand modules, `{name: module}` sorted by name: every module of this package that defines
+  `register` (U32). `SUBCOMMANDS` and `DEFAULT_CONFIG` are derived from it at import. A module that fails to
+  import or exposes no `CONFIG_DEFAULTS` is skipped and kept on `FAULTS` as `(name, message)`, the list
+  cleared and refilled by each call in name order; `build_parser()` turns the first, by name, into every
+  command's refusal. Two limits: a failure raised through another module's import is recorded under the
+  importing module, so the refusal names the first importer by name (a broken `launch` reads
+  `superegm.clean: ...`, `clean` importing it and sorting first), and `review`,
+  which the package's foot imports directly for `PANEL_OF`, raises at package import when it cannot load."""
+  modules = {}
+  FAULTS.clear()
+  for entry in sorted(pkgutil.iter_modules(__path__), key=lambda e: e.name):
+    try:
+      module = importlib.import_module(f"superegm.{entry.name}")
+    except Exception as error:  # noqa: BLE001  an import failure here is named, not raised (`review`'s aside: docstring)
+      FAULTS.append((entry.name, f"superegm.{entry.name}: {error}"))
+      continue
+    if not hasattr(module, "register"):
+      continue
+    if not hasattr(module, "CONFIG_DEFAULTS"):
+      FAULTS.append((entry.name, f"superegm.{entry.name} exposes no CONFIG_DEFAULTS"))
+      continue
+    modules[entry.name] = module
+  return modules
+
+
+FAULTS = []  # discover()'s skipped modules, `(name, message)` (U32)
+
+
+def fault_run(message):
+  """A subcommand's `run` while a module is faulty: the fault, before the command's own `run`."""
+  def run(args):
+    raise HandoffError(message)
+  return run
 
 
 def add_parser(subparsers, name, help_text, *, runcard=True):
@@ -2196,12 +2219,28 @@ def add_handoff_flag(parser) -> None:
 def build_parser():
   parser = Parser(prog="superegm.py", description=__doc__.splitlines()[0])
   sub = parser.add_subparsers(dest="command", required=True)
-  for name in SUBCOMMANDS:
-    importlib.import_module(f"superegm.{name}").register(sub)
+  for module in discover().values():
+    module.register(sub)
+  if FAULTS:  # every command exits 1 naming the first faulty module (U32)
+    run = fault_run(FAULTS[0][1])
+    for child in dict.fromkeys(sub.choices.values()):
+      set_run(child, run)
   add_handoff_flag(parser)
   return parser
 
 
+def set_run(parser, run) -> None:
+  """`run` as the default of `parser` and every nested subparser."""
+  parser.set_defaults(run=run)
+  for action in parser._actions:
+    if isinstance(action, argparse._SubParsersAction):
+      for child in dict.fromkeys(action.choices.values()):
+        set_run(child, run)
+
+
+_MODULES = discover()  # every subcommand module, imported once the names they use are defined (U32)
+SUBCOMMANDS = tuple(_MODULES)
+DEFAULT_CONFIG = json.loads(json.dumps({**CORE_CONFIG, **{k: v for m in _MODULES.values() for k, v in m.CONFIG_DEFAULTS.items()}}))
 from .review import PANEL_OF, ROLES  # noqa: E402  review.py imports this package, so it loads after the names it uses
 DEFAULT_CONFIG["reviewers"] = {kind: panel.split(",") for kind, panel in PANEL_OF.items()}  # one source: the spec's panels
 DEFAULT_CONFIG["reviewers"]["head"].append("astra")  # informational: the lane is seated by astra.enabled and astra.heads

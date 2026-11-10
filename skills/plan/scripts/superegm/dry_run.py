@@ -11,6 +11,7 @@ import superegm as core
 from superegm import apply, gate, scan
 
 WRITES = frozenset(["file", "state"])  # the store kinds this subcommand writes
+CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset(["file"])  # the skills whose card this subcommand accepts
 RULING_COMMENT_RE = re.compile(r"^\*\*(Ruling:|Decision D\d+:|Deviation)")  # a comment that would rule the unit (spec section 10)
 

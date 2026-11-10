@@ -5,22 +5,23 @@
 # the approval history, one handoff per opening, the latest-entry rule and the branch check (U20); the spec PR's
 # ingest once before the refusals, the refusal of an unsettled external finding, an external finding's carried copies
 # as one escalated pair discharged by its latest copy alone, and a re-approval of the same cycle reading that cycle
-# again and keeping the replaced entry's unnamed pairs (U26).
+# again and keeping the replaced entry's unnamed pairs (U26); `--amend-units` typed by hand opens and closes its own
+# card, the branch check reading `spec_blob` (U32).
 
 """superegm approve-spec: record the owner's approval of a converged spec (spec section 8)."""
 
-import hashlib
+import argparse
 import json
 from pathlib import Path
 import re
-import subprocess
 
 import superegm as core
-from superegm import close
+from superegm import close, runcard
 from superegm.review import Refusal, evaluate, findings_of, ingest_pr, latest_cycle, load_review, load_round, review_id, round_numbers
 
-WRITES = frozenset(["approvals", "handoffs", "state", "reviews"])  # the store kinds this subcommand writes
-SKILLS = frozenset(["review-spec", "review-plan", "integrate"])  # the skills whose card this subcommand accepts
+WRITES = frozenset(["approvals", "handoffs", "state", "reviews", "runcards"])  # the store kinds this subcommand writes
+CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
+SKILLS = frozenset(["review-spec", "review-plan", "integrate", "approve-spec"])  # the skills whose card this subcommand accepts
 CONFIG = ".superegm/config.json"
 UNITS_H2 = re.compile(r"^## (?:\d+\.?\s+)?Units\s*$")
 
@@ -33,7 +34,8 @@ def register(subparsers):
   p.add_argument("--void", action="store_true", help="void the approval after a fix-design finding")
   p.add_argument("--review", help="with --void: the review holding the fix-design finding")
   p.add_argument("--amend-units", dest="amend_units", action="store_true",
-                 help="re-approve rows appended to ## Units without a review round")
+                 help="re-approve rows appended to ## Units without a review round; typed without "
+                      "--runcard it opens and closes its own approve-spec-<6 hex>-<n> card")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -123,18 +125,9 @@ def before_units(text: str) -> str:
   return "".join(lines[:last + 1])
 
 
-def branch_holds(repo_root: Path, rel: str, sha256: str) -> bool:
-  """Whether a commit of the current branch's `git log -- <rel>` holds a blob of `rel` hashing to `sha256`."""
-  for commit in core.run_git(["log", "--format=%H", "--", rel], repo_root, check=False).split():
-    blob = subprocess.run(["git", "show", f"{commit}:{rel}"], cwd=str(repo_root), capture_output=True)
-    if blob.returncode == 0 and hashlib.sha256(blob.stdout).hexdigest() == sha256:
-      return True
-  return False
-
-
 def require_branch_holds(st: core.Store, repo_root: Path, rel: str, entry: dict) -> None:
   """Refuse a branch that never folded the history's last entry: no commit of it holds that entry's bytes."""
-  if not branch_holds(repo_root, rel, entry["sha256"]):
+  if core.spec_blob(repo_root, rel, entry["sha256"]) is None:
     raise core.HandoffError(f"approve-spec: fold {st.config['base']} first: approval {entry['sha256'][:7]} is not in this branch")
 
 
@@ -157,12 +150,22 @@ def spec_pr(repo: str, branch: str) -> int | None:
 
 
 def run(args):
-  card = core.require_runcard(args, SKILLS)
   spec = Path(args.design).expanduser().resolve()
   if not spec.is_file():
     raise core.HandoffError(f"approve-spec: spec {spec} does not exist")
   root = core.git_toplevel(spec)
   st = core.store(root)
+  if not (args.amend_units and not args.runcard):
+    return approve(args, st, spec, root, core.require_runcard(args, SKILLS))
+  # U32: `--amend-units` typed outside a skill opens and closes its own card (spec section 12)
+  args.runcard = core.open_runcard(st, "approve-spec", str(spec))
+  try:
+    return approve(args, st, spec, root, core.require_runcard(args, SKILLS))
+  finally:
+    runcard.run(argparse.Namespace(action="close", id=args.runcard, note=None))
+
+
+def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   slug = core.spec_slug(spec)
   if args.void or args.amend_units:  # an older handoff is frozen (spec section 7)
     try:

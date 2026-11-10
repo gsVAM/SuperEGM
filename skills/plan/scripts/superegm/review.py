@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest: the one review loop (spec section 8)."""
 
@@ -7,18 +7,25 @@ import argparse
 import contextlib
 from dataclasses import dataclass
 import difflib
-import hashlib
 import io
 import json
 import os
 from pathlib import Path
 import re
-import subprocess
 import sys
 
 import superegm as core
 
 WRITES = frozenset({"reviews", "foreman", "runcards", "review"})  # the store kinds this subcommand writes
+CONFIG_DEFAULTS = {  # its own config keys and init lines (U32)
+    "astra": {"enabled": False, "model": "gpt-6-astra", "effort": "xhigh", "heads": True, "heads_effort": "high"},
+    "ingest": {"severity_words": {"bug": "high", "issue": "medium", "nit": "low", "suggestion": "low"},
+               "human_role": "write"},  # `review ingest`: a thread's word map and the role a human's thread counts from
+}
+INIT_STEP = ("The Astra lane is off until you set astra.enabled to true; astra.heads (default true) then seats it on every head review.\n"
+             "`review ingest` reads PR review threads with ingest.severity_words (Devin's words by default) and counts a human's "
+             "thread from ingest.human_role (default write) up.")
+DOCTOR_CHECKS = None
 SKILLS = frozenset({"review-spec", "review-plan", "wave", "integrate"})  # the skills whose card this subcommand accepts
 KINDS = ("spec", "plan", "head", "integrate")
 REVIEWERS = ("design", "zoom-out", "comprehension", "readiness", "structural", "style",
@@ -236,29 +243,28 @@ def cited_line(location: str) -> int | None:
 
 
 def out_of_scope(rows: list, spans: list, location: str):
-  """The heading of the section a finding cites when no scope row holds its line, else None: a location
-  naming no line, or a line past the spec's end (another file's), is kept (D1 (a): the goldfish was briefed
-  to cite lines, and an unplaceable finding is not lost)."""
+  """The heading of the section a finding cites when no scope row holds its line, else None; in a scoped
+  round a location naming no line, or a line the spec does not hold, answers `none` (U32); a `whole` round
+  exempts every finding."""
+  if rows and rows[0][0] == "whole":
+    return None
   line = cited_line(location)
   index = None if line is None else section_of(spans, line)
-  if index is None or any(start <= line <= end for _, _, start, end in rows):
+  if index is None:
+    return "none"
+  if any(start <= line <= end for _, _, start, end in rows):
     return None
   return spans[index][0]
 
 
 def approved_text(spec: Path, approval: dict):
-  """The approved bytes as text: the spec at the approval's `commit` (voided or not), else at the first commit
-  of the current branch's `git log -- <spec>` whose blob hashes to its `sha256`; None when no commit holds them."""
+  """The approved bytes as text, through `core.spec_blob`: searched first from the approval's `commit` (voided
+  or not) when set, then from the current branch's `HEAD`; None when no commit holds them."""
   root = core.git_toplevel(spec.parent)
   rel = spec.resolve().relative_to(root.resolve()).as_posix()
-  show = lambda commit: subprocess.run(["git", "show", f"{commit}:{rel}"], cwd=str(root), capture_output=True)
-  if approval.get("commit") and (at := show(approval["commit"])).returncode == 0:
-    return at.stdout.decode("utf-8")
-  for commit in core.run_git(["log", "--format=%H", "--", rel], root, check=False).split():
-    blob = show(commit)
-    if blob.returncode == 0 and hashlib.sha256(blob.stdout).hexdigest() == approval["sha256"]:
-      return blob.stdout.decode("utf-8")
-  return None
+  if approval.get("commit") and (text := core.spec_blob(root, rel, approval["sha256"], ref=approval["commit"])) is not None:
+    return text
+  return core.spec_blob(root, rel, approval["sha256"])
 
 
 def scope_of(st: core.Store, review: dict, spec: Path) -> list:
@@ -574,7 +580,8 @@ def record_round(args) -> int:
       posted[-1].update({"outcome": word, "rewritten_from": "clean"})
       core.save_foreman(st, review["artifact"], data)
   for fid, _, section in refused:
-    core.journal(st, f"review record {rid} round {n} out of scope: {fid} ({section}) under {args.runcard}")
+    where = ": no line number" if section == "none" else f" ({section})"
+    core.journal(st, f"review record {rid} round {n} out of scope: {fid}{where} under {args.runcard}")
     print(f"record: {fid} out of scope ({section}): not recorded")
   core.journal(st, f"review record {rid} round {n} {reviewer} what_ran {rnd['what_ran']} under {args.runcard}")
   print(f"round {n} {reviewer} recorded, what_ran {rnd['what_ran']}")

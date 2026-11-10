@@ -23,7 +23,7 @@ EXTERNAL = {
     "interrupt": ("state-store",),
     "clean": ("destructive-local", "state-store"),
     "finishing-a-development-branch": ("github-write", "remote-branch", "state-store"),
-    "integrate": ("state-store", "start-session"),
+    "integrate": ("state-store", "start-session", "github-write"),
     "judges": ("start-session", "state-store", "github-write"),
     "orient": ("state-store",),
     "driver": ("start-session", "state-store"),

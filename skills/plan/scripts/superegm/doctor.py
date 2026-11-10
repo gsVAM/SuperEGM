@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24); the informational `plugins` and `mcp` lines and the profile line's plugin refusals (U27); the informational `model:` role table (U28); the informational `stall:` line (U31).
+# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24); the informational `plugins` and `mcp` lines and the profile line's plugin refusals (U27); the informational `model:` role table (U28); the informational `stall:` line (U31); the modules' DOCTOR_CHECKS lines after its own (U32).
 
 """superegm doctor: one line per wave prerequisite, `ok` or the refusal `launch` or `launch-builder`
 would give; read-only, no run card."""
@@ -12,12 +12,12 @@ from pathlib import Path
 
 import superegm as core
 from superegm.builder_token import app_lines, key_path, tool
-from superegm.foreman import runner_path
 from superegm.judges import judge_members
 from superegm.launch import app_login, builder_login, origin_problems, protection_problems
 from superegm.launch_builder import SENTINEL, UNSET, elephant_profile, launched_pairs, plugin_dirs, profile_problem
 
 WRITES = frozenset()  # doctor writes nothing
+CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # its own lines are `checks`' (U32)
 INFORMATIONAL = ("graphify", "scanning", "astra", "merge", "python3.12", "hooks", "core.hooksPath", "driver", "sleep", "root", "env",
                  "notify", "plugins", "mcp", "model", "stall")  # lines that never fail the exit
 MERGE = ("gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset "
@@ -47,15 +47,16 @@ def checks(config, repo_root, token):
   """The lines after `config`: `launch`'s and `launch-builder`'s own predicates, each line `ok…` or the
   refusal they would give (a check's HandoffError or GhError text is its line). On the machine-account
   path the order is owner, origin, token, builder, role, scopes, protection, merge, profile, plugins, mcp, gh,
-  environment, graphify, astra; the builder, role, scopes and protection lines need the token and are absent without it.
+  environment; the builder, role, scopes and protection lines need the token and are absent without it.
   On the App path: owner, origin, credential, key, openssl, artifacts_dir, app, permissions, token,
-  installation, scanning, protection, merge, profile, plugins, mcp, gh, environment, graphify, astra; the four App lines are
-  absent after a failing key or openssl. The environment line is absent after a failing gh line; graphify,
-  astra, scanning and merge are informational and never fail, as are python3.12, hooks and core.hooksPath (U25)
+  installation, scanning, protection, merge, profile, plugins, mcp, gh, environment; the four App lines are
+  absent after a failing key or openssl. The environment line is absent after a failing gh line;
+  scanning and merge are informational and never fail, as are python3.12, hooks and core.hooksPath (U25)
   and plugins and mcp (U27, the profile line carrying a listed plugin's refusal), and stall, the watchdog's
-  `builder.stall_minutes` after astra (U31).
-  The five driver lines (driver, sleep, root, env, notify) follow, informational too, and the `model:`
-  role table (U28) closes every form, informational."""
+  `builder.stall_minutes` after environment (U31).
+  The five driver lines (driver, sleep, root, env, notify) follow, informational too, then the `model:`
+  role table (U28), informational, then each module's DOCTOR_CHECKS lines in discovery order: foreman's
+  astra and orient's graphify, informational (U32)."""
   repo, base, owners, team, app = config["repo"], config["base"], config["owners"], config["owner_team"], config["builder"]["app"]
   lines, found = [], {}
 
@@ -158,10 +159,6 @@ def checks(config, repo_root, token):
   check("gh", gh)
   if "gh" in found:
     check("environment", lambda: environment_problem(repo_root, found["gh"], bool(app)) or "ok")
-  graphify = shutil.which("graphify")
-  lines.append(("graphify", f"ok ({graphify})" if graphify else "not on PATH (informational)"))
-  runner = runner_path()
-  lines.append(("astra", f"ok ({runner})" if runner else "not installed (heads will record not run)"))
   lines.append(("stall", f"{config['builder']['stall_minutes']} min"))  # the watchdog's bound (U31)
   python = shutil.which("python3.12")  # this repository's own prerequisite, not the gate's (U25)
   lines.append(("python3.12", f"ok ({python})" if python else "not on PATH (informational)"))
@@ -173,6 +170,9 @@ def checks(config, repo_root, token):
     lines.extend(role_lines(config))
   except (KeyError, TypeError, AttributeError) as error:  # a malformed role key: informational, the other lines still print
     lines.append(("model", f"unreadable ({type(error).__name__}: {error})"))
+  for module in core.discover().values():  # the modules' own lines, after doctor's, in discovery order (U32)
+    if module.DOCTOR_CHECKS:
+      lines.extend(module.DOCTOR_CHECKS(config, repo_root, token))
   return lines
 
 

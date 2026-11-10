@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03); the review loop and approve-spec (U04); the `acceptable:` line (U35).
+# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03); the review loop and approve-spec (U04); the `acceptable:` line (U35); the by-hand card and the lineless path (U32).
 
 """U04: the review loop (`review open|record|settle|status|rule`) and `approve-spec` (spec section 8)."""
 
@@ -801,7 +801,7 @@ def test_approve_spec_records_the_escalated_pairs(world, named):
   assert code == 0 and (f"approve-spec: 1 escalated finding(s) await the owner: {pair}" in out) is not named
   assert approve(world, spec, cid, "--yes")[0] == 0 and approval(world)["entries"][-1]["escalated"] == ([] if named else [pair])
   spec, cid, rid3 = opened(world, text=text.replace("Text.", "Changed."))
-  rounds(world, rid3, cid, [HIGH(1)])
+  rounds(world, rid3, cid, [[F("design", 1, 1, loc="§1 line 3")]])
   assert settle(world, rid3, "design-1-1", "escalated", cid)[0] == 0 and approve(world, spec, cid, "--leavemealone")[0] == 0
   assert (rid3, approval(world)["entries"][-1]["escalated"]) == (f"spec-{SLUG}-c3", [f"{rid3}:design-1-1"])
 
@@ -882,6 +882,24 @@ def test_approve_spec_amend_units(world):
   assert code == 1 and "approve-spec: a line outside ## Units changed" in out and approval(world) == whole
   store(world.repo).path("approvals", SLUG).unlink()
   assert "approve-spec: no approval to amend" in approve(world, spec, icid, "--amend-units")[1]
+
+
+def test_amend_units_typed_by_hand_opens_and_closes_its_own_card(world):
+  """Typed outside a skill, `--amend-units` opens and closes its own card, `approve-spec-<6 hex>-<n>` (U32)."""
+  spec, cid, rid = converged_spec(world)
+  assert approve(world, spec, cid, "--yes")[0] == 0
+  first = approval(world)["entries"][-1]
+  spec.write_text(SPEC + "| U02 | more (from integrate, review spec-x-integrate-c1) | U01 | S |\n", encoding="utf-8")
+  hid = first["handoff_id"]
+  card_of = lambda n: json.loads(hstore(world).path("runcards", f"approve-spec-{hid[-6:]}-000{n}").read_text(encoding="utf-8"))
+  code, out = world.run("approve-spec", "--spec", str(spec), "--amend-units", card=None)
+  last = approval(world)["entries"][-1]
+  assert code == 0 and (last["kind"], last["runcard"]) == ("amend-units", f"approve-spec-{hid[-6:]}-0001"), out
+  assert (card_of(1)["skill"], card_of(1)["artifact"]) == ("approve-spec", str(spec)) and card_of(1)["closed_at"]
+  spec.write_text(spec.read_text(encoding="utf-8").replace("Text.", "Changed."), encoding="utf-8")
+  code, out = world.run("approve-spec", "--spec", str(spec), "--amend-units", card=None)
+  assert code == 1 and "a line outside ## Units changed" in out and card_of(2)["closed_at"]
+  assert "runcard: --runcard is required" in world.run("approve-spec", "--spec", str(spec), "--yes", card=None)[1]
 
 
 def test_amend_units_and_void_act_on_the_latest_entry_alone(world):
@@ -1078,8 +1096,9 @@ def test_review_scope_derives_the_round_from_the_approval_commit(world):
 
 SPEC4 = SPEC.replace("## 2. Units", "## 2. Goals\n\nGoals.\n\n## 3. Risks\n\nRisks.\n\n## 4. Units")
 
-@pytest.mark.parametrize("location, kept", [("§1 line 5", True), ("line 2", True), ("docs/specs/x.md:13", False), ("§1", True)])
-def test_record_refuses_out_of_scope_findings_and_stores_them(world, location, kept):
+@pytest.mark.parametrize("location, kept, section", [("§1 line 5", True, None), ("line 2", True, None), ("docs/specs/x.md:13", False, "## 3. Risks"),
+                                                     ("§1", False, "none"), ("skills/x.py:500", False, "none")])
+def test_record_refuses_out_of_scope_findings_and_stores_them(world, location, kept, section):
   spec, cid, rid = converged_spec(world, SPEC4); assert approve(world, spec, cid, "--yes")[0] == 0
   spec.write_text(SPEC4.replace("Text.", "Changed."), encoding="utf-8")
   rid2 = reopen(world, "spec", cid)
@@ -1088,8 +1107,9 @@ def test_record_refuses_out_of_scope_findings_and_stores_them(world, location, k
   rnd = rjson(world, rid2, "round-1.json")
   assert code == 0 and rnd["out_of_scope"] == ([] if kept else [line]) and len(rnd["reviewers"]["design"]["findings"]) == int(kept)
   assert rnd["scope"] == [["neighbour", "(preamble)", 1, 2], ["changed", "## 1. Intent", 3, 6], ["neighbour", "## 2. Goals", 7, 10]]
-  assert ("record: design-1-1 out of scope (## 3. Risks): not recorded" in out) is not kept
-  assert ("out of scope: design-1-1" in (world.artifacts / "journal.md").read_text(encoding="utf-8")) is not kept
+  assert (f"record: design-1-1 out of scope ({section}): not recorded" in out) is not kept
+  journal = (world.artifacts / "journal.md").read_text(encoding="utf-8")
+  assert ("out of scope: design-1-1 (## 3. Risks)" in journal) is (section == "## 3. Risks") and ("out of scope: design-1-1: no line number" in journal) is (section == "none")
 
 
 # ---------------------------------------------------------------- S24: `review settle --file`, all or nothing (U19)
@@ -1117,7 +1137,7 @@ def test_cap_question_names_the_scope(world):
   spec, cid, rid = converged_spec(world); assert approve(world, spec, cid, "--yes")[0] == 0
   spec.write_text(SPEC.replace("Text.", "Changed."), encoding="utf-8")
   rid2 = reopen(world, "spec", cid)
-  rounds(world, rid2, cid, [HIGH(n) for n in range(1, 6)])
+  rounds(world, rid2, cid, [[F("design", n, 1, loc="§1 line 3")] for n in range(1, 6)])
   assert cap_question(world, rid2, cid)[1].startswith(f"## Q1 {rid2} is at its cap (scope: (preamble), ## 1. Intent, ## 2. Units)\n")
 
 
@@ -1180,7 +1200,10 @@ def test_record_keeps_a_line_past_the_specs_end(world, approved):
   line = "design-1-1 | high | skills/x.py:500 | regression: no | claim"
   code, out = record(world, rid, 1, "design", [line], cid)
   rnd = rjson(world, rid, "round-1.json")
-  assert code == 0 and rnd["out_of_scope"] == [] and len(rnd["reviewers"]["design"]["findings"]) == 1 and "out of scope" not in out
+  if approved:  # U32: a scoped round's finding citing a line the spec does not hold is out of scope
+    assert code == 0 and rnd["out_of_scope"] == [line] and rnd["reviewers"]["design"]["findings"] == [] and "out of scope" in out
+  else:
+    assert code == 0 and rnd["out_of_scope"] == [] and len(rnd["reviewers"]["design"]["findings"]) == 1 and "out of scope" not in out
 
 
 # ---------------------------------------------------------------- U21: external-review ingest

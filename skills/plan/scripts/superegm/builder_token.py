@@ -18,6 +18,7 @@ from urllib.request import Request, urlopen
 import superegm as core
 
 WRITES = frozenset()  # builder-token writes nothing
+CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 API = "https://api.github.com"
 
 

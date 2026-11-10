@@ -109,7 +109,7 @@ def test_superpowers_files_are_kept_under_the_section_14_names() -> None:
 STUBS = {  # §14 effects of the new typed skills
     "review-plan": ["state-store", "start-session"], "file": ["github-write", "state-store"],
     "interrupt": ["state-store"], "clean": ["destructive-local", "state-store"],
-    "integrate": ["state-store", "start-session"],
+    "integrate": ["state-store", "start-session", "github-write"],
     "judges": ["start-session", "state-store", "github-write"],
     "orient": ["state-store"],
     "driver": ["start-session", "state-store"],

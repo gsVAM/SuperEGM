@@ -17,6 +17,7 @@ from pathlib import Path
 import superegm as core
 
 WRITES = frozenset({"driver", "runcards", "launches"})
+CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset({"driver"})
 ACTIONS = ("tick", "install", "uninstall", "status", "reset")
 LABEL = "com.superegm.driver"

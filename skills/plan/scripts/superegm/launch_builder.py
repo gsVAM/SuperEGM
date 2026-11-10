@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch, started
 detached and recorded `running`."""
@@ -22,6 +22,21 @@ from superegm.launch import builder_email, builder_login, load_launches, termina
 from superegm.review_plan import SPEC_LINE_RE
 
 WRITES = frozenset(["launches", "orient_unit"])  # the store kinds this subcommand writes
+CONFIG_DEFAULTS = {  # its own config key (U32)
+    "builder": {"profile_dir": "~/.superegm/builder-profile", "model": "claude-opus-5-5", "effort": "medium",
+                "permission_mode": "acceptEdits", "gh_token_env": "SUPEREGM_BUILDER_TOKEN",
+                "allowed_tools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git add:*)", "Bash(git commit:*)",
+                                  "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git mv:*)",
+                                  "Bash(git rm:*)", "Bash(gh pr create:*)", "Bash(gh pr edit:*)",
+                                  "Bash(gh pr comment:*)", "Bash(gh issue comment:*)", "Bash(gh pr view:*)",
+                                  "Bash(pytest:*)"],
+                "plugins": [],  # <name>@<marketplace> ids, each passed by --plugin-dir (U27)
+                "mcp": {},  # mcpServers form, written to launches/<unit>_r<n>_mcp.json (U27)
+                "max_subagent_calls": 12,  # the orders' budget when allowed_tools carries Agent (U27)
+                "stall_minutes": 30,  # a running launch with no newer commit of its own this long is stalled (U31)
+                "app": None},  # or {app_id, slug, private_key_env}: the builder as a GitHub App (spec section 11)
+}
+INIT_STEP, DOCTOR_CHECKS = "", None  # its init lines stay numbered in init's own text (U32)
 SKILLS = frozenset(["wave"])  # the skills whose card this subcommand accepts
 PROMPT_COMMENT_RE = re.compile(r"^\*\*(Deviation \([a-z]+\)|Decision D\d+|Ruling):\*\*")
 # The PR body's DoD-results form (the orders): `### DoD <n>` then one fenced block per item.
@@ -404,29 +419,25 @@ def segment_heads(command: str) -> list:
 
 def spec_range_text(repo_root: Path, store, body_text: str, ref: str) -> str:
   """The spec range the body cites (spec section 7): its `Spec:` line's `start..end` read at the commit
-  holding the bytes the marker's sha256 names: the history entry carrying that sha, else the first commit
-  of `git log <ref> -- <rel>` whose blob hashes to it; no such commit refuses."""
+  holding the bytes the marker's sha256 names, through `core.spec_blob`: first searched from each history
+  entry carrying that sha (the first commit of `git log <entry commit> -- <rel>` holding those bytes, which
+  may be an earlier commit than the entry's own; the bytes are the same), else from `<ref>`; no such
+  commit refuses."""
   marker, match = body.MARKER_RE.match(body_text), SPEC_LINE_RE.search(body_text)
   if not marker or not match:
     raise core.HandoffError("spec range: the body carries no marker or no `Spec:` range")
   sha, rel, start, end = marker.group(3), match.group(1), int(match.group(2)), int(match.group(3))
-  def show(commit):
-    with core.hook_free() as pairs:
-      return subprocess.run(["git", *pairs, "show", f"{commit}:{rel}"], cwd=str(repo_root), capture_output=True)
-  holds = lambda blob: blob.returncode == 0 and hashlib.sha256(blob.stdout).hexdigest() == sha
   text = None
   for entry in core.load_approvals(store, Path(rel)):
-    if entry.get("sha256") == sha and entry.get("commit") and holds(blob := show(entry["commit"])):
-      text = blob.stdout
-      break
-  if text is None:
-    for commit in core.run_git(["log", "--format=%H", ref, "--", rel], repo_root, check=False).split():
-      if holds(blob := show(commit)):
-        text = blob.stdout
+    if entry.get("sha256") == sha and entry.get("commit"):
+      text = core.spec_blob(repo_root, rel, sha, ref=entry["commit"])
+      if text is not None:
         break
   if text is None:
+    text = core.spec_blob(repo_root, rel, sha, ref=ref)
+  if text is None:
     raise core.HandoffError(f"spec range: no commit holds {sha[:7]}")
-  return "\n".join(text.decode("utf-8").splitlines()[start - 1:end]) + "\n"
+  return "\n".join(text.splitlines()[start - 1:end]) + "\n"
 
 
 def filed_body(state, unit):
@@ -478,19 +489,30 @@ def add_worktree(repo_root, store, unit, rnd, branch, pr):
   """A fresh worktree for the launch on the unit's branch: round 1 from `refs/superegm/base`,
   later rounds at the PR tip (`refs/superegm/pr/<n>`, fetched by `prepare`) or, with no PR yet
   (decision point 3's `relaunch` after an exit without one), at the retained local branch, after
-  detaching the earlier launches' worktrees (nothing in them is removed; that is `clean`'s)."""
+  detaching the earlier launches' worktrees (nothing in them is removed; that is `clean`'s).
+  A re-run after a failure before the spawn (U32): an `r<n>` already on the branch refuses before any
+  switch (a builder may run there); a detached one is switched to the branch, no `worktree add`, the
+  branch moved first to where a fresh launch would start it (round 1 `refs/superegm/base`, later the PR tip)."""
   path = store.path("worktrees", unit, f"r{rnd}")
   path.parent.mkdir(parents=True, exist_ok=True)
-  if rnd == 1:
+  reuse = path.is_dir() and path.resolve() in core.registered_worktrees(repo_root)
+  if reuse and core.run_git(["branch", "--show-current"], path).strip() == branch:
+    raise core.HandoffError(f"worktree {path} is on {branch}: detach it by hand once no builder runs there")
+  if rnd == 1 and not reuse:
     core.run_git(["worktree", "add", "-b", branch, str(path), "refs/superegm/base"], repo_root)
     return path
   for earlier in core.registered_worktrees(repo_root):
-    if earlier.is_relative_to(path.parent.resolve()) and earlier.is_dir():
+    if earlier.is_relative_to(path.parent.resolve()) and earlier.is_dir() and earlier != path.resolve():
       core.run_git(["switch", "--detach"], earlier)
   core.run_git(["worktree", "prune"], repo_root, check=False)
-  if pr:
+  if rnd == 1:
+    core.run_git(["branch", "-f", branch, "refs/superegm/base"], repo_root)
+  elif pr:
     core.run_git(["branch", "-f", branch, f"refs/superegm/pr/{pr}"], repo_root)
-  core.run_git(["worktree", "add", str(path), branch], repo_root)
+  if reuse:
+    core.run_git(["switch", branch], path)
+  else:
+    core.run_git(["worktree", "add", str(path), branch], repo_root)
   return path
 
 
