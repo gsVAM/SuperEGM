@@ -131,15 +131,17 @@ Each works one approach in its own context and reports it to you by message; the
 
 **The wait.** The same for each spawn: note one Bash `date` at the spawn and end your turn, with no `sleep`.
 Before ending it, tell the owner what you are waiting on: a split-pane mode sends you nothing, so only the owner's message starts your next turn.
-After the cartographer's spawn, tell the owner you are waiting on the cartographer: if its notes are not in, their message ten minutes or more after the spawn takes the fallback, and `fallback` typed takes it at once.
+After the cartographer's spawn, tell the owner you are waiting on the cartographer: if it has sent you nothing at all, their message ten minutes or more after the spawn takes the fallback; if it has written but its notes are late, you ask it once and keep waiting; `fallback` typed takes it at once.
 After the three's spawn, tell the owner you are waiting on the three: their message ten minutes or more after the spawn has you ask each silent one once, then write its approach `not reported`; there is no fallback once the three run.
-Read your inbox at its next turn, with a second Bash `date` to tell how long it has been: the mailbox shows no arrival time, so a report in your inbox at that turn is merged, whenever it came: ten minutes counts only when the inbox holds none (a report within ten minutes is the ordinary case; one found later still proves the mailbox).
+Read your inbox at its next turn, with a second Bash `date` to tell how long it has been: the mailbox shows no arrival time, so a report in your inbox at that turn is merged, whenever it came: ten minutes counts per teammate, only for one whose report is not in (a report within ten minutes is the ordinary case; one found later still proves the mailbox).
 At a next turn less than ten minutes after the `date` with nothing in the inbox, answer what the owner asked, repeat the one-line notice and end your turn again.
 At such a turn with some of the three's reports in, merge the reports that are in, repeat the notice naming the silent ones, and end your turn again.
+That partial merge only holds the reports side by side: rank no question and ask the owner nothing until all three are in or written `not reported`.
 While you wait, a cartographer message that is not its notes (a question, a progress line) is no report: answer it if it asks, and keep waiting on its notes as above.
 `fallback` typed while waiting on the cartographer takes the fallback at once, whatever the time, if its notes are not in your inbox: send it a shutdown request first.
 The cartographer's notes already in your inbox win over `fallback` typed: merge them and spawn the three, and tell the owner the mailbox works.
-A next turn ten minutes or more after the `date` with the cartographer's notes not in means the mailbox is not working (a split-pane mode): send it a shutdown request and take the fallback.
+A next turn ten minutes or more after the `date` with no message of any kind from the cartographer means the mailbox is not working (a split-pane mode): send it a shutdown request and take the fallback.
+A next turn ten minutes or more after the `date` with the cartographer's notes not in but another message from it received: the mailbox works, so ask it once for its notes and keep waiting, with no fallback but `fallback` typed; tell the owner so.
 After the shutdown request, once you take the fallback, a teammate's later message is not merged: the subagents' returns stand in its place.
 A next turn ten minutes or more after the `date` with none from one of the three means one message asking it; still none at the turn after, write that approach `not reported`.
 Then, after the asking message, tell the owner again: you have asked the silent ones, and their next message writes each still silent `not reported`; then end your turn.
