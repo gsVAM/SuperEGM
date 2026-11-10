@@ -719,6 +719,25 @@ def test_landed_rows_and_the_issue_field_in_the_plan_prose(path, needle):
   assert needle in (ROOT / path).read_text(encoding="utf-8"), f"{path} lacks {needle!r}"
 
 
+TIER_PROSE = [
+  ("skills/plan/references/handoff_plan.md", "| Tier | doable |"),
+  ("skills/plan/references/handoff_plan.md", "| Tier | Optional; `difficult`, `doable` or `easy`, set by the author"),
+  ("skills/plan/references/handoff_plan.md", "`difficult` when the Steps leave a design choice open, the unit holds a novel algorithm or an unverified platform behaviour, or it consumes the interfaces of more than one subsystem"),
+  ("skills/plan/references/handoff_plan.md", "`easy` when the Steps are mechanical with pinned signatures and no open choice; else `doable`"),
+  ("skills/plan/references/handoff_plan.md", "a section without it is doable; another word is refused as a bad `Size` is"),
+  ("skills/plan/references/handoff_plan.md", "picks the builder's model and effort (`builder.tiers`; doable is `builder.model` and `builder.effort`)"),
+  ("skills/plan/references/issue_template.md", "· Size: {{size}} · Tier: {{tier}}"),
+  ("skills/plan/references/issue_template.md", "| `{{tier}}` | The unit's tier, `doable` when the section has no `Tier:` row. |"),
+  ("skills/plan/references/issue_template.md", "A repository `issue_template` written before 1.2 lacks `{{tier}}`: its next `graph --plan` refuses it with `issue template lacks {{tier}}` until the line gains one"),
+  ("skills/plan/SKILL.md", "Set `Tier:` on every section"),
+  ("skills/plan/SKILL.md", "a wrong tier costs rounds")]
+
+
+@pytest.mark.parametrize("path, needle", TIER_PROSE)
+def test_the_tier_field_in_the_plan_prose(path, needle):
+  assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
+
+
 def test_every_scan_call_in_the_plan_skills_names_the_plan():
   """`scan` takes no card and no spec: without `--plan` a 1.2 store resolves no handoff (change-review-1-2)."""
   for path in ("skills/plan/SKILL.md", "skills/review-plan/SKILL.md"):
