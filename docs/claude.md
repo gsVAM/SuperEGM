@@ -33,12 +33,18 @@ the skills and the helper rely on; do not re-derive it in a session.
   profile without SubagentStart hooks.
 - The foreman (`superegm:foreman`, tools `[Agent, Bash, Read, Grep, Glob]`, `omitClaudeMd: true`)
   is a **per-unit elephant**: it carries one unit's context across rounds and dispatches that
-  head's goldfish, which stay zero-context and read-only. Goldfish never spawn; builders never
-  spawn; a foreman dispatches goldfish and nothing else.
+  head's goldfish, which stay zero-context and read-only. Goldfish never spawn; a builder never
+  spawns unless `config.builder.allowed_tools` carries `Agent` (the owner's opt-in, below); a
+  foreman dispatches goldfish and nothing else.
 - A per-dispatch `model` override on a `model: inherit` adapter is honoured; `effort` is passed
-  only where the Agent tool offers it. The panel goldfish run on `SUPEREGM_GOLDFISH_MODEL` at
-  `SUPEREGM_GOLDFISH_EFFORT` (`skills/review-spec/references/review_loop.md`); each record keeps
-  the requested and the effective pair.
+  only where the Agent tool offers it. The panel goldfish run on `config.reviewers.model` at
+  `config.reviewers.effort` (`opus` / `xhigh` by default, passed on each dispatch as the adapter's
+  override); `SUPEREGM_GOLDFISH_MODEL` and `SUPEREGM_GOLDFISH_EFFORT`, when set, override those for
+  the session and never reach a judge, `inherit` meaning pass nothing
+  (`skills/review-spec/references/review_loop.md`); each record keeps the requested and the
+  effective pair. The judges run on their member's model and effort (`judges.members`: `fable` at
+  `xhigh`, `astra` at `xhigh`, `opus` at `max`), the foreman's Astra lane at `astra.heads_effort`
+  (`high`), the elephant's Astra lanes at `astra.effort`; `doctor` prints one `model:` line per role.
 
 ## Background commands
 
@@ -70,13 +76,15 @@ call (`--timeout 540` under a 600000 ms limit) and waits for it, so nothing outl
   which loads that file's servers and no other configuration's; the record of the plugins, their
   hook events, the managed plugins and the server names is `launches/<unit>_r<n>_plugins.json`.
   The launched environment carries `ENABLE_CLAUDEAI_MCP_SERVERS=false`, belt and braces over the
-  builder profile's `settings.json`, which holds `syncClaudeAiPlugins` false and `disableClaudeAiConnectors` true.
+  builder profile's `settings.json`, which holds `syncClaudeAiPlugins` false and must hold `disableClaudeAiConnectors` true.
 - A builder's model and effort come from its tier (`builder.tiers`, or `builder.model` and
   `builder.effort` for a doable unit); the effort is passed as `--effort <level>`, the session flag `-p` honours,
   and `CLAUDE_CODE_EFFORT_LEVEL`, which would beat the flag, is unset in the launched environment.
 - The builder profile (`config.builder.profile_dir`) is created empty by the owner, with no
-  plugins, no `CLAUDE.md` and no hooks (a `settings.json` with a `hooks` key); `launch-builder`
-  and `superegm doctor` refuse otherwise. The builder's allow-list is
+  plugins, no `CLAUDE.md`, no hooks (a `settings.json` with a `hooks` key), no `skills/` or
+  `commands/` directory, and a `settings.json` with `disableClaudeAiConnectors` set to true; each
+  plugin of `config.builder.plugins` needs a `user` entry in the elephant profile and must not be
+  managed in the builder profile; `launch-builder` and `superegm doctor` refuse otherwise. The builder's allow-list is
   `config.builder.allowed_tools`; a bare `Skill` and an unrestricted `Bash` are refused. `Agent`
   is the owner's opt-in (absent from the default list): with it, the builder may spawn the
   platform's default subagents, each under the builder's own allow-list and at the builder's model
@@ -113,17 +121,24 @@ call (`--timeout 540` under a 600000 ms limit) and waits for it, so nothing outl
   and the builder identity's variable). A tick records each launch in `driver/<handoff>.json` before
   starting it, and launches `claude -p` with `/superegm:wave <spec> --handoff <id> --leavemealone`
   in its own session and process group; the plist sets `AbandonProcessGroup` (the systemd unit
-  `KillMode=process`), so the reaping of the exited tick leaves the session alive. A tick chains
-  nothing and merges nothing.
+  `KillMode=process`), so the reaping of the exited tick leaves the session alive. That session runs
+  `--permission-mode bypassPermissions` with no allow-list and no prompt, under the credential the
+  env file names (the accepted residual: the driver goes only on a machine and repositories the
+  owner would let a session act on alone). A tick starts at most one session per registered store
+  and loops over every store, so several stores' sessions may run at once. A tick chains nothing
+  and merges nothing.
 
 ## Accepting below the cap
 
 - The owner may accept a review below the cap when only mediums and lows stand: `review rule
-  --ruling accept --owner`, refused for a high, a regression, an external finding or an open
-  decision. The journal records `accepted before the cap by the owner (<n> medium, <m> low)`, and
+  --ruling accept --owner`. It is refused with `--judges`, on an `integrate` review, when no
+  medium stands to accept, and for an unsettled high, a regression, an unsettled external medium,
+  an unsettled high or medium in a later round, or, on a head, a pending decision of the unit at
+  any point but 5. The journal records `accepted before the cap by the owner (<n> medium, <m> low)`, and
   `review status` prints an `acceptable:` line (`yes (<n> medium, <m> low)`) while it is allowed. On a pull
   request head the wave asks it as the fifth decision point, `decision open --point 5` (options
-  `accept` and `revise`).
+  `accept` and `revise`), and the ruling names that decision, `review rule --ruling accept --owner
+  --decision <id>`, refused without it.
 
 ## Paths and permissions
 
