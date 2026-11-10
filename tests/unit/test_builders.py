@@ -491,10 +491,29 @@ def test_launch_builder_starts_the_launch_as_its_one_behaviour(world, monkeypatc
   s, card, hid, _ = seed(world); monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder"); monkeypatch.setattr(superegm, "boot_id", lambda: "boot-1")
   assert world.run("launch", "--runcard", card)[0] == 0 and world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)[1].strip().endswith("U07 launch 1 running (pid 4242)")
   entry, (command, log, env) = launches_of(s)[0], SPAWNED[0]
-  assert command == ["/bin/sh", "-c", entry["command"]] and log == s.path("launches", f"{UNIT}_r1.log") and (entry["boot_id"], entry["pid"], entry["status"], entry["model"], entry["effort"]) == ("boot-1", 4242, "running", "claude-opus-5-5", "medium")
+  assert command == ["/bin/sh", "-c", entry["command"]] and log == s.path("launches", f"{UNIT}_r1.log") and (entry["boot_id"], entry["pid"], entry["status"], entry["model"], entry["effort"], entry["tier"]) == ("boot-1", 4242, "running", "claude-opus-5-5", "medium", "doable")
   assert "record-launch: --exit is required: launch-builder records the launch" in world.run("record-launch", "--unit", UNIT, "--runcard", card)[1]
   monkeypatch.setattr(superegm, "boot_id", lambda: "boot-2"); assert world.run("launch-builder", "--unit", UNIT, "--round", 2, "--runcard", card)[0] == 0
   assert [e["status"] for e in launches_of(s)] == ["interrupted (reboot)", "running"]
+
+
+@pytest.mark.parametrize("units, tier, model, effort", [
+  (None, "doable", "claude-opus-5-5", "medium"),
+  ({"units": {UNIT: {}}}, "doable", "claude-opus-5-5", "medium"),
+  ({"units": {UNIT: {"tier": "difficult"}}}, "difficult", "claude-opus-5-5", "high"),
+  ({"units": {UNIT: {"tier": "easy"}}}, "easy", "claude-sonnet-5-5", "medium")])
+def test_launch_builder_picks_the_pair_by_the_units_tier(world, monkeypatch, spawn_fake, units, tier, model, effort):
+  """U33: the launch reads the unit's tier from `handoff_units.json` (doable when the store has none, or the unit no
+  `tier`), passes `builder.tiers`' pair for it and writes `tier` with the `running` entry; no body parse."""
+  s, card, hid, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  units is not None and put(s.path("units"), json.dumps(units))
+  assert world.run("launch", "--runcard", card)[0] == 0
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)
+  assert code == 0, out
+  entry = launches_of(s)[0]
+  assert (entry["tier"], entry["model"], entry["effort"]) == (tier, model, effort)
+  assert f"--model '{model}'" in entry["command"] and entry["command"].split("--effort ", 1)[1].split()[0].strip("'") == effort
 
 
 @pytest.mark.parametrize("result, effective, cost", [
@@ -797,14 +816,14 @@ def test_launch_builder_loads_the_builder_profile_settings_only():
   SessionStart hooks; the launched command carries `--setting-sources user`: the builder profile's settings alone (spec section 11)."""
   from superegm.launch_builder import command_line
   cfg = {"builder": {**DEFAULT_CONFIG["builder"], "profile_dir": "/p"}}
-  line = command_line(cfg, "/wt", "/prompt.md", "/result.json", "wave-0001", ["Read"], "/usr/local/bin/gh", "b", "b@x", [], "/m.json")
+  line = command_line(cfg, "/wt", "/prompt.md", "/result.json", "wave-0001", ["Read"], "/usr/local/bin/gh", "b", "b@x", [], "/m.json", superegm.tier_pair(cfg, "doable"))
   assert " --permission-mode 'acceptEdits' --setting-sources user --mcp-config '/m.json' --strict-mcp-config --allowedTools 'Read' " in line, line
 
 
 def test_command_line_carries_the_dirs_the_mcp_file_and_the_switch():
   from superegm.launch_builder import command_line
   cfg = {"builder": {**DEFAULT_CONFIG["builder"], "profile_dir": "/p"}}
-  call = lambda dirs, mcp, **kw: command_line(cfg, "/wt", "/prompt.md", "/result.json", "wave-0001", ["Read"], "/usr/local/bin/gh", "b", "b@x", dirs, mcp, **kw)
+  call = lambda dirs, mcp, **kw: command_line(cfg, "/wt", "/prompt.md", "/result.json", "wave-0001", ["Read"], "/usr/local/bin/gh", "b", "b@x", dirs, mcp, superegm.tier_pair(cfg, "doable"), **kw)
   line = call(["/c/ponytail/5.3.3", "/c/x/1"], "/l/U07_r1_mcp.json")
   assert " CLAUDE_CONFIG_DIR='/p' ENABLE_CLAUDEAI_MCP_SERVERS=false GH_TOKEN=" in line, line
   assert " --setting-sources user --plugin-dir '/c/ponytail/5.3.3' --plugin-dir '/c/x/1' --mcp-config '/l/U07_r1_mcp.json' --strict-mcp-config --allowedTools 'Read' " in line, line
@@ -820,7 +839,8 @@ def test_the_wrapper_traps_term_and_writes_stalled(tmp_path, monkeypatch):
   c = fake / "claude"; c.write_text("#!/bin/sh\nexec sleep 30\n", encoding="utf-8"); c.chmod(0o755)
   monkeypatch.setenv("PATH", f"{fake}:{os.environ['PATH']}")
   result = tmp_path / "r.json"
-  line = command_line({"builder": {**DEFAULT_CONFIG["builder"], "profile_dir": str(tmp_path)}}, tmp_path, tmp_path / "p.md", result, "wave-1", ["Read"], "/usr/local/bin/gh", "b", "b@x", [], tmp_path / "m.json")
+  cfg = {"builder": {**DEFAULT_CONFIG["builder"], "profile_dir": str(tmp_path)}}
+  line = command_line(cfg, tmp_path, tmp_path / "p.md", result, "wave-1", ["Read"], "/usr/local/bin/gh", "b", "b@x", [], tmp_path / "m.json", superegm.tier_pair(cfg, "doable"))
   wrapper = subprocess.Popen(["/bin/sh", "-c", line], start_new_session=True)
   time.sleep(1)
   os.killpg(wrapper.pid, signal.SIGTERM)
@@ -831,7 +851,7 @@ def test_the_wrapper_traps_term_and_writes_stalled(tmp_path, monkeypatch):
 def test_launch_carries_the_effort_flag_and_unsets_the_session_level():
   from superegm.launch_builder import command_line
   cfg = {"builder": {**DEFAULT_CONFIG["builder"], "profile_dir": "/p", "model": "claude-opus-5-5", "effort": "medium"}}
-  line = command_line(cfg, "/wt", "/prompt.md", "/result.json", "wave-0001", ["Read"], "/usr/local/bin/gh", "b", "b@x", [], Path("/m.json"))
+  line = command_line(cfg, "/wt", "/prompt.md", "/result.json", "wave-0001", ["Read"], "/usr/local/bin/gh", "b", "b@x", [], Path("/m.json"), superegm.tier_pair(cfg, "doable"))
   assert " -u GITHUB_TOKEN -u CLAUDE_CODE_EFFORT_LEVEL " in line and " --model 'claude-opus-5-5' --effort 'medium' " in line, line
 
 
