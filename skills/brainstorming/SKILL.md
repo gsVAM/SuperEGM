@@ -135,10 +135,14 @@ After the cartographer's spawn, tell the owner you are waiting on the cartograph
 After the three's spawn, tell the owner you are waiting on the three: their message ten minutes or more after the spawn has you ask each silent one once, then write its approach `not reported`; there is no fallback once the three run.
 Read your inbox at its next turn, with a second Bash `date` to tell how long it has been: the mailbox shows no arrival time, so a report in your inbox at that turn is merged, whenever it came: ten minutes counts only when the inbox holds none (a report within ten minutes is the ordinary case; one found later still proves the mailbox).
 At a next turn less than ten minutes after the `date` with nothing in the inbox, answer what the owner asked, repeat the one-line notice and end your turn again.
-`fallback` typed while waiting on the cartographer takes the fallback at once, whatever the time: send it a shutdown request first.
-A next turn ten minutes or more after the `date` with no message from the cartographer means the mailbox is not working (a split-pane mode): send it a shutdown request and take the fallback.
+At such a turn with some of the three's reports in, merge the reports that are in, repeat the notice naming the silent ones, and end your turn again.
+While you wait, a cartographer message that is not its notes (a question, a progress line) is no report: answer it if it asks, and keep waiting on its notes as above.
+`fallback` typed while waiting on the cartographer takes the fallback at once, whatever the time, if its notes are not in your inbox: send it a shutdown request first.
+The cartographer's notes already in your inbox win over `fallback` typed: merge them and spawn the three, and tell the owner the mailbox works.
+A next turn ten minutes or more after the `date` with the cartographer's notes not in means the mailbox is not working (a split-pane mode): send it a shutdown request and take the fallback.
 After the shutdown request, once you take the fallback, a teammate's later message is not merged: the subagents' returns stand in its place.
 A next turn ten minutes or more after the `date` with none from one of the three means one message asking it; still none at the turn after, write that approach `not reported`.
+Then, after the asking message, tell the owner again: you have asked the silent ones, and their next message writes each still silent `not reported`; then end your turn.
 `fallback` typed while waiting on the three counts as the ten minutes passed: ask each silent one once now; it starts no fallback.
 Until the design is written, a report found after an approach is written `not reported` replaces that line.
 A `name: cartographer` spawn that returns in the same turn ran as a subagent: its return is the fallback's first return, so do not wait; go on with the fallback.
@@ -148,7 +152,7 @@ The cartographer first; its returned notes go into the other three's prompts, wh
 A question the notes do not answer goes on that subagent's `questions:` lines for the owner; no subagent but the cartographer reads code.
 
 **The merge.** Put the approaches side by side, and make one deduplicated question list ranked by how much the answer changes the build.
-Ask the owner those questions one at a time, as the conversation does.
+Ask the owner those questions one at a time, as the conversation does; the written design records the owner's answers to the ranked questions beside the approaches.
 The written design records the approaches under its `## Alternatives Considered`, with one line there: `team: on` or `team: off (subagents)`, and what the teammates or subagents reported seeing from their `saw:` lines.
 Under `team: on` the cartographer's `saw:` line answers the probe: whether a teammate sees the project context and this plugin's SessionStart hook; write what it reported.
 The cartographer's notes go in the design's current-state ground; the approach the owner chooses is the design's input.
@@ -196,6 +200,8 @@ could plan from without going back to your human partner. Cover:
   when the team or its fallback ran
 - `## Alternatives Considered`, ahead of `## Units`: the approaches weighed
   and why the chosen one won, with the `team:` line
+  when the team or its fallback ran
+- the owner's answers to the team's questions, under `## Alternatives Considered`,
   when the team or its fallback ran
 - a final `## Units` section, the last H2 of the document: one row per
   buildable unit (id, title, blocked by)
