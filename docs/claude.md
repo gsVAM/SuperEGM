@@ -77,7 +77,11 @@ call (`--timeout 540` under a 600000 ms limit) and waits for it, so nothing outl
 - The builder profile (`config.builder.profile_dir`) is created empty by the owner, with no
   plugins, no `CLAUDE.md` and no hooks (a `settings.json` with a `hooks` key); `launch-builder`
   and `superegm doctor` refuse otherwise. The builder's allow-list is
-  `config.builder.allowed_tools`; `Agent`, `Skill` and a bare `Bash` are refused.
+  `config.builder.allowed_tools`; a bare `Skill` and an unrestricted `Bash` are refused. `Agent`
+  is the owner's opt-in (absent from the default list): with it, the builder may spawn the
+  platform's default subagents, each under the builder's own allow-list and at the builder's model
+  unless the call names one, and the orders budget them at `builder.max_subagent_calls` (12), a
+  budget the orders state and the helper does not enforce.
 - `gh` acts as the account whose token `GH_TOKEN` holds; `git push` does so only over an HTTPS
   remote with `gh` as the credential helper, which `launch-builder` passes in the launched
   command's environment (`SUPEREGM_BUILDER_TOKEN`, the builder account's token made as the
