@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch, started
 detached and recorded `running`."""
@@ -425,23 +425,17 @@ def spec_range_text(repo_root: Path, store, body_text: str, ref: str) -> str:
   if not marker or not match:
     raise core.HandoffError("spec range: the body carries no marker or no `Spec:` range")
   sha, rel, start, end = marker.group(3), match.group(1), int(match.group(2)), int(match.group(3))
-  def show(commit):
-    with core.hook_free() as pairs:
-      return subprocess.run(["git", *pairs, "show", f"{commit}:{rel}"], cwd=str(repo_root), capture_output=True)
-  holds = lambda blob: blob.returncode == 0 and hashlib.sha256(blob.stdout).hexdigest() == sha
   text = None
   for entry in core.load_approvals(store, Path(rel)):
-    if entry.get("sha256") == sha and entry.get("commit") and holds(blob := show(entry["commit"])):
-      text = blob.stdout
-      break
-  if text is None:
-    for commit in core.run_git(["log", "--format=%H", ref, "--", rel], repo_root, check=False).split():
-      if holds(blob := show(commit)):
-        text = blob.stdout
+    if entry.get("sha256") == sha and entry.get("commit"):
+      text = core.spec_blob(repo_root, rel, sha, ref=entry["commit"])
+      if text is not None:
         break
   if text is None:
+    text = core.spec_blob(repo_root, rel, sha, ref=ref)
+  if text is None:
     raise core.HandoffError(f"spec range: no commit holds {sha[:7]}")
-  return "\n".join(text.decode("utf-8").splitlines()[start - 1:end]) + "\n"
+  return "\n".join(text.splitlines()[start - 1:end]) + "\n"
 
 
 def filed_body(state, unit):

@@ -264,14 +264,10 @@ def approved_text(spec: Path, approval: dict):
   of the current branch's `git log -- <spec>` whose blob hashes to its `sha256`; None when no commit holds them."""
   root = core.git_toplevel(spec.parent)
   rel = spec.resolve().relative_to(root.resolve()).as_posix()
-  show = lambda commit: subprocess.run(["git", "show", f"{commit}:{rel}"], cwd=str(root), capture_output=True)
-  if approval.get("commit") and (at := show(approval["commit"])).returncode == 0:
+  if approval.get("commit") and (at := subprocess.run(["git", "show", f"{approval['commit']}:{rel}"], cwd=str(root),
+                                                      capture_output=True)).returncode == 0:
     return at.stdout.decode("utf-8")
-  for commit in core.run_git(["log", "--format=%H", "--", rel], root, check=False).split():
-    blob = show(commit)
-    if blob.returncode == 0 and hashlib.sha256(blob.stdout).hexdigest() == approval["sha256"]:
-      return blob.stdout.decode("utf-8")
-  return None
+  return core.spec_blob(root, rel, approval["sha256"])
 
 
 def scope_of(st: core.Store, review: dict, spec: Path) -> list:

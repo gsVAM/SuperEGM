@@ -126,18 +126,9 @@ def before_units(text: str) -> str:
   return "".join(lines[:last + 1])
 
 
-def branch_holds(repo_root: Path, rel: str, sha256: str) -> bool:
-  """Whether a commit of the current branch's `git log -- <rel>` holds a blob of `rel` hashing to `sha256`."""
-  for commit in core.run_git(["log", "--format=%H", "--", rel], repo_root, check=False).split():
-    blob = subprocess.run(["git", "show", f"{commit}:{rel}"], cwd=str(repo_root), capture_output=True)
-    if blob.returncode == 0 and hashlib.sha256(blob.stdout).hexdigest() == sha256:
-      return True
-  return False
-
-
 def require_branch_holds(st: core.Store, repo_root: Path, rel: str, entry: dict) -> None:
   """Refuse a branch that never folded the history's last entry: no commit of it holds that entry's bytes."""
-  if not branch_holds(repo_root, rel, entry["sha256"]):
+  if core.spec_blob(repo_root, rel, entry["sha256"]) is None:
     raise core.HandoffError(f"approve-spec: fold {st.config['base']} first: approval {entry['sha256'][:7]} is not in this branch")
 
 

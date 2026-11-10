@@ -396,17 +396,29 @@ def resolve_handoff(st: Store, args):
   return None
 
 
-def store(repo_root: Path) -> Store:
-  """The store `.superegm/config.json` names and the handoff, resolved once from `CURRENT_ARGS`;
+def spec_blob(repo_root: Path, rel: str, sha256: str, ref: str = "HEAD") -> str | None:
+  """The text of `rel` at the first commit of `git log <ref> -- <rel>` whose blob hashes to `sha256`, or None
+  when no commit holds those bytes (U32: the one spec-blob search). The git calls are hook-free."""
+  for commit in run_git(["log", "--format=%H", ref, "--", rel], repo_root, check=False).split():
+    with hook_free() as pairs:
+      shown = subprocess.run(["git", *pairs, "show", f"{commit}:{rel}"], cwd=str(repo_root), capture_output=True)
+    if shown.returncode == 0 and hashlib.sha256(shown.stdout).hexdigest() == sha256:
+      return shown.stdout.decode("utf-8")
+  return None
+
+
+def store(repo_root: Path, args=None) -> Store:
+  """The store `.superegm/config.json` names and the handoff, resolved once from `args`, else `CURRENT_ARGS`;
   a flat store (`state.json` at the root) is read in place as its one `legacy` handoff, unless the
   resolution names a handoff opened beside it (one with its own `handoffs/<id>.json`)."""
   global STORE
+  args = CURRENT_ARGS if args is None else args
   config = load_config(repo_root)
   root = Path(config["artifacts_dir"])
   flat = root / "state.json"
   st = Store(root, config=config)
-  hid = resolve_handoff(st, CURRENT_ARGS)
-  named = getattr(CURRENT_ARGS, "handoff", None)
+  hid = resolve_handoff(st, args)
+  named = getattr(args, "handoff", None)
   if named and named != flat_handoff_id(root) and not st.path("handoffs", named).is_file():
     raise HandoffError(f"store: {named}: no such handoff")
   if flat.is_file():
@@ -654,7 +666,7 @@ def require_runcard(args, skills) -> dict:
   rid = getattr(args, "runcard", None)
   if not rid:
     raise HandoffError("runcard: --runcard is required")
-  st = STORE or store(git_toplevel(Path.cwd()))
+  st = STORE or store(git_toplevel(Path.cwd()), args)
   card = load_card(st, rid)
   if card["closed_at"]:
     raise HandoffError(f"runcard: {rid} is closed")
@@ -1717,7 +1729,7 @@ CURRENT_SUBCOMMAND = None
 
 def locate(args):
   """The store of the repository the working directory is in, and the plan."""
-  st = store(git_toplevel(Path.cwd()))
+  st = store(git_toplevel(Path.cwd()), args)
   if getattr(args, "plan", None):
     plan = Path(args.plan).expanduser().resolve()
   else:
