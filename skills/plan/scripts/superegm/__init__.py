@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes and the one stamp formatter and parser (U31); `discover()`, CORE_CONFIG and SUBCOMMANDS and DEFAULT_CONFIG derived from the modules (U32).
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes and the one stamp formatter and parser (U31); `discover()`, CORE_CONFIG and SUBCOMMANDS and DEFAULT_CONFIG derived from the modules (U32); the `Tier:` field, `builder.tiers`, `tier_pair` and `unit_tier` (U33).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
@@ -59,7 +59,8 @@ DECIDE_RE = re.compile(
 GEN_START, GEN_END = "<!-- egm:generated start -->", "<!-- egm:generated end -->"
 FIELDS = ("Objective", "Scope paths", "Design range", "Blocked by",
           "Shared files", "Risk", "Size")
-OPTIONAL_FIELDS = ("Issue",)  # `#<n>`: an open issue `file` adopts instead of creating one (spec section 10)
+OPTIONAL_FIELDS = ("Issue", "Tier")  # `#<n>`: an open issue `file` adopts instead of creating one (spec section 10); the unit's tier (U33)
+TIERS = ("difficult", "doable", "easy")  # the `Tier:` words; a section without the row is doable (spec section 9.1, amendment 12)
 SIZE_LIMIT = {"S": 3, "M": 8, "L": 10**6}
 BODY_LIMIT = 49_152
 MAX_UNITS = 100
@@ -1102,6 +1103,7 @@ class Unit:
     self.shared = []       # [(path, [(after|before, uid)])]
     self.risk = None       # (level, reason)
     self.size = None
+    self.tier = "doable"   # the `Tier:` row's word, doable when the section has none (U33)
     self.issue = None      # the adopted issue number, an int once parsed
     self.dod = []
     self.decisions = []    # [{id, question, owner, default, blocking}]
@@ -1116,7 +1118,7 @@ class Unit:
         "shared": [{"path": p, "order": [{"kind": k, "unit": u} for k, u in o]}
                    for p, o in self.shared],
         "risk": {"level": self.risk[0], "reason": self.risk[1]},
-        "size": self.size, "issue": self.issue, "dod": self.dod,
+        "size": self.size, "tier": self.tier, "issue": self.issue, "dod": self.dod,
         "decisions": [{k: v for k, v in d.items() if k != "line"} for d in self.decisions],
         "wave": wave, "predecessors": sorted(preds),
     }
@@ -1267,6 +1269,11 @@ class Plan:
     if len(unit.scope) > SIZE_LIMIT[value]:
       self._fail(line, f"{unit.id}: size {value} allows at most {SIZE_LIMIT[value]} scope paths")
     unit.size = value
+    if "Tier" in fields:
+      value, line = fields["Tier"]
+      if value not in TIERS:
+        self._fail(line, f"{unit.id}: tier must be difficult, doable or easy")
+      unit.tier = value
     if "Issue" in fields:
       value, line = fields["Issue"]
       match = re.match(r"^#(\d+)$", value)
