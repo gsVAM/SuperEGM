@@ -1,10 +1,12 @@
 # SuperEGM
 
-<!-- Modified by SuperEGM (gsVAM), 2026: U01's skeleton filled in by U11; U11's README restructured for the public with diagrams; the 1.2 docs sweep (U29); the 1.2.0 release README: what's new, install from GitHub and why, the setup map, the documentation table. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: U01's skeleton filled in by U11; U11's README restructured for the public with diagrams; the 1.2 docs sweep (U29); the 1.2.0 release README: what's new, install from GitHub and why, the setup map, the documentation table.; the inaugural public README (1.2): the pitch, the story, the feature tour, the compact review figure. -->
 
 <p align="center"><img src="docs/assets/logo.png" width="420" alt="SuperEGM: a caped elephant and a masked goldfish"></p>
 
-<p align="center"><strong>The Super Elephant-Goldfish Model</strong><br>From idea to merged pull requests, with fresh eyes on every step and a human on every merge.</p>
+<h3 align="center">An AI engineering team that ships reviewed pull requests,<br>and can never merge without you.</h3>
+
+<p align="center"><strong>The Super Elephant-Goldfish Model</strong> · one Claude Code plugin, from an idea to merged pull requests</p>
 
 <p align="center">
   <a href="https://github.com/gsVAM/superegm/releases/latest"><img src="https://img.shields.io/github/v/release/gsVAM/superegm?label=release" alt="Latest release"></a>
@@ -13,46 +15,26 @@
   <img src="https://img.shields.io/badge/licence-Apache--2.0%20%2B%20MIT-blue" alt="Licence: Apache-2.0 and MIT">
 </p>
 
-SuperEGM is one Claude Code plugin that takes an idea to merged pull requests. It brainstorms the design with you, has isolated reviewers review that design before anything is planned, cuts the approved design into units, files one GitHub issue per unit, and launches a fresh, isolated builder per unit that commits test-first and opens a draft pull request. A foreman reviews every pull request head with CI as its evidence. The human approves the design, rules when a review asks, and merges. The spec is not the plan: the spec is the design document, and the plan belongs to the GitHub issue, one per unit.
+<p align="center"><a href="#what-it-feels-like">What it feels like</a> · <a href="#whats-inside">What's inside</a> · <a href="#install">Install</a> · <a href="#before-the-first-run">Setup</a> · <a href="#your-first-project">First project</a> · <a href="#documentation">Docs</a></p>
 
-It is superpowers' unit of work (a brainstormed design, a TDD-shaped plan per unit) inside EGM's orchestration (isolated reviewers, an adversarial gate before anything is written, a dependency graph cut into waves, a foreman per unit reviewing every PR head with CI as evidence, a merge that stays human).
+> **1.2 is SuperEGM's inaugural public release, open to the world.** Two commands install it from this repository, and it was built by its own workflow.
 
-## What's new in 1.2
+SuperEGM turns Claude Code into a small, disciplined software team that works in your GitHub repository. You describe an idea. A team of agents brainstorms it with you. Reviewers who have never seen your conversation pick the design apart until it holds. The approved design becomes one GitHub issue per unit of work, and fresh builders work those issues in parallel: test first, each on its own branch, each opening its own pull request. Every pull request is reviewed again, against the design and against CI, before it reaches you.
 
-1.2 takes SuperEGM from a workflow you sit with to a fleet you can leave running. It was built by its own workflow: 15 units, each built by a fresh builder, reviewed by isolated goldfish and merged by hand.
+Then you merge. Only you can.
 
-**Run it while you are away**
+## Why it exists
 
-- **The driver** (`/superegm:driver`): a launchd or systemd timer that runs `wave --leavemealone` for every registered handoff, one at a time per store, and never merges.
-- **The inbox** (`/superegm:inbox`): one list of everything waiting on you, across every repository you registered (`--all`). An executable `~/.superegm/notify` gets each new line, so a phone notification is one script away.
-- **The watchdog**: a builder with no new commit of its own for `builder.stall_minutes` (30) is reported stalled instead of silently burning time.
-- **The board**: the tracking issue carries a live table of every unit, its pull request and its state.
+Ask one AI session to design, build and check a feature, and three things go wrong:
 
-**Rule from anywhere, hear from everyone**
+- **It drifts.** Hours in, the design in its head is no longer the one you agreed on.
+- **It grades its own homework.** The session that wrote the code is the worst judge of it.
+- **It forgets.** A decision you made before lunch is gone by the evening.
 
-- **Rulings by comment**: an owner's `**Ruling:**` comment on the unit's issue is a ruling, so you can decide from the GitHub app on your phone.
-- **Outside reviews count**: a review by a colleague or a review bot on a builder's pull request, or on the spec's own pull request (`review ingest --pr`), is ingested as findings and enters the same loop.
-- **Accept below the cap**: when only mediums and lows stand, `review status` prints an `acceptable:` line and the owner may accept without waiting out five rounds.
+SuperEGM splits the work between two kinds of session:
 
-**Trust, but verify**
-
-- **The foreman verifies**: it re-runs every definition-of-done `Run` item on the head itself and checks the test delta; a removed or weakened test is a high finding only the owner can allow.
-- **Models per role**: builders, reviewers, judges and the Astra lane each get a model and an effort (`doctor` prints one `model:` line per role), and a unit's `Tier:` (`difficult`, `doable`, `easy`) picks its builder's model.
-- **Builder tooling per launch**: `config.builder.plugins` and `config.builder.mcp` give builders exactly the plugins and MCP servers you list, recorded per launch.
-
-**Plan bigger, in parallel**
-
-- **Team brainstorm** (`--team`): a cartographer, an architect, a skeptic and an advocate argue the design before it is written.
-- **Units cut for parallel waves**: the plan rules now keep units off each other's files, so more of a wave runs at once.
-- **Cleaner endings**: `close` closes the tracking issue and the landed units' issues, `--close --patch` closes a patch release without the integrate round, and every subcommand module is discovered rather than listed.
-
-The full design is in [docs/specs/2026-11-03-superegm-design.md](https://github.com/gsVAM/superegm/blob/main/docs/specs/2026-11-03-superegm-design.md).
-
-## Elephants and goldfish
-
-The **elephant** is the long-memory session, yours. It brainstorms, drafts, plans, drives the waves and remembers everything. That is why it is biased toward its own intentions.
-
-The **goldfish** is the fresh, isolated, zero-context session: reviewer, judge, foreman, builder. It sees only the artifact and the evidence attached to its dispatch. So it finds what the elephant can no longer see.
+- The **elephant** is the long-memory session, yours. It brainstorms, drafts, plans, drives the waves and remembers everything. That memory is also why it is biased toward its own intentions.
+- The **goldfish** is a fresh, isolated, zero-context session: reviewer, judge, foreman, builder. It sees only the artifact and the evidence attached to its dispatch, so it finds what the elephant can no longer see.
 
 The philosophy:
 
@@ -62,13 +44,64 @@ The philosophy:
 - Keep the human on every merge.
 - Converge across more than one model vendor, so a verdict is not one vendor agreeing with itself.
 
-## Why
+## What it feels like
 
-- The spec is reviewed before anything is planned. Reviewers who see only the spec find the holes while they are cheap, and the approval freezes the spec at a sha256.
-- Every unit is a TDD plan a fresh builder can follow alone. A builder's brief is its issue body, the builder orders and the rulings on its issue; it never sees the planning conversation.
-- Nothing merges without a human. Builders push and open draft pull requests as their own account; only the owner can update the base branch.
-- You do not have to sit with it. The driver runs waves while you are away, the inbox lists only what needs you, and a `**Ruling:**` comment from your phone is a ruling.
-- Two vendors check each other. With the optional Codex lane, a GPT reviewer sits on every panel beside the Claude goldfish and judges.
+1. **Monday, 9:00.** You open Claude Code in your repository and describe a feature in a paragraph. With `--team`, four agents work the idea with you: a cartographer reads your code, then an architect, a skeptic and an advocate each argue an approach and challenge one another. Out comes a design document that ends in a list of units of work.
+2. **9:40.** You type `/superegm:review-spec`. Reviewers who see only the document, never your chat, find the gaps: a missing error path, two sections that disagree, a unit too big to build alone. The spec is fixed and reviewed again until nothing serious is left. You approve it, and its hash is frozen.
+3. **10:15.** `/superegm:plan` and `/superegm:file` turn the design into GitHub issues, one per unit. Each issue is a test-first plan a stranger could follow, with the links between units that depend on each other.
+4. **10:30.** `/superegm:wave` starts the builders, or you hand the run to the driver and go home. Each builder is a fresh session on its own branch, pushing as a separate GitHub account. A foreman reviews every pull request, re-runs its checks and sends back anything that is not right.
+5. **Overnight.** In leave-me-alone mode a panel of judges rules on contested findings instead of you. One question splits the panel, so it waits for you. Your inbox lists it, and you answer with a `**Ruling:**` comment on the issue, from your phone.
+6. **Tuesday, 8:00.** You open the live board on the tracking issue. Six pull requests are clean and waiting. You read them and you merge. Nothing merged itself.
+
+## What's inside
+
+### Think it through before anything is built
+
+- **Team brainstorm.** `/superegm:brainstorming --team` (or `brainstorm.team` in the config) runs the brainstorm with four agents. A cartographer maps what your code already has. An architect, a skeptic and an advocate each work one approach in their own context and challenge each other's claims. They run as Claude Code agent teams when those are enabled, and as ordinary subagents otherwise.
+- **A spec reviewed by strangers.** A panel of isolated reviewers, each with its own lens (design, readiness, structure, style, comprehension, scope and more), reads the spec round after round. Findings are rated high, medium or low and go back for fixes until nothing high or medium is left. The approval freezes the spec at a sha256, and no builder starts until the base branch carries exactly those bytes.
+
+### A plan you can read on GitHub
+
+- **One issue per unit.** The plan is cut into units, and each unit's issue is its builder's whole brief: the test-first plan, the files it owns and its definition of done. The plan is reviewed against the spec before anything is filed. Dependencies become blocked-by links between issues.
+- **Built for parallel waves.** The plan rules keep units off each other's files, so a wave can run several builders at once (`max_in_flight`).
+- **The right model for each unit.** Mark a unit `Tier: difficult`, `doable` or `easy`. By default, difficult units get Opus at high effort, easy ones get Sonnet, and doable units get the builder's default model. Every role (builder, reviewer, judge) has its own model and effort, and `superegm doctor` prints them.
+
+### Builders you do not have to trust
+
+- **Fresh, isolated builders.** A builder is a new Claude Code session with an empty profile. It sees its issue, its orders and the rulings on its issue, never your planning conversation. It writes the failing test first, commits on its own branch, and opens a draft pull request as a separate GitHub account that cannot touch your base branch. It loads exactly the plugins and MCP servers you list for builders, and each launch records them.
+- **A foreman that checks the work.** Every pull request head gets a foreman, another goldfish. It waits for CI, re-runs the definition-of-done commands itself rather than trusting pasted output, and checks the test delta, so a deleted or weakened test is a high finding. It then reviews the head with the panel, posts one review on the pull request and returns one word: `clean`, `revise`, or `contested` when a finding needs a ruling.
+- **Two vendors, not one.** With the optional Codex lane, a GPT reviewer (Astra) sits beside the Claude reviewers on every panel and every judges' panel, so no single model grades its own work.
+- **Judges for the hard calls.** In leave-me-alone mode, isolated judges on more than one model rule on contested findings, one question at a time, and a panel that does not converge waits for you.
+
+### See everything, steer from anywhere
+
+- **A live board.** The tracking issue on GitHub carries a table that updates itself on every status pass: each unit's state, review round, pull request, what it waits on, the next action, what its builders cost, and its tier. An illustrative board, trimmed to eight of its ten columns:
+
+  | unit | state | round | PR | waits on | next action | cost | tier |
+  | --- | --- | --- | --- | --- | --- | --- | --- |
+  | U1 #12 | landed | r2 posted clean | #20 | none | none | 6.84 | doable |
+  | U2 #13 | clean | r1 posted clean | #21 | none | await-merge | 3.10 | easy |
+  | U3 #14 | active | none | #22 | ci | foreman dispatch | 2.45 | difficult |
+  | U4 #15 | pending | r5 posted cap-reached | #23 | q4 | decision 2 | 11.37 | doable |
+
+- **One inbox.** `/superegm:inbox` lists only what needs you: in this repository, or with `--all` across every repository you registered. If you write an executable `~/.superegm/notify`, it receives each new item, so a phone notification is one script away.
+- **Rule from your phone.** A `**Ruling:**` comment on a unit's issue, from an owner, is a ruling. You never have to open a terminal to unblock a unit.
+- **Outside reviews count.** A review from a colleague or a review bot on a builder's pull request, or on the spec's own pull request, is ingested as findings and enters the same loop.
+- **Accept early.** When only mediums and lows remain, the review says so, and you can accept without waiting out five rounds.
+
+### Leave it running
+
+- **Leave-me-alone mode.** Add `--leavemealone` and the judges rule at every decision point. You wake up to merge-ready draft pull requests.
+- **The driver.** `/superegm:driver` installs a launchd or systemd timer that keeps your registered projects moving, one wave pass at a time, while you are away. It runs without permission prompts, so read the caution under [How a wave works](#how-a-wave-works) first.
+- **The watchdog.** A builder with no new commit for 30 minutes (`builder.stall_minutes`) is reported as stalled, so it is not left quietly burning time.
+
+### A human on every merge
+
+Builders push as their own account and open draft pull requests. A repository ruleset lets only you update the base branch. The foreman never merges or approves, and neither does the driver. SuperEGM brings you work that is reviewed, tested and clean, and the merge stays yours.
+
+## Built by SuperEGM
+
+SuperEGM 1.2 was built by SuperEGM. Its [design](https://github.com/gsVAM/superegm/blob/main/docs/specs/2026-11-03-superegm-design.md) was brainstormed and reviewed, then cut into 15 units, filed as issues #80 to #94 under tracking issue [#79](https://github.com/gsVAM/superegm/issues/79). Each unit was built by a fresh builder, reviewed head by head by isolated reviewers from two vendors, and merged by hand. The suite stands at 2,734 tests.
 
 ## The workflow at a glance
 
@@ -168,22 +201,15 @@ Add `--leavemealone` to a skill (or set `"mode": "leavemealone"` in `.superegm/c
 
 ## How a review works
 
-One review loop serves the spec, every plan and every pull request head. Each round, every reviewer on the panel is a goldfish: a fresh, isolated session that sees only the artifact, the standards for its kind and, from round 2, the previous round's findings with the fixes marked. The panel is fixed when the review opens and every reviewer runs concurrently.
+One review loop serves the spec, every plan and every pull request head. Each round, every reviewer on the panel is a goldfish: a fresh, isolated session that sees only the artifact, the standards for its kind and, from round 2, the previous round's findings with the fixes marked. The panel is fixed when the review opens and every reviewer runs concurrently. At the cap of five rounds the owner rules: one more round, accept, or stop.
 
 ```mermaid
-flowchart TD
-  O["Open the review<br/>panel fixed, a new cycle"] --> R["Round n<br/>every goldfish reviewer reads the current bytes"]
-  R --> F["Findings<br/>high, medium or low, regression yes or no"]
-  F --> D["Dispositions<br/>fixed, contested, declined, escalated, fix-design"]
-  D --> S{"A high or medium unsettled,<br/>or a regression of an earlier fix?"}
-  S -->|no| X["Converged<br/>the round's sha256 is recorded"]
-  S -->|yes| N["Fix the artifact"]
-  N --> C{"Cap of 5 rounds<br/>reached?"}
-  C -->|no| R
-  C -->|yes| RU["Owner ruling"]
-  RU -->|continue, once| R
-  RU -->|accept| X
-  RU -->|stop| ST["Stays at the cap"]
+flowchart LR
+  R["Fresh reviewers<br/>read only the artifact"] --> F["Findings<br/>high · medium · low"]
+  F -->|none high or medium| X["Converged<br/>sha256 recorded"]
+  F -->|fix| N["Fix, mark<br/>each finding"]
+  N -->|next round| R
+  N -.->|5 rounds| RU["Your ruling"]
   classDef human fill:#fde68a,stroke:#b45309,color:#1f2937
   class RU human
 ```
