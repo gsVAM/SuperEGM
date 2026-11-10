@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch, started
 detached and recorded `running`."""
@@ -34,6 +34,9 @@ CONFIG_DEFAULTS = {  # its own config key (U32)
                 "mcp": {},  # mcpServers form, written to launches/<unit>_r<n>_mcp.json (U27)
                 "max_subagent_calls": 12,  # the orders' budget when allowed_tools carries Agent (U27)
                 "stall_minutes": 30,  # a running launch with no newer commit of its own this long is stalled (U31)
+                # the model and effort per tier; doable is `model` and `effort` above (U33)
+                "tiers": {"difficult": {"model": "claude-opus-5-5", "effort": "high"},
+                          "easy": {"model": "claude-sonnet-5-5", "effort": "medium"}},
                 "app": None},  # or {app_id, slug, private_key_env}: the builder as a GitHub App (spec section 11)
 }
 INIT_STEP, DOCTOR_CHECKS = "", None  # its init lines stay numbered in init's own text (U32)

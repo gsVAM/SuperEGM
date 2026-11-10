@@ -1008,6 +1008,14 @@ def load_config(repo_root: Path) -> dict:
     cap = builder["max_subagent_calls"]
     if isinstance(cap, bool) or not isinstance(cap, int) or cap < 1:
       raise HandoffError("config: builder.max_subagent_calls: a positive integer")
+    tiers = builder.setdefault("tiers", {})  # the defaults' rows unless the file names its own (U33)
+    if not isinstance(tiers, dict) or set(tiers) - {"difficult", "easy"}:
+      raise HandoffError(f"{path}: builder.tiers keys must be difficult or easy")
+    for tier, pair in tiers.items():
+      if not isinstance(pair, dict) or set(pair) != {"model", "effort"} \
+          or not isinstance(pair["model"], str) or not MODEL_RE.match(pair["model"]) \
+          or pair["effort"] not in (*EFFORTS, "max"):
+        raise HandoffError(f"{path}: builder.tiers.{tier} must be {{model, effort}}")
   artifacts = config["artifacts_dir"]
   if not artifacts or not Path(artifacts).is_absolute() \
       or Path(artifacts).resolve().is_relative_to(repo_root.resolve()):
@@ -1066,6 +1074,14 @@ def load_config(repo_root: Path) -> dict:
   else:
     config["_template"] = DEFAULT_TEMPLATE
   return config
+
+
+def tier_pair(config: dict, tier: str) -> tuple[str, str]:
+  """The builder's (model, effort) for a tier: its `builder.tiers` row, else doable's
+  `builder.model` and `builder.effort` (a word without a row, a hand-edited one's included)."""
+  builder = config["builder"]
+  row = (builder.get("tiers") or {}).get(tier)
+  return (row["model"], row["effort"]) if row else (builder["model"], builder["effort"])
 
 
 def check_template(template: str) -> None:
