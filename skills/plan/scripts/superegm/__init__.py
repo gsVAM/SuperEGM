@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28).
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes and the one stamp formatter and parser (U31).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
@@ -99,6 +99,7 @@ DEFAULT_CONFIG = {
                 "plugins": [],  # <name>@<marketplace> ids, each passed by --plugin-dir (U27)
                 "mcp": {},  # mcpServers form, written to launches/<unit>_r<n>_mcp.json (U27)
                 "max_subagent_calls": 12,  # the orders' budget when allowed_tools carries Agent (U27)
+                "stall_minutes": 30,  # a running launch with no newer commit of its own this long is stalled (U31)
                 "app": None},  # or {app_id, slug, private_key_env}: the builder as a GitHub App (spec section 11)
     "ci_wait_minutes": 30,
     "commit_trailer": "",  # appended, after a blank line, to every commit the helper makes
@@ -714,8 +715,21 @@ def journal(store: Store, line: str) -> None:
     os.close(fd)
 
 
+STAMP = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def iso(seconds):
+  """The store's `%Y-%m-%dT%H:%M:%SZ` stamp of these seconds, or None (the one formatter, U31)."""
+  return time.strftime(STAMP, time.gmtime(seconds)) if seconds is not None else None
+
+
+def epoch(stamp: str) -> float:
+  """The seconds of a store stamp (the one parser, U31); ValueError or TypeError for any other form."""
+  return float(calendar.timegm(time.strptime(stamp, STAMP)))
+
+
 def now_iso() -> str:
-  return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(NOW()))
+  return iso(NOW())
 
 
 def canonical(obj) -> str:
@@ -976,6 +990,7 @@ def load_config(repo_root: Path) -> dict:
   if isinstance(builder, dict) and isinstance(builder.get("profile_dir"), str):
     builder["profile_dir"] = str(Path(builder["profile_dir"]).expanduser())
   app = builder.setdefault("app", None) if isinstance(builder, dict) else None
+  isinstance(builder, dict) and builder.setdefault("stall_minutes", 30)  # a file written before U31 lacks it
   if app is not None:
     app = {"private_key_env": "SUPEREGM_APP_KEY", **app} if isinstance(app, dict) else app
     if not isinstance(app, dict) or set(app) != {"app_id", "slug", "private_key_env"} \
@@ -1011,6 +1026,9 @@ def load_config(repo_root: Path) -> dict:
   for key in ("max_in_flight", "ci_wait_minutes"):
     if isinstance(config[key], bool) or not isinstance(config[key], int) or config[key] < 1:
       raise HandoffError(f"{path}: {key} must be a positive integer")
+  stall = config["builder"].get("stall_minutes") if isinstance(config["builder"], dict) else None
+  if isinstance(stall, bool) or not isinstance(stall, int) or stall < 1:
+    raise HandoffError(f"{path}: builder.stall_minutes must be a positive integer")
   timeout = config["notify_timeout_seconds"]
   if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0 < timeout < float("inf"):
     raise HandoffError(f"{path}: notify_timeout_seconds must be a positive number")
@@ -2022,7 +2040,8 @@ def status_pass(handoff: Handoff, save=True):
                     and u not in landed]
   summary = {"landed": sorted(landed), "ready": ready, "in_flight": in_flight,
              "unlaunched_with_pr": unlaunched_prs, "open_blocking": {u: [d["id"] for d in ds] for u, ds in open_blocking.items()},
-             "units": {u: {**events.fingerprint(v), "status": v["status"]} for u, v in views.items()},
+             # `stalled` rides the pass, never the saved fingerprint (U31: the predicate, derived afresh at every pass)
+             "units": {u: {**events.fingerprint(v), "status": v["status"], "stalled": v.get("stalled")} for u, v in views.items()},
              "at": now_iso()}
   if save:
     save_state(handoff.artifact_dir, state)

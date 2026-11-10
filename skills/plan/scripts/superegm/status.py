@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the `ruling` event and a status line after a comment's deviation headings (U22); the board's one write per `wave` pass, `post_board` (U30); the tick's read, `tick_trigger` (U24).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the `ruling` event and a status line after a comment's deviation headings (U22); the board's one write per `wave` pass, `post_board` (U30); the tick's read, `tick_trigger` (U24); the watchdog's `stalled` line, its predicate and `head_time` (U31).
 
 """superegm status: landed and ready sets, PRs, CI; refuses without a complete receipt.
 `--wait <s>` polls, reading only, and prints every unreported event line, or `deadline`. Under a `wave` card
@@ -146,12 +146,45 @@ def ci_word(verdict: str):
   return "pending"
 
 
-def builder_facts(st, uid: str, comments: list) -> tuple:
+def head_time(worktree) -> float | None:
+  """The committer time of the worktree's `HEAD` (`git log -1 --format=%ct`), a local read; None when git fails."""
+  try:
+    out = core.run_git(["log", "-1", "--format=%ct"], Path(worktree), check=False).strip()
+  except (OSError, TypeError):
+    return None
+  return float(out) if out.isdigit() else None
+
+
+def own_commit(entry: dict, worktree_head_time: float | None) -> float | None:
+  """The launch's own newest commit: the worktree head's time when newer than the entry's `started_at`, else None
+  (a base commit older than the launch is none of its own)."""
+  if worktree_head_time is None or not entry.get("started_at"):
+    return None
+  return worktree_head_time if worktree_head_time > core.epoch(entry["started_at"]) else None
+
+
+def stalled(entry: dict, worktree_head_time: float | None, now: float, minutes: int) -> int | None:
+  """The watchdog's one predicate (spec section 11.1, U31): a `running` launch without the `kill_failed` mark and
+  with no exit file, whose newest own commit (or `started_at` when it has none) is `minutes` or more old; the
+  whole minutes since then, or None."""
+  if entry.get("status") != "running" or entry.get("kill_failed") or not entry.get("started_at"):
+    return None
+  if Path(entry["result_file"] + ".exit").is_file():
+    return None
+  since = own_commit(entry, worktree_head_time) or core.epoch(entry["started_at"])
+  waited = int((now - since) // 60)
+  return waited if waited >= minutes else None
+
+
+def builder_facts(st, uid: str, comments: list, config: dict | None = None) -> tuple:
   """From the latest launch by `round`: `[round, <text of its exit file>]` when that file exists,
   and `[id, word, login]` of the last `**Builder status:**` comment (one opening with that line or with its
   `**Deviation**` headings) created at or after its
   `started_at` (every such comment when nothing was launched). The word is masked (None) while
-  the launch is not terminal (spec section 4), so it folds into the exit line it belongs to."""
+  the launch is not terminal (spec section 4), so it folds into the exit line it belongs to; both are masked for
+  an `exited (stalled)` launch, whose stalled line was its exit line (U31). The third value is the watchdog's
+  `[minutes, last commit stamp or None, word or None]` when `config` is given and the latest launch is `stalled`
+  (the word unmasked: the stall's question carries it), else None."""
   latest = max(load_launches(st, uid), key=lambda entry: entry["round"], default=None)
   exit = None
   if latest:
@@ -168,7 +201,21 @@ def builder_facts(st, uid: str, comments: list) -> tuple:
     match = STATUS_RE.search(body) if body.startswith(("**Builder status:**", "**Deviation")) else None
     if match and (comment.get("created_at") or "") >= since:
       status = [comment["id"], match.group(1), (comment.get("user") or {}).get("login")]
-  return exit, None if latest and not terminal(latest) else status
+  stall = None
+  # the git read only for a launch the predicate can hold of (running, unmarked, a worktree, no exit file); a
+  # `started_at` that does not parse is no stall, as record-launch reads it
+  if latest and config and latest.get("worktree") and latest.get("status") == "running" and not latest.get("kill_failed") and not exit:
+    try:
+      head = head_time(latest["worktree"])
+      waited = stalled(latest, head, core.NOW(), config["builder"]["stall_minutes"])
+      last = own_commit(latest, head) if waited is not None else None
+    except (ValueError, TypeError):
+      waited = None
+    if waited is not None:
+      stall = [waited, core.iso(last) if last else None, status[1] if status else None]
+  if latest and latest.get("status") == "exited (stalled)":
+    return None, None, stall
+  return exit, None if latest and not terminal(latest) else status, stall
 
 
 def closed_facts(repo: str, issue: dict, pr, landed: bool) -> list:
@@ -218,7 +265,8 @@ def fingerprint(unit: dict) -> dict:
 
 def unit_events(uid: str, previous, current: dict) -> list:
   """One line per event of the unit since `previous` (`EMPTY` when nothing was saved), kinds in
-  the order head, exit, status, landed, closed, ruling; a builder's exit carries its status word."""
+  the order head, exit, status, stalled, landed, closed, ruling; a builder's exit carries its status word. The
+  `stalled` line (U31) is no fingerprint's: it is emitted at every pass while the predicate holds."""
   before = {**EMPTY, **(previous or {})}
   lines = []
   if current["ci"] is not None and any(current[k] != before[k] for k in ("pr", "head", "ci")):
@@ -230,6 +278,9 @@ def unit_events(uid: str, previous, current: dict) -> list:
                  f"status={status[1] if status else 'none'}{tail}")
   elif status and status != before["builder_status"]:
     lines.append(f"{uid} status word={status[1]}{tail}")
+  if current.get("stalled"):
+    waited, last, word = current["stalled"]
+    lines.append(f"{uid} stalled ({waited} min; last commit {last or 'none'}) pr={current['pr'] or 'none'} status={word or 'none'}")
   if current["landed"] and not before["landed"]:
     lines.append(f"{uid} landed pr={current['pr'] or 'none'}")
   for what, fact, earlier in zip(("pr", "issue"), current["closed"], before["closed"]):
@@ -258,7 +309,8 @@ def tick_trigger(handoff) -> str | None:
   """What a tick's session would have to do (spec section 11.2), from one `status_pass` that saves nothing, in order:
   the proof the tick applied to the handoff's newest tick launch, backed-off launches dropped first (`reboot <n>` for
   one recorded `interrupted (reboot)`, `exit-file <card>` for one whose exit file exists and whose top-level `wave`
-  card is `interrupted`); the first event line against `state.status.units`, a `status word=` event by a login no card
+  card is `interrupted`); the first event line against `state.status.units` (a `stalled` line at every tick while its
+  predicate holds, no fingerprint saving it away, U31), a `status word=` event by a login no card
   records as a builder skipped; `<uid> ready` for a unit the read finds ready and the saved `ready` lacks; an
   un-ingested thread above `low` on the latest posted round's head, by U21's reader, a stopped unit's threads skipped;
   `first launch` while `state.status` is absent; else None, the nothing-to-do predicate."""
@@ -361,7 +413,7 @@ def unit_view(handoff, uid):
   elif view["candidates"] and view["status"] == "waiting-for-pr":
     view["status"] = "candidate: PRs " + ", ".join(f"#{c}" for c in view["candidates"]) + " (confirm with --watch)"
   comments = core.gh_pages(f"repos/{repo}/issues/{number}/comments?per_page=100")
-  view["exit"], view["builder_status"] = builder_facts(handoff.store, uid, comments)
+  view["exit"], view["builder_status"], view["stalled"] = builder_facts(handoff.store, uid, comments, handoff.config)
   view["closed"] = closed_facts(repo, issue, pr, view["landed"])
   view["rulings"] = ruling_entries(ruling_facts(handoff.store, uid, comments, handoff.config.get("owners") or []), comments)
   record["status"] = view["status"]

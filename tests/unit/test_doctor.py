@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U14's tests of `superegm doctor` (spec section 11); the App lines and the launched environment (U15); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five driver lines (U24).
+# Added by SuperEGM (gsVAM), 2026: U14's tests of `superegm doctor` (spec section 11); the App lines and the launched environment (U15); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five driver lines (U24); the informational `stall:` line (U31).
 
 """`superegm doctor`: one line per wave prerequisite, `ok` or the refusal `launch` or `launch-builder`
 would give, in a pinned order; no run card, no store write."""
@@ -21,7 +21,7 @@ ROLES = ["model: builder doable claude-opus-5-5 medium", "model: goldfish opus x
 OK = ["config: ok", "owner: ok (owner)", "origin: ok", "token: ok", "builder: ok (builder-bot)", "role: ok (write)",
       "scopes: ok (classic: repo, read:org)", "protection: ok",
       "merge: gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset restricts updates to config.owners)", "profile: ok", "plugins: none", "mcp: none", "gh: ok (/usr/local/bin/gh)", "environment: ok",
-      "graphify: not on PATH (informational)", "astra: not installed (heads will record not run)",
+      "graphify: not on PATH (informational)", "astra: not installed (heads will record not run)", "stall: 30 min",
       "python3.12: not on PATH (informational)", "hooks: none", "core.hooksPath: unset", *DRIVER_NONE, *ROLES]
 NAMES = [line.split(":")[0] for line in OK]
 
@@ -40,6 +40,7 @@ NAMES = [line.split(":")[0] for line in OK]
   ("workflow-scope", 1, ["scopes: classic token carries workflow (repo, workflow)"]),
   ("protection", 1, ["protection: base branch main: updates are not restricted to the owner (no classic restrictions, no active ruleset update rule)"]),
   ("profile", 1, ["profile: builder profile {profile} holds hooks"]),
+  ("stall", 0, ["stall: 45 min"]),
   ("graphify", 0, ["graphify: ok (/usr/local/bin/graphify)"]),
   ("no-gh", 1, ["gh: gh is not on this machine's PATH"]),
   ("astra", 0, ["astra: ok ({runner})"]),
@@ -78,6 +79,7 @@ def test_doctor_lines(world, monkeypatch, tmp_path, case, code, expected):
   if case == "workflow-scope": github(world, scopes="repo, workflow")
   if case == "protection": github(world, rulesets=[])
   if case == "profile": (Path(profile) / "settings.json").write_text('{"hooks": {"SessionStart": []}}', encoding="utf-8")
+  if case == "stall": configure(world, builder={**json.loads(config.read_text(encoding="utf-8"))["builder"], "stall_minutes": 45})
   got, out = world.run("doctor")
   assert got == code, out
   lines = out.splitlines()
@@ -106,7 +108,7 @@ def test_doctor_prints_the_plugins_and_mcp_lines(world, monkeypatch, tmp_path, s
 OK_APP = ["config: ok", "owner: ok (owner)", "origin: ok", "credential: ok (app superegm-builder)", "key: ok ({key})", "openssl: ok ({openssl})", "artifacts_dir: ok",
           "app: ok (superegm-builder #12345)", f"permissions: ok ({FOUR[1:-1]})", "token: ok", "installation: ok (example-org/webhooks)",
           "scanning: push protection enabled, non-provider patterns enabled", "protection: ok",
-          "merge: gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset restricts updates to config.owners)", "profile: ok", "plugins: none", "mcp: none", "gh: ok ({gh})", "environment: ok", "graphify: not on PATH (informational)", "astra: not installed (heads will record not run)",
+          "merge: gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset restricts updates to config.owners)", "profile: ok", "plugins: none", "mcp: none", "gh: ok ({gh})", "environment: ok", "graphify: not on PATH (informational)", "astra: not installed (heads will record not run)", "stall: 30 min",
           "python3.12: not on PATH (informational)", "hooks: none", "core.hooksPath: unset", *DRIVER_NONE, *ROLES]
 
 

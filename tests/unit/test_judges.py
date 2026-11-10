@@ -1,4 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
+# Modified by SuperEGM (gsVAM), 2026: the launch question's pending options (U31).
 """U08: the judge panel (judges open|record|diff|verdict, the grammars, the adapter, persona and skill)."""
 import hashlib
 import json
@@ -421,3 +422,19 @@ def test_no_removed_forms(path):
   for term in REMOVED:
     assert term not in text, f"{path}: {term}"
   assert not EGM_NAME_RE.search(text), f"{path}: {EGM_NAME_RE.search(text).group()}"
+
+
+from test_wave import open_wave_card, wave_store  # noqa: E402
+
+Q = {"id": "q1", "point": 3, "source": "launch 1", "question": "U01 stalled\n", "options": judges.RELAUNCH}
+USED = [{"decision": "q0", "ruling": "relaunch", "by": "owner"}]
+
+
+@pytest.mark.parametrize("decisions, rulings, code, expect", [
+  ([Q], USED, 0, "## Q1 U01 launch 1 stalled (last commit none)\n- (a) relaunch\n- (b) stop the unit\n"),
+  ([], [], 1, "superegm: question: U01 has no pending decision on launch 1")])
+def test_a_launch_question_renders_the_pending_options(world, decisions, rulings, code, expect):
+  card = open_wave_card(world)
+  wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "decisions": decisions, "rulings": rulings, "launches": [{"round": 1, "status": "exited (stalled)", "last_commit_at": None}]})
+  got, out = world.run("judges", "question", "--unit", "U01", "--blocked", "launch", "1", "--runcard", card)
+  assert got == code and (Path(out.strip()).read_text(encoding="utf-8") if code == 0 else out.strip()) == expect, out

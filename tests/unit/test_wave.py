@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U10b's tests of the driver: report, decision open|rule, the wave skill body; the by-hand ruling read through `ruling_of` (U22); the foreman-verifies prose and the owner-only decision's allowed form (U25); the head's fifth decision point and the accept below the cap's skill texts (U35).
+# Added by SuperEGM (gsVAM), 2026: U10b's tests of the driver: report, decision open|rule, the wave skill body; the by-hand ruling read through `ruling_of` (U22); the foreman-verifies prose and the owner-only decision's allowed form (U25); the head's fifth decision point and the accept below the cap's skill texts (U35); the watchdog's stalled line, carve-out and skill lines (U31).
 
 """U10b: the pure functions the wave skill cites, `report`, `decision open|rule` and the skill body.
 Fixtures: conftest's `world`, `applied` and `make_pr` (U03/U07)."""
@@ -915,7 +915,8 @@ def test_the_wave_entry_refreshes_the_snapshot_before_report():
   "Codex", "ChatGPT", "Astra `inspect`", "claudex", "defer", "--published", "--watch", "--confirm-landed", "Candidate PR",
   "wave_<n>_plan.md", "foreman_<id>_state.json", "egm-handoff", "**`Panel`**", "astra_lane", "review_panels",
   "marking a PR ready", "head-moved", "merge locally", "egm/<handoff-id>", "`--wait 1500`", "two consecutive `deadline`s",
-  "--not-run <reason>", "ask the user whether to re-review", "max 1 re-audit", "Blocker or Major"])
+  "--not-run <reason>", "ask the user whether to re-review", "max 1 re-audit", "Blocker or Major",
+  "A refusal (`relaunch` already used)"])
 def test_the_wave_skill_names_no_removed_mechanism(removed):
   for path in (SKILL, POINTS, RULINGS, SKILL.parent / "references/leavemealone_mode.md"):
     assert removed not in path.read_text(encoding="utf-8"), (path.name, removed)
@@ -1577,3 +1578,73 @@ def test_the_fifth_decision_point_is_ruled_by_word_or_comment(world, monkeypatch
   ("skills/wave/references/decision_points.md", "no head is accepted early"), ("skills/wave/SKILL.md", "printed `acceptable: yes` → Decision point 5"), ("skills/integrate/SKILL.md", "accepted before the cap")])
 def test_the_skill_texts_carry_the_accept_below_the_cap(path, needle):
   assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
+
+
+from test_events import seed as events_seed, WAIT, comment  # noqa: E402
+import time  # noqa: E402
+iso = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+
+
+@pytest.mark.parametrize("extra, head, exit_text, minutes, word, lines", [
+  ({}, NOW - 1800, None, None, "DONE_WITH_CONCERNS", ["U01 stalled (30 min; last commit 2023-11-14T21:43:20Z) pr=none status=DONE_WITH_CONCERNS"]),
+  ({}, NOW - 3600, None, None, None, ["U01 stalled (31 min; last commit none) pr=none status=none"]),
+  ({}, NOW - 3600, "0", None, None, ["U01 exit code=0 pr=none status=none"]),
+  ({}, None, None, 45, None, ["deadline"]),
+  ({"kill_failed": "no exit file"}, None, None, None, None, ["deadline"]),
+  ({"kill_failed": "no exit file"}, None, "stalled", None, None, ["U01 exit code=stalled pr=none status=none"]),
+  ({"status": "exited (stalled)"}, None, "stalled", None, None, ["deadline"])])
+def test_every_pass_reports_a_stalled_launch(world, monkeypatch, tmp_path, extra, head, exit_text, minutes, word, lines):
+  """The watchdog (spec section 11.1, U31): a `running` launch with no `kill_failed` mark and no exit file, whose
+  worktree shows no commit newer than its own newest (or its `started_at`) for `builder.stall_minutes`, is reported
+  stalled at every pass, the predicate and no fingerprint; an `exited (stalled)` launch masks its exit and status."""
+  from superegm import status as status_mod
+  gh, st, card = events_seed(world, monkeypatch)
+  minutes and set_config(world, repo=REPO, builder={**DEFAULT_CONFIG["builder"], "stall_minutes": minutes})
+  word and comment(gh, f"**Builder status:** {word}")
+  atomic_write(st.path("launches", "U01"), {"launches": [{"round": 1, "status": "running", "started_at": iso(NOW - 31 * 60), "worktree": str(tmp_path), "result_file": str(tmp_path / "r1.json"), **extra}]})
+  exit_text and (tmp_path / "r1.json.exit").write_text(exit_text + "\n", encoding="utf-8")
+  monkeypatch.setattr(status_mod, "head_time", lambda worktree: head)
+  code, out = world.run(*WAIT, card)
+  assert code == 0 and out.splitlines() == lines, out
+  assert " stalled (" not in lines[0] or world.run(*WAIT, card)[1].splitlines() == lines   # the predicate, no fingerprint
+  assert " stalled (" not in lines[0] or status_mod.tick_trigger(status_mod.core.Handoff(world.plan, st)) == lines[0]   # the tick wakes on it
+
+
+L = lambda n, s, c: {"round": n, "status": s, "last_commit_at": c}
+Q1 = {**PRIOR, "source": "launch 1", "options": decision.RELAUNCH}
+USED = [{"decision": "q1", "ruling": "relaunch", "by": "owner"}]
+
+
+@pytest.mark.parametrize("launches, decisions, rulings, source, expect", [
+  ([L(1, "exited (stalled)", None), L(2, "exited 1", None)], [Q1], USED, "launch 2", "ruled: stop the unit (second launch with no commit of its own)"),
+  ([L(1, "exited (stalled)", None), L(2, "exited (stalled)", "t")], [Q1], USED, "launch 2", "options: relaunch; stop the unit"),
+  ([L(1, "exited (stalled)", None), L(2, "interrupted", None)], [Q1], USED, "launch 2", "options: relaunch; stop the unit"),
+  ([L(1, "exited (stalled)", None), L(2, "exited 1", None)], [Q1], USED, "closed 70", "options: relaunch; stop the unit"),
+  ([L(1, "exited 1", "t"), L(2, "exited (stalled)", None), L(3, "exited 1", None)], [Q1], USED, "launch 3", "ruled: stop the unit (relaunch already used)")])
+def test_a_launch_with_no_commit_spends_no_relaunch_and_a_second_is_stop(world, launches, decisions, rulings, source, expect):
+  card = open_wave_card(world)
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "launches": launches, "decisions": decisions, "rulings": rulings})
+  code, out = world.run("decision", "open", "--unit", "U01", "--point", 3, "--question", question(world, "U01 stalled\n"), "--source", source, "--runcard", card)
+  assert code == 0 and out.splitlines()[1] == expect, out
+  if expect.startswith("ruled"):
+    f = foreman_of(s, "U01")
+    assert f["rulings"][-1]["reason"] == expect[22:-1] and f["stopped"]["reason"] == "stop the unit"
+
+
+# U31: by the owner's ruling (issue #89, comment 6752372220) each needle is pinned where its section now lives: the
+# batch, its step 3 and Entry step 4 in SKILL.md, point 3's options and carve-out in references/decision_points.md,
+# the leavemealone `launch <n>` line in references/leavemealone_mode.md.
+LEAVE = SKILL.parent / "references/leavemealone_mode.md"
+PROSE = [("ignored except `landed` and `stalled`", (SKILL,)), ("record-launch --unit <U> --exit stalled --runcard '<CARD>'", (SKILL,)),
+         ("Decision point 3 with the stall facts", (SKILL,)), ("Decision point 3 with the stall facts unless stopped; `kill_failed` idle", (SKILL,)),
+         ("A stopped unit's stall is recorded and asks nothing", (POINTS,)),
+         ("an `interrupted` launch with no decision on it", (SKILL,)), ("an interrupted or a stalled launch", (POINTS, LEAVE)),
+         ("spends no `relaunch`", (POINTS,)),
+         ("effect_kinds: [start-session, github-write, remote-branch, state-store, destructive-local]", (SKILL,))]
+
+
+@pytest.mark.parametrize("needle, paths", PROSE)
+def test_the_wave_skill_records_a_stalled_launch(needle, paths):
+  for path in paths:
+    assert needle in path.read_text(encoding="utf-8"), (path.name, needle)
+  assert len(SKILL.read_bytes()) < 15_000   # the owner's ruling: the body stays under 15,000 bytes

@@ -1,5 +1,5 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
-Added by SuperEGM (gsVAM), 2026: the wave skill's leavemealone-mode wiring, moved out of the wave skill's SKILL.md (the owner's ruling: a 24K skill body is context bloat); the owner's-alone sentence (U23); the driver role's no-ask clauses (U24). -->
+Added by SuperEGM (gsVAM), 2026: the wave skill's leavemealone-mode wiring, moved out of the wave skill's SKILL.md (the owner's ruling: a 24K skill body is context bloat); the owner's-alone sentence (U23); the driver role's no-ask clauses (U24); the `launch <n>` question after its decision, a stalled launch's (U31). -->
 
 # Leavemealone-mode
 
@@ -20,14 +20,13 @@ carries none of its own). Render the question from the record:
 - point 3: `python3 '<HELPER>' judges question --unit <U> --blocked <comment-id> --runcard <card>`
   for a BLOCKED or NEEDS_CONTEXT comment,
   `python3 '<HELPER>' judges question --unit <U> --blocked launch <n> --runcard <card>`
-  for an exit with no PR or an interrupted launch, and
+  for an exit with no PR, an interrupted or a stalled launch (after `decision open`: it renders that decision's options), and
   `python3 '<HELPER>' judges question --unit <U> --blocked closed <n> --runcard <card>`
   for a close by the builder account. Its second line, `consumers: #<n> …`,
   appears for an `interface` deviation: the ruling is also posted as the same
   `**Ruling:**` comment on every `consumers:` issue, with
   `GH_HOST=github.com gh issue comment <n> -R OWNER/NAME --body-file '<file>'`.
-  A refusal (`relaunch` already used) means `stop the unit` was applied by
-  `decision open` already.
+  A `ruled: stop the unit (…)` from `decision open` needs no panel: it is applied already.
 
 Then the panel sequence of the reference:
 `python3 '<HELPER>' judges open --question <path> --evidence <paths> --parent <card>`

@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the report subcommand (spec section 11): the per-batch wave report, the idle rules
-# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24).
+# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31).
 
 """superegm report: rewrite `wave_<n>_report.md` from the store, the plan and the spec and print its path, the
 board and the idle, pending and loop lines. It opens the card's handoff as `status` does (`core.locate`,
@@ -39,7 +39,8 @@ def run(args):
     core.card_add(st, args.runcard, "idle", {"unit": uid, "reason": reason, "at": core.now_iso()})
   card = record_heads(st, args.runcard, {uid: views[uid] for uid in launched}, now)
   foremen = {uid: core.load_foreman(st, uid) for uid in launched}
-  states = {uid: unit_state(uid, views[uid], foremen[uid], load_launches(st, uid), card, config, now) for uid in launched}
+  entries = {uid: load_launches(st, uid) for uid in launched}
+  states = {uid: unit_state(uid, views[uid], foremen[uid], entries[uid], card, config, now) for uid in launched}
   free = config["max_in_flight"] - sum(states[uid] == "active" for uid in launched)  # a pending unit holds no slot (amendment 5)
   named_idle = {entry["unit"] for entry in card.get("idle") or []}  # holds no slot, launched or not
   ready = [uid for uid in (state.get("status") or {}).get("ready") or [] if uid not in launched and uid not in named_idle]
@@ -56,7 +57,7 @@ def run(args):
                                               for e in load_launches(st, uid) if not e["status"].startswith(("exited", "interrupted"))])
   lines += section("Heads with pending or absent CI", [f"{uid} {views[uid]['head'][:7]} waiting-for-ci" for uid in launched
                                                        if views[uid]["head"] and views[uid]["ci"] in (None, "pending")])
-  lines += section("Idle", [f"{uid}: {reason}" for uid, reason in idle_reasons(card, states, views, config, now)])
+  lines += section("Idle", [f"{uid}: {reason}" for uid, reason in idle_reasons(card, states, views, config, now, entries)])
   lines += section("Ready, unlaunched", [f"{uid} ({'slot free' if free > 0 else 'no free slot'})" for uid in ready])
   lines += section("Pending decisions", [f"{uid} {d['id']} (point {d['point']}, {d['source']}): {question_line(d['question'])}"
                                          for uid, d in pending])
@@ -124,6 +125,8 @@ def board_table(handoff, state: dict, card: dict, now: float) -> str:
   # CI bound without its growing minute count, so an idle row stays equal across passes.
   reasons = dict((e["unit"], e["reason"]) for e in card.get("idle") or [] if e["unit"] in views)
   for uid in handoff.graph.order:
+    if kill_failed(launches[uid]) and uid not in reasons:  # U31: the interrupt for a `kill_failed` one
+      reasons[uid] = kill_failed_reason(uid, kill_failed(launches[uid]))
     reasons.setdefault(uid, f"ci {views[uid]['ci'] or 'absent'} (ci_wait_minutes {config.get('ci_wait_minutes', 30)})")
   open_blocking = (state.get("status") or {}).get("open_blocking") or {}
   waves = " → ".join("{" + ", ".join(handoff.graph.waves[w]) + "}" for w in sorted(handoff.graph.waves))
@@ -196,9 +199,28 @@ def section(title: str, items: list) -> list:
   return ["", f"## {title}"] + [f"- {item}" for item in items or ["none"]]
 
 
-def idle_reasons(card: dict, states: dict, views: dict, config: dict, now: float) -> list:
-  """`(unit, reason)` per idle unit: the card's `idle[]` reasons, then the CI bound with its minutes."""
+def kill_failed(launches: list):
+  """U31: the latest launch when it is `running` with the `kill_failed` mark and no exit file, else None (a late exit
+  file makes it terminal, `launch.terminal`'s reading, and the interrupt would refuse it)."""
+  latest = launches[-1] if launches else None
+  if not (latest and latest.get("status") == "running" and latest.get("kill_failed")):
+    return None
+  return None if Path(str(latest.get("result_file")) + ".exit").is_file() else latest
+
+
+def kill_failed_reason(uid: str, entry: dict) -> str:
+  """U31: a `kill_failed` launch's idle reason, its action the owner's interrupt."""
+  return f"kill_failed ({entry['kill_failed']}): /superegm:interrupt --unit {uid} --launch {entry['round']}"
+
+
+def idle_reasons(card: dict, states: dict, views: dict, config: dict, now: float, launches: dict | None = None) -> list:
+  """`(unit, reason)` per idle unit: the card's `idle[]` reasons, a `kill_failed` launch's (U31), then the CI bound
+  with its minutes."""
   reasons = [(entry["unit"], entry["reason"]) for entry in card.get("idle") or [] if entry["unit"] in views]
+  for uid, state in states.items():
+    entry = kill_failed((launches or {}).get(uid) or [])
+    if state == "idle" and entry and not any(u == uid for u, _ in reasons):
+      reasons.append((uid, kill_failed_reason(uid, entry)))
   for uid, state in states.items():
     seen = ci_seen_at(uid, views[uid], card)
     if state == "idle" and seen is not None and not any(u == uid for u, _ in reasons):
@@ -233,7 +255,8 @@ def stopped_line(st, uid: str, stopped: dict, views: dict) -> str:
 
 def unit_state(uid: str, view: dict, foreman: dict, launches: list, card: dict, config: dict, now: float) -> str:
   """One of eight: `landed`, `stopped`, `pending` (a decision without its ruling), `idle` (named on the
-  card, or a head whose CI is pending or absent for `ci_wait_minutes` since the card first saw it),
+  card, a `running` latest launch with the `kill_failed` mark (U31), or a head whose CI is pending or
+  absent for `ci_wait_minutes` since the card first saw it),
   `clean` (the latest round posted clean, no launch recorded after it), else `active`; an unlaunched
   unit not named idle is `ready` (in the saved `status.ready`) or `waiting` (a view without
   `launched` reads as launched)."""
@@ -244,6 +267,8 @@ def unit_state(uid: str, view: dict, foreman: dict, launches: list, card: dict, 
   if pending_decisions(foreman):
     return "pending"
   if any(entry["unit"] == uid for entry in card.get("idle") or []):
+    return "idle"
+  if kill_failed(launches):  # U31: a `kill_failed` launch still `running` holds no slot until the owner's interrupt
     return "idle"
   if not view.get("launched", True):
     return "ready" if view.get("ready") else "waiting"

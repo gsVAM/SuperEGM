@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24).
+# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31).
 
 """superegm inbox [--all] [--json] [--handoff <id>]: one line per item that needs the owner across the
 store's open handoffs, read-only and with no run card; superegm notify --runcard <id>: the owner's
@@ -7,13 +7,11 @@ store's open handoffs, read-only and with no run card; superegm notify --runcard
 `state.json.notified` nor `driver/<handoff>.json`'s `notified` holds it; the caller's set is rewritten,
 `state.json`'s under a `wave` card, `driver/<handoff>.json`'s under a `driver` card (U24)."""
 
-import calendar
 import json
 import os
 import re
 import signal
 import subprocess
-import time
 from pathlib import Path
 
 import superegm as core
@@ -138,6 +136,18 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
   return out
 
 
+def kill_failed_items(hs: core.Store, repo: str, uid: str) -> list:
+  """U31: a `kill_failed` launch still `running`, for the owner's typed interrupt; the pid named for `no exit file`
+  alone (the group signalled and alive), the other reasons naming no process of the launch's."""
+  entry = report.kill_failed(load_launches(hs, uid))
+  if not entry:
+    return []
+  mark, n = entry["kill_failed"], entry["round"]
+  why = f"{mark}, pid {entry.get('pid')}" if mark == "no exit file" else mark
+  return [{"repo": repo, "subject": uid, "kind": f"kill_failed ({why})",
+           "action": f"/superegm:interrupt --unit {uid} --launch {n}, then /superegm:wave", "fingerprint": f"{uid} launch {n} kill_failed"}]
+
+
 def review_items(hs: core.Store, repo: str, spec: str, rid: str, rev: dict, foremen: dict, mode: str = "normal") -> list:
   """A review's cap or stalled line (cap: `review status` exit 2 with no `stop` ruled; stalled: a head's exit 5)
   and an integrate review's `escalated` findings (in leavemealone the owner declines a blocking one with the id of
@@ -188,7 +198,7 @@ def wave_items(hs: core.Store, repo: str, hid: str) -> list:
   """The handoff's open top-level `wave` card, as information, with its age in minutes."""
   out = []
   for cid, card in wave_cards(hs, hid):
-    opened = calendar.timegm(time.strptime(card["opened_at"], "%Y-%m-%dT%H:%M:%SZ"))
+    opened = core.epoch(card["opened_at"])
     minutes = int((core.NOW() - opened) // 60)
     out.append({"repo": repo, "subject": cid, "kind": "wave", "action": f"information: open {minutes} min",
                 "fingerprint": cid})
@@ -196,7 +206,7 @@ def wave_items(hs: core.Store, repo: str, hid: str) -> list:
 
 
 def minutes_since(stamp: str) -> int:
-  return int((core.NOW() - calendar.timegm(time.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ"))) // 60)
+  return int((core.NOW() - core.epoch(stamp)) // 60)
 
 
 def driver_items(hs: core.Store, repo: str, hid: str) -> list:
@@ -238,6 +248,7 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
     mode = (cards[-1][1].get("mode") if cards else None) or store.config.get("mode", "normal")
     live = set()
     for uid, foreman in foremen.items():
+      found += kill_failed_items(hs, repo, uid)  # a stopped unit's launch too: the kill is what is left (U31)
       stopped = foreman.get("stopped")
       if stopped:
         if stopped.get("brief"):
@@ -254,7 +265,7 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
           continue
         found += review_items(hs, repo, spec, path.name, rev, foremen, mode)
       read_specs.add(spec)
-    found.sort(key=lambda i: (i["subject"], KINDS.index(i["kind"])))
+    found.sort(key=lambda i: (i["subject"], KINDS.index(i["kind"].split(" ")[0])))
     out += found + wave_items(hs, repo, hid) + driver_items(hs, repo, hid)
   return out
 

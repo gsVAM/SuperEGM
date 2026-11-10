@@ -1,12 +1,12 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the builders' tests (U09): launch, launch-builder, record-launch, interrupt, clean, the orders and the two skill bodies; the App path (U15).
+# Modified by SuperEGM (gsVAM), 2026: the builders' tests (U09): launch, launch-builder, record-launch, interrupt, clean, the orders and the two skill bodies; the App path (U15); the watchdog's trap and `--exit stalled` (U31).
 
 """The builders (spec section 11): `launch` and its preconditions, `launch-builder`'s worktree,
 prompt file and command line, `record-launch`, `interrupt`, `clean`, the builder orders and the
 `interrupt` and `clean` skill bodies."""
 
-import hashlib, json, os, re, shutil, subprocess
+import hashlib, json, os, re, shutil, signal, subprocess, time
 from pathlib import Path
 import pytest
 from superegm import store, spec_slug, DEFAULT_CONFIG
@@ -452,7 +452,7 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   cfg = json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]
   result = s.path("launches", f"{UNIT}_r1_result.json")
   pairs = " ".join(f"{k}='{v.format(gh='/usr/local/bin/gh', login='builder-bot', email='1001+builder-bot@users.noreply.github.com')}'" for k, v in PAIRS)
-  assert line.startswith(f"cd '{wt}' && env -u GIT_ASKPASS -u SSH_ASKPASS -u GITHUB_TOKEN -u CLAUDE_CODE_EFFORT_LEVEL CLAUDE_CONFIG_DIR='{cfg['profile_dir']}' ENABLE_CLAUDEAI_MCP_SERVERS=false GH_TOKEN=\"$SUPEREGM_BUILDER_TOKEN\" SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{card}' {pairs} claude -p "), line
+  assert line.startswith(f"SUPEREGM_EXIT='{result}.exit'; trap 'echo stalled > \"$SUPEREGM_EXIT\"; exit' TERM; cd '{wt}' && env -u GIT_ASKPASS -u SSH_ASKPASS -u GITHUB_TOKEN -u CLAUDE_CODE_EFFORT_LEVEL CLAUDE_CONFIG_DIR='{cfg['profile_dir']}' ENABLE_CLAUDEAI_MCP_SERVERS=false GH_TOKEN=\"$SUPEREGM_BUILDER_TOKEN\" SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{card}' {pairs} claude -p "), line
   mcp_file = s.path("launches", f"{UNIT}_r1_mcp.json")
   assert f" claude -p \"$(cat '{prompt_file}')\" --session-id '{launches_of(s)[-1]['session_id']}' --model '{cfg['model']}' --effort '{cfg['effort']}' --permission-mode '{cfg['permission_mode']}' --setting-sources user --mcp-config '{mcp_file}' --strict-mcp-config --allowedTools '" in line, line
   tools = line.split("--allowedTools '")[1].split("'")[0].split(",")
@@ -517,6 +517,69 @@ def test_record_launch_writes_the_requested_pair_then_the_effective_model_and_co
   assert world.run("record-launch", "--unit", UNIT, "--exit", 0, "--runcard", card)[0] == 0
   entry = launches_of(s)[0]
   assert (entry["status"], entry["effective_model"], entry["total_cost_usd"]) == ("exited 0", effective, cost)
+
+
+NOW = 1_700_000_000.0
+iso = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+NX = "no exit file"
+KF = "U07 launch 1 kill_failed ("
+RL = "superegm: record-launch: "
+
+
+@pytest.mark.parametrize("before, exit, file, group, trap, head, code, after, signalled, out", [
+  ({}, "stalled", None, "own", "stalled", None, 0, ("exited (stalled)", None, None), True, "U07 launch 1 stalled (31 min; last commit none)"),
+  ({}, "stalled", None, "own", "stalled", NOW - 3600, 0, ("exited (stalled)", None, None), True, "U07 launch 1 stalled (31 min; last commit none)"),
+  ({}, "stalled", None, "own", None, None, 0, ("running", NX, None), True, KF + NX + ")"),
+  ({"kill_failed": NX}, "stalled", None, "own", None, None, 1, ("running", NX, None), False, RL + KF + NX + ")"),
+  ({"kill_failed": NX}, "stalled", "stalled", "gone", None, None, 0, ("exited (stalled)", None, None), False, "U07 launch 1 stalled (31 min; last commit none)"),
+  ({}, "stalled", None, "own", "1", None, 1, ("running", None, None), True, RL + "the exit file of U07 launch 1 says 1, not stalled"),
+  ({}, "stalled", None, "reused", "stalled", None, 0, ("running", "pid reused", None), False, KF + "pid reused)"),
+  ({}, "stalled", None, "gone", "stalled", None, 0, ("running", "no process", None), False, KF + "no process)"),
+  ({}, "stalled", None, "orphan", None, None, 0, ("running", NX, None), True, KF + NX + ")"),
+  ({"kill_failed": NX}, "1", "1", "gone", None, NOW - 60, 0, ("exited 1", None, "2023-11-14T22:12:20Z"), False, "U07 launch 1 exited 1")])
+def test_exit_stalled_records_the_proof_or_kill_failed(world, monkeypatch, before, exit, file, group, trap, head, code, after, signalled, out):
+  """`record-launch --exit stalled` (spec section 11.1, U31): the group the recorded `pid` names signalled once when it
+  is the launch's own (or leaderless), the wrapper's exit file `stalled` the one proof, else `kill_failed`; a file
+  already present read with no group check and no signal; `last_commit_at` on every exit it records."""
+  from superegm import record_launch as record_launch_mod
+  s, card, *_ = seed(world)
+  result = s.path("launches", f"{UNIT}_r1_result.json")
+  put(s.path("launches", f"{UNIT}.json"), json.dumps({"launches": [{"round": 1, "worktree": "/w", "started_at": iso(NOW - 31 * 60), "status": "running",
+      "result_file": str(result), "pid": 4242, **before}]}))
+  file and Path(f"{result}.exit").write_text(f"{file}\n", encoding="utf-8")
+  leader, members = {"own": (f"/bin/sh -c claude -p x > '{result}'\n", "4242 4242\n"), "reused": ("other\n", "4242 7\n"), "orphan": ("", "4243 4242\n"), "gone": ("", "1 1\n")}[group]
+  monkeypatch.setattr(record_launch_mod, "PS", lambda args: leader if "-p" in args else members)
+  monkeypatch.setattr(record_launch_mod, "head_time", lambda worktree: head)
+  sent = []
+  world.ns["kill_group"] = lambda pgid: (sent.append(pgid), trap and Path(f"{result}.exit").write_text(f"{trap}\n", encoding="utf-8"))
+  got, printed = world.run("record-launch", "--unit", UNIT, "--exit", exit, "--runcard", card)
+  entry = launches_of(s)[0]
+  assert (got, printed.strip(), sent == [4242], entry["status"], entry.get("kill_failed"), entry.get("last_commit_at")) == (code, out, signalled, *after), printed
+  assert not (signalled and not trap) or sum(world.sleeps) >= 30
+
+
+@pytest.mark.parametrize("word", ["stall", "1.5", ""])
+def test_exit_refuses_a_word_that_is_neither_a_code_nor_stalled(world, word):
+  """`--exit` takes an integer code or `stalled` (U31); any other word is refused before the store is read."""
+  s, card, *_ = seed(world)
+  got, printed = world.run("record-launch", "--unit", UNIT, "--exit", word, "--runcard", card)
+  assert (got, printed.strip()) == (1, f"superegm: record-launch: --exit {word}: a code or stalled"), printed
+
+
+def test_exit_stalled_keeps_an_interrupted_written_during_the_wait(world, monkeypatch):
+  """`record-launch --exit stalled` re-reads the entry after its wait (spec section 11.1, U31): an `interrupted` the
+  owner's interrupt wrote meanwhile is kept, refused exit 1, and no `kill_failed` is written over it."""
+  from superegm import record_launch as record_launch_mod
+  s, card, *_ = seed(world)
+  result = s.path("launches", f"{UNIT}_r1_result.json")
+  entry = {"round": 1, "worktree": "/w", "started_at": iso(NOW - 31 * 60), "status": "running", "result_file": str(result), "pid": 4242}
+  put(s.path("launches", f"{UNIT}.json"), json.dumps({"launches": [entry]}))
+  monkeypatch.setattr(record_launch_mod, "PS", lambda args: f"/bin/sh -c claude -p x > '{result}'\n" if "-p" in args else "4242 4242\n")
+  monkeypatch.setattr(record_launch_mod, "head_time", lambda worktree: None)
+  world.ns["kill_group"] = lambda pgid: put(s.path("launches", f"{UNIT}.json"), json.dumps({"launches": [{**entry, "status": "interrupted"}]}))
+  got, printed = world.run("record-launch", "--unit", UNIT, "--exit", "stalled", "--runcard", card)
+  assert (got, printed.strip()) == (1, "superegm: record-launch: U07 launch 1 is interrupted now: kept"), printed
+  assert (launches_of(s)[0]["status"], launches_of(s)[0].get("kill_failed")) == ("interrupted", None)
 
 
 @pytest.mark.parametrize("case, reason", [
@@ -643,7 +706,8 @@ def test_launch_builder_round_2_detaches_the_earlier_worktree_and_carries_the_re
   unit_file = s.path("orient_unit", f"{UNIT}.md").read_text(encoding="utf-8")
   assert unit_file.startswith(f"orient: tree {git(['rev-parse', head + '^{tree}'], world.repo).strip()}") and "## src/worker.py (create)\ndef w(): pass\ntests: none\n" in unit_file
   assert f"\n\n---\n\n# Review comments on PR #{PR}\n\n## owner · review 9 on {head[:7]}\n**Review round 1" in prompt and "self review" not in prompt
-  assert launches_of(s)[-1]["command"].startswith(f"cd '{r2}' && env ")
+  r2_result = s.path("launches", f"{UNIT}_r2_result.json")
+  assert launches_of(s)[-1]["command"].startswith(f"SUPEREGM_EXIT='{r2_result}.exit'; trap 'echo stalled > \"$SUPEREGM_EXIT\"; exit' TERM; cd '{r2}' && env ")
 
 
 def test_launch_builder_relaunches_from_the_local_branch_when_no_pr_is_recorded(world, monkeypatch, spawn_fake):
@@ -687,6 +751,22 @@ def test_command_line_carries_the_dirs_the_mcp_file_and_the_switch():
   assert " --setting-sources user --plugin-dir '/c/ponytail/5.3.3' --plugin-dir '/c/x/1' --mcp-config '/l/U07_r1_mcp.json' --strict-mcp-config --allowedTools 'Read' " in line, line
   assert " --setting-sources user --mcp-config '/m.json' --strict-mcp-config --allowedTools 'Read' " in call([], "/m.json")
   assert " --session-id 's' " in call([], "/m.json", session_id="s") and " --session-id" not in call([], "/m.json")
+
+
+def test_the_wrapper_traps_term_and_writes_stalled(tmp_path, monkeypatch):
+  """The watchdog's one proof (spec section 11.1, U31): the wrapper traps TERM, and the trap writes `stalled` to the
+  exit file and ends the wrapper, no code written after it."""
+  from superegm.launch_builder import command_line
+  fake = tmp_path / "bin"; fake.mkdir()
+  c = fake / "claude"; c.write_text("#!/bin/sh\nexec sleep 30\n", encoding="utf-8"); c.chmod(0o755)
+  monkeypatch.setenv("PATH", f"{fake}:{os.environ['PATH']}")
+  result = tmp_path / "r.json"
+  line = command_line({"builder": {**DEFAULT_CONFIG["builder"], "profile_dir": str(tmp_path)}}, tmp_path, tmp_path / "p.md", result, "wave-1", ["Read"], "/usr/local/bin/gh", "b", "b@x", [], tmp_path / "m.json")
+  wrapper = subprocess.Popen(["/bin/sh", "-c", line], start_new_session=True)
+  time.sleep(1)
+  os.killpg(wrapper.pid, signal.SIGTERM)
+  wrapper.wait(timeout=10)
+  assert Path(f"{result}.exit").read_text(encoding="utf-8") == "stalled\n"
 
 
 def test_launch_carries_the_effort_flag_and_unsets_the_session_level():
