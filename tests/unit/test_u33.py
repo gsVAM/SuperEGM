@@ -33,7 +33,9 @@ TIERS = {"difficult": {"model": "claude-opus-5-5", "effort": "high"}, "easy": {"
   ({"tiers": {"difficult": TIERS["difficult"]}}, "easy", None),
   ({"tiers": {"hard": TIERS["difficult"]}}, "doable", "builder.tiers keys must be difficult or easy"),
   ({"tiers": {"easy": {"model": "claude-sonnet-5-5"}}}, "doable", "builder.tiers.easy must be {model, effort}"),
-  ({"tiers": {"easy": {"model": "claude-sonnet-5-5", "effort": "huge"}}}, "doable", "builder.tiers.easy must be {model, effort}")])
+  ({"tiers": {"easy": {"model": "claude-sonnet-5-5", "effort": "huge"}}}, "doable", "builder.tiers.easy must be {model, effort}"),
+  ({"tiers": {"easy": {"model": "Claude Sonnet", "effort": "medium"}}}, "doable", "builder.tiers.easy must be {model, effort}"),
+  ({"tiers": ["easy"]}, "doable", "builder.tiers keys must be difficult or easy")])
 def test_builder_tiers_defaults_the_loader_and_the_pair(world, builder, tier, expect):
   assert superegm.DEFAULT_CONFIG["builder"]["tiers"] == TIERS
   set_config(world, repo=REPO, builder={"profile_dir": "p", **builder})
@@ -46,13 +48,13 @@ def test_builder_tiers_defaults_the_loader_and_the_pair(world, builder, tier, ex
   assert tier_pair(config, tier) == (expect or (config["builder"]["model"], config["builder"]["effort"]))
 
 
-@pytest.mark.parametrize("tier, cell", [(None, "doable"), ("difficult", "difficult")])
+@pytest.mark.parametrize("tier, cell", [(None, "doable"), ("difficult", "difficult"), ("hard", "doable"), ("", "doable")])
 def test_the_board_carries_the_tier_column(world, tier, cell):
   card = open_wave_card(world)
   s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green"})
   units = json.loads(s.path("units").read_text(encoding="utf-8"))
   units["units"]["U01"].pop("tier", None)
-  tier and units["units"]["U01"].update(tier=tier)
+  tier is not None and units["units"]["U01"].update(tier=tier)
   atomic_write(s.path("units"), units)
   assert unit_tier(s, "U01") == cell
   code, out = world.run("report", "--runcard", card)

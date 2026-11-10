@@ -643,7 +643,7 @@ def test_graph_parses_the_optional_tier_field_into_the_units_and_the_body(world,
   assert code == 1 and "issue template lacks {{tier}}" in out, out
 
 
-PAIR, CLAIM ="spec-2026-11-03-webhooks-design-c1:design-1-2", "the cap is unstated"
+PAIR, CLAIM = "spec-2026-11-03-webhooks-design-c1:design-1-2", "the cap is unstated"
 D_ESC = f"- D2 {PAIR}: {CLAIM} options: (a) cap at 5; (b) cap at 8; owner: the owner; default: (a); blocking: yes"
 MSG = f"graph: {PAIR} needs a `## Units` row or a `blocking: yes` D<n> line naming it with the finding's claim verbatim"
 

@@ -94,7 +94,7 @@ def test_doctor_lines(world, monkeypatch, tmp_path, case, code, expected):
   lines = out.splitlines()
   for line in expected:
     assert line.format(config=config, profile=profile, runner=runner, hooks=hooks) in lines, out
-  skipped = {"config": set(NAMES) - {"config"}, "tier-key": set(NAMES) - {"config"},"no-token": {"builder", "role", "scopes", "protection"}, "no-gh": {"environment"}}.get(case, set())
+  skipped = {"config": set(NAMES) - {"config"}, "tier-key": set(NAMES) - {"config"}, "no-token": {"builder", "role", "scopes", "protection"}, "no-gh": {"environment"}}.get(case, set())
   assert [line.split(":")[0] for line in lines] == [name for name in NAMES if name not in skipped]
   assert "ghp_builder" not in out and not s.path("launches", f"{UNIT}.json").parent.exists()
 
