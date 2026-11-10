@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: U05's tests of graph, scan, decide and the plan skill; EGM's moved tests re-pointed at the spec-section-9.1 plan.
+# Modified by SuperEGM (gsVAM), 2026: U05's tests of graph, scan, decide and the plan skill; EGM's moved tests re-pointed at the spec-section-9.1 plan; U29's `width:` line, amendment 9's scan values, the split rules and the 1.2 docs sweep.
 
 """U05's tests: `graph --plan`, `scan`, `decide`, the body parsers' Step defaults and
 the `plan` skill's prose; EGM's graph/scan tests, moved here by U03, re-pointed."""
@@ -743,3 +743,24 @@ def test_every_scan_call_in_the_plan_skills_names_the_plan():
   for path in ("skills/plan/SKILL.md", "skills/review-plan/SKILL.md"):
     calls = re.findall(r"'<HELPER>' scan [^`]*", (ROOT / path).read_text(encoding="utf-8"))
     assert calls and all(call.startswith("'<HELPER>' scan --plan ") for call in calls), (path, calls)
+
+
+from superegm.graph import width_line
+
+@pytest.mark.parametrize("shared, line", [
+  ({}, "width: none"),
+  ({"U02": "`src/u01.ts`: after U01"}, "width: none"),
+  ({"U02": "`src/u01.ts`: after U01", "U03": "`src/u01.ts`: after U02"}, "width: chains src/u01.ts: U01 > U02 > U03 (after U02)"),
+  ({"U01": "`src/u01.ts`: before U02, before U03"}, "width: none"),
+  ({"U02": "`src/u01.ts`: after U01; `src/u02.ts`: before U03", "U03": "`src/u01.ts`: after U02"}, "width: chains src/u01.ts: U01 > U02 > U03 (after U02)"),
+  ({"U02": "`src/u01.ts`: after U01; `src/u02.ts`: after U01", "U03": "`src/u01.ts`: after U02; `src/u02.ts`: after U02"},
+   "width: chains src/u01.ts: U01 > U02 > U03 (after U02); src/u02.ts: U01 > U02 > U03 (after U02)")])
+def test_graph_prints_the_width_line_after_the_waves(world, shared, line):
+  units = tuple(s.replace("| Shared files | none |", f"| Shared files | {shared.get(u, 'none')} |") for u, s in zip(("U01", "U02", "U03"), UNITS))
+  spec, sha, plan, card = planned(world, units)
+  code, out = graph(world, plan, card)
+  assert code == 0 and out.index("wave 3: U03\n") < out.index(line + "\n") < out.index("critical path:"), out
+  assert width_line(json.loads(find(world, "handoff_units.json").read_text(encoding="utf-8"))) == line
+  chain = lambda *edges: {"units": {u: {"shared": [{"path": "x.py", "order": [{"kind": "after", "unit": p}]}] if p else []} for u, p in edges}}
+  assert width_line(chain(("U01", None), ("U02", "U01"), ("U03", "U02"), ("U04", "U03"))) == "width: chains x.py: U01 > U02 > U03 > U04 (after U02)"
+  assert width_line(chain(("U01", None), ("U02", "U01"), ("U03", "U02"), ("U04", "U02"))) == "width: chains x.py: U01 > U02 > U03 (after U02); x.py: U01 > U02 > U04 (after U02)"
