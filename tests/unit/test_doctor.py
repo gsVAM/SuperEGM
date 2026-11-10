@@ -220,7 +220,7 @@ def test_doctor_prints_the_role_table(world, monkeypatch, tmp_path):
   monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: {"gh": "/usr/local/bin/gh", "python3.12": "/usr/local/bin/python3.12"}.get(cmd))
   git(["remote", "set-url", "--push", "origin", f"git@github.com:{REPO}.git"], world.repo)
   code, out = world.run("doctor")
-  assert code == 0 and out.splitlines()[-6:] == ["model: builder doable claude-sonnet-5-5 high", "model: goldfish fable max", "model: astra lanes gpt-6-astra xhigh",
+  assert code == 0 and out.splitlines()[-8:-2] == ["model: builder doable claude-sonnet-5-5 high", "model: goldfish fable max", "model: astra lanes gpt-6-astra xhigh",
                                                  "model: astra head lane gpt-6-astra xhigh", "model: judge fable sonnet max", "model: judge astra gpt-6-astra xhigh"], out
 
 
@@ -231,4 +231,4 @@ def test_doctor_role_table_reads_a_malformed_member_as_one_informational_line(wo
   monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: {"gh": "/usr/local/bin/gh", "python3.12": "/usr/local/bin/python3.12"}.get(cmd))
   git(["remote", "set-url", "--push", "origin", f"git@github.com:{REPO}.git"], world.repo)
   code, out = world.run("doctor")
-  assert code == 0 and out.splitlines()[-1] == "model: unreadable (KeyError: 'pigeon')" and "token: ok" in out, out
+  assert code == 0 and out.splitlines()[-3] == "model: unreadable (KeyError: 'pigeon')" and "token: ok" in out, out
