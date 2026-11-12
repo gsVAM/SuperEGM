@@ -25,11 +25,7 @@
   "reviewers": {
     "spec": [
       "design",
-      "zoom-out",
-      "comprehension",
-      "readiness",
-      "structural",
-      "codebase-details"
+      "readiness"
     ],
     "plan": [
       "readiness",
