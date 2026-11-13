@@ -358,10 +358,10 @@ def collect(args, card):
   prior_ci_fid, prior_tdd, prior_scope, contest_of, external, earlier, disposed = None, {}, {}, {}, [], set(), set()
   prior_dod, prior_delta = {}, {}
   posted = {e["round"]: e.get("posted_at") or "" for e in data["rounds"] if e.get("phase") == "posted"}
-  held = {}  # each id to the first posted round whose record holds it: a reply to it counts from that round's posting
+  holds = {}  # each id to the first posted round whose record holds it: a reply to it counts from that round's posting
   for k in sorted(posted) if rid else ():
     for f in review.findings_of(review.load_round(st, rid, k) or {"reviewers": {}}):
-      held.setdefault(f["id"], k)
+      holds.setdefault(f["id"], k)
   last = review.load_round(st, rid, prior) or {} if prior and rid else {}
   for e in data["rounds"]:  # every posted round: an overruled out-of-Scope finding widens the Scope for good;
     if e.get("phase") == "posted":  # a contest or carried finding names the finding a reply may answer under
@@ -383,7 +383,7 @@ def collect(args, card):
       seen = st.path("review", unit, f"pr{number}") / f"r{e['round']}" / "comments.md"
       if seen.is_file():  # a reply in an earlier round's window still answers its finding
         who, said = parse_comments(core.read_text(seen))
-        earlier |= {m.group(1) for c in said if c["login"] == who and (m := REPLY_RE.match(c["body"])) and timely(m.group(1), c["at"], posted, held)}
+        earlier |= {m.group(1) for c in said if c["login"] == who and (m := REPLY_RE.match(c["body"])) and timely(m.group(1), c["at"], posted, holds)}
   for f in prior_foreman_findings(st, rid, prior):
     if f["location"] == "ci":
       prior_ci_fid = f["id"]
@@ -419,7 +419,7 @@ def collect(args, card):
                                       external, earlier, disposed, posted, handoff.config.get("owners") or [],
                                       recorded_rulings(data), data.get("decisions") or [], recorded_times(data),
                                       handoff.state["units"][unit].get("number"), runs=runs, prior_dod=prior_dod, present=present,
-                                      delta=delta, prior_delta=prior_delta, texts=texts, config=handoff.config, held=held,
+                                      delta=delta, prior_delta=prior_delta, texts=texts, config=handoff.config, held=holds,
                                       open_prior={f["id"] for f in review.findings_of(last) if f["disposition"] is None} if last else set())
   lines, slots, contested = carry(lines, contested, last, prior, contest_of,
                                     binding_rulings([c for c in comments if c["kind"] == "issue"], handoff.config.get("owners") or [],
@@ -666,10 +666,14 @@ def carry(lines: list, contested: list, last: dict, prior, contest_of: dict, rul
        and not {f["id"], contest_of[f["id"]]} & ruled:
       contests.append({**f, "carried_from": prior})
       contested = contested + [bc[f["id"]]]
-  same = {(f["location"], f["claim"]): f for f in prev if f["id"] not in bc and not f["claim"].startswith("contested ")}
+  same = {}  # each earlier finding matches at most once, in order: two alike keep their two ids
+  for f in prev:
+    if f["id"] not in bc and not f["claim"].startswith("contested "):
+      same.setdefault((f["location"], f["claim"]), []).append(f)
   for line in lines:
     _, _, location, _, claim = line.split(" | ", 4)
-    slots.append({**same[(location, claim)], "carried_from": prior} if (location, claim) in same else None)
+    alike = same.get((location, claim))
+    slots.append({**alike.pop(0), "carried_from": prior} if alike else None)
     if slots[-1] is None:
       kept.append(line)
   return kept, slots + contests, contested

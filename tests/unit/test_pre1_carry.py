@@ -83,11 +83,43 @@ def test_an_unruled_builder_contest_is_carried_under_its_id_and_not_posted_again
 
 
 def test_a_contest_of_a_derived_finding_is_not_carried_as_a_contest(world, tmp_path, monkeypatch):
+  """The derived finding itself is carried while its check fails; the contest of it is not."""
   contest = "foreman-2-1 | high | pr #70 comment 14 | regression: no | contested foreman-1-2: it is needed\n"
+  def round_2(r):
+    r.update(builder_contested=[{"fid": "foreman-2-1", "reason": "it is needed"}])
+    r["reviewers"]["foreman"]["findings"].append({**SCOPE_F, "carried_from": 1})
   w, n = build(world, tmp_path, monkeypatch, [{"change-review": "", "foreman": CI + SCOPE}, {"change-review": "", "foreman": contest}],
-               patches=[(2, lambda r: r.update(builder_contested=[{"fid": "foreman-2-1", "reason": "it is needed"}]))])
+               patches=[(2, round_2)], commits=OTHER)
   lines, rnd = collected(world, w, n, 0)
-  assert lines == [] and foreman_of(rnd) == [] and rnd["builder_contested"] == []
+  assert lines == [] and foreman_of(rnd) == [{**SCOPE_F, "carried_from": 2}] and rnd["builder_contested"] == []
+
+
+def test_two_alike_derived_findings_keep_their_two_ids(world, tmp_path, monkeypatch):
+  twice = {70: [c(14, "builder-bot", "**Deviation (interface):** a\n**Deviation (interface):** b")]}
+  alike = "".join(f"foreman-1-{k} | high | pr #70 comment 14 | regression: no | deviation (interface) unruled\n" for k in (1, 2))
+  w, n = build(world, tmp_path, monkeypatch, [{"change-review": "", "foreman": alike}], comments=twice)
+  lines, rnd = collected(world, w, n, 0)
+  assert [(f["id"], f["carried_from"]) for f in foreman_of(rnd)] == [("foreman-1-1", 1), ("foreman-1-2", 1)]
+
+
+EXT = "external:alice-1-1 | high | src/hooks.py:3 at 0000000 | regression: no | the hook never fires\n"
+COPY = "foreman-2-1 | high | src/hooks.py:3 at 0000000 | regression: no | unreplied external:alice-1-1: the hook never fires\n"
+
+
+@pytest.mark.parametrize("at, carried", [("2026-11-02T13:00:00Z", True), ("2026-11-02T16:00:00Z", False)])
+def test_a_reply_in_this_window_to_a_carried_copy_counts_after_its_first_post(world, tmp_path, monkeypatch, at, carried):
+  """Round 2 (posted 15:00) holds foreman-2-1; round 3's own comments hold `**Reply foreman-2-1:** fixed`: after the
+  post it ends the carry, before it answers nothing and foreman-2-1 is carried under its id."""
+  r2 = {**R2, "posted_at": "2026-11-02T15:00:00Z"}
+  kw = dict(rounds=[POSTED_R1, r2], launches=[{"round": i, "status": "exited 0"} for i in (1, 2, 3)],
+            comments={70: [c(14, "builder-bot", "**Reply foreman-2-1:** fixed", at=at)]})
+  st0, card0, _ = seed(world, **kw)
+  rid = open_head_review(world, st0, card0, "0" * 40, {"change-review": "", "external:alice": EXT})
+  record(world, st0, rid, 2, "0" * 40, card0, {"change-review": "", "foreman": COPY})
+  w = prepared(world, tmp_path, monkeypatch, **kw)
+  record(world, w.st, w.rid, 3, w.head, w.child, {"change-review": ""})
+  lines, rnd = collected(world, w, 3, 0)
+  assert [(f["id"], f["carried_from"]) for f in foreman_of(rnd)] == ([("foreman-2-1", 2)] if carried else [])
 
 
 @pytest.mark.parametrize("case", ["still-fails", "reverted", "moved"])
