@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3/5
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
-# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31).
+# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the `amendments[]` it writes (spec §6.5, 1.2.1-pre.1 P5).
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
@@ -21,10 +21,45 @@ from superegm.report import pending_decisions, unit_view
 from superegm import review
 from superegm.review import Refusal
 
-WRITES = frozenset({"foreman", "reviews"})  # the store kinds this subcommand writes (`reviews`: a fifth point's accept, U35)
+WRITES = frozenset({"foreman", "reviews", "state"})  # the store kinds this subcommand writes (`reviews`: a fifth point's accept, U35; `state`: `amendments[]`, §6.5)
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset({"wave"})  # the skills whose card this subcommand accepts
 RELAUNCH = ["relaunch", "stop the unit"]
+DEVIATION = re.compile(r"^\*\*Deviation \((?P<kind>[^)]*)\):\*\* ?(?P<rest>.*)$", re.M)
+INTERFACE = re.compile(r"(?P<unit>U\d+) (?P<name>[^\s:]+):")  # an interface heading's `<Uxx> <name>:` (spec §6.5)
+
+
+def comment_options(text: str) -> list:
+  """A builder comment's point-3 options: its `- (` lines, `amend` when it holds an interface deviation (the
+  owner's alone, spec §6.5), then `stop the unit`."""
+  amend = ["amend"] if any(m["kind"] == "interface" for m in DEVIATION.finditer(text)) else []
+  return [line[2:].strip() for line in text.splitlines() if line.startswith("- (")] + amend + ["stop the unit"]
+
+
+def amendments_of(text: str, chosen: str, reason: str, comment_id: int, now: str) -> list:
+  """The `amendments[]` entries a point-3 ruling on a builder comment writes (spec §6.5): `amend` names the one
+  interface deviation, which must be in its unit's Interfaces lines (`rule` checks), text the owner's line; any
+  other option settles every interface heading, text the option's; `stop the unit` and a relaunch keep the contract."""
+  if chosen in RELAUNCH:
+    return []
+  heads = [INTERFACE.match(m["rest"]) for m in DEVIATION.finditer(text) if m["kind"] == "interface"]
+  return [{"unit": h["unit"], "name": h["name"], "text": reason.strip() if chosen == "amend" else chosen,
+           "comment_id": comment_id, "at": now} for h in heads if h]
+
+
+def check_amend(st, text: str, reason: str) -> None:
+  """Refuse an `amend` that has no Interfaces line, is not on one interface deviation alone, or names a `<name>`
+  its unit's Interfaces lines lack (spec §6.5)."""
+  if not reason.strip():
+    raise Refusal("decision: amend needs — <the Interfaces line as it now reads>")
+  heads = list(DEVIATION.finditer(text))
+  h = INTERFACE.match(heads[0]["rest"]) if len(heads) == 1 and heads[0]["kind"] == "interface" else None
+  if h is None:
+    raise Refusal("decision: amend needs a comment with one interface deviation and no other")
+  path = st.path("unit", h["unit"])
+  lines = "\n".join(core.body.sections(core.read_text(path)).get("Interfaces", [])) if path.exists() else ""
+  if not re.search(rf"(?<![\w.]){re.escape(h['name'])}\b", lines):
+    raise Refusal(f"decision: amend names {h['unit']} {h['name']}, not in {h['unit']}'s Interfaces lines")
 
 # The one ruling grammar (spec section 13.2, amendment 5): a comment's first line in one of these forms and no other.
 FID = r"[^\s()]+"
@@ -178,10 +213,9 @@ def offered(r: "Ruling", comments: list, decisions: list) -> bool:
     named = next((c for c in comments if str(c.get("id")) == r.subject), None)
     if named is None:  # a comment id this issue lacks: an interface ruling copied from its producer's issue (spec
       return r.subject.isdigit()  # section 13.2), nothing here to check it against; a decision id it lacks binds nothing
-    lines = [line[2:].strip() for line in (named.get("body") or "").splitlines() if line.startswith("- (")]
-    if not lines:  # a comment with no option lines (a kind-`other` deviation): nothing to check the option against
-      return True
-    options = lines + ["stop the unit"]
+    if not any(line.startswith("- (") for line in (named.get("body") or "").splitlines()):
+      return True  # a comment with no option lines (a kind-`other` deviation): nothing to check the option against
+    options = comment_options(named.get("body") or "")
   try:
     check_ruling(3, options, r.option or "")
   except Refusal:
@@ -381,7 +415,7 @@ def options_for(point: int, source: str, question: str, foreman: dict, head: str
     same = [d for d in foreman.get("decisions") or []
             if d.get("point") == 3 and str(d.get("source", "")).startswith("comment") and d.get("head") == head]
     if len(same) < 2:
-      return [line[2:].strip() for line in question.splitlines() if line.startswith("- (")] + ["stop the unit"]
+      return comment_options(question)
   return list(RELAUNCH)
 
 
@@ -460,7 +494,7 @@ def rule(args) -> int:
     if ruled_by_comment != chosen:
       raise Refusal(f"decision: comment {args.posted} rules {said}, not {head.strip()}")
     reason = found.reason or ""
-  elif not reason.strip() and (decision["point"] == 3 or chosen.endswith((" finding overruled", " allowed"))):
+  elif not reason.strip() and chosen != "amend" and (decision["point"] == 3 or chosen.endswith((" finding overruled", " allowed"))):
     # a ruling typed without the reason its form carries: the session's, or the panel's, named as such
     reason = f"ruled by judges {args.by[7:]}" if args.by.startswith("judges:") else "ruled in the session"
   if chosen == "redesign" and basis["point"] in (1, 2):  # a head's third ruling; a point-3 option named `redesign` is an option
@@ -470,6 +504,9 @@ def rule(args) -> int:
       raise Refusal(f"decision: redesign by {args.by} needs a high finding behind it")
     chosen = f"redesign — {reason.strip()}"
     brief = brief_path(st, unit, decision["id"])  # written after the comment is posted: a refusal leaves no brief
+  amends = decision["point"] == 3 and str(decision["source"]).startswith("comment")
+  if amends and chosen == "amend":  # refused before anything is posted
+    check_amend(st, decision["question"], reason)
   if decision["point"] == 5:  # a head's fifth point (U35): the owner's alone, applied before anything is posted
     if args.by.startswith("judges:"):
       raise Refusal("decision: point 5 is the owner's alone")
@@ -521,6 +558,11 @@ def rule(args) -> int:
   # recorded before the read-back, the session's post marked `unread` (its GitHub time not yet read), so a
   # `status --wait` pass in between compares its edits with its own `created_at` and skips the unedited post
   core.save_foreman(st, unit, data)
+  added = amendments_of(decision["question"], chosen, reason, int(posted.split()[1]), now) if amends and not closed else []
+  if added:  # spec §6.5: the handoff's contract changes, read by `plan`'s re-check
+    fresh = core.load_state(st.root)
+    fresh["amendments"] = (fresh.get("amendments") or []) + added
+    core.save_state(st.root, fresh)
   if url:  # the session's own post: its time is GitHub's creation time, read back, so any edit since (one before the
     # read-back too) reads as an edit after the record; a failed read-back leaves the entry `unread`
     created = read_back(st, cid).get("created_at")
@@ -639,6 +681,8 @@ def check_ruling(point: int, options: list, ruling: str, by: str = "") -> str:
   answers the option carrying its fid, and `<fid> finding upheld` rules that fid upheld (spec section 8: the builder
   restores it, or at the cap point 2 asks); either is refused to the judges, the owner's alone (U25); any other text
   is none of its options."""
+  if point == 3 and ruling == "amend" and "amend" in options and by.startswith("judges:"):
+    raise Refusal("decision: amend is the owner's alone")
   if ruling == "redesign" and point in (1, 2):  # a head's third ruling: no letter, no finding id
     return "redesign"
   fid, _, text = ruling.partition(" ") if point == 1 else ("", "", ruling)
