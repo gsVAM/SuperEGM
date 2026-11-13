@@ -30,9 +30,9 @@ INTERFACE = re.compile(r"(?P<unit>U\d+) (?P<name>[^\s:]+):")  # an interface hea
 
 
 def comment_options(text: str) -> list:
-  """A builder comment's point-3 options: its `- (` lines, `amend` when it holds an interface deviation (the
-  owner's alone, spec §6.5), then `stop the unit`."""
-  amend = ["amend"] if any(m["kind"] == "interface" for m in DEVIATION.finditer(text)) else []
+  """A builder comment's point-3 options: its `- (` lines, `amend` when its one deviation heading is an interface
+  one (the owner's alone, spec §6.5; `check_amend` refuses any other), then `stop the unit`."""
+  amend = ["amend"] if [m["kind"] for m in DEVIATION.finditer(text)] == ["interface"] else []
   return [line[2:].strip() for line in text.splitlines() if line.startswith("- (")] + amend + ["stop the unit"]
 
 

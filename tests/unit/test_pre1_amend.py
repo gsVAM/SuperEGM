@@ -19,6 +19,7 @@ IFACE = "**Deviation (interface):** U01 dequeue: returns null, not undefined\n"
 DOD = "**Deviation (dod):** item 2 needs a service\n"
 OPTS = "**Builder status:** BLOCKED\nWhich?\n- (a) keep undefined\n- (b) return null\n"
 LINE = "dequeue() -> Job | null"
+NONE = "decision: ruling is none of the options: (a) keep undefined; (b) return null; stop the unit\n"
 ISO = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
 
 
@@ -26,7 +27,7 @@ def amend_of(body, cid=4, login="owner"):
   return ruling_of({"id": cid, "user": {"login": login}, "body": body}, ["owner"])
 
 
-@pytest.mark.parametrize("deviation, ok", [(IFACE, True), (DOD, False), (IFACE + DOD, True)])
+@pytest.mark.parametrize("deviation, ok", [(IFACE, True), (DOD, False), (IFACE + DOD, False)])
 def test_offered_accepts_amend_on_an_interface_deviation(deviation, ok):
   comments = [{"id": 3, "user": {"login": "builder-bot"}, "body": deviation + OPTS}]
   r = amend_of(f"**Ruling:** (3) amend — {LINE}")
@@ -80,8 +81,9 @@ def test_an_amend_ruling_is_recorded_with_its_amendment(world):
 
 @pytest.mark.parametrize("text, refusal", [
   ("**Deviation (interface):** U01 peek: missing\n" + OPTS, "decision: amend names U01 peek, not in U01's Interfaces lines\n"),
-  (IFACE + DOD + OPTS, "decision: amend needs a comment with one interface deviation and no other\n"),
-  (IFACE + "**Deviation (interface):** U02 deliver: a bool\n" + OPTS, "decision: amend needs a comment with one interface deviation and no other\n"),
+  (IFACE + DOD + OPTS, NONE),  # not offered off one interface heading alone
+  (IFACE + "**Deviation (interface):** U02 deliver: a bool\n" + OPTS, NONE),
+  ("**Deviation (interface):** dequeue returns null\n" + OPTS, "decision: amend needs a comment with one interface deviation and no other\n"),
 ])
 def test_amend_is_refused_off_one_named_interface_deviation(world, text, refusal):
   card, s = world_on(world)
@@ -150,3 +152,14 @@ def test_the_judges_question_leaves_amend_out(world):
   assert code == 0, out
   text = Path(out.splitlines()[0]).read_text(encoding="utf-8")
   assert "amend" not in text and text.endswith("- (a) keep undefined\n- (b) return null\n- (c) stop the unit\n")
+
+
+def test_the_judges_decision_question_leaves_amend_out(world):
+  from superegm.judges import decision_question
+  card, s = world_on(world)
+  qid = opened(world, card, IFACE + OPTS)
+  decision = foreman_of(s, "U02")["decisions"][-1]
+  assert "amend" in decision["options"]
+  s.path("units").write_text(json.dumps({"units": {"U02": {"decisions": [decision]}}}), encoding="utf-8")
+  text = decision_question(s, "U02", qid)
+  assert "- amend\n" not in text and text.endswith("- (a) keep undefined\n- (b) return null\n- stop the unit\n")
