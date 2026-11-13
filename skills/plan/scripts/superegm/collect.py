@@ -358,6 +358,11 @@ def collect(args, card):
   prior_ci_fid, prior_tdd, prior_scope, contest_of, external, earlier, disposed = None, {}, {}, {}, [], set(), set()
   prior_dod, prior_delta = {}, {}
   posted = {e["round"]: e.get("posted_at") or "" for e in data["rounds"] if e.get("phase") == "posted"}
+  held = {}  # each id to the first posted round whose record holds it: a reply to it counts from that round's posting
+  for k in sorted(posted) if rid else ():
+    for f in review.findings_of(review.load_round(st, rid, k) or {"reviewers": {}}):
+      held.setdefault(f["id"], k)
+  last = review.load_round(st, rid, prior) or {} if prior and rid else {}
   for e in data["rounds"]:  # every posted round: an overruled out-of-Scope finding widens the Scope for good;
     if e.get("phase") == "posted":  # a contest or carried finding names the finding a reply may answer under
       deltas = [f["id"] for f in prior_foreman_findings(st, rid, e["round"]) if f["claim"].startswith("test-delta: ")]
@@ -378,7 +383,7 @@ def collect(args, card):
       seen = st.path("review", unit, f"pr{number}") / f"r{e['round']}" / "comments.md"
       if seen.is_file():  # a reply in an earlier round's window still answers its finding
         who, said = parse_comments(core.read_text(seen))
-        earlier |= {m.group(1) for c in said if c["login"] == who and (m := REPLY_RE.match(c["body"])) and timely(m.group(1), c["at"], posted)}
+        earlier |= {m.group(1) for c in said if c["login"] == who and (m := REPLY_RE.match(c["body"])) and timely(m.group(1), c["at"], posted, held)}
   for f in prior_foreman_findings(st, rid, prior):
     if f["location"] == "ci":
       prior_ci_fid = f["id"]
@@ -414,7 +419,11 @@ def collect(args, card):
                                       external, earlier, disposed, posted, handoff.config.get("owners") or [],
                                       recorded_rulings(data), data.get("decisions") or [], recorded_times(data),
                                       handoff.state["units"][unit].get("number"), runs=runs, prior_dod=prior_dod, present=present,
-                                      delta=delta, prior_delta=prior_delta, texts=texts, config=handoff.config)
+                                      delta=delta, prior_delta=prior_delta, texts=texts, config=handoff.config, held=held,
+                                      open_prior={f["id"] for f in review.findings_of(last) if f["disposition"] is None} if last else set())
+  lines, slots, contested = carry(lines, contested, last, prior, contest_of,
+                                    binding_rulings([c for c in comments if c["kind"] == "issue"], handoff.config.get("owners") or [],
+                                                    recorded_rulings(data), data.get("decisions") or []))
   entry.update(dod_runs=runs, test_delta=delta)
   findings = r / "foreman.findings"
   core.atomic_write(findings, "".join(line + "\n" for line in lines))
@@ -427,6 +436,8 @@ def collect(args, card):
   entry["phase"] = "collected"
   core.save_foreman(st, unit, data)
   rnd = review.load_round(st, rid, n)
+  posted_now = iter(rnd["reviewers"]["foreman"]["findings"])  # in the order raised: `test_delta` pairs with it
+  rnd["reviewers"]["foreman"]["findings"] = [slot or next(posted_now) for slot in slots]
   rnd["builder_contested"] = contested
   brief = r / "astra_brief.md"
   if "astra" in rnd["reviewers"] and brief.is_file():  # the lane's record names the brief the runner read
@@ -494,7 +505,8 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
                      earlier: set = frozenset(), disposed: set = frozenset(), posted: dict = None,
                      owners: list = (), recorded: list = (), decisions: list = (), recorded_at: dict = None,
                      issue_number: int = None, runs: dict = None, prior_dod: dict = None, present: set = None,
-                     delta: list = None, prior_delta: dict = None, texts: dict = None, config: dict = None) -> tuple:
+                     delta: list = None, prior_delta: dict = None, texts: dict = None, config: dict = None,
+                     held: dict = None, open_prior: set = frozenset()) -> tuple:
   """The foreman's high findings of spec section 11 in this order, which numbers the `foreman-<r>-<k>` ids: CI,
   the DoD items' fenced-output and `Exists` checks, the `dod-<n>` re-runs, the `test-delta:` entries, scope,
   tdd-order, deviations, contested, upheld, unreplied external; and `builder_contested[]` for the contested ones. Rulings
@@ -514,9 +526,10 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
   on the unit's issue (`issue_number`). An `unread` entry's `posted_at` is the host's clock, so its comment's own
   time is the bound, and when that comment is gone the host's time is (a fixed reply before the ruling never
   counts). A reply
-  to a carried copy `foreman-<r>-<k>`, `fixed` or `contested`, counts (toward the carry, or as a contest) only
-  when it comes after round r was posted (`posted`, each posted round's `posted_at`): before that the copy did
-  not exist. The DoD re-run's `dod-<n>` highs (`runs`, `dod_runs`' record) follow the fenced-output check; an item
+  to a foreman finding, `fixed` or `contested`, counts (toward the carry, or as a contest) only when it comes
+  after the first posted round whose record holds it was posted (`held`, id to that round; `posted`, each posted
+  round's `posted_at`): before that the copy did not exist. A contest counts when its id is open in the previous
+  posted round's record (`open_prior`), carried copies included, and comes after that round was posted. The DoD re-run's `dod-<n>` highs (`runs`, `dod_runs`' record) follow the fenced-output check; an item
   number stays ruled by the owner's `dod-<n> allowed` or by an overrule or allowance of a posted `dod-<n>` fid
   (`prior_dod`, fid to item number), a contest's copy followed back to it. `present`, when given, is the `Exists`
   paths found before the runs; `texts`, item number to `(output, paste)`, the whole texts the counts are read from.
@@ -597,10 +610,10 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
       if not reply or c["login"] != login or reply.group(2) != "contested":
         continue
       fid = reply.group(1)
-      if fid == prior_ci_fid or fid in settled or (fid.split("-")[-2] != str(prior_round) and fid not in late):
+      if fid == prior_ci_fid or fid in settled or (fid not in open_prior and fid not in late):
         continue
-      if posted is not None and not timely(fid, c["at"], posted):  # a contest of a copy not yet posted contests nothing
-        continue
+      if posted is not None and not timely(fid, c["at"], posted, {fid: prior_round} if fid in open_prior else held):
+        continue  # a contest of a copy not yet posted contests nothing; one the previous round already took is not new
       reason = (reply.group(3) or "").strip()
       found.append((where(c), f"contested {fid}: {reason}"))
       contested.append({"fid": f"foreman-{round_n}-{len(found)}", "reason": reason})
@@ -620,7 +633,7 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
       if ruling.kind == "upheld" and not fixed:
         found.append((where(c), f"upheld {fid}: no `fixed` reply"))
   replied = {m.group(1) for c in comments if c["login"] == login and (m := REPLY_RE.match(c["body"]))
-             and (posted is None or timely(m.group(1), c["at"], posted))} | set(earlier)
+             and (posted is None or timely(m.group(1), c["at"], posted, held))} | set(earlier)
   for f in external:
     if f["id"] not in open_ext:
       continue
@@ -630,10 +643,36 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
   return lines, contested
 
 
-def timely(fid: str, at: str, posted: dict) -> bool:
-  """A reply to `foreman-<r>-<k>` counts only after round r was posted (`posted`: round → `posted_at`); any other id always."""
-  m = re.fullmatch(r"foreman-(\d+)-\d+", fid)
-  return m is None or (int(m.group(1)) in posted and at > posted[int(m.group(1))])
+def timely(fid: str, at: str, posted: dict, held: dict = None) -> bool:
+  """A reply to a foreman finding counts only after the round `held` names for it (id → the first posted round whose
+  record holds it) was posted (`posted`: round → `posted_at`); any other id always."""
+  r = (held or {}).get(fid)
+  return not fid.startswith("foreman-") or (r in posted and at > posted[r])
+
+
+def carry(lines: list, contested: list, last: dict, prior, contest_of: dict, rulings: list) -> tuple:
+  """Spec section 6.5, the carry: a finding waiting on a ruling is posted once. From the previous posted round's
+  record (`last`, round `prior`) alone, an open derived foreman finding this round raises again with the same claim
+  and location keeps its id, and an open builder contest of a finding the foreman does not derive, with no ruling
+  on it or on what it contests, is copied with its `builder_contested` entry; each copy gets `carried_from` and
+  leaves `lines`. Returns `(lines left, slots, contested)`: `slots` holds a copy in a carried line's place and
+  None in a posted one's, then the contest copies."""
+  prev = [f for f in ((last.get("reviewers") or {}).get("foreman") or {}).get("findings") or [] if f["disposition"] is None]
+  ruled = {r.subject for r in rulings}
+  bc = {b["fid"]: b for b in last.get("builder_contested") or []}
+  contests, kept, slots = [], [], []
+  for f in prev:
+    if f["id"] in bc and not contest_of.get(f["id"], "foreman-").startswith("foreman-") \
+       and not {f["id"], contest_of[f["id"]]} & ruled:
+      contests.append({**f, "carried_from": prior})
+      contested = contested + [bc[f["id"]]]
+  same = {(f["location"], f["claim"]): f for f in prev if f["id"] not in bc and not f["claim"].startswith("contested ")}
+  for line in lines:
+    _, _, location, _, claim = line.split(" | ", 4)
+    slots.append({**same[(location, claim)], "carried_from": prior} if (location, claim) in same else None)
+    if slots[-1] is None:
+      kept.append(line)
+  return kept, slots + contests, contested
 
 
 def where(comment: dict) -> str:
