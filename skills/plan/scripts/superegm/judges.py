@@ -583,7 +583,7 @@ def decision_question(st, unit: str, did: str) -> str:
   decision = next((d for d in units.get(unit, {}).get("decisions") or [] if d["id"] == did), None)
   if decision is None:
     raise core.HandoffError(f"question: {unit} has no decision {did}")
-  return f"## Q1 {unit} {did}: {decision['question']}\n" + "".join(f"- {o}\n" for o in decision["options"])
+  return f"## Q1 {unit} {did}: {decision['question']}\n" + "".join(f"- {o}\n" for o in decision["options"] if o != "amend")  # amend is the owner's alone
 
 
 def blocked_question(st, unit: str, what: list) -> tuple[str, list[int]]:
