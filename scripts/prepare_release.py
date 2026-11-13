@@ -17,7 +17,7 @@ def version_for_tag(root: Path, tag: str) -> str:
 
     Args:
         root: Repository root containing the portable and host manifests.
-        tag: Release tag in vMAJOR.MINOR.PATCH format, without leading zeroes.
+        tag: Release tag vMAJOR.MINOR.PATCH, optionally -pre.N (spec 1.2.1 section 6.5), without leading zeroes.
 
     Returns:
         The version without the leading v.
@@ -25,7 +25,7 @@ def version_for_tag(root: Path, tag: str) -> str:
     Raises:
         ValueError: The tag is invalid or a manifest version does not match it.
     """
-    if not re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", tag):
+    if not re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-pre\.[1-9][0-9]*)?", tag):
         raise ValueError("Tag must be vMAJOR.MINOR.PATCH without leading zeroes")
     version = tag[1:]
     for relative in ("plugin.json", ".claude-plugin/plugin.json"):
