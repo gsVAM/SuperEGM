@@ -163,3 +163,21 @@ def test_the_judges_decision_question_leaves_amend_out(world):
   s.path("units").write_text(json.dumps({"units": {"U02": {"decisions": [decision]}}}), encoding="utf-8")
   text = decision_question(s, "U02", qid)
   assert "- amend\n" not in text and text.endswith("- (a) keep undefined\n- (b) return null\n- stop the unit\n")
+
+
+def test_an_amendment_names_the_interface_as_consumes_lines_do(tmp_path):
+  # integration seam P5 -> P4: body.consumes cuts a Python name at its `(`, so the entry's name must match that form
+  from superegm import decision
+  from superegm.launch_builder import amendments_for
+  text = "**Deviation (interface):** U03 store(repo_root): takes the root, not a path\n**Builder status:** BLOCKED"
+  [entry] = decision.amendments_of(text, "amend", "store(root: Path) -> Store", 9, "2026-11-13T00:00:00Z")
+  assert entry["name"] == "store"
+
+  import json
+  (tmp_path / "state.json").write_text(json.dumps({"amendments": [entry]}))
+
+  class St:
+    def path(self, kind):
+      return tmp_path / f"{kind}.json"
+  body = "## Interfaces\n- Consumes: store(repo_root) (U03)\n"
+  assert amendments_for(St(), "U07", body) == [entry]

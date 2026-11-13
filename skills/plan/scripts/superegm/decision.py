@@ -43,7 +43,8 @@ def amendments_of(text: str, chosen: str, reason: str, comment_id: int, now: str
   if chosen in RELAUNCH:
     return []
   heads = [INTERFACE.match(m["rest"]) for m in DEVIATION.finditer(text) if m["kind"] == "interface"]
-  return [{"unit": h["unit"], "name": h["name"], "text": reason.strip() if chosen == "amend" else chosen,
+  # the name as body.consumes reads a Consumes line, cut at its `(`, so launch_builder.amendments_for matches it
+  return [{"unit": h["unit"], "name": h["name"].split("(")[0], "text": reason.strip() if chosen == "amend" else chosen,
            "comment_id": comment_id, "at": now} for h in heads if h]
 
 
