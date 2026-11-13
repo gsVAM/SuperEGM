@@ -3,7 +3,7 @@ name: writing-plans
 description: Use when you have a spec or requirements for a multi-step task, before touching code
 ---
 
-<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the SuperEGM Step form and its derived defaults. -->
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the SuperEGM Step form and its derived defaults; what a Step holds (1.2.1 §6.5). -->
 
 # Writing Plans
 
@@ -98,7 +98,7 @@ owns the code, in that task's own step style.]
 
 **Files:**
 - Create: `exact/path/to/file.py`
-- Modify: `exact/path/to/existing.py:123-145`
+- Modify: `exact/path/to/existing.py`
 - Test: `tests/exact/path/to/test.py`
 
 **Interfaces:**
@@ -143,11 +143,15 @@ git commit -m "feat: add specific feature"
 
 In a SuperEGM plan a task is a unit section and a step is one group: a
 `Write` line naming the test and its path, a fence, and an `Implement` line.
-The fence carries the test's signature (name, fixtures, any `@pytest.mark.parametrize`)
-and its assertions with the spec's exact values, with arrange/act lines only where those do not determine them;
+The fence carries the test's signature (its name, and a `@pytest.mark.parametrize` table copied from the spec when it gives several cases),
+one comment line saying the behaviour, and its assertions with the spec's exact values;
 a full test body appears only for an algorithm or data the assertions do not determine.
-The `Implement` line is one sentence: the signature, the file and the values the spec pins;
-it never restates what the test asserts.
+It names an exception class or any other name only when the public or shared contract requires it, never a fixture,
+conftest attribute, private helper or monkeypatch target: those and the arrange code are the builder's,
+and a unit's Scope lists the conftest and fixture files its tests may touch (for example `tests/conftest.py`).
+The `Implement` line is one sentence: the file, the behaviour and the values the spec pins, with a signature only
+for a public or shared contract that is not already a Produces line; it never restates what the test asserts.
+A code cite (`path:line`) is evidence, never a requirement: `scan` refuses one on an Interfaces or Produces line.
 A rule family is one parametrized Step, never one Step per rule; a copy/rename table or an edit list is test data,
 one parametrized test over it (the test is the table) and an `Implement` line that says "make the table hold".
 The `Run` line and the closing line are optional: absent, the Step's command is `pytest <test path>::<test name> -q`,
