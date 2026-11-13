@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the section 9.1 body rules, one named rule per line, over the graph module's bodies; amendment 9's warning values (U29).
+# Modified by SuperEGM (gsVAM), 2026: the section 9.1 body rules, one named rule per line, over the graph module's bodies; amendment 9's warning values (U29); 1.2.1-pre.1 P3's line cites (section 6.5).
 
 """superegm scan: the body rules of spec section 9.1, one `<rule>: <unit>: <line>` per problem."""
 
@@ -17,6 +17,8 @@ WARN = {"bytes": (24_576, "24,576"), "steps": (10, "10"), "fenced_share": (0.40,
 FENCE_LINE = re.compile(r"^\s*`{3,}")
 NAME_RE = re.compile(r"^[A-Za-z_][\w.]*")
 CHECKBOX_RE = re.compile(r"^\s*- \[[ xX]\]")
+CITE_RE = re.compile(r"(?<![\w./-])([\w./-]*\w\.[A-Za-z]\w*):\d+")  # a `path:<line>` code cite
+SCOPE_CITES = 10  # more cites than this into the unit's own Scope paths warns (spec section 6.5)
 FOCUS_RE = re.compile(r"^- (U\d{2,}): .+; pinned by `([^`]+)`$")
 PLACEHOLDERS = ("TBD", "handle edge cases", "add appropriate validation", "write tests for the above")
 
@@ -122,6 +124,12 @@ def rule_step_scope(uid, body, handoff):
           for n, t, i in core.body.step_paths(body) for p in (t, i) if p and not under(p)]
 
 
+def rule_interface_cite(uid, body, handoff):
+  """A consumer would bind to a line that moves (spec section 6.5)."""
+  return [f"interface-cite: {uid}: {line.strip()}" for line in core.body.sections(body).get("Interfaces", [])
+          if line.startswith(("- Consumes: ", "- Produces: ")) and CITE_RE.search(line)]
+
+
 def rule_decision_blocking(uid, body, handoff):
   answered = handoff.state.get("decisions") or {}
   problems = [f"decision-blocking: {uid}: {d['id']} {d['question']}" for d in handoff.plan.units[uid].decisions
@@ -140,7 +148,7 @@ RULES = {"checkbox": rule_checkbox, "placeholder": rule_placeholder,
          "consumes-undefined": rule_consumes_undefined, "consumes-producer": rule_consumes_producer,
          "global-constraints": rule_global_constraints, "review-focus": rule_review_focus,
          "review-focus-test": rule_review_focus_test, "step-group": rule_step_group,
-         "step-scope": rule_step_scope, "decision-blocking": rule_decision_blocking}
+         "step-scope": rule_step_scope, "interface-cite": rule_interface_cite, "decision-blocking": rule_decision_blocking}
 
 
 def scan_body(uid: str, body: str, handoff: graph.Handoff) -> list:
@@ -162,6 +170,10 @@ def numbers(uid: str, body: str, handoff: graph.Handoff) -> dict:
            "steps": len(core.body.step_paths(body)), "spec_range_bytes": spec_bytes,
            "ratio": round(size / spec_bytes, 2) if spec_bytes else 0.0}
   found["warnings"] = [f"{key} {found[key]:,} > {text}" for key, (limit, text) in WARN.items() if found[key] > limit]
+  scope = [p for p, _ in handoff.plan.units[uid].scope]
+  cites = sum(1 for p in CITE_RE.findall(body) if any(p == s or p.startswith(s.rstrip("/") + "/") or s.endswith("/" + p) for s in scope))
+  if cites > SCOPE_CITES:
+    found["warnings"].append(f"scope_cites {cites} > {SCOPE_CITES}")
   return found
 
 
