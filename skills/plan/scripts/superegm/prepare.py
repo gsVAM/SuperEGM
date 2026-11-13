@@ -12,12 +12,12 @@ from pathlib import Path
 
 import superegm as core
 from superegm import foreman, launch_builder, review
-from superegm.launch import app_login
+from superegm.launch import app_login, load_launches
 
 WRITES = frozenset(['foreman', 'review'])  # the store kinds this subcommand writes
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset(['wave'])  # the skills whose card this subcommand accepts
-AGED = ("**Deviation", "**Decision D", "**Ruling:**", "**Reply ")  # the comment kinds kept regardless of age (section 11; a reply answers a ruling that may be older than the last posted round)
+AGED = ("**Deviation", "**Decision D", "**Ruling:**", "**Reply ", "**Seam:**")  # the comment kinds kept regardless of age (section 11; a reply answers a ruling that may be older than the last posted round)
 HEADER_RE = re.compile(r"^### (issue|pr) #(\d+) comment (\d+) by (\S+) at (\S+)$")  # comments.md's entry header
 
 
@@ -99,6 +99,10 @@ def prepare(args, card):
   since = max((e["posted_at"] for e in data["rounds"] if e.get("posted_at")), default=None)
   write_comments(r / "comments.md", (issue, core.gh_pages(f"repos/{repo}/issues/{issue}/comments")),
                  (number, core.gh_pages(f"repos/{repo}/issues/{number}/comments")), since, login)
+  # spec section 6.5: the foreman holds this head to an amendment only when the head's launch started after it
+  launches = load_launches(st, unit)
+  started = next((l.get("started_at") for l in reversed(launches) if l["round"] == entry.get("launch")), None)
+  write_amendments(r / "amendments.md", launch_builder.amendments_for(st, unit, core.unit_file_body(st.path("unit", unit))), started)
   for key in ("dod_runs", "test_delta"):  # an earlier head's gates never stand for this one: `post` refuses until `collect`
     entry.pop(key, None)
   entry.update({"head": head, "phase": "prepared", "merge_base": merge_base, "worktree": str(tree)})
@@ -145,6 +149,16 @@ def astra_brief(st, root: Path, unit: str, r: Path, diff: bytes, ci: dict, pr_bo
   core.atomic_write(r / "astra_brief.md", "".join(f"# {name}\n\n````\n{text}\n````\n\n" for name, text in sections))
   runner = foreman.runner_path()
   return f"astra: ok {runner}" if runner else "astra: not installed"
+
+
+def write_amendments(path: Path, amendments: list, started) -> None:
+  """`r<n>/amendments.md`: each amendment that applies to the unit, marked by whether the head's launch (`started`,
+  its `started_at`) began after the amendment's `at`; an earlier head is reviewed against the brief its launch had."""
+  lines = ["# Amendments", ""] if amendments else ["# Amendments", "", "none"]
+  for a in amendments:
+    applies = "yes" if started and started > a["at"] else "no"
+    lines += [f"## {a['unit']} {a['name']} · comment {a['comment_id']} at {a['at']}", f"applies to this head: {applies}", "", a["text"], ""]
+  core.atomic_write(path, "\n".join(lines) + "\n")
 
 
 def require_base(pr: dict, base: str) -> None:
