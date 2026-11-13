@@ -115,8 +115,8 @@ this invocation's round count, 1 at its first Step 2.
    file when it found nothing. The `readiness` goldfish also receives the standard's readiness
    sentence: a question a builder would have to ask before building is a finding, a blocking
    one is `high` only when its failure scenario holds; it reviews under the plan-review remit of
-   `agents/readiness.md` (a builder who reads the code decides nothing but a product, security or
-   cross-unit contract question; fixture names, harness wiring, private names and line numbers are
+   `agents/readiness.md` (a builder who reads the code makes every choice but a product, security or
+   cross-unit contract decision; fixture names, harness wiring, private names and line numbers are
    outside it; a finding without the requirement it breaks and a failure scenario is `low`); and, by absolute path, the unit's `orient/<unit>.md` in the handoff's directory when the store
    holds it (the brief says `no orient file` when it is absent); that dispatch is recorded with
    `--isolation 'exposed:orient <tree sha>'`, the tree its first line names, joined with

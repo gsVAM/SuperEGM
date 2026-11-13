@@ -120,8 +120,9 @@ def test_specific_behavior():
 Run: `pytest tests/path/test.py::test_name -v`
 Expected: FAIL with "function not defined"
 
-- [ ] **Step 3: Implement `function(input: InputType) -> ResultType` in `exact/path/to/file.py`**
+- [ ] **Step 3: Implement the behaviour in `exact/path/to/file.py`**
 
+Name a signature only for a shared contract not already a Produces line.
 One line on the approach when the signature and the test leave a choice
 (which library call, which data structure); a code block only for an
 algorithm they do not determine.
@@ -167,8 +168,9 @@ of step carries what makes it unambiguous and nothing more:
 
 - **A test step:** the test's name and its assertions, as code, with the
   spec's exact values in them.
-- **A code step:** the exact signature (name, parameters, return type), the
-  file it lives in, and the specific values the spec pins. The implementer
+- **A code step:** the file it lives in, the behaviour and the specific
+  values the spec pins, with a signature only for a shared contract not
+  already a Produces line. The implementer
   writes the body. A body appears only for an algorithm the signature and
   tests do not determine, or for exact copy the spec fixes.
 - **A verification step:** the command to run and the output that means it
