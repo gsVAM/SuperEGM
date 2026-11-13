@@ -25,11 +25,7 @@
   "reviewers": {
     "spec": [
       "design",
-      "zoom-out",
-      "comprehension",
-      "readiness",
-      "structural",
-      "codebase-details"
+      "readiness"
     ],
     "plan": [
       "readiness",
@@ -72,7 +68,9 @@
   },
   "builder": {
     "profile_dir": "~/.claude-superegm-builder",
-    "model": "claude-opus-5-5",
+    "model": "claude-sonnet-5-5",
+    "effort": "high",
+    "tiers": {"difficult": {"model": "claude-opus-5-5", "effort": "medium"}, "easy": {"model": "claude-sonnet-5-5", "effort": "medium"}},
     "permission_mode": "acceptEdits",
     "gh_token_env": "SUPEREGM_BUILDER_TOKEN",
     "allowed_tools": [
