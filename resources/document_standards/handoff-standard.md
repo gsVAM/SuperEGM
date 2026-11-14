@@ -1,7 +1,8 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the standard
 for the handoff plan. Not part of google/elephant-goldfish-model.
-Modified by SuperEGM (gsVAM), 2026: questions 8–11, severities high|medium|low, the fix-design path. -->
+Modified by SuperEGM (gsVAM), 2026: questions 8–11, severities high|medium|low, the fix-design path.
+Modified by SuperEGM (gsVAM), 2026: the complete Step, the fence's private detail, the blocking question's failure scenario (1.2.1 §6.5). -->
 
 # Handoff Standard
 
@@ -65,12 +66,19 @@ failure is a finding at the unit (or the pair of units) where it occurs.
     line with its test path, the fenced test, the `Implement` line with its
     path, and one command: an explicit `Run` line, or the default design
     section 9.1 derives from the `Write` line. Definition-of-done item 1 is
-    the tdd-order sentence. A missing part is high.
+    the tdd-order sentence. A missing part is high. A Step is complete when
+    it has the test name, the behaviour and the expected values; it is not
+    incomplete for leaving fixtures, arrange code, helpers or private
+    exception types to the builder.
 10. **Global constraints and review focus present.** Every body carries the
     plan's `## Global constraints` lines verbatim and a `## Review focus (this
     unit)` block whose every test name appears in its own Steps. Missing or
     altered is medium.
 11. **Proportion.** Is the body no longer than the decisions the builder cannot make alone: no fenced test the signature and assertions already determine, no Implement line that restates the test, no Step a parametrized sibling covers, no prose table that should be test data?
+    A fence that names unnecessary private or harness detail (a fixture, a
+    conftest attribute, a private helper or a monkeypatch target) is a
+    proportion finding, `medium`; names the public or shared contract
+    requires are exempt.
     A proportion finding names the Step and the bytes it would remove; it is
     `medium` at most.
 
@@ -81,7 +89,10 @@ filing; low: optional, and never blocking.
 
 Readiness questions ("what would a builder still ask?") are findings of the
 `readiness` reviewer: a question a builder would have to ask before building
-is a finding, and a blocking one is high.
+is a finding, and a blocking one is high only when its failure scenario
+holds. A readiness finding names the requirement it breaks (a spec section,
+an Interfaces line or an acceptance value) and a failure scenario; one
+without both is low.
 
 Readiness and proportion are an adversarial pair: a conflict between them is
 resolved in favour of the shorter form that keeps the test honest, and the

@@ -637,7 +637,11 @@ def test_collect_records_the_test_delta_from_git_objects(world, tmp_path, monkey
   created = w.g("log", "--format=%H", "--diff-filter=A", w.head, "--", N) or None
   record(world, w.st, w.rid, r, w.head, w.child, {"change-review": ""})
   code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
-  assert code == 0 and [l.split(" | ", 2)[2] for l in (w.dir / f"r{r}/foreman.findings").read_text().splitlines()] == claims, out
+  carried = r == 2 and claims  # round 1's foreman-1-1 still fails: carried under its id, not posted again (P6, spec 6.5)
+  assert code == 0 and [l.split(" | ", 2)[2] for l in (w.dir / f"r{r}/foreman.findings").read_text().splitlines()] == ([] if carried else claims), out
+  if carried:
+    held = json.loads(w.st.path("reviews", w.rid, "round-2.json").read_text())["reviewers"]["foreman"]["findings"]
+    assert [(f["id"], f"{f['location']} | regression: {f['regression']} | {f['claim']}", f["carried_from"]) for f in held] == [("foreman-1-1", claims[0], 1)]
   entry = json.loads(w.st.path("foreman", UNIT).read_text())["rounds"][-1]
   assert entry["test_delta"] == [{**e, "base_commit": {"base": w.base, "created": created}[e["base_commit"]]} for e in delta]
 
@@ -692,7 +696,8 @@ R3 = {**POSTED_R1, "round": 3, "launch": 3, "dispatch_id": "d3"}
 @pytest.mark.parametrize("at, expected", [("2026-11-02T13:00:00Z", [CARRIED]), ("2026-11-02T16:00:00Z", [])])
 def test_a_reply_to_a_carried_copy_counts_only_after_the_copy_is_posted(world, tmp_path, monkeypatch, at, expected):
   """`**Reply foreman-2-1:** fixed` written before round 2 (which carries external:alice-1-1 as foreman-2-1) is posted
-  answers nothing: the copy did not exist yet, so round 3 carries the original again; the same reply after the post ends the carry."""
+  answers nothing: the copy did not exist yet (a reply is timed against the first posted round holding the id), so
+  round 3 carries foreman-2-1 under its id, not posted again (P6); the same reply after the post ends the carry."""
   r2 = {**R2, "posted_at": "2026-11-02T15:00:00Z"}
   kw = dict(rounds=[POSTED_R1, r2], launches=[{"round": i, "status": "exited 0"} for i in (1, 2, 3)], comments={})
   st0, card0, _ = seed(world, **kw)
@@ -701,8 +706,18 @@ def test_a_reply_to_a_carried_copy_counts_only_after_the_copy_is_posted(world, t
   w = prepared(world, tmp_path, monkeypatch, **kw)
   atomic_write(w.dir / "r2/comments.md", f"builder: builder-bot\n### pr #70 comment 9 by builder-bot at {at}\n**Reply foreman-2-1:** fixed\n")
   code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
-  assert (code, out.strip()) == (0, f"collected: {len(expected)} foreman findings"), out
-  assert (w.dir / "r3/foreman.findings").read_text(encoding="utf-8").splitlines() == [f"foreman-3-{i} | high | {e}" for i, e in enumerate(expected, 1)]
+  carried_unreplied(w, code, out, expected)
+
+
+def carried_unreplied(w, code, out, expected):
+  """Round 3's collect: a still-unreplied copy (`[CARRIED]`) is posted no more but held in round 3's record as
+  foreman-2-1 with `carried_from: 2`; any other expectation is posted as before and nothing unreplied is held."""
+  carried = expected == [CARRIED]
+  posted_lines = [] if carried else expected
+  assert (code, out.strip()) == (0, f"collected: {len(posted_lines)} foreman findings"), out
+  assert (w.dir / "r3/foreman.findings").read_text(encoding="utf-8").splitlines() == [f"foreman-3-{i} | high | {e}" for i, e in enumerate(posted_lines, 1)]
+  held = json.loads(w.st.path("reviews", w.rid, "round-3.json").read_text(encoding="utf-8"))["reviewers"]["foreman"]["findings"]
+  assert [(f["id"], f.get("carried_from")) for f in held if f["claim"].startswith("unreplied ")] == ([("foreman-2-1", 2)] if carried else [])
 
 
 @pytest.mark.parametrize("at, expected", [
@@ -710,7 +725,8 @@ def test_a_reply_to_a_carried_copy_counts_only_after_the_copy_is_posted(world, t
   ("2026-11-02T16:00:00Z", ["pr #70 comment 14 | regression: no | contested foreman-2-1: it fires on push"])])
 def test_a_contest_of_a_carried_copy_counts_only_after_the_copy_is_posted(world, tmp_path, monkeypatch, at, expected):
   """`**Reply foreman-2-1:** contested` written before round 2 (which carries external:alice-1-1 as foreman-2-1) is
-  posted contests nothing: round 3 records no contest and carries the original again; after the post it is a contest."""
+  posted contests nothing: round 3 records no contest and carries foreman-2-1 under its id, not posted again (P6);
+  after the post it is a contest."""
   r2 = {**R2, "posted_at": "2026-11-02T15:00:00Z"}
   kw = dict(rounds=[POSTED_R1, r2], launches=[{"round": i, "status": "exited 0"} for i in (1, 2, 3)],
             comments={70: [c(14, "builder-bot", "**Reply foreman-2-1:** contested — it fires on push", at=at)]})
@@ -719,8 +735,7 @@ def test_a_contest_of_a_carried_copy_counts_only_after_the_copy_is_posted(world,
   record(world, st0, rid, 2, "0" * 40, card0, {"change-review": "", "foreman": COPY})
   w = prepared(world, tmp_path, monkeypatch, **kw)
   code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
-  assert (code, out.strip()) == (0, f"collected: {len(expected)} foreman findings"), out
-  assert (w.dir / "r3/foreman.findings").read_text(encoding="utf-8").splitlines() == [f"foreman-3-{i} | high | {e}" for i, e in enumerate(expected, 1)]
+  carried_unreplied(w, code, out, expected)
 
 
 @pytest.mark.parametrize("case", ["copy-settled", "copy-contested-then-original"])

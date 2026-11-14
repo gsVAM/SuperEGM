@@ -120,7 +120,9 @@ def finish(st, unit, launches, latest, status, last, line):
   # loaded (`load_config` expands it), so a plan or spec edited during the launch cannot stop the exit's record
   profile = Path(st.config["builder"]["profile_dir"])
   latest["subagent_calls"] = subagent_calls(profile, latest["session_id"]) if latest.get("session_id") else {"count": 0, "calls": []}
-  latest["effective_model"], latest["total_cost_usd"] = result_usage(Path(latest["result_file"]))
+  latest["effective_model"], latest["total_cost_usd"], duration = result_usage(Path(latest["result_file"]))
+  if duration is not None:  # spec section 6.5 "Measuring it": omitted when the result holds none
+    latest["duration_ms"] = duration
   core.atomic_write(st.path("launches", unit), {"launches": launches})
   core.journal(st, line)
   print(line)
@@ -152,15 +154,17 @@ def group_owner(pid: int, result_file: str) -> str:
 def result_usage(result_file: Path):
   """U28: the effective model and the cost from the launch's `--output-format json` result file: every key of
   `modelUsage`, joined `, `, else `requested only`; `total_cost_usd` as the file holds it, `unrecorded` for a file
-  that does not parse (a killed launch's partial file), else `None` (no file, or no number in it)."""
+  that does not parse (a killed launch's partial file), else `None` (no file, or no number in it); and its
+  `duration_ms` when a number, else `None` (spec section 6.5)."""
   if not result_file.is_file():
-    return "requested only", None
+    return "requested only", None, None
   try:
     data = json.loads(core.read_text(result_file))
   except ValueError:
-    return "requested only", "unrecorded"
+    return "requested only", "unrecorded", None
   if not isinstance(data, dict):
-    return "requested only", None
-  usage, cost = data.get("modelUsage"), data.get("total_cost_usd")
+    return "requested only", None, None
+  usage, cost, duration = data.get("modelUsage"), data.get("total_cost_usd"), data.get("duration_ms")
   effective = ", ".join(usage) if isinstance(usage, dict) and usage else "requested only"
-  return effective, cost if isinstance(cost, (int, float)) and not isinstance(cost, bool) else None
+  number = lambda v: v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+  return effective, number(cost), number(duration)

@@ -596,8 +596,9 @@ def blocking(finding: dict) -> bool:
 
 
 def locate_finding(st: core.Store, rid: str, fid: str):
-  """`(round number, round, reviewer, finding)` of `fid` in any recorded round, completed or not."""
-  for n in round_numbers(st, rid):
+  """`(round number, round, reviewer, finding)` of `fid` in the newest recorded round holding it (a carried copy),
+  completed or not."""
+  for n in reversed(round_numbers(st, rid)):
     rnd = load_round(st, rid, n)
     for reviewer, record in rnd["reviewers"].items():
       for finding in record["findings"]:
@@ -1119,12 +1120,12 @@ def thread_severity(thread: dict, config: dict, role: str | None) -> str:
 
 def render_comment(round_json: dict, head: str, ci_verdict: str, mention) -> str:
   """The configured mention as line 1 when set, the header, the round's finding lines (section 8's form)
-  and `CI: <verdict>`; no run card, no model names."""
+  and `CI: <verdict>`, a carried finding (`carried_from`, posted once already) left out; no run card, no model names."""
   lines = [mention] if mention else []
   lines += [header(round_json["round"], head), ""]
   for record in (round_json.get("reviewers") or {}).values():
     lines += [f"{f['id']} | {f['severity']} | {f['location']} | regression: {f['regression']} | {f['claim']}"
-              for f in record["findings"]]
+              for f in record["findings"] if "carried_from" not in f]
   lines += ["", f"CI: {ci_verdict}"]
   return "\n".join(lines) + "\n"
 
