@@ -139,6 +139,26 @@ def test_amend_refusals(world, case, message):
   assert not foreman_of(s, "U02")["rulings"]
 
 
+def test_amend_names_the_interface_without_its_signature(world):
+  # a heading naming `dequeue():` is the Interfaces name `dequeue`, as Consumes lines and amendments read it
+  card, s = world_on(world)
+  qid = opened(world, card, "**Deviation (interface):** U01 dequeue(): returns null\n" + OPTS, source="comment 11")
+  code, out = rule(world, card, qid, f"amend — {LINE}")
+  assert code == 0, out
+  assert [a["name"] for a in json.loads((s.path("file") / "amendments" / "11.json").read_text())] == ["dequeue"]
+
+
+def test_the_judges_cannot_amend_by_option_letter(world):
+  # the builder's own option line `(a) amend` is no way round the owner's alone: no file, no ruling
+  card, s = world_on(world)
+  qid = opened(world, card, IFACE + "**Builder status:** BLOCKED\nWhich?\n- (a) amend\n- (b) return null\n")
+  for ruling in ("(a) — " + LINE, "(a) amend", "amend"):
+    code, err = rule(world, card, qid, ruling, "judges:p-1")
+    assert code == 1 and "amend" in err, (ruling, err)
+  assert not (s.path("file") / "amendments").exists()
+  assert not foreman_of(s, "U02")["rulings"]
+
+
 def test_judges_never_amend(world):
   # judges get no amend option; the interface question reaches filed consumers; their ruling amends nothing
   from superegm import judges
