@@ -132,7 +132,7 @@ def ruling_form(point: int, subject: str, option: str | None = None) -> str:
   else:
     text = f"{subject} {option}"
   bare = (point == 2 and text in ("one more round", "stop")) or (point == 1 and option == "finding upheld")
-  return f"**Ruling:** {text}" + ("" if bare else " — <reason>")
+  return ruling_line(text, None if bare else "<reason>")
 
 
 def recorded_rulings(foreman: dict) -> list:
@@ -305,7 +305,7 @@ def record_text(foreman: dict, entry: dict, note: str = "the comment was edited 
     text = recorded_option(foreman, entry) or text
     text = f"({source.removeprefix('comment ') if source.startswith('comment ') else decision.get('id')}) {text}"
   bare = point == 2 and text != "redesign" or point == 1 and text.endswith(" finding upheld")
-  return (f"**Ruling:** {text}" + (f" — {reason}" if reason and not bare else "")
+  return (ruling_line(text, None if bare else reason)
           + f"\n(as recorded by {entry.get('by')}; {note})")
 
 
@@ -716,7 +716,7 @@ def ruling_comment(point: int, source: str, ruling: str, question: str, brief=No
   quoted = "\n".join("> " + l for l in question.rstrip("\n").splitlines())
   marker = f"\n(judges {by[7:]}, leavemealone)" if by.startswith("judges:") else ""
   if brief:  # a redesign ruling: the unit is stopped, the brief named, the owner closes the issue by hand
-    return (f"**Ruling:** {ruling}{marker}\n\nStopped for redesign; the brainstorm brief is `{brief}`.\n"
+    return (f"{ruling_line(ruling)}{marker}\n\nStopped for redesign; the brainstorm brief is `{brief}`.\n"
             f"Close this issue by hand once the re-planned unit is filed.\n\n{quoted}\n")
   if point == 1:
     line = ruling.replace("finding upheld", "finding upheld (fix it)", 1)
@@ -724,7 +724,7 @@ def ruling_comment(point: int, source: str, ruling: str, question: str, brief=No
     line = ruling
   else:  # point 3, and a head's fifth point in the point-3 form over its decision id (U35)
     line = f"({source.removeprefix('comment ') if source.startswith('comment ') else qid}) {ruling}"
-  return f"**Ruling:** {line}{marker}\n\n{quoted}\n"
+  return f"{ruling_line(line)}{marker}\n\n{quoted}\n"
 
 
 DIFF_WHOLE, DIFF_LINES = 40_000, 200  # a diff under 40 KB is copied whole, else its first 200 lines
