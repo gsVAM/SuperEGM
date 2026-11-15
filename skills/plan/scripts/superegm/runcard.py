@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the runcard subcommand; open's boot-id proof writes (U24);
-# `runcard close --note` (U32).
+# `runcard close --note` (U32); the one `close_card` the driver shares (U48).
 
 """superegm runcard open|close: the run card every effect runs under (spec section 6)."""
 
@@ -26,6 +26,17 @@ def register(subparsers):
   p.set_defaults(run=run, writes=WRITES)
 
 
+def close_card(st: core.Store, cid: str, note: str | None = None) -> None:
+  """Stamp `closed_at`, write the card and journal the close (with `note` when non-empty); a card already closed is
+  left as it is, nothing written or journaled. The subcommand refuses a closed card before calling this."""
+  card = core.load_card(st, cid)
+  if card["closed_at"]:
+    return
+  card["closed_at"] = core.now_iso()
+  core.atomic_write(st.path("runcards", cid), card)
+  core.journal(st, f"runcard close {cid}" + (f" note {note}" if note else ""))
+
+
 def run(args):
   st = core.store(core.git_toplevel(Path.cwd()))
   if args.action == "open":
@@ -34,8 +45,6 @@ def run(args):
   card = core.load_card(st, args.id)
   if card["closed_at"]:
     raise core.HandoffError(f"runcard: {args.id} is closed")
-  card["closed_at"] = core.now_iso()
-  core.atomic_write(st.path("runcards", args.id), card)
-  core.journal(st, f"runcard close {args.id}" + (f" note {args.note}" if getattr(args, "note", None) else ""))
+  close_card(st, args.id, getattr(args, "note", None))
   print(f"closed {args.id}")
   return 0
