@@ -295,7 +295,9 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   rid = review_id(st, "spec", str(spec), review["cycle"])
   if not (root / CONFIG).is_file():  # before any GitHub call: the config names the repository
     raise core.HandoffError(f"approve-spec: {CONFIG} missing: run superegm init")
-  number = spec_pr(st.config["repo"], core.run_git(["rev-parse", "--abbrev-ref", "HEAD"], root).strip())
+  # U39: a malformed triage section refuses before the PR ingest (which writes) and before the prompt and the commit
+  triage = triage_patterns(core.read_text(spec))
+  number = spec_pr(st.config["repo"],core.run_git(["rev-parse", "--abbrev-ref", "HEAD"], root).strip())
   # U26: one `review ingest --pr` before the refusals: it reads the spec PR's threads, writes them, and the carried
   # findings, into the latest round and posts the fixed replies (a failed reply is named and retried next time, never
   # a refusal); no open PR, or a cycle with no round yet to take the threads, reads nothing (the latter is refused
@@ -321,8 +323,7 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   rounds = rounds_line(core.read_text(spec))
   if rounds is None:  # no `Rounds:` line: the live value, which `review.rounds` refuses outside 1-10
     rounds = live_rounds(st)
-  triage = triage_patterns(core.read_text(spec))  # U39: a malformed triage section refuses here, before the prompt and the commit
-  last = core.load_approval(st, spec)
+  last =core.load_approval(st, spec)
   if last:
     require_branch_holds(st, root, spec.relative_to(root).as_posix(), last)
   # the cycles past the last approval's; a re-approval of that same cycle (its bytes unmoved, U26: a thread ingested

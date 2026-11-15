@@ -87,6 +87,16 @@ def test_skills_offer_and_check_the_section(path, phrases):
   assert all(p in text for p in phrases), [p for p in phrases if p not in text]
 
 
+@pytest.mark.parametrize("path, phrases", [
+  ("agents/structural.md", ["misplaced Triage heading", "first H2 of the document", "freezes triage off"]),
+  ("agents/design.md", ["not safe when it names", "A field left out is not by itself a defect"]),
+])
+def test_review_agents_name_the_misplaced_heading_and_the_named_value_test(path, phrases):
+  """Structural flags a Triage heading `approve-spec` ignores; design reads a pattern's named values, not its omissions alone."""
+  text = (Path(__file__).resolve().parents[2] / path).read_text(encoding="utf-8")
+  assert all(p in text for p in phrases), [p for p in phrases if p not in text]
+
+
 def test_malformed_triage_section_reads_no_pr_thread(world, monkeypatch):
   """The refusal comes before the spec PR's ingest: no thread is read, no round or journal line is written."""
   seen = reader(monkeypatch, threads=THREADS[1:])
@@ -96,7 +106,7 @@ def test_malformed_triage_section_reads_no_pr_thread(world, monkeypatch):
   rounds_before, journal_before = rjson(world, rid, "round-1.json"), journal.read_text(encoding="utf-8") if journal.is_file() else None
   code, err = approve(world, spec, cid, "--yes")
   assert code == 1 and err.removeprefix("superegm: ").startswith("approve-spec: - reach: remote: "), err
-  assert seen == [] and rjson(world, rid, "round-1.json") == rounds_before and rjson(world, rid)["ingested"] == []
+  assert seen == [] and rjson(world, rid, "round-1.json") == rounds_before and "ingested" not in rjson(world, rid)
   assert (journal.read_text(encoding="utf-8") if journal.is_file() else None) == journal_before
 
 
