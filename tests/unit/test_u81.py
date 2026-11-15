@@ -88,3 +88,23 @@ def test_reads_directory_and_legacy(world):
   got = launch_builder.amendments_for(s, "U01", body)
   assert [a["comment_id"] for a in got] == [7, 11]
   assert [a["at"] for a in got] == sorted(a["at"] for a in got)
+
+
+@pytest.mark.parametrize("case, message", [
+  ("ruling with no line", "decision: amend needs — <the Interfaces line as it now reads>"),
+  ("comment with two deviation headings", "decision: amend needs a comment with one interface deviation and no other"),
+  ("name not in U01's Interfaces", "decision: amend names U01 nope, not in U01's Interfaces lines"),
+  ("ruled by the judges", "decision: amend is the owner's alone"),
+])
+def test_amend_refusals(world, case, message):
+  # each refusal leaves no amendment file and no ruling
+  from test_pre1_amend import DOD
+  card, s = world_on(world)
+  texts = {"comment with two deviation headings": IFACE + DOD, "name not in U01's Interfaces": "**Deviation (interface):** U01 nope: missing\n"}
+  qid = opened(world, card, texts.get(case, IFACE) + OPTS)
+  ruling = "amend" if case == "ruling with no line" else f"amend — {LINE}"
+  code, err = rule(world, card, qid, ruling, "judges:p-1" if case == "ruled by the judges" else "owner")
+  assert err.strip() == message and code == 1
+  hdir = s.path("file")
+  assert not (hdir / "amendments").exists() or not any((hdir / "amendments").iterdir())
+  assert not foreman_of(s, "U02")["rulings"]
