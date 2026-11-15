@@ -19,7 +19,6 @@ IFACE = "**Deviation (interface):** U01 dequeue: returns null, not undefined\n"
 DOD = "**Deviation (dod):** item 2 needs a service\n"
 OPTS = "**Builder status:** BLOCKED\nWhich?\n- (a) keep undefined\n- (b) return null\n"
 LINE = "dequeue() -> Job | null"
-NONE = "decision: ruling is none of the options: (a) keep undefined; (b) return null; stop the unit\n"
 ONE = "decision: amend needs a comment with one interface deviation and no other\n"
 ISO = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
 
