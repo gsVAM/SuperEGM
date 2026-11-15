@@ -6,7 +6,9 @@
 import json
 from pathlib import Path
 import pytest
-from test_review import SPEC, SLUG, card, converged_spec, approve, git, hstore
+from conftest import make_pr
+from test_review import SPEC, SLUG, card, converged_spec, approve, git, hstore, rjson
+from test_u26 import THREADS, reader
 from superegm import approve_spec
 
 
@@ -83,3 +85,38 @@ def test_skills_offer_and_check_the_section(path, phrases):
   """Brainstorming offers and writes the section; structural checks the grammar; design judges the patterns' safety."""
   text = (Path(__file__).resolve().parents[2] / path).read_text(encoding="utf-8")
   assert all(p in text for p in phrases), [p for p in phrases if p not in text]
+
+
+def test_malformed_triage_section_reads_no_pr_thread(world, monkeypatch):
+  """The refusal comes before the spec PR's ingest: no thread is read, no round or journal line is written."""
+  seen = reader(monkeypatch, threads=THREADS[1:])
+  make_pr(world.gh, 7, "c" * 40, branch="main")
+  spec, cid, rid = converged_spec(world, text=with_section("Unblock:\n- reach: remote\n"))
+  journal = hstore(world).path("journal")
+  rounds_before, journal_before = rjson(world, rid, "round-1.json"), journal.read_text(encoding="utf-8") if journal.is_file() else None
+  code, err = approve(world, spec, cid, "--yes")
+  assert code == 1 and err.removeprefix("superegm: ").startswith("approve-spec: - reach: remote: "), err
+  assert seen == [] and rjson(world, rid, "round-1.json") == rounds_before and rjson(world, rid)["ingested"] == []
+  assert (journal.read_text(encoding="utf-8") if journal.is_file() else None) == journal_before
+
+
+@pytest.mark.parametrize("section, line", [
+  ("Unblock:\n- reach\n", "- reach"),
+  ("Unblock:\n- reach:forged\n", "- reach:forged"),
+  ("Unblock:\n- reach: agent, later\n", "- reach: agent, later"),
+])
+def test_a_pair_that_is_no_field_value_is_refused_with_its_line(section, line):
+  """A pair without `: ` names its line at fault."""
+  with pytest.raises(approve_spec.core.HandoffError) as error:
+    approve_spec.triage_patterns("# S\n\n## Triage\n\n" + section + "\n## Units\n")
+  assert str(error.value).startswith(f"approve-spec: {line}: ")
+
+
+@pytest.mark.parametrize("section, patterns", [
+  ("```\nUnblock:\n- reach: remote\n```\nUnblock:\n- reach: agent\n", [{"reach": "agent"}]),
+  ("Unblock:\n- reach: agent\n```\n- reach: remote\n```\n- later: easy\n", [{"reach": "agent"}]),
+  ("Unblock:\n- reach: agent\n~~~\n## Other\n~~~\n", [{"reach": "agent"}]),
+])
+def test_a_fenced_block_inside_the_section_is_prose(section, patterns):
+  """A fenced `Unblock:` is ignored, and a fence ends the run; a fenced H2 does not end the section."""
+  assert approve_spec.triage_patterns("# S\n\n## Triage\n\n" + section + "\n## Units\n") == patterns
