@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
-# Modified by SuperEGM (gsVAM), 2026: the `width:` line and the plan header in `set-input`, the chain check and the split check prose (U29); the proportion split check reads the `units.*` limits (U52).
+# Modified by SuperEGM (gsVAM), 2026: the `width:` line and the plan header in `set-input`, the chain check and the split check prose (U29); the proportion split check reads the `units.*` limits and names its config input and evidence (U52).
 """U06: plan review — the dispatch set, the set reviewer, fix-design, the skill file."""
 import argparse
 import hashlib
@@ -344,4 +344,15 @@ def test_proportion_reads_the_units_limits(needle, present):
 @pytest.mark.parametrize("needle, present", [("`steps` over 10, `fenced_share` over 0.40", True), ("`bytes` over", False), ("24,576", False)])
 def test_proportion_inputs_drop_the_bytes_warning(needle, present):
     # section 6: scan's 24,576-byte warning goes (U42), its 10-step warning stays
+    assert (needle in " ".join(PROPORTION.read_text(encoding="utf-8").split())) is present
+
+
+@pytest.mark.parametrize("needle, present", [
+    ("`.superegm/config.json` at the repository root", True), ("file or a key is missing", True), ("(25 and 10)", True),
+    ("count of the body's Scope paths", True), ("one that meets none is no split candidate", True),
+    ("Four, each by absolute path", False), ("`warnings[]` at those values", False),
+    ("a body over a limit without a Step you can name", False),
+])
+def test_proportion_split_check_names_its_config_input_and_evidence(needle, present):
+    # round 2: the config is read at the repository root, defaults for a missing file or key; split evidence is scan's numbers, not warnings
     assert (needle in " ".join(PROPORTION.read_text(encoding="utf-8").split())) is present
