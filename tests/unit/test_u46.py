@@ -8,7 +8,7 @@ import types
 import pytest
 
 import superegm
-from conftest import set_config
+from conftest import ROOT, set_config
 
 
 @pytest.mark.parametrize("file,key,expected", [
@@ -26,3 +26,18 @@ def test_registered_object_keys_merge_one_level(world, monkeypatch, file, key, e
   config = superegm.load_config(world.repo)
   assert all(config[key][k] == v for k, v in expected.items())
   assert set(config[key]) >= set(superegm.DEFAULT_CONFIG[key])
+
+
+@pytest.mark.parametrize("app,ok", [({"app_id": 7, "slug": "b"}, True), ({"app_id": 7, "slug": "b", "x": 1}, False)])
+def test_builder_defaults_from_the_registry(world, app, ok):
+  # the redundant builder setdefaults go: an old file reads launch_builder.CONFIG_DEFAULTS; the app default and check stay
+  set_config(world, builder={"profile_dir": "~/p", "app": app})
+  if ok:
+    config = superegm.load_config(world.repo)
+    assert config["builder"]["app"]["private_key_env"] == "SUPEREGM_APP_KEY"
+    assert {k: config["builder"][k] for k in ("plugins", "mcp", "max_subagent_calls", "stall_minutes")} == \
+        {"plugins": [], "mcp": {}, "max_subagent_calls": 12, "stall_minutes": 30}
+  else:
+    with pytest.raises(superegm.HandoffError, match="builder.app"):
+      superegm.load_config(world.repo)
+  assert 'setdefault("stall_minutes"' not in (ROOT / "skills/plan/scripts/superegm/__init__.py").read_text(encoding="utf-8")
