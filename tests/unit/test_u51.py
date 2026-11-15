@@ -23,7 +23,8 @@ def closed_note(world, followups):
   code, out = world.run("close", "--runcard", world.card("integrate"))
   assert code == 0, out
   journal = (world.artifacts / "journal.md").read_text(encoding="utf-8").splitlines()
-  return out.splitlines()[1:], [line for line in journal if line.startswith("close: follow-up ")]
+  entries = [line.split(" ", 1)[1] for line in journal]  # each line is `<timestamp> <fact>`
+  return out.splitlines()[1:], [line for line in entries if line.startswith("close: follow-up ")]
 
 
 @pytest.mark.parametrize("followups, lines", [

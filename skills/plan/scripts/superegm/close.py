@@ -1,7 +1,7 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the close subcommand (spec section 12): `closed_at`, every unlanded unit journaled;
 # it refuses while a redesign-stopped unit's issue is open (one GitHub read per such unit); `write_closed`, `closed_at` in the state and handoffs/<id>.json (U20).
-# a merged unit's open issue and, all landed, the tracking issue closed as completed; `--note` (U32).
+# a merged unit's open issue and, all landed, the tracking issue closed as completed; `--note` (U32); the follow-ups block (U51).
 
 """superegm close [--note <text>]: close the handoff under an integrate card. GitHub reads: each redesign-stopped
 unit's issue (each read journaled; one open, it refuses with `state.json` untouched and nothing closed), each unlanded unit's recorded PR through `gh api repos/<repo>/pulls/<n>` (merged lands it for this close) and each landed unit's issue;
@@ -70,8 +70,15 @@ def run(args):
     close_issue(st, repo, "tracking", tracking)
   if args.note:
     core.journal(st, f"close: note {args.note}")
+  # The handoff's triage follow-ups (spec section 5.2), units sorted, rows in record order: one journal line each.
+  rows = [f"{uid} {r['fid']} (round {r['round']}, pattern {r['pattern']}): {r['claim']}"
+          for uid in sorted(state.get("units") or {}) for r in core.load_foreman(st, uid).get("followups") or []]
+  for row in rows:
+    core.journal(st, f"close: follow-up {row}")
   write_closed(st, state, None)
   print(f"closed {state['handoff_id']}; unlanded: {', '.join(unlanded) or 'none'}")
+  if rows:
+    print("\n".join(["Follow-ups:", *(f"- {row}" for row in rows)]))
   return 0
 
 
