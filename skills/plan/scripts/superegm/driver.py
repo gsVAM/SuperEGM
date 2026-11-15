@@ -212,23 +212,16 @@ def refuse(hs: core.Store, data: dict, reason: str) -> None:
   print(f"tick: refused ({hs.handoff_id}: {reason})")
 
 
-def close_card(hs: core.Store, cid: str) -> None:
-  card = core.load_card(hs, cid)
-  card["closed_at"] = core.now_iso()
-  core.atomic_write(hs.path("runcards", cid), card)
-  core.journal(hs, f"runcard close {cid}")
-
-
 def notify(hs: core.Store, spec: str) -> None:
   """`notify` under a `driver` card the tick opens for that alone, only when `notify`'s own predicate holds."""
-  from superegm import inbox  # inbox imports this module
+  from superegm import inbox, runcard  # inbox imports this module
   if not inbox.notify_lines(hs, {"skill": "driver", "handoff": hs.handoff_id}):
     return
   cid = core.open_runcard(hs, "driver", spec)
   try:
     inbox.run_notify(argparse.Namespace(command="notify", runcard=cid, plan=None, handoff=None))
   finally:
-    close_card(hs, cid)
+    runcard.close_card(hs, cid)
 
 
 def launch(hs: core.Store, entry: dict, spec: str, reason: str) -> bool:
@@ -237,7 +230,7 @@ def launch(hs: core.Store, entry: dict, spec: str, reason: str) -> bool:
   handoff of the store, typed or a tick's, or an open `plan`, `file`, `integrate`, `review-plan` or `orient` card of
   this handoff: the launch `interrupted`, journaled `driver: tick backed off: <skill> card <id> open`, the tick backs
   off), the wrapper started detached, its `pid` written, the card closed."""
-  from superegm import launch_builder
+  from superegm import launch_builder, runcard
   hid, data = hs.handoff_id, core.load_driver(hs)
   n = len(data["launches"]) + 1
   base = lambda suffix: hs.path("driver", f"{hid}_r{n}{suffix}")
@@ -257,14 +250,14 @@ def launch(hs: core.Store, entry: dict, spec: str, reason: str) -> bool:
     record["status"] = "interrupted"
     core.atomic_write(hs.path("driver", hid), data)
     core.journal(hs, f"driver: tick backed off: {found[0][0]} card {found[0][1]} open")
-    close_card(hs, cid)
+    runcard.close_card(hs, cid)
     return False
   env = {**os.environ, "SUPEREGM_ROLE": "driver", "SUPEREGM_RUNCARD": cid}
   record["pid"] = launch_builder.start_detached(["/bin/sh", "-c", record["command"]], Path(record["log"]), env)
   core.atomic_write(hs.path("driver", hid), data)
   core.journal(hs, f"tick: {hid} launch {n} running (pid {record['pid']})")
   print(f"tick: {hid} launch {n} running (pid {record['pid']})")
-  close_card(hs, cid)
+  runcard.close_card(hs, cid)
   return True
 
 
@@ -283,12 +276,12 @@ def tick_store(entry: dict) -> None:
   current, ids = core.boot_id(), open_ids(st)
   stores = [core.handoff_store(st, h) for h in ids]
   for hs in stores:  # the proofs first, for every open handoff: a store-wide skip below reads them all
-    core.STORE = hs
+    core.STORE = hs  # the one mid-run STORE switch: it reaches every reader by intent, the notify hook's included
     core.reboot_proof(hs, current)
     exit_file_proof(hs, core.load_driver(hs)["launches"])
   for hid in sorted(ids, key=lambda h: last_started(st, h)):
     hs = core.handoff_store(st, hid)
-    core.STORE = hs
+    core.STORE = hs  # the one mid-run STORE switch: it reaches every reader by intent, the notify hook's included
     state = core.load_state(hs.root)
     spec = (state.get("design") or {}).get("path") or ""
     units = list(state.get("units") or {})

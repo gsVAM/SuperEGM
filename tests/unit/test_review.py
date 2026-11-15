@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03); the review loop and approve-spec (U04); the `acceptable:` line (U35); the by-hand card and the lineless path (U32); an approval entry's `rounds`, and the spec resume's panel line (U36).
+# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03); the review loop and approve-spec (U04); the `acceptable:` line (U35); the by-hand card and the lineless path (U32); an external comment read whole from its root (U73); an approval entry's `rounds`, and the spec resume's panel line (U36).
 
 """U04: the review loop (`review open|record|settle|status|rule`) and `approve-spec` (spec section 8)."""
 
@@ -1279,10 +1279,10 @@ from superegm.review import thread_line
 
 @pytest.mark.parametrize("thread, severity, line", [
   ({"path": "src/x.py", "line": 3, "commit_id": "c" * 40, "body": "**Bug**: a | b\nmore"}, "high",
-   "external:devin-ai-integration[bot]-2-7 | high | src/x.py:3 at ccccccc | regression: no | **Bug**: a / b"),
+   "external:devin-ai-integration[bot]-2-7 | high | src/x.py:3 at ccccccc | regression: no | **Bug**: a / b more"),
   ({"path": "README.md", "line": None, "commit_id": "c" * 40, "body": "ping @alice about secret-codename"}, "low",
    "external:alice-2-1 | low | README.md at ccccccc | regression: no | ping @ alice about s ecret-codename"),
-  ({"path": None, "line": None, "commit_id": "c" * 40, "body": "x" * 300}, "low", "external:alice-2-1 | low | PR at ccccccc | regression: no | " + "x" * 200)])
+  ({"path": None, "line": None, "commit_id": "c" * 40, "body": "x" * 300}, "low", "external:alice-2-1 | low | PR at ccccccc | regression: no | " + "x" * 300)])
 def test_thread_line_form_and_masking(world, thread, severity, line):
   fid, config = line.split(" | ")[0], superegm.load_config(world.repo)   # banned_terms: ["(?i)secret-codename"]
   assert thread_line(fid.rsplit("-", 2)[0], 2, int(fid.rsplit("-", 1)[1]), thread, severity, config) == line

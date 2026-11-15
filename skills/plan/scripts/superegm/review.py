@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest: the one review loop (spec section 8)."""
 
@@ -1115,7 +1115,7 @@ def read_threads(repo: str, number: int, skip: set) -> list[dict]:
     if c.get("in_reply_to_id") is not None or c["id"] in skip:
       continue
     threads.append({"id": c["id"], "login": login(c), "bot": login(c).endswith("[bot]"),
-                    "body": "\n\n".join([c.get("body") or "", *replies.get(c["id"], [])]), "path": c.get("path"),
+                    "root": c.get("body") or "", "body": "\n\n".join([c.get("body") or "", *replies.get(c["id"], [])]), "path": c.get("path"),
                     "line": c.get("line"), "commit_id": c.get("commit_id"), "review_body": False,
                     "created_at": c.get("created_at")})
   for r in reviews:
@@ -1124,7 +1124,7 @@ def read_threads(repo: str, number: int, skip: set) -> list[dict]:
       continue
     if (not body.strip() or r["id"] in inline or r.get("state") == "APPROVED" or r["id"] in skip):
       continue
-    threads.append({"id": r["id"], "login": login(r), "bot": login(r).endswith("[bot]"), "body": body, "path": None,
+    threads.append({"id": r["id"], "login": login(r), "bot": login(r).endswith("[bot]"), "root": body, "body": body, "path": None,
                     "line": None, "commit_id": r.get("commit_id"), "review_body": True, "created_at": r.get("submitted_at")})
   return threads
 
@@ -1142,15 +1142,33 @@ def mask(text: str, config: dict) -> str:
   return text
 
 
+CLAIM_LIMIT = 1_000  # characters of a thread's root kept in its claim (a longer one keeps 999 and `…`)
+NO_TEXT = "(no text outside hidden markup)"  # the claim of a root with nothing left after its HTML comments go
+CUT_LIMIT = 200  # characters of a claim when its ingest comment would pass `COMMENT_LIMIT` (a longer one keeps 199 and `…`)
+
+
+def cut_claim(claim: str) -> str:
+  """The claim cut to `CUT_LIMIT` characters (199 and `…`) when it is longer, else whole."""
+  return claim[:CUT_LIMIT - 1] + "…" if len(claim) > CUT_LIMIT else claim
+
+
+def root_text(thread: dict) -> str:
+  """The thread's root comment without its HTML comments: `<!--` to the next `-->`, across lines, or to the
+  end of the text when none follows (GitHub hides that too). A thread built by hand reads its `body`."""
+  return re.sub(r"<!--.*?(?:-->|\Z)", "", thread.get("root", thread.get("body")) or "", flags=re.S)
+
+
 def thread_line(reviewer: str, rnd: int, n: int, thread: dict, severity: str, config: dict) -> str:
   """The thread's finding line: `<reviewer>-<round>-<n> | <severity> | <file:line or PR> at <commit7> |
-  regression: no | <the first line, 200 chars, masked>`."""
+  regression: no | <the root comment on one line, masked, 1,000 chars>`."""
   where = thread.get("path") or "PR"
   if thread.get("path") and thread.get("line") is not None:
     where += f":{thread['line']}"
   where = f"{mask(where, config)} at {(thread.get('commit_id') or '')[:7]}"
-  first = ((thread.get("body") or "").strip().splitlines() or [""])[0].strip()[:200]
-  return f"{reviewer}-{rnd}-{n} | {severity} | {where} | regression: no | {mask(first, config)}"
+  claim = mask(" ".join(root_text(thread).split()), config) or NO_TEXT
+  if len(claim) > CLAIM_LIMIT:
+    claim = claim[:CLAIM_LIMIT - 1] + "…"
+  return f"{reviewer}-{rnd}-{n} | {severity} | {where} | regression: no | {claim}"
 
 
 def collaborator_role(repo: str, login: str) -> str:
@@ -1178,7 +1196,7 @@ def thread_severity(thread: dict, config: dict, role: str | None) -> str:
     return "low"
   words = {w.casefold(): s for w, s in ingest["severity_words"].items()}
   words.update({s: s for s in SEVERITIES})
-  first = ((thread.get("body") or "").strip().splitlines() or [""])[0].casefold()
+  first = next((line for line in root_text(thread).splitlines() if line.strip()), "").strip().casefold()
   found = [m.group(0) for m in re.finditer(r"[^\W_]+(?:[-'][^\W_]+)*", first)]
   if thread["review_body"]:
     return "medium" if any(w in words for w in found) else "low"
@@ -1369,9 +1387,16 @@ def ingest(args) -> int:
         postable.setdefault(ext, []).append(line)
     body = None
     if postable:
-      shown = {"round": n, "reviewers": {ext: {"findings": parse_findings("\n".join(ls), ext, n)} for ext, ls in postable.items()}}
       verdict = json.loads(core.read_text(folder / "ci.json"))["verdict"]
-      body = render_comment(shown, head, verdict, config.get("fix_request_mention") or None)
+      render = lambda: render_comment(
+        {"round": n, "reviewers": {ext: {"findings": parse_findings("\n".join(ls), ext, n)} for ext, ls in postable.items()}},
+        head, verdict, config.get("fix_request_mention") or None)
+      body = render()
+      if len(body.encode("utf-8")) > COMMENT_LIMIT:  # every claim of the ingest cut to 200 characters, stored and posted alike
+        cut = lambda line: " | ".join([*line.split(" | ", 4)[:4], cut_claim(line.split(" | ", 4)[4])])
+        lines = {ext: [cut(line) for line in ls] for ext, ls in lines.items()}
+        postable = {ext: [cut(line) for line in ls] for ext, ls in postable.items()}
+        body = render()
       if len(body.encode("utf-8")) > COMMENT_LIMIT:
         raise Refusal(f"review ingest: comment over 65,536 bytes ({sum(map(len, postable.values()))} threads)")
       problems = core.scan_text(body, config, "comment", label="comment", limit=None)
@@ -1428,7 +1453,7 @@ def ingest(args) -> int:
         thread = edited.get(finding.get("thread"))
         if thread is not None:
           claim = thread_line(reviewer, m, 1, thread, finding["severity"], config).split(" | ", 4)[4]
-          if claim != finding["claim"]:
+          if claim != finding["claim"] and finding["claim"] != cut_claim(claim):  # a stored 200-character cut stays cut
             finding["claim"], changed = claim, True
     if changed:
       core.atomic_write(st.path("reviews", rid, f"round-{m}.json"), saved)
