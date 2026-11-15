@@ -268,7 +268,7 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   handoff_id, kind = handoff_id_for(st, sha, spec.stem, core.load_approvals(st, spec))
   commit = commit_by_path(root, [spec.relative_to(root).as_posix(), CONFIG], f"superegm: approve {slug} at review {rid}",
                           st.config["commit_trailer"])
-  entry =entry_of(sha, commit, args.runcard, rid, handoff_id, kind, escalated, {"rounds": rounds, "mode": mode})
+  entry = entry_of(sha, commit, args.runcard, rid, handoff_id, kind, escalated, {"rounds": rounds, "mode": mode})
   path = append_entry(st, spec, entry)
   write_handoff_file(st, handoff_id, spec, entry["approved_at"] if kind == "opening" else None)
   core.journal(st, f"approve-spec {kind} {handoff_id} sha256 {sha[:12]} at review {rid} commit {commit[:12]} under {args.runcard}")

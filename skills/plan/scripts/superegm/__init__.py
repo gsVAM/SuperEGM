@@ -657,7 +657,8 @@ def here(path) -> Path:
 
 def handoff_spec(args, store: Store) -> str:
   """The handoff's spec: the state's `design.path` (read under this checkout, `here`), else (before the first
-  `graph`) the `Design:` line of `--plan`."""
+  `graph`) the `Design:` line of `--plan`, else the spec its `handoffs/<id>.json` records (U43: `next wait` on a
+  handoff approved but not yet graphed)."""
   spec = (load_state(store.root).get("design") or {}).get("path")
   spec = str(here(spec)) if spec else spec
   plan = Path(args.plan).expanduser().resolve() if getattr(args, "plan", None) else None
@@ -666,6 +667,9 @@ def handoff_spec(args, store: Store) -> str:
     if match:
       design = Path(match.group(1)).expanduser()
       spec = str(design if design.is_absolute() else (plan.parent / design).resolve())
+  if not spec and store.handoff_id:
+    row = next((r for r in handoffs(store.root) if r.get("id") == store.handoff_id), None)
+    spec = str(here(row["spec"])) if row and row.get("spec") else spec
   return spec or ""
 
 

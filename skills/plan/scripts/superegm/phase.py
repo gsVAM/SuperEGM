@@ -86,7 +86,7 @@ def checkout_problem(root: Path, base: str, tick: str):
   if head != tick:
     behind = subprocess.run(["git", "merge-base", "--is-ancestor", head, tick], cwd=str(root), capture_output=True)
     return "behind" if behind.returncode == 0 else "diverged"
-  if core.run_git(["status", "--porcelain", "--untracked-files=no"], root, check=False).strip():
+  if core.run_git(["--no-optional-locks", "status", "--porcelain", "--untracked-files=no"], root, check=False).strip():
     return "dirty"
   return None
 
@@ -109,6 +109,19 @@ def plan_review_due(hs: core.Store, uid: str, sha: str) -> bool:
   latest, _ = review.latest_cycle(hs, "plan", uid)
   rid = review.review_id(hs, "plan", uid, latest["cycle"])
   return max(review.round_numbers(hs, rid), default=0) > latest["converged_round"]
+
+
+def spec_under(root: Path, spec: Path):
+  """The handoff's spec under the registered root: `spec` when it lies there, else root joined with the longest
+  suffix of the recorded path that `refs/superegm/tick-base` holds (a spec approved in another worktree that the
+  root has not pulled); None when the tick-base holds no suffix of it."""
+  if spec.resolve().is_relative_to(root.resolve()):
+    return spec
+  for i in range(1, len(spec.parts)):
+    rel = Path(*spec.parts[i:]).as_posix()
+    if not subprocess.run(["git", "cat-file", "-e", f"{TICK_BASE}:{rel}"], cwd=str(root), capture_output=True).returncode:
+      return root / rel
+  return None
 
 
 def approved_text(root: Path, spec: Path, entry) -> str:
@@ -180,9 +193,11 @@ def next_line(st: core.Store, hid: str, read_wait: bool = True) -> str:
   wait = read_json(st.path("chain", hid)) if read_wait else None
   if wait and not wait.get("answer") and not proceeded(hs, wait.get("review"), wait.get("since")):
     return f"waiting {wait['phase']}: {' '.join(str(wait.get('question') or '').splitlines())}"
-  if own and launch.origin_problems(root, config.get("base", "main"), {**entries[own[-1]], "path": str(spec)},
-                                    entries[own[-1] + 1:], ref=TICK_BASE, spec_only=True):
-    return "waiting push"
+  if own:
+    spec = spec_under(root, spec)
+    if spec is None or launch.origin_problems(root, config.get("base", "main"), {**entries[own[-1]], "path": str(spec)},
+                                              entries[own[-1] + 1:], ref=TICK_BASE, spec_only=True):
+      return "waiting push"
   answered = bool(wait and wait.get("answer"))
   text = approved_text(root, spec, entries[-1] if entries else None)
   below = wait["phase"] if answered else planning_line(hs, state, spec, text)
@@ -206,7 +221,8 @@ def wait(args, st: core.Store, hid: str) -> int:
 
 def clear(args, st: core.Store, hid: str) -> int:
   """Remove the wait record on confirmed progress (`next` without it prints a later phase, or a `proceed` ruling
-  resolves it); otherwise an unanswered record stays and an answered one is asked again. The card closes.
+  resolves it); a `waiting` row keeps it as it is, answered or not; otherwise an unanswered record stays and an
+  answered one is asked again. The card closes.
   Section 7.2's third removal, `next` showing "the unit withdrawn", is not read: section 7.1's table prints no
   such line and no unit of this build defines withdrawal, so a withdrawn unit's record clears only through a later
   phase."""
@@ -217,7 +233,7 @@ def clear(args, st: core.Store, hid: str) -> int:
     later = line in ORDER and ORDER.index(line) > ORDER.index(record["phase"])
     if later or proceeded(core.handoff_store(st, hid), record.get("review"), record.get("since")):
       path.unlink()
-    elif record.get("answer"):
+    elif record.get("answer") and not line.startswith("waiting "):
       core.atomic_write(path, {"phase": record["phase"], "since": core.now_iso(), "review": record.get("review"),
                                "question": f"stopped at {record['phase']} by {record.get('by')}: answer to go on"})
   runcard.close_card(st, args.runcard)
