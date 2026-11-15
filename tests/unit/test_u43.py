@@ -210,7 +210,8 @@ def commit_file(world, name):
   ("every unit filed, no filing receipt", "file"),
   ("answered wait record, root dirty", "waiting checkout: {root}: dirty"),
   ("approved amend-units row, root behind it", "waiting checkout: {root}: behind"),
-  ("fetch record ok false, empty stderr", "waiting fetch: origin: fetch failed")])
+  ("fetch record ok false, empty stderr", "waiting fetch: origin: fetch failed"),
+  ("spec approved in another worktree, root lacks it", "waiting checkout: {root}: behind")])
 def test_next_rows_registered_root_and_branches(world, tmp_path, registry, state, line):
   """The registered root is the registry's; behind and diverged; a proceeded wait record is skipped; the file row
   on a missing receipt; an answered record stops at `waiting checkout`; the rows are the latest approval's; a failed
@@ -249,6 +250,13 @@ def test_next_rows_registered_root_and_branches(world, tmp_path, registry, state
     git(world, "reset", "-q", "--hard", "HEAD~1")  # the registered checkout still holds U01-U03 only
   elif state == "fetch record ok false, empty stderr":
     c.fetch(False, "")
+  elif state == "spec approved in another worktree, root lacks it":
+    elsewhere = str(wt / c.spec.relative_to(root))  # the handoff's spec path as worktree B recorded it
+    path = c.root / "handoffs" / f"{c.hid}.json"
+    jwrite(path, {**jread(path), "spec": elsewhere})
+    c.state["design"]["path"] = elsewhere
+    git(world, "reset", "-q", "--hard", "HEAD~1")  # the registered root has not pulled the approved spec
+    assert not c.spec.exists()
   c.save()
   code, out, before, after = c.next()
   assert (code, out) == (0, line.format(root=root, wt=wt)) and before == after
@@ -273,9 +281,12 @@ def test_origin_spec_check_alone(world):
   ({"phase": "file", "question": "q"}, "waiting fetch: origin: x", {"phase": "file", "question": "q"}),
   ({"phase": "file", "question": "q"}, "file", {"phase": "file", "question": "q"}),
   ({"phase": "file", "question": "q", "answer": "yes", "by": "owner", "at": "t"}, "file",
-   {"phase": "file", "question": "stopped at file by owner: answer to go on"})])
+   {"phase": "file", "question": "stopped at file by owner: answer to go on"}),
+  ({"phase": "file", "question": "q", "answer": "yes", "by": "owner", "at": "t"}, "waiting fetch: origin: x",
+   {"phase": "file", "question": "q", "answer": "yes", "by": "owner", "at": "t"})])
 def test_next_clear(world, record, next_without, after):
-  """Removed only on confirmed progress; a waiting row keeps it; an answer turns back into a question with a new since."""
+  """Removed only on confirmed progress; a waiting row keeps it, answered or not; otherwise an answer turns back into
+  a question with a new since."""
   c = Chain(world)
   if next_without == "waiting fetch: origin: x":
     c.fetch(False, "x")
@@ -296,9 +307,21 @@ def test_next_clear(world, record, next_without, after):
   assert (now and {k: v for k, v in now.items() if k not in ("since", "review")}) == after
   if now:
     assert now["review"] == stored["review"]
-    assert (now["since"] != stored["since"]) == ("answer" in record)  # the rewrite's time, a new since
+    assert (now["since"] != stored["since"]) == ("answer" in record and "answer" not in now)  # a rewrite's new since
   code, out = world.run("next", "clear", "--handoff", c.hid)
   assert (code, out.strip().removeprefix("superegm: ")) == (1, "runcard: --runcard is required")
+
+
+def test_next_wait_before_graph(world):
+  """A handoff approved but not yet graphed has no state.json: its plan card, on the handoff's spec, still serves
+  `next wait`, which writes the record and closes the card."""
+  c = Chain(world)
+  assert not c.hs.path("state").exists()
+  cid = world.open_card("plan", c.spec)
+  code, out = world.run("next", "wait", "--handoff", c.hid, "--phase", "plan", "--question", "split U02?", "--runcard", cid)
+  assert code == 0, out
+  assert jread(superegm.Store(c.root).path("runcards", cid))["closed_at"]
+  assert jread(c.root / "chain" / f"{c.hid}.json")["question"] == "split U02?"
 
 
 def set_mode(world, mode):
