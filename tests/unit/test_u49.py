@@ -56,7 +56,7 @@ def test_interrupted_launch_records_subagent_calls(world, ender, status):
     code, out = world.run("interrupt", "--unit", UNIT, "--launch", 1, "--runcard", out.split()[-1])
     assert code == 0, out
   else:
-    superegm.reboot_launches(s, UNIT, "boot-new")
+    superegm.reboot_launches(superegm.store(world.repo), UNIT, "boot-new")  # seed's `s` read the config before seed rewrote it
   entry = launches_of(s)[0]
   assert entry["status"] == status
   assert entry["subagent_calls"] == traces.launch_subagent_calls(profile, entry) and entry["subagent_calls"]["count"] == 2
