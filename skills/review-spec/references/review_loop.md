@@ -42,10 +42,18 @@ other grammar (`review record: <file>:<line>: <reason>`).
    resumes it: a re-typed skill continues where the last invocation stopped. On kind `spec` the
    second line is `panel <a,b,astra> from round <n>`, the panel of the next unrecorded round `<n>`
    (the Astra lane last, when the cycle has it), and a resume whose `--reviewers` is a proper
-   subset of that panel, `design` first, narrows it from round `<n>` on; a wider, overlapping or
-   equal panel changes nothing, and the line then ends ` (unchanged: <reason>)` when the given
-   panel was not taken. Dispatch the panel the line prints, never the one you passed. A new cycle
-   and every other kind print the review id alone. A closed
+   subset of that panel, `design` first, narrows it from round `<n>` on. An equal panel (in any
+   order) changes nothing and the line ends there; a panel naming a reviewer off the round's panel
+   (wider or overlapping) changes nothing and the line ends ` (unchanged: <reviewer> is not on the
+   panel)`; a panel not starting with `design` is refused (`review open: first reviewer must be
+   design`, exit 1) before any line prints. The Astra lane cannot be dropped by a resume: it stays
+   when the cycle has it, and a resume ignores `--astra` and an `astra` entry in `--reviewers`.
+   Dispatch the panel the line prints, never the one you passed. When the last round is partly
+   recorded (a round's file exists once its first reviewer is recorded), the line names the
+   *next* round's panel: first finish that round with its own panel, `review status` naming the
+   reviewers still unrecorded (`not run (<reviewer>: no record)`), then dispatch the printed one.
+   A new cycle and every other kind print the review id alone: dispatch the panel you passed
+   (and the Astra lane, as the open seated it). A closed
    cycle (an `accept` or `stop` ruling, a spec edited after the approval that names it, or an
    integrate review whose handoff closed or whose `## Units` were amended past the bytes it
    reviewed) gets the next number with a fresh cap, read from `review.rounds` at that open. The helper hashes a spec or a plan body (the
@@ -53,8 +61,8 @@ other grammar (`review record: <file>:<line>: <reason>`).
 
 ## 2. Round
 
-Each round the whole panel of that round (the one `review open` printed; a spec's narrowed panel
-holds from its round on) is dispatched **concurrently**, one message with every Agent call,
+Each round the whole panel of that round (on a spec resume the one `review open` printed, else the
+one you passed; a spec's narrowed panel holds from its round on) is dispatched **concurrently**, one message with every Agent call,
 each through its own adapter `superegm:<id>` (`.claude-plugin/agents/<id>.md`: `model:
 inherit`, `omitClaudeMd: true`, tools `Read, Grep, Glob`). The adapter is what keeps the
 context fresh, whether or not the call is named; a general-purpose agent reading the persona
@@ -232,8 +240,9 @@ foreman and integrate:
   carries what it guarded.
 - The review is **at its cap** when its `completed` rounds number its `cap` plus its `continue` rulings. The `cap` is
   `review.rounds` (1 to 10, default 3) read when the cycle opened and kept: a spec's cycle reads the live value; a plan, head or
-  integrate cycle reads the `rounds` its handoff's approval froze (the spec's `Rounds: <n>` line before its first H2, else the
-  live value at the approval); a record or an approval without one reads 5.
+  integrate cycle reads the `rounds` its own handoff's latest approval entry froze (the spec's `Rounds: <n>` line before its first H2, else the
+  live value at the approval; another handoff's entry never counts); a record without a `cap`, a handoff with no approval entry of its
+  own, and an entry whose `rounds` is missing or outside 1 to 10 all read 5.
   `continue` may be ruled once per cycle, `accept` converges the artifact (`converged: by ruling
   R<n>`, never on a head, and never while the reviewed bytes moved: then `continue` or `stop`, and
   `stop` alone, ruled by no one, once `continue` is spent), and after `stop` no ruling is accepted and the cycle stays at its cap

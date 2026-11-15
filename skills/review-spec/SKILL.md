@@ -91,8 +91,11 @@ worktree in the owner's checkout.
 The id is `spec-<spec-slug>-c<n>`, the first line printed. A cycle still open from an earlier
 invocation is resumed with its stored scope form, and a second line prints its panel,
 `panel <a,b,astra> from round <n>`: a `--reviewers` that is a proper subset of it, `design` first,
-narrows it from round `<n>`; any other panel changes nothing (the line then ends
-` (unchanged: <reason>)`). Dispatch the panel that line prints. A closed one (`accept`, `stop`, or a spec edited after the
+narrows it from round `<n>`. An equal panel changes nothing and the line ends there; a panel naming
+a reviewer off the round's panel changes nothing and the line ends ` (unchanged: <reviewer> is not on the panel)`;
+a panel not starting with `design` is refused before any line prints. A resume cannot drop the Astra lane.
+Dispatch the panel that line prints, after finishing a partly recorded round with its own panel (the line names
+the next round's). On a new cycle only the id prints: dispatch the panel you passed. A closed one (`accept`, `stop`, or a spec edited after the
 approval that names it) starts the next cycle with a fresh cap (`review.rounds`, read at that open).
 
 `--scope` is the invocation's, default `auto`: an amendment is reviewed in scope, the sections
@@ -110,7 +113,7 @@ helper for the round's scope:
     superegm review scope --review <id> --runcard <id>
 
 and put the lines it prints in every goldfish's brief with the scope sentence of
-`references/review_loop.md` section 2. Then the whole panel `review open` printed, concurrently through the adapters,
+`references/review_loop.md` section 2. Then the whole panel `review open` printed (on a new cycle, the one you passed), concurrently through the adapters,
 the Astra lane alongside when it is on, every reviewer recorded with `superegm review record`
 (an empty file is a record; one retry, then `--not-run`). A finding citing a line outside the
 scope is out of scope: the helper refuses it, keeps it in the round's `out_of_scope[]`, and you
