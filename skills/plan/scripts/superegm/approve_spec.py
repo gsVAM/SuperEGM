@@ -174,14 +174,14 @@ def commit_by_path(repo_root: Path, paths: list[str], message: str, trailer: str
   return core.run_git(["rev-parse", "HEAD"], repo_root).strip()
 
 
-def freeze(root: Path, ref: str, listed: list) -> list:
-  """`listed` with each file's 12-hex blob sha and text at `ref`: `[{file, to, sha, text}]`; a file absent there,
-  over `instructions.LIMIT` bytes or not UTF-8 is refused, naming it."""
+def freeze(root: Path, ref: str, listed: list, at: str | None = None) -> list:
+  """`listed` with each file's 12-hex blob sha and text at `ref`: `[{file, to, sha, text}]`; a file absent there
+  (named `at`, else `ref`), over `instructions.LIMIT` bytes or not UTF-8 is refused, naming it."""
   frozen = []
   for item in listed:
     data = instructions.blob(root, ref, item["file"])
     if data is None:
-      raise core.HandoffError(f"instructions: {item['file']} is absent at the approval commit")
+      raise core.HandoffError(f"instructions: {item['file']} is absent at {at or ref}")
     if len(data) > instructions.LIMIT:
       raise core.HandoffError(f"instructions: {item['file']} is {len(data)} bytes, over {instructions.LIMIT}")
     try:
@@ -314,7 +314,7 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   commit = commit_by_path(root, [spec.relative_to(root).as_posix(), CONFIG], f"superegm: approve {slug} at review {rid}",
                           st.config["commit_trailer"])
   try:  # the files at the approval commit itself, each copied to the store before the entry names it
-    frozen = freeze(root, commit, listed)
+    frozen = freeze(root, commit, listed, at="the approval commit")
   except core.HandoffError as error:
     raise core.HandoffError(f"approve-spec: {error}") from None
   for item in frozen:

@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: renamed from test_egm_handoff.py; helper and skill paths under skills/plan and skills/wave; approve_spec's runcards and init.steps() (U32); the `units` key of the config `init` writes (U42); the expected config and approval-entry key sets take `review` and `rounds` (U36).
+# Modified by SuperEGM (gsVAM), 2026: renamed from test_egm_handoff.py; helper and skill paths under skills/plan and skills/wave; approve_spec's runcards and init.steps() (U32); the `units` key of the config `init` writes (U42); the expected config and approval-entry key sets take `review` and `rounds` (U36); the approve_spec, prepare and launch_builder `WRITES` pins and the `instructions` config key (U37).
 
 """U03's tests: the helper package, the store, run cards, the gating, init, the body
 parsers, the schemas, the renames and the removals; EGM's tests of the shared names."""

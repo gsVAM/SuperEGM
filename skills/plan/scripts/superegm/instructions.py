@@ -38,7 +38,7 @@ def check(value) -> list:
   """`value` when it is a well-formed `instructions` list; else refused, naming the key."""
   def good(entry):
     return (isinstance(entry, dict) and set(entry) == {"file", "to"} and isinstance(entry["file"], str) and entry["file"]
-            and not Path(entry["file"]).is_absolute() and ".." not in Path(entry["file"]).parts
+            and "\0" not in entry["file"] and not Path(entry["file"]).is_absolute() and ".." not in Path(entry["file"]).parts
             and isinstance(entry["to"], list) and entry["to"] and all(r in ROLES for r in entry["to"]))
   if not isinstance(value, list) or not all(good(e) for e in value):
     raise core.HandoffError(f"{SHAPE}, not {json.dumps(value)}")
@@ -57,9 +57,9 @@ def blob(root: Path, ref: str, rel: str) -> bytes | None:
   return shown.stdout if shown.returncode == 0 else None
 
 
-def head_list(root: Path) -> list:
-  """The `instructions` list of the config committed at `HEAD` (`[]` when `HEAD` lacks the config or the key)."""
-  data = blob(root, "HEAD", CONFIG)
+def head_list(root: Path, ref: str = "HEAD") -> list:
+  """The `instructions` list of the config committed at `ref` (`[]` when it lacks the config or the key)."""
+  data = blob(root, ref, CONFIG)
   if data is None:
     return []
   try:
@@ -102,27 +102,25 @@ def section(files: list) -> str:
 def render(st: core.Store, role: str, handoff_id: str | None = None, root: Path | None = None) -> tuple[list[dict], str]:
   """`(manifest [{file, sha}], text)` of `role`'s section: with `handoff_id` that handoff's frozen list, each file read
   from its verified store copy; else the config and the files at `HEAD` under `root` (the checkout this runs in when
-  `root` is None), a file absent there, over `LIMIT` bytes or not UTF-8 refused, naming it. Stores nothing."""
+  `root` is None), both read from the one commit `HEAD` names when the render begins, a file absent there, over `LIMIT`
+  bytes or not UTF-8 refused, naming it. Stores nothing."""
+  manifest, text, _ = rendered(st, role, handoff_id, root)
+  return manifest, text
+
+
+def rendered(st: core.Store, role: str, handoff_id: str | None, root: Path | None) -> tuple[list[dict], str, dict | None]:
+  """`render`'s pair and the approval entry it read (None on the `HEAD` path or with no entry)."""
   from superegm import approve_spec  # approve_spec imports this module
-  files = []
   if handoff_id is not None:
-    for item in handoff_list(st, handoff_id):
-      if role in item["to"]:
-        files.append((item["file"], item["sha"], approve_spec.read_copy(st, item["file"], item["sha"])))
-  else:
-    root = root if root is not None else core.git_toplevel(Path.cwd())
-    for item in head_list(root):
-      if role in item["to"]:
-        data = blob(root, "HEAD", item["file"])
-        if data is None:
-          raise core.HandoffError(f"instructions: {item['file']} is absent at HEAD")
-        if len(data) > LIMIT:
-          raise core.HandoffError(f"instructions: {item['file']} is {len(data)} bytes, over {LIMIT}")
-        try:
-          files.append((item["file"], blob_sha(data), data.decode("utf-8")))
-        except UnicodeDecodeError:
-          raise core.HandoffError(f"instructions: {item['file']} is not UTF-8") from None
-  return [{"file": f, "sha": s} for f, s, _ in files], section([(f, t) for f, _, t in files])
+    entry = handoff_entry(st, handoff_id)
+    files = [(i["file"], i["sha"], approve_spec.read_copy(st, i["file"], i["sha"]))
+             for i in (entry or {}).get("instructions") or [] if role in i["to"]]
+  else:  # HEAD resolved once, so a commit landing mid-render never mixes one commit's list with another's files
+    entry, root = None, root if root is not None else core.git_toplevel(Path.cwd())
+    commit = core.run_git(["rev-parse", "--verify", "-q", "HEAD^{commit}"], root, check=False).strip()
+    listed = [i for i in head_list(root, commit) if role in i["to"]] if commit else []
+    files = [(i["file"], i["sha"], i["text"]) for i in approve_spec.freeze(root, commit, listed, at="HEAD")]
+  return [{"file": f, "sha": s} for f, s, _ in files], section([(f, t) for f, _, t in files]), entry
 
 
 def render_stored(st: core.Store, role: str, lane: str = "local", *, card: str | None = None, review: str | None = None,
@@ -131,16 +129,15 @@ def render_stored(st: core.Store, role: str, lane: str = "local", *, card: str |
   else `render`'s, stored there first: on the card as `instructions.<role>.<lane>` (`{approved_at, manifest, text}`,
   `approved_at` the approval entry read, null with none), or as `reviews/<id>/instructions-<n>-<role>-<lane>.json`
   (`{manifest, text}`). A later call returns the stored one whatever `HEAD` or the latest approval is then."""
-  if card is not None:
-    opened = core.load_card(st, card).get("handoff", st.handoff_id)  # a card without the key: the store's handoff
+  if card is not None:  # a card renders its handoff's frozen list, nothing with no handoff id (a flat 1.0 store), never HEAD
+    record = core.load_card(st, card)
+    opened = record.get("handoff", st.handoff_id)  # a card without the key: the store's handoff
     if handoff_id is not None and opened != handoff_id:
       raise core.HandoffError(f"--handoff {handoff_id}: {card} was opened under handoff {opened}")
-    stored = ((core.load_card(st, card).get("instructions") or {}).get(role) or {}).get(lane)
+    stored = ((record.get("instructions") or {}).get(role) or {}).get(lane)
     if stored is not None:
       return stored["manifest"], stored["text"]
-    manifest, text = render(st, role, handoff_id=handoff_id, root=root)
-    entry = handoff_entry(st, handoff_id) if handoff_id is not None else None
-    record = core.load_card(st, card)
+    manifest, text, entry = rendered(st, role, handoff_id, root) if handoff_id is not None else ([], "", None)
     record.setdefault("instructions", {}).setdefault(role, {})[lane] = {
       "approved_at": (entry or {}).get("approved_at"), "manifest": manifest, "text": text}
     core.atomic_write(st.path("runcards", card), record)
@@ -164,14 +161,18 @@ def require_review(st: core.Store, rid: str, design: Path) -> None:
 def run(args):
   if args.unit and args.design:  # --unit lets a unit's card pass for --handoff; with --spec it would pass any spec
     raise core.HandoffError("instructions: --unit goes with --handoff, not --spec")
-  card = core.require_runcard(args, SKILLS)
+  core.require_runcard(args, SKILLS)
   if bool(args.handoff) == bool(args.design):
     raise core.HandoffError("instructions: exactly one of --handoff and --spec is required")
+  if args.handoff and (args.review or args.round is not None):
+    raise core.HandoffError("instructions: --review and --round go with --spec, not --handoff")
   st = core.STORE or core.store(core.git_toplevel(Path.cwd()), args)
   try:
     if args.design:
       if not args.review or args.round is None:
         raise core.HandoffError("--spec requires --review and --round")
+      if args.round < 1:
+        raise core.HandoffError(f"--round {args.round}: a round is 1 or more")
       design = Path(args.design).expanduser().resolve()
       require_review(st, args.review, design)
       _, text = render_stored(st, args.role, args.lane, review=args.review, round=args.round,
