@@ -447,6 +447,12 @@ def label_stopped(store, number: int) -> None:
   core.gh(["issue", "edit", str(number), "-R", store.config["repo"], "--add-label", store.config["labels"]["stopped"]])
 
 
+def labelled_stopped(store, number: int) -> bool:
+  """The issue carries the stopped label now (`gh issue view --json labels`)."""
+  labels = core.gh_json(["issue", "view", str(number), "-R", store.config["repo"], "--json", "labels"]).get("labels") or []
+  return any(l.get("name") == store.config["labels"]["stopped"] for l in labels)
+
+
 def stopped_entry(by: str, reason: str, now_iso: str, brief=None) -> dict:
   return {"by": by, "reason": reason, "at": now_iso} | ({"brief": str(brief)} if brief else {})
 
@@ -536,8 +542,7 @@ def rule(args) -> int:
   had = False
   if stops:
     if not (closed or found):  # a session post can fail after the label: know whether it was already on (the owner's close)
-      labels = core.gh_json(["issue", "view", str(number), "-R", st.config["repo"], "--json", "labels"]).get("labels") or []
-      had = any(l.get("name") == label for l in labels)
+      had = labelled_stopped(st, number)
     label_stopped(st, number)
   posted_at, url = now, None
   if closed:
@@ -659,9 +664,8 @@ def refuse_undo(st, unit: str, data: dict, row: dict, args) -> None:
   else:
     state = core.load_state(st.root)
     record = state["units"][unit]
-    labels = core.gh_json(["issue", "view", str(record["number"]), "-R", st.config["repo"], "--json", "labels"]).get("labels") or []
     pr = (record.get("pr") or {}).get("number")
-    if any(l.get("name") == st.config["labels"]["stopped"] for l in labels):
+    if labelled_stopped(st, record["number"]):
       why = f"{unit} is stopped (issue #{record['number']} labelled {st.config['labels']['stopped']})"
     elif pr and (pr_state := core.gh_json(["pr", "view", str(pr), "-R", st.config["repo"], "--json", "state"]).get("state")) != "OPEN":
       why = f"pull request #{pr} is {pr_state.lower()}"
@@ -685,6 +689,10 @@ def undo(st, unit: str, data: dict, args, comment: dict, found: "Ruling", now: s
   finding = next(f for f in review.findings_of(rnd) if f["id"] == found.subject)
   finding["disposition"], finding["undone_by"] = None, str(args.posted)
   core.atomic_write(st.path("reviews", rid, f"round-{row['round']}.json"), rnd)
+  # the outcome rewritten before the ruling is recorded: a stop in between leaves the follow-up row and no record,
+  # so the same `decision rule --posted` reruns and completes the undo (both writes are idempotent)
+  review.undo_outcome(st, rid, args.runcard)
+  data = core.load_foreman(st, unit)
   data["rulings"].append({"kind": "undo", "decision": None, "fid": found.subject, "by": args.by,
                           "posted": f"comment {args.posted}", "ruling": args.ruling,
                           "posted_at": comment.get("updated_at") or comment.get("created_at") or now, "at": now})
@@ -692,7 +700,6 @@ def undo(st, unit: str, data: dict, args, comment: dict, found: "Ruling", now: s
   core.save_foreman(st, unit, data)
   core.journal(st, f"Ruling ({args.by}, comment {args.posted}): {unit} undo {found.subject} deferred by triage; "
                    f"triage off for {unit}")
-  review.undo_outcome(st, rid, args.runcard)
   print(f"recorded (comment {args.posted}): undo {found.subject}")
   return 0
 

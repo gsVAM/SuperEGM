@@ -656,12 +656,11 @@ def timely(fid: str, at: str, posted: dict, held: dict = None) -> bool:
 
 def open_of(last) -> set:
   """The previous posted round's open fids, which a contest may name: a finding with no disposition. A medium
-  deferred by triage (`deferred: triage <n>`, spec section 5.2) is not open: it no longer blocks, so no contest
-  of it is carried as a blocking foreman finding."""
+  deferred by triage carries `deferred: triage <n>` (spec section 5.2), so it is not open, and no contest of it is
+  carried as a blocking foreman finding."""
   if not last:
     return set()
-  deferred = {f["id"] for f in review.deferred_of(last)}
-  return {f["id"] for f in review.findings_of(last) if f["disposition"] is None and f["id"] not in deferred}
+  return {f["id"] for f in review.findings_of(last) if f["disposition"] is None}
 
 
 def carry(lines: list, contested: list, last: dict, prior, contest_of: dict, rulings: list) -> tuple:

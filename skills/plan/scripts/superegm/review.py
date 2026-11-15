@@ -656,9 +656,7 @@ def record_round(args) -> int:
       and getattr(args, "threads", None) is None:  # a lapsed accept's `clean` rewritten (`review ingest` rewrites its own)
     data = core.load_foreman(st, review["artifact"])
     posted = sorted((e for e in data["rounds"] if e.get("phase") == "posted"), key=lambda e: e["round"])
-    word = {3: "revise", 2: "cap-reached"}.get(status.code)
-    if posted and posted[-1].get("outcome") == "clean" and word:
-      posted[-1].update({"outcome": word, "rewritten_from": "clean"})
+    if posted and rewrite_posted(posted[-1], lambda: status.code):
       core.save_foreman(st, review["artifact"], data)
   for fid, _, section in refused:
     where = ": no line number" if section == "none" else f" ({section})"
@@ -748,19 +746,34 @@ def triage(args) -> int:
   return 0
 
 
+def rewrite_posted(entry: dict, code, rnd: dict | None = None) -> str | None:
+  """A posted `rounds[]` entry whose outcome no longer holds, rewritten in place: a `clean` outcome, or (given its
+  round `rnd`) an `owner:` word whose remainder is no longer owner-only, becomes `revise`, or `cap-reached` at the cap
+  (`code()`, the review's status exit, read only then), with `rewritten_from` the old outcome. Returns the new word."""
+  outcome = str(entry.get("outcome") or "")
+  if outcome != "clean" and not (rnd is not None and outcome.startswith("owner:") and not owner_only_fids(rnd)):
+    return None
+  word = {3: "revise", 2: "cap-reached"}.get(code())
+  if word:
+    entry.update({"outcome": word, "rewritten_from": outcome})
+  return word
+
+
 def undo_outcome(st: core.Store, rid: str, runcard: str) -> None:
   """After the owner's undo (section 5.2): the verdict re-derived (an accept on the round lapses), and the unit's
-  latest posted `clean` rewritten as ingest rewrites it, `revise` or `cap-reached` at the cap, `rewritten_from: clean`."""
+  latest posted entry rewritten as ingest rewrites it (`rewrite_posted`): `clean`, or an `owner:` word whose remainder
+  is no longer owner-only, becomes `revise` or `cap-reached` at the cap."""
   review = load_review(st, rid)
   status = store_verdict(st, rid, review, runcard)
   unit = review["artifact"]
   data = core.load_foreman(st, unit)
   posted = sorted((e for e in data["rounds"] if e.get("phase") == "posted"), key=lambda e: e["round"])
-  word = {3: "revise", 2: "cap-reached"}.get(status.code)
-  if posted and word and posted[-1].get("outcome") == "clean":
-    posted[-1].update({"outcome": word, "rewritten_from": "clean"})
+  if not posted:
+    return
+  was = posted[-1].get("outcome")
+  if word := rewrite_posted(posted[-1], lambda: status.code, load_round(st, rid, posted[-1]["round"]) or {"reviewers": {}}):
     core.save_foreman(st, unit, data)
-    core.journal(st, f"{unit} round {posted[-1]['round']} clean rewritten {word} by the undo under {runcard}")
+    core.journal(st, f"{unit} round {posted[-1]['round']} {was} rewritten {word} by the undo under {runcard}")
 
 
 def deferred_of(rnd: dict) -> list[dict]:
@@ -811,7 +824,10 @@ def triage_line(line: str, root: Path, head: str) -> tuple[str, dict]:
 
 
 def pattern_matches(pattern: dict, values: dict) -> bool:
-  """A frozen pattern matches a triage when every field it names holds its value (`verified` by its first word)."""
+  """A frozen pattern matches a triage when every field it names holds its value (`verified` by its first word); a
+  `refuted` triage matches only a pattern naming `verified: refuted` (section 5.2)."""
+  if values["verified"].split(" ", 1)[0] == "refuted" and pattern.get("verified") != "refuted":
+    return False
   return all((values[key].split(" ", 1)[0] if key == "verified" else values[key]) == value for key, value in pattern.items())
 
 
@@ -1134,7 +1150,8 @@ def evaluate(st: core.Store, review: dict, runcard: str) -> Status:
 
 def acceptable(st: core.Store, review: dict, runcard: str) -> tuple[list[str], int, int]:
   """The accept below the cap's predicate, beside the cap's: what blocks it on the latest completed round
-  (`kind integrate`, then each unsettled `high <fid>`, `regression <fid>`, `external <fid>`, then each pending
+  (`kind integrate`, then each unsettled `high <fid>`, `regression <fid>`, `external <fid>`, `undone <fid>` (a
+  medium the owner's undo returned to the round, section 5.2), then each pending
   `decision <id>` of a head's unit naming this review at any point but 5), with that round's unsettled medium
   and low counts. A later round, complete or not, holding an unsettled high or medium (a set finding review-plan
   records into a unit's next round) bars it as `early_accept_lapsed` lapses one: its `high`, `regression` and
@@ -1158,7 +1175,8 @@ def acceptable(st: core.Store, review: dict, runcard: str) -> tuple[list[str], i
 def finding_blockers(rnd: dict) -> list[str]:
   """A round's findings that bar an accept below the cap: each unsettled `high <fid>`, each `regression <fid>` the
   landed `regressions_of` counts (a blocking `regression: yes` whatever its disposition, an unsettled high listed
-  under `high` alone), each unsettled `external <fid>` medium."""
+  under `high` alone), each unsettled `external <fid>` medium, then each unsettled `undone <fid>`: a finding the
+  owner's undo returned to the round (section 5.2), which lapses an accept given on it and bars a new one."""
   found = findings_of(rnd)
   high = [f for f in found if f["severity"] == "high" and f["disposition"] is None]
   regression = [f for f in found if blocking(f) and f["regression"] == "yes" and f not in high]
@@ -1629,16 +1647,10 @@ def ingest(args) -> int:
   data = core.load_foreman(st, unit)
   missing = sorted(recorded - set(data.get("ingested") or []))
   saved_entry = next(e for e in data["rounds"] if e["round"] == latest["round"])
-  word = None
-  if saved_entry.get("outcome") == "clean":  # the mirror of `review post`'s `clean` write
-    word = {3: "revise", 2: "cap-reached"}.get(status_code(rid, wave))
-    if word:
-      saved_entry.update({"outcome": word, "rewritten_from": "clean"})
-  elif str(saved_entry.get("outcome") or "").startswith("owner:") and not owner_only_fids(load_round(st, rid, latest["round"]) or {"reviewers": {}}):
-    # an external high or medium beside the owner's own leaves the remainder mixed: `revise`, or `cap-reached` at the cap
-    word = {3: "revise", 2: "cap-reached"}.get(status_code(rid, wave))
-    if word:
-      saved_entry.update({"outcome": word, "rewritten_from": saved_entry["outcome"]})
+  # the mirror of `review post`'s `clean` write; an external high or medium beside the owner's own leaves an
+  # `owner:` remainder mixed: `revise`, or `cap-reached` at the cap
+  word = rewrite_posted(saved_entry, lambda: status_code(rid, wave),
+                        load_round(st, rid, latest["round"]) or {"reviewers": {}})
   # point 2 opened since the round was posted: `decision open` records the PR's head then, not the round's
   routed = any(d.get("point") == 2 and d.get("source") == f"review {rid} cap" and d.get("asked_at", "") >= saved_entry.get("posted_at", "")
                for d in data.get("decisions") or [])
