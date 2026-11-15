@@ -293,6 +293,9 @@ def test_phase_outcome_and_failures(world, monkeypatch, tmp_path, spawn_fake, cl
   if closed or code:
     return
   # a failed plan then a failed file refuses as twice-failed; a typed file card after it restarts; driver reset clears
+  for entry in tick_launches(s, c.hid):  # the launch that tick started ended too, failing
+    if not Path(entry["exit_file"]).is_file():
+      put(Path(entry["exit_file"]), "1\n")
   n = len(tick_launches(s, c.hid)) + 1
   second = tick_launch(s, c.hid, card="driver-abc-0009", n=n)
   set_entry(s, c.hid, n, phase="file")
@@ -303,11 +306,12 @@ def test_phase_outcome_and_failures(world, monkeypatch, tmp_path, spawn_fake, cl
   assert (data["refused"] or {}).get("reason") == driver.TWICE
   typed = world.open_card("file", str(c.spec))  # the owner types file: the count restarts
   world.run("runcard", "close", typed, card=None)
+  world.advance(60)  # the next launch starts after the typed card
   tick(world)
   assert journal_lines(world, f"tick: {c.hid} refusal cleared") and len(tick_launches(s, c.hid)) == n + 1
   put(Path(tick_launches(s, c.hid)[-1]["exit_file"]), "1\n")
   third = tick_launch(s, c.hid, card="driver-abc-0011", n=n + 2)
-  set_entry(s, c.hid, n + 2, phase="review-plan")
+  set_entry(s, c.hid, n + 2, phase="review-plan", started_at=superegm.now_iso())  # after the typed card
   put(Path(third["exit_file"]), "1\n")
   tick(world)
   assert driver.twice_failed(c.hs, superegm.load_driver(c.hs), {})
