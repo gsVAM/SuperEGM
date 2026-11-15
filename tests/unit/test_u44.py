@@ -17,7 +17,7 @@ from superegm import driver, phase
 from conftest import ROOT, make_repo, Harness
 from test_builders import put, spawn_fake, SPAWNED  # noqa: F401  (spawn_fake: a fixture)
 from test_driver import registered
-from test_u24 import tick_launches, tick_launch, card_of
+from test_u24 import tick_launches, tick_launch, card_of, driver_file
 from test_u43 import Chain, UNITS
 
 
@@ -250,3 +250,77 @@ def test_driven_card_of_any_phase(world, monkeypatch, tmp_path, phase):
   import argparse
   assert not c.hs.path("state").exists()
   assert superegm.handoff_spec(argparse.Namespace(plan=None), c.hs) == str(c.spec)
+
+
+def set_entry(s, hid, n, **keys):
+  """Launch `n` of the handoff's `driver/<hid>.json` with `keys` set."""
+  path = driver_file(s, hid)
+  data = json.loads(path.read_text(encoding="utf-8"))
+  data["launches"][n - 1].update(keys)
+  path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def tick(world):
+  code, out = world.run("driver", "tick")
+  assert code == 0, out
+  return out
+
+
+@pytest.mark.parametrize("closed,code,line_changed,wait_record,outcome", [
+  (True, 0, True, False, "succeeded"), (True, 0, False, True, "succeeded"), (True, 0, False, False, "failed"),
+  (False, 0, True, False, "failed"), (True, 1, True, False, "failed")])
+def test_phase_outcome_and_failures(world, monkeypatch, tmp_path, spawn_fake, closed, code, line_changed, wait_record, outcome):
+  """A non-wave launch succeeds on card closed, exit 0 and a new next line or a wait record; failures count across
+  phases; review.stall_cards and driver status read a review-plan top-level card."""
+  c = chained(world, monkeypatch, tmp_path)
+  set_mode(c, "leavemealone")
+  fake_fetch(world, monkeypatch, True)
+  s = superegm.Store(world.artifacts)
+  first = tick_launch(s, c.hid, card="driver-abc-0001")
+  set_entry(s, c.hid, 1, phase="plan")
+  rc, out = driven_card(world, monkeypatch, c, "plan", dcard="driver-abc-0001")
+  assert rc == 0, out
+  if closed:
+    rc, out = world.run("runcard", "close", out.strip(), card=None)
+    assert rc == 0, out
+  if line_changed:
+    c.plan(*UNITS)  # the session planned: next prints review-plan
+  if wait_record:
+    c.wait(phase="plan", question="which units?")
+  put(Path(first["exit_file"]), f"{code}\n")
+  tick(world)
+  assert tick_launches(s, c.hid)[0]["outcome"] == outcome  # the plan launch entry after its session ends
+  if closed or code:
+    return
+  # a failed plan then a failed file refuses as twice-failed; a typed file card after it restarts; driver reset clears
+  n = len(tick_launches(s, c.hid)) + 1
+  second = tick_launch(s, c.hid, card="driver-abc-0009", n=n)
+  set_entry(s, c.hid, n, phase="file")
+  put(Path(second["exit_file"]), "1\n")
+  tick(world)
+  data = json.loads(driver_file(s, c.hid).read_text(encoding="utf-8"))
+  assert data["launches"][n - 1]["outcome"] == "failed"
+  assert (data["refused"] or {}).get("reason") == driver.TWICE
+  typed = world.open_card("file", str(c.spec))  # the owner types file: the count restarts
+  world.run("runcard", "close", typed, card=None)
+  tick(world)
+  assert journal_lines(world, f"tick: {c.hid} refusal cleared") and len(tick_launches(s, c.hid)) == n + 1
+  put(Path(tick_launches(s, c.hid)[-1]["exit_file"]), "1\n")
+  third = tick_launch(s, c.hid, card="driver-abc-0011", n=n + 2)
+  set_entry(s, c.hid, n + 2, phase="review-plan")
+  put(Path(third["exit_file"]), "1\n")
+  tick(world)
+  assert driver.twice_failed(c.hs, superegm.load_driver(c.hs), {})
+  rc, out = world.run("driver", "reset", "--runcard", world.open_card("driver", str(c.spec)))
+  assert rc == 0 and "set aside" in out, out
+  assert not driver.twice_failed(c.hs, superegm.load_driver(c.hs), {})
+  # review.stall_cards and driver status read a review-plan top-level card
+  from superegm import review
+  earlier = world.open_card("review-plan", str(c.spec))
+  world.run("runcard", "close", earlier, card=None)
+  rc, out = driven_card(world, monkeypatch, c, "review-plan", dcard="driver-abc-0012")
+  assert rc == 0, out
+  mine = out.strip()
+  assert {earlier, mine} <= review.stall_cards(c.hs, {"kind": "plan", "artifact": "U01"}, mine)
+  rc, out = world.run("driver", "status", card=None)
+  assert rc == 0 and f"review-plan card {mine} open" in out, out
