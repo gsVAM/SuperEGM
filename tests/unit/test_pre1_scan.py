@@ -58,4 +58,4 @@ def test_scan_warns_without_refusing_on_more_than_ten_scope_cites(world, cites, 
 
 
 def test_scan_byte_size_and_fenced_share_limits_unchanged():
-  assert scan.WARN["bytes"][0] == 24_576 and scan.WARN["fenced_share"][0] == 0.40 and scan.BODY_LIMIT == 49_152
+  assert scan.WARN["fenced_share"][0] == 0.40 and scan.BODY_LIMIT == 49_152

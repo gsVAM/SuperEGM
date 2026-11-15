@@ -3,7 +3,7 @@ name: writing-plans
 description: Use when you have a spec or requirements for a multi-step task, before touching code
 ---
 
-<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the SuperEGM Step form and its derived defaults; what a Step holds (1.2.1 §6.5); Q9 as the bar for a Step (U79). -->
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the SuperEGM Step form and its derived defaults; what a Step holds (1.2.1 §6.5); Q9 as the bar for a Step (U79); the 600-line target and the `units.*` limits (U42). -->
 
 # Writing Plans
 
@@ -41,6 +41,14 @@ configuration, scaffolding, and documentation steps into the task whose
 deliverable needs them; split only where a reviewer could meaningfully
 reject one task while approving its neighbor. Each task ends with an
 independently testable deliverable.
+
+Aim each unit at one behaviour reviewable as one pull request of about 600
+changed lines; this is guidance, and nothing refuses on it. What `scan`
+refuses is an unfiled unit over `units.max_body_kb` (a rendered body of 25 KB
+by default), `units.max_files` (10 Scope paths) or `units.max_steps` (16
+Steps). The plan splits only through the spec: a unit over a limit needs new
+rows in the spec's `## Units` table, so the plan stops for
+`approve-spec --amend-units`, typed by the owner.
 
 ## Step Granularity
 

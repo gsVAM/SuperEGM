@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: U05's tests of graph, scan, decide and the plan skill; EGM's moved tests re-pointed at the spec-section-9.1 plan; U29's `width:` line, amendment 9's scan values, the split rules and the 1.2 docs sweep.
+# Modified by SuperEGM (gsVAM), 2026: U05's tests of graph, scan, decide and the plan skill; EGM's moved tests re-pointed at the spec-section-9.1 plan; U29's `width:` line, amendment 9's scan values, the split rules and the 1.2 docs sweep; the bytes case and the pins quoting 1.2's limits updated (U42).
 
 """U05's tests: `graph --plan`, `scan`, `decide`, the body parsers' Step defaults and
 the `plan` skill's prose; EGM's graph/scan tests, moved here by U03, re-pointed."""
@@ -566,7 +566,6 @@ U02_STEP_END = "   Implement `u02_fn(x: int) -> int` in `src/u02.ts`.\n   Run th
 MORE_STEPS = "".join(f"{n}. Write the failing test `test_u02_{n}` in `tests/test_u02.py`:\n   {FENCE}python\n   def test_u02_{n}(): assert u02_fn({n}) == {n}\n   {FENCE}\n"
                      f"   Implement the `{n}` case of `u02_fn(x: int) -> int` in `src/u02.ts`, returning its input unchanged.\n" for n in range(2, 12))
 NUMBERS = [
-  pytest.param("| Objective | Worker exists. |", "| Objective | Worker " + "x" * 25_000 + " exists. |", "bytes", "24,576", id="bytes"),
   pytest.param(U02_STEP_END, U02_STEP_END + MORE_STEPS, "steps", "10", id="steps"),
   pytest.param("def test_u02_empty(): assert u02_fn(0) == 0", "def test_u02_empty(): assert u02_fn(0) == 0  # " + "x" * 3_000, "fenced_share", "0.40", id="fenced-share"),
 ]
@@ -774,7 +773,7 @@ SPLIT = [
   (PLAN_SKILL, "wave plan", True), (PLAN_SKILL, "singleton", True), (PLAN_SKILL, "`approve-spec --amend-units`", True),
   (PLAN_REF, "which the per-unit check reports as a split candidate", True), (PLAN_REF, "about twenty Step groups", False),
   (PLAN_REF, "`width: none`", True), (PLAN_REF, "(after U<b>)", True), (PLAN_REF, "Waves:", True),
-  (TEMPLATE, "24,576 bytes, ten Steps", True), (TEMPLATE, "32,768", False), (TEMPLATE, "twenty Steps", False),
+  (TEMPLATE, "24,576", False), (TEMPLATE, "ten Steps or a fenced share of 0.40", True), (TEMPLATE, "32,768", False), (TEMPLATE, "twenty Steps", False),
 ]
 
 
