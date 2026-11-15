@@ -6,6 +6,7 @@
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 
 import superegm as core
@@ -59,6 +60,52 @@ def head_list(root: Path) -> list:
   """The `instructions` list of the config committed at `HEAD` (`[]` when `HEAD` lacks the config or the key)."""
   data = blob(root, "HEAD", CONFIG)
   return check(json.loads(data.decode("utf-8")).get("instructions", [])) if data is not None else []
+
+
+def handoff_list(st: core.Store, handoff_id: str) -> list:
+  """The frozen `instructions` of the last approval entry whose `handoff_id` is `handoff_id`, across
+  `approvals/*.json` (`[]` with no such entry; an entry without the key reads `[]`)."""
+  found = None
+  for path in sorted(st.path("approvals", "x").parent.glob("*.json")):
+    record = json.loads(core.read_text(path))
+    for entry in record["entries"] if "entries" in record else [record]:
+      if entry.get("handoff_id") == handoff_id:
+        found = entry
+  return list((found or {}).get("instructions") or [])
+
+
+def section(files: list) -> str:
+  """`# Repository instructions`, then each `(file, text)` under `## <file>`, its text verbatim in a fence of backticks
+  one longer than its longest backtick run (at least three); `""` with no file."""
+  if not files:
+    return ""
+  parts = ["# Repository instructions\n"]
+  for file, text in files:
+    fence = "`" * max(3, 1 + max((len(run) for run in re.findall(r"`+", text)), default=0))
+    parts.append(f"\n## {file}\n{fence}\n{text if text.endswith(chr(10)) or not text else text + chr(10)}{fence}\n")
+  return "".join(parts)
+
+
+def render(st: core.Store, role: str, handoff_id: str | None = None, root: Path | None = None) -> tuple[list[dict], str]:
+  """`(manifest [{file, sha}], text)` of `role`'s section: with `handoff_id` that handoff's frozen list, each file read
+  from its verified store copy; else the config and the files at `HEAD` under `root`. Stores nothing."""
+  from superegm import approve_spec  # approve_spec imports this module
+  files = []
+  if handoff_id is not None:
+    for item in handoff_list(st, handoff_id):
+      if role in item["to"]:
+        files.append((item["file"], item["sha"], approve_spec.read_copy(st, item["file"], item["sha"])))
+  else:
+    for item in head_list(root):
+      if role in item["to"]:
+        data = blob(root, "HEAD", item["file"])
+        if data is None:
+          raise core.HandoffError(f"instructions: {item['file']} is absent at HEAD")
+        try:
+          files.append((item["file"], blob_sha(data), data.decode("utf-8")))
+        except UnicodeDecodeError:
+          raise core.HandoffError(f"instructions: {item['file']} is not UTF-8") from None
+  return [{"file": f, "sha": s} for f, s, _ in files], section([(f, t) for f, _, t in files])
 
 
 def run(args):
