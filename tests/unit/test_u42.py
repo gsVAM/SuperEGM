@@ -11,7 +11,7 @@ import superegm as core
 from superegm import scan
 
 from conftest import REPO, ROOT, set_config
-from test_plan import FENCE, file_unit, find, graph, plan_text, planned
+from test_plan import FENCE, body_of, file_unit, find, graph, plan_text, planned
 
 
 def graphed(world, *edits):
@@ -67,7 +67,9 @@ def test_scan_refuses_an_unfiled_unit_over_a_limit(world, limit, setting, value)
   code, out = scan_with(world, plan=plan, **{limit: setting})
   lines = [l for l in out.splitlines() if f"units.{limit}" in l]
   assert code == 1 and len(lines) == 1 and "U01" in lines[0] and str(setting) in lines[0], out
-  assert ("bytes" if value == "bytes" else str(value)) in lines[0], lines[0]
+  measured = {"max_body_kb": f"{len(body_of(world, 'U01').encode('utf-8')):,} bytes", "max_files": f"{value} Scope paths",
+              "max_steps": f"{value} Steps"}[limit]
+  assert lines[0].endswith(measured), lines[0]  # the measured value (bytes for max_body_kb), after the limit
   file_unit(world, "U01", 7)
   code, out = scan_with(world, plan=plan, **{limit: setting})
   assert code == 0 and not [l for l in out.splitlines() if "U01" in l and "units." in l], out
