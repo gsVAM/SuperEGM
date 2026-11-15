@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32).
+# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48).
 
 """superegm inbox [--all] [--json] [--handoff <id>]: one line per item that needs the owner across the
 store's open handoffs, read-only and with no run card; superegm notify --runcard <id>: the owner's
@@ -423,15 +423,15 @@ def run_hook(text: str, config: dict) -> str:
   try:
     proc.communicate(text.encode("utf-8"), timeout=config.get("notify_timeout_seconds", 30))
   except subprocess.TimeoutExpired:
-    kill_group(proc)
+    sigkill_hook(proc)
     return "hook timeout"
   except OSError as exc:
-    kill_group(proc)
+    sigkill_hook(proc)
     return f"hook failed: {exc.strerror}"
   return f"hook exit {proc.returncode}"
 
 
-def kill_group(proc) -> None:
+def sigkill_hook(proc) -> None:
   """SIGKILL the hook's process group (its leader may be gone already), then reap the hook."""
   try:
     os.killpg(proc.pid, signal.SIGKILL)
