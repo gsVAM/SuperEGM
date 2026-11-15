@@ -174,6 +174,18 @@ def test_the_judges_blocked_question_reaches_the_producers_other_consumers(world
   assert consumers == f"consumers: #{units['U03']['number']}"
 
 
+def test_the_judges_blocked_question_reads_every_interface_heading_of_the_comment(world):
+  # an option ruling settles every heading of a comment, so a dod heading first hides no interface heading's consumers
+  from test_pre1_amend import DOD
+  card, s = world_on(world, {f"repos/{REPO}/issues/comments/11": {
+    "id": 11, "user": {"login": "builder-bot"}, "body": DOD + IFACE + OPTS}})
+  opened(world, card, DOD + IFACE + OPTS, source="comment 11")
+  code, out = world.run("judges", "question", "--unit", "U02", "--blocked", "11", "--runcard", card)
+  assert code == 0, out
+  units = json.loads(s.path("state").read_text(encoding="utf-8"))["units"]
+  assert out.splitlines()[1] == f"consumers: #{units['U03']['number']}"
+
+
 def test_judges_never_amend(world):
   # judges get no amend option; the interface question reaches filed consumers; their option ruling on an interface
   # decision records the option's text, and their `amend` records nothing
