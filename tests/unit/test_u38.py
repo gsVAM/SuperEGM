@@ -208,3 +208,33 @@ def test_judge_panel_renders_once_by_parent_skill(world, parent, rendered):
   assert after["instructions"] == panel["instructions"]
   for judge, lane in (("fable", "local"), ("opus", "local"), ("astra", "astra")):
     assert after["rounds"]["1"][judge]["instructions"] == panel["instructions"][lane]["manifest"]
+
+
+def test_astra_brief_appends_the_section(world, tmp_path, monkeypatch):
+  """`astra_brief` renders role reviewers, lane astra, on the child card when none is stored; the section goes last,
+  and the Astra record copies the manifest the brief carried, whatever a later edit or the reviewers' own render does."""
+  import test_foreman as tf
+  from superegm import approve_spec, foreman as foreman_mod
+  monkeypatch.setattr(foreman_mod, "runner_path", lambda: None)
+  target, base, head, g = tf.pr_repo(world, tmp_path, monkeypatch)
+  st, wave, child, did, _ = tf.dispatched(world, head=head, astra={"enabled": True})
+  # the handoff's frozen list, as `approve-spec` leaves it: the approval entry and the file's store copy
+  approve_spec.write_copy(st, {"file": RULES, "sha": MANIFEST[0]["sha"], "text": TEXT})
+  path = st.path("approvals", "sample")        # conftest's approval record of the sample spec: it carries the commit `prepare` reads
+  record = json.loads(path.read_text(encoding="utf-8"))
+  superegm.atomic_write(path, {**record, "instructions": [{"file": RULES, "to": ["reviewers"], "sha": MANIFEST[0]["sha"]}]})
+  code, out = world.run("prepare", "--unit", tf.UNIT, "--dispatch", did, "--runcard", child)   # before any reviewers' render
+  assert code == 0 and out.strip().endswith("astra: not installed"), out
+  card = json.loads(st.path("runcards", child).read_text(encoding="utf-8"))
+  stored = card["instructions"]["reviewers"]["astra"]
+  assert stored["manifest"] == MANIFEST and stored["text"].startswith("# Repository instructions\n") and TEXT in stored["text"]
+  brief = (st.path("review", tf.UNIT, f"pr{tf.PR}") / "r1" / "astra_brief.md").read_text(encoding="utf-8")
+  assert brief.rstrip().endswith(stored["text"].rstrip()) and brief.count("# Repository instructions") == 1
+
+  # a HEAD edit and a later render change nothing: the Astra record copies what the brief carried
+  commit_file(world, RULES, "Skip the suite.\n")
+  rid = tf.head_rid(st)
+  tf.record(world, st, rid, 1, head, child, {"change-review": ""})
+  assert world.run("review", "record", "--review", rid, "--round", 1, "--sha256", head, "--reviewer", "astra",
+                   "--not-run", "not installed", "--runcard", child)[0] == 0
+  assert recorded(world, rid, 1, "astra") == stored["manifest"]
