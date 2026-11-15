@@ -518,3 +518,31 @@ def test_a_card_without_a_handoff_renders_nothing(world):
   st = hstore(world)
   assert render_stored(st, "builder", card=cid, handoff_id=None, root=world.repo) == ([], "")
   assert superegm.load_card(st, cid)["instructions"]["builder"]["local"] == {"approved_at": None, "manifest": [], "text": ""}
+
+
+# ---------------------------------------------- round 4: the review's findings
+
+
+def test_a_symlinked_file_is_refused(world, tmp_path):
+  """A listed file committed as a symlink (mode 120000) is refused, naming it: its blob is the link's target path,
+  not the rules."""
+  from superegm.instructions import render
+  root = bare_repo(tmp_path, {".superegm/config.json": json.dumps({"instructions": [{"file": "CLAUDE.md", "to": ["reviewers"]}]}),
+                              "AGENTS.md": "Run the suite.\n"})
+  (root / "CLAUDE.md").symlink_to("AGENTS.md")
+  git(["add", "-A"], root)
+  git(["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "link"], root)
+  with pytest.raises(superegm.HandoffError, match="CLAUDE.md is not a regular file"):
+    render(hstore(world), "reviewers", root=root)
+
+
+def test_a_judges_card_is_not_accepted(world):
+  """Judge panels render through the function, not this command: a judges card is refused, even one on the spec."""
+  commit_file(world, RULES, "Run the suite.\n")
+  configure(world, [{"file": RULES, "to": ["judges"]}])
+  git(["commit", "-qam", "config"], world.repo)
+  spec, cid, rid = converged_spec(world)
+  jid = card(world, spec, "judges")
+  code, out = world.run("instructions", "--role", "judges", "--spec", spec, "--review", rid, "--round", 1,
+                        "--runcard", jid, card=None)
+  assert code == 1 and "runcard: " in out and "belongs to judges" in out, out
