@@ -851,3 +851,29 @@ def test_a_non_object_astra_value_names_the_astra_key(world, value):
   set_config(world, repo=REPO, astra=value)
   with pytest.raises(superegm.HandoffError, match=re.escape("astra must be an object")):
     superegm.load_config(world.repo)
+
+
+def test_next_wait(world):
+  """U43: `next wait --review` stores the review, closes the card, and a re-ask keeps the review."""
+  from test_u43 import Chain
+  c = Chain(world)
+  c.save()
+  st = superegm.Store(world.artifacts)
+  path = world.artifacts / "chain" / f"{c.hid}.json"
+  assert (st.path("chain", c.hid), st.path("tick", "fetch")) == (path, world.artifacts / "tick" / "fetch.json")
+  cid = world.open_card("review-plan", c.spec)
+  code, out = world.run("next", "wait", "--handoff", c.hid, "--phase", "review-plan", "--question", "cap reached",
+                        "--review", "plan-U01-c1", "--runcard", cid)
+  assert code == 0, out
+  assert json.loads(st.path("runcards", cid).read_text(encoding="utf-8"))["closed_at"]
+  first = json.loads(path.read_text(encoding="utf-8"))
+  assert set(first) == {"phase", "question", "since", "review"}
+  assert (first["phase"], first["question"], first["review"]) == ("review-plan", "cap reached", "plan-U01-c1")
+  world.advance(60)
+  cid = world.open_card("review-plan", c.spec)
+  code, out = world.run("next", "wait", "--handoff", c.hid, "--phase", "review-plan", "--question", "again", "--runcard", cid)
+  assert code == 0, out
+  again = json.loads(path.read_text(encoding="utf-8"))
+  assert (again["question"], again["review"]) == ("again", "plan-U01-c1") and again["since"] > first["since"]
+  code, out = world.run("next", "wait", "--handoff", c.hid, "--phase", "file", "--question", "q")
+  assert (code, out.strip().removeprefix("superegm: ")) == (1, "runcard: --runcard is required")
