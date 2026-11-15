@@ -3,7 +3,7 @@ name: writing-plans
 description: Use when you have a spec or requirements for a multi-step task, before touching code
 ---
 
-<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the SuperEGM Step form and its derived defaults; what a Step holds (1.2.1 §6.5). -->
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the SuperEGM Step form and its derived defaults; what a Step holds (1.2.1 §6.5); Q9 as the bar for a Step (U79). -->
 
 # Writing Plans
 
@@ -196,7 +196,7 @@ After writing the complete plan, look at the spec with fresh eyes and check the 
 
 **4. Review Focus:** For each input class or failure mode the spec implies, is there a task whose tests exercise it? The five uncovered ones most likely to bite a person go in the Review Focus section, and each line there gets its test added to the owning task. An empty section means you checked and found none, not that you skipped the check.
 
-**5. Proportion:** Compare the plan's length to the spec's. A plan several times longer than the spec it implements is a transcript of the program, not a plan. If code blocks are most of the document, replace bodies with signatures, test names and assertions, and check that each step is still unambiguous.
+**5. Proportion:** Compare the plan's length to the spec's. A plan several times longer than the spec it implements is a transcript of the program, not a plan. If code blocks are most of the document, replace bodies with signatures, test names and assertions, and check that each step is still complete under Q9: the test name, the behaviour and the expected values.
 
 If you find issues, fix them inline. No need to re-review — just fix and move on. If you find a spec requirement with no task, add the task.
 

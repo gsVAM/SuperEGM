@@ -4,7 +4,7 @@ description: Pragmatic Tech Lead persona verifying that a spec or plan leaves th
 license: Apache-2.0
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: renamed to readiness; the output section is SuperEGM's findings line with high, medium and low; the plan-review remit (1.2.1 §6.5). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: renamed to readiness; the output section is SuperEGM's findings line with high, medium and low; the plan-review remit (1.2.1 §6.5); the remit in the description and Role (U79). -->
 
 # Core Mandates (Universal Goldfish Context)
 

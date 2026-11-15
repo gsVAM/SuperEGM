@@ -35,7 +35,7 @@ A question-11 finding names the Step and the bytes it would remove (a tier findi
 reason instead, `## The tier`): the location is the Step (`U07 Step 3`,
 or `U07 Steps` for the whole section), and the claim says what goes, roughly how many bytes, and
 why the test stays honest without it. The five shapes: the fenced test the signature and
-assertions already determine (keep the `Write` line, drop the fence); the `Implement` line that
+assertions already determine (keep the `Write` line and a fence cut to the test name, the behaviour comment and the assertions); the `Implement` line that
 restates the test (keep the path); the Step a parametrized sibling covers (fold it into the
 sibling's cases); the prose table that should be test data (move it into the fence); the fence
 that names unnecessary private or harness detail, a fixture, conftest attribute, private helper or

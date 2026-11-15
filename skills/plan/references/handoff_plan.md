@@ -1,6 +1,6 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema (interfaces, review focus, Steps, decisions with options), the plan file outside the store, the files and commands of the plan skill only; one directory per handoff (U32); the optional Tier field (U33); the `Waves:` line, the Size row's split candidate and the `width:` line (U29); what a unit pins and what a Step holds (1.2.1 §6.5). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema (interfaces, review focus, Steps, decisions with options), the plan file outside the store, the files and commands of the plan skill only; one directory per handoff (U32); the optional Tier field (U33); the `Waves:` line, the Size row's split candidate and the `width:` line (U29); what a unit pins and what a Step holds (1.2.1 §6.5); Q9 as the bar for a Step (U79). -->
 
 # The plan file: schema, the unit's Steps, files and commands
 

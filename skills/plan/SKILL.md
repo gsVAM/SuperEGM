@@ -12,7 +12,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: phase 2 of the SuperEGM loop (the plan file, graph, scan, decide); EGM's approval, review gate, dry run and filing steps live in review-spec, review-plan and file; `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the `Tier:` field (U33); the split rules, the `width:` line and the header's wave plan (U29); what a Step holds (1.2.1 §6.5). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: phase 2 of the SuperEGM loop (the plan file, graph, scan, decide); EGM's approval, review gate, dry run and filing steps live in review-spec, review-plan and file; `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the `Tier:` field (U33); the split rules, the `width:` line and the header's wave plan (U29); what a Step holds (1.2.1 §6.5); the scope-cite warning stated (U79). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the handoff skill. Not part of google/elephant-goldfish-model. -->
 
