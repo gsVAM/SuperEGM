@@ -16,7 +16,7 @@ from pathlib import Path
 import re
 
 import superegm as core
-from superegm import close, runcard
+from superegm import close, instructions, runcard
 from superegm.review import Refusal, evaluate, findings_of, ingest_pr, latest_cycle, live_rounds, load_review, load_round, review_id, round_numbers, valid_rounds
 
 WRITES = frozenset(["approvals", "handoffs", "state", "reviews", "runcards"])  # the store kinds this subcommand writes
@@ -243,6 +243,10 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   rounds = rounds_line(core.read_text(spec))
   if rounds is None:  # no `Rounds:` line: the live value, which `review.rounds` refuses outside 1-10
     rounds = live_rounds(st)
+  try:  # the live `instructions` list, the one the approval commit carries (U37)
+    instructions.check(st.config["instructions"])
+  except core.HandoffError as error:
+    raise core.HandoffError(f"approve-spec: {error}") from None
   last = core.load_approval(st, spec)
   if last:
     require_branch_holds(st, root, spec.relative_to(root).as_posix(), last)
