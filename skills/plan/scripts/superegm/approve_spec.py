@@ -24,6 +24,7 @@ CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init 
 SKILLS = frozenset(["review-spec", "review-plan", "integrate", "approve-spec"])  # the skills whose card this subcommand accepts
 CONFIG = ".superegm/config.json"
 FROZEN_FIELDS = ["rounds"]  # the entry fields frozen at an approval, which `--amend-units` copies where the extended entry has them (U36)
+ANY_H2 = re.compile(r"^ {0,3}##[ \t]+\S")  # an H2 as review.py reads one: up to three spaces of indent
 UNITS_H2 = re.compile(r"^## (?:\d+\.?\s+)?Units\s*$")
 
 
@@ -105,7 +106,7 @@ def rounds_line(text: str) -> int | None:
   line, or a value that is not 1-10, is refused with the line; a `Rounds:` line after the first H2 is prose (§4)."""
   found = None
   for line in text.splitlines():
-    if line.startswith("## "):
+    if ANY_H2.match(line):
       break
     if line.startswith("Rounds:"):
       if found is not None:

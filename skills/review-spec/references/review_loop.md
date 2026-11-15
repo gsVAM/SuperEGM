@@ -50,10 +50,13 @@ other grammar (`review record: <file>:<line>: <reason>`).
    when the cycle has it, and a resume ignores `--astra` and an `astra` entry in `--reviewers`.
    Dispatch the panel the line prints, never the one you passed. When the last round is partly
    recorded (a round's file exists once its first reviewer is recorded), the line names the
-   *next* round's panel: first finish that round with its own panel, `review status` naming the
-   reviewers still unrecorded (`not run (<reviewer>: no record)`), then dispatch the printed one.
-   A new cycle and every other kind print the review id alone: dispatch the panel you passed
-   (and the Astra lane, as the open seated it). A closed
+   *next* round's panel: first finish that round with its own panel, the reviewers of it with no
+   entry under `reviewers` in the round's file (`reviews/<review id>/round-<n>.json`;
+   `review record` prints `what_ran not run (<reviewer>: no record)` for the first one still owed
+   and `completed` once none is), then dispatch the printed one.
+   A new cycle and every other kind print the review id alone: dispatch the panel the cycle opened
+   with (the one you passed at its open, and the Astra lane as the open seated it); a resume of a
+   plan, head or integrate cycle never changes that panel, so pass the same `--reviewers`. A closed
    cycle (an `accept` or `stop` ruling, a spec edited after the approval that names it, or an
    integrate review whose handoff closed or whose `## Units` were amended past the bytes it
    reviewed) gets the next number with a fresh cap, read from `review.rounds` at that open. The helper hashes a spec or a plan body (the
@@ -62,7 +65,7 @@ other grammar (`review record: <file>:<line>: <reason>`).
 ## 2. Round
 
 Each round the whole panel of that round (on a spec resume the one `review open` printed, else the
-one you passed; a spec's narrowed panel holds from its round on) is dispatched **concurrently**, one message with every Agent call,
+one the cycle opened with; a spec's narrowed panel holds from its round on) is dispatched **concurrently**, one message with every Agent call,
 each through its own adapter `superegm:<id>` (`.claude-plugin/agents/<id>.md`: `model:
 inherit`, `omitClaudeMd: true`, tools `Read, Grep, Glob`). The adapter is what keeps the
 context fresh, whether or not the call is named; a general-purpose agent reading the persona
