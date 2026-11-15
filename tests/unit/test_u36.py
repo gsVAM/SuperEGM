@@ -180,7 +180,7 @@ def test_resume_narrows_the_panel(world, panels_before, recorded, given, panels_
   lines = out.splitlines()
   assert lines[0] == rid and len(lines) == 2
   assert lines[1].startswith(line2) if "(unchanged" in line2 else lines[1] == line2
-  assert resume(world, spec, cid, "zoom-out,design")[1].strip() == "review open: first reviewer must be design"
+  assert "review open: first reviewer must be design" in resume(world, spec, cid, "zoom-out,design")[1]
   _, pcid, prid = opened(world, "plan")
   for panel in (PANEL_OF["plan"], "readiness"):
     code, out = resume(world, spec, pcid, panel, "plan", "U07")

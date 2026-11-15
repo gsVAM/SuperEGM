@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); `review.rounds` for the cap, stored at a cycle's open (U36).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line (U36).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest: the one review loop (spec section 8)."""
 
@@ -466,11 +466,18 @@ def open_review(args) -> int:
   if given is not None and kind != "spec":
     raise core.HandoffError(f"review open: --scope is refused for kind {kind}")
   latest, closed = latest_cycle(st, kind, artifact)
-  if latest and not closed:  # a re-typed skill resumes the open cycle; the panel cannot change
+  if latest and not closed:  # a re-typed skill resumes the open cycle; a spec's panel may narrow, from the next round
     rid = review_id(st, kind, artifact, latest["cycle"])
     core.card_add(st, args.runcard, "produced", rid)
     core.journal(st, f"review open {rid} resumed under {args.runcard}")
     print(rid)
+    if kind == "spec":
+      nxt = max(round_numbers(st, rid), default=0) + 1
+      narrowed, refused = narrow_panel(latest, nxt, reviewers)
+      if narrowed:
+        save_review(st, rid, latest)
+        core.journal(st, f"review open {rid} panel {','.join(panel_at(latest, nxt))} from round {nxt} under {args.runcard}")
+      print(f"panel {','.join(panel_at(latest, nxt))} from round {nxt}" + (f" (unchanged: {refused})" if refused else ""))
     return 0
   cap = cap_at_open(args, st, kind, artifact)
   scope = scope_form(st, artifact, given) if kind == "spec" else None
@@ -487,6 +494,32 @@ def open_review(args) -> int:
   core.journal(st, f"review open {rid} panel {','.join(review['reviewers'])} under {args.runcard}")
   print(rid)
   return 0
+
+
+def panel_at(review: dict, n: int) -> list[str]:
+  """Round `n`'s panel: the last `panels` entry from a round at most `n`, else the cycle's `reviewers`."""
+  entries = [p for p in review.get("panels") or [] if p["from_round"] <= n]
+  return entries[-1]["reviewers"] if entries else review["reviewers"]
+
+
+def narrow_panel(review: dict, nxt: int, given: list[str]) -> tuple[bool, str | None]:
+  """A resume's `given` panel against round `nxt`'s: a proper subset (`design` first, checked by the caller)
+  becomes a `panels` entry from `nxt`, the Astra lane kept when the panel has it. Returns `(narrowed, reason)`:
+  an equal panel changes nothing and needs no reason; a given reviewer off the panel (wider or overlapping)
+  changes nothing and names it. `review` is changed in memory only."""
+  current = panel_at(review, nxt)
+  names = [r for r in current if r != "astra"]
+  off = [r for r in given if r not in names]
+  if off:
+    return False, f"{off[0]} is not on the panel"
+  if set(given) == set(names):
+    return False, None
+  entry = {"from_round": nxt, "reviewers": given + (["astra"] if "astra" in current else [])}
+  panels = review.setdefault("panels", [])
+  if panels and panels[-1]["from_round"] == nxt:  # narrowed twice before the round: the later wins
+    panels.pop()
+  panels.append(entry)
+  return True, None
 
 
 def scope_form(st: core.Store, artifact: str, given) -> str | list:
