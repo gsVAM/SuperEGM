@@ -210,7 +210,7 @@ def test_first_render_is_stored_and_reused(world, form, stored_at):
   code, second_out = instructions()
   assert code == 0 and second_out == first_out
   code, out = world.run("instructions", "--role", "builder", "--handoff", hid, card=None)
-  assert code == 1 and out.startswith("runcard: "), out
+  assert code == 1 and out.removeprefix("superegm: ").startswith("runcard: "), out  # the helper prefixes its name
   code, out = world.run("instructions", "--role", "builder", "--handoff", hid, "--spec", spec, "--runcard", cid, card=None)
   assert code == 1, out
   git(["rm", "-q", RULES], world.repo)
