@@ -119,6 +119,33 @@ def test_rerun_after_crash(world, monkeypatch):
   assert not deleted_path.exists()
 
 
+@pytest.mark.parametrize("case, message", [
+  ("empty line", "decision: amend needs — <the Interfaces line as it now reads>"),
+  ("two headings", "decision: ruling is none of the options: "),  # amend is offered only on one interface heading
+  ("dod heading", "decision: ruling is none of the options: "),
+  ("interface heading with no `<Uxx> <name>:`", "decision: amend needs a comment with one interface deviation and no other"),
+  ("name not read", "decision: amend names U01 nope, not in U01's Interfaces lines"),
+  ("judges answer (c), stored amend", "decision: amend is the owner's alone"),
+])
+def test_amend_refusals(world, case, message):
+  # each refusal leaves no amendment file and no ruling
+  card, s = world_on(world)
+  produces_file(s, "U01", "`f(x) -> int`")
+  text, ruling, by = {
+    "empty line": (deviation("U01 f: changed"), "amend", "owner"),
+    "two headings": (deviation("U01 f: changed") + deviation("U01 g: changed"), f"amend — {LINE}", "owner"),
+    "dod heading": ("**Deviation (dod):** U01 f: changed\n" + OPTS, f"amend — {LINE}", "owner"),
+    "interface heading with no `<Uxx> <name>:`": (deviation("f changed"), f"amend — {LINE}", "owner"),
+    "name not read": (deviation("U01 nope: changed"), f"amend — {LINE}", "owner"),
+    "judges answer (c), stored amend": (deviation("U01 f: changed"), "(c)", "judges:p-1"),
+  }[case]
+  qid = opened(world, card, text, source="comment 11")
+  code, err = rule(world, card, qid, ruling, by)
+  assert err.strip().startswith(message) and code == 1
+  assert not (s.base() / "amendments").exists() or not any((s.base() / "amendments").iterdir())
+  assert not foreman_of(s, "U02")["rulings"]
+
+
 def test_reads_directory_and_legacy(world):
   # a 1.2.1-pre.1 handoff's amendments[] and a directory file are both read, sorted by `at`
   card, s = world_on(world)
