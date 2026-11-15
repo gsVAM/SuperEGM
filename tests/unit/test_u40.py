@@ -214,3 +214,106 @@ def test_deferral_and_followup_row(world, tmp_path, monkeypatch):
   assert foreman(w)["rounds"][1]["outcome"] == "not run (superseded)"
   superseded_round_rows = [row for row in foreman(w)["followups"] if row["round"] == 2]
   assert superseded_round_rows == [] and foreman(w)["followups"] == followups
+
+
+ISSUE = 2  # the unit's issue in `test_foreman.seed`
+UPHELD = f"**Ruling:** {F1} finding upheld\n"
+
+
+def owner_comment(world, cid, body, at="2026-11-03T10:00:00Z", login="owner"):
+  """An owner's comment on the unit's issue, as `gh api repos/<repo>/issues/comments/<id>` returns it."""
+  world.gh.comments.setdefault(ISSUE, []).append({
+      "id": cid, "user": {"login": login}, "body": body, "created_at": at, "updated_at": at,
+      "issue_url": f"https://api.github.com/repos/example-org/webhooks/issues/{ISSUE}"})
+
+
+def deferred_round(world, tmp_path, monkeypatch, cap_one=False):
+  """Round 1 posted `clean` with F1 deferred by triage (pattern 2) and F2 declined by the owner: one follow-up row."""
+  from test_foreman import cap_at_one
+  w = head(world, tmp_path, monkeypatch, {"change-review": M("change-review", claim="a forged payload reaches the hook")
+                                          + M("change-review", 2, claim="b")}, base_files=A_PY)
+  if cap_one:
+    cap_at_one(w.st, w.rid)
+  reply = (f"{F1} | reach: forged | later: easy | critical: no | verified: confirmed src/a.py:3\n"
+           f"{F2} | reach: config | later: easy | critical: no | verified: refuted no caller reaches it\n")
+  assert triage_file(world, w, reply)[0] == 0
+  assert world.run("review", "settle", "--review", w.rid, "--finding", F2, "--disposition", "declined", "--owner",
+                   "--runcard", w.child)[0] == 0
+  code, out = post(world, w)
+  assert (code, out.strip()) == (0, "posted clean"), out
+  assert [r["fid"] for r in foreman(w)["followups"]] == [F1]
+  return w
+
+
+def rule_posted(world, w, ruling, cid, by="owner"):
+  return world.run("decision", "rule", "--unit", UNIT, "--ruling", ruling, "--by", by, "--posted", cid, "--runcard", w.card)
+
+
+def open_point(world, w, tmp_path, point, text, source):
+  path = tmp_path / f"q-{point}.md"
+  path.write_text(text, encoding="utf-8")
+  code, out = world.run("decision", "open", "--unit", UNIT, "--point", point, "--question", str(path), "--source", source,
+                        "--runcard", w.card)
+  assert code == 0, out
+  return out.splitlines()[0]
+
+
+@pytest.mark.parametrize("at_cap", [False, True])
+def test_undo_on_latest_round(world, tmp_path, monkeypatch, at_cap):
+  """`decision rule` without `--decision` checks an `upheld` on a deferred fid as the undo before `fid_decisions`: the
+  disposition none, `undone_by`, a standalone `kind: undo` ruling, the row dropped, the latest posted `clean` rewritten
+  (`revise`, `cap-reached` at the cap), an accept on the round lapsed, an older point-1 decision left unbound, triage
+  off; the record binds, so a `fixed` reply before the undo leaves it unsettled after its comment is deleted."""
+  from superegm.decision import recorded_rulings
+  w = deferred_round(world, tmp_path, monkeypatch, cap_one=at_cap)
+  if not at_cap:  # an accept given on the round below the cap, which the undo lapses
+    path = w.st.path("reviews", w.rid, "review.json")
+    rev = json.loads(path.read_text(encoding="utf-8"))
+    rev["rulings"].append({"id": "R1", "ruling": "accept", "by": "owner", "at": "2026-11-03T09:30:00Z"})
+    rev["converged"], rev["converged_round"] = "by ruling R1", 1
+    atomic_write(path, rev)
+    assert world.run("review", "status", "--review", w.rid, "--runcard", w.child)[0] == 0
+  older = open_point(world, w, tmp_path, 1, "Is round 1 right?\n", f"review {w.rid} round 1")  # no finding line: any fid's
+  owner_comment(world, 77, UPHELD)
+  code, out = rule_posted(world, w, f"{F1} finding upheld", 77)
+  assert code == 0, out
+  finding = finding_of(w, F1)
+  assert finding["disposition"] is None and finding["undone_by"] == "77"
+  data = foreman(w)
+  undo = next(r for r in data["rulings"] if r.get("kind") == "undo")
+  assert undo["kind"] == "undo" and undo["decision"] is None and undo["posted"] == "comment 77"
+  assert (undo["fid"], undo["by"], undo["ruling"], undo["posted_at"]) == (F1, "owner", f"{F1} finding upheld", "2026-11-03T10:00:00Z")
+  assert undo["at"]
+  followups, latest = data["followups"], data["rounds"][0]
+  older_point1_decision_unbound = not any(r.get("decision") == older for r in data["rulings"])
+  assert older_point1_decision_unbound
+  assert followups == [] and latest["rewritten_from"] == "clean"
+  assert any(f"{F1}" in line and "undo" in line for line in w.st.path("journal").read_text(encoding="utf-8").splitlines())
+  recorded = recorded_rulings(data)
+  assert any(r.kind == "upheld" and r.subject == F1 and r.comment_id == 77 for r in recorded)
+  assert eligible(world, w) == ""  # triage off for the unit
+  if at_cap:
+    at_cap_latest = latest
+    assert at_cap_latest["outcome"] == "cap-reached"
+    return
+  assert latest["outcome"] == "revise"
+  early_accept_lapsed = any("R1 accept lapsed" in line for line in w.st.path("journal").read_text(encoding="utf-8").splitlines())
+  assert early_accept_lapsed and world.run("review", "status", "--review", w.rid, "--runcard", w.child)[0] == 3
+  assert rule_posted(world, w, f"{F1} finding upheld", 77)[0] == 1  # recorded once
+  # the record's undo entry (decision null) breaks no reader that compares `r["decision"]`
+  owner_comment(world, 79, f"**Ruling:** {F2} finding upheld\n")
+  other_fid_upheld_after_undo = rule_posted(world, w, f"{F2} finding upheld", 79)
+  assert other_fid_upheld_after_undo[0] == 0, other_fid_upheld_after_undo[1]
+  open_point(world, w, tmp_path, 2, "One more round?\n", f"review {w.rid} cap")
+  owner_comment(world, 80, "**Ruling:** one more round\n")
+  one_more_round_after_undo = rule_posted(world, w, "one more round", 80)
+  assert one_more_round_after_undo[0] == 0, one_more_round_after_undo[1]
+  # round 2: the builder's `fixed` before the undo, the undo's comment deleted: the recorded undo still asks for one
+  fixed = "builder: builder-bot\n### pr #70 comment 9 by builder-bot at 2026-11-03T09:00:00Z\n" f"**Reply {F1}:** fixed\n"
+  _, child2, _ = next_round(world, w, 2, comments=fixed)
+  claims = [f["claim"] for f in json.loads(round_text(w, 2))["reviewers"]["foreman"]["findings"]]
+  fixed_reply_before_undo_then_comment_deleted_still_unsettled = f"upheld {F1}: no `fixed` reply" in claims
+  assert fixed_reply_before_undo_then_comment_deleted_still_unsettled, claims
+  record(world, w.st, w.rid, 2, w.head, child2, {"change-review": M("change-review", n=2, claim="a forged payload reaches the hook")})
+  eligible_next_round = eligible(world, w, 2).split()
+  assert eligible_next_round == []
