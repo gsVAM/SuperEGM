@@ -1,7 +1,7 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 From the elephant-goldfish-model (gsVAM), 2026. Modified by SuperEGM (gsVAM), 2026: EGM's two-step brief
 rewritten as spec section 11's one round, every write through the helper, one return word; Step 2b, the Astra lane on every head review (U17);
-the handoff's directory, `--handoff <handoff-id>` on every call and `spec_range.md` (U20); the two gates before the word and the `owner:` word (U25); the goldfish pair from `config.reviewers` and the head lane at `astra.heads_effort` (U28). -->
+the handoff's directory, `--handoff <handoff-id>` on every call and `spec_range.md` (U20); the two gates before the word and the `owner:` word (U25); the goldfish pair from `config.reviewers` and the head lane at `astra.heads_effort` (U28); Step 3b, the triage goldfish (U41). -->
 
 # The foreman brief
 
@@ -58,6 +58,16 @@ Step 3, collect
 2. When the round cannot complete (the fetch, prepare or a dispatch failed, or a panel goldfish is still not run after its one re-dispatch), run instead:
    superegm collect --unit <unit-id> --dispatch <dispatch-id> --runcard <child-card> --handoff <handoff-id> --not-run "<reason>"
    and return `error` with that reason.
+
+Step 3b, triage
+Once per round, between Step 3 and Step 4, after Step 3.1 completed.
+1. Run: superegm review triage --review <id> --round <n> --eligible --handoff <handoff-id> (`<id>` is the head review's id, `<review-id>` above)
+   It prints the round's eligible mediums, one fid per line. When it prints nothing (triage is off for the unit, or no medium of the round is eligible), do not dispatch: go straight to Step 4. A refusal of this call is not a failed dispatch: go straight to Step 4.
+2. Dispatch one `superegm:triage` goldfish through its adapter, without `name`, in the foreground, at the head reviewers' model and effort (<GOLDFISH_MODEL>, <GOLDFISH_EFFORT>). Its prompt carries only: the review worktree path, the four field definitions (reach `external | agent | config | forged`, later `easy | migration | version`, critical `yes | no`, verified `confirmed <file:line>` or `refuted <reason>`) and the finding lines of the eligible fids, copied from r<n>/<reviewer>.findings, one line per fid and no other line. It gets never the patterns, never the spec, never r<n>/spec_range.md, never the unit file, never the diff and never a finding that is not eligible. The goldfish reads the code at the head in the worktree and replies one line per fid and nothing else.
+3. Write its reply, verbatim, to r<n>/triage.txt, and record it:
+   superegm review triage --review <review-id> --round <n> --file <path> --isolation clean --model <requested>:<effective> --effort <requested>:<effective> --runcard <child-card> --handoff <handoff-id>
+   You never write or edit a value of the reply (a line, a field or a word): it is recorded verbatim or refused whole, and a refused file records nothing.
+4. When the call refuses the file, or the dispatch did not complete, dispatch the triage goldfish once more, with the same prompt, and record its reply as in 3. When that second attempt fails as well, in either way, go on to Step 4 without a triage: the round posts with those mediums blocking, as with triage off. Never a third dispatch, never a retry of an edited file.
 
 Step 4, post
 1. Run: superegm review post --unit <unit-id> --round <n> --dispatch <dispatch-id> --runcard <child-card> --handoff <handoff-id>
