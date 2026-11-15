@@ -37,3 +37,9 @@ def test_close_lists_the_follow_ups_in_its_closing_note(world, followups, lines)
   # every unit's foreman followups[] in the closing note and one journal line each; none: no block
   assert closed_note(world, followups) == ((["Follow-ups:", *lines] if lines else []), [f"close: follow-up {line[2:]}" for line in lines])
 
+
+
+@pytest.mark.parametrize("phrase", ["followups[]", "as known", "worse than its row says", "Astra", "Follow-ups:"])
+def test_integrate_gives_the_follow_ups_as_known(phrase):
+  # the reviewers get the rows as known before the round; the owner sees close's block in chat
+  assert phrase in " ".join((ROOT / "skills/integrate/SKILL.md").read_text(encoding="utf-8").split())
