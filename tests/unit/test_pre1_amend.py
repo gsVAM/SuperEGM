@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: 1.2.1-pre.1 P5, the owner's `amend` ruling and `amendments[]` (spec §6.5 "`amend`").
 
 """P5: `**Ruling:** (<comment-id>) amend — <Interfaces line>` on an interface deviation, offered, refused and recorded,
-and the `amendments[]` entries `decision rule` writes to the handoff's state.json."""
+and the entries `decision rule` writes to the handoff's `amendments/<comment id>.json` files."""
 
 import json
 import re
