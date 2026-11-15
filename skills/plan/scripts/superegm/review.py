@@ -1072,6 +1072,12 @@ def mask(text: str, config: dict) -> str:
 
 CLAIM_LIMIT = 1_000  # characters of a thread's root kept in its claim (a longer one keeps 999 and `…`)
 NO_TEXT = "(no text outside hidden markup)"  # the claim of a root with nothing left after its HTML comments go
+CUT_LIMIT = 200  # characters of a claim when its ingest comment would pass `COMMENT_LIMIT` (a longer one keeps 199 and `…`)
+
+
+def cut_claim(claim: str) -> str:
+  """The claim cut to `CUT_LIMIT` characters (199 and `…`) when it is longer, else whole."""
+  return claim[:CUT_LIMIT - 1] + "…" if len(claim) > CUT_LIMIT else claim
 
 
 def root_text(thread: dict) -> str:
@@ -1368,7 +1374,7 @@ def ingest(args) -> int:
         thread = edited.get(finding.get("thread"))
         if thread is not None:
           claim = thread_line(reviewer, m, 1, thread, finding["severity"], config).split(" | ", 4)[4]
-          if claim != finding["claim"]:
+          if claim != finding["claim"] and finding["claim"] != cut_claim(claim):  # a stored 200-character cut stays cut
             finding["claim"], changed = claim, True
     if changed:
       core.atomic_write(st.path("reviews", rid, f"round-{m}.json"), saved)
