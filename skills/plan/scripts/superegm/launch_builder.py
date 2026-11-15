@@ -458,10 +458,14 @@ def filed_body(state, unit):
 
 
 def amendments_for(st, unit: str, body: str) -> list[dict]:
-  """Spec section 6.5: the handoff's recorded `amendments[]` for the unit's own Interfaces and for every
+  """Spec section 6.5: the handoff's recorded amendments (the files of its `amendments/` directory, and the legacy
+  `amendments[]` of `state.json` of a 1.2.1-pre.1 handoff) for the unit's own Interfaces and for every
   `(name, unit)` its Consumes lines list, in `at` order."""
   path = st.path("state")
-  entries = (json.loads(core.read_text(path)) if path.is_file() else {}).get("amendments") or []
+  entries = list((json.loads(core.read_text(path)) if path.is_file() else {}).get("amendments") or [])
+  folder = path.parent / "amendments"  # the handoff's directory, where `state.json` lives
+  if folder.is_dir():
+    entries += [json.loads(core.read_text(f)) for f in sorted(folder.glob("*.json"))]
   consumed = set(consumes(body))
   return sorted((a for a in entries if a["unit"] == unit or (a["name"], a["unit"]) in consumed), key=lambda a: a["at"])
 
