@@ -79,3 +79,41 @@ def test_amendment_file_before_ruling(world, monkeypatch):
   assert write_order.index(hdir / "amendments" / "11.json") < write_order.index(s.path("foreman", "U02"))
   assert "recorded_at" not in json.dumps(foreman_of(s, "U02")["rulings"])
   assert decision.WRITES == frozenset({"foreman", "reviews", "state", "file"})
+
+
+def test_rerun_after_crash(world, monkeypatch):
+  # a file whose ruling was never saved is not read; the rerun rewrites or deletes it
+  card, s = world_on(world)
+  produces_file(s, "U01", "`f(x) -> int`")
+  body = consumer_body("`f` (U01)")
+  hdir, real = s.base(), core.save_foreman
+
+  def crash(*args, **kwargs):
+    raise core.HandoffError("crash before the ruling is saved")
+
+  qid = opened(world, card, deviation("U01 f: returns None"), source="comment 11")
+  monkeypatch.setattr(core, "save_foreman", crash)
+  assert rule(world, card, qid, "amend — first line")[0] == 1
+  path = hdir / "amendments" / "11.json"
+  assert json.loads(path.read_text(encoding="utf-8"))[0]["text"] == "first line"
+  assert launch_builder.amendments_for(s, "U01", body) == []
+  monkeypatch.setattr(core, "save_foreman", real)
+  rerun_line = "f(x) -> int | None"
+  assert rule(world, card, qid, f"amend — {rerun_line}")[0] == 0
+  assert json.loads(path.read_text(encoding="utf-8"))[0]["text"] == rerun_line
+  assert [a["text"] for a in launch_builder.amendments_for(s, "U01", body)] == [rerun_line]
+
+  # a `one more round` ruling records no amendment: no file beside the first
+  round_qid = opened(world, card, deviation("U01 f: returns None"), source="review head-U02-c1 cap", point=2)
+  assert rule(world, card, round_qid, "one more round")[0] == 0
+  assert [f.name for f in (hdir / "amendments").iterdir()] == ["11.json"]
+
+  # a rerun that rules `stop the unit` deletes the file the crashed run wrote
+  qid = opened(world, card, deviation("U01 f: returns None"), source="comment 12")
+  monkeypatch.setattr(core, "save_foreman", crash)
+  assert rule(world, card, qid, "amend — second line")[0] == 1
+  deleted_path = hdir / "amendments" / "12.json"
+  assert deleted_path.exists()
+  monkeypatch.setattr(core, "save_foreman", real)
+  assert rule(world, card, qid, "stop the unit")[0] == 0
+  assert not deleted_path.exists()
