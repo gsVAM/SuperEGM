@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest: the one review loop (spec section 8)."""
 
@@ -1070,15 +1070,20 @@ def mask(text: str, config: dict) -> str:
   return text
 
 
+CLAIM_LIMIT = 1_000  # characters of a thread's root kept in its claim (a longer one keeps 999 and `…`)
+
+
 def thread_line(reviewer: str, rnd: int, n: int, thread: dict, severity: str, config: dict) -> str:
   """The thread's finding line: `<reviewer>-<round>-<n> | <severity> | <file:line or PR> at <commit7> |
-  regression: no | <the first line, 200 chars, masked>`."""
+  regression: no | <the root comment on one line, masked, 1,000 chars>`."""
   where = thread.get("path") or "PR"
   if thread.get("path") and thread.get("line") is not None:
     where += f":{thread['line']}"
   where = f"{mask(where, config)} at {(thread.get('commit_id') or '')[:7]}"
-  first = ((thread.get("body") or "").strip().splitlines() or [""])[0].strip()[:200]
-  return f"{reviewer}-{rnd}-{n} | {severity} | {where} | regression: no | {mask(first, config)}"
+  claim = mask(" ".join(thread.get("root", thread.get("body") or "").split()), config)
+  if len(claim) > CLAIM_LIMIT:
+    claim = claim[:CLAIM_LIMIT - 1] + "…"
+  return f"{reviewer}-{rnd}-{n} | {severity} | {where} | regression: no | {claim}"
 
 
 def collaborator_role(repo: str, login: str) -> str:
@@ -1106,7 +1111,7 @@ def thread_severity(thread: dict, config: dict, role: str | None) -> str:
     return "low"
   words = {w.casefold(): s for w, s in ingest["severity_words"].items()}
   words.update({s: s for s in SEVERITIES})
-  first = ((thread.get("body") or "").strip().splitlines() or [""])[0].casefold()
+  first = ((thread.get("root", thread.get("body")) or "").strip().splitlines() or [""])[0].casefold()
   found = [m.group(0) for m in re.finditer(r"[^\W_]+(?:[-'][^\W_]+)*", first)]
   if thread["review_body"]:
     return "medium" if any(w in words for w in found) else "low"
