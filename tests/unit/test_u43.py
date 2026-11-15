@@ -200,3 +200,36 @@ def test_origin_spec_check_alone(world):
     "spec at origin/main is neither the approved bytes nor a later link of the approval chain"]
   assert launch.origin_problems(root, "main", approval, later) == launch.origin_problems(root, "main", approval, later, ref="refs/superegm/base")
   assert launch.origin_problems(root, "main", approval, later) == ["origin/main carries no workflow triggered on pull_request"]
+
+
+@pytest.mark.parametrize("record,next_without,after", [
+  ({"phase": "file", "question": "q"}, "wave", None),
+  ({"phase": "file", "question": "q"}, "waiting fetch: origin: x", {"phase": "file", "question": "q"}),
+  ({"phase": "file", "question": "q"}, "file", {"phase": "file", "question": "q"}),
+  ({"phase": "file", "question": "q", "answer": "yes", "by": "owner", "at": "t"}, "file",
+   {"phase": "file", "question": "stopped at file by owner: answer to go on"})])
+def test_next_clear(world, record, next_without, after):
+  """Removed only on confirmed progress; a waiting row keeps it; an answer turns back into a question with a new since."""
+  c = Chain(world)
+  if next_without == "waiting fetch: origin: x":
+    c.fetch(False, "x")
+  else:
+    c.all_filed("U01")
+    if next_without == "file":
+      c.state["units"].pop("U02")
+  c.save()
+  assert c.next()[1] == next_without  # what next prints with no wait record
+  c.wait(**record)
+  path = c.root / "chain" / f"{c.hid}.json"
+  stored = jread(path)
+  cid = world.open_card("file", c.spec)
+  code, out = world.run("next", "clear", "--handoff", c.hid, "--runcard", cid)
+  assert code == 0, out
+  assert jread(superegm.Store(c.root).path("runcards", cid))["closed_at"]
+  now = jread(path) if path.is_file() else None
+  assert (now and {k: v for k, v in now.items() if k not in ("since", "review")}) == after
+  if now:
+    assert now["review"] == stored["review"]
+    assert (now["since"] != stored["since"]) == ("answer" in record)  # the rewrite's time, a new since
+  code, out = world.run("next", "clear", "--handoff", c.hid)
+  assert (code, out.strip().removeprefix("superegm: ")) == (1, "runcard: --runcard is required")
