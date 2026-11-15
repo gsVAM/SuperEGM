@@ -5,7 +5,7 @@ effects: working-tree
 description: "You MUST use this before any creative work - creating features, building components, adding functionality, modifying behavior, or planning anything new, in software or out of it (a talk, a business, a renovation)."
 ---
 
-<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: spec path docs/specs, the Units section, the review-spec gate, the brainstorm-brief lookup; builder check and the mockups section removed; the brief in the handoff's own directory (U32); the team brainstorm (U34). -->
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: spec path docs/specs, the Units section, the review-spec gate, the brainstorm-brief lookup; builder check and the mockups section removed; the brief in the handoff's own directory (U32); the team brainstorm (U34); the triage section offered (U39). -->
 
 # Brainstorming
 
@@ -207,6 +207,35 @@ could plan from without going back to your human partner. Cover:
   when the team or its fallback ran
 - a final `## Units` section, the last H2 of the document: one row per
   buildable unit (id, title, blocked by)
+- optionally, a `## Triage` section, its heading written exactly `## Triage`: offer it
+  to your human partner and write it with them, never alone. It says which
+  medium findings may stop blocking the wave. Without it triage is off and
+  a high or medium blocks until fixed or ruled. It holds one `Unblock:`
+  line and the run of `- ` lines directly after it; each line is one
+  pattern, `field: value` pairs separated by `, ` that must all hold, and a
+  pattern applies to mediums only. Every field is one of:
+  - `reach` (`external`, `agent`, `config` or `forged`): can an HTTP caller,
+    an agent action or a plausible configuration mistake trigger it, or only
+    a hand-forged in-process object?
+  - `later` (`easy`, `migration` or `version`): easy to fix later, or does
+    the fix need a migration or a new declaration version?
+  - `critical` (`yes` or `no`): on the critical path with serious
+    ramifications?
+  - `verified` (`confirmed` or `refuted`): the triager found the defect, or
+    found none.
+
+  ```markdown
+  ## Triage
+
+  Unblock:
+  - reach: forged, later: easy
+  - critical: no, later: easy, verified: confirmed
+  ```
+
+  Ask what they would be content to see deferred, and write only the
+  patterns they say. Approval parses the section, refuses a malformed one
+  with its line and freezes the patterns; editing it later needs a new
+  approval.
 
 **Where it goes:** in a software repo,
 `docs/specs/YYYY-MM-DD-<topic>-design.md`, committed.
