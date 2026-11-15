@@ -17,12 +17,18 @@ from pathlib import Path
 import superegm as core
 
 WRITES = frozenset({"driver", "runcards", "launches"})
-CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
+CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no written config key, init line or doctor line of its own (U32)
+CONFIG_UNWRITTEN = {"driver": {"chain": False}}  # its own key, registered but never written by `init`: absent reads false (U44)
 SKILLS = frozenset({"driver"})
 ACTIONS = ("tick", "install", "uninstall", "status", "reset")
 LABEL = "com.superegm.driver"
 RUN = subprocess.run  # launchctl and systemctl: a test fakes it
 PLATFORM = sys.platform
+
+
+def chain_on(config: dict) -> bool:
+  """`driver.chain` (spec section 7.1): true only when the store's config says so; absent or false is 1.2's tick."""
+  return isinstance((config or {}).get("driver"), dict) and config["driver"].get("chain") is True
 
 
 def plist_path() -> Path:

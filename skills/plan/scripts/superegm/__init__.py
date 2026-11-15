@@ -963,10 +963,13 @@ def load_config(repo_root: Path) -> dict:
   config["_source"] = str(path) if path.is_file() else "defaults (no .superegm/config.json)"
   if path.is_file():
     data = json.loads(read_text(path))
-    unknown = set(data) - set(DEFAULT_CONFIG)
+    unknown = set(data) - set(DEFAULT_CONFIG) - set(UNWRITTEN_CONFIG)
     if unknown:
       raise HandoffError(f"{path}: unknown keys {sorted(unknown)}")
     registered = {k: v for m in _MODULES.values() for k, v in m.CONFIG_DEFAULTS.items()}  # every module's keys (U46)
+    for key, default in UNWRITTEN_CONFIG.items():  # a registered key `init` never writes, read only when the file sets it (U44)
+      if key in data:
+        registered[key] = config[key] = json.loads(json.dumps(default))
     for key, value in data.items():
       if key == "labels":
         unknown = set(value) - set(DEFAULT_CONFIG["labels"])
@@ -2301,6 +2304,9 @@ def set_run(parser, run) -> None:
 _MODULES = discover()  # every subcommand module, imported once the names they use are defined (U32)
 SUBCOMMANDS = tuple(_MODULES)
 DEFAULT_CONFIG = json.loads(json.dumps({**CORE_CONFIG, **{k: v for m in _MODULES.values() for k, v in m.CONFIG_DEFAULTS.items()}}))
+# the keys a module registers in `CONFIG_UNWRITTEN`: accepted and merged one level, never written by `init` nor present
+# in a config whose file lacks them, so an absent key reads its reader's default (U44's `driver.chain`)
+UNWRITTEN_CONFIG = {k: v for m in _MODULES.values() for k, v in getattr(m, "CONFIG_UNWRITTEN", {}).items()}
 from .review import PANEL_OF, ROLES  # noqa: E402  review.py imports this package, so it loads after the names it uses
 DEFAULT_CONFIG["reviewers"] = {kind: panel.split(",") for kind, panel in PANEL_OF.items()}  # one source: the spec's panels
 DEFAULT_CONFIG["reviewers"]["head"].append("astra")  # informational: the lane is seated by astra.enabled and astra.heads

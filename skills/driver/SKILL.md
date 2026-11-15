@@ -21,7 +21,23 @@ registered store and, when there is something to do and no session of that store
 in the registered root under `SUPEREGM_ROLE=driver`, its result and exit code written to files the tick names.
 That session is unattended: it runs with no allow-list and no prompt, under the credential `~/.superegm/env` names,
 so install the driver only on a machine and for repositories you would let a session act on alone. A tick that
-finds nothing writes nothing. It never merges, and never types `plan`, `file`, `integrate` or `review-plan`.
+finds nothing writes nothing. It never merges, and never types `integrate`; with the chain off it never types
+`plan`, `file` or `review-plan` either.
+
+## The chain
+
+The chain runs only in a store whose `.superegm/config.json` sets `driver.chain` to `true` (`init` writes no
+`driver` key, and an absent key reads `false`, so a store keeps the tick above unchanged). With the chain on, each
+tick first fetches `+refs/heads/<base>:refs/superegm/tick-base` from `config.remote` in the registered root, once
+per store, and writes the outcome to the store's `tick/fetch.json` (`at`, `ok`, the first stderr line); a failed
+fetch is journaled `driver: fetch <remote> failed: <first stderr line>` once per distinct line, and after a good
+one a superseded handoff's wait record is removed (`driver: <handoff> superseded: wait record removed`). It then
+asks `superegm next --handoff <id>` per open handoff and types the phase that line names, `/superegm:<phase> <spec>
+--handoff <id>` (`plan`, `review-plan`, `file` or `wave`), with `--leavemealone` unless the handoff's approval froze
+the mode `normal`; a `file` that answers a wait record goes without it. It types nothing on `none`, `integrate` or
+any `waiting …` line. A handoff approved before 1.2.1 (no frozen mode) runs only its `wave` row, with
+`--leavemealone`. The launch entry records its `phase` and, once its session ends, its `outcome` (`succeeded` or
+`failed`); two consecutive failed launches of any phase stop the handoff as above.
 
 `<HELPER>` is `${CLAUDE_PLUGIN_ROOT}/skills/plan/scripts/superegm.py`; pass `--handoff <id>` to every call
 when the owner typed it.
