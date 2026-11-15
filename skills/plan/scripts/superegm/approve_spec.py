@@ -35,7 +35,10 @@ def register(subparsers):
   p.add_argument("--spec", dest="design", required=True)
   p.add_argument("--yes", action="store_true", help="the owner answered Approve")
   p.add_argument("--leavemealone", action="store_true", help="the converged record is the approval")
-  p.add_argument("--void", action="store_true", help="void the approval after a fix-design finding")
+  p.add_argument("--void", action="store_true",
+                 help="void the approval after a fix-design finding (--review), or, with no --review, the owner's void "
+                      "of an approval whose handoff has no state.json; typed without --runcard it opens and closes "
+                      "its own approve-spec-<6 hex>-<n> card")
   p.add_argument("--review", help="with --void: the review holding the fix-design finding")
   p.add_argument("--amend-units", dest="amend_units", action="store_true",
                  help="re-approve rows appended to ## Units without a review round; typed without "
@@ -391,13 +394,13 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   if superseded and superseded.get("handoff_id") and not superseded.get("voided_by") \
       and incomplete_filing(handoff_state(st, superseded["handoff_id"])):  # U53: before any write
     raise core.HandoffError(f"approve-spec: handoff {superseded['handoff_id']} has an incomplete filing: finish /superegm:file first")
+  if superseded and superseded.get("handoff_id"):  # U53: first, so a restore that fails leaves no approval recorded
+    discard_unapplied_dry_run(st, superseded["handoff_id"])
   commit = commit_by_path(root, [spec.relative_to(root).as_posix(), CONFIG], f"superegm: approve {slug} at review {rid}",
                           st.config["commit_trailer"])
   entry = entry_of(sha, commit, args.runcard, rid, handoff_id, kind, escalated, {"rounds": rounds, "triage": triage, "mode": mode})
   path = append_entry(st, spec, entry)
   write_handoff_file(st, handoff_id, spec, entry["approved_at"] if kind == "opening" else None)
-  if superseded and superseded.get("handoff_id"):
-    discard_unapplied_dry_run(st, superseded["handoff_id"])
   core.journal(st, f"approve-spec {kind} {handoff_id} sha256 {sha[:12]} at review {rid} commit {commit[:12]} under {args.runcard}")
   print(f"approval recorded in {path}")
   return 0
@@ -405,10 +408,10 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
 
 def void_approval(args, st: core.Store, spec: Path) -> int:
   """`--void --review <id>`: the latest approval (the history's last entry) is void once that review records
-  a `fix-design` finding; its handoff, when its `state.json` files no unit, closes through `close`'s write."""
-  slug, rid = core.spec_slug(spec), args.review or "owner"  # U53: no `--review`, the owner's void of an unplanned handoff
-  if not args.review and not unplanned_latest(st, spec):
-    raise core.HandoffError("approve-spec: --void requires --review")
+  a `fix-design` finding; its handoff, when its `state.json` files no unit, closes through `close`'s write.
+  `--void` with no `--review` (U53) is the owner's void of an unplanned latest handoff, which `run` has checked:
+  `voided_by` is `"owner"`."""
+  slug, rid = core.spec_slug(spec), args.review or "owner"
   entries = core.load_approvals(st, spec)
   if not entries:
     raise core.HandoffError(f"approve-spec: no approval for {slug}")
