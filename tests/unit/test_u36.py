@@ -8,7 +8,7 @@ import pytest
 from conftest import REPO, set_config
 from test_review import (SPEC, SLUG, PANEL_OF, opened, converged_spec, approve, hstore, rjson, rpath,
                          head_round, record, status, F, A, card)
-from superegm import atomic_write
+from superegm import approve_spec, atomic_write
 
 BANNED = ["(?i)secret-codename"]
 
@@ -91,3 +91,46 @@ def test_cap_stored_at_open(world, kind, source, cap):
     code, out = world.run("review", "open", "--kind", "spec", "--artifact", str(other), "--reviewers",
                           PANEL_OF["spec"], "--runcard", other_card)
     assert code == 1 and "review.rounds" in out, out
+
+
+def with_rounds_line(extra):
+  """SPEC with `extra` before its first H2, or (an `(after the first H2)` line) inside its first section."""
+  if extra.startswith("(after"):
+    return SPEC.replace("Text.\n", "Text.\n" + extra.split(") ", 1)[1], 1)
+  return SPEC.replace("## 1. Intent", extra + "\n## 1. Intent", 1)
+
+
+@pytest.mark.parametrize("before_first_h2, live, frozen, refused_with", [
+  ("Rounds: 4\n", 3, 4, None),
+  ("", 3, 3, None),
+  ("(after the first H2) Rounds: 9\n", 3, 3, None),
+  ("Rounds: 0\n", 3, None, "Rounds: 0"),
+  ("Rounds: 11\n", 3, None, "Rounds: 11"),
+  ("Rounds: two\n", 3, None, "Rounds: two"),
+  ("Rounds: 4\nRounds: 5\n", 3, None, "Rounds: 5"),
+  ("", 11, None, "review.rounds"),
+])
+def test_rounds_frozen_at_approval(world, before_first_h2, live, frozen, refused_with):
+  """approve-spec freezes the one `Rounds:` line before the first H2, else the live value; `--amend-units` copies
+  the frozen fields the extended entry has."""
+  spec, cid, rid = converged_spec(world, text=with_rounds_line(before_first_h2))
+  live_rounds(world, live)
+  code, out = approve(world, spec, cid, "--yes")
+  if refused_with:
+    assert code == 1 and refused_with in out, out
+    assert not hstore(world).path("approvals", SLUG).exists()
+    return
+  assert code == 0, out
+  entry = json.loads(hstore(world).path("approvals", SLUG).read_text(encoding="utf-8"))["entries"][-1]
+  assert entry["rounds"] == frozen
+  assert "rounds" in approve_spec.FROZEN_FIELDS
+  icid = card(world, spec, "integrate")
+  spec.write_text(spec.read_text(encoding="utf-8") + "| U02 | more | U01 | S |\n", encoding="utf-8")
+  assert approve(world, spec, icid, "--amend-units")[0] == 0
+  entries = json.loads(hstore(world).path("approvals", SLUG).read_text(encoding="utf-8"))["entries"]
+  assert entries[-1]["kind"] == "amend-units" and entries[-1]["rounds"] == frozen
+  edit_entry(world, rounds=None)                           # a 1.2.0 entry: its amendment stays without the field
+  spec.write_text(spec.read_text(encoding="utf-8") + "| U03 | again | U01 | S |\n", encoding="utf-8")
+  assert approve(world, spec, icid, "--amend-units")[0] == 0
+  entries = json.loads(hstore(world).path("approvals", SLUG).read_text(encoding="utf-8"))["entries"]
+  assert len(entries) == 3 and "rounds" not in entries[-1]
