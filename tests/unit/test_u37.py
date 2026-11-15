@@ -11,7 +11,7 @@ import pytest
 
 import superegm  # the harness reloads the package per test: read its names at call time
 from conftest import REPO, git, set_config
-from test_review import SLUG, approve, card, converged_spec, hstore
+from test_review import SLUG, approve, card, converged_spec, hstore, seed_handoff
 
 BANNED = ["(?i)secret-codename"]
 RULES = ".superegm/rules.md"
@@ -164,3 +164,56 @@ def test_render_section_form(world, tmp_path):
   path.write_text(json.dumps(record), encoding="utf-8")
   ha, hb = render(st, "builder", handoff_id="h-a"), render(st, "builder", handoff_id="h-b")
   assert ha[0] != hb[0] and "first" in ha[1] and "second" in hb[1]
+
+
+@pytest.mark.parametrize("form, stored_at", [
+  ("--handoff h --runcard wave-child --unit U01", "card instructions.reviewers.local"),
+  ("--handoff h --runcard plan-card --lane astra", "card instructions.reviewers.astra"),
+  ("--spec s.md --review r --round 2 --runcard spec-card", "reviews/r/instructions-2-reviewers-local.json"),
+])
+def test_first_render_is_stored_and_reused(world, form, stored_at):
+  """The first call per card, role and lane, or round, role and lane, renders and stores; later calls print it."""
+  commit_file(world, RULES, "Run the suite.\n")
+  configure(world, [{"file": RULES, "to": ["reviewers"]}])
+  spec, cid, rid = converged_spec(world)
+  assert approve(world, spec, cid, "--yes")[0] == 0
+  entry = entries_of(world)[-1]
+  hid = entry["handoff_id"]
+  seed_handoff(world, spec)
+  if "wave-child" in form:
+    wave = card(world, spec, "wave", handoff=hid)
+    used = card(world, "U01", "wave", parent=wave, handoff=hid)
+    argv = ["--handoff", hid, "--runcard", used, "--unit", "U01"]
+  elif "plan-card" in form:
+    used = card(world, spec, "review-plan", handoff=hid)
+    argv = ["--handoff", hid, "--runcard", used, "--lane", "astra"]
+  else:
+    used, argv = cid, ["--spec", spec, "--review", rid, "--round", 2, "--runcard", cid]
+
+  def instructions(*more):
+    return world.run("instructions", "--role", "reviewers", *argv, *more, card=None)
+
+  code, first_out = instructions()
+  assert code == 0 and first_out.startswith("# Repository instructions\n") and "Run the suite." in first_out, first_out
+  manifest = [{"file": RULES, "sha": blob_sha(b"Run the suite.\n")}]
+  st = hstore(world)
+  if stored_at.startswith("card"):
+    _, role, lane = stored_at.split()[1].split(".")
+    record = superegm.load_card(st, used)["instructions"][role][lane]
+    assert record == {"approved_at": entry["approved_at"], "manifest": manifest, "text": first_out}
+  else:
+    record = json.loads(st.path("reviews", rid, "instructions-2-reviewers-local.json").read_text(encoding="utf-8"))
+    assert record == {"manifest": manifest, "text": first_out}
+  commit_file(world, RULES, "Skip the suite.\n")                       # a HEAD edit and a re-approval
+  assert approve(world, spec, cid, "--yes")[0] == 0
+  assert entries_of(world)[-1]["instructions"][0]["sha"] != manifest[0]["sha"]
+  code, second_out = instructions()
+  assert code == 0 and second_out == first_out
+  code, out = world.run("instructions", "--role", "builder", "--handoff", hid, card=None)
+  assert code == 1 and out.startswith("runcard: "), out
+  code, out = world.run("instructions", "--role", "builder", "--handoff", hid, "--spec", spec, "--runcard", cid, card=None)
+  assert code == 1, out
+  git(["rm", "-q", RULES], world.repo)
+  git(["commit", "-qm", "rules removed"], world.repo)
+  code, out = world.run("instructions", "--role", "reviewers", "--spec", spec, "--review", rid, "--round", 1, "--runcard", cid, card=None)
+  assert code == 1 and RULES in out, out
