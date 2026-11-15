@@ -1071,6 +1071,13 @@ def mask(text: str, config: dict) -> str:
 
 
 CLAIM_LIMIT = 1_000  # characters of a thread's root kept in its claim (a longer one keeps 999 and `…`)
+NO_TEXT = "(no text outside hidden markup)"  # the claim of a root with nothing left after its HTML comments go
+
+
+def root_text(thread: dict) -> str:
+  """The thread's root comment without its HTML comments: `<!--` to the next `-->`, across lines, or to the
+  end of the text when none follows (GitHub hides that too). A thread built by hand reads its `body`."""
+  return re.sub(r"<!--.*?(?:-->|\Z)", "", thread.get("root", thread.get("body")) or "", flags=re.S)
 
 
 def thread_line(reviewer: str, rnd: int, n: int, thread: dict, severity: str, config: dict) -> str:
@@ -1080,7 +1087,7 @@ def thread_line(reviewer: str, rnd: int, n: int, thread: dict, severity: str, co
   if thread.get("path") and thread.get("line") is not None:
     where += f":{thread['line']}"
   where = f"{mask(where, config)} at {(thread.get('commit_id') or '')[:7]}"
-  claim = mask(" ".join(thread.get("root", thread.get("body") or "").split()), config)
+  claim = mask(" ".join(root_text(thread).split()), config) or NO_TEXT
   if len(claim) > CLAIM_LIMIT:
     claim = claim[:CLAIM_LIMIT - 1] + "…"
   return f"{reviewer}-{rnd}-{n} | {severity} | {where} | regression: no | {claim}"
@@ -1111,7 +1118,7 @@ def thread_severity(thread: dict, config: dict, role: str | None) -> str:
     return "low"
   words = {w.casefold(): s for w, s in ingest["severity_words"].items()}
   words.update({s: s for s in SEVERITIES})
-  first = ((thread.get("root", thread.get("body")) or "").strip().splitlines() or [""])[0].casefold()
+  first = next((line for line in root_text(thread).splitlines() if line.strip()), "").strip().casefold()
   found = [m.group(0) for m in re.finditer(r"[^\W_]+(?:[-'][^\W_]+)*", first)]
   if thread["review_body"]:
     return "medium" if any(w in words for w in found) else "low"
