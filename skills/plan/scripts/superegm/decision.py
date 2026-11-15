@@ -143,11 +143,14 @@ def recorded_rulings(foreman: dict) -> list:
   out = []
   for entry in foreman.get("rulings") or []:
     decision = decisions.get(entry.get("decision"))
+    posted = entry.get("posted") or ""
+    cid = int(posted.split()[1]) if posted.startswith("comment ") and posted.split()[1].isdigit() else 0
+    if entry.get("kind") == "undo":  # the owner's undo of a triage deferral (spec section 5.2): an upheld, no decision
+      out.append(Ruling("upheld", entry["fid"], None, entry.get("reason"), entry.get("by") or "", cid))
+      continue
     if decision is None:
       continue
     text = (entry.get("ruling") or "").partition(" — ")[0].strip()
-    posted = entry.get("posted") or ""
-    cid = int(posted.split()[1]) if posted.startswith("comment ") and posted.split()[1].isdigit() else 0
     option, subject = None, ""
     if text == "redesign" and decision["point"] in (1, 2):  # a head's third ruling; a point-3 option may begin with the word
       kind = "redesign"
@@ -470,6 +473,8 @@ def rule(args) -> int:
   found = comment = None
   if args.posted and not closed:  # a by-hand ruling: read through the one grammar (spec section 13.2, U22)
     comment, found, decisions = verify_posted(st, unit, data, args, number, card.get("mode"))
+    if decisions is None:
+      return undo(st, unit, data, args, comment, found, now)
     if found.kind == "allowed-file":
       return rule_file(st, unit, data, args, comment, found, decisions)
   else:
@@ -629,6 +634,37 @@ def withdraw_accept(st, rid: str, head: dict, runcard: str) -> None:
   head["converged"], head["converged_round"] = "no", None
   review.store_verdict(st, rid, head, runcard)
   core.journal(st, f"review {rid} {accepted} accept lapsed under {runcard}")
+
+
+def deferral_of(foreman: dict, fid: str):
+  """The latest `followups[]` row of a triage-deferred fid (spec section 5.2), or None."""
+  return next((r for r in reversed(foreman.get("followups") or []) if r.get("fid") == fid), None)
+
+
+def undo(st, unit: str, data: dict, args, comment: dict, found: "Ruling", now: str) -> int:
+  """The owner's `**Ruling:** <fid> finding upheld` on a triage-deferred medium of the unit's latest posted round
+  (spec section 5.2), applied with no dispatch and no `collect`: the finding's disposition cleared and `undone_by` its
+  comment id, a standalone `kind: undo` ruling (`decision: null`), the follow-up row dropped, the latest posted
+  round's outcome rewritten, and triage off for the unit's remaining rounds (`review.triage_undone`)."""
+  said = f"{found.subject} finding upheld"
+  if args.ruling.partition(" — ")[0].strip() != said:
+    raise Refusal(f"decision: comment {args.posted} rules {said}, not {args.ruling.strip()}")
+  row = deferral_of(data, found.subject)
+  rid = review.head_review_id(st, unit)
+  rnd = review.load_round(st, rid, row["round"])
+  finding = next(f for f in review.findings_of(rnd) if f["id"] == found.subject)
+  finding["disposition"], finding["undone_by"] = None, str(args.posted)
+  core.atomic_write(st.path("reviews", rid, f"round-{row['round']}.json"), rnd)
+  data["rulings"].append({"kind": "undo", "decision": None, "fid": found.subject, "by": args.by,
+                          "posted": f"comment {args.posted}", "ruling": args.ruling,
+                          "posted_at": comment.get("updated_at") or comment.get("created_at") or now, "at": now})
+  data["followups"] = [r for r in data.get("followups") or [] if r.get("fid") != found.subject]
+  core.save_foreman(st, unit, data)
+  core.journal(st, f"Ruling ({args.by}, comment {args.posted}): {unit} undo {found.subject} deferred by triage; "
+                   f"triage off for {unit}")
+  review.undo_outcome(st, rid, args.runcard)
+  print(f"recorded (comment {args.posted}): undo {found.subject}")
+  return 0
 
 
 KIND_POINTS = {"upheld": (1,), "overruled": (1,), "allowed": (1,), "allowed-file": (1,), "round": (2,), "stop": (2,), "option": (3, 5), "redesign": (1, 2)}
@@ -818,6 +854,8 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int, mode=None)
     if found.kind == "redesign":  # every pending decision at once (spec section 13.2), the named one first: its brief
       return comment, found, [decision] + [d for d in pending_decisions(foreman) if d["id"] != decision["id"]]
     return comment, found, [decision]
+  if found.kind == "upheld" and deferral_of(foreman, found.subject):  # the undo, checked before `fid_decisions` (5.2)
+    return comment, found, None
   pending = pending_decisions(foreman)
   if found.kind == "allowed-file":  # every open decision with an entry of that file, a contest copy's too (`rule` records each fid)
     decisions = list({d["id"]: d for d, _ in file_targets(foreman, found.subject, store)}.values())

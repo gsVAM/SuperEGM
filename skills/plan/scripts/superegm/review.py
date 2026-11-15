@@ -748,6 +748,21 @@ def triage(args) -> int:
   return 0
 
 
+def undo_outcome(st: core.Store, rid: str, runcard: str) -> None:
+  """After the owner's undo (section 5.2): the verdict re-derived (an accept on the round lapses), and the unit's
+  latest posted `clean` rewritten as ingest rewrites it, `revise` or `cap-reached` at the cap, `rewritten_from: clean`."""
+  review = load_review(st, rid)
+  status = store_verdict(st, rid, review, runcard)
+  unit = review["artifact"]
+  data = core.load_foreman(st, unit)
+  posted = sorted((e for e in data["rounds"] if e.get("phase") == "posted"), key=lambda e: e["round"])
+  word = {3: "revise", 2: "cap-reached"}.get(status.code)
+  if posted and word and posted[-1].get("outcome") == "clean":
+    posted[-1].update({"outcome": word, "rewritten_from": "clean"})
+    core.save_foreman(st, unit, data)
+    core.journal(st, f"{unit} round {posted[-1]['round']} clean rewritten {word} by the undo under {runcard}")
+
+
 def deferred_of(rnd: dict) -> list[dict]:
   """The round's findings deferred by triage, in record order."""
   return [f for f in findings_of(rnd) if str(f.get("disposition") or "").startswith("deferred: triage ")]
@@ -1149,8 +1164,11 @@ def finding_blockers(rnd: dict) -> list[str]:
   regression = [f for f in found if blocking(f) and f["regression"] == "yes" and f not in high]
   external = [f for f in found if f["severity"] == "medium" and f["disposition"] is None
               and f not in regression and f["id"].startswith("external:")]
+  # a medium the owner's undo returned to the round (section 5.2) lapses an accept given on it, as a new blocker does
+  undone = [f for f in found if f.get("undone_by") and blocking(f) and f["disposition"] is None
+            and f not in high + regression + external]
   return ([f"high {f['id']}" for f in high] + [f"regression {f['id']}" for f in regression]
-          + [f"external {f['id']}" for f in external])
+          + [f"external {f['id']}" for f in external] + [f"undone {f['id']}" for f in undone])
 
 
 def early_accept_lapsed(review: dict, accept: dict, rounds: list[dict], rulings: list[str]) -> bool:
