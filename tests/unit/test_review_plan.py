@@ -330,3 +330,12 @@ WIDTH = [
 @pytest.mark.parametrize("path, needle, present", WIDTH, ids=[f"{p.name}:{n[:30]}" for p, n, _ in WIDTH])
 def test_the_chain_check_and_the_split_check_prose(path, needle, present):
   assert (needle in path.read_text(encoding="utf-8")) is present, (path, needle)
+
+
+@pytest.mark.parametrize("needle, present", [
+    ("units.max_body_kb", True), ("units.max_files", True), ("over 10 Steps", True),
+    ("crosses subsystems", True), ("24,576 bytes", False), ("eight Scope paths", False),
+])
+def test_proportion_reads_the_units_limits(needle, present):
+    # section 6: the split check reads units.* in place of 24,576 bytes and eight Scope paths; the 10-step candidate stays
+    assert (needle in " ".join(PROPORTION.read_text(encoding="utf-8").split())) is present
