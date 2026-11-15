@@ -70,12 +70,13 @@ def live_rounds(st: core.Store) -> int:
 def cap_at_open(args, st: core.Store, kind: str, artifact: str) -> int:
   """The cap a new cycle stores, completed rounds plus one per `continue` ruling (section 5): a spec's review runs
   under the live `review.rounds`; the others under the `rounds` of the handoff's latest approval entry (5 without
-  one: a 1.2.0 entry, or no approval entry at all)."""
+  one: a 1.2.0 entry, an entry whose `rounds` is outside 1-10, or no approval entry of its own, as a legacy flat
+  store's)."""
   if kind == "spec":
     return live_rounds(st)
   spec = artifact if kind == "integrate" else core.handoff_spec(args, st)
   entries = core.load_approvals(st, Path(spec)) if spec else []
-  own = [e for e in entries if st.handoff_id and e.get("handoff_id") == st.handoff_id] or entries[-1:]
+  own = [e for e in entries if st.handoff_id and e.get("handoff_id") == st.handoff_id]  # another handoff's entry does not govern
   rounds = own[-1].get("rounds") if own else None
   return rounds if valid_rounds(rounds) else LEGACY_CAP
 
@@ -514,6 +515,7 @@ def narrow_panel(review: dict, nxt: int, given: list[str]) -> tuple[bool, str | 
     return False, f"{off[0]} is not on the panel"
   if set(given) == set(names):
     return False, None
+  given = list(dict.fromkeys(given))  # a reviewer named twice is dispatched once
   entry = {"from_round": nxt, "reviewers": given + (["astra"] if "astra" in current else [])}
   panels = review.setdefault("panels", [])
   if panels and panels[-1]["from_round"] == nxt:  # narrowed twice before the round: the later wins

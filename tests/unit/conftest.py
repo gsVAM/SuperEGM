@@ -513,7 +513,8 @@ class Harness:
 
 
 def make_world(tmp_path, capsys, monkeypatch, config=None, origin_url=f"https://github.com/{REPO}.git"):
-  """What `world` builds, with the config and origin overridable."""
+  """What `world` builds, with the config and origin overridable. The default config runs `review.rounds` 5 (the
+  shipped default is 3), so the older five-round tests keep their caps; a `config=` without a `review` key runs at 3."""
   if config is None:
     config = {"repo": REPO, "banned_terms": ["(?i)secret-codename"], "review": {"rounds": 5}}
   repo = make_repo(tmp_path / "repo", origin_url=origin_url, config=config)
@@ -658,7 +659,7 @@ def launchable(world):
   assert code == 0, out
   findings = world.artifacts.parent / "design-1.txt"
   findings.write_text("", encoding="utf-8")
-  code, out = world.run("review", "record", "--review", out.strip(), "--round", "1", "--reviewer", "design",
+  code, out = world.run("review", "record", "--review", out.splitlines()[0], "--round", "1", "--reviewer", "design",
                         "--findings", findings, "--runcard", cid, card=None)
   assert code == 0, out
   code, out = world.run("approve-spec", "--spec", world.spec, "--yes")

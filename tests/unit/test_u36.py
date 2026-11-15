@@ -7,8 +7,8 @@ import json
 import pytest
 from conftest import REPO, ROOT, set_config
 from test_review import (SPEC, SLUG, PANEL_OF, opened, converged_spec, approve, hstore, rjson, rpath,
-                         head_round, record, status, F, A, card)
-from superegm import approve_spec, atomic_write
+                         head_round, record, status, F, A, card, spec_file, seed_handoff, HID)
+from superegm import approve_spec, atomic_write, handoff_store
 
 BANNED = ["(?i)secret-codename"]
 
@@ -216,12 +216,21 @@ def test_review_loop_dispatches_the_printed_panel():
 
 
 def test_a_handoff_without_its_own_entry_reads_rounds_5(world):
-  """Another handoff's approval entry on the same spec, frozen at rounds 4, does not govern a handoff with no entry."""
+  """A legacy flat handoff sharing its spec with a newer approved handoff (frozen at rounds 4) has no entry of its
+  own: its plan review stores cap 5."""
+  spec = spec_file(world)
+  seed_handoff(world, spec)                                # the flat store's handoff, HID
   spec, cid, rid = converged_spec(world)
   assert approve(world, spec, cid, "--yes")[0] == 0
-  edit_entry(world, rounds=4, handoff_id="another-handoff-123456")
-  spec, cid, rid = opened(world, "plan")
-  assert rjson(world, rid)["cap"] == 5
+  edit_entry(world, rounds=4)
+  entry = json.loads(hstore(world).path("approvals", SLUG).read_text(encoding="utf-8"))["entries"][-1]
+  assert entry["handoff_id"] != HID and entry["rounds"] == 4
+  pcid = card(world, spec, "review-plan", handoff=HID)
+  code, out = world.run("review", "open", "--kind", "plan", "--artifact", "U07", "--reviewers", PANEL_OF["plan"],
+                        "--runcard", pcid)
+  assert code == 0, out
+  legacy = handoff_store(hstore(world), HID)
+  assert json.loads(legacy.path("reviews", out.strip(), "review.json").read_text(encoding="utf-8"))["cap"] == 5
 
 
 @pytest.mark.parametrize("review, since", [

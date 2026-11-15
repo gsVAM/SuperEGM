@@ -94,6 +94,12 @@ def entry_of(sha, commit, runcard, review, handoff_id, kind, escalated, frozen=N
           "handoff_id": handoff_id, "kind": kind, "voided_by": None, "escalated": escalated, **(frozen or {})}
 
 
+def cycle_of(review_id: str | None) -> int:
+  """The cycle a review id ends in (`-c<n>`); 0 for a hand-written approval's reference, which has no such suffix."""
+  match = re.search(r"-c([0-9]+)$", review_id or "", re.ASCII)
+  return int(match.group(1)) if match else 0
+
+
 def rounds_line(text: str) -> int | None:
   """The value of the one `Rounds: <n>` line before the spec's first H2, `n` 1-10; None without one. A second such
   line, or a value that is not 1-10, is refused with the line; a `Rounds:` line after the first H2 is prose (§4)."""
@@ -233,8 +239,7 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   # the cycles past the last approval's; a re-approval of that same cycle (its bytes unmoved, U26: a thread ingested
   # and escalated after the approval) reads that cycle again and keeps the replaced entry's pairs the `## Units`
   # section does not name (that entry may cover earlier cycles too), since `graph` reads the latest entry's list alone
-  suffix = last["review"].rsplit("-c", 1)[-1] if last and last.get("review") else ""
-  since = int(suffix) if suffix.isascii() and suffix.isdigit() else 0  # a hand-written approval's review has no `-c<n>` (U36)
+  since = cycle_of(last.get("review") if last else None)
   if last and last.get("review") == rid:
     named = units_section(core.read_text(spec))
     kept = [pair for pair in last.get("escalated") or [] if pair not in named]
