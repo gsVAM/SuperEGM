@@ -94,7 +94,7 @@ FORM_RES = (
   ("allowed", re.compile(rf"(?P<subject>{FID}) allowed{REASON}")),
 )
 LETTER_RE = re.compile(r"\([a-z]\)")  # a rendered option's letter, the bare answer of the judges
-FILE_RULING_RE =re.compile(r"test-delta (\S+) allowed")  # a recorded whole-file allowance's text
+FILE_RULING_RE = re.compile(r"test-delta (\S+) allowed")  # a recorded whole-file allowance's text
 JUDGES_MARK_RE =re.compile(r"^\(judges \S+, leavemealone\)$", re.M)
 
 

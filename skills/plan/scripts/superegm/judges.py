@@ -589,10 +589,13 @@ def decision_question(st, unit: str, did: str) -> str:
   return f"## Q1 {unit} {did}: {decision['question']}\n" + "".join(f"- {o}\n" for o in decision["options"])
 
 
+STORED_LETTER_RE = re.compile(r"^\([a-z]\) ")  # a stored option's own letter prefix
+
+
 def stored_options_text(options: list) -> str:
   """A pending decision's stored options with `amend` (the owner's alone, §6.5) left out and the others keeping the
   letter of their stored position; a stored `(x) ` prefix is dropped so a letter prints once."""
-  return "".join(f"- ({chr(ord('a') + i)}) {re.sub(r'^\([a-z]\) ', '', option)}\n"
+  return "".join(f"- ({chr(ord('a') + i)}) {STORED_LETTER_RE.sub('', option)}\n"
                  for i, option in enumerate(options) if option != "amend")
 
 
