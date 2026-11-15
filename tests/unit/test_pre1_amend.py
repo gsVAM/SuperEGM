@@ -20,6 +20,7 @@ DOD = "**Deviation (dod):** item 2 needs a service\n"
 OPTS = "**Builder status:** BLOCKED\nWhich?\n- (a) keep undefined\n- (b) return null\n"
 LINE = "dequeue() -> Job | null"
 NONE = "decision: ruling is none of the options: (a) keep undefined; (b) return null; stop the unit\n"
+ONE = "decision: amend needs a comment with one interface deviation and no other\n"
 ISO = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
 
 
@@ -59,7 +60,10 @@ def opened(world, card, text, source="comment 77", point=3):
 
 
 def amendments(s):
-  return json.loads(s.path("state").read_text(encoding="utf-8")).get("amendments")
+  folder = s.path("file", "amendments")
+  if not folder.is_dir():
+    return None
+  return [e for f in sorted(folder.glob("*.json")) for e in json.loads(f.read_text(encoding="utf-8"))]
 
 
 def rule(world, card, qid, ruling, by="owner", *extra):
@@ -81,9 +85,9 @@ def test_an_amend_ruling_is_recorded_with_its_amendment(world):
 
 @pytest.mark.parametrize("text, refusal", [
   ("**Deviation (interface):** U01 peek: missing\n" + OPTS, "decision: amend names U01 peek, not in U01's Interfaces lines\n"),
-  (IFACE + DOD + OPTS, NONE),  # not offered off one interface heading alone
-  (IFACE + "**Deviation (interface):** U02 deliver: a bool\n" + OPTS, NONE),
-  ("**Deviation (interface):** dequeue returns null\n" + OPTS, "decision: amend needs a comment with one interface deviation and no other\n"),
+  (IFACE + DOD + OPTS, ONE),  # not offered off one interface heading alone: §6.5 refuses it as amend's own
+  (IFACE + "**Deviation (interface):** U02 deliver: a bool\n" + OPTS, ONE),
+  ("**Deviation (interface):** dequeue returns null\n" + OPTS, ONE),
 ])
 def test_amend_is_refused_off_one_named_interface_deviation(world, text, refusal):
   card, s = world_on(world)
@@ -103,7 +107,7 @@ def test_amend_is_not_offered_on_a_dod_deviation(world):
   card, s = world_on(world)
   qid = opened(world, card, DOD + OPTS)
   code, out = rule(world, card, qid, f"amend — {LINE}")
-  assert code == 1 and out.startswith("decision: ruling is none of the options:") and amendments(s) is None
+  assert (code, out) == (1, ONE) and amendments(s) is None
 
 
 def test_an_option_ruling_on_several_headings_settles_them_all_and_amends_the_interface(world):
@@ -177,7 +181,7 @@ def test_an_amendment_names_the_interface_as_consumes_lines_do(tmp_path):
   (tmp_path / "state.json").write_text(json.dumps({"amendments": [entry]}))
 
   class St:
-    def path(self, kind):
-      return tmp_path / f"{kind}.json"
+    def path(self, kind, *parts):
+      return tmp_path.joinpath(*parts) if kind == "file" else tmp_path / f"{kind}.json"
   body = "## Interfaces\n- Consumes: store(repo_root) (U03)\n"
   assert amendments_for(St(), "U07", body) == [entry]
