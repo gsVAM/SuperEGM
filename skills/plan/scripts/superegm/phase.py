@@ -7,13 +7,14 @@ The module is `phase`, not `next`: `discover()` imports every submodule onto the
 `superegm.next` would shadow the builtin `next`. `next` only reads: `tick/fetch.json` and
 `refs/superegm/tick-base` as the tick left them."""
 
+import argparse
 import json
 import re
 import subprocess
 from pathlib import Path
 
 import superegm as core
-from superegm import graph, launch, report, review
+from superegm import graph, launch, report, review, runcard
 from superegm.approve_spec import units_section
 
 WRITES = frozenset({"chain", "runcards"})  # the store kinds this subcommand writes
@@ -27,7 +28,13 @@ LANDED_RE = re.compile(r"^Landed:\s*([^(\n]*)", re.M)  # the comma-separated ids
 def register(subparsers):
   p = core.add_parser(subparsers, "next", "print the handoff's next phase (spec section 7.1); writes nothing", runcard=False)
   p.add_argument("--handoff", help="the handoff whose next phase is printed")
-  p.set_defaults(run=run, writes=WRITES)
+  p.set_defaults(run=run, writes=WRITES, action=None)
+  sub = p.add_subparsers(dest="action")
+  w = core.add_parser(sub, "wait", "write the handoff's wait record and close the card (spec section 7.2)")
+  w.add_argument("--handoff", default=argparse.SUPPRESS, help="the handoff that waits")
+  w.add_argument("--phase", required=True, choices=sorted(SKILLS), help="the phase that waits")
+  w.add_argument("--question", required=True, help="what the owner is asked")
+  w.add_argument("--review", help="the review whose `proceed` ruling answers it (kept on a re-ask without it)")
 
 
 def read_json(path: Path):
@@ -135,7 +142,7 @@ def next_line(st: core.Store, hid: str) -> str:
   own = [i for i, e in enumerate(entries) if e.get("handoff_id") == hid]
   if record.get("closed_at") or state.get("closed_at") or (own and entries[own[-1]].get("voided_by")):
     return "none"
-  fetch = read_json(st.root / "tick" / "fetch.json")
+  fetch = read_json(st.path("tick", "fetch"))
   tick = core.run_git(["rev-parse", "-q", "--verify", f"{TICK_BASE}^{{commit}}"], root, check=False).strip()
   if (fetch is not None and not fetch.get("ok")) or not tick:
     return f"waiting fetch: {config.get('remote')}: {first_line((fetch or {}).get('stderr')) or f'{TICK_BASE} absent'}"
@@ -146,7 +153,7 @@ def next_line(st: core.Store, hid: str) -> str:
     if not filed:
       return "none"
     return "wave" if any(unit_open(hs, state, u) for u in filed) else "integrate"
-  wait = read_json(st.root / "chain" / f"{hid}.json")
+  wait = read_json(st.path("chain", hid))
   if wait and not wait.get("answer") and not proceeded(hs, wait.get("review"), wait.get("since")):
     return f"waiting {wait['phase']}: {' '.join(str(wait.get('question') or '').splitlines())}"
   if own and launch.origin_problems(root, config.get("base", "main"), {**entries[own[-1]], "path": str(spec)},
@@ -161,9 +168,24 @@ def next_line(st: core.Store, hid: str) -> str:
   return below
 
 
+def wait(args, st: core.Store, hid: str) -> int:
+  """Write `chain/<handoff>.json` (`review` kept from the stored record on a re-ask without one) and close the card."""
+  card_id = args.runcard
+  path = st.path("chain", hid)
+  stored = read_json(path) or {}
+  core.atomic_write(path, {"phase": args.phase, "question": args.question, "since": core.now_iso(),
+                           "review": args.review or stored.get("review")})
+  runcard.close_card(st, card_id)
+  return 0
+
+
 def run(args):
+  if getattr(args, "action", None):
+    core.require_runcard(args, SKILLS)
   if not getattr(args, "handoff", None):
     raise core.HandoffError("next: --handoff is required")
   st = core.store(core.git_toplevel(Path.cwd()))
+  if args.action == "wait":
+    return wait(args, st, args.handoff)
   print(next_line(st, args.handoff))
   return 0
