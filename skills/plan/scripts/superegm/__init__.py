@@ -501,13 +501,13 @@ def open_runcard(store: Store, skill: str, artifact: str, parent=None, mode=None
           "opened_at": now_iso(), "closed_at": None, "interrupted_at": None, "produced": [],
           "handoff": store.handoff_id}
   driven = os.environ.get("SUPEREGM_ROLE") == "driver"
-  if skill == "wave" and parent is None:
+  if parent is None and (skill == "wave" or (skill in CHAIN_PHASES and driven)):  # a driven card of any chain phase (U44)
     card["boot_id"] = boot_id()
     card["driver_card"] = os.environ.get("SUPEREGM_RUNCARD") if driven else None
   # the card is written before the read for a tick's launch, so a tick racing this open sees it (spec section 11.2)
   atomic_write(store.path("runcards", rid), card)
   journal(store, f"runcard open {rid} {skill} {artifact}")
-  if parent is None and skill in GUARDED_SKILLS and not (skill == "wave" and driven) and tick_live(store, skill):
+  if parent is None and skill in GUARDED_SKILLS and not (skill in CHAIN_PHASES and driven) and tick_live(store, skill):
     card["interrupted_at"] = now_iso()
     atomic_write(store.path("runcards", rid), card)
     journal(store, f"runcard interrupted {rid}: a tick's session may be live")
@@ -529,6 +529,7 @@ def open_runcard(store: Store, skill: str, artifact: str, parent=None, mode=None
 
 
 GUARDED_SKILLS = ("wave", "plan", "file", "integrate", "review-plan", "orient")
+CHAIN_PHASES = ("plan", "review-plan", "file", "wave")  # the phases a tick launches with the chain on (U44)
 TICK_LIVE = "driver: a tick's session may be live; /superegm:driver reset is the owner's interrupt"
 
 
@@ -569,6 +570,18 @@ def top_wave_cards(hs: Store) -> list:
   return out
 
 
+def top_phase_cards(hs: Store) -> list:
+  """(path, card) of the handoff's top-level cards of every chain phase (`CHAIN_PHASES`), open or not, in open
+  order; a child card counts nowhere (U44: the proofs, the counts, `driver reset` and `status` read them all)."""
+  folder = (hs.root if hs.legacy else hs.base()) / "runcards"
+  out = []
+  for path in folder.glob("*.json"):
+    card = json.loads(read_text(path))
+    if card.get("skill") in CHAIN_PHASES and not card.get("parent") and card.get("handoff", hs.handoff_id) == hs.handoff_id:
+      out.append((path, card))
+  return sorted(out, key=lambda pc: (pc[1].get("opened_at") or "", pc[0].name))
+
+
 def interrupt_card(hs: Store, path: Path, card: dict, why: str) -> None:
   card["interrupted_at"] = now_iso()
   atomic_write(path, card)
@@ -606,7 +619,7 @@ def reboot_proof(hs: Store, current: str) -> None:
       changed = True
   if changed:
     atomic_write(hs.path("driver", hs.handoff_id), data)
-  for path, card in top_wave_cards(hs):
+  for path, card in top_phase_cards(hs):
     if not card.get("closed_at") and not card.get("interrupted_at") and (card.get("driver_card") in ended - {None} or rebooted(card, current)):
       interrupt_card(hs, path, card, "interrupted (reboot)")
   folder = hs.base(need=False) / "launches" if not hs.legacy else None
