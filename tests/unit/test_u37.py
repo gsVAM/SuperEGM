@@ -217,3 +217,37 @@ def test_first_render_is_stored_and_reused(world, form, stored_at):
   git(["commit", "-qm", "rules removed"], world.repo)
   code, out = world.run("instructions", "--role", "reviewers", "--spec", spec, "--review", rid, "--round", 1, "--runcard", cid, card=None)
   assert code == 1 and RULES in out, out
+
+
+@pytest.mark.parametrize("to", [["builder", "judges"], ["judges"]])
+def test_builder_prompt_carries_the_section(world, monkeypatch, to):
+  """A first render through launch-builder, write enforcement on, places the section last and records the manifest."""
+  from superegm import approve_spec, launch_builder
+  from superegm.instructions import render
+  from test_builders import UNIT, launches_of, seed
+  s, card_id, hid, _ = seed(world)
+  text = "Run the suite.\n"
+  sha12 = blob_sha(text.encode())
+  spec = json.loads(s.path("state").read_text(encoding="utf-8"))["design"]["path"]
+  path = s.path("approvals", superegm.spec_slug(spec))
+  record = json.loads(path.read_text(encoding="utf-8"))
+  record["instructions"] = [{"file": RULES, "to": to, "sha": sha12}]       # the frozen list of the handoff's approval
+  path.write_text(json.dumps(record), encoding="utf-8")
+  approve_spec.write_copy(s, {"file": RULES, "sha": sha12, "text": text})
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  monkeypatch.setattr(launch_builder, "start_detached", lambda command, log, env: 4242)
+  assert world.run("launch", "--runcard", card_id)[0] == 0
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card_id)
+  assert code == 0, out
+  prompt = s.path("launches", f"{UNIT}_r1_prompt.md").read_text(encoding="utf-8")
+  launch = launches_of(s)[-1]
+  builder_section = render(s, "builder", handoff_id=hid)[1]
+  stored = superegm.load_card(s, card_id)["instructions"]["builder"]["local"]
+  if "builder" in to:
+    assert builder_section.startswith("# Repository instructions\n") and "## .superegm/rules.md\n```\nRun the suite.\n```" in builder_section
+    assert prompt.rstrip().endswith(builder_section.rstrip())
+    assert launch["instructions"] == [{"file": RULES, "sha": sha12}]
+    assert stored["manifest"] == launch["instructions"] and stored["text"] == builder_section
+  else:
+    assert builder_section == "" and "# Repository instructions" not in prompt
+    assert launch["instructions"] == []

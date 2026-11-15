@@ -391,8 +391,8 @@ WRITES = {"approve_spec":{"approvals", "handoffs", "state", "reviews", "runcards
           "scan": {"file"}, "gate": {"state"},
           "dry_run": {"file", "state"}, "apply": {"state", "file"},
           "verify": {"state"}, "status": {"state"}, "launch": {"state", "runcards"}, "decide": {"state", "plan", "units", "unit", "bodies", "file"},
-          "record_launch": {"launches"}, "collect": {"foreman", "review", "reviews"}, "prepare": {"foreman", "review"},
-          "launch_builder": {"launches", "orient_unit"}, "interrupt": {"launches", "foreman"}, "clean": set(),
+          "record_launch": {"launches"}, "collect": {"foreman", "review", "reviews"}, "prepare": {"foreman", "review", "runcards"},
+          "launch_builder": {"launches", "orient_unit", "runcards"}, "interrupt": {"launches", "foreman"}, "clean": set(),
           "orient": {"orient", "orient_unit"},
           "runcard": {"runcards", "launches", "driver"}, "init": set(), "doctor": set(), "builder_token": set(), "inbox": {"state", "driver"},
           "driver": {"driver", "runcards", "launches"}, "register": set()}
