@@ -25,6 +25,7 @@
   "reviewers": {
     "spec": [
       "design",
+      "zoom-out",
       "readiness"
     ],
     "plan": [
