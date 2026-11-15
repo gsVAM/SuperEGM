@@ -28,7 +28,9 @@ def entries_of(world):
    [{"reach": "forged", "later": "easy"}, {"critical": "no", "later": "easy", "verified": "confirmed"}]),
   ("# S\n\n```markdown\n## Triage\nUnblock:\n- reach: agent\n```\n\n## Triage\n\nUnblock:\n- verified: refuted\nprose\n- reach: config\n\n## Units\n",
    [{"verified": "refuted"}]),
-  ("# S\n\n## Other\n\n## Triage\n\nUnblock:\n- reach: agent\n\n## Units\n", None),
+  ("# S\n\n## Other\n\n## Triage\n\nUnblock:\n- reach: agent\n\n## Units\n", [{"reach": "agent"}]),
+  ("# S\n\n## Triage\n\nUnblock:\n- reach: agent\n\n## Other\n\n## Triage\n\nUnblock:\n- reach: config\n", [{"reach": "agent"}]),
+  ("# S\n\n## 1. Triage\n\nUnblock:\n- reach: agent\n\n## Units\n", None),
   ("# S\n\n## Units\n", None),
 ])
 def test_triage_section_parses_the_unblock_run(text, patterns):
@@ -88,7 +90,7 @@ def test_skills_offer_and_check_the_section(path, phrases):
 
 
 @pytest.mark.parametrize("path, phrases", [
-  ("agents/structural.md", ["misplaced Triage heading", "first H2 of the document", "freezes triage off"]),
+  ("agents/structural.md", ["misplaced Triage heading", "## 1. Triage", "## Triage ##", "freezes triage off"]),
   ("agents/design.md", ["not safe when it names", "A field left out is not by itself a defect"]),
 ])
 def test_review_agents_name_the_misplaced_heading_and_the_named_value_test(path, phrases):
@@ -130,3 +132,10 @@ def test_a_pair_that_is_no_field_value_is_refused_with_its_line(section, line):
 def test_a_fenced_block_inside_the_section_is_prose(section, patterns):
   """A fenced `Unblock:` is ignored, and a fence ends the run; a fenced H2 does not end the section."""
   assert approve_spec.triage_patterns("# S\n\n## Triage\n\n" + section + "\n## Units\n") == patterns
+
+
+def test_a_malformed_section_after_another_h2_is_refused_with_its_line():
+  """The section is the first unfenced H2 exactly `Triage`, wherever it stands: a bad pattern there is refused."""
+  with pytest.raises(approve_spec.core.HandoffError) as error:
+    approve_spec.triage_patterns("# S\n\n## Intent\n\n## Triage\n\nUnblock:\n- reach: remote\n\n## Units\n")
+  assert str(error.value).startswith("approve-spec: - reach: remote: ")
