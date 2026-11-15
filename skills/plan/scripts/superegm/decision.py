@@ -61,9 +61,10 @@ def check_amend(st, text: str, reason: str) -> None:
   path = st.path("unit", h["unit"])
   lines = core.body.sections(core.read_text(path)).get("Interfaces", []) if path.exists() else []
   name = h["name"].split("(")[0]  # cut at its `(` as amendments_of and body.consumes read it
-  # a name the unit declares: it opens a `- Produces:` line, as `scan` matches the identifier before `(`
-  declared = re.compile(rf"- Produces: `?{re.escape(name)}(?![\w.])")
-  if not any(declared.match(line) for line in lines):
+  # a name the unit declares: one `scan` takes from a `- Produces:` line (the identifier, a subcommand, a store key path)
+  from superegm import scan
+  declared = {n.split("(")[0] for line in lines if line.startswith("- Produces: ") for n in scan.names_of(line[12:])}
+  if name not in declared:
     raise Refusal(f"decision: amend names {h['unit']} {name}, not in {h['unit']}'s Interfaces lines")
 
 # The one ruling grammar (spec section 13.2, amendment 5): a comment's first line in one of these forms and no other.
