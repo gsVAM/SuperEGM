@@ -199,7 +199,6 @@ def test_judges_never_amend(world):
   did = opened(world, card, IFACE + OPTS)
   decision = foreman_of(s, "U02")["decisions"][-1]
   assert "amend" in decision["options"]
-  s.path("units").write_text(json.dumps({"units": {"U02": {"decisions": [decision]}}}), encoding="utf-8")
   assert "- amend\n" not in judges.decision_question(s, "U02", did)
   units = json.loads(s.path("state").read_text(encoding="utf-8"))["units"]
   assert judges.fan_out(s, "U01") == sorted(units[u]["number"] for u in ("U02", "U03"))  # every filed consumer of U01's names
@@ -217,10 +216,8 @@ def test_the_judges_decision_question_drops_a_builders_amend_line(world):
   from superegm import judges
   card, s = world_on(world)
   did = opened(world, card, IFACE + "**Builder status:** BLOCKED\nWhich?\n- (a) amend\n- (b) return null\n")
-  decision = foreman_of(s, "U02")["decisions"][-1]
-  s.path("units").write_text(json.dumps({"units": {"U02": {"decisions": [decision]}}}), encoding="utf-8")
-  text = judges.decision_question(s, "U02", did)
-  assert "amend" not in text and "(b) return null" in text
+  [q] = judges.parse_questions(judges.decision_question(s, "U02", did))  # the panel's own parser takes it whole
+  assert q["options"] == {"a": "return null", "b": "stop the unit"}
 
 
 def test_a_by_hand_amend_not_offered_is_refused_as_amends_own(world):
