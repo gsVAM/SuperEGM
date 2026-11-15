@@ -251,7 +251,9 @@ def test_review_open_cycles(world):
   spec, cid, again = opened(world, reviewers="design")      # a re-typed skill resumes the open cycle
   assert again == rid and rjson(world, rid)["reviewers"] == ["design", "zoom-out"]   # the cycle's own panel stays
   assert rjson(world, rid)["panels"] == [{"from_round": 1, "reviewers": ["design"]}]   # the resume narrowed it from round 1
-  rounds(world, rid, cid, [HIGH(n) for n in range(1, 6)])
+  assert record(world, rid, 1, "zoom-out", [], cid)[0] == 1                            # zoom-out is off the narrowed panel
+  for n in range(1, 6):
+    assert record(world, rid, n, "design", HIGH(n), cid)[0] == 0
   assert status(world, rid, cid)[0] == 2 and rule(world, rid, "stop", cid)[0] == 0
   _, cid, rid2 = opened(world)
   assert rid2 == f"spec-{SLUG}-c2" and rjson(world, rid2)["cycle"] == 2                 # stop closed c1

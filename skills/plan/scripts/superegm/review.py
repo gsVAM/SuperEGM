@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line (U36).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest: the one review loop (spec section 8)."""
 
@@ -196,7 +196,7 @@ def keep_for_unit(findings: list[dict], unit: str) -> list[dict]:
 
 
 def derive_what_ran(review: dict, rnd: dict, entry: dict | None) -> str:
-  """`completed` when every panel reviewer has a record for the round (an empty findings file counts;
+  """`completed` when every reviewer of the round's panel (`panel_at`) has a record for the round (an empty findings file counts;
   the Astra lane's `--not-run` counts, and the lane is excused after two incomplete runs) and, on a
   head, the unit's `rounds[]` entry is `posted`; else `not run (<reason>)`, the reason being the
   entry's own `not run` reason, its phase, or the first reviewer without a record."""
@@ -207,7 +207,7 @@ def derive_what_ran(review: dict, rnd: dict, entry: dict | None) -> str:
     if entry.get("phase") != "posted":
       return f"not run (phase {entry.get('phase')})"
   records = rnd.get("reviewers") or {}
-  for reviewer in review["reviewers"]:
+  for reviewer in panel_at(review, rnd.get("round", 1)):  # a round dict built bare (a test's) reads round 1's panel
     record = records.get(reviewer)
     if reviewer == "astra":
       if record is None and review.get("astra_incomplete", 0) < 2:
@@ -573,7 +573,7 @@ def record_round(args) -> int:
   elif external:  # a PR thread's author (`review ingest`), outside the panel
     if kind not in ("head", "spec"):
       raise core.HandoffError(f"review record: {reviewer} is accepted on a head or a spec only")
-  elif reviewer not in review["reviewers"]:
+  elif reviewer not in panel_at(review, n):  # the round's own panel: a narrowed one drops a reviewer from its round on
     raise core.HandoffError(f"review record: {reviewer} is not on the panel")
   if kind == "plan" and args.sha256:
     raise core.HandoffError("review record: --sha256 is refused for kind plan")
