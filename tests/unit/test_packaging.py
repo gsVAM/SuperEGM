@@ -99,6 +99,19 @@ def test_runtime_bundle_ships_exactly_the_kept_files(source: Path, tmp_path: Pat
     assert hits == [], (path, hits)
 
 
+def test_bundle_missing_a_source_module_fails(source: Path, tmp_path: Path) -> None:
+  # a module present in the source tree but absent from the bundle is caught
+  (source / "skills/plan/scripts/superegm/extra_mod.py").write_text("")
+  first, archive = build(source, tmp_path / "first")
+  with zipfile.ZipFile(archive) as bundle:
+    names = set(bundle.namelist())
+  expected = package_modules(source)
+  assert "skills/plan/scripts/superegm/extra_mod.py" in expected
+  assert expected <= names
+  packed = {p for p in names if p.endswith(".py")} - {"skills/plan/scripts/superegm/extra_mod.py"}
+  assert packed != package_modules(source)  # the bundle check fails when a source module is left out
+
+
 @pytest.mark.parametrize("skill,base,facet", PALETTES)
 def test_skill_icon_palette(skill: str, base: str, facet: str) -> None:
   svg = ElementTree.parse(ROOT / "skills" / skill / "assets/icon.svg").getroot()
