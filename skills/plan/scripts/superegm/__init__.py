@@ -943,6 +943,7 @@ def load_config(repo_root: Path) -> dict:
     unknown = set(data) - set(DEFAULT_CONFIG)
     if unknown:
       raise HandoffError(f"{path}: unknown keys {sorted(unknown)}")
+    registered = {k: v for m in _MODULES.values() for k, v in m.CONFIG_DEFAULTS.items()}  # every module's keys (U46)
     for key, value in data.items():
       if key == "labels":
         unknown = set(value) - set(DEFAULT_CONFIG["labels"])
@@ -951,7 +952,7 @@ def load_config(repo_root: Path) -> dict:
         config["labels"].update(value)
       elif key == "brainstorm" and isinstance(value, dict) and set(value) - set(DEFAULT_CONFIG["brainstorm"]):
         raise HandoffError(f"{path}: unknown brainstorm keys {sorted(set(value) - set(DEFAULT_CONFIG['brainstorm']))}")
-      elif key in ("astra", "ingest", "foreman", "builder", "reviewers", "brainstorm") and isinstance(value, dict):
+      elif (key in ("reviewers", "brainstorm") or isinstance(registered.get(key), dict)) and isinstance(value, dict):
         config[key] = {**config[key], **value}
       else:
         config[key] = value
