@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the judges subcommand (spec section 13.1) and `judges question`, the
-# leavemealone-mode question renderer of section 13.2 (U11); the cap question names a spec review's scope (U19); the default members read from `DEFAULT_CONFIG` (U28); a `launch <n>` or `closed <n>` question renders its pending decision's options, a stall's heading its facts (U31); its own `judges` config key, moved from `__init__` (U32).
+# leavemealone-mode question renderer of section 13.2 (U11); the cap question names a spec review's scope (U19); the default members read from `DEFAULT_CONFIG` (U28); a `launch <n>` or `closed <n>` question renders its pending decision's options, a stall's heading its facts (U31); its own `judges` config key, moved from `__init__` (U32); the panel's instructions section rendered once at open by its parent card's skill, placed last in each brief and copied to each member's record (U38).
 
 """superegm judges open|record|diff|verdict|question: the judge panel over a question file, and the
 question file rendered from the record at a decision point."""
@@ -10,6 +10,7 @@ import re
 from pathlib import Path
 
 import superegm as core
+from superegm import instructions
 
 WRITES = frozenset(["judges", "runcards", "questions"])  # the store kinds this subcommand writes
 CONFIG_DEFAULTS = {"judges": {"min_vendors": 1,  # its own config key (U32)
@@ -202,7 +203,29 @@ def render_brief(panel: dict, questions: list[dict], round_no: int, open_ids: li
       lines += ["", f"### Round {rnd}, {judge}", text.rstrip("\n")]
     for diff in diffs:
       lines += ["", diff.rstrip("\n")]
-  return "\n".join(lines) + "\n"
+  section = (panel.get("instructions") or {}).get("local", {}).get("text", "")
+  return "\n".join(lines) + "\n" + (f"\n{section}" if section else "")  # the stored section, last in every round's brief
+
+
+def render_panel(store, parent: dict | None) -> dict:
+  """The panel's `instructions`: `{lane: {manifest, text}}` for `local` and `astra`, the `judges` section rendered once, by
+  the parent card's skill: a `review-spec` parent renders its artifact as the spec at `HEAD` (its card can carry a legacy
+  store's handoff id, which is not the spec's); any other parent its card's handoff's frozen list; no parent, or a parent
+  with no handoff, nothing."""
+  if parent is None:
+    manifest, text = [], ""
+  elif parent["skill"] == "review-spec":
+    manifest, text = instructions.render(store, "judges", root=core.git_toplevel(Path(parent["artifact"])))
+  else:
+    handoff = parent.get("handoff", store.handoff_id)
+    manifest, text = instructions.render(store, "judges", handoff_id=handoff) if handoff else ([], "")
+  return {lane: {"manifest": manifest, "text": text} for lane in ("local", "astra")}
+
+
+def lane_manifest(panel: dict, judge: str) -> list:
+  """The manifest stored on the panel for `judge`'s lane (`astra` for the runner member); `[]` for a panel opened before U38."""
+  lane = "astra" if panel["judges"][judge]["via"] == "runner" else "local"
+  return ((panel.get("instructions") or {}).get(lane) or {}).get("manifest", [])
 
 
 def cmd_open(args, store) -> int:
@@ -238,7 +261,8 @@ def cmd_open(args, store) -> int:
   rid = args.runcard or core.open_runcard(store, "judges", str(question), parent=args.parent)
   panel = {"id": pid, "question": str(question), "question_sha256": core.sha256_file(question),
            "evidence": evidence, "judges": members, "min_vendors": min_vendors, "runcard": rid,
-           "parent": args.parent, "opened_at": core.now_iso(), "rounds": {}}
+           "parent": args.parent, "opened_at": core.now_iso(), "rounds": {},
+           "instructions": render_panel(store, parent)}
   core.atomic_write(folder / "question.md", question.read_bytes())
   write_json(folder / "panel.json", panel)
   core.atomic_write(folder / "round-1" / "brief.md",
@@ -367,13 +391,14 @@ def cmd_record(args, store) -> int:
   else:
     reason = args.not_run
   if reason:
-    rounds[judge] = {"not_run": reason, "recorded_at": core.now_iso()}
+    rounds[judge] = {"not_run": reason, "recorded_at": core.now_iso(), "instructions": lane_manifest(panel, judge)}
     core.journal(store, f"judges {pid}: round {n} {judge} not run ({reason})")
     print(f"not run ({reason})")
   else:
     core.atomic_write(folder / f"round-{n}" / f"{judge}.md", text)
     rounds[judge] = {"isolation": isolation, "model": model, "effort": effort,
-                     "options": {q: a["option"] for q, a in answers.items()}, "recorded_at": core.now_iso()}
+                     "options": {q: a["option"] for q, a in answers.items()}, "recorded_at": core.now_iso(),
+                     "instructions": lane_manifest(panel, judge)}
     if args.verdict:
       rounds[judge]["saw"] = saw
     core.journal(store, f"judges {pid}: round {n} {judge} recorded ({isolation})")
