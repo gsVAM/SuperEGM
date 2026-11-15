@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03); the review loop and approve-spec (U04); the `acceptable:` line (U35); the by-hand card and the lineless path (U32).
+# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03); the review loop and approve-spec (U04); the `acceptable:` line (U35); the by-hand card and the lineless path (U32); an approval entry's `rounds` (U36).
 
 """U04: the review loop (`review open|record|settle|status|rule`) and `approve-spec` (spec section 8)."""
 
@@ -753,7 +753,7 @@ def test_approve_spec_asks_then_commits_by_path(world):
 def test_approve_spec_appends_history_entries_and_opens_one_handoff_per_opening(world):
   spec, cid, rid = converged_spec(world); assert approve(world, spec, cid, "--yes")[0] == 0
   rec, sha = approval(world), hashlib.sha256(spec.read_bytes()).hexdigest()
-  assert list(rec) == ["entries", "path"] and [list(e) for e in rec["entries"]] == [["approved_at", "commit", "escalated", "handoff_id", "kind", "review", "runcard", "sha256", "voided_by"]]
+  assert list(rec) == ["entries", "path"] and [list(e) for e in rec["entries"]] == [["approved_at", "commit", "escalated", "handoff_id", "kind", "review", "rounds", "runcard", "sha256", "voided_by"]]
   first = rec["entries"][0]
   assert (first["sha256"], first["kind"], first["handoff_id"]) == (sha, "opening", f"2026-11-03-sample-de-{sha[:6]}")
   assert json.loads(store(world.repo).path("handoffs", first["handoff_id"]).read_text(encoding="utf-8")) == {"id": first["handoff_id"], "spec": str(spec), "opened_at": first["approved_at"], "closed_at": None}
