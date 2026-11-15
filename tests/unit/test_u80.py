@@ -51,3 +51,18 @@ def test_launch_reason(since_last_launch, reason):
     foreman["rulings"].append({"decision": "q1", "ruling": "(a) — go", "posted_at": LATER})
   assert launch_builder.launch_reason(launches, foreman) == reason
 
+
+@pytest.mark.parametrize("value, recorded", [(1234, 1234), (12.5, 12.5), (True, None), ("1234", None), (None, None)])
+def test_duration_ms_present_or_absent(world, monkeypatch, spawn_fake, value, recorded):
+  # the result file's duration is kept only as a real number
+  s, card, hid, _ = tb.seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0
+  assert world.run("launch-builder", "--unit", tb.UNIT, "--round", 1, "--runcard", card)[0] == 0
+  entry = tb.launches_of(s)[0]
+  Path(entry["result_file"]).write_text(json.dumps({"duration_ms": value}), encoding="utf-8")
+  Path(entry["result_file"] + ".exit").write_text("0\n", encoding="utf-8")
+  assert world.run("record-launch", "--unit", tb.UNIT, "--exit", 0, "--runcard", card)[0] == 0
+  latest = tb.launches_of(s)[-1]
+  assert latest.get("duration_ms", None) == recorded and (("duration_ms" in latest) is (recorded is not None))
+
