@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes and the one stamp formatter and parser (U31); `discover()`, CORE_CONFIG and SUBCOMMANDS and DEFAULT_CONFIG derived from the modules (U32); the `Tier:` field, `builder.tiers`, `tier_pair` and `unit_tier` (U33); the brainstorm.team key (U34).
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes and the one stamp formatter and parser (U31); `discover()`, CORE_CONFIG and SUBCOMMANDS and DEFAULT_CONFIG derived from the modules (U32); the `Tier:` field, `builder.tiers`, `tier_pair` and `unit_tier` (U33); the brainstorm.team key (U34); the one-level merge of every registered object default and the builder defaults read from the registry (U46).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
@@ -934,7 +934,10 @@ def parse_remote_url(url: str):
 
 
 def load_config(repo_root: Path) -> dict:
-  """Read `.superegm/config.json`; defaults when missing; unknown keys stop."""
+  """Read `.superegm/config.json`; defaults when missing; unknown keys stop.
+
+  A key whose module `CONFIG_DEFAULTS` default is an object (and `reviewers`, `brainstorm`, `labels`) merges one level, `{**default, **file}`: a partial file value keeps the default's sibling keys, a nested object or list inside it is replaced whole.
+  """
   config = json.loads(json.dumps(DEFAULT_CONFIG))
   path = repo_root / ".superegm" / "config.json"
   config["_source"] = str(path) if path.is_file() else "defaults (no .superegm/config.json)"
@@ -943,6 +946,7 @@ def load_config(repo_root: Path) -> dict:
     unknown = set(data) - set(DEFAULT_CONFIG)
     if unknown:
       raise HandoffError(f"{path}: unknown keys {sorted(unknown)}")
+    registered = {k: v for m in _MODULES.values() for k, v in m.CONFIG_DEFAULTS.items()}  # every module's keys (U46)
     for key, value in data.items():
       if key == "labels":
         unknown = set(value) - set(DEFAULT_CONFIG["labels"])
@@ -951,7 +955,7 @@ def load_config(repo_root: Path) -> dict:
         config["labels"].update(value)
       elif key == "brainstorm" and isinstance(value, dict) and set(value) - set(DEFAULT_CONFIG["brainstorm"]):
         raise HandoffError(f"{path}: unknown brainstorm keys {sorted(set(value) - set(DEFAULT_CONFIG['brainstorm']))}")
-      elif key in ("astra", "ingest", "foreman", "builder", "reviewers", "brainstorm") and isinstance(value, dict):
+      elif (key in ("reviewers", "brainstorm") or isinstance(registered.get(key), dict)) and isinstance(value, dict):
         config[key] = {**config[key], **value}
       else:
         config[key] = value
@@ -990,8 +994,7 @@ def load_config(repo_root: Path) -> dict:
   builder = config["builder"]
   if isinstance(builder, dict) and isinstance(builder.get("profile_dir"), str):
     builder["profile_dir"] = str(Path(builder["profile_dir"]).expanduser())
-  app = builder.setdefault("app", None) if isinstance(builder, dict) else None
-  isinstance(builder, dict) and builder.setdefault("stall_minutes", 30)  # a file written before U31 lacks it
+  app = builder.get("app") if isinstance(builder, dict) else None  # the builder's other defaults come from launch_builder.CONFIG_DEFAULTS (U46)
   if app is not None:
     app = {"private_key_env": "SUPEREGM_APP_KEY", **app} if isinstance(app, dict) else app
     if not isinstance(app, dict) or set(app) != {"app_id", "slug", "private_key_env"} \
@@ -1001,8 +1004,6 @@ def load_config(repo_root: Path) -> dict:
       raise HandoffError(f"{path}: builder.app must be null or {{app_id: <int>, slug: <slug>, private_key_env: <name>}}")
     builder["app"] = app
   if isinstance(builder, dict):
-    for key, default in (("plugins", []), ("mcp", {}), ("max_subagent_calls", 12)):
-      builder.setdefault(key, default)  # a file written before U27 lacks them
     tools = builder.get("allowed_tools")
     if not isinstance(tools, list) or not all(isinstance(t, str) for t in tools):
       raise HandoffError(f"{path}: builder.allowed_tools must be a list of strings")
@@ -1015,7 +1016,7 @@ def load_config(repo_root: Path) -> dict:
     cap = builder["max_subagent_calls"]
     if isinstance(cap, bool) or not isinstance(cap, int) or cap < 1:
       raise HandoffError("config: builder.max_subagent_calls: a positive integer")
-    tiers = builder.setdefault("tiers", {})  # the defaults' rows unless the file names its own (U33)
+    tiers = builder["tiers"]  # the defaults' rows unless the file names its own (U33)
     if not isinstance(tiers, dict) or set(tiers) - {"difficult", "easy"}:
       raise HandoffError(f"{path}: builder.tiers keys must be difficult or easy")
     for tier, pair in tiers.items():
