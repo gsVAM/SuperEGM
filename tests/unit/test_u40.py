@@ -242,6 +242,8 @@ def deferred_round(world, tmp_path, monkeypatch, cap_one=False):
   code, out = post(world, w)
   assert (code, out.strip()) == (0, "posted clean"), out
   assert [r["fid"] for r in foreman(w)["followups"]] == [F1]
+  world.gh.issues.setdefault(ISSUE, {"number": ISSUE, "id": 9002, "title": "U01", "body": "", "labels": [],
+                                     "state": "open", "state_reason": None})  # what the undo's stopped-label check reads
   return w
 
 
@@ -317,3 +319,48 @@ def test_undo_on_latest_round(world, tmp_path, monkeypatch, at_cap):
   record(world, w.st, w.rid, 2, w.head, child2, {"change-review": M("change-review", n=2, claim="a forged payload reaches the hook")})
   eligible_next_round = eligible(world, w, 2).split()
   assert eligible_next_round == []
+
+
+@pytest.mark.parametrize("case", [
+    "deferral of an earlier round", "foreman.stopped after a round with a deferred medium",
+    "issue labelled stopped", "pull request merged, issue open", "pull request closed",
+])
+def test_undo_refusals_keep_the_followup(world, tmp_path, monkeypatch, case):
+  """`decision rule` refuses the undo on a deferral of an earlier round, a stopped unit (`foreman.stopped` or the
+  stopped label) and a merged or closed pull request: nothing recorded, the follow-up row kept, and the live `upheld`,
+  dropped by `binding_rulings(..., deferred=)`, never reaches `collect`, the builder prompt or a later round."""
+  from test_foreman import PR
+  from superegm.decision import binding_rulings, overridden_comments, recorded_rulings
+  w = deferred_round(world, tmp_path, monkeypatch)
+  if case == "deferral of an earlier round":  # round 2 reviewed and posted on the moved head
+    did2, child2, _ = next_round(world, w, 2)
+    record(world, w.st, w.rid, 2, w.head, child2, {"change-review": M("change-review", n=2, sev="low", claim="c")})
+    code, out = post(world, w, 2, did2, child2)
+    assert code == 0, out
+  elif case.startswith("foreman.stopped"):
+    data = foreman(w)
+    data["stopped"] = {"by": "owner", "reason": "enough", "at": "2026-11-03T09:00:00Z"}
+    save_foreman(w, data)
+  elif case == "issue labelled stopped":
+    world.gh.issues[ISSUE]["labels"].append(w.st.config["labels"]["stopped"])
+  elif case == "pull request merged, issue open":
+    world.gh.prs[PR].update({"state": "MERGED", "mergedAt": "2026-11-03T08:00:00Z"})
+  else:
+    world.gh.prs[PR]["state"] = "CLOSED"
+  followups_before, round_before = foreman(w)["followups"], round_text(w, 1)
+  owner_comment(world, 77, UPHELD)
+  code, out = rule_posted(world, w, f"{F1} finding upheld", 77)
+  followups = foreman(w)["followups"]
+  assert code == 1 and followups == followups_before, out
+  assert round_text(w, 1) == round_before and not any(r.get("kind") == "undo" for r in foreman(w)["rulings"])
+  comments = world.gh.comments[ISSUE]
+  recorded = recorded_rulings(foreman(w))
+  assert binding_rulings(comments, ["owner"], recorded, deferred=[F1]) == []
+  overridden = overridden_comments(comments, ["owner"], foreman(w))
+  assert overridden == {77: None}  # the builder prompt drops the live upheld
+  if case == "deferral of an earlier round":  # a later round's `collect` reads the live comment and carries nothing
+    upheld = f"### issue #{ISSUE} comment 77 by owner at 2026-11-03T10:00:00Z\n{UPHELD}"
+    next_round(world, w, 3, comments=upheld)
+    claims = [f["claim"] for f in json.loads(round_text(w, 3))["reviewers"]["foreman"]["findings"]]
+    collect_blocking_fids = [c.split()[1].rstrip(":") for c in claims if c.startswith("upheld ")]
+    assert F1 not in collect_blocking_fids, claims
