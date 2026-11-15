@@ -6,7 +6,7 @@
 # ingest once before the refusals, the refusal of an unsettled external finding, an external finding's carried copies
 # as one escalated pair discharged by its latest copy alone, and a re-approval of the same cycle reading that cycle
 # again and keeping the replaced entry's unnamed pairs (U26); `--amend-units` typed by hand opens and closes its own
-# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units` (U36).
+# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units`, and a hand-written prior approval read as `since` 0 (U36).
 
 """superegm approve-spec: record the owner's approval of a converged spec (spec section 8)."""
 
@@ -233,7 +233,8 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   # the cycles past the last approval's; a re-approval of that same cycle (its bytes unmoved, U26: a thread ingested
   # and escalated after the approval) reads that cycle again and keeps the replaced entry's pairs the `## Units`
   # section does not name (that entry may cover earlier cycles too), since `graph` reads the latest entry's list alone
-  since = int(last["review"].rsplit("-c", 1)[1]) if last and last.get("review") else 0
+  suffix = last["review"].rsplit("-c", 1)[-1] if last and last.get("review") else ""
+  since = int(suffix) if suffix.isascii() and suffix.isdigit() else 0  # a hand-written approval's review has no `-c<n>` (U36)
   if last and last.get("review") == rid:
     named = units_section(core.read_text(spec))
     kept = [pair for pair in last.get("escalated") or [] if pair not in named]
