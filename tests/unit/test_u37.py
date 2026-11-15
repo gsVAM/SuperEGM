@@ -401,3 +401,120 @@ def test_launch_builder_refuses_a_card_of_another_handoff(world, monkeypatch):
   code, out = world.run("launch-builder", "--handoff", other, "--unit", UNIT, "--round", 1, "--runcard", card_id)
   assert code == 1 and out.startswith("superegm: launch-builder: ") and f"opened under handoff {hid}" in out, out
   assert not list((s.root / other).rglob(f"{UNIT}_r1_prompt.md"))
+
+
+# ---------------------------------------------- round 3: the review's findings
+
+
+@pytest.mark.parametrize("bad", ["/etc/rules.md", "../rules.md", "docs/../../rules.md", "rules\x00.md"])
+def test_instructions_key_refuses_a_path_outside_the_repository(world, bad):
+  """A `file` that is absolute, climbs out with `..` or holds a NUL is refused by both readers, naming the key."""
+  commit_file(world, RULES, "Run the suite.\n")
+  configure(world, [{"file": bad, "to": ["reviewers"]}])
+  spec, cid, rid = converged_spec(world)
+  code, err = approve(world, spec, cid, "--yes")
+  assert code == 1 and "instructions" in err and "Traceback" not in err, err
+  git(["add", "-A"], world.repo)
+  git(["commit", "-qm", "config at HEAD", "--allow-empty"], world.repo)
+  code, err = world.run("instructions", "--role", "reviewers", "--spec", str(spec), "--review", rid, "--round", 1, "--runcard", cid)
+  assert code == 1 and "instructions" in err and "Traceback" not in err, err
+
+
+def test_head_render_refuses_a_file_not_utf8(world, tmp_path):
+  """The HEAD path refuses a file that is not UTF-8, naming it."""
+  from superegm.instructions import render
+  root = bare_repo(tmp_path, {".superegm/config.json": json.dumps({"instructions": [{"file": "bad.md", "to": ["judges"]}]}),
+                              "bad.md": b"\xff\xfe rules\n"})
+  with pytest.raises(superegm.HandoffError, match="bad.md is not UTF-8"):
+    render(hstore(world), "judges", root=root)
+
+
+def test_head_render_reads_one_commit(world, tmp_path, monkeypatch):
+  """The config and the files come from the one commit `HEAD` named when the render began, even when `HEAD` moves
+  between the reads."""
+  from superegm import instructions
+  root = bare_repo(tmp_path, {".superegm/config.json": json.dumps({"instructions": [{"file": "a.md", "to": ["reviewers"]}]}),
+                              "a.md": "First.\n"})
+  real, moved = instructions.blob, []
+
+  def blob(r, ref, rel):
+    data = real(r, ref, rel)
+    if rel == instructions.CONFIG and not moved:   # another process commits between the config read and the files'
+      (root / "a.md").write_text("Second.\n", encoding="utf-8")
+      git(["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qam", "moved"], root)
+      moved.append(True)
+    return data
+  monkeypatch.setattr(instructions, "blob", blob)
+  manifest, text = instructions.render(hstore(world), "reviewers", root=root)
+  assert moved and "First." in text and "Second." not in text
+  assert manifest == [{"file": "a.md", "sha": blob_sha(b"First.\n")}]
+
+
+@pytest.mark.parametrize("argv, says", [
+  (["--spec", "SPEC"], "--spec requires --review and --round"),
+  (["--spec", "SPEC", "--review", "RID"], "--spec requires --review and --round"),
+  (["--spec", "SPEC", "--review", "RID", "--round", 0], "--round"),
+  (["--spec", "SPEC", "--review", "RID", "--round", -1], "--round"),
+  (["--handoff", "HID", "--review", "RID"], "--review and --round go with --spec"),
+  (["--handoff", "HID", "--round", 1], "--review and --round go with --spec"),
+])
+def test_instructions_refuses_misplaced_flags(world, argv, says):
+  """`--spec` needs `--review` and a `--round` of 1 or more; `--review` and `--round` never go with `--handoff`;
+  nothing is written."""
+  commit_file(world, RULES, "Run the suite.\n")
+  configure(world, [{"file": RULES, "to": ["reviewers"]}])
+  git(["commit", "-qam", "config"], world.repo)
+  spec, cid, rid = converged_spec(world)
+  assert approve(world, spec, cid, "--yes")[0] == 0
+  hid = entries_of(world)[-1]["handoff_id"]
+  used = cid
+  if "--handoff" in argv:
+    seed_handoff(world, spec)
+    used = card(world, spec, "review-plan", handoff=hid)
+  names = {"SPEC": str(spec), "RID": rid, "HID": hid}
+  argv = [names.get(a, a) if isinstance(a, str) else a for a in argv]
+  st = hstore(world)
+  before = sorted(p for p in st.root.parent.rglob("*") if p.is_file())
+  code, out = world.run("instructions", "--role", "reviewers", *argv, "--runcard", used, card=None)
+  assert code == 1 and says in out, out
+  assert sorted(p for p in st.root.parent.rglob("*") if p.is_file()) == before
+
+
+def test_approval_repairs_an_edited_store_copy(world):
+  """A store copy edited after approval is rewritten from the approval commit's bytes at the next approval."""
+  from superegm import approve_spec
+  text = "Run the suite.\n"
+  commit_file(world, RULES, text)
+  configure(world, [{"file": RULES, "to": ["builder"]}])
+  spec, cid, rid = converged_spec(world)
+  assert approve(world, spec, cid, "--yes")[0] == 0
+  sha12, st = blob_sha(text.encode()), hstore(world)
+  st.path("instructions", sha12).write_text(json.dumps({"file": RULES, "sha": sha12, "text": "Skip the suite.\n"}),
+                                            encoding="utf-8")
+  with pytest.raises(superegm.HandoffError, match=RULES):
+    approve_spec.read_copy(st, RULES, sha12)
+  code, out = approve(world, spec, cid, "--yes")
+  assert code == 0, out
+  assert approve_spec.read_copy(hstore(world), RULES, sha12) == text
+
+
+def test_freeze_names_the_ref_it_read(world):
+  """A file absent from `HEAD` before the approval commit is refused as absent at HEAD."""
+  (world.repo / RULES).parent.mkdir(parents=True, exist_ok=True)
+  (world.repo / RULES).write_text("Run the suite.\n", encoding="utf-8")   # in the tree, never committed
+  configure(world, [{"file": RULES, "to": ["builder"]}])
+  spec, cid, rid = converged_spec(world)
+  code, out = approve(world, spec, cid, "--yes")
+  assert code == 1 and f"{RULES} is absent at HEAD" in out, out
+
+
+def test_a_card_without_a_handoff_renders_nothing(world):
+  """A card render with no handoff id (a flat 1.0 store's launch) reads no `HEAD`: it stores and returns nothing."""
+  from superegm.instructions import render_stored
+  configure(world, [{"file": "missing.md", "to": ["builder"]}])
+  git(["add", "-A"], world.repo)
+  git(["commit", "-qm", "config naming a file HEAD lacks"], world.repo)
+  spec, cid, rid = converged_spec(world)
+  st = hstore(world)
+  assert render_stored(st, "builder", card=cid, handoff_id=None, root=world.repo) == ([], "")
+  assert superegm.load_card(st, cid)["instructions"]["builder"]["local"] == {"approved_at": None, "manifest": [], "text": ""}
