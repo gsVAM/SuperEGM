@@ -25,6 +25,22 @@ def test_reject_invalid_tag(release: dict, tag: str) -> None:
         release["version_for_tag"](ROOT, tag)
 
 
+@pytest.mark.parametrize("tag", ["v1.2.1-pre.1", "v1.2.1-pre.12"])
+def test_accept_a_pre_tag(release: dict, tag: str, tmp_path: Path) -> None:
+    # spec 1.2.1 section 6.5 ships 1.2.1-pre.1; -rc and other suffixes stay refused above
+    for name in ("plugin.json", ".claude-plugin/plugin.json"):
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"version": tag[1:]}))
+    assert release["version_for_tag"](tmp_path, tag) == tag[1:]
+
+
+@pytest.mark.parametrize("tag", ["v1.2.1-pre.0", "v1.2.1-pre.01", "v1.2.1-pre"])
+def test_reject_a_bad_pre_tag(release: dict, tag: str) -> None:
+    with pytest.raises(ValueError, match="Tag must"):
+        release["version_for_tag"](ROOT, tag)
+
+
 def test_release_version_matches_source(release: dict) -> None:
     version = json.loads((ROOT / "plugin.json").read_text())["version"]
     assert release["version_for_tag"](ROOT, f"v{version}") == version
@@ -47,7 +63,7 @@ def test_prepare_one_superegm_archive(release: dict, tmp_path: Path) -> None:
     sums = (destination / "SHA256SUMS").read_text().splitlines()
     assert len(sums) == 1
     digest, name = sums[0].split("  ")
-    assert name == f"superegm-{version}.zip" == "superegm-1.2.0.zip"
+    assert name == f"superegm-{version}.zip" == "superegm-1.2.1-pre.1.zip"
     archive = destination / name
     assert hashlib.sha256(archive.read_bytes()).hexdigest() == digest
     with zipfile.ZipFile(archive) as bundle:
@@ -55,7 +71,7 @@ def test_prepare_one_superegm_archive(release: dict, tmp_path: Path) -> None:
         assert json.loads(bundle.read("plugin.json"))["version"] == version
         assert {"skills/plan/scripts/superegm/__init__.py", "LICENSE-MIT"} <= set(bundle.namelist())
     notes = (destination / "RELEASE_NOTES.md").read_text()
-    assert notes.startswith("# SuperEGM 1.2.0\n") and "gsVAM/superegm" in notes
+    assert notes.startswith("# SuperEGM 1.2.1-pre.1\n") and "gsVAM/superegm" in notes
     assert f"Declared source: `{'a' * 40}`" in notes
     assert "Local source identity is caller-supplied and is not verified by this script." in notes
     assert "claude plugin marketplace add gsVAM/superegm" in notes and "claude plugin install superegm@superegm" in notes

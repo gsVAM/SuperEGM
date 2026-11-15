@@ -16,6 +16,7 @@ from pathlib import Path
 
 import superegm as core
 from superegm import body, orient
+from superegm.body import consumes
 from superegm.builder_token import key_path, tool
 from superegm.decision import deleted_rulings, overridden_comments, parse_form
 from superegm.launch import builder_email, builder_login, load_launches, terminal
@@ -41,7 +42,7 @@ CONFIG_DEFAULTS = {  # its own config key (U32)
 }
 INIT_STEP, DOCTOR_CHECKS = "", None  # its init lines stay numbered in init's own text (U32)
 SKILLS = frozenset(["wave"])  # the skills whose card this subcommand accepts
-PROMPT_COMMENT_RE = re.compile(r"^\*\*(Deviation \([a-z]+\)|Decision D\d+|Ruling):\*\*")
+PROMPT_COMMENT_RE = re.compile(r"^\*\*(Deviation \([a-z]+\)|Decision D\d+|Ruling|Seam):\*\*")
 # The PR body's DoD-results form (the orders): `### DoD <n>` then one fenced block per item.
 DOD_RESULT_RE = re.compile(r"^### DoD (\d+)\n```[^\n]*\n(.*?)\n```", re.M | re.S)
 ORDERS = Path(__file__).resolve().parents[4] / "skills/wave/references/builder_orders.md"
@@ -115,8 +116,10 @@ def prepare(args, card):
   reviews = core.gh_pages(f"repos/{repo}/pulls/{pr}/reviews") if pr else []
   audit = AUDIT_LINE.format(owner=record["launched"].get("by", "unknown"),  # a pre-upgrade mark records no login
                             runcard=args.runcard, unit=unit, handoff=st.handoff_id)
+  foreman_data = core.load_foreman(st, unit)
   text = prompt_text(number, unit, issue_body, orders_text(tools, launched_gh, builder_config["max_subagent_calls"]), orient_text, comments, reviews, pr, builder, audit, pr_block,
-                     spec_range=range_text, owners=config.get("owners") or [], foreman=core.load_foreman(st, unit))
+                     spec_range=range_text, owners=config.get("owners") or [], foreman=foreman_data,
+                     amendments=amendments_for(st, unit, issue_body))
   worktree = add_worktree(handoff.repo_root, st, unit, rnd, branch, pr)
   prompt = st.path("launches", f"{unit}_r{rnd}_prompt.md")
   core.atomic_write(prompt, text)
@@ -134,7 +137,8 @@ def prepare(args, card):
   # the one behaviour (amendment 10): the wrapper started detached, then the launch recorded `running`
   pid = start_detached(["/bin/sh", "-c", line], st.path("launches", f"{unit}_r{rnd}.log"), dict(os.environ))
   launches = load_launches(st, unit)
-  launches.append({"round": rnd, "worktree": str(worktree), "branch": branch, "started_at": core.now_iso(), "status": "running",
+  launches.append({"round": rnd, "reason": launch_reason(launches, foreman_data), "worktree": str(worktree), "branch": branch,
+                   "started_at": core.now_iso(), "status": "running",
                    "model": pair[0], "effort": pair[1], "tier": tier,  # the requested pair (U28), picked by the tier (U33)
                    "result_file": str(result), "prompt_sha256": core.sha256_file(prompt), "boot_id": core.boot_id(), "pid": pid, "command": line, "session_id": session_id})
   core.atomic_write(st.path("launches", unit), {"launches": launches})
@@ -452,15 +456,39 @@ def filed_body(state, unit):
   return body.fill_numbers(filed, numbers, (state.get("tracking") or {}).get("number"))
 
 
+def amendments_for(st, unit: str, body: str) -> list[dict]:
+  """Spec section 6.5: the handoff's recorded `amendments[]` for the unit's own Interfaces and for every
+  `(name, unit)` its Consumes lines list, in `at` order."""
+  path = st.path("state")
+  entries = (json.loads(core.read_text(path)) if path.is_file() else {}).get("amendments") or []
+  consumed = set(consumes(body))
+  return sorted((a for a in entries if a["unit"] == unit or (a["name"], a["unit"]) in consumed), key=lambda a: a["at"])
+
+
+def launch_reason(launches: list, foreman: dict) -> str:
+  """Spec section 6.5 "Measuring it": why this launch starts. `first` with no launch before it; else the latest
+  event after the previous launch started: a posted round (`review`) or a ruling on a point-3 comment, a BLOCKED or
+  NEEDS_CONTEXT report (`blocked`); with neither, a fresh relaunch after a stall or a setup failure (`harness`)."""
+  if not launches:
+    return "first"
+  since = launches[-1].get("started_at") or ""
+  points = {d["id"]: d for d in foreman["decisions"]}
+  events = [(r["posted_at"], "review") for r in foreman["rounds"] if r.get("phase") == "posted" and (r.get("posted_at") or "") > since]
+  events += [(r["posted_at"], "blocked") for r in foreman["rulings"] if (r.get("posted_at") or "") > since
+             and points.get(r["decision"], {}).get("point") == 3 and str(points[r["decision"]].get("source")).startswith("comment ")]
+  return max(events)[1] if events else "harness"
+
+
 def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr, builder, audit, pr_block=None, spec_range=None,
-                owners=(), foreman=None):
+                owners=(), foreman=None, amendments=()):
   """Exactly what spec section 3's anti-goal 3 allows: the issue body, the audit-trail line, the orders, the repository's
   PR block when `pr_block_file` is set, the unit's orient file, the frozen spec range the body cites, every Deviation
   comment, every Decision comment by a `config.owners` login, every Ruling comment by one in a form the one grammar
   reads (`parse_form`; the judges' post under the elephant's token kept, a typo or a stranger's dropped, one the
   unit's record overrides dropped, and a recorded one edited after its record, whatever the edit, shown as its
   record: `overridden_comments` of `foreman`; a recorded one deleted shown as its record in its place:
-  `deleted_rulings`), and from round 2 the foreman's reviews on the PR."""
+  `deleted_rulings`), the builder's own `**Seam:**` comments, the recorded amendments that apply (spec section 6.5),
+  and from round 2 the foreman's reviews on the PR."""
   overridden = overridden_comments(comments, list(owners), foreman or {})
 
   def keep(c):
@@ -470,6 +498,8 @@ def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr,
       return False
     if c["body"].startswith("**Deviation"):
       return True
+    if c["body"].startswith("**Seam:**"):  # the builder's own record of its seam, never another's
+      return c["user"]["login"] == builder
     return c["user"]["login"] in owners and (not c["body"].startswith("**Ruling:**") or parse_form(c["body"]) is not None
                                              or overridden.get(c["id"]) is not None)
   # an edited recorded ruling is shown as its record (spec section 13.2: a later comment never changes it)
@@ -482,6 +512,9 @@ def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr,
   parts.append(f"# Orient\n\n{orient}")
   if spec_range is not None:
     parts.append(f"# Spec range\n\n{spec_range}")
+  if amendments:  # spec section 6.5: the recorded interface amendments the unit's brief now includes
+    parts.append("# Amendments\n\n" + "\n".join(f"## {a['unit']} {a['name']} · comment {a['comment_id']} at {a['at']}\n{a['text']}\n"
+                                                for a in amendments))
   parts.append(f"# Comments on issue #{issue_number}\n\n" + "\n".join(f"## {c['user']['login']} · comment {c['id']}\n{c['body']}\n" for c in kept))
   if pr:
     kept = [r for r in reviews if r.get("body") and r["user"]["login"] != builder]

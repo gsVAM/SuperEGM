@@ -43,7 +43,7 @@ def test_portable_manifest_schema() -> None:
   # rejects the skills' disable-model-invocation frontmatter field.
   manifest = read_json("plugin.json")
   assert re.fullmatch(NAME_RE, manifest["name"])
-  assert re.fullmatch(r"\d+\.\d+\.\d+", manifest["version"])
+  assert re.fullmatch(r"\d+\.\d+\.\d+(-pre\.[1-9]\d*)?", manifest["version"])
 
 
 

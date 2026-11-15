@@ -1,6 +1,6 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema (interfaces, review focus, Steps, decisions with options), the plan file outside the store, the files and commands of the plan skill only; one directory per handoff (U32); the optional Tier field (U33); the `Waves:` line, the Size row's split candidate and the `width:` line (U29). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema (interfaces, review focus, Steps, decisions with options), the plan file outside the store, the files and commands of the plan skill only; one directory per handoff (U32); the optional Tier field (U33); the `Waves:` line, the Size row's split candidate and the `width:` line (U29); what a unit pins and what a Step holds (1.2.1 §6.5). -->
 
 # The plan file: schema, the unit's Steps, files and commands
 
@@ -76,9 +76,10 @@ Review focus (this unit)
 Steps
 1. Write the failing test `test_deliver_timeout` in `src/webhooks/deliver.test.ts`:
    ```ts
+   // a job whose endpoint times out is retried
    test("test_deliver_timeout", () => { expect(deliver(timedOut)).toEqual({retry: true}) })
    ```
-   Implement `deliver(job: Job) -> Result` in `src/webhooks/deliver.ts`.
+   Implement the retry on timeout in `src/webhooks/deliver.ts`.
 
 Decide before build
 - D1 Retry ceiling? options: (a) 5 attempts; (b) 10 attempts; owner: the owner; default: (a); blocking: no
@@ -112,20 +113,41 @@ There are no parts: a unit is one issue and one PR.
 
 ## 3. Writing a unit's Steps
 
+A unit pins, and the builder may not change on its own: the spec range,
+Scope, Blocked by, the Produces and Consumes lines and the DoD command; every
+name and signature another unit consumes, with the return shape where a
+consumer depends on it; the acceptance values (the spec's exact inputs and
+outputs, and the refusal and error wording it fixes); the security, money,
+atomicity, lock order and compatibility rules the spec states; the owner's
+decisions. What only the code can settle is the builder's. A unit's Scope
+lists the conftest and fixture files its tests may touch (for example
+`tests/conftest.py`), since the builder chooses the fixtures and the Scope
+check still applies.
+
 A Step is done when the builder can write exactly one reasonable thing from
 it: unambiguous, not complete. Each group is three parts:
 
 - The `Write` line, `` <n>. Write the failing test `<test name>` in `<test path>`: ``
   (the test name in its first backtick span, the test path in its second).
-- The fence: the test's signature (name, fixtures, any
-  `@pytest.mark.parametrize`), its assertions with the spec's exact values,
-  and arrange/act lines only where the signature and assertions do not
-  determine them. A full test body appears only for an algorithm or data the
+- The fence: the test's name, one comment line saying the behaviour, and
+  the assertions with the spec's exact values; when the spec gives several
+  cases, a `@pytest.mark.parametrize` table copied from the spec. It names an
+  exception class, or any other name, only when the public or shared
+  contract requires it, and never a fixture, conftest attribute, private
+  helper or monkeypatch target: those, and the arrange code, are the
+  builder's. A full test body appears only for an algorithm or data the
   assertions do not determine: a plan longer than the code it describes has
   written the code instead.
-- The `Implement` line, one sentence: the signature, the file (its last
-  backtick span is the implementation path, under one of the Scope paths)
-  and the values the spec pins. It never restates what the test asserts.
+- The `Implement` line, one sentence: the file (its last backtick span is
+  the implementation path, under one of the Scope paths), the behaviour and
+  the values the spec pins, with a signature only for a public or shared
+  contract that is not already a Produces line. It never restates what the
+  test asserts.
+
+A code cite (`path:line`) is evidence, never a requirement. `scan` refuses a
+`:<line>` cite on an Interfaces or Produces line, because a consumer would
+bind to a line that moves, and warns when a body has more than ten cites into
+its own Scope paths.
 
 The `Run` line expecting FAIL and the closing line (runs the same command,
 expects PASS, names the commits) are optional. Absent, the Step's command is

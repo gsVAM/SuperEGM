@@ -12,7 +12,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: phase 2 of the SuperEGM loop (the plan file, graph, scan, decide); EGM's approval, review gate, dry run and filing steps live in review-spec, review-plan and file; `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the `Tier:` field (U33); the split rules, the `width:` line and the header's wave plan (U29). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: phase 2 of the SuperEGM loop (the plan file, graph, scan, decide); EGM's approval, review gate, dry run and filing steps live in review-spec, review-plan and file; `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the `Tier:` field (U33); the split rules, the `width:` line and the header's wave plan (U29); what a Step holds (1.2.1 §6.5). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the handoff skill. Not part of google/elephant-goldfish-model. -->
 
@@ -110,11 +110,15 @@ Size `L` is a split candidate: the `proportion` reviewer reports a unit over 10 
 A split that needs a row the spec's `## Units` table lacks goes through `approve-spec --amend-units`, typed by the owner outside this skill; never work around the frozen spec.
 
 **Writing a Step** (spec section 9.1; the full rules are section 3 of
-`references/handoff_plan.md`). The fence carries the test's signature (name, fixtures, any `@pytest.mark.parametrize`)
-and its assertions with the spec's exact values, with arrange/act lines only where those do not determine them;
+`references/handoff_plan.md`). The fence carries the test's signature (its name, and a `@pytest.mark.parametrize` table copied from the spec when it gives several cases),
+one comment line saying the behaviour, and its assertions with the spec's exact values;
 a full test body appears only for an algorithm or data the assertions do not determine.
-The `Implement` line is one sentence: the signature, the file and the values the spec pins;
-it never restates what the test asserts.
+It names an exception class or any other name only when the public or shared contract requires it, never a fixture,
+conftest attribute, private helper or monkeypatch target: those and the arrange code are the builder's,
+and a unit's Scope lists the conftest and fixture files its tests may touch (for example `tests/conftest.py`).
+The `Implement` line is one sentence: the file, the behaviour and the values the spec pins, with a signature only
+for a public or shared contract that is not already a Produces line; it never restates what the test asserts.
+A code cite (`path:line`) is evidence, never a requirement: `scan` refuses one on an Interfaces or Produces line.
 A rule family is one parametrized Step, never one Step per rule; a copy/rename table or an edit list is test data,
 one parametrized test over it (the test is the table) and an `Implement` line that says "make the table hold".
 The `Run` line and the closing line are optional: absent, the Step's command is `pytest <test path>::<test name> -q`,

@@ -1,5 +1,5 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
-Added by SuperEGM (gsVAM), 2026: the zoom-out persona's plan brief for the `proportion` reviewer (design section 9.2). -->
+Added by SuperEGM (gsVAM), 2026: the zoom-out persona's plan brief for the `proportion` reviewer (design section 9.2); the fence's private detail and the readiness plan remit (1.2.1 §6.5). -->
 
 # Proportion: the zoom-out goldfish's plan brief
 
@@ -34,10 +34,13 @@ One findings line per finding, the plan's grammar:
 A question-11 finding names the Step and the bytes it would remove (a tier finding names its
 reason instead, `## The tier`): the location is the Step (`U07 Step 3`,
 or `U07 Steps` for the whole section), and the claim says what goes, roughly how many bytes, and
-why the test stays honest without it. The four shapes: the fenced test the signature and
+why the test stays honest without it. The five shapes: the fenced test the signature and
 assertions already determine (keep the `Write` line, drop the fence); the `Implement` line that
 restates the test (keep the path); the Step a parametrized sibling covers (fold it into the
-sibling's cases); the prose table that should be test data (move it into the fence). Severity
+sibling's cases); the prose table that should be test data (move it into the fence); the fence
+that names unnecessary private or harness detail, a fixture, conftest attribute, private helper or
+monkeypatch target (drop the name; one the public or shared contract requires is exempt, and this
+shape is `medium`). Severity
 is `medium` at most: a proportion finding never blocks filing on its own, and `high` is not
 yours to give. An empty findings file is the record of a body that is as long as its decisions.
 
@@ -86,7 +89,11 @@ neither check; the author splits or keeps the unit.
 ## The pair
 
 Readiness and proportion are an adversarial pair: readiness asks what a builder would still
-have to ask before building, you ask what the builder did not need to be told. A conflict
+have to ask before building, you ask what the builder did not need to be told. Both read the
+plan under one remit, readiness's plan-review remit (`agents/readiness.md`): a builder who reads
+the code makes every choice but a product, security or cross-unit contract decision, so fixture
+names, harness wiring, private names and line numbers are the builder's, and a signature is
+pinned only for a shared contract. A conflict
 between them is resolved in favour of the shorter form that keeps the test honest, and the
 elephant records that disposition. Do not pre-empt it: report the removal and its bytes, and
 leave the ruling to the elephant.
