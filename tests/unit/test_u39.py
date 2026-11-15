@@ -5,7 +5,7 @@
 
 import json
 import pytest
-from test_review import SPEC, SLUG, converged_spec, approve, git, hstore
+from test_review import SPEC, SLUG, card, converged_spec, approve, git, hstore
 from superegm import approve_spec
 
 
@@ -50,3 +50,24 @@ def test_malformed_triage_section_is_refused_with_its_line(world, section, line)
   code, err = approve(world, spec, cid, "--yes")
   assert code == 1 and err.removeprefix("superegm: ").startswith(f"approve-spec: {line}: "), err
   assert git(world, "rev-list", "--count", "HEAD") == commits_before and entries_of(world) == entries_before
+
+
+@pytest.mark.parametrize("spec, frozen", [
+  ("with the example section", [{"reach": "forged", "later": "easy"}, {"critical": "no", "later": "easy", "verified": "confirmed"}]),
+  ("without a section", None),
+])
+def test_approval_entry_freezes_the_patterns(world, spec, frozen):
+  """The entry carries `triage`; `--amend-units` copies it from the entry it extends."""
+  section = "Unblock:\n- reach: forged, later: easy\n- critical: no, later: easy, verified: confirmed\n"
+  path, cid, rid = converged_spec(world, text=with_section(section) if frozen else SPEC)
+  code, out = approve(world, path, cid, "--yes")
+  assert code == 0, out
+  entry = entries_of(world)[-1]
+  icid = card(world, path, "integrate")
+  path.write_text(path.read_text(encoding="utf-8") + "| U02 | more | U01 | S |\n", encoding="utf-8")
+  code, out = approve(world, path, icid, "--amend-units")
+  assert code == 0, out
+  amended_entry = entries_of(world)[-1]
+  assert amended_entry["kind"] == "amend-units"
+  assert entry["triage"] == frozen and amended_entry["triage"] == frozen
+  assert "triage" in approve_spec.FROZEN_FIELDS
