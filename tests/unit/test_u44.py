@@ -17,7 +17,7 @@ from superegm import driver, phase
 from conftest import ROOT, make_repo, Harness
 from test_builders import put, spawn_fake, SPAWNED  # noqa: F401  (spawn_fake: a fixture)
 from test_driver import registered
-from test_u24 import tick_launches
+from test_u24 import tick_launches, tick_launch, card_of
 from test_u43 import Chain, UNITS
 
 
@@ -218,3 +218,35 @@ def test_tick_launches_by_phase(world, monkeypatch, tmp_path, spawn_fake, line, 
   assert got == prompt.format(spec=spec).replace("H1", c.hid)
   assert tick_launches(c.hs, c.hid)[-1]["phase"] == line.split()[0]
   assert driver.tick_prompt(spec, "H1", line.split()[0], prompt.endswith("--leavemealone")) == prompt.format(spec=spec)
+
+
+def driven_card(world, monkeypatch, c, skill, dcard="driver-abc-0001", boot="boot-1"):
+  """A top-level `skill` card on the handoff's spec opened by a tick's session: `SUPEREGM_ROLE=driver`,
+  `SUPEREGM_RUNCARD=dcard`, the boot id `boot`. Returns (code, output)."""
+  with monkeypatch.context() as m:
+    m.setenv("SUPEREGM_ROLE", "driver"); m.setenv("SUPEREGM_RUNCARD", dcard); m.setattr(superegm, "boot_id", lambda: boot)
+    return world.run("runcard", "open", "--skill", skill, "--artifact", str(c.spec), "--handoff", c.hid, card=None)
+
+
+@pytest.mark.parametrize("phase", ["plan", "review-plan", "file"])
+def test_driven_card_of_any_phase(world, monkeypatch, tmp_path, phase):
+  """A driven top-level card of any phase gets driver_card and boot_id, passes the second-live-card refusal, and is
+  reboot-proved; handoff_spec for a handoff with no state.json reads handoffs/<id>.json spec."""
+  c = chained(world, monkeypatch, tmp_path)
+  s = superegm.Store(world.artifacts)
+  tick_launch(s, c.hid, card="driver-abc-0001", boot="boot-1")  # the tick's launch, live
+  code, out = driven_card(world, monkeypatch, c, phase)
+  assert code == 0, out  # exempt from the refusal of a second live card
+  cid = out.strip()
+  card = card_of(c.hs, cid)
+  assert card["driver_card"] == "driver-abc-0001" and card["boot_id"] == "boot-1"
+  superegm.reboot_proof(c.hs, "boot-2")
+  assert card_of(c.hs, cid).get("interrupted_at")  # core.reboot_proof finds that card after the boot id changes
+  with monkeypatch.context() as m:  # a typed card of that phase still meets the refusal while the launch is live
+    m.delenv("SUPEREGM_ROLE", raising=False)
+    tick_launch(s, c.hid, card="driver-abc-0002", boot="boot-1", n=2)
+    code, out = world.run("runcard", "open", "--skill", phase, "--artifact", str(c.spec), "--handoff", c.hid, card=None)
+    assert code == 1, out
+  import argparse
+  assert not c.hs.path("state").exists()
+  assert superegm.handoff_spec(argparse.Namespace(plan=None), c.hs) == str(c.spec)
