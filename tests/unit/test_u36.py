@@ -5,7 +5,7 @@
 
 import json
 import pytest
-from conftest import REPO, set_config
+from conftest import REPO, ROOT, set_config
 from test_review import (SPEC, SLUG, PANEL_OF, opened, converged_spec, approve, hstore, rjson, rpath,
                          head_round, record, status, F, A, card)
 from superegm import approve_spec, atomic_write
@@ -205,3 +205,11 @@ def test_round_reads_its_panel(world):
   assert rjson(world, rid, "round-3.json")["what_ran"] == "completed"
   assert record(world, rid, 2, "zoom-out", [], cid)[0] == 0
   assert rjson(world, rid, "round-2.json")["what_ran"] == "completed"
+
+
+def test_review_loop_dispatches_the_printed_panel():
+  """The loop dispatches the panel `review open` printed; the cap is `review.rounds`."""
+  loop = (ROOT / "skills/review-spec/references/review_loop.md").read_text(encoding="utf-8")
+  spec_skill = (ROOT / "skills/review-spec/SKILL.md").read_text(encoding="utf-8")
+  assert "The panel cannot change after this" not in loop and "review.rounds" in loop
+  assert "panel <a,b,astra> from round <n>" in loop and "panel <a,b,astra> from round <n>" in spec_skill
