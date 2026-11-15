@@ -131,8 +131,8 @@ def rounds_line(text: str) -> int | None:
 
 def triage_section(lines: list[str]) -> tuple[int, list[tuple[str, bool]]] | None:
   """The triage section of a spec's `lines` (section 5.1): the index of its heading and its lines to the next H2 as
-  `(line, fenced)`, a fence's own lines and the lines inside it `fenced`; None when the spec's first H2 outside a fenced
-  block is not exactly `Triage`."""
+  `(line, fenced)`, a fence's own lines and the lines inside it `fenced`; None when no H2 outside a fenced
+  block is exactly `Triage`."""
   fence, start, body = None, None, []  # the open fence's (character, run length), as `rounds_line` reads one
   for number, line in enumerate(lines):
     fenced = fence is not None
@@ -144,9 +144,8 @@ def triage_section(lines: list[str]) -> tuple[int, list[tuple[str, bool]]] | Non
     elif ANY_H2.match(line):
       if start is not None:
         break
-      if line.strip().removeprefix("##").strip() != "Triage":
-        return None
-      start = number
+      if line.strip().removeprefix("##").strip() == "Triage":
+        start = number
       continue
     if start is not None:
       body.append((line, fenced))
@@ -178,8 +177,8 @@ def triage_pattern(line: str) -> dict:
 
 
 def triage_patterns(text: str) -> list[dict] | None:
-  """The patterns of the spec's triage section (section 5.1), in section order; None without the section (its first
-  H2 outside a fenced block, exactly `Triage`). The section holds one `Unblock:` line and the run of `- ` lines
+  """The patterns of the spec's triage section (section 5.1), in section order; None without the section (the first
+  H2 outside a fenced block whose text is exactly `Triage`, wherever it stands). The section holds one `Unblock:` line and the run of `- ` lines
   directly after it, each `field: value` pairs separated by `, `; any other line is prose. Refused with the line at
   fault: a bad pattern (`triage_pattern`), a second `Unblock:` line, a section with no `Unblock:` line (the heading is
   the line) or an `Unblock:` line with no pattern."""
@@ -297,7 +296,7 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
     raise core.HandoffError(f"approve-spec: {CONFIG} missing: run superegm init")
   # U39: a malformed triage section refuses before the PR ingest (which writes) and before the prompt and the commit
   triage = triage_patterns(core.read_text(spec))
-  number = spec_pr(st.config["repo"],core.run_git(["rev-parse", "--abbrev-ref", "HEAD"], root).strip())
+  number = spec_pr(st.config["repo"], core.run_git(["rev-parse", "--abbrev-ref", "HEAD"], root).strip())
   # U26: one `review ingest --pr` before the refusals: it reads the spec PR's threads, writes them, and the carried
   # findings, into the latest round and posts the fixed replies (a failed reply is named and retried next time, never
   # a refusal); no open PR, or a cycle with no round yet to take the threads, reads nothing (the latter is refused
@@ -323,7 +322,7 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   rounds = rounds_line(core.read_text(spec))
   if rounds is None:  # no `Rounds:` line: the live value, which `review.rounds` refuses outside 1-10
     rounds = live_rounds(st)
-  last =core.load_approval(st, spec)
+  last = core.load_approval(st, spec)
   if last:
     require_branch_holds(st, root, spec.relative_to(root).as_posix(), last)
   # the cycles past the last approval's; a re-approval of that same cycle (its bytes unmoved, U26: a thread ingested

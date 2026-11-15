@@ -207,7 +207,7 @@ could plan from without going back to your human partner. Cover:
   when the team or its fallback ran
 - a final `## Units` section, the last H2 of the document: one row per
   buildable unit (id, title, blocked by)
-- optionally, a `## Triage` section, the first H2 of the document: offer it
+- optionally, a `## Triage` section, its heading written exactly `## Triage`: offer it
   to your human partner and write it with them, never alone. It says which
   medium findings may stop blocking the wave. Without it triage is off and
   a high or medium blocks until fixed or ruled. It holds one `Unblock:`
