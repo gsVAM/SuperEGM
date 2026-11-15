@@ -4,6 +4,7 @@
 """U39: the triage section of a spec (spec section 5.1)."""
 
 import json
+from pathlib import Path
 import pytest
 from test_review import SPEC, SLUG, card, converged_spec, approve, git, hstore
 from superegm import approve_spec
@@ -71,3 +72,14 @@ def test_approval_entry_freezes_the_patterns(world, spec, frozen):
   assert amended_entry["kind"] == "amend-units"
   assert entry["triage"] == frozen and amended_entry["triage"] == frozen
   assert "triage" in approve_spec.FROZEN_FIELDS
+
+
+@pytest.mark.parametrize("path, phrases", [
+  ("skills/brainstorming/SKILL.md", ["## Triage", "Unblock:", "reach", "later", "critical", "verified"]),
+  ("agents/structural.md", ["## Triage", "Unblock:"]),
+  ("agents/design.md", ["## Triage", "safe"]),
+])
+def test_skills_offer_and_check_the_section(path, phrases):
+  """Brainstorming offers and writes the section; structural checks the grammar; design judges the patterns' safety."""
+  text = (Path(__file__).resolve().parents[2] / path).read_text(encoding="utf-8")
+  assert all(p in text for p in phrases), [p for p in phrases if p not in text]
