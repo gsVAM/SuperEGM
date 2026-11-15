@@ -122,3 +122,45 @@ def test_approve_spec_freezes_the_files(world, case):
     path.write_text(json.dumps({"file": RULES, "sha": sha12, "text": "Skip the suite.\n"}), encoding="utf-8")
     with pytest.raises(superegm.HandoffError, match=RULES):
       approve_spec.read_copy(hstore(world), RULES, sha12)
+
+
+def test_render_section_form(world, tmp_path):
+  """One heading, each addressed file in list order under ## <file>, fenced one backtick longer than its longest run
+  (min 3); nothing for a role none is addressed to; a config HEAD lacks reads []; each handoff renders its own list."""
+  from superegm import approve_spec
+  from superegm.instructions import render
+  commit_file(world, "a.md", "plain\n")
+  commit_file(world, "b.md", "has `````five\n")
+  configure(world, [{"file": "a.md", "to": ["builder"]}, {"file": "b.md", "to": ["reviewers", "builder"]}])
+  spec, cid, rid = converged_spec(world)
+  code, out = approve(world, spec, cid, "--yes")
+  assert code == 0, out
+  st = hstore(world)
+  hid = entries_of(world)[-1]["handoff_id"]
+  manifest, text = render(st, "builder", handoff_id=hid)
+  assert manifest == [{"file": "a.md", "sha": blob_sha(b"plain\n")}, {"file": "b.md", "sha": blob_sha(b"has `````five\n")}]
+  assert text.startswith("# Repository instructions\n")
+  assert text.count("# Repository instructions") == 1 and text.index("## a.md") < text.index("## b.md")
+  assert "## a.md\n```\nplain\n```" in text and "## b.md\n``````\nhas `````five\n``````" in text
+  assert render(st, "reviewers", handoff_id=hid)[0] == [{"file": "b.md", "sha": blob_sha(b"has `````five\n")}]
+  assert render(st, "foreman", handoff_id=hid) == ([], "")
+  assert render(st, "builder", handoff_id="no-such-handoff") == ([], "")
+  # the files at HEAD: the config's list there
+  assert render(st, "builder", root=world.repo) == (manifest, text)
+  bare = tmp_path / "bare-repo"
+  bare.mkdir()
+  git(["init", "-q"], bare)
+  (bare / "x.md").write_text("x\n", encoding="utf-8")
+  git(["add", "x.md"], bare)
+  git(["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "x"], bare)
+  assert render(st, "reviewers", root=bare) == ([], "")
+  # two handoffs of one spec whose lists differ: each renders its own, from its store copies
+  path = st.path("approvals", SLUG)
+  record = json.loads(path.read_text(encoding="utf-8"))
+  for other, data in (("h-a", b"first\n"), ("h-b", b"second\n")):
+    sha = blob_sha(data)
+    approve_spec.write_copy(st, {"file": "a.md", "sha": sha, "text": data.decode()})
+    record["entries"].append({**record["entries"][-1], "handoff_id": other, "instructions": [{"file": "a.md", "to": ["builder"], "sha": sha}]})
+  path.write_text(json.dumps(record), encoding="utf-8")
+  ha, hb = render(st, "builder", handoff_id="h-a"), render(st, "builder", handoff_id="h-b")
+  assert ha[0] != hb[0] and "first" in ha[1] and "second" in hb[1]
