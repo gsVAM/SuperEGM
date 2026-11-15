@@ -15,7 +15,7 @@ import uuid
 from pathlib import Path
 
 import superegm as core
-from superegm import body, orient
+from superegm import body, orient, scan
 from superegm.body import consumes
 from superegm.builder_token import key_path, tool
 from superegm.decision import deleted_rulings, overridden_comments, parse_form
@@ -461,7 +461,7 @@ def amendments_for(st, unit: str, body: str) -> list[dict]:
   `(name, unit)` its Consumes lines list, in `at` order."""
   path = st.path("state")
   entries = (json.loads(core.read_text(path)) if path.is_file() else {}).get("amendments") or []
-  consumed = set(consumes(body))
+  consumed = {(n, u) for raw, u in consumes(body) for n in scan.names_of(raw)}  # the one reader of an interface name
   return sorted((a for a in entries if a["unit"] == unit or (a["name"], a["unit"]) in consumed), key=lambda a: a["at"])
 
 

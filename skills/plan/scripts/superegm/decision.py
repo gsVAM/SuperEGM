@@ -18,7 +18,7 @@ import superegm as core
 from superegm.apply import body_file
 from superegm.launch import load_launches
 from superegm.report import pending_decisions, unit_view
-from superegm import review
+from superegm import review, scan
 from superegm.review import Refusal
 
 WRITES = frozenset({"foreman", "reviews", "state"})  # the store kinds this subcommand writes (`reviews`: a fifth point's accept, U35; `state`: `amendments[]`, §6.5)
@@ -26,7 +26,7 @@ CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init 
 SKILLS = frozenset({"wave"})  # the skills whose card this subcommand accepts
 RELAUNCH = ["relaunch", "stop the unit"]
 DEVIATION = re.compile(r"^\*\*Deviation \((?P<kind>[^)]*)\):\*\* ?(?P<rest>.*)$", re.M)
-INTERFACE = re.compile(r"(?P<unit>U\d+) (?P<name>[^\s:]+):")  # an interface heading's `<Uxx> <name>:` (spec §6.5)
+INTERFACE = re.compile(r"(?P<unit>U\d+) (?P<name>[^:]+):")  # an interface heading's `<Uxx> <name>:` (spec §6.5); `heading_name` reads the name
 
 
 def comment_options(text: str) -> list:
@@ -36,16 +36,34 @@ def comment_options(text: str) -> list:
   return [line[2:].strip() for line in text.splitlines() if line.startswith("- (")] + amend + ["stop the unit"]
 
 
-def amendments_of(text: str, chosen: str, reason: str, comment_id: int, now: str) -> list:
+def produced_names(st, unit: str) -> list:
+  """The names `scan.names_of` reads from the unit's Produces lines (no unit file: none)."""
+  path = st.path("unit", unit) if st is not None else None
+  lines = core.body.sections(core.read_text(path)).get("Interfaces", []) if path is not None and path.exists() else []
+  return [n for line in lines if line.startswith("- Produces: ") for n in scan.names_of(line[len("- Produces: "):])]
+
+
+def heading_name(raw: str, made: list) -> str:
+  """An interface heading's name: kept whole when it is exactly one of the producer's names, else read through
+  `scan.names_of` (so `load(path)` reads `load`)."""
+  name = raw.replace("`", "").strip()
+  if name in made:
+    return name
+  read = scan.names_of(name)
+  return read[0] if read else name
+
+
+def amendments_of(text: str, chosen: str, reason: str, comment_id: int, now: str, st=None) -> list:
   """The `amendments[]` entries a point-3 ruling on a builder comment writes (spec §6.5): `amend` names the one
   interface deviation, which must be in its unit's Interfaces lines (`rule` checks), text the owner's line; any
   other option settles every interface heading, text the option's; `stop the unit` and a relaunch keep the contract."""
   if chosen in RELAUNCH:
     return []
   heads = [INTERFACE.match(m["rest"]) for m in DEVIATION.finditer(text) if m["kind"] == "interface"]
-  # the name as body.consumes reads a Consumes line, cut at its `(`, so launch_builder.amendments_for matches it
-  return [{"unit": h["unit"], "name": h["name"].split("(")[0], "text": reason.strip() if chosen == "amend" else chosen,
-           "comment_id": comment_id, "at": now} for h in heads if h]
+  # the name as scan.names_of reads it, so launch_builder.amendments_for matches a Consumes line on the same reader
+  return [{"unit": h["unit"], "name": heading_name(h["name"], produced_names(st, h["unit"])),
+           "text": reason.strip() if chosen == "amend" else chosen, "comment_id": comment_id, "at": now}
+          for h in heads if h]
 
 
 def check_amend(st, text: str, reason: str) -> None:
@@ -57,10 +75,10 @@ def check_amend(st, text: str, reason: str) -> None:
   h = INTERFACE.match(heads[0]["rest"]) if len(heads) == 1 and heads[0]["kind"] == "interface" else None
   if h is None:
     raise Refusal("decision: amend needs a comment with one interface deviation and no other")
-  path = st.path("unit", h["unit"])
-  lines = "\n".join(core.body.sections(core.read_text(path)).get("Interfaces", [])) if path.exists() else ""
-  if not re.search(rf"(?<![\w.]){re.escape(h['name'])}\b", lines):
-    raise Refusal(f"decision: amend names {h['unit']} {h['name']}, not in {h['unit']}'s Interfaces lines")
+  made = produced_names(st, h["unit"])
+  name = heading_name(h["name"], made)
+  if name not in made:
+    raise Refusal(f"decision: amend names {h['unit']} {name}, not in {h['unit']}'s Interfaces lines")
 
 # The one ruling grammar (spec section 13.2, amendment 5): a comment's first line in one of these forms and no other.
 FID = r"[^\s()]+"
@@ -564,7 +582,7 @@ def rule(args) -> int:
   # recorded before the read-back, the session's post marked `unread` (its GitHub time not yet read), so a
   # `status --wait` pass in between compares its edits with its own `created_at` and skips the unedited post
   core.save_foreman(st, unit, data)
-  added = amendments_of(decision["question"], chosen, reason, int(posted.split()[1]), now) if amends and not closed else []
+  added = amendments_of(decision["question"], chosen, reason, int(posted.split()[1]), now, st) if amends and not closed else []
   if added:  # spec §6.5: the handoff's contract changes, read by `plan`'s re-check
     fresh = core.load_state(st.root)
     fresh["amendments"] = (fresh.get("amendments") or []) + added

@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the section 9.1 body rules, one named rule per line, over the graph module's bodies; amendment 9's warning values (U29); 1.2.1-pre.1 P3's line cites (section 6.5); the `units` limits registered, validated and refused over, and the bytes warning dropped (U42).
+# Modified by SuperEGM (gsVAM), 2026: the section 9.1 body rules, one named rule per line, over the graph module's bodies; amendment 9's warning values (U29); 1.2.1-pre.1 P3's line cites (section 6.5); the `units` limits registered, validated and refused over, and the bytes warning dropped (U42); `names_of` strips backticks, the one reader of an interface name (U96).
 
 """superegm scan: the body rules of spec section 9.1, one `<rule>: <unit>: <line>` per problem.
 The one exception is a `units:` line, a `units.*` config value out of range: it names no unit (spec section 6)."""
@@ -34,7 +34,8 @@ def register(subparsers):
 
 def names_of(item: str) -> list:
   """What an interface item is matched on: a store line's key paths, a
-  subcommand's words, else the leading identifier."""
+  subcommand's words, else the leading identifier; backticks are stripped before matching."""
+  item = item.replace("`", "").strip()
   if " key " in item:
     keys = item.split(" key ", 1)[1].split(" (", 1)[0]
     return [k.strip() for k in keys.split(", ")]
