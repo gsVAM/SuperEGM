@@ -72,6 +72,35 @@ def test_rerun_after_crash_records_once(world, monkeypatch):
   assert len(launch_builder.amendments_for(s, "U01", body)) == 1
 
 
+@pytest.mark.parametrize("second, texts", [
+  ("amend — enqueue() -> Job | null", ["enqueue() -> Job | null"]),
+  ("(b) return null", ["return null"]),
+  ("stop the unit", []),
+])
+def test_rerun_after_crash_with_another_ruling(world, monkeypatch, second, texts):
+  # a crash left the first ruling's file; the rerun's ruling is the one saved, and no amendment outlives it
+  import superegm
+  from superegm import launch_builder
+  card, s = world_on(world)
+  body = "## Interfaces\n- Produces: dequeue() -> Job | null\n"
+  qid = opened(world, card, IFACE + OPTS, source="comment 11")
+  real = superegm.save_foreman
+
+  def crash(*args, **kwargs):
+    monkeypatch.setattr(superegm, "save_foreman", real)
+    raise OSError("disk full")
+  monkeypatch.setattr(superegm, "save_foreman", crash)
+  with pytest.raises(OSError):
+    rule(world, card, qid, f"amend — {LINE}")
+  code, out = rule(world, card, qid, second)
+  assert code == 0, out
+  saved = foreman_of(s, "U02")["rulings"]
+  assert [r["ruling"] for r in saved] == [second]
+  got = launch_builder.amendments_for(s, "U01", body)
+  assert [a["text"] for a in got] == texts
+  assert [f"comment {a['comment_id']}" for a in got] == [saved[0]["posted"]] * len(got)  # the saved ruling's own comment
+
+
 def test_reads_directory_and_legacy(world):
   # a pre.1 handoff: comment 7 in state.json amendments[], comment 11 in the directory, comment 7 in both
   from superegm import launch_builder
