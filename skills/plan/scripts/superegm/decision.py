@@ -574,7 +574,10 @@ def rule(args) -> int:
     posted = f"comment {cid}"
   if brief:
     brainstorm_brief(st, unit, decision["id"], decision, chosen, (state["units"][unit].get("pr") or {}).get("number"))
-  entries = [{"decision": d["id"], "ruling": args.ruling, "by": args.by,
+  # a point-3 letter resolved by position is stored as the option it resolved to (its ` — <reason>` kept): the readers of
+  # `rulings[]` (`stop_reason`, `recorded_option`) compare the option's text, and see no position
+  stored = chosen + args.ruling[len(head):] if basis["point"] == 3 and by_position(basis["options"], head.strip(), args.by) else args.ruling
+  entries = [{"decision": d["id"], "ruling": stored, "by": args.by,
               "reason": reason.strip() or None, "posted": posted, "posted_at": posted_at}
              | ({"unread": True} if url else {}) for d in decisions]
   data["rulings"] += entries
@@ -582,8 +585,9 @@ def rule(args) -> int:
     data["stopped"] = stopped_entry(args.by, chosen, now, brief)
   if amends:  # spec §6.5: the contract changes, as the file `amendments/<deviation comment id>.json`, written
     # before the ruling is saved (a crash between the two leaves a file no reader trusts: `amendments_for` reads a file only
-    # once a ruling names its comment) and rewritten, or deleted when this ruling records none, by a rerun; a close
-    # (`--posted closed:<n>`) records none, so it deletes a crashed run's file
+    # once a ruling names its comment) and rewritten, or deleted when this ruling records none, by a rerun; a close given
+    # with `--decision` (`--posted closed:<n>`) records none, so it deletes a crashed run's file (a close with no `--decision`
+    # stops the unit and returns above, leaving the file, which no ruling names and no reader trusts)
     file = st.path("file", "amendments", f"{str(decision['source']).split()[1]}.json")
     added = [] if closed else amendments_of(decision["question"], chosen, reason, int(posted.split()[1]), now, st)
     if added:
@@ -704,6 +708,12 @@ def rule_file(st, unit: str, data: dict, args, comment: dict, found, decisions: 
   return 0
 
 
+def by_position(options: list, text: str, by: str) -> bool:
+  """Point 3: a bare `(x)` is the letter of its position in the rendered question: always the judges' (they see letters
+  by position), the owner's only where no stored option's own prefix carries it (the owner reads the comment's letters)."""
+  return bool(LETTER_RE.fullmatch(text)) and (by.startswith("judges:") or not any(o.startswith(text + " ") for o in options))
+
+
 def check_ruling(point: int, options: list, ruling: str, by: str = "") -> str:
   """The option `ruling` names (its letter, its text, or both; point 1 as `<fid> <option>`), resolved
   to the option's text; refused when it is none of them. At points 1 and 2 the bare word `redesign` (its ` — <why>`
@@ -715,8 +725,7 @@ def check_ruling(point: int, options: list, ruling: str, by: str = "") -> str:
   if ruling == "redesign" and point in (1, 2):  # a head's third ruling: no letter, no finding id
     return "redesign"
   fid, _, text = ruling.partition(" ") if point == 1 else ("", "", ruling)
-  if point == 3 and LETTER_RE.fullmatch(text) and not any(o.startswith(text + " ") for o in options):
-    # a bare `(x)` no stored option's own prefix carries is the letter of its position in the rendered question
+  if point == 3 and by_position(options, text, by):
     place = ord(text[1]) - ord("a")
     if place < len(options):
       text = options[place]
