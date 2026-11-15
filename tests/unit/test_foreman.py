@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U10's tests of the foreman's helper subcommands.
-# Modified by SuperEGM (gsVAM), 2026: collect reads rulings through `ruling_of` and the record (U22).
+# Modified by SuperEGM (gsVAM), 2026: collect reads rulings through `ruling_of` and the record (U22).; the forge check drops an outer run's `GIT_CONFIG_` pairs (1.2.1 wave fix).
 
 """U10: foreman dispatch, prepare, collect, tdd-order, review post. This file replaces U03's nine moved
 prepare/collect tests (they pin `--round`, `--run-folder`, `--verdict`, `head-moved`, `launched` and `--remove`:
@@ -584,7 +584,8 @@ def test_collect_reruns_the_dod_items_and_records_the_gate(world, tmp_path, monk
     assert (w.dir / "r1/dod/2.txt").read_text() == "exit: none\nsummary: \ntimed_out: yes\n" and not (w.dir / "r1/dod/3.txt").exists()
   if name.startswith("forge"):
     assert subprocess.run(["git", "config", "--get", "credential.helper"], cwd=world.repo, capture_output=True, text=True,
-                          env=dict(os.environ, GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null")).stdout == ""
+                          env={k: v for k, v in os.environ.items() if not k.startswith("GIT_CONFIG_")}  # an outer DoD re-run's pairs leak in
+                          | {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"}).stdout == ""
 
 
 Q, N, R, T = "tests/unit/test_q.py", "tests/unit/test_n.py", "tests/unit/test_r.py", lambda *l: "\n".join(l) + "\n"
