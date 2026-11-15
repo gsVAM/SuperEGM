@@ -60,6 +60,7 @@ def test_chain_off_is_1_2(world, monkeypatch, tmp_path, spawn_fake, chain, capsy
                         capture_output=True).returncode != 0
   assert not (world.artifacts / "tick" / "fetch.json").exists()
   last = tick_launches(s, hid)[-1]
+  assert "phase" not in last  # a chain-off launch entry is 1.2's (change-review-1-3)
   assert f"claude -p '/superegm:wave {world.spec.resolve()} --handoff {hid} --leavemealone' " in last["command"]
   assert driver.tick_prompt(world.spec, hid) == f"/superegm:wave {world.spec} --handoff {hid} --leavemealone"
   text = (ROOT / "skills" / "driver" / "SKILL.md").read_text(encoding="utf-8")
@@ -286,7 +287,7 @@ def test_phase_outcome_and_failures(world, monkeypatch, tmp_path, spawn_fake, cl
   if line_changed:
     c.plan(*UNITS)  # the session planned: next prints review-plan
   if wait_record:
-    c.wait(phase="plan", question="which units?")
+    c.wait(phase="plan", question="which units?", since=superegm.now_iso())  # written by the session
   put(Path(first["exit_file"]), f"{code}\n")
   tick(world)
   assert tick_launches(s, c.hid)[0]["outcome"] == outcome  # the plan launch entry after its session ends
@@ -325,7 +326,8 @@ def test_phase_outcome_and_failures(world, monkeypatch, tmp_path, spawn_fake, cl
   rc, out = driven_card(world, monkeypatch, c, "review-plan", dcard="driver-abc-0012")
   assert rc == 0, out
   mine = out.strip()
-  assert {earlier, mine} <= review.stall_cards(c.hs, {"kind": "plan", "artifact": "U01"}, mine)
+  hs = superegm.handoff_store(superegm.Store(world.artifacts, config=superegm.load_config(world.repo)), c.hid)
+  assert {earlier, mine} <= review.stall_cards(hs, {"kind": "plan", "artifact": "U01"}, mine)
   rc, out = world.run("driver", "status", card=None)
   assert rc == 0 and f"review-plan card {mine} open" in out, out
 
@@ -338,9 +340,11 @@ def test_merged_trigger_then_integrate(world, monkeypatch, tmp_path, chain, trig
   from superegm import status
   c = chained(world, monkeypatch, tmp_path, chain=chain)
   c.all_filed(open_unit="U01")
+  for n, u in enumerate(UNITS, 1):  # the snapshot's `pr` as `status.unit_view` saves it: the number
+    c.state["status"]["units"][u]["pr"] = 10 + n
   c.filed("U01", 1)  # the saved snapshot: no PR yet
   c.save()
-  fresh = {u: {**status.EMPTY, "pr": {"number": 10 + n}, "ci": "success", "landed": True} for n, u in enumerate(UNITS, 1)}
+  fresh = {u: {**status.EMPTY, "pr": 10 + n, "ci": "success", "landed": True} for n, u in enumerate(UNITS, 1)}
   fresh["U01"] = {**status.EMPTY, "pr": 7}  # the fresh pass: merged (pr set, ci null), the issue left open
   monkeypatch.setattr(superegm, "status_pass", lambda handoff, save=True: ({"units": fresh, "ready": []}, None))
   handoff = SimpleNamespace(store=c.hs, state=json.loads(c.hs.path("state").read_text(encoding="utf-8")),
@@ -362,3 +366,104 @@ def test_merged_trigger_then_integrate(world, monkeypatch, tmp_path, chain, trig
   assert card_of(c.hs, cid)["interrupted_at"] and status.tick_trigger(handoff) == f"exit-file {cid}"
   set_entry(s, c.hid, 1, status="interrupted (reboot)")
   assert status.tick_trigger(handoff) == "reboot 1"
+
+
+@pytest.mark.parametrize("chain", [True, False])
+def test_reset_status_and_stall_read_phase_cards_only_with_the_chain(world, monkeypatch, tmp_path, chain):
+  """With the chain off, `driver reset`, `driver status` and `review.stall_cards` read 1.2's `wave` cards alone: an
+  owner's open typed plan card is neither listed nor interrupted, and a typed review-plan card is no stall card; with
+  it on they read the top-level card of every chain phase (change-review-1-1, codebase-details-1-2)."""
+  from superegm import review
+  c = chained(world, monkeypatch, tmp_path, chain=chain)
+  rc, out = world.run("runcard", "open", "--skill", "plan", "--artifact", str(c.spec), "--handoff", c.hid, card=None)
+  assert rc == 0, out
+  typed = out.strip()
+  rc, out = world.run("driver", "status", card=None)
+  assert rc == 0 and (f"plan card {typed} open" in out) is chain, out
+  rc, out = world.run("driver", "reset", "--runcard", world.open_card("driver", str(c.spec)))
+  if chain:
+    assert rc == 0 and f"card {typed} interrupted" in out, out
+    assert card_of(c.hs, typed)["interrupted_at"]
+  else:
+    assert rc == 1 and f"driver: {c.hid} has no live tick launch or open wave card" in out, out
+    assert not card_of(c.hs, typed)["interrupted_at"]
+  earlier = world.open_card("review-plan", str(c.spec))
+  world.run("runcard", "close", earlier, card=None)
+  rc, out = driven_card(world, monkeypatch, c, "wave", dcard="driver-abc-0007")
+  assert rc == 0, out
+  mine = out.strip()
+  hs = superegm.handoff_store(superegm.Store(world.artifacts, config=superegm.load_config(world.repo)), c.hid)
+  assert (earlier in review.stall_cards(hs, {"kind": "plan", "artifact": "U01"}, mine)) is chain
+
+
+def test_an_outcome_waits_out_a_masking_line(world, monkeypatch, tmp_path, spawn_fake):
+  """A plan session that closed its card with exit 0 is not settled while `next` prints `waiting fetch` (a row above
+  the phase rows); once the fetch is good and `next` still prints `plan`, it is `failed` (change-review-1-2,
+  codebase-details-1-4)."""
+  c = chained(world, monkeypatch, tmp_path)
+  set_mode(c, "leavemealone")
+  s = superegm.Store(world.artifacts)
+  first = tick_launch(s, c.hid, card="driver-abc-0001")
+  set_entry(s, c.hid, 1, phase="plan")
+  rc, out = driven_card(world, monkeypatch, c, "plan", dcard="driver-abc-0001")
+  assert rc == 0, out
+  assert world.run("runcard", "close", out.strip(), card=None)[0] == 0
+  put(Path(first["exit_file"]), "0\n")
+  fake_fetch(world, monkeypatch, False, "fatal: unable to access")
+  tick(world)
+  entry = tick_launches(s, c.hid)[0]
+  assert "outcome" not in entry
+  assert not driver.counted_failures(c.hs, [entry, {**entry, "round": 2}], {})  # undecided: no failure
+  fake_fetch(world, monkeypatch, True)
+  tick(world)
+  assert tick_launches(s, c.hid)[0]["outcome"] == "failed"
+
+
+@pytest.mark.parametrize("since,outcome", [("2000-01-01T00:00:00Z", "failed"), (None, "succeeded")])
+def test_only_the_sessions_own_wait_record_is_success(world, monkeypatch, tmp_path, spawn_fake, since, outcome):
+  """The answered wait record that started a `file` launch is no success of that launch; a record the session wrote
+  (its `since` at or after the launch's start) is (codebase-details-1-3)."""
+  c = chained(world, monkeypatch, tmp_path)
+  set_mode(c, "leavemealone")
+  c.plan(*UNITS); [c.review(u) for u in UNITS]
+  c.wait(phase="file", question="create 3 issues?", answer="yes", by="owner", at="2026-11-15T01:00:00Z",
+         since="2000-01-01T00:00:00Z")
+  fake_fetch(world, monkeypatch, True)
+  s = superegm.Store(world.artifacts)
+  world.advance(60)
+  first = tick_launch(s, c.hid, card="driver-abc-0001")
+  set_entry(s, c.hid, 1, phase="file")
+  rc, out = driven_card(world, monkeypatch, c, "file", dcard="driver-abc-0001")
+  assert rc == 0, out
+  assert world.run("runcard", "close", out.strip(), card=None)[0] == 0
+  if since is None:  # the session asked again: its own record
+    c.wait(phase="file", question="create 3 issues?", since=superegm.now_iso())
+  put(Path(first["exit_file"]), "0\n")
+  code, out = world.run("next", "--handoff", c.hid)
+  assert out.strip() == ("file" if since else "waiting file: create 3 issues?"), out
+  tick(world)
+  assert tick_launches(s, c.hid)[0]["outcome"] == outcome
+
+
+@pytest.mark.parametrize("value,message", [
+  ({"chian": True}, "driver: unknown keys ['chian']"), ({"chain": "true"}, "driver.chain must be true or false"),
+  ("on", "driver must be an object")])
+def test_the_driver_key_is_validated(world, value, message):
+  """`driver` is an object whose one key `chain` is a bool (codebase-details-1-9)."""
+  edit_config(world.repo, driver=value)
+  with pytest.raises(superegm.HandoffError, match=re.escape(message)):
+    superegm.load_config(world.repo)
+
+
+def test_the_tick_fetch_is_hook_free(monkeypatch, tmp_path):
+  """The tick's fetch runs with the hook-free `-c` pairs and writes no FETCH_HEAD (codebase-details-1-5)."""
+  seen = []
+
+  def run(argv, **kw):
+    seen.append(argv)
+    return subprocess.CompletedProcess(argv, 1, "", "fatal: x\n")
+  monkeypatch.setattr(driver.subprocess, "run", run)
+  assert driver.fetch_base(tmp_path, "origin", "main") == (False, "fatal: x\n")
+  argv = seen[0]
+  assert argv[0] == "git" and "--no-write-fetch-head" in argv and any(a.startswith("core.hooksPath=") for a in argv)
+  assert argv[-1] == "+refs/heads/main:refs/superegm/tick-base"
