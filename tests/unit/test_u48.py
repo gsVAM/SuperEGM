@@ -8,7 +8,7 @@ import shlex
 
 import pytest
 
-from conftest import handoff_store
+from conftest import SCRIPTS, handoff_store
 
 
 @pytest.mark.parametrize("call, closed_before, exit_code, last_journal", [
@@ -44,3 +44,10 @@ def test_one_close_card(world, call, closed_before, exit_code, last_journal):
     lines = journal.read_text(encoding="utf-8").splitlines()
     assert lines[-1].split(" ", 1)[1] == last_journal.replace("<id>", cid)
     assert json.loads(card_path.read_text(encoding="utf-8"))["closed_at"]
+
+
+def test_driver_closes_through_runcard():
+  # the driver's closes use the shared close, and its STORE switch says why it is a global
+  src = (SCRIPTS / "superegm" / "driver.py").read_text()
+  assert "def close_card" not in src and "runcard.close_card(" in src
+  assert all("STORE" in line.split("#", 1)[1] for line in src.splitlines() if "core.STORE = hs" in line)
