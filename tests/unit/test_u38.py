@@ -239,3 +239,35 @@ def test_astra_brief_appends_the_section(world, tmp_path, monkeypatch):
                    "--not-run", "not installed", "--runcard", child)[0] == 0
   rnd = json.loads(st.path("reviews", rid, "round-1.json").read_text(encoding="utf-8"))
   assert rnd["reviewers"]["astra"]["instructions"] == stored["manifest"] and rnd["reviewers"]["change-review"]["instructions"] == []
+
+
+@pytest.mark.parametrize("path, phrase", [
+  ("skills/review-spec/references/review_loop.md", "superegm instructions --role reviewers --spec"),
+  ("skills/review-spec/references/review_loop.md", "superegm instructions --role reviewers --handoff"),
+  ("skills/review-spec/references/review_loop.md", "equals the `instructions[]` recorded on round n-1's Astra record"),
+  ("skills/wave/references/foreman_brief.md", "superegm instructions --role reviewers --handoff"),
+  ("skills/wave/references/foreman_brief.md", "--unit"),
+  ("skills/judges/SKILL.md", "# Repository instructions"),
+])
+def test_skill_texts_place_the_section(world, path, phrase):
+  """The skills render the section, paste it last, and resume Astra only on an equal manifest."""
+  from pathlib import Path
+  assert phrase in (Path(__file__).resolve().parents[2] / path).read_text(encoding="utf-8")
+  if path.endswith("review_loop.md") and "equals" in phrase:
+    # a same-id re-approval that changed the Astra instructions: the plan review's new card renders a manifest that
+    # differs from round 1's Astra record, so round 2 launches fresh
+    spec, cid, hid = approved_handoff(world, ["reviewers"])
+    used = card(world, spec, "review-plan", handoff=hid)
+    code, out = world.run("review", "open", "--kind", "plan", "--artifact", "U07", "--reviewers", "readiness", "--astra", "on",
+                          "--runcard", used)
+    assert code == 0, out
+    rid = out.splitlines()[0]
+    render(world, "--handoff", hid, "--lane", "astra", "--runcard", used)
+    assert record(world, rid, 1, "astra", [], used)[0] == 0
+    round_one = recorded(world, rid, 1, "astra")
+    assert round_one == MANIFEST
+    move_on(world, spec, cid)
+    renewed = card(world, spec, "review-plan", handoff=hid)
+    render(world, "--handoff", hid, "--lane", "astra", "--runcard", renewed)
+    stored = json.loads(superegm.store(world.repo).path("runcards", renewed).read_text(encoding="utf-8"))
+    assert stored["instructions"]["reviewers"]["astra"]["manifest"] != round_one
