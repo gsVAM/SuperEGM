@@ -203,12 +203,13 @@ def write_copy(st: core.Store, item: dict) -> None:
 
 def read_copy(st: core.Store, file: str, sha: str) -> str:
   """The text of `file` frozen at `sha`, from its store copy; a copy missing, or whose blob sha differs (edited
-  after approval), is refused, naming the file."""
+  after approval), is refused, naming the file. The copy is named by its bytes alone, so files of the same bytes
+  (two of one list, or one renamed between approvals) share it, whichever `file` it records."""
   path = st.path("instructions", sha)
   try:
     copy = json.loads(core.read_text(path))
     text = copy["text"]
-    good = copy.get("file") == file and instructions.blob_sha(text.encode("utf-8")) == sha
+    good = instructions.blob_sha(text.encode("utf-8")) == sha
   except (OSError, ValueError, KeyError, TypeError, AttributeError):
     good = False
   if not good:

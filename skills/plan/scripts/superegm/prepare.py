@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # From the elephant-goldfish-model (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_prepare` as the prepare module, keyed by the dispatch id; the fetched tip is the round's head; `pr_body.md` and `comments.md` beside the diff and the CI file; the App path's builder login (U15); the Astra brief and the lane's word on the `prepared:` line (U17); `r<n>/spec_range.md` at the marker's sha, the brief's range read from it (U20); the review worktree removed by force and its git calls hook-free (U25); `runcards` in its writes, a card's instructions render (U37).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_prepare` as the prepare module, keyed by the dispatch id; the fetched tip is the round's head; `pr_body.md` and `comments.md` beside the diff and the CI file; the App path's builder login (U15); the Astra brief and the lane's word on the `prepared:` line (U17); `r<n>/spec_range.md` at the marker's sha, the brief's range read from it (U20); the review worktree removed by force and its git calls hook-free (U25); `runcards` in its writes, allowed ahead of the Astra brief's instructions render on the card, which U38 adds (U37).
 
 """superegm prepare: fetch the PR into refs/superegm, add the review worktree, write the diff, CI, PR body and comments."""
 
@@ -14,7 +14,7 @@ import superegm as core
 from superegm import foreman, launch_builder, review
 from superegm.launch import app_login, load_launches
 
-WRITES = frozenset(['foreman', 'review', 'runcards'])  # the store kinds this subcommand writes; a card's instructions render (U37)
+WRITES = frozenset(['foreman', 'review', 'runcards'])  # the store kinds this subcommand writes; `runcards` is allowed for the Astra brief's card render, which U38 adds (U37)
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset(['wave'])  # the skills whose card this subcommand accepts
 AGED = ("**Deviation", "**Decision D", "**Ruling:**", "**Reply ", "**Seam:**")  # the comment kinds kept regardless of age (section 11; a reply answers a ruling that may be older than the last posted round)
