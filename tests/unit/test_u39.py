@@ -48,5 +48,5 @@ def test_malformed_triage_section_is_refused_with_its_line(world, section, line)
   spec, cid, rid = converged_spec(world, text=with_section(section))
   commits_before, entries_before = git(world, "rev-list", "--count", "HEAD"), entries_of(world)
   code, err = approve(world, spec, cid, "--yes")
-  assert code == 1 and err.startswith(f"approve-spec: {line}: "), err
+  assert code == 1 and err.removeprefix("superegm: ").startswith(f"approve-spec: {line}: "), err
   assert git(world, "rev-list", "--count", "HEAD") == commits_before and entries_of(world) == entries_before
