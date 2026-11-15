@@ -158,9 +158,11 @@ The `set` reviewer reads that line to grade a chain it names `low`; it checks it
     (over 49,152 bytes: split the unit), `checkbox`, `placeholder`,
     `consumes-undefined`, `consumes-producer`, `global-constraints`,
     `review-focus`, `review-focus-test`, `step-group`, `step-scope`,
-    `interface-cite`, `decision-blocking`, and the raw-text `banned-term`, `mention`,
-    `merge-marker`, `dod-missing`. Fix the plan file, run `graph`, then
-    `scan` again, until `scan: clean`.
+    `interface-cite`, `decision-blocking`, `units-limit` (an unfiled unit over
+    a `units.*` limit, as above: split it through `approve-spec --amend-units`), and the raw-text
+    `banned-term`, `mention`, `merge-marker`, `dod-missing`. A `units: units.<key>: …` line
+    has no unit: that `units` value in `.superegm/config.json` is out of range, so fix it
+    there. Fix the plan file, run `graph`, then `scan` again, until `scan: clean`.
 2.  Every `decision-blocking` line is decision point 3: ask the owner one
     question whose options are the item's own `(a) …; (b) …` lines, the
     default marked, as the sole tool call in the turn; then run
