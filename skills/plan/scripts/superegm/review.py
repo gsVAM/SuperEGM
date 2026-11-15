@@ -1043,7 +1043,7 @@ def read_threads(repo: str, number: int, skip: set) -> list[dict]:
     if c.get("in_reply_to_id") is not None or c["id"] in skip:
       continue
     threads.append({"id": c["id"], "login": login(c), "bot": login(c).endswith("[bot]"),
-                    "body": "\n\n".join([c.get("body") or "", *replies.get(c["id"], [])]), "path": c.get("path"),
+                    "root": c.get("body") or "", "body": "\n\n".join([c.get("body") or "", *replies.get(c["id"], [])]), "path": c.get("path"),
                     "line": c.get("line"), "commit_id": c.get("commit_id"), "review_body": False,
                     "created_at": c.get("created_at")})
   for r in reviews:
@@ -1052,7 +1052,7 @@ def read_threads(repo: str, number: int, skip: set) -> list[dict]:
       continue
     if (not body.strip() or r["id"] in inline or r.get("state") == "APPROVED" or r["id"] in skip):
       continue
-    threads.append({"id": r["id"], "login": login(r), "bot": login(r).endswith("[bot]"), "body": body, "path": None,
+    threads.append({"id": r["id"], "login": login(r), "bot": login(r).endswith("[bot]"), "root": body, "body": body, "path": None,
                     "line": None, "commit_id": r.get("commit_id"), "review_body": True, "created_at": r.get("submitted_at")})
   return threads
 
