@@ -339,3 +339,9 @@ def test_the_chain_check_and_the_split_check_prose(path, needle, present):
 def test_proportion_reads_the_units_limits(needle, present):
     # section 6: the split check reads units.* in place of 24,576 bytes and eight Scope paths; the 10-step candidate stays
     assert (needle in " ".join(PROPORTION.read_text(encoding="utf-8").split())) is present
+
+
+@pytest.mark.parametrize("needle, present", [("`steps` over 10, `fenced_share` over 0.40", True), ("`bytes` over", False), ("24,576", False)])
+def test_proportion_inputs_drop_the_bytes_warning(needle, present):
+    # section 6: scan's 24,576-byte warning goes (U42), its 10-step warning stays
+    assert (needle in " ".join(PROPORTION.read_text(encoding="utf-8").split())) is present
