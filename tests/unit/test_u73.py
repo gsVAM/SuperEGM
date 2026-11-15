@@ -63,3 +63,17 @@ def test_next_ingest_rewrites_a_tag_only_claim_and_keeps_a_cut(world, stored, af
   assert world.run("review", "ingest", "--unit", UNIT, "--runcard", card)[0] == 0
   finding = round_findings(st, rid)[1][0]
   assert (finding["claim"], finding["severity"], finding["disposition"]) == (after, "medium", "contested")
+
+
+def test_an_ingest_over_the_comment_limit_cuts_every_claim_to_200(world):
+  # 70 threads of 1,000-character claims pass COMMENT_LIMIT (65,536 bytes) uncut
+  texts = [f"**Bug**: {i:02d} " + "z" * 988 for i in range(70)]
+  st, card, posted, rid, head = ingest_world(world, [(i + 1, BOT, text) for i, text in enumerate(texts)])
+  assert sum(len(text.encode("utf-8")) for text in texts) > 65_536 and all(len(text) == 1000 for text in texts)
+  code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
+  assert code == 0, out
+  claims = [f["claim"] for f in round_findings(st, rid)[1]]
+  assert len(claims) == 70 and all(len(c) == 200 and c.endswith("…") for c in claims)
+  assert len(posted) == 1 and all(c in posted[0]["body"] for c in claims)
+  assert world.run("review", "ingest", "--unit", UNIT, "--runcard", card)[0] == 0
+  assert [f["claim"] for f in round_findings(st, rid)[1]] == claims
