@@ -51,7 +51,7 @@ SEVERITIES = ("high", "medium", "low")
 DISPOSITIONS = ("fixed", "contested", "declined", "escalated", "fix-design")
 RULINGS = ("continue", "accept", "stop")
 LEGACY_CAP = 5  # the cap of a cycle or an approval entry that stores none (opened under 1.2.0)
-ROUNDS = range(1, 11)  # `review.rounds` and a spec's `Rounds:` line
+ROUNDS = range(1, 11)  # the bound of `review.rounds`, and of a spec's `Rounds:` line (`approve-spec` reads it by `valid_rounds`)
 
 
 def valid_rounds(value) -> bool:
@@ -61,7 +61,7 @@ def valid_rounds(value) -> bool:
 
 def live_rounds(st: core.Store) -> int:
   """`review.rounds` now; a value outside 1-10 is refused, naming the key."""
-  value = (st.config.get("review") or {}).get("rounds", 3)
+  value = (st.config.get("review") or {}).get("rounds", CONFIG_DEFAULTS["review"]["rounds"])
   if not valid_rounds(value):
     raise core.HandoffError(f"review.rounds must be an integer 1-10, not {value!r}")
   return value

@@ -95,7 +95,8 @@ narrows it from round `<n>`. An equal panel changes nothing and the line ends th
 a reviewer off the round's panel changes nothing and the line ends ` (unchanged: <reviewer> is not on the panel)`;
 a panel not starting with `design` is refused before any line prints. A resume cannot drop the Astra lane.
 Dispatch the panel that line prints, after finishing a partly recorded round with its own panel (the line names
-the next round's). On a new cycle only the id prints: dispatch the panel you passed. A closed one (`accept`, `stop`, or a spec edited after the
+the next round's) unless the spec was edited since that round's first record: that round then takes no more
+records, so leave it as recorded. On a new cycle only the id prints: dispatch the panel you passed. A closed one (`accept`, `stop`, or a spec edited after the
 approval that names it) starts the next cycle with a fresh cap (`review.rounds`, read at that open).
 
 `--scope` is the invocation's, default `auto`: an amendment is reviewed in scope, the sections

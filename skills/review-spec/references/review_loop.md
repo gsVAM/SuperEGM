@@ -46,27 +46,27 @@ other grammar (`review record: <file>:<line>: <reason>`).
    order) changes nothing and the line ends there; a panel naming a reviewer off the round's panel
    (wider or overlapping) changes nothing and the line ends ` (unchanged: <reviewer> is not on the
    panel)`; a panel not starting with `design` is refused (`review open: first reviewer must be
-   design`, exit 1) before any line prints. The Astra lane cannot be dropped by a resume: it stays
-   when the cycle has it, and a resume ignores `--astra` and an `astra` entry in `--reviewers`.
+   design`, exit 1) before any line prints. A resume cannot drop the Astra lane: it stays when the
+   cycle has it, and `--astra` and an `astra` entry in `--reviewers` are ignored.
    Dispatch the panel the line prints, never the one you passed. When the last round is partly
    recorded (a round's file exists once its first reviewer is recorded), the line names the
-   *next* round's panel: first finish that round with its own panel, the reviewers of it with no
-   entry under `reviewers` in the round's file (`reviews/<review id>/round-<n>.json`;
-   `review record` prints `what_ran not run (<reviewer>: no record)` for the first one still owed
-   and `completed` once none is), then dispatch the printed one.
+   *next* round's panel: first finish that round with its own panel (the reviewers with no entry
+   under `reviewers` in `reviews/<review id>/round-<n>.json`; read the file, as `review record`'s
+   `what_ran` also reads `not run (<reviewer>: ...)` for a `--not-run` entry, which is not owed),
+   then dispatch the printed one. If the spec was edited since that round's first record, it takes
+   no more records (`review record: sha256 differs from the round's`): leave it, dispatch the printed one.
    A new cycle and every other kind print the review id alone: dispatch the panel the cycle opened
    with (the one you passed at its open, and the Astra lane as the open seated it); a resume of a
    plan, head or integrate cycle never changes that panel, so pass the same `--reviewers`. A closed
    cycle (an `accept` or `stop` ruling, a spec edited after the approval that names it, or an
    integrate review whose handoff closed or whose `## Units` were amended past the bytes it
-   reviewed) gets the next number with a fresh cap, read from `review.rounds` at that open. The helper hashes a spec or a plan body (the
-   stored `unit_<id>.md`) itself; a head alone passes `--sha256`.
+   reviewed) gets the next number with a fresh cap, read from `review.rounds` at that open. The
+   helper hashes a spec or a plan body (the stored `unit_<id>.md`) itself; a head alone passes `--sha256`.
 
 ## 2. Round
 
 Each round the whole panel of that round (on a spec resume the one `review open` printed, else the
-one the cycle opened with; a spec's narrowed panel holds from its round on) is dispatched **concurrently**, one message with every Agent call,
-each through its own adapter `superegm:<id>` (`.claude-plugin/agents/<id>.md`: `model:
+one the cycle opened with) is dispatched **concurrently**, one message with every Agent call, each through its own adapter `superegm:<id>` (`.claude-plugin/agents/<id>.md`: `model:
 inherit`, `omitClaudeMd: true`, tools `Read, Grep, Glob`). The adapter is what keeps the
 context fresh, whether or not the call is named; a general-purpose agent reading the persona
 is not a goldfish. Goldfish never spawn. `set` and `proportion` are the `readiness` and

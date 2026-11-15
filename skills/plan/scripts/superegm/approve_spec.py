@@ -17,14 +17,14 @@ import re
 
 import superegm as core
 from superegm import close, runcard
-from superegm.review import Refusal, evaluate, findings_of, ingest_pr, latest_cycle, live_rounds, load_review, load_round, review_id, round_numbers
+from superegm.review import Refusal, evaluate, findings_of, ingest_pr, latest_cycle, live_rounds, load_review, load_round, review_id, round_numbers, valid_rounds
 
 WRITES = frozenset(["approvals", "handoffs", "state", "reviews", "runcards"])  # the store kinds this subcommand writes
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset(["review-spec", "review-plan", "integrate", "approve-spec"])  # the skills whose card this subcommand accepts
 CONFIG = ".superegm/config.json"
 FROZEN_FIELDS = ["rounds"]  # the entry fields frozen at an approval, which `--amend-units` copies where the extended entry has them (U36)
-ANY_H2 = re.compile(r"^ {0,3}##[ \t]+\S")  # an H2 as review.py reads one: up to three spaces of indent
+ANY_H2 = re.compile(r"^ {0,3}##[ \t]+\S")  # an H2 as review.py reads one: up to three spaces of indent, outside a fence
 UNITS_H2 = re.compile(r"^## (?:\d+\.?\s+)?Units\s*$")
 
 
@@ -103,16 +103,24 @@ def cycle_of(review_id: str | None) -> int:
 
 def rounds_line(text: str) -> int | None:
   """The value of the one `Rounds: <n>` line before the spec's first H2, `n` 1-10; None without one. A second such
-  line, or a value that is not 1-10, is refused with the line; a `Rounds:` line after the first H2 is prose (§4)."""
-  found = None
+  line, or a value that is not 1-10, is refused with the line; a `Rounds:` line after the first H2 is prose (§4). A
+  line inside a fenced block is neither: it is no `Rounds:` line, and a fenced `## ` is no H2."""
+  found, fence = None, None  # the open fence's (character, run length), as review.py's `sections` reads one
   for line in text.splitlines():
+    if fence:
+      if re.match(rf"^ {{0,3}}{fence[0]}{{{fence[1]},}}\s*$", line):
+        fence = None
+      continue
+    if (opener := core.FENCE_RE.match(line)) and not (opener.group(1)[0] == "`" and "`" in opener.group(2)):
+      fence = (opener.group(1)[0], len(opener.group(1)))
+      continue
     if ANY_H2.match(line):
       break
     if line.startswith("Rounds:"):
       if found is not None:
         raise core.HandoffError(f"approve-spec: a second Rounds line before the first H2: {line}")
       value = line.removeprefix("Rounds:").strip()
-      if not (value.isascii() and value.isdigit() and int(value) in range(1, 11)):
+      if not (value.isascii() and value.isdigit() and valid_rounds(int(value))):
         raise core.HandoffError(f"approve-spec: {line} is not an integer 1-10")
       found = int(value)
   return found

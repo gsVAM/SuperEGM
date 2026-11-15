@@ -961,7 +961,7 @@ def ingest_world(world, threads, roles=(), outcome="clean"):
 
 
 @pytest.mark.parametrize("cap, word", [(None, "revise"), (1, "cap-reached")])
-def test_review_ingest_rewrites_an_owner_word_a_new_external_high_makes_mixed(world, monkeypatch, cap, word):
+def test_review_ingest_rewrites_an_owner_word_a_new_external_high_makes_mixed(world, cap, word):
   """Round 5 (PR #103 review, astra-5-6): an external high ingested beside a posted `owner: <ids>` round's owner-only
   remainder leaves it mixed: the word becomes `revise`, or `cap-reached` at the cap, never the stale owner word."""
   head = subprocess.run(["git", "-C", str(world.repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
@@ -980,7 +980,7 @@ def test_review_ingest_rewrites_an_owner_word_a_new_external_high_makes_mixed(wo
   assert (entry["outcome"], entry["rewritten_from"]) == (word, "owner: foreman-1-1")
 
 
-def test_review_ingest_at_the_cap_rewrites_clean_to_cap_reached(world, monkeypatch):
+def test_review_ingest_at_the_cap_rewrites_clean_to_cap_reached(world):
   st, card, posted, rid, head = ingest_world(world, [(1, "alice", "bug: the hook never fires")], {"alice": {"role_name": "write"}})
   cap_at_one(st, rid)
   code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
