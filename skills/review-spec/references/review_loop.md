@@ -60,7 +60,7 @@ other grammar (`review record: <file>:<line>: <reason>`).
    plan, head or integrate cycle never changes that panel, so pass the same `--reviewers`. A closed
    cycle (an `accept` or `stop` ruling, a spec edited after the approval that names it, or an
    integrate review whose handoff closed or whose `## Units` were amended past the bytes it
-   reviewed) gets the next number with a fresh cap, read from `review.rounds` at that open. The
+   reviewed) gets the next number with a fresh cap (section 6: each kind reads its own). The
    helper hashes a spec or a plan body (the stored `unit_<id>.md`) itself; a head alone passes `--sha256`.
 
 ## 2. Round

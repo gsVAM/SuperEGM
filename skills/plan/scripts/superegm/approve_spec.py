@@ -104,7 +104,8 @@ def cycle_of(review_id: str | None) -> int:
 def rounds_line(text: str) -> int | None:
   """The value of the one `Rounds: <n>` line before the spec's first H2, `n` 1-10; None without one. A second such
   line, or a value that is not 1-10, is refused with the line; a `Rounds:` line after the first H2 is prose (§4). A
-  line inside a fenced block is neither: it is no `Rounds:` line, and a fenced `## ` is no H2."""
+  line inside a fenced block is neither: it is no `Rounds:` line, and a fenced `## ` is no H2. The line starts at
+  column 0; an indented ` Rounds:` is prose."""
   found, fence = None, None  # the open fence's (character, run length), as review.py's `sections` reads one
   for line in text.splitlines():
     if fence:
