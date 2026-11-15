@@ -3,6 +3,7 @@
 
 """superegm instructions: the `# Repository instructions` section of a role's brief (spec 1.2.1 section 3.1)."""
 
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -16,6 +17,7 @@ SKILLS = frozenset(["review-spec", "review-plan", "wave", "integrate", "judges"]
 ROLES = ("builder", "foreman", "reviewers", "judges")
 LANES = ("local", "astra")
 CONFIG = ".superegm/config.json"
+LIMIT = 8192  # the most bytes a file may hold
 SHAPE = "instructions must be a list of {file: <repo-relative path>, to: [non-empty list from builder, foreman, reviewers, judges]}"
 
 
@@ -39,6 +41,11 @@ def check(value) -> list:
   if not isinstance(value, list) or not all(good(e) for e in value):
     raise core.HandoffError(f"{SHAPE}, not {json.dumps(value)}")
   return value
+
+
+def blob_sha(data: bytes) -> str:
+  """git's blob sha of `data`, 12 hex: the name of its store copy."""
+  return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()[:12]
 
 
 def blob(root: Path, ref: str, rel: str) -> bytes | None:
