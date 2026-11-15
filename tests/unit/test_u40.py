@@ -227,6 +227,20 @@ def owner_comment(world, cid, body, at="2026-11-03T10:00:00Z", login="owner"):
       "issue_url": f"https://api.github.com/repos/example-org/webhooks/issues/{ISSUE}"})
 
 
+@pytest.mark.parametrize("patterns, deferred", [
+    (PATTERNS, False), ([{"reach": "agent", "verified": "refuted"}], True),
+])
+def test_refuted_matches_only_a_verified_refuted_pattern(world, tmp_path, monkeypatch, patterns, deferred):
+  """A medium triaged `refuted` matches a pattern only if the pattern names `verified: refuted` (section 5.2): a
+  refuted line whose other fields match pattern 1 (`reach: agent`, no `verified`) is not deferred and blocks."""
+  w = head(world, tmp_path, monkeypatch, {"change-review": M("change-review")}, patterns=patterns)
+  code, out = triage_file(world, w, f"{F1} | reach: agent | later: easy | critical: no | verified: refuted no caller\n")
+  assert (code, out.splitlines()) == (0, [f"{F1} deferred: triage 1"] if deferred else []), out
+  assert finding_of(w, F1)["disposition"] == ("deferred: triage 1" if deferred else None)
+  code, out = post(world, w)
+  assert (code, foreman(w)["rounds"][0]["outcome"] == "clean") == (0, deferred), out
+
+
 def deferred_round(world, tmp_path, monkeypatch, cap_one=False):
   """Round 1 posted `clean` with F1 deferred by triage (pattern 2) and F2 declined by the owner: one follow-up row."""
   from test_foreman import cap_at_one
