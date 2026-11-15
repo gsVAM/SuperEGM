@@ -145,3 +145,44 @@ def test_approve_after_hand_written_approval(world):
   assert code == 0, out
   entries = json.loads(hstore(world).path("approvals", SLUG).read_text(encoding="utf-8"))["entries"]
   assert entries[-1]["review"] == rid and len(entries) == 2
+
+
+def resume(world, spec, cid, given, kind="spec", artifact=None):
+  """`review open` again with `given` as the panel: (code, output)."""
+  return world.run("review", "open", "--kind", kind, "--artifact", artifact or str(spec), "--reviewers", given, "--runcard", cid)
+
+
+@pytest.mark.parametrize("panels_before, recorded, given, panels_after, line2", [
+  (None, [1, 2], "design,style", [{"from_round": 3, "reviewers": ["design", "style", "astra"]}], "panel design,style,astra from round 3"),
+  (None, [1, 2, "3 partly"], "design,style", [{"from_round": 4, "reviewers": ["design", "style", "astra"]}], "panel design,style,astra from round 4"),
+  (None, [1], "design,zoom-out,style", None, "panel design,zoom-out,style,astra from round 2"),
+  (None, [1], "design,zoom-out,style,comprehension", None, "panel design,zoom-out,style,astra from round 2 (unchanged: "),
+  (None, [1], "design,comprehension", None, "panel design,zoom-out,style,astra from round 2 (unchanged: "),
+  ([{"from_round": 3, "reviewers": ["design", "style", "astra"]}], [1, 2, 3], "design",
+   [{"from_round": 3, "reviewers": ["design", "style", "astra"]}, {"from_round": 4, "reviewers": ["design", "astra"]}], "panel design,astra from round 4"),
+])
+def test_resume_narrows_the_panel(world, panels_before, recorded, given, panels_after, line2):
+  """A resume with a proper subset of the panel, `design` first, narrows it from the next unrecorded round (the Astra
+  lane kept); a wider, overlapping or equal panel changes nothing; a spec resume prints the panel line, no other kind."""
+  spec, cid, rid = opened(world, reviewers="design,zoom-out,style", astra="on")
+  assert rjson(world, rid)["reviewers"] == ["design", "zoom-out", "style", "astra"]
+  for item in recorded:
+    n = item if isinstance(item, int) else int(item.split()[0])
+    for reviewer in ("design", "zoom-out", "style")[:1 if isinstance(item, str) else 3]:
+      assert record(world, rid, n, reviewer, [F("design", n, 1)] if reviewer == "design" else [], cid)[0] == 0
+  if panels_before:
+    review = rjson(world, rid)
+    review["panels"] = panels_before
+    atomic_write(rpath(world, rid, "review.json"), review)
+  code, out = resume(world, spec, cid, given)
+  assert code == 0, out
+  assert rjson(world, rid).get("panels") == panels_after
+  lines = out.splitlines()
+  assert lines[0] == rid and len(lines) == 2
+  assert lines[1].startswith(line2) if "(unchanged" in line2 else lines[1] == line2
+  assert resume(world, spec, cid, "zoom-out,design")[1].strip() == "review open: first reviewer must be design"
+  _, pcid, prid = opened(world, "plan")
+  for panel in (PANEL_OF["plan"], "readiness"):
+    code, out = resume(world, spec, pcid, panel, "plan", "U07")
+    assert code == 0 and out.splitlines() == [prid], out
+  assert "panels" not in rjson(world, prid)
