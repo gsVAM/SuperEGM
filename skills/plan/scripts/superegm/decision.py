@@ -93,7 +93,8 @@ FORM_RES = (
   ("redesign", re.compile(rf"redesign{REASON}")),
   ("allowed", re.compile(rf"(?P<subject>{FID}) allowed{REASON}")),
 )
-FILE_RULING_RE = re.compile(r"test-delta (\S+) allowed")  # a recorded whole-file allowance's text
+LETTER_RE = re.compile(r"\([a-z]\)")  # a rendered option's letter, the bare answer of the judges
+FILE_RULING_RE =re.compile(r"test-delta (\S+) allowed")  # a recorded whole-file allowance's text
 JUDGES_MARK_RE =re.compile(r"^\(judges \S+, leavemealone\)$", re.M)
 
 
@@ -710,11 +711,16 @@ def check_ruling(point: int, options: list, ruling: str, by: str = "") -> str:
   answers the option carrying its fid, and `<fid> finding upheld` rules that fid upheld (spec section 8: the builder
   restores it, or at the cap point 2 asks); either is refused to the judges, the owner's alone (U25); any other text
   is none of its options."""
-  if point == 3 and ruling == "amend" and "amend" in options and by.startswith("judges:"):
-    raise Refusal("decision: amend is the owner's alone")
   if ruling == "redesign" and point in (1, 2):  # a head's third ruling: no letter, no finding id
     return "redesign"
   fid, _, text = ruling.partition(" ") if point == 1 else ("", "", ruling)
+  if point == 3 and LETTER_RE.fullmatch(text) and not any(o.startswith(text + " ") for o in options):
+    # a bare `(x)` no stored option's own prefix carries is the letter of its position in the rendered question
+    place = ord(text[1]) - ord("a")
+    if place < len(options):
+      text = options[place]
+  if point == 3 and text == "amend" and "amend" in options and by.startswith("judges:"):  # on the option the ruling resolves to
+    raise Refusal("decision: amend is the owner's alone")
   if point == 1 and options and all(o.endswith(" allowed") for o in options):
     said = text.partition(" — ")[0].strip()
     option = next((o for o in options if o.split(" ")[0] == fid and said in ("allowed", "finding overruled", "finding upheld")), None)
