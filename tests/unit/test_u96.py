@@ -89,6 +89,11 @@ def test_rerun_after_crash(world, monkeypatch):
   body = consumer_body("`f` (U01)")
   hdir, real = s.base(), core.save_foreman
 
+  # a `one more round` ruling on a handoff with no amendment records none: the directory is never made
+  round_qid = opened(world, card, deviation("U01 f: returns None"), source="review head-U02-c1 cap", point=2)
+  assert rule(world, card, round_qid, "one more round")[0] == 0
+  assert not (hdir / "amendments").exists()
+
   def crash(*args, **kwargs):
     raise core.HandoffError("crash before the ruling is saved")
 
@@ -103,11 +108,6 @@ def test_rerun_after_crash(world, monkeypatch):
   assert rule(world, card, qid, f"amend — {rerun_line}")[0] == 0
   assert json.loads(path.read_text(encoding="utf-8"))[0]["text"] == rerun_line
   assert [a["text"] for a in launch_builder.amendments_for(s, "U01", body)] == [rerun_line]
-
-  # a `one more round` ruling records no amendment: no file beside the first
-  round_qid = opened(world, card, deviation("U01 f: returns None"), source="review head-U02-c1 cap", point=2)
-  assert rule(world, card, round_qid, "one more round")[0] == 0
-  assert [f.name for f in (hdir / "amendments").iterdir()] == ["11.json"]
 
   # a rerun that rules `stop the unit` deletes the file the crashed run wrote
   qid = opened(world, card, deviation("U01 f: returns None"), source="comment 12")
@@ -145,6 +145,22 @@ def test_amend_refusals(world, case, message):
   assert err.strip().startswith(message) and code == 1
   assert not (s.base() / "amendments").exists() or not any((s.base() / "amendments").iterdir())
   assert not foreman_of(s, "U02")["rulings"]
+
+
+def test_a_bare_letter_resolves_to_the_option_at_its_position(world):
+  # the judges' `(d)` on stored `keep undefined`, `return null`, `amend`, `stop the unit` rules `stop the unit`;
+  # a bare `(a)` on a launch decision rules `relaunch`
+  card, s = world_on(world)
+  qid = opened(world, card, deviation("U01 f: changed"), source="comment 11")
+  code, out = rule(world, card, qid, "(d)", "judges:p-1")
+  assert code == 0, out
+  assert foreman_of(s, "U02")["stopped"]["reason"] == "stop the unit"
+  assert world.gh.comments[3][-1]["body"].startswith("**Ruling:** (11) stop the unit")
+  assert not (s.base() / "amendments").exists()
+  launch_qid = opened(world, card, "launch 1 stalled (last commit none)\n", source="launch 1")
+  code, out = rule(world, card, launch_qid, "(a)", "judges:p-1")
+  assert code == 0, out
+  assert world.gh.comments[3][-1]["body"].startswith(f"**Ruling:** ({launch_qid}) relaunch")
 
 
 def test_judges_never_amend(world):
