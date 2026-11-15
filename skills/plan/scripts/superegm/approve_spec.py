@@ -6,7 +6,7 @@
 # ingest once before the refusals, the refusal of an unsettled external finding, an external finding's carried copies
 # as one escalated pair discharged by its latest copy alone, and a re-approval of the same cycle reading that cycle
 # again and keeping the replaced entry's unnamed pairs (U26); `--amend-units` typed by hand opens and closes its own
-# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units`, and a hand-written prior approval read as `since` 0 (U36).
+# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units`, and a hand-written prior approval read as `since` 0 (U36); the triage section parsed, refused with its line and frozen as `triage` (U39).
 
 """superegm approve-spec: record the owner's approval of a converged spec (spec section 8)."""
 
@@ -125,6 +125,49 @@ def rounds_line(text: str) -> int | None:
         raise core.HandoffError(f"approve-spec: {line} is not an integer 1-10")
       found = int(value)
   return found
+
+
+def triage_section(lines: list[str]) -> tuple[int, list[tuple[str, bool]]] | None:
+  """The triage section of a spec's `lines` (section 5.1): the index of its heading and its lines to the next H2 as
+  `(line, fenced)`, a fence's own lines and the lines inside it `fenced`; None when the spec's first H2 outside a fenced
+  block is not exactly `Triage`."""
+  fence, start, body = None, None, []  # the open fence's (character, run length), as `rounds_line` reads one
+  for number, line in enumerate(lines):
+    fenced = fence is not None
+    if fence:
+      if re.match(rf"^ {{0,3}}{fence[0]}{{{fence[1]},}}\s*$", line):
+        fence = None
+    elif (opener := core.FENCE_RE.match(line)) and not (opener.group(1)[0] == "`" and "`" in opener.group(2)):
+      fence, fenced = (opener.group(1)[0], len(opener.group(1))), True
+    elif ANY_H2.match(line):
+      if start is not None:
+        break
+      if line.strip().removeprefix("##").strip() != "Triage":
+        return None
+      start = number
+      continue
+    if start is not None:
+      body.append((line, fenced))
+  return None if start is None else (start, body)
+
+
+def triage_patterns(text: str) -> list[dict] | None:
+  """The patterns of the spec's triage section (section 5.1), in section order; None without the section (its first
+  H2 outside a fenced block, exactly `Triage`). The section holds one `Unblock:` line and the run of `- ` lines
+  directly after it, each `field: value` pairs separated by `, `; any other line is prose."""
+  section = triage_section(text.splitlines())
+  if section is None:
+    return None
+  patterns, state = [], "before"  # before the `Unblock:` line, in the run after it, past the run's end
+  for line, fenced in section[1]:
+    if state == "before" and not fenced and line.rstrip() == "Unblock:":
+      state = "run"
+    elif state == "run":
+      if fenced or not line.startswith("- "):
+        state = "past"
+      else:
+        patterns.append(dict(pair.split(": ", 1) for pair in line[2:].split(", ")))
+  return patterns
 
 
 def units_section(text: str) -> str:
