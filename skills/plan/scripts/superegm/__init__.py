@@ -991,8 +991,7 @@ def load_config(repo_root: Path) -> dict:
   builder = config["builder"]
   if isinstance(builder, dict) and isinstance(builder.get("profile_dir"), str):
     builder["profile_dir"] = str(Path(builder["profile_dir"]).expanduser())
-  app = builder.setdefault("app", None) if isinstance(builder, dict) else None
-  isinstance(builder, dict) and builder.setdefault("stall_minutes", 30)  # a file written before U31 lacks it
+  app = builder.get("app") if isinstance(builder, dict) else None  # the builder's other defaults come from launch_builder.CONFIG_DEFAULTS (U46)
   if app is not None:
     app = {"private_key_env": "SUPEREGM_APP_KEY", **app} if isinstance(app, dict) else app
     if not isinstance(app, dict) or set(app) != {"app_id", "slug", "private_key_env"} \
@@ -1002,8 +1001,6 @@ def load_config(repo_root: Path) -> dict:
       raise HandoffError(f"{path}: builder.app must be null or {{app_id: <int>, slug: <slug>, private_key_env: <name>}}")
     builder["app"] = app
   if isinstance(builder, dict):
-    for key, default in (("plugins", []), ("mcp", {}), ("max_subagent_calls", 12)):
-      builder.setdefault(key, default)  # a file written before U27 lacks them
     tools = builder.get("allowed_tools")
     if not isinstance(tools, list) or not all(isinstance(t, str) for t in tools):
       raise HandoffError(f"{path}: builder.allowed_tools must be a list of strings")
@@ -1016,7 +1013,7 @@ def load_config(repo_root: Path) -> dict:
     cap = builder["max_subagent_calls"]
     if isinstance(cap, bool) or not isinstance(cap, int) or cap < 1:
       raise HandoffError("config: builder.max_subagent_calls: a positive integer")
-    tiers = builder.setdefault("tiers", {})  # the defaults' rows unless the file names its own (U33)
+    tiers = builder["tiers"]  # the defaults' rows unless the file names its own (U33)
     if not isinstance(tiers, dict) or set(tiers) - {"difficult", "easy"}:
       raise HandoffError(f"{path}: builder.tiers keys must be difficult or easy")
     for tier, pair in tiers.items():
