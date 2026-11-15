@@ -251,3 +251,108 @@ def test_builder_prompt_carries_the_section(world, monkeypatch, to):
   else:
     assert builder_section == "" and "# Repository instructions" not in prompt
     assert launch["instructions"] == []
+
+
+# ---------------------------------------------- round 2: the review's findings
+
+
+def test_identical_files_share_one_verified_copy(world):
+  """Two files of the same bytes, or a file renamed between approvals, share instructions/<sha>.json: the copy is
+  verified by its sha alone, so each file renders and none overwrites the other's copy."""
+  from superegm import approve_spec
+  from superegm.instructions import render
+  commit_file(world, "a.md", "Same text.\n")
+  commit_file(world, "b.md", "Same text.\n")
+  configure(world, [{"file": "a.md", "to": ["builder"]}, {"file": "b.md", "to": ["builder"]}])
+  spec, cid, rid = converged_spec(world)
+  code, out = approve(world, spec, cid, "--yes")
+  assert code == 0, out
+  st, sha = hstore(world), blob_sha(b"Same text.\n")
+  hid = entries_of(world)[-1]["handoff_id"]
+  manifest, text = render(st, "builder", handoff_id=hid)
+  assert manifest == [{"file": "a.md", "sha": sha}, {"file": "b.md", "sha": sha}]
+  assert "## a.md\n```\nSame text.\n```" in text and "## b.md\n```\nSame text.\n```" in text
+  approve_spec.write_copy(st, {"file": "renamed.md", "sha": sha, "text": "Same text.\n"})   # a later approval's rename
+  assert approve_spec.read_copy(st, "a.md", sha) == approve_spec.read_copy(st, "renamed.md", sha) == "Same text.\n"
+  assert render(st, "builder", handoff_id=hid) == (manifest, text)
+
+
+def bare_repo(tmp_path, files):
+  """A fresh repository whose one commit holds `files` ({path: text or bytes})."""
+  root = tmp_path / "head-repo"
+  root.mkdir()
+  git(["init", "-q"], root)
+  for rel, data in files.items():
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data if isinstance(data, bytes) else data.encode("utf-8"))
+  git(["add", "-A"], root)
+  git(["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "x"], root)
+  return root
+
+
+@pytest.mark.parametrize("files, named", [
+  ({".superegm/config.json": json.dumps({"instructions": [{"file": "big.md", "to": ["reviewers"]}]}), "big.md": "x" * 8193},
+   "big.md"),
+  ({".superegm/config.json": "{not json"}, "instructions"),
+  ({".superegm/config.json": "[1, 2]"}, "instructions"),
+])
+def test_head_render_refuses_an_oversized_file_and_a_malformed_config(world, tmp_path, files, named):
+  """The HEAD path holds a file to the 8,192-byte limit and refuses a config that is not a JSON object, naming it."""
+  from superegm.instructions import render
+  root = bare_repo(tmp_path, files)
+  with pytest.raises(superegm.HandoffError, match=named):
+    render(hstore(world), "reviewers", root=root)
+
+
+def test_head_render_defaults_root_to_the_checkout(world, tmp_path, monkeypatch):
+  """`render` with neither a handoff id nor a root reads the checkout it runs in."""
+  from superegm.instructions import render
+  root = bare_repo(tmp_path, {".superegm/config.json": json.dumps({"instructions": [{"file": "a.md", "to": ["judges"]}]}),
+                              "a.md": "Judge it.\n"})
+  monkeypatch.chdir(root)
+  assert render(hstore(world), "judges") == ([{"file": "a.md", "sha": blob_sha(b"Judge it.\n")}],
+                                             "# Repository instructions\n\n## a.md\n```\nJudge it.\n```\n")
+
+
+@pytest.mark.parametrize("case", ["review not opened", "review id escapes", "review of another spec"])
+def test_spec_render_binds_the_review_to_the_spec(world, case):
+  """`--spec` stores a round's render only under a review opened on that spec; a review id that is no plain name,
+  a review never opened or one of another spec is refused and nothing is written."""
+  commit_file(world, RULES, "Run the suite.\n")
+  configure(world, [{"file": RULES, "to": ["reviewers"]}])
+  git(["commit", "-qam", "config"], world.repo)
+  spec, cid, rid = converged_spec(world)
+  st = hstore(world)
+  review = {"review not opened": "never-opened", "review id escapes": "../../escaped", "review of another spec": "other"}[case]
+  if case == "review of another spec":
+    other = json.loads(st.path("reviews", rid, "review.json").read_text(encoding="utf-8"))
+    other["artifact"] = str(world.repo / "docs/other-design.md")
+    st.path("reviews", "other", "review.json").parent.mkdir(parents=True, exist_ok=True)
+    st.path("reviews", "other", "review.json").write_text(json.dumps(other), encoding="utf-8")
+  before = sorted(p for p in st.root.parent.rglob("*") if p.is_file())
+  code, out = world.run("instructions", "--role", "reviewers", "--spec", spec, "--review", review, "--round", 1,
+                        "--runcard", cid, card=None)
+  assert code == 1 and "instructions" in out, out
+  assert sorted(p for p in st.root.parent.rglob("*") if p.is_file()) == before
+
+
+def test_handoff_render_refuses_another_handoff_than_the_cards(world):
+  """`--handoff` must name the handoff the card was opened under: another handoff's list never lands on the card."""
+  commit_file(world, RULES, "Run the suite.\n")
+  configure(world, [{"file": RULES, "to": ["reviewers"]}])
+  spec, cid, rid = converged_spec(world)
+  assert approve(world, spec, cid, "--yes")[0] == 0
+  hid = entries_of(world)[-1]["handoff_id"]
+  seed_handoff(world, spec)
+  other = card(world, spec, "review-plan", handoff=hid)
+  st = hstore(world)
+  path = st.path("runcards", other)
+  record = json.loads(path.read_text(encoding="utf-8"))
+  path.write_text(json.dumps({**record, "handoff": "sample-000000"}), encoding="utf-8")   # a card of an older handoff
+  code, out = world.run("instructions", "--role", "reviewers", "--handoff", hid, "--runcard", other, card=None)
+  assert code == 1 and "instructions" in out, out
+  assert "instructions" not in superegm.load_card(hstore(world), other)
+  used = card(world, spec, "review-plan", handoff=hid)   # a card of this handoff (opening it interrupts `other`)
+  code, out = world.run("instructions", "--role", "reviewers", "--handoff", hid, "--runcard", used, card=None)
+  assert code == 0, out
