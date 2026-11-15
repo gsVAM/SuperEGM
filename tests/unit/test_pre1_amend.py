@@ -153,18 +153,19 @@ def test_the_judges_question_leaves_amend_out(world):
   code, out = world.run("judges", "question", "--unit", "U02", "--blocked", "77", "--runcard", card)
   assert code == 0, out
   text = Path(out.splitlines()[0]).read_text(encoding="utf-8")
-  assert "amend" not in text and text.endswith("- (a) keep undefined\n- (b) return null\n- (c) stop the unit\n")
+  assert "amend" not in text and text.endswith("- (a) keep undefined\n- (b) return null\n- (d) stop the unit\n")
 
 
 def test_the_judges_decision_question_leaves_amend_out(world):
+  from superegm import HandoffError
   from superegm.judges import decision_question
   card, s = world_on(world)
   qid = opened(world, card, IFACE + OPTS)
   decision = foreman_of(s, "U02")["decisions"][-1]
   assert "amend" in decision["options"]
   s.path("units").write_text(json.dumps({"units": {"U02": {"decisions": [decision]}}}), encoding="utf-8")
-  text = decision_question(s, "U02", qid)
-  assert "- amend\n" not in text and text.endswith("- (a) keep undefined\n- (b) return null\n- stop the unit\n")
+  with pytest.raises(HandoffError, match="--blocked"):  # a runtime `q<n>` is rendered by `--blocked`, `amend` left out
+    decision_question(s, "U02", qid)
 
 
 def test_an_amendment_names_the_interface_as_consumes_lines_do(tmp_path):
