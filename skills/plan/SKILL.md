@@ -118,7 +118,7 @@ conftest attribute, private helper or monkeypatch target: those and the arrange 
 and a unit's Scope lists the conftest and fixture files its tests may touch (for example `tests/conftest.py`).
 The `Implement` line is one sentence: the file, the behaviour and the values the spec pins, with a signature only
 for a public or shared contract that is not already a Produces line; it never restates what the test asserts.
-A code cite (`path:line`) is evidence, never a requirement: `scan` refuses one on an Interfaces or Produces line.
+A code cite (`path:line`) is evidence, never a requirement: `scan` refuses one on an Interfaces or Produces line, and warns, without refusing, when a body has more than ten cites into its own Scope paths.
 A rule family is one parametrized Step, never one Step per rule; a copy/rename table or an edit list is test data,
 one parametrized test over it (the test is the table) and an `Implement` line that says "make the table hold".
 The `Run` line and the closing line are optional: absent, the Step's command is `pytest <test path>::<test name> -q`,

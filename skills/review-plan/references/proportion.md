@@ -21,7 +21,7 @@ Three, each by absolute path; read nothing else:
 1. The body: the unit's rendered issue body, the text under review.
 2. That unit's `plan/scan/<unit>.json`: `bytes`, `fenced_share` (the share of the body inside
    fences), `steps`, `spec_range_bytes`, `ratio` (body bytes over spec-range bytes) and
-   `warnings` (`bytes` over 24,576, `steps` over 10, `fenced_share` over 0.40).
+   `warnings` (`bytes` over 24,576, `steps` over 10, `fenced_share` over 0.40, and `scope_cites <n> > 10`: more than ten `path:line` cites into the unit's own Scope paths, evidence of line-number detail that never blocks alone).
 3. The unit's spec range at the frozen hash: the lines of the approved spec the body's
    Design range names, so you can tell what the spec already decides.
 

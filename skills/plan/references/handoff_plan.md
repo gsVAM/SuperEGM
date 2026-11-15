@@ -124,8 +124,8 @@ lists the conftest and fixture files its tests may touch (for example
 `tests/conftest.py`), since the builder chooses the fixtures and the Scope
 check still applies.
 
-A Step is done when the builder can write exactly one reasonable thing from
-it: unambiguous, not complete. Each group is three parts:
+A Step is done when it has the test name, the behaviour and the expected
+values (handoff standard Q9); the rest is the builder's. Each group is three parts:
 
 - The `Write` line, `` <n>. Write the failing test `<test name>` in `<test path>`: ``
   (the test name in its first backtick span, the test path in its second).
@@ -166,8 +166,8 @@ refused by `scan`; a function body the signature and the test already
 determine is a transcript, which the proportion reviewer refuses.
 
 Self-review before `graph`, with the spec in front of you: every section of
-the spec's range for this unit has a Step; every Step lets the builder write
-exactly one reasonable thing and carries nothing more; the names and
+the spec's range for this unit has a Step; every Step carries its test name,
+the behaviour and the expected values and nothing more; the names and
 signatures a later unit consumes are the ones an earlier unit produces; every
 review-focus line has its test in the owning unit's Steps; the body is no
 longer than the decisions the builder cannot make alone (compare `scan`'s

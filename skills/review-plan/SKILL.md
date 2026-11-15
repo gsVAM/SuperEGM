@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Reviews a handoff plan against its design through the judge panel before any issue is filed.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the body: plan review over the helper's review-plan and review subcommands (U06); `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the accept below the cap's one question per round (U35); the `width:` line, the plan header, the chain check and the split check (U29); the readiness plan remit (1.2.1 §6.5); the remit sentence on one line (U79). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the body: plan review over the helper's review-plan and review subcommands (U06); `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the accept below the cap's one question per round (U35); the `width:` line, the plan header, the chain check and the split check (U29); the readiness plan remit (1.2.1 §6.5). -->
 
 # Plan review (phase 3)
 
@@ -115,9 +115,9 @@ this invocation's round count, 1 at its first Step 2.
    file when it found nothing. The `readiness` goldfish also receives the standard's readiness
    sentence: a question a builder would have to ask before building is a finding, a blocking
    one is `high` only when its failure scenario holds; it reviews under the plan-review remit of
-   `agents/readiness.md` (a builder who reads the code makes every choice but a
-   product, security or cross-unit contract decision; fixture names, harness wiring, private names
-   and line numbers are outside it; a finding without the requirement it breaks and a failure scenario is `low`); and, by absolute path, the unit's `orient/<unit>.md` in the handoff's directory when the store
+   `agents/readiness.md` (a builder who reads the code makes every choice but a product, security or
+   cross-unit contract decision; fixture names, harness wiring, private names and line numbers are
+   outside it; a finding without the requirement it breaks and a failure scenario is `low`); and, by absolute path, the unit's `orient/<unit>.md` in the handoff's directory when the store
    holds it (the brief says `no orient file` when it is absent); that dispatch is recorded with
    `--isolation 'exposed:orient <tree sha>'`, the tree its first line names, joined with
    whatever else the goldfish reports.

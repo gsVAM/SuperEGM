@@ -152,7 +152,7 @@ conftest attribute, private helper or monkeypatch target: those and the arrange 
 and a unit's Scope lists the conftest and fixture files its tests may touch (for example `tests/conftest.py`).
 The `Implement` line is one sentence: the file, the behaviour and the values the spec pins, with a signature only
 for a public or shared contract that is not already a Produces line; it never restates what the test asserts.
-A code cite (`path:line`) is evidence, never a requirement: `scan` refuses one on an Interfaces or Produces line.
+A code cite (`path:line`) is evidence, never a requirement: `scan` refuses one on an Interfaces or Produces line, and warns, without refusing, when a body has more than ten cites into its own Scope paths.
 A rule family is one parametrized Step, never one Step per rule; a copy/rename table or an edit list is test data,
 one parametrized test over it (the test is the table) and an `Implement` line that says "make the table hold".
 The `Run` line and the closing line are optional: absent, the Step's command is `pytest <test path>::<test name> -q`,
@@ -162,9 +162,9 @@ overrides the default and is the Step's one command.
 
 ## What a Step Contains
 
-A step is done when the implementer can write exactly one reasonable thing
-from it. That is the whole requirement: unambiguous, not complete. Each kind
-of step carries what makes it unambiguous and nothing more:
+A step is done when it has the test name, the behaviour and the expected
+values; fixtures, arrange code, helpers and private exception types are the
+builder's. Each kind of step carries that and nothing more:
 
 - **A test step:** the test's name and its assertions, as code, with the
   spec's exact values in them.
@@ -190,7 +190,7 @@ After writing the complete plan, look at the spec with fresh eyes and check the 
 
 **1. Spec coverage:** Skim each section/requirement in the spec. Can you point to a task that implements it? List any gaps.
 
-**2. Step scan:** Every step must let the implementer write exactly one reasonable thing, and no step may carry more than that: a line that decides nothing is a gap, a function body the signature and tests already determine is a transcript. Fix both.
+**2. Step scan:** Every step must carry its test name, the behaviour and the expected values, and no step may carry more than that: a line that decides nothing is a gap, a function body the signature and tests already determine is a transcript. Fix both.
 
 **3. Type consistency:** Do the types, method signatures, and property names you used in later tasks match what you defined in earlier tasks? A function called `clearLayers()` in Task 3 but `clearFullLayers()` in Task 7 is a bug.
 
