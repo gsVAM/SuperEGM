@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3/5
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
-# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the `amendments[]` it writes (spec §6.5, 1.2.1-pre.1 P5).
+# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the `amendments/<comment id>.json` file it writes before the ruling is saved (spec §6.5, 1.2.1-pre.1 P5, U81).
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
@@ -22,7 +22,7 @@ from superegm.report import pending_decisions, unit_view
 from superegm import review
 from superegm.review import Refusal
 
-WRITES = frozenset({"foreman", "reviews", "state", "file"})  # the store kinds this subcommand writes (`reviews`: a fifth point's accept, U35; `file`: `amendments/<comment id>.json`, §6.5)
+WRITES = frozenset({"foreman", "reviews", "state", "file"})  # the store kinds this subcommand writes (`reviews`: a fifth point's accept, U35; `file`: `amendments/<comment id>.json`, §6.5; `state` stays in the pin though `rule` no longer saves it, U81's `WRITES` value)
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset({"wave"})  # the skills whose card this subcommand accepts
 RELAUNCH = ["relaunch", "stop the unit"]
@@ -38,7 +38,7 @@ def comment_options(text: str) -> list:
 
 
 def amendments_of(text: str, chosen: str, reason: str, comment_id: int, now: str) -> list:
-  """The `amendments[]` entries a point-3 ruling on a builder comment writes (spec §6.5): `amend` names the one
+  """The entries of `amendments/<comment id>.json` a point-3 ruling on a builder comment writes (spec §6.5): `amend` names the one
   interface deviation, which must be in its unit's Interfaces lines (`rule` checks), text the owner's line; any
   other option settles every interface heading, text the option's; `stop the unit` and a relaunch keep the contract."""
   if chosen in RELAUNCH:
