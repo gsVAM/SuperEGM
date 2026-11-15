@@ -217,7 +217,8 @@ def test_the_judges_decision_question_drops_a_builders_amend_line(world):
   card, s = world_on(world)
   did = opened(world, card, IFACE + "**Builder status:** BLOCKED\nWhich?\n- (a) amend\n- (b) return null\n")
   [q] = judges.parse_questions(judges.decision_question(s, "U02", did))  # the panel's own parser takes it whole
-  assert q["options"] == {"a": "return null", "b": "stop the unit"}
+  # the stored letters stay: `(b) return null` is still (b), so a panel letter rules what the decision's own letters say
+  assert q["options"] == {"b": "return null", "c": "stop the unit"}
 
 
 def test_a_by_hand_amend_not_offered_is_refused_as_amends_own(world):
@@ -250,3 +251,23 @@ def test_amend_names_only_a_declared_contract(world):
   assert (code, err.strip()) == (1, "decision: amend names U01 Job, not in U01's Interfaces lines")
   assert not (s.path("file") / "amendments").exists()
   assert not foreman_of(s, "U02")["rulings"]
+
+
+def test_amend_names_a_store_key_contract(world):
+  # a store contract is named by its key path (`scan` reads a `key` line so), so an amend on `U01 result:` is accepted
+  card, s = world_on(world)
+  s.path("unit", "U01").write_text("## Interfaces\n- Produces: state.json key result (a list)\n", encoding="utf-8")
+  qid = opened(world, card, "**Deviation (interface):** U01 result: a dict, not a list\n" + OPTS, source="comment 11")
+  code, out = rule(world, card, qid, "amend — state.json key result (a dict)")
+  assert code == 0, out
+  [entry] = json.loads((s.path("file") / "amendments" / "11.json").read_text())
+  assert (entry["unit"], entry["name"]) == ("U01", "result")
+
+
+def test_the_judges_decision_question_keeps_the_stored_letters(world):
+  # options stored `(b) keep`, `(a) change` are shown as stored, so a panel's letter answers the option it names
+  from superegm import judges
+  card, s = world_on(world)
+  did = opened(world, card, IFACE + "**Builder status:** BLOCKED\nWhich?\n- (b) keep\n- (a) change\n")
+  [q] = judges.parse_questions(judges.decision_question(s, "U02", did))
+  assert q["options"] == {"b": "keep", "a": "change", "c": "stop the unit"}
