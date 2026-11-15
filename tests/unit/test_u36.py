@@ -134,3 +134,14 @@ def test_rounds_frozen_at_approval(world, before_first_h2, live, frozen, refused
   assert approve(world, spec, icid, "--amend-units")[0] == 0
   entries = json.loads(hstore(world).path("approvals", SLUG).read_text(encoding="utf-8"))["entries"]
   assert len(entries) == 3 and "rounds" not in entries[-1]
+
+
+def test_approve_after_hand_written_approval(world):
+  """A latest approval whose review has no numeric `-c<n>` suffix counts as since = 0."""
+  spec, cid, rid = converged_spec(world)
+  assert approve(world, spec, cid, "--yes")[0] == 0
+  edit_entry(world, review="owner: approved in session")
+  code, out = approve(world, spec, cid, "--yes")
+  assert code == 0, out
+  entries = json.loads(hstore(world).path("approvals", SLUG).read_text(encoding="utf-8"))["entries"]
+  assert entries[-1]["review"] == rid and len(entries) == 2
