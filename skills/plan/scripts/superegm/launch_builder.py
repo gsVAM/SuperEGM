@@ -457,15 +457,20 @@ def filed_body(state, unit):
 
 
 def amendments_for(st, unit: str, body: str) -> list[dict]:
-  """Spec section 6.5: the handoff's recorded `amendments[]` for the unit's own Interfaces and for every
-  `(name, unit)` its Consumes lines list, in `at` order."""
+  """Spec section 6.5: the handoff's recorded amendments for the unit's own Interfaces and for every `(name, unit)`
+  its Consumes lines list, in `at` order: `amendments/*.json` and, whenever the key is present (a handoff from
+  1.2.1-pre.1), `state.json` `amendments[]`; one entry per `(unit, name, comment_id)`."""
   path = st.path("state")
   entries = (json.loads(core.read_text(path)) if path.is_file() else {}).get("amendments") or []
   folder = st.path("file", "amendments")
   for file in sorted(folder.glob("*.json")) if folder.is_dir() else []:
     entries = entries + json.loads(core.read_text(file))
   consumed = set(consumes(body))
-  return sorted((a for a in entries if a["unit"] == unit or (a["name"], a["unit"]) in consumed), key=lambda a: a["at"])
+  kept = {}
+  for a in entries:
+    if a["unit"] == unit or (a["name"], a["unit"]) in consumed:
+      kept.setdefault((a["unit"], a["name"], a["comment_id"]), a)
+  return sorted(kept.values(), key=lambda a: a["at"])
 
 
 def launch_reason(launches: list, foreman: dict) -> str:
