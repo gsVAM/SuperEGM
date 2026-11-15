@@ -6,7 +6,7 @@
 # ingest once before the refusals, the refusal of an unsettled external finding, an external finding's carried copies
 # as one escalated pair discharged by its latest copy alone, and a re-approval of the same cycle reading that cycle
 # again and keeping the replaced entry's unnamed pairs (U26); `--amend-units` typed by hand opens and closes its own
-# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units`, and a hand-written prior approval read as `since` 0 (U36); the triage section parsed, refused with its line and frozen as `triage` (U39); the run mode frozen as the entry's `mode` (U43).
+# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units`, and a hand-written prior approval read as `since` 0 (U36); the triage section parsed, refused with its line and frozen as `triage` (U39); the run mode frozen as the entry's `mode` (U43); an opening approval refused over a partly filed handoff (U53).
 
 """superegm approve-spec: record the owner's approval of a converged spec (spec section 8)."""
 
@@ -61,6 +61,19 @@ def handoff_state(st: core.Store, hid: str) -> dict:
 
 def files_a_unit(state: dict) -> bool:
   return any((record or {}).get("number") for record in (state.get("units") or {}).values())
+
+
+def incomplete_filing(state: dict) -> bool:
+  """A handoff with a `filings[]` entry is partly filed (U53) when its last entry has no complete, problem-free `verify`
+  receipt for its own `sha256` (not `confirmed_sha256`: a later dry run never applied is no partial filing), or a unit
+  in `state.units` has no issue `number`; one with no `filings[]` entry is never partly filed."""
+  filings = state.get("filings") or []
+  if not filings:
+    return False
+  receipt = state.get("verify") or {}
+  if not (receipt.get("complete") and receipt.get("sha256") == filings[-1].get("sha256") and not receipt.get("problems")):
+    return True
+  return any(not (record or {}).get("number") for record in (state.get("units") or {}).values())
 
 
 def handoff_id_for(st: core.Store, sha: str, stem: str, entries: list) -> tuple:
@@ -344,7 +357,12 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
     print(f"Approve `{spec}` (sha256 `{sha[:12]}`) at review {rid}?")
     print("Options: Approve | Stop. Run again with --yes after the owner chose Approve.")
     return 0
-  handoff_id, kind = handoff_id_for(st, sha, spec.stem, core.load_approvals(st, spec))
+  entries = core.load_approvals(st, spec)
+  handoff_id, kind = handoff_id_for(st, sha, spec.stem, entries)
+  superseded = entries[-1] if entries and kind == "opening" and handoff_id != entries[-1].get("handoff_id") else None
+  if superseded and superseded.get("handoff_id") and not superseded.get("voided_by") \
+      and incomplete_filing(handoff_state(st, superseded["handoff_id"])):  # U53: before any write
+    raise core.HandoffError(f"approve-spec: handoff {superseded['handoff_id']} has an incomplete filing: finish /superegm:file first")
   commit = commit_by_path(root, [spec.relative_to(root).as_posix(), CONFIG], f"superegm: approve {slug} at review {rid}",
                           st.config["commit_trailer"])
   entry = entry_of(sha, commit, args.runcard, rid, handoff_id, kind, escalated, {"rounds": rounds, "triage": triage, "mode": mode})
