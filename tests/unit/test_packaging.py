@@ -1,7 +1,7 @@
 # Copyright 2026 Google LLC.
 # SPDX-License-Identifier: Apache-2.0
 # Modified by SuperEGM (gsVAM), 2026: one host; the bundle test, palettes and required files of section 15;
-# three-file hook rule, hook hash, effects checks.
+# three-file hook rule, hook hash, effects checks; the package module list and SKILL.md count read from the source tree (U95).
 
 """Exercise distributable contents, unsafe paths, and reproducible output."""
 
@@ -34,6 +34,12 @@ PALETTES = [(skill, *BLUE) for skill in (
 )]
 
 
+def package_modules(root: Path) -> set[str]:
+  scripts = root / "skills/plan/scripts"
+  return {"skills/plan/scripts/superegm.py",
+          *(p.relative_to(root).as_posix() for p in (scripts / "superegm").glob("*.py"))}
+
+
 @pytest.fixture
 def source(tmp_path: Path) -> Path:
   root = tmp_path / "source"
@@ -58,7 +64,7 @@ def test_runtime_bundle_ships_exactly_the_kept_files(source: Path, tmp_path: Pat
   with zipfile.ZipFile(archive) as bundle:
     assert bundle.testzip() is None
     names = set(bundle.namelist())
-    assert len([p for p in names if p.endswith("/SKILL.md")]) == 21
+    assert len([p for p in names if p.endswith("/SKILL.md")]) == len(list(source.glob("skills/*/SKILL.md")))
     for skill in source.glob("skills/*/SKILL.md"):
       icon = skill.parent / "assets/icon.svg"
       data = bundle.read(icon.relative_to(source).as_posix())
@@ -72,16 +78,7 @@ def test_runtime_bundle_ships_exactly_the_kept_files(source: Path, tmp_path: Pat
                  "skills/writing-skills/references/skill_discovery_optimization.md",
                  "resources/document_standards/handoff-standard.md", "docs/claude.md"):
       assert name in names, name
-    package = ("__init__", "apply", "approve_spec", "body", "clean", "close", "collect", "decide", "decision",
-               "doctor", "dry_run", "foreman", "gate", "graph", "init", "interrupt", "judges", "launch", "launch_builder",
-               "prepare", "record_launch", "report", "review", "review_plan", "runcard", "scan", "status", "tdd_order",
-               "verify")
-    package += ("orient", "builder_token")
-    package += ("inbox",)
-    package += ("driver", "register")
-    package += ("traces",)
-    assert sorted(p for p in names if p.endswith(".py")) == sorted(
-        ["skills/plan/scripts/superegm.py", *(f"skills/plan/scripts/superegm/{m}.py" for m in package)])
+    assert sorted(p for p in names if p.endswith(".py")) == sorted(package_modules(ROOT))
     assert not any(p.startswith(("tests/", ".github/", ".agents/", "docs/designs/"))
                    or p.endswith(("test_scenarios.yaml", "marketplace.json", "pyproject.toml"))
                    for p in names)
@@ -97,6 +94,34 @@ def test_runtime_bundle_ships_exactly_the_kept_files(source: Path, tmp_path: Pat
     text = (ROOT / path).read_text(encoding="utf-8").lower()
     hits = [w for w in BANNED if w in text]
     assert hits == [], (path, hits)
+
+
+def test_bundle_missing_a_source_module_fails(source: Path, tmp_path: Path) -> None:
+  # a module present in the source tree but absent from the bundle is caught
+  (source / "skills/plan/scripts/superegm/extra_mod.py").write_text("")
+  first, archive = build(source, tmp_path / "first")
+  with zipfile.ZipFile(archive) as bundle:
+    names = set(bundle.namelist())
+  expected = package_modules(source)
+  assert "skills/plan/scripts/superegm/extra_mod.py" in expected
+  assert expected <= names
+  packed = {p for p in names if p.endswith(".py")} - {"skills/plan/scripts/superegm/extra_mod.py"}
+  assert packed != package_modules(source)  # the bundle check fails when a source module is left out
+
+
+def test_bundle_skill_count_follows_the_source(source: Path, tmp_path: Path) -> None:
+  # a skill added to the source tree is counted without editing this file
+  extra = source / "skills/extra-skill/SKILL.md"
+  extra.parent.mkdir(parents=True)
+  extra.write_text("---\nname: extra-skill\neffects: none\n---\n")  # build() refuses a skill without effects (scripts/pack_plugin.py:111-125)
+  (extra.parent / "assets").mkdir()
+  (extra.parent / "assets/icon.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg"/>')  # the kept-files test reads each skill's icon
+  _, archive = build(source, tmp_path / "out")
+  with zipfile.ZipFile(archive) as bundle:
+    packed = [p for p in bundle.namelist() if p.endswith("/SKILL.md")]
+  assert len(packed) == len(list(source.glob("skills/*/SKILL.md")))
+  assert len(packed) != 21  # the literal at :61 would fail this tree
+  test_runtime_bundle_ships_exactly_the_kept_files(source, tmp_path / "kept")  # passes only with the derived count
 
 
 @pytest.mark.parametrize("skill,base,facet", PALETTES)
