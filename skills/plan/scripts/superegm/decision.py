@@ -59,9 +59,11 @@ def check_amend(st, text: str, reason: str) -> None:
   if h is None:
     raise Refusal("decision: amend needs a comment with one interface deviation and no other")
   path = st.path("unit", h["unit"])
-  lines = "\n".join(core.body.sections(core.read_text(path)).get("Interfaces", [])) if path.exists() else ""
+  lines = core.body.sections(core.read_text(path)).get("Interfaces", []) if path.exists() else []
   name = h["name"].split("(")[0]  # cut at its `(` as amendments_of and body.consumes read it
-  if not re.search(rf"(?<![\w.]){re.escape(name)}\b", lines):
+  # a name the unit declares: it opens a `- Produces:` line, as `scan` matches the identifier before `(`
+  declared = re.compile(rf"- Produces: `?{re.escape(name)}(?![\w.])")
+  if not any(declared.match(line) for line in lines):
     raise Refusal(f"decision: amend names {h['unit']} {name}, not in {h['unit']}'s Interfaces lines")
 
 # The one ruling grammar (spec section 13.2, amendment 5): a comment's first line in one of these forms and no other.
