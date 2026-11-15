@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # From the elephant-goldfish-model (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_prepare` as the prepare module, keyed by the dispatch id; the fetched tip is the round's head; `pr_body.md` and `comments.md` beside the diff and the CI file; the App path's builder login (U15); the Astra brief and the lane's word on the `prepared:` line (U17); `r<n>/spec_range.md` at the marker's sha, the brief's range read from it (U20); the review worktree removed by force and its git calls hook-free (U25).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_prepare` as the prepare module, keyed by the dispatch id; the fetched tip is the round's head; `pr_body.md` and `comments.md` beside the diff and the CI file; the App path's builder login (U15); the Astra brief and the lane's word on the `prepared:` line (U17); `r<n>/spec_range.md` at the marker's sha, the brief's range read from it (U20); the review worktree removed by force and its git calls hook-free (U25); the Astra brief's Amendments section from `r<n>/amendments.md` (U80).
 
 """superegm prepare: fetch the PR into refs/superegm, add the review worktree, write the diff, CI, PR body and comments."""
 
