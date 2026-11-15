@@ -138,6 +138,10 @@ def register(subparsers):
   g.add_argument("--round", type=int, required=True)
   which = g.add_mutually_exclusive_group(required=True)
   which.add_argument("--eligible", action="store_true", help="print the round's eligible mediums, one fid per line")
+  which.add_argument("--file", help="the triage goldfish's reply, one line per eligible medium, recorded verbatim or refused whole")
+  g.add_argument("--isolation", help="clean | exposed:<what>")
+  g.add_argument("--model", help="<requested>:<effective>")
+  g.add_argument("--effort", help="<requested>:<effective>")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -702,9 +706,85 @@ def triage(args) -> int:
   rnd = load_round(st, args.review, args.round)
   if rnd is None:
     raise Refusal(f"triage: round {args.round} not recorded")
-  for fid in eligible_fids(st, review, rnd):
-    print(fid)
+  if args.eligible:
+    for fid in eligible_fids(st, review, rnd):
+      print(fid)
+    return 0
+  bind(args, review)
+  patterns = frozen_triage(args, st)
+  if patterns is None or triage_undone(core.load_foreman(st, review["artifact"])):
+    raise Refusal("triage: triage is off for this unit")
+  if rnd.get("triage"):
+    raise Refusal(f"triage: round {args.round} already triaged")
+  eligible = eligible_fids(st, review, rnd)
+  root = core.git_toplevel(Path.cwd())
+  lines = [line for line in core.read_text(Path(args.file)).splitlines() if line.strip()]
+  fields = {}
+  for line in lines:
+    fid, values = triage_line(line, root, rnd["artifact_sha256"])
+    if fid not in eligible:
+      raise Refusal(f"triage: {fid} is not an eligible medium of round {args.round}: {line}")
+    if fid in fields:
+      raise Refusal(f"triage: a second line for {fid}: {line}")
+    fields[fid] = values
+  if missing := [fid for fid in eligible if fid not in fields]:
+    raise Refusal(f"triage: no line for {', '.join(missing)}")
+  deferred = {}
+  for fid, values in fields.items():
+    n = next((i for i, pattern in enumerate(patterns, 1) if pattern_matches(pattern, values)), None)
+    if n is not None:
+      deferred[fid] = n
+  for reviewer in rnd["reviewers"].values():
+    for finding in reviewer.get("findings") or []:
+      if finding["id"] in deferred:
+        finding["disposition"] = f"deferred: triage {deferred[finding['id']]}"
+  rnd["triage"] = {"runcard": args.runcard, "isolation": args.isolation, "model": args.model, "effort": args.effort,
+                   "lines": lines, "findings": fields}
+  core.atomic_write(st.path("reviews", args.review, f"round-{args.round}.json"), rnd)
+  store_verdict(st, args.review, review, rnd["runcard"])
+  for fid, n in deferred.items():
+    print(f"{fid} deferred: triage {n}")
   return 0
+
+
+TRIAGE_LINE = re.compile(r"^(?P<fid>\S+) \| reach: (?P<reach>\S+) \| later: (?P<later>\S+) \| critical: (?P<critical>\S+)"
+                         r" \| verified: (?P<verified>(?P<word>\S+)(?: (?P<rest>.+))?)$")
+
+
+def triage_line(line: str, root: Path, head: str) -> tuple[str, dict]:
+  """One reply line `<fid> | reach: <v> | later: <v> | critical: <v> | verified: confirmed <file:line>|refuted <reason>`:
+  its fid and the four fields, `verified` the text from its first word to the end of the line. Refused: a missing or
+  misplaced field, an unknown value, a `confirmed` whose `<file:line>` does not exist at the round's head."""
+  from superegm.approve_spec import TRIAGE_FIELDS  # approve_spec imports this module
+  match = TRIAGE_LINE.match(line.strip())
+  if not match:
+    raise Refusal(f"triage: expected `<fid> | reach: <v> | later: <v> | critical: <v> | verified: <v>`: {line}")
+  values = {key: match.group(key) for key in ("reach", "later", "critical")}
+  for key, value in [*values.items(), ("verified", match.group("word"))]:
+    if value not in TRIAGE_FIELDS[key]:
+      raise Refusal(f"triage: unknown value {value} for {key}: {line}")
+  rest = match.group("rest") or ""
+  if not rest:
+    raise Refusal(f"triage: verified: {match.group('word')} without its {'file:line' if match.group('word') == 'confirmed' else 'reason'}: {line}")
+  if match.group("word") == "confirmed":
+    cite = re.fullmatch(r"(?P<path>\S+):(?P<n>\d+)", rest)
+    text = core.run_git(["cat-file", "-p", f"{head}:{cite.group('path')}"], root, check=False) if cite else ""
+    if not cite or not 1 <= int(cite.group("n")) <= len(text.splitlines()):
+      raise Refusal(f"triage: {rest} does not exist at the round's head {head[:7]}: {line}")
+  return match.group("fid"), {**values, "verified": match.group("verified")}
+
+
+def pattern_matches(pattern: dict, values: dict) -> bool:
+  """A frozen pattern matches a triage when every field it names holds its value (`verified` by its first word)."""
+  return all((values[key].split(" ", 1)[0] if key == "verified" else values[key]) == value for key, value in pattern.items())
+
+
+def frozen_triage(args, st: core.Store):
+  """The triage patterns frozen in the handoff's latest approval entry (section 5.1), or None: triage off."""
+  spec = core.handoff_spec(args, st)
+  entries = core.load_approvals(st, Path(spec)) if spec else []
+  own = [e for e in entries if st.handoff_id and e.get("handoff_id") == st.handoff_id]
+  return own[-1].get("triage") if own else None
 
 
 # ---------------------------------------------------------------- settle
