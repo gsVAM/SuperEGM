@@ -597,12 +597,14 @@ def blocked_question(st, unit: str, what: list) -> tuple[str, list[int]]:
     options = [line[2:].strip() for line in rest if line.startswith("- (")]
     options = [o for o in (o.partition(" ")[2] for o in options) if o != "amend"] + ["stop the unit"]  # amend is the owner's alone
     consumers = []
-    if heading.startswith("**Deviation (interface):**"):
-      from superegm.decision import INTERFACE
-      named = INTERFACE.match(heading.partition("):**")[2].strip())
-      # the contract is the producer's the heading names: its filed consumers but the asking unit, which raised it
-      consumers = [n for n in fan_out(st, named["unit"] if named else unit)
-                   if n != (core.load_state(st.root).get("units") or {}).get(unit, {}).get("number")]
+    from superegm.decision import DEVIATION, INTERFACE
+    interfaces = [m for m in DEVIATION.finditer(body) if m["kind"] == "interface"]
+    if interfaces:
+      # an option ruling settles every heading, so each interface heading's producer counts: the filed consumers of
+      # the contracts the headings name, but the asking unit, which raised it
+      producers = {(INTERFACE.match(m["rest"]) or {"unit": unit})["unit"] for m in interfaces}
+      asking = (core.load_state(st.root).get("units") or {}).get(unit, {}).get("number")
+      consumers = sorted({n for p in producers for n in fan_out(st, p)} - {asking})
     return f"## Q1 {unit} BLOCKED (comment {what[0]}): {heading.strip()}\n" + options_text(options), consumers
   if len(what) == 2 and what[0] == "launch" and what[1].isdigit():
     launches = load_launches(st, unit)
