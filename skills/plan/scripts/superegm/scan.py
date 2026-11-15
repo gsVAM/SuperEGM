@@ -2,7 +2,8 @@
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
 # Modified by SuperEGM (gsVAM), 2026: the section 9.1 body rules, one named rule per line, over the graph module's bodies; amendment 9's warning values (U29); 1.2.1-pre.1 P3's line cites (section 6.5); the `units` limits registered, validated and refused over, and the bytes warning dropped (U42).
 
-"""superegm scan: the body rules of spec section 9.1, one `<rule>: <unit>: <line>` per problem."""
+"""superegm scan: the body rules of spec section 9.1, one `<rule>: <unit>: <line>` per problem.
+The one exception is a `units:` line, a `units.*` config value out of range: it names no unit (spec section 6)."""
 
 import re
 from pathlib import Path
