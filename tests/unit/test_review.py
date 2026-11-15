@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03); the review loop and approve-spec (U04); the `acceptable:` line (U35); the by-hand card and the lineless path (U32); an external comment read whole from its root (U73); an approval entry's `rounds`, and the spec resume's panel line (U36); the approval-entry key set takes `triage` (U39).
+# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03); the review loop and approve-spec (U04); the `acceptable:` line (U35); the by-hand card and the lineless path (U32); an external comment read whole from its root (U73); an approval entry's `rounds`, and the spec resume's panel line (U36); the approval-entry key set takes `triage` (U39); `test_handoff_id_copy_rule` takes a refusal row (U53).
 
 """U04: the review loop (`review open|record|settle|status|rule`) and `approve-spec` (spec section 8)."""
 
@@ -820,20 +820,30 @@ def test_approve_spec_appends_the_commit_trailer(world, trailer):
 
 # ---------------------------------------------------------------- S14: the handoff id
 
-@pytest.mark.parametrize("filed,voided,keeps", [
-  (True, True, True),
-  (True, False, False),
-  (False, True, False),
+@pytest.mark.parametrize("filed,voided,keeps,filing", [
+  (True, True, True, False),
+  (True, False, False, False),
+  (False, True, False, False),
+  (True, False, None, True),  # a `filings[]` entry with no receipt (U53): the second approval refuses
 ])
-def test_handoff_id_copy_rule(world, filed, voided, keeps):
+def test_handoff_id_copy_rule(world, filed, voided, keeps, filing):
   spec, cid, rid = converged_spec(world)
   assert approve(world, spec, cid, "--yes")[0] == 0
   first = approval(world)["entries"][-1]["handoff_id"]
-  atomic_write(world.artifacts / first / "state.json", {"handoff_id": first, "units": {"U07": {"number": 7} if filed else {}}})
+  state = {"handoff_id": first, "units": {"U07": {"number": 7} if filed else {}}}
+  if filing:  # the only row writing a `filings[]` entry
+    state["filings"] = [{"sha256": "a" * 64, "writes": [], "at": "2026-11-12T10:00:00Z"}]
+  atomic_write(world.artifacts / first / "state.json", state)
   if voided:  # as `--void` leaves the last entry
     rec = approval(world); rec["entries"][-1]["voided_by"] = f"spec-{SLUG}-c1"; atomic_write(store(world.repo).path("approvals", SLUG), rec)
   spec2, cid2, rid2 = converged_spec(world, SPEC.replace("Text.", "Changed."))
-  assert rid2.endswith("-c2") and approve(world, spec2, cid2, "--yes")[0] == 0
+  assert rid2.endswith("-c2")
+  if filing:
+    code, out = approve(world, spec2, cid2, "--yes")
+    assert code == 1 and f"handoff {first} has an incomplete filing: finish /superegm:file first" in out, out
+    assert len(approval(world)["entries"]) == 1
+    return
+  assert approve(world, spec2, cid2, "--yes")[0] == 0
   second = approval(world)["entries"][-1]
   assert (second["handoff_id"] == first) is keeps and second["kind"] == ("after-void" if keeps else "opening")
   assert second["handoff_id"].endswith(hashlib.sha256(spec2.read_bytes()).hexdigest()[:6]) is not keeps
