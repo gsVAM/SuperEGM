@@ -117,3 +117,16 @@ def test_rerun_after_crash(world, monkeypatch):
   monkeypatch.setattr(core, "save_foreman", real)
   assert rule(world, card, qid, "stop the unit")[0] == 0
   assert not deleted_path.exists()
+
+
+def test_reads_directory_and_legacy(world):
+  # a 1.2.1-pre.1 handoff's amendments[] and a directory file are both read, sorted by `at`
+  card, s = world_on(world)
+  produces_file(s, "U03", "`f(x) -> int`")
+  state = core.load_state(s.root)
+  state["amendments"] = [{"unit": "U01", "name": "g", "text": "g() -> int", "comment_id": 5, "at": "2020-01-01T00:00:00Z"}]
+  core.save_state(s.root, state)
+  qid = opened(world, card, deviation("U03 f: returns None"), source="comment 11")
+  assert rule(world, card, qid, "amend — f(x) -> int | None")[0] == 0
+  body = consumer_body("`g` (U01)")
+  assert [(a["unit"], a["name"]) for a in launch_builder.amendments_for(s, "U03", body)] == [("U01", "g"), ("U03", "f")]
