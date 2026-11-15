@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_launch` as the launch module; it marks the ready units up to `max_in_flight` after the protection checks of spec section 11, the owners set and the team bypass included; the builder as a GitHub App (U15); a unit whose `clean` outcome an ingest rewrote is ready again (U21); `interrupted (reboot)` terminal and a unit pending a decision out of the in-flight count (U24).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_launch` as the launch module; it marks the ready units up to `max_in_flight` after the protection checks of spec section 11, the owners set and the team bypass included; the builder as a GitHub App (U15); a unit whose `clean` outcome an ingest rewrote is ready again (U21); `interrupted (reboot)` terminal and a unit pending a decision out of the in-flight count (U24); `origin_problems` takes the ref and runs the spec check alone (U43).
 
 """superegm launch: check what the launch needs, then mark the ready units up to `max_in_flight`."""
 
@@ -165,16 +165,19 @@ def builder_login(config, token_env_value):
   return builder
 
 
-def origin_problems(repo_root, base, approval=None, later=()):
-  """What `refs/superegm/base` (origin/<base>, just fetched) lacks for a launch (spec section 11): the
+def origin_problems(repo_root, base, approval=None, later=(), ref="refs/superegm/base", spec_only=False):
+  """What `ref` (`refs/superegm/base`, origin/<base> just fetched) lacks for a launch (spec section 11): the
   spec at the approved bytes of `approval` (the handoff's own entry, its `path` the spec) or at a later
-  link of the chain (`later`, the entries after it); without an approval (`doctor`) that line is skipped."""
-  ref, problems = "refs/superegm/base", []
+  link of the chain (`later`, the entries after it); without an approval (`doctor`) that line is skipped.
+  `spec_only` stops after that line, as `next` reads `refs/superegm/tick-base` (U43)."""
+  problems = []
   if approval:
     rel = Path(approval["path"]).resolve().relative_to(repo_root.resolve()).as_posix()
     blob = subprocess.run(["git", "cat-file", "-p", f"{ref}:{rel}"], cwd=str(repo_root), capture_output=True).stdout
     if hashlib.sha256(blob).hexdigest() not in {approval["sha256"], *(e["sha256"] for e in later)}:
       problems.append(f"spec at origin/{base} is neither the approved bytes nor a later link of the approval chain")
+  if spec_only:
+    return problems
   if subprocess.run(["git", "cat-file", "-e", f"{ref}:.superegm/config.json"], cwd=str(repo_root), capture_output=True).returncode:
     problems.append(f".superegm/config.json is absent at origin/{base}")
   names = core.run_git(["ls-tree", "--name-only", f"{ref}:.github/workflows"], repo_root, check=False).split()
