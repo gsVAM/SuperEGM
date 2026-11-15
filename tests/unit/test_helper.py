@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: renamed from test_egm_handoff.py; helper and skill paths under skills/plan and skills/wave; approve_spec's runcards and init.steps() (U32); the expected config and approval-entry key sets take `review` and `rounds` (U36).
+# Modified by SuperEGM (gsVAM), 2026: renamed from test_egm_handoff.py; helper and skill paths under skills/plan and skills/wave; approve_spec's runcards and init.steps() (U32); the `units` key of the config `init` writes (U42); the expected config and approval-entry key sets take `review` and `rounds` (U36).
 
 """U03's tests: the helper package, the store, run cards, the gating, init, the body
 parsers, the schemas, the renames and the removals; EGM's tests of the shared names."""
@@ -462,7 +462,7 @@ def test_init_writes_the_config_with_every_key_and_refuses_another_base(tmp_path
   assert set(config) == {"repo", "base", "artifacts_dir", "mode", "max_in_flight", "labels", "issue_template",
                          "tracking_issue_title", "banned_terms", "fix_request_mention", "allowed_mentions",
                          "reviewers", "astra", "judges", "builder", "ci_wait_minutes", "commit_trailer", "owners", "brainstorm", "owner_team",
-                         "pr_block_file", "ingest", "notify_timeout_seconds", "foreman", "review"}
+                         "pr_block_file", "ingest", "notify_timeout_seconds", "foreman", "units", "review"}
   assert config["owners"] == ["octocat"] and config["owner_team"] is None and config["pr_block_file"] is None
   assert config["repo"] == REPO and config["base"] == "main" and config["artifacts_dir"] == str(tmp_path / "store")
   assert config["mode"] == "normal" and config["max_in_flight"] == 5 and config["ci_wait_minutes"] == 30

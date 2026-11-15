@@ -12,7 +12,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: phase 2 of the SuperEGM loop (the plan file, graph, scan, decide); EGM's approval, review gate, dry run and filing steps live in review-spec, review-plan and file; `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the `Tier:` field (U33); the split rules, the `width:` line and the header's wave plan (U29); what a Step holds (1.2.1 §6.5); the scope-cite warning stated (U79). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: phase 2 of the SuperEGM loop (the plan file, graph, scan, decide); EGM's approval, review gate, dry run and filing steps live in review-spec, review-plan and file; `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the `Tier:` field (U33); the split rules, the `width:` line and the header's wave plan (U29); what a Step holds (1.2.1 §6.5); the scope-cite warning stated (U79); the `units.*` limits stated (U42). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the handoff skill. Not part of google/elephant-goldfish-model. -->
 
@@ -106,7 +106,8 @@ A unit whose Scope would cross two is written as two units, with a `Blocked by` 
 The one exception is the release's closing sweep, `Blocked by` the rows it sweeps so that it closes the release.
 `README.md` and `docs/claude.md` are edited by one closing unit per release (a docs sweep, or the release's last unit) and never by the others, which, where they would have edited them, append a `docs: see U<n>` note to their Objective's one sentence instead.
 Shared test helpers are split per module: a unit adds its own test file, never a line in `test_helper.py` unless it owns it.
-Size `L` is a split candidate: the `proportion` reviewer reports a unit over 10 Steps, 24,576 bytes or eight Scope paths, or whose Scope crosses subsystems.
+Size `L` is a split candidate: the `proportion` reviewer reports a unit over 10 Steps, over `units.max_body_kb` (25 KB by default) or `units.max_files` (10 Scope paths), or whose Scope crosses subsystems.
+`scan` refuses an unfiled unit over `units.max_body_kb`, `units.max_files` or `units.max_steps` (16), naming the unit, the limit and the value; a filed unit is never checked again.
 A split that needs a row the spec's `## Units` table lacks goes through `approve-spec --amend-units`, typed by the owner outside this skill; never work around the frozen spec.
 
 **Writing a Step** (spec section 9.1; the full rules are section 3 of
@@ -157,9 +158,11 @@ The `set` reviewer reads that line to grade a chain it names `low`; it checks it
     (over 49,152 bytes: split the unit), `checkbox`, `placeholder`,
     `consumes-undefined`, `consumes-producer`, `global-constraints`,
     `review-focus`, `review-focus-test`, `step-group`, `step-scope`,
-    `interface-cite`, `decision-blocking`, and the raw-text `banned-term`, `mention`,
-    `merge-marker`, `dod-missing`. Fix the plan file, run `graph`, then
-    `scan` again, until `scan: clean`.
+    `interface-cite`, `decision-blocking`, `units-limit` (an unfiled unit over
+    a `units.*` limit, as above: split it through `approve-spec --amend-units`), and the raw-text
+    `banned-term`, `mention`, `merge-marker`, `dod-missing`. A `units: units.<key>: …` line
+    has no unit: that `units` value in `.superegm/config.json` is out of range, so fix it
+    there. Fix the plan file, run `graph`, then `scan` again, until `scan: clean`.
 2.  Every `decision-blocking` line is decision point 3: ask the owner one
     question whose options are the item's own `(a) …; (b) …` lines, the
     default marked, as the sole tool call in the turn; then run
