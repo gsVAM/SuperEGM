@@ -237,4 +237,5 @@ def test_astra_brief_appends_the_section(world, tmp_path, monkeypatch):
   tf.record(world, st, rid, 1, head, child, {"change-review": ""})
   assert world.run("review", "record", "--review", rid, "--round", 1, "--sha256", head, "--reviewer", "astra",
                    "--not-run", "not installed", "--runcard", child)[0] == 0
-  assert recorded(world, rid, 1, "astra") == stored["manifest"]
+  rnd = json.loads(st.path("reviews", rid, "round-1.json").read_text(encoding="utf-8"))
+  assert rnd["reviewers"]["astra"]["instructions"] == stored["manifest"] and rnd["reviewers"]["change-review"]["instructions"] == []
