@@ -773,7 +773,7 @@ SPLIT = [
   (PLAN_SKILL, "wave plan", True), (PLAN_SKILL, "singleton", True), (PLAN_SKILL, "`approve-spec --amend-units`", True),
   (PLAN_REF, "which the per-unit check reports as a split candidate", True), (PLAN_REF, "about twenty Step groups", False),
   (PLAN_REF, "`width: none`", True), (PLAN_REF, "(after U<b>)", True), (PLAN_REF, "Waves:", True),
-  (TEMPLATE, "24,576 bytes, ten Steps", True), (TEMPLATE, "32,768", False), (TEMPLATE, "twenty Steps", False),
+  (TEMPLATE, "24,576", False), (TEMPLATE, "ten Steps or a fenced share of 0.40", True), (TEMPLATE, "32,768", False), (TEMPLATE, "twenty Steps", False),
 ]
 
 
