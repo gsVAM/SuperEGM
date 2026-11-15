@@ -414,16 +414,18 @@ def collect(args, card):
     if run["summary"] is not None:
       core.atomic_write(r / "dod" / f"{i}.txt", f"exit: {'none' if run['exit'] is None else run['exit']}\n"
                         f"summary: {run['summary']}\ntimed_out: {'yes' if run['timed_out'] else 'no'}\n")
+  followup_fids = [row["fid"] for row in data.get("followups") or []]  # triage's deferrals (spec section 5.2)
   lines, contested = foreman_findings(n, verdict, text, scope, worktree, changed, pr_body, comments, login, prior, prior_ci_fid,
                                       commits, prior_tdd, prior_scope, contest_of,
                                       external, earlier, disposed, posted, handoff.config.get("owners") or [],
                                       recorded_rulings(data), data.get("decisions") or [], recorded_times(data),
                                       handoff.state["units"][unit].get("number"), runs=runs, prior_dod=prior_dod, present=present,
                                       delta=delta, prior_delta=prior_delta, texts=texts, config=handoff.config, held=holds,
-                                      open_prior={f["id"] for f in review.findings_of(last) if f["disposition"] is None} if last else set())
+                                      open_prior=open_of(last), deferred=followup_fids)
   lines, slots, contested = carry(lines, contested, last, prior, contest_of,
                                     binding_rulings([c for c in comments if c["kind"] == "issue"], handoff.config.get("owners") or [],
-                                                    recorded_rulings(data), data.get("decisions") or []))
+                                                    recorded_rulings(data), data.get("decisions") or [],
+                                                    deferred=followup_fids))
   entry.update(dod_runs=runs, test_delta=delta)
   findings = r / "foreman.findings"
   core.atomic_write(findings, "".join(line + "\n" for line in lines))
@@ -506,7 +508,7 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
                      owners: list = (), recorded: list = (), decisions: list = (), recorded_at: dict = None,
                      issue_number: int = None, runs: dict = None, prior_dod: dict = None, present: set = None,
                      delta: list = None, prior_delta: dict = None, texts: dict = None, config: dict = None,
-                     held: dict = None, open_prior: set = frozenset()) -> tuple:
+                     held: dict = None, open_prior: set = frozenset(), deferred: list = ()) -> tuple:
   """The foreman's high findings of spec section 11 in this order, which numbers the `foreman-<r>-<k>` ids: CI,
   the DoD items' fenced-output and `Exists` checks, the `dod-<n>` re-runs, the `test-delta:` entries, scope,
   tdd-order, deviations, contested, upheld, unreplied external; and `builder_contested[]` for the contested ones. Rulings
@@ -563,7 +565,9 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
       found.append(("pr_body.md", f"Run item {n}: no fenced output"))
   # The rulings: an owner's form comment read by `ruling_of`, and the record (`rulings[]`, the judges' post included)
   # (spec section 13.2: a recorded ruling is never changed by a later comment, so the record wins on its comment ids and subjects)
-  rulings = binding_rulings([c for c in comments if c["kind"] == "issue"], owners, recorded, decisions)  # an issue comment alone rules
+  # a live `upheld` on a fid of the record's `followups[]` is a refused undo (spec section 5.2): it never blocks
+  rulings = binding_rulings([c for c in comments if c["kind"] == "issue"], owners, recorded, decisions,
+                            deferred=deferred)  # an issue comment alone rules
   by_id = {c["id"]: c for c in comments}
   # a ruling on a contest's copy (`contested <fid>: …`) rules the finding it contests, down the chain to the original
   def chain(fid):
@@ -648,6 +652,15 @@ def timely(fid: str, at: str, posted: dict, held: dict = None) -> bool:
   record holds it) was posted (`posted`: round → `posted_at`); any other id always."""
   r = (held or {}).get(fid)
   return not fid.startswith("foreman-") or (r in posted and at > posted[r])
+
+
+def open_of(last) -> set:
+  """The previous posted round's open fids, which a contest may name: a finding with no disposition. A medium
+  deferred by triage carries `deferred: triage <n>` (spec section 5.2), so it is not open, and no contest of it is
+  carried as a blocking foreman finding."""
+  if not last:
+    return set()
+  return {f["id"] for f in review.findings_of(last) if f["disposition"] is None}
 
 
 def carry(lines: list, contested: list, last: dict, prior, contest_of: dict, rulings: list) -> tuple:
