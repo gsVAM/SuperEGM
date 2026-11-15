@@ -670,8 +670,8 @@ def test_graph_requires_a_units_row_or_a_blocking_decision_per_escalated_pair(wo
 
 
 def test_scan_requires_the_judges_on_an_escalated_decision_in_leavemealone_mode(world):
-  plan, card = escalated(world, D_ESC)
   set_config(world, repo=REPO, mode="leavemealone")
+  plan, card = escalated(world, D_ESC)
   assert graph(world, plan, card)[0] == 0
   assert world.run("decide", "--unit", "U02", "--decision", "D2", "--default", "--runcard", card)[0] == 0
   assert "decision-ruler: U02: D2 answered by owner in leavemealone-mode: decide --judges <panel>" in world.run("scan", "--plan", plan)[1]
