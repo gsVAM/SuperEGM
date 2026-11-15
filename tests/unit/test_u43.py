@@ -19,6 +19,14 @@ SHA = {u: str(i + 1) * 64 for i, u in enumerate(UNITS)}
 RECEIPT = "c" * 64
 
 
+@pytest.fixture(autouse=True)
+def registry(tmp_path, monkeypatch):
+  """`~/.superegm/registry.json` under `tmp_path`, absent until a test writes it: no test reads the owner's. HOME,
+  not `registry_path`, is patched: the `world` fixture reloads the package."""
+  monkeypatch.setenv("HOME", str(tmp_path / "home"))
+  return tmp_path / "home" / ".superegm" / "registry.json"
+
+
 def git(world, *args):
   return subprocess.run(["git", "-C", str(world.repo), *args], check=True, capture_output=True, text=True).stdout.strip()
 
@@ -186,6 +194,64 @@ def test_next_rows_first_match(world, state, line):
   line = line.format(root=superegm.git_toplevel(world.repo), spec=c.spec, review="plan-U02-c1")
   code, out, before, after = c.next()
   assert (code, out) == (0, line) and before == after
+
+
+def commit_file(world, name):
+  (world.repo / name).write_text(name + "\n", encoding="utf-8")
+  git(world, "add", name)
+  git(world, "commit", "-qm", name)
+
+
+@pytest.mark.parametrize("state,line", [
+  ("registered root another worktree off main", "waiting checkout: {wt}: not on main"),
+  ("root behind tick-base", "waiting checkout: {root}: behind"),
+  ("root diverged from tick-base", "waiting checkout: {root}: diverged"),
+  ("unanswered wait record, its review proceeded after since", "plan"),
+  ("every unit filed, no filing receipt", "file"),
+  ("answered wait record, root dirty", "waiting checkout: {root}: dirty"),
+  ("approved amend-units row, root behind it", "waiting checkout: {root}: behind"),
+  ("fetch record ok false, empty stderr", "waiting fetch: origin: fetch failed")])
+def test_next_rows_registered_root_and_branches(world, tmp_path, registry, state, line):
+  """The registered root is the registry's; behind and diverged; a proceeded wait record is skipped; the file row
+  on a missing receipt; an answered record stops at `waiting checkout`; the rows are the latest approval's; a failed
+  fetch with no stderr names no absent ref. `next` writes nothing."""
+  from test_review import card
+  c = Chain(world)
+  root, wt = superegm.git_toplevel(world.repo), tmp_path / "wt"
+  if state == "registered root another worktree off main":
+    git(world, "worktree", "add", "-q", "-b", "wt", str(wt))
+    jwrite(registry, [{"repo": "x/y", "root": str(wt), "artifacts_dir": str(c.root)}])
+  elif state == "root behind tick-base":
+    commit_file(world, "later.txt"); git(world, "update-ref", "refs/superegm/tick-base", "HEAD")
+    git(world, "reset", "-q", "--hard", "HEAD~1")
+  elif state == "root diverged from tick-base":
+    git(world, "checkout", "-q", "-b", "side"); commit_file(world, "side.txt")
+    git(world, "update-ref", "refs/superegm/tick-base", "side"); git(world, "checkout", "-q", "main")
+    commit_file(world, "local.txt")
+  elif state == "unanswered wait record, its review proceeded after since":
+    c.plan(*UNITS); c.state["units"] = {}
+    c.review("U01", converged="no", rulings=[{"id": "R1", "ruling": "proceed", "by": "owner", "at": "2026-11-15T02:00:00Z"}])
+    c.wait(phase="review-plan", question="q", review="plan-U01-c1")
+    c.plan()  # no unit planned yet: past the record, the plan row
+  elif state == "every unit filed, no filing receipt":
+    c.all_filed("U01"); c.state.pop("verify")
+  elif state == "answered wait record, root dirty":
+    c.wait(phase="review-plan", question="q", answer="yes", by="owner", at="2026-11-15T01:00:00Z")
+    (world.repo / "docs/designs/sample.md").write_text("dirty\n", encoding="utf-8")
+  elif state == "approved amend-units row, root behind it":
+    c.all_filed()
+    c.save()
+    icid = card(world, c.spec, "integrate")
+    c.spec.write_text(SPEC + "| U04 | thing U04 | — | S |\n", encoding="utf-8")
+    code, out = approve(world, c.spec, icid, "--amend-units")
+    assert code == 0, out
+    git(world, "update-ref", "refs/superegm/tick-base", "HEAD")
+    git(world, "reset", "-q", "--hard", "HEAD~1")  # the registered checkout still holds U01-U03 only
+  elif state == "fetch record ok false, empty stderr":
+    c.fetch(False, "")
+  c.save()
+  code, out, before, after = c.next()
+  assert (code, out) == (0, line.format(root=root, wt=wt)) and before == after
 
 
 def test_origin_spec_check_alone(world):
