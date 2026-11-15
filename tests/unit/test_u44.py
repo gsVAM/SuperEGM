@@ -17,6 +17,7 @@ from conftest import ROOT, make_repo, Harness
 from test_builders import put, spawn_fake, SPAWNED  # noqa: F401  (spawn_fake: a fixture)
 from test_driver import registered
 from test_u24 import tick_launches
+from test_u43 import Chain, UNITS
 
 
 def edit_config(repo, **keys):
@@ -69,3 +70,80 @@ def test_chain_off_is_1_2(world, monkeypatch, tmp_path, spawn_fake, chain, capsy
   code, out = harness.run("init", "--artifacts-dir", str(tmp_path / "store"))
   assert code == 0, out
   assert "driver" not in json.loads((fresh / ".superegm" / "config.json").read_text(encoding="utf-8"))
+
+
+def git(world, *args):
+  return subprocess.run(["git", "-C", str(world.repo), *args], check=True, capture_output=True, text=True).stdout.strip()
+
+
+def chained(world, monkeypatch, tmp_path, chain=True):
+  """U43's `Chain` (an approved three-unit handoff, its root clean on main at `refs/superegm/tick-base`) in a
+  registered store whose committed config sets `driver.chain`; HOME under `tmp_path`, the boot id fixed."""
+  monkeypatch.setenv("HOME", str(tmp_path / "home"))
+  monkeypatch.setattr(superegm, "boot_id", lambda: "boot-1")
+  edit_config(world.repo, driver={"chain": chain})
+  git(world, "commit", "-qam", "chain")
+  c = Chain(world)
+  registry = tmp_path / "home" / ".superegm" / "registry.json"
+  put(registry, json.dumps([{"repo": superegm.load_config(world.repo)["repo"], "root": str(world.repo),
+                             "artifacts_dir": str(world.artifacts)}]))
+  return c
+
+
+def fake_fetch(world, monkeypatch, ok, stderr=""):
+  """`driver.fetch_base` faked: its calls recorded; a good fetch moves `refs/superegm/tick-base` to HEAD, as a real
+  one from a remote at the root's commit would."""
+  calls = []
+
+  def fetch(root, remote, base):
+    calls.append((Path(root).resolve(), remote, base))
+    if ok:
+      git(world, "update-ref", "refs/superegm/tick-base", "HEAD")
+    return ok, stderr
+  monkeypatch.setattr(driver, "fetch_base", fetch, raising=False)
+  return calls
+
+
+def journal_lines(world, needle):
+  return [line.split(" ", 1)[1] for path in sorted(world.artifacts.rglob("journal.md"))
+          for line in path.read_text(encoding="utf-8").splitlines() if needle in line]
+
+
+@pytest.mark.parametrize("ok,journal,line", [
+  (True, [], "plan"),
+  (False, ["driver: fetch origin failed: fatal: unable to access"], "waiting fetch: origin: fatal: unable to access")])
+def test_tick_fetch(world, monkeypatch, tmp_path, spawn_fake, ok, journal, line):
+  """One fetch of +refs/heads/<base>:refs/superegm/tick-base from config.remote per store per tick, before next;
+  its record `tick/fetch.json`; a failed fetch's journal line once per distinct stderr line."""
+  c = chained(world, monkeypatch, tmp_path)
+  calls = fake_fetch(world, monkeypatch, ok, "" if ok else "fatal: unable to access\nmore detail")
+  asked = []
+  real = phase.next_line
+  monkeypatch.setattr(phase, "next_line", lambda st, hid, read_wait=True: (asked.append(len(calls)), real(st, hid, read_wait))[1])
+  for _ in range(2):
+    code, out = world.run("driver", "tick")
+    assert code == 0, out
+  assert calls == [(world.repo.resolve(), "origin", "main")] * 2
+  assert asked and all(n >= 1 for n in asked)  # the fetch came before next
+  record = json.loads((world.artifacts / "tick" / "fetch.json").read_text(encoding="utf-8"))
+  assert set(record) == {"at", "ok", "stderr"} and record["ok"] is ok
+  assert record["stderr"] == ("" if ok else "fatal: unable to access")
+  assert journal_lines(world, "driver: fetch") == journal
+  code, out = world.run("next", "--handoff", c.hid)
+  assert (code, out.strip()) == (0, line)
+
+
+def test_tick_removes_a_superseded_wait_record(world, monkeypatch, tmp_path, spawn_fake):
+  """After a good fetch, a superseded handoff's wait record goes with one journal line; a failed fetch keeps it."""
+  c = chained(world, monkeypatch, tmp_path)
+  c.plan(*UNITS); c.wait(phase="file", question="q"); c.supersede()
+  record = world.artifacts / "chain" / f"{c.hid}.json"
+  fake_fetch(world, monkeypatch, False, "fatal: x")
+  world.run("driver", "tick")
+  assert record.exists()
+  fake_fetch(world, monkeypatch, True)
+  for _ in range(2):
+    code, out = world.run("driver", "tick")
+    assert code == 0, out
+  assert not record.exists()
+  assert journal_lines(world, "superseded: wait record") == [f"driver: {c.hid} superseded: wait record removed"]
