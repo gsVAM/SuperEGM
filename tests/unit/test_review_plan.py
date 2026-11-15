@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
-# Modified by SuperEGM (gsVAM), 2026: the `width:` line and the plan header in `set-input`, the chain check and the split check prose (U29).
+# Modified by SuperEGM (gsVAM), 2026: the `width:` line and the plan header in `set-input`, the chain check and the split check prose (U29); the proportion split check reads the `units.*` limits (U52).
 """U06: plan review — the dispatch set, the set reviewer, fix-design, the skill file."""
 import argparse
 import hashlib

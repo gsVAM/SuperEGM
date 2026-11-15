@@ -1,5 +1,5 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
-Added by SuperEGM (gsVAM), 2026: the zoom-out persona's plan brief for the `proportion` reviewer (design section 9.2); the fence's private detail and the readiness plan remit (1.2.1 §6.5). -->
+Added by SuperEGM (gsVAM), 2026: the zoom-out persona's plan brief for the `proportion` reviewer (design section 9.2); the fence's private detail and the readiness plan remit (1.2.1 §6.5); the split check reads the `units.*` limits (U52). -->
 
 # Proportion: the zoom-out goldfish's plan brief
 
@@ -16,7 +16,7 @@ length that costs reading and invites drift. Your job is to name it.
 
 ## Inputs
 
-Three, each by absolute path; read nothing else:
+Four, each by absolute path; read nothing else:
 
 1. The body: the unit's rendered issue body, the text under review.
 2. That unit's `plan/scan/<unit>.json`: `bytes`, `fenced_share` (the share of the body inside
@@ -24,6 +24,8 @@ Three, each by absolute path; read nothing else:
    `warnings` (`steps` over 10, `fenced_share` over 0.40, and `scope_cites <n> > 10`: more than ten `path:line` cites into the unit's own Scope paths, evidence of line-number detail that never blocks alone).
 3. The unit's spec range at the frozen hash: the lines of the approved spec the body's
    Design range names, so you can tell what the spec already decides.
+4. `.superegm/config.json`: its `units.max_body_kb` and `units.max_files`; a key the file omits
+   reads its default (25 and 10).
 
 ## The finding
 
@@ -63,17 +65,17 @@ one finding on the Scope line:
 The two shapes: an `easy` or `doable` body with a `D<n>` item or an Implement line leaving a design choice
 (it reads `difficult`); a `difficult` body whose Steps are all mechanical with pinned signatures (it reads
 `easy` or `doable`). Severity is `medium` at most, never blocking alone, as every proportion finding.
-A `difficult` unit at Size `L` is named once, as a split candidate (the split finding, spec
-section 9.2), never in a second tier finding.
+A `difficult` unit at Size `L` that meets a split reason is named once, as a split candidate (the split
+finding, spec section 9.2), never in a second tier finding; one that meets none is no split candidate.
 
 ## The split
 
 After the tier check, the per-unit split check (spec section 9.2). A unit is a split candidate
 when it runs over 10 Steps, over `units.max_body_kb` × 1024 bytes or over `units.max_files` Scope paths
-(read from `.superegm/config.json`), or when its Scope crosses subsystems
+(the limits of input 4), or when its Scope crosses subsystems
 (section 9.1's families: a helper module with the skill folder, references and tests that drive
-it; the docs are the release's closing sweep's). `scan`'s `warnings[]` at those values are the
-evidence. One finding per unit, `medium`, on the Scope line, naming every reason it meets:
+it; the docs are the release's closing sweep's). The evidence is `scan`'s `steps` for the Steps,
+its `bytes` for the bytes and the count of the body's Scope paths for the paths. One finding per unit, `medium`, on the Scope line, naming every reason it meets:
 
     proportion-<round>-<n> | medium | U<nn> Scope | regression: no | split candidate: <Steps | bytes | paths | subsystems>: <the split>
 
@@ -83,7 +85,7 @@ the findings line's field separator (`review record` refuses a line of more than
 The claim names the split: the two units it would make and the edge between them, a `Blocked by`
 only where one consumes the other's interface. A unit whose Scope crosses subsystems is reported
 even under every number. Read the tier as the tier check reads it, from the body's own `Tier:` line
-under `## Scope, order and risk`: a `difficult` unit at Size `L` is named in this finding (its
+under `## Scope, order and risk`: a `difficult` unit at Size `L` that meets a reason is named in this finding (its
 claim says so) and draws no tier finding of its own. The helper splits nothing and enforces
 neither check; the author splits or keeps the unit.
 
