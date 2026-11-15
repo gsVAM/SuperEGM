@@ -60,8 +60,11 @@ def valid_rounds(value) -> bool:
 
 
 def live_rounds(st: core.Store) -> int:
-  """`review.rounds` now; a value outside 1-10 is refused, naming the key."""
-  value = (st.config.get("review") or {}).get("rounds", CONFIG_DEFAULTS["review"]["rounds"])
+  """`review.rounds` now; a value outside 1-10, or a `review` key that is no object, is refused, naming the key."""
+  review = st.config.get("review")
+  if not isinstance(review, dict):
+    raise core.HandoffError(f"review.rounds: review must be an object, not {review!r}")
+  value = review.get("rounds", CONFIG_DEFAULTS["review"]["rounds"])
   if not valid_rounds(value):
     raise core.HandoffError(f"review.rounds must be an integer 1-10, not {value!r}")
   return value
