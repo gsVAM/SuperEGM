@@ -12,6 +12,7 @@ import pytest
 from superegm import decision, judges, launch_builder, scan
 import superegm as core
 from test_pre1_amend import OPTS, opened, rule, world_on
+from test_wave import REPO, foreman_of
 
 LINE = "the interface as it now reads"
 
@@ -54,3 +55,27 @@ def test_name_forms(world, produces, heading, consumes):
   assert [a["name"] for a in amendments] == scan.names_of(produces.strip("`"))[:1]
   assert [a["name"] for a in launch_builder.amendments_for(s, "U02", consumer_body(consumes))] == [a["name"] for a in amendments]
   assert scan.names_of("`f.read()`") == ["f.read"]
+
+
+def test_amendment_file_before_ruling(world, monkeypatch):
+  # the amendment is its own file, written before the ruling is saved
+  line = "f(x) -> int | None"
+  routes = {f"repos/{REPO}/issues/comments/21": {"id": 21, "user": {"login": "owner"}, "body": f"**Ruling:** (11) amend — {line}\n"}}
+  card, s = world_on(world, routes)
+  produces_file(s, "U01", "`f(x) -> int`")
+  qid = opened(world, card, deviation("U01 f: returns None"), source="comment 11")
+  write_order, real = [], core.atomic_write
+
+  def spy(path, obj):
+    write_order.append(path)
+    return real(path, obj)
+
+  monkeypatch.setattr(core, "atomic_write", spy)
+  assert rule(world, card, qid, "amend", "owner", "--posted", "21") == (0, "recorded (comment 21)\n")
+  hdir = s.base()
+  entries = json.loads((hdir / "amendments" / "11.json").read_text(encoding="utf-8"))
+  assert [(e["unit"], e["name"], e["text"], e["comment_id"]) for e in entries] == [("U01", "f", line, 21)]
+  assert {"at", "recorded_at"} <= set(entries[0])
+  assert write_order.index(hdir / "amendments" / "11.json") < write_order.index(s.path("foreman", "U02"))
+  assert "recorded_at" not in json.dumps(foreman_of(s, "U02")["rulings"])
+  assert decision.WRITES == frozenset({"foreman", "reviews", "state", "file"})
