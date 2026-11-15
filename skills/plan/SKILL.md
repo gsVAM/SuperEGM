@@ -12,7 +12,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: phase 2 of the SuperEGM loop (the plan file, graph, scan, decide); EGM's approval, review gate, dry run and filing steps live in review-spec, review-plan and file; `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the `Tier:` field (U33); the split rules, the `width:` line and the header's wave plan (U29); what a Step holds (1.2.1 §6.5). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: phase 2 of the SuperEGM loop (the plan file, graph, scan, decide); EGM's approval, review gate, dry run and filing steps live in review-spec, review-plan and file; `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the `Tier:` field (U33); the split rules, the `width:` line and the header's wave plan (U29); what a Step holds (1.2.1 §6.5); the scope-cite warning stated (U79). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the handoff skill. Not part of google/elephant-goldfish-model. -->
 
@@ -118,7 +118,7 @@ conftest attribute, private helper or monkeypatch target: those and the arrange 
 and a unit's Scope lists the conftest and fixture files its tests may touch (for example `tests/conftest.py`).
 The `Implement` line is one sentence: the file, the behaviour and the values the spec pins, with a signature only
 for a public or shared contract that is not already a Produces line; it never restates what the test asserts.
-A code cite (`path:line`) is evidence, never a requirement: `scan` refuses one on an Interfaces or Produces line.
+A code cite (`path:line`) is evidence, never a requirement: `scan` refuses one on an Interfaces or Produces line, and warns, without refusing, when a body has more than ten cites into its own Scope paths.
 A rule family is one parametrized Step, never one Step per rule; a copy/rename table or an edit list is test data,
 one parametrized test over it (the test is the table) and an `Implement` line that says "make the table hold".
 The `Run` line and the closing line are optional: absent, the Step's command is `pytest <test path>::<test name> -q`,
@@ -157,7 +157,7 @@ The `set` reviewer reads that line to grade a chain it names `low`; it checks it
     (over 49,152 bytes: split the unit), `checkbox`, `placeholder`,
     `consumes-undefined`, `consumes-producer`, `global-constraints`,
     `review-focus`, `review-focus-test`, `step-group`, `step-scope`,
-    `decision-blocking`, and the raw-text `banned-term`, `mention`,
+    `interface-cite`, `decision-blocking`, and the raw-text `banned-term`, `mention`,
     `merge-marker`, `dod-missing`. Fix the plan file, run `graph`, then
     `scan` again, until `scan: clean`.
 2.  Every `decision-blocking` line is decision point 3: ask the owner one

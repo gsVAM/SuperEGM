@@ -21,7 +21,7 @@ Three, each by absolute path; read nothing else:
 1. The body: the unit's rendered issue body, the text under review.
 2. That unit's `plan/scan/<unit>.json`: `bytes`, `fenced_share` (the share of the body inside
    fences), `steps`, `spec_range_bytes`, `ratio` (body bytes over spec-range bytes) and
-   `warnings` (`bytes` over 24,576, `steps` over 10, `fenced_share` over 0.40).
+   `warnings` (`bytes` over 24,576, `steps` over 10, `fenced_share` over 0.40, and `scope_cites <n> > 10`: more than ten `path:line` cites into the unit's own Scope paths, evidence of line-number detail that never blocks alone).
 3. The unit's spec range at the frozen hash: the lines of the approved spec the body's
    Design range names, so you can tell what the spec already decides.
 
@@ -35,7 +35,7 @@ A question-11 finding names the Step and the bytes it would remove (a tier findi
 reason instead, `## The tier`): the location is the Step (`U07 Step 3`,
 or `U07 Steps` for the whole section), and the claim says what goes, roughly how many bytes, and
 why the test stays honest without it. The five shapes: the fenced test the signature and
-assertions already determine (keep the `Write` line, drop the fence); the `Implement` line that
+assertions already determine (keep the `Write` line and a fence cut to the test name, the behaviour comment and the assertions); the `Implement` line that
 restates the test (keep the path); the Step a parametrized sibling covers (fold it into the
 sibling's cases); the prose table that should be test data (move it into the fence); the fence
 that names unnecessary private or harness detail, a fixture, conftest attribute, private helper or
