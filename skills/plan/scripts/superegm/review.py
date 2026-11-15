@@ -563,6 +563,20 @@ def scope_review(args) -> int:
 # ---------------------------------------------------------------- record
 
 
+def stored_manifest(st, rid: str, review: dict, n: int, reviewer: str, card: dict) -> list:
+  """The `[{file, sha}]` stored for this record's reviewer lane, copied and never re-resolved: a spec review's from the
+  round's `instructions-<n>-reviewers-<lane>.json`, any other kind's from the recording card; `[]` with no stored render
+  and for the foreman's own and a thread's findings, which no section reached."""
+  if reviewer == "foreman" or reviewer.startswith("external:"):
+    return []
+  lane = "astra" if reviewer == "astra" else "local"
+  if review["kind"] == "spec":
+    path = st.path("reviews", rid, f"instructions-{n}-reviewers-{lane}.json")
+    return (json.loads(core.read_text(path)).get("manifest") or []) if path.exists() else []
+  stored = ((card.get("instructions") or {}).get("reviewers") or {}).get(lane) or {}
+  return list(stored.get("manifest") or [])
+
+
 def record_round(args) -> int:
   st = core.store(core.git_toplevel(Path.cwd()))
   rid, n, reviewer = args.review, args.round, args.reviewer
@@ -608,8 +622,10 @@ def record_round(args) -> int:
   refused = []
   if args.not_run and external:  # an ingest's record holds findings: a not-run would erase them
     raise core.HandoffError(f"review record: --not-run is refused for an external reviewer ({reviewer})")
+  manifest = stored_manifest(st, rid, review, n, reviewer, card)
   if args.not_run:
-    record = {"findings": [], "not_run": args.not_run, "isolation": None, "model": None, "effort": None}
+    record = {"findings": [], "not_run": args.not_run, "isolation": None, "model": None, "effort": None,
+              "instructions": manifest}
   else:
     path = Path(args.findings)
     text = core.read_text(path)
@@ -635,7 +651,7 @@ def record_round(args) -> int:
       findings = kept + [{**f, **({"thread": threads[f["id"]]} if f["id"] in threads else {})}
                          for f in findings if f["id"] not in {k["id"] for k in kept}]
     record = {"findings": findings, "not_run": None, "isolation": args.isolation, "model": args.model,
-              "effort": args.effort}
+              "effort": args.effort, "instructions": manifest}
   rnd["reviewers"][reviewer] = record
   if reviewer == "astra" and args.not_run and not args.not_run.startswith(("not installed", "stopped")):
     review["astra_incomplete"] += 1

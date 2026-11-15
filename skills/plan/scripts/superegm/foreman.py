@@ -56,7 +56,7 @@ def register(subparsers):
 
 
 def run(args):
-  core.require_runcard(args, SKILLS)
+  card = core.require_runcard(args, SKILLS)
   st = core.store(core.git_toplevel(Path.cwd()))
   unit, data = args.unit, core.load_foreman(st, args.unit)
   rounds, repo = data["rounds"], st.config["repo"]
@@ -87,8 +87,9 @@ def run(args):
   child = core.open_runcard(st, "wave", unit, parent=args.runcard)
   n = len(rounds) + 1
   did = f"d{n}"
+  stored = (((card.get("instructions") or {}).get("foreman") or {}).get("local") or {}).get("manifest") or []
   rounds.append({"round": n, "runcard": args.runcard, "launch": launches[-1]["round"], "head": None, "phase": "fetched",
-                 "dispatch_id": did})
+                 "dispatch_id": did, "instructions": list(stored)})
   data["dispatch_id"] = did
   core.save_foreman(st, unit, data)
   core.journal(st, f"{unit} round {n} dispatched {did} under {args.runcard}")
