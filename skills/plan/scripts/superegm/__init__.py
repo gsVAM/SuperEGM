@@ -934,7 +934,10 @@ def parse_remote_url(url: str):
 
 
 def load_config(repo_root: Path) -> dict:
-  """Read `.superegm/config.json`; defaults when missing; unknown keys stop."""
+  """Read `.superegm/config.json`; defaults when missing; unknown keys stop.
+
+  A key whose module `CONFIG_DEFAULTS` default is an object (and `reviewers`, `brainstorm`) merges one level, `{**default, **file}`: a partial file value keeps the default's sibling keys, a nested object or list inside it is replaced whole.
+  """
   config = json.loads(json.dumps(DEFAULT_CONFIG))
   path = repo_root / ".superegm" / "config.json"
   config["_source"] = str(path) if path.is_file() else "defaults (no .superegm/config.json)"
