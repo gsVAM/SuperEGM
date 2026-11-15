@@ -69,7 +69,8 @@ section 9.2), never in a second tier finding.
 ## The split
 
 After the tier check, the per-unit split check (spec section 9.2). A unit is a split candidate
-when it runs over 10 Steps, 24,576 bytes or eight Scope paths, or when its Scope crosses subsystems
+when it runs over 10 Steps, over `units.max_body_kb` × 1024 bytes or over `units.max_files` Scope paths
+(read from `.superegm/config.json`), or when its Scope crosses subsystems
 (section 9.1's families: a helper module with the skill folder, references and tests that drive
 it; the docs are the release's closing sweep's). `scan`'s `warnings[]` at those values are the
 evidence. One finding per unit, `medium`, on the Scope line, naming every reason it meets:

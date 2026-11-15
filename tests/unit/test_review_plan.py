@@ -321,7 +321,7 @@ WIDTH = [
   (SKILL, "chains at U<n>: <path> U<a> > U<b> > … > U<n> (after U<b>); <path> …", True),
   (SKILL, "`low` when the header names every chain", True), (SKILL, "question 11 only", False),
   (PROPORTION, "split candidate: <Steps | bytes | paths | subsystems>", True),
-  (PROPORTION, "over 10 Steps, 24,576 bytes or eight Scope paths", True), (PROPORTION, "crosses subsystems", True),
+  (PROPORTION, "over 10 Steps, over `units.max_body_kb` × 1024 bytes or over `units.max_files` Scope paths", True), (PROPORTION, "crosses subsystems", True),
   (PROPORTION, "a `difficult` unit at Size `L`", True), (PROPORTION, "`bytes` over 24,576, `steps` over 10", True),
   (PROPORTION, "32,768", False),
 ]
