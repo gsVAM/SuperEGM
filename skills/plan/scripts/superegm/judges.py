@@ -581,8 +581,11 @@ def redesign_option(st, rid: str) -> str:
 def decision_question(st, unit: str, did: str) -> str:
   # the runtime decision `decision open` recorded in foreman/<unit>.json, rendered as `blocked_question` renders a comment:
   # the question's first line, then the options lettered afresh, `amend` (the owner's alone, bare or a builder's own
-  # `- (a) amend` line) left out
+  # `- (a) amend` line) left out; a plan-time decision `D<n>` is the unit's `decisions[]` of `units.json`
   decision = next((d for d in core.load_foreman(st, unit)["decisions"] if d["id"] == did), None)
+  if decision is None and st.path("units").is_file():
+    units = json.loads(core.read_text(st.path("units"))).get("units") or {}
+    decision = next((d for d in units.get(unit, {}).get("decisions") or [] if d["id"] == did), None)
   if decision is None:
     raise core.HandoffError(f"question: {unit} has no decision {did}")
   heading = (decision["question"].strip().splitlines() or [""])[0].strip()
