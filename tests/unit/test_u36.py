@@ -95,6 +95,8 @@ def test_cap_stored_at_open(world, kind, source, cap):
 
 def with_rounds_line(extra):
   """SPEC with `extra` before its first H2, or (an `(after the first H2)` line) inside its first section."""
+  if extra.startswith("(after an indented"):  # an H2 indented up to three spaces is still the first H2
+    return SPEC.replace("## 1. Intent", " ## 1. Intent\n" + extra.split(") ", 1)[1], 1)
   if extra.startswith("(after"):
     return SPEC.replace("Text.\n", "Text.\n" + extra.split(") ", 1)[1], 1)
   return SPEC.replace("## 1. Intent", extra + "\n## 1. Intent", 1)
@@ -104,6 +106,7 @@ def with_rounds_line(extra):
   ("Rounds: 4\n", 3, 4, None),
   ("", 3, 3, None),
   ("(after the first H2) Rounds: 9\n", 3, 3, None),
+  ("(after an indented H2) Rounds: 9\n", 3, 3, None),
   ("Rounds: 0\n", 3, None, "Rounds: 0"),
   ("Rounds: 11\n", 3, None, "Rounds: 11"),
   ("Rounds: two\n", 3, None, "Rounds: two"),
