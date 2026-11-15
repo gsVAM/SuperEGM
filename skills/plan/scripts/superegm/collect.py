@@ -420,7 +420,7 @@ def collect(args, card):
                                       recorded_rulings(data), data.get("decisions") or [], recorded_times(data),
                                       handoff.state["units"][unit].get("number"), runs=runs, prior_dod=prior_dod, present=present,
                                       delta=delta, prior_delta=prior_delta, texts=texts, config=handoff.config, held=holds,
-                                      open_prior={f["id"] for f in review.findings_of(last) if f["disposition"] is None} if last else set())
+                                      open_prior=open_of(last))
   lines, slots, contested = carry(lines, contested, last, prior, contest_of,
                                     binding_rulings([c for c in comments if c["kind"] == "issue"], handoff.config.get("owners") or [],
                                                     recorded_rulings(data), data.get("decisions") or []))
@@ -648,6 +648,16 @@ def timely(fid: str, at: str, posted: dict, held: dict = None) -> bool:
   record holds it) was posted (`posted`: round → `posted_at`); any other id always."""
   r = (held or {}).get(fid)
   return not fid.startswith("foreman-") or (r in posted and at > posted[r])
+
+
+def open_of(last) -> set:
+  """The previous posted round's open fids, which a contest may name: a finding with no disposition. A medium
+  deferred by triage (`deferred: triage <n>`, spec section 5.2) is not open: it no longer blocks, so no contest
+  of it is carried as a blocking foreman finding."""
+  if not last:
+    return set()
+  deferred = {f["id"] for f in review.deferred_of(last)}
+  return {f["id"] for f in review.findings_of(last) if f["disposition"] is None and f["id"] not in deferred}
 
 
 def carry(lines: list, contested: list, last: dict, prior, contest_of: dict, rulings: list) -> tuple:

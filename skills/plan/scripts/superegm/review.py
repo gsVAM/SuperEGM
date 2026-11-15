@@ -743,8 +743,29 @@ def triage(args) -> int:
   core.atomic_write(st.path("reviews", args.review, f"round-{args.round}.json"), rnd)
   store_verdict(st, args.review, review, rnd["runcard"])
   for fid, n in deferred.items():
+    core.journal(st, f"review triage {args.review} round {args.round} {fid} deferred: triage {n} under {args.runcard}")
     print(f"{fid} deferred: triage {n}")
   return 0
+
+
+def deferred_of(rnd: dict) -> list[dict]:
+  """The round's findings deferred by triage, in record order."""
+  return [f for f in findings_of(rnd) if str(f.get("disposition") or "").startswith("deferred: triage ")]
+
+
+def write_followups(st: core.Store, unit: str, rnd: dict) -> None:
+  """A posted round's deferred mediums as `followups[]` rows (section 5.2): once per fid and round, so a recovery's
+  second count writes none."""
+  rows = [{"fid": f["id"], "round": rnd["round"], "claim": f["claim"], "triage": rnd["triage"]["findings"][f["id"]],
+           "pattern": int(f["disposition"].rsplit(" ", 1)[1])} for f in deferred_of(rnd)]
+  if not rows:
+    return
+  data = core.load_foreman(st, unit)
+  have = {(r["fid"], r["round"]) for r in data.get("followups") or []}
+  new = [r for r in rows if (r["fid"], r["round"]) not in have]
+  if new:
+    data["followups"] = (data.get("followups") or []) + new
+    core.save_foreman(st, unit, data)
 
 
 TRIAGE_LINE = re.compile(r"^(?P<fid>\S+) \| reach: (?P<reach>\S+) \| later: (?P<later>\S+) \| critical: (?P<critical>\S+)"
@@ -1343,6 +1364,9 @@ def render_comment(round_json: dict, head: str, ci_verdict: str, mention) -> str
   for record in (round_json.get("reviewers") or {}).values():
     lines += [f"{f['id']} | {f['severity']} | {f['location']} | regression: {f['regression']} | {f['claim']}"
               for f in record["findings"] if "carried_from" not in f]
+  deferred = deferred_of(round_json) if round_json.get("reviewers") else []
+  if deferred:  # section 5.2: a deferred medium no longer blocks; the builder may still fix it
+    lines += ["", "**Deferred by triage**"] + [f"{f['id']} | {f['disposition']}" for f in deferred]
   lines += ["", f"CI: {ci_verdict}"]
   return "\n".join(lines) + "\n"
 
@@ -1831,6 +1855,8 @@ def count_posted(st: core.Store, unit: str, entry: dict, posted_at: str, review_
   saved["outcome"] = word
   entry.update(saved)
   core.save_foreman(st, unit, data)
+  if rnd and rnd.get("triage"):  # the round posts: its deferrals become follow-up rows, once per fid and round
+    write_followups(st, unit, rnd)
   core.journal(st, f"{unit} round {entry['round']} posted {word} under {runcard}")
   if word == "clean":
     core.journal(st, f"{unit} awaiting merge under {runcard}")
