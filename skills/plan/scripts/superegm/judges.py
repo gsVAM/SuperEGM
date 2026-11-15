@@ -579,14 +579,15 @@ def redesign_option(st, rid: str) -> str:
 
 
 def decision_question(st, unit: str, did: str) -> str:
-  units = json.loads(core.read_text(st.path("units"))).get("units") or {}
-  decision = next((d for d in units.get(unit, {}).get("decisions") or [] if d["id"] == did), None)
+  # the runtime decision `decision open` recorded in foreman/<unit>.json, rendered as `blocked_question` renders a comment:
+  # the question's first line, then the options lettered afresh, `amend` (the owner's alone, bare or a builder's own
+  # `- (a) amend` line) left out
+  decision = next((d for d in core.load_foreman(st, unit)["decisions"] if d["id"] == did), None)
   if decision is None:
     raise core.HandoffError(f"question: {unit} has no decision {did}")
-  def owners(line: str) -> bool:  # amend is the owner's alone: bare, or a builder's own `- (a) amend` line
-    return re.fullmatch(r"(- )?(\(\w\) )?amend", line.strip()) is not None
-  question = "\n".join(l for l in decision["question"].split("\n") if not owners(l))
-  return f"## Q1 {unit} {did}: {question}\n" + "".join(f"- {o}\n" for o in decision["options"] if not owners(o))
+  heading = (decision["question"].strip().splitlines() or [""])[0].strip()
+  options = [re.sub(r"^\(\w\) ", "", o.strip()) for o in decision["options"]]
+  return f"## Q1 {unit} {did}: {heading}\n" + options_text([o for o in options if o != "amend"])
 
 
 def blocked_question(st, unit: str, what: list) -> tuple[str, list[int]]:
