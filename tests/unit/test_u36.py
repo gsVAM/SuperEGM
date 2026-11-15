@@ -186,3 +186,22 @@ def test_resume_narrows_the_panel(world, panels_before, recorded, given, panels_
     code, out = resume(world, spec, pcid, panel, "plan", "U07")
     assert code == 0 and out.splitlines() == [prid], out
   assert "panels" not in rjson(world, prid)
+
+
+def test_round_reads_its_panel(world):
+  """Narrowed to design,style from round 3: zoom-out is off round 3's panel and round 3 completes without it."""
+  spec, cid, rid = opened(world, reviewers="design,zoom-out,style")
+  for reviewer in ("design", "zoom-out", "style"):
+    assert record(world, rid, 1, reviewer, [F("design", 1, 1)] if reviewer == "design" else [], cid)[0] == 0
+  for reviewer in ("design", "style"):
+    assert record(world, rid, 2, reviewer, [F("design", 2, 1)] if reviewer == "design" else [], cid)[0] == 0
+  assert rjson(world, rid, "round-2.json")["what_ran"].startswith("not run (zoom-out")
+  code, out = resume(world, spec, cid, "design,style")
+  assert code == 0 and out.splitlines()[1] == "panel design,style from round 3", out
+  code, out = record(world, rid, 3, "zoom-out", [], cid)
+  assert code == 1 and "review record: zoom-out is not on the panel" in out
+  for reviewer in ("design", "style"):
+    assert record(world, rid, 3, reviewer, [F("design", 3, 1)] if reviewer == "design" else [], cid)[0] == 0
+  assert rjson(world, rid, "round-3.json")["what_ran"] == "completed"
+  assert record(world, rid, 2, "zoom-out", [], cid)[0] == 0
+  assert rjson(world, rid, "round-2.json")["what_ran"] == "completed"
