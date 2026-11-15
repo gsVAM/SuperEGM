@@ -186,3 +186,17 @@ def test_next_rows_first_match(world, state, line):
   line = line.format(root=superegm.git_toplevel(world.repo), spec=c.spec, review="plan-U02-c1")
   code, out, before, after = c.next()
   assert (code, out) == (0, line) and before == after
+
+
+def test_origin_spec_check_alone(world):
+  """The spec check runs alone against the given ref; the default ref and the full check are 1.2's."""
+  from superegm import launch
+  c = Chain(world)
+  git(world, "update-ref", "refs/superegm/base", "HEAD")
+  c.other_spec_at_tick_base()
+  root = superegm.git_toplevel(world.repo)
+  approval, later = {**jread(c.root / "approvals" / f"{SLUG}.json")["entries"][-1], "path": str(c.spec)}, []
+  assert launch.origin_problems(root, "main", approval, later, ref="refs/superegm/tick-base", spec_only=True) == [
+    "spec at origin/main is neither the approved bytes nor a later link of the approval chain"]
+  assert launch.origin_problems(root, "main", approval, later) == launch.origin_problems(root, "main", approval, later, ref="refs/superegm/base")
+  assert launch.origin_problems(root, "main", approval, later) == ["origin/main carries no workflow triggered on pull_request"]
