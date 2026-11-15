@@ -16,7 +16,7 @@ from pathlib import Path
 
 import superegm as core
 
-WRITES = frozenset({"driver", "runcards", "launches"})
+WRITES = frozenset({"driver", "runcards", "launches", "tick", "chain"})
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no written config key, init line or doctor line of its own (U32)
 CONFIG_UNWRITTEN = {"driver": {"chain": False}}  # its own key, registered but never written by `init`: absent reads false (U44)
 SKILLS = frozenset({"driver"})
@@ -267,6 +267,46 @@ def launch(hs: core.Store, entry: dict, spec: str, reason: str) -> bool:
   return True
 
 
+def fetch_base(root, remote: str, base: str) -> tuple:
+  """(ok, stderr) of the tick's own fetch of `<base>` into `refs/superegm/tick-base` in the registered root, with the
+  owner's git credentials (a ref no session reads, spec section 7.1)."""
+  from superegm import phase
+  done = subprocess.run(["git", "-C", str(root), "fetch", "-q", remote, f"+refs/heads/{base}:{phase.TICK_BASE}"],
+                        capture_output=True, text=True)
+  return done.returncode == 0, done.stderr
+
+
+def fetch_store(st: core.Store, entry: dict, ids: list) -> None:
+  """The store's one fetch of a tick (chain on): its outcome to `tick/fetch.json` (`at`, `ok`, the first stderr
+  line); a failure journaled `driver: fetch <remote> failed: <line>` once per distinct line; after a good one, each
+  superseded handoff's wait record removed (`driver: <handoff> superseded: wait record removed`)."""
+  from superegm import phase
+  config = st.config or {}
+  remote = config.get("remote") or "origin"
+  path = st.path("tick", "fetch")
+  before = json.loads(core.read_text(path)) if path.is_file() else {}
+  ok, stderr = fetch_base(Path(entry["root"]).resolve(), remote, config.get("base") or "main")
+  line = phase.first_line(stderr)
+  core.atomic_write(path, {"at": core.now_iso(), "ok": bool(ok), "stderr": line})
+  if not ok:
+    if before.get("ok") is not False or before.get("stderr") != line:
+      core.journal(st, f"driver: fetch {remote} failed: {line}")
+    return
+  for hid in ids:
+    record = st.path("chain", hid)
+    if not record.is_file():
+      continue
+    hs = core.handoff_store(st, hid)
+    try:
+      core.require_latest_handoff(hs)
+    except core.HandoffError:
+      record.unlink()
+      core.journal(hs, f"driver: {hid} superseded: wait record removed")
+
+
+SKIP_LINES = ("none", "integrate")  # with `waiting …`, the lines `next` prints on which the tick runs nothing
+
+
 def last_started(st: core.Store, hid: str) -> str:
   launches = core.load_driver(core.handoff_store(st, hid))["launches"]
   return launches[-1]["started_at"] if launches else ""
@@ -277,9 +317,12 @@ def tick_store(entry: dict) -> None:
   in order; at most one launch (one `.git`). The reboot and exit-file proofs may write before any skip; a skip
   (the store's live launch or open `wave` card, a phase card, nothing left, `tick_trigger` None) prints nothing and
   writes nothing unless `notify`'s own predicate holds, a new line then sent under a `driver` card opened for that."""
-  from superegm import status
+  from superegm import phase, status
   st, ok = registered_store(entry)
   current, ids = core.boot_id(), open_ids(st)
+  chain = ok and chain_on(st.config)
+  if chain:  # once per store per tick, before any `next` (spec section 7.1)
+    fetch_store(st, entry, ids)
   stores = [core.handoff_store(st, h) for h in ids]
   for hs in stores:  # the proofs first, for every open handoff: a store-wide skip below reads them all
     core.STORE = hs  # the one mid-run STORE switch: it reaches every reader by intent, the notify hook's included
@@ -288,6 +331,10 @@ def tick_store(entry: dict) -> None:
   for hid in sorted(ids, key=lambda h: last_started(st, h)):
     hs = core.handoff_store(st, hid)
     core.STORE = hs  # the one mid-run STORE switch: it reaches every reader by intent, the notify hook's included
+    if chain:
+      line = phase.next_line(st, hid)
+      if line in SKIP_LINES or line.startswith("waiting"):
+        continue
     state = core.load_state(hs.root)
     spec = (state.get("design") or {}).get("path") or ""
     units = list(state.get("units") or {})
