@@ -45,3 +45,28 @@ def test_amendment_file_before_ruling(world, monkeypatch):
   assert write_order.index(hdir / "amendments" / "11.json") < write_order.index(s.path("foreman", "U02"))
   assert decision.WRITES == frozenset({"foreman", "reviews", "state", "file"})
   assert "amendments" not in json.loads((hdir / "state.json").read_text())
+
+
+def test_rerun_after_crash_records_once(world, monkeypatch):
+  # the ruling save fails after the amendment file is written; the rerun succeeds
+  import superegm
+  from superegm import launch_builder
+  card, s = world_on(world)
+  body = "## Interfaces\n- Produces: dequeue() -> Job | null\n"
+  qid = opened(world, card, IFACE + OPTS, source="comment 11")
+  real = superegm.save_foreman
+
+  def crash(*args, **kwargs):
+    monkeypatch.setattr(superegm, "save_foreman", real)
+    raise OSError("disk full")
+  monkeypatch.setattr(superegm, "save_foreman", crash)
+  with pytest.raises(OSError):
+    rule(world, card, qid, f"amend — {LINE}")
+  hdir = s.path("file")
+  first_bytes = (hdir / "amendments" / "11.json").read_bytes()
+  assert not foreman_of(s, "U02")["rulings"]
+  code, out = rule(world, card, qid, f"amend — {LINE}")  # the rerun posts a new ruling comment
+  assert code == 0, out
+  assert sorted(p.name for p in (hdir / "amendments").iterdir()) == ["11.json"]
+  assert (hdir / "amendments" / "11.json").read_bytes() == first_bytes
+  assert len(launch_builder.amendments_for(s, "U01", body)) == 1
