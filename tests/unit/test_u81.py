@@ -198,3 +198,14 @@ def test_judges_never_amend(world):
   assert code == 0, out
   [entry] = json.loads((s.path("file") / "amendments" / "77.json").read_text())
   assert (entry["unit"], entry["name"], entry["text"]) == ("U01", "dequeue", "return null")
+
+
+def test_the_judges_decision_question_drops_a_builders_amend_line(world):
+  # a builder's `- (a) amend` option is the owner's alone, whatever its letter
+  from superegm import judges
+  card, s = world_on(world)
+  did = opened(world, card, IFACE + "**Builder status:** BLOCKED\nWhich?\n- (a) amend\n- (b) return null\n")
+  decision = foreman_of(s, "U02")["decisions"][-1]
+  s.path("units").write_text(json.dumps({"units": {"U02": {"decisions": [decision]}}}), encoding="utf-8")
+  text = judges.decision_question(s, "U02", did)
+  assert "amend" not in text and "(b) return null" in text
