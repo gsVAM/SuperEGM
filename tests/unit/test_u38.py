@@ -119,7 +119,7 @@ def test_records_copy_the_stored_manifest(world, dispatch, expected):
 
 def open_judges(world, parent=None, name="q38"):
   """A judge panel on a one-question file, under `parent` or its own card; `(panel id, card to record under, panel.json)`."""
-  from test_judges import ONE, open_card, panel_json
+  from test_judges import ONE, open_card
   question = world.repo.parent / f"{name}.md"
   question.write_text(ONE, encoding="utf-8")
   cid = parent or open_card(world, "judges", question)
@@ -128,8 +128,17 @@ def open_judges(world, parent=None, name="q38"):
   return out.strip(), cid, panel_json(world, out.strip())
 
 
+def panel_dir(world, pid):
+  """The panel's folder: it lands in the store of its card's handoff, wherever that is."""
+  return next(world.artifacts.glob(f"**/judges/{pid}"))
+
+
+def panel_json(world, pid):
+  return json.loads((panel_dir(world, pid) / "panel.json").read_text(encoding="utf-8"))
+
+
 def brief_of(world, pid, n):
-  return (world.artifacts / "judges" / pid / f"round-{n}" / "brief.md").read_text(encoding="utf-8")
+  return (panel_dir(world, pid) / f"round-{n}" / "brief.md").read_text(encoding="utf-8")
 
 
 def set_card_handoff(world, cid, handoff):
@@ -148,7 +157,7 @@ def set_card_handoff(world, cid, handoff):
 def test_judge_panel_renders_once_by_parent_skill(world, parent, rendered):
   """Rendered once per lane at open, stored on the panel, reused by every later round, placed last in each brief."""
   from superegm import instructions
-  from test_judges import panel_json, record as judge_record
+  from test_judges import record as judge_record
   head_text = "Judge by the suite.\n"
   if parent.startswith("review-spec"):
     commit_file(world, RULES, head_text)
@@ -161,8 +170,8 @@ def test_judge_panel_renders_once_by_parent_skill(world, parent, rendered):
   elif parent.startswith("review-plan"):
     spec, approved_cid, hid = approved_handoff(world, ["judges"])
     cid = card(world, spec, "review-plan", handoff=hid)
-    move_on(world, spec, approved_cid)              # a HEAD edit and a re-approval before the panel opens
-    want = instructions.section([(RULES, TEXT)])
+    move_on(world, spec, approved_cid)              # a same-id re-approval: the last approval entry is the frozen list
+    want = instructions.section([(RULES, "Skip the suite.\n")])
   elif parent.startswith("wave"):
     spec, approved_cid, hid = approved_handoff(world, ["judges"])
     cid = card(world, spec, "wave", handoff=hid)
