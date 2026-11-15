@@ -1,7 +1,7 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40).
 
-"""superegm review open|record|settle|status|rule|scope|post|ingest: the one review loop (spec section 8)."""
+"""superegm review open|record|settle|status|rule|scope|post|ingest|triage: the one review loop (spec section 8)."""
 
 import argparse
 import contextlib
@@ -133,6 +133,11 @@ def register(subparsers):
   which = i.add_mutually_exclusive_group(required=True)
   which.add_argument("--unit")
   which.add_argument("--pr", type=int, help="the spec PR: its threads into the latest round of the spec's latest cycle")
+  g = core.add_parser(action, "triage", "a head round's triage: its eligible mediums (--eligible), or the triage goldfish's reply recorded (--file)")
+  g.add_argument("--review", required=True)
+  g.add_argument("--round", type=int, required=True)
+  which = g.add_mutually_exclusive_group(required=True)
+  which.add_argument("--eligible", action="store_true", help="print the round's eligible mediums, one fid per line")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -147,7 +152,7 @@ def run(args):
   try:
     return {"open": open_review, "record": record_round, "settle": settle_finding,
             "status": status_review, "rule": rule_review, "post": post, "scope": scope_review,
-            "ingest": ingest}[args.action](args)
+            "ingest": ingest, "triage": triage}[args.action](args)
   except Refusal as refusal:
     print(refusal)
     return 1
@@ -657,6 +662,48 @@ def record_round(args) -> int:
     print(f"record: {fid} out of scope ({section}): not recorded")
   core.journal(st, f"review record {rid} round {n} {reviewer} what_ran {rnd['what_ran']} under {args.runcard}")
   print(f"round {n} {reviewer} recorded, what_ran {rnd['what_ran']}")
+  return 0
+
+
+# ---------------------------------------------------------------- triage
+
+
+def triage_undone(foreman: dict) -> bool:
+  """The owner turned triage off for the unit: a recorded undo (`kind: undo`) in its `rulings[]`."""
+  return any(r.get("kind") == "undo" for r in foreman.get("rulings") or [])
+
+
+def owner_named(foreman: dict) -> set:
+  """The fids an `owner: <ids>` outcome of any `rounds[]` entry names."""
+  return {fid for e in foreman.get("rounds") or [] if str(e.get("outcome") or "").startswith("owner: ")
+          for fid in e["outcome"][len("owner: "):].split(", ")}
+
+
+def eligible_fids(st: core.Store, review: dict, rnd: dict) -> list[str]:
+  """A head round's eligible mediums (section 5.2): a panel reviewer's unsettled medium that is not a regression,
+  not a `test-delta:` finding and not named in an `owner:` line, in a unit whose triage no undo turned off."""
+  foreman = core.load_foreman(st, review["artifact"])
+  if review["kind"] != "head" or triage_undone(foreman):
+    return []
+  panel, named = panel_at(review, rnd["round"]), owner_named(foreman)
+  return [f["id"] for reviewer in panel for f in (rnd["reviewers"].get(reviewer) or {}).get("findings") or []
+          if f["severity"] == "medium" and f["regression"] == "no" and f["disposition"] is None
+          and not f["claim"].startswith("test-delta:") and f["id"] not in named]
+
+
+def triage(args) -> int:
+  match = re.search(r"(?:^|-)head-(U\d+)-c\d+$", args.review)
+  if match and not args.runcard:  # `--eligible` runs without a card: the handoff is the one filing the review's unit
+    args.unit = match.group(1)
+  st = core.store(core.git_toplevel(Path.cwd()), args)
+  review = load_review(st, args.review)
+  if review is None:
+    raise core.HandoffError(f"review {args.review}: not opened")
+  rnd = load_round(st, args.review, args.round)
+  if rnd is None:
+    raise Refusal(f"triage: round {args.round} not recorded")
+  for fid in eligible_fids(st, review, rnd):
+    print(fid)
   return 0
 
 
