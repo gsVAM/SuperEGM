@@ -1315,9 +1315,16 @@ def ingest(args) -> int:
         postable.setdefault(ext, []).append(line)
     body = None
     if postable:
-      shown = {"round": n, "reviewers": {ext: {"findings": parse_findings("\n".join(ls), ext, n)} for ext, ls in postable.items()}}
       verdict = json.loads(core.read_text(folder / "ci.json"))["verdict"]
-      body = render_comment(shown, head, verdict, config.get("fix_request_mention") or None)
+      render = lambda: render_comment(
+        {"round": n, "reviewers": {ext: {"findings": parse_findings("\n".join(ls), ext, n)} for ext, ls in postable.items()}},
+        head, verdict, config.get("fix_request_mention") or None)
+      body = render()
+      if len(body.encode("utf-8")) > COMMENT_LIMIT:  # every claim of the ingest cut to 200 characters, stored and posted alike
+        cut = lambda line: " | ".join([*line.split(" | ", 4)[:4], cut_claim(line.split(" | ", 4)[4])])
+        lines = {ext: [cut(line) for line in ls] for ext, ls in lines.items()}
+        postable = {ext: [cut(line) for line in ls] for ext, ls in postable.items()}
+        body = render()
       if len(body.encode("utf-8")) > COMMENT_LIMIT:
         raise Refusal(f"review ingest: comment over 65,536 bytes ({sum(map(len, postable.values()))} threads)")
       problems = core.scan_text(body, config, "comment", label="comment", limit=None)
