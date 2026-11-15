@@ -6,7 +6,7 @@
 # ingest once before the refusals, the refusal of an unsettled external finding, an external finding's carried copies
 # as one escalated pair discharged by its latest copy alone, and a re-approval of the same cycle reading that cycle
 # again and keeping the replaced entry's unnamed pairs (U26); `--amend-units` typed by hand opens and closes its own
-# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units`, and a hand-written prior approval read as `since` 0 (U36); the `instructions` list frozen with each file's blob sha and its verified store copy, and the changed files printed (U37).
+# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units`, and a hand-written prior approval read as `since` 0 (U36); the triage section parsed, refused with its line and frozen as `triage` (U39); the `instructions` list frozen with each file's blob sha and its verified store copy, and the changed files printed (U37).
 
 """superegm approve-spec: record the owner's approval of a converged spec (spec section 8)."""
 
@@ -23,8 +23,10 @@ WRITES = frozenset(["approvals", "handoffs", "state", "reviews", "runcards", "in
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset(["review-spec", "review-plan", "integrate", "approve-spec"])  # the skills whose card this subcommand accepts
 CONFIG = ".superegm/config.json"
-FROZEN_FIELDS = ["rounds", "instructions"]  # the entry fields frozen at an approval, which `--amend-units` copies where the extended entry has them (U36, U37)
+FROZEN_FIELDS = ["rounds", "triage", "instructions"]  # the entry fields frozen at an approval, which `--amend-units` copies where the extended entry has them (U36, U37, U39)
 ANY_H2 = re.compile(r"^ {0,3}##[ \t]+\S")  # an H2 as review.py reads one: up to three spaces of indent, outside a fence
+TRIAGE_FIELDS = {"reach": ("external", "agent", "config", "forged"), "later": ("easy", "migration", "version"),
+                 "critical": ("yes", "no"), "verified": ("confirmed", "refuted")}  # a pattern's fields and their values (section 5.1)
 UNITS_H2 = re.compile(r"^## (?:\d+\.?\s+)?Units\s*$")
 
 
@@ -125,6 +127,81 @@ def rounds_line(text: str) -> int | None:
         raise core.HandoffError(f"approve-spec: {line} is not an integer 1-10")
       found = int(value)
   return found
+
+
+def triage_section(lines: list[str]) -> tuple[int, list[tuple[str, bool]]] | None:
+  """The triage section of a spec's `lines` (section 5.1): the index of its heading and its lines to the next H2 as
+  `(line, fenced)`, a fence's own lines and the lines inside it `fenced`; None when no H2 outside a fenced
+  block is exactly `Triage`."""
+  fence, start, body = None, None, []  # the open fence's (character, run length), as `rounds_line` reads one
+  for number, line in enumerate(lines):
+    fenced = fence is not None
+    if fence:
+      if re.match(rf"^ {{0,3}}{fence[0]}{{{fence[1]},}}\s*$", line):
+        fence = None
+    elif (opener := core.FENCE_RE.match(line)) and not (opener.group(1)[0] == "`" and "`" in opener.group(2)):
+      fence, fenced = (opener.group(1)[0], len(opener.group(1))), True
+    elif ANY_H2.match(line):
+      if start is not None:
+        break
+      if line.strip().removeprefix("##").strip() == "Triage":
+        start = number
+      continue
+    if start is not None:
+      body.append((line, fenced))
+  return None if start is None else (start, body)
+
+
+def triage_refusal(line: str, reason: str) -> core.HandoffError:
+  return core.HandoffError(f"approve-spec: {line}: {reason}")
+
+
+def triage_pattern(line: str) -> dict:
+  """The `{field: value}` pairs of one `- ` line of the triage run; the line at fault refuses an empty pattern, a pair
+  that is no `field: value`, an unknown field or value, and a field named twice."""
+  pattern = {}
+  if not line[2:].strip():
+    raise triage_refusal(line, "an empty pattern")
+  for pair in line[2:].split(", "):
+    field, sep, value = pair.strip().partition(": ")
+    if not sep:
+      raise triage_refusal(line, f"`{pair.strip()}` is not `field: value`")
+    if field not in TRIAGE_FIELDS:
+      raise triage_refusal(line, f"unknown field {field}: one of {', '.join(TRIAGE_FIELDS)}")
+    if field in pattern:
+      raise triage_refusal(line, f"field {field} repeated in one pattern")
+    if value not in TRIAGE_FIELDS[field]:
+      raise triage_refusal(line, f"unknown value {value} for {field}: one of {', '.join(TRIAGE_FIELDS[field])}")
+    pattern[field] = value
+  return pattern
+
+
+def triage_patterns(text: str) -> list[dict] | None:
+  """The patterns of the spec's triage section (section 5.1), in section order; None without the section (the first
+  H2 outside a fenced block whose text is exactly `Triage`, wherever it stands). The section holds one `Unblock:` line and the run of `- ` lines
+  directly after it, each `field: value` pairs separated by `, `; any other line is prose. Refused with the line at
+  fault: a bad pattern (`triage_pattern`), a second `Unblock:` line, a section with no `Unblock:` line (the heading is
+  the line) or an `Unblock:` line with no pattern."""
+  lines = text.splitlines()
+  section = triage_section(lines)
+  if section is None:
+    return None
+  patterns, state, unblock = [], "before", ""  # before the `Unblock:` line, in the run after it, past the run's end
+  for line, fenced in section[1]:
+    if not fenced and line.rstrip() == "Unblock:":
+      if state != "before":
+        raise triage_refusal(line, "a second Unblock: line")
+      state, unblock = "run", line
+    elif state == "run":
+      if fenced or not line.startswith("- "):
+        state = "past"
+      else:
+        patterns.append(triage_pattern(line))
+  if state == "before":
+    raise triage_refusal(lines[section[0]], "no Unblock: line")
+  if not patterns:
+    raise triage_refusal(unblock, "no pattern after Unblock:")
+  return patterns
 
 
 def units_section(text: str) -> str:
@@ -260,6 +337,8 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   rid = review_id(st, "spec", str(spec), review["cycle"])
   if not (root / CONFIG).is_file():  # before any GitHub call: the config names the repository
     raise core.HandoffError(f"approve-spec: {CONFIG} missing: run superegm init")
+  # U39: a malformed triage section refuses before the PR ingest (which writes) and before the prompt and the commit
+  triage = triage_patterns(core.read_text(spec))
   number = spec_pr(st.config["repo"], core.run_git(["rev-parse", "--abbrev-ref", "HEAD"], root).strip())
   # U26: one `review ingest --pr` before the refusals: it reads the spec PR's threads, writes them, and the carried
   # findings, into the latest round and posts the fixed replies (a failed reply is named and retried next time, never
@@ -324,7 +403,7 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
     if previous.get(item["file"]) != item["sha"]:
       print(f"approve-spec: instructions {item['file']} {item['sha']}")
   entry = entry_of(sha, commit, args.runcard, rid, handoff_id, kind, escalated,  # an empty list stays absent: absent reads []
-                   {"rounds": rounds, **({"instructions": [{k: i[k] for k in ("file", "to", "sha")} for i in frozen]} if frozen else {})})
+                   {"rounds": rounds, "triage": triage, **({"instructions": [{k: i[k] for k in ("file", "to", "sha")} for i in frozen]} if frozen else {})})
   path = append_entry(st, spec, entry)
   write_handoff_file(st, handoff_id, spec, entry["approved_at"] if kind == "opening" else None)
   core.journal(st, f"approve-spec {kind} {handoff_id} sha256 {sha[:12]} at review {rid} commit {commit[:12]} under {args.runcard}")
