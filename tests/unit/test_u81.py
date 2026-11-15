@@ -243,3 +243,13 @@ def test_an_interface_option_that_keeps_the_contract_records_no_amendment(world)
   code, out = rule(world, card, qid, "(a) one more round — try again")
   assert code == 0, out
   assert not (s.path("file") / "amendments").exists() or not any((s.path("file") / "amendments").iterdir())
+
+
+def test_amend_names_only_a_declared_contract(world):
+  # `Job` and `undefined` occur in U01's `dequeue() -> Job | undefined` line, but are no name U01 produces
+  card, s = world_on(world)
+  qid = opened(world, card, "**Deviation (interface):** U01 Job: a different shape\n" + OPTS, source="comment 11")
+  code, err = rule(world, card, qid, "amend — Job = {id}")
+  assert (code, err.strip()) == (1, "decision: amend names U01 Job, not in U01's Interfaces lines")
+  assert not (s.path("file") / "amendments").exists()
+  assert not foreman_of(s, "U02")["rulings"]
