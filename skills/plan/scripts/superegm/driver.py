@@ -2,7 +2,8 @@
 # Added by SuperEGM (gsVAM), 2026: the driver
 
 """superegm driver tick|install|uninstall|status|reset (spec section 11.2): the owner's timer. `tick` launches one
-`wave --leavemealone` session per store when there is something to do; `install` and `uninstall` write and remove
+`wave --leavemealone` session per store when there is something to do (with `driver.chain` on, the session of the
+chain phase `superegm next` names, U44); `install` and `uninstall` write and remove
 the launchd agent (a systemd user timer on Linux); `status` reads, `reset` is the owner's interrupt."""
 
 import argparse
@@ -28,7 +29,7 @@ PLATFORM = sys.platform
 
 def chain_on(config: dict) -> bool:
   """`driver.chain` (spec section 7.1): true only when the store's config says so; absent or false is 1.2's tick."""
-  return isinstance((config or {}).get("driver"), dict) and config["driver"].get("chain") is True
+  return core.chain_on(config)
 
 
 def plist_path() -> Path:
@@ -174,12 +175,14 @@ def exit_code(entry: dict):
 def counted_failures(hs: core.Store, launches: list, state: dict, set_aside: int = 0) -> list:
   """The two consecutive launches of the tick's own that failed before the loop ran (spec section 11.2), or []:
   counted after the last `interrupted` one, after the rounds `driver reset` set aside, and after the last typed
-  top-level `wave` card opened at or before `state.status.at` (the intervening success); a failure is a non-zero
-  exit, no top-level `wave` card naming the launch's card, or one opened after `state.status.at` (or with it
-  absent: no `status --wait` ever saved)."""
+  top-level `wave` card opened at or before `state.status.at` (the intervening success; with the chain on, a typed
+  top-level card of any other chain phase opened after the launch, U44); a launch with an `outcome` failed when it
+  says so, a non-wave launch without one is undecided and not a failure, and a `wave` launch without one fails by
+  1.2's test: a non-zero exit, no top-level `wave` card naming the launch's card, or one opened after
+  `state.status.at` (or with it absent: no `status --wait` ever saved)."""
   at = (state.get("status") or {}).get("at")
   chain = chain_on(hs.config)
-  cards = [c for _, c in (core.top_phase_cards(hs) if chain else core.top_wave_cards(hs))]
+  cards = [c for _, c in core.tick_cards(hs)]
   launches = [e for e in launches if not core.backed_off(e)]  # never started: no failure, no reset
   start = max((i + 1 for i, e in enumerate(launches) if str(e.get("status") or "").startswith("interrupted")
                or e.get("round", 0) <= set_aside), default=0)
@@ -193,6 +196,8 @@ def counted_failures(hs: core.Store, launches: list, state: dict, set_aside: int
   def failed(entry: dict) -> bool:
     if entry.get("outcome"):  # decided once, when the session ended (U44)
       return entry["outcome"] == "failed"
+    if (entry.get("phase") or "wave") != "wave":  # not yet settled (a masked `next` line): undecided
+      return False
     return wave_failed(entry, cards, at)
 
   return counted[-2:] if len(counted) >= 2 and failed(counted[-1]) and failed(counted[-2]) else []
@@ -214,7 +219,9 @@ def twice_failed(hs: core.Store, data: dict, state: dict) -> bool:
 def settle_outcomes(st: core.Store, hs: core.Store) -> None:
   """With the chain on, each launch whose session ended (its exit file written, or interrupted after it started)
   and has no `outcome` gets one, once: a `wave` launch by 1.2's test; any other phase `succeeded` when its driven
-  card closed, its exit code is 0, and `next` now prints another line or a wait record exists, else `failed`."""
+  card closed, its exit code is 0, and `next` now prints another line or the session wrote a wait record (its
+  `since` at or after the launch's start), else `failed`. A non-wave launch is left undecided while `next` prints a
+  line that masks the phase rows (`waiting fetch`, `waiting push`, `waiting checkout`): a later tick settles it."""
   from superegm import phase
   data = core.load_driver(hs)
   ended = [e for e in data["launches"] if not core.backed_off(e) and not e.get("outcome") and core.tick_terminal(e)]
@@ -222,22 +229,35 @@ def settle_outcomes(st: core.Store, hs: core.Store) -> None:
     return
   cards = [c for _, c in core.top_phase_cards(hs)]
   at = ((core.load_state(hs.root).get("status") or {}).get("at"))
+  line, record = None, st.path("chain", hs.handoff_id)
+  wait = json.loads(core.read_text(record)) if record.is_file() else None
+  changed = False
   for entry in ended:
     kind = entry.get("phase") or "wave"
     if kind == "wave":
       entry["outcome"] = "failed" if wave_failed(entry, cards, at) else "succeeded"
+      changed = True
+      continue
+    line = phase.next_line(st, hs.handoff_id) if line is None else line
+    if line.startswith(MASKING):
       continue
     mine = [c for c in cards if c.get("driver_card") == entry.get("card")]
     closed = bool(mine) and all(c.get("closed_at") and not c.get("interrupted_at") for c in mine)
-    moved = closed and exit_code(entry) == "0" and (
-      st.path("chain", hs.handoff_id).is_file() or phase.next_line(st, hs.handoff_id).split(" ")[0] != kind)
+    written = wait is not None and str(wait.get("since") or "") >= entry["started_at"]
+    moved = closed and exit_code(entry) == "0" and (written or line.split(" ")[0] != kind)
     entry["outcome"] = "succeeded" if moved else "failed"
-  core.atomic_write(hs.path("driver", hs.handoff_id), data)
+    changed = True
+  if changed:
+    core.atomic_write(hs.path("driver", hs.handoff_id), data)
+
+
+MASKING = ("waiting fetch", "waiting push", "waiting checkout")  # `next` rows above the phase rows: no outcome yet
 
 
 def exit_file_proof(hs: core.Store, launches: list) -> None:
-  """A launch of the tick's own whose exit file exists while its top-level `wave` card is still open: a session that
-  ended without closing its card; that card, and no other, marked `interrupted`."""
+  """A launch of the tick's own whose exit file exists while its top-level card (of any chain phase, U44; only a
+  driven card names the launch) is still open: a session that ended without closing its card; that card, and no
+  other, marked `interrupted`."""
   if not launches or exit_code(launches[-1]) is None:
     return
   for path, card in core.top_phase_cards(hs):
@@ -278,7 +298,7 @@ def launch(hs: core.Store, entry: dict, spec: str, reason: str, phase: str = "wa
   n = len(data["launches"]) + 1
   base = lambda suffix: hs.path("driver", f"{hid}_r{n}{suffix}")
   record = {"round": n, "card": None, "started_at": core.now_iso(), "boot_id": core.boot_id(), "status": "running",
-            "reason": reason, "phase": phase, "result_file": str(base("_result.json")), "exit_file": str(base(".exit")),
+            "reason": reason, **({"phase": phase} if chain_on(hs.config) else {}), "result_file": str(base("_result.json")), "exit_file": str(base(".exit")),
             "log": str(base(".log"))}
   record["command"] = tick_command(Path(entry["root"]).resolve(),
                                    tick_prompt(core.rebased(spec, entry["root"]), hid, phase, leavemealone),
@@ -307,10 +327,12 @@ def launch(hs: core.Store, entry: dict, spec: str, reason: str, phase: str = "wa
 
 def fetch_base(root, remote: str, base: str) -> tuple:
   """(ok, stderr) of the tick's own fetch of `<base>` into `refs/superegm/tick-base` in the registered root, with the
-  owner's git credentials (a ref no session reads, spec section 7.1)."""
+  owner's git credentials (a ref no session reads, spec section 7.1); hook-free and leaving `FETCH_HEAD` alone, as
+  every other fetch through `core.run_git`."""
   from superegm import phase
-  done = subprocess.run(["git", "-C", str(root), "fetch", "-q", remote, f"+refs/heads/{base}:{phase.TICK_BASE}"],
-                        capture_output=True, text=True)
+  with core.hook_free() as pairs:
+    done = subprocess.run(["git", *pairs, "-C", str(root), "fetch", "-q", "--no-write-fetch-head", remote,
+                           f"+refs/heads/{base}:{phase.TICK_BASE}"], capture_output=True, text=True)
   return done.returncode == 0, done.stderr
 
 
@@ -504,8 +526,9 @@ def uninstall() -> int:
 
 def status() -> int:
   """`driver status`, read-only and under no card: per open handoff of each registered store, the last tick launch
-  (`started_at`, the wrapper's `pid`, whether its exit file exists), the open top-level `wave` card with its age and
-  the last refusal; an absent part's clause dropped."""
+  (`started_at`, the wrapper's `pid`, whether its exit file exists), the open top-level `wave` card (with the chain
+  on, each open top-level card of any chain phase, U44) with its skill and age, and the last refusal; an absent
+  part's clause dropped."""
   from superegm.inbox import minutes_since  # inbox imports this module
   for entry in core.load_registry():
     st, _ = registered_store(entry)
@@ -516,7 +539,7 @@ def status() -> int:
         last = data["launches"][-1]
         parts.append(f"launch {last['round']} started {last['started_at']} pid {last.get('pid', '-')} "
                      f"exit file {'yes' if Path(last['exit_file']).is_file() else 'no'}")
-      for path, card in core.top_phase_cards(hs):
+      for path, card in core.tick_cards(hs):
         if is_open(card):
           parts.append(f"{card['skill']} card {path.stem} open {minutes_since(card['opened_at'])} min")
       if data.get("refused"):
@@ -530,16 +553,17 @@ def status() -> int:
 
 def reset() -> int:
   """`driver reset`, the owner's interrupt for the card's handoff: its launch without an exit file recorded
-  `interrupted`, its open top-level `wave` card marked `interrupted`, the refusal cleared and, with no live launch,
-  the two failures it counted set aside (`set_aside`: the next tick counts from the launch after them); each
-  journaled."""
+  `interrupted`, its open top-level `wave` card (with the chain on, its open top-level card of any chain phase, U44)
+  marked `interrupted`, the refusal cleared and, with no live launch, the two failures it counted set aside
+  (`set_aside`: the next tick counts from the launch after them); each journaled."""
   hs = core.STORE
   hid, data = hs.handoff_id, core.load_driver(hs)
   live = [e for e in data["launches"] if not core.tick_terminal(e)]
-  cards = [(path, card) for path, card in core.top_phase_cards(hs) if is_open(card)]
+  cards = [(path, card) for path, card in core.tick_cards(hs) if is_open(card)]
   failures = [] if live else counted_failures(hs, data["launches"], core.load_state(hs.root), data.get("set_aside") or 0)
   if not live and not cards and not data.get("refused") and not failures:
-    raise core.HandoffError(f"{hid} has no live tick launch or open wave card")
+    what = "plan, review-plan, file or wave" if chain_on(hs.config) else "wave"
+    raise core.HandoffError(f"{hid} has no live tick launch or open {what} card")
   parts = [] if live or cards else ["refusal cleared"] * bool(data.get("refused"))
   if failures:
     rounds = f"{failures[0]['round']}-{failures[1]['round']}"

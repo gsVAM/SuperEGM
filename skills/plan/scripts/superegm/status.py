@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the `ruling` event and a status line after a comment's deviation headings (U22); the board's one write per `wave` pass, `post_board` (U30); the tick's read, `tick_trigger` (U24); the watchdog's `stalled` line, its predicate and `head_time` (U31).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the `ruling` event and a status line after a comment's deviation headings (U22); the board's one write per `wave` pass, `post_board` (U30); the tick's read, `tick_trigger` (U24); the watchdog's `stalled` line, its predicate and `head_time` (U31); `tick_trigger`'s chain-on `merged` line and its proofs over every chain phase's card (U44).
 
 """superegm status: landed and ready sets, PRs, CI; refuses without a complete receipt.
 `--wait <s>` polls, reading only, and prints every unreported event line, or `deadline`. Under a `wave` card
@@ -310,10 +310,11 @@ def tick_trigger(handoff) -> str | None:
   """What a tick's session would have to do (spec section 11.2), from one `status_pass` that saves nothing, in order:
   the proof the tick applied to the handoff's newest tick launch, backed-off launches dropped first (`reboot <n>` for
   one recorded `interrupted (reboot)`, `exit-file <card>` for one whose exit file exists and whose top-level card of
-  any chain phase is `interrupted`); the first event line against `state.status.units` (a `stalled` line at every tick while its
-  predicate holds, no fingerprint saving it away, U31), a `status word=` event by a login no card
-  records as a builder skipped; with `driver.chain` on, `<uid> merged pr=<n>` for a pull request the pass reads
-  merged (`pr` set, `ci` null) that the saved snapshot does not show so (U44); `<uid> ready` for a unit the read finds ready and the saved `ready` lacks; an
+  any chain phase is `interrupted`); per unit in graph order, its first event line against `state.status.units` (a
+  `stalled` line at every tick while its predicate holds, no fingerprint saving it away, U31; a `status word=` event
+  by a login no card records as a builder skipped), then, with `driver.chain` on, `<uid> merged pr=<n>` when the pass
+  reads its pull request merged (`pr` set, `ci` null) and the saved snapshot does not show it so (U44), before the
+  next unit's lines; `<uid> ready` for a unit the read finds ready and the saved `ready` lacks; an
   un-ingested thread above `low` on the latest posted round's head, by U21's reader, a stopped unit's threads skipped;
   `first launch` while `state.status` is absent; else None, the nothing-to-do predicate."""
   st, state = handoff.store, handoff.state
@@ -330,15 +331,15 @@ def tick_trigger(handoff) -> str | None:
   previous = (saved or {}).get("units") or {}
   summary, _ = core.status_pass(handoff, save=False)
   builders = builder_logins(st)
-  from superegm import driver  # driver imports this module
-  chain = driver.chain_on(handoff.config)
+  from superegm import phase
+  chain = core.chain_on(handoff.config)
   for uid in handoff.graph.order:
     for line in unit_events(uid, previous.get(uid), summary["units"][uid]):
       if " status word=" in line and line.rsplit(" by=", 1)[-1] not in builders:
         continue  # a `**Builder status:**` comment a stranger wrote buys no session
       return line
     fresh, before = summary["units"][uid], previous.get(uid) or {}
-    if chain and fresh.get("pr") and fresh.get("ci") is None and (not before.get("pr") or before.get("ci") is not None):
+    if chain and phase.merged(fresh) and not phase.merged(before):
       return f"{uid} merged pr={fresh['pr']}"  # a merge with the issue left open fires no event (U44)
   if saved:
     for uid in summary.get("ready") or []:

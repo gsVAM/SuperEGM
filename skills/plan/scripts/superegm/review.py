@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest: the one review loop (spec section 8)."""
 
@@ -915,9 +915,10 @@ def rounds_of(st: core.Store, rid: str, review: dict) -> list[dict]:
 
 def stall_cards(st: core.Store, review: dict, runcard: str) -> set:
   """The card set the stall rule reads (spec section 11.2): the given card alone when it records no `driver_card`;
-  a tick's session's card reads every `wave` card of the handoff, typed included, opened at or after the last
-  posted round's `posted_at` (every one when none is posted), every card that ran a round after that post (an
-  earlier session's rounds since its own post), and itself, so a tick's session is no fresh retry."""
+  a tick's session's card reads every `wave` card of the handoff (with `driver.chain` on, also every top-level card
+  of the other chain phases, U44), typed included, opened at or after the last posted round's `posted_at` (every
+  one when none is posted), every card that ran a round after that post (an earlier session's rounds since its own
+  post), and itself, so a tick's session is no fresh retry."""
   path = st.path("runcards", runcard) if runcard else None
   card = json.loads(core.read_text(path)) if path and path.is_file() else {}
   if not card.get("driver_card"):
@@ -926,9 +927,10 @@ def stall_cards(st: core.Store, review: dict, runcard: str) -> set:
   last = max((i for i, r in enumerate(rounds) if r.get("phase") == "posted" and r.get("posted_at")), default=None)
   since = rounds[last]["posted_at"] if last is not None else None
   cards = {runcard} | {r["runcard"] for r in (rounds[last + 1:] if last is not None else []) if r.get("runcard")}
-  for other in sorted(st.card_dir(runcard).glob("*.json")):  # the top-level cards of every chain phase (U44)
+  chain = core.chain_on(st.config)
+  for other in sorted(st.card_dir(runcard).glob("*.json" if chain else "wave-*.json")):  # by the chain (U44)
     data = json.loads(core.read_text(other))
-    top = data.get("skill") == "wave" or (data.get("skill") in core.CHAIN_PHASES and not data.get("parent"))
+    top = data.get("skill") == "wave" or (chain and data.get("skill") in core.CHAIN_PHASES and not data.get("parent"))
     if top and (since is None or (data.get("opened_at") or "") >= since):
       cards.add(other.stem)
   return cards

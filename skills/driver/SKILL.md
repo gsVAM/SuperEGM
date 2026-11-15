@@ -4,7 +4,7 @@ license: Apache-2.0
 effects: external
 effect_kinds: [start-session, state-store]
 disable-model-invocation: true
-description: Installs, inspects and resets the owner's timer that types one leavemealone wave per store when there is something to do.
+description: Installs, inspects and resets the owner's timer that types one leavemealone wave per store when there is something to do, or, with driver.chain on, the chain phase superegm next names.
 ---
 
 <!-- Added by SuperEGM (gsVAM), 2026: the driver skill (spec section 11.2, U24). -->
@@ -72,11 +72,12 @@ refusal included. `status` is read-only and takes no card.
   after every plugin update (`doctor` prints `driver: stale (…)` until you do).
 - `uninstall`: `python3 '<HELPER>' driver uninstall --runcard '<CARD>'` removes the timer.
 - `status`: `python3 '<HELPER>' driver status` prints, per open handoff, the last tick launch (its
-  `started_at`, the wrapper's `pid`, whether its exit file exists), the open `wave` card with its age and the
-  last refusal. A launch without an exit file is a live session, never guessed dead.
+  `started_at`, the wrapper's `pid`, whether its exit file exists), the open `wave` card (with the chain on, each
+  open top-level `plan`, `review-plan`, `file` or `wave` card) with its skill and age, and the last refusal. A
+  launch without an exit file is a live session, never guessed dead.
 - `reset`: `python3 '<HELPER>' driver reset --runcard '<CARD>'` is the owner's interrupt for a tick launch the
   owner knows is dead (a kill, a crash): it records the launch `interrupted`, marks the handoff's open `wave`
-  card `interrupted` and clears the tick's refusal; after two failed launches that both exited, it sets the two
+  card (with the chain on, its open top-level card of any chain phase) `interrupted` and clears the tick's refusal; after two failed launches that both exited, it sets the two
   failures aside (`set_aside`, the second one's round), so the next tick counts afresh. A reboot needs no reset:
   the boot-id proof records it.
 
