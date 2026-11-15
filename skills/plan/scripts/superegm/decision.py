@@ -170,7 +170,7 @@ def recorded_rulings(foreman: dict) -> list:
 GROUPS = {"upheld": "fid", "overruled": "fid", "allowed": "fid", "option": "option"}  # the kinds that rule one subject
 
 
-def binding_rulings(comments: list, owners: list, recorded: list, decisions=None, pending=None) -> list:
+def binding_rulings(comments: list, owners: list, recorded: list, decisions=None, pending=None, deferred=None) -> list:
   """The rulings that bind (spec section 13.2: a recorded ruling is never changed by a later comment): the record's
   (`recorded`, as `recorded_rulings` reads it), then each owner's form comment `ruling_of` reads whose comment id
   the record does not hold and whose fid or option subject the record does not already rule; an option ruling binds
@@ -185,8 +185,11 @@ def binding_rulings(comments: list, owners: list, recorded: list, decisions=None
   fallback, the latest point-1 decision with no finding line, asks about any fid), as `decision rule` would record
   it. Before any point-1 question an upheld fid binds as the landed `collect` read it, and a `finding overruled`
   always binds: section 13.2 reads an overrule on a `tdd-order`, `test-delta` or `dod-<n>` fid that no decision asks
-  about as an allowance, which `collect` applies without a record."""
+  about as an allowance, which `collect` applies without a record. Given `deferred` (the fids of the record's
+  `followups[]`, spec section 5.2), an unrecorded `upheld` naming one of them is dropped: an applied undo removes
+  its row and binds as recorded, so a live one there is a refused undo, which never blocks."""
   recorded = list(recorded)
+  deferred = set(deferred or ())
   point3 = [d for d in decisions or [] if d.get("point") in (3, 5)]
   point1 = any(d.get("point") == 1 for d in decisions or [])
 
@@ -207,6 +210,7 @@ def binding_rulings(comments: list, owners: list, recorded: list, decisions=None
   keys = {key(r) for r in recorded if r.kind in GROUPS}
   return recorded + [r for c in comments if (r := ruling_of(c, owners))
                      and r.comment_id not in ids and key(r) not in keys and open_for(r) and asked_for(r)
+                     and not (r.kind == "upheld" and r.subject in deferred)
                      and (r.kind != "option" or offered(r, comments, decisions or []))]
 
 
@@ -244,7 +248,8 @@ def overridden_comments(comments: list, owners: list, foreman: dict) -> dict:
   entries = {r.get("posted"): r for r in foreman.get("rulings") or [] if str(r.get("posted") or "").startswith("comment ")}
   decisions = foreman.get("decisions") or []
   bound = {r.comment_id for r in binding_rulings(comments, owners, recorded_rulings(foreman), decisions,
-                                                 pending_decisions({"decisions": decisions, "rulings": foreman.get("rulings") or []}))}
+                                                 pending_decisions({"decisions": decisions, "rulings": foreman.get("rulings") or []}),
+                                                 [r["fid"] for r in foreman.get("followups") or []])}
   out = {}
   for c in comments:
     entry = entries.get(f"comment {c['id']}")
@@ -641,6 +646,30 @@ def deferral_of(foreman: dict, fid: str):
   return next((r for r in reversed(foreman.get("followups") or []) if r.get("fid") == fid), None)
 
 
+def refuse_undo(st, unit: str, data: dict, row: dict, args) -> None:
+  """The undo's refusals (spec section 5.2), checked before anything is written, so the follow-up row stays: a
+  deferral of an earlier round than the unit's latest posted one, a stopped unit (`foreman.stopped`, or the stopped
+  label on its issue), and a pull request merged or closed (its state read now)."""
+  posted = [e["round"] for e in data.get("rounds") or [] if e.get("phase") == "posted"]
+  why = None
+  if row["round"] != max(posted, default=None):
+    why = f"{row['fid']} was deferred in round {row['round']}, not the latest posted round"
+  elif data.get("stopped"):
+    why = f"{unit} is stopped"
+  else:
+    state = core.load_state(st.root)
+    record = state["units"][unit]
+    labels = core.gh_json(["issue", "view", str(record["number"]), "-R", st.config["repo"], "--json", "labels"]).get("labels") or []
+    pr = (record.get("pr") or {}).get("number")
+    if any(l.get("name") == st.config["labels"]["stopped"] for l in labels):
+      why = f"{unit} is stopped (issue #{record['number']} labelled {st.config['labels']['stopped']})"
+    elif pr and (pr_state := core.gh_json(["pr", "view", str(pr), "-R", st.config["repo"], "--json", "state"]).get("state")) != "OPEN":
+      why = f"pull request #{pr} is {pr_state.lower()}"
+  if why:
+    core.journal(st, f"undo refused ({args.by}, comment {args.posted}): {why}; follow-up {row['fid']} kept")
+    raise Refusal(f"decision: undo refused: {why}; the follow-up row stays")
+
+
 def undo(st, unit: str, data: dict, args, comment: dict, found: "Ruling", now: str) -> int:
   """The owner's `**Ruling:** <fid> finding upheld` on a triage-deferred medium of the unit's latest posted round
   (spec section 5.2), applied with no dispatch and no `collect`: the finding's disposition cleared and `undone_by` its
@@ -650,6 +679,7 @@ def undo(st, unit: str, data: dict, args, comment: dict, found: "Ruling", now: s
   if args.ruling.partition(" — ")[0].strip() != said:
     raise Refusal(f"decision: comment {args.posted} rules {said}, not {args.ruling.strip()}")
   row = deferral_of(data, found.subject)
+  refuse_undo(st, unit, data, row, args)
   rid = review.head_review_id(st, unit)
   rnd = review.load_round(st, rid, row["round"])
   finding = next(f for f in review.findings_of(rnd) if f["id"] == found.subject)
