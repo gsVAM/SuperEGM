@@ -1,6 +1,6 @@
 <!-- Copyright 2026 Google LLC. SPDX-License-Identifier: Apache-2.0. -->
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: Astra lane, per-reviewer model and effort, persisted dispositions. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: EGM's review-loop skill rewritten as the one review loop over the helper's `superegm review` subcommands (spec section 8); the stages, the report files and the second clean round are gone; a spec round's scope, `out_of_scope[]` and the batch settle (U19); the accept below the cap and its `acceptable:` line (U35); section 2's model and effort paragraph is the one rule, the config pair before the session pair (U28); a lineless finding out of scope and the per-handoff review ids (U32). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: EGM's review-loop skill rewritten as the one review loop over the helper's `superegm review` subcommands (spec section 8); the stages, the report files and the second clean round are gone; a spec round's scope, `out_of_scope[]` and the batch settle (U19); the accept below the cap and its `acceptable:` line (U35); section 2's model and effort paragraph is the one rule, the config pair before the session pair (U28); a lineless finding out of scope and the per-handoff review ids (U32); the cap is `review.rounds` and the loop dispatches the panel `review open` printed (U36). -->
 
 # The review loop
 
@@ -27,8 +27,8 @@ other grammar (`review record: <file>:<line>: <reason>`).
    gave `--reviewers`; the kind's first reviewer is fixed (`design` for a spec, `readiness` for a
    plan, `change-review` for a head; `integrate` has no fixed first). One to six ids from
    `design, zoom-out, comprehension, readiness, structural, style, codebase-details,
-   change-review, set, proportion`. The panel cannot change after this; only the owner changes
-   it, between reviews.
+   change-review, set, proportion`. A cycle's panel is fixed when it opens, with one exception: a
+   re-typed spec review may narrow it (step 4); the owner otherwise changes it between reviews.
 3. The Astra preflight, for kinds `spec`, `plan` and `integrate` when `config.astra.enabled` is
    true: `resources/astra_lane.md` section 1, read with the config keys in place of its
    variables (`config.astra.model`, `config.astra.effort`; the lane is on or off by the config
@@ -38,16 +38,23 @@ other grammar (`review record: <file>:<line>: <reason>`).
    [--sha256 <hex>] --reviewers a,b,c [--astra on|off] --runcard <id>` prints the review id
    (`spec-<slug>-c<n>`, `spec-<slug>-integrate-c<n>`, `plan-<unit>-c<n>`,
    `head-<unit>-c<n>`, under the handoff's own directory; a flat 1.0/1.1 store keeps its 6-hex prefix
-   before the plan and head ids). An artifact whose latest cycle is still open resumes it: a
-   re-typed skill continues where the last invocation stopped, with the stored panel. A closed
+   before the plan and head ids) on its first line. An artifact whose latest cycle is still open
+   resumes it: a re-typed skill continues where the last invocation stopped. On kind `spec` the
+   second line is `panel <a,b,astra> from round <n>`, the panel of the next unrecorded round `<n>`
+   (the Astra lane last, when the cycle has it), and a resume whose `--reviewers` is a proper
+   subset of that panel, `design` first, narrows it from round `<n>` on; a wider, overlapping or
+   equal panel changes nothing, and the line then ends ` (unchanged: <reason>)` when the given
+   panel was not taken. Dispatch the panel the line prints, never the one you passed. A new cycle
+   and every other kind print the review id alone. A closed
    cycle (an `accept` or `stop` ruling, a spec edited after the approval that names it, or an
    integrate review whose handoff closed or whose `## Units` were amended past the bytes it
-   reviewed) gets the next number with a fresh cap. The helper hashes a spec or a plan body (the
+   reviewed) gets the next number with a fresh cap, read from `review.rounds` at that open. The helper hashes a spec or a plan body (the
    stored `unit_<id>.md`) itself; a head alone passes `--sha256`.
 
 ## 2. Round
 
-Each round the whole panel is dispatched **concurrently**, one message with every Agent call,
+Each round the whole panel of that round (the one `review open` printed; a spec's narrowed panel
+holds from its round on) is dispatched **concurrently**, one message with every Agent call,
 each through its own adapter `superegm:<id>` (`.claude-plugin/agents/<id>.md`: `model:
 inherit`, `omitClaudeMd: true`, tools `Read, Grep, Glob`). The adapter is what keeps the
 context fresh, whether or not the call is named; a general-purpose agent reading the persona
@@ -223,7 +230,10 @@ foreman and integrate:
   one `completed`, clean, non-regressing round converges every kind, on the bytes it reviewed.
   EGM's second consecutive clean round for document reviews is dropped; the regression mark
   carries what it guarded.
-- The review is **at its cap** when its `completed` rounds number 5 plus its `continue` rulings;
+- The review is **at its cap** when its `completed` rounds number its `cap` plus its `continue` rulings. The `cap` is
+  `review.rounds` (1 to 10, default 3) read when the cycle opened and kept: a spec's cycle reads the live value; a plan, head or
+  integrate cycle reads the `rounds` its handoff's approval froze (the spec's `Rounds: <n>` line before its first H2, else the
+  live value at the approval); a record or an approval without one reads 5.
   `continue` may be ruled once per cycle, `accept` converges the artifact (`converged: by ruling
   R<n>`, never on a head, and never while the reviewed bytes moved: then `continue` or `stop`, and
   `stop` alone, ruled by no one, once `continue` is spent), and after `stop` no ruling is accepted and the cycle stays at its cap
