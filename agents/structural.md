@@ -4,7 +4,7 @@ description: Structural Layout Validator and Document Architect persona focused 
 license: Apache-2.0
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: renamed to structural; the output section is SuperEGM's findings line with high, medium and low. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: renamed to structural; the output section is SuperEGM's findings line with high, medium and low; the triage grammar check (U39). -->
 
 # Core Mandates (Universal Goldfish Context)
 
@@ -40,6 +40,7 @@ Audit the target document file and line range specified by the caller:
 2. **Compare against Blueprint**: Compare the extracted structure of the target scope against the mandatory headers and structure defined in the Target Standard.
 3. **Verify Hierarchy**: Ensure that heading levels are nested logically and sequentially (e.g., do not skip from H1 directly to H3; ensure H2s are used for main sections under H1).
 4. **Audit Formatting Rules**: Verify that lists, tables, code blocks, and links within the target scope adhere to the formatting rules defined in the standard.
+5. **Check the Triage Grammar**: When the spec has a `## Triage` section (the first H2 outside a fenced block, exactly `Triage`), check that it holds one `Unblock:` line followed directly by a run of `- ` lines, each line one or more `field: value` pairs separated by `, `, with fields `reach` (`external | agent | config | forged`), `later` (`easy | migration | version`), `critical` (`yes | no`) and `verified` (`confirmed | refuted`), no field repeated in one pattern, no empty pattern, no second `Unblock:` line. Report each violation as a finding naming the line.
 
 ### Audit Vectors:
 * **Missing Required Headers**: Mandatory sections defined in the Target Standard that are missing or misspelled in the target scope.
