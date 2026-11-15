@@ -40,8 +40,8 @@ def comment_options(text: str) -> list:
 def amendments_of(text: str, chosen: str, reason: str, comment_id: int, now: str) -> list:
   """The entries of `amendments/<comment id>.json` a point-3 ruling on a builder comment writes (spec §6.5): `amend` names the one
   interface deviation, which must be in its unit's Interfaces lines (`rule` checks), text the owner's line; any
-  other option settles every interface heading, text the option's; `stop the unit` and a relaunch keep the contract."""
-  if chosen in RELAUNCH:
+  other option settles every interface heading, text the option's; `stop the unit`, `one more round` and a relaunch keep the contract."""
+  if chosen in RELAUNCH or chosen == "one more round":
     return []
   heads = [INTERFACE.match(m["rest"]) for m in DEVIATION.finditer(text) if m["kind"] == "interface"]
   # the name as body.consumes reads a Consumes line, cut at its `(`, so launch_builder.amendments_for matches it
