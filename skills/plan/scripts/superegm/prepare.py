@@ -145,6 +145,7 @@ def astra_brief(st, root: Path, unit: str, r: Path, diff: bytes, ci: dict, pr_bo
   body = core.unit_file_body(st.path("unit", unit))
   sections = [("Unit body", body), ("Spec range", core.read_text(r / "spec_range.md")), ("Diff", cut_diff(diff)),
               ("CI", json.dumps(ci, indent=2)), ("PR body", pr_body), ("Comments", core.read_text(r / "comments.md")),
+              ("Amendments", core.read_text(r / "amendments.md")),
               ("Prior round", prior_round_text(st, rid, previous))]
   core.atomic_write(r / "astra_brief.md", "".join(f"# {name}\n\n````\n{text}\n````\n\n" for name, text in sections))
   runner = foreman.runner_path()
