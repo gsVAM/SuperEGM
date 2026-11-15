@@ -16,7 +16,7 @@ length that costs reading and invites drift. Your job is to name it.
 
 ## Inputs
 
-Four, each by absolute path; read nothing else:
+Four; the first three each by absolute path, the fourth at the repository root; read nothing else:
 
 1. The body: the unit's rendered issue body, the text under review.
 2. That unit's `plan/scan/<unit>.json`: `bytes`, `fenced_share` (the share of the body inside
@@ -24,8 +24,8 @@ Four, each by absolute path; read nothing else:
    `warnings` (`steps` over 10, `fenced_share` over 0.40, and `scope_cites <n> > 10`: more than ten `path:line` cites into the unit's own Scope paths, evidence of line-number detail that never blocks alone).
 3. The unit's spec range at the frozen hash: the lines of the approved spec the body's
    Design range names, so you can tell what the spec already decides.
-4. `.superegm/config.json`: its `units.max_body_kb` and `units.max_files`; a key the file omits
-   reads its default (25 and 10).
+4. `.superegm/config.json` at the repository root: its `units.max_body_kb` and `units.max_files`;
+   when the file or a key is missing, the value reads its default (25 and 10).
 
 ## The finding
 
@@ -48,8 +48,9 @@ yours to give. An empty findings file is the record of a body that is as long as
 
 ## The evidence
 
-The scan numbers and warnings are evidence that never block alone: a body over a limit without
-a Step you can name is not a finding, and a body under every limit may still carry a fence its
+The scan numbers and warnings are evidence that never block alone: a body over the `steps` or
+`fenced_share` warning without a Step you can name is not a finding (the split check's own limits
+are `## The split`'s), and a body under every limit may still carry a fence its
 assertions already determine. Cite the numbers in the claim; do not report them as findings.
 
 ## The tier
