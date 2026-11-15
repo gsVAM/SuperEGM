@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from test_pre1_amend import IFACE, LINE, OPTS, opened, rule, world_on
+from test_pre1_amend import IFACE, LINE, OPTS, REPO, opened, rule, world_on
 from test_wave import foreman_of
 
 ISO = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
@@ -159,15 +159,31 @@ def test_the_judges_cannot_amend_by_option_letter(world):
   assert not foreman_of(s, "U02")["rulings"]
 
 
+def test_the_judges_blocked_question_reaches_the_producers_other_consumers(world):
+  # U02 posts a deviation naming U01's contract: the question goes to U01's other filed consumer (U03), not U02's
+  # (none), and the builder's own `(a) amend` line never reaches the judges
+  card, s = world_on(world, {f"repos/{REPO}/issues/comments/11": {
+    "id": 11, "user": {"login": "builder-bot"},
+    "body": IFACE + "**Builder status:** BLOCKED\nWhich?\n- (a) amend\n- (b) return null\n"}})
+  opened(world, card, IFACE + OPTS, source="comment 11")
+  code, out = world.run("judges", "question", "--unit", "U02", "--blocked", "11", "--runcard", card)
+  assert code == 0, out
+  first, consumers = out.splitlines()[:2]
+  assert "amend" not in Path(first).read_text(encoding="utf-8")
+  units = json.loads(s.path("state").read_text(encoding="utf-8"))["units"]
+  assert consumers == f"consumers: #{units['U03']['number']}"
+
+
 def test_judges_never_amend(world):
-  # judges get no amend option; the interface question reaches filed consumers; their ruling amends nothing
+  # judges get no amend option; the interface question reaches filed consumers; their option ruling on an interface
+  # decision records the option's text, and their `amend` records nothing
   from superegm import judges
   card, s = world_on(world)
   cap = opened(world, card, IFACE + OPTS, "review head-U02-c1 cap", 2)
   code, out = rule(world, card, cap, "one more round", "judges:p-1")
   assert code == 0, out
   assert foreman_of(s, "U02")["rulings"][-1]["ruling"] == "one more round"
-  assert not (s.path("file") / "amendments").exists()
+  assert not (s.path("file") / "amendments").exists()  # a point-2 ruling is no contract change
   did = opened(world, card, IFACE + OPTS)
   decision = foreman_of(s, "U02")["decisions"][-1]
   assert "amend" in decision["options"]
@@ -175,3 +191,10 @@ def test_judges_never_amend(world):
   assert "- amend\n" not in judges.decision_question(s, "U02", did)
   units = json.loads(s.path("state").read_text(encoding="utf-8"))["units"]
   assert judges.fan_out(s, "U01") == sorted(units[u]["number"] for u in ("U02", "U03"))  # every filed consumer of U01's names
+  # the panel's option ruling on that interface decision is the chosen option's text (§6.5); its `amend` is refused
+  assert rule(world, card, did, f"amend — {LINE}", "judges:p-1") == (1, "decision: amend is the owner's alone\n")
+  assert not (s.path("file") / "amendments").exists()
+  code, out = rule(world, card, did, "(b) return null", "judges:p-1")
+  assert code == 0, out
+  [entry] = json.loads((s.path("file") / "amendments" / "77.json").read_text())
+  assert (entry["unit"], entry["name"], entry["text"]) == ("U01", "dequeue", "return null")
