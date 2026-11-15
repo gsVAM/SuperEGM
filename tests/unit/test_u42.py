@@ -10,7 +10,7 @@ import pytest
 import superegm as core
 from superegm import scan
 
-from conftest import REPO, set_config
+from conftest import REPO, ROOT, set_config
 from test_plan import FENCE, file_unit, find, graph, plan_text, planned
 
 
@@ -83,3 +83,14 @@ def test_scan_drops_the_bytes_warning(world):
   assert not any(w.startswith("bytes") for w in numbers["warnings"])
   assert "steps 11 > 10" in numbers["warnings"]
   assert "bytes" not in scan.WARN and scan.WARN["fenced_share"][0] == 0.40
+
+
+@pytest.mark.parametrize("path,needle,present", [
+  ("skills/plan/SKILL.md", "units.max_body_kb", True), ("skills/plan/SKILL.md", "--amend-units", True),
+  ("skills/plan/SKILL.md", "10 Steps", True), ("skills/plan/SKILL.md", "24,576", False),
+  ("skills/plan/references/writing_plans.md", "units.max_files", True), ("skills/plan/references/writing_plans.md", "600", True),
+  ("skills/plan/references/issue_template.md", "24,576", False), ("skills/plan/references/handoff_plan.md", "24,576", False),
+  ("skills/plan/references/handoff_plan.md", "units.max_steps", True)])
+def test_plan_documents_state_the_units_limits(path, needle, present):
+  # the splitting rule and references read units.* in place of 1.2's 24,576 bytes and eight Scope paths
+  assert (needle in " ".join((ROOT / path).read_text(encoding="utf-8").split())) is present
