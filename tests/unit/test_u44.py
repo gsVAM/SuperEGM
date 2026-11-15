@@ -288,22 +288,24 @@ def test_phase_outcome_and_failures(world, monkeypatch, tmp_path, spawn_fake, cl
     c.plan(*UNITS)  # the session planned: next prints review-plan
   if wait_record:
     c.wait(phase="plan", question="which units?", since=superegm.now_iso())  # written by the session
+  # the review focus: a plan session closed with exit 0, `next` printing the same line, no wait record
+  focus = closed and not code and not line_changed and not wait_record
+  if focus:  # the file launch after it, live while the tick settles the plan launch (no launch in between)
+    n = 2
+    second = tick_launch(s, c.hid, card="driver-abc-0009", n=n)
+    set_entry(s, c.hid, n, phase="file")
   put(Path(first["exit_file"]), f"{code}\n")
   tick(world)
   assert tick_launches(s, c.hid)[0]["outcome"] == outcome  # the plan launch entry after its session ends
-  if closed or code:
+  if not focus:
     return
-  # a failed plan then a failed file refuses as twice-failed; a typed file card after it restarts; driver reset clears
-  for entry in tick_launches(s, c.hid):  # the launch that tick started ended too, failing
-    if not Path(entry["exit_file"]).is_file():
-      put(Path(entry["exit_file"]), "1\n")
-  n = len(tick_launches(s, c.hid)) + 1
-  second = tick_launch(s, c.hid, card="driver-abc-0009", n=n)
-  set_entry(s, c.hid, n, phase="file")
+  # that failed plan then a failed file refuses as twice-failed; a typed file card after it restarts; reset clears
+  assert len(tick_launches(s, c.hid)) == n  # the file launch was live: nothing launched
   put(Path(second["exit_file"]), "1\n")
   tick(world)
   data = json.loads(driver_file(s, c.hid).read_text(encoding="utf-8"))
-  assert data["launches"][n - 1]["outcome"] == "failed"
+  assert [e.get("phase") for e in data["launches"]] == ["plan", "file"]
+  assert [e["outcome"] for e in data["launches"]] == ["failed", "failed"]
   assert (data["refused"] or {}).get("reason") == driver.TWICE
   typed = world.open_card("file", str(c.spec))  # the owner types file: the count restarts
   world.run("runcard", "close", typed, card=None)
@@ -467,3 +469,18 @@ def test_the_tick_fetch_is_hook_free(monkeypatch, tmp_path):
   argv = seen[0]
   assert argv[0] == "git" and "--no-write-fetch-head" in argv and any(a.startswith("core.hooksPath=") for a in argv)
   assert argv[-1] == "+refs/heads/main:refs/superegm/tick-base"
+
+
+@pytest.mark.parametrize("line,mode", [("integrate", "leavemealone"), ("none", "leavemealone"),
+                                       ("waiting push", "leavemealone"), ("plan", None)])
+def test_a_chain_skip_sends_notify(world, monkeypatch, tmp_path, spawn_fake, line, mode):
+  """A chain skip (`none`, `integrate`, a `waiting …` line, a 1.2.0 entry's non-wave line) launches nothing and,
+  as every 1.2 skip does, hands the handoff to `notify` on the handoff record's spec (codebase-details-2-1)."""
+  c = chained(world, monkeypatch, tmp_path)
+  set_mode(c, mode)
+  arrange_line(world, monkeypatch, c, line)
+  sent = []
+  monkeypatch.setattr(driver, "notify", lambda hs, spec: sent.append((hs.handoff_id, spec)))
+  tick(world)
+  assert launched_prompt(c.hs, c.hid) is None
+  assert [h for h, _ in sent] == [c.hid] and Path(sent[0][1]).resolve() == c.spec.resolve()
