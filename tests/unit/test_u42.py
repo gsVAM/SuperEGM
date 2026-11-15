@@ -43,6 +43,16 @@ def test_units_limits_validated(world, key, value, ok):
   assert (f"units.{key}" not in out) if ok else (code == 1 and f"units.{key}" in out), out
 
 
+def test_units_limits_refuse_a_non_object_and_a_boolean(world):
+  # `units` that is not an object is refused on one `units:` line; a JSON `true` is not the integer 1
+  plan = graphed(world)
+  code, out = scan_with(world, plan=plan, max_steps=True)
+  assert code == 1 and "units: units.max_steps: must be a positive integer" in out and "(got True)" in out, out
+  set_config(world, repo=REPO, units=5)
+  code, out = world.run("scan", "--plan", plan)
+  assert code == 1 and "units: `units` must be an object" in out, out
+
+
 U01_STEP_END = ("   Implement `u01_fn(x: int) -> int` in `src/u01.ts`.\n   Run the same command; expected: PASS. "
                 "Commit `test(S1): u01 empty` then `feat(S1): u01 empty`.\n")
 
