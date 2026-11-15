@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 import pytest
-from superegm import body, tdd_order
+from superegm import body, scan, tdd_order
 
 from test_plan import find, graph, plan_text, planned
 
@@ -28,7 +28,7 @@ FENCE = chr(96) * 3
 ])
 def test_documents_state_the_planning_rules(path, phrases):
   # each document states §6.5's rule and drops the check-fixtures and current-line-number instructions
-  text = (ROOT / path).read_text(encoding="utf-8")
+  text = " ".join((ROOT / path).read_text(encoding="utf-8").split())
   assert all(p in text for p in phrases) and "current line numbers" not in text
 
 
@@ -55,18 +55,28 @@ def test_old_and_new_steps_read_the_same():
   old, new = steps_body(True), steps_body(False)
   commits = [("test(S1): x", ["tests/unit/test_u01.py"]), ("feat(S1): x", ["src/a.py"])]
   assert body.step_paths(old) == body.step_paths(new) == [(1, "tests/unit/test_u01.py", "src/a.py")]
+  assert body.run_commands(old) == body.run_commands(new)
   assert tdd_order.check(old, commits) == tdd_order.check(new, commits) == []
   assert tdd_order.check(old, commits[::-1]) == tdd_order.check(new, commits[::-1]) != []
   assert [n for n, _, _ in body.dod_items(old)] == [n for n, _, _ in body.dod_items(new)] == [2, 3, 4]
 
 
-@pytest.mark.parametrize("line, cites, refused, warned", [
-  ("- Consumes: `x` at `review.py:52` (U02)", 0, True, False),
-  ("- Produces: `y` — see skills/plan/scripts/superegm/review.py:52", 0, True, False),
-  ("- Produces: `y`", 10, False, False),
-  ("- Produces: `y`", 11, False, True),   # bare `review.py:52` counts for `…/superegm/review.py`
+def test_scan_produces_cite_names():
+  # the unit's Produces line: the cite pattern and the Scope-cite limit
+  assert scan.CITE_RE.pattern == r"(?<![\w./-])([\w./-]*\w\.[A-Za-z]\w*):\d+"
+  assert scan.SCOPE_CITES == 10
+
+
+@pytest.mark.parametrize("line, cites, form, refused, warned", [
+  ("- Consumes: `x` at `review.py:52` (U02)", 0, "", True, False),
+  ("- Produces: `y` — see skills/plan/scripts/superegm/review.py:52", 0, "", True, False),
+  ("- Produces: `y`", 10, "src/u03.ts:{n}", False, False),
+  ("- Produces: `y`", 11, "src/u03.ts:{n}", False, True),
+  ("- Produces: `y`", 11, "u03.ts:{n}", False, True),   # a bare cite counts for the Scope path it ends
+  ("- Produces: `y`", 10, "u03.ts:{n}", False, False),
+  ("- Produces: `y`", 11, "other/file.py:{n}", False, False),   # cites outside Scope never count
 ])
-def test_scan_cite_rules(world, line, cites, refused, warned):
+def test_scan_cite_rules(world, line, cites, form, refused, warned):
   # interface-cite refuses a cite on a Consumes/Produces line; more than ten Scope cites only warn
   spec, _, plan, card = planned(world)
   text = plan_text(spec)
@@ -74,7 +84,7 @@ def test_scan_cite_rules(world, line, cites, refused, warned):
   assert produces in text
   text = text.replace(produces, f"{produces}\n{line}", 1)
   if cites:
-    cited = ", ".join(f"`src/u03.ts:{n}`" for n in range(cites))
+    cited = ", ".join("`" + form.format(n=n) + "`" for n in range(cites))
     text = text.replace("| Objective | Admin exists. |", f"| Objective | Admin exists; see {cited}. |", 1)
   plan.write_text(text, encoding="utf-8")
   graphed = graph(world, plan, card)
@@ -83,5 +93,6 @@ def test_scan_cite_rules(world, line, cites, refused, warned):
   scan_json = json.loads(find(world, "U03.json").read_text(encoding="utf-8"))
   refusals = out.splitlines()
   assert any(f.startswith("interface-cite: U03: ") for f in refusals) is refused
-  assert ("scope_cites 11 > 10" in scan_json["warnings"]) is warned
+  assert any(w.startswith("scope_cites") for w in scan_json["warnings"]) is warned
+  assert (not warned) or "scope_cites 11 > 10" in scan_json["warnings"]
   assert (code == 1) is refused
