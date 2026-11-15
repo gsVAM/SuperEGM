@@ -309,10 +309,11 @@ def builder_logins(st) -> set:
 def tick_trigger(handoff) -> str | None:
   """What a tick's session would have to do (spec section 11.2), from one `status_pass` that saves nothing, in order:
   the proof the tick applied to the handoff's newest tick launch, backed-off launches dropped first (`reboot <n>` for
-  one recorded `interrupted (reboot)`, `exit-file <card>` for one whose exit file exists and whose top-level `wave`
-  card is `interrupted`); the first event line against `state.status.units` (a `stalled` line at every tick while its
+  one recorded `interrupted (reboot)`, `exit-file <card>` for one whose exit file exists and whose top-level card of
+  any chain phase is `interrupted`); the first event line against `state.status.units` (a `stalled` line at every tick while its
   predicate holds, no fingerprint saving it away, U31), a `status word=` event by a login no card
-  records as a builder skipped; `<uid> ready` for a unit the read finds ready and the saved `ready` lacks; an
+  records as a builder skipped; with `driver.chain` on, `<uid> merged pr=<n>` for a pull request the pass reads
+  merged (`pr` set, `ci` null) that the saved snapshot does not show so (U44); `<uid> ready` for a unit the read finds ready and the saved `ready` lacks; an
   un-ingested thread above `low` on the latest posted round's head, by U21's reader, a stopped unit's threads skipped;
   `first launch` while `state.status` is absent; else None, the nothing-to-do predicate."""
   st, state = handoff.store, handoff.state
@@ -322,18 +323,23 @@ def tick_trigger(handoff) -> str | None:
     if last.get("status") == "interrupted (reboot)":
       return f"reboot {last['round']}"
     if Path(last["exit_file"]).is_file():
-      mine = [(p.stem, c) for p, c in core.top_wave_cards(st) if c.get("driver_card") == last["card"]]
+      mine = [(p.stem, c) for p, c in core.top_phase_cards(st) if c.get("driver_card") == last["card"]]
       if mine and mine[-1][1].get("interrupted_at"):
         return f"exit-file {mine[-1][0]}"
   saved = state.get("status")
   previous = (saved or {}).get("units") or {}
   summary, _ = core.status_pass(handoff, save=False)
   builders = builder_logins(st)
+  from superegm import driver  # driver imports this module
+  chain = driver.chain_on(handoff.config)
   for uid in handoff.graph.order:
     for line in unit_events(uid, previous.get(uid), summary["units"][uid]):
       if " status word=" in line and line.rsplit(" by=", 1)[-1] not in builders:
         continue  # a `**Builder status:**` comment a stranger wrote buys no session
       return line
+    fresh, before = summary["units"][uid], previous.get(uid) or {}
+    if chain and fresh.get("pr") and fresh.get("ci") is None and (not before.get("pr") or before.get("ci") is not None):
+      return f"{uid} merged pr={fresh['pr']}"  # a merge with the issue left open fires no event (U44)
   if saved:
     for uid in summary.get("ready") or []:
       if uid not in (saved.get("ready") or []):
