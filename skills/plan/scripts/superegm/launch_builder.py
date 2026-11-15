@@ -465,17 +465,22 @@ def amendments_for(st, unit: str, body: str) -> list[dict]:
   return sorted((a for a in entries if a["unit"] == unit or (a["name"], a["unit"]) in consumed), key=lambda a: a["at"])
 
 
+BLOCKED_STATUS_RE = re.compile(r"^\*\*Builder status:\*\*\s*(BLOCKED|NEEDS_CONTEXT)\b", re.M)
+
+
 def launch_reason(launches: list, foreman: dict) -> str:
   """Spec section 6.5 "Measuring it": why this launch starts. `first` with no launch before it; else the latest
-  event after the previous launch started: a posted round (`review`) or a ruling on a point-3 comment, a BLOCKED or
-  NEEDS_CONTEXT report (`blocked`); with neither, a fresh relaunch after a stall or a setup failure (`harness`)."""
+  event after the previous launch started: a posted round (`review`) or a ruling on a decision whose question is a
+  builder comment reporting BLOCKED or NEEDS_CONTEXT (`blocked`); with neither, a fresh relaunch after a stall or a
+  setup failure (`harness`)."""
   if not launches:
     return "first"
   since = launches[-1].get("started_at") or ""
   points = {d["id"]: d for d in foreman["decisions"]}
   events = [(r["posted_at"], "review") for r in foreman["rounds"] if r.get("phase") == "posted" and (r.get("posted_at") or "") > since]
   events += [(r["posted_at"], "blocked") for r in foreman["rulings"] if (r.get("posted_at") or "") > since
-             and points.get(r["decision"], {}).get("point") == 3 and str(points[r["decision"]].get("source")).startswith("comment ")]
+             and points.get(r["decision"], {}).get("point") == 3 and str(points[r["decision"]].get("source")).startswith("comment ")
+             and BLOCKED_STATUS_RE.search(str(points[r["decision"]].get("question") or ""))]
   return max(events)[1] if events else "harness"
 
 

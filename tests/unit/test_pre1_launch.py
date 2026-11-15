@@ -69,7 +69,8 @@ def test_launch_builder_carries_the_applicable_amendments_and_writes_reason_firs
 @pytest.mark.parametrize("decisions, rulings, rounds, reason", [
   ([], [], [{"round": 1, "launch": 1, "phase": "posted", "outcome": "revise", "posted_at": LATER}], "review"),
   ([], [], [{"round": 1, "launch": 1, "phase": "posted", "outcome": "owner: change-review-1-1", "posted_at": LATER}], "review"),
-  ([{"id": "Q1", "point": 3, "source": "comment 55"}], [{"decision": "Q1", "ruling": "(a) — go", "posted_at": LATER}], [], "blocked"),
+  ([{"id": "Q1", "point": 3, "source": "comment 55", "question": "**Builder status:** BLOCKED\nWhich?\n- (a) go"}],
+   [{"decision": "Q1", "ruling": "(a) — go", "posted_at": LATER}], [], "blocked"),
   ([{"id": "Q1", "point": 3, "source": "launch 1"}], [{"decision": "Q1", "ruling": "relaunch — stalled", "posted_at": LATER}], [], "harness"),
   ([], [], [], "harness"),   # an exit with nothing reviewed or ruled after it: a setup failure
   # a blocked comment ruled before launch 1 started is not this relaunch's reason
