@@ -23,6 +23,7 @@ SKILLS = frozenset({"plan", "review-plan", "file"})  # the skills whose card `ne
 TICK_BASE = "refs/superegm/tick-base"
 ROW_RE = re.compile(r"^\|\s*(U\d{2,})\s*\|", re.M)  # a unit row of the spec's `## Units` table
 LANDED_RE = re.compile(r"^Landed:\s*([^(\n]*)", re.M)  # the comma-separated ids before any parenthetical
+ORDER = ("plan", "review-plan", "file", "wave", "integrate", "none")  # the phases, earliest first: `next clear`'s progress
 
 
 def register(subparsers):
@@ -35,6 +36,8 @@ def register(subparsers):
   w.add_argument("--phase", required=True, choices=sorted(SKILLS), help="the phase that waits")
   w.add_argument("--question", required=True, help="what the owner is asked")
   w.add_argument("--review", help="the review whose `proceed` ruling answers it (kept on a re-ask without it)")
+  c = core.add_parser(sub, "clear", "remove the wait record on confirmed progress, else keep it or ask again (spec section 7.2)")
+  c.add_argument("--handoff", default=argparse.SUPPRESS, help="the handoff whose wait record is cleared")
 
 
 def read_json(path: Path):
@@ -128,8 +131,9 @@ def planning_line(hs: core.Store, state: dict, spec: Path) -> str:
   return "wave" if any(unit_open(hs, state, u) for u in units["order"]) else "integrate"
 
 
-def next_line(st: core.Store, hid: str) -> str:
-  """The line `next` prints for handoff `hid`: the first row of spec section 7.1's table that matches."""
+def next_line(st: core.Store, hid: str, read_wait: bool = True) -> str:
+  """The line `next` prints for handoff `hid`: the first row of spec section 7.1's table that matches;
+  `read_wait=False` reads the table as if the handoff had no wait record (`next clear`)."""
   record = next((r for r in core.handoffs(st.root) if r["id"] == hid), None)
   if record is None:
     raise core.HandoffError(f"next: {hid}: no such handoff")
@@ -153,7 +157,7 @@ def next_line(st: core.Store, hid: str) -> str:
     if not filed:
       return "none"
     return "wave" if any(unit_open(hs, state, u) for u in filed) else "integrate"
-  wait = read_json(st.path("chain", hid))
+  wait = read_json(st.path("chain", hid)) if read_wait else None
   if wait and not wait.get("answer") and not proceeded(hs, wait.get("review"), wait.get("since")):
     return f"waiting {wait['phase']}: {' '.join(str(wait.get('question') or '').splitlines())}"
   if own and launch.origin_problems(root, config.get("base", "main"), {**entries[own[-1]], "path": str(spec)},
@@ -179,6 +183,23 @@ def wait(args, st: core.Store, hid: str) -> int:
   return 0
 
 
+def clear(args, st: core.Store, hid: str) -> int:
+  """Remove the wait record on confirmed progress (`next` without it prints a later phase, or a `proceed` ruling
+  resolves it); otherwise an unanswered record stays and an answered one is asked again. The card closes."""
+  path = st.path("chain", hid)
+  record = read_json(path)
+  if record:
+    line = next_line(st, hid, read_wait=False)
+    later = line in ORDER and ORDER.index(line) > ORDER.index(record["phase"])
+    if later or proceeded(core.handoff_store(st, hid), record.get("review"), record.get("since")):
+      path.unlink()
+    elif record.get("answer"):
+      core.atomic_write(path, {"phase": record["phase"], "since": core.now_iso(), "review": record.get("review"),
+                               "question": f"stopped at {record['phase']} by {record.get('by')}: answer to go on"})
+  runcard.close_card(st, args.runcard)
+  return 0
+
+
 def run(args):
   if getattr(args, "action", None):
     core.require_runcard(args, SKILLS)
@@ -187,5 +208,7 @@ def run(args):
   st = core.store(core.git_toplevel(Path.cwd()))
   if args.action == "wait":
     return wait(args, st, args.handoff)
+  if args.action == "clear":
+    return clear(args, st, args.handoff)
   print(next_line(st, args.handoff))
   return 0
