@@ -23,7 +23,7 @@ WRITES = frozenset(["approvals", "handoffs", "state", "reviews", "runcards"])  #
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset(["review-spec", "review-plan", "integrate", "approve-spec"])  # the skills whose card this subcommand accepts
 CONFIG = ".superegm/config.json"
-FROZEN_FIELDS = ["rounds"]  # the entry fields frozen at an approval, which `--amend-units` copies where the extended entry has them (U36)
+FROZEN_FIELDS = ["rounds", "triage"]  # the entry fields frozen at an approval, which `--amend-units` copies where the extended entry has them (U36, U39)
 ANY_H2 = re.compile(r"^ {0,3}##[ \t]+\S")  # an H2 as review.py reads one: up to three spaces of indent, outside a fence
 TRIAGE_FIELDS = {"reach": ("external", "agent", "config", "forged"), "later": ("easy", "migration", "version"),
                  "critical": ("yes", "no"), "verified": ("confirmed", "refuted")}  # a pattern's fields and their values (section 5.1)
@@ -321,7 +321,7 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   rounds = rounds_line(core.read_text(spec))
   if rounds is None:  # no `Rounds:` line: the live value, which `review.rounds` refuses outside 1-10
     rounds = live_rounds(st)
-  triage_patterns(core.read_text(spec))  # U39: a malformed triage section refuses here, before the prompt and the commit
+  triage = triage_patterns(core.read_text(spec))  # U39: a malformed triage section refuses here, before the prompt and the commit
   last = core.load_approval(st, spec)
   if last:
     require_branch_holds(st, root, spec.relative_to(root).as_posix(), last)
@@ -344,7 +344,7 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   handoff_id, kind = handoff_id_for(st, sha, spec.stem, core.load_approvals(st, spec))
   commit = commit_by_path(root, [spec.relative_to(root).as_posix(), CONFIG], f"superegm: approve {slug} at review {rid}",
                           st.config["commit_trailer"])
-  entry = entry_of(sha, commit, args.runcard, rid, handoff_id, kind, escalated, {"rounds": rounds})
+  entry = entry_of(sha, commit, args.runcard, rid, handoff_id, kind, escalated, {"rounds": rounds, "triage": triage})
   path = append_entry(st, spec, entry)
   write_handoff_file(st, handoff_id, spec, entry["approved_at"] if kind == "opening" else None)
   core.journal(st, f"approve-spec {kind} {handoff_id} sha256 {sha[:12]} at review {rid} commit {commit[:12]} under {args.runcard}")
