@@ -5,6 +5,8 @@
 
 import json
 import shlex
+import signal
+import subprocess
 
 import pytest
 
@@ -51,3 +53,11 @@ def test_driver_closes_through_runcard():
   src = (SCRIPTS / "superegm" / "driver.py").read_text()
   assert "def close_card" not in src and "runcard.close_card(" in src
   assert all("STORE" in line.split("#", 1)[1] for line in src.splitlines() if "core.STORE = hs" in line)
+
+
+def test_sigkill_hook_renamed(world):
+  # the hook's SIGKILL group kill no longer shares a name with core.kill_group's SIGTERM kill
+  from superegm import inbox
+  proc = subprocess.Popen(["sleep", "30"], start_new_session=True)
+  inbox.sigkill_hook(proc)
+  assert proc.returncode == -signal.SIGKILL and not hasattr(inbox, "kill_group")
