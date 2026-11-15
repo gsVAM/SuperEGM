@@ -42,7 +42,7 @@ def test_modules_register_their_defaults_init_steps_and_doctor_checks(tmp_path, 
   from superegm import foreman, init, orient, review
   modules = discover()
   assert list(modules) == sorted(modules) and "body" not in modules and "traces" not in modules and tuple(modules) == superegm.SUBCOMMANDS
-  assert all(set(OWNED[n]) <= set(modules[n].CONFIG_DEFAULTS) for n in OWNED)   # contained, not equal: later units register theirs (U46)
+  assert all(set(OWNED[n]) <= set(modules[n].CONFIG_DEFAULTS) for n in OWNED)   # contained, not equal: later units add their keys, modules and doctor checks (U46)
   assert list(superegm.CORE_CONFIG)[:len(CORE)] == CORE   # U34 appends brainstorm
   assert list(superegm.DEFAULT_CONFIG) == list(superegm.CORE_CONFIG) + [k for m in modules.values() for k in m.CONFIG_DEFAULTS] == list(written)
   assert "SUBCOMMANDS = (" not in (ROOT / "skills/plan/scripts/superegm/__init__.py").read_text(encoding="utf-8")
