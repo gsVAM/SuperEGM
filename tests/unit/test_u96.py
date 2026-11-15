@@ -120,6 +120,26 @@ def test_rerun_after_crash(world, monkeypatch):
   assert not deleted_path.exists()
 
 
+def test_close_after_crash(world, monkeypatch):
+  # a crashed amend, then the decision ruled by the owner's close: the saved ruling records no amendment, so the file goes
+  card, s = world_on(world)
+  produces_file(s, "U01", "`f(x) -> int`")
+  qid = opened(world, card, deviation("U01 f: returns None"), source="comment 11")
+  real = core.save_foreman
+
+  def crash(*args, **kwargs):
+    raise core.HandoffError("crash before the ruling is saved")
+
+  monkeypatch.setattr(core, "save_foreman", crash)
+  assert rule(world, card, qid, "amend — crashed line")[0] == 1
+  path = s.base() / "amendments" / "11.json"
+  assert path.exists()
+  monkeypatch.setattr(core, "save_foreman", real)
+  assert rule(world, card, qid, "stop the unit", "owner", "--posted", "closed:5")[0] == 0
+  assert not path.exists()
+  assert launch_builder.amendments_for(s, "U01", consumer_body("`f` (U01)")) == []
+
+
 @pytest.mark.parametrize("case, message", [
   ("empty line", "decision: amend needs — <the Interfaces line as it now reads>"),
   ("two headings", "decision: ruling is none of the options: "),  # amend is offered only on one interface heading
