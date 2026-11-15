@@ -13,7 +13,7 @@ import pytest
 from superegm import decision, judges, launch_builder, scan
 import superegm as core
 from test_pre1_amend import OPTS, opened, rule, world_on
-from test_wave import REPO, foreman_of
+from test_wave import REPO, foreman_of, question
 
 LINE = "the interface as it now reads"
 
@@ -31,11 +31,8 @@ def consumer_body(*lines):
 
 
 def recorded_amendments(s, cid):
-  """What `decision rule` recorded for the deviation comment `cid`: its file, else (before the file) `state.json`."""
-  path = s.base() / "amendments" / f"{cid}.json"
-  if path.is_file():
-    return json.loads(path.read_text(encoding="utf-8"))
-  return json.loads(s.path("state").read_text(encoding="utf-8")).get("amendments") or []
+  """What `decision rule` recorded for the deviation comment `cid`: the entries of its file."""
+  return json.loads((s.base() / "amendments" / f"{cid}.json").read_text(encoding="utf-8"))
 
 
 @pytest.mark.parametrize("produces, heading, consumes", [
@@ -181,6 +178,31 @@ def test_a_bare_letter_resolves_to_the_option_at_its_position(world):
   code, out = rule(world, card, launch_qid, "(a)", "judges:p-1")
   assert code == 0, out
   assert world.gh.comments[3][-1]["body"].startswith(f"**Ruling:** ({launch_qid}) relaunch")
+
+
+def test_a_bare_letter_relaunch_spends_the_relaunch(world):
+  # `(a)` on a launch decision is recorded as the option it resolves to, so a second relaunch question is settled
+  card, s = world_on(world)
+  qid = opened(world, card, "launch 1 stalled (last commit none)\n", source="launch 1")
+  assert rule(world, card, qid, "(a)", "judges:p-1")[0] == 0
+  assert foreman_of(s, "U02")["rulings"][-1]["ruling"] == "relaunch"
+  code, out = world.run("decision", "open", "--unit", "U02", "--point", 3, "--question", question(world, "launch 2 stalled (last commit none)\n"),
+                        "--source", "launch 2", "--runcard", card)
+  assert code == 0 and "ruled: stop the unit (relaunch already used)" in out
+
+
+def test_the_judges_letter_is_the_rendered_position(world):
+  # stored `(b) x`, `(c) y`, `amend`, `stop the unit`: the judges are shown `(a) x`, `(b) y`; their bare `(b)` is `y`, the owner's is `x`
+  text = "**Deviation (interface):** U01 f: changed\n**Builder status:** BLOCKED\nWhich?\n- (b) x\n- (c) y\n"
+  card, s = world_on(world)
+  qid = opened(world, card, text, source="comment 11")
+  assert foreman_of(s, "U02")["decisions"][-1]["options"] == ["(b) x", "(c) y", "amend", "stop the unit"]
+  code, out = rule(world, card, qid, "(b)", "judges:p-1")
+  assert code == 0, out
+  assert world.gh.comments[3][-1]["body"].startswith("**Ruling:** (11) y")
+  other = opened(world, card, text, source="comment 12")
+  assert rule(world, card, other, "(b)")[0] == 0
+  assert world.gh.comments[3][-1]["body"].startswith("**Ruling:** (12) x")
 
 
 def test_judges_never_amend(world):
