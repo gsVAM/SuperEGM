@@ -387,6 +387,7 @@ def test_the_handoff_flag_and_store_layout_prose(path, needle):
   assert "<6 hex>/" not in (ROOT / "skills/wave/references/foreman_brief.md").read_text(encoding="utf-8")
 
 
+# U37 pins: approve_spec writes `instructions` copies; prepare and launch_builder write a card's instructions render.
 WRITES = {"approve_spec":{"approvals", "handoffs", "state", "reviews", "runcards", "instructions"},"graph": {"state", "plan", "units", "unit", "bodies"},
           "scan": {"file"}, "gate": {"state"},
           "dry_run": {"file", "state"}, "apply": {"state", "file"},
