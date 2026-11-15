@@ -4,7 +4,7 @@ description: Hostile Design Critic persona focused on system architecture, scala
 license: Apache-2.0
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: renamed to design; the output section is SuperEGM's findings line with high, medium and low. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: renamed to design; the output section is SuperEGM's findings line with high, medium and low; the triage patterns' safety judgement (U39). -->
 
 # Core Mandates (Universal Goldfish Context)
 
@@ -39,6 +39,7 @@ Audit the target document file and line range specified by the caller:
 1. **Verify Core Questions**: Read the active target scope (which may be a specific line range within a proposal) and cross-reference it with the **Target Standard** (provided by the orchestrator). Ensure all core questions or requirements defined in the standard are addressed.
 2. **Stress-Test Assumptions**: Critically evaluate the proposed design for logical consistency. Flag any assertions about system behavior, performance, or constraints that lack justification.
 3. **Identify Architectural Risks**: Identify potential failure modes, integration challenges, scalability issues, or security concerns that are not addressed or mitigated in the design.
+4. **Judge the Triage Patterns**: When the spec has a `## Triage` section, judge whether each `Unblock:` pattern is safe for this project: could a medium finding that matches it still hurt? A pattern is not safe when it names `reach: external` or `reach: agent`, `critical: yes`, or `later: migration` or `version` (a defect that an HTTP caller or agent can trigger, on the critical path, or costly to fix later goes unfixed), or when the fields it leaves out would let a defect of that kind through in this project, judged against what the project exposes. A field left out is not by itself a defect: the spec's own example patterns (`reach: forged, later: easy`; `critical: no, later: easy, verified: confirmed`) are safe where the project has no such exposure. Report each pattern that is not safe as a finding naming its line and the medium finding it would let through.
 
 ### Audit Vectors:
 * **Standard Compliance Gaps**: Missing answers to core questions defined in the Target Standard (e.g., missing cost estimates, success metrics, or risk sections).

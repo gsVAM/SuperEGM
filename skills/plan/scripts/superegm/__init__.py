@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes and the one stamp formatter and parser (U31); `discover()`, CORE_CONFIG and SUBCOMMANDS and DEFAULT_CONFIG derived from the modules (U32); the `Tier:` field, `builder.tiers`, `tier_pair` and `unit_tier` (U33); the brainstorm.team key (U34); the one-level merge of every registered object default and the builder defaults read from the registry (U46).
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes and the one stamp formatter and parser (U31); `discover()`, CORE_CONFIG and SUBCOMMANDS and DEFAULT_CONFIG derived from the modules (U32); the `Tier:` field, `builder.tiers`, `tier_pair` and `unit_tier` (U33); the brainstorm.team key (U34); the one-level merge of every registered object default and the builder defaults read from the registry (U46); the chain and tick store kinds, and `runcard open`'s default mode the frozen one (U43).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
@@ -186,7 +186,7 @@ class Store:
   # The Interfaces block's longer names for the same kinds.
   ALIASES = {"handoff_plan": "plan", "handoff_units": "units", "handoff_bodies": "bodies", "wave_report": "report"}
   KEYED = ("unit", "foreman", "launches", "worktrees", "review", "orient_unit", "driver")
-  LEVEL = ("approvals", "handoffs")  # always at the store level
+  LEVEL = ("approvals", "handoffs", "chain", "tick")  # always at the store level; chain/<handoff>.json, tick/fetch.json (U43)
   SHARED = ("reviews", "judges", "questions")  # at the store level for a spec review's id, else the handoff's
 
   def __init__(self, root: Path, handoff_id: str | None = None, config: dict | None = None, legacy: bool = False):
@@ -352,6 +352,22 @@ def require_latest_handoff(store: Store) -> None:
       raise HandoffError(f"{hid}: not the latest approval: plan the rows in the latest handoff")
 
 
+def frozen_mode(store: Store) -> str | None:
+  """The `mode` frozen in the store's handoff's latest approval entry; None for no handoff, no entry of its own or an
+  entry without one (1.2.0's), whose readers take the live `config.mode` (spec section 6, U43)."""
+  hid = store.handoff_id
+  for path in sorted((store.root / "approvals").glob("*.json")) if hid else ():
+    own = [e for e in load_approvals(store, path) if e.get("handoff_id") == hid]
+    if own:
+      return own[-1].get("mode")
+  return None
+
+
+def run_mode(store: Store) -> str:
+  """The frozen mode, else the live `config.mode`."""
+  return frozen_mode(store) or (store.config or {}).get("mode", "normal")
+
+
 def spec_of_plan(plan) -> str | None:
   """The spec a plan file's `Design:` line names, resolved against the plan's folder."""
   plan = Path(plan).expanduser().resolve()
@@ -481,7 +497,7 @@ def open_runcard(store: Store, skill: str, artifact: str, parent=None, mode=None
   config = store.config or {}
   card = {"skill": skill, "artifact": artifact, "artifact_sha256": sha,
           "reviewers": list((config.get("reviewers") or {}).get(RUNCARD_REVIEWERS.get(skill, ""), [])),
-          "tiering": None, "mode": mode or config.get("mode", "normal"), "parent": parent,
+          "tiering": None, "mode": mode or run_mode(store), "parent": parent,
           "opened_at": now_iso(), "closed_at": None, "interrupted_at": None, "produced": [],
           "handoff": store.handoff_id}
   driven = os.environ.get("SUPEREGM_ROLE") == "driver"
@@ -641,7 +657,8 @@ def here(path) -> Path:
 
 def handoff_spec(args, store: Store) -> str:
   """The handoff's spec: the state's `design.path` (read under this checkout, `here`), else (before the first
-  `graph`) the `Design:` line of `--plan`."""
+  `graph`) the `Design:` line of `--plan`, else the spec its `handoffs/<id>.json` records (U43: `next wait` on a
+  handoff approved but not yet graphed)."""
   spec = (load_state(store.root).get("design") or {}).get("path")
   spec = str(here(spec)) if spec else spec
   plan = Path(args.plan).expanduser().resolve() if getattr(args, "plan", None) else None
@@ -650,6 +667,9 @@ def handoff_spec(args, store: Store) -> str:
     if match:
       design = Path(match.group(1)).expanduser()
       spec = str(design if design.is_absolute() else (plan.parent / design).resolve())
+  if not spec and store.handoff_id:
+    row = next((r for r in handoffs(store.root) if r.get("id") == store.handoff_id), None)
+    spec = str(here(row["spec"])) if row and row.get("spec") else spec
   return spec or ""
 
 

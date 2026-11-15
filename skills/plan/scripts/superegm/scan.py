@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the section 9.1 body rules, one named rule per line, over the graph module's bodies; amendment 9's warning values (U29); 1.2.1-pre.1 P3's line cites (section 6.5); the `units` limits registered, validated and refused over, and the bytes warning dropped (U42); `names_of` strips backticks, the one reader of an interface name (U96).
+# Modified by SuperEGM (gsVAM), 2026: the section 9.1 body rules, one named rule per line, over the graph module's bodies; amendment 9's warning values (U29); 1.2.1-pre.1 P3's line cites (section 6.5); the `units` limits registered, validated and refused over, and the bytes warning dropped (U42); the ruler check reads the decision's mode, else the frozen, else `config.mode` (U43); `names_of` strips backticks, the one reader of an interface name (U96).
 
 """superegm scan: the body rules of spec section 9.1, one `<rule>: <unit>: <line>` per problem.
 The one exception is a `units:` line, a `units.*` config value out of range: it names no unit (spec section 6)."""
@@ -138,10 +138,12 @@ def rule_decision_blocking(uid, body, handoff):
   answered = handoff.state.get("decisions") or {}
   problems = [f"decision-blocking: {uid}: {d['id']} {d['question']}" for d in handoff.plan.units[uid].decisions
               if d["blocking"] and not d.get("answer") and f"{uid}/{d['id']}" not in answered]
-  if handoff.config["mode"] == "leavemealone":  # an escalated pair's decision is the judges' (section 13.2)
-    for d in handoff.plan.units[uid].decisions:
-      by = (answered.get(f"{uid}/{d['id']}") or {}).get("by")
-      if by and not by.startswith("judges:") and any(pair in d["question"] for pair in handoff.escalated):
+  frozen = core.run_mode(handoff.store)  # a decision without a stored mode: the frozen mode, else config.mode (U43)
+  for d in handoff.plan.units[uid].decisions:  # an escalated pair's decision in leavemealone-mode is the judges' (section 13.2)
+    record = answered.get(f"{uid}/{d['id']}") or {}
+    by = record.get("by")
+    if (record.get("mode") or frozen) == "leavemealone" \
+        and by and not by.startswith("judges:") and any(pair in d["question"] for pair in handoff.escalated):
         problems.append(f"decision-ruler: {uid}: {d['id']} answered by {by} in leavemealone-mode: decide --judges <panel>")
   return problems
 
