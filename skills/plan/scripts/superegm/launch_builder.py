@@ -461,6 +461,8 @@ def amendments_for(st, unit: str, body: str) -> list[dict]:
   `(name, unit)` its Consumes lines list, in `at` order."""
   path = st.path("state")
   entries = (json.loads(core.read_text(path)) if path.is_file() else {}).get("amendments") or []
+  for file in sorted((path.parent / "amendments").glob("*.json")):  # `decision rule`'s files (spec section 6.5)
+    entries += json.loads(core.read_text(file))
   consumed = {(n, u) for raw, u in consumes(body) for n in scan.names_of(raw)}  # the one reader of an interface name
   return sorted((a for a in entries if a["unit"] == unit or (a["name"], a["unit"]) in consumed), key=lambda a: a["at"])
 

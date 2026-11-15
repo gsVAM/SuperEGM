@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3/5
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
-# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the `amendments[]` it writes (spec §6.5, 1.2.1-pre.1 P5).
+# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96).
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
@@ -21,7 +21,7 @@ from superegm.report import pending_decisions, unit_view
 from superegm import review, scan
 from superegm.review import Refusal
 
-WRITES = frozenset({"foreman", "reviews", "state"})  # the store kinds this subcommand writes (`reviews`: a fifth point's accept, U35; `state`: `amendments[]`, §6.5)
+WRITES = frozenset({"foreman", "reviews", "state", "file"})  # the store kinds this subcommand writes (`reviews`: a fifth point's accept, U35; `state`: the other writers' fields; `file`: `amendments/<comment id>.json`, §6.5)
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset({"wave"})  # the skills whose card this subcommand accepts
 RELAUNCH = ["relaunch", "stop the unit"]
@@ -579,14 +579,19 @@ def rule(args) -> int:
   data["rulings"] += entries
   if stops:  # the stop is written with the ruling, in one save
     data["stopped"] = stopped_entry(args.by, chosen, now, brief)
+  if amends and not closed:  # spec §6.5: the contract changes, as the file `amendments/<deviation comment id>.json`, written
+    # before the ruling is saved (a crash between the two leaves a file no reader trusts: `amendments_for` reads a file only
+    # once a ruling names its comment) and rewritten, or deleted when this ruling records none, by a rerun
+    file = st.path("file", "amendments", f"{str(decision['source']).split()[1]}.json")
+    added = amendments_of(decision["question"], chosen, reason, int(posted.split()[1]), now, st)
+    if added:
+      recorded_at = core.now_iso()
+      core.atomic_write(file, [entry | {"recorded_at": recorded_at} for entry in added])
+    elif file.exists():
+      file.unlink()
   # recorded before the read-back, the session's post marked `unread` (its GitHub time not yet read), so a
   # `status --wait` pass in between compares its edits with its own `created_at` and skips the unedited post
   core.save_foreman(st, unit, data)
-  added = amendments_of(decision["question"], chosen, reason, int(posted.split()[1]), now, st) if amends and not closed else []
-  if added:  # spec §6.5: the handoff's contract changes, read by `plan`'s re-check
-    fresh = core.load_state(st.root)
-    fresh["amendments"] = (fresh.get("amendments") or []) + added
-    core.save_state(st.root, fresh)
   if url:  # the session's own post: its time is GitHub's creation time, read back, so any edit since (one before the
     # read-back too) reads as an edit after the record; a failed read-back leaves the entry `unread`
     created = read_back(st, cid).get("created_at")
