@@ -142,6 +142,22 @@ def test_superseding_leaves_a_confirmed_list_with_no_filing(world):
   assert older_state(world, first) == state and "discarded" not in journal(world, first)
 
 
+def test_a_failed_restore_records_no_approval(world):
+  # the restore runs before the approval is committed or recorded: a restore that cannot write leaves the history as it was
+  spec, cid, first = superseding_world(world)
+  spec2, cid2, _ = converged_spec(world, CHANGED)
+  head, entries = git(world, "rev-parse", "HEAD"), approval(world)["entries"]
+  folder = world.artifacts / first
+  folder.chmod(0o500)
+  try:
+    with pytest.raises(OSError):
+      approve(world, spec2, cid2, "--yes")
+  finally:
+    folder.chmod(0o700)
+  assert approval(world)["entries"] == entries and git(world, "rev-parse", "HEAD") == head
+  assert older_state(world, first)["confirmed_sha256"] == SECOND_DRY_RUN_SHA
+
+
 @pytest.fixture(autouse=True)
 def registry(tmp_path, monkeypatch):
   """`~/.superegm/registry.json` under `tmp_path`: no test reads the owner's. HOME, not `registry_path`, is patched: the
