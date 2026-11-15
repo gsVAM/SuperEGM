@@ -14,7 +14,7 @@ import subprocess
 from pathlib import Path
 
 import superegm as core
-from superegm import graph, launch, report, review, runcard
+from superegm import gate, graph, launch, report, review, runcard
 from superegm.approve_spec import units_section
 
 WRITES = frozenset({"chain", "runcards"})  # the store kinds this subcommand writes
@@ -45,7 +45,13 @@ def read_json(path: Path):
 
 
 def registered_root(st: core.Store) -> Path:
-  """The repository whose config the store was read from: the checkout the plan, review-plan and file skills read."""
+  """The `root` of the `~/.superegm/registry.json` entry whose `artifacts_dir` is the store (`superegm register`),
+  the checkout the plan, review-plan and file skills read; an unregistered store falls back to the checkout its
+  config was read from."""
+  store_root = st.root.resolve()
+  for entry in core.load_registry():
+    if entry.get("root") and Path(entry.get("artifacts_dir") or "").expanduser().resolve() == store_root:
+      return Path(entry["root"])
   source = Path(str((st.config or {}).get("_source", "")))
   return core.git_toplevel(source.parents[1] if source.is_file() else Path.cwd())
 
@@ -97,17 +103,29 @@ def plan_review_stopped(hs: core.Store, uid: str):
 
 def plan_review_due(hs: core.Store, uid: str, sha: str) -> bool:
   """Absent, not converged, converged on other body bytes, or a round recorded after the converged one."""
-  latest, _ = review.latest_cycle(hs, "plan", uid)
-  if latest is None or latest.get("converged", "no") == "no" or not latest.get("converged_round"):
+  converged, converged_sha = gate.converged_review(hs, uid)  # the gate's two tests
+  if not converged or converged_sha != sha:
     return True
+  latest, _ = review.latest_cycle(hs, "plan", uid)
   rid = review.review_id(hs, "plan", uid, latest["cycle"])
-  rnd = review.load_round(hs, rid, latest["converged_round"]) or {}
-  return rnd.get("artifact_sha256") != sha or max(review.round_numbers(hs, rid), default=0) > latest["converged_round"]
+  return max(review.round_numbers(hs, rid), default=0) > latest["converged_round"]
 
 
-def planning_line(hs: core.Store, state: dict, spec: Path) -> str:
-  """The rows from `waiting plan` down: what the handoff's plan, reviews, filing and units ask for next."""
-  section = units_section(core.read_text(spec)) if spec.is_file() else ""
+def approved_text(root: Path, spec: Path, entry) -> str:
+  """The spec text of the latest approval `entry`: its bytes as `refs/superegm/tick-base`'s history holds them,
+  else (no entry, or bytes not reachable there) the registered root's working copy."""
+  try:
+    rel = spec.resolve().relative_to(root.resolve()).as_posix()
+  except ValueError:
+    rel = None
+  text = core.spec_blob(root, rel, entry["sha256"], ref=TICK_BASE) if entry and rel else None
+  return text if text is not None else (core.read_text(spec) if spec.is_file() else "")
+
+
+def planning_line(hs: core.Store, state: dict, spec: Path, text: str) -> str:
+  """The rows from `waiting plan` down: what the handoff's plan, reviews, filing and units ask for next; `text` is
+  the latest approval's spec, whose `## Units` rows the plan must cover."""
+  section = units_section(text)
   landed = LANDED_RE.search(section)
   done = set(re.findall(r"U\d{2,}", landed.group(1))) if landed else set()
   done |= set(graph.filed_in(hs, spec))
@@ -126,7 +144,7 @@ def planning_line(hs: core.Store, state: dict, spec: Path) -> str:
       return f"waiting review-plan: {rid} stopped"
   if any(plan_review_due(hs, u, units["units"][u]["body_sha256"]) for u in unfiled):
     return "review-plan"
-  if unfiled or ((state.get("confirmed_sha256") or state.get("filings")) and not core.receipt_ok(state)):
+  if unfiled or not core.receipt_ok(state):
     return "file"
   return "wave" if any(unit_open(hs, state, u) for u in units["order"]) else "integrate"
 
@@ -140,7 +158,7 @@ def next_line(st: core.Store, hid: str, read_wait: bool = True) -> str:
   hs = core.handoff_store(st, hid)
   config = st.config or {}
   root = registered_root(st)
-  state = core.load_state(hs.root) if hs.legacy else (read_json(hs.path("state")) or {})
+  state = read_json(hs.path("state")) or {}
   spec = core.rebased(record.get("spec") or (state.get("design") or {}).get("path") or "", root)
   entries = core.load_approvals(st, spec)
   own = [i for i, e in enumerate(entries) if e.get("handoff_id") == hid]
@@ -148,8 +166,10 @@ def next_line(st: core.Store, hid: str, read_wait: bool = True) -> str:
     return "none"
   fetch = read_json(st.path("tick", "fetch"))
   tick = core.run_git(["rev-parse", "-q", "--verify", f"{TICK_BASE}^{{commit}}"], root, check=False).strip()
-  if (fetch is not None and not fetch.get("ok")) or not tick:
-    return f"waiting fetch: {config.get('remote')}: {first_line((fetch or {}).get('stderr')) or f'{TICK_BASE} absent'}"
+  if fetch is not None and not fetch.get("ok"):
+    return f"waiting fetch: {config.get('remote')}: {first_line(fetch.get('stderr')) or 'fetch failed'}"
+  if not tick:
+    return f"waiting fetch: {config.get('remote')}: {TICK_BASE} absent"
   try:
     core.require_latest_handoff(hs)
   except core.HandoffError:
@@ -164,7 +184,8 @@ def next_line(st: core.Store, hid: str, read_wait: bool = True) -> str:
                                     entries[own[-1] + 1:], ref=TICK_BASE, spec_only=True):
     return "waiting push"
   answered = bool(wait and wait.get("answer"))
-  below = wait["phase"] if answered else planning_line(hs, state, spec)
+  text = approved_text(root, spec, entries[-1] if entries else None)
+  below = wait["phase"] if answered else planning_line(hs, state, spec, text)
   if answered or below in ("plan", "review-plan", "file"):
     problem = checkout_problem(root, config.get("base", "main"), tick)
     if problem:
@@ -185,7 +206,10 @@ def wait(args, st: core.Store, hid: str) -> int:
 
 def clear(args, st: core.Store, hid: str) -> int:
   """Remove the wait record on confirmed progress (`next` without it prints a later phase, or a `proceed` ruling
-  resolves it); otherwise an unanswered record stays and an answered one is asked again. The card closes."""
+  resolves it); otherwise an unanswered record stays and an answered one is asked again. The card closes.
+  Section 7.2's third removal, `next` showing "the unit withdrawn", is not read: section 7.1's table prints no
+  such line and no unit of this build defines withdrawal, so a withdrawn unit's record clears only through a later
+  phase."""
   path = st.path("chain", hid)
   record = read_json(path)
   if record:

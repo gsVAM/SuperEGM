@@ -258,15 +258,17 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
     escalated = escalated_pairs(st, spec, since)
   if escalated:
     print(f"approve-spec: {len(escalated)} escalated finding(s) await the owner: {', '.join(escalated)}")
-  if not (args.yes or args.leavemealone or card["mode"] == "leavemealone"):
+  # the mode this approval freezes, also the ask gate's: the card's default mode is the frozen mode of the spec's
+  # previous handoff, which an approval opening a new handoff must not read (U43)
+  mode = "leavemealone" if args.leavemealone or st.config.get("mode") == "leavemealone" else "normal"
+  if not (args.yes or mode == "leavemealone"):
     print(f"Approve `{spec}` (sha256 `{sha[:12]}`) at review {rid}?")
     print("Options: Approve | Stop. Run again with --yes after the owner chose Approve.")
     return 0
   handoff_id, kind = handoff_id_for(st, sha, spec.stem, core.load_approvals(st, spec))
   commit = commit_by_path(root, [spec.relative_to(root).as_posix(), CONFIG], f"superegm: approve {slug} at review {rid}",
                           st.config["commit_trailer"])
-  mode = "leavemealone" if args.leavemealone or st.config.get("mode") == "leavemealone" else "normal"
-  entry = entry_of(sha, commit, args.runcard, rid, handoff_id, kind, escalated, {"rounds": rounds, "mode": mode})
+  entry =entry_of(sha, commit, args.runcard, rid, handoff_id, kind, escalated, {"rounds": rounds, "mode": mode})
   path = append_entry(st, spec, entry)
   write_handoff_file(st, handoff_id, spec, entry["approved_at"] if kind == "opening" else None)
   core.journal(st, f"approve-spec {kind} {handoff_id} sha256 {sha[:12]} at review {rid} commit {commit[:12]} under {args.runcard}")
