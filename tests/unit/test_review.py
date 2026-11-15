@@ -756,7 +756,7 @@ def test_approve_spec_asks_then_commits_by_path(world):
 def test_approve_spec_appends_history_entries_and_opens_one_handoff_per_opening(world):
   spec, cid, rid = converged_spec(world); assert approve(world, spec, cid, "--yes")[0] == 0
   rec, sha = approval(world), hashlib.sha256(spec.read_bytes()).hexdigest()
-  assert list(rec) == ["entries", "path"] and [list(e) for e in rec["entries"]] == [["approved_at", "commit", "escalated", "handoff_id", "kind", "review", "rounds", "runcard", "sha256", "voided_by"]]
+  assert list(rec) == ["entries", "path"] and [list(e) for e in rec["entries"]] == [["approved_at", "commit", "escalated", "handoff_id", "kind", "review", "rounds", "runcard", "sha256", "triage", "voided_by"]]
   first = rec["entries"][0]
   assert (first["sha256"], first["kind"], first["handoff_id"]) == (sha, "opening", f"2026-11-03-sample-de-{sha[:6]}")
   assert json.loads(store(world.repo).path("handoffs", first["handoff_id"]).read_text(encoding="utf-8")) == {"id": first["handoff_id"], "spec": str(spec), "opened_at": first["approved_at"], "closed_at": None}

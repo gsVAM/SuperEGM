@@ -664,7 +664,7 @@ def test_approve_spec_writes_the_approvals_record_with_handoff_id(world):
   whole = json.loads((world.artifacts / "approvals/sample.json").read_text(encoding="utf-8"))
   record = whole["entries"][-1]  # entries[0] is the world's 1.1 record, read as a one-entry history
   sha = hashlib.sha256(world.spec.read_bytes()).hexdigest()
-  assert set(record) == {"sha256", "commit", "runcard", "review", "approved_at", "escalated", "kind", "voided_by", "handoff_id", "rounds"}
+  assert set(record) == {"sha256", "commit", "runcard", "review", "approved_at", "escalated", "kind", "voided_by", "handoff_id", "rounds", "triage"}
   assert whole["path"] == str(world.spec) and record["sha256"] == sha and record["handoff_id"] == f"sample-{sha[:6]}"
   assert record["runcard"] == cid and record["review"] == rid and record["kind"] == "opening" and record["voided_by"] is None
   assert record["commit"] == git(["rev-parse", "HEAD"], world.repo).strip()
