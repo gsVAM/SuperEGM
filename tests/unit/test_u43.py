@@ -233,3 +233,82 @@ def test_next_clear(world, record, next_without, after):
     assert (now["since"] != stored["since"]) == ("answer" in record)  # the rewrite's time, a new since
   code, out = world.run("next", "clear", "--handoff", c.hid)
   assert (code, out.strip().removeprefix("superegm: ")) == (1, "runcard: --runcard is required")
+
+
+def set_mode(world, mode):
+  """`config.mode` set, every other key kept."""
+  path = world.repo / ".superegm" / "config.json"
+  jwrite(path, {**jread(path), "mode": mode})
+
+
+def edit_approval(path, **changes):
+  """The handoff's latest approval entry (or a 1.1 record) with keys set, or dropped with `None`."""
+  data = jread(path)
+  entry = data["entries"][-1] if "entries" in data else data
+  for key, value in changes.items():
+    entry.pop(key, None) if value is None else entry.update({key: value})
+  jwrite(path, data)
+
+
+def card_mode(world, root, skill, artifact):
+  """The mode `runcard open` gives a card opened without `--mode`."""
+  cid = world.open_card(skill, str(artifact))
+  return jread(superegm.Store(root).path("runcards", cid))["mode"]
+
+
+@pytest.mark.parametrize("flag,config_mode,mode", [("--leavemealone", "normal", "leavemealone"),
+                                                   ("", "leavemealone", "leavemealone"), ("", "normal", "normal")])
+def test_frozen_mode(world, tmp_path, capsys, monkeypatch, flag, config_mode, mode):
+  """approve-spec freezes mode; --amend-units copies it; runcard open, decide and scan's ruler check read it."""
+  from superegm import approve_spec
+  from test_review import card
+  other = {"normal": "leavemealone", "leavemealone": "normal"}
+  assert "mode" in approve_spec.FROZEN_FIELDS
+  # approve-spec freezes the mode; --amend-units copies it after config.mode flips
+  spec, cid, rid = converged_spec(world)
+  set_mode(world, config_mode)
+  assert approve(world, spec, cid, "--yes", *([flag] if flag else []))[0] == 0
+  path = world.artifacts / "approvals" / f"{SLUG}.json"
+  assert jread(path)["entries"][-1]["mode"] == mode
+  set_mode(world, other[mode])
+  icid = card(world, spec, "integrate")
+  spec.write_text(spec.read_text(encoding="utf-8") + "| U04 | more | U01 | S |\n", encoding="utf-8")
+  code, out = approve(world, spec, icid, "--amend-units")
+  assert code == 0, out
+  entries = jread(path)["entries"]
+  assert entries[-1]["kind"] == "amend-units" and entries[-1]["mode"] == mode
+  # runcard open's default reads the frozen mode, not the live config.mode
+  assert card_mode(world, world.artifacts, "plan", spec) == mode
+  edit_approval(path, mode=None)
+  assert card_mode(world, world.artifacts, "plan", spec) == other[mode]  # an entry without mode reads config.mode
+  # decide stores the card's mode; scan's ruler check reads the decision's mode, else the frozen, else config.mode
+  from test_plan import escalated, graph, D_ESC, store_root
+  second = superegm_world(tmp_path / "second", capsys, monkeypatch)
+  plan, _ = escalated(second, D_ESC)
+  record = store_root(second) / "approvals" / "2026-11-03-webhooks-design.json"
+  edit_approval(record, mode=mode)
+  set_mode(second, other[mode])
+  spec = second.repo / "docs/specs/2026-11-03-webhooks-design.md"
+  pcid = second.open_card("plan", str(spec))
+  assert jread(next(store_root(second).rglob(f"{pcid}.json")))["mode"] == mode
+  assert graph(second, plan, pcid)[0] == 0
+  assert second.run("decide", "--unit", "U02", "--decision", "D2", "--default", "--runcard", pcid)[0] == 0
+  state = next(store_root(second).rglob("state.json"))
+  assert jread(state)["decisions"]["U02/D2"]["mode"] == mode
+  ruler = "decision-ruler: U02: D2 answered by owner in leavemealone-mode"
+  assert (ruler in second.run("scan", "--plan", plan)[1]) == (mode == "leavemealone")
+  # a decision without mode reads the frozen mode; with neither, config.mode
+  data = jread(state)
+  data["decisions"]["U02/D2"].pop("mode")
+  jwrite(state, data)
+  set_mode(second, config_mode)
+  assert (ruler in second.run("scan", "--plan", plan)[1]) == (mode == "leavemealone")
+  edit_approval(record, mode=None)
+  assert (ruler in second.run("scan", "--plan", plan)[1]) == (config_mode == "leavemealone")
+  assert jread(next(store_root(second).rglob(f"{second.open_card('plan', str(spec))}.json")))["mode"] == config_mode
+
+
+def superegm_world(path, capsys, monkeypatch):
+  from conftest import make_world
+  path.mkdir()
+  return make_world(path, capsys, monkeypatch)

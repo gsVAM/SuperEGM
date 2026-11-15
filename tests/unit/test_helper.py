@@ -665,7 +665,7 @@ def test_approve_spec_writes_the_approvals_record_with_handoff_id(world):
   whole = json.loads((world.artifacts / "approvals/sample.json").read_text(encoding="utf-8"))
   record = whole["entries"][-1]  # entries[0] is the world's 1.1 record, read as a one-entry history
   sha = hashlib.sha256(world.spec.read_bytes()).hexdigest()
-  assert set(record) == {"sha256", "commit", "runcard", "review", "approved_at", "escalated", "kind", "voided_by", "handoff_id", "rounds"}
+  assert set(record) == {"sha256", "commit", "runcard", "review", "approved_at", "escalated", "kind", "voided_by", "handoff_id", "rounds", "mode"}
   assert whole["path"] == str(world.spec) and record["sha256"] == sha and record["handoff_id"] == f"sample-{sha[:6]}"
   assert record["runcard"] == cid and record["review"] == rid and record["kind"] == "opening" and record["voided_by"] is None
   assert record["commit"] == git(["rev-parse", "HEAD"], world.repo).strip()
@@ -732,7 +732,7 @@ def test_defer_and_published_are_gone(world):
   assert code == 0 and "PUBLISHED" not in out
   code, out = world.run("status")
   assert code == 0 and "U03/D2" not in out and "PUBLISHED" not in out
-  assert set(state_of(world)["decisions"]["U03/D2"]) == {"answer", "by", "decided_at"}
+  assert set(state_of(world)["decisions"]["U03/D2"]) == {"answer", "by", "decided_at", "mode"}  # the card's mode (U43)
   close_as_completed(gh, 2); close_as_completed(gh, 3)
   make_pr(gh, 41, "a" * 40, merged="2026-11-02T10:00:00Z", closes=[(REPO, 3)])
   gh.graphql[3] = [{**gh.prs[41], "repository": {"nameWithOwner": REPO}}]
