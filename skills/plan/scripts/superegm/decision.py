@@ -560,7 +560,9 @@ def rule(args) -> int:
   # `status --wait` pass in between compares its edits with its own `created_at` and skips the unedited post
   added = amendments_of(decision["question"], chosen, reason, int(posted.split()[1]), now) if amends and not closed else []
   if added:  # spec §6.5: the contract changes, its own file written before the ruling is saved
-    core.atomic_write(st.path("file", "amendments", f"{str(decision['source']).split()[1]}.json"), added)
+    target = st.path("file", "amendments", f"{str(decision['source']).split()[1]}.json")
+    if not target.exists():  # a rerun after a crash, its new ruling comment or not: the first record stands
+      core.atomic_write(target, added)
   core.save_foreman(st, unit, data)
   if url:  # the session's own post: its time is GitHub's creation time, read back, so any edit since (one before the
     # read-back too) reads as an edit after the record; a failed read-back leaves the entry `unread`

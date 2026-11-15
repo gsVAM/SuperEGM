@@ -461,6 +461,9 @@ def amendments_for(st, unit: str, body: str) -> list[dict]:
   `(name, unit)` its Consumes lines list, in `at` order."""
   path = st.path("state")
   entries = (json.loads(core.read_text(path)) if path.is_file() else {}).get("amendments") or []
+  folder = st.path("file", "amendments")
+  for file in sorted(folder.glob("*.json")) if folder.is_dir() else []:
+    entries = entries + json.loads(core.read_text(file))
   consumed = set(consumes(body))
   return sorted((a for a in entries if a["unit"] == unit or (a["name"], a["unit"]) in consumed), key=lambda a: a["at"])
 
