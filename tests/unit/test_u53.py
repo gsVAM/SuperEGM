@@ -92,3 +92,51 @@ def test_opening_approval_over_a_partly_filed_handoff(world, latest, approval_ki
   # only an approval that supersedes a partly filed, unvoided handoff refuses, before any write
   code, out = approve_over(world, latest, approval_kind)
   assert (code, "has an incomplete filing: finish /superegm:file first" in out) == ((1, True) if refused else (0, False)), out
+
+
+def superseding_world(world):
+  """A completed filing of the first dry run, an unapplied second one, the second approval not yet run: (spec, cid, first)."""
+  spec, cid, _ = converged_spec(world)
+  assert approve(world, spec, cid, "--yes")[0] == 0
+  first = approval(world)["entries"][-1]["handoff_id"]
+  atomic_write(world.artifacts / first / "state.json", latest_state(first, "filing complete, then a second dry run never applied"))
+  return spec, cid, first
+
+
+def older_state(world, first):
+  return jread(world.artifacts / first / "state.json")
+
+
+def journal(world, first):
+  path = world.artifacts / first / "journal.md"
+  return path.read_text(encoding="utf-8") if path.is_file() else ""
+
+
+def test_superseding_restores_the_last_filing(world):
+  # a completed filing, an unapplied second dry run, then an approval that opens a new handoff
+  import superegm as core
+  spec, cid, first = superseding_world(world)
+  assert approve(world, spec, cid, "--yes")[0] == 0  # the same-id re-approval is not an opening
+  assert older_state(world, first)["confirmed"]["sha256"] == SECOND_DRY_RUN_SHA
+  spec2, cid2, _ = converged_spec(world, CHANGED)
+  assert approve(world, spec2, cid2)[0] == 0  # stops at the Approve question
+  assert older_state(world, first)["confirmed_sha256"] == SECOND_DRY_RUN_SHA
+  assert f"dry run {SECOND_DRY_RUN_SHA[:12]} discarded" not in journal(world, first)
+  code, out = approve(world, spec2, cid2, "--yes")
+  assert code == 0 and approval(world)["entries"][-1]["handoff_id"] != first, out
+  older = older_state(world, first)
+  assert older["confirmed_sha256"] == older["confirmed"]["sha256"] == older["filings"][-1]["sha256"]
+  assert older["confirmed"]["writes"] == older["filings"][-1]["writes"] and core.require_receipt(older) is None
+  assert older["confirmed"]["repo"] == "o/r" and older["filings"][-1]["writes"] == WRITES
+  assert f"dry run {SECOND_DRY_RUN_SHA[:12]} discarded" in journal(world, first)
+
+
+def test_superseding_leaves_a_confirmed_list_with_no_filing(world):
+  spec, cid, _ = converged_spec(world)
+  assert approve(world, spec, cid, "--yes")[0] == 0
+  first = approval(world)["entries"][-1]["handoff_id"]
+  state = latest_state(first, "confirmed list, no filings[] entry")
+  atomic_write(world.artifacts / first / "state.json", state)
+  spec2, cid2, _ = converged_spec(world, CHANGED)
+  assert approve(world, spec2, cid2, "--yes")[0] == 0
+  assert older_state(world, first) == state and "discarded" not in journal(world, first)
