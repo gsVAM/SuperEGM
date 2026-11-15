@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's test world (the fake gh, the harness, the sample repository and plan) moved out of test_helper.py so every unit's tests share it; the sample plan in the section 9.1 grammar under an approval record (U05); the PR review threads and collaborator roles of the fake gh (U21); the one-comment route `issues/comments/<id>`, `gh issue edit` taking a label off alone and adding a label the issue has once (U22); `gh issue edit --body-file` in the fake gh (U30).
+# Modified by SuperEGM (gsVAM), 2026: EGM's test world (the fake gh, the harness, the sample repository and plan) moved out of test_helper.py so every unit's tests share it; the sample plan in the section 9.1 grammar under an approval record (U05); the PR review threads and collaborator roles of the fake gh (U21); the one-comment route `issues/comments/<id>`, `gh issue edit` taking a label off alone and adding a label the issue has once (U22); `gh issue edit --body-file` in the fake gh (U30); `review.rounds` 5 in the world's config (U36).
 
 """The test world: a temporary repository, a store, the fake `gh` and the harness.
 
@@ -515,7 +515,7 @@ class Harness:
 def make_world(tmp_path, capsys, monkeypatch, config=None, origin_url=f"https://github.com/{REPO}.git"):
   """What `world` builds, with the config and origin overridable."""
   if config is None:
-    config = {"repo": REPO, "banned_terms": ["(?i)secret-codename"]}
+    config = {"repo": REPO, "banned_terms": ["(?i)secret-codename"], "review": {"rounds": 5}}
   repo = make_repo(tmp_path / "repo", origin_url=origin_url, config=config)
   plan = make_plan(tmp_path / "plans", repo)
   harness = Harness(capsys)

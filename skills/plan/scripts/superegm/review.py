@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); `review.rounds` for the cap, stored at a cycle's open (U36).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest: the one review loop (spec section 8)."""
 
@@ -19,6 +19,7 @@ import superegm as core
 WRITES = frozenset({"reviews", "foreman", "runcards", "review"})  # the store kinds this subcommand writes
 CONFIG_DEFAULTS = {  # its own config keys and init lines (U32)
     "astra": {"enabled": False, "model": "gpt-6-astra", "effort": "xhigh", "heads": True, "heads_effort": "high"},
+    "review": {"rounds": 3},  # completed rounds per cycle before the cap (U36)
     "ingest": {"severity_words": {"bug": "high", "issue": "medium", "nit": "low", "suggestion": "low"},
                "human_role": "write"},  # `review ingest`: a thread's word map and the role a human's thread counts from
 }
@@ -49,7 +50,39 @@ def seat_lane(kind: str, flag: str | None, astra: dict) -> bool:
 SEVERITIES = ("high", "medium", "low")
 DISPOSITIONS = ("fixed", "contested", "declined", "escalated", "fix-design")
 RULINGS = ("continue", "accept", "stop")
-CAP = 5  # completed rounds per cycle, plus one per `continue` ruling (section 5)
+LEGACY_CAP = 5  # the cap of a cycle or an approval entry that stores none (opened under 1.2.0)
+ROUNDS = range(1, 11)  # `review.rounds` and a spec's `Rounds:` line
+
+
+def valid_rounds(value) -> bool:
+  """Whether `value` is an integer 1-10 (a bool is not)."""
+  return isinstance(value, int) and not isinstance(value, bool) and value in ROUNDS
+
+
+def live_rounds(st: core.Store) -> int:
+  """`review.rounds` now; a value outside 1-10 is refused, naming the key."""
+  value = (st.config.get("review") or {}).get("rounds", 3)
+  if not valid_rounds(value):
+    raise core.HandoffError(f"review.rounds must be an integer 1-10, not {value!r}")
+  return value
+
+
+def cap_at_open(args, st: core.Store, kind: str, artifact: str) -> int:
+  """The cap a new cycle stores, completed rounds plus one per `continue` ruling (section 5): a spec's review runs
+  under the live `review.rounds`; the others under the `rounds` of the handoff's latest approval entry (5 without
+  one: a 1.2.0 entry, or no approval entry at all)."""
+  if kind == "spec":
+    return live_rounds(st)
+  spec = artifact if kind == "integrate" else core.handoff_spec(args, st)
+  entries = core.load_approvals(st, Path(spec)) if spec else []
+  own = [e for e in entries if st.handoff_id and e.get("handoff_id") == st.handoff_id] or entries[-1:]
+  rounds = own[-1].get("rounds") if own else None
+  return rounds if valid_rounds(rounds) else LEGACY_CAP
+
+
+def cap_of(review: dict) -> int:
+  """The cycle's cap: the one stored at open; a record opened under 1.2.0 has none and reads 5."""
+  return review.get("cap", LEGACY_CAP)
 
 
 def register(subparsers):
@@ -439,12 +472,13 @@ def open_review(args) -> int:
     core.journal(st, f"review open {rid} resumed under {args.runcard}")
     print(rid)
     return 0
+  cap = cap_at_open(args, st, kind, artifact)
   scope = scope_form(st, artifact, given) if kind == "spec" else None
   cycle = latest["cycle"] + 1 if latest else 1
   rid = review_id(st, kind, artifact, cycle)
   lane = seat_lane(kind, getattr(args, "astra", None), st.config.get("astra") or {})
   review = {"kind": kind, "artifact": artifact, "cycle": cycle, "handoff_id": st.handoff_id, "scope": scope,
-            "reviewers": reviewers + (["astra"] if lane else []),
+            "reviewers": reviewers + (["astra"] if lane else []), "cap": cap,
             "runcard": args.runcard, "artifact_sha256": current_sha(st, kind, artifact) if kind == "plan" else args.sha256,
             "astra_incomplete": 0,
             "converged": "no", "converged_round": None, "rulings": []}
@@ -884,7 +918,7 @@ def evaluate(st: core.Store, review: dict, runcard: str) -> Status:
     converged, converged_round = f"by ruling {accept['id']}", review["converged_round"]
   elif clean and not regressions and not moved:
     converged, converged_round = "yes", latest["round"]
-  cap = "stop" in rulings or len(completed) >= CAP + rulings.count("continue")
+  cap = "stop" in rulings or len(completed) >= cap_of(review) + rulings.count("continue")
   cards = stall_cards(st, review, runcard)
   stalled = len(rounds) >= 2 and all(r["what_ran"] != "completed" and r.get("runcard") in cards for r in rounds[-2:])
   sha = next((r["artifact_sha256"] for r in rounds if r["round"] == converged_round), None)
@@ -947,7 +981,7 @@ def early_accept_lapsed(review: dict, accept: dict, rounds: list[dict], rulings:
     return False
   completed = [r for r in rounds if r["what_ran"] == "completed"]
   upto = [r for r in completed if r["round"] <= accepted]
-  if len(upto) >= CAP + rulings.count("continue"):
+  if len(upto) >= cap_of(review) + rulings.count("continue"):
     return False
   rnd = next((r for r in completed if r["round"] == accepted), None)
   later = [f for r in rounds if r["round"] > accepted for f in findings_of(r)]

@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U10's tests of the foreman's helper subcommands.
-# Modified by SuperEGM (gsVAM), 2026: collect reads rulings through `ruling_of` and the record (U22).; the forge check drops an outer run's `GIT_CONFIG_` pairs (1.2.1 wave fix).
+# Modified by SuperEGM (gsVAM), 2026: collect reads rulings through `ruling_of` and the record (U22).; the forge check drops an outer run's `GIT_CONFIG_` pairs (1.2.1 wave fix); the cap tests set the review's stored `cap` in place of the `review.CAP` monkeypatch (U36).
 
 """U10: foreman dispatch, prepare, collect, tdd-order, review post. This file replaces U03's nine moved
 prepare/collect tests (they pin `--round`, `--run-folder`, `--verdict`, `head-moved`, `launched` and `--remove`:
@@ -165,6 +165,12 @@ def seed(world, *, head="a" * 40, ci="success", launches=({"round": 1, "status":
 
 def head_rid(st):
   return next(p.name for p in st.path("reviews").iterdir() if re.search(rf"(^|-)head-{UNIT}-c\d+$", p.name))
+
+
+def cap_at_one(st, rid):
+  """The head review's stored `cap` at 1 (a cap-1 source for the cap tests, U36)."""
+  path = st.path("reviews", rid, "review.json")
+  atomic_write(path, json.loads(path.read_text(encoding="utf-8")) | {"cap": 1})
 
 
 def record(world, st, rid, rnd, head, card, findings):
@@ -967,7 +973,7 @@ def test_review_ingest_rewrites_an_owner_word_a_new_external_high_makes_mixed(wo
   world.gh.threads[PR] = [{"id": 1, "user": {"login": "alice"}, "body": "bug: the hook never fires", "path": "src/hooks.py", "line": 3, "commit_id": head, "created_at": "t"}]
   world.gh.roles.update({"alice": {"role_name": "write"}})
   if cap:
-    monkeypatch.setattr(review_mod, "CAP", cap)
+    cap_at_one(st, rid)
   code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
   assert (code, out.split()) == (0, ["1", "ingested", "outcome:", word]), out
   entry = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][0]
@@ -976,7 +982,7 @@ def test_review_ingest_rewrites_an_owner_word_a_new_external_high_makes_mixed(wo
 
 def test_review_ingest_at_the_cap_rewrites_clean_to_cap_reached(world, monkeypatch):
   st, card, posted, rid, head = ingest_world(world, [(1, "alice", "bug: the hook never fires")], {"alice": {"role_name": "write"}})
-  monkeypatch.setattr(review_mod, "CAP", 1)
+  cap_at_one(st, rid)
   code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
   assert (code, out.split()) == (0, ["1", "ingested", "outcome:", "cap-reached"]), out
   entry = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][0]
