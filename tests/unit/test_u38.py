@@ -9,7 +9,7 @@ import pytest
 
 import superegm  # the harness reloads the package per test: read its names at call time
 from conftest import REPO, git
-from test_review import A, SLUG, F, approve, card, converged_spec, head_round, hstore, opened, record, rounds, seed_handoff
+from test_review import A, SLUG, F, approve, card, converged_spec, head_round, hstore, opened, record, rounds, seed_handoff, spec_file
 from test_u37 import RULES, blob_sha, commit_file, configure, entries_of
 
 TEXT = "Run the suite.\n"
@@ -115,3 +115,87 @@ def test_records_copy_the_stored_manifest(world, dispatch, expected):
       assert local == MANIFEST and astra == ASTRA_ONLY
     else:
       assert local == [] and astra == []
+
+
+def open_judges(world, parent=None, name="q38"):
+  """A judge panel on a one-question file, under `parent` or its own card; `(panel id, card to record under, panel.json)`."""
+  from test_judges import ONE, open_card, panel_json
+  question = world.repo.parent / f"{name}.md"
+  question.write_text(ONE, encoding="utf-8")
+  cid = parent or open_card(world, "judges", question)
+  code, out = world.run("judges", "open", "--question", question, "--parent" if parent else "--runcard", cid)
+  assert code == 0, out
+  return out.strip(), cid, panel_json(world, out.strip())
+
+
+def brief_of(world, pid, n):
+  return (world.artifacts / "judges" / pid / f"round-{n}" / "brief.md").read_text(encoding="utf-8")
+
+
+def set_card_handoff(world, cid, handoff):
+  """The card as a store written before the handoff existed leaves it: `handoff` rewritten."""
+  path = hstore(world).path("runcards", cid)
+  superegm.atomic_write(path, {**json.loads(path.read_text(encoding="utf-8")), "handoff": handoff})
+
+
+@pytest.mark.parametrize("parent, rendered", [
+  ("review-spec card in a legacy flat store", "judges section of HEAD"),
+  ("review-plan card of an approved handoff", "judges section of its frozen list"),
+  ("wave card whose handoff has no approval entry", ""),
+  ("a parent card with no handoff", ""),
+  ("no parent (typed /superegm:judges)", ""),
+])
+def test_judge_panel_renders_once_by_parent_skill(world, parent, rendered):
+  """Rendered once per lane at open, stored on the panel, reused by every later round, placed last in each brief."""
+  from superegm import instructions
+  from test_judges import panel_json, record as judge_record
+  head_text = "Judge by the suite.\n"
+  if parent.startswith("review-spec"):
+    commit_file(world, RULES, head_text)
+    configure(world, [{"file": RULES, "to": ["judges"]}])
+    git(["commit", "-qam", "config", "--allow-empty"], world.repo)
+    spec = spec_file(world)
+    seed_handoff(world, spec)                       # a flat store: the card carries the legacy id, which is not the spec's
+    cid = card(world, spec, "review-spec")
+    want = instructions.section([(RULES, head_text)])
+  elif parent.startswith("review-plan"):
+    spec, approved_cid, hid = approved_handoff(world, ["judges"])
+    cid = card(world, spec, "review-plan", handoff=hid)
+    move_on(world, spec, approved_cid)              # a HEAD edit and a re-approval before the panel opens
+    want = instructions.section([(RULES, TEXT)])
+  elif parent.startswith("wave"):
+    spec, approved_cid, hid = approved_handoff(world, ["judges"])
+    cid = card(world, spec, "wave", handoff=hid)
+    set_card_handoff(world, cid, "2026-01-01-nowhere-aaaaaa")
+    want = ""
+  elif parent.startswith("a parent"):
+    spec, approved_cid, hid = approved_handoff(world, ["judges"])
+    cid = card(world, spec, "wave", handoff=hid)
+    set_card_handoff(world, cid, None)
+    want = ""
+  else:
+    commit_file(world, RULES, head_text)
+    configure(world, [{"file": RULES, "to": ["judges"]}])
+    git(["commit", "-qam", "config", "--allow-empty"], world.repo)
+    cid, want = None, ""
+  assert (want == "") == (rendered == "")
+  pid, record_card, panel = open_judges(world, parent=cid)
+  assert set(panel["instructions"]) == {"local", "astra"}
+  for lane in ("local", "astra"):
+    assert panel["instructions"][lane]["text"] == want
+    assert [i["file"] for i in panel["instructions"][lane]["manifest"]] == ([RULES] if want else [])
+  assert brief_of(world, pid, 1).endswith(want)
+
+  # a later edit changes nothing: round 2 reuses the stored text, last in the brief, and each member records its lane's manifest
+  commit_file(world, RULES, "Changed after the panel opened.\n")
+  for judge, option in (("fable", "a"), ("opus", "b")):
+    assert judge_record(world, pid, record_card, 1, judge, {"Q1": option})[0] == 0
+  assert judge_record(world, pid, record_card, 1, "astra", not_run="not installed")[0] == 0
+  code, out = world.run("judges", "diff", "--panel", pid, "--round", 1, "--runcard", record_card)
+  assert code == 0, out
+  round_2 = brief_of(world, pid, 2)
+  assert round_2.endswith(want) and round_2.count("# Repository instructions") == (1 if want else 0)
+  after = panel_json(world, pid)
+  assert after["instructions"] == panel["instructions"]
+  for judge, lane in (("fable", "local"), ("opus", "local"), ("astra", "astra")):
+    assert after["rounds"]["1"][judge]["instructions"] == panel["instructions"][lane]["manifest"]
