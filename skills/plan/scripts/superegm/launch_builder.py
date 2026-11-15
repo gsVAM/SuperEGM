@@ -18,7 +18,7 @@ import superegm as core
 from superegm import body, orient, scan
 from superegm.body import consumes
 from superegm.builder_token import key_path, tool
-from superegm.decision import deleted_rulings, overridden_comments, parse_form
+from superegm.decision import deleted_rulings, overridden_comments, parse_form, recorded_rulings
 from superegm.launch import builder_email, builder_login, load_launches, terminal
 from superegm.review_plan import SPEC_LINE_RE
 
@@ -461,8 +461,13 @@ def amendments_for(st, unit: str, body: str) -> list[dict]:
   `(name, unit)` its Consumes lines list, in `at` order."""
   path = st.path("state")
   entries = (json.loads(core.read_text(path)) if path.is_file() else {}).get("amendments") or []
-  for file in sorted((path.parent / "amendments").glob("*.json")):  # `decision rule`'s files (spec section 6.5)
-    entries += json.loads(core.read_text(file))
+  files = sorted((path.parent / "amendments").glob("*.json"))  # `decision rule`'s files (spec section 6.5)
+  if files:  # a file counts once a ruling in some unit's foreman record names its comment: no record is read without one
+    ruled = {r.subject for uid in core.load_state(st.root)["units"] for r in recorded_rulings(core.load_foreman(st, uid))
+             if r.kind == "option"}
+    for file in files:
+      if file.stem in ruled:
+        entries += json.loads(core.read_text(file))
   consumed = {(n, u) for raw, u in consumes(body) for n in scan.names_of(raw)}  # the one reader of an interface name
   return sorted((a for a in entries if a["unit"] == unit or (a["name"], a["unit"]) in consumed), key=lambda a: a["at"])
 
