@@ -15,7 +15,7 @@ from superegm import review
 WRITES = frozenset(["runcards", "reviews"])  # the store kinds this subcommand writes: the card's render, a round's
 CONFIG_DEFAULTS = {"instructions": []}  # [{file: <repo-relative path>, to: [<role>, ...]}], frozen at approval
 INIT_STEP, DOCTOR_CHECKS = "", None  # no init line or doctor line of its own
-SKILLS = frozenset(["review-spec", "review-plan", "wave", "integrate", "judges"])  # the skills whose card this subcommand accepts
+SKILLS = frozenset(["review-spec", "review-plan", "wave", "integrate"])  # the skills whose card this subcommand accepts (a judge panel renders through `render`)
 ROLES = ("builder", "foreman", "reviewers", "judges")
 LANES = ("local", "astra")
 CONFIG = ".superegm/config.json"
@@ -57,6 +57,14 @@ def blob(root: Path, ref: str, rel: str) -> bytes | None:
   return shown.stdout if shown.returncode == 0 else None
 
 
+def mode(root: Path, ref: str, rel: str) -> str | None:
+  """The tree mode of `rel` at `ref` (`100644`, `100755`, `120000` for a symlink, ...), or None when `ref` lacks it."""
+  with core.hook_free() as pairs:
+    shown = subprocess.run(["git", *pairs, "ls-tree", "-z", ref, "--", rel], cwd=str(root), capture_output=True)
+  entry = shown.stdout.split(b"\0", 1)[0] if shown.returncode == 0 else b""
+  return entry.split(b" ", 1)[0].decode() if entry else None
+
+
 def head_list(root: Path, ref: str = "HEAD") -> list:
   """The `instructions` list of the config committed at `ref` (`[]` when it lacks the config or the key)."""
   data = blob(root, ref, CONFIG)
@@ -69,12 +77,6 @@ def head_list(root: Path, ref: str = "HEAD") -> list:
   if not isinstance(config, dict):
     raise core.HandoffError(f"instructions: the {CONFIG} committed at HEAD is not a JSON object")
   return check(config.get("instructions", []))
-
-
-def handoff_list(st: core.Store, handoff_id: str) -> list:
-  """The frozen `instructions` of the last approval entry whose `handoff_id` is `handoff_id`, across
-  `approvals/*.json` (`[]` with no such entry; an entry without the key reads `[]`)."""
-  return list((handoff_entry(st, handoff_id) or {}).get("instructions") or [])
 
 
 def handoff_entry(st: core.Store, handoff_id: str) -> dict | None:

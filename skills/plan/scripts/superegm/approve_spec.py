@@ -259,6 +259,8 @@ def freeze(root: Path, ref: str, listed: list, at: str | None = None) -> list:
     data = instructions.blob(root, ref, item["file"])
     if data is None:
       raise core.HandoffError(f"instructions: {item['file']} is absent at {at or ref}")
+    if instructions.mode(root, ref, item["file"]) not in ("100644", "100755"):  # a symlink's blob is its target path
+      raise core.HandoffError(f"instructions: {item['file']} is not a regular file at {at or ref}")
     if len(data) > instructions.LIMIT:
       raise core.HandoffError(f"instructions: {item['file']} is {len(data)} bytes, over {instructions.LIMIT}")
     try:
