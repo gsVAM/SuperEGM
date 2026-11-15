@@ -7,14 +7,13 @@ The module is `phase`, not `next`: `discover()` imports every submodule onto the
 `superegm.next` would shadow the builtin `next`. `next` only reads: `tick/fetch.json` and
 `refs/superegm/tick-base` as the tick left them."""
 
-import hashlib
 import json
 import re
 import subprocess
 from pathlib import Path
 
 import superegm as core
-from superegm import graph, report, review
+from superegm import graph, launch, report, review
 from superegm.approve_spec import units_section
 
 WRITES = frozenset({"chain", "runcards"})  # the store kinds this subcommand writes
@@ -61,13 +60,6 @@ def proceeded(hs: core.Store, rid, since) -> bool:
   data = review.load_review(hs, rid) if rid else None
   return any(r.get("ruling") == "proceed" and str(r.get("at") or "") > str(since or "")
              for r in (data or {}).get("rulings") or [])
-
-
-def spec_moved(root: Path, spec: Path, approval: dict, later: list) -> bool:
-  """The spec at `refs/superegm/tick-base` is neither the approved bytes nor a later link of the chain."""
-  rel = spec.resolve().relative_to(root.resolve()).as_posix()
-  blob = subprocess.run(["git", "cat-file", "-p", f"{TICK_BASE}:{rel}"], cwd=str(root), capture_output=True).stdout
-  return hashlib.sha256(blob).hexdigest() not in {approval["sha256"], *(e["sha256"] for e in later)}
 
 
 def checkout_problem(root: Path, base: str, tick: str):
@@ -157,7 +149,8 @@ def next_line(st: core.Store, hid: str) -> str:
   wait = read_json(st.root / "chain" / f"{hid}.json")
   if wait and not wait.get("answer") and not proceeded(hs, wait.get("review"), wait.get("since")):
     return f"waiting {wait['phase']}: {' '.join(str(wait.get('question') or '').splitlines())}"
-  if own and spec_moved(root, spec, entries[own[-1]], entries[own[-1] + 1:]):
+  if own and launch.origin_problems(root, config.get("base", "main"), {**entries[own[-1]], "path": str(spec)},
+                                    entries[own[-1] + 1:], ref=TICK_BASE, spec_only=True):
     return "waiting push"
   answered = bool(wait and wait.get("answer"))
   below = wait["phase"] if answered else planning_line(hs, state, spec)
