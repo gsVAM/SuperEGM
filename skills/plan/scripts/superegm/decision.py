@@ -580,11 +580,12 @@ def rule(args) -> int:
   data["rulings"] += entries
   if stops:  # the stop is written with the ruling, in one save
     data["stopped"] = stopped_entry(args.by, chosen, now, brief)
-  if amends and not closed:  # spec §6.5: the contract changes, as the file `amendments/<deviation comment id>.json`, written
+  if amends:  # spec §6.5: the contract changes, as the file `amendments/<deviation comment id>.json`, written
     # before the ruling is saved (a crash between the two leaves a file no reader trusts: `amendments_for` reads a file only
-    # once a ruling names its comment) and rewritten, or deleted when this ruling records none, by a rerun
+    # once a ruling names its comment) and rewritten, or deleted when this ruling records none, by a rerun; a close
+    # (`--posted closed:<n>`) records none, so it deletes a crashed run's file
     file = st.path("file", "amendments", f"{str(decision['source']).split()[1]}.json")
-    added = amendments_of(decision["question"], chosen, reason, int(posted.split()[1]), now, st)
+    added = [] if closed else amendments_of(decision["question"], chosen, reason, int(posted.split()[1]), now, st)
     if added:
       recorded_at = core.now_iso()
       core.atomic_write(file, [entry | {"recorded_at": recorded_at} for entry in added])

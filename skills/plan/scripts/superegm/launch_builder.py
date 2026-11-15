@@ -462,10 +462,11 @@ def amendments_for(st, unit: str, body: str) -> list[dict]:
   comment a ruling in some unit's foreman record names (an unruled file, left by a crash, is not read, and no foreman
   record is read when the directory is absent), and a 1.2.1-pre.1 handoff's legacy `state.json` `amendments[]`."""
   path = st.path("state")
-  entries = (json.loads(core.read_text(path)) if path.is_file() else {}).get("amendments") or []
+  state = json.loads(core.read_text(path)) if path.is_file() else {}  # read once: the legacy entries and the unit list
+  entries = list(state.get("amendments") or [])
   files = sorted((path.parent / "amendments").glob("*.json"))  # `decision rule`'s files (spec section 6.5)
   if files:  # a file counts once a ruling in some unit's foreman record names its comment: no record is read without one
-    ruled = {r.subject for uid in core.load_state(st.root)["units"] for r in recorded_rulings(core.load_foreman(st, uid))
+    ruled = {r.subject for uid in state.get("units") or {} for r in recorded_rulings(core.load_foreman(st, uid))
              if r.kind == "option"}
     for file in files:
       if file.stem in ruled:
