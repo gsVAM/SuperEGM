@@ -234,3 +234,12 @@ def test_a_by_hand_amend_not_offered_is_refused_as_amends_own(world):
   assert code == 1 and err.strip() == "decision: amend needs a comment with one interface deviation and no other"
   assert not foreman_of(s, "U02")["rulings"]
   assert not (s.path("file") / "amendments").exists()
+
+
+def test_an_interface_option_that_keeps_the_contract_records_no_amendment(world):
+  # an interface comment's own `one more round` option leaves the contract as it was (spec §6.5): no amendment file
+  card, s = world_on(world)
+  qid = opened(world, card, IFACE + "**Builder status:** BLOCKED\nWhich?\n- (a) one more round\n- (b) return null\n")
+  code, out = rule(world, card, qid, "(a) one more round — try again")
+  assert code == 0, out
+  assert not (s.path("file") / "amendments").exists() or not any((s.path("file") / "amendments").iterdir())
