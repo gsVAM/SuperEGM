@@ -35,3 +35,28 @@ def test_launch_subagent_calls_reads_the_entry_session(tmp_path, monkeypatch):
   assert traces.launch_subagent_calls("~/prof", {"session_id": "s1"}) == traces.subagent_calls(Path.home() / "prof", "s1")
   assert traces.launch_subagent_calls("~/prof", {"session_id": "s1"})["count"] == 2
   assert traces.launch_subagent_calls("~/prof", {}) == {"count": 0, "calls": []}
+
+
+@pytest.mark.parametrize("ender, status", [("interrupt", "interrupted"), ("reboot", "interrupted (reboot)")])
+def test_interrupted_launch_records_subagent_calls(world, ender, status):
+  from superegm import traces
+  from test_builders import seed, launched, launches_of, UNIT
+  s, card, hid, _ = seed(world)
+  launched(s, UNIT, "running")
+  profile = Path(json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]["profile_dir"])
+  sid = str(uuid.uuid4())
+  path = s.path("launches", f"{UNIT}.json")
+  data = json.loads(path.read_text(encoding="utf-8"))
+  data["launches"][0].update({"session_id": sid, "boot_id": "boot-old"})
+  path.write_text(json.dumps(data), encoding="utf-8")
+  two_calls(profile, sid)
+  if ender == "interrupt":
+    code, out = world.run("runcard", "open", "--skill", "interrupt", "--artifact", UNIT)
+    assert code == 0, out
+    code, out = world.run("interrupt", "--unit", UNIT, "--launch", 1, "--runcard", out.split()[-1])
+    assert code == 0, out
+  else:
+    superegm.reboot_launches(s, UNIT, "boot-new")
+  entry = launches_of(s)[0]
+  assert entry["status"] == status
+  assert entry["subagent_calls"] == traces.launch_subagent_calls(profile, entry) and entry["subagent_calls"]["count"] == 2
