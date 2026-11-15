@@ -70,3 +70,21 @@ def test_rerun_after_crash_records_once(world, monkeypatch):
   assert sorted(p.name for p in (hdir / "amendments").iterdir()) == ["11.json"]
   assert (hdir / "amendments" / "11.json").read_bytes() == first_bytes
   assert len(launch_builder.amendments_for(s, "U01", body)) == 1
+
+
+def test_reads_directory_and_legacy(world):
+  # a pre.1 handoff: comment 7 in state.json amendments[], comment 11 in the directory, comment 7 in both
+  from superegm import launch_builder
+  import test_builders as tb
+  from test_pre1_launch import amend, with_amendments
+  s, card, hid, _ = tb.seed(world)
+  body = "## Interfaces\n- Produces: dequeue() -> Job | null\n"
+  seven, eleven = amend("U01", "dequeue", "2026-11-01T00:00:00Z", 7), amend("U01", "dequeue", "2026-11-02T00:00:00Z", 11)
+  with_amendments(s, [seven])
+  folder = s.path("file", "amendments")
+  folder.mkdir(parents=True)
+  (folder / "11.json").write_text(json.dumps([eleven]), encoding="utf-8")
+  (folder / "7.json").write_text(json.dumps([seven]), encoding="utf-8")
+  got = launch_builder.amendments_for(s, "U01", body)
+  assert [a["comment_id"] for a in got] == [7, 11]
+  assert [a["at"] for a in got] == sorted(a["at"] for a in got)
