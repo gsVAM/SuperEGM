@@ -6,6 +6,7 @@ proves, counts and reports the session of the chain phase that comes next; with 
 1.2's tick. Every path is under `tmp_path` (`HOME` patched); the fetch is faked; no test reaches launchd or `claude`."""
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -90,15 +91,15 @@ def chained(world, monkeypatch, tmp_path, chain=True):
   return c
 
 
-def fake_fetch(world, monkeypatch, ok, stderr=""):
-  """`driver.fetch_base` faked: its calls recorded; a good fetch moves `refs/superegm/tick-base` to HEAD, as a real
-  one from a remote at the root's commit would."""
+def fake_fetch(world, monkeypatch, ok, stderr="", ref="HEAD"):
+  """`driver.fetch_base` faked: its calls recorded; a good fetch moves `refs/superegm/tick-base` to `ref` (HEAD: a
+  remote at the root's commit)."""
   calls = []
 
   def fetch(root, remote, base):
     calls.append((Path(root).resolve(), remote, base))
     if ok:
-      git(world, "update-ref", "refs/superegm/tick-base", "HEAD")
+      git(world, "update-ref", "refs/superegm/tick-base", ref)
     return ok, stderr
   monkeypatch.setattr(driver, "fetch_base", fetch, raising=False)
   return calls
@@ -147,3 +148,73 @@ def test_tick_removes_a_superseded_wait_record(world, monkeypatch, tmp_path, spa
     assert code == 0, out
   assert not record.exists()
   assert journal_lines(world, "superseded: wait record") == [f"driver: {c.hid} superseded: wait record removed"]
+
+
+def set_mode(c, mode):
+  """The handoff's approval entry with `mode` frozen as given; None removes it (a 1.2.0 entry)."""
+  path = next((c.root / "approvals").glob("*.json"))
+  record = json.loads(path.read_text(encoding="utf-8"))
+  entry = record["entries"][-1]
+  entry.pop("mode", None)
+  if mode is not None:
+    entry["mode"] = mode
+  path.write_text(json.dumps(record), encoding="utf-8")
+
+
+def arrange_line(world, monkeypatch, c, line):
+  """The store for the line `next` should print, its fake fetch good; a `wave` row's trigger fires."""
+  ref = "HEAD"
+  if line == "review-plan":
+    c.plan(*UNITS)
+  elif line == "file":
+    c.plan(*UNITS); [c.review(u) for u in UNITS]
+  elif line == "file (answered wait record)":
+    c.plan(*UNITS); [c.review(u) for u in UNITS]
+    c.wait(phase="file", question="create 3 issues?", answer="yes", by="owner", at="2026-11-15T01:00:00Z")
+  elif line == "wave":
+    c.all_filed("U02"); c.save()
+  elif line == "none":
+    c.void()
+  elif line == "waiting push":
+    c.other_spec_at_tick_base(); ref = "side"
+  elif line == "integrate":
+    c.all_filed(); c.save()
+  fake_fetch(world, monkeypatch, True, ref=ref)
+  monkeypatch.setattr(driver, "wave_trigger", lambda hs, entry, state: "U02 first launch", raising=False)
+
+
+def launched_prompt(s, hid):
+  """The prompt of the handoff's last launch, or None with none."""
+  launches = tick_launches(s, hid)
+  if not launches:
+    return None
+  return re.search(r"claude -p '([^']*)' ", launches[-1]["command"]).group(1)
+
+
+@pytest.mark.parametrize("line,mode,prompt", [
+  ("plan", "leavemealone", "/superegm:plan {spec} --handoff H1 --leavemealone"),
+  ("review-plan", "normal", "/superegm:review-plan {spec} --handoff H1"),
+  ("file", "leavemealone", "/superegm:file {spec} --handoff H1 --leavemealone"),
+  ("file (answered wait record)", "leavemealone", "/superegm:file {spec} --handoff H1"),
+  ("wave", "normal", "/superegm:wave {spec} --handoff H1"), ("none", "leavemealone", None),
+  ("waiting push", "leavemealone", None), ("integrate", "leavemealone", None),
+  ("plan", None, None), ("wave", None, "/superegm:wave {spec} --handoff H1 --leavemealone")])
+def test_tick_launches_by_phase(world, monkeypatch, tmp_path, spawn_fake, line, mode, prompt):
+  """tick_store asks next first; the spec comes from handoffs/<id>.json rebased onto the root; mode None is a 1.2.0
+  entry, which runs only its `wave` row, with `--leavemealone`."""
+  c = chained(world, monkeypatch, tmp_path)
+  set_mode(c, mode)
+  arrange_line(world, monkeypatch, c, line)
+  code, out = world.run("next", "--handoff", c.hid)
+  assert out.strip() == line.split()[0] or (line == "waiting push" and out.strip() == "waiting push"), out
+  code, out = world.run("driver", "tick")
+  assert code == 0, out
+  got = launched_prompt(c.hs, c.hid)
+  if prompt is None:
+    assert got is None
+    return
+  spec = got.split()[1]
+  assert Path(spec).resolve() == c.spec.resolve()  # the handoff record's spec, there being no state.json before plan
+  assert got == prompt.format(spec=spec).replace("H1", c.hid)
+  assert tick_launches(c.hs, c.hid)[-1]["phase"] == line.split()[0]
+  assert driver.tick_prompt(spec, "H1", line.split()[0], prompt.endswith("--leavemealone")) == prompt.format(spec=spec)
