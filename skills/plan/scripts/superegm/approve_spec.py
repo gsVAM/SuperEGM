@@ -25,6 +25,8 @@ SKILLS = frozenset(["review-spec", "review-plan", "integrate", "approve-spec"]) 
 CONFIG = ".superegm/config.json"
 FROZEN_FIELDS = ["rounds"]  # the entry fields frozen at an approval, which `--amend-units` copies where the extended entry has them (U36)
 ANY_H2 = re.compile(r"^ {0,3}##[ \t]+\S")  # an H2 as review.py reads one: up to three spaces of indent, outside a fence
+TRIAGE_FIELDS = {"reach": ("external", "agent", "config", "forged"), "later": ("easy", "migration", "version"),
+                 "critical": ("yes", "no"), "verified": ("confirmed", "refuted")}  # a pattern's fields and their values (section 5.1)
 UNITS_H2 = re.compile(r"^## (?:\d+\.?\s+)?Units\s*$")
 
 
@@ -151,22 +153,55 @@ def triage_section(lines: list[str]) -> tuple[int, list[tuple[str, bool]]] | Non
   return None if start is None else (start, body)
 
 
+def triage_refusal(line: str, reason: str) -> core.HandoffError:
+  return core.HandoffError(f"approve-spec: {line}: {reason}")
+
+
+def triage_pattern(line: str) -> dict:
+  """The `{field: value}` pairs of one `- ` line of the triage run; the line at fault refuses an empty pattern, a pair
+  that is no `field: value`, an unknown field or value, and a field named twice."""
+  pattern = {}
+  if not line[2:].strip():
+    raise triage_refusal(line, "an empty pattern")
+  for pair in line[2:].split(", "):
+    field, sep, value = pair.strip().partition(": ")
+    if not sep:
+      raise triage_refusal(line, f"`{pair.strip()}` is not `field: value`")
+    if field not in TRIAGE_FIELDS:
+      raise triage_refusal(line, f"unknown field {field}: one of {', '.join(TRIAGE_FIELDS)}")
+    if field in pattern:
+      raise triage_refusal(line, f"field {field} repeated in one pattern")
+    if value not in TRIAGE_FIELDS[field]:
+      raise triage_refusal(line, f"unknown value {value} for {field}: one of {', '.join(TRIAGE_FIELDS[field])}")
+    pattern[field] = value
+  return pattern
+
+
 def triage_patterns(text: str) -> list[dict] | None:
   """The patterns of the spec's triage section (section 5.1), in section order; None without the section (its first
   H2 outside a fenced block, exactly `Triage`). The section holds one `Unblock:` line and the run of `- ` lines
-  directly after it, each `field: value` pairs separated by `, `; any other line is prose."""
-  section = triage_section(text.splitlines())
+  directly after it, each `field: value` pairs separated by `, `; any other line is prose. Refused with the line at
+  fault: a bad pattern (`triage_pattern`), a second `Unblock:` line, a section with no `Unblock:` line (the heading is
+  the line) or an `Unblock:` line with no pattern."""
+  lines = text.splitlines()
+  section = triage_section(lines)
   if section is None:
     return None
-  patterns, state = [], "before"  # before the `Unblock:` line, in the run after it, past the run's end
+  patterns, state, unblock = [], "before", ""  # before the `Unblock:` line, in the run after it, past the run's end
   for line, fenced in section[1]:
-    if state == "before" and not fenced and line.rstrip() == "Unblock:":
-      state = "run"
+    if not fenced and line.rstrip() == "Unblock:":
+      if state != "before":
+        raise triage_refusal(line, "a second Unblock: line")
+      state, unblock = "run", line
     elif state == "run":
       if fenced or not line.startswith("- "):
         state = "past"
       else:
-        patterns.append(dict(pair.split(": ", 1) for pair in line[2:].split(", ")))
+        patterns.append(triage_pattern(line))
+  if state == "before":
+    raise triage_refusal(lines[section[0]], "no Unblock: line")
+  if not patterns:
+    raise triage_refusal(unblock, "no pattern after Unblock:")
   return patterns
 
 
@@ -286,6 +321,7 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   rounds = rounds_line(core.read_text(spec))
   if rounds is None:  # no `Rounds:` line: the live value, which `review.rounds` refuses outside 1-10
     rounds = live_rounds(st)
+  triage_patterns(core.read_text(spec))  # U39: a malformed triage section refuses here, before the prompt and the commit
   last = core.load_approval(st, spec)
   if last:
     require_branch_holds(st, root, spec.relative_to(root).as_posix(), last)
