@@ -9,6 +9,7 @@
 import argparse
 import contextlib
 import io
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -561,10 +562,21 @@ def rule(args) -> int:
   # recorded before the read-back, the session's post marked `unread` (its GitHub time not yet read), so a
   # `status --wait` pass in between compares its edits with its own `created_at` and skips the unedited post
   added = amendments_of(decision["question"], chosen, reason, int(posted.split()[1]), now) if amends and not closed else []
-  if added:  # spec §6.5: the contract changes, its own file written before the ruling is saved
+  if amends and not closed:  # spec §6.5: the contract changes, its own file written before the ruling is saved
     target = st.path("file", "amendments", f"{str(decision['source']).split()[1]}.json")
-    if not target.exists():  # a rerun after a crash, its new ruling comment or not: the first record stands
-      core.atomic_write(target, added)
+    if target.exists() or added:
+      saved = {r.get("posted") for r in data["rulings"][:len(data["rulings"]) - len(entries)]}
+      try:
+        held = json.loads(target.read_text()) if target.exists() else []
+      except (OSError, ValueError):
+        held = None
+      mine = [(a["unit"], a["name"], a["text"]) for a in added]
+      kept = held is not None and [(a.get("unit"), a.get("name"), a.get("text")) for a in held] == mine
+      orphan = not held or any(f"comment {a.get('comment_id')}" not in saved for a in held)
+      # a file whose ruling was never saved (a crash before `save_foreman`) belongs to this rerun's ruling: the same
+      # contract keeps its bytes, any other is replaced, and a ruling that leaves the contract as it was empties it
+      if (added or held) and orphan and not kept:
+        core.atomic_write(target, added)
   core.save_foreman(st, unit, data)
   if url:  # the session's own post: its time is GitHub's creation time, read back, so any edit since (one before the
     # read-back too) reads as an edit after the record; a failed read-back leaves the entry `unread`
