@@ -193,8 +193,25 @@ def units_limits_problems(config: dict) -> list:
   return problems
 
 
+def unit_over_limits(uid: str, body: str, handoff: graph.Handoff) -> list:
+  """One `units-limit` problem line per `units` limit the unfiled unit's body, Scope paths or Steps exceed (spec section 6)."""
+  limits, problems = handoff.config["units"], []
+  size = len(body.encode("utf-8"))
+  if size > limits["max_body_kb"] * 1024:
+    problems.append(f"units-limit: {uid}: units.max_body_kb {limits['max_body_kb']} ({limits['max_body_kb'] * 1024:,} bytes) "
+                    f"is exceeded: the body is {size:,} bytes")
+  files = len(handoff.plan.units[uid].scope)
+  if files > limits["max_files"]:
+    problems.append(f"units-limit: {uid}: units.max_files {limits['max_files']} is exceeded: {files} Scope paths")
+  steps = len(core.body.step_paths(body))
+  if steps > limits["max_steps"]:
+    problems.append(f"units-limit: {uid}: units.max_steps {limits['max_steps']} is exceeded: {steps} Steps")
+  return problems
+
+
 def scan_handoff(handoff: graph.Handoff) -> list:
   problems = units_limits_problems(handoff.config)
+  valid = not problems
   for item in handoff.writes():
     if item[0] == "issue":
       dod = handoff.plan.units[item[1]].dod if item[1] != "tracking" else []
@@ -202,6 +219,8 @@ def scan_handoff(handoff: graph.Handoff) -> list:
       problems += scan_text(item[2], handoff.config, "body", label=f"{item[1]} title")
       if item[1] != "tracking":
         problems += scan_body(item[1], item[4], handoff)
+        if valid and handoff.filed(item[1]) is None:
+          problems += unit_over_limits(item[1], item[4], handoff)
   return problems
 
 
