@@ -328,3 +328,37 @@ def test_phase_outcome_and_failures(world, monkeypatch, tmp_path, spawn_fake, cl
   assert {earlier, mine} <= review.stall_cards(c.hs, {"kind": "plan", "artifact": "U01"}, mine)
   rc, out = world.run("driver", "status", card=None)
   assert rc == 0 and f"review-plan card {mine} open" in out, out
+
+
+@pytest.mark.parametrize("chain,trigger", [(True, "U01 merged pr=7"), (False, None)])
+def test_merged_trigger_then_integrate(world, monkeypatch, tmp_path, chain, trigger):
+  """Last PR merged, issue open: tick_trigger fires with the chain on; after the wave session saves the snapshot,
+  next prints integrate; tick_trigger's reboot and exit-file proofs read a plan top-level card."""
+  from types import SimpleNamespace
+  from superegm import status
+  c = chained(world, monkeypatch, tmp_path, chain=chain)
+  c.all_filed(open_unit="U01")
+  c.filed("U01", 1)  # the saved snapshot: no PR yet
+  c.save()
+  fresh = {u: {**status.EMPTY, "pr": {"number": 10 + n}, "ci": "success", "landed": True} for n, u in enumerate(UNITS, 1)}
+  fresh["U01"] = {**status.EMPTY, "pr": 7}  # the fresh pass: merged (pr set, ci null), the issue left open
+  monkeypatch.setattr(superegm, "status_pass", lambda handoff, save=True: ({"units": fresh, "ready": []}, None))
+  handoff = SimpleNamespace(store=c.hs, state=json.loads(c.hs.path("state").read_text(encoding="utf-8")),
+                            graph=SimpleNamespace(order=list(UNITS)), config=superegm.load_config(world.repo))
+  assert status.tick_trigger(handoff) == trigger
+  c.filed("U01", 1, pr=7)  # the wave session saved the snapshot
+  c.save()
+  handoff.state = json.loads(c.hs.path("state").read_text(encoding="utf-8"))
+  assert status.tick_trigger(handoff) is None  # the saved snapshot already shows it so
+  code, out, _, _ = c.next()
+  assert not chain or (code == 0 and out == "integrate"), out
+  # tick_trigger's reboot and exit-file proofs read a plan top-level card
+  s = superegm.Store(world.artifacts)
+  entry = tick_launch(s, c.hid, card="driver-abc-0001", exit=0)
+  rc, out = driven_card(world, monkeypatch, c, "plan", dcard="driver-abc-0001")
+  assert rc == 0, out
+  cid = out.strip()
+  driver.exit_file_proof(c.hs, tick_launches(s, c.hid))
+  assert card_of(c.hs, cid)["interrupted_at"] and status.tick_trigger(handoff) == f"exit-file {cid}"
+  set_entry(s, c.hid, 1, status="interrupted (reboot)")
+  assert status.tick_trigger(handoff) == "reboot 1"
