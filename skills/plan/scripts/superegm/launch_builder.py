@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch, started
 detached and recorded `running`."""
@@ -15,14 +15,14 @@ import uuid
 from pathlib import Path
 
 import superegm as core
-from superegm import body, orient, scan
+from superegm import body, instructions, orient, scan
 from superegm.body import consumes
 from superegm.builder_token import key_path, tool
 from superegm.decision import deleted_rulings, overridden_comments, parse_form, recorded_rulings
 from superegm.launch import builder_email, builder_login, load_launches, terminal
 from superegm.review_plan import SPEC_LINE_RE
 
-WRITES = frozenset(["launches", "orient_unit"])  # the store kinds this subcommand writes
+WRITES = frozenset(["launches", "orient_unit", "runcards"])  # the store kinds this subcommand writes; the card's render (U37)
 CONFIG_DEFAULTS = {  # its own config key (U32)
     "builder": {"profile_dir": "~/.superegm/builder-profile", "model": "claude-opus-5-5", "effort": "medium",
                 "permission_mode": "acceptEdits", "gh_token_env": "SUPEREGM_BUILDER_TOKEN",
@@ -120,6 +120,10 @@ def prepare(args, card):
   text = prompt_text(number, unit, issue_body, orders_text(tools, launched_gh, builder_config["max_subagent_calls"]), orient_text, comments, reviews, pr, builder, audit, pr_block,
                      spec_range=range_text, owners=config.get("owners") or [], foreman=foreman_data,
                      amendments=amendments_for(st, unit, issue_body))
+  # the builder's `# Repository instructions`, the handoff's frozen files, rendered once per card and placed last (U37)
+  manifest, section = instructions.render_stored(st, "builder", "local", card=args.runcard, handoff_id=st.handoff_id)
+  if section:
+    text = text.rstrip("\n") + "\n\n---\n\n" + section
   worktree = add_worktree(handoff.repo_root, st, unit, rnd, branch, pr)
   prompt = st.path("launches", f"{unit}_r{rnd}_prompt.md")
   core.atomic_write(prompt, text)
@@ -140,7 +144,8 @@ def prepare(args, card):
   launches.append({"round": rnd, "reason": launch_reason(launches, foreman_data), "worktree": str(worktree), "branch": branch,
                    "started_at": core.now_iso(), "status": "running",
                    "model": pair[0], "effort": pair[1], "tier": tier,  # the requested pair (U28), picked by the tier (U33)
-                   "result_file": str(result), "prompt_sha256": core.sha256_file(prompt), "boot_id": core.boot_id(), "pid": pid, "command": line, "session_id": session_id})
+                   "result_file": str(result), "prompt_sha256": core.sha256_file(prompt), "boot_id": core.boot_id(), "pid": pid, "command": line, "session_id": session_id,
+                   "instructions": manifest})  # the files that reached the prompt, [] when none was addressed (U37)
   core.atomic_write(st.path("launches", unit), {"launches": launches})
   done = f"{unit} launch {rnd} running (pid {pid})"
   core.journal(st, done)
