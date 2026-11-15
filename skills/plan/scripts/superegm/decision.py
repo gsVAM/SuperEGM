@@ -482,6 +482,8 @@ def rule(args) -> int:
       dropped(st, args, f"{d['id']} already ruled")
   decision = decisions[0]
   basis = next((d for d in decisions if d["point"] in (1, 2)), decision) if found and found.kind == "redesign" else decision
+  if head.strip() == "amend" and decision["point"] == 3 and str(decision["source"]).startswith("comment") and "amend" not in decision["options"]:
+    check_amend(st, decision["question"], reason)  # not offered: a comment without exactly one interface heading (spec §6.5)
   chosen = check_ruling(basis["point"], basis["options"], head.strip(), args.by)
   brief = None
   if found:  # the record is the comment's ruling: a `--ruling` that resolves to another option is refused
