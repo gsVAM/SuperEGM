@@ -60,8 +60,9 @@ def check_amend(st, text: str, reason: str) -> None:
     raise Refusal("decision: amend needs a comment with one interface deviation and no other")
   path = st.path("unit", h["unit"])
   lines = "\n".join(core.body.sections(core.read_text(path)).get("Interfaces", [])) if path.exists() else ""
-  if not re.search(rf"(?<![\w.]){re.escape(h['name'])}\b", lines):
-    raise Refusal(f"decision: amend names {h['unit']} {h['name']}, not in {h['unit']}'s Interfaces lines")
+  name = h["name"].split("(")[0]  # cut at its `(` as amendments_of and body.consumes read it
+  if not re.search(rf"(?<![\w.]){re.escape(name)}\b", lines):
+    raise Refusal(f"decision: amend names {h['unit']} {name}, not in {h['unit']}'s Interfaces lines")
 
 # The one ruling grammar (spec section 13.2, amendment 5): a comment's first line in one of these forms and no other.
 FID = r"[^\s()]+"
@@ -711,6 +712,8 @@ def check_ruling(point: int, options: list, ruling: str, by: str = "") -> str:
   for option in options:
     letter, _, rest = option.partition(" ") if option.startswith("(") else ("", "", option)
     if text and text in (option, letter, rest) and (point != 1 or fid):
+      if point == 3 and rest == "amend" and by.startswith("judges:"):  # the option by its letter, or by `(a) amend`
+        raise Refusal("decision: amend is the owner's alone")
       return f"{fid} {rest}" if point == 1 else rest
   extra = ["redesign — <one sentence why>"] if point in (1, 2) else []  # a head's third ruling, in no option list
   raise Refusal("decision: ruling is none of the options: " + "; ".join(options + extra))
