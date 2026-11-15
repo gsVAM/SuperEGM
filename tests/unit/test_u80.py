@@ -10,6 +10,7 @@ import pytest
 
 from superegm import launch_builder, prepare
 import test_builders as tb
+from test_pre1_launch import amend
 from test_builders import spawn_fake, no_graphify, which  # noqa: F401  the fixtures test_builders' launches run under
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -26,7 +27,8 @@ def test_orders_and_brief_wording():
 
 BLOCKED = "**Builder status:** BLOCKED\nWhich?\n- (a) keep\n- (b) change\n"
 NEEDS = "**Builder status:** NEEDS_CONTEXT\nWhich?\n- (a) keep\n- (b) change\n"
-INTERFACE = "**Deviation (interface):** U03 store: takes the root\n"
+DONE = "**Builder status:** DONE_WITH_CONCERNS\nUnsure of the amend wording.\n"
+INTERFACE ="**Deviation (interface):** U03 store: takes the root\n"
 
 
 @pytest.mark.parametrize("since_last_launch, reason", [
@@ -35,6 +37,7 @@ INTERFACE = "**Deviation (interface):** U03 store: takes the root\n"
   ("a ruling on a **Builder status:** BLOCKED comment", "blocked"),
   ("a ruling on a **Builder status:** NEEDS_CONTEXT comment", "blocked"),
   ("a ruling on a **Deviation (interface):** comment with no status", "harness"),
+  ("a ruling on a **Builder status:** DONE_WITH_CONCERNS comment", "harness"),
   ("nothing", "harness"),
 ])
 def test_launch_reason(since_last_launch, reason):
@@ -42,6 +45,7 @@ def test_launch_reason(since_last_launch, reason):
   launches = [] if since_last_launch == "no launch before" else [{"round": 1, "started_at": "2026-11-01T00:00:00Z"}]
   question = {"a ruling on a **Builder status:** BLOCKED comment": BLOCKED,
               "a ruling on a **Builder status:** NEEDS_CONTEXT comment": NEEDS,
+              "a ruling on a **Builder status:** DONE_WITH_CONCERNS comment": DONE,
               "a ruling on a **Deviation (interface):** comment with no status": INTERFACE}.get(since_last_launch)
   foreman = {"rounds": [], "decisions": [], "rulings": []}
   if since_last_launch == "a round posted":
@@ -67,15 +71,11 @@ def test_duration_ms_present_or_absent(world, monkeypatch, spawn_fake, value, re
   assert latest.get("duration_ms", None) == recorded and (("duration_ms" in latest) is (recorded is not None))
 
 
-def amendment(unit, name, at, cid):
-  return {"unit": unit, "name": name, "text": f"{unit} {name} now reads v{cid}", "comment_id": cid, "at": at}
-
-
 def test_amendments_and_applies_to_this_head(tmp_path):
   # own unit's and a Consumes line's amendments, by `at`; another unit's left out
   body = "# U03 — Worker\n\n## Interfaces\n- Consumes: g (U01)\n- Produces: f() -> None\n"
-  entries = [amendment("U01", "g", "2026-11-02T00:00:00Z", 12), amendment("U09", "h", "2026-11-01T00:00:00Z", 13),
-             amendment("U03", "f", "2026-11-01T00:00:00Z", 11)]
+  entries = [amend("U01", "g", "2026-11-02T00:00:00Z", 12), amend("U09", "h", "2026-11-01T00:00:00Z", 13),
+             amend("U03", "f", "2026-11-01T00:00:00Z", 11)]
   (tmp_path / "state.json").write_text(json.dumps({"amendments": entries}), encoding="utf-8")
 
   class St:
