@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: renamed from test_egm_handoff.py; helper and skill paths under skills/plan and skills/wave; approve_spec's runcards and init.steps() (U32); the `units` key of the config `init` writes (U42); the expected config and approval-entry key sets take `review` and `rounds` (U36).
+# Modified by SuperEGM (gsVAM), 2026: renamed from test_egm_handoff.py; helper and skill paths under skills/plan and skills/wave; approve_spec's runcards and init.steps() (U32); the `units` key of the config `init` writes (U42); the expected config and approval-entry key sets take `review` and `rounds` (U36); `phase` registers `next` (U43).
 
 """U03's tests: the helper package, the store, run cards, the gating, init, the body
 parsers, the schemas, the renames and the removals; EGM's tests of the shared names."""
@@ -203,8 +203,9 @@ def test_one_module_per_subcommand(name):
   assert callable(module.register) and callable(module.run)
   parser = superegm.build_parser()
   choices = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction)).choices
-  assert name.replace("_", "-") in choices
-  assert choices[name.replace("_", "-")].get_default("run") is module.run
+  command = {"phase": "next"}.get(name, name.replace("_", "-"))  # U43: `phase` registers `next` (the builtin's name)
+  assert command in choices
+  assert choices[command].get_default("run") is module.run
   defs = [l for l in (scripts / "superegm.py").read_text(encoding="utf-8").splitlines() if l.startswith("def ")]
   assert defs == ["def main(argv=None):"]
 
