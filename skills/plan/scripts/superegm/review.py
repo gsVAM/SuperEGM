@@ -926,9 +926,10 @@ def stall_cards(st: core.Store, review: dict, runcard: str) -> set:
   last = max((i for i, r in enumerate(rounds) if r.get("phase") == "posted" and r.get("posted_at")), default=None)
   since = rounds[last]["posted_at"] if last is not None else None
   cards = {runcard} | {r["runcard"] for r in (rounds[last + 1:] if last is not None else []) if r.get("runcard")}
-  for other in sorted(st.card_dir(runcard).glob("wave-*.json")):
+  for other in sorted(st.card_dir(runcard).glob("*.json")):  # the top-level cards of every chain phase (U44)
     data = json.loads(core.read_text(other))
-    if data.get("skill") == "wave" and (since is None or (data.get("opened_at") or "") >= since):
+    top = data.get("skill") == "wave" or (data.get("skill") in core.CHAIN_PHASES and not data.get("parent"))
+    if top and (since is None or (data.get("opened_at") or "") >= since):
       cards.add(other.stem)
   return cards
 

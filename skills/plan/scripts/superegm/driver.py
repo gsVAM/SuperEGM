@@ -178,25 +178,61 @@ def counted_failures(hs: core.Store, launches: list, state: dict, set_aside: int
   exit, no top-level `wave` card naming the launch's card, or one opened after `state.status.at` (or with it
   absent: no `status --wait` ever saved)."""
   at = (state.get("status") or {}).get("at")
-  cards = [c for _, c in core.top_wave_cards(hs)]
+  chain = chain_on(hs.config)
+  cards = [c for _, c in (core.top_phase_cards(hs) if chain else core.top_wave_cards(hs))]
   launches = [e for e in launches if not core.backed_off(e)]  # never started: no failure, no reset
   start = max((i + 1 for i, e in enumerate(launches) if str(e.get("status") or "").startswith("interrupted")
                or e.get("round", 0) <= set_aside), default=0)
-  typed = [c["opened_at"] for c in cards if not c.get("driver_card") and at and c["opened_at"] <= at]
+  # the intervening success: a typed `wave` card opened at or before the save; with the chain on, a typed top-level
+  # card of any other chain phase restarts the count too (U44)
+  typed = [c["opened_at"] for c in cards if not c.get("driver_card")
+           and ((at and c["opened_at"] <= at) if c.get("skill") == "wave" else chain)]
   since = max(typed, default=None)
   counted = [e for e in launches[start:] if since is None or e["started_at"] > since]
 
   def failed(entry: dict) -> bool:
-    if exit_code(entry) not in (None, "0"):
-      return True
-    mine = [c for c in cards if c.get("driver_card") == entry.get("card")]
-    return not mine or any(at is None or c["opened_at"] > at for c in mine)
+    if entry.get("outcome"):  # decided once, when the session ended (U44)
+      return entry["outcome"] == "failed"
+    return wave_failed(entry, cards, at)
 
   return counted[-2:] if len(counted) >= 2 and failed(counted[-1]) and failed(counted[-2]) else []
 
 
+def wave_failed(entry: dict, cards: list, at) -> bool:
+  """1.2's failure test of a `wave` launch: a non-zero exit, no top-level card naming the launch's card, or one
+  opened after `state.status.at` (or with it absent)."""
+  if exit_code(entry) not in (None, "0"):
+    return True
+  mine = [c for c in cards if c.get("driver_card") == entry.get("card")]
+  return not mine or any(at is None or c["opened_at"] > at for c in mine)
+
+
 def twice_failed(hs: core.Store, data: dict, state: dict) -> bool:
   return bool(counted_failures(hs, data["launches"], state, data.get("set_aside") or 0))
+
+
+def settle_outcomes(st: core.Store, hs: core.Store) -> None:
+  """With the chain on, each launch whose session ended (its exit file written, or interrupted after it started)
+  and has no `outcome` gets one, once: a `wave` launch by 1.2's test; any other phase `succeeded` when its driven
+  card closed, its exit code is 0, and `next` now prints another line or a wait record exists, else `failed`."""
+  from superegm import phase
+  data = core.load_driver(hs)
+  ended = [e for e in data["launches"] if not core.backed_off(e) and not e.get("outcome") and core.tick_terminal(e)]
+  if not ended:
+    return
+  cards = [c for _, c in core.top_phase_cards(hs)]
+  at = ((core.load_state(hs.root).get("status") or {}).get("at"))
+  for entry in ended:
+    kind = entry.get("phase") or "wave"
+    if kind == "wave":
+      entry["outcome"] = "failed" if wave_failed(entry, cards, at) else "succeeded"
+      continue
+    mine = [c for c in cards if c.get("driver_card") == entry.get("card")]
+    closed = bool(mine) and all(c.get("closed_at") and not c.get("interrupted_at") for c in mine)
+    moved = closed and exit_code(entry) == "0" and (
+      st.path("chain", hs.handoff_id).is_file() or phase.next_line(st, hs.handoff_id).split(" ")[0] != kind)
+    entry["outcome"] = "succeeded" if moved else "failed"
+  core.atomic_write(hs.path("driver", hs.handoff_id), data)
 
 
 def exit_file_proof(hs: core.Store, launches: list) -> None:
@@ -204,7 +240,7 @@ def exit_file_proof(hs: core.Store, launches: list) -> None:
   ended without closing its card; that card, and no other, marked `interrupted`."""
   if not launches or exit_code(launches[-1]) is None:
     return
-  for path, card in core.top_wave_cards(hs):
+  for path, card in core.top_phase_cards(hs):
     if card.get("driver_card") == launches[-1].get("card") and is_open(card):
       core.interrupt_card(hs, path, card, f"tick launch {launches[-1]['round']} exited")
 
@@ -330,6 +366,8 @@ def tick_store(entry: dict) -> None:
     core.STORE = hs  # the one mid-run STORE switch: it reaches every reader by intent, the notify hook's included
     core.reboot_proof(hs, current)
     exit_file_proof(hs, core.load_driver(hs)["launches"])
+    if chain:
+      settle_outcomes(st, hs)
   for hid in sorted(ids, key=lambda h: last_started(st, h)):
     hs = core.handoff_store(st, hid)
     core.STORE = hs  # the one mid-run STORE switch: it reaches every reader by intent, the notify hook's included
@@ -478,9 +516,9 @@ def status() -> int:
         last = data["launches"][-1]
         parts.append(f"launch {last['round']} started {last['started_at']} pid {last.get('pid', '-')} "
                      f"exit file {'yes' if Path(last['exit_file']).is_file() else 'no'}")
-      for path, card in core.top_wave_cards(hs):
+      for path, card in core.top_phase_cards(hs):
         if is_open(card):
-          parts.append(f"wave card {path.stem} open {minutes_since(card['opened_at'])} min")
+          parts.append(f"{card['skill']} card {path.stem} open {minutes_since(card['opened_at'])} min")
       if data.get("refused"):
         parts.append(f"refused: {data['refused']['reason']}")
       print(f"{hid}: {'; '.join(parts) or 'no tick launch'}")
@@ -498,7 +536,7 @@ def reset() -> int:
   hs = core.STORE
   hid, data = hs.handoff_id, core.load_driver(hs)
   live = [e for e in data["launches"] if not core.tick_terminal(e)]
-  cards = [(path, card) for path, card in core.top_wave_cards(hs) if is_open(card)]
+  cards = [(path, card) for path, card in core.top_phase_cards(hs) if is_open(card)]
   failures = [] if live else counted_failures(hs, data["launches"], core.load_state(hs.root), data.get("set_aside") or 0)
   if not live and not cards and not data.get("refused") and not failures:
     raise core.HandoffError(f"{hid} has no live tick launch or open wave card")
