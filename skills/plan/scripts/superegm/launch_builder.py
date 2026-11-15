@@ -457,8 +457,10 @@ def filed_body(state, unit):
 
 
 def amendments_for(st, unit: str, body: str) -> list[dict]:
-  """Spec section 6.5: the handoff's recorded `amendments[]` for the unit's own Interfaces and for every
-  `(name, unit)` its Consumes lines list, in `at` order."""
+  """Spec section 6.5: the recorded amendments for the unit's own Interfaces and for every `(name, unit)` its Consumes
+  lines list (matched through `scan.names_of`), in `at` order. Two sources: each `amendments/<comment id>.json` whose
+  comment a ruling in some unit's foreman record names (an unruled file, left by a crash, is not read, and no foreman
+  record is read when the directory is absent), and a 1.2.1-pre.1 handoff's legacy `state.json` `amendments[]`."""
   path = st.path("state")
   entries = (json.loads(core.read_text(path)) if path.is_file() else {}).get("amendments") or []
   files = sorted((path.parent / "amendments").glob("*.json"))  # `decision rule`'s files (spec section 6.5)
