@@ -93,6 +93,22 @@ def test_cap_stored_at_open(world, kind, source, cap):
     assert code == 1 and "review.rounds" in out, out
 
 
+@pytest.mark.parametrize("review", [7, False, [], "3", None])
+def test_a_review_key_that_is_no_object_is_refused_naming_review_rounds(world, review):
+  """A hand-edited `review` that is not an object is a refusal naming `review.rounds` where the live value is read
+  (a spec's open, `approve-spec`'s freeze), never a traceback and never the default silently."""
+  spec, cid, rid = converged_spec(world)
+  set_config(world, repo=REPO, banned_terms=BANNED, review=review)
+  code, out = approve(world, spec, cid, "--yes")
+  assert code == 1 and "review.rounds" in out, out
+  assert not hstore(world).path("approvals", SLUG).exists()
+  other = spec.with_name("other-design.md")
+  other.write_text(SPEC, encoding="utf-8")
+  code, out = world.run("review", "open", "--kind", "spec", "--artifact", str(other), "--reviewers",
+                        PANEL_OF["spec"], "--runcard", card(world, other))
+  assert code == 1 and "review.rounds" in out, out
+
+
 def with_rounds_line(extra):
   """SPEC with `extra` before its first H2, or (an `(after the first H2)` line) inside its first section."""
   if extra.startswith("(after an indented"):  # an H2 indented up to three spaces is still the first H2
