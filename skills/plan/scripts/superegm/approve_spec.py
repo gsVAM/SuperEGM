@@ -6,7 +6,7 @@
 # ingest once before the refusals, the refusal of an unsettled external finding, an external finding's carried copies
 # as one escalated pair discharged by its latest copy alone, and a re-approval of the same cycle reading that cycle
 # again and keeping the replaced entry's unnamed pairs (U26); `--amend-units` typed by hand opens and closes its own
-# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units`, and a hand-written prior approval read as `since` 0 (U36); the triage section parsed, refused with its line and frozen as `triage` (U39); the run mode frozen as the entry's `mode` (U43); an opening approval refused over a partly filed handoff (U53).
+# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units`, and a hand-written prior approval read as `since` 0 (U36); the triage section parsed, refused with its line and frozen as `triage` (U39); the run mode frozen as the entry's `mode` (U43); an opening approval refused over a partly filed handoff, and the last filing restored over an unapplied dry run (U53).
 
 """superegm approve-spec: record the owner's approval of a converged spec (spec section 8)."""
 
@@ -74,6 +74,23 @@ def incomplete_filing(state: dict) -> bool:
   if not (receipt.get("complete") and receipt.get("sha256") == filings[-1].get("sha256") and not receipt.get("problems")):
     return True
   return any(not (record or {}).get("number") for record in (state.get("units") or {}).values())
+
+
+def discard_unapplied_dry_run(st: core.Store, hid: str) -> None:
+  """U53: an approval opening a new handoff over a filed one restores the older handoff's `confirmed.sha256`,
+  `confirmed.writes` and `confirmed_sha256` from its last `filings[]` entry (its `repo` and the rest of `confirmed`
+  kept), so a later dry run never applied cannot leave its receipt failing `require_receipt`; a handoff with a
+  `confirmed` list and no `filings[]` entry is left untouched."""
+  state = handoff_state(st, hid)
+  filings = state.get("filings") or []
+  if not filings or state.get("confirmed_sha256") == filings[-1].get("sha256"):
+    return
+  discarded, last = state.get("confirmed_sha256") or "", filings[-1]
+  state["confirmed"] = {**(state.get("confirmed") or {}), "sha256": last["sha256"], "writes": last["writes"]}
+  state["confirmed_sha256"] = last["sha256"]
+  older = core.handoff_store(st, hid)
+  core.atomic_write(older.path("state"), state)
+  core.journal(older, f"dry run {discarded[:12]} discarded")
 
 
 def handoff_id_for(st: core.Store, sha: str, stem: str, entries: list) -> tuple:
@@ -368,6 +385,8 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   entry = entry_of(sha, commit, args.runcard, rid, handoff_id, kind, escalated, {"rounds": rounds, "triage": triage, "mode": mode})
   path = append_entry(st, spec, entry)
   write_handoff_file(st, handoff_id, spec, entry["approved_at"] if kind == "opening" else None)
+  if superseded and superseded.get("handoff_id"):
+    discard_unapplied_dry_run(st, superseded["handoff_id"])
   core.journal(st, f"approve-spec {kind} {handoff_id} sha256 {sha[:12]} at review {rid} commit {commit[:12]} under {args.runcard}")
   print(f"approval recorded in {path}")
   return 0
