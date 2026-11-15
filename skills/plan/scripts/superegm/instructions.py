@@ -11,7 +11,7 @@ import subprocess
 
 import superegm as core
 
-WRITES = frozenset()  # the store kinds this subcommand writes
+WRITES = frozenset(["runcards", "reviews"])  # the store kinds this subcommand writes: the card's render, a round's
 CONFIG_DEFAULTS = {"instructions": []}  # [{file: <repo-relative path>, to: [<role>, ...]}], frozen at approval
 INIT_STEP, DOCTOR_CHECKS = "", None  # no init line or doctor line of its own
 SKILLS = frozenset(["review-spec", "review-plan", "wave", "integrate", "judges"])  # the skills whose card this subcommand accepts
@@ -65,13 +65,18 @@ def head_list(root: Path) -> list:
 def handoff_list(st: core.Store, handoff_id: str) -> list:
   """The frozen `instructions` of the last approval entry whose `handoff_id` is `handoff_id`, across
   `approvals/*.json` (`[]` with no such entry; an entry without the key reads `[]`)."""
+  return list((handoff_entry(st, handoff_id) or {}).get("instructions") or [])
+
+
+def handoff_entry(st: core.Store, handoff_id: str) -> dict | None:
+  """The last approval entry whose `handoff_id` is `handoff_id`, across `approvals/*.json`, or None."""
   found = None
   for path in sorted(st.path("approvals", "x").parent.glob("*.json")):
     record = json.loads(core.read_text(path))
     for entry in record["entries"] if "entries" in record else [record]:
       if entry.get("handoff_id") == handoff_id:
         found = entry
-  return list((found or {}).get("instructions") or [])
+  return found
 
 
 def section(files: list) -> str:
@@ -108,13 +113,47 @@ def render(st: core.Store, role: str, handoff_id: str | None = None, root: Path 
   return [{"file": f, "sha": s} for f, s, _ in files], section([(f, t) for f, _, t in files])
 
 
+def render_stored(st: core.Store, role: str, lane: str = "local", *, card: str | None = None, review: str | None = None,
+                  round: int | None = None, handoff_id: str | None = None, root: Path | None = None) -> tuple[list[dict], str]:
+  """The store-once path: the render stored for that card (or that review's round), role and lane when one exists,
+  else `render`'s, stored there first: on the card as `instructions.<role>.<lane>` (`{approved_at, manifest, text}`,
+  `approved_at` the approval entry read, null with none), or as `reviews/<id>/instructions-<n>-<role>-<lane>.json`
+  (`{manifest, text}`). A later call returns the stored one whatever `HEAD` or the latest approval is then."""
+  if card is not None:
+    stored = ((core.load_card(st, card).get("instructions") or {}).get(role) or {}).get(lane)
+    if stored is not None:
+      return stored["manifest"], stored["text"]
+    manifest, text = render(st, role, handoff_id=handoff_id, root=root)
+    entry = handoff_entry(st, handoff_id) if handoff_id is not None else None
+    record = core.load_card(st, card)
+    record.setdefault("instructions", {}).setdefault(role, {})[lane] = {
+      "approved_at": (entry or {}).get("approved_at"), "manifest": manifest, "text": text}
+    core.atomic_write(st.path("runcards", card), record)
+    return manifest, text
+  path = st.path("reviews", review, f"instructions-{round}-{role}-{lane}.json")
+  if path.is_file():
+    stored = json.loads(core.read_text(path))
+    return stored["manifest"], stored["text"]
+  manifest, text = render(st, role, handoff_id=handoff_id, root=root)
+  core.atomic_write(path, {"manifest": manifest, "text": text})
+  return manifest, text
+
+
 def run(args):
   core.require_runcard(args, SKILLS)
   if bool(args.handoff) == bool(args.design):
     raise core.HandoffError("instructions: exactly one of --handoff and --spec is required")
+  st = core.STORE or core.store(core.git_toplevel(Path.cwd()), args)
   try:
     if args.design:
-      head_list(core.git_toplevel(Path(args.design).expanduser().resolve()))
+      if not args.review or args.round is None:
+        raise core.HandoffError("--spec requires --review and --round")
+      _, text = render_stored(st, args.role, args.lane, review=args.review, round=args.round,
+                              root=core.git_toplevel(Path(args.design).expanduser().resolve()))
+    else:
+      _, text = render_stored(st, args.role, args.lane, card=args.runcard, handoff_id=args.handoff)
   except core.HandoffError as error:
-    raise core.HandoffError(f"instructions: {error}") from None
+    message = str(error)
+    raise core.HandoffError(message if message.startswith("instructions: ") else f"instructions: {message}") from None
+  print(text, end="")
   return 0
