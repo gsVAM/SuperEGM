@@ -3,11 +3,15 @@
 
 """U73: an external comment reaches the builder whole (`review ingest` reads a thread's root, spec section 5.3)."""
 
+import json
+
 import pytest
 
 import superegm
+from superegm import atomic_write
 from superegm.review import read_threads, thread_line, thread_severity
 
+from test_foreman import builder_token, ingest_world, UNIT  # the autouse fixture: the machine account's token for `review ingest`
 from test_review import REPO, cm, rv
 
 
@@ -34,3 +38,28 @@ def test_replies_stay_out_of_the_claim_and_severity(world):
   assert thread_severity(threads[0], config, None) == "low"
   assert thread_line("external:devin-ai-integration[bot]", 1, 1, threads[0], "low", config).endswith("| (no text outside hidden markup)")
   assert threads[1]["root"] == threads[1]["body"] == "**Issue**: the retry never backs off"
+
+
+BOT = "devin-ai-integration[bot]"
+TAG = '<!-- devin-review-comment {"id": 1} -->'
+
+
+def round_findings(st, rid, login=BOT):
+  saved = json.loads((st.path("reviews", rid) / "round-1.json").read_text(encoding="utf-8"))
+  return saved, saved["reviewers"][f"external:{login}"]["findings"]
+
+
+@pytest.mark.parametrize("stored, after", [
+  (TAG, "**Bug**: " + "y" * 300),
+  ("**Bug**: " + "y" * 190 + "…", "**Bug**: " + "y" * 190 + "…")])
+def test_next_ingest_rewrites_a_tag_only_claim_and_keeps_a_cut(world, stored, after):
+  # the next `review ingest --unit` re-reads every ingested thread still on the PR; a stored 200-character cut stays
+  st, card, posted, rid, head = ingest_world(world, [(1, BOT, TAG + "\n**Bug**: " + "y" * 300)])
+  code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
+  assert code == 0, out
+  saved, findings = round_findings(st, rid)
+  findings[0].update({"claim": stored, "severity": "medium", "disposition": "contested"})
+  atomic_write(st.path("reviews", rid) / "round-1.json", saved)
+  assert world.run("review", "ingest", "--unit", UNIT, "--runcard", card)[0] == 0
+  finding = round_findings(st, rid)[1][0]
+  assert (finding["claim"], finding["severity"], finding["disposition"]) == (after, "medium", "contested")
