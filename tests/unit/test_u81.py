@@ -209,3 +209,16 @@ def test_the_judges_decision_question_drops_a_builders_amend_line(world):
   s.path("units").write_text(json.dumps({"units": {"U02": {"decisions": [decision]}}}), encoding="utf-8")
   text = judges.decision_question(s, "U02", did)
   assert "amend" not in text and "(b) return null" in text
+
+
+def test_a_by_hand_amend_not_offered_is_refused_as_amends_own(world):
+  # a by-hand `amend — <line>` on a comment with a dod heading: the comment carries the line, so the refusal is the
+  # one-interface-deviation one, not the missing line
+  from test_pre1_amend import DOD
+  routes = {f"repos/{REPO}/issues/comments/88": {"id": 88, "user": {"login": "owner"}, "body": f"**Ruling:** (77) amend — {LINE}\n"}}
+  card, s = world_on(world, routes)
+  qid = opened(world, card, IFACE + DOD + OPTS)
+  code, err = rule(world, card, qid, "amend", "owner", "--posted", "88")
+  assert code == 1 and err.strip() == "decision: amend needs a comment with one interface deviation and no other"
+  assert not foreman_of(s, "U02")["rulings"]
+  assert not (s.path("file") / "amendments").exists()
