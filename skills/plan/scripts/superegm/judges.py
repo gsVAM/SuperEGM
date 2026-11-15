@@ -583,7 +583,10 @@ def decision_question(st, unit: str, did: str) -> str:
   decision = next((d for d in units.get(unit, {}).get("decisions") or [] if d["id"] == did), None)
   if decision is None:
     raise core.HandoffError(f"question: {unit} has no decision {did}")
-  return f"## Q1 {unit} {did}: {decision['question']}\n" + "".join(f"- {o}\n" for o in decision["options"] if o != "amend")  # amend is the owner's alone
+  def owners(line: str) -> bool:  # amend is the owner's alone: bare, or a builder's own `- (a) amend` line
+    return re.fullmatch(r"(- )?(\(\w\) )?amend", line.strip()) is not None
+  question = "\n".join(l for l in decision["question"].split("\n") if not owners(l))
+  return f"## Q1 {unit} {did}: {question}\n" + "".join(f"- {o}\n" for o in decision["options"] if not owners(o))
 
 
 def blocked_question(st, unit: str, what: list) -> tuple[str, list[int]]:
@@ -592,8 +595,14 @@ def blocked_question(st, unit: str, what: list) -> tuple[str, list[int]]:
     body = (core.gh_json(["api", f"repos/{st.config['repo']}/issues/comments/{what[0]}"]) or {}).get("body") or ""
     heading, *rest = body.splitlines() or [""]
     options = [line[2:].strip() for line in rest if line.startswith("- (")]
-    options = [o.partition(" ")[2] for o in options] + ["stop the unit"]
-    consumers = fan_out(st, unit) if heading.startswith("**Deviation (interface):**") else []
+    options = [o for o in (o.partition(" ")[2] for o in options) if o != "amend"] + ["stop the unit"]  # amend is the owner's alone
+    consumers = []
+    if heading.startswith("**Deviation (interface):**"):
+      from superegm.decision import INTERFACE
+      named = INTERFACE.match(heading.partition("):**")[2].strip())
+      # the contract is the producer's the heading names: its filed consumers but the asking unit, which raised it
+      consumers = [n for n in fan_out(st, named["unit"] if named else unit)
+                   if n != (core.load_state(st.root).get("units") or {}).get(unit, {}).get("number")]
     return f"## Q1 {unit} BLOCKED (comment {what[0]}): {heading.strip()}\n" + options_text(options), consumers
   if len(what) == 2 and what[0] == "launch" and what[1].isdigit():
     launches = load_launches(st, unit)
