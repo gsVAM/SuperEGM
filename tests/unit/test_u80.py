@@ -23,3 +23,31 @@ def test_orders_and_brief_wording():
   assert all(f"`{k}`" in orders for k in ("interface", "dod", "test", "other")) and "one heading per comment" in orders
   assert "r<n>/amendments.md" in (ROOT / "skills/wave/references/foreman_brief.md").read_text()
 
+
+BLOCKED = "**Builder status:** BLOCKED\nWhich?\n- (a) keep\n- (b) change\n"
+NEEDS = "**Builder status:** NEEDS_CONTEXT\nWhich?\n- (a) keep\n- (b) change\n"
+INTERFACE = "**Deviation (interface):** U03 store: takes the root\n"
+
+
+@pytest.mark.parametrize("since_last_launch, reason", [
+  ("no launch before", "first"),
+  ("a round posted", "review"),
+  ("a ruling on a **Builder status:** BLOCKED comment", "blocked"),
+  ("a ruling on a **Builder status:** NEEDS_CONTEXT comment", "blocked"),
+  ("a ruling on a **Deviation (interface):** comment with no status", "harness"),
+  ("nothing", "harness"),
+])
+def test_launch_reason(since_last_launch, reason):
+  # the latest event after the previous launch started decides the reason
+  launches = [] if since_last_launch == "no launch before" else [{"round": 1, "started_at": "2026-11-01T00:00:00Z"}]
+  question = {"a ruling on a **Builder status:** BLOCKED comment": BLOCKED,
+              "a ruling on a **Builder status:** NEEDS_CONTEXT comment": NEEDS,
+              "a ruling on a **Deviation (interface):** comment with no status": INTERFACE}.get(since_last_launch)
+  foreman = {"rounds": [], "decisions": [], "rulings": []}
+  if since_last_launch == "a round posted":
+    foreman["rounds"].append({"round": 1, "phase": "posted", "outcome": "revise", "posted_at": LATER})
+  if question:
+    foreman["decisions"].append({"id": "q1", "point": 3, "source": "comment 55", "question": question})
+    foreman["rulings"].append({"decision": "q1", "ruling": "(a) — go", "posted_at": LATER})
+  assert launch_builder.launch_reason(launches, foreman) == reason
+
