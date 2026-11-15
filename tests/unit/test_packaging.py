@@ -64,7 +64,7 @@ def test_runtime_bundle_ships_exactly_the_kept_files(source: Path, tmp_path: Pat
   with zipfile.ZipFile(archive) as bundle:
     assert bundle.testzip() is None
     names = set(bundle.namelist())
-    assert len([p for p in names if p.endswith("/SKILL.md")]) == 21
+    assert len([p for p in names if p.endswith("/SKILL.md")]) == len(list(source.glob("skills/*/SKILL.md")))
     for skill in source.glob("skills/*/SKILL.md"):
       icon = skill.parent / "assets/icon.svg"
       data = bundle.read(icon.relative_to(source).as_posix())
