@@ -109,6 +109,21 @@ def test_bundle_missing_a_source_module_fails(source: Path, tmp_path: Path) -> N
   assert packed != package_modules(source)  # the bundle check fails when a source module is left out
 
 
+def test_bundle_skill_count_follows_the_source(source: Path, tmp_path: Path) -> None:
+  # a skill added to the source tree is counted without editing this file
+  extra = source / "skills/extra-skill/SKILL.md"
+  extra.parent.mkdir(parents=True)
+  extra.write_text("---\nname: extra-skill\neffects: none\n---\n")  # build() refuses a skill without effects (scripts/pack_plugin.py:111-125)
+  (extra.parent / "assets").mkdir()
+  (extra.parent / "assets/icon.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg"/>')  # the kept-files test reads each skill's icon
+  _, archive = build(source, tmp_path / "out")
+  with zipfile.ZipFile(archive) as bundle:
+    packed = [p for p in bundle.namelist() if p.endswith("/SKILL.md")]
+  assert len(packed) == len(list(source.glob("skills/*/SKILL.md")))
+  assert len(packed) != 21  # the literal at :61 would fail this tree
+  test_runtime_bundle_ships_exactly_the_kept_files(source, tmp_path / "kept")  # passes only with the derived count
+
+
 @pytest.mark.parametrize("skill,base,facet", PALETTES)
 def test_skill_icon_palette(skill: str, base: str, facet: str) -> None:
   svg = ElementTree.parse(ROOT / "skills" / skill / "assets/icon.svg").getroot()
