@@ -162,9 +162,10 @@ overrides the default and is the Step's one command.
 
 ## What a Step Contains
 
-A step is done when it has the test name, the behaviour and the expected
-values; fixtures, arrange code, helpers and private exception types are the
-builder's. Each kind of step carries that and nothing more:
+A test Step is complete under Q9 when it has the test name, the behaviour and
+the expected values; fixtures, arrange code, helpers and private exception
+types are the builder's. Each kind of step carries what it needs and no
+detail the builder can settle alone:
 
 - **A test step:** the test's name and its assertions, as code, with the
   spec's exact values in them.
@@ -190,7 +191,7 @@ After writing the complete plan, look at the spec with fresh eyes and check the 
 
 **1. Spec coverage:** Skim each section/requirement in the spec. Can you point to a task that implements it? List any gaps.
 
-**2. Step scan:** Every step must carry its test name, the behaviour and the expected values, and no step may carry more than that: a line that decides nothing is a gap, a function body the signature and tests already determine is a transcript. Fix both.
+**2. Step scan:** Every test Step must be complete under Q9 (its test name, the behaviour and the expected values) and carry no private or harness detail: a line that decides nothing is a gap, a function body the signature and tests already determine is a transcript. Fix both.
 
 **3. Type consistency:** Do the types, method signatures, and property names you used in later tasks match what you defined in earlier tasks? A function called `clearLayers()` in Task 3 but `clearFullLayers()` in Task 7 is a bug.
 

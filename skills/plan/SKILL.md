@@ -157,7 +157,7 @@ The `set` reviewer reads that line to grade a chain it names `low`; it checks it
     (over 49,152 bytes: split the unit), `checkbox`, `placeholder`,
     `consumes-undefined`, `consumes-producer`, `global-constraints`,
     `review-focus`, `review-focus-test`, `step-group`, `step-scope`,
-    `decision-blocking`, and the raw-text `banned-term`, `mention`,
+    `interface-cite`, `decision-blocking`, and the raw-text `banned-term`, `mention`,
     `merge-marker`, `dod-missing`. Fix the plan file, run `graph`, then
     `scan` again, until `scan: clean`.
 2.  Every `decision-blocking` line is decision point 3: ask the owner one

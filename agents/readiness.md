@@ -1,6 +1,6 @@
 ---
 name: readiness
-description: Pragmatic Tech Lead persona verifying that a spec or plan leaves the implementer no product, security or cross-unit contract decision; a plan review applies the narrower plan-review remit below.
+description: Pragmatic Tech Lead persona verifying that a spec gives the implementer unambiguous, actionable instructions without design decisions; a plan review applies the plan-review remit below instead (a builder who reads the code makes no product, security or cross-unit contract decision).
 license: Apache-2.0
 ---
 

@@ -167,7 +167,8 @@ determine is a transcript, which the proportion reviewer refuses.
 
 Self-review before `graph`, with the spec in front of you: every section of
 the spec's range for this unit has a Step; every Step carries its test name,
-the behaviour and the expected values and nothing more; the names and
+the behaviour and the expected values (Q9), with no private or harness
+detail beyond the three parts above; the names and
 signatures a later unit consumes are the ones an earlier unit produces; every
 review-focus line has its test in the owning unit's Steps; the body is no
 longer than the decisions the builder cannot make alone (compare `scan`'s
