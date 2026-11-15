@@ -37,6 +37,13 @@ def test_launch_subagent_calls_reads_the_entry_session(tmp_path, monkeypatch):
   assert traces.launch_subagent_calls("~/prof", {}) == {"count": 0, "calls": []}
 
 
+def test_one_reader_of_subagent_calls():
+  # every reader counts through the helper, so U63 changes one place
+  users = {p.name for p in SCRIPTS.glob("*.py") if re.search(r"\bsubagent_calls\(", p.read_text(encoding="utf-8")) and p.name != "traces.py"}
+  assert users == set()
+  assert all("launch_subagent_calls(" in (SCRIPTS / n).read_text(encoding="utf-8") for n in ("record_launch.py", "interrupt.py", "__init__.py"))
+
+
 @pytest.mark.parametrize("ender, status", [("interrupt", "interrupted"), ("reboot", "interrupted (reboot)")])
 def test_interrupted_launch_records_subagent_calls(world, ender, status):
   from superegm import traces
