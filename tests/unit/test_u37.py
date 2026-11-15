@@ -5,6 +5,7 @@
 
 import hashlib
 import json
+import shutil
 import subprocess
 
 import pytest
@@ -315,7 +316,8 @@ def test_head_render_defaults_root_to_the_checkout(world, tmp_path, monkeypatch)
                                              "# Repository instructions\n\n## a.md\n```\nJudge it.\n```\n")
 
 
-@pytest.mark.parametrize("case", ["review not opened", "review id escapes", "review of another spec"])
+@pytest.mark.parametrize("case", ["review not opened", "review id escapes", "review of another spec",
+                                  "integrate review of the spec", "--unit with --spec"])
 def test_spec_render_binds_the_review_to_the_spec(world, case):
   """`--spec` stores a round's render only under a review opened on that spec; a review id that is no plain name,
   a review never opened or one of another spec is refused and nothing is written."""
@@ -324,15 +326,22 @@ def test_spec_render_binds_the_review_to_the_spec(world, case):
   git(["commit", "-qam", "config"], world.repo)
   spec, cid, rid = converged_spec(world)
   st = hstore(world)
-  review = {"review not opened": "never-opened", "review id escapes": "../../escaped", "review of another spec": "other"}[case]
-  if case == "review of another spec":
+  integrate = f"spec-{superegm.spec_slug(spec)}-integrate-c1"   # its review.json names the same spec
+  review = {"review not opened": "never-opened", "review id escapes": "../../escaped", "review of another spec": "other",
+            "integrate review of the spec": integrate, "--unit with --spec": rid}[case]
+  if case in ("review of another spec", "integrate review of the spec"):
     other = json.loads(st.path("reviews", rid, "review.json").read_text(encoding="utf-8"))
-    other["artifact"] = str(world.repo / "docs/other-design.md")
-    st.path("reviews", "other", "review.json").parent.mkdir(parents=True, exist_ok=True)
-    st.path("reviews", "other", "review.json").write_text(json.dumps(other), encoding="utf-8")
+    if case == "review of another spec":
+      other["artifact"] = str(world.repo / "docs/other-design.md")
+    st.path("reviews", review, "review.json").parent.mkdir(parents=True, exist_ok=True)
+    st.path("reviews", review, "review.json").write_text(json.dumps(other), encoding="utf-8")
+  unit = ["--unit", "U01"] if case == "--unit with --spec" else []   # --unit belongs to --handoff alone
+  if unit:   # a unit's card: --unit alone would pass the artifact check for any --spec
+    path = st.path("runcards", cid)
+    path.write_text(json.dumps({**json.loads(path.read_text(encoding="utf-8")), "artifact": "U01"}), encoding="utf-8")
   before = sorted(p for p in st.root.parent.rglob("*") if p.is_file())
   code, out = world.run("instructions", "--role", "reviewers", "--spec", spec, "--review", review, "--round", 1,
-                        "--runcard", cid, card=None)
+                        *unit, "--runcard", cid, card=None)
   assert code == 1 and "instructions" in out, out
   assert sorted(p for p in st.root.parent.rglob("*") if p.is_file()) == before
 
@@ -356,3 +365,39 @@ def test_handoff_render_refuses_another_handoff_than_the_cards(world):
   used = card(world, spec, "review-plan", handoff=hid)   # a card of this handoff (opening it interrupts `other`)
   code, out = world.run("instructions", "--role", "reviewers", "--handoff", hid, "--runcard", used, card=None)
   assert code == 0, out
+  path = st.path("runcards", used)
+  record = json.loads(path.read_text(encoding="utf-8"))
+  del record["handoff"]                                   # a card opened before cards recorded their handoff
+  path.write_text(json.dumps(record), encoding="utf-8")
+  assert hstore(world).handoff_id == hid
+  code, out = world.run("instructions", "--role", "builder", "--handoff", hid, "--runcard", used, card=None)
+  assert code == 0, out
+
+
+def test_launch_builder_refuses_a_card_of_another_handoff(world, monkeypatch):
+  """launch-builder never stores or reuses a render on a card opened under another handoff than the store's."""
+  from superegm import launch_builder
+  from test_builders import UNIT, seed
+  s, card_id, hid, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  monkeypatch.setattr(launch_builder, "start_detached", lambda command, log, env: 4242)
+  assert world.run("launch", "--runcard", card_id)[0] == 0
+  path = s.path("runcards", card_id)
+  record = json.loads(path.read_text(encoding="utf-8"))
+  record["instructions"] = {"builder": {"local": {"approved_at": None, "manifest": [{"file": RULES, "sha": "0" * 12}],
+                                                  "text": "# Repository instructions\n\n## x\n```\nhandoff A's\n```\n"}}}
+  path.write_text(json.dumps(record), encoding="utf-8")   # handoff A's card, its builder render cached
+  other = "sample-design-0b0b0b"                           # handoff B of the same spec, opened beside it
+  shutil.copytree(s.root / hid, s.root / other, ignore=shutil.ignore_patterns("runcards"))
+  state = json.loads((s.root / other / "state.json").read_text(encoding="utf-8"))
+  (s.root / other / "state.json").write_text(json.dumps({**state, "handoff_id": other}), encoding="utf-8")
+  handoff = json.loads(s.path("handoffs", hid).read_text(encoding="utf-8"))
+  s.path("handoffs", other).write_text(json.dumps({**handoff, "id": other}), encoding="utf-8")
+  (approvals,) = (s.root / "approvals").glob("*.json")    # B's own approval entry, the spec's latest
+  log = json.loads(approvals.read_text(encoding="utf-8"))
+  log = log if "entries" in log else {"path": log.get("path"), "entries": [log]}
+  log["entries"].append({**log["entries"][-1], "handoff_id": other})
+  approvals.write_text(json.dumps(log), encoding="utf-8")
+  code, out = world.run("launch-builder", "--handoff", other, "--unit", UNIT, "--round", 1, "--runcard", card_id)
+  assert code == 1 and out.startswith("superegm: launch-builder: ") and f"opened under handoff {hid}" in out, out
+  assert not list((s.root / other).rglob(f"{UNIT}_r1_prompt.md"))
