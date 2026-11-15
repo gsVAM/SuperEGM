@@ -11,7 +11,9 @@ import superegm as core
 from superegm import graph
 
 WRITES = frozenset(['file'])  # the store kinds this subcommand writes: the derived `plan/scan/<unit>.json`
-CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
+CONFIG_DEFAULTS = {"units": {"max_body_kb": 25, "max_files": 10, "max_steps": 16}}  # its own config key (spec section 6)
+INIT_STEP, DOCTOR_CHECKS = "", None  # no init line or doctor line of its own (U32)
+UNIT_LIMIT_RANGE = {"max_body_kb": (1, 48), "max_files": (8, None), "max_steps": (1, None)}  # each limit's valid range
 scan_text, BODY_LIMIT = core.scan_text, core.BODY_LIMIT  # the one raw-text scan, the package's
 WARN = {"bytes": (24_576, "24,576"), "steps": (10, "10"), "fenced_share": (0.40, "0.40")}  # limit, as printed
 FENCE_LINE = re.compile(r"^\s*`{3,}")
@@ -177,8 +179,22 @@ def numbers(uid: str, body: str, handoff: graph.Handoff) -> dict:
   return found
 
 
-def scan_handoff(handoff: graph.Handoff) -> list:
+def units_limits_problems(config: dict) -> list:
+  """One `units.<key>` problem line per `units` limit that is not an integer within its range (spec section 6)."""
+  units = config.get("units")
+  if not isinstance(units, dict):
+    return ["units: `units` must be an object"]
   problems = []
+  for key, (low, high) in UNIT_LIMIT_RANGE.items():
+    value = units.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or value < low or (high is not None and value > high):
+      bound = f"at most {high}" if high is not None else f"at least {low}"
+      problems.append(f"units: units.{key}: must be a positive integer, {bound} (got {value!r})")
+  return problems
+
+
+def scan_handoff(handoff: graph.Handoff) -> list:
+  problems = units_limits_problems(handoff.config)
   for item in handoff.writes():
     if item[0] == "issue":
       dod = handoff.plan.units[item[1]].dod if item[1] != "tracking" else []
