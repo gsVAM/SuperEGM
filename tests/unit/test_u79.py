@@ -74,6 +74,8 @@ def test_scan_produces_cite_names():
   ("- Produces: `y`", 11, "src/u03.ts:{n}", False, True),
   ("- Produces: `y`", 11, "u03.ts:{n}", False, True),   # a bare cite counts for the Scope path it ends
   ("- Produces: `y`", 10, "u03.ts:{n}", False, False),
+  ("- Produces: `y`", 11, "src/u03.ts/x.ts:{n}", False, True),   # a cite under a Scope path counts for it
+  ("- Produces: `y`", 10, "src/u03.ts/x.ts:{n}", False, False),
   ("- Produces: `y`", 11, "other/file.py:{n}", False, False),   # cites outside Scope never count
 ])
 def test_scan_cite_rules(world, line, cites, form, refused, warned):
