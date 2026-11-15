@@ -150,9 +150,10 @@ def is_open(card: dict) -> bool:
   return not card.get("closed_at") and not card.get("interrupted_at")
 
 
-def tick_prompt(spec, hid: str) -> str:
-  """The tick's prompt (D1 (a)): the typed skill's form, which `claude -p` expands as the owner's command."""
-  return f"/superegm:wave {spec} --handoff {hid} --leavemealone"
+def tick_prompt(spec, hid: str, phase: str = "wave", leavemealone: bool = True) -> str:
+  """The tick's prompt (D1 (a)): the typed skill's form, which `claude -p` expands as the owner's command; with the
+  chain off always 1.2's `wave` with `--leavemealone`."""
+  return f"/superegm:{phase} {spec} --handoff {hid}" + (" --leavemealone" if leavemealone else "")
 
 
 def tick_command(root, prompt: str, result, exit_file) -> str:
@@ -230,7 +231,7 @@ def notify(hs: core.Store, spec: str) -> None:
     runcard.close_card(hs, cid)
 
 
-def launch(hs: core.Store, entry: dict, spec: str, reason: str) -> bool:
+def launch(hs: core.Store, entry: dict, spec: str, reason: str, phase: str = "wave", leavemealone: bool = True) -> bool:
   """Record the launch, then start it: the card opened, the entry written before the start (a crash between the
   two leaves a launch without an exit file), the store's cards re-read once (an open top-level `wave` card of any open
   handoff of the store, typed or a tick's, or an open `plan`, `file`, `integrate`, `review-plan` or `orient` card of
@@ -241,9 +242,10 @@ def launch(hs: core.Store, entry: dict, spec: str, reason: str) -> bool:
   n = len(data["launches"]) + 1
   base = lambda suffix: hs.path("driver", f"{hid}_r{n}{suffix}")
   record = {"round": n, "card": None, "started_at": core.now_iso(), "boot_id": core.boot_id(), "status": "running",
-            "reason": reason, "result_file": str(base("_result.json")), "exit_file": str(base(".exit")),
+            "reason": reason, "phase": phase, "result_file": str(base("_result.json")), "exit_file": str(base(".exit")),
             "log": str(base(".log"))}
-  record["command"] = tick_command(Path(entry["root"]).resolve(), tick_prompt(core.rebased(spec, entry["root"]), hid),
+  record["command"] = tick_command(Path(entry["root"]).resolve(),
+                                   tick_prompt(core.rebased(spec, entry["root"]), hid, phase, leavemealone),
                                    record["result_file"], record["exit_file"])
   record["card"] = cid = core.open_runcard(hs, "driver", spec)
   data["launches"].append(record)
@@ -317,7 +319,7 @@ def tick_store(entry: dict) -> None:
   in order; at most one launch (one `.git`). The reboot and exit-file proofs may write before any skip; a skip
   (the store's live launch or open `wave` card, a phase card, nothing left, `tick_trigger` None) prints nothing and
   writes nothing unless `notify`'s own predicate holds, a new line then sent under a `driver` card opened for that."""
-  from superegm import phase, status
+  from superegm import phase
   st, ok = registered_store(entry)
   current, ids = core.boot_id(), open_ids(st)
   chain = ok and chain_on(st.config)
@@ -331,17 +333,25 @@ def tick_store(entry: dict) -> None:
   for hid in sorted(ids, key=lambda h: last_started(st, h)):
     hs = core.handoff_store(st, hid)
     core.STORE = hs  # the one mid-run STORE switch: it reaches every reader by intent, the notify hook's included
-    if chain:
-      line = phase.next_line(st, hid)
-      if line in SKIP_LINES or line.startswith("waiting"):
+    word, leavemealone = "wave", True
+    if chain:  # `next` first: nothing on `none`, `waiting …` or `integrate`; a 1.2.0 entry runs its `wave` row alone
+      word = phase.next_line(st, hid)
+      mode = core.frozen_mode(hs)
+      if word in SKIP_LINES or word.startswith("waiting") or (mode is None and word != "wave"):
         continue
+      wait = st.path("chain", hid)
+      answered = wait.is_file() and bool(json.loads(core.read_text(wait)).get("answer"))
+      leavemealone = mode != "normal" and not (answered and word == "file")  # an answered file wait: any mode
     state = core.load_state(hs.root)
     spec = (state.get("design") or {}).get("path") or ""
-    units = list(state.get("units") or {})
-    saved = ((state.get("status") or {}).get("units") or {})
-    if not [u for u in units if not (saved.get(u) or {}).get("landed") and not core.load_foreman(hs, u).get("stopped")]:
-      notify(hs, spec)  # nothing to launch, but its typed `wave` card may block the store's other handoffs
-      continue
+    if chain:  # the handoff record's spec: no phase before `plan` writes `state.json`
+      spec = next((r.get("spec") for r in core.handoffs(st.root) if r["id"] == hid), None) or spec
+    if word == "wave":
+      units = list(state.get("units") or {})
+      saved = ((state.get("status") or {}).get("units") or {})
+      if not [u for u in units if not (saved.get(u) or {}).get("landed") and not core.load_foreman(hs, u).get("stopped")]:
+        notify(hs, spec)  # nothing to launch, but its typed `wave` card may block the store's other handoffs
+        continue
     data = core.load_driver(hs)
     if (any(not core.tick_terminal(e) for h in stores for e in core.load_driver(h)["launches"])
         or any(is_open(c) for h in stores for _, c in core.top_wave_cards(h))
@@ -356,13 +366,19 @@ def tick_store(entry: dict) -> None:
       core.journal(hs, f"tick: {hid} refusal cleared ({data['refused']['reason']})")
       data["refused"] = None
       core.atomic_write(hs.path("driver", hid), data)
-    reason = status.tick_trigger(core.Handoff(core.rebased(state["plan"], entry["root"]), hs))
+    reason = wave_trigger(hs, entry, state) if word == "wave" else word
     if reason is None:
       notify(hs, spec)
       continue
-    if launch(hs, entry, spec, reason):
+    if launch(hs, entry, spec, reason, word, leavemealone):
       notify(hs, spec)
     return  # one launch per store, and a back-off ends the tick (spec section 11.2)
+
+
+def wave_trigger(hs: core.Store, entry: dict, state: dict):
+  """A `wave` launch's reason: 1.2's `status.tick_trigger` on the handoff's plan, None when nothing happened."""
+  from superegm import status
+  return status.tick_trigger(core.Handoff(core.rebased(state["plan"], entry["root"]), hs))
 
 
 def tick() -> int:
