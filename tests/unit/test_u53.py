@@ -140,3 +140,45 @@ def test_superseding_leaves_a_confirmed_list_with_no_filing(world):
   spec2, cid2, _ = converged_spec(world, CHANGED)
   assert approve(world, spec2, cid2, "--yes")[0] == 0
   assert older_state(world, first) == state and "discarded" not in journal(world, first)
+
+
+@pytest.fixture(autouse=True)
+def registry(tmp_path, monkeypatch):
+  """`~/.superegm/registry.json` under `tmp_path`: no test reads the owner's. HOME, not `registry_path`, is patched: the
+  `world` fixture reloads the package."""
+  monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+
+def void_without_review(world, state_json):
+  """The spec approved, its handoff planned (a `state.json`) or not, then `--void` typed with no `--review` and no `--runcard`."""
+  spec, cid, _ = converged_spec(world)
+  assert approve(world, spec, cid, "--yes")[0] == 0
+  world.hid = approval(world)["entries"][-1]["handoff_id"]
+  if state_json:
+    atomic_write(world.artifacts / world.hid / "state.json", {"handoff_id": world.hid, "units": {"U07": {}}})
+  world.code, world.out = world.run("approve-spec", "--spec", str(spec), "--void", card=None)
+  return world.code
+
+
+def latest_entry(world):
+  return approval(world)["entries"][-1]["voided_by"]
+
+
+def cards(world, skill):
+  found = [jread(p) for p in sorted((world.artifacts / world.hid / "runcards").glob("*.json"))]
+  return [c for c in found if c["skill"] == skill]
+
+
+def next_line(world):
+  return world.run("next", "--handoff", world.hid)[1].strip()
+
+
+@pytest.mark.parametrize("state_json, code, voided_by", [(False, 0, "owner"), (True, 1, None)])
+def test_owner_void_without_review(world, state_json, code, voided_by):
+  # `--void --spec <spec>` typed without --review or --runcard, the latest approval's handoff planned or not
+  assert void_without_review(world, state_json) == code and latest_entry(world) == voided_by, world.out
+  if code == 0:
+    assert f"approval {SLUG} voided by the owner: no unit left to plan" in journal(world, world.hid)
+    assert all(c["closed_at"] for c in cards(world, "approve-spec")) and next_line(world) == "none"
+  else:
+    assert "approve-spec: --void requires --review" in world.out and cards(world, "approve-spec") == []
