@@ -213,3 +213,53 @@ def test_review_loop_dispatches_the_printed_panel():
   spec_skill = (ROOT / "skills/review-spec/SKILL.md").read_text(encoding="utf-8")
   assert "The panel cannot change after this" not in loop and "review.rounds" in loop
   assert "panel <a,b,astra> from round <n>" in loop and "panel <a,b,astra> from round <n>" in spec_skill
+
+
+def test_a_handoff_without_its_own_entry_reads_rounds_5(world):
+  """Another handoff's approval entry on the same spec, frozen at rounds 4, does not govern a handoff with no entry."""
+  spec, cid, rid = converged_spec(world)
+  assert approve(world, spec, cid, "--yes")[0] == 0
+  edit_entry(world, rounds=4, handoff_id="another-handoff-123456")
+  spec, cid, rid = opened(world, "plan")
+  assert rjson(world, rid)["cap"] == 5
+
+
+@pytest.mark.parametrize("review, since", [
+  ("spec-x-c3", 3),
+  ("spec-x-c12", 12),
+  ("owner: approved in session", 0),
+  ("123", 0),
+  ("c7", 0),
+  ("spec-x-c", 0),
+  ("", 0),
+])
+def test_since_reads_the_cycle_suffix_alone(review, since):
+  """Only a trailing `-c<n>` is a cycle number: a hand-written review reference, digits or not, counts as 0."""
+  assert approve_spec.cycle_of(review) == since
+
+
+def test_resume_journals_the_narrowing(world):
+  """The narrowing is one journal line naming the panel and its first round; a resume that narrows nothing writes none."""
+  spec, cid, rid = opened(world, reviewers="design,zoom-out,style")
+  journal = hstore(world).path("journal")
+  assert resume(world, spec, cid, "design,style")[0] == 0
+  assert f"review open {rid} panel design,style from round 1 under {cid}" in journal.read_text(encoding="utf-8")
+  assert resume(world, spec, cid, "design,style")[0] == 0
+  assert journal.read_text(encoding="utf-8").count("panel design,style from round") == 1
+
+
+def test_narrowing_twice_before_a_round_keeps_the_later(world):
+  """Two narrowings before the same round leave one `panels` entry from that round: the later."""
+  spec, cid, rid = opened(world, reviewers="design,zoom-out,style")
+  assert resume(world, spec, cid, "design,zoom-out")[0] == 0
+  code, out = resume(world, spec, cid, "design")
+  assert code == 0 and out.splitlines()[1] == "panel design from round 1", out
+  assert rjson(world, rid)["panels"] == [{"from_round": 1, "reviewers": ["design"]}]
+
+
+def test_a_repeated_reviewer_in_the_given_panel_counts_once(world):
+  """`design,zoom-out,zoom-out` narrows to `design,zoom-out`: a reviewer is dispatched once."""
+  spec, cid, rid = opened(world, reviewers="design,zoom-out,style")
+  code, out = resume(world, spec, cid, "design,zoom-out,zoom-out")
+  assert code == 0 and out.splitlines()[1] == "panel design,zoom-out from round 1", out
+  assert rjson(world, rid)["panels"] == [{"from_round": 1, "reviewers": ["design", "zoom-out"]}]
