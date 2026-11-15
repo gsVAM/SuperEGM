@@ -143,11 +143,14 @@ def recorded_rulings(foreman: dict) -> list:
   out = []
   for entry in foreman.get("rulings") or []:
     decision = decisions.get(entry.get("decision"))
+    posted = entry.get("posted") or ""
+    cid = int(posted.split()[1]) if posted.startswith("comment ") and posted.split()[1].isdigit() else 0
+    if entry.get("kind") == "undo":  # the owner's undo of a triage deferral (spec section 5.2): an upheld, no decision
+      out.append(Ruling("upheld", entry["fid"], None, entry.get("reason"), entry.get("by") or "", cid))
+      continue
     if decision is None:
       continue
     text = (entry.get("ruling") or "").partition(" — ")[0].strip()
-    posted = entry.get("posted") or ""
-    cid = int(posted.split()[1]) if posted.startswith("comment ") and posted.split()[1].isdigit() else 0
     option, subject = None, ""
     if text == "redesign" and decision["point"] in (1, 2):  # a head's third ruling; a point-3 option may begin with the word
       kind = "redesign"
@@ -167,7 +170,7 @@ def recorded_rulings(foreman: dict) -> list:
 GROUPS = {"upheld": "fid", "overruled": "fid", "allowed": "fid", "option": "option"}  # the kinds that rule one subject
 
 
-def binding_rulings(comments: list, owners: list, recorded: list, decisions=None, pending=None) -> list:
+def binding_rulings(comments: list, owners: list, recorded: list, decisions=None, pending=None, deferred=None) -> list:
   """The rulings that bind (spec section 13.2: a recorded ruling is never changed by a later comment): the record's
   (`recorded`, as `recorded_rulings` reads it), then each owner's form comment `ruling_of` reads whose comment id
   the record does not hold and whose fid or option subject the record does not already rule; an option ruling binds
@@ -182,8 +185,11 @@ def binding_rulings(comments: list, owners: list, recorded: list, decisions=None
   fallback, the latest point-1 decision with no finding line, asks about any fid), as `decision rule` would record
   it. Before any point-1 question an upheld fid binds as the landed `collect` read it, and a `finding overruled`
   always binds: section 13.2 reads an overrule on a `tdd-order`, `test-delta` or `dod-<n>` fid that no decision asks
-  about as an allowance, which `collect` applies without a record."""
+  about as an allowance, which `collect` applies without a record. Given `deferred` (the fids of the record's
+  `followups[]`, spec section 5.2), an unrecorded `upheld` naming one of them is dropped: an applied undo removes
+  its row and binds as recorded, so a live one there is a refused undo, which never blocks."""
   recorded = list(recorded)
+  deferred = set(deferred or ())
   point3 = [d for d in decisions or [] if d.get("point") in (3, 5)]
   point1 = any(d.get("point") == 1 for d in decisions or [])
 
@@ -204,6 +210,7 @@ def binding_rulings(comments: list, owners: list, recorded: list, decisions=None
   keys = {key(r) for r in recorded if r.kind in GROUPS}
   return recorded + [r for c in comments if (r := ruling_of(c, owners))
                      and r.comment_id not in ids and key(r) not in keys and open_for(r) and asked_for(r)
+                     and not (r.kind == "upheld" and r.subject in deferred)
                      and (r.kind != "option" or offered(r, comments, decisions or []))]
 
 
@@ -241,7 +248,8 @@ def overridden_comments(comments: list, owners: list, foreman: dict) -> dict:
   entries = {r.get("posted"): r for r in foreman.get("rulings") or [] if str(r.get("posted") or "").startswith("comment ")}
   decisions = foreman.get("decisions") or []
   bound = {r.comment_id for r in binding_rulings(comments, owners, recorded_rulings(foreman), decisions,
-                                                 pending_decisions({"decisions": decisions, "rulings": foreman.get("rulings") or []}))}
+                                                 pending_decisions({"decisions": decisions, "rulings": foreman.get("rulings") or []}),
+                                                 [r["fid"] for r in foreman.get("followups") or []])}
   out = {}
   for c in comments:
     entry = entries.get(f"comment {c['id']}")
@@ -439,6 +447,12 @@ def label_stopped(store, number: int) -> None:
   core.gh(["issue", "edit", str(number), "-R", store.config["repo"], "--add-label", store.config["labels"]["stopped"]])
 
 
+def labelled_stopped(store, number: int) -> bool:
+  """The issue carries the stopped label now (`gh issue view --json labels`)."""
+  labels = core.gh_json(["issue", "view", str(number), "-R", store.config["repo"], "--json", "labels"]).get("labels") or []
+  return any(l.get("name") == store.config["labels"]["stopped"] for l in labels)
+
+
 def stopped_entry(by: str, reason: str, now_iso: str, brief=None) -> dict:
   return {"by": by, "reason": reason, "at": now_iso} | ({"brief": str(brief)} if brief else {})
 
@@ -470,6 +484,8 @@ def rule(args) -> int:
   found = comment = None
   if args.posted and not closed:  # a by-hand ruling: read through the one grammar (spec section 13.2, U22)
     comment, found, decisions = verify_posted(st, unit, data, args, number, card.get("mode"))
+    if decisions is None:
+      return undo(st, unit, data, args, comment, found, now)
     if found.kind == "allowed-file":
       return rule_file(st, unit, data, args, comment, found, decisions)
   else:
@@ -526,8 +542,7 @@ def rule(args) -> int:
   had = False
   if stops:
     if not (closed or found):  # a session post can fail after the label: know whether it was already on (the owner's close)
-      labels = core.gh_json(["issue", "view", str(number), "-R", st.config["repo"], "--json", "labels"]).get("labels") or []
-      had = any(l.get("name") == label for l in labels)
+      had = labelled_stopped(st, number)
     label_stopped(st, number)
   posted_at, url = now, None
   if closed:
@@ -629,6 +644,64 @@ def withdraw_accept(st, rid: str, head: dict, runcard: str) -> None:
   head["converged"], head["converged_round"] = "no", None
   review.store_verdict(st, rid, head, runcard)
   core.journal(st, f"review {rid} {accepted} accept lapsed under {runcard}")
+
+
+def deferral_of(foreman: dict, fid: str):
+  """The latest `followups[]` row of a triage-deferred fid (spec section 5.2), or None."""
+  return next((r for r in reversed(foreman.get("followups") or []) if r.get("fid") == fid), None)
+
+
+def refuse_undo(st, unit: str, data: dict, row: dict, args) -> None:
+  """The undo's refusals (spec section 5.2), checked before anything is written, so the follow-up row stays: a
+  deferral of an earlier round than the unit's latest posted one, a stopped unit (`foreman.stopped`, or the stopped
+  label on its issue), and a pull request merged or closed (its state read now)."""
+  posted = [e["round"] for e in data.get("rounds") or [] if e.get("phase") == "posted"]
+  why = None
+  if row["round"] != max(posted, default=None):
+    why = f"{row['fid']} was deferred in round {row['round']}, not the latest posted round"
+  elif data.get("stopped"):
+    why = f"{unit} is stopped"
+  else:
+    state = core.load_state(st.root)
+    record = state["units"][unit]
+    pr = (record.get("pr") or {}).get("number")
+    if labelled_stopped(st, record["number"]):
+      why = f"{unit} is stopped (issue #{record['number']} labelled {st.config['labels']['stopped']})"
+    elif pr and (pr_state := core.gh_json(["pr", "view", str(pr), "-R", st.config["repo"], "--json", "state"]).get("state")) != "OPEN":
+      why = f"pull request #{pr} is {pr_state.lower()}"
+  if why:
+    core.journal(st, f"undo refused ({args.by}, comment {args.posted}): {why}; follow-up {row['fid']} kept")
+    raise Refusal(f"decision: undo refused: {why}; the follow-up row stays")
+
+
+def undo(st, unit: str, data: dict, args, comment: dict, found: "Ruling", now: str) -> int:
+  """The owner's `**Ruling:** <fid> finding upheld` on a triage-deferred medium of the unit's latest posted round
+  (spec section 5.2), applied with no dispatch and no `collect`: the finding's disposition cleared and `undone_by` its
+  comment id, a standalone `kind: undo` ruling (`decision: null`), the follow-up row dropped, the latest posted
+  round's outcome rewritten, and triage off for the unit's remaining rounds (`review.triage_undone`)."""
+  said = f"{found.subject} finding upheld"
+  if args.ruling.partition(" — ")[0].strip() != said:
+    raise Refusal(f"decision: comment {args.posted} rules {said}, not {args.ruling.strip()}")
+  row = deferral_of(data, found.subject)
+  refuse_undo(st, unit, data, row, args)
+  rid = review.head_review_id(st, unit)
+  rnd = review.load_round(st, rid, row["round"])
+  finding = next(f for f in review.findings_of(rnd) if f["id"] == found.subject)
+  finding["disposition"], finding["undone_by"] = None, str(args.posted)
+  core.atomic_write(st.path("reviews", rid, f"round-{row['round']}.json"), rnd)
+  # the outcome rewritten before the ruling is recorded: a stop in between leaves the follow-up row and no record,
+  # so the same `decision rule --posted` reruns and completes the undo (both writes are idempotent)
+  review.undo_outcome(st, rid, args.runcard)
+  data = core.load_foreman(st, unit)
+  data["rulings"].append({"kind": "undo", "decision": None, "fid": found.subject, "by": args.by,
+                          "posted": f"comment {args.posted}", "ruling": args.ruling,
+                          "posted_at": comment.get("updated_at") or comment.get("created_at") or now, "at": now})
+  data["followups"] = [r for r in data.get("followups") or [] if r.get("fid") != found.subject]
+  core.save_foreman(st, unit, data)
+  core.journal(st, f"Ruling ({args.by}, comment {args.posted}): {unit} undo {found.subject} deferred by triage; "
+                   f"triage off for {unit}")
+  print(f"recorded (comment {args.posted}): undo {found.subject}")
+  return 0
 
 
 KIND_POINTS = {"upheld": (1,), "overruled": (1,), "allowed": (1,), "allowed-file": (1,), "round": (2,), "stop": (2,), "option": (3, 5), "redesign": (1, 2)}
@@ -818,6 +891,8 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int, mode=None)
     if found.kind == "redesign":  # every pending decision at once (spec section 13.2), the named one first: its brief
       return comment, found, [decision] + [d for d in pending_decisions(foreman) if d["id"] != decision["id"]]
     return comment, found, [decision]
+  if found.kind == "upheld" and deferral_of(foreman, found.subject):  # the undo, checked before `fid_decisions` (5.2)
+    return comment, found, None
   pending = pending_decisions(foreman)
   if found.kind == "allowed-file":  # every open decision with an entry of that file, a contest copy's too (`rule` records each fid)
     decisions = list({d["id"]: d for d, _ in file_targets(foreman, found.subject, store)}.values())
