@@ -6,6 +6,7 @@ before the ruling is saved; `amendments_for` reads ruled files and a 1.2.1-pre.1
 the judges never see `amend`; an interface question fans out to the named producer's filed consumers."""
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -144,6 +145,25 @@ def test_amend_refusals(world, case, message):
   assert err.strip().startswith(message) and code == 1
   assert not (s.base() / "amendments").exists() or not any((s.base() / "amendments").iterdir())
   assert not foreman_of(s, "U02")["rulings"]
+
+
+def test_judges_never_amend(world):
+  # stored: keep undefined, return null, amend, stop the unit; amend left out, letters kept
+  text = deviation("U01 f: changed")
+  routes = {f"repos/{REPO}/issues/comments/11": {"id": 11, "user": {"login": "builder-bot"}, "body": text}}
+  card, s = world_on(world, routes)
+  opened(world, card, text, source="comment 11")
+  stored_options = foreman_of(s, "U02")["decisions"][-1]["options"]
+  assert stored_options == ["(a) keep undefined", "(b) return null", "amend", "stop the unit"]
+  code, out = world.run("judges", "question", "--unit", "U02", "--blocked", "11", "--runcard", card)
+  assert code == 0, out
+  blocked_text = Path(out.splitlines()[0]).read_text(encoding="utf-8")
+  assert "amend" not in blocked_text and blocked_text.endswith("- (a) keep undefined\n- (b) return null\n- (d) stop the unit\n")
+  plan_time = {"id": "D1", "question": "Which?", "options": stored_options}
+  s.path("units").write_text(json.dumps({"units": {"U01": {"decisions": [plan_time]}}}), encoding="utf-8")
+  assert judges.decision_question(s, "U01", "D1").splitlines()[1:] == ["- " + o for o in stored_options]
+  with pytest.raises(core.HandoffError, match="--blocked"):
+    judges.decision_question(s, "U01", "q1")
 
 
 def test_reads_directory_and_legacy(world):
