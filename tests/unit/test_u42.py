@@ -4,11 +4,14 @@
 """U42: `scan` registers and validates the `units` limits, refuses an unfiled unit over one of them,
 drops the 24,576-byte warning, and the plan documents state the limits."""
 
+import json
+
 import pytest
 import superegm as core
+from superegm import scan
 
 from conftest import REPO, set_config
-from test_plan import FENCE, file_unit, graph, plan_text, planned
+from test_plan import FENCE, file_unit, find, graph, plan_text, planned
 
 
 def graphed(world, *edits):
@@ -42,14 +45,19 @@ def test_units_limits_validated(world, key, value, ok):
 
 U01_STEP_END = ("   Implement `u01_fn(x: int) -> int` in `src/u01.ts`.\n   Run the same command; expected: PASS. "
                 "Commit `test(S1): u01 empty` then `feat(S1): u01 empty`.\n")
-MORE_STEPS = "".join(f"{n}. Write the failing test `test_u01_{n}` in `tests/test_u01.py`:\n   {FENCE}python\n   def test_u01_{n}(): assert u01_fn({n}) == {n}\n   {FENCE}\n"
-                     f"   Implement the `{n}` case of `u01_fn(x: int) -> int` in `src/u01.ts`, returning its input unchanged.\n" for n in (2, 3))
+
+
+def more_steps(*numbers):
+  return "".join(f"{n}. Write the failing test `test_u01_{n}` in `tests/test_u01.py`:\n   {FENCE}python\n   def test_u01_{n}(): assert u01_fn({n}) == {n}\n   {FENCE}\n"
+                 f"   Implement the `{n}` case of `u01_fn(x: int) -> int` in `src/u01.ts`, returning its input unchanged.\n" for n in numbers)
+
+
 SCOPE = "| Scope paths | `src/u01.ts` (create), `tests/test_u01.py` (create) |"
 OVER = {  # U01's section made one over the limit (nine Scope paths take Size L)
   "max_body_kb": [("| Objective | Queue exists. |", "| Objective | Queue " + "x" * 25_700 + " exists. |")],
   "max_files": [(SCOPE, SCOPE[:-2] + ", " + ", ".join(f"`src/more{n}.ts` (create)" for n in range(7)) + " |"),
                 ("| Size | S |", "| Size | L |")],
-  "max_steps": [(U01_STEP_END, U01_STEP_END + MORE_STEPS)]}
+  "max_steps": [(U01_STEP_END, U01_STEP_END + more_steps(2, 3))]}
 
 
 @pytest.mark.parametrize("limit,setting,value", [("max_body_kb", 25, "bytes"), ("max_files", 8, 9), ("max_steps", 2, 3)])
@@ -63,3 +71,15 @@ def test_scan_refuses_an_unfiled_unit_over_a_limit(world, limit, setting, value)
   file_unit(world, "U01", 7)
   code, out = scan_with(world, plan=plan, **{limit: setting})
   assert code == 0 and not [l for l in out.splitlines() if "U01" in l and "units." in l], out
+
+
+def test_scan_drops_the_bytes_warning(world):
+  # the 24,576-byte warning goes; the 10-step and 0.40 fenced-share warnings stay
+  plan = graphed(world, ("| Objective | Queue exists. |", "| Objective | Queue " + "x" * 21_300 + " exists. |"),
+                 (U01_STEP_END, U01_STEP_END + more_steps(*range(2, 12))))
+  code, out = scan_with(world, plan=plan)
+  numbers = json.loads(find(world, "U01.json").read_text(encoding="utf-8"))  # scan numbers of the 25,000-byte unit with 11 Steps
+  assert code == 0 and 24_576 < numbers["bytes"] <= 25_600 and numbers["steps"] == 11, out
+  assert not any(w.startswith("bytes") for w in numbers["warnings"])
+  assert "steps 11 > 10" in numbers["warnings"]
+  assert "bytes" not in scan.WARN and scan.WARN["fenced_share"][0] == 0.40
