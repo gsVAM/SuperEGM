@@ -108,3 +108,21 @@ def test_amend_refusals(world, case, message):
   hdir = s.path("file")
   assert not (hdir / "amendments").exists() or not any((hdir / "amendments").iterdir())
   assert not foreman_of(s, "U02")["rulings"]
+
+
+def test_judges_never_amend(world):
+  # judges get no amend option; the interface question reaches filed consumers; their ruling amends nothing
+  from superegm import judges
+  card, s = world_on(world)
+  cap = opened(world, card, IFACE + OPTS, "review head-U02-c1 cap", 2)
+  code, out = rule(world, card, cap, "one more round", "judges:p-1")
+  assert code == 0, out
+  assert foreman_of(s, "U02")["rulings"][-1]["ruling"] == "one more round"
+  assert not (s.path("file") / "amendments").exists()
+  did = opened(world, card, IFACE + OPTS)
+  decision = foreman_of(s, "U02")["decisions"][-1]
+  assert "amend" in decision["options"]
+  s.path("units").write_text(json.dumps({"units": {"U02": {"decisions": [decision]}}}), encoding="utf-8")
+  assert "- amend\n" not in judges.decision_question(s, "U02", did)
+  units = json.loads(s.path("state").read_text(encoding="utf-8"))["units"]
+  assert judges.fan_out(s, "U01") == sorted(units[u]["number"] for u in ("U02", "U03"))  # every filed consumer of U01's names
