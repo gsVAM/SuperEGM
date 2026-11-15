@@ -166,6 +166,25 @@ def test_judges_never_amend(world):
     judges.decision_question(s, "U01", "q1")
 
 
+def test_fan_out_named_producer(world):
+  # U03 consumes U01 and raises `U01 f:`; U02 and U04 also consume U01
+  text = deviation("U01 f: changed")
+  routes = {f"repos/{REPO}/issues/comments/11": {"id": 11, "user": {"login": "builder-bot"}, "body": text},
+            f"repos/{REPO}/issues/comments/12": {"id": 12, "user": {"login": "builder-bot"}, "body": deviation("`g` changed")}}
+  card, s = world_on(world, routes)
+  state = core.load_state(s.root)
+  state["units"] = {f"U0{n}": {"number": 100 + n} for n in range(1, 6)}
+  core.save_state(s.root, state)
+  for unit, consumes in (("U02", "`f` (U01)"), ("U03", "`f` (U01)"), ("U04", "`f` (U01)"), ("U05", "`g` (U03)")):
+    s.path("unit", unit).write_text(consumer_body(consumes), encoding="utf-8")
+  assert judges.fan_out(s, "U01", "U03") == [102, 104]
+  old_form_consumers = judges.fan_out(s, "U03", "U03")
+  assert old_form_consumers == [105]  # a heading with no `<Uxx> <name>:`
+  # `blocked_question` passes the heading's producer, else the raising unit
+  assert judges.blocked_question(s, "U03", ["11"])[1] == [102, 104]
+  assert judges.blocked_question(s, "U03", ["12"])[1] == old_form_consumers
+
+
 def test_reads_directory_and_legacy(world):
   # a 1.2.1-pre.1 handoff's amendments[] and a directory file are both read, sorted by `at`
   card, s = world_on(world)
