@@ -395,7 +395,8 @@ WRITES = {"approve_spec":{"approvals", "handoffs", "state", "reviews", "runcards
           "launch_builder": {"launches", "orient_unit"}, "interrupt": {"launches", "foreman"}, "clean": set(),
           "orient": {"orient", "orient_unit"},
           "runcard": {"runcards", "launches", "driver"}, "init": set(), "doctor": set(), "builder_token": set(), "inbox": {"state", "driver"},
-          "driver": {"driver", "runcards", "launches"}, "register": set()}
+          "driver": {"driver", "runcards", "launches"}, "register": set(),
+          "decision": {"foreman", "reviews", "state", "file"}}
 
 
 @pytest.mark.parametrize("name, kinds", sorted(WRITES.items()))

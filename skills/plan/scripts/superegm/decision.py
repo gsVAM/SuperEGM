@@ -21,7 +21,7 @@ from superegm.report import pending_decisions, unit_view
 from superegm import review
 from superegm.review import Refusal
 
-WRITES = frozenset({"foreman", "reviews", "state"})  # the store kinds this subcommand writes (`reviews`: a fifth point's accept, U35; `state`: `amendments[]`, §6.5)
+WRITES = frozenset({"foreman", "reviews", "state", "file"})  # the store kinds this subcommand writes (`reviews`: a fifth point's accept, U35; `file`: `amendments/<comment id>.json`, §6.5)
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset({"wave"})  # the skills whose card this subcommand accepts
 RELAUNCH = ["relaunch", "stop the unit"]
@@ -558,12 +558,10 @@ def rule(args) -> int:
     data["stopped"] = stopped_entry(args.by, chosen, now, brief)
   # recorded before the read-back, the session's post marked `unread` (its GitHub time not yet read), so a
   # `status --wait` pass in between compares its edits with its own `created_at` and skips the unedited post
-  core.save_foreman(st, unit, data)
   added = amendments_of(decision["question"], chosen, reason, int(posted.split()[1]), now) if amends and not closed else []
-  if added:  # spec §6.5: the handoff's contract changes, read by `plan`'s re-check
-    fresh = core.load_state(st.root)
-    fresh["amendments"] = (fresh.get("amendments") or []) + added
-    core.save_state(st.root, fresh)
+  if added:  # spec §6.5: the contract changes, its own file written before the ruling is saved
+    core.atomic_write(st.path("file", "amendments", f"{str(decision['source']).split()[1]}.json"), added)
+  core.save_foreman(st, unit, data)
   if url:  # the session's own post: its time is GitHub's creation time, read back, so any edit since (one before the
     # read-back too) reads as an edit after the record; a failed read-back leaves the entry `unread`
     created = read_back(st, cid).get("created_at")
