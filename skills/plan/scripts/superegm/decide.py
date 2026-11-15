@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the answer is one of the item's options, written into the plan line of an unfiled unit; a filed unit gets the comment file only.
+# Modified by SuperEGM (gsVAM), 2026: the answer is one of the item's options, written into the plan line of an unfiled unit; a filed unit gets the comment file only; the card's mode stored on the decision (U43).
 
 """superegm decide: answer a decide-before-build item in place."""
 
@@ -37,7 +37,7 @@ def answer_for(decision: dict, answer, default: bool) -> str:
 def run(args):
   st = core.store(core.git_toplevel(Path.cwd()))
   handoff = graph.load(st, args.plan)
-  core.require_runcard(args, SKILLS)
+  card = core.require_runcard(args, SKILLS)
   uid, did = args.unit, args.decision
   unit = handoff.plan.units.get(uid)
   if not unit:
@@ -47,7 +47,7 @@ def run(args):
     raise core.HandoffError(f"decide: {uid} has no decision {did}")
   answer = answer_for({**decision, "unit": uid}, args.answer, args.default)
   by = f"judges:{args.judges}" if args.judges else "owner"
-  record = {"answer": answer, "by": by, "decided_at": core.now_iso()}
+  record = {"answer": answer, "by": by, "decided_at": core.now_iso(), "mode": card["mode"]}  # scan's ruler reads it (U43)
   number = handoff.filed(uid)
   if number is None:
     lines = core.read_text(handoff.plan_path).split("\n")

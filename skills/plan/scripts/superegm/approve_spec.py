@@ -6,7 +6,7 @@
 # ingest once before the refusals, the refusal of an unsettled external finding, an external finding's carried copies
 # as one escalated pair discharged by its latest copy alone, and a re-approval of the same cycle reading that cycle
 # again and keeping the replaced entry's unnamed pairs (U26); `--amend-units` typed by hand opens and closes its own
-# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units`, and a hand-written prior approval read as `since` 0 (U36).
+# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units`, and a hand-written prior approval read as `since` 0 (U36); the run mode frozen as the entry's `mode` (U43).
 
 """superegm approve-spec: record the owner's approval of a converged spec (spec section 8)."""
 
@@ -23,7 +23,7 @@ WRITES = frozenset(["approvals", "handoffs", "state", "reviews", "runcards"])  #
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset(["review-spec", "review-plan", "integrate", "approve-spec"])  # the skills whose card this subcommand accepts
 CONFIG = ".superegm/config.json"
-FROZEN_FIELDS = ["rounds"]  # the entry fields frozen at an approval, which `--amend-units` copies where the extended entry has them (U36)
+FROZEN_FIELDS = ["rounds", "mode"]  # the entry fields frozen at an approval, which `--amend-units` copies where the extended entry has them (U36, U43)
 ANY_H2 = re.compile(r"^ {0,3}##[ \t]+\S")  # an H2 as review.py reads one: up to three spaces of indent, outside a fence
 UNITS_H2 = re.compile(r"^## (?:\d+\.?\s+)?Units\s*$")
 
@@ -265,7 +265,8 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   handoff_id, kind = handoff_id_for(st, sha, spec.stem, core.load_approvals(st, spec))
   commit = commit_by_path(root, [spec.relative_to(root).as_posix(), CONFIG], f"superegm: approve {slug} at review {rid}",
                           st.config["commit_trailer"])
-  entry = entry_of(sha, commit, args.runcard, rid, handoff_id, kind, escalated, {"rounds": rounds})
+  mode = "leavemealone" if args.leavemealone or st.config.get("mode") == "leavemealone" else "normal"
+  entry = entry_of(sha, commit, args.runcard, rid, handoff_id, kind, escalated, {"rounds": rounds, "mode": mode})
   path = append_entry(st, spec, entry)
   write_handoff_file(st, handoff_id, spec, entry["approved_at"] if kind == "opening" else None)
   core.journal(st, f"approve-spec {kind} {handoff_id} sha256 {sha[:12]} at review {rid} commit {commit[:12]} under {args.runcard}")
