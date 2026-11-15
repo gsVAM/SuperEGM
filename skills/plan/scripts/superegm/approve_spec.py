@@ -319,7 +319,7 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
     raise core.HandoffError(f"approve-spec: {error}") from None
   for item in frozen:
     write_copy(st, item)
-  previous = {e["file"]: e["sha"] for e in (core.load_approvals(st, spec) or [{}])[-1].get("instructions") or []}
+  previous = {e["file"]: e["sha"] for e in (last or {}).get("instructions") or []}
   for item in frozen:  # each file whose sha the spec's previous entry, whatever its handoff, does not hold
     if previous.get(item["file"]) != item["sha"]:
       print(f"approve-spec: instructions {item['file']} {item['sha']}")

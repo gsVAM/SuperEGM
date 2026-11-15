@@ -10,6 +10,7 @@ import re
 import subprocess
 
 import superegm as core
+from superegm import review
 
 WRITES = frozenset(["runcards", "reviews"])  # the store kinds this subcommand writes: the card's render, a round's
 CONFIG_DEFAULTS = {"instructions": []}  # [{file: <repo-relative path>, to: [<role>, ...]}], frozen at approval
@@ -131,6 +132,9 @@ def render_stored(st: core.Store, role: str, lane: str = "local", *, card: str |
   `approved_at` the approval entry read, null with none), or as `reviews/<id>/instructions-<n>-<role>-<lane>.json`
   (`{manifest, text}`). A later call returns the stored one whatever `HEAD` or the latest approval is then."""
   if card is not None:
+    opened = core.load_card(st, card).get("handoff", st.handoff_id)  # a card without the key: the store's handoff
+    if handoff_id is not None and opened != handoff_id:
+      raise core.HandoffError(f"--handoff {handoff_id}: {card} was opened under handoff {opened}")
     stored = ((core.load_card(st, card).get("instructions") or {}).get(role) or {}).get(lane)
     if stored is not None:
       return stored["manifest"], stored["text"]
@@ -151,19 +155,15 @@ def render_stored(st: core.Store, role: str, lane: str = "local", *, card: str |
 
 
 def require_review(st: core.Store, rid: str, design: Path) -> None:
-  """`rid` names a review opened on the spec `design`: a plain name (no path), its `review.json` there, its artifact
-  that spec, so a card for one spec never stores a round's render under another's review."""
-  if not rid or rid in (".", "..") or Path(rid).name != rid or "\\" in rid:
-    raise core.HandoffError(f"--review {rid!r} is not a review id")
-  path = st.path("reviews", rid, "review.json")
-  review = json.loads(core.read_text(path)) if path.is_file() else None
-  if review is None:
-    raise core.HandoffError(f"review {rid}: not opened")
-  if core.here(Path(review["artifact"]).expanduser().resolve()) != core.here(design):
-    raise core.HandoffError(f"review {rid} is for {review['artifact']}, not {design}")
+  """`rid` is one of the spec review cycles of `design`, so a card for one spec never stores a round's render under
+  another spec's review, an integrate review or a path outside `reviews/`."""
+  if rid not in review.cycle_ids(st, "spec", str(design)):
+    raise core.HandoffError(f"--review {rid}: not a spec review of {design}")
 
 
 def run(args):
+  if args.unit and args.design:  # --unit lets a unit's card pass for --handoff; with --spec it would pass any spec
+    raise core.HandoffError("instructions: --unit goes with --handoff, not --spec")
   card = core.require_runcard(args, SKILLS)
   if bool(args.handoff) == bool(args.design):
     raise core.HandoffError("instructions: exactly one of --handoff and --spec is required")
@@ -176,9 +176,7 @@ def run(args):
       require_review(st, args.review, design)
       _, text = render_stored(st, args.role, args.lane, review=args.review, round=args.round,
                               root=core.git_toplevel(design))
-    else:
-      if card.get("handoff") != args.handoff:
-        raise core.HandoffError(f"--handoff {args.handoff}: {args.runcard} was opened under handoff {card.get('handoff')}")
+    else:  # render_stored refuses a card opened under another handoff
       _, text = render_stored(st, args.role, args.lane, card=args.runcard, handoff_id=args.handoff)
   except core.HandoffError as error:
     message = str(error)
