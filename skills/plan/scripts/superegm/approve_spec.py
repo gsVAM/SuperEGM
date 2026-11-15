@@ -6,7 +6,7 @@
 # ingest once before the refusals, the refusal of an unsettled external finding, an external finding's carried copies
 # as one escalated pair discharged by its latest copy alone, and a re-approval of the same cycle reading that cycle
 # again and keeping the replaced entry's unnamed pairs (U26); `--amend-units` typed by hand opens and closes its own
-# card, the branch check reading `spec_blob` (U32).
+# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units`, and a hand-written prior approval read as `since` 0 (U36).
 
 """superegm approve-spec: record the owner's approval of a converged spec (spec section 8)."""
 
@@ -17,12 +17,14 @@ import re
 
 import superegm as core
 from superegm import close, runcard
-from superegm.review import Refusal, evaluate, findings_of, ingest_pr, latest_cycle, load_review, load_round, review_id, round_numbers
+from superegm.review import Refusal, evaluate, findings_of, ingest_pr, latest_cycle, live_rounds, load_review, load_round, review_id, round_numbers, valid_rounds
 
 WRITES = frozenset(["approvals", "handoffs", "state", "reviews", "runcards"])  # the store kinds this subcommand writes
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset(["review-spec", "review-plan", "integrate", "approve-spec"])  # the skills whose card this subcommand accepts
 CONFIG = ".superegm/config.json"
+FROZEN_FIELDS = ["rounds"]  # the entry fields frozen at an approval, which `--amend-units` copies where the extended entry has them (U36)
+ANY_H2 = re.compile(r"^ {0,3}##[ \t]+\S")  # an H2 as review.py reads one: up to three spaces of indent, outside a fence
 UNITS_H2 = re.compile(r"^## (?:\d+\.?\s+)?Units\s*$")
 
 
@@ -87,9 +89,42 @@ def write_entries(st: core.Store, spec: Path, entries: list) -> None:
   core.atomic_write(st.path("approvals", core.spec_slug(spec)), {"path": str(spec), "entries": entries})
 
 
-def entry_of(sha, commit, runcard, review, handoff_id, kind, escalated) -> dict:
+def entry_of(sha, commit, runcard, review, handoff_id, kind, escalated, frozen=None) -> dict:
+  """An approval entry; `frozen` holds the frozen fields (`FROZEN_FIELDS`) it carries, none for a field it lacks."""
   return {"sha256": sha, "commit": commit, "runcard": runcard, "review": review, "approved_at": core.now_iso(),
-          "handoff_id": handoff_id, "kind": kind, "voided_by": None, "escalated": escalated}
+          "handoff_id": handoff_id, "kind": kind, "voided_by": None, "escalated": escalated, **(frozen or {})}
+
+
+def cycle_of(review_id: str | None) -> int:
+  """The cycle a review id ends in (`-c<n>`); 0 for a hand-written approval's reference, which has no such suffix."""
+  match = re.search(r"-c([0-9]+)$", review_id or "", re.ASCII)
+  return int(match.group(1)) if match else 0
+
+
+def rounds_line(text: str) -> int | None:
+  """The value of the one `Rounds: <n>` line before the spec's first H2, `n` 1-10; None without one. A second such
+  line, or a value that is not 1-10, is refused with the line; a `Rounds:` line after the first H2 is prose (§4). A
+  line inside a fenced block is neither: it is no `Rounds:` line, and a fenced `## ` is no H2. The line starts at
+  column 0; an indented ` Rounds:` is prose."""
+  found, fence = None, None  # the open fence's (character, run length), as review.py's `sections` reads one
+  for line in text.splitlines():
+    if fence:
+      if re.match(rf"^ {{0,3}}{fence[0]}{{{fence[1]},}}\s*$", line):
+        fence = None
+      continue
+    if (opener := core.FENCE_RE.match(line)) and not (opener.group(1)[0] == "`" and "`" in opener.group(2)):
+      fence = (opener.group(1)[0], len(opener.group(1)))
+      continue
+    if ANY_H2.match(line):
+      break
+    if line.startswith("Rounds:"):
+      if found is not None:
+        raise core.HandoffError(f"approve-spec: a second Rounds line before the first H2: {line}")
+      value = line.removeprefix("Rounds:").strip()
+      if not (value.isascii() and value.isdigit() and valid_rounds(int(value))):
+        raise core.HandoffError(f"approve-spec: {line} is not an integer 1-10")
+      found = int(value)
+  return found
 
 
 def units_section(text: str) -> str:
@@ -205,13 +240,16 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
     raise core.HandoffError("approve-spec: spec bytes differ from the converged round's")
   if not units_is_last_h2(core.read_text(spec)):
     raise core.HandoffError("approve-spec: last H2 must be `Units`")
+  rounds = rounds_line(core.read_text(spec))
+  if rounds is None:  # no `Rounds:` line: the live value, which `review.rounds` refuses outside 1-10
+    rounds = live_rounds(st)
   last = core.load_approval(st, spec)
   if last:
     require_branch_holds(st, root, spec.relative_to(root).as_posix(), last)
   # the cycles past the last approval's; a re-approval of that same cycle (its bytes unmoved, U26: a thread ingested
   # and escalated after the approval) reads that cycle again and keeps the replaced entry's pairs the `## Units`
   # section does not name (that entry may cover earlier cycles too), since `graph` reads the latest entry's list alone
-  since = int(last["review"].rsplit("-c", 1)[1]) if last and last.get("review") else 0
+  since = cycle_of(last.get("review") if last else None)
   if last and last.get("review") == rid:
     named = units_section(core.read_text(spec))
     kept = [pair for pair in last.get("escalated") or [] if pair not in named]
@@ -227,7 +265,7 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   handoff_id, kind = handoff_id_for(st, sha, spec.stem, core.load_approvals(st, spec))
   commit = commit_by_path(root, [spec.relative_to(root).as_posix(), CONFIG], f"superegm: approve {slug} at review {rid}",
                           st.config["commit_trailer"])
-  entry = entry_of(sha, commit, args.runcard, rid, handoff_id, kind, escalated)
+  entry = entry_of(sha, commit, args.runcard, rid, handoff_id, kind, escalated, {"rounds": rounds})
   path = append_entry(st, spec, entry)
   write_handoff_file(st, handoff_id, spec, entry["approved_at"] if kind == "opening" else None)
   core.journal(st, f"approve-spec {kind} {handoff_id} sha256 {sha[:12]} at review {rid} commit {commit[:12]} under {args.runcard}")
@@ -282,7 +320,8 @@ def amend_units(args, st: core.Store, spec: Path, root: Path) -> int:
   commit = commit_by_path(root, [rel, CONFIG], f"superegm: approve {slug} at review {approval['review']}",
                           st.config["commit_trailer"])
   path = append_entry(st, spec, entry_of(sha, commit, args.runcard, approval["review"], approval["handoff_id"], "amend-units",
-                                         list(approval.get("escalated") or [])))
+                                         list(approval.get("escalated") or []),
+                                         {f: approval[f] for f in FROZEN_FIELDS if f in approval}))
   write_handoff_file(st, approval["handoff_id"], spec, None)
   core.journal(st, f"approve-spec amend-units {approval['handoff_id']} sha256 {sha[:12]} commit {commit[:12]} under {args.runcard}")
   print(f"approval recorded in {path}")

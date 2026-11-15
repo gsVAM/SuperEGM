@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03); the review loop and approve-spec (U04); the `acceptable:` line (U35); the by-hand card and the lineless path (U32); an external comment read whole from its root (U73).
+# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03); the review loop and approve-spec (U04); the `acceptable:` line (U35); the by-hand card and the lineless path (U32); an external comment read whole from its root (U73); an approval entry's `rounds`, and the spec resume's panel line (U36).
 
 """U04: the review loop (`review open|record|settle|status|rule`) and `approve-spec` (spec section 8)."""
 
@@ -107,7 +107,7 @@ def opened(world, kind="spec", reviewers=None, astra="off", mode=None, text=SPEC
   code, out = world.run("review", "open", "--kind", kind, "--artifact", artifact, "--reviewers",
                         reviewers or PANEL_OF[kind], *(["--astra", astra] if astra is not None else []), "--runcard", cid)
   assert code == 0, out
-  return spec, cid, out.strip()
+  return spec, cid, out.splitlines()[0]
 
 def rpath(world, rid, *parts):
   return hstore(world).path("reviews", rid, *parts)
@@ -177,7 +177,7 @@ def reopen(world, kind, cid):
   spec = (world.repo / "docs" / "specs" / f"{SLUG}.md").resolve()
   code, out = world.run("review", "open", "--kind", kind, "--artifact", str(spec), "--reviewers", PANEL_OF[kind], "--runcard", cid)
   assert code == 0, out
-  return out.strip()
+  return out.splitlines()[0]
 
 def converged_spec(world, text=SPEC):
   spec, cid, rid = opened(world, text=text)
@@ -249,8 +249,11 @@ def test_a_not_installed_lane_record_is_not_an_incomplete_run(world):
 def test_review_open_cycles(world):
   _, _, rid = opened(world)
   spec, cid, again = opened(world, reviewers="design")      # a re-typed skill resumes the open cycle
-  assert again == rid and rjson(world, rid)["reviewers"] == ["design", "zoom-out"]   # the panel cannot change
-  rounds(world, rid, cid, [HIGH(n) for n in range(1, 6)])
+  assert again == rid and rjson(world, rid)["reviewers"] == ["design", "zoom-out"]   # the cycle's own panel stays
+  assert rjson(world, rid)["panels"] == [{"from_round": 1, "reviewers": ["design"]}]   # the resume narrowed it from round 1
+  assert record(world, rid, 1, "zoom-out", [], cid)[0] == 1                            # zoom-out is off the narrowed panel
+  for n in range(1, 6):
+    assert record(world, rid, n, "design", HIGH(n), cid)[0] == 0
   assert status(world, rid, cid)[0] == 2 and rule(world, rid, "stop", cid)[0] == 0
   _, cid, rid2 = opened(world)
   assert rid2 == f"spec-{SLUG}-c2" and rjson(world, rid2)["cycle"] == 2                 # stop closed c1
@@ -753,7 +756,7 @@ def test_approve_spec_asks_then_commits_by_path(world):
 def test_approve_spec_appends_history_entries_and_opens_one_handoff_per_opening(world):
   spec, cid, rid = converged_spec(world); assert approve(world, spec, cid, "--yes")[0] == 0
   rec, sha = approval(world), hashlib.sha256(spec.read_bytes()).hexdigest()
-  assert list(rec) == ["entries", "path"] and [list(e) for e in rec["entries"]] == [["approved_at", "commit", "escalated", "handoff_id", "kind", "review", "runcard", "sha256", "voided_by"]]
+  assert list(rec) == ["entries", "path"] and [list(e) for e in rec["entries"]] == [["approved_at", "commit", "escalated", "handoff_id", "kind", "review", "rounds", "runcard", "sha256", "voided_by"]]
   first = rec["entries"][0]
   assert (first["sha256"], first["kind"], first["handoff_id"]) == (sha, "opening", f"2026-11-03-sample-de-{sha[:6]}")
   assert json.loads(store(world.repo).path("handoffs", first["handoff_id"]).read_text(encoding="utf-8")) == {"id": first["handoff_id"], "spec": str(spec), "opened_at": first["approved_at"], "closed_at": None}
@@ -1168,7 +1171,7 @@ def test_scope_refusals_resume_and_settle_arguments(world):
   code, out = world.run("review", "scope", "--review", rid, "--runcard", cid)
   assert code == 1 and f"review scope: {rid} is not a spec review" in out
   spec, cid, rid = opened(world)
-  assert world.run("review", "open", "--kind", "spec", "--artifact", str(spec), "--reviewers", PANEL_OF["spec"], "--scope", "whole", "--runcard", cid) == (0, rid + "\n")
+  assert world.run("review", "open", "--kind", "spec", "--artifact", str(spec), "--reviewers", PANEL_OF["spec"], "--scope", "whole", "--runcard", cid) == (0, rid + "\npanel design,zoom-out from round 1\n")
   assert rjson(world, rid)["scope"] == "auto"
   rounds(world, rid, cid, [HIGH(1)])
   path = world.repo.parent / "dispositions.txt"; path.write_text("design-1-1 | contested | wrong\n", encoding="utf-8")

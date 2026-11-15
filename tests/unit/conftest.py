@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's test world (the fake gh, the harness, the sample repository and plan) moved out of test_helper.py so every unit's tests share it; the sample plan in the section 9.1 grammar under an approval record (U05); the PR review threads and collaborator roles of the fake gh (U21); the one-comment route `issues/comments/<id>`, `gh issue edit` taking a label off alone and adding a label the issue has once (U22); `gh issue edit --body-file` in the fake gh (U30).
+# Modified by SuperEGM (gsVAM), 2026: EGM's test world (the fake gh, the harness, the sample repository and plan) moved out of test_helper.py so every unit's tests share it; the sample plan in the section 9.1 grammar under an approval record (U05); the PR review threads and collaborator roles of the fake gh (U21); the one-comment route `issues/comments/<id>`, `gh issue edit` taking a label off alone and adding a label the issue has once (U22); `gh issue edit --body-file` in the fake gh (U30); `review.rounds` 5 in the world's config (U36).
 
 """The test world: a temporary repository, a store, the fake `gh` and the harness.
 
@@ -513,9 +513,10 @@ class Harness:
 
 
 def make_world(tmp_path, capsys, monkeypatch, config=None, origin_url=f"https://github.com/{REPO}.git"):
-  """What `world` builds, with the config and origin overridable."""
+  """What `world` builds, with the config and origin overridable. The default config runs `review.rounds` 5 (the
+  shipped default is 3), so the older five-round tests keep their caps; a `config=` without a `review` key runs at 3."""
   if config is None:
-    config = {"repo": REPO, "banned_terms": ["(?i)secret-codename"]}
+    config = {"repo": REPO, "banned_terms": ["(?i)secret-codename"], "review": {"rounds": 5}}
   repo = make_repo(tmp_path / "repo", origin_url=origin_url, config=config)
   plan = make_plan(tmp_path / "plans", repo)
   harness = Harness(capsys)
@@ -658,7 +659,7 @@ def launchable(world):
   assert code == 0, out
   findings = world.artifacts.parent / "design-1.txt"
   findings.write_text("", encoding="utf-8")
-  code, out = world.run("review", "record", "--review", out.strip(), "--round", "1", "--reviewer", "design",
+  code, out = world.run("review", "record", "--review", out.splitlines()[0], "--round", "1", "--reviewer", "design",
                         "--findings", findings, "--runcard", cid, card=None)
   assert code == 0, out
   code, out = world.run("approve-spec", "--spec", world.spec, "--yes")

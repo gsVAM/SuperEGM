@@ -11,7 +11,7 @@ description: >-
   Zoom Out Review, and Implementation Readiness.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: renamed to review-spec; the body is spec section 8's one review loop over the helper (the stages, presets, semantic split, checkpoint gates and report files are gone); persona path agents/zoom-out.md; the amendment scope, the branch sentence and the batch settle (U19); the spec PR, the pushes and the PR's ingest (U26); step 3's accept below the cap (U35). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: renamed to review-spec; the body is spec section 8's one review loop over the helper (the stages, presets, semantic split, checkpoint gates and report files are gone); persona path agents/zoom-out.md; the amendment scope, the branch sentence and the batch settle (U19); the spec PR, the pushes and the PR's ingest (U26); step 3's accept below the cap (U35); the resumed panel line and the cap read from `review.rounds` (U36). -->
 
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: run card, panel presets, Astra lane. -->
 
@@ -88,9 +88,16 @@ worktree in the owner's checkout.
 
     superegm review open --kind spec --artifact <spec-path> --reviewers <panel> [--astra on|off] [--scope auto|whole|<sections>] --runcard <id>
 
-The id is `spec-<spec-slug>-c<n>`. A cycle still open from an earlier invocation is resumed
-with its stored panel and scope form; a closed one (`accept`, `stop`, or a spec edited after the
-approval that names it) starts the next cycle with a fresh cap.
+The id is `spec-<spec-slug>-c<n>`, the first line printed. A cycle still open from an earlier
+invocation is resumed with its stored scope form, and a second line prints its panel,
+`panel <a,b,astra> from round <n>`: a `--reviewers` that is a proper subset of it, `design` first,
+narrows it from round `<n>`. An equal panel changes nothing and the line ends there; a panel naming
+a reviewer off the round's panel changes nothing and the line ends ` (unchanged: <reviewer> is not on the panel)`;
+a panel not starting with `design` is refused before any line prints. A resume cannot drop the Astra lane.
+Dispatch the panel that line prints, after finishing a partly recorded round with its own panel (the line names
+the next round's) unless the spec was edited since that round's first record: that round then takes no more
+records, so leave it as recorded. On a new cycle only the id prints: dispatch the panel you passed. A closed one (`accept`, `stop`, or a spec edited after the
+approval that names it) starts the next cycle with a fresh cap (`review.rounds`, read at that open).
 
 `--scope` is the invocation's, default `auto`: an amendment is reviewed in scope, the sections
 changed since the last approval and their neighbours, re-derived every round; with no approval
@@ -107,7 +114,7 @@ helper for the round's scope:
     superegm review scope --review <id> --runcard <id>
 
 and put the lines it prints in every goldfish's brief with the scope sentence of
-`references/review_loop.md` section 2. Then the whole panel concurrently through the adapters,
+`references/review_loop.md` section 2. Then the whole panel `review open` printed (on a new cycle, the one you passed), concurrently through the adapters,
 the Astra lane alongside when it is on, every reviewer recorded with `superegm review record`
 (an empty file is a record; one retry, then `--not-run`). A finding citing a line outside the
 scope is out of scope: the helper refuses it, keeps it in the round's `out_of_scope[]`, and you
