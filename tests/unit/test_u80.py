@@ -93,3 +93,17 @@ def test_amendments_and_applies_to_this_head(tmp_path):
   prepare.write_amendments(tmp_path / "none.md", [], "2026-11-01T12:00:00Z")
   empty_amendments_md = (tmp_path / "none.md").read_text(encoding="utf-8")
   assert empty_amendments_md.split() == ["#", "Amendments", "none"]
+
+
+def test_amendments_read_from_the_handoff_directory(tmp_path):
+  # the `amendments/<comment id>.json` files and a legacy state.json list are both read, by `at`
+  body = "# U03 — Worker\n\n## Interfaces\n- Consumes: g (U01)\n- Produces: f() -> None\n"
+  (tmp_path / "amendments").mkdir()
+  (tmp_path / "amendments" / "12.json").write_text(json.dumps(amend("U01", "g", "2026-11-02T00:00:00Z", 12)), encoding="utf-8")
+  (tmp_path / "amendments" / "13.json").write_text(json.dumps(amend("U09", "h", "2026-11-01T00:00:00Z", 13)), encoding="utf-8")
+  (tmp_path / "state.json").write_text(json.dumps({"amendments": [amend("U03", "f", "2026-11-01T00:00:00Z", 11)]}), encoding="utf-8")
+
+  class St:
+    def path(self, kind, *parts):
+      return tmp_path / "state.json" if kind == "state" else tmp_path.joinpath(*parts)
+  assert [(a["unit"], a["name"]) for a in launch_builder.amendments_for(St(), "U03", body)] == [("U03", "f"), ("U01", "g")]
