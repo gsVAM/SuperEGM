@@ -35,6 +35,7 @@ from graphlib import CycleError, TopologicalSorter
 from pathlib import Path
 
 from . import body
+from . import traces
 LABEL_RE = re.compile(r"^[^,\s]{1,50}$")
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 MENTION_CONFIG_RE = re.compile(r"^@[A-Za-z0-9][A-Za-z0-9-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)?(?:\[bot\])?$")
@@ -570,6 +571,7 @@ def reboot_launches(hs: Store, unit: str, current: str) -> None:
   for entry in data.get("launches") or []:
     if entry.get("status") == "running" and rebooted(entry, current) and not Path(entry["result_file"] + ".exit").is_file():
       entry["status"] = "interrupted (reboot)"
+      entry["subagent_calls"] = traces.launch_subagent_calls(hs.config["builder"]["profile_dir"], entry)
       journal(hs, f"{unit} launch {entry['round']} interrupted (reboot)")
       changed = True
   if changed:

@@ -7,6 +7,7 @@ round (`collected`, `not run (interrupted: owner)`); an owner's decision, never 
 from pathlib import Path
 
 import superegm as core
+from superegm import traces
 from superegm.launch import load_launches, terminal
 
 WRITES = frozenset(["launches", "foreman"])  # the store kinds this subcommand writes
@@ -42,6 +43,7 @@ def interrupt(args):
     if terminal(entry):
       raise core.HandoffError(f"{unit} launch {args.launch} is already terminal ({entry['status']})")
     entry["status"] = "interrupted"
+    entry["subagent_calls"] = traces.launch_subagent_calls(st.config["builder"]["profile_dir"], entry)
     core.atomic_write(st.path("launches", unit), {"launches": launches})
     line = f"{unit} launch {args.launch} interrupted"
   else:
