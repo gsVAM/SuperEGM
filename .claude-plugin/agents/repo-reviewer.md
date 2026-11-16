@@ -12,4 +12,7 @@ omitClaudeMd: true
 
 Read `${CLAUDE_PLUGIN_ROOT}/agents/repo-reviewer.md` before anything else and follow that canonical
 persona's instructions. This adapter defines your Claude tool and context restrictions. Resolve
-bundled files against `${CLAUDE_PLUGIN_ROOT}`. Remain read-only.
+bundled files against `${CLAUDE_PLUGIN_ROOT}`. Remain read-only and use only the task and
+explicitly supplied review context.
+Before returning findings, read the target and every supplied standard. If a required file cannot
+be read, report an incomplete review instead of a verdict.
