@@ -4,9 +4,12 @@
 """U97: spec section 6.5 conformance, the builder's launch and its measurement."""
 
 import json
+from pathlib import Path
 import pytest
 from conftest import ROOT
 from superegm import launch_builder, record_launch
+import test_builders as tb
+from test_builders import spawn_fake, no_graphify, which  # noqa: F401  the fixtures test_builders' launches run under
 
 ORDERS = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8")
 BRIEF = (ROOT / "skills/wave/references/foreman_brief.md").read_text(encoding="utf-8")
@@ -45,11 +48,21 @@ def test_launch_reason(event, reason):
 
 
 @pytest.mark.parametrize("value, recorded", [(1234, 1234), (12.5, 12.5), (True, None), ("1234", None), (None, None)])
-def test_duration_ms_present_or_absent(tmp_path, value, recorded):
-  # the key is present only for a real number
+def test_duration_ms_present_or_absent(world, monkeypatch, spawn_fake, tmp_path, value, recorded):
+  # the key is present only for a real number, in the filter and in the launch record
   result = tmp_path / "result.json"
   result.write_text(json.dumps({"duration_ms": value}), encoding="utf-8")
   assert record_launch.result_usage(result)[2] == recorded
+  s, card, hid, _ = tb.seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0
+  assert world.run("launch-builder", "--unit", tb.UNIT, "--round", 1, "--runcard", card)[0] == 0
+  entry = tb.launches_of(s)[0]
+  Path(entry["result_file"]).write_text(json.dumps({"duration_ms": value}), encoding="utf-8")
+  Path(entry["result_file"] + ".exit").write_text("0\n", encoding="utf-8")
+  assert world.run("record-launch", "--unit", tb.UNIT, "--exit", 0, "--runcard", card)[0] == 0
+  entry = tb.launches_of(s)[0]
+  assert ("duration_ms" in entry) is (recorded is not None) and entry.get("duration_ms") == recorded
 
 
 def _prepare_head(world, tmp_path, monkeypatch, started, amendments=(), extra=None):
