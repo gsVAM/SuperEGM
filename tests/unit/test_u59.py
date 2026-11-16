@@ -81,3 +81,26 @@ def test_mcp_source_order(world, tmp_path, monkeypatch, local, user, project, co
   builder = superegm.load_config(world.repo)["builder"]
   assert builder["mcp"] == {"relay": entry(copied)}
   assert "mcp__relay__*" in builder["allowed_tools"] and "Bash(pytest:*)" in builder["allowed_tools"]
+
+
+@pytest.mark.parametrize("entry, key", [
+  ({"command": "x", "env": {"API_KEY": "sk-live"}}, "API_KEY"),
+  ({"url": "https://h", "headers": {"Authorization": "Bearer ${TOKEN}"}}, "Authorization"),
+  ({"command": "x", "env": {"API_KEY": "${API_KEY}"}}, None),
+])
+def test_literal_secret_refused(world, tmp_path, monkeypatch, entry, key):
+  import superegm
+  profile = setup(world, tmp_path, monkeypatch)
+  good = {"command": "good-server"}
+  (tmp_path / "claude").mkdir()
+  (tmp_path / "claude" / ".claude.json").write_text(json.dumps({"mcpServers": {"good": good, "bad": entry}}), encoding="utf-8")
+  config_before = (world.repo / CONFIG).read_bytes()
+  code, out = world.run("builder-setup", "--mcp", "good", "--mcp", "bad")
+  if key:
+    assert code == 1 and key in out and "sk-live" not in out, out
+    assert (world.repo / CONFIG).read_bytes() == config_before and not profile.exists()
+    return
+  assert code == 0, out
+  builder = superegm.load_config(world.repo)["builder"]
+  assert builder["mcp"] == {"good": good, "bad": entry}
+  assert "mcp__good__*" in builder["allowed_tools"] and "mcp__bad__*" in builder["allowed_tools"]
