@@ -17,7 +17,7 @@ from superegm.builder_token import app_lines, key_path, tool
 from superegm.judges import judge_members
 from superegm.launch import app_login, builder_login, origin_problems, protection_problems
 from superegm.launch_builder import (SENTINEL, UNSET, allowed_tools, builder_flags, elephant_profile, launched_pairs, plugin_dirs,
-                                     profile_problem)
+                                     profile_problem, segment_heads)
 
 WRITES = frozenset()  # doctor writes nothing
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # its own lines are `checks`' (U32)
@@ -73,13 +73,69 @@ def probe(config, repo_root: Path) -> bool:
     env_words, args = builder_flags(config, tools, dirs, mcp_file, (b["model"], b["effort"]))
     done = subprocess.run(["env", *env_words, "claude", "-p", "Reply ok.", *args, *PROBE_TAIL], cwd=temp,
                           stdin=subprocess.DEVNULL, capture_output=True, text=True)
-    if done.returncode:
-      print(f"probe: session exit {done.returncode}")
-      return False
-    print("probe: session ok")
-    return True
+    lines = probe_lines(done.stdout, b["profile_dir"])
+    for text, _ in lines:
+      print(f"probe: {text}")
+    if any(text.startswith("mcp ") and text.split()[2] == "needs-auth" for text, _ in lines):
+      shutil.copyfile(mcp_file, Path(b["profile_dir"]) / "probe-mcp.json")  # the one-time auth step's file outlives the temp dir
+    print(f"probe: session exit {done.returncode}" if done.returncode else "probe: session ok")
+    return not done.returncode and all(ok for _, ok in lines)
   finally:
     shutil.rmtree(temp, ignore_errors=True)
+
+
+def probe_lines(stdout: str, profile: str) -> list[tuple[str, bool]]:
+  """The probe's lines from the session's stream-json events, each with whether it passes: `mcp <name> <status>`
+  per server of the init event (`connected` passes; `needs-auth` names the one-time auth step), `tool <name> ok` or
+  `tool <name> error: <first line>` per tool result, `denied <tool> <input> (--allow <prefix>)` per entry of the
+  result's `permission_denials` (each fails)."""
+  lines, names = [], {}
+  for raw in stdout.splitlines():
+    try:
+      event = json.loads(raw)
+    except ValueError:
+      continue
+    if not isinstance(event, dict):
+      continue
+    kind = event.get("type")
+    if kind == "system" and event.get("subtype") == "init":
+      for server in event.get("mcp_servers") or []:
+        name, status = server.get("name"), server.get("status")
+        text = f"mcp {name} {status}"
+        if status == "needs-auth":
+          text += (f" (once: CLAUDE_CONFIG_DIR={profile} claude --mcp-config {profile}/probe-mcp.json --strict-mcp-config, "
+                   "then /mcp and Authenticate)")
+        lines.append((text, status == "connected"))
+    elif kind in ("assistant", "user"):
+      content = (event.get("message") or {}).get("content")
+      for block in content if isinstance(content, list) else []:
+        if not isinstance(block, dict):
+          continue
+        if block.get("type") == "tool_use":
+          names[block.get("id")] = block.get("name")
+        elif block.get("type") == "tool_result":
+          name = names.get(block.get("tool_use_id"), block.get("tool_use_id"))
+          if block.get("is_error"):
+            lines.append((f"tool {name} error: {first_line(block.get('content'))}", False))
+          else:
+            lines.append((f"tool {name} ok", True))
+    elif kind == "result":
+      for denial in event.get("permission_denials") or []:
+        tool_name, tool_input = denial.get("tool_name"), denial.get("tool_input") or {}
+        if tool_name == "Bash" and isinstance(tool_input.get("command"), str):
+          command = first_line(tool_input["command"])
+          allow = " ".join(f"--allow {head}" for head in dict.fromkeys(segment_heads(tool_input["command"])))
+          lines.append((f"denied Bash {command} ({allow})", False))
+        else:
+          lines.append((f"denied {tool_name} {json.dumps(tool_input, sort_keys=True)}", False))
+  return lines
+
+
+def first_line(content) -> str:
+  """The first line of a tool result's content: a string, or a list of blocks whose text is joined."""
+  if isinstance(content, list):
+    content = "\n".join(b.get("text", "") for b in content if isinstance(b, dict))
+  return (str(content or "").strip().splitlines() or [""])[0]
 
 
 def checks(config, repo_root, token):
