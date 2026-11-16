@@ -605,16 +605,18 @@ def test_the_file_skill_body_runs_the_filing_in_order_and_asks_one_question():
   body = (ROOT / "skills/file/SKILL.md").read_text(encoding="utf-8").split("---", 2)[2]
   assert len(body.encode("utf-8")) <= 24_000
   assert "In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first." in body
-  order = ["runcard open --skill file", "gate --pass", "dry-run", "Create these <n> issues and <m> links on OWNER/NAME as handoff_dryrun.md shows?",
-           "apply --yes", "verify", "runcard close"]
+  order = ["runcard open --skill file", "apply --yes", "verify", "gate --pass", "dry-run",
+           "Create these <n> issues and <m> links on OWNER/NAME as handoff_dryrun.md shows?"]
   positions = [body.index(s) for s in order]
   assert positions == sorted(positions), order
+  for s in ("apply --yes", "verify", "runcard close"):  # after the question
+    assert body.index(s, positions[-1]) > positions[-1], s
   assert "Create, Change the plan, Stop" in body
   assert "Create: automatic (leavemealone)" in body
   assert "A filed issue body is never edited; a deviation during the build is a comment on the issue (§10)." in body
   assert "filings[]" in body and "base_at_start" in body and "/superegm:wave" in body
   for helper_call in re.findall(r"<HELPER>'\s+([a-z-]+)((?:\s+--[a-z-]+(?:\s+'[^']*'|\s+<[^>]*>)?)*)", body):
-    assert helper_call[0] in ("runcard", "gate", "dry-run", "apply", "verify"), helper_call
+    assert helper_call[0] in ("runcard", "gate", "dry-run", "apply", "verify", "next"), helper_call
 
 
 # ---------------------------------------------------------------- adoption (spec section 10, U13)

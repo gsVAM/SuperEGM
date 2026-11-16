@@ -95,3 +95,30 @@ def test_started_filing_resumes(world, case, apply_code, verify_line):
   else:
     assert code == 1 and verify_line in out, out
     assert after["verify"]["problems"] and all(p.startswith("MISMATCH") for p in after["verify"]["problems"])
+
+
+def test_file_skill_under_the_chain():
+  body = (ROOT / "skills/file/SKILL.md").read_text(encoding="utf-8").split("---", 2)[2]
+  assert len(body.encode("utf-8")) <= 24_000
+  # the resume names `filings[]` and `confirmed_sha256`; its `apply --yes` and `verify` come before `gate --pass`
+  resume = body.index("Resume a started filing")
+  assert "filings[]" in body[resume:] and "confirmed_sha256" in body[resume:]
+  gate_at = body.index("gate --pass")
+  assert resume < body.index("apply --yes", resume) < body.index("verify", resume) < gate_at
+  # the config-mode clause of Step 1 is gone: the frozen default, `config.mode` the fallback
+  assert "the config's `mode` is `leavemealone`" not in body
+  step_one = body[body.index("## Step 1"):resume]
+  assert "--mode leavemealone" in step_one and "only when the invocation said `--leavemealone`" in step_one
+  assert "frozen" in step_one and "`config.mode`" in step_one
+  # under the driver: `next wait` at Create and on MISMATCH lines other than `MISMATCH read failed`
+  assert "<HELPER>' next wait" in body and "--phase file" in body and "SUPEREGM_ROLE=driver" in body
+  create = body[body.index("In leavemealone-mode there is no question"):body.index("## Step 5")]
+  assert "next wait" in create and "handoff_dryrun.md" in create
+  readback = body[body.index("## Step 6"):body.index("## Step 7")]
+  assert "next wait" in readback and "MISMATCH read failed" in readback
+  # on a wait record: `runcard open --mode normal`, the record's question asked directly, then `next clear`
+  assert "runcard open --mode normal" in body and "the record's question" in body
+  assert "<HELPER>' next clear" in body
+  # the gate's "nothing to file" no longer ends the skill after a resumed verify with problems
+  gate_text = body[gate_at:body.index("## Step 4")]
+  assert "nothing to file" in gate_text and "never after a resumed verify with problems" in gate_text
