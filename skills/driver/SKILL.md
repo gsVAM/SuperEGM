@@ -4,7 +4,7 @@ license: Apache-2.0
 effects: external
 effect_kinds: [start-session, state-store]
 disable-model-invocation: true
-description: Installs, inspects and resets the owner's timer that types one leavemealone wave per store when there is something to do.
+description: Installs, inspects and resets the owner's timer that types one leavemealone wave per store when there is something to do, or, with driver.chain on, the chain phase superegm next names.
 ---
 
 <!-- Added by SuperEGM (gsVAM), 2026: the driver skill (spec section 11.2, U24). -->
@@ -20,8 +20,31 @@ registered store and, when there is something to do and no session of that store
 `claude -p '/superegm:wave <spec> --handoff <id> --leavemealone' --permission-mode bypassPermissions --output-format json`
 in the registered root under `SUPEREGM_ROLE=driver`, its result and exit code written to files the tick names.
 That session is unattended: it runs with no allow-list and no prompt, under the credential `~/.superegm/env` names,
-so install the driver only on a machine and for repositories you would let a session act on alone. A tick that
-finds nothing writes nothing. It never merges, and never types `plan`, `file`, `integrate` or `review-plan`.
+so install the driver only on a machine and for repositories you would let a session act on alone. With the
+chain off, a tick that finds nothing writes nothing (with it on, see the writes below). It never merges, and never types `integrate`; with the chain off it never types
+`plan`, `file` or `review-plan` either.
+
+## The chain
+
+The chain runs only in a store whose `.superegm/config.json` sets `driver.chain` to `true` (`init` writes no
+`driver` key, and an absent key reads `false`, so a store keeps the tick above unchanged). With the chain on, each
+tick first fetches `+refs/heads/<base>:refs/superegm/tick-base` from `config.remote` in the registered root, once
+per store, and writes the outcome to the store's `tick/fetch.json` (`at`, `ok`, the first stderr line); a failed
+fetch is journaled `driver: fetch <remote> failed: <first stderr line>` once per distinct line, and after a good
+one a superseded handoff's wait record is removed (`driver: <handoff> superseded: wait record removed`). It then
+asks `superegm next --handoff <id>` per open handoff and types the phase that line names, `/superegm:<phase> <spec>
+--handoff <id>` (`plan`, `review-plan`, `file` or `wave`), with `--leavemealone` unless the handoff's approval froze
+the mode `normal`; a `file` that answers a wait record goes without it. It types nothing on `none`, `integrate` or
+any `waiting …` line. A handoff approved before 1.2.1 (no frozen mode) runs only its `wave` row, with
+`--leavemealone`. The launch entry records its `phase` and, once its session ends, its `outcome` (`succeeded` or
+`failed`), decided once by the outcome test: a `wave` launch by 1.2's test (below); a `plan`, `review-plan` or
+`file` launch succeeded when its driven card closed, it exited 0, and either `next` then prints a different line or
+the session wrote a wait record of its own (`since` at or after the launch's start), and failed otherwise, so a plan
+session that closed with exit 0 and left `next` on `plan` with no wait record failed. While `next` prints `waiting
+fetch`, `waiting push` or `waiting checkout`, a `plan`, `review-plan` or `file` launch's outcome stays undecided and
+a later tick decides it; a `wave` launch's is decided when its session ends, whatever `next` prints. So a chain-on
+tick that launches nothing may still write `tick/fetch.json`, a fetch journal line, a removed wait record and an
+`outcome`. Two consecutive failed launches of any phase stop the handoff, as "What the tick refuses" says below.
 
 `<HELPER>` is `${CLAUDE_PLUGIN_ROOT}/skills/plan/scripts/superegm.py`; pass `--handoff <id>` to every call
 when the owner typed it.
@@ -29,7 +52,8 @@ when the owner typed it.
 ## The card
 
 Every action but `status` runs under a `driver` card on the handoff's spec (the `design.path` of its
-`state.json`): `python3 '<HELPER>' runcard open --skill driver --artifact <spec>` prints `<CARD>`; run the
+`state.json`, or, before `plan` writes one, the `spec` of its handoff record `handoffs/<id>.json`):
+`python3 '<HELPER>' runcard open --skill driver --artifact <spec>` prints `<CARD>`; run the
 action with `--runcard '<CARD>'`, then `python3 '<HELPER>' runcard close '<CARD>'` after each action, a
 refusal included. `status` is read-only and takes no card.
 
@@ -56,19 +80,24 @@ refusal included. `status` is read-only and takes no card.
   after every plugin update (`doctor` prints `driver: stale (…)` until you do).
 - `uninstall`: `python3 '<HELPER>' driver uninstall --runcard '<CARD>'` removes the timer.
 - `status`: `python3 '<HELPER>' driver status` prints, per open handoff, the last tick launch (its
-  `started_at`, the wrapper's `pid`, whether its exit file exists), the open `wave` card with its age and the
-  last refusal. A launch without an exit file is a live session, never guessed dead.
+  `started_at`, the wrapper's `pid`, whether its exit file exists), the open `wave` card (with the chain on, each
+  open top-level `plan`, `review-plan`, `file` or `wave` card) with its skill and age, and the last refusal. A
+  launch without an exit file is a live session, never guessed dead.
 - `reset`: `python3 '<HELPER>' driver reset --runcard '<CARD>'` is the owner's interrupt for a tick launch the
   owner knows is dead (a kill, a crash): it records the launch `interrupted`, marks the handoff's open `wave`
-  card `interrupted` and clears the tick's refusal; after two failed launches that both exited, it sets the two
+  card (with the chain on, its open top-level card of any chain phase) `interrupted` and clears the tick's refusal; after two failed launches that both exited, it sets the two
   failures aside (`set_aside`, the second one's round), so the next tick counts afresh. A reboot needs no reset:
   the boot-id proof records it.
 
 ## What the tick refuses
 
-Two consecutive tick launches that failed before the loop ran, or a registered `root` that is not a worktree
-of the store's repository, stop the tick for that handoff: journaled `tick: refused (<handoff>: <reason>)` and
-sent by `notify`. Re-type `/superegm:wave`, or `/superegm:driver reset` (the failures), or
+Two consecutive tick launches that failed (a `wave` before the loop ran, 1.2's test; with the chain on, a launch of
+any chain phase, a `plan`, `review-plan` or `file` launch failing on the outcome test in "The chain" above), or a registered `root`
+that is not a worktree of the store's repository, stop the tick for that handoff: journaled `tick: refused
+(<handoff>: <reason>)` and sent by `notify`, the failures' reason `two launches failed before the loop ran` with the
+chain off and `two launches failed their phase's outcome test` with it on. Re-type `/superegm:wave` (with the chain on, the phase `superegm next`
+names: a typed top-level card of any chain phase restarts the count), or `/superegm:driver reset` (the failures), or
 `/superegm:driver register` from the right checkout (the root). While a tick's session may be live, a typed
 `wave` (and that handoff's `plan`, `file`, `integrate`, `review-plan` and `orient`) refuses with
-`driver: a tick's session may be live; /superegm:driver reset is the owner's interrupt`.
+`driver: a tick's session may be live; /superegm:driver reset is the owner's interrupt`; with the chain on, a
+top-level `plan`, `review-plan` or `file` card the tick's own session opens is exempt, as its `wave` card is.
