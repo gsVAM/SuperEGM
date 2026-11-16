@@ -41,7 +41,8 @@ any `waiting …` line. A handoff approved before 1.2.1 (no frozen mode) runs on
 `file` launch succeeded when its driven card closed, it exited 0, and either `next` then prints a different line or
 the session wrote a wait record of its own (`since` at or after the launch's start), and failed otherwise, so a plan
 session that closed with exit 0 and left `next` on `plan` with no wait record failed. While `next` prints `waiting
-fetch`, `waiting push` or `waiting checkout`, the outcome stays undecided and a later tick decides it. So a chain-on
+fetch`, `waiting push` or `waiting checkout`, a `plan`, `review-plan` or `file` launch's outcome stays undecided and
+a later tick decides it; a `wave` launch's is decided when its session ends, whatever `next` prints. So a chain-on
 tick that launches nothing may still write `tick/fetch.json`, a fetch journal line, a removed wait record and an
 `outcome`. Two consecutive failed launches of any phase stop the handoff, as "What the tick refuses" says below.
 
