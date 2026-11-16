@@ -10,6 +10,7 @@ import pytest
 from conftest import ROOT, set_config
 from superegm import atomic_write
 from test_wave import open_wave_card, wave_store, fake_gh, foreman_of, head_review
+from test_u43 import registry  # noqa: F401 -- autouse: HOME under tmp_path, so `next` never reads the owner's registry
 
 REPO, OWNER = "example-org/webhooks", "owner"
 UPDATED = "2026-11-10T09:00:00Z"
@@ -285,3 +286,82 @@ def test_proceed_converges_first(world, monkeypatch, case, kind, k, h):
     kept = files()
     code, out = world.run("review", "ingest", "--unit", "U01", "--runcard", cid)
     assert code == 0 and out.split()[:2] == ["0", "ingested"] and files() == kept, out
+
+
+# ---------------------------------------------------------------- S4: a proceed is honoured downstream
+
+
+def honoured_spec(world, monkeypatch):
+  """approve-spec on a proceeded spec cycle: an unsettled external finding no refusal, the pinned bytes the test."""
+  from conftest import make_pr
+  from test_review import opened, rounds, approve, move, hstore, card
+  from test_u26 import reader, ingest, THREADS
+  reader(monkeypatch, threads=THREADS[:1])
+  make_pr(world.gh, 7, "c" * 40, branch="main")
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [[]])
+  assert ingest(world, cid)[0] == 0
+  code, out = proceed(world, rid, cid, "--owner", "--reason", "ship it")
+  assert code == 0, out
+  # approve-spec's own ingest now reads a new high thread: unsettled on the proceeded cycle
+  reader(monkeypatch, threads=[THREADS[0], {**THREADS[0], "id": 13, "body": "**bug** the stall is unstated",
+                                            "created_at": "2026-11-05T00:00:02Z"}])
+  code, out = approve(world, spec, cid, "--yes")
+  assert code == 0, out
+  move(world, "spec", spec)
+  cid2 = card(world, spec)
+  code, out = approve(world, spec, cid2, "--yes")
+  assert code == 1 and "approve-spec: spec bytes differ from the converged round's" in out, out
+  code, out = proceed(world, rid, cid2, "--owner", "--reason", "ship the edit")
+  assert code == 0, out
+  assert verdict(hstore(world), rid) == "by proceed R2"
+  code, out = approve(world, spec, cid2, "--yes")
+  assert code == 0, out
+
+
+def honoured_plan(world):
+  """U03's plan cycle proceeded at round 0: converged for the gate and for `review-plan due`."""
+  from test_file import planned, open_card, converge, hp
+  from superegm import gate, review_plan, store
+  spec, _, _ = planned(world, ("U01", "U02", "U03"))
+  cid = open_card(world, "review-plan", str(spec))
+  code, out = world.run("review", "open", "--kind", "plan", "--artifact", "U03", "--reviewers", "readiness",
+                        "--runcard", cid)
+  assert code == 0, out
+  rid = out.splitlines()[0]
+  code, out = proceed(world, rid, cid, "--owner", "--reason", "planned enough")
+  assert code == 0, out
+  pinned = json.loads(hp(world, "units").read_text(encoding="utf-8"))["units"]["U03"]["body_sha256"]
+  st = store(world.repo)
+  assert gate.converged_review(st, "U03") == (True, pinned)
+  assert [r for r in review_plan.due_rows(st, cid) if r[0] == "U03"] == [("U03", "converged", rid, "-", pinned)]
+  for uid in ("U01", "U02"):
+    converge(world, uid)
+  code, out = world.run("gate", "--pass", "--spec", spec, "--runcard", open_card(world, "file", str(spec)))
+  assert code == 0, out
+
+
+def honoured_next(world):
+  """A plan review stopped, then proceeded: `next` passes the stopped row and the review row to `file`."""
+  from test_u43 import Chain, SHA
+  c = Chain(world)
+  c.all_filed()
+  c.state["units"].pop("U02")
+  c.review("U02", converged="by proceed R2", rulings=[
+    {"id": "R1", "ruling": "stop", "by": "owner", "at": "2026-11-15T00:00:00Z"},
+    {"id": "R2", "ruling": "proceed", "by": "owner", "at": "2026-11-15T01:00:00Z", "reason": "r", "sha256": SHA["U02"]}])
+  path = c.hs.path("reviews", "plan-U02-c1", "review.json")  # `evaluate` stores a proceed at the latest round
+  path.write_text(json.dumps({**json.loads(path.read_text(encoding="utf-8")), "converged_round": 1}), encoding="utf-8")
+  c.save()
+  code, out, _, _ = c.next()
+  assert (code, out) == (0, "file")
+
+
+@pytest.mark.parametrize("part", ["spec", "plan", "next"])
+def test_proceed_is_honoured_downstream(world, monkeypatch, part):
+  if part == "spec":
+    honoured_spec(world, monkeypatch)
+  elif part == "plan":
+    honoured_plan(world)
+  else:
+    honoured_next(world)
