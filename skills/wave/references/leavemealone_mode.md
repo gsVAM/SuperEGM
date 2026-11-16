@@ -1,10 +1,10 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
-Added by SuperEGM (gsVAM), 2026: the wave skill's leavemealone-mode wiring, moved out of the wave skill's SKILL.md (the owner's ruling: a 24K skill body is context bloat); the owner's-alone sentence (U23); the driver role's no-ask clauses (U24); the `launch <n>` question after its decision, a stalled launch's (U31). -->
+Added by SuperEGM (gsVAM), 2026: the wave skill's leavemealone-mode wiring, moved out of the wave skill's SKILL.md (the owner's ruling: a 24K skill body is context bloat); the owner's-alone sentence (U23); the driver role's no-ask clauses (U24); the `launch <n>` question after its decision, a stalled launch's (U31); the frozen mode (U45). -->
 
 # Leavemealone-mode
 
-In leavemealone-mode (`--leavemealone` on the invocation, or `config.mode`,
-recorded on the card at Entry step 1) the three `Leavemealone-mode: U11 wires
+In leavemealone-mode (`--leavemealone` on the invocation, or the approval's frozen
+`mode`, else `config.mode` for an entry with no `mode`, recorded on the card at Entry step 1) the three `Leavemealone-mode: U11 wires
 §13.2 here.` lines of `references/decision_points.md` are the entry points (`<card>` below is `<CARD>`): at
 each decision point, after
 `python3 '<HELPER>' decision open --unit <U> --point <1|2|3> --question <path> --source <source> --runcard <card>`

@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48).
+# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45).
 
 """superegm inbox [--all] [--json] [--handoff <id>]: one line per item that needs the owner across the
 store's open handoffs, read-only and with no run card; superegm notify --runcard <id>: the owner's
@@ -236,6 +236,47 @@ def driver_items(hs: core.Store, repo: str, hid: str) -> list:
   return out
 
 
+def integrate_line(state: dict, foremen: dict) -> str:
+  """`ready to integrate`, or, while a stopped unit's issue is still open (`decision.stop_unit` leaves it open), the
+  ids to close: `close` or `integrate --close` for a stopped unit, by hand alone for one stopped for redesign
+  (`stopped.brief`), which `close` refuses while its issue is open (spec section 7.1, U45)."""
+  stale, by_hand = [], []
+  for uid, foreman in sorted(foremen.items()):
+    stopped = foreman.get("stopped")
+    if not stopped or not ((state.get("units") or {}).get(uid) or {}).get("number"):
+      continue
+    view = ((state.get("status") or {}).get("units") or {}).get(uid) or {}
+    if view.get("landed") or (view.get("closed") or [None, None])[1]:
+      continue
+    (by_hand if stopped.get("brief") else stale).append(uid)
+  line = "ready to integrate"
+  if by_hand:
+    line += f": close the issues of {', '.join(by_hand)} by hand (stopped for redesign)"
+  if stale:
+    line += (", then close" if by_hand else ": close") + f" the issues of {', '.join(stale)}, or type /superegm:integrate --close"
+  return line
+
+
+def chain_items(store: core.Store, hs: core.Store, repo: str, hid: str, state: dict, foremen: dict) -> list:
+  """A chained handoff's (the chain on and a frozen `mode` on its approval) `waiting …` line and `ready to integrate`
+  line, from `phase.next_line`; a 1.2.0 entry (no `mode`) or the chain off keeps 1.2's lines, since no tick fetches
+  there and `waiting fetch` would never clear (spec section 7.1, U45)."""
+  from superegm import phase  # phase imports review, launch and graph
+  if not (core.chain_on(store.config) and core.frozen_mode(hs)):
+    return []
+  try:
+    printed = phase.next_line(store, hid)
+  except core.HandoffError:
+    return []
+  if printed.startswith("waiting "):
+    action = printed
+  elif printed == "integrate":
+    action = integrate_line(state, foremen)
+  else:
+    return []
+  return [{"repo": repo, "subject": hid, "kind": "driver", "action": action, "fingerprint": f"chain:{hid}:{action}"}]
+
+
 def inbox_items(store: core.Store, handoff_ids: list) -> list:
   """What needs the owner across the handoffs `handoff_ids` (spec section 11.2), one dict per item: `repo`,
   `subject`, `kind`, `action`, `fingerprint`; ordered by handoff id, subject, then kind, the `wave` card and the
@@ -251,7 +292,7 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
     found = [i for i in escalations(hs, repo, hid, spec, foremen, state) if i["fingerprint"] not in seen]
     seen |= {i["fingerprint"] for i in found}
     cards = wave_cards(hs, hid)
-    mode = (cards[-1][1].get("mode") if cards else None) or store.config.get("mode", "normal")
+    mode = (cards[-1][1].get("mode") if cards else None) or core.run_mode(hs)  # the card's, else the frozen, else config.mode
     live = set()
     for uid, foreman in foremen.items():
       found += kill_failed_items(hs, repo, uid)  # a stopped unit's launch too: the kill is what is left (U31)
@@ -272,7 +313,7 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
         found += review_items(hs, repo, spec, path.name, rev, foremen, mode)
       read_specs.add(spec)
     found.sort(key=lambda i: (i["subject"], KINDS.index(i["kind"].split(" ")[0])))
-    out += found + wave_items(hs, repo, hid) + driver_items(hs, repo, hid)
+    out += found + wave_items(hs, repo, hid) + driver_items(hs, repo, hid) + chain_items(store, hs, repo, hid, state, foremen)
   return out
 
 
