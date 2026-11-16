@@ -12,7 +12,7 @@ from pathlib import Path
 import superegm as core
 from superegm import instructions
 
-WRITES = frozenset(["judges", "runcards", "questions"])  # the store kinds this subcommand writes
+WRITES = frozenset(["judges", "runcards", "questions", "instructions"])  # the store kinds this subcommand writes (`instructions`: a spec review's reference copies, U74)
 CONFIG_DEFAULTS = {"judges": {"min_vendors": 1,  # its own config key (U32)
                               "members": [{"name": "fable", "via": "adapter", "effort": "xhigh"},
                                           {"name": "opus", "via": "adapter", "effort": "max"},
@@ -185,7 +185,7 @@ def panel_id(question: Path) -> str:
 
 
 def render_brief(panel: dict, questions: list[dict], round_no: int, open_ids: list[str],
-                 prior: list[tuple[int, str, str]], diffs: list[str]) -> str:
+                 prior: list[tuple[int, str, str]], diffs: list[str], lane: str = "local") -> str:
   lines = [f"JUDGE BRIEF, panel {panel['id']}, round {round_no}.",
            "You are one judge of a panel. Answer each question below by option id, one line per question:",
            "`Q<n>: (<id>)`",
@@ -203,8 +203,15 @@ def render_brief(panel: dict, questions: list[dict], round_no: int, open_ids: li
       lines += ["", f"### Round {rnd}, {judge}", text.rstrip("\n")]
     for diff in diffs:
       lines += ["", diff.rstrip("\n")]
-  section = (panel.get("instructions") or {}).get("local", {}).get("text", "")
-  return "\n".join(lines) + "\n" + (f"\n{section}" if section else "")  # the stored section, last in every round's brief
+  section = (panel.get("instructions") or {}).get(lane, {}).get("text", "")
+  return "\n".join(lines) + "\n" + (f"\n{section}" if section else "")  # the lane's stored section, last in every round's brief
+
+
+def write_briefs(folder: Path, round_no: int, panel: dict, *args) -> None:
+  """`round-<n>/brief.md` for the local members (the index) and `brief-astra.md` for the Astra member, which cannot read
+  the store (the pastes): the same brief, each with its own lane's stored section."""
+  for name, lane in (("brief.md", "local"), ("brief-astra.md", "astra")):
+    core.atomic_write(folder / f"round-{round_no}" / name, render_brief(panel, *args, lane=lane))
 
 
 def render_panel(store, parent: dict | None) -> dict:
@@ -212,14 +219,16 @@ def render_panel(store, parent: dict | None) -> dict:
   the parent card's skill: a `review-spec` parent renders its artifact as the spec at `HEAD` (its card can carry a legacy
   store's handoff id, which is not the spec's); any other parent its card's handoff's frozen list; no parent, or a parent
   with no handoff, nothing."""
-  if parent is None:
-    manifest, text = [], ""
-  elif parent["skill"] == "review-spec":
-    manifest, text = instructions.render(store, "judges", root=core.git_toplevel(Path(parent["artifact"])))
-  else:
-    handoff = parent.get("handoff", store.handoff_id)
-    manifest, text = instructions.render(store, "judges", handoff_id=handoff) if handoff else ([], "")
-  return {lane: {"manifest": manifest, "text": text} for lane in ("local", "astra")}
+  def lane_render(lane: str) -> dict:
+    if parent is None:
+      manifest, text = [], ""
+    elif parent["skill"] == "review-spec":
+      manifest, text = instructions.render(store, "judges", root=core.git_toplevel(Path(parent["artifact"])), lane=lane)
+    else:
+      handoff = parent.get("handoff", store.handoff_id)
+      manifest, text = instructions.render(store, "judges", handoff_id=handoff, lane=lane) if handoff else ([], "")
+    return {"manifest": manifest, "text": text}
+  return {lane: lane_render(lane) for lane in ("local", "astra")}  # the Astra member's pastes, the local members' index
 
 
 def lane_manifest(panel: dict, judge: str) -> list:
@@ -266,8 +275,7 @@ def cmd_open(args, store) -> int:
            "instructions": rendered}
   core.atomic_write(folder / "question.md", question.read_bytes())
   write_json(folder / "panel.json", panel)
-  core.atomic_write(folder / "round-1" / "brief.md",
-                    render_brief(panel, questions, 1, [q["id"] for q in questions], [], []))
+  write_briefs(folder, 1, panel, questions, 1, [q["id"] for q in questions], [], [])
   core.journal(store, f"judges {pid}: opened ({', '.join(members)}; min_vendors {min_vendors})")
   print(pid)
   return 0
@@ -447,8 +455,7 @@ def cmd_diff(args, store) -> int:
              for k in range(1, n + 1) for judge in panel["judges"]
              if "options" in panel["rounds"][str(k)].get(judge, {})]
     diffs = [core.read_text(folder / f"round-{k}" / "diff.md") for k in range(1, n + 1)]
-    core.atomic_write(folder / f"round-{n + 1}" / "brief.md",
-                      render_brief(panel, questions, n + 1, still_open, prior, diffs))
+    write_briefs(folder, n + 1, panel, questions, n + 1, still_open, prior, diffs)
   core.journal(store, f"judges {pid}: round {n} diff written, open {', '.join(still_open) or 'none'}")
   print(folder / f"round-{n}" / "diff.md")
   return 0
