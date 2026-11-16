@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Files a confirmed handoff plan as GitHub issues, with the tracking issue, one sub-issue per unit and the blocked-by links.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the file skill body, phase 4 of the SuperEGM loop (design section 10); `[--handoff <id>]` and a frozen handoff's refusal (U20); the resume of a started filing (U56). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the file skill body, phase 4 of the SuperEGM loop (design section 10); `[--handoff <id>]` and a frozen handoff's refusal (U20); the resume of a started filing, the frozen mode, `next wait` and `next clear` under the chain (U56). -->
 
 # file
 
@@ -32,7 +32,8 @@ creates only the new issues and rewrites the tracking issue.
 *   **`SpecPath`**: the approved spec, absolute or relative to the
     repository root.
 *   **`--leavemealone`** (optional): the automatic Create of leavemealone-mode
-    for this run; without it the mode is the config's `mode`.
+    for this run; without it the mode is the one frozen in the handoff's
+    approval (`config.mode` for an approval with no `mode`).
 *   **`[--handoff <id>]`** (optional, after `<SpecPath>`): the handoff to file; by default the spec's latest
     approval's. An older handoff is frozen: every command below refuses it (`<handoff>: not the latest approval: plan the rows in the latest handoff`).
 
@@ -50,21 +51,46 @@ let each command finish before starting the next. Every command below takes
 `superegm: <reason>` line when it refuses; show that line to the owner. When the invocation named a handoff,
 pass `--handoff '<id>'` to `runcard open` and to every command below.
 
+## Under the chain
+
+With the chain on, a tick of `/superegm:driver` may start this skill
+(SUPEREGM_ROLE=driver), or the owner may type it. Under the driver the skill
+never asks: where this file says to ask the owner, or to end on a line the
+owner must act on, a driven run instead runs
+
+`python3 '<HELPER>' next wait --handoff '<id>' --phase file --question '<text>' --runcard '<CARD>'`
+
+which writes the handoff's wait record and closes the card, and then the run
+ends. A typed run asks as written. The two driven stops are Create (Step 4)
+and verification problems left on GitHub (Step 2 and Step 6).
+
+A typed run that finds a wait record for this handoff (`chain/<handoff>.json`
+in the store) opens its card with `runcard open --mode normal` whatever the
+frozen mode (Step 1), asks the owner the record's question directly, with no
+new panel, and runs the phase on from that answer; a Create answers Step 4's
+question. At its end it runs
+`python3 '<HELPER>' next clear --handoff '<id>' --runcard '<CARD>'` in place
+of `runcard close`, which removes the record only on confirmed progress and
+closes the card.
+
 ## Step 1: Run card
 
 Run `python3 '<HELPER>' runcard open --skill file --artifact '<SpecPath>'`,
-adding `--mode leavemealone` when the invocation said `--leavemealone` or
-the config's `mode` is `leavemealone`. The printed id is `<CARD>`. A card
+adding `--mode leavemealone` only when the invocation said `--leavemealone`;
+otherwise `runcard open` takes the mode frozen in the handoff's approval
+(`config.mode` for an approval with no `mode`). On a wait record the mode is
+`--mode normal` instead (Under the chain). The printed id is `<CARD>`. A card
 still open on this spec is marked interrupted by the new one.
 
 ## Step 2: Resume a started filing
 
-A filing is started when `state.json`'s `filings[]` holds an entry whose
-`sha256` is `confirmed_sha256`, and it still needs finishing when the
-`verify` receipt (`verify.complete`, `verify.sha256`, `verify.problems`) is
-missing, incomplete, for another sha or has problems. Then, before the gate,
-run Step 5 (`apply --yes`) and Step 6 (`verify`) for it: the fresh receipt
-replaces the stored one, so a body repaired by hand on GitHub clears it. A
+Before the gate, resume a started filing with `apply --yes` (Step 5) and
+then `verify` (Step 6). A filing is started when `state.json`'s `filings[]`
+holds an entry whose `sha256` is `confirmed_sha256`, and it still needs
+finishing when the receipt (`verify.complete`, `verify.sha256`,
+`verify.problems`) is missing, incomplete, for another sha or has problems.
+The fresh receipt replaces the stored one, so a body repaired by hand on
+GitHub clears it. A
 dry run the owner stopped on after an earlier complete filing has no
 `filings[]` entry and is not started: go to Step 3.
 
@@ -76,7 +102,9 @@ dry run the owner stopped on after an earlier complete filing has no
     does and close; the gate's `nothing to file` is not the end of a
     resume that still had problems to repair.
 *   `MISMATCH` lines remain, other than `MISMATCH read failed`: a person
-    must fix them on GitHub. Report them as Step 6 says and end.
+    must fix them on GitHub. A typed run reports them as Step 6 says and
+    ends. A driven run runs `next wait` (Under the chain) with those lines
+    as the `--question` and ends.
 
 ## Step 3: The gate
 
@@ -93,7 +121,8 @@ hashes the rest of the filing is checked against, and prints
     one more `/superegm:review-plan` round on the current body; this skill
     ends.
 *   `gate: nothing to file (every unit is filed)`: there is nothing to do;
-    report that and close the card (Step 7).
+    report that and close the card (Step 7), never after a resumed verify with problems:
+    that run ends at Step 2 or Step 6.
 
 ## Step 4: The dry run
 
@@ -135,6 +164,11 @@ Options, in this order: Create, Change the plan, Stop.
 In leavemealone-mode there is no question: go to Step 5, where the helper
 journals `Create: automatic (leavemealone)` once per filing.
 
+A driven run in normal mode asks nothing either: it runs `next wait`
+(Under the chain) with `--phase file` and a `--question` that reads as the
+question above, adding `handoff_dryrun.md` and the `Confirmed write list
+sha256` from it, and ends.
+
 ## Step 5: The writes
 
 Run `python3 '<HELPER>' apply --yes --spec '<SpecPath>' --runcard '<CARD>'`.
@@ -174,14 +208,19 @@ issue against the latest), then records the receipt in `state.json`
 that differs from the list (a body edited by hand, a label removed, a link
 missing or obsolete): report every line to the owner, who fixes it on
 GitHub by hand (the helper never edits a filed body), then run this step
-again until it is clean.
+again until it is clean. A driven run does not wait on the owner here: when
+the lines include any `MISMATCH` other than `MISMATCH read failed`, it runs
+`python3 '<HELPER>' next wait --handoff '<id>' --phase file --question
+'<the MISMATCH lines>' --runcard '<CARD>'` and ends. `MISMATCH read failed`
+lines are a GitHub read that failed, not a difference: run this step again.
 
 ## Step 7: Report and close
 
 Report in chat, in this order: the tracking issue's URL; one line per unit,
 `U07 #412 <title>` (the numbers are in `state.json` under `units`); the
 `verify:` line. Then say that `/superegm:wave` starts the first wave.
-Finally run `python3 '<HELPER>' runcard close '<CARD>'`.
+Finally run `python3 '<HELPER>' runcard close '<CARD>'`, or, on a wait
+record (Under the chain), `next clear`.
 
 ## Resuming
 
