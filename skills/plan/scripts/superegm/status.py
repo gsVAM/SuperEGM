@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the `ruling` event and a status line after a comment's deviation headings (U22); the board's one write per `wave` pass, `post_board` (U30); the tick's read, `tick_trigger` (U24); the watchdog's `stalled` line, its predicate and `head_time` (U31); `tick_trigger`'s chain-on `merged` line and its proofs over every chain phase's card (U44).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the `ruling` event and a status line after a comment's deviation headings (U22); the board's one write per `wave` pass, `post_board` (U30); the tick's read, `tick_trigger` (U24); the watchdog's `stalled` line, its predicate and `head_time` (U31); `tick_trigger`'s chain-on `merged` line and its proofs over every chain phase's card (U44); `ruling_facts` reads `proceeds[]`, so a recorded proceed comment is no event (U94).
 
 """superegm status: landed and ready sets, PRs, CI; refuses without a complete receipt.
 `--wait <s>` polls, reading only, and prints every unreported event line, or `deadline`. Under a `wave` card
@@ -235,13 +235,14 @@ def closed_facts(repo: str, issue: dict, pr, landed: bool) -> list:
 
 def ruling_facts(store, uid: str, comments: list, owners) -> list:
   """One `Ruling` per comment of an owner `ruling_of` parses (spec section 13.2); a comment the unit's `rulings[]`
-  names as `posted` is skipped unless its `updated_at` is later than that entry's `posted_at` (a by-hand `--posted`
+  (or the unit's `proceeds[]`, a consumed proceed) names as `posted` is skipped unless its `updated_at` is later than that entry's `posted_at` (a by-hand `--posted`
   record's: the comment's `updated_at` when recorded, else its `created_at`; a session post's: its `created_at`, read
   back, so any edit of it since its creation is one), so an unedited recorded post is no event and an owner's edit of it is one.
   For an `unread` entry (the session's own post whose GitHub time was never read back, `posted_at` the host's) the edit
   is an `updated_at` later than the comment's own `created_at` (`decision.edited_after_record`)."""
+  foreman = core.load_foreman(store, uid)
   posted = {}
-  for entry in core.load_foreman(store, uid).get("rulings") or []:
+  for entry in (foreman.get("rulings") or []) + (foreman.get("proceeds") or []):  # a recorded proceed is consumed too
     kind, _, cid = (entry.get("posted") or "").partition("comment ")
     if not kind and cid.isdigit():
       posted[int(cid)] = entry

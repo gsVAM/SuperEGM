@@ -190,7 +190,8 @@ def recorded_rulings(foreman: dict) -> list:
 GROUPS = {"upheld": "fid", "overruled": "fid", "allowed": "fid", "option": "option"}  # the kinds that rule one subject
 
 
-def binding_rulings(comments: list, owners: list, recorded: list, decisions=None, pending=None, deferred=None) -> list:
+def binding_rulings(comments: list, owners: list, recorded: list, decisions=None, pending=None, deferred=None,
+                    consumed=frozenset()) -> list:
   """The rulings that bind (spec section 13.2: a recorded ruling is never changed by a later comment): the record's
   (`recorded`, as `recorded_rulings` reads it), then each owner's form comment `ruling_of` reads whose comment id
   the record does not hold and whose fid or option subject the record does not already rule; an option ruling binds
@@ -207,7 +208,8 @@ def binding_rulings(comments: list, owners: list, recorded: list, decisions=None
   always binds: section 13.2 reads an overrule on a `tdd-order`, `test-delta` or `dod-<n>` fid that no decision asks
   about as an allowance, which `collect` applies without a record. Given `deferred` (the fids of the record's
   `followups[]`, spec section 5.2), an unrecorded `upheld` naming one of them is dropped: an applied undo removes
-  its row and binds as recorded, so a live one there is a refused undo, which never blocks."""
+  its row and binds as recorded, so a live one there is a refused undo, which never blocks. A comment in `consumed`
+  (`consumed_comments`) binds nothing, whatever it now reads: an edited recorded proceed rules nothing (spec section 4.2)."""
   recorded = list(recorded)
   deferred = set(deferred or ())
   point3 = [d for d in decisions or [] if d.get("point") in (3, 5)]
@@ -229,7 +231,7 @@ def binding_rulings(comments: list, owners: list, recorded: list, decisions=None
   ids = {r.comment_id for r in recorded if r.comment_id}
   keys = {key(r) for r in recorded if r.kind in GROUPS}
   return recorded + [r for c in comments if (r := ruling_of(c, owners))
-                     and r.comment_id not in ids and key(r) not in keys and open_for(r) and asked_for(r)
+                     and r.comment_id not in ids and r.comment_id not in consumed and key(r) not in keys and open_for(r) and asked_for(r)
                      and not (r.kind == "upheld" and r.subject in deferred)
                      and (r.kind != "option" or offered(r, comments, decisions or []))]
 
@@ -266,14 +268,18 @@ def overridden_comments(comments: list, owners: list, foreman: dict) -> dict:
   text); an unrecorded form ruling a subject the record already rules, an option the decision does not offer, or a
   bare `one more round`, `stop` or `redesign` no open decision takes, maps to None (dropped)."""
   entries = {r.get("posted"): r for r in foreman.get("rulings") or [] if str(r.get("posted") or "").startswith("comment ")}
+  proceeds = {r.get("posted"): r for r in foreman.get("proceeds") or [] if str(r.get("posted") or "").startswith("comment ")}
   decisions = foreman.get("decisions") or []
   bound = {r.comment_id for r in binding_rulings(comments, owners, recorded_rulings(foreman), decisions,
                                                  pending_decisions({"decisions": decisions, "rulings": foreman.get("rulings") or []}),
-                                                 [r["fid"] for r in foreman.get("followups") or []])}
+                                                 [r["fid"] for r in foreman.get("followups") or []], consumed_comments(foreman))}
   out = {}
   for c in comments:
     entry = entries.get(f"comment {c['id']}")
-    if entry:
+    if proceed := proceeds.get(f"comment {c['id']}"):  # consumed by its record: once edited, the prompt shows the record
+      if edited_after_record(c, proceed):
+        out[c["id"]] = proceed_text(proceed)
+    elif entry:
       if edited_after_record(c, entry):
         out[c["id"]] = record_text(foreman, entry)
       elif parse_form(c.get("body") or "") is None:  # recorded before the one grammar (no reason): the record binds
@@ -300,12 +306,16 @@ def deleted_rulings(comments: list, foreman: dict) -> list:
   """A recorded ruling whose comment is gone, as a comment in its place: its id, `by` as the author and the record's
   text, so the prompt still carries what binds (spec section 13.2: a recorded ruling is never changed)."""
   live = {int(c["id"]) for c in comments}
+  note = "the comment was deleted after its record"
   out = {}
   for entry in foreman.get("rulings") or []:
     cid = str(entry.get("posted") or "").removeprefix("comment ")
     if str(entry.get("posted") or "").startswith("comment ") and cid.isdigit() and int(cid) not in live and int(cid) not in out:
-      out[int(cid)] = {"id": int(cid), "user": {"login": entry.get("by")},
-                       "body": record_text(foreman, entry, "the comment was deleted after its record")}
+      out[int(cid)] = {"id": int(cid), "user": {"login": entry.get("by")}, "body": record_text(foreman, entry, note)}
+  for entry in foreman.get("proceeds") or []:  # a recorded proceed's comment, gone: the proceed as recorded
+    cid = str(entry.get("posted") or "").removeprefix("comment ")
+    if str(entry.get("posted") or "").startswith("comment ") and cid.isdigit() and int(cid) not in live and int(cid) not in out:
+      out[int(cid)] = {"id": int(cid), "user": {"login": entry.get("by")}, "body": proceed_text(entry, note)}
   return list(out.values())
 
 
@@ -322,6 +332,19 @@ def recorded_option(foreman: dict, entry: dict):
       continue
     return option
   return None
+
+
+def consumed_comments(foreman: dict) -> set:
+  """The comment ids `rulings[]` and `proceeds[]` record as `posted` (a typed proceed's null `posted` names none): the
+  comments a record consumed, whose later edit or deletion the record answers (spec section 4.2)."""
+  return {int(cid) for entry in (foreman.get("rulings") or []) + (foreman.get("proceeds") or [])
+          if (cid := str(entry.get("posted") or "").removeprefix("comment ")).isdigit()}
+
+
+def proceed_text(entry: dict, note: str = "the comment was edited after its record") -> str:
+  """A `proceeds[]` entry as its form, marked as the record: `**Ruling:** proceed — <reason>` by its `by` (what an edited
+  or deleted recorded proceed comment is replaced by in the prompt; `record_text` reads `rulings[]`, never `proceeds[]`)."""
+  return ruling_line("proceed", entry.get("reason")) + f"\n(as recorded by {entry.get('by')}; {note})"
 
 
 def record_text(foreman: dict, entry: dict, note: str = "the comment was edited after its record") -> str:
@@ -900,9 +923,9 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int, mode=None)
   found = ruling_of(comment, store.config.get("owners") or [])
   if found is None:
     raise Refusal(f"decision: comment {cid} by {author} is not an owner's ruling")
-  recorded = next((r for r in foreman["rulings"] if r.get("posted") == f"comment {cid}"), None)
-  if recorded:
-    core.journal(store, f"Ruling ({args.by}, comment {cid}): {unit} {recorded['decision']} ruling edited after record, ignored")
+  if int(cid) in consumed_comments(foreman):
+    recorded = next(r for r in foreman["rulings"] + (foreman.get("proceeds") or []) if r.get("posted") == f"comment {cid}")
+    core.journal(store, f"Ruling ({args.by}, comment {cid}): {unit} {recorded.get('decision') or recorded.get('ruling')} ruling edited after record, ignored")
     raise Refusal(f"decision: comment {cid} already recorded (ruling edited after record, ignored)")
   points = KIND_POINTS.get(found.kind, ())
   point2 = {d["id"] for d in foreman["decisions"] if d["point"] == 2}
