@@ -13,7 +13,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30); the batch's `notify` (U23); the decision points, rulings and leavemealone-mode moved to `references/`; a head's Decision point 5 and `clean` by accept (U35); `launch-builder` alone and the driver role (U24); `stalled` (U31); the frozen mode at Entry step 1 (U45). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30); the batch's `notify` (U23); the decision points, rulings and leavemealone-mode moved to `references/`; a head's Decision point 5 and `clean` by accept (U35); `launch-builder` alone and the driver role (U24); `stalled` (U31); the frozen mode, driven normal-mode decisions (U45). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the wave skill. Not part of google/elephant-goldfish-model. -->
 
@@ -47,10 +47,12 @@ as one Bash call, `python3 '<HELPER>' <subcommand> …`, absolute paths in
 single quotes, no chaining; `superegm <subcommand>` below stands for that.
 Every writing call carries `--runcard '<CARD>'`; a refusal is one `superegm: <reason>` line.
 
-Under SUPEREGM_ROLE=driver (a tick of `/superegm:driver` started this session, always
-`--leavemealone`), never ask: a decision the judges did not converge on is a journal line and
-an inbox line, its unit is `pending a decision` (no slot) and the batch goes on; the session
-ends on the loop's condition alone and the next tick resumes the rest.
+Under SUPEREGM_ROLE=driver (a tick of `/superegm:driver` started this session), never ask. In
+normal mode open points 1, 2, 3 and 5 as `decision open` records, as leavemealone-mode does (an
+unconverged judges' question stays open alike). That unit is `pending a decision`
+(no slot) and the batch goes on handling every event of the batch; the session ends on the
+loop's condition alone: `status.wait_events` already acked every event, so an early exit
+would lose another unit's exit.
 
 Open a reference only when this file sends you to it:
 
