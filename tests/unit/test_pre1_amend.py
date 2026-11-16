@@ -59,7 +59,9 @@ def opened(world, card, text, source="comment 77", point=3):
 
 
 def amendments(s):
-  return json.loads(s.path("state").read_text(encoding="utf-8")).get("amendments")
+  """The entries of every `amendments/<comment id>.json` in the handoff's directory, or None when it holds none."""
+  files = sorted((s.base() / "amendments").glob("*.json")) if (s.base() / "amendments").is_dir() else []
+  return [e for f in files for e in json.loads(f.read_text(encoding="utf-8"))] or None
 
 
 def rule(world, card, qid, ruling, by="owner", *extra):
@@ -75,8 +77,8 @@ def test_an_amend_ruling_is_recorded_with_its_amendment(world):
   assert world.gh.comments[3][-1]["body"].startswith(f"**Ruling:** (77) amend — {LINE}\n")
   assert foreman_of(s, "U02")["rulings"][-1]["ruling"] == f"amend — {LINE}"
   [entry] = amendments(s)
-  assert {k: v for k, v in entry.items() if k != "at"} == {"unit": "U01", "name": "dequeue", "text": LINE, "comment_id": 1}
-  assert ISO.match(entry["at"])
+  assert {k: v for k, v in entry.items() if k not in ("at", "recorded_at")} == {"unit": "U01", "name": "dequeue", "text": LINE, "comment_id": 1}
+  assert ISO.match(entry["at"]) and ISO.match(entry["recorded_at"])
 
 
 @pytest.mark.parametrize("text, refusal", [
@@ -111,7 +113,7 @@ def test_an_option_ruling_on_several_headings_settles_them_all_and_amends_the_in
   text = IFACE + DOD + "**Deviation (interface):** U01 enqueue: takes a list\n" + OPTS
   qid = opened(world, card, text)
   assert rule(world, card, qid, "(b) — null reads better") == (0, f"https://github.com/{REPO}/issues/3#issuecomment-1\n")
-  got = [{k: v for k, v in e.items() if k != "at"} for e in amendments(s)]
+  got = [{k: v for k, v in e.items() if k not in ("at", "recorded_at")} for e in amendments(s)]
   assert got == [{"unit": "U01", "name": "dequeue", "text": "return null", "comment_id": 1},
                  {"unit": "U01", "name": "enqueue", "text": "return null", "comment_id": 1}]
 
@@ -151,18 +153,19 @@ def test_the_judges_question_leaves_amend_out(world):
   code, out = world.run("judges", "question", "--unit", "U02", "--blocked", "77", "--runcard", card)
   assert code == 0, out
   text = Path(out.splitlines()[0]).read_text(encoding="utf-8")
-  assert "amend" not in text and text.endswith("- (a) keep undefined\n- (b) return null\n- (c) stop the unit\n")
+  assert "amend" not in text and text.endswith("- (a) keep undefined\n- (b) return null\n- (d) stop the unit\n")
 
 
 def test_the_judges_decision_question_leaves_amend_out(world):
+  from superegm import HandoffError
   from superegm.judges import decision_question
   card, s = world_on(world)
   qid = opened(world, card, IFACE + OPTS)
   decision = foreman_of(s, "U02")["decisions"][-1]
   assert "amend" in decision["options"]
   s.path("units").write_text(json.dumps({"units": {"U02": {"decisions": [decision]}}}), encoding="utf-8")
-  text = decision_question(s, "U02", qid)
-  assert "- amend\n" not in text and text.endswith("- (a) keep undefined\n- (b) return null\n- stop the unit\n")
+  with pytest.raises(HandoffError, match="--blocked"):  # a runtime `q<n>` is rendered by `--blocked`, `amend` left out
+    decision_question(s, "U02", qid)
 
 
 def test_an_amendment_names_the_interface_as_consumes_lines_do(tmp_path):

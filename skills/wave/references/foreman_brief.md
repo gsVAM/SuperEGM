@@ -1,7 +1,7 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 From the elephant-goldfish-model (gsVAM), 2026. Modified by SuperEGM (gsVAM), 2026: EGM's two-step brief
 rewritten as spec section 11's one round, every write through the helper, one return word; Step 2b, the Astra lane on every head review (U17);
-the handoff's directory, `--handoff <handoff-id>` on every call and `spec_range.md` (U20); the two gates before the word and the `owner:` word (U25); the goldfish pair from `config.reviewers` and the head lane at `astra.heads_effort` (U28); Step 3b, the triage goldfish (U41). -->
+the handoff's directory, `--handoff <handoff-id>` on every call and `spec_range.md` (U20); the two gates before the word and the `owner:` word (U25); the goldfish pair from `config.reviewers` and the head lane at `astra.heads_effort` (U28); Step 2.0, the reviewers' repository instructions rendered under the child card with `--unit` (U38); Step 3b, the triage goldfish (U41). -->
 
 # The foreman brief
 
@@ -36,6 +36,8 @@ Step 1, prepare
    When it refuses with `spec range: no commit holds <sha7>` (no commit holds the spec bytes the body's marker names; it adds no worktree), run superegm collect --unit <unit-id> --dispatch <dispatch-id> --runcard <child-card> --handoff <handoff-id> --not-run "error: spec range: no commit holds <sha7>" and return `error`.
 
 Step 2, dispatch the panel
+0. Render the repository instructions the head reviewers read, once, before the first dispatch: superegm instructions --role reviewers --handoff <handoff-id> --runcard <child-card> --unit <unit-id>
+   It prints the `# Repository instructions` section frozen at the handoff's approval, or nothing when no file is addressed to `reviewers`. Paste its output last in every goldfish's prompt, after the paths and the request for findings, never summarised or edited; a re-dispatch prints the same stored text, and each reviewer's record copies the manifest stored on your child card. The Astra lane's brief carries its own copy of the section (`prepare` wrote it last in r<n>/astra_brief.md), so paste nothing into the runner call. The section is part of the brief: a goldfish does not name it on its `saw:` line.
 1. Dispatch every panel entry but `astra` concurrently through its adapter (`superegm:<id>`), `change-review` first, without `name`, in the foreground. Each goldfish receives, by path, only: unit_<unit-id>.md (the unit's contract, under the Standard above), the spec range (r<n>/spec_range.md), r<n>/diff, r<n>/ci.json, r<n>/pr_body.md, r<n>/comments.md, r<n>/amendments.md, reviews/<review-id>/round-<previous>.json when a round was posted before (the last posted round's findings; the builder's replies are in comments.md), and the worktree path. Ask for its findings in the findings line of spec section 8, ids `<id>-<n>-<k>`, held to the Standard above, and pass it the amendments prepare marks as applying. Tell it that a finding the builder contested in round-<previous>.json and that still waits on a ruling is not raised again: collect carries it, so it is posted once.
 2. Write each goldfish's output to r<n>/<id>.findings and record it:
    superegm review record --review <review-id> --round <n> --sha256 <head> --reviewer <id> --findings <file> --isolation clean --model <requested>:<effective> --effort <requested>:<effective> --runcard <child-card> --handoff <handoff-id>

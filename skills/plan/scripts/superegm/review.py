@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest|triage: the one review loop (spec section 8)."""
 
@@ -572,6 +572,20 @@ def scope_review(args) -> int:
 # ---------------------------------------------------------------- record
 
 
+def stored_manifest(st, rid: str, review: dict, n: int, reviewer: str, card: dict) -> list:
+  """The `[{file, sha}]` stored for this record's reviewer lane, copied and never re-resolved: a spec review's from the
+  round's `instructions-<n>-reviewers-<lane>.json`, any other kind's from the recording card; `[]` with no stored render
+  and for the foreman's own and a thread's findings, which no section reached."""
+  if reviewer == "foreman" or reviewer.startswith("external:"):
+    return []
+  lane = "astra" if reviewer == "astra" else "local"
+  if review["kind"] == "spec":
+    path = st.path("reviews", rid, f"instructions-{n}-reviewers-{lane}.json")
+    return (json.loads(core.read_text(path)).get("manifest") or []) if path.exists() else []
+  stored = ((card.get("instructions") or {}).get("reviewers") or {}).get(lane) or {}
+  return list(stored.get("manifest") or [])
+
+
 def record_round(args) -> int:
   st = core.store(core.git_toplevel(Path.cwd()))
   rid, n, reviewer = args.review, args.round, args.reviewer
@@ -617,8 +631,10 @@ def record_round(args) -> int:
   refused = []
   if args.not_run and external:  # an ingest's record holds findings: a not-run would erase them
     raise core.HandoffError(f"review record: --not-run is refused for an external reviewer ({reviewer})")
+  manifest = stored_manifest(st, rid, review, n, reviewer, card)
   if args.not_run:
-    record = {"findings": [], "not_run": args.not_run, "isolation": None, "model": None, "effort": None}
+    record = {"findings": [], "not_run": args.not_run, "isolation": None, "model": None, "effort": None,
+              "instructions": manifest}
   else:
     path = Path(args.findings)
     text = core.read_text(path)
@@ -644,7 +660,7 @@ def record_round(args) -> int:
       findings = kept + [{**f, **({"thread": threads[f["id"]]} if f["id"] in threads else {})}
                          for f in findings if f["id"] not in {k["id"] for k in kept}]
     record = {"findings": findings, "not_run": None, "isolation": args.isolation, "model": args.model,
-              "effort": args.effort}
+              "effort": args.effort, "instructions": manifest}
   rnd["reviewers"][reviewer] = record
   if reviewer == "astra" and args.not_run and not args.not_run.startswith(("not installed", "stopped")):
     review["astra_incomplete"] += 1
