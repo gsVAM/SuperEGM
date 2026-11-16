@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch, started
 detached and recorded `running`."""
@@ -223,6 +223,10 @@ def refusal(store, state, config, unit, rnd, builder):
   record = (state.get("units") or {}).get(unit) or {}
   if not record.get("launched"):
     return f"{unit} is not marked by launch"
+  number = (record.get("pr") or {}).get("number")
+  if rnd >= 2 and number:  # a pull request merged after the saved snapshot: a direct revision never relaunches its unit (spec section 7.1)
+    if (core.gh_json(["pr", "view", str(number), "-R", config["repo"], "--json", "mergedAt"]) or {}).get("mergedAt"):
+      return f"pull request #{number} is merged: {unit} is not relaunched"
   core.reboot_launches(store, unit, core.boot_id())  # the boot-id proof: a launch a reboot ended is terminal (spec section 11.2)
   launches = load_launches(store, unit)
   for entry in launches:
