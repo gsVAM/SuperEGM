@@ -126,3 +126,27 @@ def test_builder_setup_is_idempotent(world, tmp_path, monkeypatch):
   assert "superegm builder-setup" in step and "superegm doctor --probe" in step and '"disableClaudeAiConnectors": true' in step
   step = (ROOT / "docs" / "getting_started.md").read_text(encoding="utf-8").split("\n2. ", 1)[1].split("\n3. ", 1)[0]
   assert "superegm builder-setup" in step and "doctor --probe" in step
+
+
+def test_config_key_order_is_kept(world, tmp_path, monkeypatch):
+  setup(world, tmp_path, monkeypatch)
+  held = json.loads((world.repo / CONFIG).read_text(encoding="utf-8"))
+  held = {key: held[key] for key in sorted(held, reverse=True)}  # an order `sort_keys` would change
+  (world.repo / CONFIG).write_text(json.dumps(held, indent=2) + "\n", encoding="utf-8")
+  order = list(held)
+  code, out = world.run("builder-setup", "--allow", "relay register")
+  assert code == 0, out
+  after = json.loads((world.repo / CONFIG).read_text(encoding="utf-8"))
+  assert list(after) == order and list(after["builder"])[:len(held["builder"])] == list(held["builder"])
+  assert "Bash(relay register:*)" in after["builder"]["allowed_tools"]
+
+
+@pytest.mark.parametrize("argv", [("--allow", "relay 'register"), ("--mcp", "re'lay")])
+def test_a_quoted_name_is_refused(world, tmp_path, monkeypatch, argv):
+  profile = setup(world, tmp_path, monkeypatch)
+  (tmp_path / "claude").mkdir()
+  (tmp_path / "claude" / ".claude.json").write_text(json.dumps({"mcpServers": {"re'lay": {"command": "x"}}}), encoding="utf-8")
+  config_before = (world.repo / CONFIG).read_bytes()
+  code, out = world.run("builder-setup", *argv)
+  assert code == 1 and "holds a quote" in out, out
+  assert (world.repo / CONFIG).read_bytes() == config_before and not profile.exists()
