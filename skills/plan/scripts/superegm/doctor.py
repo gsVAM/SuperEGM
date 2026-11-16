@@ -148,44 +148,79 @@ def probe_lines(stdout: str, profile: str) -> list[tuple[str, bool]]:
 PUSH_HINT = "git push: a launch admits only its own branch, no --allow"
 
 
+GIT_OPTIONS_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--super-prefix",
+                          "--exec-path"}
+
+
 def allow_prefixes(command: str) -> list:
   """The `--allow` prefix for every line and every `;`, `&&`, `||`, `|` and `&` segment of a denied command: its
   first word, but for git and gh (by bare name or path) as narrow as the allow-list's own entries, `git <subcommand>`
   and `gh <group> <command>`, so the hint never admits every git or gh subcommand; `gh api`, and one whose subcommand
-  follows an option, is named whole. A `git push` gives None: no prefix narrower than the push itself keeps the launch's
-  own-branch limit. An unsplittable line gives its first word."""
-  try:
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|()<>\n")
-    lexer.whitespace_split = True
-    lexer.whitespace = " \t\r"  # a newline ends a command, as `;` does
-    tokens = list(lexer)
-  except ValueError:
-    return command.split()[:1]
-  segments, current = [], []
-  for token in tokens:
-    if token and set(token) <= set(";&|\n"):
-      segments.append(current)
-      current = []
-    else:
-      current.append(token)
+  follows an option, is named whole, in the segment's own text so the hint is a prefix of what was denied. A
+  `git push`, after git's own options too, gives None: no prefix narrower than the push itself keeps the launch's
+  own-branch limit. An unsplittable segment gives its first word."""
   prefixes = []
-  for words in segments + [current]:
+  for text in segments_of(command):
+    try:
+      words = shlex.split(text)
+    except ValueError:
+      prefixes.append(text.split()[0])
+      continue
     if not words:
       continue
     name = os.path.basename(words[0])
+    at = 1
+    while name == "git" and at < len(words) and words[at].startswith("-"):
+      at += 2 if words[at] in GIT_OPTIONS_WITH_VALUE else 1  # git's own options before its subcommand
     depth = {"git": 1, "gh": 2}.get(name, 0)
     sub = words[1:1 + depth]
-    if name == "git" and sub == ["push"]:
+    if name == "git" and words[at:at + 1] == ["push"]:
       prefixes.append(None)
     elif name == "gh" and words[1:2] == ["api"]:
-      prefixes.append(" ".join([name, *words[1:]]))
+      prefixes.append(" ".join([name, text.split(None, 1)[1]]))
     elif not depth:
       prefixes.append(words[0])
     elif len(sub) == depth and not any(w.startswith("-") for w in sub):
       prefixes.append(" ".join([name, *sub]))
     else:
-      prefixes.append(" ".join(words))
+      prefixes.append(text)
   return prefixes
+
+
+def segments_of(command: str) -> list:
+  """The text of every line and every `;`, `&`, `|` segment of `command` (so `&&` and `||` too), split outside
+  quotes as the shell does, a `#` comment dropped up to its line's end (never past it); `>&` and `&>` are
+  redirections, not separators. Each segment is stripped; empty ones are left out."""
+  out, current, quote, i = [], [], None, 0
+  while i < len(command):
+    c = command[i]
+    if quote:
+      current.append(c)
+      if c == "\\" and quote == '"' and i + 1 < len(command):
+        current.append(command[i + 1])
+        i += 1
+      elif c == quote:
+        quote = None
+    elif c == "\\":
+      current.append(command[i:i + 2])
+      i += 1
+    elif c in "'\"":
+      quote = c
+      current.append(c)
+    elif c == "#" and (not current or current[-1].isspace()):
+      end = command.find("\n", i)
+      i = len(command) if end < 0 else end
+      continue
+    elif c == "&" and ((current and current[-1] in "<>") or command[i + 1:i + 2] == ">"):
+      current.append(c)
+    elif c in ";&|\n":
+      out.append("".join(current))
+      current = []
+    else:
+      current.append(c)
+    i += 1
+  out.append("".join(current))
+  return [s.strip() for s in out if s.strip()]
 
 
 def result_text(stdout: str) -> str:
