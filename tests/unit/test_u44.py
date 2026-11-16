@@ -320,7 +320,9 @@ def test_phase_outcome_and_failures(world, monkeypatch, tmp_path, spawn_fake, cl
   data = json.loads(driver_file(s, c.hid).read_text(encoding="utf-8"))
   assert [e.get("phase") for e in data["launches"]] == ["plan", "file"]
   assert [e["outcome"] for e in data["launches"]] == ["failed", "failed"]
-  assert (data["refused"] or {}).get("reason") == driver.TWICE
+  # the chain-on refusal names its own test, not 1.2's "before the loop ran" (codebase-details-5-1)
+  assert (data["refused"] or {}).get("reason") == driver.TWICE_CHAIN and "loop" not in driver.TWICE_CHAIN
+  assert journal_lines(world, f"tick: refused ({c.hid}: {driver.TWICE_CHAIN})")
   typed = world.open_card("file", str(c.spec))  # the owner types file: the count restarts
   world.run("runcard", "close", typed, card=None)
   world.advance(60)  # the next launch starts after the typed card
@@ -387,7 +389,10 @@ def test_merged_trigger_then_integrate(world, monkeypatch, tmp_path, chain, trig
   assert rc == 0, out
   cid = out.strip()
   driver.exit_file_proof(c.hs, tick_launches(s, c.hid))
-  assert card_of(c.hs, cid)["interrupted_at"] and status.tick_trigger(handoff) == f"exit-file {cid}"
+  if chain:
+    assert card_of(c.hs, cid)["interrupted_at"] and status.tick_trigger(handoff) == f"exit-file {cid}"
+  else:  # chain off: 1.2's driven plan card carries no driver_card, and the proofs read `wave` cards alone
+    assert "driver_card" not in card_of(c.hs, cid) and not card_of(c.hs, cid)["interrupted_at"]
   set_entry(s, c.hid, 1, status="interrupted (reboot)")
   assert status.tick_trigger(handoff) == "reboot 1"
 
