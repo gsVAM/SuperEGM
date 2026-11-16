@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Reviews a handoff plan against its design through the judge panel before any issue is filed.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the body: plan review over the helper's review-plan and review subcommands (U06); `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the accept below the cap's one question per round (U35); the `width:` line, the plan header, the chain check and the split check (U29); the readiness plan remit (1.2.1 §6.5). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the body: plan review over the helper's review-plan and review subcommands (U06); `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the accept below the cap's one question per round (U35); the `width:` line, the plan header, the chain check and the split check (U29); the readiness plan remit (1.2.1 §6.5); the driven wait and the typed run on a wait record (U45). -->
 
 # Plan review (phase 3)
 
@@ -208,6 +208,27 @@ of every path, including an error you cannot recover from. The next phase is `/s
   no body.
 - Findings live in the store and dispositions in the round files: name the review id and the
   `review status` line in chat, never paste a report.
+
+## Under the driver, and on a wait record
+
+Under `SUPEREGM_ROLE=driver` (a tick of `/superegm:driver` started this session) nobody can be
+asked, so Step 0 item 5's start question is not asked: the chain chose to start. Where this skill
+would ask the owner in normal mode (Step 1's accept question, a contested or declined high or
+medium, a review at its cap) or a unit stalls, or where it must stop in either mode (a split that
+needs `approve-spec --amend-units`), run
+`superegm next wait --handoff '<id>' --phase review-plan --question '<text>' --review '<review id>' --runcard '<card>'`
+through the helper (the question on one line; the cap, stall and contest waits pass `--review`). It writes the wait
+record `chain/<handoff>.json` and closes the card; then exit. The owner answers in the inbox, which
+writes the answer into the record, and the next tick runs this skill again.
+
+Typed, or driven on an answered record, this skill first reads the handoff's wait record. Finding
+one, open the card with `python3 '<HELPER>' runcard open --mode normal --skill review-plan --artifact '<spec>'`
+whatever the frozen mode, ask the owner the record's question directly (no new panel), record the
+answer as a normal-mode run does (`review settle … --owner`, `review rule … --owner`), and run the
+phase on. While that card is open the tick skips the handoff. At the end, before Step 5's
+`runcard close`, run `superegm next clear --handoff '<id>' --runcard '<card>'` through the helper: it removes
+the record only on confirmed progress and otherwise keeps it, asked again as
+`stopped at review-plan by <by>: answer to go on`.
 
 ## Leavemealone-mode
 

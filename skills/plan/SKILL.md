@@ -12,7 +12,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: phase 2 of the SuperEGM loop (the plan file, graph, scan, decide); EGM's approval, review gate, dry run and filing steps live in review-spec, review-plan and file; `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the `Tier:` field (U33); the split rules, the `width:` line and the header's wave plan (U29); what a Step holds (1.2.1 §6.5); the scope-cite warning stated (U79); the `units.*` limits stated (U42). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: phase 2 of the SuperEGM loop (the plan file, graph, scan, decide); EGM's approval, review gate, dry run and filing steps live in review-spec, review-plan and file; `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the `Tier:` field (U33); the split rules, the `width:` line and the header's wave plan (U29); what a Step holds (1.2.1 §6.5); the scope-cite warning stated (U79); the `units.*` limits stated (U42); the driven wait and the typed run on a wait record (U45). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the handoff skill. Not part of google/elephant-goldfish-model. -->
 
@@ -189,6 +189,24 @@ The `set` reviewer reads that line to grade a chain it names `low`; it checks it
 2.  Run `python3 '<HELPER>' runcard close '<CARD>'`.
 3.  Next: `/superegm:review-plan '<SpecPath>'` reviews every unfiled body;
     `/superegm:file` creates the issues once that review converged.
+
+## Under the driver, and on a wait record
+
+Under `SUPEREGM_ROLE=driver` (a tick of `/superegm:driver` started this session) nobody can be
+asked. Where this skill would ask the owner in normal mode (Step 4 item 2's `decision-blocking`
+question), or must stop in either mode (a split that needs `approve-spec --amend-units`), run
+`superegm next wait --handoff '<id>' --phase plan --question '<text>' --runcard '<CARD>'` through
+the helper (the question on one line, naming the item and its options). It writes the wait record
+`chain/<handoff>.json` and closes the card; then exit. The owner answers in the inbox, which writes
+the answer into the record, and the next tick runs this skill again.
+
+Typed, or driven on an answered record, this skill first reads the handoff's wait record. Finding
+one, open the card with `python3 '<HELPER>' runcard open --mode normal --skill plan --artifact '<SpecPath>'`
+whatever the frozen mode, ask the owner the record's question directly (no new panel), record the
+answer as a normal-mode run does (`decide` by the owner, Step 4), and run the phase on. While that
+card is open the tick skips the handoff. At the end, before Step 5's `runcard close`, run
+`superegm next clear --handoff '<id>' --runcard '<CARD>'` through the helper: it removes the record only on
+confirmed progress and otherwise keeps it, asked again as `stopped at plan by <by>: answer to go on`.
 
 ## Leavemealone-mode
 
