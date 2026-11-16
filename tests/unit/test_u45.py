@@ -15,3 +15,12 @@ def test_skills_wait_and_resume(path, phase):
   text = " ".join((ROOT / path).read_text(encoding="utf-8").split())
   assert "SUPEREGM_ROLE=driver" in text and "next wait" in text and f"--phase {phase}" in text
   assert "runcard open --mode normal" in text and "next clear" in text
+
+
+@pytest.mark.parametrize("path", ["skills/wave/SKILL.md", "skills/wave/references/leavemealone_mode.md",
+                                  "skills/review-plan/SKILL.md", "skills/plan/SKILL.md"])
+def test_skills_frozen_mode(path):
+  # --mode leavemealone only when the invocation says --leavemealone, else runcard open's frozen default; config.mode kept as fallback
+  text = " ".join((ROOT / path).read_text(encoding="utf-8").split())
+  assert "frozen" in text and "`config.mode`" in text
+  assert "or the config's `mode` is `leavemealone`" not in text and "--mode '<normal|leavemealone>'" not in text
