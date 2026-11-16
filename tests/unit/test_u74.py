@@ -102,3 +102,105 @@ def test_the_index_lists_each_document_after_the_pasted_files(world):
   only = render(st, "reviewers", handoff_id=hid)
   assert only[1].startswith("# Repository instructions\n") and "```" not in only[1]
   assert only[0] == manifest[1:]
+
+
+A_TEXT = "A first line.\nA body marker.\n"
+B_TEXT = "B first line.\nB body marker.\n"
+NOT_PASTED = "(not pasted: over the 262,144-byte brief budget)"
+
+
+def approved_docs(world, docs):
+  """`docs` committed under the folder, an entry for all four roles, approved; `(spec, handoff id)`."""
+  from test_u37 import entries_of
+  commit_files(world, docs)
+  configure(world, [{"dir": DIR, "to": ROLES}])
+  spec, cid, rid = converged_spec(world)
+  assert approve(world, spec, cid, "--yes")[0] == 0
+  return spec, entries_of(world)[-1]["handoff_id"]
+
+
+def unapproved_docs(world, docs):
+  """The same committed, its config committed too, and no approval: a flat store as a spec review's; `(spec, store)`."""
+  from test_review import hstore, seed_handoff, spec_file
+  commit_files(world, docs)
+  configure(world, [{"dir": DIR, "to": ROLES}])
+  git(["commit", "-qam", "config", "--allow-empty"], world.repo)
+  spec = spec_file(world)
+  seed_handoff(world, spec)
+  return spec, hstore(world)
+
+
+@pytest.mark.parametrize("case, expect", [
+  ("working tree changed", "the store copy's bytes"),
+  ("store copy sha differs", "refused naming docs/reference/a.md"),
+  ("over 262,144 bytes", "(not pasted: over the 262,144-byte brief budget) and pasted: false"),
+  ("spec review before first approval", "the HEAD copy pasted and {file, sha} recorded"),
+  ("a panel's Astra and local members", "the Astra member pasted, the local member indexed"),
+  ("a head review's prepare.astra_brief", "the documents pasted"),
+])
+def test_the_astra_lane_pastes_checked_store_copies(world, tmp_path, monkeypatch, case, expect):
+  """The Astra lane cannot read the store: each copy pasted under its index line after its sha check."""
+  import superegm
+  from superegm.instructions import render
+  from test_review import hstore
+  from test_u37 import blob_sha
+  files = {f"{DIR}/a.md": A_TEXT, f"{DIR}/b.md": B_TEXT}
+  sha_a, sha_b = blob_sha(A_TEXT.encode()), blob_sha(B_TEXT.encode())
+  both = [{"file": f"{DIR}/a.md", "sha": sha_a}, {"file": f"{DIR}/b.md", "sha": sha_b}]
+  pasted_a = f"- {DIR}/a.md ({sha_a}): A first line.\n```\n{A_TEXT}```\n"
+  if case == "working tree changed":
+    spec, hid = approved_docs(world, files)
+    st = hstore(world)
+    commit_files(world, {f"{DIR}/a.md": "A first line.\nEdited after the approval.\n"})
+    manifest, text = render(st, "reviewers", handoff_id=hid, lane="astra")
+    assert pasted_a in text and "Edited after the approval." not in text and "— read" not in text
+    assert manifest == both
+    local_manifest, local_text = render(st, "reviewers", handoff_id=hid, lane="local")   # the other lane of the round
+    assert local_manifest == both and "A body marker." not in local_text and "— read" in local_text
+  elif case == "store copy sha differs":
+    spec, hid = approved_docs(world, files)
+    st = hstore(world)
+    st.path("instructions", sha_a).with_suffix(".md").write_bytes(b"A first line.\nTampered.\n")
+    with pytest.raises(superegm.HandoffError, match=f"{DIR}/a.md"):
+      render(st, "reviewers", handoff_id=hid, lane="astra")
+  elif case == "over 262,144 bytes":
+    big = {f"{DIR}/d{n}.md": f"Doc {n}\n" + "x" * (65536 - len(f"Doc {n}\n")) for n in range(1, 6)}
+    spec, hid = approved_docs(world, big)
+    st = hstore(world)
+    manifest, text = render(st, "reviewers", handoff_id=hid, lane="astra")
+    shas = [blob_sha(data.encode()) for data in big.values()]
+    assert manifest == [{"file": f, "sha": s} for f, s in zip(big, shas)][:4] + [{"file": f"{DIR}/d5.md", "sha": shas[4], "pasted": False}]
+    assert text.count(NOT_PASTED) == 1 and f"- {DIR}/d5.md ({shas[4]}): Doc 5 {NOT_PASTED}\n" in text
+    assert text.count("x" * 65000) == 4          # the first four fit the budget exactly, the fifth is not pasted
+    assert all("pasted" not in item for item in render(st, "reviewers", handoff_id=hid, lane="local")[0])
+  elif case == "spec review before first approval":
+    spec, st = unapproved_docs(world, files)
+    manifest, text = render(st, "reviewers", root=world.repo, lane="astra")
+    assert manifest == both and pasted_a in text and "— read" not in text
+    assert st.path("instructions", sha_a).with_suffix(".md").read_bytes() == A_TEXT.encode()   # the review wrote the copy
+  elif case == "a panel's Astra and local members":
+    from test_review import card
+    from test_u38 import open_judges
+    spec, st = unapproved_docs(world, files)
+    pid, record_card, panel = open_judges(world, parent=card(world, spec, "review-spec"))
+    astra, local = panel["instructions"]["astra"], panel["instructions"]["local"]
+    assert astra["manifest"] == both and local["manifest"] == both
+    assert pasted_a in astra["text"] and "A body marker." not in local["text"] and "— read" in local["text"]
+  else:   # a head review's prepare.astra_brief
+    import json
+    import test_foreman as tf
+    from superegm import approve_spec, foreman as foreman_mod
+    monkeypatch.setattr(foreman_mod, "runner_path", lambda: None)
+    target, base, head, g = tf.pr_repo(world, tmp_path, monkeypatch)
+    st, wave, child, did, _ = tf.dispatched(world, head=head, astra={"enabled": True})
+    for name, text, sha in (("a.md", A_TEXT, sha_a), ("b.md", B_TEXT, sha_b)):
+      approve_spec.write_copy(st, {"file": f"{DIR}/{name}", "sha": sha, "text": text}, raw=True)
+    path = st.path("approvals", "sample")
+    record = json.loads(path.read_text(encoding="utf-8"))
+    superegm.atomic_write(path, {**record, "instructions": [{"dir": DIR, "to": ["reviewers"], "files": both}]})
+    code, out = world.run("prepare", "--unit", tf.UNIT, "--dispatch", did, "--runcard", child)
+    assert code == 0, out
+    stored = json.loads(st.path("runcards", child).read_text(encoding="utf-8"))["instructions"]["reviewers"]["astra"]
+    assert stored["manifest"] == both and pasted_a in stored["text"]
+    brief = (st.path("review", tf.UNIT, f"pr{tf.PR}") / "r1" / "astra_brief.md").read_text(encoding="utf-8")
+    assert brief.rstrip().endswith(stored["text"].rstrip())
