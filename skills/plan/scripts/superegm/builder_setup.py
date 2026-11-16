@@ -7,6 +7,7 @@ tree's config, never the store, and takes no run card."""
 
 import json
 import os
+import re
 from pathlib import Path
 
 import superegm as core
@@ -14,6 +15,7 @@ from superegm.launch_builder import profile_problem
 
 WRITES = frozenset()  # the profile and the config are outside the store
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
+WHOLE_REFERENCE = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}")  # `${VAR}` and nothing else
 SETTINGS = {"syncClaudeAiPlugins": False, "disableClaudeAiConnectors": True}
 
 
@@ -75,7 +77,7 @@ def owner_server(root: Path, name: str) -> dict:
   owner = Path(folder) / ".claude.json" if folder else Path.home() / ".claude.json"
   for servers in (read_servers(owner, "projects", str(root)), read_servers(owner), read_servers(root / ".mcp.json")):
     if isinstance(servers.get(name), dict):
-      return servers[name]
+      return checked_entry(name, servers[name])
   raise core.HandoffError(f"MCP server {name} is in no local or user scope of {owner} and not in {root / '.mcp.json'}")
 
 
@@ -96,3 +98,18 @@ def profile_settings(profile_dir: Path) -> dict:
   if not isinstance(data, dict):
     raise core.HandoffError(f"builder profile {profile_dir} settings.json is not a JSON object")
   return data
+
+
+def checked_entry(name: str, entry: dict) -> dict:
+  """`entry` when every value under its `env` and `headers` is a whole `${VAR}` reference; else refused naming the key (a literal
+  secret would be committed with the config)."""
+  for field in ("env", "headers"):
+    values = entry.get(field)
+    if values is None:
+      continue
+    if not isinstance(values, dict):
+      raise core.HandoffError(f"MCP server {name} {field} is not an object")
+    for key, value in values.items():
+      if not (isinstance(value, str) and WHOLE_REFERENCE.fullmatch(value)):
+        raise core.HandoffError(f"MCP server {name} {field} {key} is not a whole ${{VAR}} reference; keep secrets out of the config")
+  return entry
