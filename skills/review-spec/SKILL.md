@@ -211,8 +211,8 @@ open (a closed card refuses it), then go to step 4:
     superegm review rule --review <id> --ruling proceed --owner --reason "<text>" --runcard <id>
 
 Otherwise this invocation ends here with the record: close the card (step 7). A re-typed
-`/superegm:review-spec` opens a new run card and resumes the same cycle; a proceed ruled after
-that re-type would meet a closed cycle, so give it before closing.
+`/superegm:review-spec` opens a new run card and resumes the same cycle, and the owner's
+`proceed` can be ruled there under that card.
 
 ### 7. Close
 
