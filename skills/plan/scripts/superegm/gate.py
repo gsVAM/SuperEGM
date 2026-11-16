@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: `gate --pass` on converged plan reviews at the body hash over the store's plan copy; the unfiled write list; the reviewed pair, accept and readiness forms removed; an adopted unit's two trailing fields (U13); a review with a round after the converged one is not converged (U56).
+# Modified by SuperEGM (gsVAM), 2026: `gate --pass` on converged plan reviews at the body hash over the store's plan copy; the unfiled write list; the reviewed pair, accept and readiness forms removed; an adopted unit's two trailing fields (U13); a review with a round after the converged one is not converged (U56); a review the owner's proceed converged, at the ruling's sha256 (U57).
 
 """superegm gate: pass the gate when every unfiled unit's plan review converged at its body hash."""
 
@@ -38,13 +38,16 @@ def require_latest(handoff, name: str) -> None:
 
 def converged_review(store: core.Store, uid: str):
   """(converged, the converged round's artifact_sha256) of the unit's latest plan review in the handoff's
-  `reviews/`, found by kind and artifact, never by id; U04 writes `converged` as `yes | no | by ruling R<n>`."""
+  `reviews/`, found by kind and artifact, never by id; U04 writes `converged` as `yes | no | by ruling R<n>`, U57 `by proceed R<n>` (the ruling's
+  `sha256`, ahead of the converged-round test)."""
   latest = None
   for path in store.path("reviews").glob("*/review.json"):
     record = json.loads(core.read_text(path))
     if record.get("kind") == "plan" and record.get("artifact") == uid \
         and (latest is None or record["cycle"] > latest[0]["cycle"]):
       latest = (record, path.parent)
+  if latest is not None and str(latest[0].get("converged") or "").startswith("by proceed "):  # the owner's (U57)
+    return True, next(r["sha256"] for r in reversed(latest[0]["rulings"]) if r["ruling"] == "proceed")
   if latest is None or latest[0].get("converged", "no") == "no" or not latest[0].get("converged_round"):
     return False, None
   converged_round = int(latest[0]["converged_round"])
