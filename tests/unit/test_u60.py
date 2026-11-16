@@ -23,14 +23,17 @@ WRAPPER_BEFORE_REFACTOR = (
     "--allowedTools 'Read,Bash(pytest:*)' --output-format json > '/result.json'; echo $? > '/result.json.exit'")
 
 
-def probe_world(world, monkeypatch, tmp_path, events=(), exit_code=0, mcp=None):
+def probe_world(world, monkeypatch, tmp_path, events=(), exit_code=0, mcp=None, stderr="", allowed=None):
   """A repository whose config names a builder profile under `tmp_path`, doctor's own checks stubbed to nothing, and a
   fake `claude` on PATH that records its argv, its cwd and its prompt, then prints `events` as stream-json lines."""
   from superegm import doctor
   profile = tmp_path / "profile"
   profile.mkdir()
   current = json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))
-  set_config(world, repo=current["repo"], builder={"profile_dir": str(profile), "mcp": mcp or {}})
+  builder = {"profile_dir": str(profile), "mcp": mcp or {}}
+  if allowed is not None:
+    builder["allowed_tools"] = allowed
+  set_config(world, repo=current["repo"], builder=builder)
   monkeypatch.setattr(doctor, "checks", lambda config, repo_root, token: [])
   fake = tmp_path / "fakebin"
   fake.mkdir()
@@ -42,9 +45,10 @@ def probe_world(world, monkeypatch, tmp_path, events=(), exit_code=0, mcp=None):
       f"#!{sys.executable}\n"
       "import json, os, sys\n"
       f"with open({str(record)!r}, 'a') as f:\n"
-      "  f.write(json.dumps({'argv': sys.argv[1:], 'cwd': os.getcwd()}) + '\\n')\n"
+      "  f.write(json.dumps({'argv': sys.argv[1:], 'cwd': os.getcwd(), 'gh_token': os.environ.get('GH_TOKEN')}) + '\\n')\n"
       f"for event in json.load(open({str(events_file)!r})):\n"
       "  print(json.dumps(event))\n"
+      f"sys.stderr.write({stderr!r})\n"
       f"sys.exit({exit_code})\n", encoding="utf-8")
   script.chmod(0o755)
   monkeypatch.setenv("PATH", f"{fake}:{os.environ['PATH']}")
@@ -160,3 +164,48 @@ def test_probe_prompt(world, monkeypatch, tmp_path, addressed, prompt):
   assert prompt_seen_by_fake_claude.strip() == prompt
   assert claude_calls_without_probe == 0
   assert rendered == [("builder", None, world.repo.resolve())] and code == 0, out
+
+
+def test_probe_session_has_no_token(world, monkeypatch, tmp_path):
+  # review change-review-1-1: the session's GH_TOKEN is the launch's no-token sentinel, never the owner's
+  from superegm.launch_builder import SENTINEL
+  monkeypatch.setenv("GH_TOKEN", "owner-secret")
+  profile, record, spawned = probe_world(world, monkeypatch, tmp_path, events=[CLEAN_RESULT])
+  code, out = world.run("doctor", "--probe")
+  assert [c["gh_token"] for c in calls(record)] == [SENTINEL] and code == 0, out
+
+
+def test_probe_refused_allow_list_closes_the_session(world, monkeypatch, tmp_path):
+  # review change-review-1-2: an allow-list `allowed_tools` refuses prints the closing session line and starts no session
+  profile, record, spawned = probe_world(world, monkeypatch, tmp_path, allowed=["Read", "Bash"])
+  code, out = world.run("doctor", "--probe")
+  assert spawned == [] and code == 1, out
+  assert out.rstrip().splitlines()[-1].startswith("probe: session ") and "allowed_tools carries Bash" in out, out
+
+
+@pytest.mark.parametrize("command, allow", [
+    ("curl -s x", "--allow curl"),
+    ("git checkout -b x", "--allow 'git checkout'"),
+    ("/usr/local/bin/gh api repos/o/r", "--allow 'gh api'"),
+    ("gh pr merge 1", "--allow 'gh pr merge'"),
+    ("pytest -q | tail -5", "--allow pytest --allow tail"),
+    ("make test || npm test", "--allow make --allow npm"),
+    ("git -C x status", "--allow 'git -C x status'"),
+])
+def test_probe_denial_names_a_narrow_allow(command, allow):
+  # review codebase-details-1-2 and 1-3: as narrow as the allow-list's own git and gh entries, every pipeline segment named
+  from superegm.doctor import probe_lines
+  event = {"type": "result", "permission_denials": [{"tool_name": "Bash", "tool_input": {"command": command}}]}
+  assert probe_lines(json.dumps(event), "/p") == [(f"denied Bash {command} ({allow})", False)]
+
+
+def test_probe_session_exit_names_the_reason(world, monkeypatch, tmp_path):
+  # review codebase-details-1-4: a failed session's closing line carries stderr's first line, else the result text's
+  profile, record, spawned = probe_world(world, monkeypatch, tmp_path, exit_code=1, stderr="Invalid API key\nmore\n")
+  code, out = world.run("doctor", "--probe")
+  assert out.rstrip().endswith("probe: session exit 1: Invalid API key") and code == 1, out
+  result = {"type": "result", "subtype": "success", "is_error": True, "result": "Not logged in · Please run /login"}
+  (tmp_path / "again").mkdir()
+  profile, record, spawned = probe_world(world, monkeypatch, tmp_path / "again", events=[result], exit_code=1)
+  code, out = world.run("doctor", "--probe")
+  assert out.rstrip().endswith("probe: session exit 1: Not logged in · Please run /login") and code == 1, out
