@@ -100,3 +100,38 @@ def test_probe_uses_the_launch_flags(world, monkeypatch, tmp_path):
   assert f"CLAUDE_CONFIG_DIR={profile}" in probe_env
   assert out.rstrip().endswith("probe: session ok") and code == 0, out
   assert not os.path.exists(spawned[0]["cwd"])
+
+
+READ_CALL = {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t1", "name": "Read", "input": {"file_path": "x"}}]}}
+CLEAN_RESULT = {"type": "result", "subtype": "success", "is_error": False, "permission_denials": []}
+
+
+def store_files(world) -> list:
+  root = Path(superegm.load_config(world.repo)["artifacts_dir"])
+  return sorted(str(p.relative_to(root)) for p in root.rglob("*")) if root.is_dir() else []
+
+
+@pytest.mark.parametrize("event, line, code", [
+    ({"type": "system", "subtype": "init", "mcp_servers": [{"name": "linear", "status": "connected"}]}, "probe: mcp linear connected", 0),
+    ({"type": "system", "subtype": "init", "mcp_servers": [{"name": "linear", "status": "needs-auth"}]}, "probe: mcp linear needs-auth", 1),
+    ({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "is_error": True, "content": "boom\nmore"}]}}, "probe: tool Read error: boom", 1),
+    ({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "is_error": False, "content": "x"}]}}, "probe: tool Read ok", 0),
+    ({"type": "result", "subtype": "success", "is_error": False, "permission_denials": [{"tool_name": "Bash", "tool_input": {"command": "curl -s x"}}]}, "probe: denied Bash curl -s x (--allow curl)", 1),
+])
+def test_probe_lines(world, monkeypatch, tmp_path, event, line, code):
+  # §3.3: a fake `claude` prints the event (tool t1 is a Read) and a clean result; any failing line fails doctor
+  events = [READ_CALL, event] + ([] if event["type"] == "result" else [CLEAN_RESULT])
+  mcp = {"linear": {"type": "http", "url": "https://mcp.example.invalid/mcp"}}
+  store_files_before = store_files(world)
+  profile_path, record, spawned = probe_world(world, monkeypatch, tmp_path, events=events, mcp=mcp)
+  profile = str(profile_path)
+  exit_code, out = world.run("doctor", "--probe")
+  probe_temp_dir = spawned[0]["cwd"]
+  store_files_after = store_files(world)
+  assert line in out and out.rstrip().endswith("probe: session ok") and exit_code == code, out
+  assert ("CLAUDE_CONFIG_DIR=" + profile + " claude --mcp-config " + profile + "/probe-mcp.json --strict-mcp-config" in out) == ("needs-auth" in line)
+  assert os.path.exists(profile + "/probe-mcp.json") == ("needs-auth" in line)
+  assert not os.path.exists(probe_temp_dir) and store_files_after == store_files_before
+  if "needs-auth" in line:
+    assert "/mcp" in out and "Authenticate" in out, out
+    assert json.loads(Path(profile, "probe-mcp.json").read_text(encoding="utf-8")) == {"mcpServers": mcp}
