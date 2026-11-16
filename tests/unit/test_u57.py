@@ -365,3 +365,30 @@ def test_proceed_is_honoured_downstream(world, monkeypatch, part):
     honoured_plan(world)
   else:
     honoured_next(world)
+
+
+# ---------------------------------------------------------------- S5: a wait record answered by a proceed
+
+
+def test_wait_record_answered_by_proceed(world, monkeypatch):
+  import superegm
+  from superegm import phase
+  from test_u43 import Chain, jread
+  c = Chain(world)
+  c.plan("U01", "U02", "U03")
+  c.review("U01", converged="by proceed R1", rulings=[
+    {"id": "R1", "ruling": "proceed", "by": "owner", "at": "2026-11-15T02:00:00Z", "reason": "r", "sha256": "1" * 64}])
+  path = c.hs.path("reviews", "plan-U01-c1", "review.json")  # `evaluate` stores a proceed at the latest round
+  path.write_text(json.dumps({**json.loads(path.read_text(encoding="utf-8")), "converged_round": 1}), encoding="utf-8")
+  c.wait(phase="review-plan", question="the cap is reached", since="2026-11-15T00:00:00Z", review="plan-U01-c1")
+  c.save()
+  store, hid = superegm.Store(c.root), c.hid
+  assert not phase.next_line(store, hid).startswith("waiting")
+  # the skill asks again before the ruling lands, without --review: the record keeps it
+  monkeypatch.setattr(superegm, "now_iso", lambda: "2026-11-15T01:00:00Z")
+  cid = world.open_card("review-plan", c.spec)
+  code, out = world.run("next", "wait", "--handoff", hid, "--phase", "review-plan", "--question", "still?", "--runcard", cid)
+  assert code == 0, out
+  record = jread(c.root / "chain" / f"{hid}.json")
+  assert (record["review"], record["since"], record["question"]) == ("plan-U01-c1", "2026-11-15T01:00:00Z", "still?")
+  assert not phase.next_line(store, hid).startswith("waiting")
