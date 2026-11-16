@@ -14,7 +14,6 @@ from test_u37 import RULES, blob_sha, commit_file, configure, entries_of
 
 TEXT = "Run the suite.\n"
 MANIFEST = [{"file": RULES, "sha": blob_sha(TEXT.encode())}]
-ASTRA_ONLY = [{"file": "astra-only.md", "sha": "a" * 12}]
 
 
 def recorded(world, rid, n, reviewer):
@@ -101,18 +100,19 @@ def test_records_copy_the_stored_manifest(world, dispatch, expected):
     rounds(world, rid, cid, [[F("design", 1, 1)]])
     assert record(world, rid, 1, "astra", [], cid)[0] == 0
     assert recorded(world, rid, 1, "design") == [] and recorded(world, rid, 1, "astra") == []   # no render for round 1
+    edited = [{"file": RULES, "sha": blob_sha(b"Skip the suite.\n")}]
     if expected != []:
       render(world, "--spec", spec, "--review", rid, "--round", 2, "--runcard", cid)
-      superegm.atomic_write(hstore(world).path("reviews", rid, "instructions-2-reviewers-astra.json"),
-                            {"manifest": ASTRA_ONLY, "text": "# Repository instructions\n"})
       commit_file(world, RULES, "Skip the suite.\n")
+      render(world, "--spec", spec, "--review", rid, "--round", 2, "--lane", "astra", "--runcard", cid)
+      commit_file(world, RULES, "Run it twice.\n")
     assert record(world, rid, 2, "design", [], cid)[0] == 0
     assert record(world, rid, 2, "astra", [], cid)[0] == 0
     local, astra = recorded(world, rid, 2, "design"), recorded(world, rid, 2, "astra")
     if dispatch.endswith("astra lane"):
-      assert astra == ASTRA_ONLY and local == MANIFEST
+      assert astra == edited and astra != MANIFEST       # rendered with --lane astra after a HEAD edit, not the local file
     elif dispatch.endswith("local lane"):
-      assert local == MANIFEST and astra == ASTRA_ONLY
+      assert local == MANIFEST and local != edited       # the local render, whatever HEAD is at the record
     else:
       assert local == [] and astra == []
 
@@ -271,3 +271,44 @@ def test_skill_texts_place_the_section(world, path, phrase):
     render(world, "--handoff", hid, "--lane", "astra", "--runcard", renewed)
     stored = json.loads(superegm.store(world.repo).path("runcards", renewed).read_text(encoding="utf-8"))
     assert stored["instructions"]["reviewers"]["astra"]["manifest"] != round_one
+
+
+def test_a_foreman_and_a_thread_record_carry_no_manifest(world):
+  """No section reached the foreman's own findings or an external thread's: their records say `[]` with a render stored."""
+  spec, cid, hid = approved_handoff(world, ["reviewers"])
+  wave = card(world, spec, "wave", handoff=hid)
+  child = card(world, "U07", "wave", parent=wave, handoff=hid)
+  code, out = world.run("review", "open", "--kind", "head", "--artifact", "U07", "--reviewers", "change-review", "--astra", "off",
+                        "--runcard", wave)
+  assert code == 0, out
+  rid = out.splitlines()[0]
+  render(world, "--handoff", hid, "--runcard", child, "--unit", "U07")
+  head_round(world, 1, "prepared", child)
+  assert record(world, rid, 1, "change-review", [], child, sha=A)[0] == 0
+  assert record(world, rid, 1, "foreman", [F("foreman", 1, 1)], child, sha=A)[0] == 0
+  assert recorded(world, rid, 1, "change-review") == MANIFEST and recorded(world, rid, 1, "foreman") == []
+  # a spec round: the thread beside the panel copies nothing from the round's stored local lane
+  _, scid, srid = opened(world)
+  render(world, "--spec", spec, "--review", srid, "--round", 1, "--runcard", scid)
+  ext = "external:devin-ai-integration[bot]"
+  assert record(world, srid, 1, "design", [], scid)[0] == 0
+  assert record(world, srid, 1, ext, [F(ext, 1, 1)], scid)[0] == 0
+  assert recorded(world, srid, 1, "design") == MANIFEST and recorded(world, srid, 1, ext) == []
+
+
+def test_a_refused_panel_render_leaves_no_open_judges_card(world):
+  """The render runs before the card opens: a configured file absent at HEAD refuses the open and leaves no card behind."""
+  from test_judges import ONE
+  configure(world, [{"file": "absent.md", "to": ["judges"]}])
+  git(["commit", "-qam", "config", "--allow-empty"], world.repo)
+  spec = spec_file(world)
+  seed_handoff(world, spec)
+  cid = card(world, spec, "review-spec")
+  def cards():
+    return sorted(p.name for p in world.artifacts.glob("**/runcards/*.json"))
+  before = cards()
+  question = world.repo.parent / "q-refused.md"
+  question.write_text(ONE, encoding="utf-8")
+  code, out = world.run("judges", "open", "--question", question, "--parent", cid)
+  assert code == 1 and "absent.md" in out, out
+  assert cards() == before
