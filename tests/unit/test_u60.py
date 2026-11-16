@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -229,6 +230,24 @@ PUSH = "git push: a launch admits only its own branch, no --allow"
 ])
 def test_probe_denial_never_widens_push_and_names_every_line(command, shown, hint):
   # review change-review-2-1, codebase-details-2-2 and 2-3: no hint admits a push; every line of a command is a segment
+  from superegm.doctor import probe_lines
+  event = {"type": "result", "permission_denials": [{"tool_name": "Bash", "tool_input": {"command": command}}]}
+  assert probe_lines(json.dumps(event), "/p") == [(f"denied Bash {shown} ({hint})", False)]
+
+
+@pytest.mark.parametrize("command, shown, hint", [
+    ("git -C x push origin main", "git -C x push origin main", PUSH),
+    ("git -c k=v push origin main", "git -c k=v push origin main", PUSH),
+    ("git --no-pager push --force", "git --no-pager push --force", PUSH),
+    ("git status  # check\ngh pr merge 1", "git status  # check\\ngh pr merge 1", "--allow 'git status' --allow 'gh pr merge'"),
+    ("git status # x\ngit push origin main", "git status # x\\ngit push origin main", "--allow 'git status'; " + PUSH),
+    ("gh api repos/o/r/pulls/1 --jq '.state'", "gh api repos/o/r/pulls/1 --jq '.state'",
+     "--allow " + shlex.quote("gh api repos/o/r/pulls/1 --jq '.state'")),
+    ("pytest -q 2>&1 | tail -5", "pytest -q 2>&1 | tail -5", "--allow pytest --allow tail"),
+])
+def test_probe_denial_after_a_git_option_a_comment_or_a_quote(command, shown, hint):
+  # review change-review-3-1, codebase-details-3-1, 3-2 and 3-3: a push after a git option gives no hint, a comment never
+  # joins two lines, and a whole-call hint is the command's own text, so it is a prefix of what was denied
   from superegm.doctor import probe_lines
   event = {"type": "result", "permission_denials": [{"tool_name": "Bash", "tool_input": {"command": command}}]}
   assert probe_lines(json.dumps(event), "/p") == [(f"denied Bash {shown} ({hint})", False)]
