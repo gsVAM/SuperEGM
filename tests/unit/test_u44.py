@@ -317,10 +317,18 @@ def test_phase_outcome_and_failures(world, monkeypatch, tmp_path, spawn_fake, cl
   set_entry(s, c.hid, n + 2, phase="review-plan", started_at=superegm.now_iso())  # after the typed card
   put(Path(third["exit_file"]), "1\n")
   tick(world)
-  assert driver.twice_failed(c.hs, superegm.load_driver(c.hs), {})
+  # the store carrying world's config: chain_on reads true, so the chain-on count (the typed file card) is tested
+  chs = superegm.handoff_store(superegm.Store(world.artifacts, config=superegm.load_config(world.repo)), c.hid)
+  assert driver.chain_on(chs.config)
+  data = superegm.load_driver(chs)
+  assert driver.twice_failed(chs, data, {})
+  # up to the first launch after the typed file card: chain on, the typed card restarted the count; chain off
+  # (no config) it does not, and the failed file launch before the card still counts
+  assert driver.counted_failures(chs, data["launches"][:n + 1], {}) == []
+  assert len(driver.counted_failures(c.hs, data["launches"][:n + 1], {})) == 2
   rc, out = world.run("driver", "reset", "--runcard", world.open_card("driver", str(c.spec)))
   assert rc == 0 and "set aside" in out, out
-  assert not driver.twice_failed(c.hs, superegm.load_driver(c.hs), {})
+  assert not driver.twice_failed(chs, superegm.load_driver(chs), {})
   # review.stall_cards and driver status read a review-plan top-level card
   from superegm import review
   earlier = world.open_card("review-plan", str(c.spec))
