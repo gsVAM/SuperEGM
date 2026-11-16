@@ -35,6 +35,17 @@ def test_consumed_comments_lists_posted_proceeds(world, monkeypatch):
   assert code == 0 and "U01 ruling" not in out, out
 
 
+def test_edited_recorded_proceed_is_a_ruling_event(world, monkeypatch):
+  set_config(world, repo=REPO, owners=["gsvam"])
+  gh, st, card = seed(world, monkeypatch)
+  foreman = {"dispatch_id": None, "rounds": [], "decisions": [], "rulings": [], "proceeds": [proceed_entry("comment 501")]}
+  put(st.path("foreman", "U01"), json.dumps(foreman))
+  comment(gh, "**Ruling:** stop", login="gsvam", cid=501, at=T0)
+  gh.comments[2][-1]["updated_at"] = "2026-11-03T11:00:00Z"
+  code, out = world.run(*WAIT, card)
+  assert code == 0 and "U01 ruling" in out, out
+
+
 @pytest.mark.parametrize("comment", ["**Ruling:** stop", None])
 def test_edited_or_deleted_proceed_shows_the_record(world, comment):
   foreman = {"decisions": [], "rulings": [], "proceeds": [proceed_entry("comment 501", by="owner1", posted_at="t2")]}
