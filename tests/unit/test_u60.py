@@ -135,3 +135,28 @@ def test_probe_lines(world, monkeypatch, tmp_path, event, line, code):
   if "needs-auth" in line:
     assert "/mcp" in out and "Authenticate" in out, out
     assert json.loads(Path(profile, "probe-mcp.json").read_text(encoding="utf-8")) == {"mcpServers": mcp}
+
+
+@pytest.mark.parametrize("addressed, prompt", [
+    (True, "Always run make lint first.\n\nDo only what these instructions ask at the start of a session, then reply ok."),
+    (False, "Reply ok."),
+])
+def test_probe_prompt(world, monkeypatch, tmp_path, addressed, prompt):
+  # §3.3: HEAD's builder-addressed text from U37's renderer; plain doctor never calls claude
+  from superegm import instructions
+  rendered = []
+
+  def render(st, role, handoff_id=None, root=None, **kwargs):
+    rendered.append((role, handoff_id, Path(root).resolve() if root else None))
+    return ([{"path": "AGENTS.md"}], "Always run make lint first.\n") if addressed else ([], "")
+  monkeypatch.setattr(instructions, "render", render)
+  profile, record, spawned = probe_world(world, monkeypatch, tmp_path, events=[CLEAN_RESULT])
+  code, out = world.run("doctor")
+  claude_calls_without_probe = len(calls(record)) + len(spawned)
+  assert "probe:" not in out and rendered == [], out
+  code, out = world.run("doctor", "--probe")
+  argv = calls(record)[0]["argv"]
+  prompt_seen_by_fake_claude = argv[argv.index("-p") + 1]
+  assert prompt_seen_by_fake_claude.strip() == prompt
+  assert claude_calls_without_probe == 0
+  assert rendered == [("builder", None, world.repo.resolve())] and code == 0, out
