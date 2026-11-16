@@ -197,7 +197,8 @@ in one line that the spec returns to `/superegm:review-spec` for that unit's Des
 
 One line per unit from the last `due` listing: converged at round n; stalled, with the reviewer
 and reason; stopped at the cap. `python3 '<HELPER>' runcard close '<card>'` is the last action
-of every path, including an error you cannot recover from. The next phase is `/superegm:file`.
+of every path, including an error you cannot recover from, except that `next wait` and
+`next clear` close the card themselves, so a path that ran one does not run `runcard close`. The next phase is `/superegm:file`.
 
 ## Rules
 
@@ -222,13 +223,19 @@ through the helper (the question on one line; the cap, stall and contest waits p
 record `chain/<handoff>.json` and closes the card; then exit. The owner answers in the inbox, which
 writes the answer into the record, and the next tick runs this skill again.
 
-Typed, or driven on an answered record, this skill first reads the handoff's wait record. Finding
-one, open the card with `python3 '<HELPER>' runcard open --mode normal --skill review-plan --artifact '<spec>'`
-whatever the frozen mode, ask the owner the record's question directly (no new panel), record the
-answer as a normal-mode run does (`review settle … --owner`, `review rule … --owner`), and run the
-phase on. While that card is open the tick skips the handoff. At the end, before Step 5's
-`runcard close`, run `superegm next clear --handoff '<id>' --runcard '<card>'` through the helper: it removes
-the record only on confirmed progress and otherwise keeps it, asked again as
+A run, typed or driven, that finds a wait record for this handoff (`chain/<handoff>.json` in the
+store) opens its card with `python3 '<HELPER>' runcard open --mode normal --skill review-plan --artifact '<spec>'`
+whatever the frozen mode (Step 0 item 2), and runs the phase on. A typed run that names no
+`--handoff` has no `<id>` before its card exists: it opens the card as Step 0 says, reads `<id>` from
+the card's record, and when `chain/<id>.json` exists opens its card again with `--mode normal` (the
+new card marks the first interrupted) and passes `--handoff '<id>'` to every command below. A typed
+run asks the owner the record's question directly (no new panel) and records the answer as a
+normal-mode run does (`review settle … --owner`, `review rule … --owner`). A driven run is started
+only on a record with an `answer`: it takes the record's `answer` where a typed run asks, with no
+new panel and no second `next wait` for the same question. While that card is open the tick skips
+the handoff. At its end the run runs `superegm next clear --handoff '<id>' --runcard '<card>'`
+through the helper in place of `runcard close` (Step 5; it closes the card itself): it removes the
+record only on confirmed progress and otherwise keeps it, asked again as
 `stopped at review-plan by <by>: answer to go on`.
 
 ## Leavemealone-mode
@@ -251,4 +258,10 @@ dispatch of the `judges` skill (Astra through the runner, the Claude judges thro
 `python3 '<HELPER>' judges verdict --panel <id> --runcard <card>`. Apply each converged answer
 through its row as it converges (`review settle … --judges '<panel>'`, `review rule … --judges '<panel>'`);
 the verdict's `open[]` are the unconverged questions: end the invocation for that unit naming
-them and `judges/<id>/verdict.json`, the other units continue, and the owner rules by hand.
+them and `judges/<id>/verdict.json`, the other units continue, and the owner rules by hand. Under
+the driver that ending is a wait record, never a new panel on the next tick: once the units are
+handled, run
+`superegm next wait --handoff '<id>' --phase review-plan --question '<text>' --review '<review id>' --runcard '<card>'`
+once, the question naming the open questions and the verdict file (one record per handoff, so every
+such unit goes in that one question). An owner-only outcome (a `test-delta:` finding, an `owner:`
+line) ends the same way.
