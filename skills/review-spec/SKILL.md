@@ -11,7 +11,7 @@ description: >-
   Zoom Out Review, and Implementation Readiness.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: renamed to review-spec; the body is spec section 8's one review loop over the helper (the stages, presets, semantic split, checkpoint gates and report files are gone); persona path agents/zoom-out.md; the amendment scope, the branch sentence and the batch settle (U19); the spec PR, the pushes and the PR's ingest (U26); step 3's accept below the cap (U35); the resumed panel line and the cap read from `review.rounds` (U36). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: renamed to review-spec; the body is spec section 8's one review loop over the helper (the stages, presets, semantic split, checkpoint gates and report files are gone); persona path agents/zoom-out.md; the amendment scope, the branch sentence and the batch settle (U19); the spec PR, the pushes and the PR's ingest (U26); step 3's accept below the cap (U35); the resumed panel line and the cap read from `review.rounds` (U36); proceed offered at the cap and on a stall (U58). -->
 
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: run card, panel presets, Astra lane. -->
 
@@ -191,11 +191,22 @@ Record it:
 `continue` raises the cap by one: the next round. `accept` converges the spec: step 4. `stop`
 ends the cycle at its cap: step 7 with the record; the next invocation opens cycle n+1.
 
+Beside those, the owner alone (never `--judges`, and never in the judges' question, which keeps
+its three options) can end the review with their go-ahead, whatever its state:
+
+    superegm review rule --review <id> --ruling proceed --owner --reason "<text>" --runcard <id>
+
+`proceed` settles every unsettled finding `declined` as accepted risk and converges the cycle
+by that ruling: step 4.
+
 ### 6. Stalled (exit 5)
 
 The two latest rounds did not complete under this run card. End this invocation with the
 record: name the review id, the reviewer and the reason from the round file, and close the card
-(step 7). A re-typed `/superegm:review-spec` opens a new run card and resumes the same cycle.
+(step 7). A re-typed `/superegm:review-spec` opens a new run card and resumes the same cycle. The stall still ends the invocation; the
+owner's way past it is `proceed`, typed in an interactive session:
+
+    superegm review rule --review <id> --ruling proceed --owner --reason "<text>" --runcard <id>
 
 ### 7. Close
 
