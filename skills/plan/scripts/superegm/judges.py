@@ -185,7 +185,7 @@ def panel_id(question: Path) -> str:
 
 
 def render_brief(panel: dict, questions: list[dict], round_no: int, open_ids: list[str],
-                 prior: list[tuple[int, str, str]], diffs: list[str]) -> str:
+                 prior: list[tuple[int, str, str]], diffs: list[str], lane: str = "local") -> str:
   lines = [f"JUDGE BRIEF, panel {panel['id']}, round {round_no}.",
            "You are one judge of a panel. Answer each question below by option id, one line per question:",
            "`Q<n>: (<id>)`",
@@ -203,8 +203,15 @@ def render_brief(panel: dict, questions: list[dict], round_no: int, open_ids: li
       lines += ["", f"### Round {rnd}, {judge}", text.rstrip("\n")]
     for diff in diffs:
       lines += ["", diff.rstrip("\n")]
-  section = (panel.get("instructions") or {}).get("local", {}).get("text", "")
-  return "\n".join(lines) + "\n" + (f"\n{section}" if section else "")  # the stored section, last in every round's brief
+  section = (panel.get("instructions") or {}).get(lane, {}).get("text", "")
+  return "\n".join(lines) + "\n" + (f"\n{section}" if section else "")  # the lane's stored section, last in every round's brief
+
+
+def write_briefs(folder: Path, round_no: int, panel: dict, *args) -> None:
+  """`round-<n>/brief.md` for the local members (the index) and `brief-astra.md` for the Astra member, which cannot read
+  the store (the pastes): the same brief, each with its own lane's stored section."""
+  for name, lane in (("brief.md", "local"), ("brief-astra.md", "astra")):
+    core.atomic_write(folder / f"round-{round_no}" / name, render_brief(panel, *args, lane=lane))
 
 
 def render_panel(store, parent: dict | None) -> dict:
@@ -268,8 +275,7 @@ def cmd_open(args, store) -> int:
            "instructions": rendered}
   core.atomic_write(folder / "question.md", question.read_bytes())
   write_json(folder / "panel.json", panel)
-  core.atomic_write(folder / "round-1" / "brief.md",
-                    render_brief(panel, questions, 1, [q["id"] for q in questions], [], []))
+  write_briefs(folder, 1, panel, questions, 1, [q["id"] for q in questions], [], [])
   core.journal(store, f"judges {pid}: opened ({', '.join(members)}; min_vendors {min_vendors})")
   print(pid)
   return 0
@@ -449,8 +455,7 @@ def cmd_diff(args, store) -> int:
              for k in range(1, n + 1) for judge in panel["judges"]
              if "options" in panel["rounds"][str(k)].get(judge, {})]
     diffs = [core.read_text(folder / f"round-{k}" / "diff.md") for k in range(1, n + 1)]
-    core.atomic_write(folder / f"round-{n + 1}" / "brief.md",
-                      render_brief(panel, questions, n + 1, still_open, prior, diffs))
+    write_briefs(folder, n + 1, panel, questions, n + 1, still_open, prior, diffs)
   core.journal(store, f"judges {pid}: round {n} diff written, open {', '.join(still_open) or 'none'}")
   print(folder / f"round-{n}" / "diff.md")
   return 0
