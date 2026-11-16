@@ -250,7 +250,13 @@ def answer(args, st: core.Store, hid: str) -> int:
   handoff's directory. No run card: the phase session that runs next holds the card."""
   path = st.path("chain", hid)
   record = read_json(path)
+  if not record:
+    raise core.HandoffError(f"next answer: {hid}: no wait record to answer")
+  if record.get("answer"):
+    raise core.HandoffError(f"next answer: {hid}: the wait record already holds an answer")
   login = core.gh(["api", "user", "--jq", ".login"]).strip()
+  if login not in ((st.config or {}).get("owners") or []):
+    raise core.HandoffError(f"next answer: {login or 'no login'} is not in config.owners")
   at = core.now_iso()
   sha = hashlib.sha256(args.answer.encode("utf-8")).hexdigest()
   core.atomic_write(core.handoff_store(st, hid).path("file", "waits", f"{record['phase']}-{record['since']}.answer.json"),
