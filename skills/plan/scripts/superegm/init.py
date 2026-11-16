@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the init subcommand; `owners` from `gh api user` and the pointer to the README's token recipe and to `doctor` (spec section 11); the astra.enabled and astra.heads sentence (U17); the ingest sentence (U21); the ~/.superegm/notify sentence (U23); the foreman.run_timeout_minutes sentence (U25); step 2's disableClaudeAiConnectors, builder.plugins and builder.mcp (U27); `steps()` composing the modules' INIT_STEPs, those four sentences moved to their modules (U32).
+# Added by SuperEGM (gsVAM), 2026: the init subcommand; `owners` from `gh api user` and the pointer to the README's token recipe and to `doctor` (spec section 11); the astra.enabled and astra.heads sentence (U17); the ingest sentence (U21); the ~/.superegm/notify sentence (U23); the foreman.run_timeout_minutes sentence (U25); step 2's disableClaudeAiConnectors, builder.plugins and builder.mcp (U27); `steps()` composing the modules' INIT_STEPs, those four sentences moved to their modules (U32); step 2 pointing to `superegm builder-setup` and `doctor --probe` (U59).
 
 """superegm init: write .superegm/config.json with every key's default; print the owner's by-hand steps."""
 
@@ -16,7 +16,9 @@ By hand, before the first typed skill runs:
 2. Create the builder's empty profile at {profile_dir} (config key builder.profile_dir):
    no hooks, no plugins, no skills/ or commands/ directory, only the login (`CLAUDE_CONFIG_DIR={profile_dir} claude`,
    `/login`, exit) and a settings.json with "syncClaudeAiPlugins": false and "disableClaudeAiConnectors": true,
-   written before the login. A plugin the builder is to load is named in builder.plugins (its <name>@<marketplace>
+   written before the login; `superegm builder-setup` writes the profile and those two settings (never the login),
+   `--mcp <name>` copies one of your MCP servers into builder.mcp and `--allow <prefix>` adds a Bash(<prefix>:*) rule,
+   then `superegm doctor --probe` runs one headless session to show what a builder reaches. A plugin the builder is to load is named in builder.plugins (its <name>@<marketplace>
    id, installed once into this session's profile, disabled there) and passed by --plugin-dir per launch; the
    builder's MCP servers go in builder.mcp (mcpServers form: the server map under that key, a secret by ${{VAR}} reference, never its value),
    passed by --mcp-config --strict-mcp-config.

@@ -1,6 +1,6 @@
 # Getting started
 
-<!-- Modified by SuperEGM (gsVAM), 2026: EGM's and the Astra fork's workflow guide replaced by SuperEGM's install, by-hand setup and eight phases (design section 5). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: EGM's and the Astra fork's workflow guide replaced by SuperEGM's install, by-hand setup and eight phases (design section 5); the profile step points to `superegm builder-setup` and `doctor --probe` (U59). -->
 
 ## Install
 
@@ -37,6 +37,15 @@ the first typed skill runs it when the file is missing. The steps:
    connectors stay out (Claude Code 2.1.273 or later); no `skills/` or `commands/` directory.
    `launch-builder` refuses a profile with anything else in it; the files Claude Code writes on its
    own are not plugins.
+
+   `superegm builder-setup [--mcp <name>]... [--allow <prefix>]...` makes the profile and its two
+   settings for you (keeping every other key, never touching the login): `--mcp <name>` copies that
+   server's entry from your `.claude.json` (local scope, then user scope) or the repository's
+   `.mcp.json` into `builder.mcp` and adds `mcp__<name>__*` to `builder.allowed_tools`, refusing an
+   `env` or `headers` value that is not a whole `${VAR}` reference; `--allow <prefix>` adds
+   `Bash(<prefix>:*)`. It prints what it changed and ends with `then run superegm doctor --probe`,
+   which runs one headless session as a builder and shows each MCP server's status, tool call and
+   permission denial.
 
    The plugins and MCP servers a builder gets are named in the config, never installed in its
    profile. `builder.plugins` lists `<name>@<marketplace>` ids, each installed once into your own
