@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3/5
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
-# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the `amendments[]` it writes (spec §6.5, 1.2.1-pre.1 P5).
+# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96).
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
@@ -18,15 +18,15 @@ import superegm as core
 from superegm.apply import body_file
 from superegm.launch import load_launches
 from superegm.report import pending_decisions, unit_view
-from superegm import review
+from superegm import review, scan
 from superegm.review import Refusal
 
-WRITES = frozenset({"foreman", "reviews", "state"})  # the store kinds this subcommand writes (`reviews`: a fifth point's accept, U35; `state`: `amendments[]`, §6.5)
+WRITES = frozenset({"foreman", "reviews", "state", "file"})  # the store kinds this subcommand writes (`reviews`: a fifth point's accept, U35; `state`: the other writers' fields; `file`: `amendments/<comment id>.json`, §6.5)
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset({"wave"})  # the skills whose card this subcommand accepts
 RELAUNCH = ["relaunch", "stop the unit"]
 DEVIATION = re.compile(r"^\*\*Deviation \((?P<kind>[^)]*)\):\*\* ?(?P<rest>.*)$", re.M)
-INTERFACE = re.compile(r"(?P<unit>U\d+) (?P<name>[^\s:]+):")  # an interface heading's `<Uxx> <name>:` (spec §6.5)
+INTERFACE = re.compile(r"(?P<unit>U\d+) (?P<name>[^:]+):")  # an interface heading's `<Uxx> <name>:` (spec §6.5); `heading_name` reads the name
 
 
 def comment_options(text: str) -> list:
@@ -36,16 +36,34 @@ def comment_options(text: str) -> list:
   return [line[2:].strip() for line in text.splitlines() if line.startswith("- (")] + amend + ["stop the unit"]
 
 
-def amendments_of(text: str, chosen: str, reason: str, comment_id: int, now: str) -> list:
+def produced_names(st, unit: str) -> list:
+  """The names `scan.names_of` reads from the unit's Produces lines (no unit file: none)."""
+  path = st.path("unit", unit) if st is not None else None
+  lines = core.body.sections(core.read_text(path)).get("Interfaces", []) if path is not None and path.exists() else []
+  return [n for line in lines if line.startswith("- Produces: ") for n in scan.names_of(line[len("- Produces: "):])]
+
+
+def heading_name(raw: str, made: list) -> str:
+  """An interface heading's name: kept whole when it is exactly one of the producer's names, else read through
+  `scan.names_of` (so `load(path)` reads `load`)."""
+  name = raw.replace("`", "").strip()
+  if name in made:
+    return name
+  read = scan.names_of(name)
+  return read[0] if read else name
+
+
+def amendments_of(text: str, chosen: str, reason: str, comment_id: int, now: str, st=None) -> list:
   """The `amendments[]` entries a point-3 ruling on a builder comment writes (spec §6.5): `amend` names the one
   interface deviation, which must be in its unit's Interfaces lines (`rule` checks), text the owner's line; any
   other option settles every interface heading, text the option's; `stop the unit` and a relaunch keep the contract."""
   if chosen in RELAUNCH:
     return []
   heads = [INTERFACE.match(m["rest"]) for m in DEVIATION.finditer(text) if m["kind"] == "interface"]
-  # the name as body.consumes reads a Consumes line, cut at its `(`, so launch_builder.amendments_for matches it
-  return [{"unit": h["unit"], "name": h["name"].split("(")[0], "text": reason.strip() if chosen == "amend" else chosen,
-           "comment_id": comment_id, "at": now} for h in heads if h]
+  # the name as scan.names_of reads it, so launch_builder.amendments_for matches a Consumes line on the same reader
+  return [{"unit": h["unit"], "name": heading_name(h["name"], produced_names(st, h["unit"])),
+           "text": reason.strip() if chosen == "amend" else chosen, "comment_id": comment_id, "at": now}
+          for h in heads if h]
 
 
 def check_amend(st, text: str, reason: str) -> None:
@@ -57,10 +75,10 @@ def check_amend(st, text: str, reason: str) -> None:
   h = INTERFACE.match(heads[0]["rest"]) if len(heads) == 1 and heads[0]["kind"] == "interface" else None
   if h is None:
     raise Refusal("decision: amend needs a comment with one interface deviation and no other")
-  path = st.path("unit", h["unit"])
-  lines = "\n".join(core.body.sections(core.read_text(path)).get("Interfaces", [])) if path.exists() else ""
-  if not re.search(rf"(?<![\w.]){re.escape(h['name'])}\b", lines):
-    raise Refusal(f"decision: amend names {h['unit']} {h['name']}, not in {h['unit']}'s Interfaces lines")
+  made = produced_names(st, h["unit"])
+  name = heading_name(h["name"], made)
+  if name not in made:
+    raise Refusal(f"decision: amend names {h['unit']} {name}, not in {h['unit']}'s Interfaces lines")
 
 # The one ruling grammar (spec section 13.2, amendment 5): a comment's first line in one of these forms and no other.
 FID = r"[^\s()]+"
@@ -75,6 +93,7 @@ FORM_RES = (
   ("redesign", re.compile(rf"redesign{REASON}")),
   ("allowed", re.compile(rf"(?P<subject>{FID}) allowed{REASON}")),
 )
+LETTER_RE = re.compile(r"\([a-z]\)")  # a rendered option's letter, the bare answer of the judges
 FILE_RULING_RE = re.compile(r"test-delta (\S+) allowed")  # a recorded whole-file allowance's text
 JUDGES_MARK_RE =re.compile(r"^\(judges \S+, leavemealone\)$", re.M)
 
@@ -570,20 +589,30 @@ def rule(args) -> int:
     posted = f"comment {cid}"
   if brief:
     brainstorm_brief(st, unit, decision["id"], decision, chosen, (state["units"][unit].get("pr") or {}).get("number"))
-  entries = [{"decision": d["id"], "ruling": args.ruling, "by": args.by,
+  # a point-3 letter resolved by position is stored as the option it resolved to (its ` — <reason>` kept): the readers of
+  # `rulings[]` (`stop_reason`, `recorded_option`) compare the option's text, and see no position
+  stored = chosen + args.ruling[len(head):] if basis["point"] == 3 and by_position(basis["options"], head.strip(), args.by) else args.ruling
+  entries = [{"decision": d["id"], "ruling": stored, "by": args.by,
               "reason": reason.strip() or None, "posted": posted, "posted_at": posted_at}
              | ({"unread": True} if url else {}) for d in decisions]
   data["rulings"] += entries
   if stops:  # the stop is written with the ruling, in one save
     data["stopped"] = stopped_entry(args.by, chosen, now, brief)
+  if amends:  # spec §6.5: the contract changes, as the file `amendments/<deviation comment id>.json`, written
+    # before the ruling is saved (a crash between the two leaves a file no reader trusts: `amendments_for` reads a file only
+    # once a ruling names its comment) and rewritten, or deleted when this ruling records none, by a rerun; a close given
+    # with `--decision` (`--posted closed:<n>`) records none, so it deletes a crashed run's file (a close with no `--decision`
+    # stops the unit and returns above, leaving the file, which no ruling names and no reader trusts)
+    file = st.path("file", "amendments", f"{str(decision['source']).split()[1]}.json")
+    added = [] if closed else amendments_of(decision["question"], chosen, reason, int(posted.split()[1]), now, st)
+    if added:
+      recorded_at = core.now_iso()
+      core.atomic_write(file, [entry | {"recorded_at": recorded_at} for entry in added])
+    elif file.exists():
+      file.unlink()
   # recorded before the read-back, the session's post marked `unread` (its GitHub time not yet read), so a
   # `status --wait` pass in between compares its edits with its own `created_at` and skips the unedited post
   core.save_foreman(st, unit, data)
-  added = amendments_of(decision["question"], chosen, reason, int(posted.split()[1]), now) if amends and not closed else []
-  if added:  # spec §6.5: the handoff's contract changes, read by `plan`'s re-check
-    fresh = core.load_state(st.root)
-    fresh["amendments"] = (fresh.get("amendments") or []) + added
-    core.save_state(st.root, fresh)
   if url:  # the session's own post: its time is GitHub's creation time, read back, so any edit since (one before the
     # read-back too) reads as an edit after the record; a failed read-back leaves the entry `unread`
     created = read_back(st, cid).get("created_at")
@@ -752,6 +781,12 @@ def rule_file(st, unit: str, data: dict, args, comment: dict, found, decisions: 
   return 0
 
 
+def by_position(options: list, text: str, by: str) -> bool:
+  """Point 3: a bare `(x)` is the letter of its position in the rendered question: always the judges' (they see letters
+  by position), the owner's only where no stored option's own prefix carries it (the owner reads the comment's letters)."""
+  return bool(LETTER_RE.fullmatch(text)) and (by.startswith("judges:") or not any(o.startswith(text + " ") for o in options))
+
+
 def check_ruling(point: int, options: list, ruling: str, by: str = "") -> str:
   """The option `ruling` names (its letter, its text, or both; point 1 as `<fid> <option>`), resolved
   to the option's text; refused when it is none of them. At points 1 and 2 the bare word `redesign` (its ` — <why>`
@@ -760,11 +795,15 @@ def check_ruling(point: int, options: list, ruling: str, by: str = "") -> str:
   answers the option carrying its fid, and `<fid> finding upheld` rules that fid upheld (spec section 8: the builder
   restores it, or at the cap point 2 asks); either is refused to the judges, the owner's alone (U25); any other text
   is none of its options."""
-  if point == 3 and ruling == "amend" and "amend" in options and by.startswith("judges:"):
-    raise Refusal("decision: amend is the owner's alone")
   if ruling == "redesign" and point in (1, 2):  # a head's third ruling: no letter, no finding id
     return "redesign"
   fid, _, text = ruling.partition(" ") if point == 1 else ("", "", ruling)
+  if point == 3 and by_position(options, text, by):
+    place = ord(text[1]) - ord("a")
+    if place < len(options):
+      text = options[place]
+  if point == 3 and text == "amend" and "amend" in options and by.startswith("judges:"):  # on the option the ruling resolves to
+    raise Refusal("decision: amend is the owner's alone")
   if point == 1 and options and all(o.endswith(" allowed") for o in options):
     said = text.partition(" — ")[0].strip()
     option = next((o for o in options if o.split(" ")[0] == fid and said in ("allowed", "finding overruled", "finding upheld")), None)
