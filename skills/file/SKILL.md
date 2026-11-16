@@ -20,8 +20,9 @@ This skill runs in Claude Code only. In any other host reply with one line,
 
 The converged, unfiled unit bodies of an approved spec become labelled GitHub
 issues: one tracking issue, one issue per unit as a sub-issue of it, and a
-blocked-by link per `Blocked by` entry. Six helper commands do it in order,
-each under one run card: the gate, the dry run, the owner's one answer, the
+blocked-by link per `Blocked by` entry. Helper commands do it in order, each
+under one run card: the resume of a started filing, when there is one
+(the writes again and the read-back), the gate, the dry run, the owner's one answer, the
 writes, the read-back, the close. Every write is on one confirmed write list
 that the helper hashes, shows, and re-checks before it writes. Units already
 filed are frozen: a later filing (after `/superegm:plan` appended units)
@@ -46,8 +47,9 @@ Ask for a missing `SpecPath` in plain chat.
 call, `python3 '<HELPER>' <subcommand> ...`, absolute paths in single quotes,
 no chaining, pipes, redirects or environment variables; the Bash `timeout`
 is the default. **One command at a time**: the helper is single-writer, so
-let each command finish before starting the next. Every command below takes
-`--spec '<SpecPath>'` and `--runcard '<CARD>'` and exits 1 with one
+let each command finish before starting the next. Every command below except `next` takes
+`--spec '<SpecPath>'` and `--runcard '<CARD>'` (`next` takes `--handoff` and
+`--runcard`, never `--spec`) and exits 1 with one
 `superegm: <reason>` line when it refuses; show that line to the owner. When the invocation named a handoff,
 pass `--handoff '<id>'` to `runcard open` and to every command below.
 
@@ -55,20 +57,39 @@ pass `--handoff '<id>'` to `runcard open` and to every command below.
 
 With the chain on, a tick of `/superegm:driver` may start this skill
 (SUPEREGM_ROLE=driver), or the owner may type it. Under the driver the skill
-never asks: where this file says to ask the owner, or to end on a line the
-owner must act on, a driven run instead runs
+never asks. The two driven stops are Create (Step 4) and verification
+problems left on GitHub (Step 2 and Step 6); at either a driven run runs
 
 `python3 '<HELPER>' next wait --handoff '<id>' --phase file --question '<text>' --runcard '<CARD>'`
 
 which writes the handoff's wait record and closes the card, and then the run
-ends. A typed run asks as written. The two driven stops are Create (Step 4)
-and verification problems left on GitHub (Step 2 and Step 6).
+ends. `<id>` is the invocation's `--handoff`, else the `handoff` of the card's
+record (`<handoff>/runcards/<CARD>.json` in the store, which `runcard open`
+resolved from the spec's latest approval). `<text>` is one line with no single
+quote: a quote in the lines it carries is written as a backtick. Every other
+ending is as written, with no wait record: a gate, dry run or adopt refusal
+ends a driven run on its line, as it does a typed one. A typed run asks as
+written.
 
-A typed run that finds a wait record for this handoff (`chain/<handoff>.json`
-in the store) opens its card with `runcard open --mode normal` whatever the
-frozen mode (Step 1), asks the owner the record's question directly, with no
-new panel, and runs the phase on from that answer; a Create answers Step 4's
-question. At its end it runs
+A run, typed or driven, that finds a wait record for this handoff
+(`chain/<handoff>.json` in the store) opens its card with `runcard open --mode
+normal` whatever the frozen mode (Step 1) and runs Steps 2 to 4 as for any
+filing. A driven run is started only on a record with an `answer`; it takes
+the record's `answer` where a typed run asks the record's question directly,
+with no new panel.
+
+*   A verification record (its question is the `MISMATCH` lines): the typed
+    run asks that question first, then goes on from Step 2.
+*   A Create record (its question names `handoff_dryrun.md` and a `Confirmed
+    write list sha256`): the answer is for that write list only. At Step 4,
+    after the dry run, compare the `Confirmed write list sha256` of the fresh
+    `handoff_dryrun.md` with the record's. Equal: the record's question
+    replaces Step 4's, and its answer is Create (Step 5), Change the plan or
+    Stop (the run ends). Different: the answer is for another write list and
+    is void; a typed run asks Step 4's own question, a driven run runs `next
+    wait` with the fresh question.
+
+At its end the run runs
 `python3 '<HELPER>' next clear --handoff '<id>' --runcard '<CARD>'` in place
 of `runcard close`, which removes the record only on confirmed progress and
 closes the card.
@@ -90,14 +111,16 @@ holds an entry whose `sha256` is `confirmed_sha256`, and it still needs
 finishing when the receipt (`verify.complete`, `verify.sha256`,
 `verify.problems`) is missing, incomplete, for another sha or has problems.
 The fresh receipt replaces the stored one, so a body repaired by hand on
-GitHub clears it. A
-dry run the owner stopped on after an earlier complete filing has no
-`filings[]` entry and is not started: go to Step 3.
+GitHub clears it. A dry run the owner stopped on after an earlier complete
+filing has no `filings[]` entry and is not started: go to Step 3.
 
 *   `apply` refuses (its gate, write-list or body check, as after an
     `--amend-units` that changed the plan): go on to Step 3, the gate, and
     Step 4, the dry run, as for a new filing. The earlier `filings[]` entry
     stays and `verify` covers it.
+*   `apply` exits on a rate limit (`rate limited: resume with ...`) or on
+    `stopped after` (`--max-writes`, Step 5): the run ends with that line
+    and the next run resumes here.
 *   The receipt comes out complete with `0 problem(s)`: report as Step 7
     does and close; the gate's `nothing to file` is not the end of a
     resume that still had problems to repair.
@@ -105,6 +128,10 @@ dry run the owner stopped on after an earlier complete filing has no
     must fix them on GitHub. A typed run reports them as Step 6 says and
     ends. A driven run runs `next wait` (Under the chain) with those lines
     as the `--question` and ends.
+*   Only `MISMATCH read failed` lines remain (a GitHub read that failed; an
+    issue deleted or transferred reads so for good): run `verify` once more.
+    When they remain, report them and end, a driven run too, with no wait
+    record.
 
 ## Step 3: The gate
 
@@ -115,7 +142,8 @@ hashes the rest of the filing is checked against, and prints
 `gate passed: <k> unfiled units converged`. Its refusals:
 
 *   `gate: <unit> plan review not converged`: the unit has no converged plan
-    review. The owner returns to `/superegm:review-plan`; this skill ends.
+    review, or a round was recorded after the converged one (the review is
+    due again). The owner returns to `/superegm:review-plan`; this skill ends.
 *   `gate: <unit> body differs from its converged round`: the plan changed
     after the review (an edit, a `decide`, a re-run `graph`). The unit needs
     one more `/superegm:review-plan` round on the current body; this skill
@@ -164,10 +192,11 @@ Options, in this order: Create, Change the plan, Stop.
 In leavemealone-mode there is no question: go to Step 5, where the helper
 journals `Create: automatic (leavemealone)` once per filing.
 
-A driven run in normal mode asks nothing either: it runs `next wait`
-(Under the chain) with `--phase file` and a `--question` that reads as the
-question above, adding `handoff_dryrun.md` and the `Confirmed write list
-sha256` from it, and ends.
+A driven run in normal mode asks nothing either: unless a wait record's
+`answer` applies to this write list (Under the chain), it runs `next wait`
+with `--phase file` and a `--question` that reads as the question above,
+adding `handoff_dryrun.md` and the `Confirmed write list sha256` from it, and
+ends.
 
 ## Step 5: The writes
 
@@ -211,8 +240,11 @@ GitHub by hand (the helper never edits a filed body), then run this step
 again until it is clean. A driven run does not wait on the owner here: when
 the lines include any `MISMATCH` other than `MISMATCH read failed`, it runs
 `python3 '<HELPER>' next wait --handoff '<id>' --phase file --question
-'<the MISMATCH lines>' --runcard '<CARD>'` and ends. `MISMATCH read failed`
-lines are a GitHub read that failed, not a difference: run this step again.
+'<the MISMATCH lines>' --runcard '<CARD>'` and ends; the lines go on one
+line, separated by ` | `, a single quote in them written as a backtick.
+`MISMATCH read failed` lines are a GitHub read that failed, not a difference:
+run this step once more, and when they remain report them and end, a driven
+run too, with no wait record.
 
 ## Step 7: Report and close
 
