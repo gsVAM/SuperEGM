@@ -18,7 +18,7 @@ from pathlib import Path
 import superegm as core
 
 WRITES = frozenset({"driver", "runcards", "launches", "tick", "chain"})
-CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no written config key, init line or doctor line of its own (U32)
+CONFIG_DEFAULTS, INIT_STEP = {}, ""  # no written config key or init line of its own (U32)
 CONFIG_UNWRITTEN = {"driver": {"chain": False}}  # its own key, registered but never written by `init`: absent reads false (U44)
 SKILLS = frozenset({"driver"})
 ACTIONS = ("tick", "install", "uninstall", "status", "reset")
@@ -30,6 +30,11 @@ PLATFORM = sys.platform
 def chain_on(config: dict) -> bool:
   """`driver.chain` (spec section 7.1): true only when the store's config says so; absent or false is 1.2's tick."""
   return core.chain_on(config)
+
+
+def DOCTOR_CHECKS(config, repo_root, token):  # noqa: N802 (the registration name, U32)
+  """doctor's informational `chain: on` or `chain: off` line for this repository's store (U54, spec section 7.1)."""
+  return [("chain", "on" if chain_on(config) else "off")]
 
 
 def plist_path() -> Path:
