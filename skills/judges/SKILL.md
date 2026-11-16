@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Runs one judge panel over a review round and posts the settled findings.
 ---
 
-<!-- Added by SuperEGM (gsVAM), 2026: the judges skill; each judge's model and effort read from the panel's `panel.json` (U28). -->
+<!-- Added by SuperEGM (gsVAM), 2026: the judges skill; each judge's model and effort read from the panel's `panel.json` (U28); the panel's repository instructions, rendered once at open and placed last in each brief (U38). -->
 
 # judges
 
@@ -49,8 +49,15 @@ config's `artifacts_dir`.
     --evidence '<path>' ... --runcard <CARD>` checks the grammar, records the
     file's sha256, the evidence hashes and the judges from
     `config.judges.members`, prints the panel id `<PANEL>` and writes
-    `<STORE>/judges/<PANEL>/round-1/brief.md`. A refusal (`judges: question
-    file: <reason>`) is shown to the user verbatim; fix the file and open again.
+    `<STORE>/judges/<PANEL>/round-1/brief.md`. At open the helper also renders the repository
+    instructions for role `judges` once per lane, by the parent card's skill (a `review-spec`
+    parent: the spec at `HEAD`; another parent: its handoff's frozen list, nothing for a
+    parent with no handoff or whose handoff has no approval entry; a typed
+    `/superegm:judges` has no parent and renders nothing), stores them on `panel.json` and
+    places the `# Repository instructions` section last in every round's `brief.md`; you
+    render nothing, add nothing and never move or edit that section. A refusal (`judges: question
+    file: <reason>`, or `instructions: <reason>` when a configured file cannot be read at `HEAD`;
+    no card opens then) is shown to the user verbatim; fix the file and open again.
 3.  **Run one round** (`<n>` = 1, then the next):
     1.  **Astra first**, from this main conversation only, as one Bash
         command with `run_in_background: true`, exactly as
