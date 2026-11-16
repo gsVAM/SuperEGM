@@ -52,15 +52,17 @@ def test_duration_ms_present_or_absent(tmp_path, value, recorded):
   assert record_launch.result_usage(result)[2] == recorded
 
 
-def _prepare_head(world, tmp_path, monkeypatch, started, amendments=()):
-  """Prepare round 2 of U01 whose head commit is made now, with launches started at `started` and the legacy amendments."""
+def _prepare_head(world, tmp_path, monkeypatch, started, amendments=(), extra=None):
+  """Prepare round 2 of U01 whose head commit is made now, with launches started at `started` (`extra` maps a launch
+  number to more launch keys) and the amendments: an `at`, an `(at, recorded_at)` pair, or `(at, None)` for a legacy entry."""
   import test_foreman as tf
   target, base, head, g = tf.pr_repo(world, tmp_path, monkeypatch)
-  launches = [{"round": i + 1, "status": "exited 0", "started_at": at} for i, at in enumerate(started)]
+  launches = [{"round": i + 1, "status": "exited 0", "started_at": at, **(extra or {}).get(i + 1, {})} for i, at in enumerate(started)]
   st, card, child, did, _ = tf.dispatched(world, head=head, rounds=[tf.POSTED_R1], launches=launches)
   state = json.loads(st.path("state").read_text(encoding="utf-8"))
-  state["amendments"] = [{"unit": "U01", "name": "hook", "text": "hook now reads v1", "comment_id": 61, "at": at, "recorded_at": at}
-                         for at in amendments]
+  pairs = [a if isinstance(a, tuple) else (a, a) for a in amendments]
+  state["amendments"] = [{"unit": "U01", "name": "hook", "text": "hook now reads v1", "comment_id": 61, "at": at,
+                          **({"recorded_at": rec} if rec else {})} for at, rec in pairs]
   st.path("state").write_text(json.dumps(state), encoding="utf-8")
   code, out = world.run("prepare", "--unit", tf.UNIT, "--dispatch", did, "--runcard", child)
   assert code == 0, out
@@ -86,7 +88,7 @@ def test_head_attributed_to_own_commit(world, tmp_path, monkeypatch):
   # launch 3 pushed nothing: the head is launch 2's, and an amendment recorded after launch 2 started does not apply
   import test_foreman as tf
   early, mid, late = "2000-01-01T00:00:00Z", "2000-01-02T00:00:00Z", "2099-01-01T00:00:00Z"
-  for name in "abcd":
+  for name in "abcdefghi":
     (tmp_path / name).mkdir()
   st, card, record, amendments_md = _prepare_head(world, tmp_path / "a", monkeypatch, [early, mid, late], ["2000-01-03T00:00:00Z"])
   assert record["rounds"][-1]["head_launch"] == 2 and record["rounds"][-1]["launch"] == 3
@@ -99,6 +101,19 @@ def test_head_attributed_to_own_commit(world, tmp_path, monkeypatch):
   assert after_push["rounds"][-1]["head_launch"] == 2 and "applies to this head: yes" in md_after_push
   _, _, _, md_before = _prepare_head(world, tmp_path / "c", monkeypatch, [early, mid], ["2000-01-03T00:00:00Z"])
   assert "applies to this head: no" in md_before
+  # a launch 3 that committed but never pushed is not the head's
+  _, _, unpushed, _ = _prepare_head(world, tmp_path / "e", monkeypatch, [early, mid, late], [], {3: {"last_commit_at": "2099-01-01T01:00:00Z"}})
+  assert unpushed["rounds"][-1]["head_launch"] == 2
+  # launch 3 pushed: the head is its own and the amendment recorded after launch 2 started now applies
+  _, _, pushed, md_pushed = _prepare_head(world, tmp_path / "f", monkeypatch, [early, mid, "2000-01-04T00:00:00Z"], ["2000-01-03T00:00:00Z"])
+  assert pushed["rounds"][-1]["head_launch"] == 3 and "applies to this head: yes" in md_pushed
+  # `recorded_at` decides over `at`; a legacy entry without it falls back to `at`
+  _, _, _, md_rec_late = _prepare_head(world, tmp_path / "g", monkeypatch, [early, mid], [("2000-01-01T12:00:00Z", "2000-01-03T00:00:00Z")])
+  assert "applies to this head: no" in md_rec_late
+  _, _, _, md_rec_early = _prepare_head(world, tmp_path / "h", monkeypatch, [early, mid], [("2000-01-03T00:00:00Z", "2000-01-01T12:00:00Z")])
+  assert "applies to this head: yes" in md_rec_early
+  _, _, _, md_legacy = _prepare_head(world, tmp_path / "i", monkeypatch, [early, mid], [("2000-01-01T12:00:00Z", None), ("2000-01-03T00:00:00Z", None)])
+  assert md_legacy.count("applies to this head: yes") == 1 and md_legacy.count("applies to this head: no") == 1
   _, _, none_record, empty_md = _prepare_head(world, tmp_path / "d", monkeypatch, ["2099-01-01T00:00:00Z", "2099-01-02T00:00:00Z"])
   assert empty_md.split() == ["#", "Amendments", "none"]
   assert none_record["rounds"][-1]["head_launch"] is None
