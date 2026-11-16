@@ -1990,8 +1990,13 @@ def rule_proceed(st: core.Store, rid: str, review: dict, card: dict, args) -> in
   head = review["kind"] == "head"
   if posted and not head:
     raise core.HandoffError("review rule: --posted proceeds a head alone")
+  ruling = {"id": f"R{len(review['rulings']) + 1}", "ruling": "proceed", "by": "owner", "at": core.now_iso(),
+            "reason": reason}
   if not head:
-    return 0
+    ruling["sha256"] = current_sha(st, review["kind"], review["artifact"])
+    review["rulings"].append(ruling)
+    save_review(st, rid, review)
+    return proceeded(st, rid, ruling, card, args)
   unit = review["artifact"]
   foreman = core.load_foreman(st, unit)
   if foreman.get("stopped"):
@@ -1999,6 +2004,7 @@ def rule_proceed(st: core.Store, rid: str, review: dict, card: dict, args) -> in
   state = core.load_state(st.root)
   number = state["units"][unit]["number"]
   pinned = pinned_head(st, rid, review, state)
+  comment, by = None, "owner"
   if posted:
     recorded = next((e for e in foreman.get("proceeds") or [] if e.get("posted") == f"comment {posted}"), None)
     if recorded and (recorded.get("review"), recorded.get("head")) == (rid, pinned):
@@ -2006,7 +2012,25 @@ def rule_proceed(st: core.Store, rid: str, review: dict, card: dict, args) -> in
       return 0
     if recorded or posted_anywhere(st, f"comment {posted}"):
       raise core.HandoffError(f"review rule: comment {posted} already ruled")
-    posted_comment(st, posted, number)
+    comment, found = posted_comment(st, posted, number)
+    ruling["reason"], by = found.reason, found.login
+  ruling["sha256"] = pinned
+  launches = st.path("launches", unit)
+  launched = json.loads(core.read_text(launches))["launches"] if launches.is_file() else []
+  foreman.setdefault("proceeds", []).append(
+    {"ruling": ruling["id"], "review": rid, "posted": f"comment {posted}" if posted else None,
+     "posted_at": comment.get("updated_at") if comment else None, "issue": number, "head": pinned,
+     "launch": max((e.get("round") or 0 for e in launched), default=None), "by": by, "reason": ruling["reason"]})
+  review["rulings"].append(ruling)
+  save_review(st, rid, review)
+  core.save_foreman(st, unit, foreman)
+  return proceeded(st, rid, ruling, card, args)
+
+
+def proceeded(st: core.Store, rid: str, ruling: dict, card: dict, args) -> int:
+  """The proceed's journal line and its one printed line, once its records are written."""
+  core.journal(st, f"review rule {rid} {ruling['id']} proceed by owner under {card.get('parent') or args.runcard}")
+  print(f"ruling {ruling['id']} proceed")
   return 0
 
 
