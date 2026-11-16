@@ -101,8 +101,12 @@ def prepare(args, card):
                  (number, core.gh_pages(f"repos/{repo}/issues/{number}/comments")), since, login)
   # spec section 6.5: the foreman holds this head to an amendment only when the head's launch started after it
   launches = load_launches(st, unit)
-  started = next((l.get("started_at") for l in reversed(launches) if l["round"] == entry.get("launch")), None)
-  write_amendments(r / "amendments.md", launch_builder.amendments_for(st, unit, core.unit_file_body(st.path("unit", unit))), started)
+  committed = float(core.run_git(["log", "-1", "--format=%ct", head], root).strip())
+  own = [l for l in launches if l.get("started_at") and core.epoch(l["started_at"]) < committed]
+  head_launch = own[-1] if own else None  # the latest launch that started before the head commit; `launch` stays the latest launch
+  entry["head_launch"] = head_launch["round"] if head_launch else None
+  write_amendments(r / "amendments.md", launch_builder.amendments_for(st, unit, core.unit_file_body(st.path("unit", unit))),
+                   head_launch.get("started_at") if head_launch else None)
   for key in ("dod_runs", "test_delta"):  # an earlier head's gates never stand for this one: `post` refuses until `collect`
     entry.pop(key, None)
   entry.update({"head": head, "phase": "prepared", "merge_base": merge_base, "worktree": str(tree)})
@@ -153,10 +157,10 @@ def astra_brief(st, root: Path, unit: str, r: Path, diff: bytes, ci: dict, pr_bo
 
 def write_amendments(path: Path, amendments: list, started) -> None:
   """`r<n>/amendments.md`: each amendment that applies to the unit, marked by whether the head's launch (`started`,
-  its `started_at`) began after the amendment's `at`; an earlier head is reviewed against the brief its launch had."""
+  its `started_at`) began after the amendment's `recorded_at` (`at` for a legacy entry); an earlier head is reviewed against the brief its launch had."""
   lines = ["# Amendments", ""] if amendments else ["# Amendments", "", "none"]
   for a in amendments:
-    applies = "yes" if started and started > a["at"] else "no"
+    applies = "yes" if started and started > (a.get("recorded_at") or a["at"]) else "no"
     lines += [f"## {a['unit']} {a['name']} · comment {a['comment_id']} at {a['at']}", f"applies to this head: {applies}", "", a["text"], ""]
   core.atomic_write(path, "\n".join(lines) + "\n")
 
