@@ -13,6 +13,7 @@ import tempfile
 from pathlib import Path
 
 import superegm as core
+from superegm import instructions
 from superegm.builder_token import app_lines, key_path, tool
 from superegm.judges import judge_members
 from superegm.launch import app_login, builder_login, origin_problems, protection_problems
@@ -51,6 +52,7 @@ def run(args):
 
 
 PROBE_TAIL = ["--output-format", "stream-json", "--verbose", "--max-turns", "5"]
+PROBE_CLOSING = "Do only what these instructions ask at the start of a session, then reply ok."
 
 
 def probe(config, repo_root: Path) -> bool:
@@ -63,15 +65,18 @@ def probe(config, repo_root: Path) -> bool:
   try:
     try:
       dirs = [d["dir"] for d in plugin_dirs(b["plugins"], elephant_profile())]
+      # HEAD's builder-addressed instruction text (U37's renderer); a throwaway store in the temp dir takes any copy it writes
+      text = instructions.render(core.Store(temp / "store"), "builder", None, repo_root)[1].strip()
     except core.HandoffError as error:
       print(f"probe: session {error}")
       return False
+    prompt = f"{text}\n\n{PROBE_CLOSING}" if text else "Reply ok."
     gh = shutil.which("gh") or "gh"
     tools = [t for t in allowed_tools(b["allowed_tools"], "superegm/probe", "", gh) if not t.startswith("Bash(git push ")]
     mcp_file = temp / "probe-mcp.json"
     mcp_file.write_text(json.dumps({"mcpServers": b["mcp"]}, indent=2) + "\n", encoding="utf-8")
     env_words, args = builder_flags(config, tools, dirs, mcp_file, (b["model"], b["effort"]))
-    done = subprocess.run(["env", *env_words, "claude", "-p", "Reply ok.", *args, *PROBE_TAIL], cwd=temp,
+    done = subprocess.run(["env", *env_words, "claude", "-p", prompt, *args, *PROBE_TAIL], cwd=temp,
                           stdin=subprocess.DEVNULL, capture_output=True, text=True)
     lines = probe_lines(done.stdout, b["profile_dir"])
     for text, _ in lines:
