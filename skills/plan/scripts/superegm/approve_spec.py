@@ -6,7 +6,7 @@
 # ingest once before the refusals, the refusal of an unsettled external finding, an external finding's carried copies
 # as one escalated pair discharged by its latest copy alone, and a re-approval of the same cycle reading that cycle
 # again and keeping the replaced entry's unnamed pairs (U26); `--amend-units` typed by hand opens and closes its own
-# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units`, and a hand-written prior approval read as `since` 0 (U36); the triage section parsed, refused with its line and frozen as `triage` (U39); the run mode frozen as the entry's `mode` (U43); the `instructions` list frozen with each file's blob sha and its verified store copy, and the changed files printed (U37); an opening approval refused over a partly filed handoff, and the last filing restored over an unapplied dry run, and `--void` without `--review` on a handoff with no `state.json` (U53); a `dir` entry's documents validated, frozen by blob sha with their raw copies (U74).
+# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units`, and a hand-written prior approval read as `since` 0 (U36); the triage section parsed, refused with its line and frozen as `triage` (U39); the run mode frozen as the entry's `mode` (U43); the `instructions` list frozen with each file's blob sha and its verified store copy, and the changed files printed (U37); an opening approval refused over a partly filed handoff, and the last filing restored over an unapplied dry run, and `--void` without `--review` on a handoff with no `state.json` (U53); a `dir` entry's documents validated, frozen by blob sha with their raw copies (U74); a proceeded cycle's unsettled external findings no refusal, its bytes checked against the proceed's pinned sha (U57).
 
 """superegm approve-spec: record the owner's approval of a converged spec (spec section 8)."""
 
@@ -17,7 +17,7 @@ import re
 
 import superegm as core
 from superegm import close, instructions, runcard
-from superegm.review import Refusal, evaluate, findings_of, ingest_pr, latest_cycle, live_rounds, load_review, load_round, review_id, round_numbers, valid_rounds
+from superegm.review import Refusal, evaluate, findings_of, ingest_pr, last_proceed, latest_cycle, live_rounds, load_review, load_round, review_id, round_numbers, valid_rounds
 
 WRITES = frozenset(["approvals", "handoffs", "state", "reviews", "runcards", "instructions"])  # the store kinds this subcommand writes
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
@@ -432,7 +432,8 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
       _, unsettled = ingest_pr(st, review, number, card.get("parent") or args.runcard)
     except Refusal as error:
       raise core.HandoffError(f"approve-spec: {str(error).removeprefix('review ingest: ')}") from None
-    if unsettled:  # named on the PR its thread came from: a carried finding's may be an earlier PR's
+    if unsettled and not last_proceed(review):  # U57: a proceeded cycle's are the owner's accepted risk
+      # named on the PR its thread came from: a carried finding's may be an earlier PR's
       fid = unsettled[0]
       latest = load_round(st, rid, round_numbers(st, rid)[-1])
       pr = next((f.get("pr") for f in findings_of(latest) if f["id"] == fid and f.get("pr")), number)
