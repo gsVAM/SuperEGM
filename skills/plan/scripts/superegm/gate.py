@@ -1,10 +1,11 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: `gate --pass` on converged plan reviews at the body hash over the store's plan copy; the unfiled write list; the reviewed pair, accept and readiness forms removed; an adopted unit's two trailing fields (U13).
+# Modified by SuperEGM (gsVAM), 2026: `gate --pass` on converged plan reviews at the body hash over the store's plan copy; the unfiled write list; the reviewed pair, accept and readiness forms removed; an adopted unit's two trailing fields (U13); a review with a round after the converged one is not converged (U56).
 
 """superegm gate: pass the gate when every unfiled unit's plan review converged at its body hash."""
 
 import json
+import re
 from pathlib import Path
 
 import superegm as core
@@ -47,7 +48,11 @@ def converged_review(store: core.Store, uid: str):
       latest = (review, path.parent)
   if latest is None or latest[0].get("converged", "no") == "no" or not latest[0].get("converged_round"):
     return False, None
-  rnd = json.loads(core.read_text(latest[1] / f"round-{latest[0]['converged_round']}.json"))
+  converged_round = int(latest[0]["converged_round"])
+  if any(int(m.group(1)) > converged_round for p in latest[1].glob("round-*.json")
+         if (m := re.fullmatch(r"round-(\d+)\.json", p.name))):
+    return False, None  # a round recorded after the converged one: the review is due again (`review_plan.due_rows`)
+  rnd = json.loads(core.read_text(latest[1] / f"round-{converged_round}.json"))
   return True, rnd["artifact_sha256"]
 
 
