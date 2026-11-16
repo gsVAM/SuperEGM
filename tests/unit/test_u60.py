@@ -91,8 +91,7 @@ def test_probe_uses_the_launch_flags(world, monkeypatch, tmp_path):
   probe_env, probe_argv = argv[1:at], argv[at:]
   config = superegm.load_config(world.repo)
   from superegm.launch_builder import allowed_tools
-  import shutil
-  tools = [t for t in allowed_tools(config["builder"]["allowed_tools"], "superegm/probe", "", shutil.which("gh") or "gh")
+  tools = [t for t in allowed_tools(config["builder"]["allowed_tools"], "superegm/probe", "", "gh")
            if not t.startswith("Bash(git push ")]
   mcp_file = Path(spawned[0]["cwd"]) / "probe-mcp.json"
   env_words, claude_args = builder_flags(config, tools, [], mcp_file, (config["builder"]["model"], config["builder"]["effort"]))
@@ -186,7 +185,7 @@ def test_probe_refused_allow_list_closes_the_session(world, monkeypatch, tmp_pat
 @pytest.mark.parametrize("command, allow", [
     ("curl -s x", "--allow curl"),
     ("git checkout -b x", "--allow 'git checkout'"),
-    ("/usr/local/bin/gh api repos/o/r", "--allow 'gh api'"),
+    ("/usr/local/bin/gh api repos/o/r", "--allow 'gh api repos/o/r'"),
     ("gh pr merge 1", "--allow 'gh pr merge'"),
     ("pytest -q | tail -5", "--allow pytest --allow tail"),
     ("make test || npm test", "--allow make --allow npm"),
@@ -209,3 +208,27 @@ def test_probe_session_exit_names_the_reason(world, monkeypatch, tmp_path):
   profile, record, spawned = probe_world(world, monkeypatch, tmp_path / "again", events=[result], exit_code=1)
   code, out = world.run("doctor", "--probe")
   assert out.rstrip().endswith("probe: session exit 1: Not logged in · Please run /login") and code == 1, out
+
+
+def test_probe_admits_bare_gh_as_the_launch_admits_its_gh(world, monkeypatch, tmp_path):
+  # review codebase-details-2-1 and change-review-2-2: the probe prompt carries no gh path, so its rules name bare gh;
+  # a `gh <group> <command>` hint is then the entry that admits the call, rewritten to the launch's gh at launch
+  profile, record, spawned = probe_world(world, monkeypatch, tmp_path, events=[CLEAN_RESULT], allowed=["Read", "Bash(gh pr view:*)"])
+  code, out = world.run("doctor", "--probe")
+  argv = spawned[0]["argv"]
+  assert argv[argv.index("--allowedTools") + 1] == "Read,Bash(gh pr view:*)" and code == 0, out
+
+
+PUSH = "git push: a launch admits only its own branch, no --allow"
+
+
+@pytest.mark.parametrize("command, shown, hint", [
+    ("git push origin main", "git push origin main", PUSH),
+    ("git status && git push --force origin main", "git status && git push --force origin main", "--allow 'git status'; " + PUSH),
+    ("git status\ngh pr merge 1", "git status\\ngh pr merge 1", "--allow 'git status' --allow 'gh pr merge'"),
+])
+def test_probe_denial_never_widens_push_and_names_every_line(command, shown, hint):
+  # review change-review-2-1, codebase-details-2-2 and 2-3: no hint admits a push; every line of a command is a segment
+  from superegm.doctor import probe_lines
+  event = {"type": "result", "permission_denials": [{"tool_name": "Bash", "tool_input": {"command": command}}]}
+  assert probe_lines(json.dumps(event), "/p") == [(f"denied Bash {shown} ({hint})", False)]
