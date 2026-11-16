@@ -7,7 +7,7 @@ records, the convergence it gives ahead of every other test, and its readers dow
 import json
 import pytest
 
-from conftest import set_config
+from conftest import ROOT, set_config
 from superegm import atomic_write
 from test_wave import open_wave_card, wave_store, fake_gh, foreman_of, head_review
 
@@ -89,3 +89,52 @@ def test_proceed_refusals(world, case, message):
   code, out = proceed(world, rid, card, *by)
   assert code == 1 and message in out, out
   assert snapshot(s, rid, "U01", "U02") == before
+
+
+# ---------------------------------------------------------------- S2: a head's proceed is recorded
+
+
+def launches(s, uid, *rounds):
+  atomic_write(s.path("launches", uid), {"launches": [{"round": n, "status": "exited 0"} for n in rounds]})
+
+
+def test_proceed_records_the_head(world):
+  s, card, rid = head_world(world)
+  launches(s, "U01", 1, 2)
+  serve(world, comment(s, 901, "**Ruling:** proceed — the medium is accepted risk"),
+        comment(s, 902, "**Ruling:** proceed — again, after the merge round", updated="2026-11-11T09:00:00Z"))
+  rulings_before = foreman_of(s, "U01")["rulings"]
+  code, out = proceed(world, rid, card, "--owner", "--posted", "901")
+  assert code == 0, out
+  entry = {"ruling": "R1", "review": rid, "posted": "comment 901", "posted_at": UPDATED, "issue": issue_of(s, "U01"),
+           "head": "a" * 40, "launch": 2, "by": OWNER, "reason": "the medium is accepted risk"}
+  assert foreman_of(s, "U01")["proceeds"] == [entry]
+  ruling = json.loads(s.path("reviews", rid, "review.json").read_text(encoding="utf-8"))["rulings"][-1]
+  assert {k: ruling[k] for k in ("id", "ruling", "by", "reason", "sha256")} == {
+    "id": "R1", "ruling": "proceed", "by": "owner", "reason": "the medium is accepted risk", "sha256": "a" * 40}
+  # the same comment, review and head again: the recorded entry, nothing written
+  before = snapshot(s, rid, "U01")
+  code, out = proceed(world, rid, card, "--owner", "--posted", "901")
+  assert code == 0 and json.loads(out) == entry, out
+  assert snapshot(s, rid, "U01") == before
+  # a newer launch, then a second proceed on a new comment
+  launches(s, "U01", 1, 2, 3)
+  code, out = proceed(world, rid, card, "--owner", "--posted", "902")
+  assert code == 0, out
+  proceeds = foreman_of(s, "U01")["proceeds"]
+  assert len(proceeds) == 2 and proceeds[-1]["launch"] == 3 and proceeds[-1]["ruling"] == "R2", proceeds
+  assert proceeds[-1]["posted_at"] == "2026-11-11T09:00:00Z"
+  # a typed head proceed on another unit: no comment, by the owner
+  code, out = world.run("review", "open", "--kind", "head", "--artifact", "U02", "--reviewers", "change-review",
+                        "--runcard", card)
+  assert code == 0, out
+  rid2 = out.strip()
+  u02_rulings = foreman_of(s, "U02")["rulings"]
+  code, out = proceed(world, rid2, card, "--owner", "--reason", "typed in session")
+  assert code == 0, out
+  assert foreman_of(s, "U02")["proceeds"] == [
+    {"ruling": "R1", "review": rid2, "posted": None, "posted_at": None, "issue": issue_of(s, "U02"),
+     "head": "b" * 40, "launch": 1, "by": "owner", "reason": "typed in session"}]
+  assert foreman_of(s, "U01")["rulings"] == rulings_before and foreman_of(s, "U02")["rulings"] == u02_rulings
+  rulings_md = (ROOT / "skills" / "wave" / "references" / "rulings.md").read_text(encoding="utf-8")
+  assert "review rule --ruling proceed --owner --posted <cid>" in rulings_md
