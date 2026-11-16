@@ -46,3 +46,14 @@ def test_triage_adapter_is_zero_context_and_read_only():
 def test_triage_texts_name_the_rules(path, phrase):
   # persona: four fields from the code at the head, one line per fid; brief: Step 3b between collect and post
   assert phrase in text_of(path)
+
+
+@pytest.mark.parametrize("path, phrase", [
+    ("agents/triage.md", "exactly one `<path>:<line>`"),
+    ("agents/triage.md", "a single line number, never a range"),
+    ("agents/triage.md", "only `refuted` takes free text"),
+    ("skills/wave/references/foreman_brief.md", "except the `--file` call of Step 3b"),
+])
+def test_triage_round_3_rules(path, phrase):
+  # round 2: `confirmed` takes a bare path:line (the helper fullmatches it); Step 3b's --file refusals are not Step 5 errors
+  assert phrase in text_of(path)
