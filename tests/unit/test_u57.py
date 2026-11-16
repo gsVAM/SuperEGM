@@ -138,3 +138,150 @@ def test_proceed_records_the_head(world):
   assert foreman_of(s, "U01")["rulings"] == rulings_before and foreman_of(s, "U02")["rulings"] == u02_rulings
   rulings_md = (ROOT / "skills" / "wave" / "references" / "rulings.md").read_text(encoding="utf-8")
   assert "review rule --ruling proceed --owner --posted <cid>" in rulings_md
+
+
+# ---------------------------------------------------------------- S3: a proceed converges first
+
+
+def head_at_the_cap(world):
+  """test_foreman's unit U01: round 1 posted at the repository's HEAD with two unsettled mediums, the cap at 1, and a
+  cap decision naming the review open. (store, card, review id, first reviewer, head)."""
+  import subprocess
+  import test_foreman as tf
+  head = subprocess.run(["git", "-C", str(world.repo), "rev-parse", "HEAD"], check=True, capture_output=True,
+                        text=True).stdout.strip()
+  st, card, _ = tf.seed(world, head=head, rounds=[{**tf.POSTED_R1, "head": head, "outcome": "revise"}], owners=[OWNER])
+  lines = "".join(f"change-review-1-{i} | medium | src/hooks.py:{i} | regression: no | claim {i}\n" for i in (1, 2))
+  rid = tf.open_head_review(world, st, card, head, {"change-review": lines})
+  tf.cap_at_one(st, rid)
+  q = world.artifacts.parent / "cap.md"
+  q.write_text("the cap is reached\n", encoding="utf-8")
+  code, out = world.run("decision", "open", "--unit", "U01", "--point", "2", "--question", str(q),
+                        "--source", f"review {rid} cap", "--runcard", card)
+  assert code == 0, out
+  return st, card, rid, "change-review", head
+
+
+def spec_moved(world, monkeypatch):
+  """A spec cycle's round 1 clean for its panel, the PR's two threads ingested (a high, a low), the spec then edited."""
+  from test_review import opened, rounds, hstore, move
+  from test_u26 import reader, ingest
+  reader(monkeypatch)
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [[]])
+  assert ingest(world, cid)[0] == 0
+  move(world, "spec", spec)
+  return hstore(world), cid, rid, "design", None
+
+
+def plan_review(world, case):
+  """U07's plan cycle under `readiness,set`: round 1's readiness findings by the case; a fix-design settled, or two
+  rounds with readiness missing after it (the stall)."""
+  from test_review import opened, record, settle, hstore, F
+  _, cid, rid = opened(world, "plan", reviewers="readiness,set")
+  sevs = {"below the cap, a high open": ["high", "medium", "low"], "a fix-design finding": ["high", "medium"],
+          "stalled": ["high", "high", "medium", "low"]}[case]
+  assert record(world, rid, 1, "readiness", [F("readiness", 1, i, s) for i, s in enumerate(sevs, 1)], cid)[0] == 0
+  assert record(world, rid, 1, "set", [], cid)[0] == 0
+  if case == "a fix-design finding":
+    assert settle(world, rid, "readiness-1-1", "fix-design", cid, "--owner")[0] == 0
+  if case == "stalled":
+    for n in (2, 3):
+      assert record(world, rid, n, "set", [], cid)[0] == 0
+  return hstore(world), cid, rid, "readiness", None
+
+
+def round_zero(world):
+  """test_file's planned handoff (U01, U02): U01's plan cycle opened, no round recorded."""
+  from test_file import planned, open_card, hp
+  from superegm import store
+  spec, plan, handoff_id = planned(world)
+  cid = open_card(world, "review-plan", str(spec))
+  code, out = world.run("review", "open", "--kind", "plan", "--artifact", "U01", "--reviewers", "readiness",
+                        "--runcard", cid)
+  assert code == 0, out
+  hp(world, "state")
+  return store(world.repo), cid, out.splitlines()[0], "readiness", spec
+
+
+def findings(st, rid):
+  return [f for p in sorted(st.path("reviews", rid).glob("round-*.json"))
+          for r in json.loads(p.read_text(encoding="utf-8"))["reviewers"].values() for f in r["findings"]]
+
+
+def verdict(st, rid):
+  return json.loads(st.path("reviews", rid, "review.json").read_text(encoding="utf-8"))["converged"]
+
+
+@pytest.mark.parametrize("case, kind, k, h", [
+  ("below the cap, a high open", "plan", 3, 1), ("head at the cap", "head", 2, 0),
+  ("a fix-design finding", "plan", 1, 0), ("bytes moved after the last round", "spec", 2, 1),
+  ("round 0", "plan", 0, 0), ("stalled", "plan", 4, 2),
+])
+def test_proceed_converges_first(world, monkeypatch, case, kind, k, h):
+  from superegm import review as review_mod
+  if kind == "head":
+    st, cid, rid, first, head = head_at_the_cap(world)
+  elif kind == "spec":
+    st, cid, rid, first, head = spec_moved(world, monkeypatch)
+  elif case == "round 0":
+    st, cid, rid, first, spec = round_zero(world)
+  else:
+    st, cid, rid, first, head = plan_review(world, case)
+  run_status = lambda: world.run("review", "status", "--review", rid, "--runcard", cid)
+  before = run_status()[0]
+  assert before != 0 or case == "round 0", before
+  open_before = {f["id"] for f in findings(st, rid) if f["disposition"] is None}
+  assert len(open_before) == k
+  code, out = proceed(world, rid, cid, "--owner", "--reason", "accepted risk")
+  assert code == 0, out
+  assert verdict(st, rid) == "by proceed R1"
+  assert run_status()[0] == 0
+  assert f"review {rid} proceeded by the owner: {k} findings accepted ({h} high)" in st.path("journal").read_text(encoding="utf-8")
+  for f in findings(st, rid):
+    if f["id"] in open_before:
+      assert (f["disposition"], f.get("by"), f["ruling"]) == ("declined", "owner", "R1"), f
+  if kind == "head":
+    data = foreman_of(st, "U01")
+    assert [r for r in data["rulings"] if r.get("ruling") == "proceed"] == [
+      {"decision": "q1", "ruling": "proceed", "by": "owner", "reason": "accepted risk", "review": "R1"}]
+    assert review_mod.open_decisions(st, "U01") == []
+    assert data["rounds"][0]["outcome"] == "clean"  # the clean outcome, as an accept writes it
+  # a later settle and an ingest keep the verdict
+  if open_before:
+    fid = sorted(open_before)[0]
+    code, out = world.run("review", "settle", "--review", rid, "--finding", fid, "--disposition", "declined",
+                          "--owner", "--runcard", cid)
+    assert code == 0, out
+    assert verdict(st, rid) == "by proceed R1"
+  if kind == "spec":
+    from test_u26 import ingest
+    assert ingest(world, cid)[0] == 0 and verdict(st, rid) == "by proceed R1"
+  # a reviewer round's record is refused
+  path = world.artifacts.parent / "next.findings"
+  path.write_text("", encoding="utf-8")
+  latest = max(review_mod.round_numbers(st, rid), default=0)
+  code, out = world.run("review", "record", "--review", rid, "--round", str(latest + 1), "--reviewer", first,
+                        "--findings", str(path), "--isolation", "clean", "--model", "m:m", "--effort", "e:e",
+                        "--runcard", cid, *(["--sha256", head] if kind == "head" else []))
+  assert code == 1 and f"review {rid} proceeded by R1" in out, out
+  if case == "round 0":
+    from test_file import converge, open_card
+    converge(world, "U02")
+    code, out = world.run("gate", "--pass", "--spec", spec, "--runcard", open_card(world, "file", str(spec)))
+    assert code == 0, out
+  if kind == "head":
+    import test_foreman as tf
+    monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")  # the fake `gh` answers the builder's login
+    atomic_write(st.path("review", "U01", f"pr{tf.PR}") / "r1/ci.json", json.dumps({"verdict": "ci green"}))
+    world.gh.threads[tf.PR] = [{"id": 1, "user": {"login": "alice"}, "body": "bug: the hook never fires",
+                                "path": "src/hooks.py", "line": 3, "commit_id": head, "created_at": "t"}]
+    world.gh.roles.update({"alice": {"role_name": "write"}})
+    code, out = world.run("review", "ingest", "--unit", "U01", "--runcard", cid)
+    assert code == 0 and out.split()[:2] == ["1", "ingested"], out
+    assert foreman_of(st, "U01")["ingested"] == [1] and verdict(st, rid) == "by proceed R1"
+    assert any(f["id"].startswith("external:alice-1-") for f in findings(st, rid))
+    files = lambda: [p.read_bytes() for p in sorted(st.path("reviews", rid).glob("*.json"))] + [st.path("foreman", "U01").read_bytes()]
+    kept = files()
+    code, out = world.run("review", "ingest", "--unit", "U01", "--runcard", cid)
+    assert code == 0 and out.split()[:2] == ["0", "ingested"] and files() == kept, out
