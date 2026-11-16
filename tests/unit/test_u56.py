@@ -141,6 +141,8 @@ def test_file_skill_under_the_chain():
   # a record's answer: a driven run takes it from the record; Create counts only for the write list it names
   assert "the record's `answer`" in chain and "`Confirmed write list sha256`" in chain
   assert "for another write list" in chain
+  # review round 2: a typed run without `--handoff` learns the id from its card, so it re-opens the card in normal mode
+  assert "names no `--handoff`" in chain and "opens its card again with `--mode normal`" in chain
   # a `next wait` question is one line with no single quote
   assert "no single quote" in chain
   # `What it does` no longer counts six commands
