@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_launch` as the launch module; it marks the ready units up to `max_in_flight` after the protection checks of spec section 11, the owners set and the team bypass included; the builder as a GitHub App (U15); a unit whose `clean` outcome an ingest rewrote is ready again (U21); `interrupted (reboot)` terminal and a unit pending a decision out of the in-flight count (U24); `origin_problems` takes the ref and runs the spec check alone (U43).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_launch` as the launch module; it marks the ready units up to `max_in_flight` after the protection checks of spec section 11, the owners set and the team bypass included; the builder as a GitHub App (U15); a unit whose `clean` outcome an ingest rewrote is ready again (U21); `interrupted (reboot)` terminal and a unit pending a decision out of the in-flight count (U24); `origin_problems` takes the ref and runs the spec check alone (U43); a merged view holds no slot and is never relaunched (U55).
 
 """superegm launch: check what the launch needs, then mark the ready units up to `max_in_flight`."""
 
@@ -78,7 +78,7 @@ def launch(args, card):
            for uid in handoff.graph.order}
   flying = [uid for uid in handoff.graph.order if in_flight(st, uid, views[uid], idle)]
   again = {uid for uid in handoff.graph.order if uid not in stopped and uid not in idle and not views[uid].get("landed")
-           and ready_again(core.load_foreman(st, uid), load_launches(st, uid))}
+           and not merged(views[uid]) and ready_again(core.load_foreman(st, uid), load_launches(st, uid))}
   ready = set(summary["ready"]) | again  # a unit an ingest returned to `revise` waits for a slot as a ready unit does
   marked = [uid for uid in handoff.graph.order if uid in ready and uid not in stopped][:max(0, config["max_in_flight"] - len(flying))]
   for uid in marked:
@@ -90,6 +90,12 @@ def launch(args, card):
   return 0
 
 
+def merged(view: dict) -> bool:
+  """A merged view (spec section 7.1): its pull request is merged with the issue left open, `pr` set and `ci` null.
+  It holds no slot and is never relaunched, as a landed view does."""
+  return bool(view.get("pr")) and view.get("ci") is None
+
+
 def in_flight(store, uid, view, idle):
   """True from the unit's mark (the mark reserves the slot) until its latest round is posted
   `clean`, it has landed, it carries the stopped label, or this invocation names it idle; a
@@ -98,7 +104,7 @@ def in_flight(store, uid, view, idle):
   `report.pending_decisions` reads as pending, the read `report`'s free-slot count makes (amendment 5: the batch
   goes on while the owner rules)."""
   from superegm.report import pending_decisions  # imported here: `report` imports this module
-  if not view.get("launched") or view.get("landed") or view.get("stopped") or uid in idle:
+  if not view.get("launched") or view.get("landed") or merged(view) or view.get("stopped") or uid in idle:
     return False
   foreman, launches = core.load_foreman(store, uid), load_launches(store, uid)
   if pending_decisions(foreman):
