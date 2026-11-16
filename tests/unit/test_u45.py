@@ -24,3 +24,10 @@ def test_skills_frozen_mode(path):
   text = " ".join((ROOT / path).read_text(encoding="utf-8").split())
   assert "frozen" in text and "`config.mode`" in text
   assert "or the config's `mode` is `leavemealone`" not in text and "--mode '<normal|leavemealone>'" not in text
+
+
+def test_wave_batch_decision_and_exit():
+  # driven normal mode opens points 1, 2, 3 and 5 as decision open records, holds that unit, handles every other event of the batch
+  text = " ".join((ROOT / "skills/wave/SKILL.md").read_text(encoding="utf-8").split())
+  assert "always `--leavemealone`" not in text
+  assert "normal mode" in text and "points 1, 2, 3 and 5" in text and "every event of the batch" in text
