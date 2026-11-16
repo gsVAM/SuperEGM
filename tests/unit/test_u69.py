@@ -47,3 +47,20 @@ def test_next_answer_writes_the_answer(world):
   assert answer_json_path.name == f"file-{record['since']}.answer.json"
   assert jread(answer_json_path) == {"by": "owner", "at": record["at"], "sha": hashlib.sha256(b"go on with the plan").hexdigest()}
   assert not list((world.artifacts / c.hid).glob("runcards/*"))
+
+
+ANSWERED = {"answer": "yes", "by": "owner", "at": "2026-11-15T01:00:00Z"}
+
+
+@pytest.mark.parametrize("case", ["already answered", "no record", "login not an owner", "--phase given"])
+def test_next_answer_refusals(world, case):
+  # an answer needs an unanswered record and an owner's login
+  c, path = chain_of(world, login="stranger" if case == "login not an owner" else "owner",
+                     **(ANSWERED if case == "already answered" else {}))
+  if case == "no record":
+    path.unlink()
+  record_bytes_before = path.read_bytes() if path.exists() else None
+  code, out = answer(world, c, *(["--phase", "file"] if case == "--phase given" else []), text="a new answer")
+  record_bytes_after = path.read_bytes() if path.exists() else None
+  assert code != 0 and record_bytes_after == record_bytes_before
+  assert not list((world.artifacts / c.hid).glob("waits/*"))
