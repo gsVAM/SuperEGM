@@ -12,7 +12,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: phase 2 of the SuperEGM loop (the plan file, graph, scan, decide); EGM's approval, review gate, dry run and filing steps live in review-spec, review-plan and file; `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the `Tier:` field (U33); the split rules, the `width:` line and the header's wave plan (U29); what a Step holds (1.2.1 §6.5); the scope-cite warning stated (U79); the `units.*` limits stated (U42); the driven wait and the typed run on a wait record (U45). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: phase 2 of the SuperEGM loop (the plan file, graph, scan, decide); EGM's approval, review gate, dry run and filing steps live in review-spec, review-plan and file; `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the `Tier:` field (U33); the split rules, the `width:` line and the header's wave plan (U29); what a Step holds (1.2.1 §6.5); the scope-cite warning stated (U79); the `units.*` limits stated (U42); the driven wait and the typed run on a wait record, the frozen mode (U45). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the handoff skill. Not part of google/elephant-goldfish-model. -->
 
@@ -210,7 +210,8 @@ confirmed progress and otherwise keeps it, asked again as `stopped at plan by <b
 
 ## Leavemealone-mode
 
-In leavemealone-mode (`--leavemealone` on the invocation, or `config.mode`) a
+In leavemealone-mode (`--leavemealone` on the invocation, or the approval's frozen `mode`, else
+`config.mode` for an entry with no `mode`) a
 `decision-blocking` line of Step 4 (decision point 3, a `blocking: yes` item)
 goes to the judge panel instead of the owner, and what the converged answer
 applies is the one routing table

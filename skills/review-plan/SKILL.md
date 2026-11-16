@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Reviews a handoff plan against its design through the judge panel before any issue is filed.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the body: plan review over the helper's review-plan and review subcommands (U06); `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the accept below the cap's one question per round (U35); the `width:` line, the plan header, the chain check and the split check (U29); the readiness plan remit (1.2.1 §6.5); the driven wait and the typed run on a wait record (U45). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the body: plan review over the helper's review-plan and review subcommands (U06); `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the accept below the cap's one question per round (U35); the `width:` line, the plan header, the chain check and the split check (U29); the readiness plan remit (1.2.1 §6.5); the driven wait and the typed run on a wait record, the frozen mode (U45). -->
 
 # Plan review (phase 3)
 
@@ -37,8 +37,9 @@ dispatch.
 
 1. When `.superegm/config.json` is missing, run `python3 '<HELPER>' init`, then continue; the
    owner's by-hand steps it prints are not needed for this review.
-2. `python3 '<HELPER>' runcard open --skill review-plan --artifact '<spec>' --mode '<normal|leavemealone>'`
-   prints `<card>`; it goes on every writing helper call below. `<spec>` is the approved spec
+2. `python3 '<HELPER>' runcard open --skill review-plan --artifact '<spec>'`, adding `--mode leavemealone`
+   only when the invocation said `--leavemealone`; otherwise the mode is `runcard open`'s default, the
+   approval's frozen mode (`config.mode` for an entry with no `mode`), prints `<card>`; it goes on every writing helper call below. `<spec>` is the approved spec
    the plan names (`state.json`'s `design.path`). With `[--handoff <id>]` on the invocation, pass `--handoff '<id>'` to this `runcard open` and to every helper call below; an older handoff is frozen and refuses.
 3. The panel is `--reviewers` when the invocation gave it, else `config.reviewers.plan`;
    `readiness` is first, one to six ids.
@@ -232,7 +233,8 @@ the record only on confirmed progress and otherwise keeps it, asked again as
 
 ## Leavemealone-mode
 
-In leavemealone-mode (`--leavemealone` on the invocation, or `config.mode`) the pause of Step 0
+In leavemealone-mode (`--leavemealone` on the invocation, or the approval's frozen `mode`, else
+`config.mode` for an entry with no `mode`) the pause of Step 0
 item 4 is replaced by the judge panel at decision points 1 and 2, and what each converged answer
 applies is the one routing table `${CLAUDE_PLUGIN_ROOT}/skills/judges/references/leavemealone.md`
 (this skill carries none of its own). At the point, render the question from the record:
