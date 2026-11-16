@@ -70,3 +70,35 @@ def test_a_folder_freezes_each_document_with_its_raw_copy(world):
     [f"{f['sha']}.json" for f in entry["files"]] + [f"{f['sha']}.md" for f in entry["files"]])
   for f in entry["files"]:
     assert (store_dir / f"{f['sha']}.md").read_bytes() == texts[f["file"]].encode("utf-8")
+
+
+def test_the_index_lists_each_document_after_the_pasted_files(world):
+  """One heading, one line per document addressed to the role, then the verbatim sentence."""
+  from superegm.instructions import render
+  from test_review import hstore
+  from test_u37 import blob_sha, commit_file, entries_of
+  a_text = "\n  \n" + "z" * 130 + "\nrest\n"
+  commit_file(world, RULES, "Run the suite.\n")
+  commit_files(world, {f"{DIR}/a.md": a_text, f"{DIR}/b.md": "# B title\n"})
+  configure(world, [{"file": RULES, "to": ["builder"]}, {"dir": DIR, "to": ["builder", "reviewers"]}])
+  spec, cid, rid = converged_spec(world)
+  assert approve(world, spec, cid, "--yes")[0] == 0
+  hid = entries_of(world)[-1]["handoff_id"]
+  st = hstore(world)
+  sha, sha_b = blob_sha(a_text.encode()), blob_sha(b"# B title\n")
+  store = st.path("instructions", sha).parent.parent   # the store root: instructions/<sha>.md under it
+  manifest, text = render(st, "builder", handoff_id=hid)
+  assert text.index("## Reference documents") > text.index("rules.md")
+  assert text.count("## Reference documents") == 1
+  assert f"- docs/reference/a.md ({sha}): {'z' * 120} — read {store}/instructions/{sha}.md\n" in text
+  assert f"- docs/reference/b.md ({sha_b}): # B title — read {store}/instructions/{sha_b}.md\n" in text
+  assert "z" * 121 not in text
+  assert text.rstrip().endswith("Read a reference document when your task touches what its first line names; "
+                                "cite it by file when a finding rests on it.")
+  assert manifest == [{"file": RULES, "sha": blob_sha(b"Run the suite.\n")},
+                      {"file": "docs/reference/a.md", "sha": sha}, {"file": "docs/reference/b.md", "sha": sha_b}]
+  # a role the folder is not addressed to gets nothing of it; a role with only the folder gets its heading
+  assert render(st, "judges", handoff_id=hid) == ([], "")
+  only = render(st, "reviewers", handoff_id=hid)
+  assert only[1].startswith("# Repository instructions\n") and "```" not in only[1]
+  assert only[0] == manifest[1:]
