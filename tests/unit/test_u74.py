@@ -204,3 +204,27 @@ def test_the_astra_lane_pastes_checked_store_copies(world, tmp_path, monkeypatch
     assert stored["manifest"] == both and pasted_a in stored["text"]
     brief = (st.path("review", tf.UNIT, f"pr{tf.PR}") / "r1" / "astra_brief.md").read_text(encoding="utf-8")
     assert brief.rstrip().endswith(stored["text"].rstrip())
+
+
+def test_a_spec_review_renders_each_lane_apart(world):
+  """`superegm instructions --spec --lane` stores and prints one rendering per lane: the Astra one pasted, the local one indexed."""
+  import json
+  from test_review import hstore, opened
+  from test_u37 import blob_sha
+  commit_files(world, {f"{DIR}/a.md": A_TEXT})
+  configure(world, [{"dir": DIR, "to": ROLES}])
+  git(["commit", "-qam", "config", "--allow-empty"], world.repo)
+  spec, cid, rid = opened(world, astra="on")
+  sha = blob_sha(A_TEXT.encode())
+  outputs = {}
+  for lane in ("local", "astra"):
+    code, out = world.run("instructions", "--role", "reviewers", "--spec", spec, "--review", rid, "--round", 1, "--lane", lane,
+                          "--runcard", cid, card=None)
+    assert code == 0, out
+    outputs[lane] = out
+  assert f"```\n{A_TEXT}```" in outputs["astra"] and "— read" not in outputs["astra"]
+  assert "A body marker." not in outputs["local"] and "— read" in outputs["local"]
+  st = hstore(world)
+  for lane in ("local", "astra"):
+    stored = json.loads(st.path("reviews", rid, f"instructions-1-reviewers-{lane}.json").read_text(encoding="utf-8"))
+    assert stored["manifest"] == [{"file": f"{DIR}/a.md", "sha": sha}] and stored["text"] == outputs[lane]
