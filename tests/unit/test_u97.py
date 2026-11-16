@@ -69,6 +69,19 @@ def _prepare_head(world, tmp_path, monkeypatch, started, amendments=()):
   return st, card, record, text
 
 
+def test_astra_brief_amendments(world, tmp_path, monkeypatch):
+  # the Astra lane reviews against the same amendments as the foreman
+  import test_foreman as tf
+  from superegm import foreman
+  monkeypatch.setattr(foreman, "runner_path", lambda: "/x/runner.py")
+  (tmp_path / "e").mkdir()
+  w = tf.prepared(world, tmp_path / "e", monkeypatch, astra={"enabled": True}, rounds=[tf.POSTED_R1], launches=tf.TWO_LAUNCHES)
+  dir_ = w.dir / "r2"
+  brief = (dir_ / "astra_brief.md").read_text(encoding="utf-8")
+  amendments_md_text = (dir_ / "amendments.md").read_text(encoding="utf-8")
+  assert "# Amendments\n" in brief and amendments_md_text in brief
+
+
 def test_head_attributed_to_own_commit(world, tmp_path, monkeypatch):
   # launch 3 pushed nothing: the head is launch 2's, and an amendment recorded after launch 2 started does not apply
   import test_foreman as tf
