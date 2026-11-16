@@ -253,6 +253,20 @@ def test_driven_card_of_any_phase(world, monkeypatch, tmp_path, phase):
   assert superegm.handoff_spec(argparse.Namespace(plan=None), c.hs) == str(c.spec)
 
 
+@pytest.mark.parametrize("phase", ["plan", "review-plan", "file"])
+def test_a_chain_off_driven_card_is_refused_as_in_1_2(world, monkeypatch, tmp_path, phase):
+  """With the chain off a driven top-level non-wave card is 1.2's: refused while the tick's launch is live, with no
+  `driver_card` or `boot_id`."""
+  c = chained(world, monkeypatch, tmp_path, chain=False)
+  s = superegm.Store(world.artifacts)
+  tick_launch(s, c.hid, card="driver-abc-0001", boot="boot-1")  # the tick's launch, live
+  code, out = driven_card(world, monkeypatch, c, phase)
+  assert code == 1 and superegm.TICK_LIVE in out, out
+  cards = [card for _, card in superegm.top_phase_cards(c.hs) if card["skill"] == phase]
+  assert cards and all(card.get("interrupted_at") for card in cards)
+  assert all("driver_card" not in card and "boot_id" not in card for card in cards)
+
+
 def set_entry(s, hid, n, **keys):
   """Launch `n` of the handoff's `driver/<hid>.json` with `keys` set."""
   path = driver_file(s, hid)
