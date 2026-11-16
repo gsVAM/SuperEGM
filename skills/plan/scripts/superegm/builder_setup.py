@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 
 import superegm as core
+from superegm import launch_builder
 from superegm.launch_builder import profile_problem
 
 WRITES = frozenset()  # the profile and the config are outside the store
@@ -24,6 +25,8 @@ def register(subparsers):
                       runcard=False)
   p.add_argument("--mcp", action="append", default=[], metavar="NAME",
                  help="copy the owner's MCP server NAME into builder.mcp and allow mcp__NAME__*")
+  p.add_argument("--allow", action="append", default=[], metavar="PREFIX",
+                 help="allow the Bash command prefix PREFIX to a builder (Bash(PREFIX:*))")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -42,6 +45,14 @@ def run(args):
     if rule not in allowed:
       allowed.append(rule)
       lines.append(f"builder.allowed_tools: added {rule}")
+  for prefix in dict.fromkeys(args.allow):
+    if not prefix.strip() or prefix.strip() == "*":
+      raise core.HandoffError(f"--allow {prefix!r} names no command prefix")
+    rule = f"Bash({prefix}:*)"
+    if rule not in allowed:
+      allowed.append(rule)
+      lines.append(f"builder.allowed_tools: added {rule}")
+  launch_builder.allowed_tools(allowed, "unit", "", "gh")  # the launch's own check of the list, raised before the first write
   config_path = root / ".superegm" / "config.json"
   if lines and not config_path.is_file():
     raise core.HandoffError(f"{config_path} is absent: run superegm init first")
@@ -54,6 +65,7 @@ def run(args):
     core.atomic_write(config_path, held)
   for line in lines:
     print(line)
+  print("then run superegm doctor --probe")
   return 0
 
 
