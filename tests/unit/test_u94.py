@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+import test_foreman as tf
 from conftest import REPO, set_config
 from superegm import decision
 from superegm.launch_builder import prompt_text
@@ -43,3 +44,19 @@ def test_edited_or_deleted_proceed_shows_the_record(world, comment):
   shown = text.split("# Comments on issue #2\n\n", 1)[1]
   assert "## owner1 · comment 501\n**Ruling:** proceed — ship it\n(as recorded by owner1; " in shown
   assert "stop" not in shown
+
+
+def test_edited_proceed_waives_no_collect_check(world, tmp_path, monkeypatch):
+  allowances = ["**Ruling:** test-delta tests/unit/test_q.py allowed — by design", "**Ruling:** dod-2 allowed — needs a service"]
+  comments = {2: [tf.c(501 + i,"owner", body) | {"updated_at": "2026-11-02T14:00:00Z"} for i, body in enumerate(allowances)]}
+  monkeypatch.setattr(tf, "BODY", tf.BODY.replace("2. Run `true` — passes\n", f"2. Run `{tf.RED}` — passes\n"))
+  pr_body = f"U01\n\n### DoD 2\n```\n$ {tf.RED}\nok\n```\n\nCloses #2\n"
+  gut = [("chore: gut", tf.Q, tf.T("def test_a():", "  pass"))]
+  w = tf.prepared(world, tmp_path, monkeypatch, commits=tf.S1 + gut, base_files={tf.Q: tf.THREE}, pr_body=pr_body, comments=comments)
+  data = json.loads(w.st.path("foreman", tf.UNIT).read_text())
+  data["proceeds"] = [proceed_entry(f"comment {501 + i}", by="owner", posted_at="2026-11-02T13:00:00Z") for i in range(2)]
+  w.st.path("foreman", tf.UNIT).write_text(json.dumps(data))
+  tf.record(world, w.st, w.rid, 1, w.head, w.child, {"change-review": ""})
+  code, out = world.run("collect", "--unit", tf.UNIT, "--dispatch", w.did, "--runcard", w.child)
+  found = (w.dir / "r1/foreman.findings").read_text()
+  assert code == 0 and "test-delta" in found and "dod" in found, (out, found)
