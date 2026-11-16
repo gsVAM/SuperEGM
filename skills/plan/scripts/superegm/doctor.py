@@ -1,20 +1,23 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24); the informational `plugins` and `mcp` lines and the profile line's plugin refusals (U27); the informational `model:` role table (U28); the informational `stall:` line (U31); the modules' DOCTOR_CHECKS lines after its own (U32); the three `model: builder <tier>` lines (U33); `chain` in INFORMATIONAL (U54).
+# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24); the informational `plugins` and `mcp` lines and the profile line's plugin refusals (U27); the informational `model:` role table (U28); the informational `stall:` line (U31); the modules' DOCTOR_CHECKS lines after its own (U32); the three `model: builder <tier>` lines (U33); `chain` in INFORMATIONAL (U54); `--probe`, one headless builder session on the launch's own flags (U60).
 
 """superegm doctor: one line per wave prerequisite, `ok` or the refusal `launch` or `launch-builder`
 would give; read-only, no run card."""
 
+import json
 import os
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import superegm as core
 from superegm.builder_token import app_lines, key_path, tool
 from superegm.judges import judge_members
 from superegm.launch import app_login, builder_login, origin_problems, protection_problems
-from superegm.launch_builder import SENTINEL, UNSET, elephant_profile, launched_pairs, plugin_dirs, profile_problem
+from superegm.launch_builder import (SENTINEL, UNSET, allowed_tools, builder_flags, elephant_profile, launched_pairs, plugin_dirs,
+                                     profile_problem)
 
 WRITES = frozenset()  # doctor writes nothing
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # its own lines are `checks`' (U32)
@@ -27,6 +30,7 @@ MERGE = ("gh pr merge --admin (informational: the owner merges with the admin by
 def register(subparsers):
   p = core.add_parser(subparsers, "doctor", "print every wave prerequisite as ok or the refusal launch would give",
                       runcard=False)
+  p.add_argument("--probe", action="store_true", help="then run one headless builder session on the launch's own flags")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -40,7 +44,42 @@ def run(args):
   lines = [("config", "ok"), *checks(config, repo_root, os.environ.get(config["builder"]["gh_token_env"]))]
   for name, text in lines:
     print(f"{name}: {text}")
-  return 0 if all(text.startswith("ok") for name, text in lines if name not in INFORMATIONAL) else 1
+  passed = all(text.startswith("ok") for name, text in lines if name not in INFORMATIONAL)
+  if getattr(args, "probe", False):
+    passed = probe(config, repo_root) and passed
+  return 0 if passed else 1
+
+
+PROBE_TAIL = ["--output-format", "stream-json", "--verbose", "--max-turns", "5"]
+
+
+def probe(config, repo_root: Path) -> bool:
+  """Spec 1.2.1 section 3.3: one headless builder session in a fresh temporary directory, on `builder_flags` (the
+  launch's own: profile, setting sources, plugin directories, the MCP file from `builder.mcp`, the unset names, the
+  allow-list, permission mode, `builder.model` and `builder.effort`) plus `PROBE_TAIL`; no token, issue or worktree.
+  Prints the `probe:` lines and returns True when none fails. Writes nothing to the store; the directory is removed."""
+  b = config["builder"]
+  temp = Path(tempfile.mkdtemp(prefix="superegm-probe-"))
+  try:
+    try:
+      dirs = [d["dir"] for d in plugin_dirs(b["plugins"], elephant_profile())]
+    except core.HandoffError as error:
+      print(f"probe: session {error}")
+      return False
+    gh = shutil.which("gh") or "gh"
+    tools = [t for t in allowed_tools(b["allowed_tools"], "superegm/probe", "", gh) if not t.startswith("Bash(git push ")]
+    mcp_file = temp / "probe-mcp.json"
+    mcp_file.write_text(json.dumps({"mcpServers": b["mcp"]}, indent=2) + "\n", encoding="utf-8")
+    env_words, args = builder_flags(config, tools, dirs, mcp_file, (b["model"], b["effort"]))
+    done = subprocess.run(["env", *env_words, "claude", "-p", "Reply ok.", *args, *PROBE_TAIL], cwd=temp,
+                          stdin=subprocess.DEVNULL, capture_output=True, text=True)
+    if done.returncode:
+      print(f"probe: session exit {done.returncode}")
+      return False
+    print("probe: session ok")
+    return True
+  finally:
+    shutil.rmtree(temp, ignore_errors=True)
 
 
 def checks(config, repo_root, token):
