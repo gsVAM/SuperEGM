@@ -7,6 +7,7 @@ would give; read-only, no run card."""
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -18,7 +19,7 @@ from superegm.builder_token import app_lines, key_path, tool
 from superegm.judges import judge_members
 from superegm.launch import app_login, builder_login, origin_problems, protection_problems
 from superegm.launch_builder import (SENTINEL, UNSET, allowed_tools, builder_flags, elephant_profile, launched_pairs, plugin_dirs,
-                                     profile_problem, segment_heads)
+                                     profile_problem)
 
 WRITES = frozenset()  # doctor writes nothing
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # its own lines are `checks`' (U32)
@@ -67,23 +68,28 @@ def probe(config, repo_root: Path) -> bool:
       dirs = [d["dir"] for d in plugin_dirs(b["plugins"], elephant_profile())]
       # HEAD's builder-addressed instruction text (U37's renderer); a throwaway store in the temp dir takes any copy it writes
       text = instructions.render(core.Store(temp / "store"), "builder", None, repo_root)[1].strip()
+      gh = shutil.which("gh") or "gh"
+      tools = [t for t in allowed_tools(b["allowed_tools"], "superegm/probe", "", gh) if not t.startswith("Bash(git push ")]
     except core.HandoffError as error:
       print(f"probe: session {error}")
       return False
     prompt = f"{text}\n\n{PROBE_CLOSING}" if text else "Reply ok."
-    gh = shutil.which("gh") or "gh"
-    tools = [t for t in allowed_tools(b["allowed_tools"], "superegm/probe", "", gh) if not t.startswith("Bash(git push ")]
     mcp_file = temp / "probe-mcp.json"
     mcp_file.write_text(json.dumps({"mcpServers": b["mcp"]}, indent=2) + "\n", encoding="utf-8")
     env_words, args = builder_flags(config, tools, dirs, mcp_file, (b["model"], b["effort"]))
+    # no token (spec 1.2.1 section 3.3): the launch's no-token sentinel, never the owner's GH_TOKEN or gh login
     done = subprocess.run(["env", *env_words, "claude", "-p", prompt, *args, *PROBE_TAIL], cwd=temp,
-                          stdin=subprocess.DEVNULL, capture_output=True, text=True)
+                          env={**os.environ, "GH_TOKEN": SENTINEL}, stdin=subprocess.DEVNULL, capture_output=True, text=True)
     lines = probe_lines(done.stdout, b["profile_dir"])
     for text, _ in lines:
       print(f"probe: {text}")
     if any(text.startswith("mcp ") and text.split()[2] == "needs-auth" for text, _ in lines):
       shutil.copyfile(mcp_file, Path(b["profile_dir"]) / "probe-mcp.json")  # the one-time auth step's file outlives the temp dir
-    print(f"probe: session exit {done.returncode}" if done.returncode else "probe: session ok")
+    if done.returncode:
+      reason = first_line(done.stderr) or result_text(done.stdout)
+      print(f"probe: session exit {done.returncode}" + (f": {reason}" if reason else ""))
+    else:
+      print("probe: session ok")
     return not done.returncode and all(ok for _, ok in lines)
   finally:
     shutil.rmtree(temp, ignore_errors=True)
@@ -129,11 +135,60 @@ def probe_lines(stdout: str, profile: str) -> list[tuple[str, bool]]:
         tool_name, tool_input = denial.get("tool_name"), denial.get("tool_input") or {}
         if tool_name == "Bash" and isinstance(tool_input.get("command"), str):
           command = first_line(tool_input["command"])
-          allow = " ".join(f"--allow {head}" for head in dict.fromkeys(segment_heads(tool_input["command"])))
+          allow = " ".join(f"--allow {shlex.quote(p)}" for p in dict.fromkeys(allow_prefixes(tool_input["command"])))
           lines.append((f"denied Bash {command} ({allow})", False))
         else:
           lines.append((f"denied {tool_name} {json.dumps(tool_input, sort_keys=True)}", False))
   return lines
+
+
+SEPARATORS = (";", "&&", "||", "|", "&")
+
+
+def allow_prefixes(command: str) -> list:
+  """The `--allow` prefix for every `;`, `&&`, `||`, `|` and `&` segment of a denied command: its first word, but for
+  git and gh (by bare name or path) as narrow as the allow-list's own entries, `git <subcommand>` and `gh <group>
+  <command>` (`gh api`), so the hint never admits every git or gh subcommand; one whose subcommand follows an option
+  is named whole. An unsplittable line gives its first word."""
+  try:
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    tokens = list(lexer)
+  except ValueError:
+    return command.split()[:1]
+  segments, current = [], []
+  for token in tokens:
+    if token in SEPARATORS:
+      segments.append(current)
+      current = []
+    else:
+      current.append(token)
+  prefixes = []
+  for words in segments + [current]:
+    if not words:
+      continue
+    name = os.path.basename(words[0])
+    depth = {"git": 1, "gh": 1 if words[1:2] == ["api"] else 2}.get(name, 0)
+    sub = words[1:1 + depth]
+    if not depth:
+      prefixes.append(words[0])
+    elif len(sub) == depth and not any(w.startswith("-") for w in sub):
+      prefixes.append(" ".join([name, *sub]))
+    else:
+      prefixes.append(" ".join(words))
+  return prefixes
+
+
+def result_text(stdout: str) -> str:
+  """The first line of the result event's `result` text, or empty."""
+  for raw in stdout.splitlines():
+    try:
+      event = json.loads(raw)
+    except ValueError:
+      continue
+    if isinstance(event, dict) and event.get("type") == "result":
+      return first_line(event.get("result"))
+  return ""
 
 
 def first_line(content) -> str:
