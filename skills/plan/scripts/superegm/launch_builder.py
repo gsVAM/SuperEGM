@@ -489,8 +489,12 @@ def launch_reason(launches: list, foreman: dict) -> str:
   since = launches[-1].get("started_at") or ""
   points = {d["id"]: d for d in foreman["decisions"]}
   events = [(r["posted_at"], "review") for r in foreman["rounds"] if r.get("phase") == "posted" and (r.get("posted_at") or "") > since]
-  events += [(r["posted_at"], "blocked") for r in foreman["rulings"] if (r.get("posted_at") or "") > since
-             and points.get(r["decision"], {}).get("point") == 3 and str(points[r["decision"]].get("source")).startswith("comment ")]
+  from superegm.status import STATUS_RE  # late: status imports decision, which imports this module
+
+  def blocked(point):  # a point-3 decision on a comment whose stored question the builder's status line reads BLOCKED or NEEDS_CONTEXT
+    match = STATUS_RE.search(point.get("question") or "")
+    return point.get("point") == 3 and str(point.get("source")).startswith("comment ") and bool(match) and match.group(1) in ("BLOCKED", "NEEDS_CONTEXT")
+  events += [(r["posted_at"], "blocked") for r in foreman["rulings"] if (r.get("posted_at") or "") > since and blocked(points.get(r["decision"], {}))]
   return max(events)[1] if events else "harness"
 
 
