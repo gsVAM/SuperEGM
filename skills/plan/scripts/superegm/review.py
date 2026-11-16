@@ -49,7 +49,7 @@ def seat_lane(kind: str, flag: str | None, astra: dict) -> bool:
 
 SEVERITIES = ("high", "medium", "low")
 DISPOSITIONS = ("fixed", "contested", "declined", "escalated", "fix-design")
-RULINGS = ("continue", "accept", "stop")
+RULINGS = ("continue", "accept", "stop", "proceed")
 LEGACY_CAP = 5  # the cap of a cycle or an approval entry that stores none (opened under 1.2.0)
 ROUNDS = range(1, 11)  # the bound of `review.rounds`, and of a spec's `Rounds:` line (`approve-spec` reads it by `valid_rounds`)
 
@@ -124,6 +124,7 @@ def register(subparsers):
   u.add_argument("--review", required=True)
   u.add_argument("--ruling", choices=RULINGS, required=True)
   u.add_argument("--decision", metavar="ID", help="on a head below the cap: the unit's pending point-5 decision naming this review")
+  u.add_argument("--reason", help="proceed: the owner's reason, typed (else --posted names the owner's comment on a head)")
   by_whom(u, required=False)  # `stop` alone needs no ruler once `continue` is spent and the bytes moved
   v = core.add_parser(action, "post", "post a head round's review to its pull request, bound to the reviewed commit")
   v.add_argument("--unit", required=True)
@@ -1937,6 +1938,8 @@ def rule_review(args) -> int:
   if review is None:
     raise core.HandoffError(f"review {rid}: not opened")
   card = bind(args, review)
+  if args.ruling == "proceed":  # the owner's go-ahead ends the review whatever its state (spec section 4.2)
+    return rule_proceed(st, rid, review, card, args)
   rulings = [r["ruling"] for r in review["rulings"]]
   if "stop" in rulings:
     raise core.HandoffError("review rule: cycle stopped")
@@ -1974,6 +1977,71 @@ def rule_review(args) -> int:
       write_head_outcome(st, review, args.runcard)
   print(f"ruling {ruling['id']} {args.ruling}")
   return 0
+
+
+def rule_proceed(st: core.Store, rid: str, review: dict, card: dict, args) -> int:
+  """`review rule --ruling proceed --owner` (spec section 4.2): the owner's alone, typed with `--reason`, or on a head
+  `--posted <comment id>`, the owner's `**Ruling:** proceed — <reason>` on the unit's issue, consumed once."""
+  reason, posted = getattr(args, "reason", None), getattr(args, "posted", None)
+  if getattr(args, "judges", None) or not args.owner:
+    raise core.HandoffError("review rule: proceed is the owner's")
+  if bool(reason) == bool(posted):
+    raise core.HandoffError("review rule: proceed takes --reason or --posted")
+  head = review["kind"] == "head"
+  if posted and not head:
+    raise core.HandoffError("review rule: --posted proceeds a head alone")
+  if not head:
+    return 0
+  unit = review["artifact"]
+  foreman = core.load_foreman(st, unit)
+  if foreman.get("stopped"):
+    raise core.HandoffError(f"review rule: {unit} is stopped")
+  state = core.load_state(st.root)
+  number = state["units"][unit]["number"]
+  pinned = pinned_head(st, rid, review, state)
+  if posted:
+    recorded = next((e for e in foreman.get("proceeds") or [] if e.get("posted") == f"comment {posted}"), None)
+    if recorded and (recorded.get("review"), recorded.get("head")) == (rid, pinned):
+      print(json.dumps(recorded, sort_keys=True))  # the same comment, review and head: the recorded entry, nothing written
+      return 0
+    if recorded or posted_anywhere(st, f"comment {posted}"):
+      raise core.HandoffError(f"review rule: comment {posted} already ruled")
+    posted_comment(st, posted, number)
+  return 0
+
+
+def pinned_head(st: core.Store, rid: str, review: dict, state: dict):
+  """A head's bytes at a proceed: the pull request's saved head (`status --wait`'s snapshot), else the latest round's."""
+  from superegm.report import unit_view
+  saved = unit_view(state, review["artifact"]).get("head")
+  rounds = rounds_of(st, rid, review)
+  return saved or (rounds[-1]["artifact_sha256"] if rounds else None)
+
+
+def posted_anywhere(st: core.Store, posted: str) -> bool:
+  """A `proceeds[]` or `rulings[]` entry of any unit's foreman file names the comment (`posted: "comment <id>"`)."""
+  for path in sorted(st.path("foreman", "U00").parent.glob("*.json")):
+    data = json.loads(core.read_text(path))
+    if any(e.get("posted") == posted for e in (data.get("proceeds") or []) + (data.get("rulings") or [])):
+      return True
+  return False
+
+
+def posted_comment(st: core.Store, comment_id, number: int):
+  """The owner's proceed comment as `review settle` checks a posted ruling: one GitHub read, its author in
+  `config.owners`, `ruling_of` of kind `proceed`, on the unit's issue (`issue_url`, as `decision.verify_posted`)."""
+  from superegm.decision import ruling_of  # inside: `decision` imports `review`
+  owners = st.config.get("owners") or []
+  comment = core.gh_json(["api", f"repos/{st.config['repo']}/issues/comments/{comment_id}"]) or {}
+  author = (comment.get("user") or {}).get("login")
+  if author not in owners:
+    raise core.HandoffError(f"review rule: comment {comment_id} is by {author}, not a login in config.owners")
+  found = ruling_of({**comment, "id": comment.get("id") or comment_id}, owners)
+  if found is None or found.kind != "proceed":
+    raise core.HandoffError(f"review rule: comment {comment_id} does not rule proceed")
+  if not (comment.get("issue_url") or "").endswith(f"/issues/{number}"):
+    raise core.HandoffError(f"review rule: comment {comment_id} is not on issue #{number}")
+  return comment, found
 
 
 def refuse_early_accept(st: core.Store, rid: str, review: dict, status: Status, args) -> tuple[int, int]:
