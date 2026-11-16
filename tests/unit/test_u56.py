@@ -43,3 +43,55 @@ def test_converged_review_refuses_a_later_round(world):
   # without the round-3 file
   (folder / "round-3.json").unlink()
   assert gate.converged_review(handoff_store, "U01") == (True, round_one["artifact_sha256"])
+
+
+@pytest.mark.parametrize("case, apply_code, verify_line", [
+    ("complete with problems, repaired by hand", 0, "verify: complete, <k> of <k> checked, 0 problem(s)"),
+    ("issue body mismatch left", 1, "MISMATCH"),     # a typed run reports it; the fresh receipt replaces the stored one
+    ("--amend-units changed the plan", 1, None)])    # falls through: gate --pass, dry-run; len(filings) unchanged
+def test_started_filing_resumes(world, case, apply_code, verify_line):
+  spec, plan, handoff_id, card = applied(world)
+  state = state_of(world)
+  filed = state["units"]["U01"]["number"]
+  clean = world.gh.issues[filed]["body"]
+  # a filing applied (filings[-1].sha256 == confirmed.sha256), verify recorded a failing receipt
+  world.gh.issues[filed]["body"] = clean + "\nedited by hand\n"
+  code, out = world.run("verify", "--spec", spec, "--runcard", card)
+  assert code == 1 and "MISMATCH" in out, out
+  state = state_of(world)
+  assert state["filings"][-1]["sha256"] == state["confirmed"]["sha256"] and state["verify"]["problems"]
+  state["verify"]["stale"] = True  # the stored receipt the fresh one must replace
+  (hp(world, "state")).write_text(json.dumps(state), encoding="utf-8")
+  filings = len(state["filings"])
+  if case.startswith("complete"):
+    world.gh.issues[filed]["body"] = clean  # repaired by hand on GitHub
+  if case.startswith("--amend"):
+    plan_text = plan.read_text(encoding="utf-8")
+    from test_file import unit_section, approve, graphed
+    import hashlib
+    approve(world, ROWS, amended=(hashlib.sha256(spec.read_bytes()).hexdigest(),))
+    plan.write_text(plan_text.replace("## Global constraints", unit_section(*ROWS[2]) + "\n## Global constraints"), encoding="utf-8")
+    graphed(world, spec, plan)
+    converge(world, "U03")
+  # the resume order of the skill: `apply --yes` then `verify`, no `gate --pass` between
+  code, out = world.run("apply", "--yes", "--spec", spec, "--runcard", card)
+  assert code == apply_code, out
+  if case.startswith("--amend"):
+    assert "changed after the gate" in out or "write list changed" in out, out
+    after = state_of(world)
+    assert len(after["filings"]) == filings and after["verify"].get("stale")  # the earlier entry and receipt stay
+    code, out = world.run("gate", "--pass", "--spec", spec, "--runcard", card)
+    assert code == 0 and "gate passed" in out, out
+    code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
+    assert code == 0, out
+    assert len(state_of(world)["filings"]) == filings
+    return
+  code, out = world.run("verify", "--spec", spec, "--runcard", card)
+  after = state_of(world)
+  assert "stale" not in after["verify"] and after["verify"]["sha256"] == after["confirmed_sha256"]
+  if case.startswith("complete"):
+    assert code == 0 and re.search(r"verify: complete, (\d+) of \1 checked, 0 problem\(s\)", out), out
+    assert after["verify"]["complete"] and not after["verify"]["problems"]
+  else:
+    assert code == 1 and verify_line in out, out
+    assert after["verify"]["problems"] and all(p.startswith("MISMATCH") for p in after["verify"]["problems"])
