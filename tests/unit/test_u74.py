@@ -206,6 +206,27 @@ def test_the_astra_lane_pastes_checked_store_copies(world, tmp_path, monkeypatch
     assert brief.rstrip().endswith(stored["text"].rstrip())
 
 
+@pytest.mark.parametrize("round_no", [1, 2])
+def test_the_astra_member_gets_a_brief_with_the_pastes(world, round_no):
+  """Each round writes `brief.md` for the local members (the index) and `brief-astra.md` for the Astra member (the pastes)."""
+  from test_judges import QUESTIONS, open_panel, record
+  from test_review import card
+  from test_u38 import panel_dir, panel_json
+  spec, st = unapproved_docs(world, {f"{DIR}/a.md": A_TEXT})
+  pid, cid, _ = open_panel(world, QUESTIONS, parent=card(world, spec, "review-spec"))
+  if round_no == 2:
+    for judge, answers in (("fable", {"Q1": "a", "Q2": "a"}), ("opus", {"Q1": "a", "Q2": "b"}), ("astra", {"Q1": "a", "Q2": "b"})):
+      assert record(world, pid, cid, 1, judge, answers)[0] == 0
+    code, out = world.run("judges", "diff", "--panel", pid, "--round", 1, "--runcard", cid)
+    assert code == 0, out
+  folder = panel_dir(world, pid) / f"round-{round_no}"
+  local, astra = [(folder / name).read_text(encoding="utf-8") for name in ("brief.md", "brief-astra.md")]
+  instructions = panel_json(world, pid)["instructions"]
+  assert local.endswith(instructions["local"]["text"]) and astra.endswith(instructions["astra"]["text"])
+  assert f"```\n{A_TEXT}```" in astra and "— read" not in astra and "A body marker." not in local and "— read" in local
+  assert local.replace(instructions["local"]["text"], "") == astra.replace(instructions["astra"]["text"], "")   # one brief, two sections
+
+
 def test_a_spec_review_renders_each_lane_apart(world):
   """`superegm instructions --spec --lane` stores and prints one rendering per lane: the Astra one pasted, the local one indexed."""
   import json
