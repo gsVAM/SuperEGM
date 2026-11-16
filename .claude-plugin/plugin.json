@@ -29,6 +29,7 @@
     "./.claude-plugin/agents/foreman.md",
     "./.claude-plugin/agents/judge.md",
     "./.claude-plugin/agents/readiness.md",
+    "./.claude-plugin/agents/repo-reviewer.md",
     "./.claude-plugin/agents/structural.md",
     "./.claude-plugin/agents/style.md",
     "./.claude-plugin/agents/triage.md",

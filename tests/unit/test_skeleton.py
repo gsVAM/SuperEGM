@@ -10,7 +10,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 IDS = ("design", "zoom-out", "comprehension", "codebase-details", "readiness", "structural",
-       "style", "change-review", "judge", "foreman", "cartographer", "triage")
+       "style", "change-review", "judge", "foreman", "cartographer", "triage", "repo-reviewer")
 SKILLS = ("brainstorming", "draft", "review-spec", "plan", "review-plan", "file", "wave", "interrupt",
           "clean", "finishing-a-development-branch", "integrate", "judges", "test-driven-development",
           "systematic-debugging", "verification-before-completion", "writing-skills",
