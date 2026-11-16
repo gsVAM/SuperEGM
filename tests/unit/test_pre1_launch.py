@@ -14,6 +14,7 @@ import test_foreman as tf
 from test_builders import spawn_fake, no_graphify, which  # noqa: F401  the fixtures test_builders' launches run under
 
 LATER, EARLIER = "2099-01-01T00:00:00Z", "2000-01-01T00:00:00Z"
+BLOCKED = "**Builder status:** BLOCKED\n\nstuck\n- (a) go\n- (b) stop\n"
 
 
 def amend(unit, name, at, cid=50):
@@ -69,11 +70,14 @@ def test_launch_builder_carries_the_applicable_amendments_and_writes_reason_firs
 @pytest.mark.parametrize("decisions, rulings, rounds, reason", [
   ([], [], [{"round": 1, "launch": 1, "phase": "posted", "outcome": "revise", "posted_at": LATER}], "review"),
   ([], [], [{"round": 1, "launch": 1, "phase": "posted", "outcome": "owner: change-review-1-1", "posted_at": LATER}], "review"),
-  ([{"id": "Q1", "point": 3, "source": "comment 55"}], [{"decision": "Q1", "ruling": "(a) — go", "posted_at": LATER}], [], "blocked"),
+  ([{"id": "Q1", "point": 3, "source": "comment 55", "question": BLOCKED}], [{"decision": "Q1", "ruling": "(a) — go", "posted_at": LATER}], [], "blocked"),
+  # a ruled comment whose question is no BLOCKED or NEEDS_CONTEXT status is no `blocked` reason
+  ([{"id": "Q1", "point": 3, "source": "comment 55", "question": "**Deviation (other):** x\n"}],
+   [{"decision": "Q1", "ruling": "(a) — go", "posted_at": LATER}], [], "harness"),
   ([{"id": "Q1", "point": 3, "source": "launch 1"}], [{"decision": "Q1", "ruling": "relaunch — stalled", "posted_at": LATER}], [], "harness"),
   ([], [], [], "harness"),   # an exit with nothing reviewed or ruled after it: a setup failure
   # a blocked comment ruled before launch 1 started is not this relaunch's reason
-  ([{"id": "Q1", "point": 3, "source": "comment 55"}], [{"decision": "Q1", "ruling": "(a) — go", "posted_at": EARLIER}],
+  ([{"id": "Q1", "point": 3, "source": "comment 55", "question": BLOCKED}], [{"decision": "Q1", "ruling": "(a) — go", "posted_at": EARLIER}],
    [{"round": 1, "launch": 1, "phase": "posted", "outcome": "revise", "posted_at": LATER}], "review"),
   # a round not yet posted is no reason
   ([], [], [{"round": 1, "launch": 1, "phase": "prepared"}], "harness")])

@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U10's tests of the foreman's helper subcommands.
-# Modified by SuperEGM (gsVAM), 2026: collect reads rulings through `ruling_of` and the record (U22).; the forge check drops an outer run's `GIT_CONFIG_` pairs (1.2.1 wave fix); the cap tests set the review's stored `cap` in place of the `review.CAP` monkeypatch (U36).
+# Modified by SuperEGM (gsVAM), 2026: collect reads rulings through `ruling_of` and the record (U22).; the forge check drops an outer run's `GIT_CONFIG_` pairs (1.2.1 wave fix); the cap tests set the review's stored `cap` in place of the `review.CAP` monkeypatch (U36); the Astra brief's sections pin includes `Amendments` (U97).
 
 """U10: foreman dispatch, prepare, collect, tdd-order, review post. This file replaces U03's nine moved
 prepare/collect tests (they pin `--round`, `--run-folder`, `--verdict`, `head-moved`, `launched` and `--remove`:
@@ -371,7 +371,7 @@ def test_prepare_writes_the_astra_brief_and_prints_the_lane_state(world, tmp_pat
   assert w.out.strip().endswith(state) and (w.dir / "r2/astra_brief.md").is_file() is brief
   if brief:
     text = (w.dir / "r2/astra_brief.md").read_text(encoding="utf-8")
-    assert re.findall(r"^# ([^\n]+)\n\n````\n", text, re.M) == ["Unit body", "Spec range", "Diff", "CI", "PR body", "Comments", "Prior round"]
+    assert re.findall(r"^# ([^\n]+)\n\n````\n", text, re.M) == ["Unit body", "Spec range", "Diff", "CI", "PR body", "Comments", "Amendments", "Prior round"]
     assert BODY in text and PR_BODY in text and "+feat(S1): hook" in text
   assert cut_diff(b"x" * 400_001).endswith("\n(diff cut at 400 KB)\n") and cut_diff(b"x" * 400_000) == "x" * 400_000
 
