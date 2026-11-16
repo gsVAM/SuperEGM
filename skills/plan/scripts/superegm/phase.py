@@ -8,6 +8,7 @@ The module is `phase`, not `next`: `discover()` imports every submodule onto the
 `refs/superegm/tick-base` as the tick left them."""
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -17,7 +18,7 @@ import superegm as core
 from superegm import gate, graph, launch, report, review, runcard
 from superegm.approve_spec import units_section
 
-WRITES = frozenset({"chain", "runcards"})  # the store kinds this subcommand writes
+WRITES = frozenset({"chain", "runcards", "file"})  # the store kinds this subcommand writes
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset({"plan", "review-plan", "file"})  # the skills whose card `next wait` and `next clear` accept
 TICK_BASE = "refs/superegm/tick-base"
@@ -38,6 +39,9 @@ def register(subparsers):
   w.add_argument("--review", help="the review whose `proceed` ruling answers it (kept on a re-ask without it)")
   c = core.add_parser(sub, "clear", "remove the wait record on confirmed progress, else keep it or ask again (spec section 7.2)")
   c.add_argument("--handoff", default=argparse.SUPPRESS, help="the handoff whose wait record is cleared")
+  a = core.add_parser(sub, "answer", "record the owner's words on the handoff's unanswered wait record (spec section 7.3)", runcard=False)
+  a.add_argument("--handoff", default=argparse.SUPPRESS, help="the handoff whose wait is answered")
+  a.add_argument("--answer", required=True, help="the owner's words")
 
 
 def read_json(path: Path):
@@ -240,12 +244,30 @@ def clear(args, st: core.Store, hid: str) -> int:
   return 0
 
 
+def answer(args, st: core.Store, hid: str) -> int:
+  """Record `--answer` on the handoff's wait record as the login `gh api user` reports: `answer`, `by` and `at` on
+  `chain/<handoff>.json`, and `{by, at, sha}` (the answer's sha256) as `waits/<phase>-<since>.answer.json` in the
+  handoff's directory. No run card: the phase session that runs next holds the card."""
+  path = st.path("chain", hid)
+  record = read_json(path)
+  login = core.gh(["api", "user", "--jq", ".login"]).strip()
+  at = core.now_iso()
+  sha = hashlib.sha256(args.answer.encode("utf-8")).hexdigest()
+  core.atomic_write(core.handoff_store(st, hid).path("file", "waits", f"{record['phase']}-{record['since']}.answer.json"),
+                    {"by": login, "at": at, "sha": sha})
+  core.atomic_write(path, {**record, "answer": args.answer, "by": login, "at": at})
+  return 0
+
+
 def run(args):
-  if getattr(args, "action", None):
+  action = getattr(args, "action", None)
+  if action and action != "answer":  # `answer` is the owner's, read before any card: the owner opens none
     core.require_runcard(args, SKILLS)
   if not getattr(args, "handoff", None):
     raise core.HandoffError("next: --handoff is required")
   st = core.store(core.git_toplevel(Path.cwd()))
+  if action == "answer":
+    return answer(args, st, args.handoff)
   if args.action == "wait":
     return wait(args, st, args.handoff)
   if args.action == "clear":
