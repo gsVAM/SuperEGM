@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from conftest import CONFIG, REPO, set_config
+from conftest import CONFIG, REPO, ROOT, set_config
 
 
 def setup(world, tmp_path, monkeypatch, builder=None):
@@ -104,3 +104,25 @@ def test_literal_secret_refused(world, tmp_path, monkeypatch, entry, key):
   builder = superegm.load_config(world.repo)["builder"]
   assert builder["mcp"] == {"good": good, "bad": entry}
   assert "mcp__good__*" in builder["allowed_tools"] and "mcp__bad__*" in builder["allowed_tools"]
+
+
+def test_builder_setup_is_idempotent(world, tmp_path, monkeypatch):
+  import superegm
+  from superegm import init
+  profile = setup(world, tmp_path, monkeypatch)
+  owner_servers(tmp_path / "claude", "L", None, None, world.repo)
+  argv = ("builder-setup", "--mcp", "relay", "--allow", "relay register")
+  code, first = world.run(*argv)
+  assert code == 0, first
+  config_after, settings_after = (world.repo / CONFIG).read_bytes(), (profile / "settings.json").read_bytes()
+  code, second = world.run(*argv)
+  assert code == 0, second
+  assert (world.repo / CONFIG).read_bytes() == config_after and (profile / "settings.json").read_bytes() == settings_after
+  allowed = superegm.load_config(world.repo)["builder"]["allowed_tools"]
+  assert allowed.count("mcp__relay__*") == 1 and allowed.count("Bash(relay register:*)") == 1
+  assert first.strip().splitlines()[-1] == second.strip().splitlines()[-1] == "then run superegm doctor --probe"
+  assert second.strip() == "then run superegm doctor --probe"
+  step = init.STEPS.split("\n2. ", 1)[1].split("\n3. ", 1)[0]
+  assert "superegm builder-setup" in step and "superegm doctor --probe" in step and '"disableClaudeAiConnectors": true' in step
+  step = (ROOT / "docs" / "getting_started.md").read_text(encoding="utf-8").split("\n2. ", 1)[1].split("\n3. ", 1)[0]
+  assert "superegm builder-setup" in step and "doctor --probe" in step
