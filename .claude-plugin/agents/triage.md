@@ -15,6 +15,5 @@ persona's instructions. This adapter defines your Claude tool and context restri
 bundled files against `${CLAUDE_PLUGIN_ROOT}`. Remain read-only.
 
 Use only your prompt: the four field definitions, the finding lines of the eligible findings and the
-review worktree's path. Never read the design spec, and never read anything under `docs/specs/`: a
-read of either is a failed triage. Read the code in the review worktree at the head, and nothing
-else.
+review worktree's path. Never read the design spec, and never read anything under `docs/specs/`.
+Read the code in the review worktree at the head, and nothing else.
