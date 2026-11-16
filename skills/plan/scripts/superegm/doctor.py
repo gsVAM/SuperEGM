@@ -68,8 +68,9 @@ def probe(config, repo_root: Path) -> bool:
       dirs = [d["dir"] for d in plugin_dirs(b["plugins"], elephant_profile())]
       # HEAD's builder-addressed instruction text (U37's renderer); a throwaway store in the temp dir takes any copy it writes
       text = instructions.render(core.Store(temp / "store"), "builder", None, repo_root)[1].strip()
-      gh = shutil.which("gh") or "gh"
-      tools = [t for t in allowed_tools(b["allowed_tools"], "superegm/probe", "", gh) if not t.startswith("Bash(git push ")]
+      # bare gh: the probe prompt carries no gh path (a launch's orders do), so the rules a launch rewrites to its gh
+      # admit the probe's bare calls, and a `gh <group> <command>` hint is the entry that admits them
+      tools = [t for t in allowed_tools(b["allowed_tools"], "superegm/probe", "", "gh") if not t.startswith("Bash(git push ")]
     except core.HandoffError as error:
       print(f"probe: session {error}")
       return False
@@ -134,31 +135,35 @@ def probe_lines(stdout: str, profile: str) -> list[tuple[str, bool]]:
       for denial in event.get("permission_denials") or []:
         tool_name, tool_input = denial.get("tool_name"), denial.get("tool_input") or {}
         if tool_name == "Bash" and isinstance(tool_input.get("command"), str):
-          command = first_line(tool_input["command"])
-          allow = " ".join(f"--allow {shlex.quote(p)}" for p in dict.fromkeys(allow_prefixes(tool_input["command"])))
-          lines.append((f"denied Bash {command} ({allow})", False))
+          command = "\\n".join(tool_input["command"].strip().splitlines())
+          prefixes = list(dict.fromkeys(allow_prefixes(tool_input["command"])))
+          hint = "; ".join(filter(None, [" ".join(f"--allow {shlex.quote(p)}" for p in prefixes if p is not None),
+                                         PUSH_HINT if None in prefixes else ""]))
+          lines.append((f"denied Bash {command} ({hint})", False))
         else:
           lines.append((f"denied {tool_name} {json.dumps(tool_input, sort_keys=True)}", False))
   return lines
 
 
-SEPARATORS = (";", "&&", "||", "|", "&")
+PUSH_HINT = "git push: a launch admits only its own branch, no --allow"
 
 
 def allow_prefixes(command: str) -> list:
-  """The `--allow` prefix for every `;`, `&&`, `||`, `|` and `&` segment of a denied command: its first word, but for
-  git and gh (by bare name or path) as narrow as the allow-list's own entries, `git <subcommand>` and `gh <group>
-  <command>` (`gh api`), so the hint never admits every git or gh subcommand; one whose subcommand follows an option
-  is named whole. An unsplittable line gives its first word."""
+  """The `--allow` prefix for every line and every `;`, `&&`, `||`, `|` and `&` segment of a denied command: its
+  first word, but for git and gh (by bare name or path) as narrow as the allow-list's own entries, `git <subcommand>`
+  and `gh <group> <command>`, so the hint never admits every git or gh subcommand; `gh api`, and one whose subcommand
+  follows an option, is named whole. A `git push` gives None: no prefix narrower than the push itself keeps the launch's
+  own-branch limit. An unsplittable line gives its first word."""
   try:
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|()<>\n")
     lexer.whitespace_split = True
+    lexer.whitespace = " \t\r"  # a newline ends a command, as `;` does
     tokens = list(lexer)
   except ValueError:
     return command.split()[:1]
   segments, current = [], []
   for token in tokens:
-    if token in SEPARATORS:
+    if token and set(token) <= set(";&|\n"):
       segments.append(current)
       current = []
     else:
@@ -168,9 +173,13 @@ def allow_prefixes(command: str) -> list:
     if not words:
       continue
     name = os.path.basename(words[0])
-    depth = {"git": 1, "gh": 1 if words[1:2] == ["api"] else 2}.get(name, 0)
+    depth = {"git": 1, "gh": 2}.get(name, 0)
     sub = words[1:1 + depth]
-    if not depth:
+    if name == "git" and sub == ["push"]:
+      prefixes.append(None)
+    elif name == "gh" and words[1:2] == ["api"]:
+      prefixes.append(" ".join([name, *words[1:]]))
+    elif not depth:
       prefixes.append(words[0])
     elif len(sub) == depth and not any(w.startswith("-") for w in sub):
       prefixes.append(" ".join([name, *sub]))
