@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the `instructions` key and the instructions subcommand (spec 1.2.1 section 3.1, U37).
+# Added by SuperEGM (gsVAM), 2026: the `instructions` key and the instructions subcommand (spec 1.2.1 section 3.1, U37); the dir entry's validation (section 3.5, U74).
 
 """superegm instructions: the `# Repository instructions` section of a role's brief (spec 1.2.1 section 3.1)."""
 
@@ -20,7 +20,10 @@ ROLES = ("builder", "foreman", "reviewers", "judges")
 LANES = ("local", "astra")
 CONFIG = ".superegm/config.json"
 LIMIT = 8192  # the most bytes a file may hold
-SHAPE = "instructions must be a list of {file: <repo-relative path>, to: [non-empty list from builder, foreman, reviewers, judges]}"
+DOC_LIMIT = 65_536  # the most bytes a reference document may hold
+DOC_COUNT = 50  # the most reference documents one `dir` entry may name
+SHAPE = ("instructions must be a list of {file: <repo-relative path> or dir: <repo-relative folder>, "
+         "to: [non-empty list from builder, foreman, reviewers, judges]}, exactly one of file and dir")
 
 
 def register(subparsers):
@@ -37,9 +40,15 @@ def register(subparsers):
 def check(value) -> list:
   """`value` when it is a well-formed `instructions` list; else refused, naming the key."""
   def good(entry):
-    return (isinstance(entry, dict) and set(entry) == {"file", "to"} and isinstance(entry["file"], str) and entry["file"]
-            and "\0" not in entry["file"] and not Path(entry["file"]).is_absolute() and ".." not in Path(entry["file"]).parts
+    if not (isinstance(entry, dict) and set(entry) in ({"file", "to"}, {"dir", "to"})):
+      return False
+    path = entry.get("file", entry.get("dir"))
+    return (isinstance(path, str) and path and "\0" not in path and not Path(path).is_absolute()
+            and ".." not in Path(path).parts
             and isinstance(entry["to"], list) and entry["to"] and all(r in ROLES for r in entry["to"]))
+  for entry in value if isinstance(value, list) else []:
+    if isinstance(entry, dict) and "file" in entry and "dir" in entry:
+      raise core.HandoffError(f"instructions entry {json.dumps(entry)}: exactly one of file and dir")
   if not isinstance(value, list) or not all(good(e) for e in value):
     raise core.HandoffError(f"{SHAPE}, not {json.dumps(value)}")
   return value
@@ -63,6 +72,40 @@ def mode(root: Path, ref: str, rel: str) -> str | None:
     shown = subprocess.run(["git", *pairs, "ls-tree", "-z", ref, "--", rel], cwd=str(root), capture_output=True)
   entry = shown.stdout.split(b"\0", 1)[0] if shown.returncode == 0 else b""
   return entry.split(b" ", 1)[0].decode() if entry else None
+
+
+def documents(root: Path, ref: str, entry: dict, at: str | None = None) -> list[tuple[str, bytes]]:
+  """`[(file, bytes)]` of the `*.md` files under `entry["dir"]` at `ref` (named `at`, else `ref`), recursively, in path
+  order; a folder absent or holding none, more than `DOC_COUNT` files, a file over `DOC_LIMIT` bytes, not UTF-8 or not a
+  regular file is refused, naming the folder or the file."""
+  folder, where = entry["dir"].rstrip("/"), at or ref
+  with core.hook_free() as pairs:
+    shown = subprocess.run(["git", *pairs, "ls-tree", "-r", "-z", ref, "--", folder + "/"], cwd=str(root), capture_output=True)
+  listed = {}
+  for line in (shown.stdout.split(b"\0") if shown.returncode == 0 else []):
+    meta, _, name = line.decode("utf-8", "surrogateescape").partition("\t")
+    if name.startswith(folder + "/") and name.endswith(".md"):
+      listed[name] = meta.split(" ", 1)[0]
+  paths = sorted(listed)
+  if not paths:
+    raise core.HandoffError(f"instructions: {folder} is absent or holds no .md file at {where}")
+  if len(paths) > DOC_COUNT:
+    raise core.HandoffError(f"instructions: {paths[DOC_COUNT]} is file {DOC_COUNT + 1} of {folder}, over {DOC_COUNT}")
+  found = []
+  for name in paths:
+    if listed[name] not in ("100644", "100755"):  # a symlink's blob is its target path
+      raise core.HandoffError(f"instructions: {name} is not a regular file at {where}")
+    data = blob(root, ref, name)
+    if data is None:
+      raise core.HandoffError(f"instructions: {name} is absent at {where}")
+    if len(data) > DOC_LIMIT:
+      raise core.HandoffError(f"instructions: {name} is {len(data)} bytes, over {DOC_LIMIT}")
+    try:
+      data.decode("utf-8")
+    except UnicodeDecodeError:
+      raise core.HandoffError(f"instructions: {name} is not UTF-8") from None
+    found.append((name, data))
+  return found
 
 
 def head_list(root: Path, ref: str = "HEAD") -> list:

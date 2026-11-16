@@ -6,7 +6,7 @@
 # ingest once before the refusals, the refusal of an unsettled external finding, an external finding's carried copies
 # as one escalated pair discharged by its latest copy alone, and a re-approval of the same cycle reading that cycle
 # again and keeping the replaced entry's unnamed pairs (U26); `--amend-units` typed by hand opens and closes its own
-# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units`, and a hand-written prior approval read as `since` 0 (U36); the triage section parsed, refused with its line and frozen as `triage` (U39); the run mode frozen as the entry's `mode` (U43); the `instructions` list frozen with each file's blob sha and its verified store copy, and the changed files printed (U37); an opening approval refused over a partly filed handoff, and the last filing restored over an unapplied dry run, and `--void` without `--review` on a handoff with no `state.json` (U53).
+# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units`, and a hand-written prior approval read as `since` 0 (U36); the triage section parsed, refused with its line and frozen as `triage` (U39); the run mode frozen as the entry's `mode` (U43); the `instructions` list frozen with each file's blob sha and its verified store copy, and the changed files printed (U37); an opening approval refused over a partly filed handoff, and the last filing restored over an unapplied dry run, and `--void` without `--review` on a handoff with no `state.json` (U53); a `dir` entry's documents validated, frozen by blob sha with their raw copies (U74).
 
 """superegm approve-spec: record the owner's approval of a converged spec (spec section 8)."""
 
@@ -297,6 +297,9 @@ def freeze(root: Path, ref: str, listed: list, at: str | None = None) -> list:
   (named `at`, else `ref`), over `instructions.LIMIT` bytes or not UTF-8 is refused, naming it."""
   frozen = []
   for item in listed:
+    if "dir" in item:  # a folder's documents: validated here, frozen by the next Step
+      instructions.documents(root, ref, item, at)
+      continue
     data = instructions.blob(root, ref, item["file"])
     if data is None:
       raise core.HandoffError(f"instructions: {item['file']} is absent at {at or ref}")
