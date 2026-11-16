@@ -13,7 +13,7 @@ from pathlib import Path
 
 import superegm as core
 from superegm import apply
-from superegm.decision import consumed_comments, edited_after_record, ruling_of
+from superegm.decision import edited_after_record, ruling_of
 from superegm.launch import load_launches, terminal
 from superegm.report import board_table
 from superegm.review import collaborator_role, read_threads, thread_severity  # bound here: a test patches status's names
@@ -235,22 +235,21 @@ def closed_facts(repo: str, issue: dict, pr, landed: bool) -> list:
 
 def ruling_facts(store, uid: str, comments: list, owners) -> list:
   """One `Ruling` per comment of an owner `ruling_of` parses (spec section 13.2); a comment the unit's `rulings[]`
-  names as `posted` is skipped unless its `updated_at` is later than that entry's `posted_at` (a by-hand `--posted`
+  (or the unit's `proceeds[]`, a consumed proceed) names as `posted` is skipped unless its `updated_at` is later than that entry's `posted_at` (a by-hand `--posted`
   record's: the comment's `updated_at` when recorded, else its `created_at`; a session post's: its `created_at`, read
   back, so any edit of it since its creation is one), so an unedited recorded post is no event and an owner's edit of it is one.
   For an `unread` entry (the session's own post whose GitHub time was never read back, `posted_at` the host's) the edit
   is an `updated_at` later than the comment's own `created_at` (`decision.edited_after_record`)."""
   foreman = core.load_foreman(store, uid)
   posted = {}
-  for entry in foreman.get("rulings") or []:
+  for entry in (foreman.get("rulings") or []) + (foreman.get("proceeds") or []):  # a recorded proceed is consumed too
     kind, _, cid = (entry.get("posted") or "").partition("comment ")
     if not kind and cid.isdigit():
       posted[int(cid)] = entry
-  consumed = consumed_comments({"proceeds": foreman.get("proceeds")})  # a recorded proceed is never an event again
   facts = []
   for comment in comments:
     ruling = ruling_of(comment, owners)
-    if ruling and ruling.comment_id not in consumed and (ruling.comment_id not in posted or edited_after_record(comment, posted[ruling.comment_id])):
+    if ruling and (ruling.comment_id not in posted or edited_after_record(comment, posted[ruling.comment_id])):
       facts.append(ruling)
   return facts
 
