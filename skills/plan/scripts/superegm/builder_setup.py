@@ -37,6 +37,9 @@ def run(args):
   profile_dir = Path(builder["profile_dir"])
   settings = profile_settings(profile_dir)  # every refusal is raised before the first write
   servers, allowed, lines = dict(builder["mcp"]), list(builder["allowed_tools"]), []
+  for value in (*args.mcp, *args.allow):
+    if "'" in value:  # `launch_builder.command_line` refuses a tool holding a quote, so every later launch would be refused
+      raise core.HandoffError(f"{value} holds a quote and cannot go on the command line")
   for name in dict.fromkeys(args.mcp):
     if name not in servers:
       servers[name] = owner_server(root, name)
@@ -62,7 +65,7 @@ def run(args):
   if servers != builder["mcp"] or allowed != builder["allowed_tools"]:
     held = json.loads(core.read_text(config_path))
     held["builder"] = {**held.get("builder", {}), "mcp": servers, "allowed_tools": allowed}
-    core.atomic_write(config_path, held)
+    core.atomic_write(config_path, json.dumps(held, indent=2) + "\n")  # as text, so the owner's key order stays: the diff is the additions
   for line in lines:
     print(line)
   print("then run superegm doctor --probe")
