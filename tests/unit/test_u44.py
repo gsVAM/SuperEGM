@@ -492,3 +492,41 @@ def test_a_chain_skip_sends_notify(world, monkeypatch, tmp_path, spawn_fake, lin
   tick(world)
   assert launched_prompt(c.hs, c.hid) is None
   assert [h for h, _ in sent] == [c.hid] and Path(sent[0][1]).resolve() == c.spec.resolve()
+
+
+@pytest.mark.parametrize("saved,outcome", [(False, "failed"), (True, "succeeded")])
+def test_a_chain_on_wave_outcome_is_decided_once(world, monkeypatch, tmp_path, spawn_fake, saved, outcome):
+  """With the chain on, an ended `wave` launch gets its `outcome` by 1.2's test once: exit 0 with no status save
+  after its card opened is `failed`, a save after it `succeeded`; a later save leaves a stored `failed` as it is, and
+  `counted_failures` reads the stored value (change-review-4-1)."""
+  c = chained(world, monkeypatch, tmp_path)
+  set_mode(c, "leavemealone")
+  c.all_filed("U02")
+  c.save()
+  fake_fetch(world, monkeypatch, True)
+  monkeypatch.setattr(driver, "wave_trigger", lambda hs, entry, state: None, raising=False)
+  s = superegm.Store(world.artifacts)
+  first = tick_launch(s, c.hid, card="driver-abc-0001")
+  set_entry(s, c.hid, 1, phase="wave")
+  rc, out = driven_card(world, monkeypatch, c, "wave", dcard="driver-abc-0001")
+  assert rc == 0, out
+  assert world.run("runcard", "close", out.strip(), card=None)[0] == 0
+
+  def save_status():
+    world.advance(60)
+    c.state.setdefault("status", {"units": {}, "ready": []})["at"] = superegm.now_iso()
+    c.save()
+  if saved:  # the session saved `status --wait` after its card opened
+    save_status()
+  put(Path(first["exit_file"]), "0\n")
+  tick(world)
+  assert tick_launches(s, c.hid)[0]["outcome"] == outcome
+  tick_launch(s, c.hid, card="driver-abc-0002", n=2)
+  set_entry(s, c.hid, 2, phase="wave", outcome="failed")
+  save_status()  # a save after both: 1.2's test, re-run, would now pass the first launch
+  tick(world)
+  data = json.loads(driver_file(s, c.hid).read_text(encoding="utf-8"))
+  assert data["launches"][0]["outcome"] == outcome  # decided once
+  chs = superegm.handoff_store(superegm.Store(world.artifacts, config=superegm.load_config(world.repo)), c.hid)
+  state = json.loads(c.hs.path("state").read_text(encoding="utf-8"))
+  assert bool(driver.counted_failures(chs, data["launches"][:2], state)) is (outcome == "failed")
