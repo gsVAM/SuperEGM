@@ -19,6 +19,32 @@ def test_skills_wait_and_resume(path, phase):
   text = " ".join((ROOT / path).read_text(encoding="utf-8").split())
   assert "SUPEREGM_ROLE=driver" in text and "next wait" in text and f"--phase {phase}" in text
   assert "runcard open --mode normal" in text and "next clear" in text
+  # a driven run on an answered record takes its `answer` (nobody to ask); the record's place and id are named; next clear closes the card
+  assert "chain/<handoff>.json" in text and "takes the record's `answer`" in text
+  assert "reads `<id>` from the card's record" in text and "in place of `runcard close`" in text
+  assert "before Step 5's `runcard close`" not in text
+  # a question the panel leaves unconverged is a wait record, never a new panel on the next tick
+  assert "never a new panel on the next tick" in text
+
+
+def test_plan_card_mode():
+  # a typed --leavemealone plan opens a leavemealone card; otherwise runcard open's frozen default
+  text = " ".join((ROOT / "skills/plan/SKILL.md").read_text(encoding="utf-8").split())
+  assert "adding `--mode leavemealone` only when the invocation said `--leavemealone`" in text
+
+
+def test_integrate_line_branches():
+  # a unit stopped for redesign is named for closing by hand only, both kinds mix, and a closed issue is not named
+  inbox = importlib.import_module("superegm.inbox")
+  state = {"units": {u: {"number": n} for n, u in enumerate(["U01", "U02", "U03", "U04"], 1)},
+           "status": {"units": {"U04": {"closed": [None, "2026-11-15"]}}}}
+  stop = {"stopped": {"by": "owner"}}
+  redesign = {"stopped": {"by": "owner", "brief": "b"}}
+  assert inbox.integrate_line(state, {"U02": redesign}) == "ready to integrate: close the issues of U02 by hand (stopped for redesign)"
+  assert inbox.integrate_line(state, {"U02": redesign, "U03": stop}) == (
+    "ready to integrate: close the issues of U02 by hand (stopped for redesign), then close the issues of U03, "
+    "or type /superegm:integrate --close")
+  assert inbox.integrate_line(state, {"U04": stop}) == "ready to integrate"
 
 
 @pytest.mark.parametrize("path", ["skills/wave/SKILL.md", "skills/wave/references/leavemealone_mode.md",
