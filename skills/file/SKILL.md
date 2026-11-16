@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Files a confirmed handoff plan as GitHub issues, with the tracking issue, one sub-issue per unit and the blocked-by links.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the file skill body, phase 4 of the SuperEGM loop (design section 10); `[--handoff <id>]` and a frozen handoff's refusal (U20). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the file skill body, phase 4 of the SuperEGM loop (design section 10); `[--handoff <id>]` and a frozen handoff's refusal (U20); the resume of a started filing (U56). -->
 
 # file
 
@@ -57,7 +57,28 @@ adding `--mode leavemealone` when the invocation said `--leavemealone` or
 the config's `mode` is `leavemealone`. The printed id is `<CARD>`. A card
 still open on this spec is marked interrupted by the new one.
 
-## Step 2: The gate
+## Step 2: Resume a started filing
+
+A filing is started when `state.json`'s `filings[]` holds an entry whose
+`sha256` is `confirmed_sha256`, and it still needs finishing when the
+`verify` receipt (`verify.complete`, `verify.sha256`, `verify.problems`) is
+missing, incomplete, for another sha or has problems. Then, before the gate,
+run Step 5 (`apply --yes`) and Step 6 (`verify`) for it: the fresh receipt
+replaces the stored one, so a body repaired by hand on GitHub clears it. A
+dry run the owner stopped on after an earlier complete filing has no
+`filings[]` entry and is not started: go to Step 3.
+
+*   `apply` refuses (its gate, write-list or body check, as after an
+    `--amend-units` that changed the plan): go on to Step 3, the gate, and
+    Step 4, the dry run, as for a new filing. The earlier `filings[]` entry
+    stays and `verify` covers it.
+*   The receipt comes out complete with `0 problem(s)`: report as Step 7
+    does and close; the gate's `nothing to file` is not the end of a
+    resume that still had problems to repair.
+*   `MISMATCH` lines remain, other than `MISMATCH read failed`: a person
+    must fix them on GitHub. Report them as Step 6 says and end.
+
+## Step 3: The gate
 
 Run `python3 '<HELPER>' gate --pass --spec '<SpecPath>' --runcard '<CARD>'`.
 It passes when every unfiled unit's plan review converged on the body the
@@ -72,9 +93,9 @@ hashes the rest of the filing is checked against, and prints
     one more `/superegm:review-plan` round on the current body; this skill
     ends.
 *   `gate: nothing to file (every unit is filed)`: there is nothing to do;
-    report that and close the card (Step 6).
+    report that and close the card (Step 7).
 
-## Step 3: The dry run
+## Step 4: The dry run
 
 Run `python3 '<HELPER>' dry-run --spec '<SpecPath>' --runcard '<CARD>'`. It
 scans the bodies with the current rules, reads GitHub three times (login,
@@ -93,7 +114,7 @@ closed`, `not in <repo>`, `is a pull request`, `has a parent`, `has
 dependencies`, `carries superegm labels`, `carries a ruling comment`), each
 ending the skill with the line shown. `handoff_dryrun.md` heads such a unit
 `### edit #<n> <unit> (old body sha256 <hex>)` where a created unit reads
-`### issue <unit>`: Step 4 adds the unit labels to that issue and replaces
+`### issue <unit>`: Step 5 adds the unit labels to that issue and replaces
 its body with the rendered one, keeping its title, other labels and
 comments.
 
@@ -105,16 +126,16 @@ from the `Writes:` line and the repository from the config, and no
 
 Options, in this order: Create, Change the plan, Stop.
 
-*   **Create**: go to Step 4.
+*   **Create**: go to Step 5.
 *   **Change the plan**: this skill ends; the owner re-types `/superegm:plan`
     (and `/superegm:review-plan`) and comes back.
 *   **Stop**: this skill ends and leaves every store file as it is; nothing
     was written to GitHub.
 
-In leavemealone-mode there is no question: go to Step 4, where the helper
+In leavemealone-mode there is no question: go to Step 5, where the helper
 journals `Create: automatic (leavemealone)` once per filing.
 
-## Step 4: The writes
+## Step 5: The writes
 
 Run `python3 '<HELPER>' apply --yes --spec '<SpecPath>' --runcard '<CARD>'`.
 Before its first write it re-checks the gate pair and the write list against
@@ -126,7 +147,7 @@ labels (`superegm:unit`, `superegm:tracking`, `superegm:handoff-<6 hex>`,
 `superegm:stopped`, one `superegm:wave-<n>` per wave), the tracking issue
 (or rewrites it on a later filing), the unit issues in graph order with
 their blocker numbers filled in, the sub-issue links, the blocked-by links,
-and reads everything back (Step 5's check, run once by `apply` itself).
+and reads everything back (Step 6's check, run once by `apply` itself).
 
 *   It is idempotent: a crash, a rate limit (`rate limited: resume with
     ...`) or a stop at `--max-writes` leaves a state the same command resumes
@@ -137,11 +158,11 @@ and reads everything back (Step 5's check, run once by `apply` itself).
     in several calls, until it no longer prints `stopped after`.
 *   `adopt: #<n> body changed since the dry run` (or `adopt: #<n> not in
     <repo>`): the adopted issue changed, or went, between the dry run and
-    the writes; nothing was written. The owner re-runs the dry run (Step 3)
+    the writes; nothing was written. The owner re-runs the dry run (Step 4)
     and answers the question again.
 *   A filed issue body is never edited; a deviation during the build is a comment on the issue (§10).
 
-## Step 5: The read-back
+## Step 6: The read-back
 
 Run `python3 '<HELPER>' verify --spec '<SpecPath>' --runcard '<CARD>'`. It
 reads every label, issue body and link of every filing back and compares
@@ -155,7 +176,7 @@ missing or obsolete): report every line to the owner, who fixes it on
 GitHub by hand (the helper never edits a filed body), then run this step
 again until it is clean.
 
-## Step 6: Report and close
+## Step 7: Report and close
 
 Report in chat, in this order: the tracking issue's URL; one line per unit,
 `U07 #412 <title>` (the numbers are in `state.json` under `units`); the
@@ -165,8 +186,8 @@ Finally run `python3 '<HELPER>' runcard close '<CARD>'`.
 ## Resuming
 
 Every step is re-entrant from `state.json`: a new invocation opens a new
-card (Step 1) and runs the steps again; the gate and the dry run recompute
+card (Step 1) and runs the steps again, a started filing first (Step 2); the gate and the dry run recompute
 the same hashes on an unchanged store, `apply` finds what was created, and
 the read-back reports only what differs. If the owner answered the question
 already in this filing (`filings[]` holds the dry run's hash), do not ask it
-again: go to Step 4.
+again: go to Step 5.
