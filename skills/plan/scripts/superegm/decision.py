@@ -92,6 +92,7 @@ FORM_RES = (
   ("allowed-file", re.compile(rf"test-delta (?P<subject>\S+) allowed{REASON}")),
   ("redesign", re.compile(rf"redesign{REASON}")),
   ("allowed", re.compile(rf"(?P<subject>{FID}) allowed{REASON}")),
+  ("proceed", re.compile(rf"proceed{REASON}")),  # the owner's go-ahead on a head (spec section 4.2): owners alone
 )
 LETTER_RE = re.compile(r"\([a-z]\)")  # a rendered option's letter, the bare answer of the judges
 FILE_RULING_RE = re.compile(r"test-delta (\S+) allowed")  # a recorded whole-file allowance's text
@@ -100,7 +101,7 @@ JUDGES_MARK_RE =re.compile(r"^\(judges \S+, leavemealone\)$", re.M)
 
 @dataclass(frozen=True)
 class Ruling:
-  kind: str  # upheld | overruled | round | stop | option | allowed | allowed-file | redesign
+  kind: str  # upheld | overruled | round | stop | option | allowed | allowed-file | redesign | proceed
   subject: str  # the fid, the comment or decision id, the `dod-<n>` item, the file, or "" for round, stop and redesign
   option: str | None  # the option text at point 3
   reason: str | None  # the text after the first ` — `, as typed

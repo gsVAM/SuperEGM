@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest|triage: the one review loop (spec section 8)."""
 
@@ -49,7 +49,7 @@ def seat_lane(kind: str, flag: str | None, astra: dict) -> bool:
 
 SEVERITIES = ("high", "medium", "low")
 DISPOSITIONS = ("fixed", "contested", "declined", "escalated", "fix-design")
-RULINGS = ("continue", "accept", "stop")
+RULINGS = ("continue", "accept", "stop", "proceed")
 LEGACY_CAP = 5  # the cap of a cycle or an approval entry that stores none (opened under 1.2.0)
 ROUNDS = range(1, 11)  # the bound of `review.rounds`, and of a spec's `Rounds:` line (`approve-spec` reads it by `valid_rounds`)
 
@@ -124,6 +124,7 @@ def register(subparsers):
   u.add_argument("--review", required=True)
   u.add_argument("--ruling", choices=RULINGS, required=True)
   u.add_argument("--decision", metavar="ID", help="on a head below the cap: the unit's pending point-5 decision naming this review")
+  u.add_argument("--reason", help="proceed: the owner's reason, typed (else --posted names the owner's comment on a head)")
   by_whom(u, required=False)  # `stop` alone needs no ruler once `continue` is spent and the bytes moved
   v = core.add_parser(action, "post", "post a head round's review to its pull request, bound to the reviewed commit")
   v.add_argument("--unit", required=True)
@@ -414,7 +415,7 @@ def latest_cycle(st: core.Store, kind: str, artifact: str) -> tuple[dict | None,
     return None, False
   rid = cycles[-1]
   review = load_review(st, rid)
-  closed = any(r["ruling"] in ("accept", "stop") for r in review["rulings"])
+  closed = any(r["ruling"] in ("accept", "stop", "proceed") for r in review["rulings"])
   if not closed and kind == "spec":
     approval = core.load_approval(st, Path(artifact))
     closed = bool(approval) and approval["review"] == rid and approval["sha256"] != current_sha(st, kind, artifact)
@@ -593,6 +594,9 @@ def record_round(args) -> int:
   if review is None:
     raise core.HandoffError(f"review {rid}: not opened")
   card = bind(args, review)
+  proceed = last_proceed(review)
+  if proceed and getattr(args, "threads", None) is None:  # head ingest's own call passes `threads`: it records still
+    raise core.HandoffError(f"review {rid} proceeded by {proceed['id']}")
   kind, existing = review["kind"], load_round(st, rid, n)
   external = reviewer.startswith("external:")
   if reviewer == "foreman":  # the helper's own findings (section 11), outside the panel
@@ -1015,6 +1019,8 @@ def settle_external_copies(st: core.Store, review: dict, reviewer: str, finding:
       if twins:
         for twin in twins:
           twin["disposition"], twin["ruling"] = finding["disposition"], finding["ruling"]
+          if "by" in finding:  # a proceed's settlement (`by: owner`, `ruling: R<n>`)
+            twin["by"] = finding["by"]
           if "note" in finding:
             twin["note"] = finding["note"]
         core.atomic_write(st.path("reviews", other_rid, f"round-{m}.json"), other)
@@ -1159,11 +1165,15 @@ def evaluate(st: core.Store, review: dict, runcard: str) -> Status:
   stalled = len(rounds) >= 2 and all(r["what_ran"] != "completed" and r.get("runcard") in cards for r in rounds[-2:])
   sha = next((r["artifact_sha256"] for r in rounds if r["round"] == converged_round), None)
   code = 4 if fix_design else 0 if converged != "no" else 5 if stalled else 2 if cap else 3
+  proceed = last_proceed(review)
+  if proceed:  # the owner's go-ahead is checked first (spec section 4.2): at the latest recorded round, its pinned sha
+    converged, converged_round = f"by proceed {proceed['id']}", max((r["round"] for r in rounds), default=0)
+    sha, code = proceed.get("sha256"), 0
   line = (f"round {latest['round'] if latest else 0}: {'clean' if clean else 'not clean'}, regressions {regressions}, "
           f"converged {converged}, cap {'yes' if cap else 'no'}, stalled {'yes' if stalled else 'no'}, sha256 {sha or 'none'}")
   trend = (f"rounds: {' -> '.join(str(len(findings_of(r))) for r in rounds)} "
            f"(regressions {', '.join(str(regressions_of(r)) for r in rounds)})") if rounds else "rounds: none"
-  fixed = moved and clean and not regressions and not (fix_design or accept)
+  fixed = moved and clean and not regressions and not (fix_design or accept or proceed)
   return Status(code, line, trend, converged, converged_round, sha, moved, latest_sha, fixed)
 
 
@@ -1245,6 +1255,8 @@ def point_one_open(st: core.Store, foreman: dict, decision: dict) -> bool:
   words = (decision.get("source") or "").split()
   if len(words) != 4 or words[0] != "review" or words[2] != "round" or not words[3].isdigit():
     return False
+  if any(r.get("decision") == decision["id"] and r.get("ruling") == "proceed" for r in foreman.get("rulings") or []):
+    return False  # a proceed closes the whole decision, as `redesign` does
   rnd = load_round(st, words[1], int(words[3])) or {}
   fids = contested_fids(rnd) or [c["fid"] for c in rnd.get("builder_contested") or []]
   ruled = {r["ruling"].partition(" — ")[0].strip().split(" ")[0]
@@ -1937,6 +1949,8 @@ def rule_review(args) -> int:
   if review is None:
     raise core.HandoffError(f"review {rid}: not opened")
   card = bind(args, review)
+  if args.ruling == "proceed":  # the owner's go-ahead ends the review whatever its state (spec section 4.2)
+    return rule_proceed(st, rid, review, card, args)
   rulings = [r["ruling"] for r in review["rulings"]]
   if "stop" in rulings:
     raise core.HandoffError("review rule: cycle stopped")
@@ -1974,6 +1988,124 @@ def rule_review(args) -> int:
       write_head_outcome(st, review, args.runcard)
   print(f"ruling {ruling['id']} {args.ruling}")
   return 0
+
+
+def rule_proceed(st: core.Store, rid: str, review: dict, card: dict, args) -> int:
+  """`review rule --ruling proceed --owner` (spec section 4.2): the owner's alone, typed with `--reason`, or on a head
+  `--posted <comment id>`, the owner's `**Ruling:** proceed — <reason>` on the unit's issue, consumed once."""
+  reason, posted = getattr(args, "reason", None), getattr(args, "posted", None)
+  if getattr(args, "judges", None) or not args.owner:
+    raise core.HandoffError("review rule: proceed is the owner's")
+  if bool(reason) == bool(posted):
+    raise core.HandoffError("review rule: proceed takes --reason or --posted")
+  head = review["kind"] == "head"
+  if posted and not head:
+    raise core.HandoffError("review rule: --posted proceeds a head alone")
+  ruling = {"id": f"R{len(review['rulings']) + 1}", "ruling": "proceed", "by": "owner", "at": core.now_iso(),
+            "reason": reason}
+  if not head:
+    ruling["sha256"] = current_sha(st, review["kind"], review["artifact"])
+    review["rulings"].append(ruling)
+    save_review(st, rid, review)
+    return proceeded(st, rid, review, ruling, card, args)
+  unit = review["artifact"]
+  foreman = core.load_foreman(st, unit)
+  if foreman.get("stopped"):
+    raise core.HandoffError(f"review rule: {unit} is stopped")
+  state = core.load_state(st.root)
+  number = state["units"][unit]["number"]
+  pinned = pinned_head(st, rid, review, state)
+  comment, by = None, "owner"
+  if posted:
+    recorded = next((e for e in foreman.get("proceeds") or [] if e.get("posted") == f"comment {posted}"), None)
+    if recorded and (recorded.get("review"), recorded.get("head")) == (rid, pinned):
+      print(json.dumps(recorded, sort_keys=True))  # the same comment, review and head: the recorded entry, nothing written
+      return 0
+    if recorded or posted_anywhere(st, f"comment {posted}"):
+      raise core.HandoffError(f"review rule: comment {posted} already ruled")
+    comment, found = posted_comment(st, posted, number)
+    ruling["reason"], by = found.reason, found.login
+  ruling["sha256"] = pinned
+  launches = st.path("launches", unit)
+  launched = json.loads(core.read_text(launches))["launches"] if launches.is_file() else []
+  foreman.setdefault("proceeds", []).append(
+    {"ruling": ruling["id"], "review": rid, "posted": f"comment {posted}" if posted else None,
+     "posted_at": comment.get("updated_at") if comment else None, "issue": number, "head": pinned,
+     "launch": max((e.get("round") or 0 for e in launched), default=None), "by": by, "reason": ruling["reason"]})
+  for decision in [d for d in open_decisions(st, unit) if names_review(d, rid)]:  # a cap or point-5 question, answered
+    foreman["rulings"].append({"decision": decision["id"], "ruling": "proceed", "by": "owner",
+                               "reason": ruling["reason"], "review": ruling["id"]})
+  review["rulings"].append(ruling)
+  save_review(st, rid, review)
+  core.save_foreman(st, unit, foreman)
+  return proceeded(st, rid, review, ruling, card, args)
+
+
+def last_proceed(review: dict):
+  """The cycle's latest `proceed` ruling, or None."""
+  return next((r for r in reversed(review.get("rulings") or []) if r["ruling"] == "proceed"), None)
+
+
+def proceeded(st: core.Store, rid: str, review: dict, ruling: dict, card: dict, args) -> int:
+  """Once the ruling is recorded: every unsettled finding of every round settled `declined` by the owner under the
+  ruling (a spec's external copies too), the verdict re-derived, a head's clean outcome, the journal lines."""
+  runcard = card.get("parent") or args.runcard
+  k = h = 0
+  for n in round_numbers(st, rid):
+    rnd = load_round(st, rid, n)
+    settled = []
+    for reviewer, record in rnd["reviewers"].items():
+      for finding in record["findings"]:
+        if finding["disposition"] is None:
+          finding.update(disposition="declined", by="owner", ruling=ruling["id"])
+          k, h = k + 1, h + (finding["severity"] == "high")
+          settled.append((reviewer, finding))
+    if settled:
+      core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
+    for reviewer, finding in settled:
+      if review["kind"] == "spec" and reviewer.startswith("external:"):
+        settle_external_copies(st, review, reviewer, finding)
+  status = store_verdict(st, rid, review, runcard)
+  if review["kind"] == "head" and status.code == 0:
+    write_head_outcome(st, review, runcard)
+  core.journal(st, f"review rule {rid} {ruling['id']} proceed by owner under {runcard}")
+  core.journal(st, f"review {rid} proceeded by the owner: {k} findings accepted ({h} high)")
+  print(f"ruling {ruling['id']} proceed")
+  return 0
+
+
+def pinned_head(st: core.Store, rid: str, review: dict, state: dict):
+  """A head's bytes at a proceed: the pull request's saved head (`status --wait`'s snapshot), else the latest round's."""
+  from superegm.report import unit_view
+  saved = unit_view(state, review["artifact"]).get("head")
+  rounds = rounds_of(st, rid, review)
+  return saved or (rounds[-1]["artifact_sha256"] if rounds else None)
+
+
+def posted_anywhere(st: core.Store, posted: str) -> bool:
+  """A `proceeds[]` or `rulings[]` entry of any unit's foreman file names the comment (`posted: "comment <id>"`)."""
+  for path in sorted(st.path("foreman", "U00").parent.glob("*.json")):
+    data = json.loads(core.read_text(path))
+    if any(e.get("posted") == posted for e in (data.get("proceeds") or []) + (data.get("rulings") or [])):
+      return True
+  return False
+
+
+def posted_comment(st: core.Store, comment_id, number: int):
+  """The owner's proceed comment as `review settle` checks a posted ruling: one GitHub read, its author in
+  `config.owners`, `ruling_of` of kind `proceed`, on the unit's issue (`issue_url`, as `decision.verify_posted`)."""
+  from superegm.decision import ruling_of  # inside: `decision` imports `review`
+  owners = st.config.get("owners") or []
+  comment = core.gh_json(["api", f"repos/{st.config['repo']}/issues/comments/{comment_id}"]) or {}
+  author = (comment.get("user") or {}).get("login")
+  if author not in owners:
+    raise core.HandoffError(f"review rule: comment {comment_id} is by {author}, not a login in config.owners")
+  found = ruling_of({**comment, "id": comment.get("id") or comment_id}, owners)
+  if found is None or found.kind != "proceed":
+    raise core.HandoffError(f"review rule: comment {comment_id} does not rule proceed")
+  if not (comment.get("issue_url") or "").endswith(f"/issues/{number}"):
+    raise core.HandoffError(f"review rule: comment {comment_id} is not on issue #{number}")
+  return comment, found
 
 
 def refuse_early_accept(st: core.Store, rid: str, review: dict, status: Status, args) -> tuple[int, int]:
