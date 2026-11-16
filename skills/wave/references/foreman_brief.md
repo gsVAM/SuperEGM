@@ -1,7 +1,7 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 From the elephant-goldfish-model (gsVAM), 2026. Modified by SuperEGM (gsVAM), 2026: EGM's two-step brief
 rewritten as spec section 11's one round, every write through the helper, one return word; Step 2b, the Astra lane on every head review (U17);
-the handoff's directory, `--handoff <handoff-id>` on every call and `spec_range.md` (U20); the two gates before the word and the `owner:` word (U25); the goldfish pair from `config.reviewers` and the head lane at `astra.heads_effort` (U28). -->
+the handoff's directory, `--handoff <handoff-id>` on every call and `spec_range.md` (U20); the two gates before the word and the `owner:` word (U25); the goldfish pair from `config.reviewers` and the head lane at `astra.heads_effort` (U28); Step 2.0, the reviewers' repository instructions rendered under the child card with `--unit` (U38); Step 3b, the triage goldfish (U41). -->
 
 # The foreman brief
 
@@ -36,6 +36,8 @@ Step 1, prepare
    When it refuses with `spec range: no commit holds <sha7>` (no commit holds the spec bytes the body's marker names; it adds no worktree), run superegm collect --unit <unit-id> --dispatch <dispatch-id> --runcard <child-card> --handoff <handoff-id> --not-run "error: spec range: no commit holds <sha7>" and return `error`.
 
 Step 2, dispatch the panel
+0. Render the repository instructions the head reviewers read, once, before the first dispatch: superegm instructions --role reviewers --handoff <handoff-id> --runcard <child-card> --unit <unit-id>
+   It prints the `# Repository instructions` section frozen at the handoff's approval, or nothing when no file is addressed to `reviewers`. Paste its output last in every goldfish's prompt, after the paths and the request for findings, never summarised or edited; a re-dispatch prints the same stored text, and each reviewer's record copies the manifest stored on your child card. The Astra lane's brief carries its own copy of the section (`prepare` wrote it last in r<n>/astra_brief.md), so paste nothing into the runner call. The section is part of the brief: a goldfish does not name it on its `saw:` line.
 1. Dispatch every panel entry but `astra` concurrently through its adapter (`superegm:<id>`), `change-review` first, without `name`, in the foreground. Each goldfish receives, by path, only: unit_<unit-id>.md (the unit's contract, under the Standard above), the spec range (r<n>/spec_range.md), r<n>/diff, r<n>/ci.json, r<n>/pr_body.md, r<n>/comments.md, r<n>/amendments.md, reviews/<review-id>/round-<previous>.json when a round was posted before (the last posted round's findings; the builder's replies are in comments.md), and the worktree path. Ask for its findings in the findings line of spec section 8, ids `<id>-<n>-<k>`, held to the Standard above, and pass it the amendments prepare marks as applying. Tell it that a finding the builder contested in round-<previous>.json and that still waits on a ruling is not raised again: collect carries it, so it is posted once.
 2. Write each goldfish's output to r<n>/<id>.findings and record it:
    superegm review record --review <review-id> --round <n> --sha256 <head> --reviewer <id> --findings <file> --isolation clean --model <requested>:<effective> --effort <requested>:<effective> --runcard <child-card> --handoff <handoff-id>
@@ -59,6 +61,16 @@ Step 3, collect
    superegm collect --unit <unit-id> --dispatch <dispatch-id> --runcard <child-card> --handoff <handoff-id> --not-run "<reason>"
    and return `error` with that reason.
 
+Step 3b, triage
+Once per round, between Step 3 and Step 4, after Step 3.1 completed.
+1. Run: superegm review triage --review <id> --round <n> --eligible --handoff <handoff-id> (`<id>` is the head review's id, `<review-id>` above)
+   It prints the round's eligible mediums, one fid per line. When it prints nothing (no medium of the round is eligible, or the owner undid triage for the unit), do not dispatch: go straight to Step 4. It does not check whether the handoff's triage is on: that is checked by the `--file` call in 3, and a refusal `triage: triage is off for this unit` there is final, not a refused file: go on to Step 4 without the retry of 4.
+2. Dispatch one `superegm:triage` goldfish through its adapter, without `name`, in the foreground, at the head reviewers' model and effort (<GOLDFISH_MODEL>, <GOLDFISH_EFFORT>). Its prompt carries only: the review worktree path, the four field definitions (reach `external | agent | config | forged`, later `easy | migration | version`, critical `yes | no`, verified `confirmed <file:line>` or `refuted <reason>`) and the finding lines of the eligible fids, copied from r<n>/<reviewer>.findings, one line per fid and no other line. It gets never the patterns, never the spec, never r<n>/spec_range.md, never the unit file, never the diff and never a finding that is not eligible. The goldfish reads the code at the head in the worktree and replies one line per fid and nothing else.
+3. Write its reply, verbatim, to r<n>/triage.txt, and record it:
+   superegm review triage --review <review-id> --round <n> --file <path> --isolation clean --model <requested>:<effective> --effort <requested>:<effective> --runcard <child-card> --handoff <handoff-id>
+   You never write or edit a value of the reply (a line, a field or a word): it is recorded verbatim or refused whole, and a refused file records nothing.
+4. When the call refuses the file, or the dispatch did not complete, dispatch the triage goldfish once more, with the same prompt, and record its reply as in 3. When that second attempt fails as well, in either way, go on to Step 4 without a triage: the round posts with those mediums blocking, as with triage off. Never a third dispatch, never a retry of an edited file.
+
 Step 4, post
 1. Run: superegm review post --unit <unit-id> --round <n> --dispatch <dispatch-id> --runcard <child-card> --handoff <handoff-id>
    It renders the comment (the configured mention, the header, the finding lines, the CI verdict), scans it, never posts a header already on the pull request, posts through the pull-request reviews API bound to the reviewed commit as a COMMENT (never approve, never request changes), refuses with exit 3 `target-moved` when the merge base moved since prepare, and counts the round posted only when the response names the reviewed commit. Its line is `posted <outcome>`.
@@ -69,5 +81,5 @@ One word, then one line: `foreman <unit-id> <dispatch-id>: pr #<pr> head <sha7> 
 The word is one of: clean | revise | contested: <ids> | owner: <ids> | cap-reached | target-moved | error
 - the round's `outcome` as `review post` printed it, when the round is `posted`;
 - `target-moved` when `review post` exited 3;
-- `error` otherwise (the round recorded with --not-run, a refused helper call, a stale dispatch id).
+- `error` otherwise (the round recorded with --not-run, a refused helper call except the `--file` call of Step 3b, whose refusals Step 3b handles, a stale dispatch id).
 ```

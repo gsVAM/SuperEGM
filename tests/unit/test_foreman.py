@@ -201,7 +201,7 @@ def test_dispatch_writes_the_round_and_opens_the_head_review(world):
   data = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))
   assert did == "d2" and data["dispatch_id"] == "d2" and child != card
   assert data["rounds"][0] == {**stale, "phase": "collected", "outcome": "not run (superseded)"}
-  assert data["rounds"][1] == {"round": 2, "runcard": card, "launch": 1, "head": None, "phase": "fetched", "dispatch_id": "d2"}
+  assert data["rounds"][1] == {"round": 2, "runcard": card, "launch": 1, "head": None, "phase": "fetched", "dispatch_id": "d2", "instructions": []}
   review = json.loads((st.path("reviews", head_rid(st)) / "review.json").read_text(encoding="utf-8"))
   assert review["kind"] == "head" and review["reviewers"][0] == "change-review"
   child_card = json.loads(st.path("runcards", child).read_text(encoding="utf-8"))
