@@ -245,7 +245,7 @@ def render_stored(st: core.Store, role: str, lane: str = "local", *, card: str |
     stored = ((record.get("instructions") or {}).get(role) or {}).get(lane)
     if stored is not None:
       return stored["manifest"], stored["text"]
-    manifest, text, entry = rendered(st, role, handoff_id, root) if handoff_id is not None else ([], "", None)
+    manifest, text, entry = rendered(st, role, handoff_id, root, lane) if handoff_id is not None else ([], "", None)
     record.setdefault("instructions", {}).setdefault(role, {})[lane] = {
       "approved_at": (entry or {}).get("approved_at"), "manifest": manifest, "text": text}
     core.atomic_write(st.path("runcards", card), record)
@@ -254,7 +254,7 @@ def render_stored(st: core.Store, role: str, lane: str = "local", *, card: str |
   if path.is_file():
     stored = json.loads(core.read_text(path))
     return stored["manifest"], stored["text"]
-  manifest, text = render(st, role, handoff_id=handoff_id, root=root)
+  manifest, text = render(st, role, handoff_id=handoff_id, root=root, lane=lane)
   core.atomic_write(path, {"manifest": manifest, "text": text})
   return manifest, text
 

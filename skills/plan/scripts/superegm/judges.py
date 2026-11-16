@@ -12,7 +12,7 @@ from pathlib import Path
 import superegm as core
 from superegm import instructions
 
-WRITES = frozenset(["judges", "runcards", "questions"])  # the store kinds this subcommand writes
+WRITES = frozenset(["judges", "runcards", "questions", "instructions"])  # the store kinds this subcommand writes (`instructions`: a spec review's reference copies, U74)
 CONFIG_DEFAULTS = {"judges": {"min_vendors": 1,  # its own config key (U32)
                               "members": [{"name": "fable", "via": "adapter", "effort": "xhigh"},
                                           {"name": "opus", "via": "adapter", "effort": "max"},
@@ -212,14 +212,16 @@ def render_panel(store, parent: dict | None) -> dict:
   the parent card's skill: a `review-spec` parent renders its artifact as the spec at `HEAD` (its card can carry a legacy
   store's handoff id, which is not the spec's); any other parent its card's handoff's frozen list; no parent, or a parent
   with no handoff, nothing."""
-  if parent is None:
-    manifest, text = [], ""
-  elif parent["skill"] == "review-spec":
-    manifest, text = instructions.render(store, "judges", root=core.git_toplevel(Path(parent["artifact"])))
-  else:
-    handoff = parent.get("handoff", store.handoff_id)
-    manifest, text = instructions.render(store, "judges", handoff_id=handoff) if handoff else ([], "")
-  return {lane: {"manifest": manifest, "text": text} for lane in ("local", "astra")}
+  def lane_render(lane: str) -> dict:
+    if parent is None:
+      manifest, text = [], ""
+    elif parent["skill"] == "review-spec":
+      manifest, text = instructions.render(store, "judges", root=core.git_toplevel(Path(parent["artifact"])), lane=lane)
+    else:
+      handoff = parent.get("handoff", store.handoff_id)
+      manifest, text = instructions.render(store, "judges", handoff_id=handoff, lane=lane) if handoff else ([], "")
+    return {"manifest": manifest, "text": text}
+  return {lane: lane_render(lane) for lane in ("local", "astra")}  # the Astra member's pastes, the local members' index
 
 
 def lane_manifest(panel: dict, judge: str) -> list:
