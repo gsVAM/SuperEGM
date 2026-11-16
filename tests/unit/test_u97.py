@@ -86,6 +86,6 @@ def test_head_attributed_to_own_commit(world, tmp_path, monkeypatch):
   assert after_push["rounds"][-1]["head_launch"] == 2 and "applies to this head: yes" in md_after_push
   _, _, _, md_before = _prepare_head(world, tmp_path / "c", monkeypatch, [early, mid], ["2000-01-03T00:00:00Z"])
   assert "applies to this head: no" in md_before
-  _, _, none_record, empty_md = _prepare_head(world, tmp_path / "d", monkeypatch, ["2099-01-01T00:00:00Z"])
+  _, _, none_record, empty_md = _prepare_head(world, tmp_path / "d", monkeypatch, ["2099-01-01T00:00:00Z", "2099-01-02T00:00:00Z"])
   assert empty_md.split() == ["#", "Amendments", "none"]
   assert none_record["rounds"][-1]["head_launch"] is None
