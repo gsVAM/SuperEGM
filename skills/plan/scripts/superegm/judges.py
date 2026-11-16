@@ -258,11 +258,12 @@ def cmd_open(args, store) -> int:
   config = store.config or {}
   members = judge_members(config)
   min_vendors = (config.get("judges") or {}).get("min_vendors", 1)
+  rendered = render_panel(store, parent)  # before the card opens: a refused render leaves no open judges card
   rid = args.runcard or core.open_runcard(store, "judges", str(question), parent=args.parent)
   panel = {"id": pid, "question": str(question), "question_sha256": core.sha256_file(question),
            "evidence": evidence, "judges": members, "min_vendors": min_vendors, "runcard": rid,
            "parent": args.parent, "opened_at": core.now_iso(), "rounds": {},
-           "instructions": render_panel(store, parent)}
+           "instructions": rendered}
   core.atomic_write(folder / "question.md", question.read_bytes())
   write_json(folder / "panel.json", panel)
   core.atomic_write(folder / "round-1" / "brief.md",

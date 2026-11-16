@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the foreman subcommand (spec section 11); `runner_path`, the claudex-loop runner's lookup (U17); a launch `interrupted (reboot)` is terminal (U24); doctor's `astra:` line as its DOCTOR_CHECKS (U32).
+# Added by SuperEGM (gsVAM), 2026: the foreman subcommand (spec section 11); `runner_path`, the claudex-loop runner's lookup (U17); a launch `interrupted (reboot)` is terminal (U24); doctor's `astra:` line as its DOCTOR_CHECKS (U32); each round's `instructions`, the manifest stored for role `foreman` on its card (U38).
 
 """superegm foreman dispatch: one evaluation of the dispatch predicate, the supersede of a non-terminal
 round, the head review and the child card of a round."""

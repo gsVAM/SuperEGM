@@ -51,11 +51,13 @@ config's `artifacts_dir`.
     `config.judges.members`, prints the panel id `<PANEL>` and writes
     `<STORE>/judges/<PANEL>/round-1/brief.md`. At open the helper also renders the repository
     instructions for role `judges` once per lane, by the parent card's skill (a `review-spec`
-    parent: the spec at `HEAD`; another parent: its handoff's frozen list; a typed
+    parent: the spec at `HEAD`; another parent: its handoff's frozen list, nothing for a
+    parent with no handoff or whose handoff has no approval entry; a typed
     `/superegm:judges` has no parent and renders nothing), stores them on `panel.json` and
     places the `# Repository instructions` section last in every round's `brief.md`; you
     render nothing, add nothing and never move or edit that section. A refusal (`judges: question
-    file: <reason>`) is shown to the user verbatim; fix the file and open again.
+    file: <reason>`, or `instructions: <reason>` when a configured file cannot be read at `HEAD`;
+    no card opens then) is shown to the user verbatim; fix the file and open again.
 3.  **Run one round** (`<n>` = 1, then the next):
     1.  **Astra first**, from this main conversation only, as one Bash
         command with `run_in_background: true`, exactly as

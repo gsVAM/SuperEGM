@@ -1,6 +1,6 @@
 <!-- Copyright 2026 Google LLC. SPDX-License-Identifier: Apache-2.0. -->
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: Astra lane, per-reviewer model and effort, persisted dispositions. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: EGM's review-loop skill rewritten as the one review loop over the helper's `superegm review` subcommands (spec section 8); the stages, the report files and the second clean round are gone; a spec round's scope, `out_of_scope[]` and the batch settle (U19); the accept below the cap and its `acceptable:` line (U35); section 2's model and effort paragraph is the one rule, the config pair before the session pair (U28); a lineless finding out of scope and the per-handoff review ids (U32); the cap is `review.rounds` and the loop dispatches the panel `review open` printed (U36); the instructions section last, Astra's resume on an equal manifest (U38). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: EGM's review-loop skill rewritten as the one review loop over the helper's `superegm review` subcommands (spec section 8); the stages, the report files and the second clean round are gone; a spec round's scope, `out_of_scope[]` and the batch settle (U19); the accept below the cap and its `acceptable:` line (U35); section 2's model and effort paragraph is the one rule, the config pair before the session pair (U28); a lineless finding out of scope and the per-handoff review ids (U32); the cap is `review.rounds` and the loop dispatches the panel `review open` printed (U36); the instructions section, Astra's resume (U38). -->
 
 # The review loop
 
@@ -90,10 +90,10 @@ Each goldfish receives only:
 - the round number and its own reviewer id, so its ids are `<id>-<round>-<n>`;
 - the instruction to write its findings file and nothing else, one findings line per finding,
   an empty file when it found nothing, and to end its report with what it saw besides the
-  brief (nothing, or the text a hook or an instruction file injected);
-- last, the section, pasted verbatim: `superegm instructions --role reviewers --spec <spec> --review <id>
+  brief (nothing, or the text a hook or an instruction file injected, the section below excepted);
+- last, the section, verbatim: `superegm instructions --role reviewers --spec <spec> --review <id>
   --round <n> --runcard <id>` on `spec`, `superegm instructions --role reviewers --handoff <handoff-id>
-  --runcard <id>` on `plan` and `integrate` (a head's is the foreman's); nothing prints with no file for `reviewers`.
+  --runcard <id>` on `plan` and `integrate` (a head's is the foreman's); no file for `reviewers`, nothing.
 
 Model and effort, one rule: every panel goldfish of the four kinds runs on
 `config.reviewers.model` at `config.reviewers.effort` (`opus` / `xhigh` by default, the Agent tool's alias and level),
@@ -116,7 +116,7 @@ The Astra lane (kinds `spec`, `plan`, `integrate`, when the review opened with i
 - The brief: `resources/astra_lane.md` section 2's template, written by you to
   `<artifacts_dir>/reviews/<id>/astra_brief_r<n>.md`, with the artifact's range lines and
   standard; from round 2 it ends with the `astra-*` lines of round n-1 and their dispositions,
-  rendered from `round-<n-1>.json`, and no other reviewer's. The section, with `--lane astra`, goes last.
+  rendered from `round-<n-1>.json`, and no other reviewer's. The section (`--lane astra`, rendered first) follows, last.
 - The launch, from the main conversation with the Bash tool, `run_in_background: true`, and the
   tool's `timeout` set to the runner's plus 300 seconds in milliseconds (`2100000`); never from
   a subagent, because a background command dies with the agent that started it. One command,
@@ -127,7 +127,7 @@ The Astra lane (kinds `spec`, `plan`, `integrate`, when the review opened with i
   `<RUNNER>` is the claudex-loop `runner.py` the preflight found. Round 1 of a cycle is a fresh
   session; round n > 1 adds `--resume '<round n-1 result.json>'` when section 7 of
   `resources/astra_lane.md` says the previous round is resumable (`status` completed, the same
-  model, effort, repository and artifact, a UUID `session_id`) and the round's Astra manifest
+  model, effort, repository and artifact, a UUID `session_id`) and the round's Astra manifest (`reviews/<id>/instructions-<n>-reviewers-astra.json` on `spec`, else the card's `instructions.reviewers.astra`)
   equals the `instructions[]` recorded on round n-1's Astra record (none: fresh), else it launches fresh and says so. Dispatch the Claude panel right after, in the same turn; do not edit the artifact while
   the run is live.
 - Collect from the run's `result.json` as section 5 of `resources/astra_lane.md` says: a
@@ -236,8 +236,7 @@ foreman and integrate:
 - The artifact is **converged** when a round is `completed` and clean, no high or medium
   finding in it is `regression: yes`, and its sha256 equals the artifact's current bytes (a head has no byte test):
   one `completed`, clean, non-regressing round converges every kind, on the bytes it reviewed.
-  EGM's second consecutive clean round for document reviews is dropped; the regression mark
-  carries what it guarded.
+  EGM's second consecutive clean round for document reviews is dropped.
 - The review is **at its cap** when its `completed` rounds number its `cap` plus its `continue` rulings. The `cap` is
   `review.rounds` (1 to 10, default 3) read when the cycle opened and kept: a spec's cycle reads the live value; a plan, head or
   integrate cycle reads the `rounds` its own handoff's latest approval entry froze (the spec's `Rounds: <n>` line before its first H2, else the
