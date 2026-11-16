@@ -79,5 +79,5 @@ One word, then one line: `foreman <unit-id> <dispatch-id>: pr #<pr> head <sha7> 
 The word is one of: clean | revise | contested: <ids> | owner: <ids> | cap-reached | target-moved | error
 - the round's `outcome` as `review post` printed it, when the round is `posted`;
 - `target-moved` when `review post` exited 3;
-- `error` otherwise (the round recorded with --not-run, a refused helper call, a stale dispatch id).
+- `error` otherwise (the round recorded with --not-run, a refused helper call except the `--file` call of Step 3b, whose refusals Step 3b handles, a stale dispatch id).
 ```

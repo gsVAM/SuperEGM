@@ -43,8 +43,10 @@ Answer all four for every finding:
 
 1. For each finding, read the code at its location in the worktree and follow its callers and callees
    as far as the answer needs. Judge the code at the head, as it stands, not the claim's wording.
-2. `verified: confirmed <file:line>` names a file path relative to the worktree and a line that exists
-   at the head, where the defect is. A `file:line` that does not exist refuses the whole reply.
+2. `verified: confirmed <file:line>` is `confirmed` followed by exactly one `<path>:<line>` and nothing
+   after it: a path relative to the worktree, no spaces, then `:` and a single line number, never a range
+   (`a.py:12`, not `a.py:64-66`), of a line that exists at the head, where the defect is. A cite that does
+   not exist, or any text after it, refuses the whole reply; only `refuted` takes free text.
 3. `verified: refuted <reason>` states in one line why the code at the head has no such defect. Give
    the four values all the same: `reach`, `later` and `critical` are your answer for the finding as
    reported, even when you refute it.
