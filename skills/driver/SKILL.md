@@ -20,8 +20,8 @@ registered store and, when there is something to do and no session of that store
 `claude -p '/superegm:wave <spec> --handoff <id> --leavemealone' --permission-mode bypassPermissions --output-format json`
 in the registered root under `SUPEREGM_ROLE=driver`, its result and exit code written to files the tick names.
 That session is unattended: it runs with no allow-list and no prompt, under the credential `~/.superegm/env` names,
-so install the driver only on a machine and for repositories you would let a session act on alone. A tick that
-finds nothing writes nothing. It never merges, and never types `integrate`; with the chain off it never types
+so install the driver only on a machine and for repositories you would let a session act on alone. With the
+chain off, a tick that finds nothing writes nothing (with it on, see the writes below). It never merges, and never types `integrate`; with the chain off it never types
 `plan`, `file` or `review-plan` either.
 
 ## The chain
@@ -37,7 +37,13 @@ asks `superegm next --handoff <id>` per open handoff and types the phase that li
 the mode `normal`; a `file` that answers a wait record goes without it. It types nothing on `none`, `integrate` or
 any `waiting …` line. A handoff approved before 1.2.1 (no frozen mode) runs only its `wave` row, with
 `--leavemealone`. The launch entry records its `phase` and, once its session ends, its `outcome` (`succeeded` or
-`failed`); two consecutive failed launches of any phase stop the handoff as above.
+`failed`), decided once by the outcome test: a `wave` launch by 1.2's test (below); a `plan`, `review-plan` or
+`file` launch succeeded when its driven card closed, it exited 0, and either `next` then prints a different line or
+the session wrote a wait record of its own (`since` at or after the launch's start), and failed otherwise, so a plan
+session that closed with exit 0 and left `next` on `plan` with no wait record failed. While `next` prints `waiting
+fetch`, `waiting push` or `waiting checkout`, the outcome stays undecided and a later tick decides it. So a chain-on
+tick that launches nothing may still write `tick/fetch.json`, a fetch journal line, a removed wait record and an
+`outcome`. Two consecutive failed launches of any phase stop the handoff, as "What the tick refuses" says below.
 
 `<HELPER>` is `${CLAUDE_PLUGIN_ROOT}/skills/plan/scripts/superegm.py`; pass `--handoff <id>` to every call
 when the owner typed it.
@@ -84,8 +90,8 @@ refusal included. `status` is read-only and takes no card.
 
 ## What the tick refuses
 
-Two consecutive tick launches that failed (a `wave` before the loop ran; with the chain on, a launch of any
-chain phase, a `plan`, `review-plan` or `file` launch failing on the outcome test above), or a registered `root`
+Two consecutive tick launches that failed (a `wave` before the loop ran, 1.2's test; with the chain on, a launch of
+any chain phase, a `plan`, `review-plan` or `file` launch failing on the outcome test in "The chain" above), or a registered `root`
 that is not a worktree of the store's repository, stop the tick for that handoff: journaled `tick: refused
 (<handoff>: <reason>)` and sent by `notify`. Re-type `/superegm:wave` (with the chain on, the phase `superegm next`
 names: a typed top-level card of any chain phase restarts the count), or `/superegm:driver reset` (the failures), or

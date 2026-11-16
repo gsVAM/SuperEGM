@@ -292,7 +292,9 @@ def launch(hs: core.Store, entry: dict, spec: str, reason: str, phase: str = "wa
   two leaves a launch without an exit file), the store's cards re-read once (an open top-level `wave` card of any open
   handoff of the store, typed or a tick's, or an open `plan`, `file`, `integrate`, `review-plan` or `orient` card of
   this handoff: the launch `interrupted`, journaled `driver: tick backed off: <skill> card <id> open`, the tick backs
-  off), the wrapper started detached, its `pid` written, the card closed."""
+  off), the wrapper started detached, its `pid` written, the card closed. The session's prompt is
+  `tick_prompt(<spec rebased onto the root>, <handoff>, phase, leavemealone)`; the entry gains `phase` only when
+  `driver.chain` is on (U44), so a chain-off store's entry keeps 1.2's keys and reads as a `wave` launch."""
   from superegm import launch_builder, runcard
   hid, data = hs.handoff_id, core.load_driver(hs)
   n = len(data["launches"]) + 1
