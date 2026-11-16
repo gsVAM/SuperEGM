@@ -468,10 +468,10 @@ def open_runcard(store: Store, skill: str, artifact: str, parent=None, mode=None
   preceding any handoff, at the store level) the 6 hex of the spec slug (the parent card's, else
   the artifact's stem), counted per skill and hex; a legacy store keeps `<skill>-<n>`. `artifact` is
   stored resolved when it is a file; the card records the handoff it resolved, and a top-level `wave`
-  card, or a top-level card of any chain phase (`CHAIN_PHASES`) under `SUPEREGM_ROLE=driver` (U44), also its
-  `boot_id` and `driver_card` (`SUPEREGM_RUNCARD` under `SUPEREGM_ROLE=driver`, else None). The card is
-  written first; then a top-level card of the six `GUARDED_SKILLS` (a chain phase under
-  `SUPEREGM_ROLE=driver` excepted) is refused with `TICK_LIVE` while `tick_live` holds, its own card
+  card, or, with `driver.chain` on, a top-level card of any chain phase (`CHAIN_PHASES`) under
+  `SUPEREGM_ROLE=driver` (U44), also its `boot_id` and `driver_card` (`SUPEREGM_RUNCARD` under
+  `SUPEREGM_ROLE=driver`, else None). The card is written first; then a top-level card of the six
+  `GUARDED_SKILLS` (with the chain on, a chain phase under `SUPEREGM_ROLE=driver` excepted) is refused with `TICK_LIVE` while `tick_live` holds, its own card
   marked interrupted and no other open card of its skill touched (spec section 11.2, U24); for `wave`,
   `tick_live` first applies the boot-id proof to every open handoff (`reboot_proof`), which may record
   `driver/<handoff>.json` and `launches/<unit>.json` entries `interrupted (reboot)` and mark rebooted top-level
@@ -503,13 +503,15 @@ def open_runcard(store: Store, skill: str, artifact: str, parent=None, mode=None
           "opened_at": now_iso(), "closed_at": None, "interrupted_at": None, "produced": [],
           "handoff": store.handoff_id}
   driven = os.environ.get("SUPEREGM_ROLE") == "driver"
-  if parent is None and (skill == "wave" or (skill in CHAIN_PHASES and driven)):  # a driven card of any chain phase (U44)
+  # a driven `wave` card, as in 1.2, or with the chain on a driven card of any chain phase (U44)
+  chained = driven and (skill == "wave" or (skill in CHAIN_PHASES and chain_on(config)))
+  if parent is None and (skill == "wave" or chained):
     card["boot_id"] = boot_id()
     card["driver_card"] = os.environ.get("SUPEREGM_RUNCARD") if driven else None
   # the card is written before the read for a tick's launch, so a tick racing this open sees it (spec section 11.2)
   atomic_write(store.path("runcards", rid), card)
   journal(store, f"runcard open {rid} {skill} {artifact}")
-  if parent is None and skill in GUARDED_SKILLS and not (skill in CHAIN_PHASES and driven) and tick_live(store, skill):
+  if parent is None and skill in GUARDED_SKILLS and not chained and tick_live(store, skill):
     card["interrupted_at"] = now_iso()
     atomic_write(store.path("runcards", rid), card)
     journal(store, f"runcard interrupted {rid}: a tick's session may be live")

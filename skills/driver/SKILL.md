@@ -94,8 +94,10 @@ refusal included. `status` is read-only and takes no card.
 Two consecutive tick launches that failed (a `wave` before the loop ran, 1.2's test; with the chain on, a launch of
 any chain phase, a `plan`, `review-plan` or `file` launch failing on the outcome test in "The chain" above), or a registered `root`
 that is not a worktree of the store's repository, stop the tick for that handoff: journaled `tick: refused
-(<handoff>: <reason>)` and sent by `notify`. Re-type `/superegm:wave` (with the chain on, the phase `superegm next`
+(<handoff>: <reason>)` and sent by `notify`, the failures' reason `two launches failed before the loop ran` with the
+chain off and `two launches failed their phase's outcome test` with it on. Re-type `/superegm:wave` (with the chain on, the phase `superegm next`
 names: a typed top-level card of any chain phase restarts the count), or `/superegm:driver reset` (the failures), or
 `/superegm:driver register` from the right checkout (the root). While a tick's session may be live, a typed
 `wave` (and that handoff's `plan`, `file`, `integrate`, `review-plan` and `orient`) refuses with
-`driver: a tick's session may be live; /superegm:driver reset is the owner's interrupt`.
+`driver: a tick's session may be live; /superegm:driver reset is the owner's interrupt`; with the chain on, a
+top-level `plan`, `review-plan` or `file` card the tick's own session opens is exempt, as its `wave` card is.

@@ -78,6 +78,7 @@ def root_ok(root, artifacts_dir) -> bool:
 
 PHASES = ("plan", "file", "integrate", "review-plan", "orient")  # a handoff's own writers a tick waits for
 TWICE = "two launches failed before the loop ran"
+TWICE_CHAIN = "two launches failed their phase's outcome test"  # the chain on: a launch of any phase (U44)
 
 
 def register(subparsers):
@@ -173,7 +174,8 @@ def exit_code(entry: dict):
 
 
 def counted_failures(hs: core.Store, launches: list, state: dict, set_aside: int = 0) -> list:
-  """The two consecutive launches of the tick's own that failed before the loop ran (spec section 11.2), or []:
+  """The two consecutive launches of the tick's own that failed (spec section 11.2; refused `TWICE`, with the chain
+  on `TWICE_CHAIN`), or []:
   counted after the last `interrupted` one, after the rounds `driver reset` set aside, and after the last typed
   top-level `wave` card opened at or before `state.status.at` (the intervening success; with the chain on, a typed
   top-level card of any other chain phase opened after the launch, U44); a launch with an `outcome` failed when it
@@ -426,7 +428,7 @@ def tick_store(entry: dict) -> None:
       notify(hs, spec)  # a skip, silent unless `notify`'s own predicate holds (a typed `wave` card, a launch)
       continue
     if not ok or twice_failed(hs, data, state):  # `notify`'s own predicate decides: a refusal recorded and never sent
-      refuse(hs, data, TWICE if ok else f"root {entry['root']} is not a worktree of {entry['repo']}")
+      refuse(hs, data, (TWICE_CHAIN if chain_on(hs.config) else TWICE) if ok else f"root {entry['root']} is not a worktree of {entry['repo']}")
       notify(hs, spec)
       continue
     if data.get("refused"):  # the refusal no longer holds: the owner re-typed `wave` or re-registered the root
