@@ -176,7 +176,9 @@ After the approval commit, `git push origin <branch>`, so the PR's head is the a
 
 Tell the owner, in one line: push the approval commit to `origin/<base>` (only the owner updates
 the base branch; `launch` refuses the first wave until the spec there hashes to the approval; GitHub records that push as the PR's merge),
-then type `/superegm:plan <spec-path>`. Nothing chains.
+then check out `<base>` at the pushed commit (`superegm next --handoff <id>` prints
+`waiting checkout: <root>: <reason>` until the checkout is there), then type
+`/superegm:plan <spec-path>` with the chain off, or leave the driver's plan to run with it on.
 
 ### 5. At the cap (exit 2)
 
