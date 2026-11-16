@@ -108,6 +108,18 @@ def documents(root: Path, ref: str, entry: dict, at: str | None = None) -> list[
   return found
 
 
+def flat(items: list) -> list[dict]:
+  """The files of `items` (frozen or approved): a `file` item as it is, a `dir` item as one `{dir, to, file, sha, ...}`
+  per document, in order."""
+  out = []
+  for item in items:
+    if "dir" in item:
+      out += [{**f, "dir": item["dir"], "to": item["to"]} for f in item["files"]]
+    else:
+      out.append(item)
+  return out
+
+
 def head_list(root: Path, ref: str = "HEAD") -> list:
   """The `instructions` list of the config committed at `ref` (`[]` when it lacks the config or the key)."""
   data = blob(root, ref, CONFIG)

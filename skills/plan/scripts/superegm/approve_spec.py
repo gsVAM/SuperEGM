@@ -293,12 +293,15 @@ def commit_by_path(repo_root: Path, paths: list[str], message: str, trailer: str
 
 
 def freeze(root: Path, ref: str, listed: list, at: str | None = None) -> list:
-  """`listed` with each file's 12-hex blob sha and text at `ref`: `[{file, to, sha, text}]`; a file absent there
-  (named `at`, else `ref`), over `instructions.LIMIT` bytes or not UTF-8 is refused, naming it."""
+  """`listed` with each file's 12-hex blob sha and text at `ref`: `[{file, to, sha, text}]`, and for a `dir` entry
+  `{dir, to, files: [{file, sha, text}]}`; a file absent there (named `at`, else `ref`), over `instructions.LIMIT` bytes
+  or not UTF-8 is refused, naming it (a folder's documents by `instructions.documents`)."""
   frozen = []
   for item in listed:
-    if "dir" in item:  # a folder's documents: validated here, frozen by the next Step
-      instructions.documents(root, ref, item, at)
+    if "dir" in item:  # a folder's documents, each frozen as a file is, under the entry
+      files = [{"file": name, "sha": instructions.blob_sha(data), "text": data.decode("utf-8")}
+               for name, data in instructions.documents(root, ref, item, at)]
+      frozen.append({"dir": item["dir"], "to": list(item["to"]), "files": files})
       continue
     data = instructions.blob(root, ref, item["file"])
     if data is None:
@@ -315,13 +318,37 @@ def freeze(root: Path, ref: str, listed: list, at: str | None = None) -> list:
   return frozen
 
 
-def write_copy(st: core.Store, item: dict) -> None:
+def write_copy(st: core.Store, item: dict, raw: bool = False) -> None:
   """`instructions/<sha>.json` (`file`, `sha`, `text`), the frozen bytes that outlive the approval commit; a copy
-  already there that does not verify is rewritten."""
+  already there that does not verify is rewritten. With `raw` (a reference document), the bytes themselves also as
+  `instructions/<sha>.md`, the copy an agent reads, rewritten likewise."""
   try:
     read_copy(st, item["file"], item["sha"])
   except core.HandoffError:
     core.atomic_write(st.path("instructions", item["sha"]), {k: item[k] for k in ("file", "sha", "text")})
+  if raw:
+    try:
+      read_raw(st, item["file"], item["sha"])
+    except core.HandoffError:
+      core.atomic_write(raw_path(st, item["sha"]), item["text"].encode("utf-8"))
+
+
+def raw_path(st: core.Store, sha: str) -> Path:
+  """The raw copy of a reference document: `instructions/<sha>.md`, beside its `.json`."""
+  return st.path("instructions", sha).with_suffix(".md")
+
+
+def read_raw(st: core.Store, file: str, sha: str) -> bytes:
+  """The raw bytes of reference document `file` frozen at `sha`, from `instructions/<sha>.md`; a copy missing, or whose
+  blob sha differs, is refused, naming the file."""
+  path = raw_path(st, sha)
+  try:
+    data = path.read_bytes()
+  except OSError:
+    data = None
+  if data is None or instructions.blob_sha(data) != sha:
+    raise core.HandoffError(f"instructions: {file}: the store copy {path.name} does not verify against blob sha {sha}")
+  return data
 
 
 def read_copy(st: core.Store, file: str, sha: str) -> str:
@@ -338,6 +365,13 @@ def read_copy(st: core.Store, file: str, sha: str) -> str:
   if not good:
     raise core.HandoffError(f"instructions: {file}: the store copy {path.name} does not verify against blob sha {sha}")
   return text
+
+
+def entry_item(item: dict) -> dict:
+  """A frozen item as the approval entry holds it: `{file, to, sha}`, or `{dir, to, files: [{file, sha}]}` for a folder."""
+  if "dir" in item:
+    return {"dir": item["dir"], "to": item["to"], "files": [{k: f[k] for k in ("file", "sha")} for f in item["files"]]}
+  return {k: item[k] for k in ("file", "to", "sha")}
 
 
 def spec_pr(repo: str, branch: str) -> int | None:
@@ -455,14 +489,14 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
     frozen = freeze(root, commit, listed, at="the approval commit")
   except core.HandoffError as error:
     raise core.HandoffError(f"approve-spec: {error}") from None
-  for item in frozen:
-    write_copy(st, item)
-  previous = {e["file"]: e["sha"] for e in (last or {}).get("instructions") or []}
-  for item in frozen:  # each file whose sha the spec's previous entry, whatever its handoff, does not hold
+  for item in instructions.flat(frozen):
+    write_copy(st, item, raw="dir" in item)
+  previous = {i["file"]: i["sha"] for i in instructions.flat((last or {}).get("instructions") or [])}
+  for item in instructions.flat(frozen):  # each file whose sha the spec's previous entry, whatever its handoff, does not hold
     if previous.get(item["file"]) != item["sha"]:
       print(f"approve-spec: instructions {item['file']} {item['sha']}")
   entry = entry_of(sha, commit, args.runcard, rid, handoff_id, kind, escalated,  # an empty list stays absent: absent reads []
-                   {"rounds": rounds, "triage": triage, "mode": mode, **({"instructions": [{k: i[k] for k in ("file", "to", "sha")} for i in frozen]} if frozen else {})})
+                   {"rounds": rounds, "triage": triage, "mode": mode, **({"instructions": [entry_item(i) for i in frozen]} if frozen else {})})
   path = append_entry(st, spec, entry)
   write_handoff_file(st, handoff_id, spec, entry["approved_at"] if kind == "opening" else None)
   core.journal(st, f"approve-spec {kind} {handoff_id} sha256 {sha[:12]} at review {rid} commit {commit[:12]} under {args.runcard}")
