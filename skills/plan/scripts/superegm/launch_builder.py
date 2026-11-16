@@ -21,6 +21,7 @@ from superegm.builder_token import key_path, tool
 from superegm.decision import deleted_rulings, overridden_comments, parse_form, recorded_rulings
 from superegm.launch import builder_email, builder_login, load_launches, terminal
 from superegm.review_plan import SPEC_LINE_RE
+from superegm.status import STATUS_RE
 
 WRITES = frozenset(["launches", "orient_unit", "runcards"])  # the store kinds this subcommand writes; the card's render (U37)
 CONFIG_DEFAULTS = {  # its own config key (U32)
@@ -489,7 +490,6 @@ def launch_reason(launches: list, foreman: dict) -> str:
   since = launches[-1].get("started_at") or ""
   points = {d["id"]: d for d in foreman["decisions"]}
   events = [(r["posted_at"], "review") for r in foreman["rounds"] if r.get("phase") == "posted" and (r.get("posted_at") or "") > since]
-  from superegm.status import STATUS_RE  # late: status imports decision, which imports this module
 
   def blocked(point):  # a point-3 decision on a comment whose stored question the builder's status line reads BLOCKED or NEEDS_CONTEXT
     match = STATUS_RE.search(point.get("question") or "")

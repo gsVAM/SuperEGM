@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 
 import superegm as core
-from superegm import foreman, launch_builder, review
+from superegm import foreman, launch_builder, review, status
 from superegm.launch import app_login, load_launches
 
 WRITES = frozenset(['foreman', 'review', 'runcards'])  # the store kinds this subcommand writes; `runcards` is allowed for the Astra brief's card render, which U38 adds (U37)
@@ -101,8 +101,8 @@ def prepare(args, card):
                  (number, core.gh_pages(f"repos/{repo}/issues/{number}/comments")), since, login)
   # spec section 6.5: the foreman holds this head to an amendment only when the head's launch started after it
   launches = load_launches(st, unit)
-  committed = float(core.run_git(["log", "-1", "--format=%ct", head], root).strip())
-  own = [l for l in launches if l.get("started_at") and core.epoch(l["started_at"]) < committed]
+  committed = status.head_time(tree)  # the committer time of the head fetched above, checked out at `tree`
+  own = [l for l in launches if status.own_commit(l, committed) is not None]
   head_launch = own[-1] if own else None  # the latest launch that started before the head commit; `launch` stays the latest launch
   entry["head_launch"] = head_launch["round"] if head_launch else None
   write_amendments(r / "amendments.md", launch_builder.amendments_for(st, unit, core.unit_file_body(st.path("unit", unit))),
