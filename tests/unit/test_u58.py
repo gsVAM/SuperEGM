@@ -27,3 +27,14 @@ def test_skills_offer_proceed(path, start, end):
         for opt in ("continue", "accept", "stop"):
             assert opt in passage
         assert "owner" in passage
+
+
+def test_review_spec_closing_line():
+    text = (ROOT / "skills/review-spec/SKILL.md").read_text()
+    i = text.index("Tell the owner, in one line:")
+    para = text[i:].split("\n\n", 1)[0]
+    a = para.index("origin/<base>")
+    b = para.index("check out `<base>` at the pushed commit")
+    c = para.index("waiting checkout")
+    assert a < b < c
+    assert "Nothing chains." not in text
