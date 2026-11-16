@@ -74,7 +74,11 @@ written.
 A run, typed or driven, that finds a wait record for this handoff
 (`chain/<handoff>.json` in the store) opens its card with `runcard open --mode
 normal` whatever the frozen mode (Step 1) and runs Steps 2 to 4 as for any
-filing. A driven run is started only on a record with an `answer`; it takes
+filing. A typed run that names no `--handoff` has no `<id>` before its card
+exists: it opens the card as Step 1 says, reads `<id>` from the card's
+record, and when `chain/<id>.json` exists opens its card again with `--mode
+normal` (the new card marks the first interrupted) and passes `--handoff
+'<id>'` to every command below. A driven run is started only on a record with an `answer`; it takes
 the record's `answer` where a typed run asks the record's question directly,
 with no new panel.
 
