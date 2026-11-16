@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the filing on the confirmed write list under converged plan reviews (U07); EGM's moved tests rewritten to that form.
+# Modified by SuperEGM (gsVAM), 2026: the filing on the confirmed write list under converged plan reviews (U07); EGM's moved tests rewritten to that form; the file skill's order pin follows its resume and the chain's `next` (U56).
 
 """The filing (spec section 10): `gate --pass` on converged plan reviews, the dry run of the
 unfiled units, `apply` on the confirmed write list with `filings[]` and `base_at_start`,

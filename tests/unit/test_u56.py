@@ -117,8 +117,31 @@ def test_file_skill_under_the_chain():
   readback = body[body.index("## Step 6"):body.index("## Step 7")]
   assert "next wait" in readback and "MISMATCH read failed" in readback
   # on a wait record: `runcard open --mode normal`, the record's question asked directly, then `next clear`
-  assert "runcard open --mode normal" in body and "the record's question" in body
+  flat = " ".join(body.split())
+  assert "runcard open --mode normal" in flat and "the record's question" in flat
   assert "<HELPER>' next clear" in body
   # the gate's "nothing to file" no longer ends the skill after a resumed verify with problems
-  gate_text = body[gate_at:body.index("## Step 4")]
+  gate_text = " ".join(body[gate_at:body.index("## Step 4")].split())
   assert "nothing to file" in gate_text and "never after a resumed verify with problems" in gate_text
+  assert "recorded after the converged one" in gate_text  # the gate's second not-converged cause
+  # review round 1: the resume names the receipt, sends a stopped dry run to the gate, and waits on MISMATCH lines
+  step_two = " ".join(body[resume:body.index("## Step 3")].split())
+  assert "the receipt" in step_two and "has no `filings[]` entry" in step_two and "go to Step 3" in step_two
+  assert "next wait" in step_two and "MISMATCH read failed" in step_two
+  assert "stopped after" in step_two and "rate limited" in step_two  # apply's own exits end the resume
+  assert "once more" in step_two  # a `MISMATCH read failed` receipt is read again once, never in a loop
+  # a closed list of driven stops: no catch-all over every place the skill asks or ends on a line
+  chain = " ".join(body[body.index("## Under the chain"):body.index("## Step 1")].split())
+  assert "or to end on a line the owner must act on" not in " ".join(body.split())
+  assert "The two driven stops are Create (Step 4) and verification problems" in chain
+  assert "Every other ending is as written, with no wait record" in chain
+  # the handoff id `next` requires, with or without `--handoff`; `next` takes no `--spec`
+  assert "the `handoff` of the card's record" in chain
+  assert "Every command below except `next` takes `--spec" in flat
+  # a record's answer: a driven run takes it from the record; Create counts only for the write list it names
+  assert "the record's `answer`" in chain and "`Confirmed write list sha256`" in chain
+  assert "for another write list" in chain
+  # a `next wait` question is one line with no single quote
+  assert "no single quote" in chain
+  # `What it does` no longer counts six commands
+  assert "Six helper commands" not in flat
