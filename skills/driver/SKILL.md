@@ -45,7 +45,8 @@ when the owner typed it.
 ## The card
 
 Every action but `status` runs under a `driver` card on the handoff's spec (the `design.path` of its
-`state.json`): `python3 '<HELPER>' runcard open --skill driver --artifact <spec>` prints `<CARD>`; run the
+`state.json`, or, before `plan` writes one, the `spec` of its handoff record `handoffs/<id>.json`):
+`python3 '<HELPER>' runcard open --skill driver --artifact <spec>` prints `<CARD>`; run the
 action with `--runcard '<CARD>'`, then `python3 '<HELPER>' runcard close '<CARD>'` after each action, a
 refusal included. `status` is read-only and takes no card.
 
@@ -83,9 +84,11 @@ refusal included. `status` is read-only and takes no card.
 
 ## What the tick refuses
 
-Two consecutive tick launches that failed before the loop ran, or a registered `root` that is not a worktree
-of the store's repository, stop the tick for that handoff: journaled `tick: refused (<handoff>: <reason>)` and
-sent by `notify`. Re-type `/superegm:wave`, or `/superegm:driver reset` (the failures), or
+Two consecutive tick launches that failed (a `wave` before the loop ran; with the chain on, a launch of any
+chain phase, a `plan`, `review-plan` or `file` launch failing on the outcome test above), or a registered `root`
+that is not a worktree of the store's repository, stop the tick for that handoff: journaled `tick: refused
+(<handoff>: <reason>)` and sent by `notify`. Re-type `/superegm:wave` (with the chain on, the phase `superegm next`
+names: a typed top-level card of any chain phase restarts the count), or `/superegm:driver reset` (the failures), or
 `/superegm:driver register` from the right checkout (the root). While a tick's session may be live, a typed
 `wave` (and that handoff's `plan`, `file`, `integrate`, `review-plan` and `orient`) refuses with
 `driver: a tick's session may be live; /superegm:driver reset is the owner's interrupt`.

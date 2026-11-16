@@ -374,9 +374,13 @@ def last_started(st: core.Store, hid: str) -> str:
 
 def tick_store(entry: dict) -> None:
   """One store's tick: per open handoff, the one that waited longest first, the proofs, then the spec's conditions
-  in order; at most one launch (one `.git`). The reboot and exit-file proofs may write before any skip; a skip
-  (the store's live launch or open `wave` card, a phase card, nothing left, `tick_trigger` None) prints nothing and
-  writes nothing unless `notify`'s own predicate holds, a new line then sent under a `driver` card opened for that."""
+  in order; at most one launch (one `.git`). The reboot and exit-file proofs may write before any skip, and with the
+  chain on (U44) so may the store's fetch (`tick/fetch.json`, its journal line, a superseded handoff's wait record
+  removed) and the settled `outcome` of an ended launch in `driver/<handoff>.json`. A skip (with the chain on,
+  `next` printing `none`, `integrate` or a `waiting …` line, or a non-wave line for a handoff with no frozen mode;
+  then the store's live launch or open `wave` card, a phase card, nothing left for `wave`, `tick_trigger` None for
+  `wave`) prints nothing and writes nothing more unless `notify`'s own predicate holds, a new line then sent under
+  a `driver` card opened for that."""
   from superegm import phase
   st, ok = registered_store(entry)
   current, ids = core.boot_id(), open_ids(st)
@@ -394,18 +398,19 @@ def tick_store(entry: dict) -> None:
     hs = core.handoff_store(st, hid)
     core.STORE = hs  # the one mid-run STORE switch: it reaches every reader by intent, the notify hook's included
     word, leavemealone = "wave", True
+    state = core.load_state(hs.root)
+    spec = (state.get("design") or {}).get("path") or ""
     if chain:  # `next` first: nothing on `none`, `waiting …` or `integrate`; a 1.2.0 entry runs its `wave` row alone
+      # the handoff record's spec: no phase before `plan` writes `state.json`
+      spec = next((r.get("spec") for r in core.handoffs(st.root) if r["id"] == hid), None) or spec
       word = phase.next_line(st, hid)
       mode = core.frozen_mode(hs)
       if word in SKIP_LINES or word.startswith("waiting") or (mode is None and word != "wave"):
+        notify(hs, spec)  # a skip, as every 1.2 skip: silent unless `notify`'s own predicate holds
         continue
       wait = st.path("chain", hid)
       answered = wait.is_file() and bool(json.loads(core.read_text(wait)).get("answer"))
       leavemealone = mode != "normal" and not (answered and word == "file")  # an answered file wait: any mode
-    state = core.load_state(hs.root)
-    spec = (state.get("design") or {}).get("path") or ""
-    if chain:  # the handoff record's spec: no phase before `plan` writes `state.json`
-      spec = next((r.get("spec") for r in core.handoffs(st.root) if r["id"] == hid), None) or spec
     if word == "wave":
       units = list(state.get("units") or {})
       saved = ((state.get("status") or {}).get("units") or {})
