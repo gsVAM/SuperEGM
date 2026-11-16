@@ -324,6 +324,13 @@ def recorded_option(foreman: dict, entry: dict):
   return None
 
 
+def consumed_comments(foreman: dict) -> set:
+  """The comment ids `rulings[]` and `proceeds[]` record as `posted` (a typed proceed's null `posted` names none): the
+  comments a record consumed, whose later edit or deletion the record answers (spec section 4.2)."""
+  return {int(cid) for entry in (foreman.get("rulings") or []) + (foreman.get("proceeds") or [])
+          if (cid := str(entry.get("posted") or "").removeprefix("comment ")).isdigit()}
+
+
 def record_text(foreman: dict, entry: dict, note: str = "the comment was edited after its record") -> str:
   """A `rulings[]` entry as its form, marked as the record (what an edited or deleted recorded comment is replaced by)."""
   decision = next((d for d in foreman.get("decisions") or [] if d["id"] == entry.get("decision")), {})
@@ -900,9 +907,9 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int, mode=None)
   found = ruling_of(comment, store.config.get("owners") or [])
   if found is None:
     raise Refusal(f"decision: comment {cid} by {author} is not an owner's ruling")
-  recorded = next((r for r in foreman["rulings"] if r.get("posted") == f"comment {cid}"), None)
-  if recorded:
-    core.journal(store, f"Ruling ({args.by}, comment {cid}): {unit} {recorded['decision']} ruling edited after record, ignored")
+  if int(cid) in consumed_comments(foreman):
+    recorded = next(r for r in foreman["rulings"] + (foreman.get("proceeds") or []) if r.get("posted") == f"comment {cid}")
+    core.journal(store, f"Ruling ({args.by}, comment {cid}): {unit} {recorded.get('decision') or recorded.get('ruling')} ruling edited after record, ignored")
     raise Refusal(f"decision: comment {cid} already recorded (ruling edited after record, ignored)")
   points = KIND_POINTS.get(found.kind, ())
   point2 = {d["id"] for d in foreman["decisions"] if d["point"] == 2}
