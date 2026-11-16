@@ -15,10 +15,10 @@ import uuid
 from pathlib import Path
 
 import superegm as core
-from superegm import body, instructions, orient
+from superegm import body, instructions, orient, scan
 from superegm.body import consumes
 from superegm.builder_token import key_path, tool
-from superegm.decision import deleted_rulings, overridden_comments, parse_form
+from superegm.decision import deleted_rulings, overridden_comments, parse_form, recorded_rulings
 from superegm.launch import builder_email, builder_login, load_launches, terminal
 from superegm.review_plan import SPEC_LINE_RE
 
@@ -462,11 +462,21 @@ def filed_body(state, unit):
 
 
 def amendments_for(st, unit: str, body: str) -> list[dict]:
-  """Spec section 6.5: the handoff's recorded `amendments[]` for the unit's own Interfaces and for every
-  `(name, unit)` its Consumes lines list, in `at` order."""
+  """Spec section 6.5: the recorded amendments for the unit's own Interfaces and for every `(name, unit)` its Consumes
+  lines list (matched through `scan.names_of`), in `at` order. Two sources: each `amendments/<comment id>.json` whose
+  comment a ruling in some unit's foreman record names (an unruled file, left by a crash, is not read, and no foreman
+  record is read when the directory is absent), and a 1.2.1-pre.1 handoff's legacy `state.json` `amendments[]`."""
   path = st.path("state")
-  entries = (json.loads(core.read_text(path)) if path.is_file() else {}).get("amendments") or []
-  consumed = set(consumes(body))
+  state = json.loads(core.read_text(path)) if path.is_file() else {}  # read once: the legacy entries and the unit list
+  entries = list(state.get("amendments") or [])
+  files = sorted((path.parent / "amendments").glob("*.json"))  # `decision rule`'s files (spec section 6.5)
+  if files:  # a file counts once a ruling in some unit's foreman record names its comment: no record is read without one
+    ruled = {r.subject for uid in state.get("units") or {} for r in recorded_rulings(core.load_foreman(st, uid))
+             if r.kind == "option"}
+    for file in files:
+      if file.stem in ruled:
+        entries += json.loads(core.read_text(file))
+  consumed = {(n, u) for raw, u in consumes(body) for n in scan.names_of(raw)}  # the one reader of an interface name
   return sorted((a for a in entries if a["unit"] == unit or (a["name"], a["unit"]) in consumed), key=lambda a: a["at"])
 
 

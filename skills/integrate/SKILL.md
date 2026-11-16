@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Merges the landed units of a wave into the base branch and closes the handoff.
 ---
 
-<!-- Added by SuperEGM (gsVAM), 2026: the integrate skill (spec section 12); close's issue closes, `--note` and `--close --patch` (U32). -->
+<!-- Added by SuperEGM (gsVAM), 2026: the integrate skill (spec section 12); close's issue closes, `--note` and `--close --patch` (U32); the follow-ups given as known and quoted (U51). -->
 
 # Integrate (phase 7)
 
@@ -52,6 +52,10 @@ every writing call carries `--runcard`.
    `units[<U>].pr.number` of every unit whose PR merged, its issue open or not), each `GH_HOST=github.com gh pr diff <n> -R OWNER/NAME` output
    concatenated in unit order, into
    `${TMPDIR:-/tmp}/superegm-integrate/<card>.diff`, the file every reviewer reads (another handoff's merges stay out of it).
+   Read the handoff's triage follow-ups before the round: every unit's `foreman/<U>.json` `followups[]`
+   (units in sorted order, rows in record order), one line each in the form
+   `- <unit> <fid> (round <n>, pattern <k>): <claim>`. Give them to every reviewer's brief, the Astra brief
+   included, as known: a reviewer reports one only where the integrated code makes it worse than its row says.
 3. Dispatch every reviewer of the panel concurrently, in one message, each through its adapter
    `superegm:<id>` (`omitClaudeMd: true`, read-only tools), with the frozen spec's path and sha256
    (`approvals/<spec-slug>.json`), the diff file, the review id, round 1 and its own id, and the
@@ -112,6 +116,6 @@ are untouched: each has its own directory.
 
 `superegm runcard close <card>` (`--note '<text>'` journals a note with it) is the last action of every path, including an error you cannot
 recover from. In chat: the review id and its `review status` line, the escalated findings with
-their new unit rows, or the `closed` line, and the handoff journal's `accepted before the cap` lines quoted
+their new unit rows, or the `closed` line with `close`'s `Follow-ups:` block quoted beside it, and the handoff journal's `accepted before the cap` lines quoted
 verbatim (the one source for the owner's by-hand release notes), skipping a review's line that a later
 `review <id> R<n> accept lapsed` line of the same review names; never a report pasted.

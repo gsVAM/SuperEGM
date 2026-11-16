@@ -605,11 +605,24 @@ def redesign_option(st, rid: str) -> str:
 
 
 def decision_question(st, unit: str, did: str) -> str:
+  """A plan-time `D<n>` with its options as stored; a runtime `q<n>` is refused (`--blocked` renders it, `amend` left out)."""
+  if re.fullmatch(r"q\d+", did):
+    raise core.HandoffError(f"question: {did} is a runtime decision: use --blocked <comment-id> | launch <n> | closed <n>")
   units = json.loads(core.read_text(st.path("units"))).get("units") or {}
   decision = next((d for d in units.get(unit, {}).get("decisions") or [] if d["id"] == did), None)
   if decision is None:
     raise core.HandoffError(f"question: {unit} has no decision {did}")
-  return f"## Q1 {unit} {did}: {decision['question']}\n" + "".join(f"- {o}\n" for o in decision["options"] if o != "amend")  # amend is the owner's alone
+  return f"## Q1 {unit} {did}: {decision['question']}\n" + "".join(f"- {o}\n" for o in decision["options"])
+
+
+STORED_LETTER_RE = re.compile(r"^\([a-z]\) ")  # a stored option's own letter prefix
+
+
+def stored_options_text(options: list) -> str:
+  """A pending decision's stored options with `amend` (the owner's alone, §6.5) left out and the others keeping the
+  letter of their stored position; a stored `(x) ` prefix is dropped so a letter prints once."""
+  return "".join(f"- ({chr(ord('a') + i)}) {STORED_LETTER_RE.sub('', option)}\n"
+                 for i, option in enumerate(options) if option != "amend")
 
 
 def blocked_question(st, unit: str, what: list) -> tuple[str, list[int]]:
@@ -617,10 +630,20 @@ def blocked_question(st, unit: str, what: list) -> tuple[str, list[int]]:
   if len(what) == 1 and what[0].isdigit():
     body = (core.gh_json(["api", f"repos/{st.config['repo']}/issues/comments/{what[0]}"]) or {}).get("body") or ""
     heading, *rest = body.splitlines() or [""]
-    options = [line[2:].strip() for line in rest if line.startswith("- (")]
-    options = [o.partition(" ")[2] for o in options] + ["stop the unit"]
-    consumers = fan_out(st, unit) if heading.startswith("**Deviation (interface):**") else []
-    return f"## Q1 {unit} BLOCKED (comment {what[0]}): {heading.strip()}\n" + options_text(options), consumers
+    from superegm.report import pending_decisions
+    pending = next((d for d in pending_decisions(core.load_foreman(st, unit))
+                    if d.get("point") == 3 and d.get("source") == f"comment {what[0]}"), None)
+    if pending is not None:  # the stored options, `amend` left out and the letters kept
+      shown = stored_options_text(pending.get("options") or RELAUNCH)
+    else:  # no decision opened on the comment: its `- (` lines, then `stop the unit`
+      options = [line[2:].strip() for line in rest if line.startswith("- (")]
+      shown = options_text([o.partition(" ")[2] for o in options] + ["stop the unit"])
+    consumers = []
+    if heading.startswith("**Deviation (interface):**"):
+      from superegm.decision import INTERFACE
+      named = INTERFACE.match(heading[len("**Deviation (interface):**"):].strip())
+      consumers = fan_out(st, named["unit"] if named else unit, unit)  # the named producer's; the raising unit's for an old-form heading
+    return f"## Q1 {unit} BLOCKED (comment {what[0]}): {heading.strip()}\n" + shown, consumers
   if len(what) == 2 and what[0] == "launch" and what[1].isdigit():
     launches = load_launches(st, unit)
     n = int(what[1])
@@ -644,15 +667,17 @@ def blocked_question(st, unit: str, what: list) -> tuple[str, list[int]]:
   return f"## Q1 {heading}\n" + options_text(pending.get("options") or RELAUNCH), []
 
 
-def fan_out(st, unit: str) -> list[int]:
-  """The issue numbers of every other filed unit whose unit file consumes a name of `unit` (section 13.2)."""
-  # shortcut: the fan-out targets every filed consumer of any name the unit produces, since the deviation text is
+def fan_out(st, producer: str, raising: str) -> list[int]:
+  """The issue numbers of every filed unit whose unit file consumes a name of `producer`, the raising unit left out
+  (section 13.2, spec section 6.5: keyed on the producer the heading names; an old-form heading passes the raising unit
+  as both)."""
+  # shortcut: the fan-out targets every filed consumer of any name the producer produces, since the deviation text is
   # free prose; narrow it when the Deviation comment gains a name field
   numbers = []
   for other, record in (core.load_state(st.root).get("units") or {}).items():
     path = st.path("unit", other)
-    if other != unit and record.get("number") and path.is_file() \
-        and any(producer == unit for _, producer in core.body.consumes(core.read_text(path))):
+    if other != raising and record.get("number") and path.is_file() \
+        and any(made == producer for _, made in core.body.consumes(core.read_text(path))):
       numbers.append(record["number"])
   return sorted(numbers)
 

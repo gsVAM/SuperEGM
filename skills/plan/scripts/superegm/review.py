@@ -1,7 +1,7 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); each reviewer's record copying its stored instructions manifest (U38).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38).
 
-"""superegm review open|record|settle|status|rule|scope|post|ingest: the one review loop (spec section 8)."""
+"""superegm review open|record|settle|status|rule|scope|post|ingest|triage: the one review loop (spec section 8)."""
 
 import argparse
 import contextlib
@@ -133,6 +133,15 @@ def register(subparsers):
   which = i.add_mutually_exclusive_group(required=True)
   which.add_argument("--unit")
   which.add_argument("--pr", type=int, help="the spec PR: its threads into the latest round of the spec's latest cycle")
+  g = core.add_parser(action, "triage", "a head round's triage: its eligible mediums (--eligible), or the triage goldfish's reply recorded (--file)")
+  g.add_argument("--review", required=True)
+  g.add_argument("--round", type=int, required=True)
+  which = g.add_mutually_exclusive_group(required=True)
+  which.add_argument("--eligible", action="store_true", help="print the round's eligible mediums, one fid per line")
+  which.add_argument("--file", help="the triage goldfish's reply, one line per eligible medium, recorded verbatim or refused whole")
+  g.add_argument("--isolation", help="clean | exposed:<what>")
+  g.add_argument("--model", help="<requested>:<effective>")
+  g.add_argument("--effort", help="<requested>:<effective>")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -147,7 +156,7 @@ def run(args):
   try:
     return {"open": open_review, "record": record_round, "settle": settle_finding,
             "status": status_review, "rule": rule_review, "post": post, "scope": scope_review,
-            "ingest": ingest}[args.action](args)
+            "ingest": ingest, "triage": triage}[args.action](args)
   except Refusal as refusal:
     print(refusal)
     return 1
@@ -663,9 +672,7 @@ def record_round(args) -> int:
       and getattr(args, "threads", None) is None:  # a lapsed accept's `clean` rewritten (`review ingest` rewrites its own)
     data = core.load_foreman(st, review["artifact"])
     posted = sorted((e for e in data["rounds"] if e.get("phase") == "posted"), key=lambda e: e["round"])
-    word = {3: "revise", 2: "cap-reached"}.get(status.code)
-    if posted and posted[-1].get("outcome") == "clean" and word:
-      posted[-1].update({"outcome": word, "rewritten_from": "clean"})
+    if posted and rewrite_posted(posted[-1], lambda: status.code):
       core.save_foreman(st, review["artifact"], data)
   for fid, _, section in refused:
     where = ": no line number" if section == "none" else f" ({section})"
@@ -674,6 +681,178 @@ def record_round(args) -> int:
   core.journal(st, f"review record {rid} round {n} {reviewer} what_ran {rnd['what_ran']} under {args.runcard}")
   print(f"round {n} {reviewer} recorded, what_ran {rnd['what_ran']}")
   return 0
+
+
+# ---------------------------------------------------------------- triage
+
+
+def triage_undone(foreman: dict) -> bool:
+  """The owner turned triage off for the unit: a recorded undo (`kind: undo`) in its `rulings[]`."""
+  return any(r.get("kind") == "undo" for r in foreman.get("rulings") or [])
+
+
+def owner_named(foreman: dict) -> set:
+  """The fids an `owner: <ids>` outcome of any `rounds[]` entry names."""
+  return {fid for e in foreman.get("rounds") or [] if str(e.get("outcome") or "").startswith("owner: ")
+          for fid in e["outcome"][len("owner: "):].split(", ")}
+
+
+def eligible_fids(st: core.Store, review: dict, rnd: dict) -> list[str]:
+  """A head round's eligible mediums (section 5.2): a panel reviewer's unsettled medium that is not a regression,
+  not a `test-delta:` finding and not named in an `owner:` line, in a unit whose triage no undo turned off."""
+  foreman = core.load_foreman(st, review["artifact"])
+  if review["kind"] != "head" or triage_undone(foreman):
+    return []
+  panel, named = panel_at(review, rnd["round"]), owner_named(foreman)
+  return [f["id"] for reviewer in panel for f in (rnd["reviewers"].get(reviewer) or {}).get("findings") or []
+          if f["severity"] == "medium" and f["regression"] == "no" and f["disposition"] is None
+          and not f["claim"].startswith("test-delta:") and f["id"] not in named]
+
+
+def triage(args) -> int:
+  match = re.search(r"(?:^|-)head-(U\d+)-c\d+$", args.review)
+  if match and not args.runcard:  # `--eligible` runs without a card: the handoff is the one filing the review's unit
+    args.unit = match.group(1)
+  st = core.store(core.git_toplevel(Path.cwd()), args)
+  review = load_review(st, args.review)
+  if review is None:
+    raise core.HandoffError(f"review {args.review}: not opened")
+  rnd = load_round(st, args.review, args.round)
+  if rnd is None:
+    raise Refusal(f"triage: round {args.round} not recorded")
+  if args.eligible:
+    for fid in eligible_fids(st, review, rnd):
+      print(fid)
+    return 0
+  bind(args, review)
+  patterns = frozen_triage(args, st)
+  if patterns is None or triage_undone(core.load_foreman(st, review["artifact"])):
+    raise Refusal("triage: triage is off for this unit")
+  if rnd.get("triage"):
+    raise Refusal(f"triage: round {args.round} already triaged")
+  eligible = eligible_fids(st, review, rnd)
+  root = core.git_toplevel(Path.cwd())
+  lines = [line for line in core.read_text(Path(args.file)).splitlines() if line.strip()]
+  fields = {}
+  for line in lines:
+    fid, values = triage_line(line, root, rnd["artifact_sha256"])
+    if fid not in eligible:
+      raise Refusal(f"triage: {fid} is not an eligible medium of round {args.round}: {line}")
+    if fid in fields:
+      raise Refusal(f"triage: a second line for {fid}: {line}")
+    fields[fid] = values
+  if missing := [fid for fid in eligible if fid not in fields]:
+    raise Refusal(f"triage: no line for {', '.join(missing)}")
+  deferred = {}
+  for fid, values in fields.items():
+    n = next((i for i, pattern in enumerate(patterns, 1) if pattern_matches(pattern, values)), None)
+    if n is not None:
+      deferred[fid] = n
+  for reviewer in rnd["reviewers"].values():
+    for finding in reviewer.get("findings") or []:
+      if finding["id"] in deferred:
+        finding["disposition"] = f"deferred: triage {deferred[finding['id']]}"
+  rnd["triage"] = {"runcard": args.runcard, "isolation": args.isolation, "model": args.model, "effort": args.effort,
+                   "lines": lines, "findings": fields}
+  core.atomic_write(st.path("reviews", args.review, f"round-{args.round}.json"), rnd)
+  store_verdict(st, args.review, review, rnd["runcard"])
+  for fid, n in deferred.items():
+    core.journal(st, f"review triage {args.review} round {args.round} {fid} deferred: triage {n} under {args.runcard}")
+    print(f"{fid} deferred: triage {n}")
+  return 0
+
+
+def rewrite_posted(entry: dict, code, rnd: dict | None = None) -> str | None:
+  """A posted `rounds[]` entry whose outcome no longer holds, rewritten in place: a `clean` outcome, or (given its
+  round `rnd`) an `owner:` word whose remainder is no longer owner-only, becomes `revise`, or `cap-reached` at the cap
+  (`code()`, the review's status exit, read only then), with `rewritten_from` the old outcome. Returns the new word."""
+  outcome = str(entry.get("outcome") or "")
+  if outcome != "clean" and not (rnd is not None and outcome.startswith("owner:") and not owner_only_fids(rnd)):
+    return None
+  word = {3: "revise", 2: "cap-reached"}.get(code())
+  if word:
+    entry.update({"outcome": word, "rewritten_from": outcome})
+  return word
+
+
+def undo_outcome(st: core.Store, rid: str, runcard: str) -> None:
+  """After the owner's undo (section 5.2): the verdict re-derived (an accept on the round lapses), and the unit's
+  latest posted entry rewritten as ingest rewrites it (`rewrite_posted`): `clean`, or an `owner:` word whose remainder
+  is no longer owner-only, becomes `revise` or `cap-reached` at the cap."""
+  review = load_review(st, rid)
+  status = store_verdict(st, rid, review, runcard)
+  unit = review["artifact"]
+  data = core.load_foreman(st, unit)
+  posted = sorted((e for e in data["rounds"] if e.get("phase") == "posted"), key=lambda e: e["round"])
+  if not posted:
+    return
+  was = posted[-1].get("outcome")
+  if word := rewrite_posted(posted[-1], lambda: status.code, load_round(st, rid, posted[-1]["round"]) or {"reviewers": {}}):
+    core.save_foreman(st, unit, data)
+    core.journal(st, f"{unit} round {posted[-1]['round']} {was} rewritten {word} by the undo under {runcard}")
+
+
+def deferred_of(rnd: dict) -> list[dict]:
+  """The round's findings deferred by triage, in record order."""
+  return [f for f in findings_of(rnd) if str(f.get("disposition") or "").startswith("deferred: triage ")]
+
+
+def write_followups(st: core.Store, unit: str, rnd: dict) -> None:
+  """A posted round's deferred mediums as `followups[]` rows (section 5.2): once per fid and round, so a recovery's
+  second count writes none."""
+  rows = [{"fid": f["id"], "round": rnd["round"], "claim": f["claim"], "triage": rnd["triage"]["findings"][f["id"]],
+           "pattern": int(f["disposition"].rsplit(" ", 1)[1])} for f in deferred_of(rnd)]
+  if not rows:
+    return
+  data = core.load_foreman(st, unit)
+  have = {(r["fid"], r["round"]) for r in data.get("followups") or []}
+  new = [r for r in rows if (r["fid"], r["round"]) not in have]
+  if new:
+    data["followups"] = (data.get("followups") or []) + new
+    core.save_foreman(st, unit, data)
+
+
+TRIAGE_LINE = re.compile(r"^(?P<fid>\S+) \| reach: (?P<reach>\S+) \| later: (?P<later>\S+) \| critical: (?P<critical>\S+)"
+                         r" \| verified: (?P<verified>(?P<word>\S+)(?: (?P<rest>.+))?)$")
+
+
+def triage_line(line: str, root: Path, head: str) -> tuple[str, dict]:
+  """One reply line `<fid> | reach: <v> | later: <v> | critical: <v> | verified: confirmed <file:line>|refuted <reason>`:
+  its fid and the four fields, `verified` the text from its first word to the end of the line. Refused: a missing or
+  misplaced field, an unknown value, a `confirmed` whose `<file:line>` does not exist at the round's head."""
+  from superegm.approve_spec import TRIAGE_FIELDS  # approve_spec imports this module
+  match = TRIAGE_LINE.match(line.strip())
+  if not match:
+    raise Refusal(f"triage: expected `<fid> | reach: <v> | later: <v> | critical: <v> | verified: <v>`: {line}")
+  values = {key: match.group(key) for key in ("reach", "later", "critical")}
+  for key, value in [*values.items(), ("verified", match.group("word"))]:
+    if value not in TRIAGE_FIELDS[key]:
+      raise Refusal(f"triage: unknown value {value} for {key}: {line}")
+  rest = match.group("rest") or ""
+  if not rest:
+    raise Refusal(f"triage: verified: {match.group('word')} without its {'file:line' if match.group('word') == 'confirmed' else 'reason'}: {line}")
+  if match.group("word") == "confirmed":
+    cite = re.fullmatch(r"(?P<path>\S+):(?P<n>\d+)", rest)
+    text = core.run_git(["cat-file", "-p", f"{head}:{cite.group('path')}"], root, check=False) if cite else ""
+    if not cite or not 1 <= int(cite.group("n")) <= len(text.splitlines()):
+      raise Refusal(f"triage: {rest} does not exist at the round's head {head[:7]}: {line}")
+  return match.group("fid"), {**values, "verified": match.group("verified")}
+
+
+def pattern_matches(pattern: dict, values: dict) -> bool:
+  """A frozen pattern matches a triage when every field it names holds its value (`verified` by its first word); a
+  `refuted` triage matches only a pattern naming `verified: refuted` (section 5.2)."""
+  if values["verified"].split(" ", 1)[0] == "refuted" and pattern.get("verified") != "refuted":
+    return False
+  return all((values[key].split(" ", 1)[0] if key == "verified" else values[key]) == value for key, value in pattern.items())
+
+
+def frozen_triage(args, st: core.Store):
+  """The triage patterns frozen in the handoff's latest approval entry (section 5.1), or None: triage off."""
+  spec = core.handoff_spec(args, st)
+  entries = core.load_approvals(st, Path(spec)) if spec else []
+  own = [e for e in entries if st.handoff_id and e.get("handoff_id") == st.handoff_id]
+  return own[-1].get("triage") if own else None
 
 
 # ---------------------------------------------------------------- settle
@@ -987,7 +1166,8 @@ def evaluate(st: core.Store, review: dict, runcard: str) -> Status:
 
 def acceptable(st: core.Store, review: dict, runcard: str) -> tuple[list[str], int, int]:
   """The accept below the cap's predicate, beside the cap's: what blocks it on the latest completed round
-  (`kind integrate`, then each unsettled `high <fid>`, `regression <fid>`, `external <fid>`, then each pending
+  (`kind integrate`, then each unsettled `high <fid>`, `regression <fid>`, `external <fid>`, `undone <fid>` (a
+  medium the owner's undo returned to the round, section 5.2), then each pending
   `decision <id>` of a head's unit naming this review at any point but 5), with that round's unsettled medium
   and low counts. A later round, complete or not, holding an unsettled high or medium (a set finding review-plan
   records into a unit's next round) bars it as `early_accept_lapsed` lapses one: its `high`, `regression` and
@@ -1011,14 +1191,18 @@ def acceptable(st: core.Store, review: dict, runcard: str) -> tuple[list[str], i
 def finding_blockers(rnd: dict) -> list[str]:
   """A round's findings that bar an accept below the cap: each unsettled `high <fid>`, each `regression <fid>` the
   landed `regressions_of` counts (a blocking `regression: yes` whatever its disposition, an unsettled high listed
-  under `high` alone), each unsettled `external <fid>` medium."""
+  under `high` alone), each unsettled `external <fid>` medium, then each unsettled `undone <fid>`: a finding the
+  owner's undo returned to the round (section 5.2), which lapses an accept given on it and bars a new one."""
   found = findings_of(rnd)
   high = [f for f in found if f["severity"] == "high" and f["disposition"] is None]
   regression = [f for f in found if blocking(f) and f["regression"] == "yes" and f not in high]
   external = [f for f in found if f["severity"] == "medium" and f["disposition"] is None
               and f not in regression and f["id"].startswith("external:")]
+  # a medium the owner's undo returned to the round (section 5.2) lapses an accept given on it, as a new blocker does
+  undone = [f for f in found if f.get("undone_by") and blocking(f) and f["disposition"] is None
+            and f not in high + regression + external]
   return ([f"high {f['id']}" for f in high] + [f"regression {f['id']}" for f in regression]
-          + [f"external {f['id']}" for f in external])
+          + [f"external {f['id']}" for f in external] + [f"undone {f['id']}" for f in undone])
 
 
 def early_accept_lapsed(review: dict, accept: dict, rounds: list[dict], rulings: list[str]) -> bool:
@@ -1232,6 +1416,9 @@ def render_comment(round_json: dict, head: str, ci_verdict: str, mention) -> str
   for record in (round_json.get("reviewers") or {}).values():
     lines += [f"{f['id']} | {f['severity']} | {f['location']} | regression: {f['regression']} | {f['claim']}"
               for f in record["findings"] if "carried_from" not in f]
+  deferred = deferred_of(round_json) if round_json.get("reviewers") else []
+  if deferred:  # section 5.2: a deferred medium no longer blocks; the builder may still fix it
+    lines += ["", "**Deferred by triage**"] + [f"{f['id']} | {f['disposition']}" for f in deferred]
   lines += ["", f"CI: {ci_verdict}"]
   return "\n".join(lines) + "\n"
 
@@ -1476,16 +1663,10 @@ def ingest(args) -> int:
   data = core.load_foreman(st, unit)
   missing = sorted(recorded - set(data.get("ingested") or []))
   saved_entry = next(e for e in data["rounds"] if e["round"] == latest["round"])
-  word = None
-  if saved_entry.get("outcome") == "clean":  # the mirror of `review post`'s `clean` write
-    word = {3: "revise", 2: "cap-reached"}.get(status_code(rid, wave))
-    if word:
-      saved_entry.update({"outcome": word, "rewritten_from": "clean"})
-  elif str(saved_entry.get("outcome") or "").startswith("owner:") and not owner_only_fids(load_round(st, rid, latest["round"]) or {"reviewers": {}}):
-    # an external high or medium beside the owner's own leaves the remainder mixed: `revise`, or `cap-reached` at the cap
-    word = {3: "revise", 2: "cap-reached"}.get(status_code(rid, wave))
-    if word:
-      saved_entry.update({"outcome": word, "rewritten_from": saved_entry["outcome"]})
+  # the mirror of `review post`'s `clean` write; an external high or medium beside the owner's own leaves an
+  # `owner:` remainder mixed: `revise`, or `cap-reached` at the cap
+  word = rewrite_posted(saved_entry, lambda: status_code(rid, wave),
+                        load_round(st, rid, latest["round"]) or {"reviewers": {}})
   # point 2 opened since the round was posted: `decision open` records the PR's head then, not the round's
   routed = any(d.get("point") == 2 and d.get("source") == f"review {rid} cap" and d.get("asked_at", "") >= saved_entry.get("posted_at", "")
                for d in data.get("decisions") or [])
@@ -1720,6 +1901,8 @@ def count_posted(st: core.Store, unit: str, entry: dict, posted_at: str, review_
   saved["outcome"] = word
   entry.update(saved)
   core.save_foreman(st, unit, data)
+  if rnd and rnd.get("triage"):  # the round posts: its deferrals become follow-up rows, once per fid and round
+    write_followups(st, unit, rnd)
   core.journal(st, f"{unit} round {entry['round']} posted {word} under {runcard}")
   if word == "clean":
     core.journal(st, f"{unit} awaiting merge under {runcard}")

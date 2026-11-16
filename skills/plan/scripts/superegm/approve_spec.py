@@ -6,7 +6,7 @@
 # ingest once before the refusals, the refusal of an unsettled external finding, an external finding's carried copies
 # as one escalated pair discharged by its latest copy alone, and a re-approval of the same cycle reading that cycle
 # again and keeping the replaced entry's unnamed pairs (U26); `--amend-units` typed by hand opens and closes its own
-# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units`, and a hand-written prior approval read as `since` 0 (U36); the triage section parsed, refused with its line and frozen as `triage` (U39); the run mode frozen as the entry's `mode` (U43); the `instructions` list frozen with each file's blob sha and its verified store copy, and the changed files printed (U37).
+# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units`, and a hand-written prior approval read as `since` 0 (U36); the triage section parsed, refused with its line and frozen as `triage` (U39); the run mode frozen as the entry's `mode` (U43); the `instructions` list frozen with each file's blob sha and its verified store copy, and the changed files printed (U37); an opening approval refused over a partly filed handoff, and the last filing restored over an unapplied dry run, and `--void` without `--review` on a handoff with no `state.json` (U53).
 
 """superegm approve-spec: record the owner's approval of a converged spec (spec section 8)."""
 
@@ -35,7 +35,10 @@ def register(subparsers):
   p.add_argument("--spec", dest="design", required=True)
   p.add_argument("--yes", action="store_true", help="the owner answered Approve")
   p.add_argument("--leavemealone", action="store_true", help="the converged record is the approval")
-  p.add_argument("--void", action="store_true", help="void the approval after a fix-design finding")
+  p.add_argument("--void", action="store_true",
+                 help="void the approval after a fix-design finding (--review), or, with no --review, the owner's void "
+                      "of an approval whose handoff has no state.json; typed without --runcard it opens and closes "
+                      "its own approve-spec-<6 hex>-<n> card")
   p.add_argument("--review", help="with --void: the review holding the fix-design finding")
   p.add_argument("--amend-units", dest="amend_units", action="store_true",
                  help="re-approve rows appended to ## Units without a review round; typed without "
@@ -61,6 +64,44 @@ def handoff_state(st: core.Store, hid: str) -> dict:
 
 def files_a_unit(state: dict) -> bool:
   return any((record or {}).get("number") for record in (state.get("units") or {}).values())
+
+
+def incomplete_filing(state: dict) -> bool:
+  """A handoff with a `filings[]` entry is partly filed (U53) when its last entry has no complete, problem-free `verify`
+  receipt for its own `sha256` (not `confirmed_sha256`: a later dry run never applied is no partial filing), or a unit
+  in `state.units` has no issue `number`; one with no `filings[]` entry is never partly filed."""
+  filings = state.get("filings") or []
+  if not filings:
+    return False
+  receipt = state.get("verify") or {}
+  if not (receipt.get("complete") and receipt.get("sha256") == filings[-1].get("sha256") and not receipt.get("problems")):
+    return True
+  return any(not (record or {}).get("number") for record in (state.get("units") or {}).values())
+
+
+def discard_unapplied_dry_run(st: core.Store, hid: str) -> None:
+  """U53: an approval opening a new handoff over a filed one restores the older handoff's `confirmed.sha256`,
+  `confirmed.writes` and `confirmed_sha256` from its last `filings[]` entry (its `repo` and the rest of `confirmed`
+  kept), so a later dry run never applied cannot leave its receipt failing `require_receipt`; a handoff with a
+  `confirmed` list and no `filings[]` entry is left untouched."""
+  state = handoff_state(st, hid)
+  filings = state.get("filings") or []
+  if not filings or state.get("confirmed_sha256") == filings[-1].get("sha256"):
+    return
+  discarded, last = state.get("confirmed_sha256") or "", filings[-1]
+  state["confirmed"] = {**(state.get("confirmed") or {}), "sha256": last["sha256"], "writes": last["writes"]}
+  state["confirmed_sha256"] = last["sha256"]
+  older = core.handoff_store(st, hid)
+  core.atomic_write(older.path("state"), state)
+  core.journal(older, f"dry run {discarded[:12]} discarded")
+
+
+def unplanned_latest(st: core.Store, spec: Path) -> bool:
+  """U53: the spec has an approval whose handoff has no `state.json`, nothing planned or filed: the one handoff the
+  owner voids without a review."""
+  entries = core.load_approvals(st, spec)
+  hid = entries[-1].get("handoff_id") if entries else None
+  return bool(hid) and not core.handoff_store(st, hid).path("state").is_file()
 
 
 def handoff_id_for(st: core.Store, sha: str, stem: str, entries: list) -> tuple:
@@ -312,9 +353,12 @@ def run(args):
     raise core.HandoffError(f"approve-spec: spec {spec} does not exist")
   root = core.git_toplevel(spec)
   st = core.store(root)
-  if not (args.amend_units and not args.runcard):
+  owner_void = args.void and not args.review
+  if owner_void and not unplanned_latest(st, spec):  # U53: before any card
+    raise core.HandoffError("approve-spec: --void requires --review")
+  if not ((args.amend_units or owner_void) and not args.runcard):
     return approve(args, st, spec, root, core.require_runcard(args, SKILLS))
-  # U32: `--amend-units` typed outside a skill opens and closes its own card (spec section 12)
+  # U32, U53: `--amend-units`, and the owner's `--void`, typed outside a skill open and close their own card (spec section 12)
   args.runcard = core.open_runcard(st, "approve-spec", str(spec))
   try:
     return approve(args, st, spec, root, core.require_runcard(args, SKILLS))
@@ -394,7 +438,14 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
     print(f"Approve `{spec}` (sha256 `{sha[:12]}`) at review {rid}?")
     print("Options: Approve | Stop. Run again with --yes after the owner chose Approve.")
     return 0
-  handoff_id, kind = handoff_id_for(st, sha, spec.stem, core.load_approvals(st, spec))
+  entries = core.load_approvals(st, spec)
+  handoff_id, kind = handoff_id_for(st, sha, spec.stem, entries)
+  superseded = entries[-1] if entries and kind == "opening" and handoff_id != entries[-1].get("handoff_id") else None
+  if superseded and superseded.get("handoff_id") and not superseded.get("voided_by") \
+      and incomplete_filing(handoff_state(st, superseded["handoff_id"])):  # U53: before any write
+    raise core.HandoffError(f"approve-spec: handoff {superseded['handoff_id']} has an incomplete filing: finish /superegm:file first")
+  if superseded and superseded.get("handoff_id"):  # U53: first, so a restore that fails leaves no approval recorded
+    discard_unapplied_dry_run(st, superseded["handoff_id"])
   commit = commit_by_path(root, [spec.relative_to(root).as_posix(), CONFIG], f"superegm: approve {slug} at review {rid}",
                           st.config["commit_trailer"])
   try:  # the files at the approval commit itself, each copied to the store before the entry names it
@@ -418,16 +469,16 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
 
 def void_approval(args, st: core.Store, spec: Path) -> int:
   """`--void --review <id>`: the latest approval (the history's last entry) is void once that review records
-  a `fix-design` finding; its handoff, when its `state.json` files no unit, closes through `close`'s write."""
-  if not args.review:
-    raise core.HandoffError("approve-spec: --void requires --review")
-  slug, rid = core.spec_slug(spec), args.review
+  a `fix-design` finding; its handoff, when its `state.json` files no unit, closes through `close`'s write.
+  `--void` with no `--review` (U53) is the owner's void of an unplanned latest handoff, which `run` has checked:
+  `voided_by` is `"owner"`."""
+  slug, rid = core.spec_slug(spec), args.review or "owner"
   entries = core.load_approvals(st, spec)
   if not entries:
     raise core.HandoffError(f"approve-spec: no approval for {slug}")
-  if load_review(st, rid) is None:
+  if args.review and load_review(st, rid) is None:
     raise core.HandoffError(f"approve-spec: review {rid}: not opened")
-  if not any(f["disposition"] == "fix-design" for n in round_numbers(st, rid) for f in findings_of(load_round(st, rid, n))):
+  if args.review and not any(f["disposition"] == "fix-design" for n in round_numbers(st, rid) for f in findings_of(load_round(st, rid, n))):
     raise core.HandoffError(f"approve-spec: review {rid} has no fix-design finding")
   path = st.path("approvals", slug)
   record = json.loads(core.read_text(path))
@@ -437,13 +488,16 @@ def void_approval(args, st: core.Store, spec: Path) -> int:
   else:  # a 1.1 record is its one entry: `voided_by` written in place, nothing migrated
     entries[-1]["voided_by"] = record["voided_by"] = rid
     core.atomic_write(path, record)
-  core.journal(st, f"approve-spec void {slug} by review {rid} under {args.runcard}")
   hid = entries[-1].get("handoff_id")
+  if args.review:
+    core.journal(st, f"approve-spec void {slug} by review {rid} under {args.runcard}")
+  else:
+    core.journal(st, f"approval {slug} voided by the owner: no unit left to plan")
   voided = core.handoff_store(st, hid)
   state = handoff_state(st, hid) or {"handoff_id": hid}  # a handoff never planned: a minimal state.json
   if hid and not files_a_unit(state) and not state.get("closed_at"):
     close.write_closed(voided, state, "voided")
-  print(f"approval of {slug} voided by review {rid}")
+  print(f"approval of {slug} voided by " + (f"review {rid}" if args.review else "the owner"))
   return 0
 
 
