@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Files a confirmed handoff plan as GitHub issues, with the tracking issue, one sub-issue per unit and the blocked-by links.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the file skill body, phase 4 of the SuperEGM loop (design section 10); `[--handoff <id>]` and a frozen handoff's refusal (U20). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the file skill body, phase 4 of the SuperEGM loop (design section 10); `[--handoff <id>]` and a frozen handoff's refusal (U20); the resume of a started filing, the frozen mode, `next wait` and `next clear` under the chain (U56). -->
 
 # file
 
@@ -20,8 +20,9 @@ This skill runs in Claude Code only. In any other host reply with one line,
 
 The converged, unfiled unit bodies of an approved spec become labelled GitHub
 issues: one tracking issue, one issue per unit as a sub-issue of it, and a
-blocked-by link per `Blocked by` entry. Six helper commands do it in order,
-each under one run card: the gate, the dry run, the owner's one answer, the
+blocked-by link per `Blocked by` entry. Helper commands do it in order, each
+under one run card: the resume of a started filing, when there is one
+(the writes again and the read-back), the gate, the dry run, the owner's one answer, the
 writes, the read-back, the close. Every write is on one confirmed write list
 that the helper hashes, shows, and re-checks before it writes. Units already
 filed are frozen: a later filing (after `/superegm:plan` appended units)
@@ -32,7 +33,8 @@ creates only the new issues and rewrites the tracking issue.
 *   **`SpecPath`**: the approved spec, absolute or relative to the
     repository root.
 *   **`--leavemealone`** (optional): the automatic Create of leavemealone-mode
-    for this run; without it the mode is the config's `mode`.
+    for this run; without it the mode is the one frozen in the handoff's
+    approval (`config.mode` for an approval with no `mode`).
 *   **`[--handoff <id>]`** (optional, after `<SpecPath>`): the handoff to file; by default the spec's latest
     approval's. An older handoff is frozen: every command below refuses it (`<handoff>: not the latest approval: plan the rows in the latest handoff`).
 
@@ -45,19 +47,97 @@ Ask for a missing `SpecPath` in plain chat.
 call, `python3 '<HELPER>' <subcommand> ...`, absolute paths in single quotes,
 no chaining, pipes, redirects or environment variables; the Bash `timeout`
 is the default. **One command at a time**: the helper is single-writer, so
-let each command finish before starting the next. Every command below takes
-`--spec '<SpecPath>'` and `--runcard '<CARD>'` and exits 1 with one
+let each command finish before starting the next. Every command below except `next` takes
+`--spec '<SpecPath>'` and `--runcard '<CARD>'` (`next` takes `--handoff` and
+`--runcard`, never `--spec`) and exits 1 with one
 `superegm: <reason>` line when it refuses; show that line to the owner. When the invocation named a handoff,
 pass `--handoff '<id>'` to `runcard open` and to every command below.
+
+## Under the chain
+
+With the chain on, a tick of `/superegm:driver` may start this skill
+(SUPEREGM_ROLE=driver), or the owner may type it. Under the driver the skill
+never asks. The two driven stops are Create (Step 4) and verification
+problems left on GitHub (Step 2 and Step 6); at either a driven run runs
+
+`python3 '<HELPER>' next wait --handoff '<id>' --phase file --question '<text>' --runcard '<CARD>'`
+
+which writes the handoff's wait record and closes the card, and then the run
+ends. `<id>` is the invocation's `--handoff`, else the `handoff` of the card's
+record (`<handoff>/runcards/<CARD>.json` in the store, which `runcard open`
+resolved from the spec's latest approval). `<text>` is one line with no single
+quote: a quote in the lines it carries is written as a backtick. Every other
+ending is as written, with no wait record: a gate, dry run or adopt refusal
+ends a driven run on its line, as it does a typed one. A typed run asks as
+written.
+
+A run, typed or driven, that finds a wait record for this handoff
+(`chain/<handoff>.json` in the store) opens its card with `runcard open --mode
+normal` whatever the frozen mode (Step 1) and runs Steps 2 to 4 as for any
+filing. A typed run that names no `--handoff` has no `<id>` before its card
+exists: it opens the card as Step 1 says, reads `<id>` from the card's
+record, and when `chain/<id>.json` exists opens its card again with `--mode
+normal` (the new card marks the first interrupted) and passes `--handoff
+'<id>'` to every command below. A driven run is started only on a record with an `answer`; it takes
+the record's `answer` where a typed run asks the record's question directly,
+with no new panel.
+
+*   A verification record (its question is the `MISMATCH` lines): the typed
+    run asks that question first, then goes on from Step 2.
+*   A Create record (its question names `handoff_dryrun.md` and a `Confirmed
+    write list sha256`): the answer is for that write list only. At Step 4,
+    after the dry run, compare the `Confirmed write list sha256` of the fresh
+    `handoff_dryrun.md` with the record's. Equal: the record's question
+    replaces Step 4's, and its answer is Create (Step 5), Change the plan or
+    Stop (the run ends). Different: the answer is for another write list and
+    is void; a typed run asks Step 4's own question, a driven run runs `next
+    wait` with the fresh question.
+
+At its end the run runs
+`python3 '<HELPER>' next clear --handoff '<id>' --runcard '<CARD>'` in place
+of `runcard close`, which removes the record only on confirmed progress and
+closes the card.
 
 ## Step 1: Run card
 
 Run `python3 '<HELPER>' runcard open --skill file --artifact '<SpecPath>'`,
-adding `--mode leavemealone` when the invocation said `--leavemealone` or
-the config's `mode` is `leavemealone`. The printed id is `<CARD>`. A card
+adding `--mode leavemealone` only when the invocation said `--leavemealone`;
+otherwise `runcard open` takes the mode frozen in the handoff's approval
+(`config.mode` for an approval with no `mode`). On a wait record the mode is
+`--mode normal` instead (Under the chain). The printed id is `<CARD>`. A card
 still open on this spec is marked interrupted by the new one.
 
-## Step 2: The gate
+## Step 2: Resume a started filing
+
+Before the gate, resume a started filing with `apply --yes` (Step 5) and
+then `verify` (Step 6). A filing is started when `state.json`'s `filings[]`
+holds an entry whose `sha256` is `confirmed_sha256`, and it still needs
+finishing when the receipt (`verify.complete`, `verify.sha256`,
+`verify.problems`) is missing, incomplete, for another sha or has problems.
+The fresh receipt replaces the stored one, so a body repaired by hand on
+GitHub clears it. A dry run the owner stopped on after an earlier complete
+filing has no `filings[]` entry and is not started: go to Step 3.
+
+*   `apply` refuses (its gate, write-list or body check, as after an
+    `--amend-units` that changed the plan): go on to Step 3, the gate, and
+    Step 4, the dry run, as for a new filing. The earlier `filings[]` entry
+    stays and `verify` covers it.
+*   `apply` exits on a rate limit (`rate limited: resume with ...`) or on
+    `stopped after` (`--max-writes`, Step 5): the run ends with that line
+    and the next run resumes here.
+*   The receipt comes out complete with `0 problem(s)`: report as Step 7
+    does and close; the gate's `nothing to file` is not the end of a
+    resume that still had problems to repair.
+*   `MISMATCH` lines remain, other than `MISMATCH read failed`: a person
+    must fix them on GitHub. A typed run reports them as Step 6 says and
+    ends. A driven run runs `next wait` (Under the chain) with those lines
+    as the `--question` and ends.
+*   Only `MISMATCH read failed` lines remain (a GitHub read that failed; an
+    issue deleted or transferred reads so for good): run `verify` once more.
+    When they remain, report them and end, a driven run too, with no wait
+    record.
+
+## Step 3: The gate
 
 Run `python3 '<HELPER>' gate --pass --spec '<SpecPath>' --runcard '<CARD>'`.
 It passes when every unfiled unit's plan review converged on the body the
@@ -66,15 +146,17 @@ hashes the rest of the filing is checked against, and prints
 `gate passed: <k> unfiled units converged`. Its refusals:
 
 *   `gate: <unit> plan review not converged`: the unit has no converged plan
-    review. The owner returns to `/superegm:review-plan`; this skill ends.
+    review, or a round was recorded after the converged one (the review is
+    due again). The owner returns to `/superegm:review-plan`; this skill ends.
 *   `gate: <unit> body differs from its converged round`: the plan changed
     after the review (an edit, a `decide`, a re-run `graph`). The unit needs
     one more `/superegm:review-plan` round on the current body; this skill
     ends.
 *   `gate: nothing to file (every unit is filed)`: there is nothing to do;
-    report that and close the card (Step 6).
+    report that and close the card (Step 7), never after a resumed verify with problems:
+    that run ends at Step 2 or Step 6.
 
-## Step 3: The dry run
+## Step 4: The dry run
 
 Run `python3 '<HELPER>' dry-run --spec '<SpecPath>' --runcard '<CARD>'`. It
 scans the bodies with the current rules, reads GitHub three times (login,
@@ -93,7 +175,7 @@ closed`, `not in <repo>`, `is a pull request`, `has a parent`, `has
 dependencies`, `carries superegm labels`, `carries a ruling comment`), each
 ending the skill with the line shown. `handoff_dryrun.md` heads such a unit
 `### edit #<n> <unit> (old body sha256 <hex>)` where a created unit reads
-`### issue <unit>`: Step 4 adds the unit labels to that issue and replaces
+`### issue <unit>`: Step 5 adds the unit labels to that issue and replaces
 its body with the rendered one, keeping its title, other labels and
 comments.
 
@@ -105,16 +187,22 @@ from the `Writes:` line and the repository from the config, and no
 
 Options, in this order: Create, Change the plan, Stop.
 
-*   **Create**: go to Step 4.
+*   **Create**: go to Step 5.
 *   **Change the plan**: this skill ends; the owner re-types `/superegm:plan`
     (and `/superegm:review-plan`) and comes back.
 *   **Stop**: this skill ends and leaves every store file as it is; nothing
     was written to GitHub.
 
-In leavemealone-mode there is no question: go to Step 4, where the helper
+In leavemealone-mode there is no question: go to Step 5, where the helper
 journals `Create: automatic (leavemealone)` once per filing.
 
-## Step 4: The writes
+A driven run in normal mode asks nothing either: unless a wait record's
+`answer` applies to this write list (Under the chain), it runs `next wait`
+with `--phase file` and a `--question` that reads as the question above,
+adding `handoff_dryrun.md` and the `Confirmed write list sha256` from it, and
+ends.
+
+## Step 5: The writes
 
 Run `python3 '<HELPER>' apply --yes --spec '<SpecPath>' --runcard '<CARD>'`.
 Before its first write it re-checks the gate pair and the write list against
@@ -126,7 +214,7 @@ labels (`superegm:unit`, `superegm:tracking`, `superegm:handoff-<6 hex>`,
 `superegm:stopped`, one `superegm:wave-<n>` per wave), the tracking issue
 (or rewrites it on a later filing), the unit issues in graph order with
 their blocker numbers filled in, the sub-issue links, the blocked-by links,
-and reads everything back (Step 5's check, run once by `apply` itself).
+and reads everything back (Step 6's check, run once by `apply` itself).
 
 *   It is idempotent: a crash, a rate limit (`rate limited: resume with
     ...`) or a stop at `--max-writes` leaves a state the same command resumes
@@ -137,11 +225,11 @@ and reads everything back (Step 5's check, run once by `apply` itself).
     in several calls, until it no longer prints `stopped after`.
 *   `adopt: #<n> body changed since the dry run` (or `adopt: #<n> not in
     <repo>`): the adopted issue changed, or went, between the dry run and
-    the writes; nothing was written. The owner re-runs the dry run (Step 3)
+    the writes; nothing was written. The owner re-runs the dry run (Step 4)
     and answers the question again.
 *   A filed issue body is never edited; a deviation during the build is a comment on the issue (§10).
 
-## Step 5: The read-back
+## Step 6: The read-back
 
 Run `python3 '<HELPER>' verify --spec '<SpecPath>' --runcard '<CARD>'`. It
 reads every label, issue body and link of every filing back and compares
@@ -153,20 +241,28 @@ issue against the latest), then records the receipt in `state.json`
 that differs from the list (a body edited by hand, a label removed, a link
 missing or obsolete): report every line to the owner, who fixes it on
 GitHub by hand (the helper never edits a filed body), then run this step
-again until it is clean.
+again until it is clean. A driven run does not wait on the owner here: when
+the lines include any `MISMATCH` other than `MISMATCH read failed`, it runs
+`python3 '<HELPER>' next wait --handoff '<id>' --phase file --question
+'<the MISMATCH lines>' --runcard '<CARD>'` and ends; the lines go on one
+line, separated by ` | `, a single quote in them written as a backtick.
+`MISMATCH read failed` lines are a GitHub read that failed, not a difference:
+run this step once more, and when they remain report them and end, a driven
+run too, with no wait record.
 
-## Step 6: Report and close
+## Step 7: Report and close
 
 Report in chat, in this order: the tracking issue's URL; one line per unit,
 `U07 #412 <title>` (the numbers are in `state.json` under `units`); the
 `verify:` line. Then say that `/superegm:wave` starts the first wave.
-Finally run `python3 '<HELPER>' runcard close '<CARD>'`.
+Finally run `python3 '<HELPER>' runcard close '<CARD>'`, or, on a wait
+record (Under the chain), `next clear`.
 
 ## Resuming
 
 Every step is re-entrant from `state.json`: a new invocation opens a new
-card (Step 1) and runs the steps again; the gate and the dry run recompute
+card (Step 1) and runs the steps again, a started filing first (Step 2); the gate and the dry run recompute
 the same hashes on an unchanged store, `apply` finds what was created, and
 the read-back reports only what differs. If the owner answered the question
 already in this filing (`filings[]` holds the dry run's hash), do not ask it
-again: go to Step 4.
+again: go to Step 5.
