@@ -47,3 +47,26 @@ def test_a_dir_entry_outside_the_limits_is_refused(world, case, named):
   assert "must be a list of" not in out, out   # refused for its reason, not as a malformed shape
   if case == "both file and dir":
     assert "exactly one of file and dir" in out, out
+
+
+def test_a_folder_freezes_each_document_with_its_raw_copy(world):
+  """Each document frozen by its 12-hex blob sha, the raw bytes beside the .json."""
+  from test_review import hstore
+  from test_u37 import blob_sha, entries_of
+  texts = {f"{DIR}/b.md": "B first line.\nmore\n", f"{DIR}/a.md": "A first line.\n", f"{DIR}/sub/c.md": "C é line.\n"}
+  commit_files(world, {**texts, f"{DIR}/skip.txt": "not markdown\n"})
+  configure(world, [{"dir": DIR, "to": ROLES}])
+  spec, cid, rid = converged_spec(world)
+  code, out = approve(world, spec, cid, "--yes")
+  assert code == 0, out
+  entry = entries_of(world)[-1]["instructions"][0]
+  assert entry["dir"] == DIR and entry["to"] == ROLES
+  assert [f["file"] for f in entry["files"]] == ["docs/reference/a.md", "docs/reference/b.md", "docs/reference/sub/c.md"]
+  for f in entry["files"]:
+    assert f["sha"] == blob_sha(texts[f["file"]].encode("utf-8")) and set(f) == {"file", "sha"}
+    assert f"{f['file']} {f['sha']}" in out, out
+  store_dir = hstore(world).path("instructions", entry["files"][0]["sha"]).parent
+  assert sorted(p.name for p in store_dir.iterdir()) == sorted(
+    [f"{f['sha']}.json" for f in entry["files"]] + [f"{f['sha']}.md" for f in entry["files"]])
+  for f in entry["files"]:
+    assert (store_dir / f"{f['sha']}.md").read_bytes() == texts[f["file"]].encode("utf-8")
