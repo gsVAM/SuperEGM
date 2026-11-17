@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Reviews a handoff plan against its design through the judge panel before any issue is filed.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the body: plan review over the helper's review-plan and review subcommands (U06); `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the accept below the cap's one question per round (U35); the `width:` line, the plan header, the chain check and the split check (U29); the readiness plan remit (1.2.1 §6.5); the driven wait and the typed run on a wait record, the frozen mode (U45). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the body: plan review over the helper's review-plan and review subcommands (U06); `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the accept below the cap's one question per round (U35); the `width:` line, the plan header, the chain check and the split check (U29); the readiness plan remit (1.2.1 §6.5); the driven wait and the typed run on a wait record, the frozen mode (U45); proceed offered at the cap and on a stall (U58). -->
 
 # Plan review (phase 3)
 
@@ -74,13 +74,17 @@ command carries no flag), and drop the units this invocation already ended. Then
   record names the reviewer and the reason from
   `python3 '<HELPER>' review status --review '<id>' --runcard '<card>'` and the round file's
   `not run (<reviewer>: <reason>)`. A re-typed `/superegm:review-plan` opens a new card and
-  resumes the same cycle.
+  resumes the same cycle. The stall still ends the invocation; the owner's way past it is
+  `python3 '<HELPER>' review rule --review '<id>' --ruling 'proceed' --owner --reason '<text>' --runcard '<card>'`.
 - `cap`: decision point 2 as one question (continue one bounded round, once per cycle; accept
   the remainder, not while the body moved since the round; stop, alone and ruled by no one once
   continue is spent and the body moved), recorded with
   `python3 '<HELPER>' review rule --review '<id>' --ruling '<continue|accept|stop>' --owner --runcard '<card>'`
   (`--judges '<id>'` in leavemealone-mode). `continue` raises the cap by one and the next round
-  follows; `accept` converges the unit; `stop` ends the invocation for that unit. When the
+  follows; `accept` converges the unit; `stop` ends the invocation for that unit. Beside these the
+  owner alone (never `--judges`; the judges' question keeps its options) may end the review with
+  `python3 '<HELPER>' review rule --review '<id>' --ruling 'proceed' --owner --reason '<text>' --runcard '<card>'`,
+  which settles the open findings `declined` and converges the unit. When the
   helper answers `review rule: cycle stopped`, a stop was ruled earlier: run `review open` as
   for `due - 1`; it starts the next cycle with a fresh cap.
 - Below the cap, before the `due <id> <n>` rows run, run `python3 '<HELPER>' review status --review '<id>' --runcard '<card>'` per
@@ -219,7 +223,8 @@ would ask the owner in normal mode (Step 1's accept question, a contested or dec
 medium, a review at its cap) or a unit stalls, or where it must stop in either mode (a split that
 needs `approve-spec --amend-units`), run
 `superegm next wait --handoff '<id>' --phase review-plan --question '<text>' --review '<review id>' --runcard '<card>'`
-through the helper (the question on one line; the cap, stall and contest waits pass `--review`). It writes the wait
+through the helper (the question on one line; the cap, stall and contest waits pass `--review`; at the cap or a stall the question names
+`proceed` beside the other answers). It writes the wait
 record `chain/<handoff>.json` and closes the card; then exit. The owner answers in the inbox, which
 writes the answer into the record, and the next tick runs this skill again.
 

@@ -11,7 +11,7 @@ description: >-
   Zoom Out Review, and Implementation Readiness.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: renamed to review-spec; the body is spec section 8's one review loop over the helper (the stages, presets, semantic split, checkpoint gates and report files are gone); persona path agents/zoom-out.md; the amendment scope, the branch sentence and the batch settle (U19); the spec PR, the pushes and the PR's ingest (U26); step 3's accept below the cap (U35); the resumed panel line and the cap read from `review.rounds` (U36). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: renamed to review-spec; the body is spec section 8's one review loop over the helper (the stages, presets, semantic split, checkpoint gates and report files are gone); persona path agents/zoom-out.md; the amendment scope, the branch sentence and the batch settle (U19); the spec PR, the pushes and the PR's ingest (U26); step 3's accept below the cap (U35); the resumed panel line and the cap read from `review.rounds` (U36); proceed offered at the cap and on a stall (U58). -->
 
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: run card, panel presets, Astra lane. -->
 
@@ -96,7 +96,7 @@ a reviewer off the round's panel changes nothing and the line ends ` (unchanged:
 a panel not starting with `design` is refused before any line prints. A resume cannot drop the Astra lane.
 Dispatch the panel that line prints, after finishing a partly recorded round with its own panel (the line names
 the next round's) unless the spec was edited since that round's first record: that round then takes no more
-records, so leave it as recorded. On a new cycle only the id prints: dispatch the panel you passed. A closed one (`accept`, `stop`, or a spec edited after the
+records, so leave it as recorded. On a new cycle only the id prints: dispatch the panel you passed. A closed one (`accept`, `stop`, `proceed`, or a spec edited after the
 approval that names it) starts the next cycle with a fresh cap (`review.rounds`, read at that open).
 
 `--scope` is the invocation's, default `auto`: an amendment is reviewed in scope, the sections
@@ -176,7 +176,9 @@ After the approval commit, `git push origin <branch>`, so the PR's head is the a
 
 Tell the owner, in one line: push the approval commit to `origin/<base>` (only the owner updates
 the base branch; `launch` refuses the first wave until the spec there hashes to the approval; GitHub records that push as the PR's merge),
-then type `/superegm:plan <spec-path>`. Nothing chains.
+then check out `<base>` at the pushed commit (`superegm next --handoff <handoff-id>`, the `handoff_id` of `approvals/<spec-slug>.json`, prints
+`waiting checkout: <root>: <reason>` until the checkout is there), then type
+`/superegm:plan <spec-path>` with the chain off, or leave the driver's plan to run with it on.
 
 ### 5. At the cap (exit 2)
 
@@ -191,11 +193,26 @@ Record it:
 `continue` raises the cap by one: the next round. `accept` converges the spec: step 4. `stop`
 ends the cycle at its cap: step 7 with the record; the next invocation opens cycle n+1.
 
+Beside those, the owner alone (never `--judges`, and never in the judges' question, which keeps
+its three options) can end the review with their go-ahead, whatever its state:
+
+    superegm review rule --review <id> --ruling proceed --owner --reason "<text>" --runcard <id>
+
+`proceed` settles every unsettled finding `declined` as accepted risk and converges the cycle
+by that ruling: step 4.
+
 ### 6. Stalled (exit 5)
 
-The two latest rounds did not complete under this run card. End this invocation with the
-record: name the review id, the reviewer and the reason from the round file, and close the card
-(step 7). A re-typed `/superegm:review-spec` opens a new run card and resumes the same cycle.
+The two latest rounds did not complete under this run card. Name the review id, the reviewer and
+the reason from the round file. The stall still ends the invocation; the owner's way past it is
+`proceed`. When the owner gives it in this session, record it now, while the run card is still
+open (a closed card refuses it), then go to step 4:
+
+    superegm review rule --review <id> --ruling proceed --owner --reason "<text>" --runcard <id>
+
+Otherwise this invocation ends here with the record: close the card (step 7). A re-typed
+`/superegm:review-spec` opens a new run card and resumes the same cycle, and the owner's
+`proceed` can be ruled there under that card.
 
 ### 7. Close
 
