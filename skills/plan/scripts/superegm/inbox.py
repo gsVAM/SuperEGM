@@ -147,10 +147,16 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
     # U61: the shared-file merge order from `handoff_units.json`, none when the file or the key is absent
     order, merge_after = merge_order(hs)
     after = [m for m in order if m in merge_after.get(uid, []) and not report.unit_view(state, m)["landed"]]
-    action = f"await-merge after {', '.join(after)} · {url}" if after else url
+    auth = authorizing(foreman) or {}
+    if auth.get("ruling"):  # spec section 4.2: a proceed authorizes; the owner merges that head and no other
+      target = f"gh pr merge {pr} --match-head-commit {auth.get('head')} · {url}"
+      base = f"{auth.get('review')}/{auth.get('head')}"  # a head cycle may have no foreman round at all
+    else:
+      target, base = url, str(max(r["round"] for r in rounds))
+    action = f"await-merge after {', '.join(after)} · {target}" if after else target
     # the unlanded `after` list is in the fingerprint: the item is new again to `notify` each time an `after` unit
     # lands, the last one included
-    key = "".join([str(max(r["round"] for r in rounds))] + [f"/after-{m}" for m in after])
+    key = "".join([base] + [f"/after-{m}" for m in after])
     out.append(item(repo, uid, "merge", action, key))
   return out
 
