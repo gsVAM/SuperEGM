@@ -15,3 +15,20 @@ def test_workflow_step_order():
   assert t.index("## The Written Design") < s < t.rindex("`/superegm:review-spec`")
   order = ["`reviewers.spec`", "`reviewers.integrate`", "`instructions`", "`review.rounds`", "`mode`", "`superegm builder-setup`", "commit", "`superegm doctor`", "`doctor --probe`", "`driver.chain`"]
   assert [t.index(p, s) for p in order] == sorted(t.index(p, s) for p in order)
+
+
+@pytest.mark.parametrize("phrase", [
+    "suggestion drawn from the spec",                        # each question led by its suggestion
+    "changes only what the owner agrees to",
+    "quick, clear task",                                     # skips the step
+    "In Cowork",
+    "`plan` and `wave` need `superegm doctor` to pass",
+    "`--mcp`", "`--allow`",
+    "model call", "only when the owner agrees",              # the probe offered, never run unasked
+    "records nothing", "refuse until doctor passes",         # a skipped area
+    "`~/.superegm/env`", "`0600`",                           # the driver setup offer
+])
+def test_workflow_step_phrases(phrase):
+  # §3.4: the step's branches and promises, each a required phrase in the section
+  t = Path("skills/brainstorming/SKILL.md").read_text()
+  assert phrase in t[t.index("## Design the SDLC Workflow"):]
