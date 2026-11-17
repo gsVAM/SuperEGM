@@ -119,3 +119,31 @@ def test_inbox_offers_merge_on_the_authorizing_head(world, case):
   # offered only while the pull request's head is the authorizing outcome's
   set_head(s, "U01", "d" * 40)
   assert not any(i["subject"] == "U01" and i["kind"] == "merge" for i in inbox_items(s, [s.handoff_id]))
+
+
+# ---------------------------------------------------------------- S3: a proceed closes the point-1 decisions
+
+
+@pytest.mark.parametrize("decision", ["owner-only point-1 allowance", "builder-contest point-1",
+                                      "cap question naming the review"])
+def test_proceed_closes_point_one_decisions(world, decision):
+  s, card, rid = head_world(world)
+  opened = {"owner-only point-1 allowance": {"id": "q1", "point": 1, "source": f"review {rid} round 1", "question": "owner: f1",
+                                             "options": ["change-review-1-1 allowed"]},
+            "builder-contest point-1": {"id": "q1", "point": 1, "source": f"review {rid} round 1",
+                                        "question": "change-review-1-1 | medium | a.py | regression: no | x\n"},
+            "cap question naming the review": {"id": "q1", "point": 2, "source": f"review {rid} cap", "question": "the cap",
+                                               "options": ["one more round", "stop", "redesign"]}}[decision]
+  f = foreman_of(s, "U01")
+  f["decisions"].append(opened)
+  atomic_write(s.path("foreman", "U01"), f)
+  # a proceed ruling on the review the decision names
+  code, out = proceed(world, rid, card, "--owner", "--reason", "accepted risk")
+  assert code == 0, out
+  view, foreman, entries, card_json = reading(s, card)
+  assert [r["ruling"] for r in foreman["rulings"] if r.get("decision") == "q1"] == ["proceed"]
+  assert report.pending_decisions(foreman) == []
+  assert report.unit_state("U01", view, foreman, entries, card_json, {}, NOW) != "pending"
+  assert not foreman.get("stopped")
+  code, out = world.run("report", "--runcard", card)
+  assert code == 0 and "pending: U01" not in out, out
