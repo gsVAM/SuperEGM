@@ -13,7 +13,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30); the batch's `notify` (U23); the decision points, rulings and leavemealone-mode moved to `references/`; a head's Decision point 5 and `clean` by accept (U35); `launch-builder` alone and the driver role (U24); `stalled` (U31); the frozen mode, driven normal-mode decisions (U45). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30); the batch's `notify` (U23); the decision points, rulings and leavemealone-mode moved to `references/`; a head's Decision point 5 and `clean` by accept (U35); `launch-builder` alone and the driver role (U24); `stalled` (U31); the frozen mode, driven normal-mode decisions (U45); `waiting proceed` (U92). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the wave skill. Not part of google/elephant-goldfish-model. -->
 
@@ -165,9 +165,12 @@ ignored except `landed` and `stalled`:
    decision was opened this batch, pause (outside SUPEREGM_ROLE=driver, above): ask the owner at its decision
    point and run `report` again once ruled. Else `loop: ended` → The end; else the next batch.
 
-`report` derives each launched unit's state with `unit_state`, one of six:
-`landed`, `stopped`, `pending`, `idle`, `clean`, else `active`; only an
-active unit is dispatched. `loop_ended` is the end condition: no active
+`report` derives each launched unit's state with `unit_state`, one of seven:
+`landed`, `stopped`, `pending`, `idle`, `waiting proceed`, `clean`, else
+`active`; only an active unit is dispatched. A proceeded unit whose later
+launch finished, or whose head moved off the proceeded one, is `waiting
+proceed`: it holds no slot, offers no merge, and `report` and `inbox` show
+`proceed again` until the owner proceeds again. `loop_ended` is the end condition: no active
 unit, and no ready unit unlaunched while a slot is free. A head whose CI is
 pending or absent for `ci_wait_minutes` (default 30) since this card first
 saw it is idle and holds no slot; a new head restarts the clock.
