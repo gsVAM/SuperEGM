@@ -165,15 +165,12 @@ ignored except `landed` and `stalled`:
    decision was opened this batch, pause (outside SUPEREGM_ROLE=driver, above): ask the owner at its decision
    point and run `report` again once ruled. Else `loop: ended` → The end; else the next batch.
 
-`report` derives each launched unit's state with `unit_state`, one of seven:
-`landed`, `stopped`, `pending`, `idle`, `waiting proceed`, `clean`, else
-`active`; only an active unit is dispatched. A proceeded unit whose later
-launch finished, or whose head moved off the proceeded one, is `waiting
-proceed`: it holds no slot, offers no merge, and `report` and `inbox` show
-`proceed again` until the owner proceeds again. `loop_ended` is the end condition: no active
-unit, and no ready unit unlaunched while a slot is free. A head whose CI is
-pending or absent for `ci_wait_minutes` (default 30) since this card first
-saw it is idle and holds no slot; a new head restarts the clock.
+`report`'s `unit_state` of a launched unit is one of seven: `landed`,
+`stopped`, `pending`, `idle`, `waiting proceed` (no slot), `clean`, else
+`active`; only `active` is dispatched. `loop_ended`: no active unit, no ready
+unlaunched unit with a free slot. A head with CI pending or absent for
+`ci_wait_minutes` (default 30) since this card first saw it is idle (no
+slot); a new head restarts the clock.
 
 ## The word table
 
