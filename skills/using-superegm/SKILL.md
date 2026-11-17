@@ -5,7 +5,7 @@ effects: none
 description: Use when starting any conversation - establishes how to find and use skills, requiring skill invocation before ANY response including clarifying questions
 ---
 
-<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: renamed to using-superegm; superegm names, the typed and auto-invoked lists, the phase rule; the Claude Code reference only; the four rules of design section 5 (U19); the inbox line (U23); the driver in the typed list (U24). -->
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: renamed to using-superegm; superegm names, the typed and auto-invoked lists, the phase rule; the Claude Code reference only; the four rules of design section 5 (U19); the inbox line (U23); the driver in the typed list (U24); the line on the brainstorm's review and build design step (U64). -->
 
 In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.
 
@@ -22,6 +22,8 @@ This is not negotiable. You cannot rationalize your way out of this.
 **Invoke relevant or requested skills BEFORE any response or action** — including clarifying questions, exploring the codebase, or checking files. If it turns out wrong for the situation, you don't have to use it.
 
 **Before entering plan mode:** if you haven't already brainstormed, invoke the brainstorming skill first.
+
+After a spec is written, the brainstorming skill designs the SDLC workflow that reviews and builds it, ending at `superegm doctor`, before `/superegm:review-spec`.
 
 Then announce "Using [skill] to [purpose]" and follow the skill exactly. If it has a checklist, create a todo per item.
 
