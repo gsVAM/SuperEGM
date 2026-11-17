@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the report subcommand (spec section 11): the per-batch wave report, the idle rules
-# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31); its own `ci_wait_minutes` config key, moved from `__init__` (U32); the board's tier column (U33).
+# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31); its own `ci_wait_minutes` config key, moved from `__init__` (U32); the board's tier column (U33); `waiting proceed` and a proceed closing a point-1 decision (U92).
 
 """superegm report: rewrite `wave_<n>_report.md` from the store, the plan and the spec and print its path, the
 board and the idle, pending and loop lines. It opens the card's handoff as `status` does (`core.locate`,
@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 import superegm as core
-from superegm.launch import latest_clean, load_launches
+from superegm.launch import latest_clean, load_launches, waiting_proceed
 
 WRITES = frozenset({"report", "runcards"})  # the store kinds this subcommand writes
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {"ci_wait_minutes": 30}, "", None  # its own config key (U32)
@@ -182,6 +182,8 @@ def next_action(word: str, latest, launch, decisions: list, reason) -> str:
     return f"decision {decisions[0]['point']}"
   if word == "idle":
     return reason or "none"
+  if word == "waiting proceed":  # spec section 4.2: the owner's second proceed, naming the later launch
+    return "proceed again"
   if word not in ("active", "clean"):
     return "none"
   if (latest and latest.get("phase") == "posted" and latest.get("outcome")
@@ -260,7 +262,8 @@ def stopped_line(st, uid: str, stopped: dict, views: dict) -> str:
 
 
 def unit_state(uid: str, view: dict, foreman: dict, launches: list, card: dict, config: dict, now: float) -> str:
-  """One of eight: `landed` (a merged view, `pr` set and `ci` null, included: it holds no slot, U55), `stopped`, `pending` (a decision without its ruling), `idle` (named on the
+  """One of nine: `waiting proceed` (spec section 4.2: a proceeded head with a later finished launch or a moved
+  head; no slot, U92), `landed` (a merged view, `pr` set and `ci` null, included: it holds no slot, U55), `stopped`, `pending` (a decision without its ruling), `idle` (named on the
   card, a `running` latest launch with the `kill_failed` mark (U31), or a head whose CI is pending or
   absent for `ci_wait_minutes` since the card first saw it),
   `clean` (the latest round posted clean, no launch recorded after it), else `active`; an unlaunched
@@ -278,10 +281,12 @@ def unit_state(uid: str, view: dict, foreman: dict, launches: list, card: dict, 
     return "idle"
   if not view.get("launched", True):
     return "ready" if view.get("ready") else "waiting"
+  if waiting_proceed(foreman, launches, view.get("head")):
+    return "waiting proceed"
   seen = ci_seen_at(uid, view, card)
   if seen is not None and now - seen >= config.get("ci_wait_minutes", 30) * 60:
     return "idle"
-  return "clean" if latest_clean(foreman, launches) else "active"
+  return "clean" if latest_clean(foreman, launches, view.get("head")) else "active"
 
 
 def pending_decisions(foreman: dict) -> list:

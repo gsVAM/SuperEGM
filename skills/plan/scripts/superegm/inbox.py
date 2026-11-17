@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45).
+# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45); the `proceed again` item and the merge on the authorizing outcome (U92).
 
 """superegm inbox [--all] [--json] [--handoff <id>]: one line per item that needs the owner across the
 store's open handoffs, read-only and with no run card; superegm notify --runcard <id>: the owner's
@@ -17,7 +17,7 @@ from pathlib import Path
 import superegm as core
 from superegm import approve_spec, decision, report, review
 from superegm.decision import ruling_form
-from superegm.launch import latest_clean, load_launches
+from superegm.launch import authorizing, latest_clean, load_launches, waiting_proceed
 
 WRITES = frozenset({"state", "driver"})  # notify's `notified` (a driver card's in `driver/`); inbox writes nothing
 CONFIG_DEFAULTS = {  # its own config key and init line (U32)
@@ -28,7 +28,7 @@ INIT_STEP = ("An executable ~/.superegm/notify, written outside every repository
 DOCTOR_CHECKS = None
 SKILLS = frozenset({"wave", "driver"})
 KINDS = ("decision", "cap", "contested", "merge", "stalled", "escalated", "redesign", "test-delta", "owner",
-         "kill_failed", "wave", "driver")
+         "proceed", "kill_failed", "wave", "driver")
 GITHUB = "https://github.com"
 
 
@@ -135,7 +135,12 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
       out += [item(repo, uid, "owner", form(fid), f"{n}/{fid}")
               for fid in (x.strip() for x in outcome.removeprefix("owner: ").split(","))
               if fid and fid not in deltas and open_fid(fid)]
-  if latest_clean(foreman, load_launches(hs, uid)):
+  launches, head = load_launches(hs, uid), report.unit_view(state, uid).get("head")
+  if waiting_proceed(foreman, launches, head):  # spec section 4.2: keyed on the later launch and the head it left
+    shown = head or (authorizing(foreman) or {}).get("head")
+    last = launches[-1]["round"] if launches else 0
+    out.append(item(repo, uid, "proceed", f"proceed again: {uid} head {shown}{on_issue}", f"{last}/{shown}"))
+  if latest_clean(foreman, launches, head):
     pr = report.unit_view(state, uid)["pr"] or ((state["units"].get(uid) or {}).get("pr") or {}).get("number")
     rounds = foreman.get("rounds") or []
     url = f"{GITHUB}/{repo}/pull/{pr}"
