@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes and the one stamp formatter and parser (U31); `discover()`, CORE_CONFIG and SUBCOMMANDS and DEFAULT_CONFIG derived from the modules (U32); the `Tier:` field, `builder.tiers`, `tier_pair` and `unit_tier` (U33); the brainstorm.team key (U34); the one-level merge of every registered object default and the builder defaults read from the registry (U46); the chain and tick store kinds, and `runcard open`'s default mode the frozen one (U43); the store-level instructions kind (U37); the driven card of every chain phase, the top-level cards the tick reads by the chain and the unwritten `driver` key (U44); `reboot_launches` records `subagent_calls` (U49).
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes and the one stamp formatter and parser (U31); `discover()`, CORE_CONFIG and SUBCOMMANDS and DEFAULT_CONFIG derived from the modules (U32); the `Tier:` field, `builder.tiers`, `tier_pair` and `unit_tier` (U33); the brainstorm.team key (U34); the one-level merge of every registered object default and the builder defaults read from the registry (U46); the chain and tick store kinds, and `runcard open`'s default mode the frozen one (U43); the store-level instructions kind (U37); the driven card of every chain phase, the top-level cards the tick reads by the chain and the unwritten `driver` key (U44); `reboot_launches` records `subagent_calls` (U49); `Graph(plan, approval)` splits the blockers from the shared-file merge orders under an approval entry with `rounds` (U61).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
@@ -1202,7 +1202,7 @@ class Unit:
     self.dod = []
     self.decisions = []    # [{id, question, owner, default, blocking}]
 
-  def to_json(self, wave, preds):
+  def to_json(self, wave, preds, merge_after=()):
     return {
         "id": self.id, "title": self.title, "objective": self.objective,
         "scope": [{"path": p, "action": a} for p, a in self.scope],
@@ -1214,7 +1214,7 @@ class Unit:
         "risk": {"level": self.risk[0], "reason": self.risk[1]},
         "size": self.size, "tier": self.tier, "issue": self.issue, "dod": self.dod,
         "decisions": [{k: v for k, v in d.items() if k != "line"} for d in self.decisions],
-        "wave": wave, "predecessors": sorted(preds),
+        "wave": wave, "predecessors": sorted(preds), "merge_after": sorted(merge_after),
     }
 
 
@@ -1716,7 +1716,7 @@ class Handoff:
     # The store's copy: `require_frozen_units` compares a filed unit's section
     # in the plan file with the one stored here.
     atomic_write(self.store.path("plan"), self.plan.text)
-    units = {u: self.plan.units[u].to_json(self.graph.wave[u], self.graph.preds[u])
+    units = {u: self.plan.units[u].to_json(self.graph.wave[u], self.graph.preds[u], self.graph.merge_after[u])
              for u in self.graph.order}
     data = {"handoff_id": self.handoff_id, "repo": self.config["repo"],
             "design": {"path": str(self.design_path), "sha256": self.design_sha,

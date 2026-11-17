@@ -97,10 +97,16 @@ def merge_world(world, rounds=True):
   atomic_write(path, record)
 
 
-def clean_store(world, u02_landed=False):
-  """Both heads clean (a posted clean round after an exited launch); U02 merged when `u02_landed`."""
-  u02 = {"pr": 71, "head": A, "ci": None, "landed": True} if u02_landed else {"pr": 71, "head": A, "ci": "green"}
-  return wave_store(world, U01={"pr": 70, "head": A, "ci": "green", **CLEAN}, U02={**u02, **CLEAN})
+def clean_store(world):
+  """Both heads clean (a posted clean round after an exited launch), U02 unlanded."""
+  return wave_store(world, U01={"pr": 70, "head": A, "ci": "green", **CLEAN},
+                    U02={"pr": 71, "head": A, "ci": "green", **CLEAN})
+
+
+def land_u02(s, landed=True):
+  state = json.loads(s.path("state").read_text(encoding="utf-8"))
+  state["status"]["units"]["U02"].update(landed=landed, ci=None if landed else "green")
+  atomic_write(s.path("state"), state)
 
 
 def board_row(world, card, uid):
@@ -129,12 +135,12 @@ def test_clean_head_awaits_merge_after(world):
   assert [i["subject"] for i in merges] == ["U02", "U01"]  # in merge order, not by id
   assert merges[1]["action"] == f"await-merge after U02 · {PR_URL}70"
   assert merges[0]["action"] == f"{PR_URL}71"
-  clean_store(world, u02_landed=True)
+  land_u02(s)
   assert "await-merge after" not in board_row(world, card, "U01")
   assert [i["action"] for i in inbox_merges(s)] == [f"{PR_URL}70"]
-  clean_store(world)
-  assert inbox_merges(s, units_file=False)[1]["action"] == f"{PR_URL}70"  # no handoff_units.json: no merge order
-  assert [i["subject"] for i in inbox_merges(s, units_file=False)] == ["U01", "U02"]
+  land_u02(s, landed=False)
+  bare = inbox_merges(s, units_file=False)  # no handoff_units.json: no merge order, by id
+  assert [(i["subject"], i["action"]) for i in bare] == [("U01", f"{PR_URL}70"), ("U02", f"{PR_URL}71")]
 
 
 def test_a_1_2_0_entry_writes_no_merge_order(world):

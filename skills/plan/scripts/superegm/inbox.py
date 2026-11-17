@@ -138,8 +138,33 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
   if latest_clean(foreman, load_launches(hs, uid)):
     pr = report.unit_view(state, uid)["pr"] or ((state["units"].get(uid) or {}).get("pr") or {}).get("number")
     rounds = foreman.get("rounds") or []
-    out.append(item(repo, uid, "merge", f"{GITHUB}/{repo}/pull/{pr}", max(r["round"] for r in rounds)))
+    url = f"{GITHUB}/{repo}/pull/{pr}"
+    # U61: the shared-file merge order from `handoff_units.json`, none when the file or the key is absent
+    order, merge_after = merge_order(hs)
+    after = [m for m in order if m in merge_after.get(uid, []) and not report.unit_view(state, m)["landed"]]
+    action = f"await-merge after {', '.join(after)} · {url}" if after else url
+    out.append(item(repo, uid, "merge", action, max(r["round"] for r in rounds)))
   return out
+
+
+def merge_order(hs: core.Store) -> tuple:
+  """`handoff_units.json`'s top-level `order` list and each unit's `merge_after` list, read as `core.unit_tier`
+  reads the file (no plan parse): ([], {}) when the file, the list or the key is absent."""
+  path = hs.path("units")
+  data = json.loads(core.read_text(path)) if path.is_file() else {}
+  return data.get("order") or [], {u: (v or {}).get("merge_after") or [] for u, v in (data.get("units") or {}).items()}
+
+
+def in_merge_order(hs: core.Store, found: list) -> list:
+  """`found` with its `merge` items put in the file's `order` (units outside it after, by id), each in a slot a
+  `merge` item held; every other item as it was."""
+  order = merge_order(hs)[0]
+  slots = [n for n, i in enumerate(found) if i["kind"] == "merge"]
+  merges = sorted((found[n] for n in slots),
+                  key=lambda i: (order.index(i["subject"]) if i["subject"] in order else len(order), i["subject"]))
+  for n, i in zip(slots, merges):
+    found[n] = i
+  return found
 
 
 def kill_failed_items(hs: core.Store, repo: str, uid: str) -> list:
@@ -313,6 +338,7 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
         found += review_items(hs, repo, spec, path.name, rev, foremen, mode)
       read_specs.add(spec)
     found.sort(key=lambda i: (i["subject"], KINDS.index(i["kind"].split(" ")[0])))
+    found = in_merge_order(hs, found)
     out += found + wave_items(hs, repo, hid) + driver_items(hs, repo, hid) + chain_items(store, hs, repo, hid, state, foremen)
   return out
 

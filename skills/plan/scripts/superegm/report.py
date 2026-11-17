@@ -146,10 +146,15 @@ def board_table(handoff, state: dict, card: dict, now: float) -> str:
     # Every predecessor `status_pass` holds readiness on: the blockers and the shared-file order, then the plan's open blocking decisions.
     waits += [p for p in handoff.graph.order if p in handoff.graph.preds[uid] and not views[p]["landed"]]
     waits += [f"{uid}/{d}" for d in open_blocking.get(uid) or []]
+    action = next_action(word, latest, launch, decisions, reasons.get(uid))
+    # U61: a clean head whose shared-file merge order is not all landed waits for those merges; `waits on` keeps the blockers.
+    unmerged = [p for p in handoff.graph.order if p in handoff.graph.merge_after[uid] and not views[p]["landed"]]
+    if word == "clean" and action == "await-merge" and unmerged:
+      action = "await-merge after " + ", ".join(unmerged)
     cells =[f"{uid} #{(units.get(uid) or {}).get('number')}", word, round_cell(latest),
              f"{launch['round']} {launch['status']}" if launch else "none", view["head"][:7] if view["head"] else "none",
              f"#{view['pr']}" if view["pr"] else "none", ", ".join(waits) or "none",
-             next_action(word, latest, launch, decisions, reasons.get(uid)), cost_cell(entries), core.unit_tier(st, uid)]
+             action, cost_cell(entries), core.unit_tier(st, uid)]
     lines.append("| " + " | ".join(map(board_cell, cells)) + " |")
   return "\n".join(lines)
 
