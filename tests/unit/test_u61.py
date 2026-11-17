@@ -3,13 +3,17 @@
 
 """U61: parallel readiness and the merge order (spec 1.2.1 section 6.1)."""
 
+import json
 from types import SimpleNamespace
 
 import pytest
 
 import superegm
-from superegm import status as events
-from conftest import make_plan
+from superegm import atomic_write, status as events
+from conftest import REPO, make_plan
+from test_wave import A, CLEAN, open_wave_card, wave_store
+
+PR_URL = f"https://github.com/{REPO}/pull/"
 
 
 def unit_section(uid, blocked="none", shared="none", scope=None):
@@ -79,3 +83,65 @@ def test_shared_file_units_are_ready_together(approval, preds_u01, merge_u01, tm
   assert g.merge_after == {"U01": merge_u01, "U02": set()}
   assert g.order == ["U02", "U01"]
   assert sorted(ready_of(g, tmp_path, monkeypatch)) == (["U01", "U02"] if merge_u01 else ["U02"])
+
+
+def merge_world(world, rounds=True):
+  """The world with U01 sharing `src/shared.py` after U02, no blocker, the approval record carrying `rounds`."""
+  units = (unit_section("U01", "none", "`src/shared.py`: after U02")
+           + unit_section("U02", "none", "`src/shared.py`: before U01"))
+  make_plan(world.plan.parent, world.repo, units)
+  path = world.artifacts / "approvals" / "sample.json"
+  record = json.loads(path.read_text(encoding="utf-8"))
+  if rounds:
+    (record["entries"][-1] if "entries" in record else record)["rounds"] = 3
+  atomic_write(path, record)
+
+
+def clean_store(world, u02_landed=False):
+  """Both heads clean (a posted clean round after an exited launch); U02 merged when `u02_landed`."""
+  u02 = {"pr": 71, "head": A, "ci": None, "landed": True} if u02_landed else {"pr": 71, "head": A, "ci": "green"}
+  return wave_store(world, U01={"pr": 70, "head": A, "ci": "green", **CLEAN}, U02={**u02, **CLEAN})
+
+
+def board_row(world, card, uid):
+  out = world.run("report", "--runcard", card)[1]
+  return next(line for line in out.splitlines() if line.startswith(f"| {uid} #"))
+
+
+def inbox_merges(s, units_file=True):
+  from superegm.inbox import inbox_items
+  if not units_file:
+    s.path("units").unlink()
+  return [i for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "merge"]
+
+
+def test_clean_head_awaits_merge_after(world):
+  # §6.1: U01 merges after U02; both heads clean, U02 unlanded; the owner still merges
+  merge_world(world)
+  card = open_wave_card(world)
+  s = clean_store(world)
+  units = json.loads(s.path("units").read_text(encoding="utf-8"))
+  assert units["order"] == ["U02", "U01"]
+  assert {u: units["units"][u]["merge_after"] for u in ("U01", "U02")} == {"U01": ["U02"], "U02": []}
+  assert "| await-merge after U02 |" in board_row(world, card, "U01")
+  assert "await-merge after" not in board_row(world, card, "U02")
+  merges = inbox_merges(s)
+  assert [i["subject"] for i in merges] == ["U02", "U01"]  # in merge order, not by id
+  assert merges[1]["action"] == f"await-merge after U02 · {PR_URL}70"
+  assert merges[0]["action"] == f"{PR_URL}71"
+  clean_store(world, u02_landed=True)
+  assert "await-merge after" not in board_row(world, card, "U01")
+  assert [i["action"] for i in inbox_merges(s)] == [f"{PR_URL}70"]
+  clean_store(world)
+  assert inbox_merges(s, units_file=False)[1]["action"] == f"{PR_URL}70"  # no handoff_units.json: no merge order
+  assert [i["subject"] for i in inbox_merges(s, units_file=False)] == ["U01", "U02"]
+
+
+def test_a_1_2_0_entry_writes_no_merge_order(world):
+  # §6.1: without `rounds` the file holds `merge_after: []` for every unit and the board keeps its text
+  merge_world(world, rounds=False)
+  card = open_wave_card(world)
+  s = clean_store(world)
+  units = json.loads(s.path("units").read_text(encoding="utf-8"))["units"]
+  assert {u: units[u]["merge_after"] for u in units} == {"U01": [], "U02": []}
+  assert "await-merge after" not in board_row(world, card, "U01")
