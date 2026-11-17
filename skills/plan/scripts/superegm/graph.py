@@ -288,7 +288,9 @@ class Handoff(core.Handoff):
     if self.filed(uid) is not None:
       return core.unit_file_body(self.unit_file(uid)) + "\n"
     unit = self.plan.units[uid]
-    shared = "; ".join(f"`{path}`: " + ", ".join(f"after {self.ref(o)}" if k == "after" else f"before {self.forward_ref(o)}"
+    merges = "merges " if self.graph.parallel else ""  # U61: with `rounds` the order is a merge order
+    shared = "; ".join(f"`{path}`: " + ", ".join(f"{merges}after {self.ref(o)}" if k == "after"
+                                                 else f"{merges}before {self.forward_ref(o)}"
                                                  for k, o in orders) for path, orders in unit.shared)
     values = {
         "handoff_id": self.handoff_id, "unit_id": uid, "title": unit.title, "spec_sha256": self.spec_sha,

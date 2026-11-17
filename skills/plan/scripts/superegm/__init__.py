@@ -1405,7 +1405,7 @@ class Graph:
     units = plan.units
     # §6.1: only an approval entry carrying `rounds` builds shared-file units in parallel; any other entry
     # (1.2.0, `--amend-units`) or none keeps 1.2's serial rule, the shared-file orders held in `preds`
-    parallel = approval is not None and "rounds" in approval
+    parallel = self.parallel = approval is not None and "rounds" in approval
     self.preds = {u: set() for u in units}
     self.merge_after = {u: set() for u in units}
     shared_edges = self.merge_after if parallel else self.preds
