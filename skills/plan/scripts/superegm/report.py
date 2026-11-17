@@ -143,7 +143,7 @@ def board_table(handoff, state: dict, card: dict, now: float) -> str:
     waits = [d["id"] for d in decisions]
     if not view["landed"] and view["head"] and view["ci"] in (None, "pending"):
       waits.append("ci")
-    # Every predecessor `status_pass` holds readiness on: the blockers and the shared-file order, then the plan's open blocking decisions.
+    # Every predecessor `status_pass` holds readiness on: `preds`, the blockers (the shared-file order too only for an entry without `rounds`), then the plan's open blocking decisions.
     waits += [p for p in handoff.graph.order if p in handoff.graph.preds[uid] and not views[p]["landed"]]
     waits += [f"{uid}/{d}" for d in open_blocking.get(uid) or []]
     action = next_action(word, latest, launch, decisions, reasons.get(uid))

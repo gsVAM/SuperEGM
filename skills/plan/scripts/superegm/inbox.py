@@ -305,7 +305,7 @@ def chain_items(store: core.Store, hs: core.Store, repo: str, hid: str, state: d
 def inbox_items(store: core.Store, handoff_ids: list) -> list:
   """What needs the owner across the handoffs `handoff_ids` (spec section 11.2), one dict per item: `repo`,
   `subject`, `kind`, `action`, `fingerprint`; ordered by handoff id, subject, then kind, the `wave` card and the
-  driver's lines last."""
+  driver's lines last, except that a handoff's `merge` items follow the `order` list of its `handoff_units.json` (U61)."""
   repo, rows = store.config["repo"], {r["id"]: r for r in core.handoffs(store.root)}
   out, read_specs, seen = [], set(), set()  # a spec's store-level reviews are read once, under its first handoff
   for hid in sorted(handoff_ids):
