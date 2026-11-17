@@ -144,6 +144,19 @@ def test_clean_head_awaits_merge_after(world):
   assert [(i["subject"], i["action"]) for i in bare] == [("U01", f"{PR_URL}70"), ("U02", f"{PR_URL}71")]
 
 
+def test_a_merge_item_is_new_again_once_its_merge_order_lands(world):
+  # §6.1: notify dedupes on the fingerprint; U01's line changes when U02 lands, so its fingerprint must too
+  merge_world(world)
+  open_wave_card(world)
+  s = clean_store(world)
+  prints = lambda: {i["subject"]: i["fingerprint"] for i in inbox_merges(s)}
+  held = prints()
+  assert prints() == held  # unchanged while nothing lands
+  land_u02(s)
+  after = prints()
+  assert after["U01"] != held["U01"]
+
+
 def test_a_1_2_0_entry_writes_no_merge_order(world):
   # §6.1: without `rounds` the file holds `merge_after: []` for every unit and the board keeps its text
   merge_world(world, rounds=False)
