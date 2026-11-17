@@ -32,3 +32,9 @@ def test_workflow_step_phrases(phrase):
   # §3.4: the step's branches and promises, each a required phrase in the section
   t = Path("skills/brainstorming/SKILL.md").read_text()
   assert phrase in t[t.index("## Design the SDLC Workflow"):]
+
+
+def test_using_superegm_names_the_step():
+  # §3.4: one line saying the brainstorm designs the review and build workflow after the spec
+  lines = [l for l in Path("skills/using-superegm/SKILL.md").read_text().splitlines() if "SDLC workflow" in l]
+  assert len(lines) == 1 and "brainstorming" in lines[0] and "superegm doctor" in lines[0]
