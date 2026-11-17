@@ -23,6 +23,9 @@ WRAPPER_BEFORE_REFACTOR = (
     "--setting-sources user --plugin-dir '/c/a/1' --plugin-dir '/c/b/2' --mcp-config '/m.json' --strict-mcp-config "
     "--allowedTools 'Read,Bash(pytest:*)' --output-format json > '/result.json'; echo $? > '/result.json.exit'")
 
+PUSH = "git push: a launch admits only its own branch, no --allow"
+NARROW = "no --allow: a hint names only a plain `git <subcommand>` or `gh <group> <command>`"
+
 
 def probe_world(world, monkeypatch, tmp_path, events=(), exit_code=0, mcp=None, stderr="", allowed=None):
   """A repository whose config names a builder profile under `tmp_path`, doctor's own checks stubbed to nothing, and a
@@ -120,7 +123,7 @@ def store_files(world) -> list:
     ({"type": "system", "subtype": "init", "mcp_servers": [{"name": "linear", "status": "needs-auth"}]}, "probe: mcp linear needs-auth", 1),
     ({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "is_error": True, "content": "boom\nmore"}]}}, "probe: tool Read error: boom", 1),
     ({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "is_error": False, "content": "x"}]}}, "probe: tool Read ok", 0),
-    ({"type": "result", "subtype": "success", "is_error": False, "permission_denials": [{"tool_name": "Bash", "tool_input": {"command": "curl -s x"}}]}, "probe: denied Bash curl -s x (--allow curl)", 1),
+    ({"type": "result", "subtype": "success", "is_error": False, "permission_denials": [{"tool_name": "Bash", "tool_input": {"command": "curl -s x"}}]}, "probe: denied Bash curl -s x (" + NARROW + ")", 1),
 ])
 def test_probe_lines(world, monkeypatch, tmp_path, event, line, code):
   # §3.3: a fake `claude` prints the event (tool t1 is a Read) and a clean result; any failing line fails doctor
@@ -184,15 +187,19 @@ def test_probe_refused_allow_list_closes_the_session(world, monkeypatch, tmp_pat
 
 
 @pytest.mark.parametrize("command, allow", [
-    ("curl -s x", "--allow curl"),
+    ("curl -s x", NARROW),
     ("git checkout -b x", "--allow 'git checkout'"),
-    ("/usr/local/bin/gh api repos/o/r", "--allow 'gh api repos/o/r'"),
+    ("/usr/local/bin/gh api repos/o/r", NARROW),
+    ("gh api graphql -f query=x", NARROW),
     ("gh pr merge 1", "--allow 'gh pr merge'"),
-    ("pytest -q | tail -5", "--allow pytest --allow tail"),
-    ("make test || npm test", "--allow make --allow npm"),
-    ("git -C x status", "--allow 'git -C x status'"),
+    ("python -c 'print(1)'", NARROW),
+    ("git status && curl x", "--allow 'git status'; " + NARROW),
+    ("pytest -q | tail -5", NARROW),
+    ("make test || npm test", NARROW),
+    ("git -C x status", NARROW),
 ])
 def test_probe_denial_names_a_narrow_allow(command, allow):
+  # ruling 6951371255: a hint only for a plain `git <sub>` (not push) and `gh <group> <cmd>` (not api), none else;
   # review codebase-details-1-2 and 1-3: as narrow as the allow-list's own git and gh entries, every pipeline segment named
   from superegm.doctor import probe_lines
   event = {"type": "result", "permission_denials": [{"tool_name": "Bash", "tool_input": {"command": command}}]}
@@ -220,9 +227,6 @@ def test_probe_admits_bare_gh_as_the_launch_admits_its_gh(world, monkeypatch, tm
   assert argv[argv.index("--allowedTools") + 1] == "Read,Bash(gh pr view:*)" and code == 0, out
 
 
-PUSH = "git push: a launch admits only its own branch, no --allow"
-
-
 @pytest.mark.parametrize("command, shown, hint", [
     ("git push origin main", "git push origin main", PUSH),
     ("git status && git push --force origin main", "git status && git push --force origin main", "--allow 'git status'; " + PUSH),
@@ -242,8 +246,8 @@ def test_probe_denial_never_widens_push_and_names_every_line(command, shown, hin
     ("git status  # check\ngh pr merge 1", "git status  # check\\ngh pr merge 1", "--allow 'git status' --allow 'gh pr merge'"),
     ("git status # x\ngit push origin main", "git status # x\\ngit push origin main", "--allow 'git status'; " + PUSH),
     ("gh api repos/o/r/pulls/1 --jq '.state'", "gh api repos/o/r/pulls/1 --jq '.state'",
-     "--allow " + shlex.quote("gh api repos/o/r/pulls/1 --jq '.state'")),
-    ("pytest -q 2>&1 | tail -5", "pytest -q 2>&1 | tail -5", "--allow pytest --allow tail"),
+     NARROW),
+    ("pytest -q 2>&1 | tail -5", "pytest -q 2>&1 | tail -5", NARROW),
 ])
 def test_probe_denial_after_a_git_option_a_comment_or_a_quote(command, shown, hint):
   # review change-review-3-1, codebase-details-3-1, 3-2 and 3-3: a push after a git option gives no hint, a comment never
@@ -251,9 +255,6 @@ def test_probe_denial_after_a_git_option_a_comment_or_a_quote(command, shown, hi
   from superegm.doctor import probe_lines
   event = {"type": "result", "permission_denials": [{"tool_name": "Bash", "tool_input": {"command": command}}]}
   assert probe_lines(json.dumps(event), "/p") == [(f"denied Bash {shown} ({hint})", False)]
-
-
-NARROW = "no --allow keeps the launch's limits: rewrite the call as a plain command"
 
 
 @pytest.mark.parametrize("command, hint", [
@@ -266,7 +267,7 @@ NARROW = "no --allow keeps the launch's limits: rewrite the call as a plain comm
     ("env GIT_TERMINAL_PROMPT=0 git push origin main", NARROW),
     ("CI=1 npm test", NARROW),
     ("git -c alias.p=push p origin main", NARROW),
-    ("git -C x status", "--allow 'git -C x status'"),
+    ("git -C x status", NARROW),
 ])
 def test_probe_denial_behind_a_quote_an_assignment_a_runner_or_an_alias(command, hint):
   # review change-review-4-1..4-3, codebase-details-4-1..4-3: an unsplittable segment, a first word that is no plain
