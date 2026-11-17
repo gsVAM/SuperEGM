@@ -120,7 +120,9 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
   if entry:
     n, rid = entry["round"], review.head_review_id(hs, uid)
     rnd = (review.load_round(hs, rid, n) if rid else None) or {}
-    book = {"decisions": foreman.get("decisions") or [], "rulings": foreman.get("rulings") or []}
+    # a posted proceed's `rulings[]` entry names no decision: it rules none, so the walk skips it (U92)
+    book = {"decisions": foreman.get("decisions") or [],
+            "rulings": [r for r in foreman.get("rulings") or [] if "decision" in r]}
     settled = {f["id"] for f in (review.findings_of(rnd) if rnd else []) if f.get("disposition") is not None}
     # the outcome keeps naming a fid settled since until the round converges (review.settle_finding)
     open_fid = lambda fid: fid not in settled and not decision.fid_ruled(book, fid)
