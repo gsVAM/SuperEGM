@@ -143,7 +143,8 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
     order, merge_after = merge_order(hs)
     after = [m for m in order if m in merge_after.get(uid, []) and not report.unit_view(state, m)["landed"]]
     action = f"await-merge after {', '.join(after)} · {url}" if after else url
-    # the unlanded `after` list is in the fingerprint: `notify` tells the owner again once the head can merge
+    # the unlanded `after` list is in the fingerprint: the item is new again to `notify` each time an `after` unit
+    # lands, the last one included
     key = "".join([str(max(r["round"] for r in rounds))] + [f"/after-{m}" for m in after])
     out.append(item(repo, uid, "merge", action, key))
   return out
@@ -151,7 +152,8 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
 
 def merge_order(hs: core.Store) -> tuple:
   """`handoff_units.json`'s top-level `order` list and each unit's `merge_after` list, read as `core.unit_tier`
-  reads the file (no plan parse): ([], {}) when the file, the list or the key is absent."""
+  reads the file (no plan parse): ([], {}) when the file is absent; a missing `order` list empties only the list
+  and a missing `merge_after` key (a file written before U61) only that unit's list."""
   path = hs.path("units")
   data = json.loads(core.read_text(path)) if path.is_file() else {}
   return data.get("order") or [], {u: (v or {}).get("merge_after") or [] for u, v in (data.get("units") or {}).items()}
