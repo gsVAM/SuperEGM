@@ -144,3 +144,11 @@ def subagent_calls(profile_dir: Path, session_id: str) -> dict:
     calls.append({"role": call.get("subagent_type") or "general-purpose", "description": call.get("description") or "",
                   "model": model if isinstance(model, str) and model else None, "duration_s": duration})
   return {"count": len(calls), "calls": calls}
+
+
+def launch_subagent_calls(profile_dir, entry: dict) -> dict:
+  """`subagent_calls` of the launch entry's `session_id` under `profile_dir` (`~` expanded): the one reader of a
+  launch's calls. An entry with no `session_id`, or no transcript: `{"count": 0, "calls": []}`."""
+  if not entry.get("session_id"):
+    return {"count": 0, "calls": []}
+  return subagent_calls(Path(profile_dir).expanduser(), entry["session_id"])

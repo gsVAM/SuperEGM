@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes and the one stamp formatter and parser (U31); `discover()`, CORE_CONFIG and SUBCOMMANDS and DEFAULT_CONFIG derived from the modules (U32); the `Tier:` field, `builder.tiers`, `tier_pair` and `unit_tier` (U33); the brainstorm.team key (U34); the one-level merge of every registered object default and the builder defaults read from the registry (U46); the chain and tick store kinds, and `runcard open`'s default mode the frozen one (U43); the store-level instructions kind (U37); the driven card of every chain phase, the top-level cards the tick reads by the chain and the unwritten `driver` key (U44).
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes and the one stamp formatter and parser (U31); `discover()`, CORE_CONFIG and SUBCOMMANDS and DEFAULT_CONFIG derived from the modules (U32); the `Tier:` field, `builder.tiers`, `tier_pair` and `unit_tier` (U33); the brainstorm.team key (U34); the one-level merge of every registered object default and the builder defaults read from the registry (U46); the chain and tick store kinds, and `runcard open`'s default mode the frozen one (U43); the store-level instructions kind (U37); the driven card of every chain phase, the top-level cards the tick reads by the chain and the unwritten `driver` key (U44); `reboot_launches` records `subagent_calls` (U49).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
@@ -35,6 +35,7 @@ from graphlib import CycleError, TopologicalSorter
 from pathlib import Path
 
 from . import body
+from . import traces
 LABEL_RE = re.compile(r"^[^,\s]{1,50}$")
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 MENTION_CONFIG_RE = re.compile(r"^@[A-Za-z0-9][A-Za-z0-9-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)?(?:\[bot\])?$")
@@ -614,6 +615,7 @@ def reboot_launches(hs: Store, unit: str, current: str) -> None:
   for entry in data.get("launches") or []:
     if entry.get("status") == "running" and rebooted(entry, current) and not Path(entry["result_file"] + ".exit").is_file():
       entry["status"] = "interrupted (reboot)"
+      entry["subagent_calls"] = traces.launch_subagent_calls(hs.config["builder"]["profile_dir"], entry)
       journal(hs, f"{unit} launch {entry['round']} interrupted (reboot)")
       changed = True
   if changed:

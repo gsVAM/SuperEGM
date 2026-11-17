@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_record_launch` as the record-launch module; it records a builder launch in `launches/<unit>.json` and, with --exit, the exit its exit file proves; the flagless form refused, launch-builder recording the launch (U24); `subagent_calls` read from the session's transcript at the exit (U27); the effective model and `total_cost_usd` read from the result file at the exit (U28); `--exit stalled`, the group check, the signal, `kill_failed` and `last_commit_at` (U31).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_record_launch` as the record-launch module; it records a builder launch in `launches/<unit>.json` and, with --exit, the exit its exit file proves; the flagless form refused, launch-builder recording the launch (U24); `subagent_calls` read from the session's transcript at the exit (U27); the effective model and `total_cost_usd` read from the result file at the exit (U28); `--exit stalled`, the group check, the signal, `kill_failed` and `last_commit_at` (U31); the exit's `subagent_calls` read through `traces.launch_subagent_calls` (U49).
 
 """superegm record-launch: record a builder launch's exit as `exited <code>`, or a stalled launch's as `exited (stalled)`
 after signalling its group (or `kill_failed`); `launch-builder` records it `running`."""
@@ -12,7 +12,7 @@ from pathlib import Path
 import superegm as core
 from superegm.launch import load_launches
 from superegm.status import head_time, own_commit
-from superegm.traces import subagent_calls
+from superegm.traces import launch_subagent_calls
 
 WRITES = frozenset(["launches"])  # the store kinds this subcommand writes
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
@@ -118,8 +118,7 @@ def finish(st, unit, launches, latest, status, last, line):
   # U27: the platform's default subagents the session spawned, from its transcript under the builder profile;
   # a pre-U27 entry, without `session_id`, records the no-file value; the profile from the config the store
   # loaded (`load_config` expands it), so a plan or spec edited during the launch cannot stop the exit's record
-  profile = Path(st.config["builder"]["profile_dir"])
-  latest["subagent_calls"] = subagent_calls(profile, latest["session_id"]) if latest.get("session_id") else {"count": 0, "calls": []}
+  latest["subagent_calls"] = launch_subagent_calls(st.config["builder"]["profile_dir"], latest)
   latest["effective_model"], latest["total_cost_usd"], duration = result_usage(Path(latest["result_file"]))
   if duration is not None:  # spec section 6.5 "Measuring it": omitted when the result holds none
     latest["duration_ms"] = duration
