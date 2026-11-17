@@ -137,8 +137,8 @@ def probe_lines(stdout: str, profile: str) -> list[tuple[str, bool]]:
         if tool_name == "Bash" and isinstance(tool_input.get("command"), str):
           command = "\\n".join(tool_input["command"].strip().splitlines())
           prefixes = list(dict.fromkeys(allow_prefixes(tool_input["command"])))
-          hint = "; ".join(filter(None, [" ".join(f"--allow {shlex.quote(p)}" for p in prefixes if p is not None),
-                                         PUSH_HINT if None in prefixes else ""]))
+          hint = "; ".join(filter(None, [" ".join(f"--allow {shlex.quote(p)}" for p in prefixes if p),
+                                         PUSH_HINT if None in prefixes else "", NARROW_HINT if "" in prefixes else ""]))
           lines.append((f"denied Bash {command} ({hint})", False))
         else:
           lines.append((f"denied {tool_name} {json.dumps(tool_input, sort_keys=True)}", False))
@@ -146,10 +146,10 @@ def probe_lines(stdout: str, profile: str) -> list[tuple[str, bool]]:
 
 
 PUSH_HINT = "git push: a launch admits only its own branch, no --allow"
-
-
-GIT_OPTIONS_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--super-prefix",
-                          "--exec-path"}
+NARROW_HINT = "no --allow keeps the launch's limits: rewrite the call as a plain command"
+RUNNERS = {"env", "command", "builtin", "exec", "eval", "nohup", "nice", "ionice", "timeout", "time", "stdbuf", "sudo",
+           "doas", "xargs", "sh", "bash", "zsh", "dash", "ksh", "fish"}
+PLAIN_NAME = re.compile(r"[A-Za-z0-9_./+-]+")
 
 
 def allow_prefixes(command: str) -> list:
@@ -157,25 +157,31 @@ def allow_prefixes(command: str) -> list:
   first word, but for git and gh (by bare name or path) as narrow as the allow-list's own entries, `git <subcommand>`
   and `gh <group> <command>`, so the hint never admits every git or gh subcommand; `gh api`, and one whose subcommand
   follows an option, is named whole, in the segment's own text so the hint is a prefix of what was denied. A
-  `git push`, after git's own options too, gives None: no prefix narrower than the push itself keeps the launch's
-  own-branch limit. An unsplittable segment gives its first word."""
+  `git push`, or a git call with an option before its subcommand and the word `push` anywhere, gives None: no prefix
+  narrower than the push itself keeps the launch's own-branch limit. A segment no prefix names without widening the
+  launch gives "": one shlex cannot split, one whose first word is no plain command name (an assignment, a quoted or
+  escaped space), a command runner (`env`, `xargs`, `bash` …), and a git call setting config before its subcommand
+  (`-c`, `--config-env`: an alias)."""
   prefixes = []
   for text in segments_of(command):
     try:
       words = shlex.split(text)
     except ValueError:
-      prefixes.append(text.split()[0])
+      prefixes.append("")
       continue
     if not words:
       continue
     name = os.path.basename(words[0])
-    at = 1
-    while name == "git" and at < len(words) and words[at].startswith("-"):
-      at += 2 if words[at] in GIT_OPTIONS_WITH_VALUE else 1  # git's own options before its subcommand
+    if not PLAIN_NAME.fullmatch(words[0]) or not text.startswith(words[0]) or name in RUNNERS:
+      prefixes.append("")
+      continue
     depth = {"git": 1, "gh": 2}.get(name, 0)
     sub = words[1:1 + depth]
-    if name == "git" and words[at:at + 1] == ["push"]:
+    optioned = bool(sub) and sub[0].startswith("-")
+    if name == "git" and (sub == ["push"] or optioned and "push" in words):
       prefixes.append(None)
+    elif name == "git" and optioned and any(w.startswith(("-c", "--config-env")) for w in words):
+      prefixes.append("")
     elif name == "gh" and words[1:2] == ["api"]:
       prefixes.append(" ".join([name, text.split(None, 1)[1]]))
     elif not depth:
