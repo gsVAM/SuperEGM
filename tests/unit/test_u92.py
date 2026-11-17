@@ -6,6 +6,7 @@ its authorizing outcome, the newer by launch of the latest round posted clean an
 
 import json
 import time
+import traceback
 
 import pytest
 
@@ -15,6 +16,7 @@ from superegm.inbox import inbox_items, line_of
 from test_wave import foreman_of
 from test_u57 import head_world, proceed, launches, REPO
 from test_u43 import registry  # noqa: F401 -- autouse: HOME under tmp_path
+from test_builders import spawn_fake, which, no_graphify  # noqa: F401 -- launch-builder starts no builder, finds `gh`
 
 NOW = time.time()
 
@@ -147,3 +149,74 @@ def test_proceed_closes_point_one_decisions(world, decision):
   assert not foreman.get("stopped")
   code, out = world.run("report", "--runcard", card)
   assert code == 0 and "pending: U01" not in out, out
+
+
+# ---------------------------------------------------------------- S4: the readers after a posted proceed
+
+
+class Result:
+  """A subcommand's run as the test reads it: its exit code, and its output with any uncaught exception's name."""
+
+  def __init__(self, run):
+    try:
+      self.returncode, self.stderr = run()
+    except Exception:  # an uncaught reader error is the failure this Step pins
+      self.returncode, self.stderr = 1, traceback.format_exc()
+
+
+def posted_proceed(foreman, rid):
+  """`foreman.rulings[]` holding a proceed entry without `decision` beside the posted `proceeds[]` entry."""
+  entry = {"ruling": "proceed", "by": "owner", "posted": "comment 901", "posted_at": "2026-11-10T09:00:00Z",
+           "reason": "the medium is accepted risk", "review": "R1"}
+  foreman["rulings"] = (foreman.get("rulings") or []) + [entry]
+  foreman.setdefault("proceeds", [])
+  if not foreman["proceeds"]:
+    foreman["proceeds"].append({"ruling": "R1", "review": rid, "posted": "comment 901", "posted_at": entry["posted_at"],
+                                "issue": 2, "head": "a" * 40, "launch": 1, "by": "owner", "reason": entry["reason"]})
+  return foreman
+
+
+def run_after_a_posted_proceed(world, monkeypatch, command):
+  if command == "launch-builder":
+    from test_builders import seed, UNIT
+    s, card, _, _ = seed(world)
+    monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+    assert world.run("launch", "--runcard", card)[0] == 0
+    code, out = world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)
+    assert code == 0, out
+    runs = launch.load_launches(s, UNIT)
+    runs[-1]["status"] = "exited 0"
+    atomic_write(s.path("launches", UNIT), {"launches": runs})
+    with open(runs[-1]["result_file"] + ".exit", "w", encoding="utf-8") as exit_file:  # the wrapper's exit file
+      exit_file.write("0\n")
+    f = posted_proceed({"dispatch_id": None, "rounds": [], "decisions": [], "rulings": []}, f"head-{UNIT}-c1")
+    atomic_write(s.path("foreman", UNIT), f)
+    return world.run("launch-builder", "--unit", UNIT, "--round", 2, "--runcard", card)
+  from test_u57 import comment, serve
+  s, card, rid = head_world(world)
+  serve(world, comment(s, 901, "**Ruling:** proceed — the medium is accepted risk"))
+  code, out = proceed(world, rid, card, "--owner", "--posted", "901")
+  assert code == 0, out
+  atomic_write(s.path("foreman", "U01"), posted_proceed(foreman_of(s, "U01"), rid))
+  if command == "inbox":  # a later posted round naming an owner-only fid: the walk reads every ruling
+    f = foreman_of(s, "U01")
+    f["rounds"].append({"round": 2, "phase": "posted", "launch": 1, "head": "a" * 40,
+                        "outcome": "owner: change-review-1-1"})
+    atomic_write(s.path("foreman", "U01"), f)
+    out = inbox_text(s)  # what `superegm inbox` prints for this handoff
+    assert "U01 | owner | " in out, out  # the walk reached the owner-only fid
+    return 0, out
+  f = foreman_of(s, "U01")
+  f["decisions"].append({"id": "q1", "point": 1, "source": f"review {rid} round 1", "question": "owner: f1",
+                         "options": ["change-review-1-1 allowed"]})
+  atomic_write(s.path("foreman", "U01"), f)
+  return world.run("decision", "rule", "--unit", "U01", "--decision", "q1", "--ruling",
+                   "change-review-1-1 allowed — accepted risk", "--by", "owner", "--runcard", card)
+
+
+@pytest.mark.parametrize("command", ["inbox", "decision rule on a later point-1 decision", "launch-builder"])
+def test_readers_run_after_a_posted_proceed(world, monkeypatch, spawn_fake, command):
+  # foreman.rulings[] holds a proceed entry without `decision`; proceeds[] holds the posted entry
+  result = Result(lambda: run_after_a_posted_proceed(world, monkeypatch, command))
+  assert result.returncode == 0, result.stderr
+  assert "KeyError" not in result.stderr
