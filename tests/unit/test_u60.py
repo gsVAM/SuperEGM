@@ -251,3 +251,26 @@ def test_probe_denial_after_a_git_option_a_comment_or_a_quote(command, shown, hi
   from superegm.doctor import probe_lines
   event = {"type": "result", "permission_denials": [{"tool_name": "Bash", "tool_input": {"command": command}}]}
   assert probe_lines(json.dumps(event), "/p") == [(f"denied Bash {shown} ({hint})", False)]
+
+
+NARROW = "no --allow keeps the launch's limits: rewrite the call as a plain command"
+
+
+@pytest.mark.parametrize("command, hint", [
+    ("git commit -m $'it\\'s done' && git push origin main", NARROW),
+    ("git status \\", NARROW),
+    ("git --attr-source HEAD push origin main", PUSH),
+    ("'git push' origin main", NARROW),
+    ("git\\ push origin main", NARROW),
+    ("HUSKY=0 git push origin main", NARROW),
+    ("env GIT_TERMINAL_PROMPT=0 git push origin main", NARROW),
+    ("CI=1 npm test", NARROW),
+    ("git -c alias.p=push p origin main", NARROW),
+    ("git -C x status", "--allow 'git -C x status'"),
+])
+def test_probe_denial_behind_a_quote_an_assignment_a_runner_or_an_alias(command, hint):
+  # review change-review-4-1..4-3, codebase-details-4-1..4-3: an unsplittable segment, a first word that is no plain
+  # command name, a command runner and a git alias set in the call give no --allow; a push after any git option is one
+  from superegm.doctor import probe_lines
+  event = {"type": "result", "permission_denials": [{"tool_name": "Bash", "tool_input": {"command": command}}]}
+  assert probe_lines(json.dumps(event), "/p") == [(f"denied Bash {command} ({hint})", False)]
