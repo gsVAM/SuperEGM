@@ -92,7 +92,7 @@ Decide before build
 | Scope paths | Comma-separated `` `path` (create\|modify\|delete) ``; a path may be a directory; nothing else in the cell. |
 | Design range | `` `path:start-end (heading)` `` into the frozen spec, start <= end. |
 | Blocked by | `none` or unit ids, comma-separated. A blocker is a unit that creates or changes a file or symbol this unit uses. |
-| Shared files | `none` or `` `path`: after U01, before U05 `` items separated by `; `. `after` adds an edge from that unit to this one; `before` from this one to that unit. |
+| Shared files | `none` or `` `path`: after U01, before U05 `` items separated by `; `. Read as a merge order: `after` merges after that unit, `before` merges before it; readiness reads `Blocked by` alone (an approval without `rounds` keeps 1.2's edges). |
 | Risk | `low\|medium\|high: reason`. |
 | Size | `S` (up to 3 scope paths), `M` (up to 8), `L` (more, which the per-unit check reports as a split candidate: over 10 Steps, over `units.max_body_kb` or `units.max_files`, or a Scope crossing subsystems; `scan` refuses an unfiled unit over `units.max_body_kb`, `units.max_files` or `units.max_steps`). |
 | Tier | Optional; `difficult`, `doable` or `easy`, set by the author: `difficult` when the Steps leave a design choice open, the unit holds a novel algorithm or an unverified platform behaviour, or it consumes the interfaces of more than one subsystem; `easy` when the Steps are mechanical with pinned signatures and no open choice; else `doable`. A difficult unit keeps a small Scope and few Steps. The tier picks the builder's model and effort (`builder.tiers`; doable is `builder.model` and `builder.effort`); a section without it is doable; another word is refused as a bad `Size` is. |
@@ -103,8 +103,10 @@ Decide before build
 | Steps | Numbered groups, each a `Write` line, a fence and an `Implement` line (section 3). |
 | Decide before build | `- none`, or `- D<n> <question> options: (a) <option>; (b) <option>[; …]; owner: <owner>; default: (a); blocking: yes\|no` with two or more options and the default among them. `decide` appends `; answer: (b)` to the line of an unfiled unit; a `blocking: yes` item without an answer keeps the unit from passing `scan`. |
 
-The graph: edges are the `Blocked by` entries and the shared-file `after` and
-`before` entries. A unit's wave is `1 + max(wave of its predecessors)`. A
+The graph: readiness edges are the `Blocked by` entries alone; the shared-file
+`after` and `before` entries are a merge order (an approval without `rounds`
+keeps 1.2's edges), so units sharing a file build in parallel. A unit's wave
+is `1 + max(wave of its predecessors)`. A
 `Blocked by` cycle stops with the cycle listed. A shared-file chain that
 contradicts the blockers stops with "shared-file chain contradicts the
 blockers": fix the chain or the blockers; the helper never drops an edge
