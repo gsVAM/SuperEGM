@@ -5,7 +5,7 @@ effects: working-tree
 description: "You MUST use this before any creative work - creating features, building components, adding functionality, modifying behavior, or planning anything new, in software or out of it (a talk, a business, a renovation)."
 ---
 
-<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: spec path docs/specs, the Units section, the review-spec gate, the brainstorm-brief lookup; builder check and the mockups section removed; the brief in the handoff's own directory (U32); the team brainstorm (U34); the triage section offered (U39). -->
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: spec path docs/specs, the Units section, the review-spec gate, the brainstorm-brief lookup; builder check and the mockups section removed; the brief in the handoff's own directory (U32); the team brainstorm (U34); the triage section offered (U39); the SDLC workflow step (U64). -->
 
 # Brainstorming
 
@@ -240,6 +240,38 @@ could plan from without going back to your human partner. Cover:
 **Where it goes:** in a software repo,
 `docs/specs/YYYY-MM-DD-<topic>-design.md`, committed.
 Otherwise, ask. Your human partner's preferences override both.
+
+## Design the SDLC Workflow
+
+Once a project's document is written and saved in git, and before you name
+`/superegm:review-spec`, design with your human partner the workflow that
+will review and build it. It comes after the spec because most of the
+choices follow from it: which reviewers it needs, which rules every agent
+carries, how many rounds a review gets.
+
+With no `.superegm/config.json`, offer `superegm init`; once they agree,
+run it and walk them through the by-hand steps it prints. Then take the
+areas one at a time, in this order. For each, lead the question with what
+you suggest from the spec, show the current value, and wait for the answer:
+
+1. Reviewers: `reviewers.spec`, `reviewers.plan`, `reviewers.head` and
+   `reviewers.integrate`, and any custom reviewer the spec calls for,
+   written as `.superegm/reviewers/<id>.md` and shown to them before it is
+   written.
+2. Instructions: the `instructions` entries, then the reference documents.
+3. The round cap: `review.rounds`, or a `Rounds:` line in the spec.
+4. The mode: normal or leavemealone (`mode`).
+5. The builder: the MCP servers it needs and the commands it may run, then
+   `superegm builder-setup`. Now commit the config, reviewer and
+   reference-document changes of areas 1 to 5 on the current branch, so
+   that doctor and the probe read what `HEAD` will freeze with the spec.
+6. `superegm doctor`: an exit of 0 passes. Otherwise show the failing
+   lines, work through each with them, and commit each fix by path before
+   you run doctor again. Then offer `doctor --probe` once.
+7. The chain, once doctor passes: on their yes, set `driver.chain` to
+   `true` and commit it, so the checkout stays clean.
+
+## The Gate
 
 <HARD-GATE>
 Nothing gets built until your human partner approves the full
