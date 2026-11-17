@@ -4,13 +4,14 @@
 """U61: parallel readiness and the merge order (spec 1.2.1 section 6.1)."""
 
 import json
+import re
 from types import SimpleNamespace
 
 import pytest
 
 import superegm
 from superegm import atomic_write, status as events
-from conftest import REPO, make_plan
+from conftest import REPO, handoff_store, make_plan
 from test_wave import A, CLEAN, open_wave_card, wave_store
 
 PR_URL = f"https://github.com/{REPO}/pull/"
@@ -158,3 +159,18 @@ def test_cycle_through_a_shared_order_is_refused(tmp_path):
   plan = shared_plan(tmp_path, u02_blocked="U01")
   with pytest.raises(superegm.HandoffError, match="shared-file chain contradicts the blockers"):
     superegm.Graph(plan, {"rounds": 3})
+
+
+@pytest.mark.parametrize("rounds, after, before", [
+    (True, "`src/shared.py`: merges after ", "`src/shared.py`: merges before "),
+    (False, "`src/shared.py`: after ", "`src/shared.py`: before "),
+])
+def test_issue_body_says_merges_after(world, rounds, after, before):
+  # §6.1: with `rounds` the body's shared-file line names a merge order, not a code dependency
+  merge_world(world, rounds=rounds)
+  assert world.run("graph", "--plan", world.plan)[0] == 0
+  text = handoff_store(world).path("bodies").read_text(encoding="utf-8")
+  body_of = lambda uid: next(p for p in re.split(r"\n## (?=U\d+\n)", text) if p.startswith(uid))
+  assert after in body_of("U01") and before in body_of("U02")
+  if rounds:  # the plain words are gone, not alongside
+    assert "`src/shared.py`: after " not in body_of("U01") and "`src/shared.py`: before " not in body_of("U02")
