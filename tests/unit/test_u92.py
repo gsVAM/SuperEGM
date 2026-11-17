@@ -7,6 +7,7 @@ its authorizing outcome, the newer by launch of the latest round posted clean an
 import json
 import time
 import traceback
+from pathlib import Path
 
 import pytest
 
@@ -220,3 +221,13 @@ def test_readers_run_after_a_posted_proceed(world, monkeypatch, spawn_fake, comm
   result = Result(lambda: run_after_a_posted_proceed(world, monkeypatch, command))
   assert result.returncode == 0, result.stderr
   assert "KeyError" not in result.stderr
+
+
+def read(path):
+  """A repository file's text, from the repository root."""
+  return (Path(__file__).resolve().parents[2] / path).read_text(encoding="utf-8")
+
+
+def test_wave_lists_waiting_proceed():
+  # the wave's state list names the new state
+  assert "waiting proceed" in read("skills/wave/SKILL.md")
