@@ -74,11 +74,12 @@ def ready_of(graph, tmp_path, monkeypatch):
 @pytest.mark.parametrize("approval, preds_u01, merge_u01", [
     ({"rounds": 3}, set(), {"U02"}),
     ({}, {"U02"}, set()),
-    ({"amended": True}, {"U02"}, set()),
+    ({"kind": "amend-units"}, {"U02"}, set()),  # an `--amend-units` entry over a 1.2.0 entry: no `rounds` copied
+    ({"kind": "amend-units", "rounds": 3}, set(), {"U02"}),  # over a 1.2.1 entry: `rounds` copied, parallel
     (None, {"U02"}, set()),
 ])
 def test_shared_file_units_are_ready_together(approval, preds_u01, merge_u01, tmp_path, monkeypatch):
-  # U01 shares a file after U02, no Blocked by; only a raw `rounds` key splits the orders
+  # U01 shares a file after U02, no Blocked by; only a `rounds` key in the entry splits the orders
   g = superegm.Graph(shared_plan(tmp_path), approval)
   assert g.preds == {"U01": preds_u01, "U02": set()}
   assert g.merge_after == {"U01": merge_u01, "U02": set()}
@@ -87,7 +88,7 @@ def test_shared_file_units_are_ready_together(approval, preds_u01, merge_u01, tm
 
 
 def merge_world(world, rounds=True):
-  """The world with U01 sharing `src/shared.py` after U02, no blocker, the approval record carrying `rounds`."""
+  """The world with U01 sharing `src/shared.py` after U02, no blocker, the approval record carrying `rounds` only when `rounds` is true."""
   units = (unit_section("U01", "none", "`src/shared.py`: after U02")
            + unit_section("U02", "none", "`src/shared.py`: before U01"))
   make_plan(world.plan.parent, world.repo, units)
