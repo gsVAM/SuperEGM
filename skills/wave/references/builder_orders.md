@@ -1,4 +1,4 @@
-<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the implementer prompt, receiving-code-review and test-driven-development absorbed into the builder orders; the full suite runs once per build, not once per Step. -->
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the implementer prompt, receiving-code-review and test-driven-development absorbed into the builder orders. -->
 
 # Builder orders
 
