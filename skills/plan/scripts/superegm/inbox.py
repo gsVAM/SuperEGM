@@ -143,7 +143,9 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
     order, merge_after = merge_order(hs)
     after = [m for m in order if m in merge_after.get(uid, []) and not report.unit_view(state, m)["landed"]]
     action = f"await-merge after {', '.join(after)} · {url}" if after else url
-    out.append(item(repo, uid, "merge", action, max(r["round"] for r in rounds)))
+    # the unlanded `after` list is in the fingerprint: `notify` tells the owner again once the head can merge
+    key = "".join([str(max(r["round"] for r in rounds))] + [f"/after-{m}" for m in after])
+    out.append(item(repo, uid, "merge", action, key))
   return out
 
 
