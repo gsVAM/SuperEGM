@@ -23,9 +23,9 @@ This is not negotiable. You cannot rationalize your way out of this.
 
 **Before entering plan mode:** if you haven't already brainstormed, invoke the brainstorming skill first.
 
-After a spec is written, the brainstorming skill designs the SDLC workflow that reviews and builds it, ending at `superegm doctor`, before `/superegm:review-spec`.
-
 Then announce "Using [skill] to [purpose]" and follow the skill exactly. If it has a checklist, create a todo per item.
+
+After a spec is written, the brainstorming skill designs the SDLC workflow that reviews and builds it, from reviewers to `superegm doctor` and the chain, before `/superegm:review-spec`.
 
 ## Skill Priority
 

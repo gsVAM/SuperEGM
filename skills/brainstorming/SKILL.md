@@ -181,7 +181,7 @@ words. They can override it.
 |------|----------------------|------|
 | A quick, clear task | the request itself | do it |
 | A small change | in chat | build it through the normal workflow |
-| A project with a written design | a written design document | `/superegm:review-spec`, typed by your human partner, then `/superegm:plan` |
+| A project with a written design | a written design document | design the SDLC workflow, then `/superegm:review-spec`, typed by your human partner, then `/superegm:plan` |
 
 If it grows mid-task, stop, say so, and step up a size.
 
@@ -243,12 +243,14 @@ Otherwise, ask. Your human partner's preferences override both.
 
 ## Design the SDLC Workflow
 
-Once a project's document is written and saved in git, and before you name
-`/superegm:review-spec`, design with your human partner the workflow that
-will review and build it. It comes after the spec because most of the
-choices follow from it: which reviewers it needs, which rules every agent
-carries, how many rounds a review gets. A quick, clear task skips this
-step, as does a brainstorm that ended without a spec.
+Once a project's document is written and saved in git, with any edits
+the builder check made, and before you name `/superegm:review-spec`,
+design with your human partner the workflow that will review and build
+it. It comes after the spec because most of the choices follow from it:
+which reviewers it needs, which rules every agent carries, how many
+rounds a review gets. A quick, clear task skips this step, as does a
+brainstorm that ended without a spec. In Cowork, where the helper cannot
+run, skip the walk and say only what the last paragraph says.
 
 With no `.superegm/config.json`, offer `superegm init`; once they agree,
 run it and walk them through the by-hand steps it prints. Then take the
@@ -263,29 +265,35 @@ changes only what the owner agrees to:
 2. Instructions: the `instructions` entries, then the reference documents.
 3. The round cap: `review.rounds`, or a `Rounds:` line in the spec.
 4. The mode: normal or leavemealone (`mode`).
-5. The builder: the MCP server names it needs and the commands it may run,
-   then `superegm builder-setup`, each server name passed as `--mcp` and
-   each command as `--allow`. Now commit the config, reviewer and
+5. The builder: first show the MCP server names they already have, from
+   the three places the helper reads (the repository's local scope and the
+   user scope of `.claude.json`, and the repository's `.mcp.json`; a name
+   in none of them is refused), then ask which the builder needs and which
+   commands it may run. Then `superegm builder-setup`, each server name
+   passed as `--mcp` and each command as `--allow`. Now commit the config, reviewer and
    reference-document changes of areas 1 to 5 on the current branch, so
    that doctor and the probe read what `HEAD` will freeze with the spec.
 6. `superegm doctor`: an exit of 0 passes. Otherwise show the failing
-   lines, work through each with them, and commit each fix by path before
-   you run doctor again. Then offer `doctor --probe` once: the probe makes
-   a model call, so run it only when the owner agrees.
+   lines, work through each with them, and commit each fix by path
+   before you run doctor or the probe again. Then offer `doctor --probe`
+   once: the probe makes a model call, so run it
+   only when the owner agrees.
 7. The chain, once doctor passes: on their yes, set `driver.chain` to
    `true` and commit it, so the checkout stays clean. The same question
    offers the driver's setup: it names the env file it would write
    (`~/.superegm/env`, mode `0600`, literal `KEY=value` lines: `PATH`,
-   `CLAUDE_CONFIG_DIR` and the credential the shell holds; show the
-   credential's name, never its value) and the root a tick's sessions
-   would run in (the repository's checkout on the base branch), and one
-   yes covers both. You write nothing outside the repository: the setup
-   runs at `/superegm:review-spec`'s approval step.
+   `CLAUDE_CONFIG_DIR` and the credentials the shell holds) and the root a
+   tick's sessions would run in (the repository's checkout on the base
+   branch), and one yes covers both. List every credential name, never a
+   value: with `builder.app` its `private_key_env` alone, otherwise
+   `builder.gh_token_env` alone, plus every `${NAME}` a `builder.mcp`
+   server's `env` or `headers` values name. The driver setup writes
+   nothing from this step: it runs at `/superegm:review-spec`'s approval
+   step.
 
 The owner may skip any area, or the whole step. A skipped area
 records nothing, and you say once that `plan` and `wave`
-refuse until doctor passes. In Cowork, where the helper cannot run, skip the walk and say only,
-once, that `plan` and `wave` need `superegm doctor` to pass.
+refuse until doctor passes. In Cowork, say only, once, that `plan` and `wave` need `superegm doctor` to pass.
 
 ## The Gate
 
@@ -301,8 +309,9 @@ and the gate goes with it. A spike they said yes to may be built; it
 stays labeled throwaway, and keeping what it produced is a new request
 that comes back through this gate.
 
-After a project's document is approved, the next step is
-`/superegm:review-spec`, typed by your human partner; invoke no skill.
+After a project's document is approved, the next step is the
+SDLC workflow design above (or its skip), then `/superegm:review-spec`,
+typed by your human partner; invoke no skill.
 </HARD-GATE>
 
 ## Red Flags
