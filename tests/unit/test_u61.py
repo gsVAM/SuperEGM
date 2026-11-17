@@ -151,3 +151,10 @@ def test_a_1_2_0_entry_writes_no_merge_order(world):
   units = json.loads(s.path("units").read_text(encoding="utf-8"))["units"]
   assert {u: units[u]["merge_after"] for u in units} == {"U01": [], "U02": []}
   assert "await-merge after" not in board_row(world, card, "U01")
+
+
+def test_cycle_through_a_shared_order_is_refused(tmp_path):
+  # §6.1: U02 is blocked by U01 while U01 merges after U02; the cycle check runs over blockers and merge orders together
+  plan = shared_plan(tmp_path, u02_blocked="U01")
+  with pytest.raises(superegm.HandoffError, match="shared-file chain contradicts the blockers"):
+    superegm.Graph(plan, {"rounds": 3})
