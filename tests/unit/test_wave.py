@@ -525,8 +525,8 @@ def test_the_board_names_the_latest_idle_reason(world):
 
 def test_the_board_waits_on_a_shared_file_predecessor_and_an_open_blocking_decision(world):
   class Graph(world.ns["Graph"]):  # U03 after U01 by a shared file alone, beside its blocker U02
-    def __init__(self, plan):
-      super().__init__(plan)
+    def __init__(self, plan, approval=None):
+      super().__init__(plan, approval)
       self.preds["U03"].add("U01")
   world.ns["Graph"] = Graph
   card = open_wave_card(world)

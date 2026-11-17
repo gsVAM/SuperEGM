@@ -257,7 +257,7 @@ class Handoff(core.Handoff):
     self.config = core.load_config(self.repo_root)
     self.template = self.config["_template"] if self.config["issue_template"] else BODY_TEMPLATE
     check_template(self.template)
-    self.graph = core.Graph(self.plan)
+    self.graph = core.Graph(self.plan, approval)
     self.state = state
     store.handoff_id = self.handoff_id
     elsewhere = filed_in(store, self.design_path)

@@ -1400,10 +1400,15 @@ class Plan:
 
 class Graph:
 
-  def __init__(self, plan: Plan):
+  def __init__(self, plan: Plan, approval: dict | None = None):
     self.plan = plan
     units = plan.units
+    # §6.1: only an approval entry carrying `rounds` builds shared-file units in parallel; any other entry
+    # (1.2.0, `--amend-units`) or none keeps 1.2's serial rule, the shared-file orders held in `preds`
+    parallel = approval is not None and "rounds" in approval
     self.preds = {u: set() for u in units}
+    self.merge_after = {u: set() for u in units}
+    shared_edges = self.merge_after if parallel else self.preds
     kinds = {}  # (from, to) -> [kind]
     blockers_only = {u: set() for u in units}
     for unit in units.values():
@@ -1414,20 +1419,21 @@ class Graph:
       for path, orders in unit.shared:
         for kind, other in orders:
           if kind == "after":
-            self.preds[unit.id].add(other)
+            shared_edges[unit.id].add(other)
             kinds.setdefault((other, unit.id), []).append(f"shared file `{path}`")
           else:
-            self.preds[other].add(unit.id)
+            shared_edges[other].add(unit.id)
             kinds.setdefault((unit.id, other), []).append(f"shared file `{path}`")
     self.edges = [(a, b, "; ".join(dict.fromkeys(k))) for (a, b), k in sorted(kinds.items())]
     cycle = find_cycle(blockers_only)
     if cycle:
       raise HandoffError("blocked-by cycle: " + " -> ".join(cycle))
-    cycle = find_cycle(self.preds)
+    both = {u: self.preds[u] | self.merge_after[u] for u in units}
+    cycle = find_cycle(both)
     if cycle:
       raise HandoffError("shared-file chain contradicts the blockers: "
                          + " -> ".join(cycle) + " (fix the chain or the blockers)")
-    self.order = topo_order(self.preds)
+    self.order = topo_order(both)
     self.wave = {}
     for u in self.order:
       self.wave[u] = 1 + max((self.wave[p] for p in self.preds[u]), default=0)
@@ -1503,7 +1509,7 @@ class Handoff:
     self.design_title = next((l[2:].strip() for l in read_text(design).splitlines()
                               if l.startswith("# ")), design.stem)
     self.config = load_config(self.repo_root)
-    self.graph = Graph(self.plan)
+    self.graph = Graph(self.plan, approval)
     slug = re.sub(r"[^a-z0-9]+", "-", design.stem.lower()).strip("-")[:20].rstrip("-")
     self.handoff_id = (approval or {}).get("handoff_id") or f"{slug}-{self.design_sha[:6]}"
     store.handoff_id = self.handoff_id
