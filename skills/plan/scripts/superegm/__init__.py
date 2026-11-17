@@ -1403,8 +1403,9 @@ class Graph:
   def __init__(self, plan: Plan, approval: dict | None = None):
     self.plan = plan
     units = plan.units
-    # §6.1: only an approval entry carrying `rounds` builds shared-file units in parallel; any other entry
-    # (1.2.0, `--amend-units`) or none keeps 1.2's serial rule, the shared-file orders held in `preds`
+    # §6.1: only an approval entry carrying `rounds` builds shared-file units in parallel; an entry without it
+    # (1.2.0, or an `--amend-units` entry extending a 1.2.0 entry) or none keeps 1.2's serial rule, the
+    # shared-file orders held in `preds`
     parallel = self.parallel = approval is not None and "rounds" in approval
     self.preds = {u: set() for u in units}
     self.merge_after = {u: set() for u in units}
@@ -1428,6 +1429,8 @@ class Graph:
     cycle = find_cycle(blockers_only)
     if cycle:
       raise HandoffError("blocked-by cycle: " + " -> ".join(cycle))
+    # the cycle check runs over the blockers and the shared-file merge orders together (§6.1), so a chain that
+    # contradicts a blocker is refused with or without `rounds`
     both = {u: self.preds[u] | self.merge_after[u] for u in units}
     cycle = find_cycle(both)
     if cycle:
