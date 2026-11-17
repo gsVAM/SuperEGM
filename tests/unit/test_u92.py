@@ -78,3 +78,44 @@ def test_waiting_proceed_after_a_later_launch(world, case, merge_offered):
     assert f"proceed again: U01 head {head}" in text, text
     word = report.unit_state("U01", view, foreman, entries, card_json, {}, NOW)
     assert report.next_action(word, None, entries[-1], [], None) == "proceed again"
+
+
+# ---------------------------------------------------------------- S2: the merge on the authorizing head
+
+
+def unposted_world(world, case):
+  """U01 on head `abc123` with its head review open and no round posted on that head: its attempts collected and
+  never posted, a posted round on an older head before a launch that pushed `abc123`, or no foreman round at all."""
+  from test_wave import open_wave_card, wave_store
+  card = open_wave_card(world)
+  rounds = {"attempts never posted": [{"round": 1, "phase": "collected", "launch": 1, "head": "abc123", "outcome": None}],
+            "typed proceed on a never-posted head": [{"round": 1, "phase": "posted", "launch": 1, "head": "a" * 40,
+                                                     "outcome": "revise"}],
+            "head cycle with no foreman round": []}[case]
+  runs = [{"round": 1, "status": "exited 0"}] + ([{"round": 2, "status": "exited 0"}]
+                                                if case == "typed proceed on a never-posted head" else [])
+  s = wave_store(world, U01={"pr": 70, "head": "abc123", "ci": "green", "launches": runs, "rounds": rounds})
+  code, out = world.run("review", "open", "--kind", "head", "--artifact", "U01", "--reviewers", "change-review",
+                        "--runcard", card)
+  assert code == 0, out
+  set_config(world, repo=REPO, owners=["owner"])
+  return s, card, out.strip()
+
+
+@pytest.mark.parametrize("case", ["attempts never posted", "typed proceed on a never-posted head",
+                                  "head cycle with no foreman round"])
+def test_inbox_offers_merge_on_the_authorizing_head(world, case):
+  s, card, rid = unposted_world(world, case)
+  code, out = proceed(world, rid, card, "--owner", "--reason", "ship it")
+  assert code == 0, out
+  assert foreman_of(s, "U01")["proceeds"][-1]["head"] == "abc123"
+  # proceeded on head "abc123"; inbox stays read-only and names the owner's merge command
+  world.gh.calls.clear()
+  item = next(i for i in inbox_items(s, [s.handoff_id]) if i["subject"].startswith("U01") and i["kind"] == "merge")
+  assert "--match-head-commit abc123" in item["action"]
+  assert f"gh pr merge 70 --match-head-commit abc123" in item["action"]
+  assert item["fingerprint"] == f"U01/merge/{rid}/abc123"
+  assert world.gh.calls == []
+  # offered only while the pull request's head is the authorizing outcome's
+  set_head(s, "U01", "d" * 40)
+  assert not any(i["subject"] == "U01" and i["kind"] == "merge" for i in inbox_items(s, [s.handoff_id]))
