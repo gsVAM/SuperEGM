@@ -105,6 +105,7 @@ drafting.
 **Splitting units** (spec section 9.1, amendment 9; the helper never splits a unit itself).
 A unit's Scope stays within one subsystem, one module family: a helper module with the skill folder, references and tests that drive it (the docs are the sweep's).
 A unit whose Scope would cross two is written as two units, with a `Blocked by` edge only where one consumes the other's interface and the Shared files order for any file both edit, or split so that no file is shared.
+A unit calling a function, extending a change or consuming an interface of another unit lists it in `Blocked by`; a `Shared files` order says only which pull request merges first, a merge order, so units sharing a file build in parallel.
 The one exception is the release's closing sweep, `Blocked by` the rows it sweeps so that it closes the release.
 `README.md` and `docs/claude.md` are edited by one closing unit per release (a docs sweep, or the release's last unit) and never by the others, which, where they would have edited them, append a `docs: see U<n>` note to their Objective's one sentence instead.
 Shared test helpers are split per module: a unit adds its own test file, never a line in `test_helper.py` unless it owns it.
