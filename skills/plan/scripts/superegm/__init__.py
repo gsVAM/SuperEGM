@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes and the one stamp formatter and parser (U31); `discover()`, CORE_CONFIG and SUBCOMMANDS and DEFAULT_CONFIG derived from the modules (U32); the `Tier:` field, `builder.tiers`, `tier_pair` and `unit_tier` (U33); the brainstorm.team key (U34); the one-level merge of every registered object default and the builder defaults read from the registry (U46); the chain and tick store kinds, and `runcard open`'s default mode the frozen one (U43); the store-level instructions kind (U37); the driven card of every chain phase, the top-level cards the tick reads by the chain and the unwritten `driver` key (U44); `reboot_launches` records `subagent_calls` (U49).
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes and the one stamp formatter and parser (U31); `discover()`, CORE_CONFIG and SUBCOMMANDS and DEFAULT_CONFIG derived from the modules (U32); the `Tier:` field, `builder.tiers`, `tier_pair` and `unit_tier` (U33); the brainstorm.team key (U34); the one-level merge of every registered object default and the builder defaults read from the registry (U46); the chain and tick store kinds, and `runcard open`'s default mode the frozen one (U43); the store-level instructions kind (U37); the driven card of every chain phase, the top-level cards the tick reads by the chain and the unwritten `driver` key (U44); `reboot_launches` records `subagent_calls` (U49); `Graph(plan, approval)` splits the blockers from the shared-file merge orders under an approval entry with `rounds` (U61).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
@@ -1202,7 +1202,7 @@ class Unit:
     self.dod = []
     self.decisions = []    # [{id, question, owner, default, blocking}]
 
-  def to_json(self, wave, preds):
+  def to_json(self, wave, preds, merge_after=()):
     return {
         "id": self.id, "title": self.title, "objective": self.objective,
         "scope": [{"path": p, "action": a} for p, a in self.scope],
@@ -1214,7 +1214,7 @@ class Unit:
         "risk": {"level": self.risk[0], "reason": self.risk[1]},
         "size": self.size, "tier": self.tier, "issue": self.issue, "dod": self.dod,
         "decisions": [{k: v for k, v in d.items() if k != "line"} for d in self.decisions],
-        "wave": wave, "predecessors": sorted(preds),
+        "wave": wave, "predecessors": sorted(preds), "merge_after": sorted(merge_after),
     }
 
 
@@ -1400,10 +1400,16 @@ class Plan:
 
 class Graph:
 
-  def __init__(self, plan: Plan):
+  def __init__(self, plan: Plan, approval: dict | None = None):
     self.plan = plan
     units = plan.units
+    # §6.1: only an approval entry carrying `rounds` builds shared-file units in parallel; an entry without it
+    # (1.2.0, or an `--amend-units` entry extending a 1.2.0 entry) or none keeps 1.2's serial rule, the
+    # shared-file orders held in `preds`
+    parallel = self.parallel = approval is not None and "rounds" in approval
     self.preds = {u: set() for u in units}
+    self.merge_after = {u: set() for u in units}
+    shared_edges = self.merge_after if parallel else self.preds
     kinds = {}  # (from, to) -> [kind]
     blockers_only = {u: set() for u in units}
     for unit in units.values():
@@ -1414,20 +1420,23 @@ class Graph:
       for path, orders in unit.shared:
         for kind, other in orders:
           if kind == "after":
-            self.preds[unit.id].add(other)
+            shared_edges[unit.id].add(other)
             kinds.setdefault((other, unit.id), []).append(f"shared file `{path}`")
           else:
-            self.preds[other].add(unit.id)
+            shared_edges[other].add(unit.id)
             kinds.setdefault((unit.id, other), []).append(f"shared file `{path}`")
     self.edges = [(a, b, "; ".join(dict.fromkeys(k))) for (a, b), k in sorted(kinds.items())]
     cycle = find_cycle(blockers_only)
     if cycle:
       raise HandoffError("blocked-by cycle: " + " -> ".join(cycle))
-    cycle = find_cycle(self.preds)
+    # the cycle check runs over the blockers and the shared-file merge orders together (§6.1), so a chain that
+    # contradicts a blocker is refused with or without `rounds`
+    both = {u: self.preds[u] | self.merge_after[u] for u in units}
+    cycle = find_cycle(both)
     if cycle:
       raise HandoffError("shared-file chain contradicts the blockers: "
                          + " -> ".join(cycle) + " (fix the chain or the blockers)")
-    self.order = topo_order(self.preds)
+    self.order = topo_order(both)
     self.wave = {}
     for u in self.order:
       self.wave[u] = 1 + max((self.wave[p] for p in self.preds[u]), default=0)
@@ -1503,7 +1512,7 @@ class Handoff:
     self.design_title = next((l[2:].strip() for l in read_text(design).splitlines()
                               if l.startswith("# ")), design.stem)
     self.config = load_config(self.repo_root)
-    self.graph = Graph(self.plan)
+    self.graph = Graph(self.plan, approval)
     slug = re.sub(r"[^a-z0-9]+", "-", design.stem.lower()).strip("-")[:20].rstrip("-")
     self.handoff_id = (approval or {}).get("handoff_id") or f"{slug}-{self.design_sha[:6]}"
     store.handoff_id = self.handoff_id
@@ -1710,7 +1719,7 @@ class Handoff:
     # The store's copy: `require_frozen_units` compares a filed unit's section
     # in the plan file with the one stored here.
     atomic_write(self.store.path("plan"), self.plan.text)
-    units = {u: self.plan.units[u].to_json(self.graph.wave[u], self.graph.preds[u])
+    units = {u: self.plan.units[u].to_json(self.graph.wave[u], self.graph.preds[u], self.graph.merge_after[u])
              for u in self.graph.order}
     data = {"handoff_id": self.handoff_id, "repo": self.config["repo"],
             "design": {"path": str(self.design_path), "sha256": self.design_sha,

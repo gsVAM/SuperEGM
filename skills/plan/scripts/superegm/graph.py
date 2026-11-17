@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema and issue body; the handoff id comes from the approval record; the plan is copied into the store; the optional `Issue` field checked against the spec's `## Units` section (U13); every escalated pair needs a `## Units` row or a blocking decision (U16); `filed_elsewhere[]`, an older handoff frozen, one store of many handoffs (U20); the body's `· Tier:` (U33); the `width:` line (U29).
+# Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema and issue body; the handoff id comes from the approval record; the plan is copied into the store; the optional `Issue` field checked against the spec's `## Units` section (U13); every escalated pair needs a `## Units` row or a blocking decision (U16); `filed_elsewhere[]`, an older handoff frozen, one store of many handoffs (U20); the body's `· Tier:` (U33); the `width:` line (U29); `merge_after`, `merges after` and `merges before` for a handoff whose approval carries `rounds` (U61).
 
 """superegm graph: parse the plan under its approval; write the store's plan copy,
 units, unit files and bodies."""
@@ -80,8 +80,8 @@ class Unit(core.Unit):
     self.steps = ""          # the Steps text, verbatim
     self.decide = []         # the raw `Decide before build` lines
 
-  def to_json(self, wave, preds):
-    return {**super().to_json(wave, preds), "interfaces": self.interfaces, "review_focus": self.review_focus}
+  def to_json(self, wave, preds, merge_after=()):
+    return {**super().to_json(wave, preds, merge_after), "interfaces": self.interfaces, "review_focus": self.review_focus}
 
 
 class Plan(core.Plan):
@@ -257,7 +257,7 @@ class Handoff(core.Handoff):
     self.config = core.load_config(self.repo_root)
     self.template = self.config["_template"] if self.config["issue_template"] else BODY_TEMPLATE
     check_template(self.template)
-    self.graph = core.Graph(self.plan)
+    self.graph = core.Graph(self.plan, approval)
     self.state = state
     store.handoff_id = self.handoff_id
     elsewhere = filed_in(store, self.design_path)
@@ -288,7 +288,9 @@ class Handoff(core.Handoff):
     if self.filed(uid) is not None:
       return core.unit_file_body(self.unit_file(uid)) + "\n"
     unit = self.plan.units[uid]
-    shared = "; ".join(f"`{path}`: " + ", ".join(f"after {self.ref(o)}" if k == "after" else f"before {self.forward_ref(o)}"
+    merges = "merges " if self.graph.parallel else ""  # U61: with `rounds` the order is a merge order
+    shared = "; ".join(f"`{path}`: " + ", ".join(f"{merges}after {self.ref(o)}" if k == "after"
+                                                 else f"{merges}before {self.forward_ref(o)}"
                                                  for k, o in orders) for path, orders in unit.shared)
     values = {
         "handoff_id": self.handoff_id, "unit_id": uid, "title": unit.title, "spec_sha256": self.spec_sha,
@@ -317,7 +319,8 @@ class Handoff(core.Handoff):
     g = self.graph
     hashes = {uid: core.sha256_text(self.render_unit(uid)) for uid in g.order}
     core.atomic_write(self.store.path("plan"), self.plan.text)
-    units = {u: {**self.plan.units[u].to_json(g.wave[u], g.preds[u]), "body_sha256": hashes[u]} for u in g.order}
+    units = {u: {**self.plan.units[u].to_json(g.wave[u], g.preds[u], g.merge_after[u]), "body_sha256": hashes[u]}
+             for u in g.order}
     data = {"handoff_id": self.handoff_id, "repo": self.config["repo"],
             "design": {"path": str(self.design_path), "sha256": self.design_sha,
                        "commit": self.design_commit, "title": self.design_title},
