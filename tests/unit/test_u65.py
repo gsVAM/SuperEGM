@@ -16,3 +16,11 @@ def test_plan_skill_says_shared_files_build_in_parallel():
   assert "says only which pull request merges first" in t
   assert "units sharing a file build in parallel" in t
   assert "the Shared files order for any file both edit" in t
+
+
+def test_handoff_plan_says_shared_files_are_a_merge_order():
+  t = _read("skills/plan/references/handoff_plan.md")
+  assert "a merge order: `after` merges after that unit, `before` merges before it" in t
+  assert "readiness reads `Blocked by` alone (an approval without `rounds` keeps 1.2's edges)" in t
+  assert "`after` adds an edge" not in t
+  assert "shared-file chain contradicts the blockers" in t
