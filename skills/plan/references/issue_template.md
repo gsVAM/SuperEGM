@@ -1,6 +1,6 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: the section 9.1 body layout and markers replace EGM's template; the per-handoff scan path (U32); the `{{tier}}` placeholder (U33); amendment 9's warning values (U29); the `units.*` limits in place of the bytes warning (U42). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the section 9.1 body layout and markers replace EGM's template; the per-handoff scan path (U32); the `{{tier}}` placeholder (U33); amendment 9's warning values (U29); the `units.*` limits in place of the bytes warning (U42); the `{{shared}}` words `merges after` / `merges before` (U65). -->
 
 # The issue body
 
