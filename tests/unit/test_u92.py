@@ -231,3 +231,80 @@ def read(path):
 def test_wave_lists_waiting_proceed():
   # the wave's state list names the new state
   assert "waiting proceed" in read("skills/wave/SKILL.md")
+
+
+# ---------------------------------------------------------------- round 1 review: the readers' remaining paths
+
+H1, H2 = "a" * 40, "c" * 40
+VIEW = {"launched": True, "landed": False, "pr": 70, "ci": "green", "head": H1}
+
+
+def proceeded_foreman(rounds=(), launch_n=1, head=H1):
+  return {"rounds": list(rounds), "decisions": [], "rulings": [],
+          "proceeds": [{"ruling": "R1", "review": "head-U01-c1", "head": head, "launch": launch_n}]}
+
+
+def test_ready_again_reads_the_proceed():
+  # change-review-1-2: a clean an ingest rewrote is ready again, unless a proceed not older by launch authorizes it
+  rewritten = {"round": 1, "phase": "posted", "launch": 1, "head": H1, "outcome": "revise", "rewritten_from": "clean"}
+  runs = [{"round": 1, "status": "exited 0"}]
+  assert launch.ready_again({"rounds": [rewritten]}, runs) is True
+  assert launch.ready_again(proceeded_foreman([rewritten]), runs) is False
+  assert launch.ready_again(proceeded_foreman([rewritten], launch_n=0), runs) is True
+
+
+def test_latest_clean_reads_the_head_of_a_plain_clean_round():
+  # change-review-1-3: a round posted clean on a head the pull request has left no longer frees the slot
+  clean = {"round": 1, "phase": "posted", "launch": 1, "head": H1, "outcome": "clean"}
+  runs = [{"round": 1, "status": "exited 0"}]
+  foreman = {"rounds": [clean], "decisions": [], "rulings": []}
+  assert launch.latest_clean(foreman, runs, H1) is True
+  assert launch.latest_clean(foreman, runs, None) is True
+  assert launch.latest_clean(foreman, runs, H2) is False
+  assert report.unit_state("U01", {**VIEW, "head": H2}, foreman, runs, {}, {}, NOW) == "active"
+  headless = {"rounds": [{k: v for k, v in clean.items() if k != "head"}], "decisions": [], "rulings": []}
+  assert launch.latest_clean(headless, runs, H2) is True
+
+
+@pytest.mark.parametrize("status, exit_file, waiting", [
+  ("running", False, False),  # a later launch still running on the proceeded head: no waiting proceed, it holds a slot
+  ("running", True, True),    # its exit file written before its status: terminal
+  ("exited 0", False, True),
+])
+def test_waiting_proceed_reads_the_later_launch_finished(tmp_path, status, exit_file, waiting):
+  # change-review-1-4: both branches of `finished`
+  result = tmp_path / "U01_r2.json"
+  if exit_file:
+    Path(str(result) + ".exit").write_text("0\n", encoding="utf-8")
+  runs = [{"round": 1, "status": "exited 0"}, {"round": 2, "status": status, "result_file": str(result)}]
+  foreman = proceeded_foreman()
+  assert launch.waiting_proceed(foreman, runs, H1) is waiting
+  assert launch.latest_clean(foreman, runs, H1) is False
+  assert report.unit_state("U01", VIEW, foreman, runs, {}, {}, NOW) == ("waiting proceed" if waiting else "active")
+
+
+def test_merge_needs_the_proceeds_pinned_head(world):
+  # change-review-1-5: a proceed with no pinned head offers no merge: `--match-head-commit` has nothing to pin
+  s, card, rid = head_world(world)
+  code, out = proceed(world, rid, card, "--owner", "--reason", "accepted risk")
+  assert code == 0, out
+  f = foreman_of(s, "U01")
+  f["proceeds"][-1]["head"] = None
+  atomic_write(s.path("foreman", "U01"), f)
+  items = inbox_items(s, [s.handoff_id])
+  assert not any(i["subject"] == "U01" and i["kind"] == "merge" for i in items), items
+  assert "None" not in inbox_text(s)
+
+
+@pytest.mark.parametrize("latest", [
+  None,
+  {"round": 1, "phase": "posted", "launch": 1, "outcome": "revise"},
+  {"round": 1, "phase": "posted", "launch": 1, "outcome": "contested: change-review-1-1"},
+  {"round": 1, "phase": "posted", "launch": 1, "outcome": "cap-reached"},
+])
+def test_board_action_of_a_proceeded_head(latest):
+  # codebase-details-1-1: a head made clean by a proceed awaits its merge, whatever its latest posted round said
+  runs = {"round": 1, "status": "exited 0"}
+  assert report.next_action("clean", latest, runs, [], None, proceeded=True) == "await-merge"
+  if latest:
+    assert report.next_action("clean", latest, runs, [], None) != "await-merge"
