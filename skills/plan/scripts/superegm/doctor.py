@@ -1,25 +1,30 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24); the informational `plugins` and `mcp` lines and the profile line's plugin refusals (U27); the informational `model:` role table (U28); the informational `stall:` line (U31); the modules' DOCTOR_CHECKS lines after its own (U32); the three `model: builder <tier>` lines (U33).
+# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24); the informational `plugins` and `mcp` lines and the profile line's plugin refusals (U27); the informational `model:` role table (U28); the informational `stall:` line (U31); the modules' DOCTOR_CHECKS lines after its own (U32); the three `model: builder <tier>` lines (U33); `chain` in INFORMATIONAL (U54); `--probe`, one headless builder session on the launch's own flags (U60).
 
 """superegm doctor: one line per wave prerequisite, `ok` or the refusal `launch` or `launch-builder`
 would give; read-only, no run card."""
 
+import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import superegm as core
+from superegm import instructions
 from superegm.builder_token import app_lines, key_path, tool
 from superegm.judges import judge_members
 from superegm.launch import app_login, builder_login, origin_problems, protection_problems
-from superegm.launch_builder import SENTINEL, UNSET, elephant_profile, launched_pairs, plugin_dirs, profile_problem
+from superegm.launch_builder import (SENTINEL, UNSET, allowed_tools, builder_flags, elephant_profile, launched_pairs, plugin_dirs,
+                                     profile_problem)
 
 WRITES = frozenset()  # doctor writes nothing
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # its own lines are `checks`' (U32)
 INFORMATIONAL = ("graphify", "scanning", "astra", "merge", "python3.12", "hooks", "core.hooksPath", "driver", "sleep", "root", "env",
-                 "notify", "plugins", "mcp", "model", "stall")  # lines that never fail the exit
+                 "notify", "plugins", "mcp", "model", "stall", "chain")  # lines that never fail the exit
 MERGE = ("gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset "
          "restricts updates to config.owners)")
 
@@ -27,6 +32,7 @@ MERGE = ("gh pr merge --admin (informational: the owner merges with the admin by
 def register(subparsers):
   p = core.add_parser(subparsers, "doctor", "print every wave prerequisite as ok or the refusal launch would give",
                       runcard=False)
+  p.add_argument("--probe", action="store_true", help="then run one headless builder session on the launch's own flags")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -40,7 +46,197 @@ def run(args):
   lines = [("config", "ok"), *checks(config, repo_root, os.environ.get(config["builder"]["gh_token_env"]))]
   for name, text in lines:
     print(f"{name}: {text}")
-  return 0 if all(text.startswith("ok") for name, text in lines if name not in INFORMATIONAL) else 1
+  passed = all(text.startswith("ok") for name, text in lines if name not in INFORMATIONAL)
+  if getattr(args, "probe", False):
+    passed = probe(config, repo_root) and passed
+  return 0 if passed else 1
+
+
+PROBE_TAIL = ["--output-format", "stream-json", "--verbose", "--max-turns", "5"]
+PROBE_CLOSING = "Do only what these instructions ask at the start of a session, then reply ok."
+
+
+def probe(config, repo_root: Path) -> bool:
+  """Spec 1.2.1 section 3.3: one headless builder session in a fresh temporary directory, on `builder_flags` (the
+  launch's own: profile, setting sources, plugin directories, the MCP file from `builder.mcp`, the unset names, the
+  allow-list, permission mode, `builder.model` and `builder.effort`) plus `PROBE_TAIL`; no token, issue or worktree.
+  Prints the `probe:` lines and returns True when none fails. Writes nothing to the store; the directory is removed."""
+  b = config["builder"]
+  temp = Path(tempfile.mkdtemp(prefix="superegm-probe-"))
+  try:
+    try:
+      dirs = [d["dir"] for d in plugin_dirs(b["plugins"], elephant_profile())]
+      # HEAD's builder-addressed instruction text (U37's renderer); a throwaway store in the temp dir takes any copy it writes
+      text = instructions.render(core.Store(temp / "store"), "builder", None, repo_root)[1].strip()
+      # bare gh: the probe prompt carries no gh path (a launch's orders do), so the rules a launch rewrites to its gh
+      # admit the probe's bare calls, and a `gh <group> <command>` hint is the entry that admits them
+      tools = [t for t in allowed_tools(b["allowed_tools"], "superegm/probe", "", "gh") if not t.startswith("Bash(git push ")]
+    except core.HandoffError as error:
+      print(f"probe: session {error}")
+      return False
+    prompt = f"{text}\n\n{PROBE_CLOSING}" if text else "Reply ok."
+    mcp_file = temp / "probe-mcp.json"
+    mcp_file.write_text(json.dumps({"mcpServers": b["mcp"]}, indent=2) + "\n", encoding="utf-8")
+    env_words, args = builder_flags(config, tools, dirs, mcp_file, (b["model"], b["effort"]))
+    # no token (spec 1.2.1 section 3.3): the launch's no-token sentinel, never the owner's GH_TOKEN or gh login
+    done = subprocess.run(["env", *env_words, "claude", "-p", prompt, *args, *PROBE_TAIL], cwd=temp,
+                          env={**os.environ, "GH_TOKEN": SENTINEL}, stdin=subprocess.DEVNULL, capture_output=True, text=True)
+    lines = probe_lines(done.stdout, b["profile_dir"])
+    for text, _ in lines:
+      print(f"probe: {text}")
+    if any(text.startswith("mcp ") and text.split()[2] == "needs-auth" for text, _ in lines):
+      shutil.copyfile(mcp_file, Path(b["profile_dir"]) / "probe-mcp.json")  # the one-time auth step's file outlives the temp dir
+    if done.returncode:
+      reason = first_line(done.stderr) or result_text(done.stdout)
+      print(f"probe: session exit {done.returncode}" + (f": {reason}" if reason else ""))
+    else:
+      print("probe: session ok")
+    return not done.returncode and all(ok for _, ok in lines)
+  finally:
+    shutil.rmtree(temp, ignore_errors=True)
+
+
+def probe_lines(stdout: str, profile: str) -> list[tuple[str, bool]]:
+  """The probe's lines from the session's stream-json events, each with whether it passes: `mcp <name> <status>`
+  per server of the init event (`connected` passes; `needs-auth` names the one-time auth step), `tool <name> ok` or
+  `tool <name> error: <first line>` per tool result, `denied <tool> <input> (--allow <prefix>)` per entry of the
+  result's `permission_denials` (each fails)."""
+  lines, names = [], {}
+  for raw in stdout.splitlines():
+    try:
+      event = json.loads(raw)
+    except ValueError:
+      continue
+    if not isinstance(event, dict):
+      continue
+    kind = event.get("type")
+    if kind == "system" and event.get("subtype") == "init":
+      for server in event.get("mcp_servers") or []:
+        name, status = server.get("name"), server.get("status")
+        text = f"mcp {name} {status}"
+        if status == "needs-auth":
+          text += (f" (once: CLAUDE_CONFIG_DIR={profile} claude --mcp-config {profile}/probe-mcp.json --strict-mcp-config, "
+                   "then /mcp and Authenticate)")
+        lines.append((text, status == "connected"))
+    elif kind in ("assistant", "user"):
+      content = (event.get("message") or {}).get("content")
+      for block in content if isinstance(content, list) else []:
+        if not isinstance(block, dict):
+          continue
+        if block.get("type") == "tool_use":
+          names[block.get("id")] = block.get("name")
+        elif block.get("type") == "tool_result":
+          name = names.get(block.get("tool_use_id"), block.get("tool_use_id"))
+          if block.get("is_error"):
+            lines.append((f"tool {name} error: {first_line(block.get('content'))}", False))
+          else:
+            lines.append((f"tool {name} ok", True))
+    elif kind == "result":
+      for denial in event.get("permission_denials") or []:
+        tool_name, tool_input = denial.get("tool_name"), denial.get("tool_input") or {}
+        if tool_name == "Bash" and isinstance(tool_input.get("command"), str):
+          command = "\\n".join(tool_input["command"].strip().splitlines())
+          prefixes = list(dict.fromkeys(allow_prefixes(tool_input["command"])))
+          hint = "; ".join(filter(None, [" ".join(f"--allow {shlex.quote(p)}" for p in prefixes if p),
+                                         PUSH_HINT if None in prefixes else "", NARROW_HINT if "" in prefixes else ""]))
+          lines.append((f"denied Bash {command} ({hint})", False))
+        else:
+          lines.append((f"denied {tool_name} {json.dumps(tool_input, sort_keys=True)}", False))
+  return lines
+
+
+PUSH_HINT = "git push: a launch admits only its own branch, no --allow"
+NARROW_HINT = "no --allow: a hint names only a plain `git <subcommand>` or `gh <group> <command>`"
+PLAIN_NAME = re.compile(r"[A-Za-z0-9_./+-]+")
+PLAIN_WORD = re.compile(r"[a-z][a-z0-9-]*")
+
+
+def allow_prefixes(command: str) -> list:
+  """The `--allow` prefix for every line and every `;`, `&&`, `||`, `|` and `&` segment of a denied command, by an
+  allowlist (ruling 6951371255): `git <subcommand>` when the word after git is a plain word other than `push`, and
+  `gh <group> <command>` (gh by bare name or path; the launch rewrites a bare gh rule to its own gh) when both words
+  are plain and the group is not `api`, whose next word is an endpoint, not a command. A `git push`, or a git call
+  with an option before its subcommand and the word `push` anywhere, gives None: no prefix narrower than the push
+  itself keeps the launch's own-branch limit. Every other segment gives "", no --allow: so no interpreter, runner or
+  other first word is offered a rule that admits arbitrary calls."""
+  prefixes = []
+  for text in segments_of(command):
+    try:
+      words = shlex.split(text)
+    except ValueError:
+      prefixes.append("")
+      continue
+    if not words:
+      continue
+    name = os.path.basename(words[0])
+    if not PLAIN_NAME.fullmatch(words[0]) or not text.startswith(words[0]):
+      prefixes.append("")
+      continue
+    plain = [bool(PLAIN_WORD.fullmatch(w)) for w in words[1:3]]
+    if words[0] == "git" and (words[1:2] == ["push"] or words[1:2] and words[1].startswith("-") and "push" in words):
+      prefixes.append(None)
+    elif words[0] == "git" and plain[:1] == [True]:
+      prefixes.append(f"git {words[1]}")
+    elif name == "gh" and plain == [True, True] and words[1] != "api":
+      prefixes.append(f"gh {words[1]} {words[2]}")
+    else:
+      prefixes.append("")
+  return prefixes
+
+
+def segments_of(command: str) -> list:
+  """The text of every line and every `;`, `&`, `|` segment of `command` (so `&&` and `||` too), split outside
+  quotes as the shell does, a `#` comment dropped up to its line's end (never past it); `>&` and `&>` are
+  redirections, not separators. Each segment is stripped; empty ones are left out."""
+  out, current, quote, i = [], [], None, 0
+  while i < len(command):
+    c = command[i]
+    if quote:
+      current.append(c)
+      if c == "\\" and quote == '"' and i + 1 < len(command):
+        current.append(command[i + 1])
+        i += 1
+      elif c == quote:
+        quote = None
+    elif c == "\\":
+      current.append(command[i:i + 2])
+      i += 1
+    elif c in "'\"":
+      quote = c
+      current.append(c)
+    elif c == "#" and (not current or current[-1].isspace()):
+      end = command.find("\n", i)
+      i = len(command) if end < 0 else end
+      continue
+    elif c == "&" and ((current and current[-1] in "<>") or command[i + 1:i + 2] == ">"):
+      current.append(c)
+    elif c in ";&|\n":
+      out.append("".join(current))
+      current = []
+    else:
+      current.append(c)
+    i += 1
+  out.append("".join(current))
+  return [s.strip() for s in out if s.strip()]
+
+
+def result_text(stdout: str) -> str:
+  """The first line of the result event's `result` text, or empty."""
+  for raw in stdout.splitlines():
+    try:
+      event = json.loads(raw)
+    except ValueError:
+      continue
+    if isinstance(event, dict) and event.get("type") == "result":
+      return first_line(event.get("result"))
+  return ""
+
+
+def first_line(content) -> str:
+  """The first line of a tool result's content: a string, or a list of blocks whose text is joined."""
+  if isinstance(content, list):
+    content = "\n".join(b.get("text", "") for b in content if isinstance(b, dict))
+  return (str(content or "").strip().splitlines() or [""])[0]
 
 
 def checks(config, repo_root, token):

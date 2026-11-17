@@ -273,10 +273,12 @@ def test_record_astra_result(world, result, expect):
     requested = panel["judges"]["astra"]["model"]
     assert entry == {"isolation": "runner", "model": f"{requested}:gpt-6-astra",
                      "effort": f"{panel['judges']['astra']['effort']}:xhigh",
-                     "options": {"Q1": "a", "Q2": "c"}, "recorded_at": entry["recorded_at"]}
+                     "options": {"Q1": "a", "Q2": "c"}, "recorded_at": entry["recorded_at"],
+                     "instructions": []}
     assert (world.artifacts / "judges" / pid / "round-1/astra.md").read_text(encoding="utf-8") == result["response"]["summary"]
   else:
-    assert entry == {"not_run": expect[len("not run ("):-1], "recorded_at": entry["recorded_at"]}
+    assert entry == {"not_run": expect[len("not run ("):-1], "recorded_at": entry["recorded_at"],
+                     "instructions": []}
     assert f"judges {pid}: round 1 astra not run ({entry['not_run']})" in journal(world)
 
 

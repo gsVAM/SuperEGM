@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Reviews a handoff plan against its design through the judge panel before any issue is filed.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the body: plan review over the helper's review-plan and review subcommands (U06); `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the accept below the cap's one question per round (U35); the `width:` line, the plan header, the chain check and the split check (U29); the readiness plan remit (1.2.1 §6.5). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the body: plan review over the helper's review-plan and review subcommands (U06); `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the accept below the cap's one question per round (U35); the `width:` line, the plan header, the chain check and the split check (U29); the readiness plan remit (1.2.1 §6.5); the driven wait and the typed run on a wait record, the frozen mode (U45); proceed offered at the cap and on a stall (U58). -->
 
 # Plan review (phase 3)
 
@@ -37,8 +37,9 @@ dispatch.
 
 1. When `.superegm/config.json` is missing, run `python3 '<HELPER>' init`, then continue; the
    owner's by-hand steps it prints are not needed for this review.
-2. `python3 '<HELPER>' runcard open --skill review-plan --artifact '<spec>' --mode '<normal|leavemealone>'`
-   prints `<card>`; it goes on every writing helper call below. `<spec>` is the approved spec
+2. `python3 '<HELPER>' runcard open --skill review-plan --artifact '<spec>'`, adding `--mode leavemealone`
+   only when the invocation said `--leavemealone`; otherwise the mode is `runcard open`'s default, the
+   approval's frozen mode (`config.mode` for an entry with no `mode`), prints `<card>`; it goes on every writing helper call below. `<spec>` is the approved spec
    the plan names (`state.json`'s `design.path`). With `[--handoff <id>]` on the invocation, pass `--handoff '<id>'` to this `runcard open` and to every helper call below; an older handoff is frozen and refuses.
 3. The panel is `--reviewers` when the invocation gave it, else `config.reviewers.plan`;
    `readiness` is first, one to six ids.
@@ -73,13 +74,17 @@ command carries no flag), and drop the units this invocation already ended. Then
   record names the reviewer and the reason from
   `python3 '<HELPER>' review status --review '<id>' --runcard '<card>'` and the round file's
   `not run (<reviewer>: <reason>)`. A re-typed `/superegm:review-plan` opens a new card and
-  resumes the same cycle.
+  resumes the same cycle. The stall still ends the invocation; the owner's way past it is
+  `python3 '<HELPER>' review rule --review '<id>' --ruling 'proceed' --owner --reason '<text>' --runcard '<card>'`.
 - `cap`: decision point 2 as one question (continue one bounded round, once per cycle; accept
   the remainder, not while the body moved since the round; stop, alone and ruled by no one once
   continue is spent and the body moved), recorded with
   `python3 '<HELPER>' review rule --review '<id>' --ruling '<continue|accept|stop>' --owner --runcard '<card>'`
   (`--judges '<id>'` in leavemealone-mode). `continue` raises the cap by one and the next round
-  follows; `accept` converges the unit; `stop` ends the invocation for that unit. When the
+  follows; `accept` converges the unit; `stop` ends the invocation for that unit. Beside these the
+  owner alone (never `--judges`; the judges' question keeps its options) may end the review with
+  `python3 '<HELPER>' review rule --review '<id>' --ruling 'proceed' --owner --reason '<text>' --runcard '<card>'`,
+  which settles the open findings `declined` and converges the unit. When the
   helper answers `review rule: cycle stopped`, a stop was ruled earlier: run `review open` as
   for `due - 1`; it starts the next cycle with a fresh cap.
 - Below the cap, before the `due <id> <n>` rows run, run `python3 '<HELPER>' review status --review '<id>' --runcard '<card>'` per
@@ -196,7 +201,8 @@ in one line that the spec returns to `/superegm:review-spec` for that unit's Des
 
 One line per unit from the last `due` listing: converged at round n; stalled, with the reviewer
 and reason; stopped at the cap. `python3 '<HELPER>' runcard close '<card>'` is the last action
-of every path, including an error you cannot recover from. The next phase is `/superegm:file`.
+of every path, including an error you cannot recover from, except that `next wait` and
+`next clear` close the card themselves, so a path that ran one does not run `runcard close`. The next phase is `/superegm:file`.
 
 ## Rules
 
@@ -209,9 +215,38 @@ of every path, including an error you cannot recover from. The next phase is `/s
 - Findings live in the store and dispositions in the round files: name the review id and the
   `review status` line in chat, never paste a report.
 
+## Under the driver, and on a wait record
+
+Under `SUPEREGM_ROLE=driver` (a tick of `/superegm:driver` started this session) nobody can be
+asked, so Step 0 item 5's start question is not asked: the chain chose to start. Where this skill
+would ask the owner in normal mode (Step 1's accept question, a contested or declined high or
+medium, a review at its cap) or a unit stalls, or where it must stop in either mode (a split that
+needs `approve-spec --amend-units`), run
+`superegm next wait --handoff '<id>' --phase review-plan --question '<text>' --review '<review id>' --runcard '<card>'`
+through the helper (the question on one line; the cap, stall and contest waits pass `--review`; at the cap or a stall the question names
+`proceed` beside the other answers). It writes the wait
+record `chain/<handoff>.json` and closes the card; then exit. The owner answers in the inbox, which
+writes the answer into the record, and the next tick runs this skill again.
+
+A run, typed or driven, that finds a wait record for this handoff (`chain/<handoff>.json` in the
+store) opens its card with `python3 '<HELPER>' runcard open --mode normal --skill review-plan --artifact '<spec>'`
+whatever the frozen mode (Step 0 item 2), and runs the phase on. A typed run that names no
+`--handoff` has no `<id>` before its card exists: it opens the card as Step 0 says, reads `<id>` from
+the card's record, and when `chain/<id>.json` exists opens its card again with `--mode normal` (the
+new card marks the first interrupted) and passes `--handoff '<id>'` to every command below. A typed
+run asks the owner the record's question directly (no new panel) and records the answer as a
+normal-mode run does (`review settle … --owner`, `review rule … --owner`). A driven run is started
+only on a record with an `answer`: it takes the record's `answer` where a typed run asks, with no
+new panel and no second `next wait` for the same question. While that card is open the tick skips
+the handoff. At its end the run runs `superegm next clear --handoff '<id>' --runcard '<card>'`
+through the helper in place of `runcard close` (Step 5; it closes the card itself): it removes the
+record only on confirmed progress and otherwise keeps it, asked again as
+`stopped at review-plan by <by>: answer to go on`.
+
 ## Leavemealone-mode
 
-In leavemealone-mode (`--leavemealone` on the invocation, or `config.mode`) the pause of Step 0
+In leavemealone-mode (`--leavemealone` on the invocation, or the approval's frozen `mode`, else
+`config.mode` for an entry with no `mode`) the pause of Step 0
 item 4 is replaced by the judge panel at decision points 1 and 2, and what each converged answer
 applies is the one routing table `${CLAUDE_PLUGIN_ROOT}/skills/judges/references/leavemealone.md`
 (this skill carries none of its own). At the point, render the question from the record:
@@ -228,4 +263,10 @@ dispatch of the `judges` skill (Astra through the runner, the Claude judges thro
 `python3 '<HELPER>' judges verdict --panel <id> --runcard <card>`. Apply each converged answer
 through its row as it converges (`review settle … --judges '<panel>'`, `review rule … --judges '<panel>'`);
 the verdict's `open[]` are the unconverged questions: end the invocation for that unit naming
-them and `judges/<id>/verdict.json`, the other units continue, and the owner rules by hand.
+them and `judges/<id>/verdict.json`, the other units continue, and the owner rules by hand. Under
+the driver that ending is a wait record, never a new panel on the next tick: once the units are
+handled, run
+`superegm next wait --handoff '<id>' --phase review-plan --question '<text>' --review '<review id>' --runcard '<card>'`
+once, the question naming the open questions and the verdict file (one record per handoff, so every
+such unit goes in that one question). An owner-only outcome (a `test-delta:` finding, an `owner:`
+line) ends the same way.

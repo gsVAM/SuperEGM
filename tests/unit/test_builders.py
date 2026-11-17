@@ -693,6 +693,7 @@ def test_launch_builder_carries_the_audit_trail_line(world, monkeypatch, spawn_f
   git(["update-ref", f"refs/pull/{PR}/head", head], world.repo.parent / "origin.git")
   state = state_of(s); del state["units"][UNIT]["launched"]["by"]; state["units"][UNIT]["pr"] = {"number": PR, "head": head, "base_ref": BASE}
   s.path("state").write_text(json.dumps(state), encoding="utf-8")
+  make_pr(world.gh, PR, head, branch=f"superegm/{hid}/U07", closes=[(REPO, ISSUE)])      # round 2 reads the recorded pull request (U55)
   code, out = world.run("launch-builder", "--unit", UNIT, "--round", 2, "--runcard", card)
   assert code == 0, out
   assert f"# Audit trail\n\nLaunched by unknown · run card {card} · unit U07 · handoff {hid}\n" in s.path("launches", f"{UNIT}_r2_prompt.md").read_text(encoding="utf-8")

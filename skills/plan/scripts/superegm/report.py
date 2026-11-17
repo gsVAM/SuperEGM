@@ -255,13 +255,13 @@ def stopped_line(st, uid: str, stopped: dict, views: dict) -> str:
 
 
 def unit_state(uid: str, view: dict, foreman: dict, launches: list, card: dict, config: dict, now: float) -> str:
-  """One of eight: `landed`, `stopped`, `pending` (a decision without its ruling), `idle` (named on the
+  """One of eight: `landed` (a merged view, `pr` set and `ci` null, included: it holds no slot, U55), `stopped`, `pending` (a decision without its ruling), `idle` (named on the
   card, a `running` latest launch with the `kill_failed` mark (U31), or a head whose CI is pending or
   absent for `ci_wait_minutes` since the card first saw it),
   `clean` (the latest round posted clean, no launch recorded after it), else `active`; an unlaunched
   unit not named idle is `ready` (in the saved `status.ready`) or `waiting` (a view without
   `launched` reads as launched)."""
-  if view.get("landed"):
+  if view.get("landed") or (view.get("pr") and view.get("ci") is None):  # a merged view (`pr` set, `ci` null) has landed
     return "landed"
   if foreman.get("stopped"):
     return "stopped"

@@ -3,7 +3,7 @@ name: writing-plans
 description: Use when you have a spec or requirements for a multi-step task, before touching code
 ---
 
-<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the SuperEGM Step form and its derived defaults; what a Step holds (1.2.1 §6.5). -->
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the SuperEGM Step form and its derived defaults; what a Step holds (1.2.1 §6.5); Q9 as the bar for a Step (U79); the 600-line target and the `units.*` limits (U42). -->
 
 # Writing Plans
 
@@ -41,6 +41,14 @@ configuration, scaffolding, and documentation steps into the task whose
 deliverable needs them; split only where a reviewer could meaningfully
 reject one task while approving its neighbor. Each task ends with an
 independently testable deliverable.
+
+Aim each unit at one behaviour reviewable as one pull request of about 600
+changed lines; this is guidance, and nothing refuses on it. What `scan`
+refuses is an unfiled unit over `units.max_body_kb` (a rendered body of 25 KB
+by default), `units.max_files` (10 Scope paths) or `units.max_steps` (16
+Steps). The plan splits only through the spec: a unit over a limit needs new
+rows in the spec's `## Units` table, so the plan stops for
+`approve-spec --amend-units`, typed by the owner.
 
 ## Step Granularity
 
@@ -152,7 +160,7 @@ conftest attribute, private helper or monkeypatch target: those and the arrange 
 and a unit's Scope lists the conftest and fixture files its tests may touch (for example `tests/conftest.py`).
 The `Implement` line is one sentence: the file, the behaviour and the values the spec pins, with a signature only
 for a public or shared contract that is not already a Produces line; it never restates what the test asserts.
-A code cite (`path:line`) is evidence, never a requirement: `scan` refuses one on an Interfaces or Produces line.
+A code cite (`path:line`) is evidence, never a requirement: `scan` refuses one on an Interfaces or Produces line, and warns, without refusing, when a body has more than ten cites into its own Scope paths.
 A rule family is one parametrized Step, never one Step per rule; a copy/rename table or an edit list is test data,
 one parametrized test over it (the test is the table) and an `Implement` line that says "make the table hold".
 The `Run` line and the closing line are optional: absent, the Step's command is `pytest <test path>::<test name> -q`,
@@ -162,9 +170,10 @@ overrides the default and is the Step's one command.
 
 ## What a Step Contains
 
-A step is done when the implementer can write exactly one reasonable thing
-from it. That is the whole requirement: unambiguous, not complete. Each kind
-of step carries what makes it unambiguous and nothing more:
+A test Step is complete under Q9 when it has the test name, the behaviour and
+the expected values; fixtures, arrange code, helpers and private exception
+types are the builder's. Each kind of step carries what it needs and no
+detail the builder can settle alone:
 
 - **A test step:** the test's name and its assertions, as code, with the
   spec's exact values in them.
@@ -190,13 +199,13 @@ After writing the complete plan, look at the spec with fresh eyes and check the 
 
 **1. Spec coverage:** Skim each section/requirement in the spec. Can you point to a task that implements it? List any gaps.
 
-**2. Step scan:** Every step must let the implementer write exactly one reasonable thing, and no step may carry more than that: a line that decides nothing is a gap, a function body the signature and tests already determine is a transcript. Fix both.
+**2. Step scan:** Every test Step must be complete under Q9 (its test name, the behaviour and the expected values) and carry no private or harness detail: a line that decides nothing is a gap, a function body the signature and tests already determine is a transcript. Fix both.
 
 **3. Type consistency:** Do the types, method signatures, and property names you used in later tasks match what you defined in earlier tasks? A function called `clearLayers()` in Task 3 but `clearFullLayers()` in Task 7 is a bug.
 
 **4. Review Focus:** For each input class or failure mode the spec implies, is there a task whose tests exercise it? The five uncovered ones most likely to bite a person go in the Review Focus section, and each line there gets its test added to the owning task. An empty section means you checked and found none, not that you skipped the check.
 
-**5. Proportion:** Compare the plan's length to the spec's. A plan several times longer than the spec it implements is a transcript of the program, not a plan. If code blocks are most of the document, replace bodies with signatures, test names and assertions, and check that each step is still unambiguous.
+**5. Proportion:** Compare the plan's length to the spec's. A plan several times longer than the spec it implements is a transcript of the program, not a plan. If code blocks are most of the document, replace bodies with signatures, test names and assertions, and check that each step is still complete under Q9: the test name, the behaviour and the expected values.
 
 If you find issues, fix them inline. No need to re-review — just fix and move on. If you find a spec requirement with no task, add the task.
 

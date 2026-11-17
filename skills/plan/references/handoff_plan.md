@@ -1,6 +1,6 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema (interfaces, review focus, Steps, decisions with options), the plan file outside the store, the files and commands of the plan skill only; one directory per handoff (U32); the optional Tier field (U33); the `Waves:` line, the Size row's split candidate and the `width:` line (U29); what a unit pins and what a Step holds (1.2.1 §6.5). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema (interfaces, review focus, Steps, decisions with options), the plan file outside the store, the files and commands of the plan skill only; one directory per handoff (U32); the optional Tier field (U33); the `Waves:` line, the Size row's split candidate and the `width:` line (U29); what a unit pins and what a Step holds (1.2.1 §6.5); Q9 as the bar for a Step (U79); the `units.*` limits in the Size row (U42). -->
 
 # The plan file: schema, the unit's Steps, files and commands
 
@@ -94,7 +94,7 @@ Decide before build
 | Blocked by | `none` or unit ids, comma-separated. A blocker is a unit that creates or changes a file or symbol this unit uses. |
 | Shared files | `none` or `` `path`: after U01, before U05 `` items separated by `; `. `after` adds an edge from that unit to this one; `before` from this one to that unit. |
 | Risk | `low\|medium\|high: reason`. |
-| Size | `S` (up to 3 scope paths), `M` (up to 8), `L` (more, which the per-unit check reports as a split candidate: over 10 Steps, 24,576 bytes or eight Scope paths, or a Scope crossing subsystems). |
+| Size | `S` (up to 3 scope paths), `M` (up to 8), `L` (more, which the per-unit check reports as a split candidate: over 10 Steps, over `units.max_body_kb` or `units.max_files`, or a Scope crossing subsystems; `scan` refuses an unfiled unit over `units.max_body_kb`, `units.max_files` or `units.max_steps`). |
 | Tier | Optional; `difficult`, `doable` or `easy`, set by the author: `difficult` when the Steps leave a design choice open, the unit holds a novel algorithm or an unverified platform behaviour, or it consumes the interfaces of more than one subsystem; `easy` when the Steps are mechanical with pinned signatures and no open choice; else `doable`. A difficult unit keeps a small Scope and few Steps. The tier picks the builder's model and effort (`builder.tiers`; doable is `builder.model` and `builder.effort`); a section without it is doable; another word is refused as a bad `Size` is. |
 | Issue | Optional; `#<n>`, an open issue in `config.repo` that `file` adopts instead of creating one; `graph` refuses a `#<n>` the spec's `## Units` section does not name; the dry run heads such a unit `### edit #<n> <unit> (old body sha256 <hex>)` where a created unit reads `### issue <unit>`. |
 | Interfaces | One item per line: `- Consumes: <name> (U<nn>)` names what this unit uses and the producing unit; `- Produces: <name>` what later units rely on. A name is `fn(params) -> type` for a Python interface, `superegm <sub> <flags> → <stdout shape>; exit <codes>` for a helper subcommand, or `<file> key <path>` for a store field; `scan` matches on the identifier before `(`, the subcommand words, or the key path, and refuses a Consumes no sibling produces or whose producer is not a direct or transitive blocker. |
@@ -124,8 +124,8 @@ lists the conftest and fixture files its tests may touch (for example
 `tests/conftest.py`), since the builder chooses the fixtures and the Scope
 check still applies.
 
-A Step is done when the builder can write exactly one reasonable thing from
-it: unambiguous, not complete. Each group is three parts:
+A Step is done when it has the test name, the behaviour and the expected
+values (handoff standard Q9); the rest is the builder's. Each group is three parts:
 
 - The `Write` line, `` <n>. Write the failing test `<test name>` in `<test path>`: ``
   (the test name in its first backtick span, the test path in its second).
@@ -166,8 +166,9 @@ refused by `scan`; a function body the signature and the test already
 determine is a transcript, which the proportion reviewer refuses.
 
 Self-review before `graph`, with the spec in front of you: every section of
-the spec's range for this unit has a Step; every Step lets the builder write
-exactly one reasonable thing and carries nothing more; the names and
+the spec's range for this unit has a Step; every Step carries its test name,
+the behaviour and the expected values (Q9), with no private or harness
+detail beyond the three parts above; the names and
 signatures a later unit consumes are the ones an earlier unit produces; every
 review-focus line has its test in the owning unit's Steps; the body is no
 longer than the decisions the builder cannot make alone (compare `scan`'s

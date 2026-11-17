@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch, started
 detached and recorded `running`."""
@@ -15,14 +15,15 @@ import uuid
 from pathlib import Path
 
 import superegm as core
-from superegm import body, orient
+from superegm import body, instructions, orient, scan
 from superegm.body import consumes
 from superegm.builder_token import key_path, tool
-from superegm.decision import deleted_rulings, overridden_comments, parse_form
+from superegm.decision import deleted_rulings, overridden_comments, parse_form, recorded_rulings
 from superegm.launch import builder_email, builder_login, load_launches, terminal
 from superegm.review_plan import SPEC_LINE_RE
+from superegm.status import STATUS_RE
 
-WRITES = frozenset(["launches", "orient_unit"])  # the store kinds this subcommand writes
+WRITES = frozenset(["launches", "orient_unit", "runcards"])  # the store kinds this subcommand writes; the card's render (U37)
 CONFIG_DEFAULTS = {  # its own config key (U32)
     "builder": {"profile_dir": "~/.superegm/builder-profile", "model": "claude-opus-5-5", "effort": "medium",
                 "permission_mode": "acceptEdits", "gh_token_env": "SUPEREGM_BUILDER_TOKEN",
@@ -120,6 +121,10 @@ def prepare(args, card):
   text = prompt_text(number, unit, issue_body, orders_text(tools, launched_gh, builder_config["max_subagent_calls"]), orient_text, comments, reviews, pr, builder, audit, pr_block,
                      spec_range=range_text, owners=config.get("owners") or [], foreman=foreman_data,
                      amendments=amendments_for(st, unit, issue_body))
+  # the builder's `# Repository instructions`, the handoff's frozen files, rendered once per card and placed last (U37)
+  manifest, section = instructions.render_stored(st, "builder", "local", card=args.runcard, handoff_id=st.handoff_id)
+  if section:
+    text = text.rstrip("\n") + "\n\n---\n\n" + section
   worktree = add_worktree(handoff.repo_root, st, unit, rnd, branch, pr)
   prompt = st.path("launches", f"{unit}_r{rnd}_prompt.md")
   core.atomic_write(prompt, text)
@@ -140,7 +145,8 @@ def prepare(args, card):
   launches.append({"round": rnd, "reason": launch_reason(launches, foreman_data), "worktree": str(worktree), "branch": branch,
                    "started_at": core.now_iso(), "status": "running",
                    "model": pair[0], "effort": pair[1], "tier": tier,  # the requested pair (U28), picked by the tier (U33)
-                   "result_file": str(result), "prompt_sha256": core.sha256_file(prompt), "boot_id": core.boot_id(), "pid": pid, "command": line, "session_id": session_id})
+                   "result_file": str(result), "prompt_sha256": core.sha256_file(prompt), "boot_id": core.boot_id(), "pid": pid, "command": line, "session_id": session_id,
+                   "instructions": manifest})  # the files that reached the prompt, [] when none was addressed (U37)
   core.atomic_write(st.path("launches", unit), {"launches": launches})
   done = f"{unit} launch {rnd} running (pid {pid})"
   core.journal(st, done)
@@ -217,6 +223,10 @@ def refusal(store, state, config, unit, rnd, builder):
   record = (state.get("units") or {}).get(unit) or {}
   if not record.get("launched"):
     return f"{unit} is not marked by launch"
+  number = (record.get("pr") or {}).get("number")
+  if rnd >= 2 and number:  # a pull request merged after the saved snapshot: a direct revision never relaunches its unit (spec section 7.1)
+    if (core.gh_json(["pr", "view", str(number), "-R", config["repo"], "--json", "mergedAt"]) or {}).get("mergedAt"):
+      return f"pull request #{number} is merged: {unit} is not relaunched"
   core.reboot_launches(store, unit, core.boot_id())  # the boot-id proof: a launch a reboot ended is terminal (spec section 11.2)
   launches = load_launches(store, unit)
   for entry in launches:
@@ -457,11 +467,21 @@ def filed_body(state, unit):
 
 
 def amendments_for(st, unit: str, body: str) -> list[dict]:
-  """Spec section 6.5: the handoff's recorded `amendments[]` for the unit's own Interfaces and for every
-  `(name, unit)` its Consumes lines list, in `at` order."""
+  """Spec section 6.5: the recorded amendments for the unit's own Interfaces and for every `(name, unit)` its Consumes
+  lines list (matched through `scan.names_of`), in `at` order. Two sources: each `amendments/<comment id>.json` whose
+  comment a ruling in some unit's foreman record names (an unruled file, left by a crash, is not read, and no foreman
+  record is read when the directory is absent), and a 1.2.1-pre.1 handoff's legacy `state.json` `amendments[]`."""
   path = st.path("state")
-  entries = (json.loads(core.read_text(path)) if path.is_file() else {}).get("amendments") or []
-  consumed = set(consumes(body))
+  state = json.loads(core.read_text(path)) if path.is_file() else {}  # read once: the legacy entries and the unit list
+  entries = list(state.get("amendments") or [])
+  files = sorted((path.parent / "amendments").glob("*.json"))  # `decision rule`'s files (spec section 6.5)
+  if files:  # a file counts once a ruling in some unit's foreman record names its comment: no record is read without one
+    ruled = {r.subject for uid in state.get("units") or {} for r in recorded_rulings(core.load_foreman(st, uid))
+             if r.kind == "option"}
+    for file in files:
+      if file.stem in ruled:
+        entries += json.loads(core.read_text(file))
+  consumed = {(n, u) for raw, u in consumes(body) for n in scan.names_of(raw)}  # the one reader of an interface name
   return sorted((a for a in entries if a["unit"] == unit or (a["name"], a["unit"]) in consumed), key=lambda a: a["at"])
 
 
@@ -474,8 +494,11 @@ def launch_reason(launches: list, foreman: dict) -> str:
   since = launches[-1].get("started_at") or ""
   points = {d["id"]: d for d in foreman["decisions"]}
   events = [(r["posted_at"], "review") for r in foreman["rounds"] if r.get("phase") == "posted" and (r.get("posted_at") or "") > since]
-  events += [(r["posted_at"], "blocked") for r in foreman["rulings"] if (r.get("posted_at") or "") > since
-             and points.get(r["decision"], {}).get("point") == 3 and str(points[r["decision"]].get("source")).startswith("comment ")]
+
+  def blocked(point):  # a point-3 decision on a comment whose stored question the builder's status line reads BLOCKED or NEEDS_CONTEXT
+    match = STATUS_RE.search(point.get("question") or "")
+    return point.get("point") == 3 and str(point.get("source")).startswith("comment ") and bool(match) and match.group(1) in ("BLOCKED", "NEEDS_CONTEXT")
+  events += [(r["posted_at"], "blocked") for r in foreman["rulings"] if (r.get("posted_at") or "") > since and blocked(points.get(r["decision"], {}))]
   return max(events)[1] if events else "harness"
 
 
@@ -570,6 +593,24 @@ def launched_pairs(gh: str, name: str, email: str) -> list:
   return pairs
 
 
+def builder_flags(config, tools: list, plugin_dirs: list, mcp_file: Path, pair: tuple[str, str]) -> tuple[list[str], list[str]]:
+  """The builder session's own flags (spec 1.2.1 section 3.3), the one source `command_line` and `doctor --probe`
+  build from: `(env words, claude arguments)`. The env words unset `UNSET` (`-u <name>` each) and set the builder
+  profile and `ENABLE_CLAUDEAI_MCP_SERVERS=false`; the arguments run from `--model` through `--allowedTools`. No
+  token, role, card, git pairs, session id or output format: those are the launch's alone."""
+  b, (model, effort) = config["builder"], pair
+  env = [word for name in UNSET for word in ("-u", name)]
+  env += [f"CLAUDE_CONFIG_DIR={b['profile_dir']}", "ENABLE_CLAUDEAI_MCP_SERVERS=false"]
+  args = ["--model", model, "--effort", effort, "--permission-mode", b["permission_mode"], "--setting-sources", "user"]
+  for d in plugin_dirs:
+    args += ["--plugin-dir", str(d)]
+  args += ["--mcp-config", str(mcp_file), "--strict-mcp-config", "--allowedTools", ",".join(tools)]
+  return env, args
+
+
+QUOTED = {"--model", "--effort", "--permission-mode", "--plugin-dir", "--mcp-config", "--allowedTools"}  # command_line quotes their values
+
+
 def command_line(config, worktree, prompt, result, runcard, tools, gh, login, email, plugin_dirs: list, mcp_file: Path,
                  pair: tuple[str, str], session_id: str | None = None) -> str:
   """The launched command (spec section 11): the owner's prompts and token and `CLAUDE_CODE_EFFORT_LEVEL`
@@ -590,12 +631,13 @@ def command_line(config, worktree, prompt, result, runcard, tools, gh, login, em
     if "'" in str(value):
       raise core.HandoffError(f"{value} holds a quote and cannot go on the command line")
   token = f"GH_TOKEN={SENTINEL}" if b["app"] else f"GH_TOKEN=\"${b['gh_token_env']}\""
-  unset, env = " ".join(f"-u {k}" for k in UNSET), " ".join(f"{k}='{v}'" for k, v in pairs)
+  env_words, args = builder_flags(config, tools, plugin_dirs, mcp_file, pair)
+  flags = " ".join(f"'{word}'" if previous in QUOTED else word for previous, word in zip([None, *args], args))
+  setting = " ".join(f"CLAUDE_CONFIG_DIR='{word.split('=', 1)[1]}'" if word.startswith("CLAUDE_CONFIG_DIR=") else word
+                     for word in env_words)
+  env = " ".join(f"{k}='{v}'" for k, v in pairs)
   session = f" --session-id '{session_id}'" if session_id else ""
-  dirs = "".join(f"--plugin-dir '{d}' " for d in plugin_dirs)
   return (f"SUPEREGM_EXIT='{result}.exit'; trap 'echo stalled > \"$SUPEREGM_EXIT\"; exit' TERM; "
-          f"cd '{worktree}' && env {unset} CLAUDE_CONFIG_DIR='{b['profile_dir']}' ENABLE_CLAUDEAI_MCP_SERVERS=false {token} "
+          f"cd '{worktree}' && env {setting} {token} "
           f"SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{runcard}' {env} "
-          f"claude -p \"$(cat '{prompt}')\"{session} --model '{model}' --effort '{effort}' --permission-mode '{b['permission_mode']}' --setting-sources user "
-          f"{dirs}--mcp-config '{mcp_file}' --strict-mcp-config "
-          f"--allowedTools '{','.join(tools)}' --output-format json > '{result}'; echo $? > '{result}.exit'")
+          f"claude -p \"$(cat '{prompt}')\"{session} {flags} --output-format json > '{result}'; echo $? > '{result}.exit'")

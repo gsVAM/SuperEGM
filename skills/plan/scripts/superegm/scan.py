@@ -1,8 +1,9 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the section 9.1 body rules, one named rule per line, over the graph module's bodies; amendment 9's warning values (U29); 1.2.1-pre.1 P3's line cites (section 6.5).
+# Modified by SuperEGM (gsVAM), 2026: the section 9.1 body rules, one named rule per line, over the graph module's bodies; amendment 9's warning values (U29); 1.2.1-pre.1 P3's line cites (section 6.5); the `units` limits registered, validated and refused over, and the bytes warning dropped (U42); the ruler check reads the decision's mode, else the frozen, else `config.mode` (U43); `names_of` strips backticks, the one reader of an interface name (U96).
 
-"""superegm scan: the body rules of spec section 9.1, one `<rule>: <unit>: <line>` per problem."""
+"""superegm scan: the body rules of spec section 9.1, one `<rule>: <unit>: <line>` per problem.
+The one exception is a `units:` line, a `units.*` config value out of range: it names no unit (spec section 6)."""
 
 import re
 from pathlib import Path
@@ -11,9 +12,11 @@ import superegm as core
 from superegm import graph
 
 WRITES = frozenset(['file'])  # the store kinds this subcommand writes: the derived `plan/scan/<unit>.json`
-CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
+CONFIG_DEFAULTS = {"units": {"max_body_kb": 25, "max_files": 10, "max_steps": 16}}  # its own config key (spec section 6)
+INIT_STEP, DOCTOR_CHECKS = "", None  # no init line or doctor line of its own (U32)
+UNIT_LIMIT_RANGE = {"max_body_kb": (1, 48), "max_files": (8, None), "max_steps": (1, None)}  # each limit's valid range
 scan_text, BODY_LIMIT = core.scan_text, core.BODY_LIMIT  # the one raw-text scan, the package's
-WARN = {"bytes": (24_576, "24,576"), "steps": (10, "10"), "fenced_share": (0.40, "0.40")}  # limit, as printed
+WARN = {"steps": (10, "10"), "fenced_share": (0.40, "0.40")}  # limit, as printed
 FENCE_LINE = re.compile(r"^\s*`{3,}")
 NAME_RE = re.compile(r"^[A-Za-z_][\w.]*")
 CHECKBOX_RE = re.compile(r"^\s*- \[[ xX]\]")
@@ -31,7 +34,8 @@ def register(subparsers):
 
 def names_of(item: str) -> list:
   """What an interface item is matched on: a store line's key paths, a
-  subcommand's words, else the leading identifier."""
+  subcommand's words, else the leading identifier; backticks are stripped before matching."""
+  item = item.replace("`", "").strip()
   if " key " in item:
     keys = item.split(" key ", 1)[1].split(" (", 1)[0]
     return [k.strip() for k in keys.split(", ")]
@@ -134,10 +138,12 @@ def rule_decision_blocking(uid, body, handoff):
   answered = handoff.state.get("decisions") or {}
   problems = [f"decision-blocking: {uid}: {d['id']} {d['question']}" for d in handoff.plan.units[uid].decisions
               if d["blocking"] and not d.get("answer") and f"{uid}/{d['id']}" not in answered]
-  if handoff.config["mode"] == "leavemealone":  # an escalated pair's decision is the judges' (section 13.2)
-    for d in handoff.plan.units[uid].decisions:
-      by = (answered.get(f"{uid}/{d['id']}") or {}).get("by")
-      if by and not by.startswith("judges:") and any(pair in d["question"] for pair in handoff.escalated):
+  frozen = core.run_mode(handoff.store)  # a decision without a stored mode: the frozen mode, else config.mode (U43)
+  for d in handoff.plan.units[uid].decisions:  # an escalated pair's decision in leavemealone-mode is the judges' (section 13.2)
+    record = answered.get(f"{uid}/{d['id']}") or {}
+    by = record.get("by")
+    if (record.get("mode") or frozen) == "leavemealone" \
+        and by and not by.startswith("judges:") and any(pair in d["question"] for pair in handoff.escalated):
         problems.append(f"decision-ruler: {uid}: {d['id']} answered by {by} in leavemealone-mode: decide --judges <panel>")
   return problems
 
@@ -177,8 +183,39 @@ def numbers(uid: str, body: str, handoff: graph.Handoff) -> dict:
   return found
 
 
-def scan_handoff(handoff: graph.Handoff) -> list:
+def units_limits_problems(config: dict) -> list:
+  """One `units.<key>` problem line per `units` limit that is not an integer within its range (spec section 6)."""
+  units = config.get("units")
+  if not isinstance(units, dict):
+    return ["units: `units` must be an object"]
   problems = []
+  for key, (low, high) in UNIT_LIMIT_RANGE.items():
+    value = units.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or value < low or (high is not None and value > high):
+      bound = f"at most {high}" if high is not None else f"at least {low}"
+      problems.append(f"units: units.{key}: must be a positive integer, {bound} (got {value!r})")
+  return problems
+
+
+def unit_over_limits(uid: str, body: str, handoff: graph.Handoff) -> list:
+  """One `units-limit` problem line per `units` limit the unfiled unit's body, Scope paths or Steps exceed (spec section 6)."""
+  limits, problems = handoff.config["units"], []
+  size = len(body.encode("utf-8"))
+  if size > limits["max_body_kb"] * 1024:
+    problems.append(f"units-limit: {uid}: units.max_body_kb {limits['max_body_kb']} ({limits['max_body_kb'] * 1024:,} bytes) "
+                    f"is exceeded: the body is {size:,} bytes")
+  files = len(handoff.plan.units[uid].scope)
+  if files > limits["max_files"]:
+    problems.append(f"units-limit: {uid}: units.max_files {limits['max_files']} is exceeded: {files} Scope paths")
+  steps = len(core.body.step_paths(body))
+  if steps > limits["max_steps"]:
+    problems.append(f"units-limit: {uid}: units.max_steps {limits['max_steps']} is exceeded: {steps} Steps")
+  return problems
+
+
+def scan_handoff(handoff: graph.Handoff) -> list:
+  problems = units_limits_problems(handoff.config)
+  valid = not problems
   for item in handoff.writes():
     if item[0] == "issue":
       dod = handoff.plan.units[item[1]].dod if item[1] != "tracking" else []
@@ -186,6 +223,8 @@ def scan_handoff(handoff: graph.Handoff) -> list:
       problems += scan_text(item[2], handoff.config, "body", label=f"{item[1]} title")
       if item[1] != "tracking":
         problems += scan_body(item[1], item[4], handoff)
+        if valid and handoff.filed(item[1]) is None:
+          problems += unit_over_limits(item[1], item[4], handoff)
   return problems
 
 

@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes and the one stamp formatter and parser (U31); `discover()`, CORE_CONFIG and SUBCOMMANDS and DEFAULT_CONFIG derived from the modules (U32); the `Tier:` field, `builder.tiers`, `tier_pair` and `unit_tier` (U33); the brainstorm.team key (U34); `reboot_launches` records `subagent_calls` (U49).
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes and the one stamp formatter and parser (U31); `discover()`, CORE_CONFIG and SUBCOMMANDS and DEFAULT_CONFIG derived from the modules (U32); the `Tier:` field, `builder.tiers`, `tier_pair` and `unit_tier` (U33); the brainstorm.team key (U34); the one-level merge of every registered object default and the builder defaults read from the registry (U46); the chain and tick store kinds, and `runcard open`'s default mode the frozen one (U43); the store-level instructions kind (U37); the driven card of every chain phase, the top-level cards the tick reads by the chain and the unwritten `driver` key (U44); `reboot_launches` records `subagent_calls` (U49).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
@@ -187,7 +187,7 @@ class Store:
   # The Interfaces block's longer names for the same kinds.
   ALIASES = {"handoff_plan": "plan", "handoff_units": "units", "handoff_bodies": "bodies", "wave_report": "report"}
   KEYED = ("unit", "foreman", "launches", "worktrees", "review", "orient_unit", "driver")
-  LEVEL = ("approvals", "handoffs")  # always at the store level
+  LEVEL = ("approvals", "handoffs", "chain", "tick", "instructions")  # always at the store level; chain/<handoff>.json, tick/fetch.json (U43); `instructions/<blob sha>.json` (U37)
   SHARED = ("reviews", "judges", "questions")  # at the store level for a spec review's id, else the handoff's
 
   def __init__(self, root: Path, handoff_id: str | None = None, config: dict | None = None, legacy: bool = False):
@@ -353,6 +353,22 @@ def require_latest_handoff(store: Store) -> None:
       raise HandoffError(f"{hid}: not the latest approval: plan the rows in the latest handoff")
 
 
+def frozen_mode(store: Store) -> str | None:
+  """The `mode` frozen in the store's handoff's latest approval entry; None for no handoff, no entry of its own or an
+  entry without one (1.2.0's), whose readers take the live `config.mode` (spec section 6, U43)."""
+  hid = store.handoff_id
+  for path in sorted((store.root / "approvals").glob("*.json")) if hid else ():
+    own = [e for e in load_approvals(store, path) if e.get("handoff_id") == hid]
+    if own:
+      return own[-1].get("mode")
+  return None
+
+
+def run_mode(store: Store) -> str:
+  """The frozen mode, else the live `config.mode`."""
+  return frozen_mode(store) or (store.config or {}).get("mode", "normal")
+
+
 def spec_of_plan(plan) -> str | None:
   """The spec a plan file's `Design:` line names, resolved against the plan's folder."""
   plan = Path(plan).expanduser().resolve()
@@ -453,13 +469,15 @@ def open_runcard(store: Store, skill: str, artifact: str, parent=None, mode=None
   preceding any handoff, at the store level) the 6 hex of the spec slug (the parent card's, else
   the artifact's stem), counted per skill and hex; a legacy store keeps `<skill>-<n>`. `artifact` is
   stored resolved when it is a file; the card records the handoff it resolved, and a top-level `wave`
-  card also its `boot_id` and `driver_card` (`SUPEREGM_RUNCARD` under `SUPEREGM_ROLE=driver`, else
-  None). The card is written first; then a top-level card of the six `GUARDED_SKILLS` (a `wave` under
-  `SUPEREGM_ROLE=driver` excepted) is refused with `TICK_LIVE` while `tick_live` holds, its own card
+  card, or, with `driver.chain` on, a top-level card of any chain phase (`CHAIN_PHASES`) under
+  `SUPEREGM_ROLE=driver` (U44), also its `boot_id` and `driver_card` (`SUPEREGM_RUNCARD` under
+  `SUPEREGM_ROLE=driver`, else None). The card is written first; then a top-level card of the six
+  `GUARDED_SKILLS` (with the chain on, a chain phase under `SUPEREGM_ROLE=driver` excepted) is refused with `TICK_LIVE` while `tick_live` holds, its own card
   marked interrupted and no other open card of its skill touched (spec section 11.2, U24); for `wave`,
   `tick_live` first applies the boot-id proof to every open handoff (`reboot_proof`), which may record
   `driver/<handoff>.json` and `launches/<unit>.json` entries `interrupted (reboot)` and mark rebooted top-level
-  `wave` cards interrupted, on the refusal path too (`runcard`'s `WRITES`); only after that is
+  cards of every chain phase (U44; a typed non-wave card records no boot id, so with the chain off only `wave`
+  cards) interrupted, on the refusal path too (`runcard`'s `WRITES`); only after that is
   every open card of the same skill and artifact marked interrupted, the artifacts compared rebased
   onto the working directory's checkout, one spec being one artifact in every worktree."""
   if parent is not None and not store.path("runcards", parent).is_file():
@@ -482,17 +500,19 @@ def open_runcard(store: Store, skill: str, artifact: str, parent=None, mode=None
   config = store.config or {}
   card = {"skill": skill, "artifact": artifact, "artifact_sha256": sha,
           "reviewers": list((config.get("reviewers") or {}).get(RUNCARD_REVIEWERS.get(skill, ""), [])),
-          "tiering": None, "mode": mode or config.get("mode", "normal"), "parent": parent,
+          "tiering": None, "mode": mode or run_mode(store), "parent": parent,
           "opened_at": now_iso(), "closed_at": None, "interrupted_at": None, "produced": [],
           "handoff": store.handoff_id}
   driven = os.environ.get("SUPEREGM_ROLE") == "driver"
-  if skill == "wave" and parent is None:
+  # a driven `wave` card, as in 1.2, or with the chain on a driven card of any chain phase (U44)
+  chained = driven and (skill == "wave" or (skill in CHAIN_PHASES and chain_on(config)))
+  if parent is None and (skill == "wave" or chained):
     card["boot_id"] = boot_id()
     card["driver_card"] = os.environ.get("SUPEREGM_RUNCARD") if driven else None
   # the card is written before the read for a tick's launch, so a tick racing this open sees it (spec section 11.2)
   atomic_write(store.path("runcards", rid), card)
   journal(store, f"runcard open {rid} {skill} {artifact}")
-  if parent is None and skill in GUARDED_SKILLS and not (skill == "wave" and driven) and tick_live(store, skill):
+  if parent is None and skill in GUARDED_SKILLS and not chained and tick_live(store, skill):
     card["interrupted_at"] = now_iso()
     atomic_write(store.path("runcards", rid), card)
     journal(store, f"runcard interrupted {rid}: a tick's session may be live")
@@ -514,6 +534,7 @@ def open_runcard(store: Store, skill: str, artifact: str, parent=None, mode=None
 
 
 GUARDED_SKILLS = ("wave", "plan", "file", "integrate", "review-plan", "orient")
+CHAIN_PHASES = ("plan", "review-plan", "file", "wave")  # the phases a tick launches with the chain on (U44)
 TICK_LIVE = "driver: a tick's session may be live; /superegm:driver reset is the owner's interrupt"
 
 
@@ -543,15 +564,38 @@ def load_driver(hs: Store) -> dict:
   return {"launches": [], "notified": [], "refused": None, **data}
 
 
-def top_wave_cards(hs: Store) -> list:
-  """(path, card) of the handoff's top-level `wave` cards, open or not; a child card counts nowhere."""
+def top_cards(hs: Store, skills=CHAIN_PHASES, pattern: str = "*.json") -> list:
+  """(path, card) of the handoff's top-level cards of `skills`, open or not, in open order; a child card counts
+  nowhere."""
   folder = (hs.root if hs.legacy else hs.base()) / "runcards"
   out = []
-  for path in sorted(folder.glob("wave-*.json")):
+  for path in folder.glob(pattern):
     card = json.loads(read_text(path))
-    if card.get("skill") == "wave" and not card.get("parent") and card.get("handoff", hs.handoff_id) == hs.handoff_id:
+    if card.get("skill") in skills and not card.get("parent") and card.get("handoff", hs.handoff_id) == hs.handoff_id:
       out.append((path, card))
-  return out
+  return sorted(out, key=lambda pc: (pc[1].get("opened_at") or "", pc[0].name))
+
+
+def top_wave_cards(hs: Store) -> list:
+  """(path, card) of the handoff's top-level `wave` cards, open or not; a child card counts nowhere."""
+  return sorted(top_cards(hs, ("wave",), "wave-*.json"), key=lambda pc: pc[0].name)
+
+
+def top_phase_cards(hs: Store) -> list:
+  """(path, card) of the handoff's top-level cards of every chain phase (`CHAIN_PHASES`), open or not, in open
+  order (U44: the proofs read them all; a typed non-wave card carries no boot id and no driver card)."""
+  return top_cards(hs)
+
+
+def chain_on(config: dict | None) -> bool:
+  """`driver.chain` is `true` in the store's config; an absent key reads false (U44, spec section 7.1)."""
+  return ((config or {}).get("driver") or {}).get("chain") is True
+
+
+def tick_cards(hs: Store) -> list:
+  """The top-level cards the counts, `driver reset`, `driver status` and the stall rule read: every chain phase's
+  with the chain on, else 1.2's `wave` cards alone (U44: `false` keeps 1.2's driver exactly)."""
+  return top_phase_cards(hs) if chain_on(hs.config) else top_wave_cards(hs)
 
 
 def interrupt_card(hs: Store, path: Path, card: dict, why: str) -> None:
@@ -580,8 +624,9 @@ def reboot_launches(hs: Store, unit: str, current: str) -> None:
 
 def reboot_proof(hs: Store, current: str) -> None:
   """The boot-id proof over one handoff: its tick launches and builders that a reboot ended recorded
-  `interrupted (reboot)`, the open top-level `wave` cards of those launches, or recording a former boot id
-  themselves, marked `interrupted`."""
+  `interrupted (reboot)`, the open top-level cards of every chain phase (U44) of those launches, or recording a
+  former boot id themselves, marked `interrupted`. A typed non-wave card records no boot id and no driver card, so
+  with the chain off this reads exactly 1.2's `wave` cards."""
   data, changed = load_driver(hs), False
   ended = set()
   for entry in data["launches"]:
@@ -592,7 +637,7 @@ def reboot_proof(hs: Store, current: str) -> None:
       changed = True
   if changed:
     atomic_write(hs.path("driver", hs.handoff_id), data)
-  for path, card in top_wave_cards(hs):
+  for path, card in top_phase_cards(hs):
     if not card.get("closed_at") and not card.get("interrupted_at") and (card.get("driver_card") in ended - {None} or rebooted(card, current)):
       interrupt_card(hs, path, card, "interrupted (reboot)")
   folder = hs.base(need=False) / "launches" if not hs.legacy else None
@@ -643,7 +688,8 @@ def here(path) -> Path:
 
 def handoff_spec(args, store: Store) -> str:
   """The handoff's spec: the state's `design.path` (read under this checkout, `here`), else (before the first
-  `graph`) the `Design:` line of `--plan`."""
+  `graph`) the `Design:` line of `--plan`, else the spec its `handoffs/<id>.json` records (U43: `next wait` on a
+  handoff approved but not yet graphed)."""
   spec = (load_state(store.root).get("design") or {}).get("path")
   spec = str(here(spec)) if spec else spec
   plan = Path(args.plan).expanduser().resolve() if getattr(args, "plan", None) else None
@@ -652,6 +698,9 @@ def handoff_spec(args, store: Store) -> str:
     if match:
       design = Path(match.group(1)).expanduser()
       spec = str(design if design.is_absolute() else (plan.parent / design).resolve())
+  if not spec and store.handoff_id:
+    row = next((r for r in handoffs(store.root) if r.get("id") == store.handoff_id), None)
+    spec = str(here(row["spec"])) if row and row.get("spec") else spec
   return spec or ""
 
 
@@ -936,15 +985,22 @@ def parse_remote_url(url: str):
 
 
 def load_config(repo_root: Path) -> dict:
-  """Read `.superegm/config.json`; defaults when missing; unknown keys stop."""
+  """Read `.superegm/config.json`; defaults when missing; unknown keys stop.
+
+  A key whose module `CONFIG_DEFAULTS` default is an object (and `reviewers`, `brainstorm`, `labels`) merges one level, `{**default, **file}`: a partial file value keeps the default's sibling keys, a nested object or list inside it is replaced whole.
+  """
   config = json.loads(json.dumps(DEFAULT_CONFIG))
   path = repo_root / ".superegm" / "config.json"
   config["_source"] = str(path) if path.is_file() else "defaults (no .superegm/config.json)"
   if path.is_file():
     data = json.loads(read_text(path))
-    unknown = set(data) - set(DEFAULT_CONFIG)
+    unknown = set(data) - set(DEFAULT_CONFIG) - set(UNWRITTEN_CONFIG)
     if unknown:
       raise HandoffError(f"{path}: unknown keys {sorted(unknown)}")
+    registered = {k: v for m in _MODULES.values() for k, v in m.CONFIG_DEFAULTS.items()}  # every module's keys (U46)
+    for key, default in UNWRITTEN_CONFIG.items():  # a registered key `init` never writes, read only when the file sets it (U44)
+      if key in data:
+        registered[key] = config[key] = json.loads(json.dumps(default))
     for key, value in data.items():
       if key == "labels":
         unknown = set(value) - set(DEFAULT_CONFIG["labels"])
@@ -953,7 +1009,7 @@ def load_config(repo_root: Path) -> dict:
         config["labels"].update(value)
       elif key == "brainstorm" and isinstance(value, dict) and set(value) - set(DEFAULT_CONFIG["brainstorm"]):
         raise HandoffError(f"{path}: unknown brainstorm keys {sorted(set(value) - set(DEFAULT_CONFIG['brainstorm']))}")
-      elif key in ("astra", "ingest", "foreman", "builder", "reviewers", "brainstorm") and isinstance(value, dict):
+      elif (key in ("reviewers", "brainstorm") or isinstance(registered.get(key), dict)) and isinstance(value, dict):
         config[key] = {**config[key], **value}
       else:
         config[key] = value
@@ -979,6 +1035,13 @@ def load_config(repo_root: Path) -> dict:
   bound = config["foreman"].get("run_timeout_minutes")
   if isinstance(bound, bool) or not isinstance(bound, (int, float)) or not 0 < bound <= 9:
     raise HandoffError("foreman.run_timeout_minutes must be a number above 0 and at most 9")
+  if "driver" in config:  # registered unwritten by driver.py (U44): present only when the file sets it
+    if not isinstance(config["driver"], dict):
+      raise HandoffError("driver must be an object")
+    if set(config["driver"]) - set(UNWRITTEN_CONFIG.get("driver") or {}):
+      raise HandoffError(f"driver: unknown keys {sorted(set(config['driver']) - set(UNWRITTEN_CONFIG.get('driver') or {}))}")
+    if not isinstance(config["driver"].get("chain"), bool):
+      raise HandoffError("driver.chain must be true or false")
   if not config["repo"]:
     origin = run_git(["remote", "get-url", "origin"], repo_root)
     config["repo"] = parse_remote_url(origin)
@@ -992,8 +1055,7 @@ def load_config(repo_root: Path) -> dict:
   builder = config["builder"]
   if isinstance(builder, dict) and isinstance(builder.get("profile_dir"), str):
     builder["profile_dir"] = str(Path(builder["profile_dir"]).expanduser())
-  app = builder.setdefault("app", None) if isinstance(builder, dict) else None
-  isinstance(builder, dict) and builder.setdefault("stall_minutes", 30)  # a file written before U31 lacks it
+  app = builder.get("app") if isinstance(builder, dict) else None  # the builder's other defaults come from launch_builder.CONFIG_DEFAULTS (U46)
   if app is not None:
     app = {"private_key_env": "SUPEREGM_APP_KEY", **app} if isinstance(app, dict) else app
     if not isinstance(app, dict) or set(app) != {"app_id", "slug", "private_key_env"} \
@@ -1003,8 +1065,6 @@ def load_config(repo_root: Path) -> dict:
       raise HandoffError(f"{path}: builder.app must be null or {{app_id: <int>, slug: <slug>, private_key_env: <name>}}")
     builder["app"] = app
   if isinstance(builder, dict):
-    for key, default in (("plugins", []), ("mcp", {}), ("max_subagent_calls", 12)):
-      builder.setdefault(key, default)  # a file written before U27 lacks them
     tools = builder.get("allowed_tools")
     if not isinstance(tools, list) or not all(isinstance(t, str) for t in tools):
       raise HandoffError(f"{path}: builder.allowed_tools must be a list of strings")
@@ -1017,7 +1077,7 @@ def load_config(repo_root: Path) -> dict:
     cap = builder["max_subagent_calls"]
     if isinstance(cap, bool) or not isinstance(cap, int) or cap < 1:
       raise HandoffError("config: builder.max_subagent_calls: a positive integer")
-    tiers = builder.setdefault("tiers", {})  # the defaults' rows unless the file names its own (U33)
+    tiers = builder["tiers"]  # the defaults' rows unless the file names its own (U33)
     if not isinstance(tiers, dict) or set(tiers) - {"difficult", "easy"}:
       raise HandoffError(f"{path}: builder.tiers keys must be difficult or easy")
     for tier, pair in tiers.items():
@@ -2282,6 +2342,9 @@ def set_run(parser, run) -> None:
 _MODULES = discover()  # every subcommand module, imported once the names they use are defined (U32)
 SUBCOMMANDS = tuple(_MODULES)
 DEFAULT_CONFIG = json.loads(json.dumps({**CORE_CONFIG, **{k: v for m in _MODULES.values() for k, v in m.CONFIG_DEFAULTS.items()}}))
+# the keys a module registers in `CONFIG_UNWRITTEN`: accepted and merged one level, never written by `init` nor present
+# in a config whose file lacks them, so an absent key reads its reader's default (U44's `driver.chain`)
+UNWRITTEN_CONFIG = {k: v for m in _MODULES.values() for k, v in getattr(m, "CONFIG_UNWRITTEN", {}).items()}
 from .review import PANEL_OF, ROLES  # noqa: E402  review.py imports this package, so it loads after the names it uses
 DEFAULT_CONFIG["reviewers"] = {kind: panel.split(",") for kind, panel in PANEL_OF.items()}  # one source: the spec's panels
 DEFAULT_CONFIG["reviewers"]["head"].append("astra")  # informational: the lane is seated by astra.enabled and astra.heads

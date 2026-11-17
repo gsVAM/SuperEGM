@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U10's tests of the foreman's helper subcommands.
-# Modified by SuperEGM (gsVAM), 2026: collect reads rulings through `ruling_of` and the record (U22).; the forge check drops an outer run's `GIT_CONFIG_` pairs (1.2.1 wave fix).
+# Modified by SuperEGM (gsVAM), 2026: collect reads rulings through `ruling_of` and the record (U22).; the forge check drops an outer run's `GIT_CONFIG_` pairs (1.2.1 wave fix); the cap tests set the review's stored `cap` in place of the `review.CAP` monkeypatch (U36); the Astra brief's sections pin includes `Amendments` (U97).
 
 """U10: foreman dispatch, prepare, collect, tdd-order, review post. This file replaces U03's nine moved
 prepare/collect tests (they pin `--round`, `--run-folder`, `--verdict`, `head-moved`, `launched` and `--remove`:
@@ -167,6 +167,12 @@ def head_rid(st):
   return next(p.name for p in st.path("reviews").iterdir() if re.search(rf"(^|-)head-{UNIT}-c\d+$", p.name))
 
 
+def cap_at_one(st, rid):
+  """The head review's stored `cap` at 1 (a cap-1 source for the cap tests, U36)."""
+  path = st.path("reviews", rid, "review.json")
+  atomic_write(path, json.loads(path.read_text(encoding="utf-8")) | {"cap": 1})
+
+
 def record(world, st, rid, rnd, head, card, findings):
   for reviewer, text in findings.items():
     path = st.path("review", UNIT, f"pr{PR}") / f"r{rnd}/{reviewer}.findings"
@@ -195,7 +201,7 @@ def test_dispatch_writes_the_round_and_opens_the_head_review(world):
   data = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))
   assert did == "d2" and data["dispatch_id"] == "d2" and child != card
   assert data["rounds"][0] == {**stale, "phase": "collected", "outcome": "not run (superseded)"}
-  assert data["rounds"][1] == {"round": 2, "runcard": card, "launch": 1, "head": None, "phase": "fetched", "dispatch_id": "d2"}
+  assert data["rounds"][1] == {"round": 2, "runcard": card, "launch": 1, "head": None, "phase": "fetched", "dispatch_id": "d2", "instructions": []}
   review = json.loads((st.path("reviews", head_rid(st)) / "review.json").read_text(encoding="utf-8"))
   assert review["kind"] == "head" and review["reviewers"][0] == "change-review"
   child_card = json.loads(st.path("runcards", child).read_text(encoding="utf-8"))
@@ -365,7 +371,7 @@ def test_prepare_writes_the_astra_brief_and_prints_the_lane_state(world, tmp_pat
   assert w.out.strip().endswith(state) and (w.dir / "r2/astra_brief.md").is_file() is brief
   if brief:
     text = (w.dir / "r2/astra_brief.md").read_text(encoding="utf-8")
-    assert re.findall(r"^# ([^\n]+)\n\n````\n", text, re.M) == ["Unit body", "Spec range", "Diff", "CI", "PR body", "Comments", "Prior round"]
+    assert re.findall(r"^# ([^\n]+)\n\n````\n", text, re.M) == ["Unit body", "Spec range", "Diff", "CI", "PR body", "Comments", "Amendments", "Prior round"]
     assert BODY in text and PR_BODY in text and "+feat(S1): hook" in text
   assert cut_diff(b"x" * 400_001).endswith("\n(diff cut at 400 KB)\n") and cut_diff(b"x" * 400_000) == "x" * 400_000
 
@@ -955,7 +961,7 @@ def ingest_world(world, threads, roles=(), outcome="clean"):
 
 
 @pytest.mark.parametrize("cap, word", [(None, "revise"), (1, "cap-reached")])
-def test_review_ingest_rewrites_an_owner_word_a_new_external_high_makes_mixed(world, monkeypatch, cap, word):
+def test_review_ingest_rewrites_an_owner_word_a_new_external_high_makes_mixed(world, cap, word):
   """Round 5 (PR #103 review, astra-5-6): an external high ingested beside a posted `owner: <ids>` round's owner-only
   remainder leaves it mixed: the word becomes `revise`, or `cap-reached` at the cap, never the stale owner word."""
   head = subprocess.run(["git", "-C", str(world.repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
@@ -967,16 +973,16 @@ def test_review_ingest_rewrites_an_owner_word_a_new_external_high_makes_mixed(wo
   world.gh.threads[PR] = [{"id": 1, "user": {"login": "alice"}, "body": "bug: the hook never fires", "path": "src/hooks.py", "line": 3, "commit_id": head, "created_at": "t"}]
   world.gh.roles.update({"alice": {"role_name": "write"}})
   if cap:
-    monkeypatch.setattr(review_mod, "CAP", cap)
+    cap_at_one(st, rid)
   code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
   assert (code, out.split()) == (0, ["1", "ingested", "outcome:", word]), out
   entry = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][0]
   assert (entry["outcome"], entry["rewritten_from"]) == (word, "owner: foreman-1-1")
 
 
-def test_review_ingest_at_the_cap_rewrites_clean_to_cap_reached(world, monkeypatch):
+def test_review_ingest_at_the_cap_rewrites_clean_to_cap_reached(world):
   st, card, posted, rid, head = ingest_world(world, [(1, "alice", "bug: the hook never fires")], {"alice": {"role_name": "write"}})
-  monkeypatch.setattr(review_mod, "CAP", 1)
+  cap_at_one(st, rid)
   code, out = world.run("review", "ingest", "--unit", UNIT, "--runcard", card)
   assert (code, out.split()) == (0, ["1", "ingested", "outcome:", "cap-reached"]), out
   entry = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][0]

@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U14's tests of `superegm doctor` (spec section 11); the App lines and the launched environment (U15); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five driver lines (U24); the informational `stall:` line (U31); the modules' `astra:` and `graphify:` lines last (U32); the three `model: builder` lines (U33).
+# Added by SuperEGM (gsVAM), 2026: U14's tests of `superegm doctor` (spec section 11); the App lines and the launched environment (U15); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five driver lines (U24); the informational `stall:` line (U31); the modules' `astra:` and `graphify:` lines last (U32); the three `model: builder` lines (U33); the informational `chain:` line (U54).
 
 """`superegm doctor`: one line per wave prerequisite, `ok` or the refusal `launch` or `launch-builder`
 would give, in a pinned order; no run card, no store write."""
@@ -19,8 +19,8 @@ MODEL = ["model: builder difficult claude-opus-5-5 high", "model: builder doable
 # U28: the role table at init's defaults, after U24's `notify:` line
 ROLES = [*MODEL, "model: goldfish opus xhigh", "model: astra lanes gpt-6-astra xhigh",
          "model: astra head lane gpt-6-astra high", "model: judge fable fable xhigh", "model: judge opus opus max", "model: judge astra gpt-6-astra xhigh"]
-# U32: the modules' DOCTOR_CHECKS lines close every form, in discovery order (foreman, orient)
-MODULES = ["astra: not installed (heads will record not run)", "graphify: not on PATH (informational)"]
+# U32, U54: the modules' DOCTOR_CHECKS lines close every form, in discovery order (driver, foreman, orient)
+MODULES = ["chain: off","astra: not installed (heads will record not run)", "graphify: not on PATH (informational)"]
 
 OK = ["config: ok", "owner: ok (owner)", "origin: ok", "token: ok", "builder: ok (builder-bot)", "role: ok (write)",
       "scopes: ok (classic: repo, read:org)", "protection: ok",
@@ -227,7 +227,7 @@ def test_doctor_prints_the_role_table(world, monkeypatch, tmp_path):
   monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: {"gh": "/usr/local/bin/gh", "python3.12": "/usr/local/bin/python3.12"}.get(cmd))
   git(["remote", "set-url", "--push", "origin", f"git@github.com:{REPO}.git"], world.repo)
   code, out = world.run("doctor")
-  assert code == 0 and out.splitlines()[-10:-2] == ["model: builder difficult claude-opus-5-5 high", "model: builder doable claude-sonnet-5-5 high",
+  assert code == 0 and out.splitlines()[-11:-3] == ["model: builder difficult claude-opus-5-5 high", "model: builder doable claude-sonnet-5-5 high",
                                                   "model: builder easy claude-sonnet-5-5 medium", "model: goldfish fable max", "model: astra lanes gpt-6-astra xhigh",
                                                  "model: astra head lane gpt-6-astra xhigh", "model: judge fable sonnet max", "model: judge astra gpt-6-astra xhigh"], out
 
@@ -239,4 +239,15 @@ def test_doctor_role_table_reads_a_malformed_member_as_one_informational_line(wo
   monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: {"gh": "/usr/local/bin/gh", "python3.12": "/usr/local/bin/python3.12"}.get(cmd))
   git(["remote", "set-url", "--push", "origin", f"git@github.com:{REPO}.git"], world.repo)
   code, out = world.run("doctor")
-  assert code == 0 and out.splitlines()[-3] == "model: unreadable (KeyError: 'pigeon')" and "token: ok" in out, out
+  assert code == 0 and out.splitlines()[-4] == "model: unreadable (KeyError: 'pigeon')" and "token: ok" in out, out
+
+
+@pytest.mark.parametrize("chain, line", [(None, "chain: off"), (False, "chain: off"), (True, "chain: on")])
+def test_doctor_chain_line(world, monkeypatch, tmp_path, chain, line):
+  arranged(world, monkeypatch, tmp_path, None)
+  if chain is not None:
+    configure(world, driver={"chain": chain})
+  got, out = world.run("doctor")
+  assert got == 0, out  # every other check ok: the line is informational
+  assert out.splitlines()[-3:] == [line, *MODULES[1:]], out
+  assert MODULES[0] == "chain: off"

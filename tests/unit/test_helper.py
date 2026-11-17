@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: renamed from test_egm_handoff.py; helper and skill paths under skills/plan and skills/wave; approve_spec's runcards and init.steps() (U32).
+# Modified by SuperEGM (gsVAM), 2026: renamed from test_egm_handoff.py; helper and skill paths under skills/plan and skills/wave; approve_spec's runcards and init.steps() (U32); the `units` key of the config `init` writes (U42); the expected config and approval-entry key sets take `review` and `rounds` (U36); the approval-entry key set takes `triage` (U39); `phase` registers `next` (U43); the approve_spec, prepare and launch_builder `WRITES` pins and the `instructions` config key (U37); the `WRITES` map gains `decision` with the `file` kind (U96); the `driver` module writes `tick` and `chain` (U44); the `WRITES` map gains `builder_setup` (U59); the `WRITES` map gains `phase` with the `file` kind (U69).
 
 """U03's tests: the helper package, the store, run cards, the gating, init, the body
 parsers, the schemas, the renames and the removals; EGM's tests of the shared names."""
@@ -203,8 +203,9 @@ def test_one_module_per_subcommand(name):
   assert callable(module.register) and callable(module.run)
   parser = superegm.build_parser()
   choices = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction)).choices
-  assert name.replace("_", "-") in choices
-  assert choices[name.replace("_", "-")].get_default("run") is module.run
+  command = {"phase": "next"}.get(name, name.replace("_", "-"))  # U43: `phase` registers `next` (the builtin's name)
+  assert command in choices
+  assert choices[command].get_default("run") is module.run
   defs = [l for l in (scripts / "superegm.py").read_text(encoding="utf-8").splitlines() if l.startswith("def ")]
   assert defs == ["def main(argv=None):"]
 
@@ -387,15 +388,16 @@ def test_the_handoff_flag_and_store_layout_prose(path, needle):
   assert "<6 hex>/" not in (ROOT / "skills/wave/references/foreman_brief.md").read_text(encoding="utf-8")
 
 
-WRITES = {"approve_spec":{"approvals", "handoffs", "state", "reviews", "runcards"},"graph": {"state", "plan", "units", "unit", "bodies"},
+# U37 pins: approve_spec writes `instructions` copies; prepare and launch_builder write a card's instructions render.
+WRITES = {"approve_spec":{"approvals", "handoffs", "state", "reviews", "runcards", "instructions"},"graph": {"state", "plan", "units", "unit", "bodies"},
           "scan": {"file"}, "gate": {"state"},
           "dry_run": {"file", "state"}, "apply": {"state", "file"},
           "verify": {"state"}, "status": {"state"}, "launch": {"state", "runcards"}, "decide": {"state", "plan", "units", "unit", "bodies", "file"},
-          "record_launch": {"launches"}, "collect": {"foreman", "review", "reviews"}, "prepare": {"foreman", "review"},
-          "launch_builder": {"launches", "orient_unit"}, "interrupt": {"launches", "foreman"}, "clean": set(),
+          "record_launch": {"launches"}, "collect": {"foreman", "review", "reviews"}, "prepare": {"foreman", "review", "runcards"},
+          "launch_builder": {"launches", "orient_unit", "runcards"}, "interrupt": {"launches", "foreman"}, "clean": set(),
           "orient": {"orient", "orient_unit"},
-          "runcard": {"runcards", "launches", "driver"}, "init": set(), "doctor": set(), "builder_token": set(), "inbox": {"state", "driver"},
-          "driver": {"driver", "runcards", "launches"}, "register": set()}
+          "runcard": {"runcards", "launches", "driver"}, "init": set(), "doctor": set(), "builder_token": set(), "builder_setup": set(), "inbox": {"state", "driver"},
+          "driver": {"driver", "runcards", "launches", "tick", "chain"}, "phase": {"chain", "runcards", "file"}, "register": set(), "decision": {"foreman", "reviews", "state", "file"}}
 
 
 @pytest.mark.parametrize("name, kinds", sorted(WRITES.items()))
@@ -462,7 +464,7 @@ def test_init_writes_the_config_with_every_key_and_refuses_another_base(tmp_path
   assert set(config) == {"repo", "base", "artifacts_dir", "mode", "max_in_flight", "labels", "issue_template",
                          "tracking_issue_title", "banned_terms", "fix_request_mention", "allowed_mentions",
                          "reviewers", "astra", "judges", "builder", "ci_wait_minutes", "commit_trailer", "owners", "brainstorm", "owner_team",
-                         "pr_block_file", "ingest", "notify_timeout_seconds", "foreman"}
+                         "pr_block_file", "ingest", "notify_timeout_seconds", "foreman", "units", "review", "instructions"}
   assert config["owners"] == ["octocat"] and config["owner_team"] is None and config["pr_block_file"] is None
   assert config["repo"] == REPO and config["base"] == "main" and config["artifacts_dir"] == str(tmp_path / "store")
   assert config["mode"] == "normal" and config["max_in_flight"] == 5 and config["ci_wait_minutes"] == 30
@@ -664,7 +666,7 @@ def test_approve_spec_writes_the_approvals_record_with_handoff_id(world):
   whole = json.loads((world.artifacts / "approvals/sample.json").read_text(encoding="utf-8"))
   record = whole["entries"][-1]  # entries[0] is the world's 1.1 record, read as a one-entry history
   sha = hashlib.sha256(world.spec.read_bytes()).hexdigest()
-  assert set(record) == {"sha256", "commit", "runcard", "review", "approved_at", "escalated", "kind", "voided_by", "handoff_id"}
+  assert set(record) == {"sha256", "commit", "runcard", "review", "approved_at", "escalated", "kind", "voided_by", "handoff_id", "rounds", "triage", "mode"}
   assert whole["path"] == str(world.spec) and record["sha256"] == sha and record["handoff_id"] == f"sample-{sha[:6]}"
   assert record["runcard"] == cid and record["review"] == rid and record["kind"] == "opening" and record["voided_by"] is None
   assert record["commit"] == git(["rev-parse", "HEAD"], world.repo).strip()
@@ -731,7 +733,7 @@ def test_defer_and_published_are_gone(world):
   assert code == 0 and "PUBLISHED" not in out
   code, out = world.run("status")
   assert code == 0 and "U03/D2" not in out and "PUBLISHED" not in out
-  assert set(state_of(world)["decisions"]["U03/D2"]) == {"answer", "by", "decided_at"}
+  assert set(state_of(world)["decisions"]["U03/D2"]) == {"answer", "by", "decided_at", "mode"}  # the card's mode (U43)
   close_as_completed(gh, 2); close_as_completed(gh, 3)
   make_pr(gh, 41, "a" * 40, merged="2026-11-02T10:00:00Z", closes=[(REPO, 3)])
   gh.graphql[3] = [{**gh.prs[41], "repository": {"nameWithOwner": REPO}}]
@@ -850,3 +852,29 @@ def test_a_non_object_astra_value_names_the_astra_key(world, value):
   set_config(world, repo=REPO, astra=value)
   with pytest.raises(superegm.HandoffError, match=re.escape("astra must be an object")):
     superegm.load_config(world.repo)
+
+
+def test_next_wait(world):
+  """U43: `next wait --review` stores the review, closes the card, and a re-ask keeps the review."""
+  from test_u43 import Chain
+  c = Chain(world)
+  c.save()
+  st = superegm.Store(world.artifacts)
+  path = world.artifacts / "chain" / f"{c.hid}.json"
+  assert (st.path("chain", c.hid), st.path("tick", "fetch")) == (path, world.artifacts / "tick" / "fetch.json")
+  cid = world.open_card("review-plan", c.spec)
+  code, out = world.run("next", "wait", "--handoff", c.hid, "--phase", "review-plan", "--question", "cap reached",
+                        "--review", "plan-U01-c1", "--runcard", cid)
+  assert code == 0, out
+  assert json.loads(st.path("runcards", cid).read_text(encoding="utf-8"))["closed_at"]
+  first = json.loads(path.read_text(encoding="utf-8"))
+  assert set(first) == {"phase", "question", "since", "review"}
+  assert (first["phase"], first["question"], first["review"]) == ("review-plan", "cap reached", "plan-U01-c1")
+  world.advance(60)
+  cid = world.open_card("review-plan", c.spec)
+  code, out = world.run("next", "wait", "--handoff", c.hid, "--phase", "review-plan", "--question", "again", "--runcard", cid)
+  assert code == 0, out
+  again = json.loads(path.read_text(encoding="utf-8"))
+  assert (again["question"], again["review"]) == ("again", "plan-U01-c1") and again["since"] > first["since"]
+  code, out = world.run("next", "wait", "--handoff", c.hid, "--phase", "file", "--question", "q")
+  assert (code, out.strip().removeprefix("superegm: ")) == (1, "runcard: --runcard is required")

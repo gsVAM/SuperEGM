@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3/5
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
-# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the `amendments[]` it writes (spec §6.5, 1.2.1-pre.1 P5).
+# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96).
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
@@ -18,15 +18,15 @@ import superegm as core
 from superegm.apply import body_file
 from superegm.launch import load_launches
 from superegm.report import pending_decisions, unit_view
-from superegm import review
+from superegm import review, scan
 from superegm.review import Refusal
 
-WRITES = frozenset({"foreman", "reviews", "state"})  # the store kinds this subcommand writes (`reviews`: a fifth point's accept, U35; `state`: `amendments[]`, §6.5)
+WRITES = frozenset({"foreman", "reviews", "state", "file"})  # the store kinds this subcommand writes (`reviews`: a fifth point's accept, U35; `state`: the other writers' fields; `file`: `amendments/<comment id>.json`, §6.5)
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset({"wave"})  # the skills whose card this subcommand accepts
 RELAUNCH = ["relaunch", "stop the unit"]
 DEVIATION = re.compile(r"^\*\*Deviation \((?P<kind>[^)]*)\):\*\* ?(?P<rest>.*)$", re.M)
-INTERFACE = re.compile(r"(?P<unit>U\d+) (?P<name>[^\s:]+):")  # an interface heading's `<Uxx> <name>:` (spec §6.5)
+INTERFACE = re.compile(r"(?P<unit>U\d+) (?P<name>[^:]+):")  # an interface heading's `<Uxx> <name>:` (spec §6.5); `heading_name` reads the name
 
 
 def comment_options(text: str) -> list:
@@ -36,16 +36,34 @@ def comment_options(text: str) -> list:
   return [line[2:].strip() for line in text.splitlines() if line.startswith("- (")] + amend + ["stop the unit"]
 
 
-def amendments_of(text: str, chosen: str, reason: str, comment_id: int, now: str) -> list:
+def produced_names(st, unit: str) -> list:
+  """The names `scan.names_of` reads from the unit's Produces lines (no unit file: none)."""
+  path = st.path("unit", unit) if st is not None else None
+  lines = core.body.sections(core.read_text(path)).get("Interfaces", []) if path is not None and path.exists() else []
+  return [n for line in lines if line.startswith("- Produces: ") for n in scan.names_of(line[len("- Produces: "):])]
+
+
+def heading_name(raw: str, made: list) -> str:
+  """An interface heading's name: kept whole when it is exactly one of the producer's names, else read through
+  `scan.names_of` (so `load(path)` reads `load`)."""
+  name = raw.replace("`", "").strip()
+  if name in made:
+    return name
+  read = scan.names_of(name)
+  return read[0] if read else name
+
+
+def amendments_of(text: str, chosen: str, reason: str, comment_id: int, now: str, st=None) -> list:
   """The `amendments[]` entries a point-3 ruling on a builder comment writes (spec §6.5): `amend` names the one
   interface deviation, which must be in its unit's Interfaces lines (`rule` checks), text the owner's line; any
   other option settles every interface heading, text the option's; `stop the unit` and a relaunch keep the contract."""
   if chosen in RELAUNCH:
     return []
   heads = [INTERFACE.match(m["rest"]) for m in DEVIATION.finditer(text) if m["kind"] == "interface"]
-  # the name as body.consumes reads a Consumes line, cut at its `(`, so launch_builder.amendments_for matches it
-  return [{"unit": h["unit"], "name": h["name"].split("(")[0], "text": reason.strip() if chosen == "amend" else chosen,
-           "comment_id": comment_id, "at": now} for h in heads if h]
+  # the name as scan.names_of reads it, so launch_builder.amendments_for matches a Consumes line on the same reader
+  return [{"unit": h["unit"], "name": heading_name(h["name"], produced_names(st, h["unit"])),
+           "text": reason.strip() if chosen == "amend" else chosen, "comment_id": comment_id, "at": now}
+          for h in heads if h]
 
 
 def check_amend(st, text: str, reason: str) -> None:
@@ -57,10 +75,10 @@ def check_amend(st, text: str, reason: str) -> None:
   h = INTERFACE.match(heads[0]["rest"]) if len(heads) == 1 and heads[0]["kind"] == "interface" else None
   if h is None:
     raise Refusal("decision: amend needs a comment with one interface deviation and no other")
-  path = st.path("unit", h["unit"])
-  lines = "\n".join(core.body.sections(core.read_text(path)).get("Interfaces", [])) if path.exists() else ""
-  if not re.search(rf"(?<![\w.]){re.escape(h['name'])}\b", lines):
-    raise Refusal(f"decision: amend names {h['unit']} {h['name']}, not in {h['unit']}'s Interfaces lines")
+  made = produced_names(st, h["unit"])
+  name = heading_name(h["name"], made)
+  if name not in made:
+    raise Refusal(f"decision: amend names {h['unit']} {name}, not in {h['unit']}'s Interfaces lines")
 
 # The one ruling grammar (spec section 13.2, amendment 5): a comment's first line in one of these forms and no other.
 FID = r"[^\s()]+"
@@ -74,14 +92,16 @@ FORM_RES = (
   ("allowed-file", re.compile(rf"test-delta (?P<subject>\S+) allowed{REASON}")),
   ("redesign", re.compile(rf"redesign{REASON}")),
   ("allowed", re.compile(rf"(?P<subject>{FID}) allowed{REASON}")),
+  ("proceed", re.compile(rf"proceed{REASON}")),  # the owner's go-ahead on a head (spec section 4.2): owners alone
 )
+LETTER_RE = re.compile(r"\([a-z]\)")  # a rendered option's letter, the bare answer of the judges
 FILE_RULING_RE = re.compile(r"test-delta (\S+) allowed")  # a recorded whole-file allowance's text
 JUDGES_MARK_RE =re.compile(r"^\(judges \S+, leavemealone\)$", re.M)
 
 
 @dataclass(frozen=True)
 class Ruling:
-  kind: str  # upheld | overruled | round | stop | option | allowed | allowed-file | redesign
+  kind: str  # upheld | overruled | round | stop | option | allowed | allowed-file | redesign | proceed
   subject: str  # the fid, the comment or decision id, the `dod-<n>` item, the file, or "" for round, stop and redesign
   option: str | None  # the option text at point 3
   reason: str | None  # the text after the first ` — `, as typed
@@ -113,6 +133,11 @@ def ruling_of(comment: dict, owners: list) -> "Ruling | None":
   return form and Ruling(*form, login=login, comment_id=int(comment["id"]))
 
 
+def ruling_line(text: str, reason: str | None = None) -> str:
+  """The one renderer of the `**Ruling:**` line: the text, then ` — <reason>` only for a non-empty reason."""
+  return f"**Ruling:** {text}" + (f" — {reason}" if reason else "")
+
+
 def ruling_form(point: int, subject: str, option: str | None = None) -> str:
   """The form `ruling_of` reads, as the inbox's action text: point 1 `subject` the fid or `test-delta <file>` and
   `option` the verdict; point 2 `subject` the verdict; `redesign` as `subject` with no option; point 3 `subject` the
@@ -127,7 +152,7 @@ def ruling_form(point: int, subject: str, option: str | None = None) -> str:
   else:
     text = f"{subject} {option}"
   bare = (point == 2 and text in ("one more round", "stop")) or (point == 1 and option == "finding upheld")
-  return f"**Ruling:** {text}" + ("" if bare else " — <reason>")
+  return ruling_line(text, None if bare else "<reason>")
 
 
 def recorded_rulings(foreman: dict) -> list:
@@ -138,11 +163,14 @@ def recorded_rulings(foreman: dict) -> list:
   out = []
   for entry in foreman.get("rulings") or []:
     decision = decisions.get(entry.get("decision"))
+    posted = entry.get("posted") or ""
+    cid = int(posted.split()[1]) if posted.startswith("comment ") and posted.split()[1].isdigit() else 0
+    if entry.get("kind") == "undo":  # the owner's undo of a triage deferral (spec section 5.2): an upheld, no decision
+      out.append(Ruling("upheld", entry["fid"], None, entry.get("reason"), entry.get("by") or "", cid))
+      continue
     if decision is None:
       continue
     text = (entry.get("ruling") or "").partition(" — ")[0].strip()
-    posted = entry.get("posted") or ""
-    cid = int(posted.split()[1]) if posted.startswith("comment ") and posted.split()[1].isdigit() else 0
     option, subject = None, ""
     if text == "redesign" and decision["point"] in (1, 2):  # a head's third ruling; a point-3 option may begin with the word
       kind = "redesign"
@@ -162,7 +190,8 @@ def recorded_rulings(foreman: dict) -> list:
 GROUPS = {"upheld": "fid", "overruled": "fid", "allowed": "fid", "option": "option"}  # the kinds that rule one subject
 
 
-def binding_rulings(comments: list, owners: list, recorded: list, decisions=None, pending=None) -> list:
+def binding_rulings(comments: list, owners: list, recorded: list, decisions=None, pending=None, deferred=None,
+                    consumed=frozenset()) -> list:
   """The rulings that bind (spec section 13.2: a recorded ruling is never changed by a later comment): the record's
   (`recorded`, as `recorded_rulings` reads it), then each owner's form comment `ruling_of` reads whose comment id
   the record does not hold and whose fid or option subject the record does not already rule; an option ruling binds
@@ -177,8 +206,12 @@ def binding_rulings(comments: list, owners: list, recorded: list, decisions=None
   fallback, the latest point-1 decision with no finding line, asks about any fid), as `decision rule` would record
   it. Before any point-1 question an upheld fid binds as the landed `collect` read it, and a `finding overruled`
   always binds: section 13.2 reads an overrule on a `tdd-order`, `test-delta` or `dod-<n>` fid that no decision asks
-  about as an allowance, which `collect` applies without a record."""
+  about as an allowance, which `collect` applies without a record. Given `deferred` (the fids of the record's
+  `followups[]`, spec section 5.2), an unrecorded `upheld` naming one of them is dropped: an applied undo removes
+  its row and binds as recorded, so a live one there is a refused undo, which never blocks. A comment in `consumed`
+  (`consumed_comments`) binds nothing, whatever it now reads: an edited recorded proceed rules nothing (spec section 4.2)."""
   recorded = list(recorded)
+  deferred = set(deferred or ())
   point3 = [d for d in decisions or [] if d.get("point") in (3, 5)]
   point1 = any(d.get("point") == 1 for d in decisions or [])
 
@@ -198,7 +231,8 @@ def binding_rulings(comments: list, owners: list, recorded: list, decisions=None
   ids = {r.comment_id for r in recorded if r.comment_id}
   keys = {key(r) for r in recorded if r.kind in GROUPS}
   return recorded + [r for c in comments if (r := ruling_of(c, owners))
-                     and r.comment_id not in ids and key(r) not in keys and open_for(r) and asked_for(r)
+                     and r.comment_id not in ids and r.comment_id not in consumed and key(r) not in keys and open_for(r) and asked_for(r)
+                     and not (r.kind == "upheld" and r.subject in deferred)
                      and (r.kind != "option" or offered(r, comments, decisions or []))]
 
 
@@ -234,13 +268,18 @@ def overridden_comments(comments: list, owners: list, foreman: dict) -> dict:
   text); an unrecorded form ruling a subject the record already rules, an option the decision does not offer, or a
   bare `one more round`, `stop` or `redesign` no open decision takes, maps to None (dropped)."""
   entries = {r.get("posted"): r for r in foreman.get("rulings") or [] if str(r.get("posted") or "").startswith("comment ")}
+  proceeds = {r.get("posted"): r for r in foreman.get("proceeds") or [] if str(r.get("posted") or "").startswith("comment ")}
   decisions = foreman.get("decisions") or []
   bound = {r.comment_id for r in binding_rulings(comments, owners, recorded_rulings(foreman), decisions,
-                                                 pending_decisions({"decisions": decisions, "rulings": foreman.get("rulings") or []}))}
+                                                 pending_decisions({"decisions": decisions, "rulings": foreman.get("rulings") or []}),
+                                                 [r["fid"] for r in foreman.get("followups") or []], consumed_comments(foreman))}
   out = {}
   for c in comments:
     entry = entries.get(f"comment {c['id']}")
-    if entry:
+    if proceed := proceeds.get(f"comment {c['id']}"):  # consumed by its record: once edited, the prompt shows the record
+      if edited_after_record(c, proceed):
+        out[c["id"]] = proceed_text(proceed)
+    elif entry:
       if edited_after_record(c, entry):
         out[c["id"]] = record_text(foreman, entry)
       elif parse_form(c.get("body") or "") is None:  # recorded before the one grammar (no reason): the record binds
@@ -267,12 +306,16 @@ def deleted_rulings(comments: list, foreman: dict) -> list:
   """A recorded ruling whose comment is gone, as a comment in its place: its id, `by` as the author and the record's
   text, so the prompt still carries what binds (spec section 13.2: a recorded ruling is never changed)."""
   live = {int(c["id"]) for c in comments}
+  note = "the comment was deleted after its record"
   out = {}
   for entry in foreman.get("rulings") or []:
     cid = str(entry.get("posted") or "").removeprefix("comment ")
     if str(entry.get("posted") or "").startswith("comment ") and cid.isdigit() and int(cid) not in live and int(cid) not in out:
-      out[int(cid)] = {"id": int(cid), "user": {"login": entry.get("by")},
-                       "body": record_text(foreman, entry, "the comment was deleted after its record")}
+      out[int(cid)] = {"id": int(cid), "user": {"login": entry.get("by")}, "body": record_text(foreman, entry, note)}
+  for entry in foreman.get("proceeds") or []:  # a recorded proceed's comment, gone: the proceed as recorded
+    cid = str(entry.get("posted") or "").removeprefix("comment ")
+    if str(entry.get("posted") or "").startswith("comment ") and cid.isdigit() and int(cid) not in live and int(cid) not in out:
+      out[int(cid)] = {"id": int(cid), "user": {"login": entry.get("by")}, "body": proceed_text(entry, note)}
   return list(out.values())
 
 
@@ -291,6 +334,19 @@ def recorded_option(foreman: dict, entry: dict):
   return None
 
 
+def consumed_comments(foreman: dict) -> set:
+  """The comment ids `rulings[]` and `proceeds[]` record as `posted` (a typed proceed's null `posted` names none): the
+  comments a record consumed, whose later edit or deletion the record answers (spec section 4.2)."""
+  return {int(cid) for entry in (foreman.get("rulings") or []) + (foreman.get("proceeds") or [])
+          if (cid := str(entry.get("posted") or "").removeprefix("comment ")).isdigit()}
+
+
+def proceed_text(entry: dict, note: str = "the comment was edited after its record") -> str:
+  """A `proceeds[]` entry as its form, marked as the record: `**Ruling:** proceed — <reason>` by its `by` (what an edited
+  or deleted recorded proceed comment is replaced by in the prompt; `record_text` reads `rulings[]`, never `proceeds[]`)."""
+  return ruling_line("proceed", entry.get("reason")) + f"\n(as recorded by {entry.get('by')}; {note})"
+
+
 def record_text(foreman: dict, entry: dict, note: str = "the comment was edited after its record") -> str:
   """A `rulings[]` entry as its form, marked as the record (what an edited or deleted recorded comment is replaced by)."""
   decision = next((d for d in foreman.get("decisions") or [] if d["id"] == entry.get("decision")), {})
@@ -300,7 +356,7 @@ def record_text(foreman: dict, entry: dict, note: str = "the comment was edited 
     text = recorded_option(foreman, entry) or text
     text = f"({source.removeprefix('comment ') if source.startswith('comment ') else decision.get('id')}) {text}"
   bare = point == 2 and text != "redesign" or point == 1 and text.endswith(" finding upheld")
-  return (f"**Ruling:** {text}" + (f" — {reason}" if reason and not bare else "")
+  return (ruling_line(text, None if bare else reason)
           + f"\n(as recorded by {entry.get('by')}; {note})")
 
 
@@ -434,6 +490,12 @@ def label_stopped(store, number: int) -> None:
   core.gh(["issue", "edit", str(number), "-R", store.config["repo"], "--add-label", store.config["labels"]["stopped"]])
 
 
+def labelled_stopped(store, number: int) -> bool:
+  """The issue carries the stopped label now (`gh issue view --json labels`)."""
+  labels = core.gh_json(["issue", "view", str(number), "-R", store.config["repo"], "--json", "labels"]).get("labels") or []
+  return any(l.get("name") == store.config["labels"]["stopped"] for l in labels)
+
+
 def stopped_entry(by: str, reason: str, now_iso: str, brief=None) -> dict:
   return {"by": by, "reason": reason, "at": now_iso} | ({"brief": str(brief)} if brief else {})
 
@@ -465,6 +527,8 @@ def rule(args) -> int:
   found = comment = None
   if args.posted and not closed:  # a by-hand ruling: read through the one grammar (spec section 13.2, U22)
     comment, found, decisions = verify_posted(st, unit, data, args, number, card.get("mode"))
+    if decisions is None:
+      return undo(st, unit, data, args, comment, found, now)
     if found.kind == "allowed-file":
       return rule_file(st, unit, data, args, comment, found, decisions)
   else:
@@ -521,8 +585,7 @@ def rule(args) -> int:
   had = False
   if stops:
     if not (closed or found):  # a session post can fail after the label: know whether it was already on (the owner's close)
-      labels = core.gh_json(["issue", "view", str(number), "-R", st.config["repo"], "--json", "labels"]).get("labels") or []
-      had = any(l.get("name") == label for l in labels)
+      had = labelled_stopped(st, number)
     label_stopped(st, number)
   posted_at, url = now, None
   if closed:
@@ -550,20 +613,30 @@ def rule(args) -> int:
     posted = f"comment {cid}"
   if brief:
     brainstorm_brief(st, unit, decision["id"], decision, chosen, (state["units"][unit].get("pr") or {}).get("number"))
-  entries = [{"decision": d["id"], "ruling": args.ruling, "by": args.by,
+  # a point-3 letter resolved by position is stored as the option it resolved to (its ` — <reason>` kept): the readers of
+  # `rulings[]` (`stop_reason`, `recorded_option`) compare the option's text, and see no position
+  stored = chosen + args.ruling[len(head):] if basis["point"] == 3 and by_position(basis["options"], head.strip(), args.by) else args.ruling
+  entries = [{"decision": d["id"], "ruling": stored, "by": args.by,
               "reason": reason.strip() or None, "posted": posted, "posted_at": posted_at}
              | ({"unread": True} if url else {}) for d in decisions]
   data["rulings"] += entries
   if stops:  # the stop is written with the ruling, in one save
     data["stopped"] = stopped_entry(args.by, chosen, now, brief)
+  if amends:  # spec §6.5: the contract changes, as the file `amendments/<deviation comment id>.json`, written
+    # before the ruling is saved (a crash between the two leaves a file no reader trusts: `amendments_for` reads a file only
+    # once a ruling names its comment) and rewritten, or deleted when this ruling records none, by a rerun; a close given
+    # with `--decision` (`--posted closed:<n>`) records none, so it deletes a crashed run's file (a close with no `--decision`
+    # stops the unit and returns above, leaving the file, which no ruling names and no reader trusts)
+    file = st.path("file", "amendments", f"{str(decision['source']).split()[1]}.json")
+    added = [] if closed else amendments_of(decision["question"], chosen, reason, int(posted.split()[1]), now, st)
+    if added:
+      recorded_at = core.now_iso()
+      core.atomic_write(file, [entry | {"recorded_at": recorded_at} for entry in added])
+    elif file.exists():
+      file.unlink()
   # recorded before the read-back, the session's post marked `unread` (its GitHub time not yet read), so a
   # `status --wait` pass in between compares its edits with its own `created_at` and skips the unedited post
   core.save_foreman(st, unit, data)
-  added = amendments_of(decision["question"], chosen, reason, int(posted.split()[1]), now) if amends and not closed else []
-  if added:  # spec §6.5: the handoff's contract changes, read by `plan`'s re-check
-    fresh = core.load_state(st.root)
-    fresh["amendments"] = (fresh.get("amendments") or []) + added
-    core.save_state(st.root, fresh)
   if url:  # the session's own post: its time is GitHub's creation time, read back, so any edit since (one before the
     # read-back too) reads as an edit after the record; a failed read-back leaves the entry `unread`
     created = read_back(st, cid).get("created_at")
@@ -626,6 +699,64 @@ def withdraw_accept(st, rid: str, head: dict, runcard: str) -> None:
   core.journal(st, f"review {rid} {accepted} accept lapsed under {runcard}")
 
 
+def deferral_of(foreman: dict, fid: str):
+  """The latest `followups[]` row of a triage-deferred fid (spec section 5.2), or None."""
+  return next((r for r in reversed(foreman.get("followups") or []) if r.get("fid") == fid), None)
+
+
+def refuse_undo(st, unit: str, data: dict, row: dict, args) -> None:
+  """The undo's refusals (spec section 5.2), checked before anything is written, so the follow-up row stays: a
+  deferral of an earlier round than the unit's latest posted one, a stopped unit (`foreman.stopped`, or the stopped
+  label on its issue), and a pull request merged or closed (its state read now)."""
+  posted = [e["round"] for e in data.get("rounds") or [] if e.get("phase") == "posted"]
+  why = None
+  if row["round"] != max(posted, default=None):
+    why = f"{row['fid']} was deferred in round {row['round']}, not the latest posted round"
+  elif data.get("stopped"):
+    why = f"{unit} is stopped"
+  else:
+    state = core.load_state(st.root)
+    record = state["units"][unit]
+    pr = (record.get("pr") or {}).get("number")
+    if labelled_stopped(st, record["number"]):
+      why = f"{unit} is stopped (issue #{record['number']} labelled {st.config['labels']['stopped']})"
+    elif pr and (pr_state := core.gh_json(["pr", "view", str(pr), "-R", st.config["repo"], "--json", "state"]).get("state")) != "OPEN":
+      why = f"pull request #{pr} is {pr_state.lower()}"
+  if why:
+    core.journal(st, f"undo refused ({args.by}, comment {args.posted}): {why}; follow-up {row['fid']} kept")
+    raise Refusal(f"decision: undo refused: {why}; the follow-up row stays")
+
+
+def undo(st, unit: str, data: dict, args, comment: dict, found: "Ruling", now: str) -> int:
+  """The owner's `**Ruling:** <fid> finding upheld` on a triage-deferred medium of the unit's latest posted round
+  (spec section 5.2), applied with no dispatch and no `collect`: the finding's disposition cleared and `undone_by` its
+  comment id, a standalone `kind: undo` ruling (`decision: null`), the follow-up row dropped, the latest posted
+  round's outcome rewritten, and triage off for the unit's remaining rounds (`review.triage_undone`)."""
+  said = f"{found.subject} finding upheld"
+  if args.ruling.partition(" — ")[0].strip() != said:
+    raise Refusal(f"decision: comment {args.posted} rules {said}, not {args.ruling.strip()}")
+  row = deferral_of(data, found.subject)
+  refuse_undo(st, unit, data, row, args)
+  rid = review.head_review_id(st, unit)
+  rnd = review.load_round(st, rid, row["round"])
+  finding = next(f for f in review.findings_of(rnd) if f["id"] == found.subject)
+  finding["disposition"], finding["undone_by"] = None, str(args.posted)
+  core.atomic_write(st.path("reviews", rid, f"round-{row['round']}.json"), rnd)
+  # the outcome rewritten before the ruling is recorded: a stop in between leaves the follow-up row and no record,
+  # so the same `decision rule --posted` reruns and completes the undo (both writes are idempotent)
+  review.undo_outcome(st, rid, args.runcard)
+  data = core.load_foreman(st, unit)
+  data["rulings"].append({"kind": "undo", "decision": None, "fid": found.subject, "by": args.by,
+                          "posted": f"comment {args.posted}", "ruling": args.ruling,
+                          "posted_at": comment.get("updated_at") or comment.get("created_at") or now, "at": now})
+  data["followups"] = [r for r in data.get("followups") or [] if r.get("fid") != found.subject]
+  core.save_foreman(st, unit, data)
+  core.journal(st, f"Ruling ({args.by}, comment {args.posted}): {unit} undo {found.subject} deferred by triage; "
+                   f"triage off for {unit}")
+  print(f"recorded (comment {args.posted}): undo {found.subject}")
+  return 0
+
+
 KIND_POINTS = {"upheld": (1,), "overruled": (1,), "allowed": (1,), "allowed-file": (1,), "round": (2,), "stop": (2,), "option": (3, 5), "redesign": (1, 2)}
 
 
@@ -674,6 +805,12 @@ def rule_file(st, unit: str, data: dict, args, comment: dict, found, decisions: 
   return 0
 
 
+def by_position(options: list, text: str, by: str) -> bool:
+  """Point 3: a bare `(x)` is the letter of its position in the rendered question: always the judges' (they see letters
+  by position), the owner's only where no stored option's own prefix carries it (the owner reads the comment's letters)."""
+  return bool(LETTER_RE.fullmatch(text)) and (by.startswith("judges:") or not any(o.startswith(text + " ") for o in options))
+
+
 def check_ruling(point: int, options: list, ruling: str, by: str = "") -> str:
   """The option `ruling` names (its letter, its text, or both; point 1 as `<fid> <option>`), resolved
   to the option's text; refused when it is none of them. At points 1 and 2 the bare word `redesign` (its ` — <why>`
@@ -682,11 +819,15 @@ def check_ruling(point: int, options: list, ruling: str, by: str = "") -> str:
   answers the option carrying its fid, and `<fid> finding upheld` rules that fid upheld (spec section 8: the builder
   restores it, or at the cap point 2 asks); either is refused to the judges, the owner's alone (U25); any other text
   is none of its options."""
-  if point == 3 and ruling == "amend" and "amend" in options and by.startswith("judges:"):
-    raise Refusal("decision: amend is the owner's alone")
   if ruling == "redesign" and point in (1, 2):  # a head's third ruling: no letter, no finding id
     return "redesign"
   fid, _, text = ruling.partition(" ") if point == 1 else ("", "", ruling)
+  if point == 3 and by_position(options, text, by):
+    place = ord(text[1]) - ord("a")
+    if place < len(options):
+      text = options[place]
+  if point == 3 and text == "amend" and "amend" in options and by.startswith("judges:"):  # on the option the ruling resolves to
+    raise Refusal("decision: amend is the owner's alone")
   if point == 1 and options and all(o.endswith(" allowed") for o in options):
     said = text.partition(" — ")[0].strip()
     option = next((o for o in options if o.split(" ")[0] == fid and said in ("allowed", "finding overruled", "finding upheld")), None)
@@ -711,7 +852,7 @@ def ruling_comment(point: int, source: str, ruling: str, question: str, brief=No
   quoted = "\n".join("> " + l for l in question.rstrip("\n").splitlines())
   marker = f"\n(judges {by[7:]}, leavemealone)" if by.startswith("judges:") else ""
   if brief:  # a redesign ruling: the unit is stopped, the brief named, the owner closes the issue by hand
-    return (f"**Ruling:** {ruling}{marker}\n\nStopped for redesign; the brainstorm brief is `{brief}`.\n"
+    return (f"{ruling_line(ruling)}{marker}\n\nStopped for redesign; the brainstorm brief is `{brief}`.\n"
             f"Close this issue by hand once the re-planned unit is filed.\n\n{quoted}\n")
   if point == 1:
     line = ruling.replace("finding upheld", "finding upheld (fix it)", 1)
@@ -719,7 +860,7 @@ def ruling_comment(point: int, source: str, ruling: str, question: str, brief=No
     line = ruling
   else:  # point 3, and a head's fifth point in the point-3 form over its decision id (U35)
     line = f"({source.removeprefix('comment ') if source.startswith('comment ') else qid}) {ruling}"
-  return f"**Ruling:** {line}{marker}\n\n{quoted}\n"
+  return f"{ruling_line(line)}{marker}\n\n{quoted}\n"
 
 
 DIFF_WHOLE, DIFF_LINES = 40_000, 200  # a diff under 40 KB is copied whole, else its first 200 lines
@@ -782,9 +923,9 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int, mode=None)
   found = ruling_of(comment, store.config.get("owners") or [])
   if found is None:
     raise Refusal(f"decision: comment {cid} by {author} is not an owner's ruling")
-  recorded = next((r for r in foreman["rulings"] if r.get("posted") == f"comment {cid}"), None)
-  if recorded:
-    core.journal(store, f"Ruling ({args.by}, comment {cid}): {unit} {recorded['decision']} ruling edited after record, ignored")
+  if int(cid) in consumed_comments(foreman):
+    recorded = next(r for r in foreman["rulings"] + (foreman.get("proceeds") or []) if r.get("posted") == f"comment {cid}")
+    core.journal(store, f"Ruling ({args.by}, comment {cid}): {unit} {recorded.get('decision') or recorded.get('ruling')} ruling edited after record, ignored")
     raise Refusal(f"decision: comment {cid} already recorded (ruling edited after record, ignored)")
   points = KIND_POINTS.get(found.kind, ())
   point2 = {d["id"] for d in foreman["decisions"] if d["point"] == 2}
@@ -813,6 +954,8 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int, mode=None)
     if found.kind == "redesign":  # every pending decision at once (spec section 13.2), the named one first: its brief
       return comment, found, [decision] + [d for d in pending_decisions(foreman) if d["id"] != decision["id"]]
     return comment, found, [decision]
+  if found.kind == "upheld" and deferral_of(foreman, found.subject):  # the undo, checked before `fid_decisions` (5.2)
+    return comment, found, None
   pending = pending_decisions(foreman)
   if found.kind == "allowed-file":  # every open decision with an entry of that file, a contest copy's too (`rule` records each fid)
     decisions = list({d["id"]: d for d, _ in file_targets(foreman, found.subject, store)}.values())

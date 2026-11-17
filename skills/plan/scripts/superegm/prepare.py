@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # From the elephant-goldfish-model (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_prepare` as the prepare module, keyed by the dispatch id; the fetched tip is the round's head; `pr_body.md` and `comments.md` beside the diff and the CI file; the App path's builder login (U15); the Astra brief and the lane's word on the `prepared:` line (U17); `r<n>/spec_range.md` at the marker's sha, the brief's range read from it (U20); the review worktree removed by force and its git calls hook-free (U25).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_prepare` as the prepare module, keyed by the dispatch id; the fetched tip is the round's head; `pr_body.md` and `comments.md` beside the diff and the CI file; the App path's builder login (U15); the Astra brief and the lane's word on the `prepared:` line (U17); `r<n>/spec_range.md` at the marker's sha, the brief's range read from it (U20); the review worktree removed by force and its git calls hook-free (U25); `runcards` in its writes, allowed ahead of the Astra brief's instructions render on the card, which U38 adds (U37); `head_launch` of a round, the `recorded_at` comparison of `amendments.md` and the Astra brief's `Amendments` section (U97); the Astra brief ends with the instructions section rendered for role reviewers, lane astra, on the child card (U38).
 
 """superegm prepare: fetch the PR into refs/superegm, add the review worktree, write the diff, CI, PR body and comments."""
 
@@ -11,10 +11,10 @@ import subprocess
 from pathlib import Path
 
 import superegm as core
-from superegm import foreman, launch_builder, review
+from superegm import foreman, instructions, launch_builder, review, status
 from superegm.launch import app_login, load_launches
 
-WRITES = frozenset(['foreman', 'review'])  # the store kinds this subcommand writes
+WRITES = frozenset(['foreman', 'review', 'runcards'])  # the store kinds this subcommand writes; `runcards` is allowed for the Astra brief's card render, which U38 adds (U37)
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset(['wave'])  # the skills whose card this subcommand accepts
 AGED = ("**Deviation", "**Decision D", "**Ruling:**", "**Reply ", "**Seam:**")  # the comment kinds kept regardless of age (section 11; a reply answers a ruling that may be older than the last posted round)
@@ -101,14 +101,18 @@ def prepare(args, card):
                  (number, core.gh_pages(f"repos/{repo}/issues/{number}/comments")), since, login)
   # spec section 6.5: the foreman holds this head to an amendment only when the head's launch started after it
   launches = load_launches(st, unit)
-  started = next((l.get("started_at") for l in reversed(launches) if l["round"] == entry.get("launch")), None)
-  write_amendments(r / "amendments.md", launch_builder.amendments_for(st, unit, core.unit_file_body(st.path("unit", unit))), started)
+  committed = status.head_time(tree)  # the committer time of the head fetched above, checked out at `tree`
+  own = [l for l in launches if status.own_commit(l, committed) is not None]
+  head_launch = own[-1] if own else None  # the latest launch that started before the head commit; `launch` stays the latest launch
+  entry["head_launch"] = head_launch["round"] if head_launch else None
+  write_amendments(r / "amendments.md", launch_builder.amendments_for(st, unit, core.unit_file_body(st.path("unit", unit))),
+                   head_launch.get("started_at") if head_launch else None)
   for key in ("dod_runs", "test_delta"):  # an earlier head's gates never stand for this one: `post` refuses until `collect`
     entry.pop(key, None)
   entry.update({"head": head, "phase": "prepared", "merge_base": merge_base, "worktree": str(tree)})
   core.save_foreman(st, unit, data)
   previous = max((e["round"] for e in data["rounds"] if e.get("phase") == "posted"), default=None)
-  lane = astra_brief(st, root, unit, r, diff, ci, pr.get("body") or "", previous)
+  lane = astra_brief(st, root, unit, r, diff, ci, pr.get("body") or "", previous, args.runcard)
   core.journal(st, f"{unit} round {n} prepared head {head[:7]} under {args.runcard}")
   print(f"prepared: head {head[:7]} merge-base {merge_base[:7]} {ci['verdict']} previous {previous or '-'} {lane}")
   return 0
@@ -133,9 +137,10 @@ def prior_round_text(st, rid, previous) -> str:
   return "\n".join(lines) or "none"
 
 
-def astra_brief(st, root: Path, unit: str, r: Path, diff: bytes, ci: dict, pr_body: str, previous) -> str:
+def astra_brief(st, root: Path, unit: str, r: Path, diff: bytes, ci: dict, pr_body: str, previous, card: str) -> str:
   """Write `r<n>/astra_brief.md` when the head review's panel seats `astra` and fewer than two runs were
-  incomplete; return the lane's word for the `prepared:` line: `astra: off | ok <runner> | not installed | stopped`."""
+  incomplete, the `# Repository instructions` section for role reviewers, lane astra, last (rendered on `card` through the
+  store-once path when none is stored there, so the Astra record copies the manifest the brief carried); return the lane's word for the `prepared:` line: `astra: off | ok <runner> | not installed | stopped`."""
   rid = review.head_review_id(st, unit)
   panel = review.load_review(st, rid) if rid else None
   if not panel or "astra" not in panel["reviewers"]:
@@ -145,18 +150,19 @@ def astra_brief(st, root: Path, unit: str, r: Path, diff: bytes, ci: dict, pr_bo
   body = core.unit_file_body(st.path("unit", unit))
   sections = [("Unit body", body), ("Spec range", core.read_text(r / "spec_range.md")), ("Diff", cut_diff(diff)),
               ("CI", json.dumps(ci, indent=2)), ("PR body", pr_body), ("Comments", core.read_text(r / "comments.md")),
-              ("Prior round", prior_round_text(st, rid, previous))]
-  core.atomic_write(r / "astra_brief.md", "".join(f"# {name}\n\n````\n{text}\n````\n\n" for name, text in sections))
+              ("Amendments", core.read_text(r / "amendments.md")), ("Prior round", prior_round_text(st, rid, previous))]
+  _, section = instructions.render_stored(st, "reviewers", "astra", card=card, handoff_id=st.handoff_id)
+  core.atomic_write(r / "astra_brief.md", "".join(f"# {name}\n\n````\n{text}\n````\n\n" for name, text in sections) + section)
   runner = foreman.runner_path()
   return f"astra: ok {runner}" if runner else "astra: not installed"
 
 
 def write_amendments(path: Path, amendments: list, started) -> None:
   """`r<n>/amendments.md`: each amendment that applies to the unit, marked by whether the head's launch (`started`,
-  its `started_at`) began after the amendment's `at`; an earlier head is reviewed against the brief its launch had."""
+  its `started_at`) began after the amendment's `recorded_at` (`at` for a legacy entry); an earlier head is reviewed against the brief its launch had."""
   lines = ["# Amendments", ""] if amendments else ["# Amendments", "", "none"]
   for a in amendments:
-    applies = "yes" if started and started > a["at"] else "no"
+    applies = "yes" if started and started > (a.get("recorded_at") or a["at"]) else "no"
     lines += [f"## {a['unit']} {a['name']} · comment {a['comment_id']} at {a['at']}", f"applies to this head: {applies}", "", a["text"], ""]
   core.atomic_write(path, "\n".join(lines) + "\n")
 

@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the judges subcommand (spec section 13.1) and `judges question`, the
-# leavemealone-mode question renderer of section 13.2 (U11); the cap question names a spec review's scope (U19); the default members read from `DEFAULT_CONFIG` (U28); a `launch <n>` or `closed <n>` question renders its pending decision's options, a stall's heading its facts (U31); its own `judges` config key, moved from `__init__` (U32).
+# leavemealone-mode question renderer of section 13.2 (U11); the cap question names a spec review's scope (U19); the default members read from `DEFAULT_CONFIG` (U28); a `launch <n>` or `closed <n>` question renders its pending decision's options, a stall's heading its facts (U31); its own `judges` config key, moved from `__init__` (U32); the panel's instructions section rendered once at open by its parent card's skill, placed last in each brief and copied to each member's record (U38).
 
 """superegm judges open|record|diff|verdict|question: the judge panel over a question file, and the
 question file rendered from the record at a decision point."""
@@ -10,8 +10,9 @@ import re
 from pathlib import Path
 
 import superegm as core
+from superegm import instructions
 
-WRITES = frozenset(["judges", "runcards", "questions"])  # the store kinds this subcommand writes
+WRITES = frozenset(["judges", "runcards", "questions", "instructions"])  # the store kinds this subcommand writes (`instructions`: a spec review's reference copies, U74)
 CONFIG_DEFAULTS = {"judges": {"min_vendors": 1,  # its own config key (U32)
                               "members": [{"name": "fable", "via": "adapter", "effort": "xhigh"},
                                           {"name": "opus", "via": "adapter", "effort": "max"},
@@ -184,7 +185,7 @@ def panel_id(question: Path) -> str:
 
 
 def render_brief(panel: dict, questions: list[dict], round_no: int, open_ids: list[str],
-                 prior: list[tuple[int, str, str]], diffs: list[str]) -> str:
+                 prior: list[tuple[int, str, str]], diffs: list[str], lane: str = "local") -> str:
   lines = [f"JUDGE BRIEF, panel {panel['id']}, round {round_no}.",
            "You are one judge of a panel. Answer each question below by option id, one line per question:",
            "`Q<n>: (<id>)`",
@@ -202,7 +203,38 @@ def render_brief(panel: dict, questions: list[dict], round_no: int, open_ids: li
       lines += ["", f"### Round {rnd}, {judge}", text.rstrip("\n")]
     for diff in diffs:
       lines += ["", diff.rstrip("\n")]
-  return "\n".join(lines) + "\n"
+  section = (panel.get("instructions") or {}).get(lane, {}).get("text", "")
+  return "\n".join(lines) + "\n" + (f"\n{section}" if section else "")  # the lane's stored section, last in every round's brief
+
+
+def write_briefs(folder: Path, round_no: int, panel: dict, *args) -> None:
+  """`round-<n>/brief.md` for the local members (the index) and `brief-astra.md` for the Astra member, which cannot read
+  the store (the pastes): the same brief, each with its own lane's stored section."""
+  for name, lane in (("brief.md", "local"), ("brief-astra.md", "astra")):
+    core.atomic_write(folder / f"round-{round_no}" / name, render_brief(panel, *args, lane=lane))
+
+
+def render_panel(store, parent: dict | None) -> dict:
+  """The panel's `instructions`: `{lane: {manifest, text}}` for `local` and `astra`, the `judges` section rendered once, by
+  the parent card's skill: a `review-spec` parent renders its artifact as the spec at `HEAD` (its card can carry a legacy
+  store's handoff id, which is not the spec's); any other parent its card's handoff's frozen list; no parent, or a parent
+  with no handoff, nothing."""
+  def lane_render(lane: str) -> dict:
+    if parent is None:
+      manifest, text = [], ""
+    elif parent["skill"] == "review-spec":
+      manifest, text = instructions.render(store, "judges", root=core.git_toplevel(Path(parent["artifact"])), lane=lane)
+    else:
+      handoff = parent.get("handoff", store.handoff_id)
+      manifest, text = instructions.render(store, "judges", handoff_id=handoff, lane=lane) if handoff else ([], "")
+    return {"manifest": manifest, "text": text}
+  return {lane: lane_render(lane) for lane in ("local", "astra")}  # the Astra member's pastes, the local members' index
+
+
+def lane_manifest(panel: dict, judge: str) -> list:
+  """The manifest stored on the panel for `judge`'s lane (`astra` for the runner member); `[]` for a panel opened before U38."""
+  lane = "astra" if panel["judges"][judge]["via"] == "runner" else "local"
+  return ((panel.get("instructions") or {}).get(lane) or {}).get("manifest", [])
 
 
 def cmd_open(args, store) -> int:
@@ -235,14 +267,15 @@ def cmd_open(args, store) -> int:
   config = store.config or {}
   members = judge_members(config)
   min_vendors = (config.get("judges") or {}).get("min_vendors", 1)
+  rendered = render_panel(store, parent)  # before the card opens: a refused render leaves no open judges card
   rid = args.runcard or core.open_runcard(store, "judges", str(question), parent=args.parent)
   panel = {"id": pid, "question": str(question), "question_sha256": core.sha256_file(question),
            "evidence": evidence, "judges": members, "min_vendors": min_vendors, "runcard": rid,
-           "parent": args.parent, "opened_at": core.now_iso(), "rounds": {}}
+           "parent": args.parent, "opened_at": core.now_iso(), "rounds": {},
+           "instructions": rendered}
   core.atomic_write(folder / "question.md", question.read_bytes())
   write_json(folder / "panel.json", panel)
-  core.atomic_write(folder / "round-1" / "brief.md",
-                    render_brief(panel, questions, 1, [q["id"] for q in questions], [], []))
+  write_briefs(folder, 1, panel, questions, 1, [q["id"] for q in questions], [], [])
   core.journal(store, f"judges {pid}: opened ({', '.join(members)}; min_vendors {min_vendors})")
   print(pid)
   return 0
@@ -367,13 +400,14 @@ def cmd_record(args, store) -> int:
   else:
     reason = args.not_run
   if reason:
-    rounds[judge] = {"not_run": reason, "recorded_at": core.now_iso()}
+    rounds[judge] = {"not_run": reason, "recorded_at": core.now_iso(), "instructions": lane_manifest(panel, judge)}
     core.journal(store, f"judges {pid}: round {n} {judge} not run ({reason})")
     print(f"not run ({reason})")
   else:
     core.atomic_write(folder / f"round-{n}" / f"{judge}.md", text)
     rounds[judge] = {"isolation": isolation, "model": model, "effort": effort,
-                     "options": {q: a["option"] for q, a in answers.items()}, "recorded_at": core.now_iso()}
+                     "options": {q: a["option"] for q, a in answers.items()}, "recorded_at": core.now_iso(),
+                     "instructions": lane_manifest(panel, judge)}
     if args.verdict:
       rounds[judge]["saw"] = saw
     core.journal(store, f"judges {pid}: round {n} {judge} recorded ({isolation})")
@@ -421,8 +455,7 @@ def cmd_diff(args, store) -> int:
              for k in range(1, n + 1) for judge in panel["judges"]
              if "options" in panel["rounds"][str(k)].get(judge, {})]
     diffs = [core.read_text(folder / f"round-{k}" / "diff.md") for k in range(1, n + 1)]
-    core.atomic_write(folder / f"round-{n + 1}" / "brief.md",
-                      render_brief(panel, questions, n + 1, still_open, prior, diffs))
+    write_briefs(folder, n + 1, panel, questions, n + 1, still_open, prior, diffs)
   core.journal(store, f"judges {pid}: round {n} diff written, open {', '.join(still_open) or 'none'}")
   print(folder / f"round-{n}" / "diff.md")
   return 0
@@ -579,11 +612,24 @@ def redesign_option(st, rid: str) -> str:
 
 
 def decision_question(st, unit: str, did: str) -> str:
+  """A plan-time `D<n>` with its options as stored; a runtime `q<n>` is refused (`--blocked` renders it, `amend` left out)."""
+  if re.fullmatch(r"q\d+", did):
+    raise core.HandoffError(f"question: {did} is a runtime decision: use --blocked <comment-id> | launch <n> | closed <n>")
   units = json.loads(core.read_text(st.path("units"))).get("units") or {}
   decision = next((d for d in units.get(unit, {}).get("decisions") or [] if d["id"] == did), None)
   if decision is None:
     raise core.HandoffError(f"question: {unit} has no decision {did}")
-  return f"## Q1 {unit} {did}: {decision['question']}\n" + "".join(f"- {o}\n" for o in decision["options"] if o != "amend")  # amend is the owner's alone
+  return f"## Q1 {unit} {did}: {decision['question']}\n" + "".join(f"- {o}\n" for o in decision["options"])
+
+
+STORED_LETTER_RE = re.compile(r"^\([a-z]\) ")  # a stored option's own letter prefix
+
+
+def stored_options_text(options: list) -> str:
+  """A pending decision's stored options with `amend` (the owner's alone, §6.5) left out and the others keeping the
+  letter of their stored position; a stored `(x) ` prefix is dropped so a letter prints once."""
+  return "".join(f"- ({chr(ord('a') + i)}) {STORED_LETTER_RE.sub('', option)}\n"
+                 for i, option in enumerate(options) if option != "amend")
 
 
 def blocked_question(st, unit: str, what: list) -> tuple[str, list[int]]:
@@ -591,10 +637,20 @@ def blocked_question(st, unit: str, what: list) -> tuple[str, list[int]]:
   if len(what) == 1 and what[0].isdigit():
     body = (core.gh_json(["api", f"repos/{st.config['repo']}/issues/comments/{what[0]}"]) or {}).get("body") or ""
     heading, *rest = body.splitlines() or [""]
-    options = [line[2:].strip() for line in rest if line.startswith("- (")]
-    options = [o.partition(" ")[2] for o in options] + ["stop the unit"]
-    consumers = fan_out(st, unit) if heading.startswith("**Deviation (interface):**") else []
-    return f"## Q1 {unit} BLOCKED (comment {what[0]}): {heading.strip()}\n" + options_text(options), consumers
+    from superegm.report import pending_decisions
+    pending = next((d for d in pending_decisions(core.load_foreman(st, unit))
+                    if d.get("point") == 3 and d.get("source") == f"comment {what[0]}"), None)
+    if pending is not None:  # the stored options, `amend` left out and the letters kept
+      shown = stored_options_text(pending.get("options") or RELAUNCH)
+    else:  # no decision opened on the comment: its `- (` lines, then `stop the unit`
+      options = [line[2:].strip() for line in rest if line.startswith("- (")]
+      shown = options_text([o.partition(" ")[2] for o in options] + ["stop the unit"])
+    consumers = []
+    if heading.startswith("**Deviation (interface):**"):
+      from superegm.decision import INTERFACE
+      named = INTERFACE.match(heading[len("**Deviation (interface):**"):].strip())
+      consumers = fan_out(st, named["unit"] if named else unit, unit)  # the named producer's; the raising unit's for an old-form heading
+    return f"## Q1 {unit} BLOCKED (comment {what[0]}): {heading.strip()}\n" + shown, consumers
   if len(what) == 2 and what[0] == "launch" and what[1].isdigit():
     launches = load_launches(st, unit)
     n = int(what[1])
@@ -618,15 +674,17 @@ def blocked_question(st, unit: str, what: list) -> tuple[str, list[int]]:
   return f"## Q1 {heading}\n" + options_text(pending.get("options") or RELAUNCH), []
 
 
-def fan_out(st, unit: str) -> list[int]:
-  """The issue numbers of every other filed unit whose unit file consumes a name of `unit` (section 13.2)."""
-  # shortcut: the fan-out targets every filed consumer of any name the unit produces, since the deviation text is
+def fan_out(st, producer: str, raising: str) -> list[int]:
+  """The issue numbers of every filed unit whose unit file consumes a name of `producer`, the raising unit left out
+  (section 13.2, spec section 6.5: keyed on the producer the heading names; an old-form heading passes the raising unit
+  as both)."""
+  # shortcut: the fan-out targets every filed consumer of any name the producer produces, since the deviation text is
   # free prose; narrow it when the Deviation comment gains a name field
   numbers = []
   for other, record in (core.load_state(st.root).get("units") or {}).items():
     path = st.path("unit", other)
-    if other != unit and record.get("number") and path.is_file() \
-        and any(producer == unit for _, producer in core.body.consumes(core.read_text(path))):
+    if other != raising and record.get("number") and path.is_file() \
+        and any(made == producer for _, made in core.body.consumes(core.read_text(path))):
       numbers.append(record["number"])
   return sorted(numbers)
 

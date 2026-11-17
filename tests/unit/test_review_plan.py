@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
-# Modified by SuperEGM (gsVAM), 2026: the `width:` line and the plan header in `set-input`, the chain check and the split check prose (U29).
+# Modified by SuperEGM (gsVAM), 2026: the `width:` line and the plan header in `set-input`, the chain check and the split check prose (U29); the proportion split check reads the `units.*` limits and names its config input and evidence (U52).
 """U06: plan review — the dispatch set, the set reviewer, fix-design, the skill file."""
 import argparse
 import hashlib
@@ -321,8 +321,8 @@ WIDTH = [
   (SKILL, "chains at U<n>: <path> U<a> > U<b> > … > U<n> (after U<b>); <path> …", True),
   (SKILL, "`low` when the header names every chain", True), (SKILL, "question 11 only", False),
   (PROPORTION, "split candidate: <Steps | bytes | paths | subsystems>", True),
-  (PROPORTION, "over 10 Steps, 24,576 bytes or eight Scope paths", True), (PROPORTION, "crosses subsystems", True),
-  (PROPORTION, "a `difficult` unit at Size `L`", True), (PROPORTION, "`bytes` over 24,576, `steps` over 10", True),
+  (PROPORTION, "over 10 Steps, over `units.max_body_kb` × 1024 bytes or over `units.max_files` Scope paths", True), (PROPORTION, "crosses subsystems", True),
+  (PROPORTION, "a `difficult` unit at Size `L`", True), (PROPORTION, "`steps` over 10, `fenced_share` over 0.40", True),
   (PROPORTION, "32,768", False),
 ]
 
@@ -330,3 +330,29 @@ WIDTH = [
 @pytest.mark.parametrize("path, needle, present", WIDTH, ids=[f"{p.name}:{n[:30]}" for p, n, _ in WIDTH])
 def test_the_chain_check_and_the_split_check_prose(path, needle, present):
   assert (needle in path.read_text(encoding="utf-8")) is present, (path, needle)
+
+
+@pytest.mark.parametrize("needle, present", [
+    ("units.max_body_kb", True), ("units.max_files", True), ("over 10 Steps", True),
+    ("crosses subsystems", True), ("24,576 bytes", False), ("eight Scope paths", False),
+])
+def test_proportion_reads_the_units_limits(needle, present):
+    # section 6: the split check reads units.* in place of 24,576 bytes and eight Scope paths; the 10-step candidate stays
+    assert (needle in " ".join(PROPORTION.read_text(encoding="utf-8").split())) is present
+
+
+@pytest.mark.parametrize("needle, present", [("`steps` over 10, `fenced_share` over 0.40", True), ("`bytes` over", False), ("24,576", False)])
+def test_proportion_inputs_drop_the_bytes_warning(needle, present):
+    # section 6: scan's 24,576-byte warning goes (U42), its 10-step warning stays
+    assert (needle in " ".join(PROPORTION.read_text(encoding="utf-8").split())) is present
+
+
+@pytest.mark.parametrize("needle, present", [
+    ("`.superegm/config.json` at the repository root", True), ("file or a key is missing", True), ("(25 and 10)", True),
+    ("count of the body's Scope paths", True), ("one that meets none is no split candidate", True),
+    ("Four, each by absolute path", False), ("`warnings[]` at those values", False),
+    ("a body over a limit without a Step you can name", False),
+])
+def test_proportion_split_check_names_its_config_input_and_evidence(needle, present):
+    # round 2: the config is read at the repository root, defaults for a missing file or key; split evidence is scan's numbers, not warnings
+    assert (needle in " ".join(PROPORTION.read_text(encoding="utf-8").split())) is present

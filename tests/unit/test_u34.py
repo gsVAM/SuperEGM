@@ -38,7 +38,7 @@ def test_cartographer_adapter_and_persona():
     assert needle in body, needle
   assert FINDINGS_LINE not in body and "regression:" not in body
   manifest = json.loads((ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
-  assert "./.claude-plugin/agents/cartographer.md" in manifest["agents"] and IDS[-1] == "cartographer"
+  assert "./.claude-plugin/agents/cartographer.md" in manifest["agents"] and IDS[10] == "cartographer"
 
 
 TEAMMATES = ROOT / "skills/brainstorming/references/teammates.md"

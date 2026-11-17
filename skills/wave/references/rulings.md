@@ -53,6 +53,26 @@ point's section" below is the point's section of `references/decision_points.md`
   for one naming no open decision or an already ruled one, or a refused allowance (not one refused with `no open decision names it`); take either as the fact it states, and
   run nothing else for it. For a run stopped between a record and its continuation, the
   journal's `Ruling (…)` line with no continuation after it is the step to finish.
+- The undo of triage (design section 5.2): `**Ruling:** <fid> finding upheld`
+  naming a fid of the unit's `followups[]` (a medium triage took off the blocking list, the
+  inbox's undo) is the same `decision rule --unit <U> --ruling '<fid> finding upheld' --by <login>
+  --posted <comment id>` with no `--decision`, and no decision: it is checked as the undo
+  before any point-1 decision is looked for, so it never binds to an older one. On exit 0
+  (`recorded (comment <id>): undo <fid>`) nothing else runs: no dispatch, no `collect`, no
+  `review settle`; the finding is unsettled again, the follow-up row is gone, the latest
+  posted `clean` reads `revise` (`cap-reached` at the cap), an accept given on the round
+  has lapsed, and triage is off for the unit's remaining rounds; the next wave session
+  sends the unit to revision or to the cap decision. Refused (a fid of an earlier
+  round, a stopped unit, a merged or closed pull request), the follow-up row stays for the
+  owner to file as follow-up work, and the comment never blocks a round.
+- A proceed (design section 4.2): the owner's `**Ruling:** proceed — <reason>` on a unit's
+  issue ends the unit's head review whatever its state. Run
+  `python3 '<HELPER>' review rule --ruling proceed --owner --posted <cid> --review <rid> --runcard '<CARD>'`,
+  `<cid>` the comment's id and `<rid>` the unit's head review, never `decision rule`. It checks the
+  comment (an owner's, of the proceed form, on the unit's issue), settles every unsettled
+  finding of the cycle `declined` by the owner and records `foreman.proceeds[]`; replayed
+  for the same comment, review and head it writes nothing. Refused (`--judges`, a stopped
+  unit, `comment <cid> already ruled`: a later head needs a new comment), it writes nothing.
 - A stopped unit keeps its branch and its open issue, is never dispatched or
   launched again, and is listed in the report with its unlanded dependants
   for the owner (design section 12).

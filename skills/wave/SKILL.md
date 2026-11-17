@@ -13,7 +13,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30); the batch's `notify` (U23); the decision points, rulings and leavemealone-mode moved to `references/`; a head's Decision point 5 and `clean` by accept (U35); `launch-builder` alone and the driver role (U24); `stalled` (U31). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30); the batch's `notify` (U23); the decision points, rulings and leavemealone-mode moved to `references/`; a head's Decision point 5 and `clean` by accept (U35); `launch-builder` alone and the driver role (U24); `stalled` (U31); the frozen mode, driven normal-mode decisions (U45). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the wave skill. Not part of google/elephant-goldfish-model. -->
 
@@ -29,39 +29,38 @@ This skill runs in Claude Code only. In any other host reply with one line,
 You, the elephant, drive one loop from this conversation over a filed
 handoff's units (design section 11). `superegm launch` marks the ready units
 up to `max_in_flight` (a unit pending a decision holds no slot); you launch one
-builder per marked unit as the builder account (`launch-builder` starts the builder and records the launch); the builder pushes its unit branch and opens a draft pull request it can never merge. Every head
+builder per marked unit as the builder account; the builder pushes its unit branch and opens a draft pull request it can never merge. Every head
 with concluded CI gets one review round from a **foreman**: a per-unit
 elephant dispatched through its own adapter (`superegm:foreman`,
 `omitClaudeMd: true`), which dispatches the head's goldfish panel
 (zero-context, read-only, each through its own adapter), records the
 findings, posts one review comment bound to the reviewed commit, and returns
-one word (the word table). The builder answers the review in its next launch.
+one word (the word table). The builder answers it in its next launch.
 
 Your only GitHub writes are the `**Ruling:**` comment `decision rule` posts,
 the `superegm:stopped` label a stop adds and the board `status` writes into
 the tracking issue. Merge is human: the owner alone updates `<base>`; nothing
 here approves, merges, closes an issue or pushes to a builder's branch. One
-command at a time: the helper is single-writer. `<HELPER>` =
+command at a time (the helper is single-writer). `<HELPER>` =
 `${CLAUDE_PLUGIN_ROOT}/skills/plan/scripts/superegm.py`; run every helper call
 as one Bash call, `python3 '<HELPER>' <subcommand> …`, absolute paths in
 single quotes, no chaining; `superegm <subcommand>` below stands for that.
-Every writing call carries `--runcard '<CARD>'`; a refusal is one
-`superegm: <reason>` line, exit 1.
+Every writing call carries `--runcard '<CARD>'`; a refusal is one `superegm: <reason>` line.
 
-Under SUPEREGM_ROLE=driver (a tick of `/superegm:driver` started this session, always
-`--leavemealone`), never ask: a decision the judges did not converge on is a journal line and
-an inbox line, its unit is `pending a decision` (no slot) and the batch goes on; the session
-ends on the loop's condition alone and the next tick resumes the rest.
+Under SUPEREGM_ROLE=driver (a tick of `/superegm:driver` started this session), never ask. In
+normal mode open points 1, 2, 3 and 5 as `decision open` records, as leavemealone-mode does (an
+unconverged judges' question stays open alike). That unit is `pending a decision`
+(no slot) and the batch goes on handling every event of the batch; the session ends on the
+loop's condition alone: `status.wait_events` already acked every event, so an early exit
+would lose another unit's exit.
 
 Open a reference only when this file sends you to it:
 
 - `references/foreman_brief.md`: the brief every foreman is dispatched with (batch step 5).
 - `references/decision_points.md`: the `owner:` row and Decision points 1–3 and 5 (`decision open`, then
-  `decision rule`, `review settle` or `review rule`), whenever a word, a step or a `pending:` item names one.
-- `references/rulings.md`: a `ruling` line (batch step 4), an owner's `**Ruling:**` already posted
-  (entry step 4), and the stops.
-- `references/leavemealone_mode.md`: on a card opened with `--mode leavemealone`, before asking the
-  owner at any decision point.
+  `decision rule`, `review settle` or `review rule`), whenever a word, step or `pending:` item names one.
+- `references/rulings.md`: a `ruling` line (batch step 4), a posted owner `**Ruling:**` (entry step 4), the stops.
+- `references/leavemealone_mode.md`: on a `leavemealone` card, before asking the owner at a decision point.
 
 ## Entry: resume from the store
 
@@ -72,8 +71,9 @@ Open a reference only when this file sends you to it:
    `status` and `report` read the card's handoff alone; the inbox is the store-wide read.
 1. Run `python3 '<HELPER>' runcard open --skill wave --artifact '<spec>'`
    (the approved spec the invocation named), adding `--mode leavemealone`
-   when the invocation said `--leavemealone` or the config's `mode` is
-   `leavemealone` (then follow `references/leavemealone_mode.md`). The
+   only when the invocation said `--leavemealone`, else leaving the mode to
+   `runcard open`'s default, the approval's frozen mode (`config.mode` for an entry
+   with no `mode`); on a `leavemealone` card follow `references/leavemealone_mode.md`. The
    printed id is `<CARD>`; a card still open on this spec is marked
    interrupted by the new one.
 2. Run `python3 '<HELPER>' status --wait 1 --runcard '<CARD>'` as a batch
@@ -88,7 +88,7 @@ Open a reference only when this file sends you to it:
    one GitHub write per pass and none when the rows are unchanged; the inbox stays the action list.
 3. Run `python3 '<HELPER>' report --runcard '<CARD>'`. Everything is derived
    from the store, the plan and the spec (it refuses as `status` does when the spec changed since
-   its approval); idle units come from this card alone (idle never carries over). Its lines: the
+   its approval); idle units come from this card alone. Its lines: the
    report path, the board, `idle:`, `pending:`, `loop:`.
 4. Rule every `pending:` item first, at its decision point in
    `references/decision_points.md`: the record's `point`, printed as `(point <p>, <source>)`, names
@@ -101,9 +101,8 @@ Open a reference only when this file sends you to it:
    first from its step 5: step 2 was its wait, and its lines are handled.
 
 Builders a previous invocation left running report through `status --wait`'s
-`exit` lines. Nothing recorded is launched, ruled or reviewed twice: `launch`,
-`launch-builder`, `decision rule` and `foreman dispatch` refuse, and you take
-a refusal as the fact it states, never as an error to retry.
+`exit` lines. Nothing recorded is launched, ruled or reviewed twice (`launch`,
+`launch-builder`, `decision rule` and `foreman dispatch` refuse): take a refusal as fact, never retry it.
 
 ## A batch
 
@@ -135,9 +134,9 @@ ignored except `landed` and `stalled`:
    slot is free (never `launch-builder` here).
    `outcome: cap-reached` → Decision point 2 (source `review <head-review-id> cap`).
    Exit 1: report the unit and the refusal line in chat; the batch goes on. A GitHub read or a record
-   refusal may clear on the next batch's retry, and `unfinished ingest is not on the latest posted round` clears on the re-run it names;
+   refusal may clear on the next batch's retry, as does `unfinished ingest is not on the latest posted round`;
    `comment over 65,536 bytes`, `is not set: the builder's login is unknown`,
-   `header present on` and a `review ingest: comment:<n>:` scan refusal repeat until the owner resolves them by hand, so say so in chat each batch.
+   `header present on` and a `review ingest: comment:<n>:` scan refusal repeat until the owner resolves them by hand, so say so each batch.
 4. `ruling` lines: an owner's `**Ruling:**` comment; apply it as the `ruling`
    bullet of `references/rulings.md` says.
 5. `superegm foreman dispatch` for every active unit with a head, `deadline`
@@ -164,8 +163,7 @@ ignored except `landed` and `stalled`:
 7. `superegm report`: `python3 '<HELPER>' report --runcard '<CARD>'`, then `python3 '<HELPER>' notify --runcard '<CARD>'`
    (the owner's `~/.superegm/notify` hook gets the inbox lines new since the last notify; a failing or slow hook never stops the wave). If a
    decision was opened this batch, pause (outside SUPEREGM_ROLE=driver, above): ask the owner at its decision
-   point and run `report` again once ruled. Else `loop: ended` → The end;
-   otherwise the next batch.
+   point and run `report` again once ruled. Else `loop: ended` → The end; else the next batch.
 
 `report` derives each launched unit's state with `unit_state`, one of six:
 `landed`, `stopped`, `pending`, `idle`, `clean`, else `active`; only an
@@ -200,10 +198,10 @@ dispatch):
 ## Retries
 
 - `status --wait` exiting non-zero: run it once more; if it fails again, run
-  `report`, say so in chat, and end this invocation.
+  `report` and end.
 - A `decision rule` whose post or label request fails (a `gh` error, not a refusal) records nothing: run it again, a `--posted` one included. A journaled `<U> <qid>: label superegm:stopped left on issue #<n>` means the label stayed on: run `gh issue edit <n> --remove-label superegm:stopped` first.
 - `error`, `target-moved` and a `launch-builder` refusal are retried only as
-  the word table and step 6 say; a refusal is handled by the batch order.
+  the word table and step 6 say.
 
 ## The end
 
@@ -214,5 +212,5 @@ report in chat from `wave_<n>_report.md`: per unit its state, head and
 rounds; the non-terminal launches (builders still running report to the
 next `wave`); the heads with pending or absent CI; the idle units and why;
 the ready units without a slot; the pending decisions; the stopped units
-with their unlanded dependants. That is what stayed open, for the owner to
-merge, close, or re-type `/superegm:wave`. Where the base ruleset restricts updates to config.owners, the owner merges with the admin bypass: `gh pr merge --admin`.
+with their unlanded dependants: what stayed open for the owner to merge,
+close, or re-type `/superegm:wave`. Where the base ruleset restricts updates to config.owners, the owner merges with the admin bypass: `gh pr merge --admin`.

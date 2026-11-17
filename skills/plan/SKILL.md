@@ -12,7 +12,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: phase 2 of the SuperEGM loop (the plan file, graph, scan, decide); EGM's approval, review gate, dry run and filing steps live in review-spec, review-plan and file; `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the `Tier:` field (U33); the split rules, the `width:` line and the header's wave plan (U29); what a Step holds (1.2.1 §6.5). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: phase 2 of the SuperEGM loop (the plan file, graph, scan, decide); EGM's approval, review gate, dry run and filing steps live in review-spec, review-plan and file; `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the `Tier:` field (U33); the split rules, the `width:` line and the header's wave plan (U29); what a Step holds (1.2.1 §6.5); the scope-cite warning stated (U79); the `units.*` limits stated (U42); the driven wait and the typed run on a wait record, the frozen mode (U45). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the handoff skill. Not part of google/elephant-goldfish-model. -->
 
@@ -68,7 +68,9 @@ report only and needs no card. When the invocation named a handoff, pass `--hand
     --artifacts-dir '<a directory outside the working tree>'` and show the
     owner the by-hand steps it prints.
 2.  Run `python3 '<HELPER>' runcard open --skill plan --artifact
-    '<SpecPath>'`. The printed id is `<CARD>`; every writing command below
+    '<SpecPath>'`, adding `--mode leavemealone` only when the invocation said
+    `--leavemealone`; otherwise the mode is `runcard open`'s default, the
+    approval's frozen mode (`config.mode` for an entry with no `mode`). The printed id is `<CARD>`; every writing command below
     carries `--runcard '<CARD>'`. A card still open on this spec is marked
     interrupted by the new one.
 
@@ -106,7 +108,8 @@ A unit whose Scope would cross two is written as two units, with a `Blocked by` 
 The one exception is the release's closing sweep, `Blocked by` the rows it sweeps so that it closes the release.
 `README.md` and `docs/claude.md` are edited by one closing unit per release (a docs sweep, or the release's last unit) and never by the others, which, where they would have edited them, append a `docs: see U<n>` note to their Objective's one sentence instead.
 Shared test helpers are split per module: a unit adds its own test file, never a line in `test_helper.py` unless it owns it.
-Size `L` is a split candidate: the `proportion` reviewer reports a unit over 10 Steps, 24,576 bytes or eight Scope paths, or whose Scope crosses subsystems.
+Size `L` is a split candidate: the `proportion` reviewer reports a unit over 10 Steps, over `units.max_body_kb` (25 KB by default) or `units.max_files` (10 Scope paths), or whose Scope crosses subsystems.
+`scan` refuses an unfiled unit over `units.max_body_kb`, `units.max_files` or `units.max_steps` (16), naming the unit, the limit and the value; a filed unit is never checked again.
 A split that needs a row the spec's `## Units` table lacks goes through `approve-spec --amend-units`, typed by the owner outside this skill; never work around the frozen spec.
 
 **Writing a Step** (spec section 9.1; the full rules are section 3 of
@@ -118,7 +121,7 @@ conftest attribute, private helper or monkeypatch target: those and the arrange 
 and a unit's Scope lists the conftest and fixture files its tests may touch (for example `tests/conftest.py`).
 The `Implement` line is one sentence: the file, the behaviour and the values the spec pins, with a signature only
 for a public or shared contract that is not already a Produces line; it never restates what the test asserts.
-A code cite (`path:line`) is evidence, never a requirement: `scan` refuses one on an Interfaces or Produces line.
+A code cite (`path:line`) is evidence, never a requirement: `scan` refuses one on an Interfaces or Produces line, and warns, without refusing, when a body has more than ten cites into its own Scope paths.
 A rule family is one parametrized Step, never one Step per rule; a copy/rename table or an edit list is test data,
 one parametrized test over it (the test is the table) and an `Implement` line that says "make the table hold".
 The `Run` line and the closing line are optional: absent, the Step's command is `pytest <test path>::<test name> -q`,
@@ -157,9 +160,11 @@ The `set` reviewer reads that line to grade a chain it names `low`; it checks it
     (over 49,152 bytes: split the unit), `checkbox`, `placeholder`,
     `consumes-undefined`, `consumes-producer`, `global-constraints`,
     `review-focus`, `review-focus-test`, `step-group`, `step-scope`,
-    `decision-blocking`, and the raw-text `banned-term`, `mention`,
-    `merge-marker`, `dod-missing`. Fix the plan file, run `graph`, then
-    `scan` again, until `scan: clean`.
+    `interface-cite`, `decision-blocking`, `units-limit` (an unfiled unit over
+    a `units.*` limit, as above: split it through `approve-spec --amend-units`), and the raw-text
+    `banned-term`, `mention`, `merge-marker`, `dod-missing`. A `units: units.<key>: …` line
+    has no unit: that `units` value in `.superegm/config.json` is out of range, so fix it
+    there. Fix the plan file, run `graph`, then `scan` again, until `scan: clean`.
 2.  Every `decision-blocking` line is decision point 3: ask the owner one
     question whose options are the item's own `(a) …; (b) …` lines, the
     default marked, as the sole tool call in the turn; then run
@@ -183,13 +188,39 @@ The `set` reviewer reads that line to grade a chain it names `low`; it checks it
 1.  Tell the owner, in a few lines, the handoff id, the wave table from
     `handoff_units.json` (wave, unit, title, blocked by), the critical path
     and the scan numbers; no body text in chat.
-2.  Run `python3 '<HELPER>' runcard close '<CARD>'`.
+2.  Run `python3 '<HELPER>' runcard close '<CARD>'`, except on a run that found a wait record, which
+    runs `next clear` in its place (see Under the driver).
 3.  Next: `/superegm:review-plan '<SpecPath>'` reviews every unfiled body;
     `/superegm:file` creates the issues once that review converged.
 
+## Under the driver, and on a wait record
+
+Under `SUPEREGM_ROLE=driver` (a tick of `/superegm:driver` started this session) nobody can be
+asked. Where this skill would ask the owner in normal mode (Step 4 item 2's `decision-blocking`
+question), or must stop in either mode (a split that needs `approve-spec --amend-units`), run
+`superegm next wait --handoff '<id>' --phase plan --question '<text>' --runcard '<CARD>'` through
+the helper (the question on one line, naming the item and its options). It writes the wait record
+`chain/<handoff>.json` and closes the card; then exit. The owner answers in the inbox, which writes
+the answer into the record, and the next tick runs this skill again.
+
+A run, typed or driven, that finds a wait record for this handoff (`chain/<handoff>.json` in the
+store) opens its card with `python3 '<HELPER>' runcard open --mode normal --skill plan --artifact '<SpecPath>'`
+whatever the frozen mode (Step 1), and runs the phase on. A typed run that names no `--handoff` has
+no `<id>` before its card exists: it opens the card as Step 1 says, reads `<id>` from the card's
+record, and when `chain/<id>.json` exists opens its card again with `--mode normal` (the new card
+marks the first interrupted) and passes `--handoff '<id>'` to every command below. A typed run asks
+the owner the record's question directly (no new panel) and records the answer as a normal-mode run
+does (`decide` by the owner, Step 4). A driven run is started only on a record with an `answer`: it
+takes the record's `answer` where a typed run asks, with no new panel and no second `next wait` for
+the same question. While that card is open the tick skips the handoff. At its end the run runs
+`superegm next clear --handoff '<id>' --runcard '<CARD>'` through the helper in place of
+`runcard close` (it closes the card itself): it removes the record only on confirmed progress and
+otherwise keeps it, asked again as `stopped at plan by <by>: answer to go on`.
+
 ## Leavemealone-mode
 
-In leavemealone-mode (`--leavemealone` on the invocation, or `config.mode`) a
+In leavemealone-mode (`--leavemealone` on the invocation, or the approval's frozen `mode`, else
+`config.mode` for an entry with no `mode`) a
 `decision-blocking` line of Step 4 (decision point 3, a `blocking: yes` item)
 goes to the judge panel instead of the owner, and what the converged answer
 applies is the one routing table
@@ -206,6 +237,7 @@ through `superegm:judge`, `judges record`, `judges diff`, round by round), and
 `python3 '<HELPER>' decide --unit <U> --decision D<n> --answer "(<id>)" --judges <panel> --runcard <card>`,
 which rewrites the plan line of an unfiled unit (`; answer: (<id>)`) and
 re-renders its body, so `graph` and `scan` again; a filed unit gets the comment
-file of Step 4 item 3. An unconverged question stays open: end the invocation
-naming it and `judges/<id>/verdict.json`, close the card, and the owner answers
-it with `decide` by hand.
+file of Step 4 item 3. An unconverged question stays open: under the driver run
+`superegm next wait --handoff '<id>' --phase plan --question '<text>' --runcard '<CARD>'` naming it
+and `judges/<id>/verdict.json` (a wait record, never a new panel on the next tick); typed, end the
+invocation naming them, close the card, and the owner answers it with `decide` by hand.

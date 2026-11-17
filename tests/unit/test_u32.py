@@ -42,14 +42,14 @@ def test_modules_register_their_defaults_init_steps_and_doctor_checks(tmp_path, 
   from superegm import foreman, init, orient, review
   modules = discover()
   assert list(modules) == sorted(modules) and "body" not in modules and "traces" not in modules and tuple(modules) == superegm.SUBCOMMANDS
-  assert {n: list(m.CONFIG_DEFAULTS) for n, m in modules.items() if m.CONFIG_DEFAULTS} == OWNED
+  assert all(set(OWNED[n]) <= set(modules[n].CONFIG_DEFAULTS) for n in OWNED)   # contained, not equal: later units add their keys, modules and doctor checks (U46)
   assert list(superegm.CORE_CONFIG)[:len(CORE)] == CORE   # U34 appends brainstorm
   assert list(superegm.DEFAULT_CONFIG) == list(superegm.CORE_CONFIG) + [k for m in modules.values() for k in m.CONFIG_DEFAULTS] == list(written)
   assert "SUBCOMMANDS = (" not in (ROOT / "skills/plan/scripts/superegm/__init__.py").read_text(encoding="utf-8")
   assert review.INIT_STEP.startswith("The Astra lane is off until you set astra.enabled") and init.steps().endswith(review.INIT_STEP + "\nthen run `superegm doctor`")
   monkeypatch.setattr(foreman, "runner_path", lambda: None); monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: None)
   assert foreman.DOCTOR_CHECKS({}, ROOT, None) == [("astra", "not installed (heads will record not run)")]
-  assert orient.DOCTOR_CHECKS({}, ROOT, None) == [("graphify", "not on PATH (informational)")] and [m for m in modules.values() if m.DOCTOR_CHECKS] == [foreman, orient]
+  assert orient.DOCTOR_CHECKS({}, ROOT, None) == [("graphify", "not on PATH (informational)")] and {foreman, orient} <= {m for m in modules.values() if m.DOCTOR_CHECKS}
 
 
 # ---------------------------------------------------------------- S6: a faulty module is named, every command exits 1
