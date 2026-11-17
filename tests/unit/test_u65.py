@@ -24,3 +24,9 @@ def test_handoff_plan_says_shared_files_are_a_merge_order():
   assert "readiness reads `Blocked by` alone (an approval without `rounds` keeps 1.2's edges)" in t
   assert "`after` adds an edge" not in t
   assert "shared-file chain contradicts the blockers" in t
+
+
+def test_issue_template_documents_merges_after_words():
+  t = _read("skills/plan/references/issue_template.md")
+  assert "`merges after` / `merges before` for a handoff whose approval carries `rounds`" in t
+  assert "`after` / `before` for one approved under 1.2.0" in t
