@@ -1,6 +1,6 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: the section 9.1 body layout and markers replace EGM's template; the per-handoff scan path (U32); the `{{tier}}` placeholder (U33); amendment 9's warning values (U29); the `units.*` limits in place of the bytes warning (U42). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the section 9.1 body layout and markers replace EGM's template; the per-handoff scan path (U32); the `{{tier}}` placeholder (U33); amendment 9's warning values (U29); the `units.*` limits in place of the bytes warning (U42); the `{{shared}}` words `merges after` / `merges before` (U65). -->
 
 # The issue body
 
@@ -65,7 +65,7 @@ lets a rerun of `apply` find the issue instead of creating it twice.
 | `{{decisions}}` | The `Decide before build` lines, verbatim, with `; answer: (x)` once an unfiled unit's item is decided. |
 | `{{scope}}` | The Scope paths cell, `` `path` (action) `` comma-separated. |
 | `{{blocked_by}}` | `#<n>` of each blocker (a placeholder `#<U01>` until `apply` fills the number; blockers exist by then because issues are created in topological order), or `none`. |
-| `{{shared}}` | The shared-file items, `after` references as `#<n>`, `before` references as the unit id and title (that issue does not exist yet when this body is posted), or `none`. |
+| `{{shared}}` | The shared-file items, `after` references as `#<n>`, `before` references as the unit id and title (that issue does not exist yet when this body is posted), or `none`. The words are `merges after` / `merges before` for a handoff whose approval carries `rounds`, and `after` / `before` for one approved under 1.2.0. |
 | `{{risk}}`, `{{size}}` | From the unit. |
 | `{{tier}}` | The unit's tier, `doable` when the section has no `Tier:` row. |
 | `{{branch}}` | `superegm/<handoff id>/<unit id>`: the branch the builder pushes and `status` recognises. |

@@ -12,7 +12,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: phase 2 of the SuperEGM loop (the plan file, graph, scan, decide); EGM's approval, review gate, dry run and filing steps live in review-spec, review-plan and file; `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the `Tier:` field (U33); the split rules, the `width:` line and the header's wave plan (U29); what a Step holds (1.2.1 §6.5); the scope-cite warning stated (U79); the `units.*` limits stated (U42); the driven wait and the typed run on a wait record, the frozen mode (U45). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: phase 2 of the SuperEGM loop (the plan file, graph, scan, decide); EGM's approval, review gate, dry run and filing steps live in review-spec, review-plan and file; `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the `Tier:` field (U33); the split rules, the `width:` line and the header's wave plan (U29); what a Step holds (1.2.1 §6.5); the scope-cite warning stated (U79); the `units.*` limits stated (U42); the driven wait and the typed run on a wait record, the frozen mode (U45); shared files are a merge order, `Blocked by` carries code dependencies (U65). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the handoff skill. Not part of google/elephant-goldfish-model. -->
 
@@ -104,8 +104,9 @@ drafting.
 
 **Splitting units** (spec section 9.1, amendment 9; the helper never splits a unit itself).
 A unit's Scope stays within one subsystem, one module family: a helper module with the skill folder, references and tests that drive it (the docs are the sweep's).
-A unit whose Scope would cross two is written as two units, with a `Blocked by` edge only where one consumes the other's interface and the Shared files order for any file both edit, or split so that no file is shared.
+A unit whose Scope would cross two is written as two units, with a `Blocked by` edge where one calls its function, extends its change or consumes its interface and the Shared files order for any file both edit, or split so that no file is shared.
 The one exception is the release's closing sweep, `Blocked by` the rows it sweeps so that it closes the release.
+A unit calling a function, extending a change or consuming an interface of another unit lists it in `Blocked by`; a `Shared files` order says only which pull request merges first, a merge order, so units sharing a file build in parallel for a handoff whose approval carries `rounds` (an approval without `rounds` keeps 1.2's serial edges).
 `README.md` and `docs/claude.md` are edited by one closing unit per release (a docs sweep, or the release's last unit) and never by the others, which, where they would have edited them, append a `docs: see U<n>` note to their Objective's one sentence instead.
 Shared test helpers are split per module: a unit adds its own test file, never a line in `test_helper.py` unless it owns it.
 Size `L` is a split candidate: the `proportion` reviewer reports a unit over 10 Steps, over `units.max_body_kb` (25 KB by default) or `units.max_files` (10 Scope paths), or whose Scope crosses subsystems.
@@ -145,7 +146,7 @@ run it again until it exits 0. It prints the handoff id, one `wave <n>: …`
 line per wave, the `width:` line, the critical path and what it wrote.
 
 Read the `width:` line before `scan`: `width: none`, or `width: chains <path>: U<a> > U<b> > … > U<n> (after U<b>); …`, every shared-file chain longer than two units with its forcing edge.
-Split or re-scope until every wave holds two or more units where the spec allows it, then run `graph` again.
+Split or re-scope until every wave holds two or more units where the spec allows it, then run `graph` again; under an approval with `rounds` a shared-file chain forces no wave, so split for a code dependency or a Scope crossing subsystems, not for a chain.
 State the wave plan in the plan file's header, and why any wave is a singleton, as one `Waves:` line after the `Design:` line (for example `Waves: {U01, U02} → {U03}; U03 a singleton: it consumes both.`).
 The `set` reviewer reads that line to grade a chain it names `low`; it checks it not.
 

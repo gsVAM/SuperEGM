@@ -1,6 +1,6 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema (interfaces, review focus, Steps, decisions with options), the plan file outside the store, the files and commands of the plan skill only; one directory per handoff (U32); the optional Tier field (U33); the `Waves:` line, the Size row's split candidate and the `width:` line (U29); what a unit pins and what a Step holds (1.2.1 §6.5); Q9 as the bar for a Step (U79); the `units.*` limits in the Size row (U42). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema (interfaces, review focus, Steps, decisions with options), the plan file outside the store, the files and commands of the plan skill only; one directory per handoff (U32); the optional Tier field (U33); the `Waves:` line, the Size row's split candidate and the `width:` line (U29); what a unit pins and what a Step holds (1.2.1 §6.5); Q9 as the bar for a Step (U79); the `units.*` limits in the Size row (U42); the Shared files row, the blocker definition and the graph paragraph as a merge order (U65). -->
 
 # The plan file: schema, the unit's Steps, files and commands
 
@@ -91,8 +91,8 @@ Decide before build
 | Objective | One sentence, not empty. |
 | Scope paths | Comma-separated `` `path` (create\|modify\|delete) ``; a path may be a directory; nothing else in the cell. |
 | Design range | `` `path:start-end (heading)` `` into the frozen spec, start <= end. |
-| Blocked by | `none` or unit ids, comma-separated. A blocker is a unit that creates or changes a file or symbol this unit uses. |
-| Shared files | `none` or `` `path`: after U01, before U05 `` items separated by `; `. `after` adds an edge from that unit to this one; `before` from this one to that unit. |
+| Blocked by | `none` or unit ids, comma-separated. A blocker is a unit whose code this unit calls, whose change it extends or whose interface it consumes; a file both edit is a `Shared files` order, never a blocker. |
+| Shared files | `none` or `` `path`: after U01, before U05 `` items separated by `; `. Read as a merge order: `after` merges after that unit, `before` merges before it; readiness reads `Blocked by` alone (an approval without `rounds` keeps 1.2's edges). |
 | Risk | `low\|medium\|high: reason`. |
 | Size | `S` (up to 3 scope paths), `M` (up to 8), `L` (more, which the per-unit check reports as a split candidate: over 10 Steps, over `units.max_body_kb` or `units.max_files`, or a Scope crossing subsystems; `scan` refuses an unfiled unit over `units.max_body_kb`, `units.max_files` or `units.max_steps`). |
 | Tier | Optional; `difficult`, `doable` or `easy`, set by the author: `difficult` when the Steps leave a design choice open, the unit holds a novel algorithm or an unverified platform behaviour, or it consumes the interfaces of more than one subsystem; `easy` when the Steps are mechanical with pinned signatures and no open choice; else `doable`. A difficult unit keeps a small Scope and few Steps. The tier picks the builder's model and effort (`builder.tiers`; doable is `builder.model` and `builder.effort`); a section without it is doable; another word is refused as a bad `Size` is. |
@@ -103,8 +103,10 @@ Decide before build
 | Steps | Numbered groups, each a `Write` line, a fence and an `Implement` line (section 3). |
 | Decide before build | `- none`, or `- D<n> <question> options: (a) <option>; (b) <option>[; …]; owner: <owner>; default: (a); blocking: yes\|no` with two or more options and the default among them. `decide` appends `; answer: (b)` to the line of an unfiled unit; a `blocking: yes` item without an answer keeps the unit from passing `scan`. |
 
-The graph: edges are the `Blocked by` entries and the shared-file `after` and
-`before` entries. A unit's wave is `1 + max(wave of its predecessors)`. A
+The graph: readiness edges are the `Blocked by` entries alone; the shared-file
+`after` and `before` entries are a merge order (an approval without `rounds`
+keeps 1.2's edges), so units sharing a file build in parallel. A unit's wave
+is `1 + max(wave of its predecessors)`, predecessors being the `Blocked by` entries alone (an approval without `rounds` adds the shared-file orders). A
 `Blocked by` cycle stops with the cycle listed. A shared-file chain that
 contradicts the blockers stops with "shared-file chain contradicts the
 blockers": fix the chain or the blockers; the helper never drops an edge
@@ -179,7 +181,7 @@ longer than the decisions the builder cannot make alone (compare `scan`'s
 | File | Written by | Content |
 | --- | --- | --- |
 | `<handoff id>/handoff_plan.md` | `graph`, `decide` | The store's copy of the plan file; a filed unit's section here is the one the plan file must still carry. |
-| `<handoff id>/handoff_units.json` | `graph`, `decide` | The parsed units (interfaces, review focus, decisions with options and answers, `body_sha256` per unit) with waves and predecessors, the `order`, the edges, the critical path. Derived; never hand-edited. |
+| `<handoff id>/handoff_units.json` | `graph`, `decide` | The parsed units (interfaces, review focus, decisions with options and answers, `body_sha256` per unit) with waves and predecessors, a per-unit `merge_after` list (the shared-file orders the inbox reads), the `order` (a topological order over blockers and merge orders, the merge order), the edges (`edges` lists both kinds; only the `Blocked by` entries gate readiness under an approval with `rounds`), the critical path. Derived; never hand-edited. |
 | `<handoff id>/unit_<id>.md` | `graph`, `decide` | The unit's section plus its issue body as it will be posted, in a four-backtick `markdown` fence under `## Issue body as posted`. Written for unfiled units only; a filed unit's file is frozen. |
 | `<handoff id>/handoff_bodies.md` | `graph`, `decide` | Every title, label set and body in creation order, with placeholders `#<U01>` for blockers and `#<tracking>` for the tracking issue. |
 | `<handoff id>/state.json` | `graph`, `decide` | `handoff_id`, `repo`, `remote`, `repo_root`, `plan` (the plan file's path), `design`, `units[<id>].body_sha256`, `decisions` (section 5). |
