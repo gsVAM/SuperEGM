@@ -557,7 +557,7 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
                                 config=config, present=present, delta=delta,
                                 prior={"dod": prior_dod, "delta": prior_delta, "scope": prior_scope, "tdd": prior_tdd})
   found += checked
-  ruled ={int(r.subject) for r in rulings if r.kind == "option" and r.subject.isdigit()}
+  ruled = {int(r.subject) for r in rulings if r.kind == "option" and r.subject.isdigit()}
   for c in comments:  # every `**Deviation**` heading a comment folds; one ruling naming the comment rules them all
     for line in c["body"].splitlines():
       kind = DEVIATION_RE.match(line)
@@ -625,11 +625,11 @@ def worktree_checks(worktree: Path, merge_base: str, head: str, body: str, scope
     try:
       runs = dod_runs([(i, cmd, last_line(pasted[i])) for i, kind, cmd in items if kind == "run" and i in pasted], worktree,
                       run_env(gh or shutil.which("gh") or "gh", worktree), deadline, out_dir)
-    finally:  # written back whole, whatever a run did: an edit a run made to them is overwritten
+    finally:  # written back whole when a run changed them: an edit a run made to them is overwritten, nothing else is
       for path, raw in held.items():
         if raw is None:
           path.unlink(missing_ok=True)
-        else:
+        elif not path.is_file() or path.read_bytes() != raw:
           core.atomic_write(path, raw)
     out = lambda i: out_dir / f"{i}.out"
     texts = {int(i): (out(i).read_text(encoding="utf-8", errors="replace") if out(i).is_file() else "", pasted[int(i)])

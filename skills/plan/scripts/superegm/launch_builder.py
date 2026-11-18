@@ -91,6 +91,9 @@ def prepare(args, card):
   # every launch's bin directory reaches the unquotable allow-list (`superegm-precheck`, U67; the App path's `gh` shim)
   if re.search(r"\s", config["artifacts_dir"]):
     raise core.HandoffError(f"artifacts_dir {config['artifacts_dir']} holds whitespace")
+  attempts = builder_config.get("precheck_attempts", 3)  # the orders' bound on the precheck runs per launch (U67)
+  if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 1:
+    raise core.HandoffError(f"builder.precheck_attempts must be a positive integer, not {attempts!r}")
   if app:  # the App path: the scripts bake openssl and the key variable
     openssl = tool("openssl")
     key_path(app["private_key_env"])
@@ -102,7 +105,7 @@ def prepare(args, card):
   pr = (record.get("pr") or {}).get("number") if rnd >= 2 else None
   merge = merge_mode(handoff.graph.parallel, record.get("pr") if pr else None, foreman_data)  # spec section 6.1
   bin_dir = st.path("launches", f"{unit}_r{rnd}_bin")
-  for value in (sys.executable, HELPER, st.handoff_id, unit):  # write_precheck's quote check, before any write
+  for value in (sys.executable, HELPER, st.handoff_id, unit, handoff.repo_root):  # write_precheck's quote check, before any write
     if "'" in str(value):
       raise core.HandoffError(f"{value} holds a quote and cannot go in a launched script")
   tools = allowed_tools(builder_config["allowed_tools"], branch, issue_body, launched_gh, merge=merge is not None, bin=bin_dir)
@@ -143,7 +146,8 @@ def prepare(args, card):
   reviews = core.gh_pages(f"repos/{repo}/pulls/{pr}/reviews") if pr else []
   audit = AUDIT_LINE.format(owner=record["launched"].get("by", "unknown"),  # a pre-upgrade mark records no login
                             runcard=args.runcard, unit=unit, handoff=st.handoff_id)
-  text = prompt_text(number, unit, issue_body, orders_text(tools, launched_gh, builder_config["max_subagent_calls"], str(bin_dir / "superegm-precheck"), merge=merge is not None), orient_text, comments, reviews, pr, builder, audit, pr_block,
+  text = prompt_text(number, unit, issue_body, orders_text(tools, launched_gh, builder_config["max_subagent_calls"], str(bin_dir / "superegm-precheck"),
+                                                           merge=merge is not None, attempts=attempts), orient_text, comments, reviews, pr, builder, audit, pr_block,
                      spec_range=range_text, owners=config.get("owners") or [], foreman=foreman_data,
                      amendments=amendments_for(st, unit, issue_body))
   if merge:
@@ -160,7 +164,12 @@ def prepare(args, card):
             "shim) are stale.\n") + text
   prompt = st.path("launches", f"{unit}_r{rnd}_prompt.md")
   core.atomic_write(prompt, text)
-  write_precheck(st, unit, rnd)  # every launch, the machine-account path included (U67)
+  write_precheck(st, unit, rnd, handoff.repo_root)  # every launch, the machine-account path included (U67)
+  # the issue comments this launch fetched, kept for its precheck: a ruling posted after the last round is posted
+  # reaches no round's `comments.md` until the next prepare, yet the prompt carries it (U67)
+  from superegm.prepare import write_comments  # prepare imports this module
+  fetched = [{**c, "created_at": c.get("created_at") or "", "user": c.get("user") or {"login": ""}} for c in comments]
+  write_comments(st.path("launches", f"{unit}_r{rnd}_comments.md"), (number, fetched), (pr or 0, []), None, builder)
   if app:
     write_bin(st, unit, rnd, config, openssl, gh)
   managed = managed_plugins(Path(config["builder"]["profile_dir"]).expanduser() / "plugins")
@@ -210,9 +219,9 @@ SUBAGENTS_RE = re.compile(r"(?:\n<!-- subagents(?: Agent)?: [^\n]* -->)+\n")  # 
 MERGE_RE = re.compile(r"\n<!-- merge: ([^\n]*) -->\n")  # the merge orders' line (spec section 6.1)
 
 
-def orders_text(tools: list, gh: str, cap: int, precheck: str = "", merge: bool = False) -> str:
+def orders_text(tools: list, gh: str, cap: int, precheck: str = "", merge: bool = False, attempts: int = 3) -> str:
   """`references/builder_orders.md` as one launch reads it: `{{gh}}` the launched `gh`, `{{precheck}}` the launch's
-  `superegm-precheck` script (U67), `{{skills}}` the skills
+  `superegm-precheck` script and `{{attempts}}` its `builder.precheck_attempts` (U67), `{{skills}}` the skills
   the allow-list names, `none` when it names none, and `{{subagents}}` the sentence of the `<!-- subagents Agent: -->`
   line, `{{cap}}` filled, when the list carries `Agent`, else that of the `<!-- subagents: -->` line; both lines removed.
   The `<!-- merge: -->` line becomes a `## The merge orders` section on a launch carrying merge orders (`merge`,
@@ -223,6 +232,7 @@ def orders_text(tools: list, gh: str, cap: int, precheck: str = "", merge: bool 
   line = next(l for l in text.splitlines() if l.startswith(marker))
   sentence = line[len(marker):].removesuffix(" -->").replace("{{cap}}", str(cap))
   text = SUBAGENTS_RE.sub("", text, count=1).replace("{{subagents}}", sentence)
+  text = text.replace("{{attempts}}", str(attempts))
   return text.replace("{{gh}}", gh).replace("{{precheck}}", precheck).replace("{{skills}}", ", ".join(skill_names(tools)) or "none")
 
 
@@ -261,16 +271,18 @@ def write_bin(store, unit: str, rnd: int, config: dict, openssl: str, gh: str) -
   return shim
 
 
-def write_precheck(store, unit: str, rnd: int) -> Path:
+def write_precheck(store, unit: str, rnd: int, repo_root: Path) -> Path:
   """`launches/<unit>_r<n>_bin/superegm-precheck` (spec 1.2.1 section 6.3), written on every launch: `superegm
   precheck` through this helper's own python3 and plugin root, both quoted (the helper's path may hold whitespace an
-  allow-list prefix cannot), with the handoff and the unit baked in; the builder adds `--pr-body <file>`. 0o700."""
+  allow-list prefix cannot), with the handoff, the unit and, as SUPEREGM_REPO, the handoff's checkout (whose
+  `.superegm/config.json` names the store) baked in; the builder adds `--pr-body <file>`. 0o700."""
   script = store.path("launches", f"{unit}_r{rnd}_bin", "superegm-precheck")
-  for value in (sys.executable, HELPER, store.handoff_id, unit):
+  for value in (sys.executable, HELPER, store.handoff_id, unit, repo_root):
     if "'" in str(value):
       raise core.HandoffError(f"{value} holds a quote and cannot go in a launched script")
   q = lambda value: f"'{value}'"
   core.atomic_write(script, "#!/bin/sh\n# written by superegm launch-builder: the foreman's worktree checks, before every push\n"
+                    f"SUPEREGM_REPO={q(repo_root)}; export SUPEREGM_REPO\n"
                     f'exec {q(sys.executable)} {q(HELPER)} precheck --handoff {q(store.handoff_id)} --unit {q(unit)} "$@"\n')
   script.chmod(0o700)
   return script
