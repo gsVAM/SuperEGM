@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # From the elephant-goldfish-model (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17); an unreplied external high or medium carried forward (U21); rulings read through `ruling_of` and the record, every folded deviation heading (U22); the DoD re-run and the test delta, two gates before the word (U25); its own `foreman` config key and `init` line, moved from `__init__` and `init` (U32); both `binding_rulings` calls drop the consumed comments, so an edited recorded proceed waives no check (U94).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17); an unreplied external high or medium carried forward (U21); rulings read through `ruling_of` and the record, every folded deviation heading (U22); the DoD re-run and the test delta, two gates before the word (U25); its own `foreman` config key and `init` line, moved from `__init__` and `init` (U32); both `binding_rulings` calls drop the consumed comments, so an edited recorded proceed waives no check (U94); the worktree checks in `worktree_checks`, the one function `collect` and `precheck` call (U67).
 
 """superegm collect: the foreman's findings of a round through one `review record --reviewer foreman`, or a
 round that could not complete with `--not-run`."""
@@ -351,7 +351,6 @@ def collect(args, card):
   worktree = Path(entry["worktree"])
   text = core.unit_file_body(st.path("unit", unit))
   scope = [path for path, _ in handoff.plan.units[unit].scope]
-  changed = core.run_git(["diff", "--name-only", entry["merge_base"], "HEAD"], worktree).split()
   login, comments = parse_comments(core.read_text(r / "comments.md"))
   rid = head_review_id(st, unit)
   prior = max((e["round"] for e in data["rounds"] if e.get("phase") == "posted"), default=None)
@@ -388,44 +387,30 @@ def collect(args, card):
     if f["location"] == "ci":
       prior_ci_fid = f["id"]
   verdict, pr_body = json.loads(core.read_text(r / "ci.json"))["verdict"], core.read_text(r / "pr_body.md")
-  commits = tdd_order.commits_of(worktree, entry["merge_base"])
-  items = body_mod.dod_items(text)
-  present = {path for _, kind, path in items if kind == "exists" and (worktree / path).exists()}
-  named = {test_path for _, test_path, _ in body_mod.step_paths(text) if test_path}
-  delta = test_delta(*delta_files(worktree, entry["merge_base"], entry["head"], commits, named), named)
-  # every input is read; the three files a run could edit are held whole, then the DoD `Run` items run
-  config = worktree / core.run_git(["rev-parse", "--git-common-dir"], worktree).strip() / "config"
-  held = [st.path("foreman", unit), config] + ([st.path("reviews", rid, f"round-{n}.json")] if rid else [])
-  held = {path: path.read_bytes() if path.is_file() else None for path in held}
-  pasted = {int(m.group(1)): m.group(2) for m in DOD_RESULT_RE.finditer(pr_body)}
-  try:
-    runs = dod_runs([(i, cmd, last_line(pasted[i])) for i, kind, cmd in items if kind == "run" and i in pasted], worktree,
-                    run_env(shutil.which("gh") or "gh", worktree), deadline, r / "dod")
-  finally:  # written back whole, whatever a run did: an edit a run made to them is overwritten
-    for path, raw in held.items():
-      if raw is None:
-        path.unlink(missing_ok=True)
-      else:
-        core.atomic_write(path, raw)
-  out = lambda i: r / "dod" / f"{i}.out"
-  texts = {int(i): (out(i).read_text(encoding="utf-8", errors="replace") if out(i).is_file() else "", pasted[int(i)])
-           for i in runs}  # each side's whole text: its last count line is compared, not its last line
+  followup_fids = [row["fid"] for row in data.get("followups") or []]  # triage's deferrals (spec section 5.2)
+  rulings = binding_rulings([c for c in comments if c["kind"] == "issue"], handoff.config.get("owners") or [],
+                            recorded_rulings(data), data.get("decisions") or [],
+                            deferred=followup_fids, consumed=consumed_comments(data))
+  # the worktree's checks, shared with `precheck`: the files a run could edit (the foreman file, the round's record,
+  # the worktree's git config) are held whole while the DoD `Run` items run
+  checked, facts = worktree_checks(worktree, entry["merge_base"], entry["head"], text, scope, pr_body, rulings, contest_of,
+                                   {"dod": prior_dod, "delta": prior_delta, "scope": prior_scope, "tdd": prior_tdd},
+                                   deadline=deadline, out_dir=r / "dod", config=handoff.config,
+                                   hold=[st.path("foreman", unit)] + ([st.path("reviews", rid, f"round-{n}.json")] if rid else []))
+  commits, present, delta, runs, texts = (facts[k] for k in ("commits", "present", "delta", "runs", "texts"))
   for i, run in runs.items():
     if run["summary"] is not None:
       core.atomic_write(r / "dod" / f"{i}.txt", f"exit: {'none' if run['exit'] is None else run['exit']}\n"
                         f"summary: {run['summary']}\ntimed_out: {'yes' if run['timed_out'] else 'no'}\n")
-  followup_fids = [row["fid"] for row in data.get("followups") or []]  # triage's deferrals (spec section 5.2)
-  lines, contested = foreman_findings(n, verdict, text, scope, worktree, changed, pr_body, comments, login, prior, prior_ci_fid,
+  lines, contested = foreman_findings(n, verdict, text, scope, worktree, facts["changed"], pr_body, comments, login, prior, prior_ci_fid,
                                       commits, prior_tdd, prior_scope, contest_of,
                                       external, earlier, disposed, posted, handoff.config.get("owners") or [],
                                       recorded_rulings(data), data.get("decisions") or [], recorded_times(data),
                                       handoff.state["units"][unit].get("number"), runs=runs, prior_dod=prior_dod, present=present,
                                       delta=delta, prior_delta=prior_delta, texts=texts, config=handoff.config, held=holds,
-                                      open_prior=open_of(last), deferred=followup_fids, consumed=consumed_comments(data))
-  lines, slots, contested = carry(lines, contested, last, prior, contest_of,
-                                    binding_rulings([c for c in comments if c["kind"] == "issue"], handoff.config.get("owners") or [],
-                                                    recorded_rulings(data), data.get("decisions") or [],
-                                                    deferred=followup_fids, consumed=consumed_comments(data)))
+                                      open_prior=open_of(last), deferred=followup_fids, consumed=consumed_comments(data),
+                                      checked=checked)
+  lines, slots, contested = carry(lines, contested, last, prior, contest_of, rulings)
   entry.update(dod_runs=runs, test_delta=delta)
   findings = r / "foreman.findings"
   core.atomic_write(findings, "".join(line + "\n" for line in lines))
@@ -509,7 +494,7 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
                      issue_number: int = None, runs: dict = None, prior_dod: dict = None, present: set = None,
                      delta: list = None, prior_delta: dict = None, texts: dict = None, config: dict = None,
                      held: dict = None, open_prior: set = frozenset(), deferred: list = (),
-                     consumed: frozenset = frozenset()) -> tuple:
+                     consumed: frozenset = frozenset(), checked: list = None) -> tuple:
   """The foreman's high findings of spec section 11 in this order, which numbers the `foreman-<r>-<k>` ids: CI,
   the DoD items' fenced-output and `Exists` checks, the `dod-<n>` re-runs, the `test-delta:` entries, scope,
   tdd-order, deviations, contested, upheld, unreplied external; and `builder_contested[]` for the contested ones. Rulings
@@ -538,7 +523,9 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
   paths found before the runs; `texts`, item number to `(output, paste)`, the whole texts the counts are read from.
   `delta`, `test_delta`'s entries, is trimmed in place of every entry an owner's ruling allows (a posted fid's,
   through `prior_delta`, fid to `(file, base_commit, base_line, kind)`, or `test-delta <file> allowed`; a judges'
-  recorded ruling never settles one) and each entry left is a `test-delta:` high, after the `dod-<n>` ones and before scope."""
+  recorded ruling never settles one) and each entry left is a `test-delta:` high, after the `dod-<n>` ones and before scope.
+  The worktree's findings (fenced output through tdd-order) are `worktree_findings`' over these facts, or `checked`
+  when given: `collect` passes `worktree_checks`' own, the one function `precheck` calls too (U67)."""
   found, contested = [], []
   links = contest_of or {}
 
@@ -558,12 +545,6 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
   late = {fid for fid in open_ext if not groups[origin(fid)] & set(earlier)}
   if ci_verdict != "ci green":
     found.append(("ci", f"CI not green on this head: {ci_verdict}"))
-  results = {int(m.group(1)) for m in DOD_RESULT_RE.finditer(pr_body)}
-  for n, kind, text in body_mod.dod_items(body):
-    if kind == "exists" and not (text in present if present is not None else (worktree / text).exists()):
-      found.append((text, f"Exists item {n}: path absent"))
-    elif kind == "run" and n not in results:
-      found.append(("pr_body.md", f"Run item {n}: no fenced output"))
   # The rulings: an owner's form comment read by `ruling_of`, and the record (`rulings[]`, the judges' post included)
   # (spec section 13.2: a recorded ruling is never changed by a later comment, so the record wins on its comment ids and subjects)
   # a live `upheld` on a fid of the record's `followups[]` is a refused undo (spec section 5.2): it never blocks
@@ -571,39 +552,12 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
   rulings = binding_rulings([c for c in comments if c["kind"] == "issue"], owners, recorded, decisions,
                             deferred=deferred, consumed=consumed)  # an issue comment alone rules
   by_id = {c["id"]: c for c in comments}
-  # a ruling on a contest's copy (`contested <fid>: …`) rules the finding it contests, down the chain to the original
-  def chain(fid):
-    out = {fid}
-    while fid in links and links[fid] not in out:
-      fid = links[fid]
-      out.add(fid)
-    return out
-  overruled = set().union(*(chain(r.subject) for r in rulings if r.kind == "overruled"))
-  allowed = set().union(*(chain(r.subject) for r in rulings if r.kind == "allowed"))
-  ruled = {int(r.subject[4:]) for r in rulings if r.kind == "allowed" and re.fullmatch(r"dod-\d+", r.subject)}
-  found += dod_findings(body, runs or {}, ruled | {item for fid, item in (prior_dod or {}).items() if fid in overruled | allowed},
-                        texts, config)
-  if delta is not None:  # the test delta: an allowed entry or file is dropped from the round's record, then each left is a high
-    owners_own = [r for r in rulings if not r.login.startswith("judges:")]  # the owner's alone: never the judges' rulings
-    settled = set().union(*(chain(r.subject) for r in owners_own if r.kind in ("overruled", "allowed")))
-    keys = {key for fid, key in (prior_delta or {}).items() if fid in settled}
-    # a file allowance binds whole: unrecorded, its comment; recorded (`decision rule` keeps `test-delta <file> allowed`
-    # beside the per-fid ones), the record, whatever a later edit or deletion of the comment does
-    files = {r.subject for r in owners_own if r.kind == "allowed-file"}
-    delta[:] = [e for e in delta if e["file"] not in files and (e["file"], e["base_commit"], e["base_line"], e["kind"]) not in keys]
-    found += [(f"{e['file']}:{e['line']}", f"test-delta: {e['file']}:{e['line']} {e['kind']}") for e in delta]
-  widened = {path for fid, path in (prior_scope or {}).items() if fid in overruled}  # an owner's overrule widens the Scope
-  in_scope = lambda path: any(path == s or path.startswith(s.rstrip("/") + "/") for s in scope)  # a directory covers its files
-  found += [(path, "changed path outside Scope paths") for path in changed if not in_scope(path) and path not in widened]
-  # a tdd-order failure a posted round raised and a ruling overruled or allowed is skipped; any other failure is raised
-  skipped = {text for fid, text in (prior_tdd or {}).items() if fid in overruled | allowed}
-  tests = {n: t for n, t, _ in body_mod.step_paths(body)}
-  for failure in tdd_order.check(body, list(commits)):
-    if failure in skipped:
-      continue
-    step = re.match(r"S(\d+):", failure) or re.search(r"test\(S(\d+)\)", failure)
-    found.append((tests.get(int(step.group(1)), "tests/") if step else "tests/", f"tdd-order: {failure}"))
-  ruled = {int(r.subject) for r in rulings if r.kind == "option" and r.subject.isdigit()}
+  if checked is None:  # `worktree_checks`' findings, else the same checks over the facts given here
+    checked = worktree_findings(body, scope, worktree, changed, pr_body, commits, rulings, links, runs=runs, texts=texts,
+                                config=config, present=present, delta=delta,
+                                prior={"dod": prior_dod, "delta": prior_delta, "scope": prior_scope, "tdd": prior_tdd})
+  found += checked
+  ruled ={int(r.subject) for r in rulings if r.kind == "option" and r.subject.isdigit()}
   for c in comments:  # every `**Deviation**` heading a comment folds; one ruling naming the comment rules them all
     for line in c["body"].splitlines():
       kind = DEVIATION_RE.match(line)
@@ -647,6 +601,94 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
       found.append((f["location"], f"unreplied {f['id']}: {f['claim']}"))
   lines = [f"foreman-{round_n}-{i} | high | {location} | regression: no | {claim}" for i, (location, claim) in enumerate(found, 1)]
   return lines, contested
+
+
+def worktree_checks(worktree: Path, merge_base: str, head: str, body: str, scope: list, pr_body: str, rulings: list,
+                    links: dict, prior: dict, deadline: float = None, out_dir: Path = None, gh: str = None,
+                    hold=(), config: dict = None) -> tuple:
+  """The foreman's checks that need only the worktree, the one function `collect` and `precheck` both call
+  (spec section 6.3): the changed paths, commits, `Exists` paths and test delta are read, the DoD `Run` items whose
+  output `pr_body` pastes run (`dod_runs`, outputs under `out_dir`; none when it is None) with the worktree's git
+  config and every `hold` path held whole and written back, then `worktree_findings` reads them. Returns
+  `(found, facts)`: `(location, claim)` per finding and `{changed, commits, present, delta, runs, texts, pasted}`."""
+  changed = core.run_git(["diff", "--name-only", merge_base, "HEAD"], worktree).split()
+  commits = tdd_order.commits_of(worktree, merge_base)
+  items = body_mod.dod_items(body)
+  present = {path for _, kind, path in items if kind == "exists" and (worktree / path).exists()}
+  named = {test_path for _, test_path, _ in body_mod.step_paths(body) if test_path}
+  delta = test_delta(*delta_files(worktree, merge_base, head, commits, named), named)
+  pasted = {int(m.group(1)): m.group(2) for m in DOD_RESULT_RE.finditer(pr_body)}
+  runs, texts = {}, {}
+  if out_dir is not None:  # every input is read; the files a run could edit are held whole, then the `Run` items run
+    git_config = worktree / core.run_git(["rev-parse", "--git-common-dir"], worktree).strip() / "config"
+    held = {path: path.read_bytes() if path.is_file() else None for path in [*hold, git_config]}
+    try:
+      runs = dod_runs([(i, cmd, last_line(pasted[i])) for i, kind, cmd in items if kind == "run" and i in pasted], worktree,
+                      run_env(gh or shutil.which("gh") or "gh", worktree), deadline, out_dir)
+    finally:  # written back whole, whatever a run did: an edit a run made to them is overwritten
+      for path, raw in held.items():
+        if raw is None:
+          path.unlink(missing_ok=True)
+        else:
+          core.atomic_write(path, raw)
+    out = lambda i: out_dir / f"{i}.out"
+    texts = {int(i): (out(i).read_text(encoding="utf-8", errors="replace") if out(i).is_file() else "", pasted[int(i)])
+             for i in runs}  # each side's whole text: its last count line is compared, not its last line
+  found = worktree_findings(body, scope, worktree, changed, pr_body, commits, rulings, links, runs=runs, texts=texts,
+                            config=config, present=present, delta=delta, prior=prior)
+  return found, {"changed": changed, "commits": commits, "present": present, "delta": delta, "runs": runs,
+                 "texts": texts, "pasted": pasted}
+
+
+def worktree_findings(body: str, scope: list, worktree: Path, changed: list, pr_body: str, commits: list, rulings: list,
+                      links: dict, runs: dict = None, texts: dict = None, config: dict = None, present: set = None,
+                      delta: list = None, prior: dict = None) -> list:
+  """`(location, claim)` per worktree finding in the foreman's order: the fenced-output and `Exists` checks, the
+  `dod-<n>` re-runs, the `test-delta:` entries (`delta` trimmed in place of what an owner's ruling allows), scope,
+  tdd-order. `prior` holds the posted rounds' fids: `dod` (to item number), `delta` (to its key), `scope` (to its
+  path), `tdd` (to its failure); `links` the contest links a ruling on a copy follows back to the original."""
+  prior, links, found = prior or {}, links or {}, []
+  prior_dod, prior_delta, prior_scope, prior_tdd = (prior.get(k) or {} for k in ("dod", "delta", "scope", "tdd"))
+  results = {int(m.group(1)) for m in DOD_RESULT_RE.finditer(pr_body)}
+  for n, kind, text in body_mod.dod_items(body):
+    if kind == "exists" and not (text in present if present is not None else (worktree / text).exists()):
+      found.append((text, f"Exists item {n}: path absent"))
+    elif kind == "run" and n not in results:
+      found.append(("pr_body.md", f"Run item {n}: no fenced output"))
+
+  # a ruling on a contest's copy (`contested <fid>: …`) rules the finding it contests, down the chain to the original
+  def chain(fid):
+    out = {fid}
+    while fid in links and links[fid] not in out:
+      fid = links[fid]
+      out.add(fid)
+    return out
+  overruled = set().union(*(chain(r.subject) for r in rulings if r.kind == "overruled"))
+  allowed = set().union(*(chain(r.subject) for r in rulings if r.kind == "allowed"))
+  ruled = {int(r.subject[4:]) for r in rulings if r.kind == "allowed" and re.fullmatch(r"dod-\d+", r.subject)}
+  found += dod_findings(body, runs or {}, ruled | {item for fid, item in prior_dod.items() if fid in overruled | allowed},
+                        texts, config)
+  if delta is not None:  # the test delta: an allowed entry or file is dropped from the round's record, then each left is a high
+    owners_own = [r for r in rulings if not r.login.startswith("judges:")]  # the owner's alone: never the judges' rulings
+    settled = set().union(*(chain(r.subject) for r in owners_own if r.kind in ("overruled", "allowed")))
+    keys = {key for fid, key in prior_delta.items() if fid in settled}
+    # a file allowance binds whole: unrecorded, its comment; recorded (`decision rule` keeps `test-delta <file> allowed`
+    # beside the per-fid ones), the record, whatever a later edit or deletion of the comment does
+    files = {r.subject for r in owners_own if r.kind == "allowed-file"}
+    delta[:] = [e for e in delta if e["file"] not in files and (e["file"], e["base_commit"], e["base_line"], e["kind"]) not in keys]
+    found += [(f"{e['file']}:{e['line']}", f"test-delta: {e['file']}:{e['line']} {e['kind']}") for e in delta]
+  widened = {path for fid, path in prior_scope.items() if fid in overruled}  # an owner's overrule widens the Scope
+  in_scope = lambda path: any(path == s or path.startswith(s.rstrip("/") + "/") for s in scope)  # a directory covers its files
+  found += [(path, "changed path outside Scope paths") for path in changed if not in_scope(path) and path not in widened]
+  # a tdd-order failure a posted round raised and a ruling overruled or allowed is skipped; any other failure is raised
+  skipped = {text for fid, text in prior_tdd.items() if fid in overruled | allowed}
+  tests = {n: t for n, t, _ in body_mod.step_paths(body)}
+  for failure in tdd_order.check(body, list(commits)):
+    if failure in skipped:
+      continue
+    step = re.match(r"S(\d+):", failure) or re.search(r"test\(S(\d+)\)", failure)
+    found.append((tests.get(int(step.group(1)), "tests/") if step else "tests/", f"tdd-order: {failure}"))
+  return found
 
 
 def timely(fid: str, at: str, posted: dict, held: dict = None) -> bool:

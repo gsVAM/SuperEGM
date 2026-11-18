@@ -12,8 +12,8 @@ import re
 from pathlib import Path
 
 import superegm as core
-from superegm import body as body_mod, review, tdd_order
-from superegm.collect import (DOD_RESULT_RE, delta_files, parse_comments, prior_foreman_findings, test_delta)
+from superegm import collect, review
+from superegm.collect import parse_comments, prior_foreman_findings
 from superegm.decision import binding_rulings, consumed_comments, recorded_rulings
 
 WRITES = frozenset()  # the store kinds this subcommand writes: none, it reads
@@ -50,7 +50,9 @@ def run(args):
   rulings = binding_rulings([c for c in comments if c["kind"] == "issue"], handoff.config.get("owners") or [],
                             recorded_rulings(data), data.get("decisions") or [],
                             deferred=[row["fid"] for row in data.get("followups") or []], consumed=consumed_comments(data))
-  found = worktree_checks(worktree, merge_base, body, scope, pr_body, rulings, prior)
+  head = core.run_git(["rev-parse", "HEAD"], worktree).strip()
+  found, _ = collect.worktree_checks(worktree, merge_base, head, body, scope, pr_body, rulings, prior["links"], prior,
+                                     config=handoff.config)  # the one function `collect` calls too
   for i, (location, claim) in enumerate(found, 1):
     print(f"foreman-{rnd}-{i} | high | {location} | regression: no | {claim}")
   return 1 if found else 0
@@ -83,48 +85,3 @@ def settled(st, handoff, unit: str, data: dict) -> tuple:
     if seen is not None and seen.is_file():
       comments.update({c["id"]: c for c in parse_comments(core.read_text(seen))[1]})
   return prior, list(comments.values())
-
-
-def worktree_checks(worktree: Path, merge_base: str, body: str, scope: list, pr_body: str, rulings: list,
-                    prior: dict) -> list:
-  """`(location, claim)` per finding, in the foreman's order: the fenced-output and `Exists` checks, the test
-  delta, scope, tdd-order; what a ruling settled on a posted round's finding is left out."""
-  links = prior["links"]
-
-  def chain(fid):
-    out = {fid}
-    while fid in links and links[fid] not in out:
-      fid = links[fid]
-      out.add(fid)
-    return out
-  found = []
-  head = core.run_git(["rev-parse", "HEAD"], worktree).strip()
-  changed = core.run_git(["diff", "--name-only", merge_base, "HEAD"], worktree).split()
-  commits = tdd_order.commits_of(worktree, merge_base)
-  results = {int(m.group(1)) for m in DOD_RESULT_RE.finditer(pr_body)}
-  for n, kind, text in body_mod.dod_items(body):
-    if kind == "exists" and not (worktree / text).exists():
-      found.append((text, f"Exists item {n}: path absent"))
-    elif kind == "run" and n not in results:
-      found.append(("pr_body.md", f"Run item {n}: no fenced output"))
-  overruled = set().union(*(chain(r.subject) for r in rulings if r.kind == "overruled"))
-  allowed = set().union(*(chain(r.subject) for r in rulings if r.kind == "allowed"))
-  named = {test_path for _, test_path, _ in body_mod.step_paths(body) if test_path}
-  delta = test_delta(*delta_files(worktree, merge_base, head, commits, named), named)
-  owners_own = [r for r in rulings if not r.login.startswith("judges:")]
-  settled_ids = set().union(*(chain(r.subject) for r in owners_own if r.kind in ("overruled", "allowed")))
-  keys = {key for fid, key in prior["delta"].items() if fid in settled_ids}
-  files = {r.subject for r in owners_own if r.kind == "allowed-file"}
-  found += [(f"{e['file']}:{e['line']}", f"test-delta: {e['file']}:{e['line']} {e['kind']}") for e in delta
-            if e["file"] not in files and (e["file"], e["base_commit"], e["base_line"], e["kind"]) not in keys]
-  widened = {path for fid, path in prior["scope"].items() if fid in overruled}
-  in_scope = lambda path: any(path == s or path.startswith(s.rstrip("/") + "/") for s in scope)
-  found += [(path, "changed path outside Scope paths") for path in changed if not in_scope(path) and path not in widened]
-  skipped = {text for fid, text in prior["tdd"].items() if fid in overruled | allowed}
-  tests = {n: t for n, t, _ in body_mod.step_paths(body)}
-  for failure in tdd_order.check(body, list(commits)):
-    if failure in skipped:
-      continue
-    step = re.match(r"S(\d+):", failure) or re.search(r"test\(S(\d+)\)", failure)
-    found.append((tests.get(int(step.group(1)), "tests/") if step else "tests/", f"tdd-order: {failure}"))
-  return found
