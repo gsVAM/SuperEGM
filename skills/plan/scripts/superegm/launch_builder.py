@@ -83,6 +83,9 @@ def prepare(args, card):
     raise core.HandoffError(problem)
   dirs = plugin_dirs(builder_config["plugins"], elephant_profile())  # each listed plugin's user-scope directory, version and hooks
   mcp_file = st.path("launches", f"{unit}_r{rnd}_mcp.json")
+  after = builder_config.get("escalate_after", 2)  # refused as precheck_attempts is, never read as off (U68)
+  if isinstance(after, bool) or not isinstance(after, int) or after < 0:
+    raise core.HandoffError(f"builder.escalate_after must be a non-negative integer, not {after!r}")
   tier = core.unit_tier(st, unit)
   escalated = escalates(st, unit, tier, builder_config)  # a stronger model on a later round (spec 1.2.1 section 6.4, U68)
   if escalated:
@@ -297,20 +300,22 @@ def write_precheck(store, unit: str, rnd: int, repo_root: Path) -> Path:
 def escalates(st, unit: str, tier: str, builder_config: dict) -> bool:
   """Whether the launch moves up to the `difficult` tier (spec 1.2.1 section 6.4): never from `difficult` itself or with
   no `difficult` row; when an earlier launch entry of the unit carries `escalated: true` (it wins over `0`, D1 (a));
-  otherwise when the current head cycle holds `builder.escalate_after` counted rounds (`failing_head_rounds`), `0` or
-  a non-integer turning that off."""
+  otherwise when the current head cycle holds `builder.escalate_after` counted rounds (`failing_head_rounds`), `0`
+  turning that off (`prepare` has refused a value that is no non-negative integer)."""
   if tier == "difficult" or not (builder_config.get("tiers") or {}).get("difficult"):
     return False
   if any(entry.get("escalated") for entry in load_launches(st, unit)):  # upward only: a later launch never drops back
     return True
   after = builder_config.get("escalate_after", 2)
-  return isinstance(after, int) and not isinstance(after, bool) and after > 0 and failing_head_rounds(st, unit) >= after
+  return after > 0 and failing_head_rounds(st, unit) >= after
 
 
 def failing_head_rounds(st, unit: str) -> int:
   """The posted foreman rounds of the unit's current head cycle that say the model fell short, each read with
-  `review.load_round`: outcome `revise` or `cap-reached`, or `contested:` while the round holds an open blocking
-  finding that is no builder contest, no `test-delta:` finding and no `changed path outside Scope paths` one. A merge
+  `review.load_round`: outcome `revise` or `cap-reached`, or `contested:` while the round holds, in any reviewer's
+  findings (the foreman's, the panel's, an external one), an open blocking finding that is not waiting on a ruling:
+  no `test-delta:` finding, and no builder contest or `changed path outside Scope paths` finding (point 1) unless the
+  owner ruled `<fid> finding upheld` on it (an overruled or allowed one is settled, so it is no open finding). A merge
   round, a round collected as `not run (...)`, an `owner:` outcome and every round of a cycle a `proceed` closed
   do not count."""
   from superegm import review  # review imports this module's callers
@@ -318,7 +323,10 @@ def failing_head_rounds(st, unit: str) -> int:
   if not cycle or review.last_proceed(cycle):
     return 0
   rid, count = review.review_id(st, "head", unit, cycle["cycle"]), 0
-  for entry in core.load_foreman(st, unit)["rounds"]:
+  foreman = core.load_foreman(st, unit)
+  upheld = {ruling["ruling"].split()[0] for ruling in foreman.get("rulings") or []  # as write_owner_outcome reads an upheld one
+            if ruling.get("ruling", "").partition(" — ")[0].strip().endswith(" finding upheld")}
+  for entry in foreman["rounds"]:
     rnd = review.load_round(st, rid, entry["round"]) if entry.get("phase") == "posted" and not entry.get("merge") else None
     if rnd is None:
       continue
@@ -327,10 +335,9 @@ def failing_head_rounds(st, unit: str) -> int:
       count += 1
     elif word.startswith("contested:"):
       contested = {c["fid"] for c in rnd.get("builder_contested") or []}
-      findings = ((rnd.get("reviewers") or {}).get("foreman") or {}).get("findings") or []
-      count += any(f["disposition"] is None and review.blocking(f) and f["id"] not in contested
-                   and not f["claim"].startswith("test-delta:") and f["claim"] != "changed path outside Scope paths"
-                   for f in findings)
+      count += any(f["disposition"] is None and review.blocking(f) and not f["claim"].startswith("test-delta:")
+                   and (f["id"] in upheld or (f["id"] not in contested and f["claim"] != "changed path outside Scope paths"))
+                   for f in review.findings_of(rnd))
   return count
 
 
