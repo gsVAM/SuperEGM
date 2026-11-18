@@ -282,3 +282,57 @@ def test_conflict_on_board_and_inbox(world):
   row = next(r for r in report.board_table(handoff, handoff.state, card, 0).splitlines() if "U01 #" in r)
   assert "conflict" in row
   assert any("U01" in line and "conflict" in line for line in map(inbox.line_of, inbox.inbox_items(s, [hid])))
+
+
+# ---------------------------------------------------------------- R1: the review's findings on the board, the inbox and the loop
+
+
+def conflict_wave(world, case):
+  """test_wave's store with U01 conflicting at HEAD: clean (`rounds` set or not), its launch 2 running, or stopped."""
+  import superegm as core
+  from test_wave import wave_store, CLEAN as WAVE_CLEAN
+  u01 = {"pr": 71, "head": HEAD, "ci": "green", **WAVE_CLEAN}
+  if case == "running":
+    u01["launches"] = [{"round": 1, "status": "exited 0"}, {"round": 2, "status": "running"}]
+  s = wave_store(world, U01=u01)
+  if case != "clean, 1.2.0":
+    with_rounds(s, world)
+  if case == "stopped":
+    foreman = json.loads(s.path("foreman", "U01").read_text(encoding="utf-8"))
+    put(s.path("foreman", "U01"), json.dumps({**foreman, "stopped": {"reason": "stop the unit"}}))
+  state = json.loads(s.path("state").read_text(encoding="utf-8"))
+  state["status"]["units"]["U01"] |= {"status": "conflict", "conflict": True}
+  s.path("state").write_text(json.dumps(state), encoding="utf-8")
+  return s, core.Handoff(core.here(state["plan"]), s)
+
+
+@pytest.mark.parametrize("case, board, inbox_action", [
+    ("clean", "conflict: merge round", "a merge round"),
+    ("clean, 1.2.0", "conflict: the owner resolves it", "the owner resolves it"),
+    ("running", "conflict; ", "once the launch ends or the owner rules"),
+    ("stopped", "conflict; ", "stopped"),
+])
+def test_conflict_board_action_and_inbox_line(world, case, board, inbox_action):
+  # astra-1-3, change-review-1-1, change-review-1-2, codebase-details-1-4, codebase-details-1-7: §6.1
+  from superegm import report, inbox
+  from test_wave import open_wave_card
+  s, handoff = conflict_wave(world, case)
+  card = json.loads(s.path("runcards", open_wave_card(world)).read_text(encoding="utf-8"))
+  row = next(r for r in report.board_table(handoff, handoff.state, card, 0).splitlines() if "U01 #" in r)
+  assert board in row, row
+  items = [i for i in inbox.inbox_items(s, [s.handoff_id]) if i["subject"] == "U01"]
+  conflicts = [i for i in items if i["kind"] == "conflict"]
+  assert len(conflicts) == 1 and inbox_action in conflicts[0]["action"], items
+  assert not [i for i in items if i["kind"] == "merge"], items  # no merge GitHub would refuse
+
+
+@pytest.mark.parametrize("case, loop", [
+    ("clean", "loop: continuing (merge round: U01)"),
+    ("clean, 1.2.0", "loop: ended"),
+])
+def test_conflict_keeps_the_loop(world, case, loop):
+  # astra-1-1, codebase-details-1-6: a clean conflicting unit a merge round takes is pending work
+  from test_wave import open_wave_card
+  s, _ = conflict_wave(world, case)
+  code, out = world.run("report", "--runcard", open_wave_card(world))
+  assert code == 0 and loop in out, out
