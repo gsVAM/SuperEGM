@@ -54,6 +54,16 @@ def test_merge_round_and_the_cap(world, cap, rounds, status_exit, outcome):
   assert (code, review_mod.outcome_word(code, [])) == (status_exit, outcome), out
 
 
+@pytest.mark.parametrize("round2_merge, lapsed", [(True, True), (False, False)])
+def test_an_early_accept_next_to_a_merge_round(round2_merge, lapsed):
+  # cap 3, accepted on round 3: a merge round 2 is left out of the count, so the accept is below the cap and a later
+  # completed round lapses it; with round 2 counted the accept is the cap's and stands
+  rounds = [{"round": n, "what_ran": "completed", "reviewers": {}} | ({"merge": True} if n == 2 and round2_merge else {})
+            for n in range(1, 5)]
+  review = {"converged": "by ruling R1", "converged_round": 3, "cap": 3}
+  assert review_mod.early_accept_lapsed(review, {"id": "R1"}, rounds, ["accept"]) is lapsed
+
+
 # ---------------------------------------------------------------- S3: a proceeded head's merge launch is not reviewed
 
 MERGE_HEAD = "c" * 40
@@ -71,6 +81,7 @@ def test_proceeded_merge_head_is_not_reviewed(world):
   record(world, st, rid, 1, HEAD, card, {"change-review": FINDING.format(n=1)})
   state = json.loads(st.path("state").read_text(encoding="utf-8"))
   state["status"] = {"units": {UNIT: {"pr": PR, "head": HEAD, "ci": "green", "landed": False}}, "ready": [], "landed": []}
+  state["units"][UNIT]["launched"] = True
   atomic_write(st.path("state"), state)
   code, out = world.run("review", "rule", "--review", rid, "--ruling", "proceed", "--owner", "--reason", "accepted risk",
                         "--runcard", card)
@@ -86,12 +97,28 @@ def test_proceeded_merge_head_is_not_reviewed(world):
   code, out = world.run("foreman", "dispatch", "--unit", UNIT, "--runcard", card)
   assert (code, out) == (1, f"dispatch refused: review {rid} proceeded\n")
   foreman = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))
+  assert [r["round"] for r in foreman["rounds"]] == [1]  # the refusal opened no round
   items = [inbox.line_of(i) for i in inbox.inbox_items(st, [st.handoff_id]) if i["subject"] == UNIT]
   assert any(f"proceed again: {UNIT} head {MERGE_HEAD}" in line for line in items), items
   assert not any("gh pr merge" in line for line in items), items
+  assert unit_state(st, card, foreman) == "waiting proceed"
   # the second proceed names launch 2: the merge is offered on the merge head
   code, out = world.run("review", "rule", "--review", rid, "--ruling", "proceed", "--owner", "--reason", "merge round fine",
                         "--runcard", card)
   assert code == 0, out
   items = [inbox.line_of(i) for i in inbox.inbox_items(st, [st.handoff_id]) if i["subject"] == UNIT]
   assert any(f"gh pr merge {PR} --match-head-commit {MERGE_HEAD}" in line for line in items), items
+  # a proceed is final for the head: the second proceed authorizes the merge, not a review of the merge head
+  code, out = world.run("foreman", "dispatch", "--unit", UNIT, "--runcard", card)
+  assert (code, out) == (1, f"dispatch refused: review {rid} proceeded\n")
+  foreman = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))
+  assert [r["round"] for r in foreman["rounds"]] == [1]
+
+
+def unit_state(st, card, foreman):
+  """`report.unit_state` of UNIT as the readers see it: its saved view, launches and the wave card."""
+  import time
+  from superegm import launch, report
+  view = report.unit_view(json.loads(st.path("state").read_text(encoding="utf-8")), UNIT)
+  card_json = json.loads(st.path("runcards", card).read_text(encoding="utf-8"))
+  return report.unit_state(UNIT, view, foreman, launch.load_launches(st, UNIT), card_json, {}, time.time())
