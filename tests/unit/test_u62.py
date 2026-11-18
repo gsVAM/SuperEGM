@@ -230,3 +230,23 @@ def test_merge_brief_pins_the_current_base(world, monkeypatch, spawn_fake):
   assert entry["base"] == new_base != batch_base
   assert f"git merge {new_base}" in prompt and batch_base not in prompt
   assert "`src/worker.py` (landed: U08)" in prompt  # the fixture's units all hold `src/worker.py`
+
+
+# ---------------------------------------------------------------- S5: the merge orders' text
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_merge_orders_text():
+  # skill text: the orders sit behind a marker launch-builder fills only on a merge launch
+  from superegm import launch_builder
+  builder_orders = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8")
+  wave_skill = (ROOT / "skills/wave/SKILL.md").read_text(encoding="utf-8")
+  assert "<!-- merge: " in builder_orders and "merge commit" in builder_orders
+  assert "no rebase" in builder_orders and "no force push" in builder_orders and "keeping both units' intent" in builder_orders
+  assert "merge round" in wave_skill and "await-merge after" in wave_skill and "conflict" in wave_skill
+  plain = launch_builder.orders_text([], "/bin/gh", 0)
+  merging = launch_builder.orders_text(["Bash(git merge:*)"], "/bin/gh", 0, merge=True)
+  assert "<!-- merge: " not in plain and "merge commit" not in plain  # an ordinary launch reads no merge orders
+  assert "<!-- merge: " not in merging and "merge commit" in merging and "keeping both units' intent" in merging
