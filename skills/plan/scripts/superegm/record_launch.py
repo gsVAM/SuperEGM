@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_record_launch` as the record-launch module; it records a builder launch in `launches/<unit>.json` and, with --exit, the exit its exit file proves; the flagless form refused, launch-builder recording the launch (U24); `subagent_calls` read from the session's transcript at the exit (U27); the effective model and `total_cost_usd` read from the result file at the exit (U28); `--exit stalled`, the group check, the signal, `kill_failed` and `last_commit_at` (U31); the exit's `subagent_calls` read through `traces.launch_subagent_calls` (U49).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_record_launch` as the record-launch module; it records a builder launch in `launches/<unit>.json` and, with --exit, the exit its exit file proves; the flagless form refused, launch-builder recording the launch (U24); `subagent_calls` read from the session's transcript at the exit (U27); the effective model and `total_cost_usd` read from the result file at the exit (U28); `--exit stalled`, the group check, the signal, `kill_failed` and `last_commit_at` (U31); the exit's `subagent_calls` read through `traces.launch_subagent_calls` (U49); `failed_resume` and `failed resume` on a resumed launch ending with no result and no commit of its own (U63).
 
 """superegm record-launch: record a builder launch's exit as `exited <code>`, or a stalled launch's as `exited (stalled)`
 after signalling its group (or `kill_failed`); `launch-builder` records it `running`."""
@@ -11,6 +11,7 @@ from pathlib import Path
 
 import superegm as core
 from superegm.launch import load_launches
+from superegm.launch_builder import has_result
 from superegm.status import head_time, own_commit
 from superegm.traces import launch_subagent_calls
 
@@ -122,9 +123,16 @@ def finish(st, unit, launches, latest, status, last, line):
   latest["effective_model"], latest["total_cost_usd"], duration = result_usage(Path(latest["result_file"]))
   if duration is not None:  # spec section 6.5 "Measuring it": omitted when the result holds none
     latest["duration_ms"] = duration
+  # spec 1.2.1 section 6.2 (U63): a resumed launch ending with no result and no commit of its own is a failed
+  # resume; the status stays `exited <code>`, so every terminal reader is unchanged, and the next launch is fresh
+  failed = bool(latest.get("resumed_from")) and not has_result(latest.get("result_file")) and last is None
+  if failed:
+    latest["failed_resume"] = True
   core.atomic_write(st.path("launches", unit), {"launches": launches})
   core.journal(st, line)
   print(line)
+  if failed:
+    print("failed resume")
   return 0
 
 
