@@ -39,3 +39,20 @@ def test_doctor_prints_the_reviewers_line_after_mcp(world, monkeypatch, tmp_path
   lines = out.splitlines()
   assert got == 0, out
   assert lines[lines.index(next(l for l in lines if l.startswith("mcp:"))) + 1] == "reviewers: none"
+
+
+@pytest.mark.parametrize("kind, reviewers, code, expect", [
+  ("spec", "design,zoom-out,security", 0, "design"),
+  ("head", "security", 1, "review open: security does not review head")])
+def test_review_open_takes_a_loaded_reviewer_for_its_kinds(world, kind, reviewers, code, expect):
+  """A loaded id whose kinds holds the review's kind opens; one that does not is refused; an overridden design keeps its id."""
+  from test_review import SKILL_OF, card, rjson, seed_handoff, spec_file
+  from test_u37 import commit_file
+  commit_file(world, ".superegm/reviewers/security.md", "---\nname: Security\nkinds: [spec]\n---\nHunt for secrets.\n")
+  commit_file(world, ".superegm/reviewers/design.md", "---\nname: Design\nkinds: [spec]\n---\nA new design persona.\n")
+  spec = spec_file(world)
+  seed_handoff(world, spec)
+  cid = card(world, spec, SKILL_OF[kind])
+  artifact = str(spec) if kind == "spec" else "U07"
+  got, out = world.run("review", "open", "--kind", kind, "--artifact", artifact, "--reviewers", reviewers, "--astra", "off", "--runcard", cid)
+  assert got == code and (expect in out if code else rjson(world, out.splitlines()[0])["reviewers"][0] == expect), out
