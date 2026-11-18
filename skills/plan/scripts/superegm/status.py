@@ -386,6 +386,10 @@ def unit_view(handoff, uid):
       view["status"] = "ambiguous: PRs " + ", ".join(f"#{m['number']}" for m in matches) + " (choose with --watch)"
     view["candidates"] = [c["number"] for c in candidates]
   if pr:
+    saved = record.get("pr") or {}
+    # spec section 6.1: `UNKNOWN` is read again next pass, so a `CONFLICTING` read of the same head stands until then
+    if pr.get("mergeable") == "UNKNOWN" and saved.get("mergeable") == "CONFLICTING" and saved.get("head") == pr["head"]:
+      pr = {**pr, "mergeable": "CONFLICTING"}
     record["pr"] = pr
     view["pr"], view["head"] = pr["number"], pr["head"]
     view["pr_state"] = "MERGED" if pr.get("merged_at") else (pr.get("state") or "OPEN").upper()

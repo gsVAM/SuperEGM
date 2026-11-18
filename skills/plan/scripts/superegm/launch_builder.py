@@ -105,7 +105,8 @@ def prepare(args, card):
     identity = {"login": builder, "email": builder_email(builder)}  # `builder` is `app_login(config)`, `<slug>[bot]`, on this path
   if not identity:
     raise core.HandoffError("the wave card records no builder: run launch first")
-  ref ="refs/superegm/base"  # the launch's ref: origin/<base> as `launch` fetched it, the PR tip from round 2
+  # the launch's ref: origin/<base> as `launch` (or a merge launch, below) last fetched and checked it, the PR tip from round 2
+  ref = "refs/superegm/base"
   if pr:
     ref = f"refs/superegm/pr/{pr}"
     core.run_git(["fetch", "--no-write-fetch-head", st.config["remote"], f"+refs/pull/{pr}/head:{ref}"], handoff.repo_root)
@@ -114,6 +115,10 @@ def prepare(args, card):
   base_commit = conflicts = None
   if merge:  # spec section 6.1: the base as it is now, never the batch's fetch, pinned for the brief, the command and the entry
     core.run_git(["fetch", "--no-write-fetch-head", st.config["remote"], f"+refs/heads/{config['base']}:refs/superegm/base"], handoff.repo_root)
+    # the shared ref moved: checked as `launch` checks it, so no later launch of the batch starts from an unread base
+    problems = base_problems(handoff, st, config["base"])
+    if problems:
+      raise core.HandoffError(problems[0])
     base_commit = core.run_git(["rev-parse", "refs/superegm/base^{commit}"], handoff.repo_root).strip()
     conflicts = [(path, landed_holders(handoff, state, path)) for path in conflicting_paths(handoff.repo_root, ref, base_commit)]
   pr_block = pr_block_text(handoff.repo_root, ref, config["pr_block_file"]) if config["pr_block_file"] else None
@@ -437,18 +442,31 @@ def merge_mode(parallel: bool, saved_pr, foreman: dict):
   return "with-fix"
 
 
+def base_problems(handoff, st, base: str) -> list:
+  """`launch.origin_problems` of `refs/superegm/base` against the handoff's own approval entry and the later links of
+  its chain, read as `launch` reads them."""
+  from superegm.launch import origin_problems
+  entries = core.load_approvals(st, handoff.design_path)
+  own = [i for i, e in enumerate(entries) if e.get("handoff_id") == st.handoff_id] or ([len(entries) - 1] if entries else [])
+  if not own:
+    raise core.HandoffError(f"{handoff.design_path} has no approval record")
+  return origin_problems(handoff.repo_root, base, {**entries[own[-1]], "path": str(handoff.design_path)}, entries[own[-1] + 1:])
+
+
 def conflicting_paths(repo_root: Path, head: str, base: str) -> list[str]:
   """The paths `git merge-tree --write-tree` of `head` and `base` leaves conflicted (spec section 6.1), in its order,
-  once each; none when the two merge cleanly. Exit 1 is a conflicted merge; any other failure is a refusal."""
+  once each; none when the two merge cleanly. `-z` gives them NUL-terminated and unquoted. Exit 1 is a conflicted
+  merge; any other failure is a refusal (`--write-tree` needs git 2.38 or later)."""
   with core.hook_free() as pairs:
-    result = subprocess.run(["git", *pairs, "merge-tree", "--write-tree", "--name-only", "--no-messages", head, base],
+    result = subprocess.run(["git", *pairs, "merge-tree", "--write-tree", "-z", "--name-only", "--no-messages", head, base],
                             cwd=str(repo_root), capture_output=True, text=True, encoding="utf-8")
   if result.returncode not in (0, 1):
-    raise core.HandoffError(f"git merge-tree {head} {base} failed: {result.stderr.strip()}")
+    raise core.HandoffError(f"git merge-tree --write-tree {head} {base} failed (it needs git 2.38 or later): "
+                            f"{result.stderr.strip()}")
   paths = []
-  for line in result.stdout.splitlines()[1:]:  # the first line is the merged tree
-    if line and line not in paths:
-      paths.append(line)
+  for name in result.stdout.split("\0")[1:]:  # the first field is the merged tree
+    if name and name not in paths:
+      paths.append(name)
   return paths
 
 
