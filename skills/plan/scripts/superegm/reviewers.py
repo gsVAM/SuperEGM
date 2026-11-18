@@ -3,13 +3,15 @@
 
 """superegm reviewers: the repository's custom review goldfish, `.superegm/reviewers/<id>.md` (spec 1.2.1 section 3.6)."""
 
+import json
 from pathlib import Path
 import re
 import subprocess
 
 import superegm as core
 
-WRITES = frozenset()  # the store kinds this subcommand writes
+WRITES = frozenset(["reviews"])  # the store kinds this subcommand writes: a spec cycle's `persona-<n>-<id>.json`
+SKILLS = frozenset(["review-spec", "review-plan", "integrate", "wave"])  # the skills whose card `--brief` accepts (the foreman's card is a child of the wave card)
 CONFIG_DEFAULTS = {}  # no config key of its own: a file under `.superegm/reviewers/` is the setting
 INIT_STEP, DOCTOR_CHECKS = "", None  # no init line of its own; its doctor line is `doctor`'s
 DIR = ".superegm/reviewers"
@@ -80,7 +82,7 @@ def parse(rel: str, data: bytes) -> dict:
   size = len(body.encode("utf-8"))
   if size > LIMIT:
     raise refuse(rel, f"the persona is {size} bytes, over {LIMIT}")
-  return {"id": stem, "name": name, "kinds": kinds, "model": model, "effort": effort, "text": body, "sha": blob_sha(data)}
+  return {"id": stem, "name": name, "kinds": kinds, "model": model, "effort": effort, "text": body.strip(), "sha": blob_sha(data)}
 
 
 def load(root: Path, ref: str | None = None) -> dict[str, dict]:
@@ -101,3 +103,104 @@ def load(root: Path, ref: str | None = None) -> dict[str, dict]:
     if data is not None:
       found[Path(rel).stem] = {k: v for k, v in parse(rel, data).items() if k != "id"}
   return found
+
+
+def frozen(st: core.Store, handoff_id: str | None) -> dict[str, dict] | None:
+  """`{id: {name, kinds, model, effort, text, sha}}` the approval entry of `handoff_id` froze, each read from its store
+  copy (`{}` for an entry freezing none: an absent field reads `[]`), or None with no such entry."""
+  from superegm import instructions
+  entry = instructions.handoff_entry(st, handoff_id) if handoff_id else None
+  if entry is None:
+    return None
+  found = {}
+  for item in entry.get("reviewers") or []:
+    path = st.path("reviewers", item["sha"])
+    try:
+      copy = json.loads(core.read_text(path))
+    except (OSError, ValueError):
+      raise core.HandoffError(f"{DIR}/{item['id']}.md: the store copy {path.name} is missing or unreadable") from None
+    if copy.get("id") != item["id"] or copy.get("sha") != item["sha"]:
+      raise core.HandoffError(f"{DIR}/{item['id']}.md: the store copy {path.name} does not match the approval entry")
+    found[item["id"]] = {k: v for k, v in copy.items() if k != "id"}
+  return found
+
+
+def available(st: core.Store, root: Path, kind: str, handoff_id: str | None = None) -> dict[str, dict]:
+  """The reviewers a review of `kind` reads: a spec review's at `HEAD`; any other kind's the handoff's frozen copies,
+  else (the handoff has no approval entry) `HEAD`'s."""
+  held = frozen(st, handoff_id) if kind != "spec" else None
+  return held if held is not None else load(root, "HEAD")
+
+
+def persona_of(st: core.Store, review: dict, rid: str, n: int, reviewer: str) -> dict | None:
+  """`{id, sha}` the round's record of `reviewer` carries: for a repository or overridden reviewer the persona it read
+  (a spec review's stored read when a brief stored one, else `HEAD`'s; any other kind's the frozen one); None for a
+  built-in with no file and for any name that is not a reviewer."""
+  if reviewer == "astra" or reviewer == "foreman" or reviewer.startswith("external:"):
+    return None
+  if review["kind"] == "spec":
+    path = st.path("reviews", rid, f"persona-{n}-{reviewer}.json")
+    if path.is_file():
+      read = json.loads(core.read_text(path))
+      return {"id": read["id"], "sha": read["sha"]}
+  found = available(st, core.git_toplevel(Path.cwd()), review["kind"], review.get("handoff_id")).get(reviewer)
+  return {"id": reviewer, "sha": found["sha"]} if found else None
+
+
+def brief(args, st: core.Store) -> str:
+  """The persona text `--brief` prints: the handoff's frozen copy, or a spec review's `HEAD` read, stored once for the round."""
+  from superegm import instructions
+  if args.handoff:
+    record = core.load_card(st, args.runcard)
+    opened = record.get("handoff", st.handoff_id)  # a card without the key: the store's handoff
+    if opened != args.handoff:
+      raise core.HandoffError(f"--handoff {args.handoff}: {args.runcard} was opened under handoff {opened}")
+    held = frozen(st, args.handoff)
+    if held is None:
+      raise core.HandoffError(f"--handoff {args.handoff}: no approval entry")
+    if args.brief not in held:
+      raise core.HandoffError(f"{args.brief} is not frozen in handoff {args.handoff}")
+    return held[args.brief]["text"]
+  if not args.review or args.round is None:
+    raise core.HandoffError("--spec requires --review and --round")
+  if args.round < 1:
+    raise core.HandoffError(f"--round {args.round}: a round is 1 or more")
+  design = Path(args.design).expanduser().resolve()
+  instructions.require_review(st, args.review, design)
+  path = st.path("reviews", args.review, f"persona-{args.round}-{args.brief}.json")
+  if path.is_file():
+    return json.loads(core.read_text(path))["text"]
+  found = load(core.git_toplevel(design), "HEAD").get(args.brief)
+  if found is None:
+    raise core.HandoffError(f"unknown reviewer {args.brief}")
+  core.atomic_write(path, {"id": args.brief, "sha": found["sha"], "text": found["text"]})
+  return found["text"]
+
+
+def register(subparsers):
+  p = core.add_parser(subparsers, "reviewers", "print a repository reviewer's persona, frozen or at HEAD")
+  p.add_argument("--brief", required=True, metavar="ID", help="the reviewer id")
+  p.add_argument("--handoff", help="the handoff whose frozen copy to print")
+  p.add_argument("--spec", dest="design", help="a spec review's: the file at HEAD")
+  p.add_argument("--review", help="with --spec: the review id")
+  p.add_argument("--round", type=int, help="with --spec: the round")
+  p.add_argument("--unit", help="with --handoff: the unit whose card (the foreman's child card) this runs under")
+  p.set_defaults(run=run, writes=WRITES)
+
+
+def run(args) -> int:
+  if args.unit and args.design:  # --unit lets a unit's card pass for --handoff; with --spec it would pass any spec
+    raise core.HandoffError("reviewers: --unit goes with --handoff, not --spec")
+  core.require_runcard(args, SKILLS)
+  if bool(args.handoff) == bool(args.design):
+    raise core.HandoffError("reviewers: exactly one of --handoff and --spec is required")
+  if args.handoff and (args.review or args.round is not None):
+    raise core.HandoffError("reviewers: --review and --round go with --spec, not --handoff")
+  st = core.STORE or core.store(core.git_toplevel(Path.cwd()), args)
+  try:
+    text = brief(args, st)
+  except core.HandoffError as error:
+    message = str(error)
+    raise core.HandoffError(message if message.startswith("reviewers: ") else f"reviewers: {message}") from None
+  print(text)
+  return 0

@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); `review open` taking a loaded repository reviewer for its kinds (U76).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest|triage: the one review loop (spec section 8)."""
 
@@ -467,7 +467,7 @@ def open_review(args) -> int:
   if unknown:  # a repository reviewer: a loaded file whose kinds holds this review's kind (spec section 3.6)
     from superegm import reviewers as repository  # at call time: that module's import chain reaches this one
     try:
-      loaded = repository.load(core.git_toplevel(Path.cwd()), "HEAD")
+      loaded = repository.available(st, core.git_toplevel(Path.cwd()), kind, st.handoff_id)
     except core.HandoffError as error:
       raise core.HandoffError(f"review open: {error}") from None
     for rid in unknown:
@@ -645,6 +645,11 @@ def record_round(args) -> int:
   if args.not_run and external:  # an ingest's record holds findings: a not-run would erase them
     raise core.HandoffError(f"review record: --not-run is refused for an external reviewer ({reviewer})")
   manifest = stored_manifest(st, rid, review, n, reviewer, card)
+  from superegm import reviewers as repository  # at call time: that module's import chain reaches this one
+  try:  # a repository or overridden reviewer's record carries the persona it read; a built-in with no file's has none (U76)
+    persona = repository.persona_of(st, review, rid, n, reviewer)
+  except core.HandoffError as error:
+    raise core.HandoffError(f"review record: {error}") from None
   if args.not_run:
     record = {"findings": [], "not_run": args.not_run, "isolation": None, "model": None, "effort": None,
               "instructions": manifest}
@@ -674,7 +679,7 @@ def record_round(args) -> int:
                          for f in findings if f["id"] not in {k["id"] for k in kept}]
     record = {"findings": findings, "not_run": None, "isolation": args.isolation, "model": args.model,
               "effort": args.effort, "instructions": manifest}
-  rnd["reviewers"][reviewer] = record
+  rnd["reviewers"][reviewer] = {**record, **({"persona": persona} if persona else {})}
   if reviewer == "astra" and args.not_run and not args.not_run.startswith(("not installed", "stopped")):
     review["astra_incomplete"] += 1
   rnd["what_ran"] = derive_what_ran(review, rnd, entry)
