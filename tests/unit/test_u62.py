@@ -188,3 +188,45 @@ def test_merge_orders_on_launch(world, monkeypatch, spawn_fake, latest, mergeabl
   assert ("Bash(git merge:*)" in tools) == (merge is not None)
   first = launches_of(s, "U07")[0]
   assert "merge" not in first and "Bash(git merge:*)" not in first["command"]  # the first launch carried none
+
+
+# ---------------------------------------------------------------- S4: the brief pins the current base
+
+
+def commit_on(world, start, path, text, push):
+  """A commit on `start` writing `path` as `text`, pushed to origin's `push` ref, made in a scratch clone; its sha."""
+  side = world.repo.parent / "side"
+  if not side.exists():
+    git(["clone", "-q", str(world.repo.parent / "origin.git"), str(side)], world.repo.parent)
+  git(["fetch", "-q", "origin", "+refs/*:refs/remotes/all/*"], side)
+  git(["checkout", "-q", "--detach", start], side)
+  put(side / path, text)
+  git(["add", path], side)
+  git(["-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", f"edit {path}"], side)
+  git(["push", "-q", "origin", f"HEAD:{push}"], side)
+  return git(["rev-parse", "HEAD"], side).strip()
+
+
+def test_merge_brief_pins_the_current_base(world, monkeypatch, spawn_fake):
+  # §6.1: base advanced after the batch's launch; the direct with-fix revision fetches and pins it itself
+  s, card, hid, _ = seed(world, units=("U07", "U08"))
+  with_rounds(s, world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  batch_base = first_round(world, s, card)  # the base `launch` fetched for the batch
+  head = commit_on(world, batch_base, "src/worker.py", "the head's worker\n", "refs/pull/71/head")
+  new_base = commit_on(world, batch_base, "src/worker.py", "the landed unit's worker\n", "refs/heads/main")  # U08 landed
+  make_pr(world.gh, 71, head, closes=[(REPO, 7)])
+  state = json.loads(s.path("state").read_text(encoding="utf-8"))
+  state.setdefault("status", {}).setdefault("units", {}).setdefault("U08", {})["landed"] = True
+  s.path("state").write_text(json.dumps(state), encoding="utf-8")
+  write_foreman(s, "U07", [{**REVISE, "head": head, "posted_at": "2099-01-01T00:00:00Z"}])
+  save_pr(s, "U07", 71, head, "CONFLICTING")
+  assert git(["rev-parse", "refs/superegm/base"], world.repo).strip() == batch_base  # no `launch` ran since
+  code, out = world.run("launch-builder", "--unit", "U07", "--round", 2, "--runcard", card)
+  assert code == 0, out
+  entry = launches_of(s, "U07")[-1]
+  prompt = s.path("launches", "U07_r2_prompt.md").read_text(encoding="utf-8")
+  assert entry["merge"] == "with-fix"
+  assert entry["base"] == new_base != batch_base
+  assert f"git merge {new_base}" in prompt and batch_base not in prompt
+  assert "`src/worker.py` (landed: U08)" in prompt  # the fixture's units all hold `src/worker.py`
