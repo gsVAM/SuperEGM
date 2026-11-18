@@ -167,12 +167,11 @@ def test_a_spec_round_records_the_persona_it_read_and_no_other(world):
   got, _ = world.run("reviewers", "--brief", "security", "--spec", str(spec), "--review", rid, "--round", 1, "--runcard", cid, card=None)
   assert got == 0
   commit_file(world, ".superegm/reviewers/security.md", b"---\nname: Security\nkinds: [spec]\n---\nlater persona\n")
-  commit_file(world, ".superegm/reviewers/design.md", b"---\nname: Design\nkinds: [spec]\n---\ncommitted after design was dispatched\n")
   commit_file(world, ".superegm/reviewers/bad.md", b"no frontmatter")
-  assert record(world, rid, 1, "design", [], cid)[0] == 0
+  assert record(world, rid, 1, "zoom-out", [], cid)[0] == 0  # a built-in with no file at HEAD records none
   assert record(world, rid, 1, "security", [], cid)[0] == 0
   reviewers = rjson(world, rid, "round-1.json")["reviewers"]
-  assert reviewers["security"]["persona"] == {"id": "security", "sha": blob_sha(read)} and "persona" not in reviewers["design"]
+  assert reviewers["security"]["persona"] == {"id": "security", "sha": blob_sha(read)} and "persona" not in reviewers["zoom-out"]
 
 
 def test_a_not_run_record_carries_no_persona_and_one_missing_copy_blocks_no_other_reviewer(world):
@@ -222,8 +221,8 @@ def test_astra_is_not_a_reviewer_file(world):
     reviewers.load(world.repo)
 
 
-def test_the_frontmatter_takes_comments_and_block_lists_and_the_limit_is_the_persona(world):
-  """`#` lines and a block list are valid frontmatter; a persona of exactly 8,192 bytes is not refused for its final newline (U76 round 2)."""
+def test_the_frontmatter_takes_comments_and_block_lists_and_the_limit_spares_the_last_newline(world):
+  """`#` lines and a block list are valid frontmatter; a body of exactly 8,192 bytes is not refused for its final newline (U76 round 2)."""
   from superegm import reviewers
   write_reviewer(world.repo, "listed.md", "---\n# who reviews\nname: Listed\nkinds:\n  - spec\n  - head\nmodel: opus\neffort: high\n---\n" + "b" * 8192 + "\n")
   loaded = reviewers.load(world.repo)["listed"]
@@ -299,10 +298,10 @@ def test_an_effort_of_max_is_loaded(world):
   assert reviewers.load(world.repo)["deep"]["effort"] == "max"
 
 
-@pytest.mark.parametrize("body", [" " * 8193, " " * 5000 + "x" + " " * 5000, "x" * 8193 + "\n", "\n" * 8193 + "x"],
-                         ids=["spaces", "padded", "newline-last", "newlines-first"])
+@pytest.mark.parametrize("body", [" " * 8193, " " * 5000 + "x" + " " * 5000, "x" * 8193 + "\n", "\n" * 8193 + "x", "x" + "\n" * 8193, "x" * 8192 + "\n\n"],
+                         ids=["spaces", "padded", "newline-last", "newlines-first", "newlines-after", "two-final-newlines"])
 def test_the_limit_counts_the_body_as_written(world, body):
-  """A body over 8,192 bytes is refused whatever surrounds the persona; only the file's last newlines are not counted (U76 round 3)."""
+  """A body over 8,192 bytes is refused whatever surrounds the persona; only the file's one last newline is not counted (U76 rounds 3, 4)."""
   from superegm import reviewers
   write_reviewer(world.repo, "wide.md", "---\nname: Wide\nkinds: [spec]\n---\n" + body)
   with pytest.raises(superegm.HandoffError, match="wide.md"):
@@ -397,3 +396,44 @@ def test_the_brief_refuses_each_misuse(world, make, expect):
     "unit_with_spec": [*base, "--spec", str(spec), "--unit", "U07", "--runcard", cid]}[make]
   got, out = world.run(*argv, card=None)
   assert got == 1 and expect in out and "Traceback" not in out, out
+
+
+# ---------------------------------------------------------------- round 4
+
+def test_a_spec_round_of_an_overridden_built_in_needs_its_read_and_records_it(world):
+  """A built-in with a file at HEAD is overridden: its completed spec record with no stored read is refused, and with one carries `persona` (U76 round 4)."""
+  from test_review import opened, record, rjson
+  from test_u37 import blob_sha, commit_file
+  data = b"---\nname: Design\nkinds: [spec]\n---\nan overriding design persona\n"
+  commit_file(world, ".superegm/reviewers/design.md", data)
+  spec, cid, rid = opened(world, "spec", reviewers="design,zoom-out")
+  brief = lambda reviewer, n: world.run("reviewers", "--brief", reviewer, "--spec", str(spec), "--review", rid, "--round", n, "--runcard", cid, card=None)
+  got, out = record(world, rid, 1, "design", [], cid)
+  assert got == 1 and "design" in out and "reviewers --brief" in out, out
+  assert record(world, rid, 1, "design", cid=cid, not_run="timed out")[0] == 0  # a not-run read none
+  assert brief("design", 2)[0] == 0
+  assert record(world, rid, 2, "design", [], cid)[0] == 0
+  assert record(world, rid, 2, "zoom-out", [], cid)[0] == 0  # no file at HEAD: a plain built-in
+  reviewers = rjson(world, rid, "round-2.json")["reviewers"]
+  assert reviewers["design"]["persona"] == {"id": "design", "sha": blob_sha(data)} and "persona" not in reviewers["zoom-out"]
+
+
+def test_a_head_round_of_an_overridden_built_in_records_its_frozen_persona(world):
+  """A head round of a built-in the approval froze an override of carries `persona: {id, sha}` of the frozen copy (U76 round 4)."""
+  from test_review import A, head_round, opened, record, rjson
+  from test_u37 import blob_sha
+  data = b"---\nname: Design\nkinds: [head]\n---\nan overriding design persona\n"
+  approved_with(world, {"design.md": data})
+  _, wcid, hrid = opened(world, "head", reviewers="change-review,design")
+  head_round(world, 1, "posted", wcid, "revise")
+  for reviewer in ("change-review", "design"):
+    assert record(world, hrid, 1, reviewer, [], wcid, sha=A)[0] == 0
+  reviewers = rjson(world, hrid, "round-1.json")["reviewers"]
+  assert reviewers["design"]["persona"] == {"id": "design", "sha": blob_sha(data)} and "persona" not in reviewers["change-review"]
+
+
+def test_the_spec_brief_of_a_built_in_with_no_file_says_so(world):
+  """`--brief` of a built-in with no file at HEAD says it is a built-in with no override, not that it is unknown (U76 round 4)."""
+  _, cid, rid, _, brief = spec_briefed(world, {"security.md": b"---\nname: S\nkinds: [spec]\n---\npersona\n"})
+  got, out = brief("design", 1)
+  assert got == 1 and "design is a built-in with no" in out and "unknown reviewer" not in out, out
