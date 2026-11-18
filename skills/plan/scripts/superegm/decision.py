@@ -541,7 +541,7 @@ def rule(args) -> int:
   fid_of = lambda text: text.partition(" — ")[0].strip().split(" ")[0]
   fid = found.subject if found and found.kind in ("upheld", "overruled", "allowed") else fid_of(head)
   for d in decisions:
-    ruled = [r for r in data["rulings"] if r["decision"] == d["id"]]
+    ruled = [r for r in data["rulings"] if r.get("decision") == d["id"]]
     if ruled and (d["point"] != 1 or any(fid_of(r["ruling"]) == fid for r in ruled)):
       dropped(st, args, f"{d['id']} already ruled")
   decision = decisions[0]
@@ -929,7 +929,7 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int, mode=None)
     raise Refusal(f"decision: comment {cid} already recorded (ruling edited after record, ignored)")
   points = KIND_POINTS.get(found.kind, ())
   point2 = {d["id"] for d in foreman["decisions"] if d["point"] == 2}
-  if found.kind == "round" and any(r["decision"] in point2 and r["ruling"].partition(" — ")[0].strip() == "one more round"
+  if found.kind == "round" and any(r.get("decision") in point2 and r["ruling"].partition(" — ")[0].strip() == "one more round"
                                    for r in foreman["rulings"]):
     # a head's `one more round` is once per unit (spec section 13.2): refused before anything is recorded, where the
     # typed path's `review rule` refuses `continue already ruled this cycle`
@@ -1045,5 +1045,5 @@ def file_targets(foreman: dict, path: str, st=None) -> list:
 def fid_ruled(foreman: dict, fid: str, but: str = "") -> bool:
   """Whether a point-1 ruling on `fid` is recorded on any decision but `but` (the one `rule` checks itself)."""
   point1 = {d["id"] for d in foreman["decisions"] if d["point"] == 1} - {but}
-  return any(r["decision"] in point1 and r["ruling"].partition(" — ")[0].strip().split(" ")[0] == fid
+  return any(r.get("decision") in point1 and r["ruling"].partition(" — ")[0].strip().split(" ")[0] == fid
              for r in foreman["rulings"])

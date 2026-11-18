@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the report subcommand (spec section 11): the per-batch wave report, the idle rules
-# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31); its own `ci_wait_minutes` config key, moved from `__init__` (U32); the board's tier column (U33).
+# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31); its own `ci_wait_minutes` config key, moved from `__init__` (U32); the board's tier column (U33); `waiting proceed` and a proceed closing a point-1 decision (U92).
 
 """superegm report: rewrite `wave_<n>_report.md` from the store, the plan and the spec and print its path, the
 board and the idle, pending and loop lines. It opens the card's handoff as `status` does (`core.locate`,
@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 import superegm as core
-from superegm.launch import latest_clean, load_launches
+from superegm.launch import authorizing, latest_clean, load_launches, waiting_proceed
 
 WRITES = frozenset({"report", "runcards"})  # the store kinds this subcommand writes
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {"ci_wait_minutes": 30}, "", None  # its own config key (U32)
@@ -146,7 +146,10 @@ def board_table(handoff, state: dict, card: dict, now: float) -> str:
     # Every predecessor `status_pass` holds readiness on: `preds`, the blockers (the shared-file order too only for an entry without `rounds`), then the plan's open blocking decisions.
     waits += [p for p in handoff.graph.order if p in handoff.graph.preds[uid] and not views[p]["landed"]]
     waits += [f"{uid}/{d}" for d in open_blocking.get(uid) or []]
-    action = next_action(word, latest, launch, decisions, reasons.get(uid))
+    # spec section 4.2: a head made clean by a proceed reads its proceed, never its latest posted round alone
+    auth = authorizing(foreman) or {}
+    action = next_action(word, latest, launch, decisions, reasons.get(uid),
+                         proceeded=bool(auth.get("ruling")), pinned=bool(auth.get("head")))
     # U61: a clean head whose shared-file merge order is not all landed waits for those merges; `waits on` keeps the blockers.
     unmerged = [p for p in handoff.graph.order if p in handoff.graph.merge_after[uid] and not views[p]["landed"]]
     if word == "clean" and action == "await-merge" and unmerged:
@@ -171,19 +174,29 @@ def round_cell(latest) -> str:
   return f"r{latest.get('round')} {latest.get('phase')}" + (f" {latest['outcome']}" if latest.get("outcome") else "")
 
 
-def next_action(word: str, latest, launch, decisions: list, reason) -> str:
+def next_action(word: str, latest, launch, decisions: list, reason, proceeded: bool = False,
+                pinned: bool = True) -> str:
   """The board's `next action` by state: `launch-builder` for `ready`, the decision for `pending`, the idle
-  reason for `idle`, none for `waiting`, `landed` and `stopped`; an `active` or `clean` unit's from the word
-  of a posted round not older than the latest launch, else none while a launch runs, `foreman dispatch` once
-  it is terminal or when there is none."""
+  reason for `idle`, `proceed again` for `waiting proceed` (spec section 4.2), none for `waiting`, `landed` and
+  `stopped`; for a `clean` unit whose authorizing outcome is a proceed (`proceeded`, spec section 4.2: its latest
+  posted round, if any, is not what authorizes it), `await-merge` when the proceed pinned a head and `proceed
+  again` when it did not (`pinned` False: `inbox` offers no merge without a head for `--match-head-commit`, and
+  lists `proceed again` on the pull request's head once the pull request has one; while it has none, the inbox
+  lists nothing for the unit and the owner's proceed waits for the builder's push); otherwise an `active` or `clean` unit's from
+  the word of a posted round not older than the latest launch, else none while a launch runs, `foreman dispatch`
+  once it is terminal or when there is none."""
   if word == "ready":
     return "launch-builder"
   if word == "pending":
     return f"decision {decisions[0]['point']}"
   if word == "idle":
     return reason or "none"
+  if word == "waiting proceed":  # spec section 4.2: the owner's second proceed, naming the later launch
+    return "proceed again"
   if word not in ("active", "clean"):
     return "none"
+  if word == "clean" and proceeded:
+    return "await-merge" if pinned else "proceed again"
   if (latest and latest.get("phase") == "posted" and latest.get("outcome")
       and not (launch and launch["round"] > (latest.get("launch") or 0))):
     return word_action(latest["outcome"], 0)
@@ -260,10 +273,15 @@ def stopped_line(st, uid: str, stopped: dict, views: dict) -> str:
 
 
 def unit_state(uid: str, view: dict, foreman: dict, launches: list, card: dict, config: dict, now: float) -> str:
-  """One of eight: `landed` (a merged view, `pr` set and `ci` null, included: it holds no slot, U55), `stopped`, `pending` (a decision without its ruling), `idle` (named on the
-  card, a `running` latest launch with the `kill_failed` mark (U31), or a head whose CI is pending or
-  absent for `ci_wait_minutes` since the card first saw it),
-  `clean` (the latest round posted clean, no launch recorded after it), else `active`; an unlaunched
+  """One of nine, read in this order: `landed` (a merged view, `pr` set and `ci` null, included: it holds no
+  slot, U55), `stopped`, `pending` (a decision without its ruling), `idle` (named on the card, or a `running`
+  latest launch with the `kill_failed` mark, U31), `waiting proceed` (spec section 4.2: a proceeded head with a
+  later finished launch or a moved head; no slot, U92; read before the CI wait, so a proceeded unit's new head
+  with CI pending reads `waiting proceed`), `idle` (a head whose CI is pending or absent for `ci_wait_minutes`
+  since the card first saw it),
+  `clean` (`launch.latest_clean`: spec section 4.2's authorizing outcome, the newer by launch of the latest round
+  posted clean and the newest proceed, with no launch recorded after it and, when both carry one, the pull
+  request's head equal to its head), else `active`; an unlaunched
   unit not named idle is `ready` (in the saved `status.ready`) or `waiting` (a view without
   `launched` reads as launched)."""
   if view.get("landed") or (view.get("pr") and view.get("ci") is None):  # a merged view (`pr` set, `ci` null) has landed
@@ -278,15 +296,17 @@ def unit_state(uid: str, view: dict, foreman: dict, launches: list, card: dict, 
     return "idle"
   if not view.get("launched", True):
     return "ready" if view.get("ready") else "waiting"
+  if waiting_proceed(foreman, launches, view.get("head")):
+    return "waiting proceed"
   seen = ci_seen_at(uid, view, card)
   if seen is not None and now - seen >= config.get("ci_wait_minutes", 30) * 60:
     return "idle"
-  return "clean" if latest_clean(foreman, launches) else "active"
+  return "clean" if latest_clean(foreman, launches, view.get("head")) else "active"
 
 
 def pending_decisions(foreman: dict) -> list:
   """`decisions[]` minus `rulings[]` (spec section 7); a point-1 decision whose options end ` allowed` (an
-  `owner: <ids>` decision, U25) stays pending until every option's fid has a ruling or a `redesign` rules it whole."""
+  `owner: <ids>` decision, U25) stays pending until every option's fid has a ruling or a `redesign` or a `proceed` rules it whole."""
   rulings = foreman.get("rulings") or []
   ruled = {r.get("decision") for r in rulings}
 
@@ -294,7 +314,9 @@ def pending_decisions(foreman: dict) -> list:
     options = d.get("options") or []
     if d.get("point") == 1 and options and all(o.endswith(" allowed") for o in options):
       fids = {str(r.get("ruling") or "").split(" ")[0] for r in rulings if r.get("decision") == d["id"]}
-      return "redesign" not in fids and any(o.split(" ")[0] not in fids for o in options)
+      if fids & {"redesign", "proceed"}:  # spec section 4.2: a proceed closes the whole decision, as `redesign` does
+        return False
+      return any(o.split(" ")[0] not in fids for o in options)
     return d["id"] not in ruled
 
   return [d for d in foreman.get("decisions") or [] if pending(d)]
@@ -317,6 +339,10 @@ def loop_ended(states: dict, ready_unlaunched: list, free_slots: int) -> tuple:
     return False, "ready, unlaunched: " + ", ".join(ready_unlaunched)
   if ready_unlaunched:
     return True, "no free slot for " + ", ".join(ready_unlaunched)
+  waiting = [uid for uid, state in states.items() if state == "waiting proceed"]
+  if waiting:  # spec section 4.2: holds no slot, so the wave ends; the reason names the units the owner proceeds on
+    return True, ("every launched unit is clean, landed, stopped, pending, idle or waiting proceed"
+                  f" (waiting proceed: {', '.join(waiting)})")
   return True, "every launched unit is clean, landed, stopped, pending or idle"
 
 

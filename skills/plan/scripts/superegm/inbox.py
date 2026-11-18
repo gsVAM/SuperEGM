@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45).
+# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45); the `proceed again` item and the merge on the authorizing outcome (U92).
 
 """superegm inbox [--all] [--json] [--handoff <id>]: one line per item that needs the owner across the
 store's open handoffs, read-only and with no run card; superegm notify --runcard <id>: the owner's
@@ -17,7 +17,7 @@ from pathlib import Path
 import superegm as core
 from superegm import approve_spec, decision, report, review
 from superegm.decision import ruling_form
-from superegm.launch import latest_clean, load_launches
+from superegm.launch import authorizing, latest_clean, load_launches, waiting_proceed
 
 WRITES = frozenset({"state", "driver"})  # notify's `notified` (a driver card's in `driver/`); inbox writes nothing
 CONFIG_DEFAULTS = {  # its own config key and init line (U32)
@@ -28,7 +28,7 @@ INIT_STEP = ("An executable ~/.superegm/notify, written outside every repository
 DOCTOR_CHECKS = None
 SKILLS = frozenset({"wave", "driver"})
 KINDS = ("decision", "cap", "contested", "merge", "stalled", "escalated", "redesign", "test-delta", "owner",
-         "kill_failed", "wave", "driver")
+         "proceed", "kill_failed", "wave", "driver")
 GITHUB = "https://github.com"
 
 
@@ -83,7 +83,11 @@ def review_dirs(hs: core.Store, spec, read: bool = False) -> list:
 
 
 def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, mode: str = "normal") -> list:
-  """The decisions, test-delta, owner-only and merge-ready lines of one unit neither stopped nor landed."""
+  """The decisions, test-delta, owner-only and merge-ready lines of one unit neither stopped nor landed, and its
+  `proceed again: <unit> head <sha>` line while it is waiting proceed (spec section 4.2), keyed on the later launch
+  and the head (the pull request's, else the proceed's pinned one; none listed while neither exists). A merge a proceed authorizes names the owner's `gh pr merge <pr> --match-head-commit <sha>` on the
+  proceed's pinned head and is keyed `<review>/<head>`; a proceed without a pinned head offers no merge, and lists
+  `proceed again` on the pull request's head once it has one."""
   out = []
   number = (state["units"].get(uid) or {}).get("number")
   on_issue = f" on {GITHUB}/{repo}/issues/{number}"
@@ -120,7 +124,9 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
   if entry:
     n, rid = entry["round"], review.head_review_id(hs, uid)
     rnd = (review.load_round(hs, rid, n) if rid else None) or {}
-    book = {"decisions": foreman.get("decisions") or [], "rulings": foreman.get("rulings") or []}
+    # a posted proceed's `rulings[]` entry names no decision: it rules none, so the walk skips it (U92)
+    book = {"decisions": foreman.get("decisions") or [],
+            "rulings": [r for r in foreman.get("rulings") or [] if "decision" in r]}
     settled = {f["id"] for f in (review.findings_of(rnd) if rnd else []) if f.get("disposition") is not None}
     # the outcome keeps naming a fid settled since until the round converges (review.settle_finding)
     open_fid = lambda fid: fid not in settled and not decision.fid_ruled(book, fid)
@@ -135,17 +141,36 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
       out += [item(repo, uid, "owner", form(fid), f"{n}/{fid}")
               for fid in (x.strip() for x in outcome.removeprefix("owner: ").split(","))
               if fid and fid not in deltas and open_fid(fid)]
-  if latest_clean(foreman, load_launches(hs, uid)):
+  launches, head = load_launches(hs, uid), report.unit_view(state, uid).get("head")
+  shown = head or (authorizing(foreman) or {}).get("head")
+  # spec section 4.2: keyed on the later launch and the head it left; with no head at all there is none to
+  # proceed on, so nothing is listed until the pull request has one
+  if shown and waiting_proceed(foreman, launches, head):
+    last = launches[-1]["round"] if launches else 0
+    out.append(item(repo, uid, "proceed", f"proceed again: {uid} head {shown}{on_issue}", f"{last}/{shown}"))
+  auth = authorizing(foreman) or {}
+  # a proceed with no pinned head has nothing for `--match-head-commit` to pin: no merge is offered on it, and
+  # once the pull request has a head the owner is asked to proceed again on it, as the board's action says
+  unpinned = bool(auth.get("ruling")) and not auth.get("head")
+  if unpinned and head and latest_clean(foreman, launches, head):
+    last = launches[-1]["round"] if launches else 0
+    out.append(item(repo, uid, "proceed", f"proceed again: {uid} head {head}{on_issue}", f"{last}/{head}"))
+  if latest_clean(foreman, launches, head) and not unpinned:
     pr = report.unit_view(state, uid)["pr"] or ((state["units"].get(uid) or {}).get("pr") or {}).get("number")
     rounds = foreman.get("rounds") or []
     url = f"{GITHUB}/{repo}/pull/{pr}"
     # U61: the shared-file merge order from `handoff_units.json`, none when the file or the key is absent
     order, merge_after = merge_order(hs)
     after = [m for m in order if m in merge_after.get(uid, []) and not report.unit_view(state, m)["landed"]]
-    action = f"await-merge after {', '.join(after)} · {url}" if after else url
+    if auth.get("ruling"):  # spec section 4.2: a proceed authorizes; the owner merges that head and no other
+      target = f"gh pr merge {pr} --match-head-commit {auth.get('head')} · {url}"
+      base = f"{auth.get('review')}/{auth.get('head')}"  # a head cycle may have no foreman round at all
+    else:
+      target, base = url, str(max(r["round"] for r in rounds))
+    action = f"await-merge after {', '.join(after)} · {target}" if after else target
     # the unlanded `after` list is in the fingerprint: the item is new again to `notify` each time an `after` unit
     # lands, the last one included
-    key = "".join([str(max(r["round"] for r in rounds))] + [f"/after-{m}" for m in after])
+    key = "".join([base] + [f"/after-{m}" for m in after])
     out.append(item(repo, uid, "merge", action, key))
   return out
 

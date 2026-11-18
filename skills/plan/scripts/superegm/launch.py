@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_launch` as the launch module; it marks the ready units up to `max_in_flight` after the protection checks of spec section 11, the owners set and the team bypass included; the builder as a GitHub App (U15); a unit whose `clean` outcome an ingest rewrote is ready again (U21); `interrupted (reboot)` terminal and a unit pending a decision out of the in-flight count (U24); `origin_problems` takes the ref and runs the spec check alone (U43); a merged view holds no slot and is never relaunched (U55).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_launch` as the launch module; it marks the ready units up to `max_in_flight` after the protection checks of spec section 11, the owners set and the team bypass included; the builder as a GitHub App (U15); a unit whose `clean` outcome an ingest rewrote is ready again (U21); `interrupted (reboot)` terminal and a unit pending a decision out of the in-flight count (U24); `origin_problems` takes the ref and runs the spec check alone (U43); a merged view holds no slot and is never relaunched (U55); the authorizing outcome, a proceed's pinned head and `waiting proceed` (U92).
 
 """superegm launch: check what the launch needs, then mark the ready units up to `max_in_flight`."""
 
@@ -97,9 +97,13 @@ def merged(view: dict) -> bool:
 
 
 def in_flight(store, uid, view, idle):
-  """True from the unit's mark (the mark reserves the slot) until its latest round is posted
-  `clean`, it has landed, it carries the stopped label, or this invocation names it idle; a
-  launch recorded after the clean round holds the slot again. A unit whose `clean` an ingest rewrote
+  """True from the unit's mark (the mark reserves the slot) until `latest_clean` holds on its authorizing outcome
+  (spec section 4.2: the newer by launch of the latest round posted `clean` and the newest proceed, the pull
+  request's head equal to its head when both carry one), it has landed, it carries the stopped label, or this
+  invocation names it idle; a launch recorded after that outcome holds the slot again: after a round posted
+  `clean`, until a newer round posts `clean`; after a proceed, while it runs. Once that launch has finished on a
+  proceeded head, or the pull request's head has left the proceeded one, the unit is `waiting proceed` and holds
+  no slot until the owner's second proceed. A unit whose `clean` an ingest rewrote
   (`ready_again`) holds no slot until its relaunch records a launch, nor does a unit with a decision
   `report.pending_decisions` reads as pending, the read `report`'s free-slot count makes (amendment 5: the batch
   goes on while the owner rules)."""
@@ -109,23 +113,68 @@ def in_flight(store, uid, view, idle):
   foreman, launches = core.load_foreman(store, uid), load_launches(store, uid)
   if pending_decisions(foreman):
     return False
-  return not latest_clean(foreman, launches) and not ready_again(foreman, launches)
+  head = view.get("head")
+  if waiting_proceed(foreman, launches, head):  # spec section 4.2: no slot until the owner's second proceed
+    return False
+  return not latest_clean(foreman, launches, head) and not ready_again(foreman, launches)
 
 
 def ready_again(foreman: dict, launches: list) -> bool:
   """The latest round's `clean` outcome an ingest rewrote `revise` (spec section 8, External review) and no
-  launch recorded after it: the unit is ready again, not in flight, until its relaunch records one."""
+  launch recorded after it: the unit is ready again, not in flight, until its relaunch records one. A proceed
+  not older by launch than that round is the authorizing outcome instead (spec section 4.2), so it is not."""
   latest = max(foreman.get("rounds") or [], key=lambda r: r.get("round") or 0, default={})
+  proceeds = foreman.get("proceeds") or []
+  if proceeds and (proceeds[-1].get("launch") or 0) >= (latest.get("launch") or 0):
+    return False
   return (latest.get("phase") == "posted" and latest.get("outcome") == "revise" and latest.get("rewritten_from") == "clean"
           and not (launches and launches[-1]["round"] > (latest.get("launch") or 0)))
 
 
-def latest_clean(foreman: dict, launches: list) -> bool:
-  """The latest round is posted `clean` and no launch was recorded after it: a verdict names its
-  launch (spec section 11's predicate), so a later launch is a builder the round never saw."""
+def authorizing(foreman: dict):
+  """Spec section 4.2's authorizing outcome: the newer, by launch, of the latest round posted `clean` and the
+  newest `foreman.proceeds[]` entry (a tie goes to the proceed, which rules on that round), each with its `launch`
+  and `head`; None with neither. A proceed entry carries `ruling`, a round does not."""
   latest = max(foreman.get("rounds") or [], key=lambda r: r.get("round") or 0, default={})
-  return (latest.get("phase") == "posted" and latest.get("outcome") == "clean"
-          and not (launches and launches[-1]["round"] > (latest.get("launch") or 0)))
+  clean = latest if latest.get("phase") == "posted" and latest.get("outcome") == "clean" else None
+  proceeds = foreman.get("proceeds") or []
+  last = proceeds[-1] if proceeds else None
+  if last is None or (clean is not None and (clean.get("launch") or 0) > (last.get("launch") or 0)):
+    return clean
+  return last
+
+
+def latest_clean(foreman: dict, launches: list, head: str | None = None) -> bool:
+  """The authorizing outcome (spec section 4.2) holds: no launch was recorded after it (a verdict names its
+  launch, spec section 11's predicate, so a later launch is a builder it never saw) and, when `head` (the pull
+  request's current head) is given and the outcome carries a `head`, the two are equal. An outcome or a view
+  without a head holds as before."""
+  auth = authorizing(foreman)
+  if auth is None:
+    return False
+  if launches and launches[-1]["round"] > (auth.get("launch") or 0):
+    return False
+  return not (head and auth.get("head") and head != auth["head"])
+
+
+def waiting_proceed(foreman: dict, launches: list, head: str | None = None) -> bool:
+  """Spec section 4.2's `waiting proceed`: the authorizing outcome is a proceed and either a launch newer than it
+  has finished or the pull request's head (`head`, when given) differs from its pinned head. Only the owner's
+  second proceed, naming that launch, authorizes the merge again."""
+  auth = authorizing(foreman)
+  if auth is None or not auth.get("ruling"):
+    return False
+  latest = launches[-1] if launches else None
+  if latest is not None and latest["round"] > (auth.get("launch") or 0) and finished(latest):
+    return True
+  return bool(head and auth.get("head") and head != auth["head"])
+
+
+def finished(entry: dict) -> bool:
+  """A launch entry that ran out: its status `exited …` or `interrupted …`, or `terminal`'s exit file."""
+  if str(entry.get("status") or "").startswith(("exited", "interrupted")):
+    return True
+  return bool(entry.get("result_file")) and terminal(entry)
 
 
 def load_launches(store, unit):
