@@ -9,6 +9,8 @@ and, from round 2, the unit's posted rounds, recorded rulings and issue comments
 foreman's grammar, numbered for the round the next dispatch takes; exit 0 when there is none."""
 
 import re
+import tempfile
+import time
 from pathlib import Path
 
 import superegm as core
@@ -51,8 +53,10 @@ def run(args):
                             recorded_rulings(data), data.get("decisions") or [],
                             deferred=[row["fid"] for row in data.get("followups") or []], consumed=consumed_comments(data))
   head = core.run_git(["rev-parse", "HEAD"], worktree).strip()
-  found, _ = collect.worktree_checks(worktree, merge_base, head, body, scope, pr_body, rulings, prior["links"], prior,
-                                     config=handoff.config)  # the one function `collect` calls too
+  deadline = time.time() + 60 * handoff.config["foreman"]["run_timeout_minutes"]  # collect's bound on the DoD runs
+  with tempfile.TemporaryDirectory(prefix="superegm-precheck-") as out_dir:  # the runs' outputs: never the store or worktree
+    found, _ = collect.worktree_checks(worktree, merge_base, head, body, scope, pr_body, rulings, prior["links"], prior,
+                                       deadline=deadline, out_dir=Path(out_dir), config=handoff.config)  # `collect`'s own
   for i, (location, claim) in enumerate(found, 1):
     print(f"foreman-{rnd}-{i} | high | {location} | regression: no | {claim}")
   return 1 if found else 0
