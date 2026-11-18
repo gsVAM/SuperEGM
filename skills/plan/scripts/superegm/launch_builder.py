@@ -105,7 +105,7 @@ def prepare(args, card):
   pr = (record.get("pr") or {}).get("number") if rnd >= 2 else None
   merge = merge_mode(handoff.graph.parallel, record.get("pr") if pr else None, foreman_data)  # spec section 6.1
   bin_dir = st.path("launches", f"{unit}_r{rnd}_bin")
-  for value in (sys.executable, HELPER, st.handoff_id, unit, handoff.repo_root):  # write_precheck's quote check, before any write
+  for value in (sys.executable, HELPER, st.handoff_id, unit, handoff.repo_root):  # write_precheck's values, before any write
     if "'" in str(value):
       raise core.HandoffError(f"{value} holds a quote and cannot go in a launched script")
   tools = allowed_tools(builder_config["allowed_tools"], branch, issue_body, launched_gh, merge=merge is not None, bin=bin_dir)
@@ -280,10 +280,7 @@ def write_precheck(store, unit: str, rnd: int, repo_root: Path) -> Path:
   allow-list prefix cannot), with the handoff, the unit and, as SUPEREGM_REPO, the handoff's checkout (whose
   `.superegm/config.json` names the store) baked in; the builder adds `--pr-body <file>`. 0o700."""
   script = store.path("launches", f"{unit}_r{rnd}_bin", "superegm-precheck")
-  for value in (sys.executable, HELPER, store.handoff_id, unit, repo_root):
-    if "'" in str(value):
-      raise core.HandoffError(f"{value} holds a quote and cannot go in a launched script")
-  q = lambda value: f"'{value}'"
+  q = lambda value: f"'{value}'"  # `prepare` refused a quote in any of these before its first write
   core.atomic_write(script, "#!/bin/sh\n# written by superegm launch-builder: the foreman's worktree checks, before every push\n"
                     f"SUPEREGM_REPO={q(repo_root)}; export SUPEREGM_REPO\n"
                     f'exec {q(sys.executable)} {q(HELPER)} precheck --handoff {q(store.handoff_id)} --unit {q(unit)} "$@"\n')

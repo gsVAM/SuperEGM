@@ -7,8 +7,8 @@ test-first order. The merge base is `git merge-base refs/superegm/base HEAD`, th
 and, from round 2, the unit's posted rounds, recorded rulings and issue comments are read from the store as
 `collect` reads them (the issue comments as this launch fetched them), so a finding the owner settled is not
 reported again. The `Run` items run in a separate clone of HEAD under a temporary directory, never in the
-builder's worktree or repository; each run's output is kept in a temporary directory of its own, which a
-`dod-<n>` finding names. One line per finding in the foreman's grammar, numbered for the round the next dispatch
+builder's worktree or repository; a run's output is kept in a temporary directory of its own when a `dod-<n>`
+finding names it, and removed by the unit's next precheck (or at once, when no finding names it). One line per finding in the foreman's grammar, numbered for the round the next dispatch
 takes; exit 0 when there is none."""
 
 import os
@@ -62,16 +62,29 @@ def run(args):
                             deferred=[row["fid"] for row in data.get("followups") or []], consumed=consumed_comments(data))
   head = core.run_git(["rev-parse", "HEAD"], worktree).strip()
   deadline = time.time() + 60 * handoff.config["foreman"]["run_timeout_minutes"]  # collect's bound on the DoD runs
-  # each run's output is kept, outside the store and the worktree, for the builder to read when a finding names it
-  out_dir = Path(tempfile.mkdtemp(prefix="superegm-precheck-out-"))
-  with tempfile.TemporaryDirectory(prefix="superegm-precheck-") as scratch:  # never the store or the builder's worktree
-    tree = Path(scratch) / "tree"
-    # the Run items run in a separate clone of HEAD, as `collect` runs them in its own checkout of the head: its own
-    # refs, config and files, so whatever a run writes (a cache, a tracked file, a ref, a config key) goes with it
-    core.run_git(["clone", "--quiet", "--shared", "--no-checkout", str(worktree), str(tree)], worktree)
-    core.run_git(["checkout", "--quiet", "--detach", head], tree)
-    found, _ = collect.worktree_checks(tree, merge_base, head, body, scope, pr_body, rulings, prior["links"], prior,
-                                       deadline=deadline, out_dir=out_dir, config=handoff.config)  # `collect`'s own
+  # each run's output is kept, outside the store and the worktree, for the builder to read when a finding names it;
+  # the next precheck of this unit removes it, so at most one run's output is left at a time
+  prefix = f"superegm-precheck-{st.handoff_id}-{unit}-out-"
+  for earlier in Path(tempfile.gettempdir()).glob(f"{prefix}*"):
+    shutil.rmtree(earlier, ignore_errors=True)
+  out_dir = Path(tempfile.mkdtemp(prefix=prefix))
+  try:
+    with tempfile.TemporaryDirectory(prefix="superegm-precheck-") as scratch:  # never the store or the worktree
+      tree = Path(scratch) / "tree"
+      # the Run items run in a separate clone of HEAD: its own refs, config and files, so whatever a run writes (a
+      # cache, a tracked file, a ref, a config key) goes with it. The clone keeps no `origin` (a push through it
+      # would write the builder's refs) and holds the builder's refs/superegm/* and remote-tracking refs, the refs
+      # `collect`'s checkout of the head sees
+      core.run_git(["clone", "--quiet", "--shared", "--no-checkout", str(worktree), str(tree)], worktree)
+      core.run_git(["remote", "remove", "origin"], tree)
+      core.run_git(["fetch", "--quiet", "--no-write-fetch-head", str(worktree), "+refs/superegm/*:refs/superegm/*",
+                    "+refs/remotes/origin/*:refs/remotes/origin/*"], tree)
+      core.run_git(["checkout", "--quiet", "--detach", head], tree)
+      found, _ = collect.worktree_checks(tree, merge_base, head, body, scope, pr_body, rulings, prior["links"], prior,
+                                         deadline=deadline, out_dir=out_dir, config=handoff.config)  # `collect`'s own
+  except BaseException:
+    shutil.rmtree(out_dir, ignore_errors=True)
+    raise
   kept = lambda m: str(out_dir / f"{m.group(1)}.out")
   named = [(re.sub(r"^dod/(\d+)\.txt$", kept, location), claim) for location, claim in found]
   if named == found:  # no finding names a run's output: nothing is left behind
