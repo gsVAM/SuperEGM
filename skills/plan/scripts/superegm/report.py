@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the report subcommand (spec section 11): the per-batch wave report, the idle rules
-# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31); its own `ci_wait_minutes` config key, moved from `__init__` (U32); the board's tier column (U33); `waiting proceed` and a proceed closing a point-1 decision (U92).
+# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31); its own `ci_wait_minutes` config key, moved from `__init__` (U32); the board's tier column (U33); `waiting proceed` and a proceed closing a point-1 decision (U92); the `conflict` view and its board action (U62).
 
 """superegm report: rewrite `wave_<n>_report.md` from the store, the plan and the spec and print its path, the
 board and the idle, pending and loop lines. It opens the card's handoff as `status` does (`core.locate`,
@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 import superegm as core
-from superegm.launch import authorizing, latest_clean, load_launches, waiting_proceed
+from superegm.launch import authorizing, conflict_again, latest_clean, load_launches, waiting_proceed
 
 WRITES = frozenset({"report", "runcards"})  # the store kinds this subcommand writes
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {"ci_wait_minutes": 30}, "", None  # its own config key (U32)
@@ -45,7 +45,11 @@ def run(args):
   free = config["max_in_flight"] - sum(states[uid] == "active" for uid in launched)  # a pending unit holds no slot (amendment 5)
   named_idle = {entry["unit"] for entry in card.get("idle") or []}  # holds no slot, launched or not
   ready = [uid for uid in (state.get("status") or {}).get("ready") or [] if uid not in launched and uid not in named_idle]
-  ended, why = loop_ended(states, ready, free)
+  # U62 (spec section 6.1): a clean conflicting unit `launch`'s `again` set takes is pending work, not an end
+  # an idle unit, named or on its CI wait, is passed to `launch --idle`, which marks none of them
+  merge_rounds = [uid for uid in launched if uid not in named_idle and states[uid] != "idle" and conflict_again(
+      {**views[uid], "conflict": conflicting(state, uid)}, foremen[uid], entries[uid], handoff.graph.parallel)]
+  ended, why = loop_ended(states, ready, free, merge_rounds)
   n = wave_number(st, args.runcard, card)
   path = st.path("wave_report", n)
   lines = [f"# Wave {n} report (handoff {st.handoff_id})", f"Run card: {args.runcard}", f"Loop: {'ended' if ended else 'continuing'} ({why})", "",
@@ -92,6 +96,11 @@ def unit_view(state: dict, uid: str) -> dict:
   return ({key: saved.get(key) for key in ("pr", "head", "ci")} | {"landed": bool(saved.get("landed"))}
           | {"launched": bool(((state.get("units") or {}).get(uid) or {}).get("launched")),
              "ready": uid in (status.get("ready") or [])})
+
+
+def conflicting(state: dict, uid: str) -> bool:
+  """U62: the saved `status.units[<id>].conflict`, its pull request read `CONFLICTING` by the last `status` pass."""
+  return bool((((state.get("status") or {}).get("units") or {}).get(uid) or {}).get("conflict"))
 
 
 def wave_number(st, rid: str, card: dict) -> int:
@@ -154,12 +163,30 @@ def board_table(handoff, state: dict, card: dict, now: float) -> str:
     unmerged = [p for p in handoff.graph.order if p in handoff.graph.merge_after[uid] and not views[p]["landed"]]
     if word == "clean" and action == "await-merge" and unmerged:
       action = "await-merge after " + ", ".join(unmerged)
-    cells =[f"{uid} #{(units.get(uid) or {}).get('number')}", word, round_cell(latest),
+    conflict = conflicting(state, uid)
+    again = conflict and conflict_again({**view, "conflict": True}, foreman, entries, handoff.graph.parallel)
+    action = conflict_action(conflict, view, word, action, handoff.graph.parallel, again)
+    cells = [f"{uid} #{(units.get(uid) or {}).get('number')}", word, round_cell(latest),
              f"{launch['round']} {launch['status']}" if launch else "none", view["head"][:7] if view["head"] else "none",
              f"#{view['pr']}" if view["pr"] else "none", ", ".join(waits) or "none",
              action, cost_cell(entries), core.unit_tier(st, uid)]
     lines.append("| " + " | ".join(map(board_cell, cells)) + " |")
   return "\n".join(lines)
+
+
+def conflict_action(conflict: bool, view: dict, word: str, action: str, parallel: bool, again: bool = False) -> str:
+  """U62 (spec section 6.1): a unit whose pull request GitHub reads `CONFLICTING` shows `conflict` beside its
+  action. A clean head awaits no merge: its merge round (an approval with `rounds`) when `launch` would mark it
+  (`again`, `launch.conflict_again`), else once the launch running on it ends, or the owner's hand (an approval
+  without `rounds`, 1.2's rule); any other state, a stopped unit's included, keeps its action, the rule applied
+  once it ends."""
+  if not conflict or view.get("landed") or word == "landed":
+    return action
+  if word == "clean":
+    if not parallel:
+      return "conflict: the owner resolves it"
+    return "conflict: merge round" if again else "conflict: a merge round once the launch ends"
+  return f"conflict; {action}"
 
 
 def board_cell(text: str) -> str:
@@ -330,11 +357,14 @@ def ci_seen_at(uid: str, view: dict, card: dict):
   return entry["seen_at"] if entry and entry["head"] == view["head"] else None
 
 
-def loop_ended(states: dict, ready_unlaunched: list, free_slots: int) -> tuple:
-  """The end condition: no launched unit active, and no ready unit unlaunched while a slot is free."""
+def loop_ended(states: dict, ready_unlaunched: list, free_slots: int, merge_rounds=()) -> tuple:
+  """The end condition: no launched unit active, and no ready unit unlaunched, nor a merge round `launch` would
+  mark (U62), while a slot is free."""
   active = [uid for uid, state in states.items() if state == "active"]
   if active:
     return False, "in flight: " + ", ".join(active)
+  if merge_rounds and free_slots > 0:
+    return False, "merge round: " + ", ".join(merge_rounds)
   if ready_unlaunched and free_slots > 0:
     return False, "ready, unlaunched: " + ", ".join(ready_unlaunched)
   if ready_unlaunched:

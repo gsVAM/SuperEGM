@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45); the `proceed again` item and the merge on the authorizing outcome (U92).
+# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45); the `proceed again` item and the merge on the authorizing outcome (U92); the `conflict` item (U62).
 
 """superegm inbox [--all] [--json] [--handoff <id>]: one line per item that needs the owner across the
 store's open handoffs, read-only and with no run card; superegm notify --runcard <id>: the owner's
@@ -17,7 +17,7 @@ from pathlib import Path
 import superegm as core
 from superegm import approve_spec, decision, report, review
 from superegm.decision import ruling_form
-from superegm.launch import authorizing, latest_clean, load_launches, waiting_proceed
+from superegm.launch import authorizing, conflict_again, finished, latest_clean, load_launches, waiting_proceed
 
 WRITES = frozenset({"state", "driver"})  # notify's `notified` (a driver card's in `driver/`); inbox writes nothing
 CONFIG_DEFAULTS = {  # its own config key and init line (U32)
@@ -27,7 +27,7 @@ INIT_STEP = ("An executable ~/.superegm/notify, written outside every repository
              "since the last notify on its stdin, bounded by config key notify_timeout_seconds; absent means no hook.")
 DOCTOR_CHECKS = None
 SKILLS = frozenset({"wave", "driver"})
-KINDS = ("decision", "cap", "contested", "merge", "stalled", "escalated", "redesign", "test-delta", "owner",
+KINDS = ("decision", "cap", "contested", "conflict", "merge", "stalled", "escalated", "redesign", "test-delta", "owner",
          "proceed", "kill_failed", "wave", "driver")
 GITHUB = "https://github.com"
 
@@ -142,6 +142,7 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
               for fid in (x.strip() for x in outcome.removeprefix("owner: ").split(","))
               if fid and fid not in deltas and open_fid(fid)]
   launches, head = load_launches(hs, uid), report.unit_view(state, uid).get("head")
+  conflict = report.conflicting(state, uid)  # U62: its `conflict` item is `conflict_items`', beside this unit's
   shown = head or (authorizing(foreman) or {}).get("head")
   # spec section 4.2: keyed on the later launch and the head it left; with no head at all there is none to
   # proceed on, so nothing is listed until the pull request has one
@@ -155,7 +156,8 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
   if unpinned and head and latest_clean(foreman, launches, head):
     last = launches[-1]["round"] if launches else 0
     out.append(item(repo, uid, "proceed", f"proceed again: {uid} head {head}{on_issue}", f"{last}/{head}"))
-  if latest_clean(foreman, launches, head) and not unpinned:
+  # U62: no merge is offered while GitHub reads the pull request `CONFLICTING`: it would refuse it
+  if latest_clean(foreman, launches, head) and not unpinned and not conflict:
     pr = report.unit_view(state, uid)["pr"] or ((state["units"].get(uid) or {}).get("pr") or {}).get("number")
     rounds = foreman.get("rounds") or []
     url = f"{GITHUB}/{repo}/pull/{pr}"
@@ -173,6 +175,40 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
     key = "".join([base] + [f"/after-{m}" for m in after])
     out.append(item(repo, uid, "merge", action, key))
   return out
+
+
+def conflict_items(repo: str, state: dict, uid: str, foreman: dict, launches: list, parallel: bool) -> list:
+  """U62 (spec section 6.1): one `conflict` item beside an unlanded unit while its saved view is `conflict`, a
+  stopped unit's included, naming what resolves it: the merge round `launch` marks (`launch.conflict_again`), the
+  owner's hand (a stopped unit, or an approval without `rounds`, 1.2's rule), or the rule applied again once the
+  running launch ends or the owner rules; a revising unit's next fix round carries the merge orders."""
+  view = report.unit_view(state, uid)
+  if not report.conflicting(state, uid) or view["landed"]:
+    return []
+  if foreman.get("stopped"):
+    then = "the unit is stopped: the owner resolves it"
+  elif not parallel:
+    then = "approved under 1.2.0: the owner resolves it"
+  elif conflict_again({**view, "conflict": True}, foreman, launches, parallel):
+    then = "a merge round is marked at the next `launch`"
+  elif ((latest_posted(foreman) or {}).get("outcome") == "revise" and not report.pending_decisions(foreman)
+        and (not launches or finished(launches[-1]))  # an open decision (point 5's accept) may end the fixes
+        and not waiting_proceed(foreman, launches, view["head"])):  # spec section 4.2: no fix round, the owner's proceed
+    then = "the next fix round carries the merge orders"
+  else:
+    then = "the rule is applied again once the launch ends or the owner rules"
+  return [item(repo, uid, "conflict", f"conflict: {uid} pull request {GITHUB}/{repo}/pull/{view['pr']} reads CONFLICTING"
+               f" · {then}", view["head"])]
+
+
+def parallel_of(store: core.Store, hid: str, spec) -> bool:
+  """Whether handoff `hid`'s approval entry carries `rounds` (spec section 6.1, `core.Graph.parallel`): its own
+  latest entry (`core.own_approval`, as `core.frozen_mode` finds it), else its spec's latest entry; False with none."""
+  own = core.own_approval(store, hid)
+  if own is not None:
+    return "rounds" in own
+  entries = core.load_approvals(store, spec) if spec else []
+  return bool(entries) and "rounds" in entries[-1]
 
 
 def merge_order(hs: core.Store) -> tuple:
@@ -347,18 +383,20 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
     seen |= {i["fingerprint"] for i in found}
     cards = wave_cards(hs, hid)
     mode = (cards[-1][1].get("mode") if cards else None) or core.run_mode(hs)  # the card's, else the frozen, else config.mode
-    live = set()
+    live, parallel = set(), parallel_of(store, hid, spec)
     for uid, foreman in foremen.items():
       found += kill_failed_items(hs, repo, uid)  # a stopped unit's launch too: the kill is what is left (U31)
       stopped = foreman.get("stopped")
       if stopped:
         if stopped.get("brief"):
           found.append(item(repo, uid, "redesign", f"/superegm:brainstorming {stopped['brief']}", Path(stopped["brief"]).name))
+        found += conflict_items(repo, state, uid, foreman, load_launches(hs, uid), parallel)  # U62: a stop shows it too
         continue
       if report.unit_view(state, uid)["landed"]:
         continue
       live.add(uid)
       found += unit_items(hs, repo, state, uid, foreman, mode)
+      found += conflict_items(repo, state, uid, foreman, load_launches(hs, uid), parallel)  # U62 (spec section 6.1)
     if units:
       for path in review_dirs(hs, spec, spec in read_specs):
         rev = json.loads(core.read_text(path / "review.json"))
