@@ -1110,7 +1110,7 @@ def rounds_of(st: core.Store, rid: str, review: dict) -> list[dict]:
   for entry in sorted(core.load_foreman(st, review["artifact"])["rounds"], key=lambda e: e["round"]):
     rnd = files.get(entry["round"]) or {"round": entry["round"], "runcard": entry.get("runcard"),
                                         "artifact_sha256": entry.get("head"), "builder_contested": [], "reviewers": {}}
-    rounds.append(rnd | {"what_ran": derive_what_ran(review, rnd, entry)})
+    rounds.append(rnd | {"what_ran": derive_what_ran(review, rnd, entry)} | ({"merge": True} if entry.get("merge") else {}))
   return rounds
 
 
@@ -1160,7 +1160,8 @@ def evaluate(st: core.Store, review: dict, runcard: str) -> Status:
     converged, converged_round = f"by ruling {accept['id']}", review["converged_round"]
   elif clean and not regressions and not moved:
     converged, converged_round = "yes", latest["round"]
-  cap = "stop" in rulings or len(completed) >= cap_of(review) + rulings.count("continue")
+  counted = [r for r in completed if not r.get("merge")]  # a merge round is not counted toward the cap (spec section 6.1)
+  cap = "stop" in rulings or len(counted) >= cap_of(review) + rulings.count("continue")
   cards = stall_cards(st, review, runcard)
   stalled = len(rounds) >= 2 and all(r["what_ran"] != "completed" and r.get("runcard") in cards for r in rounds[-2:])
   sha = next((r["artifact_sha256"] for r in rounds if r["round"] == converged_round), None)
@@ -1231,7 +1232,7 @@ def early_accept_lapsed(review: dict, accept: dict, rounds: list[dict], rulings:
   if accepted is None:
     return False
   completed = [r for r in rounds if r["what_ran"] == "completed"]
-  upto = [r for r in completed if r["round"] <= accepted]
+  upto = [r for r in completed if r["round"] <= accepted and not r.get("merge")]
   if len(upto) >= cap_of(review) + rulings.count("continue"):
     return False
   rnd = next((r for r in completed if r["round"] == accepted), None)
