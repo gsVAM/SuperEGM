@@ -85,14 +85,18 @@ def record_heads(store, card_id: str, views: dict, now: float) -> dict:
 
 
 def unit_view(state: dict, uid: str) -> dict:
-  """The one reader of `status.units[<id>]` (what `status --wait` saves): `pr, head, ci, landed, conflict`, plus
+  """The one reader of `status.units[<id>]` (what `status --wait` saves): `pr, head, ci, landed`, plus
   `launched` (`units[<id>].launched` truthy) and `ready` (`<id>` in the saved `status.ready`)."""
   status = state.get("status") or {}
   saved = (status.get("units") or {}).get(uid) or {}
-  return ({key: saved.get(key) for key in ("pr", "head", "ci")}
-          | {"landed": bool(saved.get("landed")), "conflict": bool(saved.get("conflict"))}
+  return ({key: saved.get(key) for key in ("pr", "head", "ci")} | {"landed": bool(saved.get("landed"))}
           | {"launched": bool(((state.get("units") or {}).get(uid) or {}).get("launched")),
              "ready": uid in (status.get("ready") or [])})
+
+
+def conflicting(state: dict, uid: str) -> bool:
+  """U62: the saved `status.units[<id>].conflict`, its pull request read `CONFLICTING` by the last `status` pass."""
+  return bool((((state.get("status") or {}).get("units") or {}).get(uid) or {}).get("conflict"))
 
 
 def wave_number(st, rid: str, card: dict) -> int:
@@ -155,7 +159,7 @@ def board_table(handoff, state: dict, card: dict, now: float) -> str:
     unmerged = [p for p in handoff.graph.order if p in handoff.graph.merge_after[uid] and not views[p]["landed"]]
     if word == "clean" and action == "await-merge" and unmerged:
       action = "await-merge after " + ", ".join(unmerged)
-    action = conflict_action(view, word, action, handoff.graph.parallel)
+    action = conflict_action(conflicting(state, uid), view, word, action, handoff.graph.parallel)
     cells =[f"{uid} #{(units.get(uid) or {}).get('number')}", word, round_cell(latest),
              f"{launch['round']} {launch['status']}" if launch else "none", view["head"][:7] if view["head"] else "none",
              f"#{view['pr']}" if view["pr"] else "none", ", ".join(waits) or "none",
@@ -164,11 +168,11 @@ def board_table(handoff, state: dict, card: dict, now: float) -> str:
   return "\n".join(lines)
 
 
-def conflict_action(view: dict, word: str, action: str, parallel: bool) -> str:
+def conflict_action(conflict: bool, view: dict, word: str, action: str, parallel: bool) -> str:
   """U62 (spec section 6.1): a unit whose pull request GitHub reads `CONFLICTING` shows `conflict` beside its
   action. A clean head awaits no merge: its merge round (an approval with `rounds`) or the owner's hand (one
   without, 1.2's rule) resolves it; any other state keeps its action, the rule applied once it ends."""
-  if not view.get("conflict") or view.get("landed") or word in ("landed", "stopped"):
+  if not conflict or view.get("landed") or word in ("landed", "stopped"):
     return action
   if word == "clean":
     return "conflict: merge round" if parallel else "conflict: the owner resolves it"

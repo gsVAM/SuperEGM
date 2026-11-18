@@ -142,7 +142,7 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
               for fid in (x.strip() for x in outcome.removeprefix("owner: ").split(","))
               if fid and fid not in deltas and open_fid(fid)]
   launches, head = load_launches(hs, uid), report.unit_view(state, uid).get("head")
-  if report.unit_view(state, uid)["conflict"]:  # U62 (spec section 6.1): beside the unit while its view is `conflict`
+  if report.conflicting(state, uid):  # U62 (spec section 6.1): beside the unit while its view is `conflict`
     pr = report.unit_view(state, uid)["pr"]
     out.append(item(repo, uid, "conflict", f"conflict: {uid} pull request {GITHUB}/{repo}/pull/{pr} reads CONFLICTING", head))
   shown = head or (authorizing(foreman) or {}).get("head")
