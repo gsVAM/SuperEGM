@@ -173,3 +173,11 @@ def test_every_launch_writes_and_allows_the_precheck_script(app, world, monkeypa
   assert CONFIG_DEFAULTS["builder"]["precheck_attempts"] == 3
   assert whitespace_code == 1 and "artifacts_dir /tmp/a b holds whitespace" in whitespace_out
   assert f"'{sys.executable}' '{HELPER}' precheck --handoff '{s.handoff_id}' --unit '{UNIT}' \"$@\"" in script.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("phrase", [
+  "{{precheck}}", "600000", "before every push", "merge round", "`builder.precheck_attempts`",
+  "git reset --hard", "never one older than the pull request's tip", "**Precheck reply <n>:** contested", "**Precheck:**"])
+def test_orders_carry_the_precheck_step(phrase):
+  # precheck, then a self-review against the DoD and Scope paths, before each push, with no subagent
+  assert phrase in Path("skills/wave/references/builder_orders.md").read_text()
