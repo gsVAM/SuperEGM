@@ -308,3 +308,49 @@ def test_board_action_of_a_proceeded_head(latest):
   assert report.next_action("clean", latest, runs, [], None, proceeded=True) == "await-merge"
   if latest:
     assert report.next_action("clean", latest, runs, [], None) != "await-merge"
+
+
+# ---------------------------------------------------------------- round 2 review
+
+
+def proceed_items(s):
+  return [i for i in inbox_items(s, [s.handoff_id]) if i["subject"] == "U01" and i["kind"] == "proceed"]
+
+
+def test_proceed_again_item_is_keyed_on_the_later_launch_and_head(world):
+  # change-review-2-1: the `proceed again` item's fingerprint is the later launch and the head it left
+  s, card, rid = head_world(world)
+  code, out = proceed(world, rid, card, "--owner", "--reason", "accepted risk")
+  assert code == 0, out
+  launches(s, "U01", 1, 2)  # the merge launch after the proceed, terminal
+  head = reading(s, card)[0]["head"]
+  assert [i["fingerprint"] for i in proceed_items(s)] == [f"U01/proceed/2/{head}"]
+  set_head(s, "U01", H2)  # a moved head is a new item to `notify`
+  assert [i["fingerprint"] for i in proceed_items(s)] == [f"U01/proceed/2/{H2}"]
+
+
+def test_loop_ended_names_waiting_proceed():
+  # change-review-2-2, codebase-details-2-1: the end reason names a unit waiting proceed
+  ended, reason = report.loop_ended({"U01": "clean", "U02": "waiting proceed"}, [], 1)
+  assert ended is True
+  assert reason == ("every launched unit is clean, landed, stopped, pending, idle or waiting proceed"
+                    " (waiting proceed: U02)")
+  assert report.loop_ended({"U01": "clean"}, [], 1) == (True, "every launched unit is clean, landed, stopped, pending or idle")
+
+
+def test_head_less_proceed_asks_for_a_proceed_again(world):
+  # codebase-details-2-2: a proceed with no pinned head offers no merge, so the board does not say `await-merge`;
+  # with a pull request head to pin, the board and the inbox both ask for the owner's proceed again on it
+  latest = {"round": 1, "phase": "posted", "launch": 1, "outcome": "revise"}
+  runs = {"round": 1, "status": "exited 0"}
+  assert report.next_action("clean", latest, runs, [], None, proceeded=True, pinned=False) == "proceed again"
+  assert report.next_action("clean", latest, runs, [], None, proceeded=True) == "await-merge"
+  s, card, rid = head_world(world)
+  code, out = proceed(world, rid, card, "--owner", "--reason", "accepted risk")
+  assert code == 0, out
+  f = foreman_of(s, "U01")
+  f["proceeds"][-1]["head"] = None
+  atomic_write(s.path("foreman", "U01"), f)
+  head = reading(s, card)[0]["head"]
+  assert head
+  assert [i["action"].split(" · ")[0] for i in proceed_items(s)] == [f"proceed again: U01 head {head}"]
