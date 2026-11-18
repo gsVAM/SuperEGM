@@ -32,21 +32,26 @@ RULING = ("builder: builder-bot\n### issue #2 comment 13 by owner at 2026-11-02T
           "**Ruling:** foreman-1-2 finding overruled — Scope widened to src/other.py\n")
 
 
-def builder_worktree(world, tmp_path, monkeypatch, commits=GOOD, round_2=False, **kw):
+def builder_worktree(world, tmp_path, monkeypatch, commits=GOOD, round_2=False, ruling="launch", **kw):
   """The builder's worktree on its branch, `refs/superegm/base` at the base as `launch` fetches it, the
-  working directory inside it; on round 2 a posted round whose out-of-Scope finding the owner overruled."""
+  working directory inside it; on round 2 a posted round whose out-of-Scope finding the owner overruled after
+  the round was posted: by an issue comment round 2's launch fetched (`ruling="launch"`), or by the foreman
+  file's recorded `rulings[]` alone (`ruling="recorded"`)."""
   target, base, head, g = pr_repo(world, tmp_path, monkeypatch, commits=commits)
   if round_2:
     kw.update(rounds=[POSTED_R1], launches=TWO_LAUNCHES)
+  if round_2 and ruling == "recorded":
+    kw.update(decisions=[{"id": "q1", "point": 1, "source": "review r round 1"}],
+              rulings=[{"decision": "q1", "ruling": "foreman-1-2 finding overruled — Scope widened to src/other.py",
+                        "by": "owner", "reason": None, "posted": "comment 13", "posted_at": "2026-11-02T13:00:00Z"}])
   st, card, _ = seed(world, head=head, **kw)
   if round_2:
     open_head_review(world, st, card, "0" * 40, {
         "change-review": "",
         "foreman": "foreman-1-1 | high | ci | regression: no | CI not green on this head: ci red (tests)\n"
                    "foreman-1-2 | high | src/other.py | regression: no | changed path outside Scope paths\n"})
-    seen = st.path("review", "U01", "pr70") / "r1" / "comments.md"
-    seen.parent.mkdir(parents=True, exist_ok=True)
-    seen.write_text(RULING, encoding="utf-8")
+    if ruling == "launch":  # posted after round 1: in round 2's launch snapshot, never in round 1's comments.md
+      st.path("launches", "U01_r2_comments.md").write_text(RULING, encoding="utf-8")
   g("fetch", "-q", "--no-write-fetch-head", "origin", "+refs/heads/main:refs/superegm/base",
     f"+refs/pull/70/head:refs/heads/{BRANCH}", cwd=world.repo)
   worktree = tmp_path / "wt"
@@ -181,3 +186,91 @@ def test_every_launch_writes_and_allows_the_precheck_script(app, world, monkeypa
 def test_orders_carry_the_precheck_step(phrase):
   # precheck, then a self-review against the DoD and Scope paths, before each push, with no subagent
   assert phrase in Path("skills/wave/references/builder_orders.md").read_text()
+
+
+# Round 2's review (PR #227): the fixes, each pinned.
+
+@pytest.mark.parametrize("ruling", ["launch", "recorded"])
+def test_precheck_reads_a_ruling_posted_after_the_round(world, tmp_path, monkeypatch, ruling):
+  # an owner's ruling posted after round 1 posted: from round 2's launch snapshot, or from the record alone
+  st, _, _ = builder_worktree(world, tmp_path, monkeypatch, commits=GOOD + (("feat(S1): more", "src/other.py"),),
+                              round_2=True, ruling=ruling)
+  assert not (st.path("review", "U01", "pr70") / "r1" / "comments.md").exists()
+  assert precheck(world, st, tmp_path) == (0, "")
+
+
+def test_precheck_runs_the_items_outside_the_builders_worktree(world, tmp_path, monkeypatch):
+  # a Run item that edits a tracked file and leaves a cache behind changes nothing in the builder's worktree
+  from superegm import collect as collect_mod
+  st, worktree, g = builder_worktree(world, tmp_path, monkeypatch)
+  config = Path(g("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=worktree).strip()) / "config"
+  cwds, real = [], collect_mod.dod_runs
+
+  def fake(items, cwd, env, deadline, out_dir):
+    cwds.append((Path(cwd), (Path(cwd) / "src/hooks.py").is_file()))
+    edit = "echo edit >> src/hooks.py; mkdir -p .cache && touch .cache/x; "
+    return real([(n, edit + f"echo '{paste}'", paste) for n, _, paste in items], cwd, env, deadline, out_dir)
+  monkeypatch.setattr(collect_mod, "dod_runs", fake)
+  before = (snapshot(worktree), g("status", "--porcelain", "--ignored", cwd=worktree), config.stat().st_mtime_ns)
+  code, out = precheck(world, st, tmp_path)
+  after = (snapshot(worktree), g("status", "--porcelain", "--ignored", cwd=worktree), config.stat().st_mtime_ns)
+  assert (code, out) == (0, "")
+  assert after == before
+  assert len(cwds) == 1 and cwds[0][1] and not cwds[0][0].exists() and not cwds[0][0].is_relative_to(worktree)
+  assert str(cwds[0][0]) not in g("worktree", "list", cwd=worktree)
+
+
+def test_precheck_reads_the_store_of_the_checkout_its_script_names(world, tmp_path, monkeypatch):
+  # SUPEREGM_REPO, the handoff's checkout the script bakes in, beats the git common directory's parent
+  st, _, _ = builder_worktree(world, tmp_path, monkeypatch)
+  other = tmp_path / "other"
+  (other / ".superegm").mkdir(parents=True)
+  cfg = json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))
+  cfg["artifacts_dir"] = str(tmp_path / "no-store")
+  (other / ".superegm/config.json").write_text(json.dumps(cfg), encoding="utf-8")
+  monkeypatch.setenv("SUPEREGM_REPO", str(other))
+  code, out = precheck(world, st, tmp_path)
+  assert code == 1 and str(other) in out  # the named checkout is read, not the common directory's parent
+  monkeypatch.setenv("SUPEREGM_REPO", str(world.repo))
+  assert precheck(world, st, tmp_path) == (0, "")
+
+
+def launched(world, monkeypatch, **builder):
+  """test_builders' machine-account launch of round 1, its config's `builder` keys updated by `builder`."""
+  import shutil
+  from superegm import orient
+  monkeypatch.setattr(orient, "GRAPHIFY", "superegm-no-such-tool")
+  monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: {"gh": "/usr/local/bin/gh", "openssl": OPENSSL}.get(cmd))
+  s, card, _, _ = builders_seed(world)
+  path = world.repo / ".superegm/config.json"
+  cfg = json.loads(path.read_text(encoding="utf-8"))
+  cfg["builder"] = dict(cfg.get("builder") or {}, **builder)
+  path.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0
+  return s, world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)
+
+
+def test_the_launch_bakes_the_checkout_and_the_attempts(world, monkeypatch, spawn_fake):
+  # the script names the handoff's checkout; the orders carry the configured attempts; the comments are kept
+  s, (code, out) = launched(world, monkeypatch, precheck_attempts=5)
+  assert code == 0, out
+  script = s.path("launches", f"{UNIT}_r1_bin", "superegm-precheck").read_text(encoding="utf-8")
+  prompt = s.path("launches", f"{UNIT}_r1_prompt.md").read_text(encoding="utf-8")
+  assert f"SUPEREGM_REPO='{world.repo}'" in script
+  assert "at most 5 runs in this launch" in prompt and "3 by default" not in prompt
+  assert s.path("launches", f"{UNIT}_r1_comments.md").read_text(encoding="utf-8").startswith("builder: ")
+
+
+@pytest.mark.parametrize("value", [0, -1, True, "3"])
+def test_a_bad_precheck_attempts_is_refused(world, monkeypatch, spawn_fake, value):
+  _, (code, out) = launched(world, monkeypatch, precheck_attempts=value)
+  assert code == 1 and "builder.precheck_attempts must be a positive integer" in out
+
+
+@pytest.mark.parametrize("phrase, present", [
+  ("git diff refs/superegm/base...HEAD", True), ("git merge-base", False),
+  ("On a merge round alone (`merge: alone`)", True), ("On round 1, before any push", True)])
+def test_the_orders_self_review_merge_and_round_1_wording(phrase, present):
+  text = Path("skills/wave/references/builder_orders.md").read_text()
+  assert (phrase in text) == present
