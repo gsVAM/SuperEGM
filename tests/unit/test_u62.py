@@ -106,6 +106,10 @@ def marked(out):
   ("clean, CONFLICTING, approval without rounds", [], []),
   ("proceeded with no posted round, CONFLICTING", ["U01"], []),
   ("merge round recorded, second proceed, CONFLICTING again", ["U01"], []),
+  ("clean, CONFLICTING, stopped", [], []),
+  ("clean, CONFLICTING, open cap question D2", [], []),
+  ("clean, CONFLICTING, head moved", [], []),
+  ("proceeded during launch 2, it exited on a new head, CONFLICTING", [], []),
 ])
 def test_conflict_relaunches_once(world, monkeypatch, case, marked_first, marked_second):
   # §6.1/§4.2: again takes a conflict unit with no launch since its authorizing outcome's launch
@@ -116,17 +120,25 @@ def test_conflict_relaunches_once(world, monkeypatch, case, marked_first, marked
   code, out = world.run("launch", "--runcard", card)
   assert code == 0 and marked(out) == ["U01"], out  # the unit's first launch
   mergeable = next(word for word in ("CONFLICTING", "MERGEABLE", "UNKNOWN") if word in case)
-  open_pr(world, mergeable)
+  moved = "head moved" in case or "new head" in case  # the pull request's head is not the authorizing outcome's
+  open_pr(world, mergeable, head="b" * 40 if moved else HEAD)
   rounds, proceeds, decisions, runs = [CLEAN], [], [], [(1, "exited 0")]
   if "launch running" in case:
     runs = [(1, "running")]
   if "open decision" in case:
     decisions = [{"id": "D1", "point": 3}]
+  if "open cap question" in case:
+    decisions = [{"id": "D2", "point": 2}]
+  if "during launch 2" in case:  # the owner proceeded on HEAD while launch 2 ran; it pushed a new head and exited
+    proceeds, runs = [proceed_entry(2)], [(1, "exited 0"), (2, "exited 0")]
   if case.startswith("proceeded"):
     rounds, proceeds = [], [proceed_entry(1)]
   if case.startswith("merge round recorded"):  # a first conflict's merge round ran, the owner proceeded on its head again
     proceeds, runs = [proceed_entry(1), proceed_entry(2)], [(1, "exited 0"), (2, "exited 0")]
   write_foreman(s, "U01", rounds, proceeds, decisions)
+  if case.endswith("stopped"):  # the owner's stop, recorded on the foreman file
+    foreman = json.loads(s.path("foreman", "U01").read_text(encoding="utf-8"))
+    put(s.path("foreman", "U01"), json.dumps({**foreman, "stopped": {"reason": "stop the unit"}}))
   write_launches(s, "U01", *runs)
   code, out = world.run("launch", "--runcard", card)
   assert code == 0 and marked(out) == marked_first, out
