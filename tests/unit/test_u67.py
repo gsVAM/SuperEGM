@@ -9,6 +9,7 @@ HEAD under a temporary directory. Fixtures: conftest's `world` and test_foreman'
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -384,3 +385,70 @@ def test_the_launch_snapshot_holds_each_issue_comment_precheck_reads(world, monk
       ("issue", ISSUE, 21, "owner", "**Ruling:** foreman-1-2 finding overruled — wide"),
       ("issue", ISSUE, 22, "ghost", "from a deleted account")]
   assert login == "builder-bot" and read[0]["at"] == "2026-11-02T13:00:00Z"
+
+
+# Round 4's review (PR #227): the fixes, each pinned.
+
+@pytest.fixture(autouse=True)
+def tmpdir_in_tmp_path(tmp_path, monkeypatch):
+  """Every temporary directory precheck makes, a kept output included, under `tmp_path`, never the system's."""
+  import tempfile
+  (tmp_path / "tmp").mkdir()
+  monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "tmp"))
+  return tmp_path / "tmp"
+
+
+def test_precheck_runs_cannot_push_through_origin_and_see_the_builders_refs(world, tmp_path, monkeypatch):
+  # the clone has no `origin` to push to, and holds the builder's refs/superegm/* and remote-tracking refs, as collect's checkout does
+  from superegm import collect as collect_mod
+  st, worktree, g = builder_worktree(world, tmp_path, monkeypatch)
+  g("fetch", "-q", "--no-write-fetch-head", "origin", "+refs/heads/main:refs/remotes/origin/main", cwd=world.repo)
+  base = g("rev-parse", "refs/superegm/base", cwd=worktree)
+  real = collect_mod.dod_runs
+
+  def fake(items, cwd, env, deadline, out_dir):
+    probe = (f'test "$(git rev-parse refs/superegm/base)" = {base} && test "$(git rev-parse origin/main)" = {base} && '
+             "! git push -q origin HEAD:refs/tags/precheck-probe && ")
+    return real([(n, probe + f"echo '{paste}'", paste) for n, _, paste in items], cwd, env, deadline, out_dir)
+  monkeypatch.setattr(collect_mod, "dod_runs", fake)
+  refs = lambda: g("for-each-ref", "--format=%(refname) %(objectname)", cwd=worktree)
+  before = refs()
+  assert precheck(world, st, tmp_path) == (0, "")
+  assert refs() == before and "precheck-probe" not in before
+
+
+def test_precheck_prints_a_path_with_a_newline_on_one_line(world, tmp_path, monkeypatch):
+  # a literal newline in a changed path is escaped: one finding, one line, five fields
+  st, _, _ = builder_worktree(world, tmp_path, monkeypatch, commits=GOOD + (("feat(S1): odd", "src/a\nb.py"),))
+  code, out = precheck(world, st, tmp_path)
+  assert code == 1 and out == 'foreman-1-1 | high | "src/a\\nb.py" | regression: no | changed path outside Scope paths\n', out
+
+
+def test_a_quoted_helper_path_is_refused_before_any_write(world, monkeypatch, spawn_fake):
+  # the launched script's quote check runs once, in prepare, before the worktree, the prompt or the script is written
+  from superegm import launch_builder
+  monkeypatch.setattr(launch_builder, "HELPER", Path("/tmp/it's/superegm.py"))
+  s, (code, out) = launched(world, monkeypatch)
+  assert code == 1 and "holds a quote and cannot go in a launched script" in out, out
+  assert not list(s.path("launches", "x").parent.glob(f"{UNIT}_r1*"))
+  assert f"/{UNIT}/" not in subprocess.run(["git", "-C", str(world.repo), "worktree", "list"], capture_output=True,
+                                           text=True, check=True).stdout
+
+
+def test_precheck_keeps_only_the_latest_failed_runs_output(world, tmp_path, monkeypatch, tmpdir_in_tmp_path):
+  # each run removes the output an earlier run of the unit kept; a run that raises keeps nothing
+  import superegm as core
+  from superegm import collect as collect_mod
+  st, _, _ = builder_worktree(world, tmp_path, monkeypatch)
+  unit = st.path("unit", "U01")
+  unit.write_text(unit.read_text(encoding="utf-8").replace("Run `true`", "Run `echo boom; false`"), encoding="utf-8")
+  first = Path(precheck(world, st, tmp_path)[1].split(" | ")[2])
+  second = Path(precheck(world, st, tmp_path)[1].split(" | ")[2])
+  assert second.is_file() and not first.parent.exists()
+  assert [p.name for p in tmpdir_in_tmp_path.iterdir()] == [second.parent.name]
+
+  def broken(*a, **kw):
+    raise core.HandoffError("broken")
+  monkeypatch.setattr(collect_mod, "worktree_checks", broken)
+  code, out = precheck(world, st, tmp_path)
+  assert code == 1 and "broken" in out and list(tmpdir_in_tmp_path.iterdir()) == []
