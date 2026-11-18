@@ -210,6 +210,24 @@ def test_failed_resume(world, started, monkeypatch, capsys, result, commit, fail
   assert (failed and next_entry["fresh"] == "no result" and open_decisions == []) or not failed
 
 
+def test_stalled_resume_is_no_failed_resume(world, started, monkeypatch):
+  # §6.2 names `exited <code>`; a host-caused stall stays Decision point 3's, spending no relaunch (U31)
+  from superegm import decision, record_launch
+  s, card, _ = started
+  resumable(world, s, card)
+  launch_round(world, card, 2)
+  second = launches_of(s)[-1]
+  assert second["resumed_from"] == "s-1"
+  Path(second["result_file"] + ".exit").write_text("stalled\n", encoding="utf-8")
+  monkeypatch.setattr(record_launch, "own_commit_of", lambda entry: None)
+  code, out = world.run("record-launch", "--unit", UNIT, "--exit", "stalled", "--runcard", card)
+  assert code == 0, out
+  entry = launches_of(s)[-1]
+  assert entry["status"] == "exited (stalled)" and "failed_resume" not in entry
+  assert "failed resume" not in out and "stalled" in out
+  assert decision.no_commit(entry)
+
+
 def test_wave_relaunches_on_failed_resume():
   # skill text: step 3 relaunches at once, fresh; decision point 3 excludes it
   root = Path(__file__).resolve().parents[2] / "skills/wave"
