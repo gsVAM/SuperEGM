@@ -295,10 +295,13 @@ def write_precheck(store, unit: str, rnd: int, repo_root: Path) -> Path:
 
 def escalates(st, unit: str, tier: str, builder_config: dict) -> bool:
   """Whether the launch moves up to the `difficult` tier (spec 1.2.1 section 6.4): never from `difficult` itself or with
-  no `difficult` row; otherwise when the current head cycle holds `builder.escalate_after` counted rounds
-  (`failing_head_rounds`), `0` or a non-integer turning that off."""
+  no `difficult` row; when an earlier launch entry of the unit carries `escalated: true` (it wins over `0`, D1 (a));
+  otherwise when the current head cycle holds `builder.escalate_after` counted rounds (`failing_head_rounds`), `0` or
+  a non-integer turning that off."""
   if tier == "difficult" or not (builder_config.get("tiers") or {}).get("difficult"):
     return False
+  if any(entry.get("escalated") for entry in load_launches(st, unit)):  # upward only: a later launch never drops back
+    return True
   after = builder_config.get("escalate_after", 2)
   return isinstance(after, int) and not isinstance(after, bool) and after > 0 and failing_head_rounds(st, unit) >= after
 
