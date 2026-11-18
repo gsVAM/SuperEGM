@@ -52,3 +52,46 @@ def test_merge_round_and_the_cap(world, cap, rounds, status_exit, outcome):
     record(world, st, rid, n, HEAD, card, {"change-review": "" if result == "clean" else FINDING.format(n=n)})
   code, out = world.run("review", "status", "--review", rid, "--runcard", card)
   assert (code, review_mod.outcome_word(code, [])) == (status_exit, outcome), out
+
+
+# ---------------------------------------------------------------- S3: a proceeded head's merge launch is not reviewed
+
+MERGE_HEAD = "c" * 40
+
+
+def test_proceeded_merge_head_is_not_reviewed(world):
+  # a proceed is final for its head: the merge launch's head waits for a second proceed, not a review
+  from superegm import inbox
+  from test_foreman import PR
+  round1 = {"round": 1, "runcard": "w", "launch": 1, "head": HEAD, "phase": "posted", "dispatch_id": "d1",
+            "outcome": "revise", "posted_at": "2026-11-02T12:00:00Z"}
+  st, card, _ = seed(world, head=HEAD, rounds=[round1])
+  assert world.run("review", "open", "--kind", "head", "--artifact", UNIT, "--reviewers", "change-review", "--runcard", card)[0] == 0
+  rid = head_rid(st)
+  record(world, st, rid, 1, HEAD, card, {"change-review": FINDING.format(n=1)})
+  state = json.loads(st.path("state").read_text(encoding="utf-8"))
+  state["status"] = {"units": {UNIT: {"pr": PR, "head": HEAD, "ci": "green", "landed": False}}, "ready": [], "landed": []}
+  atomic_write(st.path("state"), state)
+  code, out = world.run("review", "rule", "--review", rid, "--ruling", "proceed", "--owner", "--reason", "accepted risk",
+                        "--runcard", card)
+  assert code == 0, out
+  # the conflict: the unit's merge launch 2 ran and moved the head
+  atomic_write(st.path("launches", UNIT), {"launches": [{"round": 1, "status": "exited 0"},
+                                                        {"round": 2, "status": "exited 0", "merge": "alone"}]})
+  world.gh.prs[PR]["headRefOid"] = MERGE_HEAD
+  world.gh.check_runs[MERGE_HEAD] = [{"name": "tests", "status": "completed", "conclusion": "success"}]
+  world.gh.combined[MERGE_HEAD] = {"state": "success", "statuses": []}
+  state["status"]["units"][UNIT]["head"] = MERGE_HEAD
+  atomic_write(st.path("state"), state)
+  code, out = world.run("foreman", "dispatch", "--unit", UNIT, "--runcard", card)
+  assert (code, out) == (1, f"dispatch refused: review {rid} proceeded\n")
+  foreman = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))
+  items = [inbox.line_of(i) for i in inbox.inbox_items(st, [st.handoff_id]) if i["subject"] == UNIT]
+  assert any(f"proceed again: {UNIT} head {MERGE_HEAD}" in line for line in items), items
+  assert not any("gh pr merge" in line for line in items), items
+  # the second proceed names launch 2: the merge is offered on the merge head
+  code, out = world.run("review", "rule", "--review", rid, "--ruling", "proceed", "--owner", "--reason", "merge round fine",
+                        "--runcard", card)
+  assert code == 0, out
+  items = [inbox.line_of(i) for i in inbox.inbox_items(st, [st.handoff_id]) if i["subject"] == UNIT]
+  assert any(f"gh pr merge {PR} --match-head-commit {MERGE_HEAD}" in line for line in items), items
