@@ -1,7 +1,8 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the builder transcript reader
 # `trace_directory` and `assert_child_probe` moved from tests/integration/test_claude.py (Copyright 2026 Google LLC,
-# Apache-2.0); modified by SuperEGM (gsVAM), 2026: `trace_directory` takes the profile directory first.
+# Apache-2.0); modified by SuperEGM (gsVAM), 2026: `trace_directory` takes the profile directory first; a resumed
+# launch's calls exclude the resumed session's tool-use ids (U63).
 
 """The builder's session transcript under its profile (U27): the platform's default subagents a launch spawned
 through the `Agent` tool, read at the exit onto the launch entry as `subagent_calls`; the transcript directory and
@@ -148,7 +149,19 @@ def subagent_calls(profile_dir: Path, session_id: str) -> dict:
 
 def launch_subagent_calls(profile_dir, entry: dict) -> dict:
   """`subagent_calls` of the launch entry's `session_id` under `profile_dir` (`~` expanded): the one reader of a
-  launch's calls. An entry with no `session_id`, or no transcript: `{"count": 0, "calls": []}`."""
+  launch's calls. An entry with no `session_id`, or no transcript: `{"count": 0, "calls": []}`. A resumed launch
+  (`resumed_from`, U63) forks a transcript that repeats the earlier history: its calls whose tool-use id is in the
+  resumed session's transcript are not its own and are dropped, whatever its status. The count is exact; a kept
+  call's `model` and `duration_s` may not be: children are paired before the drop, so a repeated call unlinked to
+  any child (its child lies under the resumed session) can take a leftover child of the launch's own unlinked call."""
   if not entry.get("session_id"):
     return {"count": 0, "calls": []}
-  return subagent_calls(Path(profile_dir).expanduser(), entry["session_id"])
+  profile = Path(profile_dir).expanduser()
+  found = subagent_calls(profile, entry["session_id"])
+  earlier = entry.get("resumed_from")
+  if not earlier or not found["calls"]:
+    return found
+  seen = {tid for path in profile.glob(f"projects/*/{earlier}.jsonl") for tid, _, _ in agent_calls(events(path))}
+  own = sorted(profile.glob(f"projects/*/{entry['session_id']}.jsonl"))[0]
+  calls = [call for (tid, _, _), call in zip(agent_calls(events(own)), found["calls"]) if tid is None or tid not in seen]
+  return {"count": len(calls), "calls": calls}

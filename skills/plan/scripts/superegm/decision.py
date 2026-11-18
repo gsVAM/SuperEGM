@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3/5
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
-# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96).
+# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63).
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
@@ -419,8 +419,9 @@ def open_decision(args) -> int:
 
 def no_commit(entry) -> bool:
   """U31: a launch with no commit of its own: an `exited …` or `exited (stalled)` entry whose `last_commit_at` is
-  absent or None (an `interrupted` or `running` entry, or none, is not)."""
-  return bool(entry) and str(entry.get("status") or "").startswith("exited") and not entry.get("last_commit_at")
+  absent or None (an `interrupted` or `running` entry, or none, is not; nor a failed resume, relaunched fresh, U63)."""
+  return (bool(entry) and str(entry.get("status") or "").startswith("exited") and not entry.get("last_commit_at")
+          and not entry.get("failed_resume"))
 
 
 def launch_of(launches: list, source):
