@@ -68,3 +68,25 @@ def test_precheck_prints_each_worktree_finding(world, tmp_path, monkeypatch, cas
   else:
     assert code == 1 and len(lines) == 1 and claim_part in lines[0], out
     assert re.fullmatch(r"foreman-1-\d+ \| (high|medium|low) \| .+ \| regression: no \| .+", lines[0])
+
+
+def test_collect_and_precheck_share_the_worktree_checks(world, tmp_path, monkeypatch):
+  # one worktree, no rulings: the shared function yields the same lines to both callers
+  from superegm import collect as collect_mod
+  calls, shared = [], collect_mod.worktree_checks  # each caller goes through the one function
+  monkeypatch.setattr(collect_mod, "worktree_checks", lambda *a, **kw: calls.append(a) or shared(*a, **kw))
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  st, _, _ = builder_worktree(world, tmp_path, monkeypatch, pr_body="U01\n\nCloses #2\n")
+  code, out = precheck(world, st, tmp_path, "U01\n\nCloses #2\n")
+  precheck_lines = out.splitlines()
+  monkeypatch.chdir(world.repo)
+  card = world.open_card("wave", str(world.spec.resolve()))
+  code, out = world.run("foreman", "dispatch", "--unit", "U01", "--runcard", card)
+  assert code == 0, out
+  did, child = out.split()
+  assert world.run("prepare", "--unit", "U01", "--dispatch", did, "--runcard", child)[0] == 0
+  code, out = world.run("collect", "--unit", "U01", "--dispatch", did, "--runcard", child)
+  assert code == 0, out
+  collect_lines = (st.path("review", "U01", "pr70") / "r1" / "foreman.findings").read_text(encoding="utf-8").splitlines()
+  assert len(calls) == 2
+  assert collect_lines == precheck_lines and "Run item 2: no fenced output" in " ".join(precheck_lines)
