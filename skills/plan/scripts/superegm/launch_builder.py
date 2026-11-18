@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING`, its freshly pinned base and its `git merge-tree` brief (U62); a fix round resuming the previous launch's session, `resumed_from` or `fresh` and `profile_dir` on the entry, and the stale-paths line (U63).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING`, its freshly pinned base and its `git merge-tree` brief (U62); a fix round resuming the previous launch's session, `resumed_from` or `fresh` and `profile_dir` on the entry, and the stale-paths line (U63); the `superegm-precheck` script on every launch, its allow rules and `{{precheck}}`, the whitespace refusal on every launch, `builder.precheck_attempts` and the launch's issue-comment snapshot (U67).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch, started
 detached and recorded `running`."""
@@ -36,6 +36,7 @@ CONFIG_DEFAULTS = {  # its own config key (U32)
                 "mcp": {},  # mcpServers form, written to launches/<unit>_r<n>_mcp.json (U27)
                 "max_subagent_calls": 12,  # the orders' budget when allowed_tools carries Agent (U27)
                 "stall_minutes": 30,  # a running launch with no newer commit of its own this long is stalled (U31)
+                "precheck_attempts": 3,  # the orders' `superegm-precheck` runs per launch (U67)
                 # the model and effort per tier; doable is `model` and `effort` above (U33)
                 "tiers": {"difficult": {"model": "claude-opus-5-5", "effort": "high"},
                           "easy": {"model": "claude-sonnet-5-5", "effort": "medium"}},
@@ -87,11 +88,15 @@ def prepare(args, card):
     if "'" in str(value):
       raise core.HandoffError(f"{value} holds a quote and cannot go on the command line")
   gh, app = tool("gh"), builder_config["app"]
-  if app:  # the App path: the scripts bake openssl and the key variable; the bin directory reaches the unquotable allow-list
+  # every launch's bin directory reaches the unquotable allow-list (`superegm-precheck`, U67; the App path's `gh` shim)
+  if re.search(r"\s", config["artifacts_dir"]):
+    raise core.HandoffError(f"artifacts_dir {config['artifacts_dir']} holds whitespace")
+  attempts = builder_config.get("precheck_attempts", 3)  # the orders' bound on the precheck runs per launch (U67)
+  if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 1:
+    raise core.HandoffError(f"builder.precheck_attempts must be a positive integer, not {attempts!r}")
+  if app:  # the App path: the scripts bake openssl and the key variable
     openssl = tool("openssl")
     key_path(app["private_key_env"])
-    if re.search(r"\s", config["artifacts_dir"]):
-      raise core.HandoffError(f"artifacts_dir {config['artifacts_dir']} holds whitespace")
   record = state["units"][unit]
   branch, number = handoff.branch(unit), record["number"]
   issue_body = filed_body(state, unit)
@@ -99,7 +104,11 @@ def prepare(args, card):
   foreman_data = core.load_foreman(st, unit)
   pr = (record.get("pr") or {}).get("number") if rnd >= 2 else None
   merge = merge_mode(handoff.graph.parallel, record.get("pr") if pr else None, foreman_data)  # spec section 6.1
-  tools = allowed_tools(builder_config["allowed_tools"], branch, issue_body, launched_gh, merge=merge is not None)
+  bin_dir = st.path("launches", f"{unit}_r{rnd}_bin")
+  for value in (sys.executable, HELPER, st.handoff_id, unit, handoff.repo_root):  # write_precheck's values, before any write
+    if "'" in str(value):
+      raise core.HandoffError(f"{value} holds a quote and cannot go in a launched script")
+  tools = allowed_tools(builder_config["allowed_tools"], branch, issue_body, launched_gh, merge=merge is not None, bin=bin_dir)
   identity = (card.get("builder") or [None])[-1]
   if not identity and app:  # a re-typed wave relaunching while launch is held off: every reader derives the App login (spec section 11)
     identity = {"login": builder, "email": builder_email(builder)}  # `builder` is `app_login(config)`, `<slug>[bot]`, on this path
@@ -137,7 +146,8 @@ def prepare(args, card):
   reviews = core.gh_pages(f"repos/{repo}/pulls/{pr}/reviews") if pr else []
   audit = AUDIT_LINE.format(owner=record["launched"].get("by", "unknown"),  # a pre-upgrade mark records no login
                             runcard=args.runcard, unit=unit, handoff=st.handoff_id)
-  text = prompt_text(number, unit, issue_body, orders_text(tools, launched_gh, builder_config["max_subagent_calls"], merge=merge is not None), orient_text, comments, reviews, pr, builder, audit, pr_block,
+  text = prompt_text(number, unit, issue_body, orders_text(tools, launched_gh, builder_config["max_subagent_calls"], str(bin_dir / "superegm-precheck"),
+                                                           merge=merge is not None, attempts=attempts), orient_text, comments, reviews, pr, builder, audit, pr_block,
                      spec_range=range_text, owners=config.get("owners") or [], foreman=foreman_data,
                      amendments=amendments_for(st, unit, issue_body))
   if merge:
@@ -154,6 +164,15 @@ def prepare(args, card):
             "shim) are stale.\n") + text
   prompt = st.path("launches", f"{unit}_r{rnd}_prompt.md")
   core.atomic_write(prompt, text)
+  write_precheck(st, unit, rnd, handoff.repo_root)  # every launch, the machine-account path included (U67)
+  # the issue comments this launch fetched, kept for its precheck: a ruling posted after the last round is posted
+  # reaches no round's `comments.md` until the next prepare, yet the prompt carries it (U67)
+  from superegm.prepare import write_comments  # prepare imports this module
+  # each header field non-empty, as comments.md's header reads it (`HEADER_RE`): an empty one would fold the comment
+  # into the one before it; a deleted account is GitHub's `ghost`, a missing date `-`
+  fetched = [{**c, "created_at": c.get("created_at") or "-",
+              "user": {"login": (c.get("user") or {}).get("login") or "ghost"}} for c in comments]
+  write_comments(st.path("launches", f"{unit}_r{rnd}_comments.md"), (number, fetched), (pr or 0, []), None, builder)
   if app:
     write_bin(st, unit, rnd, config, openssl, gh)
   managed = managed_plugins(Path(config["builder"]["profile_dir"]).expanduser() / "plugins")
@@ -203,8 +222,9 @@ SUBAGENTS_RE = re.compile(r"(?:\n<!-- subagents(?: Agent)?: [^\n]* -->)+\n")  # 
 MERGE_RE = re.compile(r"\n<!-- merge: ([^\n]*) -->\n")  # the merge orders' line (spec section 6.1)
 
 
-def orders_text(tools: list, gh: str, cap: int, merge: bool = False) -> str:
-  """`references/builder_orders.md` as one launch reads it: `{{gh}}` the launched `gh`, `{{skills}}` the skills
+def orders_text(tools: list, gh: str, cap: int, precheck: str = "", merge: bool = False, attempts: int = 3) -> str:
+  """`references/builder_orders.md` as one launch reads it: `{{gh}}` the launched `gh`, `{{precheck}}` the launch's
+  `superegm-precheck` script and `{{attempts}}` its `builder.precheck_attempts` (U67), `{{skills}}` the skills
   the allow-list names, `none` when it names none, and `{{subagents}}` the sentence of the `<!-- subagents Agent: -->`
   line, `{{cap}}` filled, when the list carries `Agent`, else that of the `<!-- subagents: -->` line; both lines removed.
   The `<!-- merge: -->` line becomes a `## The merge orders` section on a launch carrying merge orders (`merge`,
@@ -215,7 +235,8 @@ def orders_text(tools: list, gh: str, cap: int, merge: bool = False) -> str:
   line = next(l for l in text.splitlines() if l.startswith(marker))
   sentence = line[len(marker):].removesuffix(" -->").replace("{{cap}}", str(cap))
   text = SUBAGENTS_RE.sub("", text, count=1).replace("{{subagents}}", sentence)
-  return text.replace("{{gh}}", gh).replace("{{skills}}", ", ".join(skill_names(tools)) or "none")
+  text = text.replace("{{attempts}}", str(attempts))
+  return text.replace("{{gh}}", gh).replace("{{precheck}}", precheck).replace("{{skills}}", ", ".join(skill_names(tools)) or "none")
 
 
 def start_detached(command: list, log: Path, env: dict) -> int:
@@ -251,6 +272,20 @@ def write_bin(store, unit: str, rnd: int, config: dict, openssl: str, gh: str) -
   helper.chmod(0o700)
   shim.chmod(0o700)
   return shim
+
+
+def write_precheck(store, unit: str, rnd: int, repo_root: Path) -> Path:
+  """`launches/<unit>_r<n>_bin/superegm-precheck` (spec 1.2.1 section 6.3), written on every launch: `superegm
+  precheck` through this helper's own python3 and plugin root, both quoted (the helper's path may hold whitespace an
+  allow-list prefix cannot), with the handoff, the unit and, as SUPEREGM_REPO, the handoff's checkout (whose
+  `.superegm/config.json` names the store) baked in; the builder adds `--pr-body <file>`. 0o700."""
+  script = store.path("launches", f"{unit}_r{rnd}_bin", "superegm-precheck")
+  q = lambda value: f"'{value}'"  # `prepare` refused a quote in any of these before its first write
+  core.atomic_write(script, "#!/bin/sh\n# written by superegm launch-builder: the foreman's worktree checks, before every push\n"
+                    f"SUPEREGM_REPO={q(repo_root)}; export SUPEREGM_REPO\n"
+                    f'exec {q(sys.executable)} {q(HELPER)} precheck --handoff {q(store.handoff_id)} --unit {q(unit)} "$@"\n')
+  script.chmod(0o700)
+  return script
 
 
 def refusal(store, state, config, unit, rnd, builder):
@@ -422,12 +457,14 @@ def pr_block_text(repo_root, ref, path):
   return result.stdout.decode("utf-8")
 
 
-def allowed_tools(configured, branch, body_text, gh, merge=False):
+def allowed_tools(configured, branch, body_text, gh, merge=False, bin=None):
   """The configured allow-list with its `gh` prefixes rewritten to `gh`'s absolute path (a bare `gh …`
   is refused, so no PATH order is assumed), plus a push prefix for the unit's own branch and
   `Bash(<first word>:*)` for the first word of every `&&`/`;` segment of every command the body runs (U25's D1 (a));
   a bare `Skill` and unrestricted Bash are refused; `Agent` passes, the owner's opt-in (amendment 15, U27).
-  `merge`: the launch carries merge orders (spec section 6.1), and on it alone `Bash(git merge:*)` is admitted."""
+  `merge`: the launch carries merge orders (spec section 6.1), and on it alone `Bash(git merge:*)` is admitted.
+  `bin`: the launch's bin directory; given, `Bash(<bin>/superegm-precheck:*)` and `Bash(git reset --hard:*)`, the
+  reset to the best checkpoint, are admitted (spec 1.2.1 section 6.3)."""
   for entry in ("Skill", "Bash", "Bash(*)"):
     if entry in configured:
       raise core.HandoffError(f"allowed_tools carries {entry}: a builder invokes no skill bare, never runs unrestricted Bash")
@@ -438,6 +475,8 @@ def allowed_tools(configured, branch, body_text, gh, merge=False):
         tools.append(f"Bash({first}:*)")
   if merge and "Bash(git merge:*)" not in tools:
     tools.append("Bash(git merge:*)")
+  if bin is not None:
+    tools += [rule for rule in (f"Bash({bin}/superegm-precheck:*)", "Bash(git reset --hard:*)") if rule not in tools]
   return tools
 
 

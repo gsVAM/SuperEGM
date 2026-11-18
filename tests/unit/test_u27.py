@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U27
+# Added by SuperEGM (gsVAM), 2026: U27; the orders' `{{precheck}}` row and the fourth `orders_text` argument (U67)
 
 """U27 (spec section 11.1): the builder's plugins and MCP servers passed per launch, the amendment-7
 profile refusals, the prose, and the `Agent` rule with the subagent calls read from the transcript."""
@@ -90,7 +90,7 @@ def test_profile_problem_refuses_the_amendment_7_layouts(tmp_path, monkeypatch, 
 
 
 PROSE = [("skills/wave/references/builder_orders.md", n) for n in ("Your skills, named by your allow-list: {{skills}}.", "invokes no skill its allow-list does not name",
-          "refresh the PR body (`{{gh}} pr edit <n> --body-file <file>`) before every push")] + [
+          "refresh the PR body (`{{gh}} pr edit <n> --body-file <file>`) before every push", "{{precheck}}")] + [
          ("skills/using-superegm/references/claude-code-tools.md", n) for n in ("`Skill(<name>)` and `Skill(<name> *)`", "`mcp__<server>__<tool>` or `mcp__<server>__*`",
           "`--plugin-dir <dir>` loads a plugin for the session", "`--mcp-config <file> --strict-mcp-config` loads that file's servers")] + [
          ("docs/getting_started.md", n) for n in ('"disableClaudeAiConnectors": true', "no `skills/` or `commands/` directory", "`builder.plugins`", "`builder.mcp`")]
@@ -237,7 +237,7 @@ def test_launch_builder_refuses_a_quoted_plugin_dir_before_any_write(world, monk
   (["Read", "Agent"], ["at most 12 calls in this launch: a budget, not a gate"], ["You have no subagents", "{{"])])
 def test_the_agent_rule_and_the_delegation_paragraph(tools, present, absent):
   from superegm.launch_builder import orders_text
-  text = orders_text(tools, "/usr/local/bin/gh", 12)
+  text = orders_text(tools, "/usr/local/bin/gh", 12, "/bin/U07_r1_bin/superegm-precheck")
   assert all(n in text for n in present) and not any(n in text for n in absent), text
 
 
