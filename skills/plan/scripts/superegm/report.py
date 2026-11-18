@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 import superegm as core
-from superegm.launch import latest_clean, load_launches, waiting_proceed
+from superegm.launch import authorizing, latest_clean, load_launches, waiting_proceed
 
 WRITES = frozenset({"report", "runcards"})  # the store kinds this subcommand writes
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {"ci_wait_minutes": 30}, "", None  # its own config key (U32)
@@ -146,7 +146,9 @@ def board_table(handoff, state: dict, card: dict, now: float) -> str:
     # Every predecessor `status_pass` holds readiness on: `preds`, the blockers (the shared-file order too only for an entry without `rounds`), then the plan's open blocking decisions.
     waits += [p for p in handoff.graph.order if p in handoff.graph.preds[uid] and not views[p]["landed"]]
     waits += [f"{uid}/{d}" for d in open_blocking.get(uid) or []]
-    action = next_action(word, latest, launch, decisions, reasons.get(uid))
+    # spec section 4.2: a head made clean by a proceed reads its proceed, never its latest posted round alone
+    action = next_action(word, latest, launch, decisions, reasons.get(uid),
+                         proceeded=bool((authorizing(foreman) or {}).get("ruling")))
     # U61: a clean head whose shared-file merge order is not all landed waits for those merges; `waits on` keeps the blockers.
     unmerged = [p for p in handoff.graph.order if p in handoff.graph.merge_after[uid] and not views[p]["landed"]]
     if word == "clean" and action == "await-merge" and unmerged:
@@ -171,11 +173,13 @@ def round_cell(latest) -> str:
   return f"r{latest.get('round')} {latest.get('phase')}" + (f" {latest['outcome']}" if latest.get("outcome") else "")
 
 
-def next_action(word: str, latest, launch, decisions: list, reason) -> str:
+def next_action(word: str, latest, launch, decisions: list, reason, proceeded: bool = False) -> str:
   """The board's `next action` by state: `launch-builder` for `ready`, the decision for `pending`, the idle
-  reason for `idle`, none for `waiting`, `landed` and `stopped`; an `active` or `clean` unit's from the word
-  of a posted round not older than the latest launch, else none while a launch runs, `foreman dispatch` once
-  it is terminal or when there is none."""
+  reason for `idle`, `proceed again` for `waiting proceed` (spec section 4.2), none for `waiting`, `landed` and
+  `stopped`; `await-merge` for a `clean` unit whose authorizing outcome is a proceed (`proceeded`, spec section
+  4.2: its latest posted round, if any, is not what authorizes it); otherwise an `active` or `clean` unit's from
+  the word of a posted round not older than the latest launch, else none while a launch runs, `foreman dispatch`
+  once it is terminal or when there is none."""
   if word == "ready":
     return "launch-builder"
   if word == "pending":
@@ -186,6 +190,8 @@ def next_action(word: str, latest, launch, decisions: list, reason) -> str:
     return "proceed again"
   if word not in ("active", "clean"):
     return "none"
+  if word == "clean" and proceeded:
+    return "await-merge"
   if (latest and latest.get("phase") == "posted" and latest.get("outcome")
       and not (launch and launch["round"] > (latest.get("launch") or 0))):
     return word_action(latest["outcome"], 0)
@@ -266,7 +272,9 @@ def unit_state(uid: str, view: dict, foreman: dict, launches: list, card: dict, 
   head; no slot, U92), `landed` (a merged view, `pr` set and `ci` null, included: it holds no slot, U55), `stopped`, `pending` (a decision without its ruling), `idle` (named on the
   card, a `running` latest launch with the `kill_failed` mark (U31), or a head whose CI is pending or
   absent for `ci_wait_minutes` since the card first saw it),
-  `clean` (the latest round posted clean, no launch recorded after it), else `active`; an unlaunched
+  `clean` (`launch.latest_clean`: spec section 4.2's authorizing outcome, the newer by launch of the latest round
+  posted clean and the newest proceed, with no launch recorded after it and, when both carry one, the pull
+  request's head equal to its head), else `active`; an unlaunched
   unit not named idle is `ready` (in the saved `status.ready`) or `waiting` (a view without
   `launched` reads as launched)."""
   if view.get("landed") or (view.get("pr") and view.get("ci") is None):  # a merged view (`pr` set, `ci` null) has landed

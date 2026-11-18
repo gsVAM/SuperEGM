@@ -83,7 +83,10 @@ def review_dirs(hs: core.Store, spec, read: bool = False) -> list:
 
 
 def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, mode: str = "normal") -> list:
-  """The decisions, test-delta, owner-only and merge-ready lines of one unit neither stopped nor landed."""
+  """The decisions, test-delta, owner-only and merge-ready lines of one unit neither stopped nor landed, and its
+  `proceed again: <unit> head <sha>` line while it is waiting proceed (spec section 4.2), keyed on the later launch
+  and the head. A merge a proceed authorizes names the owner's `gh pr merge <pr> --match-head-commit <sha>` on the
+  proceed's pinned head and is keyed `<review>/<head>`; a proceed without a pinned head offers no merge."""
   out = []
   number = (state["units"].get(uid) or {}).get("number")
   on_issue = f" on {GITHUB}/{repo}/issues/{number}"
@@ -142,14 +145,15 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
     shown = head or (authorizing(foreman) or {}).get("head")
     last = launches[-1]["round"] if launches else 0
     out.append(item(repo, uid, "proceed", f"proceed again: {uid} head {shown}{on_issue}", f"{last}/{shown}"))
-  if latest_clean(foreman, launches, head):
+  auth = authorizing(foreman) or {}
+  # a proceed with no pinned head has nothing for `--match-head-commit` to pin: no merge is offered on it
+  if latest_clean(foreman, launches, head) and not (auth.get("ruling") and not auth.get("head")):
     pr = report.unit_view(state, uid)["pr"] or ((state["units"].get(uid) or {}).get("pr") or {}).get("number")
     rounds = foreman.get("rounds") or []
     url = f"{GITHUB}/{repo}/pull/{pr}"
     # U61: the shared-file merge order from `handoff_units.json`, none when the file or the key is absent
     order, merge_after = merge_order(hs)
     after = [m for m in order if m in merge_after.get(uid, []) and not report.unit_view(state, m)["landed"]]
-    auth = authorizing(foreman) or {}
     if auth.get("ruling"):  # spec section 4.2: a proceed authorizes; the owner merges that head and no other
       target = f"gh pr merge {pr} --match-head-commit {auth.get('head')} · {url}"
       base = f"{auth.get('review')}/{auth.get('head')}"  # a head cycle may have no foreman round at all
