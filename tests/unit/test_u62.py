@@ -322,6 +322,14 @@ def test_merge_orders_text():
   assert "<!-- merge: " not in merging and "merge commit" in merging and "keeping both units' intent" in merging
 
 
+def test_merge_orders_square_with_never_merge():
+  # codebase-details-1-1, -1-11: the never-merge rules are about the pull request; an alone round only merges
+  from superegm import launch_builder
+  merging = launch_builder.orders_text(["Bash(git merge:*)"], "/bin/gh", 0, merge=True)
+  assert "never merges (a pull request;" in merging and "they never merge your pull request" in merging
+  assert "change nothing beyond the merge and its conflict resolution" in merging
+
+
 # ---------------------------------------------------------------- S6: the board and the inbox
 
 
