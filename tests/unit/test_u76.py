@@ -288,3 +288,112 @@ def test_approve_spec_prints_the_changed_reviewer_files_and_amend_units_copies_t
   assert code == 0, out
   last = approval(world)["entries"][-1]
   assert last["kind"] == "amend-units" and last["reviewers"] == frozen
+
+
+# ---------------------------------------------------------------- round 3
+
+def test_an_effort_of_max_is_loaded(world):
+  """`config.reviewers.effort` takes `low` to `max`: a file's `effort` takes the same forms (U76 round 3)."""
+  from superegm import reviewers
+  write_reviewer(world.repo, "deep.md", "---\nname: Deep\nkinds: [spec]\neffort: max\n---\nbody")
+  assert reviewers.load(world.repo)["deep"]["effort"] == "max"
+
+
+@pytest.mark.parametrize("body", [" " * 8193, " " * 5000 + "x" + " " * 5000, "x" * 8193 + "\n", "\n" * 8193 + "x"],
+                         ids=["spaces", "padded", "newline-last", "newlines-first"])
+def test_the_limit_counts_the_body_as_written(world, body):
+  """A body over 8,192 bytes is refused whatever surrounds the persona; only the file's last newlines are not counted (U76 round 3)."""
+  from superegm import reviewers
+  write_reviewer(world.repo, "wide.md", "---\nname: Wide\nkinds: [spec]\n---\n" + body)
+  with pytest.raises(superegm.HandoffError, match="wide.md"):
+    reviewers.load(world.repo)
+
+
+def test_the_persona_keeps_its_indentation(world):
+  """The printed persona loses its leading and trailing blank lines and no indentation of its first line (U76 round 3)."""
+  from superegm import reviewers
+  write_reviewer(world.repo, "indent.md", "---\nname: I\nkinds: [spec]\n---\n\n  \n    - first\n  - second  \n\n")
+  assert reviewers.load(world.repo)["indent"]["text"] == "    - first\n  - second"
+
+
+def spec_briefed(world, files):
+  """A spec review with `files` at HEAD: (spec, cid, rid, st, brief), `brief(id, round)` running `reviewers --brief --spec`."""
+  from test_review import hstore, opened
+  from test_u37 import commit_file
+  for name, data in files.items():
+    commit_file(world, f".superegm/reviewers/{name}", data)
+  spec, cid, rid = opened(world, "spec", reviewers="design,zoom-out,security")
+  brief = lambda reviewer, n: world.run("reviewers", "--brief", reviewer, "--spec", str(spec), "--review", rid, "--round", n, "--runcard", cid, card=None)
+  return spec, cid, rid, hstore(world), brief
+
+
+def test_a_second_brief_of_a_round_prints_the_read_the_first_stored(world):
+  """A spec review stores what it read on the round: a later brief of that round prints it though HEAD moved; the next round reads HEAD again (U76 round 3)."""
+  from test_u37 import commit_file
+  _, _, _, _, brief = spec_briefed(world, {"security.md": b"---\nname: S\nkinds: [spec]\n---\nfirst persona\n"})
+  assert brief("security", 1)[1].strip() == "first persona"
+  commit_file(world, ".superegm/reviewers/security.md", b"---\nname: S\nkinds: [spec]\n---\nsecond persona\n")
+  assert brief("security", 1)[1].strip() == "first persona"
+  assert brief("security", 2)[1].strip() == "second persona"
+
+
+def test_a_damaged_persona_read_is_refused_naming_it(world):
+  """A truncated or keyless `persona-<n>-<id>.json` ends `--brief` and `review record` in a refusal naming the file, not a traceback (U76 round 3)."""
+  from test_review import record
+  _, cid, rid, st, brief = spec_briefed(world, {"security.md": b"---\nname: S\nkinds: [spec]\n---\npersona\n"})
+  assert brief("security", 1)[0] == 0
+  path = st.path("reviews", rid, "persona-1-security.json")
+  for damage in ('{"id": "sec', '{"text": "x"}', "[]"):
+    path.write_text(damage, encoding="utf-8")
+    got, out = brief("security", 1)
+    assert got == 1 and "persona-1-security.json" in out and "Traceback" not in out, out
+    got, out = record(world, rid, 1, "security", [], cid)
+    assert got == 1 and "persona-1-security.json" in out and "Traceback" not in out, out
+
+
+def test_a_spec_round_of_a_repository_reviewer_needs_its_read(world):
+  """A completed spec record of a repository reviewer with no stored read is refused, so the panel never completes without evidence of its persona; a not-run one needs none (U76 round 3)."""
+  from test_review import record, rjson
+  _, cid, rid, _, brief = spec_briefed(world, {"security.md": b"---\nname: S\nkinds: [spec]\n---\npersona\n"})
+  got, out = record(world, rid, 1, "security", [], cid)
+  assert got == 1 and "security" in out and "reviewers --brief" in out, out
+  assert record(world, rid, 1, "security", cid=cid, not_run="timed out")[0] == 0
+  assert brief("security", 2)[0] == 0
+  assert record(world, rid, 2, "security", [], cid)[0] == 0
+  assert rjson(world, rid, "round-2.json")["reviewers"]["security"]["persona"]["id"] == "security"
+
+
+@pytest.mark.parametrize("make, expect", [
+  ("other_card", "was opened under handoff"),
+  ("no_entry", "no approval entry"),
+  ("unfrozen", "is not frozen in handoff"),
+  ("no_review", "--spec requires --review and --round"),
+  ("round_zero", "a round is 1 or more"),
+  ("unknown_at_head", "unknown reviewer nobody"),
+  ("both", "exactly one of --handoff and --spec"),
+  ("neither", "exactly one of --handoff and --spec"),
+  ("handoff_round", "--review and --round go with --spec"),
+  ("unit_with_spec", "--unit goes with --handoff")])
+def test_the_brief_refuses_each_misuse(world, make, expect):
+  """`reviewers --brief` refuses a card of another handoff, a handoff with no approval entry or no such frozen reviewer, a spec read missing its review or round, an unknown id and each bad flag combination (U76 round 3)."""
+  import test_review
+  spec, cid, rid, hid, plancard, st, _ = approved_with(world, {"security.md": b"---\nname: S\nkinds: [spec, plan]\n---\npersona\n"})
+  base = ["reviewers", "--brief", "security"]
+  if make == "other_card":  # a card the handoff's store holds, opened under another handoff
+    path = st.path("runcards", plancard)
+    path.write_text(path.read_text(encoding="utf-8").replace(f'"handoff": "{hid}"', '"handoff": "elsewhere"'), encoding="utf-8")
+  if make == "no_entry":  # the handoff's approval entry is gone
+    superegm.atomic_write(st.path("approvals", test_review.SLUG), {"entries": []})
+  argv = {
+    "other_card": [*base, "--handoff", hid, "--runcard", plancard],
+    "no_entry": [*base, "--handoff", hid, "--runcard", plancard],
+    "unfrozen": ["reviewers", "--brief", "design", "--handoff", hid, "--runcard", plancard],
+    "no_review": [*base, "--spec", str(spec), "--runcard", cid],
+    "round_zero": [*base, "--spec", str(spec), "--review", rid, "--round", 0, "--runcard", cid],
+    "unknown_at_head": ["reviewers", "--brief", "nobody", "--spec", str(spec), "--review", rid, "--round", 1, "--runcard", cid],
+    "both": [*base, "--handoff", hid, "--spec", str(spec), "--runcard", plancard],
+    "neither": [*base, "--runcard", plancard],
+    "handoff_round": [*base, "--handoff", hid, "--round", 1, "--runcard", plancard],
+    "unit_with_spec": [*base, "--spec", str(spec), "--unit", "U07", "--runcard", cid]}[make]
+  got, out = world.run(*argv, card=None)
+  assert got == 1 and expect in out and "Traceback" not in out, out
