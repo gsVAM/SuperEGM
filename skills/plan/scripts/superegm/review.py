@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest|triage: the one review loop (spec section 8)."""
 
@@ -1110,7 +1110,7 @@ def rounds_of(st: core.Store, rid: str, review: dict) -> list[dict]:
   for entry in sorted(core.load_foreman(st, review["artifact"])["rounds"], key=lambda e: e["round"]):
     rnd = files.get(entry["round"]) or {"round": entry["round"], "runcard": entry.get("runcard"),
                                         "artifact_sha256": entry.get("head"), "builder_contested": [], "reviewers": {}}
-    rounds.append(rnd | {"what_ran": derive_what_ran(review, rnd, entry)})
+    rounds.append(rnd | {"what_ran": derive_what_ran(review, rnd, entry)} | ({"merge": True} if entry.get("merge") else {}))
   return rounds
 
 
@@ -1160,7 +1160,8 @@ def evaluate(st: core.Store, review: dict, runcard: str) -> Status:
     converged, converged_round = f"by ruling {accept['id']}", review["converged_round"]
   elif clean and not regressions and not moved:
     converged, converged_round = "yes", latest["round"]
-  cap = "stop" in rulings or len(completed) >= cap_of(review) + rulings.count("continue")
+  counted = [r for r in completed if not r.get("merge")]  # a merge round is not counted toward the cap (spec section 6.1)
+  cap = "stop" in rulings or len(counted) >= cap_of(review) + rulings.count("continue")
   cards = stall_cards(st, review, runcard)
   stalled = len(rounds) >= 2 and all(r["what_ran"] != "completed" and r.get("runcard") in cards for r in rounds[-2:])
   sha = next((r["artifact_sha256"] for r in rounds if r["round"] == converged_round), None)
@@ -1231,7 +1232,7 @@ def early_accept_lapsed(review: dict, accept: dict, rounds: list[dict], rulings:
   if accepted is None:
     return False
   completed = [r for r in rounds if r["what_ran"] == "completed"]
-  upto = [r for r in completed if r["round"] <= accepted]
+  upto = [r for r in completed if r["round"] <= accepted and not r.get("merge")]
   if len(upto) >= cap_of(review) + rulings.count("continue"):
     return False
   rnd = next((r for r in completed if r["round"] == accepted), None)
