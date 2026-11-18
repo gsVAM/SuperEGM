@@ -1,5 +1,5 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
-Added by SuperEGM (gsVAM), 2026: the `owner:` row of the word table and the three decision points, moved out of the wave skill's SKILL.md (the owner's ruling: a 24K skill body is context bloat); the `owner: <ids>` decision's allowed options, one per id, and its leavemealone sentence (U25); Decision point 5, a head's accept below the cap (U35); a stalled launch at point 3 and the carve-out (U31). -->
+Added by SuperEGM (gsVAM), 2026: the `owner:` row of the word table and the three decision points, moved out of the wave skill's SKILL.md (the owner's ruling: a 24K skill body is context bloat); the `owner: <ids>` decision's allowed options, one per id, and its leavemealone sentence (U25); Decision point 5, a head's accept below the cap (U35); a stalled launch at point 3 and the carve-out (U31); a failed resume excluded from point 3 (U63). -->
 
 # The decision points
 
@@ -81,6 +81,7 @@ head; or `ruled: stop the unit (relaunch already used)` or `ruled: stop the unit
 A stalled launch's question carries the stall facts (the event line `U<n> stalled (<minutes> min; last commit <time | none>)`, source `launch <n>`); leavemealone's panel renders it `<U> launch <n> stalled (last commit <time | none>)`.
 A stopped unit's stall is recorded and asks nothing: the kill is the one thing left to do.
 A launch with no commit of its own (an `exited …` entry whose `last_commit_at` is absent or none, a launch recorded before U31 included) spends no `relaunch`; a second such launch on the unit is `stop the unit`, with no question.
+A failed resume (`record-launch` printed `failed resume`, the entry `failed_resume: true`) is not a launch without a commit and opens no question here: the batch's step 3 relaunches it at once, fresh.
 Ask the owner, then
 `python3 '<HELPER>' decision rule --unit <U> --decision <qid> --ruling '(<letter>) — <reason>' --by <login> --runcard '<CARD>'`
 (it posts `**Ruling:** (<comment-id>) <option> — <reason>` quoting the
