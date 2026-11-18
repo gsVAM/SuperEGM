@@ -13,7 +13,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30); the batch's `notify` (U23); the decision points, rulings and leavemealone-mode moved to `references/`; a head's Decision point 5 and `clean` by accept (U35); `launch-builder` alone and the driver role (U24); `stalled` (U31); the frozen mode, driven normal-mode decisions (U45); `waiting proceed` (U92). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30); the batch's `notify` (U23); the decision points, rulings and leavemealone-mode moved to `references/`; a head's Decision point 5 and `clean` by accept (U35); `launch-builder` alone and the driver role (U24); `stalled` (U31); the frozen mode, driven normal-mode decisions (U45); `waiting proceed` (U92); the merge round (U62). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the wave skill. Not part of google/elephant-goldfish-model. -->
 
@@ -33,7 +33,7 @@ builder per marked unit as the builder account; the builder pushes its unit bran
 with concluded CI gets one review round from a **foreman**: a per-unit
 elephant dispatched through its own adapter (`superegm:foreman`,
 `omitClaudeMd: true`), which dispatches the head's goldfish panel
-(zero-context, read-only, each through its own adapter), records the
+(zero-context, read-only, each its own adapter), records the
 findings, posts one review comment bound to the reviewed commit, and returns
 one word (the word table). The builder answers it in its next launch.
 
@@ -51,8 +51,7 @@ Under SUPEREGM_ROLE=driver (a tick of `/superegm:driver` started this session), 
 normal mode open points 1, 2, 3 and 5 as `decision open` records, as leavemealone-mode does (an
 unconverged judges' question stays open alike). That unit is `pending a decision`
 (no slot) and the batch goes on handling every event of the batch; the session ends on the
-loop's condition alone: `status.wait_events` already acked every event, so an early exit
-would lose another unit's exit.
+loop's condition alone (an early exit loses an acked event).
 
 Open a reference only when this file sends you to it:
 
@@ -78,16 +77,15 @@ Open a reference only when this file sends you to it:
    interrupted by the new one.
 2. Run `python3 '<HELPER>' status --wait 1 --runcard '<CARD>'` as a batch
    runs its wait (`run_in_background: true`, Bash timeout 1,800,000 ms: the
-   first pass reads every unit's issue, PR and checks). It reads GitHub
-   once, saves the snapshot `report` derives from (`report` reads GitHub
-   never, so skipping this ends the loop on a stale snapshot) and returns every event since that
-   invocation's last save, or `deadline`. Handle every line as a batch's
+   first pass reads every issue, PR and check). It reads GitHub
+   once, saves the snapshot `report` derives from (skipping it ends the loop on a stale one)
+   and returns every event since its last save, or `deadline`. Handle every line as a batch's
    steps 1–3 before going on, and `ruling` lines as its step 4; then run
    batch step 3b.
    Every `status` pass under this card rewrites the board (the `## Units` table `report` prints) between `<!-- superegm:board -->` and `<!-- /superegm:board -->` in the tracking issue's body:
    one GitHub write per pass and none when the rows are unchanged; the inbox stays the action list.
 3. Run `python3 '<HELPER>' report --runcard '<CARD>'`. Everything is derived
-   from the store, the plan and the spec (it refuses as `status` does when the spec changed since
+   from the store, the plan and the spec (refused as `status` is on a spec changed since
    its approval); idle units come from this card alone. Its lines: the
    report path, the board, `idle:`, `pending:`, `loop:`.
 4. Rule every `pending:` item first, at its decision point in
@@ -109,7 +107,7 @@ Builders a previous invocation left running report through `status --wait`'s
 Run `python3 '<HELPER>' status --wait 1500 --runcard '<CARD>'` from this
 main conversation with `run_in_background: true` (Bash timeout 1,800,000
 ms). It returns every unreported event since its last save, one line each
-(`head`, `exit`, `status`, `landed`, `closed`, `ruling`, `stalled`), or `deadline`. Handle every
+(`head`, `exit`, `status`, `landed`, `closed`, `ruling`, `stalled`, `conflict`), or `deadline`. Handle every
 line before calling it again, in this order; lines for a stopped unit are
 ignored except `landed` and `stalled`:
 
@@ -144,9 +142,8 @@ ignored except `landed` and `stalled`:
    It prints `<dispatch-id> <child-card>` when section 11's predicate holds
    (CI concluded, the latest launch terminal, no round posted since it, no
    decision pending, the review not stalled) and refuses otherwise: skip a
-   refused unit, except exit 1 `recovered <word>`, which is the foreman's
-   word for a round the PR already carries. Never evaluate the predicate
-   yourself: `foreman dispatch` is its one place. Dispatch every accepted unit's
+   refused unit, except exit 1 `recovered <word>` (a round the PR already
+   carries). Never evaluate the predicate yourself. Dispatch every accepted unit's
    foreman **in one message**, each through the `superegm:foreman` adapter,
    named `foreman-<U>-<dispatch-id>`, in the foreground, with the brief of
    `references/foreman_brief.md` filled in. Then `word_action` per returned
@@ -154,10 +151,11 @@ ignored except `landed` and `stalled`:
 6. `superegm launch`:
    `python3 '<HELPER>' launch --idle <the report's idle list> --runcard '<CARD>'`
    (omit `--idle` when the list is `none`) marks the ready units up to the
-   free slots and prints `in flight:` and `marked:`. Per marked unit:
+   free slots and prints `in flight:` and `marked:`; a clean `conflict` unit is marked once
+   for its **merge round**. Per marked unit:
    `python3 '<HELPER>' launch-builder --unit <U> --round <n> --runcard '<CARD>'`
    (`<n>` is the launch count) alone: `launch-builder` starts the builder and records the launch,
-   detached in its own session, and returns at once. A
+   detached, and returns at once. A
    `launch-builder` refusal makes the unit idle for this invocation, no retry:
    `python3 '<HELPER>' report --idle '<U>=launch-builder: <reason>' --runcard '<CARD>'`.
 7. `superegm report`: `python3 '<HELPER>' report --runcard '<CARD>'`, then `python3 '<HELPER>' notify --runcard '<CARD>'`
@@ -181,6 +179,7 @@ dispatch):
 
 - `clean` → await-merge: nothing runs; the unit awaits the owner's merge and
   its slot is free; so after accept (point 5) or a proceed, but one pinning no head: `proceed again`.
+  `await-merge after <unit>, …`: the owner merges in that order.
 - `revise` → in normal mode, when `review status` printed `acceptable: yes` → Decision point 5 first (no launch
   while it is pending). Otherwise, and on a ruled `revise`, `launch-builder` for the next
   round as today (the prompt carries the review); a ruled `revise` spends no relaunch.
@@ -205,7 +204,7 @@ dispatch):
 
 ## The end
 
-Before the close, run batch step 3b once and `report` again (a thread posted before the last round's review is read now): an `outcome:` line or no longer `loop: ended` → back to the batches.
+Before the close, run batch step 3b once and `report` again (a thread posted before the last round's review is read now): an `outcome:` line, a merge round marked at batch step 6 or no longer `loop: ended` → back to the batches.
 
 `loop: ended` → run `python3 '<HELPER>' runcard close '<CARD>'`. Then
 report in chat from `wave_<n>_report.md`: per unit its state, head and

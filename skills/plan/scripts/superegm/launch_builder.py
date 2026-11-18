@@ -124,7 +124,7 @@ def prepare(args, card):
   reviews = core.gh_pages(f"repos/{repo}/pulls/{pr}/reviews") if pr else []
   audit = AUDIT_LINE.format(owner=record["launched"].get("by", "unknown"),  # a pre-upgrade mark records no login
                             runcard=args.runcard, unit=unit, handoff=st.handoff_id)
-  text = prompt_text(number, unit, issue_body, orders_text(tools, launched_gh, builder_config["max_subagent_calls"]), orient_text, comments, reviews, pr, builder, audit, pr_block,
+  text = prompt_text(number, unit, issue_body, orders_text(tools, launched_gh, builder_config["max_subagent_calls"], merge=merge is not None), orient_text, comments, reviews, pr, builder, audit, pr_block,
                      spec_range=range_text, owners=config.get("owners") or [], foreman=foreman_data,
                      amendments=amendments_for(st, unit, issue_body))
   if merge:
@@ -181,11 +181,17 @@ def skill_names(tools: list) -> list[str]:
 SUBAGENTS_RE = re.compile(r"(?:\n<!-- subagents(?: Agent)?: [^\n]* -->)+\n")  # the two delegation lines (amendment 15)
 
 
-def orders_text(tools: list, gh: str, cap: int) -> str:
+MERGE_RE = re.compile(r"\n<!-- merge: ([^\n]*) -->\n")  # the merge orders' line (spec section 6.1)
+
+
+def orders_text(tools: list, gh: str, cap: int, merge: bool = False) -> str:
   """`references/builder_orders.md` as one launch reads it: `{{gh}}` the launched `gh`, `{{skills}}` the skills
   the allow-list names, `none` when it names none, and `{{subagents}}` the sentence of the `<!-- subagents Agent: -->`
-  line, `{{cap}}` filled, when the list carries `Agent`, else that of the `<!-- subagents: -->` line; both lines removed."""
+  line, `{{cap}}` filled, when the list carries `Agent`, else that of the `<!-- subagents: -->` line; both lines removed.
+  The `<!-- merge: -->` line becomes a `## The merge orders` section on a launch carrying merge orders (`merge`,
+  spec section 6.1) and is removed on any other."""
   text = core.read_text(ORDERS)
+  text = MERGE_RE.sub(lambda m: f"\n## The merge orders\n\n{m.group(1)}\n" if merge else "", text, count=1)
   marker = "<!-- subagents Agent: " if "Agent" in tools else "<!-- subagents: "
   line = next(l for l in text.splitlines() if l.startswith(marker))
   sentence = line[len(marker):].removesuffix(" -->").replace("{{cap}}", str(cap))
