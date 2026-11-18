@@ -224,7 +224,7 @@ def test_merge_orders_on_launch(world, monkeypatch, spawn_fake, latest, mergeabl
 # ---------------------------------------------------------------- S4: the brief pins the current base
 
 
-def commit_on(world, start, path, text, push):
+def commit_on(world, start, path, text, push, message=None):
   """A commit on `start` writing `path` as `text`, pushed to origin's `push` ref, made in a scratch clone; its sha."""
   side = world.repo.parent / "side"
   if not side.exists():
@@ -233,7 +233,7 @@ def commit_on(world, start, path, text, push):
   git(["checkout", "-q", "--detach", start], side)
   put(side / path, text)
   git(["add", path], side)
-  git(["-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", f"edit {path}"], side)
+  git(["-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", message or f"edit {path}"], side)
   git(["push", "-q", "origin", f"HEAD:{push}"], side)
   return git(["rev-parse", "HEAD"], side).strip()
 
@@ -263,13 +263,14 @@ def test_merge_brief_pins_the_current_base(world, monkeypatch, spawn_fake):
   assert "`src/worker.py` (landed: U08)" in prompt  # the fixture's units all hold `src/worker.py`
 
 
-def merge_revision(world, s, card, head_path="src/worker.py", base_path="src/worker.py", base_text="landed\n"):
+def merge_revision(world, s, card, head_path="src/worker.py", base_path="src/worker.py", base_text="landed\n",
+                   base_message=None):
   """S4's arrange: U07's pull request #71 `CONFLICTING` with a revise round, the base advanced past the batch's."""
   batch_base = first_round(world, s, card)
   head = commit_on(world, batch_base, "src/worker.py", "the head's worker\n", "refs/heads/side-head")
   if head_path != "src/worker.py":
     head = commit_on(world, head, head_path, "the head's\n", "refs/heads/side-head")
-  new_base = commit_on(world, batch_base, base_path, base_text, "refs/heads/main")
+  new_base = commit_on(world, batch_base, base_path, base_text, "refs/heads/main", base_message)
   make_pr(world.gh, 71, head, closes=[(REPO, 7)])
   git(["push", "-q", str(world.repo.parent / "origin.git"), f"{head}:refs/pull/71/head"], world.repo.parent / "side")
   write_foreman(s, "U07", [{**REVISE, "head": head, "posted_at": "2099-01-01T00:00:00Z"}])
@@ -305,6 +306,42 @@ def test_merge_brief_names_paths_unquoted(world, monkeypatch, spawn_fake):
   assert "- `src/café.py`" in prompt and "\\303" not in prompt
 
 
+def test_merge_launch_scratch_ref_is_its_own(world, monkeypatch, spawn_fake):
+  # astra-3-1: a concurrent launch's scratch ref is neither read nor deleted; the pinned commit is the one checked
+  s, card, hid, _ = seed(world, units=("U07", "U08"))
+  with_rounds(s, world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  batch_base, new_base = merge_revision(world, s, card)
+  git(["update-ref", "refs/superegm/merge-base", batch_base], world.repo)  # another invocation's scratch, mid-launch
+  code, out = world.run("launch-builder", "--unit", "U07", "--round", 2, "--runcard", card)
+  assert code == 0, out
+  assert launches_of(s, "U07")[-1]["base"] == new_base
+  assert git(["rev-parse", "refs/superegm/merge-base"], world.repo).strip() == batch_base  # left as it was
+  assert git(["rev-parse", "refs/superegm/base"], world.repo).strip() == new_base
+  left = git(["for-each-ref", "--format=%(refname)", "refs/superegm/"], world.repo).split()
+  assert {r for r in left if not r.startswith("refs/superegm/pr/")} == {"refs/superegm/base", "refs/superegm/merge-base"}  # its own scratch removed
+
+
+@pytest.mark.parametrize("message, landed", [
+  ("U08's worker (#72)", "(landed: U08)"),  # squash merge: the saved status has not seen U08 land
+  ("Merge pull request #72 from o/feature", "(landed: U08)"),
+  ("Merge pull request #90 from o/superegm/2026-01-01-other-abcdef/U03", "(landed: 2026-01-01-other-abcdef/U03)"),
+])
+def test_merge_brief_names_holders_from_the_base(world, monkeypatch, spawn_fake, message, landed):
+  # astra-3-2: the holders are read from the pinned base's commits, not the last status pass alone, a unit of
+  # another handoff included; the base commits that touch each path are named
+  s, card, hid, _ = seed(world, units=("U07", "U08"))
+  with_rounds(s, world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  _, new_base = merge_revision(world, s, card, base_message=message)
+  save_pr(s, "U08", 72, "b" * 40, "MERGEABLE")  # U08's pull request, saved before it merged; landed not yet read
+  code, out = world.run("launch-builder", "--unit", "U07", "--round", 2, "--runcard", card)
+  assert code == 0, out
+  prompt = s.path("launches", "U07_r2_prompt.md").read_text(encoding="utf-8")
+  assert f"- `src/worker.py` {landed}" in prompt
+  assert f"base commit `{new_base[:12]}`: {message}" in prompt
+
+
 # ---------------------------------------------------------------- S5: the merge orders' text
 
 
@@ -331,6 +368,9 @@ def test_merge_orders_square_with_never_merge():
   merging = launch_builder.orders_text(["Bash(git merge:*)"], "/bin/gh", 0, merge=True)
   assert "never merges (a pull request;" in merging and "they never merge your pull request" in merging
   assert "change nothing beyond the merge and its conflict resolution" in merging
+  # change-review-3-1, codebase-details-3-1: an ordinary launch is pointed at no merge orders it does not carry
+  plain = launch_builder.orders_text([], "/bin/gh", 0)
+  assert "merge orders below" not in plain and "they never merge your pull request" not in plain
 
 
 # ---------------------------------------------------------------- S6: the board and the inbox
