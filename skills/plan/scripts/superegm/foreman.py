@@ -88,8 +88,11 @@ def run(args):
   n = len(rounds) + 1
   did = f"d{n}"
   stored = (((card.get("instructions") or {}).get("foreman") or {}).get("local") or {}).get("manifest") or []
-  rounds.append({"round": n, "runcard": args.runcard, "launch": launches[-1]["round"], "head": None, "phase": "fetched",
-                 "dispatch_id": did, "instructions": list(stored)})
+  entry = {"round": n, "runcard": args.runcard, "launch": launches[-1]["round"], "head": None, "phase": "fetched",
+           "dispatch_id": did, "instructions": list(stored)}
+  if launches[-1].get("merge") == "alone":  # spec section 6.1: a merge round, left out of the cap's count
+    entry["merge"] = True
+  rounds.append(entry)
   data["dispatch_id"] = did
   core.save_foreman(st, unit, data)
   core.journal(st, f"{unit} round {n} dispatched {did} under {args.runcard}")
