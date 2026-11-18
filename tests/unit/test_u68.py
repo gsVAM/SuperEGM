@@ -22,22 +22,32 @@ def finding(fid, claim="a fault", severity="high"):
 
 
 def round_of(n, word):
-  """`(foreman rounds[] entry, round file or None)` for the outcome `word` of round `n`, the form `contested: <what>`
-  naming what its open findings are."""
+  """`(foreman rounds[] entry, round file or None, rulings[] entries)` for the outcome `word` of round `n`, the form
+  `contested: <what>` naming what its open findings are, beside the builder's contest waiting on a ruling."""
   entry = {"round": n, "phase": "posted", "outcome": word}
   if word.startswith("not run"):
-    return entry | {"phase": "collected"}, None
+    return entry | {"phase": "collected"}, None, []
   contest = finding(f"foreman-{n}-1")  # the builder's contest, waiting on a ruling
+  scope = finding(f"foreman-{n}-2", "changed path outside Scope paths")
+  delta = "test-delta: tests/unit/test_x.py"
+  panel = {"contested: other reviewers' open high": {"change-review": [finding(f"change-review-{n}-1")],
+                                                     "external:alice": [finding(f"external:alice-{n}-1", severity="medium")]},
+           "contested: other reviewers' test-delta only": {"astra": [finding(f"astra-{n}-1", delta)]}}.get(word, {})
   findings = {"contested: open high": [contest, finding(f"foreman-{n}-2")],
               "contested: builder contest only": [contest],
-              "contested: test-delta only": [contest, finding(f"foreman-{n}-2", "test-delta: tests/unit/test_x.py")],
-              "contested: unruled point-1 only": [contest, finding(f"foreman-{n}-2", "changed path outside Scope paths")],
-              "owner: medium-1": [finding(f"foreman-{n}-1", "test-delta: tests/unit/test_x.py", "medium")]}.get(word, [finding(f"foreman-{n}-1")])
+              "contested: test-delta only": [contest, finding(f"foreman-{n}-2", delta)],
+              "contested: unruled point-1 only": [contest, scope],
+              "contested: upheld point-1": [contest, scope],  # beside an unruled contest
+              "owner: medium-1": [finding(f"foreman-{n}-1", delta, "medium")]}.get(word, [finding(f"foreman-{n}-1")])
+  ruled = {"contested: upheld contest": f"foreman-{n}-1",  # the owner upheld the builder's contest: the finding stands
+           "contested: upheld point-1": f"foreman-{n}-2",
+           "contested: other fid upheld": f"foreman-{n}-9"}  # a ruling naming another finding rules nothing here
+  rulings = [{"decision": "D1", "ruling": f"{ruled[word]} finding upheld"}] if word in ruled else []
   if word.startswith("contested:"):
     word = entry["outcome"] = f"contested: foreman-{n}-1"
-  rnd = {"round": n, "reviewers": {"foreman": {"findings": findings}},
+  rnd = {"round": n, "reviewers": {"foreman": {"findings": findings}} | {k: {"findings": v} for k, v in panel.items()},
          "builder_contested": [{"fid": f"foreman-{n}-1"}] if word.startswith("contested:") else []}
-  return entry, rnd
+  return entry, rnd, rulings
 
 
 def store_rounds(s, rounds, planned, escalate_after, difficult_row=True, earlier=False):
@@ -55,8 +65,9 @@ def store_rounds(s, rounds, planned, escalate_after, difficult_row=True, earlier
       opened[rid] = {"kind": "head", "artifact": UNIT, "cycle": cycle, "rulings": []}
       continue
     merge = word.endswith(" merge: true")
-    entry, rnd = round_of(len(entries) + 1, word.removesuffix(" merge: true"))
+    entry, rnd, ruled = round_of(len(entries) + 1, word.removesuffix(" merge: true"))
     entries.append(entry | ({"merge": True} if merge else {}))
+    data["rulings"] = data.get("rulings", []) + ruled
     if rnd:
       superegm.atomic_write(s.path("reviews", rid, f"round-{entry['round']}.json"), rnd)
   for name, review_json in opened.items():
@@ -106,6 +117,11 @@ def second_launch(world, s, card, rounds, planned, escalate_after=2, difficult_r
   ("doable", ["revise", "contested: builder contest only"], "doable"),
   ("doable", ["revise", "contested: test-delta only"], "doable"),
   ("doable", ["revise", "contested: unruled point-1 only"], "doable"),
+  ("doable", ["revise", "contested: other reviewers' open high"], "difficult"),
+  ("doable", ["revise", "contested: other reviewers' test-delta only"], "doable"),
+  ("doable", ["revise", "contested: upheld contest"], "difficult"),
+  ("doable", ["revise", "contested: upheld point-1"], "difficult"),
+  ("doable", ["revise", "contested: other fid upheld"], "doable"),
   ("doable", ["revise", "not run (timeout)"], "doable"),
   ("doable", ["revise", "revise merge: true"], "doable"),
   ("doable", ["revise", "owner: medium-1"], "doable"),
@@ -116,7 +132,10 @@ def test_failing_head_rounds_escalate(world, started, planned, rounds, tier):
   entry, brief, config = second_launch(world, s, card, rounds, planned)
   assert (entry["tier"], entry.get("escalated")) == (tier, True if tier != planned else None)
   assert (entry["model"], entry["effort"]) == superegm.tier_pair(config, tier)
-  assert entry.get("fresh") == ("model changed" if tier != planned else entry.get("fresh"))
+  if tier != planned:
+    assert entry.get("fresh") == "model changed"
+  else:  # the pair is the first launch's: the session resumes
+    assert "fresh" not in entry and "resumed_from" in entry
   # the same round unescalated: the fix brief is the prompt's text beside the resume's stale-paths line
   from superegm import launch_builder
   write_launches(s, launches_of(s)[:1])
@@ -152,3 +171,14 @@ def test_escalation_off_or_without_effect_changes_nothing(world, started, escala
   assert (entry["model"], entry["effort"]) == superegm.tier_pair(config, planned)
   from superegm import launch_builder
   assert launch_builder.CONFIG_DEFAULTS["builder"]["escalate_after"] == 2
+
+
+@pytest.mark.parametrize("value", ["2", 2.0, True, -1, None])
+def test_a_malformed_escalate_after_is_refused(world, started, value):
+  # a setting that is no non-negative integer is refused, as precheck_attempts is, not read as off
+  s, card, _ = started
+  resumable(world, s, card)
+  configure(world, value)
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", 2, "--runcard", card)
+  assert code == 1 and "builder.escalate_after must be a non-negative integer" in out
+  assert len(launches_of(s)) == 1
