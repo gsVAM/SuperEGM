@@ -181,7 +181,8 @@ def next_action(word: str, latest, launch, decisions: list, reason, proceeded: b
   `stopped`; for a `clean` unit whose authorizing outcome is a proceed (`proceeded`, spec section 4.2: its latest
   posted round, if any, is not what authorizes it), `await-merge` when the proceed pinned a head and `proceed
   again` when it did not (`pinned` False: `inbox` offers no merge without a head for `--match-head-commit`, and
-  lists `proceed again` on the pull request's head); otherwise an `active` or `clean` unit's from
+  lists `proceed again` on the pull request's head once the pull request has one; while it has none, the inbox
+  lists nothing for the unit and the owner's proceed waits for the builder's push); otherwise an `active` or `clean` unit's from
   the word of a posted round not older than the latest launch, else none while a launch runs, `foreman dispatch`
   once it is terminal or when there is none."""
   if word == "ready":

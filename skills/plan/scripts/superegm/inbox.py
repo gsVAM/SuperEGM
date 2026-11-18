@@ -85,7 +85,7 @@ def review_dirs(hs: core.Store, spec, read: bool = False) -> list:
 def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, mode: str = "normal") -> list:
   """The decisions, test-delta, owner-only and merge-ready lines of one unit neither stopped nor landed, and its
   `proceed again: <unit> head <sha>` line while it is waiting proceed (spec section 4.2), keyed on the later launch
-  and the head. A merge a proceed authorizes names the owner's `gh pr merge <pr> --match-head-commit <sha>` on the
+  and the head (the pull request's, else the proceed's pinned one; none listed while neither exists). A merge a proceed authorizes names the owner's `gh pr merge <pr> --match-head-commit <sha>` on the
   proceed's pinned head and is keyed `<review>/<head>`; a proceed without a pinned head offers no merge, and lists
   `proceed again` on the pull request's head once it has one."""
   out = []
@@ -142,8 +142,10 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
               for fid in (x.strip() for x in outcome.removeprefix("owner: ").split(","))
               if fid and fid not in deltas and open_fid(fid)]
   launches, head = load_launches(hs, uid), report.unit_view(state, uid).get("head")
-  if waiting_proceed(foreman, launches, head):  # spec section 4.2: keyed on the later launch and the head it left
-    shown = head or (authorizing(foreman) or {}).get("head")
+  shown = head or (authorizing(foreman) or {}).get("head")
+  # spec section 4.2: keyed on the later launch and the head it left; with no head at all there is none to
+  # proceed on, so nothing is listed until the pull request has one
+  if shown and waiting_proceed(foreman, launches, head):
     last = launches[-1]["round"] if launches else 0
     out.append(item(repo, uid, "proceed", f"proceed again: {uid} head {shown}{on_issue}", f"{last}/{shown}"))
   auth = authorizing(foreman) or {}
