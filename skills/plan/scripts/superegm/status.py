@@ -275,6 +275,8 @@ def unit_events(uid: str, previous, current: dict) -> list:
     lines.append(f"{uid} head pr={current['pr']} sha={current['head']} ci={current['ci']}")
   if current.get("conflict") and not before["conflict"]:  # spec section 6.1: a view change (U62)
     lines.append(f"{uid} conflict pr={current['pr']} sha={current['head']}")
+  elif before["conflict"] and not current.get("conflict") and not current["landed"]:  # cleared: the board and the inbox drop it
+    lines.append(f"{uid} conflict cleared pr={current['pr']} sha={current['head']}")
   status = current["builder_status"]
   tail = f" comment={status[0]} by={status[2]}" if status else ""
   if current["exit"] is not None and current["exit"] != before["exit"]:

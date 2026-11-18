@@ -19,7 +19,7 @@ from superegm import body, instructions, orient, scan
 from superegm.body import consumes
 from superegm.builder_token import key_path, tool
 from superegm.decision import deleted_rulings, overridden_comments, parse_form, recorded_rulings
-from superegm.launch import authorizing, builder_email, builder_login, load_launches, terminal
+from superegm.launch import authorizing, base_problems, builder_email, builder_login, load_launches, terminal
 from superegm.review_plan import SPEC_LINE_RE
 from superegm.status import STATUS_RE
 
@@ -114,12 +114,18 @@ def prepare(args, card):
     ref = f"refs/heads/{branch}"
   base_commit = conflicts = None
   if merge:  # spec section 6.1: the base as it is now, never the batch's fetch, pinned for the brief, the command and the entry
-    core.run_git(["fetch", "--no-write-fetch-head", st.config["remote"], f"+refs/heads/{config['base']}:refs/superegm/base"], handoff.repo_root)
-    # the shared ref moved: checked as `launch` checks it, so no later launch of the batch starts from an unread base
-    problems = base_problems(handoff, st, config["base"])
-    if problems:
-      raise core.HandoffError(problems[0])
-    base_commit = core.run_git(["rev-parse", "refs/superegm/base^{commit}"], handoff.repo_root).strip()
+    # fetched into a scratch ref and checked as `launch` checks its fetch; only a base that passes moves the shared
+    # `refs/superegm/base`, so a refused one never reaches a later launch of the batch
+    scratch = "refs/superegm/merge-base"
+    core.run_git(["fetch", "--no-write-fetch-head", st.config["remote"], f"+refs/heads/{config['base']}:{scratch}"], handoff.repo_root)
+    try:
+      problems = base_problems(handoff.repo_root, st, handoff.design_path, config["base"], ref=scratch)
+      if problems:
+        raise core.HandoffError(problems[0])
+      base_commit = core.run_git(["rev-parse", f"{scratch}^{{commit}}"], handoff.repo_root).strip()
+      core.run_git(["update-ref", "refs/superegm/base", base_commit], handoff.repo_root)
+    finally:
+      core.run_git(["update-ref", "-d", scratch], handoff.repo_root, check=False)
     conflicts = [(path, landed_holders(handoff, state, path)) for path in conflicting_paths(handoff.repo_root, ref, base_commit)]
   pr_block = pr_block_text(handoff.repo_root, ref, config["pr_block_file"]) if config["pr_block_file"] else None
   # The launch's tree, before any worktree: an orient or spec-range refusal is an ordinary precondition.
@@ -440,17 +446,6 @@ def merge_mode(parallel: bool, saved_pr, foreman: dict):
   if auth is not None and (latest is None or (auth.get("launch") or 0) >= (latest.get("launch") or 0)):
     return "alone"
   return "with-fix"
-
-
-def base_problems(handoff, st, base: str) -> list:
-  """`launch.origin_problems` of `refs/superegm/base` against the handoff's own approval entry and the later links of
-  its chain, read as `launch` reads them."""
-  from superegm.launch import origin_problems
-  entries = core.load_approvals(st, handoff.design_path)
-  own = [i for i, e in enumerate(entries) if e.get("handoff_id") == st.handoff_id] or ([len(entries) - 1] if entries else [])
-  if not own:
-    raise core.HandoffError(f"{handoff.design_path} has no approval record")
-  return origin_problems(handoff.repo_root, base, {**entries[own[-1]], "path": str(handoff.design_path)}, entries[own[-1] + 1:])
 
 
 def conflicting_paths(repo_root: Path, head: str, base: str) -> list[str]:

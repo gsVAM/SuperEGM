@@ -356,11 +356,17 @@ def require_latest_handoff(store: Store) -> None:
 def frozen_mode(store: Store) -> str | None:
   """The `mode` frozen in the store's handoff's latest approval entry; None for no handoff, no entry of its own or an
   entry without one (1.2.0's), whose readers take the live `config.mode` (spec section 6, U43)."""
-  hid = store.handoff_id
+  own = own_approval(store, store.handoff_id)
+  return own.get("mode") if own else None
+
+
+def own_approval(store: Store, hid: str | None) -> dict | None:
+  """Handoff `hid`'s latest approval entry, found by scanning `approvals/*.json` for its id; None for no id or no
+  entry of its own (`frozen_mode`, and U62's `rounds` read in the inbox)."""
   for path in sorted((store.root / "approvals").glob("*.json")) if hid else ():
     own = [e for e in load_approvals(store, path) if e.get("handoff_id") == hid]
     if own:
-      return own[-1].get("mode")
+      return own[-1]
   return None
 
 

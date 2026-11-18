@@ -41,13 +41,7 @@ def launch(args, card):
   base, token_env = config["base"], config["builder"]["gh_token_env"]
   repo_root = core.git_toplevel(Path.cwd())
   core.run_git(["fetch", "--no-write-fetch-head", config["remote"], f"+refs/heads/{base}:refs/superegm/base"], repo_root)
-  spec = Path(core.handoff_spec(args, st))
-  entries = core.load_approvals(st, spec)
-  own = [i for i, e in enumerate(entries) if e.get("handoff_id") == st.handoff_id] or ([len(entries) - 1] if entries else [])
-  if not own:
-    raise core.HandoffError(f"{spec} has no approval record")
-  # the handoff's own entry (the last carrying its id) and the later links of the chain (spec section 7)
-  problems = origin_problems(repo_root, base, {**entries[own[-1]], "path": str(spec)}, entries[own[-1] + 1:])
+  problems = base_problems(repo_root, st, Path(core.handoff_spec(args, st)), base)
   if problems:
     raise core.HandoffError(problems[0])
   handoff = core.Handoff(plan, st)
@@ -77,10 +71,13 @@ def launch(args, card):
   views = {uid: {**summary["units"][uid], "launched": state["units"][uid].get("launched"), "stopped": uid in stopped}
            for uid in handoff.graph.order}
   flying = [uid for uid in handoff.graph.order if in_flight(st, uid, views[uid], idle)]
-  again = {uid for uid in handoff.graph.order if uid not in stopped and uid not in idle and not views[uid].get("landed")
-           and not merged(views[uid]) and (ready_again(core.load_foreman(st, uid), load_launches(st, uid))
-                                           or conflict_again(views[uid], core.load_foreman(st, uid), load_launches(st, uid),
-                                                             handoff.graph.parallel))}
+  again = set()
+  for uid in handoff.graph.order:
+    if uid in stopped or uid in idle or views[uid].get("landed") or merged(views[uid]):
+      continue
+    foreman, launches = core.load_foreman(st, uid), load_launches(st, uid)  # read once per unit
+    if ready_again(foreman, launches) or conflict_again(views[uid], foreman, launches, handoff.graph.parallel):
+      again.add(uid)
   ready = set(summary["ready"]) | again  # a unit an ingest returned to `revise` waits for a slot as a ready unit does
   marked = [uid for uid in handoff.graph.order if uid in ready and uid not in stopped][:max(0, config["max_in_flight"] - len(flying))]
   for uid in marked:
@@ -106,7 +103,8 @@ def in_flight(store, uid, view, idle):
   `clean`, until a newer round posts `clean`; after a proceed, while it runs. Once that launch has finished on a
   proceeded head, or the pull request's head has left the proceeded one, the unit is `waiting proceed` and holds
   no slot until the owner's second proceed. A unit whose `clean` an ingest rewrote
-  (`ready_again`) holds no slot until its relaunch records a launch, nor does a unit with a decision
+  (`ready_again`) holds no slot until its relaunch records a launch, nor does a unit marked for its merge round
+  (`conflict_again`, U62: `latest_clean` still holds) until `launch-builder` records the merge launch, nor a unit with a decision
   `report.pending_decisions` reads as pending, the read `report`'s free-slot count makes (amendment 5: the batch
   goes on while the owner rules)."""
   from superegm.report import pending_decisions  # imported here: `report` imports this module
@@ -237,6 +235,16 @@ def builder_login(config, token_env_value):
   if builder in config["owners"]:
     raise core.HandoffError(f"the builder token's login ({builder}) is in config.owners")
   return builder
+
+
+def base_problems(repo_root, st, spec, base, ref="refs/superegm/base") -> list:
+  """`origin_problems` of `ref` against the handoff's own approval entry (the last carrying its id, else the spec's
+  latest) and the later links of its chain (spec section 7): `launch`'s check, and a merge launch's (U62)."""
+  entries = core.load_approvals(st, spec)
+  own = [i for i, e in enumerate(entries) if e.get("handoff_id") == st.handoff_id] or ([len(entries) - 1] if entries else [])
+  if not own:
+    raise core.HandoffError(f"{spec} has no approval record")
+  return origin_problems(repo_root, base, {**entries[own[-1]], "path": str(spec)}, entries[own[-1] + 1:], ref=ref)
 
 
 def origin_problems(repo_root, base, approval=None, later=(), ref="refs/superegm/base", spec_only=False):

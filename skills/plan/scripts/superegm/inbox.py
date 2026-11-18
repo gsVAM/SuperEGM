@@ -191,7 +191,8 @@ def conflict_items(repo: str, state: dict, uid: str, foreman: dict, launches: li
     then = "approved under 1.2.0: the owner resolves it"
   elif conflict_again({**view, "conflict": True}, foreman, launches, parallel):
     then = "a merge round is marked at the next `launch`"
-  elif (latest_posted(foreman) or {}).get("outcome") == "revise" and (not launches or finished(launches[-1])):
+  elif ((latest_posted(foreman) or {}).get("outcome") == "revise" and not report.pending_decisions(foreman)
+        and (not launches or finished(launches[-1]))):  # an open decision (point 5's accept) may end the fixes
     then = "the next fix round carries the merge orders"
   else:
     then = "the rule is applied again once the launch ends or the owner rules"
@@ -201,11 +202,10 @@ def conflict_items(repo: str, state: dict, uid: str, foreman: dict, launches: li
 
 def parallel_of(store: core.Store, hid: str, spec) -> bool:
   """Whether handoff `hid`'s approval entry carries `rounds` (spec section 6.1, `core.Graph.parallel`): its own
-  latest entry, found as `core.frozen_mode` finds it, else its spec's latest entry; False with none."""
-  for path in sorted((store.root / "approvals").glob("*.json")):
-    own = [e for e in core.load_approvals(store, path) if e.get("handoff_id") == hid]
-    if own:
-      return "rounds" in own[-1]
+  latest entry (`core.own_approval`, as `core.frozen_mode` finds it), else its spec's latest entry; False with none."""
+  own = core.own_approval(store, hid)
+  if own is not None:
+    return "rounds" in own
   entries = core.load_approvals(store, spec) if spec else []
   return bool(entries) and "rounds" in entries[-1]
 
