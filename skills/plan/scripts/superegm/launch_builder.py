@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING`, its freshly pinned base and its `git merge-tree` brief (U62); a fix round resuming the previous launch's session, `resumed_from` or `fresh` and `profile_dir` on the entry, and the stale-paths line (U63); the `superegm-precheck` script on every launch, its allow rules and `{{precheck}}`, the whitespace refusal on every launch, `builder.precheck_attempts` and the launch's issue-comment snapshot (U67).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING`, its freshly pinned base and its `git merge-tree` brief (U62); a fix round resuming the previous launch's session, `resumed_from` or `fresh` and `profile_dir` on the entry, and the stale-paths line (U63); the `superegm-precheck` script on every launch, its allow rules and `{{precheck}}`, the whitespace refusal on every launch, `builder.precheck_attempts` and the launch's issue-comment snapshot (U67); a unit with `builder.escalate_after` failing head rounds launching on the `difficult` tier's pair, `escalated` on the entry (U68).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch, started
 detached and recorded `running`."""
@@ -83,6 +83,9 @@ def prepare(args, card):
   dirs = plugin_dirs(builder_config["plugins"], elephant_profile())  # each listed plugin's user-scope directory, version and hooks
   mcp_file = st.path("launches", f"{unit}_r{rnd}_mcp.json")
   tier = core.unit_tier(st, unit)
+  escalated = escalates(st, unit, tier, builder_config)  # a stronger model on a later round (spec 1.2.1 section 6.4, U68)
+  if escalated:
+    tier = "difficult"
   pair = core.tier_pair(config, tier)  # the model and effort the unit's tier picks (U33)
   for value in (*(d["dir"] for d in dirs), mcp_file, *pair):  # command_line's quote check, before any worktree or store write
     if "'" in str(value):
@@ -193,6 +196,8 @@ def prepare(args, card):
            "result_file": str(result), "prompt_sha256": core.sha256_file(prompt), "boot_id": core.boot_id(), "pid": pid, "command": line, "session_id": session_id,
            "instructions": manifest,  # the files that reached the prompt, [] when none was addressed (U37)
            "profile_dir": profile_dir, **resume}  # `resumed_from` or `fresh` (U63)
+  if escalated:  # absent on a launch that did not escalate (U68)
+    entry["escalated"] = True
   if merge:  # spec section 6.1: absent on a launch with no merge orders
     entry["merge"], entry["base"] = merge, base_commit
   launches.append(entry)
@@ -286,6 +291,43 @@ def write_precheck(store, unit: str, rnd: int, repo_root: Path) -> Path:
                     f'exec {q(sys.executable)} {q(HELPER)} precheck --handoff {q(store.handoff_id)} --unit {q(unit)} "$@"\n')
   script.chmod(0o700)
   return script
+
+
+def escalates(st, unit: str, tier: str, builder_config: dict) -> bool:
+  """Whether the launch moves up to the `difficult` tier (spec 1.2.1 section 6.4): never from `difficult` itself or with
+  no `difficult` row; otherwise when the current head cycle holds `builder.escalate_after` counted rounds
+  (`failing_head_rounds`), `0` or a non-integer turning that off."""
+  if tier == "difficult" or not (builder_config.get("tiers") or {}).get("difficult"):
+    return False
+  after = builder_config.get("escalate_after", 2)
+  return isinstance(after, int) and not isinstance(after, bool) and after > 0 and failing_head_rounds(st, unit) >= after
+
+
+def failing_head_rounds(st, unit: str) -> int:
+  """The posted foreman rounds of the unit's current head cycle that say the model fell short, each read with
+  `review.load_round`: outcome `revise` or `cap-reached`, or `contested:` while the round holds an open blocking
+  finding that is no builder contest, no `test-delta:` finding and no `changed path outside Scope paths` one. A merge
+  round, a round collected as `not run (...)`, an `owner:` outcome and every round of a cycle a `proceed` closed
+  do not count."""
+  from superegm import review  # review imports this module's callers
+  cycle, _ = review.latest_cycle(st, "head", unit)
+  if not cycle or review.last_proceed(cycle):
+    return 0
+  rid, count = review.review_id(st, "head", unit, cycle["cycle"]), 0
+  for entry in core.load_foreman(st, unit)["rounds"]:
+    rnd = review.load_round(st, rid, entry["round"]) if entry.get("phase") == "posted" and not entry.get("merge") else None
+    if rnd is None:
+      continue
+    word = entry.get("outcome") or ""
+    if word in ("revise", "cap-reached"):
+      count += 1
+    elif word.startswith("contested:"):
+      contested = {c["fid"] for c in rnd.get("builder_contested") or []}
+      findings = ((rnd.get("reviewers") or {}).get("foreman") or {}).get("findings") or []
+      count += any(f["disposition"] is None and review.blocking(f) and f["id"] not in contested
+                   and not f["claim"].startswith("test-delta:") and f["claim"] != "changed path outside Scope paths"
+                   for f in findings)
+  return count
 
 
 def refusal(store, state, config, unit, rnd, builder):
