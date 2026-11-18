@@ -158,6 +158,8 @@ def prepare(args, card):
   core.journal(st, f"{unit} launch {rnd} prepared" + (f" (managed plugins: {', '.join(managed)})" if managed else ""))
   result = st.path("launches", f"{unit}_r{rnd}_result.json")
   session_id = str(uuid.uuid4())  # the session's transcript `projects/<slug>/<id>.jsonl`, read at the exit (U27)
+  profile_dir = str(Path(config["builder"]["profile_dir"]).expanduser())
+  resume = resume_or_fresh(load_launches(st, unit), pair, profile_dir, manifest)  # spec 1.2.1 section 6.2 (U63)
   line = command_line(config, worktree, prompt, result, args.runcard, tools, launched_gh, identity["login"], identity["email"],
                       [d["dir"] for d in dirs], mcp_file, pair, session_id=session_id)
   # the one behaviour (amendment 10): the wrapper started detached, then the launch recorded `running`
@@ -167,7 +169,8 @@ def prepare(args, card):
            "started_at": core.now_iso(), "status": "running",
            "model": pair[0], "effort": pair[1], "tier": tier,  # the requested pair (U28), picked by the tier (U33)
            "result_file": str(result), "prompt_sha256": core.sha256_file(prompt), "boot_id": core.boot_id(), "pid": pid, "command": line, "session_id": session_id,
-           "instructions": manifest}  # the files that reached the prompt, [] when none was addressed (U37)
+           "instructions": manifest,  # the files that reached the prompt, [] when none was addressed (U37)
+           "profile_dir": profile_dir, **resume}  # `resumed_from` or `fresh` (U63)
   if merge:  # spec section 6.1: absent on a launch with no merge orders
     entry["merge"], entry["base"] = merge, base_commit
   launches.append(entry)
@@ -734,6 +737,35 @@ def launched_pairs(gh: str, name: str, email: str) -> list:
   for i, (key, value) in enumerate(entries):
     pairs += [(f"GIT_CONFIG_KEY_{i}", key), (f"GIT_CONFIG_VALUE_{i}", value)]
   return pairs
+
+
+def has_result(result_file) -> bool:
+  """A launch's result file parses to an object with `type: "result"` and `is_error` false (spec 1.2.1 section 6.2)."""
+  try:
+    data = json.loads(Path(result_file).read_text(encoding="utf-8"))
+  except (OSError, TypeError, ValueError, UnicodeDecodeError):
+    return False
+  return isinstance(data, dict) and data.get("type") == "result" and data.get("is_error") is False
+
+
+def resume_or_fresh(launches: list, pair: tuple, profile_dir: str, manifest: list) -> dict:
+  """`{"resumed_from": <id>}` or `{"fresh": <reason>}` for the next launch, over the immediately previous launch
+  alone (spec 1.2.1 section 6.2): the checks in order result (its `session_id` and its result file), transcript
+  (`projects/*/<id>.jsonl` under its `profile_dir`, none on a pre-U63 entry), model, effort and profile, then its
+  recorded `instructions[]` against the new prompt's manifest."""
+  if not launches:
+    return {"fresh": "first round"}
+  last = launches[-1]
+  sid = last.get("session_id")
+  if not isinstance(sid, str) or not sid or not has_result(last.get("result_file")):
+    return {"fresh": "no result"}
+  if not last.get("profile_dir") or not any(Path(last["profile_dir"]).glob(f"projects/*/{sid}.jsonl")):
+    return {"fresh": "no transcript"}
+  if (last.get("model"), last.get("effort"), last["profile_dir"]) != (pair[0], pair[1], profile_dir):
+    return {"fresh": "model changed"}
+  if "instructions" not in last or last["instructions"] != manifest:
+    return {"fresh": "instructions changed"}
+  return {"resumed_from": sid}
 
 
 def builder_flags(config, tools: list, plugin_dirs: list, mcp_file: Path, pair: tuple[str, str]) -> tuple[list[str], list[str]]:
