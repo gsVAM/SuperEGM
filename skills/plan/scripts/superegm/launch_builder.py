@@ -475,13 +475,15 @@ BRIEF_COMMITS = 5  # the base commits named under one path
 def landed_holders(handoff, state: dict, path: str, head: str, base: str) -> tuple[list[str], list[tuple[str, str]]]:
   """The landed units whose scope holds `path` (spec section 6.1), and the commits `base` holds past `head` that touch
   it (sha, subject), newest first. Read from those commits, not the saved status pass alone, which may predate a
-  landing: `--full-history` keeps a landing merge commit, which Git's default simplification drops as TREESAME to
-  its unit branch. The handoff's units, in its graph's order, whose Scope paths hold `path` and which the saved status
+  landing: `--first-parent` reads the base's own line, where each landing (a squash, or a merge commit diffed against
+  the base it merged into) is listed when it changed `path`. Git's default simplification drops a landing merge
+  commit as TREESAME to its unit branch, and `--full-history` also lists the merge of a branch that never touched
+  `path` but forked before the base changed it. The handoff's units, in its graph's order, whose Scope paths hold `path` and which the saved status
   reads landed or whose saved pull request or unit branch a commit names; then, as `<handoff>/<unit>`, a unit of
   another handoff of the store whose unit branch a commit names, or whose Scope paths (its `handoff_units.json`) hold
   `path` and whose saved pull request a commit names."""
   from superegm.report import unit_view  # the one reader of the saved status
-  out = core.run_git(["log", "-z", "--full-history", "--format=%H%x1f%s%x1f%B", f"{head}..{base}", "--", path],
+  out = core.run_git(["log", "-z", "--first-parent","--format=%H%x1f%s%x1f%B", f"{head}..{base}", "--", path],
                      handoff.repo_root)
   commits = [c.split("\x1f", 2) for c in out.split("\0") if c.strip("\n")]
   text = "\n".join(c[2] if len(c) > 2 else "" for c in commits)
