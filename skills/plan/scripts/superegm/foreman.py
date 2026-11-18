@@ -71,8 +71,12 @@ def run(args):
     print(f"recovered {recovered}")
     return 1
   status_exit = review.status_code(rid, args.runcard) if rid else 0
+  ruling = review.last_proceed(review.load_review(st, rid)) if rid else None
+  given = next((e for e in reversed(data.get("proceeds") or []) if ruling and e.get("ruling") == ruling["id"]), None)
+  # spec section 6.1: a launch recorded after the proceed is its merge launch, and its head is not reviewed
+  proceeded = rid if given and launches and launches[-1]["round"] > (given.get("launch") or 0) else None
   reason = dispatch_refusal(pr, core.read_ci(repo, pr["headRefOid"]), launches, rounds, data["decisions"],
-                            data["rulings"], status_exit)
+                            data["rulings"], status_exit, proceeded)
   if reason:
     print(f"dispatch refused: {reason}")
     return 1
@@ -114,9 +118,10 @@ def recover_posted(st, unit: str, data: dict, reviews: list, runcard: str):
 
 
 def dispatch_refusal(pr: dict, ci: dict, launches: list, rounds: list, decisions: list, rulings: list,
-                     status_exit: int):
+                     status_exit: int, proceeded: str | None = None):
   """Spec section 11's predicate, its first failing clause: CI concluded on the head, the latest launch
-  terminal, no round posted since it, no decision pending, the review not stalled."""
+  terminal, the head not a proceeded review's merge launch (`proceeded`, that review's id: the owner proceeds
+  again, spec section 4.2), no round posted since it, no decision pending, the review not stalled."""
   if not ci["check_runs"] and not ci["statuses"]:
     return "ci absent"
   if core.ci_verdict(ci) == "waiting-for-ci":
@@ -126,6 +131,8 @@ def dispatch_refusal(pr: dict, ci: dict, launches: list, rounds: list, decisions
   latest = launches[-1]
   if not latest["status"].startswith(("exited", "interrupted")):  # `interrupted (reboot)`: the boot-id proof (U24)
     return f"launch {latest['round']} not terminal"
+  if proceeded:
+    return f"review {proceeded} proceeded"
   for entry in rounds:
     if entry.get("phase") == "posted" and entry.get("launch") == latest["round"]:
       return f"round {entry['round']} posted since launch {latest['round']}"
