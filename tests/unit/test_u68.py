@@ -131,3 +131,13 @@ def test_failing_head_rounds_escalate(world, started, planned, rounds, tier):
   finally:
     launch_builder.prompt_text = real
   assert made[-1] == brief
+
+
+@pytest.mark.parametrize("after", ["proceed", "merge: true"])
+def test_an_escalated_unit_stays_escalated(world, started, after):
+  # an earlier launch entry with escalated: true keeps every later launch difficult
+  s, card, _ = started
+  rounds = ["revise", "revise", "proceed", "revise"] if after == "proceed" else ["revise", "revise merge: true"]
+  entry, _, config = second_launch(world, s, card, rounds, "doable", earlier=True)
+  assert (entry["tier"], entry["escalated"]) == ("difficult", True)
+  assert (entry["model"], entry["effort"]) == superegm.tier_pair(config, "difficult")
