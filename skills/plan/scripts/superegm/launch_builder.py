@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING` (U62).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING`, its freshly pinned base and its `git merge-tree` brief (U62).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch, started
 detached and recorded `running`."""
@@ -111,6 +111,11 @@ def prepare(args, card):
     core.run_git(["fetch", "--no-write-fetch-head", st.config["remote"], f"+refs/pull/{pr}/head:{ref}"], handoff.repo_root)
   elif rnd >= 2:  # no PR yet (decision point 3's `relaunch`): the retained local branch is the tree the builder gets
     ref = f"refs/heads/{branch}"
+  base_commit = conflicts = None
+  if merge:  # spec section 6.1: the base as it is now, never the batch's fetch, pinned for the brief, the command and the entry
+    core.run_git(["fetch", "--no-write-fetch-head", st.config["remote"], f"+refs/heads/{config['base']}:refs/superegm/base"], handoff.repo_root)
+    base_commit = core.run_git(["rev-parse", "refs/superegm/base^{commit}"], handoff.repo_root).strip()
+    conflicts = [(path, landed_holders(handoff, state, path)) for path in conflicting_paths(handoff.repo_root, ref, base_commit)]
   pr_block = pr_block_text(handoff.repo_root, ref, config["pr_block_file"]) if config["pr_block_file"] else None
   # The launch's tree, before any worktree: an orient or spec-range refusal is an ordinary precondition.
   orient_text = core.read_text(orient.orient_unit(st, handoff.repo_root, ref, unit))
@@ -123,7 +128,7 @@ def prepare(args, card):
                      spec_range=range_text, owners=config.get("owners") or [], foreman=foreman_data,
                      amendments=amendments_for(st, unit, issue_body))
   if merge:
-    text = text.rstrip("\n") + "\n\n---\n\n" + merge_brief(merge)
+    text = text.rstrip("\n") + "\n\n---\n\n" + merge_brief(merge, base_commit, conflicts)
   # the builder's `# Repository instructions`, the handoff's frozen files, rendered once per card and placed last (U37)
   manifest, section = instructions.render_stored(st, "builder", "local", card=args.runcard, handoff_id=st.handoff_id)
   if section:
@@ -151,7 +156,7 @@ def prepare(args, card):
            "result_file": str(result), "prompt_sha256": core.sha256_file(prompt), "boot_id": core.boot_id(), "pid": pid, "command": line, "session_id": session_id,
            "instructions": manifest}  # the files that reached the prompt, [] when none was addressed (U37)
   if merge:  # spec section 6.1: absent on a launch with no merge orders
-    entry["merge"] = merge
+    entry["merge"], entry["base"] = merge, base_commit
   launches.append(entry)
   core.atomic_write(st.path("launches", unit), {"launches": launches})
   done = f"{unit} launch {rnd} running (pid {pid})"
@@ -426,11 +431,42 @@ def merge_mode(parallel: bool, saved_pr, foreman: dict):
   return "with-fix"
 
 
-def merge_brief(merge: str) -> str:
-  """The prompt's `# Merge orders` section (spec section 6.1)."""
+def conflicting_paths(repo_root: Path, head: str, base: str) -> list[str]:
+  """The paths `git merge-tree --write-tree` of `head` and `base` leaves conflicted (spec section 6.1), in its order,
+  once each; none when the two merge cleanly. Exit 1 is a conflicted merge; any other failure is a refusal."""
+  with core.hook_free() as pairs:
+    result = subprocess.run(["git", *pairs, "merge-tree", "--write-tree", "--name-only", "--no-messages", head, base],
+                            cwd=str(repo_root), capture_output=True, text=True, encoding="utf-8")
+  if result.returncode not in (0, 1):
+    raise core.HandoffError(f"git merge-tree {head} {base} failed: {result.stderr.strip()}")
+  paths = []
+  for line in result.stdout.splitlines()[1:]:  # the first line is the merged tree
+    if line and line not in paths:
+      paths.append(line)
+  return paths
+
+
+def landed_holders(handoff, state: dict, path: str) -> list[str]:
+  """The handoff's landed units (the saved status pass) whose Scope paths hold `path`, in the plan's order."""
+  from superegm.report import unit_view  # the one reader of the saved status
+  holders = []
+  for uid in handoff.graph.order:
+    if not unit_view(state, uid)["landed"]:
+      continue
+    if any(path == s or path.startswith(s.rstrip("/") + "/") for s, _kind in handoff.plan.units[uid].scope):
+      holders.append(uid)
+  return holders
+
+
+def merge_brief(merge: str, base: str, conflicts: list) -> str:
+  """The prompt's `# Merge orders` section (spec section 6.1): the pinned base commit, the merge command and the
+  conflicting paths, each with the landed units whose scope holds it."""
   kind = "a merge round alone" if merge == "alone" else "the merge orders with this round's fixes"
+  lines = [f"- `{path}`" + (f" (landed: {', '.join(units)})" if units else "") for path, units in conflicts]
   return (f"# Merge orders\n\nThis launch is {kind} (`merge: {merge}`): GitHub reads your pull request `CONFLICTING`. "
-          "Merge `refs/superegm/base` into your branch as the builder orders' merge orders say.\n")
+          f"The base is pinned at `{base}` (`refs/superegm/base`); merge it with `git merge {base}`, as the builder "
+          "orders' merge orders say.\n\nConflicting paths (`git merge-tree --write-tree` of your head and the base):\n\n"
+          + ("\n".join(lines) or "- none at the pinned base") + "\n")
 
 
 def segment_heads(command: str) -> list:
