@@ -136,3 +136,33 @@ def test_resume_or_fresh(world, started, tmp_path, previous, recorded):
   entry = launches_of(s)[-1]
   assert {k: entry.get(k) for k in recorded} == recorded and entry["profile_dir"] == profile
   assert ("resumed_from" in entry) != ("fresh" in entry)
+
+
+def resumable(world, s, card):
+  """Round 1 launched and ended with a result and a transcript, as a resume needs; returns its entry."""
+  launch_round(world, card, 1)
+  first = launches_of(s)[0]
+  first["profile_dir"], first["session_id"] = profile_of(world), "s-1"
+  write_launches(s, [ended(first)])
+  return first
+
+
+def test_resumed_command_and_prompt(world, started, monkeypatch):
+  # §6.2: flags through U60's builder_flags, run from the new round's worktree; one stale-paths line first
+  s, card, launch_builder = started
+  config = json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))
+  _, args = launch_builder.builder_flags(config, ["Read"], [], Path("mcp.json"), ("claude-opus-5-5", "medium"), resume_from="s-1")
+  assert args[args.index("--resume"):args.index("--resume") + 3] == ["--resume", "s-1", "--fork-session"]
+  resumable(world, s, card)
+  made = []
+  real = launch_builder.prompt_text
+  monkeypatch.setattr(launch_builder, "prompt_text", lambda *a, **k: made.append(real(*a, **k)) or made[-1])
+  launch_round(world, card, 2)
+  entry = launches_of(s)[-1]
+  assert entry["resumed_from"] == "s-1"
+  command, worktree_r2 = entry["command"], entry["worktree"]
+  prompt_text_output = made[-1]
+  prompt = Path(s.path("launches", f"{UNIT}_r2_prompt.md")).read_text(encoding="utf-8")
+  assert "--resume 's-1' --fork-session" in command or "--resume s-1 --fork-session" in command
+  assert "--session-id" in command and command.startswith(f"SUPEREGM_EXIT=") and f"cd '{worktree_r2}'" in command
+  assert prompt.split("\n", 1)[1] == prompt_text_output and worktree_r2 in prompt.split("\n", 1)[0] and "stale" in prompt.split("\n", 1)[0]
