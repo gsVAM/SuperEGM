@@ -393,6 +393,30 @@ def test_merge_brief_names_holders_landed_by_a_merge_commit(world, monkeypatch, 
   assert f"base commit `{new_base[:12]}`: {merge_message}" in prompt
 
 
+def test_merge_brief_leaves_out_an_unrelated_merge(world, monkeypatch, spawn_fake):
+  # change-review-5-1, codebase-details-5-1: a unit branch that forked before the base changed the path and never
+  # touched it, landed later by a merge commit, is neither a holder nor a base commit under that path
+  s, card, hid, _ = seed(world, units=("U07", "U08"))
+  with_rounds(s, world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  batch_base, main = merge_revision(world, s, card, base_message="U08's worker (#72)")
+  save_pr(s, "U08", 72, "b" * 40, "MERGEABLE")
+  side = world.repo.parent / "side"
+  unrelated = commit_on(world, batch_base, "src/other.py", "another unit's file\n", "refs/heads/unrelated", "its own work")
+  git(["checkout", "-q", "--detach", main], side)
+  merge_message = f"Merge pull request #95 from o/{superegm.BRANCH_PREFIX}/{OTHER}/U05"
+  git(["-c", "user.name=t", "-c", "user.email=t@example.com", "merge", "-q", "--no-ff", "-m", merge_message, unrelated], side)
+  git(["push", "-q", "origin", "HEAD:refs/heads/main"], side)
+  new_base = git(["rev-parse", "HEAD"], side).strip()
+  code, out = world.run("launch-builder", "--unit", "U07", "--round", 2, "--runcard", card)
+  assert code == 0, out
+  assert launches_of(s, "U07")[-1]["base"] == new_base
+  prompt = s.path("launches", "U07_r2_prompt.md").read_text(encoding="utf-8")
+  assert "- `src/worker.py` (landed: U08)\n" in prompt, prompt
+  assert f"base commit `{main[:12]}`: U08's worker (#72)" in prompt
+  assert OTHER not in prompt and new_base[:12] not in prompt.split("Conflicting paths")[1], prompt
+
+
 @pytest.mark.parametrize("scope, landed", [
   ("src/worker.py", f"(landed: {OTHER}/U03)"),
   ("src/other.py", None),  # its scope does not hold the path: not a holder
