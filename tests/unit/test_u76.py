@@ -29,3 +29,13 @@ def test_a_bad_reviewer_file_is_refused_naming_it(world, name, text):
   with pytest.raises(superegm.HandoffError) as refusal:
     reviewers.load(world.repo)
   assert f".superegm/reviewers/{name}" in str(refusal.value)
+
+
+def test_doctor_prints_the_reviewers_line_after_mcp(world, monkeypatch, tmp_path):
+  """With no reviewer file the line after `mcp:` is `reviewers: none`."""
+  from test_doctor import arranged
+  arranged(world, monkeypatch, tmp_path, None)
+  got, out = world.run("doctor")
+  lines = out.splitlines()
+  assert got == 0, out
+  assert lines[lines.index(next(l for l in lines if l.startswith("mcp:"))) + 1] == "reviewers: none"
