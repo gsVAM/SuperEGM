@@ -312,14 +312,16 @@ def test_merge_launch_scratch_ref_is_its_own(world, monkeypatch, spawn_fake):
   with_rounds(s, world)
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
   batch_base, new_base = merge_revision(world, s, card)
-  git(["update-ref", "refs/superegm/merge-base", batch_base], world.repo)  # another invocation's scratch, mid-launch
+  # codebase-details-4-2: a concurrent invocation's scratch ref, mid-launch, in the namespace every invocation writes
+  theirs = "refs/superegm/scratch/" + "0" * 32
+  git(["update-ref", theirs, batch_base], world.repo)
   code, out = world.run("launch-builder", "--unit", "U07", "--round", 2, "--runcard", card)
   assert code == 0, out
   assert launches_of(s, "U07")[-1]["base"] == new_base
-  assert git(["rev-parse", "refs/superegm/merge-base"], world.repo).strip() == batch_base  # left as it was
+  assert git(["rev-parse", theirs], world.repo).strip() == batch_base  # neither read nor moved nor deleted
   assert git(["rev-parse", "refs/superegm/base"], world.repo).strip() == new_base
   left = git(["for-each-ref", "--format=%(refname)", "refs/superegm/"], world.repo).split()
-  assert {r for r in left if not r.startswith("refs/superegm/pr/")} == {"refs/superegm/base", "refs/superegm/merge-base"}  # its own scratch removed
+  assert {r for r in left if not r.startswith("refs/superegm/pr/")} == {"refs/superegm/base", theirs}  # its own scratch removed
 
 
 @pytest.mark.parametrize("message, landed", [
@@ -340,6 +342,76 @@ def test_merge_brief_names_holders_from_the_base(world, monkeypatch, spawn_fake,
   prompt = s.path("launches", "U07_r2_prompt.md").read_text(encoding="utf-8")
   assert f"- `src/worker.py` {landed}" in prompt
   assert f"base commit `{new_base[:12]}`: {message}" in prompt
+
+
+OTHER = "2026-01-01-other-abcdef"
+
+
+def other_handoff(s, uid="U03", number=90, scope="src/worker.py"):
+  """Another handoff in the store whose unit `uid` holds `scope` and whose saved pull request is #`number`."""
+  import superegm as core
+  put(s.root / "handoffs" / f"{OTHER}.json", json.dumps({"id": OTHER, "spec": None, "opened_at": None, "closed_at": None}))
+  hs = core.handoff_store(s, OTHER)
+  put(hs.path("state"), json.dumps({"handoff_id": OTHER, "units": {uid: {"number": 9, "pr": {"number": number}}}}))
+  put(hs.path("units"), json.dumps({"handoff_id": OTHER, "order": [uid],
+                                    "units": {uid: {"id": uid, "scope": [{"path": scope, "action": "modify"}]}}}))
+
+
+def land_by_merge(world, start, branch_message, merge_message):
+  """A unit branch off `start` writing `src/worker.py`, landed on origin's main by a real two-parent merge commit
+  (GitHub's "Merge pull request"); the merge's sha."""
+  side = world.repo.parent / "side"
+  branch_tip = commit_on(world, start, "src/worker.py", "the landed unit's worker\n", "refs/heads/landing", branch_message)
+  git(["checkout", "-q", "--detach", start], side)
+  git(["-c", "user.name=t", "-c", "user.email=t@example.com", "merge", "-q", "--no-ff", "-m", merge_message, branch_tip], side)
+  git(["push", "-q", "origin", "HEAD:refs/heads/main"], side)
+  return git(["rev-parse", "HEAD"], side).strip()
+
+
+@pytest.mark.parametrize("merge_message, landed, other", [
+  ("Merge pull request #72 from o/feature", "(landed: U08)", False),
+  (f"Merge pull request #90 from o/{superegm.BRANCH_PREFIX}/{OTHER}/U03", f"(landed: {OTHER}/U03)", False),
+  ("Merge pull request #90 from o/feature", f"(landed: {OTHER}/U03)", True),
+])
+def test_merge_brief_names_holders_landed_by_a_merge_commit(world, monkeypatch, spawn_fake, merge_message, landed, other):
+  # astra-4-1, codebase-details-4-1: a unit landed by a two-parent merge commit is named from that commit, which
+  # Git's default history simplification would leave out (it is TREESAME to the unit branch)
+  s, card, hid, _ = seed(world, units=("U07", "U08"))
+  with_rounds(s, world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  _, main = merge_revision(world, s, card)
+  new_base = land_by_merge(world, main, "the unit's own work", merge_message)
+  save_pr(s, "U08", 72, "b" * 40, "MERGEABLE")
+  if other:
+    other_handoff(s)
+  code, out = world.run("launch-builder", "--unit", "U07", "--round", 2, "--runcard", card)
+  assert code == 0, out
+  entry = launches_of(s, "U07")[-1]
+  prompt = s.path("launches", "U07_r2_prompt.md").read_text(encoding="utf-8")
+  assert entry["base"] == new_base
+  assert f"- `src/worker.py` {landed}" in prompt, prompt
+  assert f"base commit `{new_base[:12]}`: {merge_message}" in prompt
+
+
+@pytest.mark.parametrize("scope, landed", [
+  ("src/worker.py", f"(landed: {OTHER}/U03)"),
+  ("src/other.py", None),  # its scope does not hold the path: not a holder
+])
+def test_merge_brief_names_another_handoffs_squash(world, monkeypatch, spawn_fake, scope, landed):
+  # astra-4-2: a squash merge of another handoff's unit names only its pull request number; that handoff's saved
+  # pull request and Scope paths name the unit
+  s, card, hid, _ = seed(world, units=("U07", "U08"))
+  with_rounds(s, world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  merge_revision(world, s, card, base_message="Update worker (#90)")
+  other_handoff(s, scope=scope)
+  code, out = world.run("launch-builder", "--unit", "U07", "--round", 2, "--runcard", card)
+  assert code == 0, out
+  prompt = s.path("launches", "U07_r2_prompt.md").read_text(encoding="utf-8")
+  if landed:
+    assert f"- `src/worker.py` {landed}" in prompt, prompt
+  else:
+    assert "- `src/worker.py`\n" in prompt and OTHER not in prompt, prompt
 
 
 # ---------------------------------------------------------------- S5: the merge orders' text
@@ -407,6 +479,9 @@ def conflict_wave(world, case):
     u01["rounds"] = [{**WAVE_CLEAN["rounds"][0], "outcome": "revise"}]
     u01["decisions"] = [{"id": "D1", "point": 5, "source": "review head-U01-c1", "question": "accept or revise?",
                          "options": ["accept", "revise"]}]
+  if case == "proceeded on revise, relaunched":  # change-review-4-1: proceeded on a revise round, launch 2 finished
+    u01["rounds"] = [{**WAVE_CLEAN["rounds"][0], "outcome": "revise"}]
+    u01["launches"] = [{"round": 1, "status": "exited 0"}, {"round": 2, "status": "exited 0"}]
   if case == "proceeded, ci pending":
     u01["ci"] = "pending"
   s = wave_store(world, U01=u01)
@@ -432,6 +507,7 @@ def conflict_wave(world, case):
     ("stopped", "conflict; ", "stopped"),
     ("proceeded, running", "conflict: a merge round once the launch ends", "once the launch ends or the owner rules"),
     ("revise, point 5", "conflict; ", "once the launch ends or the owner rules"),
+    ("proceeded on revise, relaunched", "conflict; proceed again", "once the launch ends or the owner rules"),
 ])
 def test_conflict_board_action_and_inbox_line(world, case, board, inbox_action):
   # astra-1-3, change-review-1-1, change-review-1-2, codebase-details-1-4, codebase-details-1-7: §6.1
