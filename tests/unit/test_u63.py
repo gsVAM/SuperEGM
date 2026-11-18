@@ -1,0 +1,138 @@
+# Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
+# Added by SuperEGM (gsVAM), 2026: U63
+
+"""U63 (spec 1.2.1 section 6.2): a launch of round 2 or later resumes the immediately previous launch's session when
+that launch has a session id, a result, a transcript, the same model, effort and profile and the same instructions
+manifest; it records `resumed_from` or `fresh: <reason>`, counts only its own tool uses, and a resumed launch ending
+with no result and no commit of its own is a failed resume, relaunched fresh, never decision point 3."""
+
+import json
+import shutil
+from pathlib import Path
+
+import pytest
+
+import superegm  # the harness reloads the package per test: read its names at call time
+from test_builders import seed, launches_of, UNIT, no_graphify, which  # noqa: F401  the autouse fixtures
+from test_u37 import blob_sha
+
+OK = {"type": "result", "subtype": "success", "is_error": False, "result": "done", "session_id": "s"}
+RULES = ".superegm/rules.md"
+
+
+def jsonl(path, items):
+  path.parent.mkdir(parents=True, exist_ok=True)
+  path.write_text("".join(json.dumps(i) + "\n" for i in items), encoding="utf-8")
+
+
+def agent(tid):
+  return {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": tid, "name": "Agent", "input": {"prompt": "p"}}]}}
+
+
+def profile_of(world):
+  return json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]["profile_dir"]
+
+
+def write_launches(s, launches):
+  s.path("launches", f"{UNIT}.json").write_text(json.dumps({"launches": launches}), encoding="utf-8")
+
+
+def ended(entry, result=OK, transcript=True, code=0):
+  """The launch `entry` as an exit leaves it: `exited <code>`, its exit file, its result file (`None`: none) and,
+  when `transcript`, its session's transcript under its `profile_dir`."""
+  entry["status"] = f"exited {code}"
+  Path(entry["result_file"] + ".exit").write_text(f"{code}\n", encoding="utf-8")
+  if result is not None:
+    Path(entry["result_file"]).write_text(json.dumps(result), encoding="utf-8")
+  if transcript:
+    jsonl(Path(entry["profile_dir"]) / "projects/-wt" / f"{entry['session_id']}.jsonl", [agent("a1")])
+  return entry
+
+
+def instructed(world, s, card, text):
+  """The handoff's approval freezing `RULES` with `text` for the builder, `card`'s stored render dropped (a new card's)."""
+  from superegm import approve_spec
+  sha12 = blob_sha(text.encode())
+  spec = json.loads(s.path("state").read_text(encoding="utf-8"))["design"]["path"]
+  path = s.path("approvals", superegm.spec_slug(spec))
+  record = json.loads(path.read_text(encoding="utf-8"))
+  record["instructions"] = [{"file": RULES, "to": ["builder"], "sha": sha12}]
+  path.write_text(json.dumps(record), encoding="utf-8")
+  approve_spec.write_copy(s, {"file": RULES, "sha": sha12, "text": text})
+  path = s.path("runcards", card)
+  data = json.loads(path.read_text(encoding="utf-8"))
+  if data.pop("instructions", None) is not None:
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+@pytest.fixture
+def started(world, monkeypatch):
+  """`seed`, `launch` and round 1's `launch-builder` (the spawn faked); returns `(s, card, launch_builder)`."""
+  from superegm import launch_builder
+  s, card, hid, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  monkeypatch.setattr(launch_builder, "start_detached", lambda command, log, env: 4242)
+  assert world.run("launch", "--runcard", card)[0] == 0
+  return s, card, launch_builder
+
+
+def launch_round(world, card, rnd):
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", rnd, "--runcard", card)
+  assert code == 0, out
+
+
+@pytest.mark.parametrize("previous, recorded", [
+  ("none", {"fresh": "first round"}),
+  ("ok", {"resumed_from": "s-1"}),
+  ("result file is_error true", {"fresh": "no result"}),
+  ("no session_id", {"fresh": "no result"}),
+  ("previous no result, older launch ok", {"fresh": "no result"}),
+  ("no transcript under its profile_dir", {"fresh": "no transcript"}),
+  ("no profile_dir (pre-U63 entry)", {"fresh": "no transcript"}),
+  ("effort differs, transcript missing too", {"fresh": "no transcript"}),
+  ("tier changed: model differs", {"fresh": "model changed"}),
+  ("profile differs", {"fresh": "model changed"}),
+  ("re-approval changed a reference document", {"fresh": "instructions changed"}),
+  ("previous recorded no instructions[]", {"fresh": "instructions changed"}),
+])
+def test_resume_or_fresh(world, started, tmp_path, previous, recorded):
+  # §6.2: only the immediately previous launch; checks in order result, transcript, model, instructions
+  s, card, _ = started
+  profile = profile_of(world)
+  if previous == "re-approval changed a reference document":
+    instructed(world, s, card, "Run the suite.\n")
+  launch_round(world, card, 1)
+  if previous != "none":
+    first = launches_of(s)[0]
+    first["profile_dir"] = profile  # as U63 records it; a pre-U63 entry has none
+    first["session_id"] = "s-1"
+    launches = [ended(first)]
+    if previous == "result file is_error true":
+      ended(first, result=dict(OK, is_error=True))
+    elif previous == "no session_id":
+      first.pop("session_id")
+    elif previous == "previous no result, older launch ok":
+      second = dict(first, round=2, session_id="s-2", result_file=first["result_file"].replace("_r1_", "_r2_"))
+      launches.append(ended(second, result=None))
+    elif previous == "no transcript under its profile_dir":
+      shutil.rmtree(Path(profile) / "projects")
+    elif previous == "no profile_dir (pre-U63 entry)":
+      first.pop("profile_dir")
+    elif previous == "effort differs, transcript missing too":
+      first["effort"] = "low"
+      shutil.rmtree(Path(profile) / "projects")
+    elif previous == "tier changed: model differs":
+      first["model"] = "claude-sonnet-5-5"
+    elif previous == "profile differs":
+      other = tmp_path / "other-profile"
+      first["profile_dir"] = str(other)
+      ended(first)  # its transcript under its own profile
+    elif previous == "re-approval changed a reference document":
+      instructed(world, s, card, "Run the whole suite.\n")
+    elif previous == "previous recorded no instructions[]":
+      first.pop("instructions")
+    write_launches(s, launches)
+    launch_round(world, card, len(launches) + 1)
+  entry = launches_of(s)[-1]
+  assert {k: entry.get(k) for k in recorded} == recorded and entry["profile_dir"] == profile
+  assert ("resumed_from" in entry) != ("fresh" in entry)
