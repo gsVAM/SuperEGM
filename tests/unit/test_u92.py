@@ -395,3 +395,16 @@ def test_proceed_again_names_no_missing_head(world):
   assert "None" not in inbox_text(s)
   set_head(s, "U01", H2)
   assert [i["fingerprint"] for i in proceed_items(s)] == [f"U01/proceed/2/{H2}"]
+
+
+def test_waiting_proceed_reads_before_the_ci_wait():
+  # codebase-details-4-1: a proceeded unit whose head moved, CI pending past `ci_wait_minutes`, reads `waiting
+  # proceed` (the owner's next step), not the CI-wait `idle`; a unit with no proceed on that head reads `idle`
+  view = {**VIEW, "head": H2, "ci": "pending"}
+  card = {"heads": [{"unit": "U01", "head": H2, "seen_at": NOW - 3600}]}
+  runs = [{"round": 1, "status": "exited 0"}]
+  config = {"ci_wait_minutes": 30}
+  assert report.unit_state("U01", view, proceeded_foreman(), runs, card, config, NOW) == "waiting proceed"
+  clean = {"round": 1, "phase": "posted", "launch": 1, "head": H1, "outcome": "clean"}
+  plain = {"rounds": [clean], "decisions": [], "rulings": []}
+  assert report.unit_state("U01", view, plain, runs, card, config, NOW) == "idle"
