@@ -141,3 +141,14 @@ def test_an_escalated_unit_stays_escalated(world, started, after):
   entry, _, config = second_launch(world, s, card, rounds, "doable", earlier=True)
   assert (entry["tier"], entry["escalated"]) == ("difficult", True)
   assert (entry["model"], entry["effort"]) == superegm.tier_pair(config, "difficult")
+
+
+@pytest.mark.parametrize("escalate_after, planned, difficult_row", [(0, "doable", True), (2, "difficult", True), (2, "doable", False)])
+def test_escalation_off_or_without_effect_changes_nothing(world, started, escalate_after, planned, difficult_row):
+  # two revise rounds: off, already difficult, or no row to move to
+  s, card, _ = started
+  entry, _, config = second_launch(world, s, card, ["revise", "revise"], planned, escalate_after, difficult_row)
+  assert entry["tier"] == planned and "escalated" not in entry
+  assert (entry["model"], entry["effort"]) == superegm.tier_pair(config, planned)
+  from superegm import launch_builder
+  assert launch_builder.CONFIG_DEFAULTS["builder"]["escalate_after"] == 2
