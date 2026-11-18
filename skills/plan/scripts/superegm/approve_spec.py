@@ -23,7 +23,7 @@ WRITES = frozenset(["approvals", "handoffs", "state", "reviews", "runcards", "in
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset(["review-spec", "review-plan", "integrate", "approve-spec"])  # the skills whose card this subcommand accepts
 CONFIG = ".superegm/config.json"
-FROZEN_FIELDS = ["rounds", "triage", "mode", "instructions", "reviewers"]  # the entry fields frozen at an approval, which `--amend-units` copies where the extended entry has them (U36, U37, U39, U43)
+FROZEN_FIELDS = ["rounds", "triage", "mode", "instructions", "reviewers"]  # the entry fields frozen at an approval, which `--amend-units` copies where the extended entry has them (U36, U37, U39, U43, U76)
 ANY_H2 = re.compile(r"^ {0,3}##[ \t]+\S")  # an H2 as review.py reads one: up to three spaces of indent, outside a fence
 TRIAGE_FIELDS = {"reach": ("external", "agent", "config", "forged"), "later": ("easy", "migration", "version"),
                  "critical": ("yes", "no"), "verified": ("confirmed", "refuted")}  # a pattern's fields and their values (section 5.1)
@@ -502,7 +502,7 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   held = {r["id"]: r["sha"] for r in (last or {}).get("reviewers") or []}
   for pid, persona in personas.items():  # each reviewer whose sha the spec's previous entry does not hold
     if held.get(pid) != persona["sha"]:
-      print(f"approve-spec: reviewers {pid} {persona['sha']}")
+      print(f"approve-spec: reviewers {reviewers.DIR}/{pid}.md {persona['sha']}")
   previous = {i["file"]: i["sha"] for i in instructions.flat((last or {}).get("instructions") or [])}
   for item in instructions.flat(frozen):  # each file whose sha the spec's previous entry, whatever its handoff, does not hold
     if previous.get(item["file"]) != item["sha"]:

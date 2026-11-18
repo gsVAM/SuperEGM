@@ -242,13 +242,14 @@ def first_line(content) -> str:
 def checks(config, repo_root, token):
   """The lines after `config`: `launch`'s and `launch-builder`'s own predicates, each line `ok…` or the
   refusal they would give (a check's HandoffError or GhError text is its line). On the machine-account
-  path the order is owner, origin, token, builder, role, scopes, protection, merge, profile, plugins, mcp, gh,
-  environment; the builder, role, scopes and protection lines need the token and are absent without it.
+  path the order is owner, origin, token, builder, role, scopes, protection, merge, profile, plugins, mcp, reviewers,
+  gh, environment; the builder, role, scopes and protection lines need the token and are absent without it.
   On the App path: owner, origin, credential, key, openssl, artifacts_dir, app, permissions, token,
-  installation, scanning, protection, merge, profile, plugins, mcp, gh, environment; the four App lines are
+  installation, scanning, protection, merge, profile, plugins, mcp, reviewers, gh, environment; the four App lines are
   absent after a failing key or openssl. The environment line is absent after a failing gh line;
   scanning and merge are informational and never fail, as are python3.12, hooks and core.hooksPath (U25)
-  and plugins and mcp (U27, the profile line carrying a listed plugin's refusal), and stall, the watchdog's
+  and plugins and mcp (U27, the profile line carrying a listed plugin's refusal), reviewers (U76: the loaded ids
+  and their kinds, `none`, or the first refused file, read from the working tree), and stall, the watchdog's
   `builder.stall_minutes` after environment (U31).
   The five driver lines (driver, sleep, root, env, notify) follow, informational too, then the `model:`
   role table (U28), informational, then each module's DOCTOR_CHECKS lines in discovery order: foreman's
@@ -374,7 +375,7 @@ def checks(config, repo_root, token):
 
 
 def reviewer_line(repo_root: Path) -> str:
-  """Each loaded reviewer's id and kinds, `none` when `.superegm/reviewers/` holds no file; a refused file raises its refusal (the line's text)."""
+  """Each loaded reviewer's id and kinds, `none` when `.superegm/reviewers/` holds no `.md` file; a refused file raises its refusal (the line's text)."""
   loaded = reviewers.load(repo_root)
   return ", ".join(f"{rid} ({', '.join(r['kinds'])})" for rid, r in loaded.items()) or "none"
 

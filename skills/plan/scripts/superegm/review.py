@@ -467,7 +467,7 @@ def open_review(args) -> int:
   if unknown:  # a repository reviewer: a loaded file whose kinds holds this review's kind (spec section 3.6)
     from superegm import reviewers as repository  # at call time: that module's import chain reaches this one
     try:
-      loaded = repository.available(st, core.git_toplevel(Path.cwd()), kind, st.handoff_id)
+      loaded = repository.available(st, core.git_toplevel(Path.cwd()), kind, st.handoff_id, set(unknown))
     except core.HandoffError as error:
       raise core.HandoffError(f"review open: {error}") from None
     for rid in unknown:
@@ -646,8 +646,8 @@ def record_round(args) -> int:
     raise core.HandoffError(f"review record: --not-run is refused for an external reviewer ({reviewer})")
   manifest = stored_manifest(st, rid, review, n, reviewer, card)
   from superegm import reviewers as repository  # at call time: that module's import chain reaches this one
-  try:  # a repository or overridden reviewer's record carries the persona it read; a built-in with no file's has none (U76)
-    persona = repository.persona_of(st, review, rid, n, reviewer)
+  try:  # a repository or overridden reviewer's record carries the persona it read; a built-in with no file's has none, and a not-run read none (U76)
+    persona = None if args.not_run else repository.persona_of(st, review, rid, n, reviewer)
   except core.HandoffError as error:
     raise core.HandoffError(f"review record: {error}") from None
   if args.not_run:
