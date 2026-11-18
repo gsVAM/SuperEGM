@@ -33,7 +33,7 @@ builder per marked unit as the builder account; the builder pushes its unit bran
 with concluded CI gets one review round from a **foreman**: a per-unit
 elephant dispatched through its own adapter (`superegm:foreman`,
 `omitClaudeMd: true`), which dispatches the head's goldfish panel
-(zero-context, read-only, each its own adapter), records the
+(zero-context, read-only, each through its own adapter), records the
 findings, posts one review comment bound to the reviewed commit, and returns
 one word (the word table). The builder answers it in its next launch.
 
@@ -51,7 +51,7 @@ Under SUPEREGM_ROLE=driver (a tick of `/superegm:driver` started this session), 
 normal mode open points 1, 2, 3 and 5 as `decision open` records, as leavemealone-mode does (an
 unconverged judges' question stays open alike). That unit is `pending a decision`
 (no slot) and the batch goes on handling every event of the batch; the session ends on the
-loop's condition alone (an early exit loses an acked event).
+loop's condition alone: `status.wait_events` acked every event, so an early exit loses another unit's exit.
 
 Open a reference only when this file sends you to it:
 
@@ -63,38 +63,14 @@ Open a reference only when this file sends you to it:
 
 ## Entry: resume from the store
 
-0. The invocation is `/superegm:wave <spec> [--handoff <id>] [--leavemealone]`. With `--handoff`, pass
-   `--handoff '<id>'` to `runcard open` and to every helper call below (an older handoff's filed units
-   still run); without it the card carries the spec's latest approval's handoff. Fill the foreman brief's
-   `<handoff-id>` with the card's handoff.
+0. The invocation is `/superegm:wave <spec> [--handoff <id>] [--leavemealone]`. With `--handoff`, pass `--handoff '<id>'` to `runcard open` and to every helper call below (an older handoff's filed units still run); without it the card carries the spec's latest approval's handoff. Fill the foreman brief's `<handoff-id>` with the card's handoff.
    `status` and `report` read the card's handoff alone; the inbox is the store-wide read.
-1. Run `python3 '<HELPER>' runcard open --skill wave --artifact '<spec>'`
-   (the approved spec the invocation named), adding `--mode leavemealone`
-   only when the invocation said `--leavemealone`, else leaving the mode to
-   `runcard open`'s default, the approval's frozen mode (`config.mode` for an entry
-   with no `mode`); on a `leavemealone` card follow `references/leavemealone_mode.md`. The
-   printed id is `<CARD>`; a card still open on this spec is marked
-   interrupted by the new one.
-2. Run `python3 '<HELPER>' status --wait 1 --runcard '<CARD>'` as a batch
-   runs its wait (`run_in_background: true`, Bash timeout 1,800,000 ms: the
-   first pass reads every issue, PR and check). It reads GitHub
-   once, saves the snapshot `report` derives from (skipping it ends the loop on a stale one)
-   and returns every event since its last save, or `deadline`. Handle every line as a batch's
-   steps 1–3 before going on, and `ruling` lines as its step 4; then run
-   batch step 3b.
+1. Run `python3 '<HELPER>' runcard open --skill wave --artifact '<spec>'` (the approved spec the invocation named), adding `--mode leavemealone` only when the invocation said `--leavemealone`, else leaving the mode to `runcard open`'s default, the approval's frozen mode (`config.mode` for an entry with no `mode`); on a `leavemealone` card follow `references/leavemealone_mode.md`. The printed id is `<CARD>`; a card still open on this spec is marked interrupted by the new one.
+2. Run `python3 '<HELPER>' status --wait 1 --runcard '<CARD>'` as a batch runs its wait (`run_in_background: true`, Bash timeout 1,800,000 ms: the first pass reads every issue, PR and check). It reads GitHub once, saves the snapshot `report` derives from (`report` never reads GitHub: skipping this ends the loop on a stale snapshot) and returns every event since its last save, or `deadline`. Handle every line as a batch's steps 1–3 before going on, and `ruling` lines as its step 4; then run batch step 3b.
    Every `status` pass under this card rewrites the board (the `## Units` table `report` prints) between `<!-- superegm:board -->` and `<!-- /superegm:board -->` in the tracking issue's body:
    one GitHub write per pass and none when the rows are unchanged; the inbox stays the action list.
-3. Run `python3 '<HELPER>' report --runcard '<CARD>'`. Everything is derived
-   from the store, the plan and the spec (refused as `status` is on a spec changed since
-   its approval); idle units come from this card alone. Its lines: the
-   report path, the board, `idle:`, `pending:`, `loop:`.
-4. Rule every `pending:` item first, at its decision point in
-   `references/decision_points.md`: the record's `point`, printed as `(point <p>, <source>)`, names
-   the point, never the source's words (a point-5 decision's source is `review <id> round <n>`,
-   as point 1's is). Before asking any of them, read the issue's comments
-   (`GH_HOST=github.com gh api repos/<repo>/issues/<n>/comments --paginate`): an owner's
-   `**Ruling:**` already posted binds once `decision rule --posted <comment id>` records it,
-   as the `ruling` bullet of `references/rulings.md` says; then an `interrupted` launch with no decision on it → Decision point 3.
+3. Run `python3 '<HELPER>' report --runcard '<CARD>'`. Everything is derived from the store, the plan and the spec (it refuses as `status` does when the spec changed since its approval); idle units come from this card alone. Its lines: the report path, the board, `idle:`, `pending:`, `loop:`.
+4. Rule every `pending:` item first, at its decision point in `references/decision_points.md`: the record's `point`, printed as `(point <p>, <source>)`, names the point, never the source's words (a point-5 decision's source is `review <id> round <n>`, as point 1's is). Before asking any of them, read the issue's comments (`GH_HOST=github.com gh api repos/<repo>/issues/<n>/comments --paginate`): an owner's `**Ruling:**` already posted binds once `decision rule --posted <comment id>` records it, as the `ruling` bullet of `references/rulings.md` says; then an `interrupted` launch with no decision on it → Decision point 3.
 5. Run `report` again. `loop: ended` → The end. Otherwise run batches, the
    first from its step 5: step 2 was its wait, and its lines are handled.
 
@@ -119,17 +95,11 @@ ignored except `landed` and `stalled`:
    The builder account closed it → Decision point 3 (source `closed <n>`).
 3. `exit` and `status` lines, one folded decision per unit. First record the
    exit: `python3 '<HELPER>' record-launch --unit <U> --exit <code> --runcard '<CARD>'`.
-   Then: `DONE` and `DONE_WITH_CONCERNS` need nothing (the head is reviewed
-   at step 5); `BLOCKED` or `NEEDS_CONTEXT`, an exit with no PR
-   (`pr=none`), or an interrupted launch → Decision point 3.
+   Then: `DONE` and `DONE_WITH_CONCERNS` need nothing (the head is reviewed at step 5); `BLOCKED` or `NEEDS_CONTEXT`, an exit with no PR (`pr=none`), or an interrupted launch → Decision point 3.
    `stalled`: `python3 '<HELPER>' record-launch --unit <U> --exit stalled --runcard '<CARD>'`, then Decision point 3 with the stall facts unless stopped; `kill_failed` idle.
-3b. `superegm review ingest` for every unit with an open PR (never a landed unit),
-   awaiting-merge units included, stopped units excluded:
-   `python3 '<HELPER>' review ingest --unit <U> --runcard '<CARD>'` records
-   the PR's new review threads as `external:<login>` findings into the latest
-   posted round and prints `<n> ingested` (`0 ingested` before its first posted round).
-   `outcome: revise`: the unit is ready again; `launch` marks it at step 6 when a
-   slot is free (never `launch-builder` here).
+3b. `superegm review ingest` for every unit with an open PR (never a landed unit), awaiting-merge units included, stopped units excluded:
+   `python3 '<HELPER>' review ingest --unit <U> --runcard '<CARD>'` records the PR's new review threads as `external:<login>` findings into the latest posted round and prints `<n> ingested` (`0 ingested` before its first posted round).
+   `outcome: revise`: the unit is ready again; `launch` marks it at step 6 when a slot is free (never `launch-builder` here).
    `outcome: cap-reached` → Decision point 2 (source `review <head-review-id> cap`).
    Exit 1: report the unit and the refusal line in chat; the batch goes on. A GitHub read or a record
    refusal may clear on the next batch's retry, as does `unfinished ingest is not on the latest posted round`;
@@ -137,26 +107,12 @@ ignored except `landed` and `stalled`:
    `header present on` and a `review ingest: comment:<n>:` scan refusal repeat until the owner resolves them by hand, so say so each batch.
 4. `ruling` lines: an owner's `**Ruling:**` comment; apply it as the `ruling`
    bullet of `references/rulings.md` says.
-5. `superegm foreman dispatch` for every active unit with a head, `deadline`
-   included: `python3 '<HELPER>' foreman dispatch --unit <U> --runcard '<CARD>'`.
-   It prints `<dispatch-id> <child-card>` when section 11's predicate holds
-   (CI concluded, the latest launch terminal, no round posted since it, no
-   decision pending, the review not stalled) and refuses otherwise: skip a
-   refused unit, except exit 1 `recovered <word>` (a round the PR already
-   carries). Never evaluate the predicate yourself. Dispatch every accepted unit's
-   foreman **in one message**, each through the `superegm:foreman` adapter,
-   named `foreman-<U>-<dispatch-id>`, in the foreground, with the brief of
-   `references/foreman_brief.md` filled in. Then `word_action` per returned
-   word (the table below).
+5. `superegm foreman dispatch` for every active unit with a head, `deadline` included: `python3 '<HELPER>' foreman dispatch --unit <U> --runcard '<CARD>'`.
+   It prints `<dispatch-id> <child-card>` when section 11's predicate holds (CI concluded, the latest launch terminal, no round posted since it, no decision pending, the review not stalled) and refuses otherwise: skip a refused unit, except exit 1 `recovered <word>`, which is the foreman's word for a round the PR already carries. Never evaluate the predicate yourself: `foreman dispatch` is its one place.
+   Dispatch every accepted unit's foreman **in one message**, each through the `superegm:foreman` adapter, named `foreman-<U>-<dispatch-id>`, in the foreground, with the brief of `references/foreman_brief.md` filled in. Then `word_action` per returned word (the table below).
 6. `superegm launch`:
-   `python3 '<HELPER>' launch --idle <the report's idle list> --runcard '<CARD>'`
-   (omit `--idle` when the list is `none`) marks the ready units up to the
-   free slots and prints `in flight:` and `marked:`; a clean `conflict` unit is marked once
-   for its **merge round**. Per marked unit:
-   `python3 '<HELPER>' launch-builder --unit <U> --round <n> --runcard '<CARD>'`
-   (`<n>` is the launch count) alone: `launch-builder` starts the builder and records the launch,
-   detached, and returns at once. A
-   `launch-builder` refusal makes the unit idle for this invocation, no retry:
+   `python3 '<HELPER>' launch --idle <the report's idle list> --runcard '<CARD>'` (omit `--idle` when the list is `none`) marks the ready units up to the free slots and prints `in flight:` and `marked:`; a clean `conflict` unit is marked once for its **merge round**. Per marked unit:
+   `python3 '<HELPER>' launch-builder --unit <U> --round <n> --runcard '<CARD>'` (`<n>` is the launch count) alone: `launch-builder` starts the builder and records the launch, detached in its own session, and returns at once. A `launch-builder` refusal makes the unit idle for this invocation, no retry:
    `python3 '<HELPER>' report --idle '<U>=launch-builder: <reason>' --runcard '<CARD>'`.
 7. `superegm report`: `python3 '<HELPER>' report --runcard '<CARD>'`, then `python3 '<HELPER>' notify --runcard '<CARD>'`
    (the owner's `~/.superegm/notify` hook gets the inbox lines new since the last notify; a failing or slow hook never stops the wave). If a
@@ -204,12 +160,7 @@ dispatch):
 
 ## The end
 
-Before the close, run batch step 3b once and `report` again (a thread posted before the last round's review is read now): an `outcome:` line or no longer `loop: ended` (`merge round: <unit>` included) → back to the batches.
+Before the close, run batch step 3b once and `report` again (a thread posted before the last round's review is read now): an `outcome:` line or no longer `loop: ended` → back to the batches.
 
-`loop: ended` → run `python3 '<HELPER>' runcard close '<CARD>'`. Then
-report in chat from `wave_<n>_report.md`: per unit its state, head and
-rounds; the non-terminal launches (builders still running report to the
-next `wave`); the heads with pending or absent CI; the idle units and why;
-the ready units without a slot; the pending decisions; the stopped units
-with their unlanded dependants: what stayed open for the owner to merge,
+`loop: ended` → run `python3 '<HELPER>' runcard close '<CARD>'`. Then report in chat from `wave_<n>_report.md`: per unit its state, head and rounds; the non-terminal launches (builders still running report to the next `wave`); the heads with pending or absent CI; the idle units and why; the ready units without a slot; the pending decisions; the stopped units with their unlanded dependants: what stayed open for the owner to merge,
 close, or re-type `/superegm:wave`. Where the base ruleset restricts updates to config.owners, the owner merges with the admin bypass: `gh pr merge --admin`.
