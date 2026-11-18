@@ -208,3 +208,14 @@ def test_failed_resume(world, started, monkeypatch, capsys, result, commit, fail
     next_entry = launches_of(s)[-1]
     open_decisions = pending_decisions(superegm.load_foreman(s, UNIT))
   assert (failed and next_entry["fresh"] == "no result" and open_decisions == []) or not failed
+
+
+def test_wave_relaunches_on_failed_resume():
+  # skill text: step 3 relaunches at once, fresh; decision point 3 excludes it
+  root = Path(__file__).resolve().parents[2] / "skills/wave"
+  skill = (root / "SKILL.md").read_text(encoding="utf-8")
+  wave_step_3 = next(line for line in skill.splitlines() if line.startswith("3. `exit` and `status` lines"))
+  points = (root / "references/decision_points.md").read_text(encoding="utf-8")
+  decision_point_3 = points.split("### Decision point 3", 1)[1].split("\n#", 1)[0]
+  assert "failed resume" in wave_step_3 and "launch-builder" in wave_step_3
+  assert "failed resume" in decision_point_3 and "not" in decision_point_3
