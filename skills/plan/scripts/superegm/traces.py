@@ -151,7 +151,9 @@ def launch_subagent_calls(profile_dir, entry: dict) -> dict:
   """`subagent_calls` of the launch entry's `session_id` under `profile_dir` (`~` expanded): the one reader of a
   launch's calls. An entry with no `session_id`, or no transcript: `{"count": 0, "calls": []}`. A resumed launch
   (`resumed_from`, U63) forks a transcript that repeats the earlier history: its calls whose tool-use id is in the
-  resumed session's transcript are not its own and are dropped, whatever its status."""
+  resumed session's transcript are not its own and are dropped, whatever its status. The count is exact; a kept
+  call's `model` and `duration_s` may not be: children are paired before the drop, so a repeated call unlinked to
+  any child (its child lies under the resumed session) can take a leftover child of the launch's own unlinked call."""
   if not entry.get("session_id"):
     return {"count": 0, "calls": []}
   profile = Path(profile_dir).expanduser()
