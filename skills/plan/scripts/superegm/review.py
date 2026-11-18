@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); `review open` taking a loaded repository reviewer for its kinds (U76).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest|triage: the one review loop (spec section 8)."""
 
@@ -464,8 +464,17 @@ def open_review(args) -> int:
     args.unit = artifact = args.artifact
   core.require_runcard(args, SKILLS)
   unknown = [r for r in reviewers if r not in REVIEWERS]
-  if unknown:
-    raise core.HandoffError(f"review open: unknown reviewer {unknown[0]}")
+  if unknown:  # a repository reviewer: a loaded file whose kinds holds this review's kind (spec section 3.6)
+    from superegm import reviewers as repository  # at call time: that module's import chain reaches this one
+    try:
+      loaded = repository.load(core.git_toplevel(Path.cwd()), "HEAD")
+    except core.HandoffError as error:
+      raise core.HandoffError(f"review open: {error}") from None
+    for rid in unknown:
+      if rid not in loaded:
+        raise core.HandoffError(f"review open: unknown reviewer {rid}")
+      if kind not in loaded[rid]["kinds"]:
+        raise core.HandoffError(f"review open: {rid} does not review {kind}")
   if not 1 <= len(reviewers) <= 6:
     raise core.HandoffError("review open: 1 to 6 reviewers")
   if kind in FIRST and reviewers[0] != FIRST[kind]:
