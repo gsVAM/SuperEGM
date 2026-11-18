@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the `ruling` event and a status line after a comment's deviation headings (U22); the board's one write per `wave` pass, `post_board` (U30); the tick's read, `tick_trigger` (U24); the watchdog's `stalled` line, its predicate and `head_time` (U31); `tick_trigger`'s chain-on `merged` line and its proofs over every chain phase's card (U44); `ruling_facts` reads `proceeds[]`, so a recorded proceed comment is no event (U94).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the `ruling` event and a status line after a comment's deviation headings (U22); the board's one write per `wave` pass, `post_board` (U30); the tick's read, `tick_trigger` (U24); the watchdog's `stalled` line, its predicate and `head_time` (U31); `tick_trigger`'s chain-on `merged` line and its proofs over every chain phase's card (U44); `ruling_facts` reads `proceeds[]`, so a recorded proceed comment is no event (U94); the `conflict` view status, its fingerprint key and its event line (U62).
 
 """superegm status: landed and ready sets, PRs, CI; refuses without a complete receipt.
 `--wait <s>` polls, reading only, and prints every unreported event line, or `deadline`. Under a `wave` card
@@ -25,7 +25,7 @@ SKILLS = frozenset(['wave', 'integrate'])  # the skills whose card this subcomma
 STATUS_RE = re.compile(r"^\*\*Builder status:\*\*\s*(DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT)\b", re.M)
 # The saved fingerprint of a unit (spec section 11): every `--wait` reports the keys that differ from it.
 EMPTY = {"pr": None, "head": None, "ci": None, "exit": None, "builder_status": None, "landed": False,
-         "closed": [None, None], "rulings": []}
+         "closed": [None, None], "rulings": [], "conflict": False}  # `conflict`: an open head GitHub reads CONFLICTING (U62)
 
 
 def register(subparsers):
@@ -267,12 +267,14 @@ def fingerprint(unit: dict) -> dict:
 
 def unit_events(uid: str, previous, current: dict) -> list:
   """One line per event of the unit since `previous` (`EMPTY` when nothing was saved), kinds in
-  the order head, exit, status, stalled, landed, closed, ruling; a builder's exit carries its status word. The
+  the order head, conflict, exit, status, stalled, landed, closed, ruling; a builder's exit carries its status word. The
   `stalled` line (U31) is no fingerprint's: it is emitted at every pass while the predicate holds."""
   before = {**EMPTY, **(previous or {})}
   lines = []
   if current["ci"] is not None and any(current[k] != before[k] for k in ("pr", "head", "ci")):
     lines.append(f"{uid} head pr={current['pr']} sha={current['head']} ci={current['ci']}")
+  if current.get("conflict") and not before["conflict"]:  # spec section 6.1: a view change (U62)
+    lines.append(f"{uid} conflict pr={current['pr']} sha={current['head']}")
   status = current["builder_status"]
   tail = f" comment={status[0]} by={status[2]}" if status else ""
   if current["exit"] is not None and current["exit"] != before["exit"]:
@@ -392,6 +394,9 @@ def unit_view(handoff, uid):
     else:
       view["status"] = core.ci_verdict(core.read_ci(repo, pr["head"]))
     view["ci"] = ci_word(view["status"])
+    # spec section 6.1: set after the CI column is read, so `ci` keeps its value; `UNKNOWN` is read again next pass
+    if not pr["merged_at"] and (pr.get("state") or "OPEN").upper() == "OPEN" and pr.get("mergeable") == "CONFLICTING":
+      view["status"], view["conflict"] = "conflict", True
   closed_done = issue.get("state") == "closed" and issue.get("state_reason") == "completed"
   if pr and not pr.get("merged_at") and (pr.get("state") or "").upper() == "CLOSED":
     # Terminal: the builder abandoned this PR. Never rediscover silently; the

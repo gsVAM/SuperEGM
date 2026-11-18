@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes and the one stamp formatter and parser (U31); `discover()`, CORE_CONFIG and SUBCOMMANDS and DEFAULT_CONFIG derived from the modules (U32); the `Tier:` field, `builder.tiers`, `tier_pair` and `unit_tier` (U33); the brainstorm.team key (U34); the one-level merge of every registered object default and the builder defaults read from the registry (U46); the chain and tick store kinds, and `runcard open`'s default mode the frozen one (U43); the store-level instructions kind (U37); the driven card of every chain phase, the top-level cards the tick reads by the chain and the unwritten `driver` key (U44); `reboot_launches` records `subagent_calls` (U49); `Graph(plan, approval)` splits the blockers from the shared-file merge orders under an approval entry with `rounds` (U61).
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes and the one stamp formatter and parser (U31); `discover()`, CORE_CONFIG and SUBCOMMANDS and DEFAULT_CONFIG derived from the modules (U32); the `Tier:` field, `builder.tiers`, `tier_pair` and `unit_tier` (U33); the brainstorm.team key (U34); the one-level merge of every registered object default and the builder defaults read from the registry (U46); the chain and tick store kinds, and `runcard open`'s default mode the frozen one (U43); the store-level instructions kind (U37); the driven card of every chain phase, the top-level cards the tick reads by the chain and the unwritten `driver` key (U44); `reboot_launches` records `subagent_calls` (U49); `Graph(plan, approval)` splits the blockers from the shared-file merge orders under an approval entry with `rounds` (U61); `read_pr` and `pr_record` read `mergeable` (U62).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
@@ -2008,7 +2008,7 @@ def require_receipt(state):
 
 def read_pr(repo, number):
   data = gh_json(["pr", "view", str(number), "-R", repo, "--json",
-                  "number,state,headRefName,headRefOid,baseRefName,baseRefOid,mergedAt,isDraft"])
+                  "number,state,headRefName,headRefOid,baseRefName,baseRefOid,mergedAt,isDraft,mergeable"])
   return pr_record(data)
 
 
@@ -2016,14 +2016,16 @@ def pr_record(data):
   return {"number": data["number"], "state": data.get("state"), "head_ref": data.get("headRefName"),
           "head": data.get("headRefOid"), "base_ref": data.get("baseRefName"),
           "base_sha": data.get("baseRefOid"), "merged_at": data.get("mergedAt"),
-          "draft": bool(data.get("isDraft"))}
+          "draft": bool(data.get("isDraft")),
+          # spec section 6.1: GitHub's `MERGEABLE`, `CONFLICTING` or `UNKNOWN` (an `UNKNOWN` is read again next pass)
+          "mergeable": data.get("mergeable")}
 
 
 GRAPHQL_QUERY = (
     "query($owner: String!, $name: String!, $number: Int!, $endCursor: String) { "
     "repository(owner: $owner, name: $name) { issue(number: $number) { "
     "closedByPullRequestsReferences(first: 100, includeClosedPrs: true, after: $endCursor) { "
-    "nodes { number state headRefName headRefOid baseRefName baseRefOid mergedAt isDraft "
+    "nodes { number state headRefName headRefOid baseRefName baseRefOid mergedAt isDraft mergeable "
     "repository { nameWithOwner } } pageInfo { hasNextPage endCursor } } } } }")
 
 
@@ -2047,7 +2049,7 @@ def discover_pr(handoff: Handoff, uid, number):
   if matches:
     return matches, []
   prs = gh_json(["pr", "list", "-R", repo, "--state", "all", "--limit", "1000", "--json",
-                 "number,state,headRefName,headRefOid,baseRefName,baseRefOid,closingIssuesReferences,isDraft,mergedAt"]) or []
+                 "number,state,headRefName,headRefOid,baseRefName,baseRefOid,closingIssuesReferences,isDraft,mergedAt,mergeable"]) or []
   branch = handoff.branch(uid)
   candidates = []
   for pr in prs:
