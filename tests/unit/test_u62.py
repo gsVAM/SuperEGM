@@ -38,6 +38,25 @@ def test_conflict_view(world, monkeypatch, mergeable, status_word, ci, changed):
   assert handoff.state["units"]["U01"]["pr"]["mergeable"] == mergeable  # the saved pull request `launch-builder` reads
 
 
+@pytest.mark.parametrize("same_head, status_word, changed", [(True, "conflict", False), (False, "ci green", True)])
+def test_unknown_keeps_a_conflict_on_its_head(world, monkeypatch, same_head, status_word, changed):
+  # codebase-details-1-5: §6.1 UNKNOWN is read again next pass, so it neither clears a conflict on that head nor
+  # wakes `tick_trigger` and `wait_events` twice; a new head is a new read
+  gh, st, card = status_seed(world, monkeypatch)
+  node = status_pr(gh, "green")
+  node["mergeable"] = "CONFLICTING"
+  state = json.loads(st.path("state").read_text(encoding="utf-8"))
+  handoff = superegm.Handoff(Path(state["plan"]), st, state)
+  saved_view = status.fingerprint(status.unit_view(handoff, "U01"))
+  node["mergeable"] = "UNKNOWN"
+  if not same_head:
+    handoff.state["units"]["U01"]["pr"]["head"] = "b" * 40  # the saved read was of another head
+  fresh = status.unit_view(handoff, "U01")
+  assert fresh["status"] == status_word and fresh["ci"] == "green"
+  assert (status.fingerprint(fresh) != saved_view) == changed
+  assert handoff.state["units"]["U01"]["pr"]["mergeable"] == ("CONFLICTING" if same_head else "UNKNOWN")
+
+
 # ---------------------------------------------------------------- S2: the `again` set's conflict rule
 
 
@@ -242,6 +261,45 @@ def test_merge_brief_pins_the_current_base(world, monkeypatch, spawn_fake):
   assert entry["base"] == new_base != batch_base
   assert f"git merge {new_base}" in prompt and batch_base not in prompt
   assert "`src/worker.py` (landed: U08)" in prompt  # the fixture's units all hold `src/worker.py`
+
+
+def merge_revision(world, s, card, head_path="src/worker.py", base_path="src/worker.py", base_text="landed\n"):
+  """S4's arrange: U07's pull request #71 `CONFLICTING` with a revise round, the base advanced past the batch's."""
+  batch_base = first_round(world, s, card)
+  head = commit_on(world, batch_base, "src/worker.py", "the head's worker\n", "refs/heads/side-head")
+  if head_path != "src/worker.py":
+    head = commit_on(world, head, head_path, "the head's\n", "refs/heads/side-head")
+  new_base = commit_on(world, batch_base, base_path, base_text, "refs/heads/main")
+  make_pr(world.gh, 71, head, closes=[(REPO, 7)])
+  git(["push", "-q", str(world.repo.parent / "origin.git"), f"{head}:refs/pull/71/head"], world.repo.parent / "side")
+  write_foreman(s, "U07", [{**REVISE, "head": head, "posted_at": "2099-01-01T00:00:00Z"}])
+  save_pr(s, "U07", 71, head, "CONFLICTING")
+  return batch_base, new_base
+
+
+def test_merge_launch_checks_the_base_it_fetched(world, monkeypatch, spawn_fake):
+  # codebase-details-1-2: the merge launch moves `refs/superegm/base`; it checks it as `launch` does, so no later
+  # launch of the batch starts from a base `origin_problems` never read
+  s, card, hid, _ = seed(world, units=("U07", "U08"))
+  with_rounds(s, world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  spec = next(world.repo.glob("docs/**/*.md")).relative_to(world.repo).as_posix()
+  merge_revision(world, s, card, base_path=spec, base_text="# an unapproved spec\n")
+  code, out = world.run("launch-builder", "--unit", "U07", "--round", 2, "--runcard", card)
+  assert code == 1 and "neither the approved bytes nor a later link" in out, out
+  assert launches_of(s, "U07")[-1]["round"] == 1  # no merge launch recorded
+
+
+def test_merge_brief_names_paths_unquoted(world, monkeypatch, spawn_fake):
+  # astra-1-4: a path Git would C-quote is named as it is in the tree
+  s, card, hid, _ = seed(world, units=("U07", "U08"))
+  with_rounds(s, world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  merge_revision(world, s, card, head_path="src/café.py", base_path="src/café.py")
+  code, out = world.run("launch-builder", "--unit", "U07", "--round", 2, "--runcard", card)
+  assert code == 0, out
+  prompt = s.path("launches", "U07_r2_prompt.md").read_text(encoding="utf-8")
+  assert "- `src/café.py`" in prompt and "\\303" not in prompt
 
 
 # ---------------------------------------------------------------- S5: the merge orders' text
