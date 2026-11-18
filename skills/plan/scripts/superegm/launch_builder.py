@@ -37,6 +37,7 @@ CONFIG_DEFAULTS = {  # its own config key (U32)
                 "max_subagent_calls": 12,  # the orders' budget when allowed_tools carries Agent (U27)
                 "stall_minutes": 30,  # a running launch with no newer commit of its own this long is stalled (U31)
                 "precheck_attempts": 3,  # the orders' `superegm-precheck` runs per launch (U67)
+                "escalate_after": 2,  # failing head rounds before a launch moves to the `difficult` tier, 0 off (U68)
                 # the model and effort per tier; doable is `model` and `effort` above (U33)
                 "tiers": {"difficult": {"model": "claude-opus-5-5", "effort": "high"},
                           "easy": {"model": "claude-sonnet-5-5", "effort": "medium"}},
