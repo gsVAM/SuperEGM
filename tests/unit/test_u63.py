@@ -166,3 +166,14 @@ def test_resumed_command_and_prompt(world, started, monkeypatch):
   assert "--resume 's-1' --fork-session" in command or "--resume s-1 --fork-session" in command
   assert "--session-id" in command and command.startswith(f"SUPEREGM_EXIT=") and f"cd '{worktree_r2}'" in command
   assert prompt.split("\n", 1)[1] == prompt_text_output and worktree_r2 in prompt.split("\n", 1)[0] and "stale" in prompt.split("\n", 1)[0]
+
+
+@pytest.mark.parametrize("status", ["exited 0", "interrupted"])
+def test_resumed_launch_counts_own_calls(tmp_path, status):
+  # §6.2: the forked transcript repeats round 1's two Agent calls; tool-use ids already there are not counted
+  from superegm import traces
+  profile_dir = tmp_path / "profile"
+  jsonl(profile_dir / "projects/-wt-r1/s-1.jsonl", [agent("a1"), agent("a2")])
+  jsonl(profile_dir / "projects/-wt-r2/s-2.jsonl", [agent("a1"), agent("a2"), agent("a3")])
+  assert traces.launch_subagent_calls(profile_dir, {"session_id": "s-2", "resumed_from": "s-1", "status": status})["count"] == 1
+  assert traces.launch_subagent_calls(profile_dir, {"session_id": "s-1", "status": status})["count"] == 2
