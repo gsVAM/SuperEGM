@@ -475,24 +475,56 @@ BRIEF_COMMITS = 5  # the base commits named under one path
 def landed_holders(handoff, state: dict, path: str, head: str, base: str) -> tuple[list[str], list[tuple[str, str]]]:
   """The landed units whose scope holds `path` (spec section 6.1), and the commits `base` holds past `head` that touch
   it (sha, subject), newest first. Read from those commits, not the saved status pass alone, which may predate a
-  landing: the handoff's units, in the plan's order, whose Scope paths hold `path` and which the saved status reads
-  landed or whose saved pull request or unit branch a commit names; then a unit of another handoff whose unit branch
-  a commit names, as `<handoff>/<unit>`."""
+  landing: `--full-history` keeps a landing merge commit, which Git's default simplification drops as TREESAME to
+  its unit branch. The handoff's units, in its graph's order, whose Scope paths hold `path` and which the saved status
+  reads landed or whose saved pull request or unit branch a commit names; then, as `<handoff>/<unit>`, a unit of
+  another handoff of the store whose unit branch a commit names, or whose Scope paths (its `handoff_units.json`) hold
+  `path` and whose saved pull request a commit names."""
   from superegm.report import unit_view  # the one reader of the saved status
-  out = core.run_git(["log", "-z", "--format=%H%x1f%s%x1f%B", f"{head}..{base}", "--", path], handoff.repo_root)
+  out = core.run_git(["log", "-z", "--full-history", "--format=%H%x1f%s%x1f%B", f"{head}..{base}", "--", path],
+                     handoff.repo_root)
   commits = [c.split("\x1f", 2) for c in out.split("\0") if c.strip("\n")]
   text = "\n".join(c[2] if len(c) > 2 else "" for c in commits)
   numbers = {int(n) for n in PR_NUMBER_RE.findall(text)}
   branches = list(dict.fromkeys(UNIT_BRANCH_RE.findall(text)))
   holders = []
   for uid in handoff.graph.order:
-    if not any(path == s or path.startswith(s.rstrip("/") + "/") for s, _kind in handoff.plan.units[uid].scope):
+    if not holds(path, handoff.plan.units[uid].scope):
       continue
     number = ((state["units"].get(uid) or {}).get("pr") or {}).get("number")
     if unit_view(state, uid)["landed"] or number in numbers or (handoff.handoff_id, uid) in branches:
       holders.append(uid)
   holders += [f"{hid}/{uid}" for hid, uid in branches if hid != handoff.handoff_id]
+  if numbers:
+    holders += [h for h in other_holders(handoff, path, numbers) if h not in holders]
   return holders, [(c[0].strip("\n"), c[1] if len(c) > 1 else "") for c in commits]
+
+
+def holds(path: str, scope) -> bool:
+  """A Scope path list (`(path, action)` pairs) holds `path`: the same path, or a directory above it."""
+  return any(path == s or path.startswith(s.rstrip("/") + "/") for s, _kind in scope)
+
+
+def other_holders(handoff, path: str, numbers: set) -> list:
+  """Spec section 6.1's other-handoff holders a squash merge names only by number: each other handoff of the store,
+  by id, whose unit's saved pull request (its `state.json`) is one of `numbers` and whose Scope paths (its
+  `handoff_units.json`) hold `path`, as `<handoff>/<unit>`; a handoff missing either file adds none."""
+  out = []
+  for row in core.handoffs(handoff.store.root):
+    hid = row.get("id")
+    if not hid or hid == handoff.handoff_id:
+      continue
+    hs = core.handoff_store(handoff.store, hid)
+    units_path, state_path = hs.path("units"), hs.path("state")
+    if not (units_path.is_file() and state_path.is_file()):
+      continue
+    scopes = {u: [(s.get("path") or "", s.get("action")) for s in (v or {}).get("scope") or []]
+              for u, v in (json.loads(core.read_text(units_path)).get("units") or {}).items()}
+    for uid, record in sorted((json.loads(core.read_text(state_path)).get("units") or {}).items()):
+      number = ((record or {}).get("pr") or {}).get("number")
+      if number in numbers and holds(path, scopes.get(uid) or []):
+        out.append(f"{hid}/{uid}")
+  return out
 
 
 def merge_brief(merge: str, base: str, conflicts: list) -> str:

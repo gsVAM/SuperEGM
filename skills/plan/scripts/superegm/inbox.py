@@ -192,7 +192,8 @@ def conflict_items(repo: str, state: dict, uid: str, foreman: dict, launches: li
   elif conflict_again({**view, "conflict": True}, foreman, launches, parallel):
     then = "a merge round is marked at the next `launch`"
   elif ((latest_posted(foreman) or {}).get("outcome") == "revise" and not report.pending_decisions(foreman)
-        and (not launches or finished(launches[-1]))):  # an open decision (point 5's accept) may end the fixes
+        and (not launches or finished(launches[-1]))  # an open decision (point 5's accept) may end the fixes
+        and not waiting_proceed(foreman, launches, view["head"])):  # spec section 4.2: no fix round, the owner's proceed
     then = "the next fix round carries the merge orders"
   else:
     then = "the rule is applied again once the launch ends or the owner rules"
