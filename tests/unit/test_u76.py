@@ -56,3 +56,39 @@ def test_review_open_takes_a_loaded_reviewer_for_its_kinds(world, kind, reviewer
   artifact = str(spec) if kind == "spec" else "U07"
   got, out = world.run("review", "open", "--kind", kind, "--artifact", artifact, "--reviewers", reviewers, "--astra", "off", "--runcard", cid)
   assert got == code and (expect in out if code else rjson(world, out.splitlines()[0])["reviewers"][0] == expect), out
+
+
+def test_the_brief_prints_the_frozen_persona_and_the_record_carries_it(world):
+  """approve-spec freezes each reviewer file by blob sha; a builder's branch edit changes neither the handoff's brief nor its record."""
+  import json
+  from test_review import A, SLUG, approve, card, converged_spec, head_round, hstore, opened, record, rjson, seed_handoff
+  from test_u37 import blob_sha, commit_file
+  frozen_bytes = b"---\nname: Security\nkinds: [spec, plan, head, integrate]\n---\nfrozen persona\n"
+  commit_file(world, ".superegm/reviewers/security.md", frozen_bytes)
+  spec, cid, rid = converged_spec(world)
+  assert approve(world, spec, cid, "--yes")[0] == 0
+  st = hstore(world)
+  entry = json.loads(st.path("approvals", SLUG).read_text(encoding="utf-8"))["entries"][-1]
+  sha = blob_sha(frozen_bytes)
+  stored = json.loads(st.path("reviewers", sha).read_text(encoding="utf-8"))
+  assert entry["reviewers"] == [{"id": "security", "sha": sha}] and stored["text"] == "frozen persona"
+  assert [stored[k] for k in ("id", "sha", "name", "kinds")] == ["security", sha, "Security", ["spec", "plan", "head", "integrate"]]
+  head_bytes = b"---\nname: Security\nkinds: [spec, plan, head, integrate]\n---\nhead persona\n"
+  commit_file(world, ".superegm/reviewers/security.md", head_bytes)  # a builder's branch edits the file
+  hid = entry["handoff_id"]
+  seed_handoff(world, spec)
+  plancard = card(world, spec, "review-plan", handoff=hid)
+  got, brief_out = world.run("reviewers", "--brief", "security", "--handoff", hid, "--runcard", plancard, card=None)
+  assert got == 0 and brief_out.strip() == "frozen persona", brief_out
+  got, spec_out = world.run("reviewers", "--brief", "security", "--spec", str(spec), "--review", rid, "--round", 1, "--runcard", cid, card=None)
+  assert got == 0 and spec_out.strip() == "head persona", spec_out
+  spec_read = json.loads(st.path("reviews", rid, "persona-1-security.json").read_text(encoding="utf-8"))
+  assert spec_read == {"id": "security", "sha": blob_sha(head_bytes), "text": "head persona"}
+  got, out = world.run("reviewers", "--brief", "nobody", "--handoff", hid, "--runcard", plancard, card=None)
+  assert got == 1 and "reviewers: " in out, out
+  _, wcid, hrid = opened(world, "head", reviewers="change-review,security")
+  head_round(world, 1, "posted", wcid, "revise")
+  for reviewer in ("change-review", "security"):
+    assert record(world, hrid, 1, reviewer, [], wcid, sha=A)[0] == 0
+  reviewers = rjson(world, hrid, "round-1.json")["reviewers"]
+  assert reviewers["security"]["persona"] == {"id": "security", "sha": sha} and "persona" not in reviewers["change-review"]
