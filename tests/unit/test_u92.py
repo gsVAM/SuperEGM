@@ -354,3 +354,44 @@ def test_head_less_proceed_asks_for_a_proceed_again(world):
   head = reading(s, card)[0]["head"]
   assert head
   assert [i["action"].split(" on ")[0] for i in proceed_items(s)] == [f"proceed again: U01 head {head}"]
+
+
+# ---------------------------------------------------------------- round 3 review
+
+
+def board_row(world, s, card, uid="U01"):
+  code, out = world.run("report", "--runcard", card)
+  assert code == 0, out
+  text = s.path("wave_report", 1).read_text(encoding="utf-8")
+  return next(line for line in text.splitlines() if line.startswith(f"| {uid} #"))
+
+
+@pytest.mark.parametrize("pinned, action", [(True, "await-merge"), (False, "proceed again")])
+def test_board_shows_the_proceeds_action(world, pinned, action):
+  # change-review-3-1: the board itself, not `next_action` alone, reads the proceed and its pinned head
+  s, card, rid = head_world(world)
+  code, out = proceed(world, rid, card, "--owner", "--reason", "accepted risk")
+  assert code == 0, out
+  if not pinned:
+    f = foreman_of(s, "U01")
+    f["proceeds"][-1]["head"] = None
+    atomic_write(s.path("foreman", "U01"), f)
+  cells = [c.strip() for c in board_row(world, s, card).strip("|").split("|")]
+  assert cells[1] == "clean" and cells[7] == action, cells
+
+
+def test_proceed_again_names_no_missing_head(world):
+  # codebase-details-3-3: a later launch finished on a proceed that pinned no head, and the pull request has
+  # none: no `proceed again: U01 head None`, keyed `2/None`, until a head exists to proceed on
+  s, card, rid = head_world(world)
+  code, out = proceed(world, rid, card, "--owner", "--reason", "accepted risk")
+  assert code == 0, out
+  f = foreman_of(s, "U01")
+  f["proceeds"][-1]["head"] = None
+  atomic_write(s.path("foreman", "U01"), f)
+  launches(s, "U01", 1, 2)
+  set_head(s, "U01", None)
+  assert proceed_items(s) == []
+  assert "None" not in inbox_text(s)
+  set_head(s, "U01", H2)
+  assert [i["fingerprint"] for i in proceed_items(s)] == [f"U01/proceed/2/{H2}"]
