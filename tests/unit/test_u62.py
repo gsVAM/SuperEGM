@@ -150,7 +150,7 @@ def test_conflict_relaunches_once(world, monkeypatch, case, marked_first, marked
     decisions = [{"id": "D2", "point": 2}]
   if "during launch 2" in case:  # the owner proceeded on HEAD while launch 2 ran; it pushed a new head and exited
     proceeds, runs = [proceed_entry(2)], [(1, "exited 0"), (2, "exited 0")]
-  if case.startswith("proceeded"):
+  if case.startswith("proceeded with no posted round"):
     rounds, proceeds = [], [proceed_entry(1)]
   if case.startswith("merge round recorded"):  # a first conflict's merge round ran, the owner proceeded on its head again
     proceeds, runs = [proceed_entry(1), proceed_entry(2)], [(1, "exited 0"), (2, "exited 0")]
@@ -284,10 +284,13 @@ def test_merge_launch_checks_the_base_it_fetched(world, monkeypatch, spawn_fake)
   with_rounds(s, world)
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
   spec = next(world.repo.glob("docs/**/*.md")).relative_to(world.repo).as_posix()
-  merge_revision(world, s, card, base_path=spec, base_text="# an unapproved spec\n")
+  batch_base, _ = merge_revision(world, s, card, base_path=spec, base_text="# an unapproved spec\n")
   code, out = world.run("launch-builder", "--unit", "U07", "--round", 2, "--runcard", card)
   assert code == 1 and "neither the approved bytes nor a later link" in out, out
   assert launches_of(s, "U07")[-1]["round"] == 1  # no merge launch recorded
+  # astra-2-1, change-review-2-1, codebase-details-2-2: the refused base never reaches the shared ref, so a later
+  # round-1 launch of the batch builds from the base `launch` checked
+  assert git(["rev-parse", "refs/superegm/base"], world.repo).strip() == batch_base
 
 
 def test_merge_brief_names_paths_unquoted(world, monkeypatch, spawn_fake):
@@ -358,9 +361,19 @@ def conflict_wave(world, case):
   import superegm as core
   from test_wave import wave_store, CLEAN as WAVE_CLEAN
   u01 = {"pr": 71, "head": HEAD, "ci": "green", **WAVE_CLEAN}
-  if case == "running":
+  if case in ("running", "proceeded, running"):
     u01["launches"] = [{"round": 1, "status": "exited 0"}, {"round": 2, "status": "running"}]
+  if case == "revise, point 5":
+    u01["rounds"] = [{**WAVE_CLEAN["rounds"][0], "outcome": "revise"}]
+    u01["decisions"] = [{"id": "D1", "point": 5, "source": "review head-U01-c1", "question": "accept or revise?",
+                         "options": ["accept", "revise"]}]
+  if case == "proceeded, ci pending":
+    u01["ci"] = "pending"
   s = wave_store(world, U01=u01)
+  if case.startswith("proceeded"):  # the owner proceeded on HEAD: on launch 2 while it runs, or on launch 1
+    foreman = json.loads(s.path("foreman", "U01").read_text(encoding="utf-8"))
+    launch_n = 2 if case.endswith("running") else 1
+    put(s.path("foreman", "U01"), json.dumps({**foreman, "proceeds": [proceed_entry(launch_n)]}))
   if case != "clean, 1.2.0":
     with_rounds(s, world)
   if case == "stopped":
@@ -377,6 +390,8 @@ def conflict_wave(world, case):
     ("clean, 1.2.0", "conflict: the owner resolves it", "the owner resolves it"),
     ("running", "conflict; ", "once the launch ends or the owner rules"),
     ("stopped", "conflict; ", "stopped"),
+    ("proceeded, running", "conflict: a merge round once the launch ends", "once the launch ends or the owner rules"),
+    ("revise, point 5", "conflict; ", "once the launch ends or the owner rules"),
 ])
 def test_conflict_board_action_and_inbox_line(world, case, board, inbox_action):
   # astra-1-3, change-review-1-1, change-review-1-2, codebase-details-1-4, codebase-details-1-7: §6.1
@@ -386,6 +401,8 @@ def test_conflict_board_action_and_inbox_line(world, case, board, inbox_action):
   card = json.loads(s.path("runcards", open_wave_card(world)).read_text(encoding="utf-8"))
   row = next(r for r in report.board_table(handoff, handoff.state, card, 0).splitlines() if "U01 #" in r)
   assert board in row, row
+  if case == "proceeded, running":  # codebase-details-2-3: `launch` marks nothing while the launch runs
+    assert "conflict: merge round" not in row, row
   items = [i for i in inbox.inbox_items(s, [s.handoff_id]) if i["subject"] == "U01"]
   conflicts = [i for i in items if i["kind"] == "conflict"]
   assert len(conflicts) == 1 and inbox_action in conflicts[0]["action"], items
@@ -402,3 +419,34 @@ def test_conflict_keeps_the_loop(world, case, loop):
   s, _ = conflict_wave(world, case)
   code, out = world.run("report", "--runcard", open_wave_card(world))
   assert code == 0 and loop in out, out
+
+
+def test_ci_wait_idle_is_no_merge_round(world):
+  # astra-2-2: a unit idle on its CI wait is idle for `launch` too, so it is no merge round that keeps the loop
+  from test_wave import open_wave_card
+  conflict_wave(world, "proceeded, ci pending")
+  card = open_wave_card(world)
+  assert world.run("report", "--runcard", card)[0] == 0  # the card sees the head
+  world.advance(31 * 60)
+  code, out = world.run("report", "--runcard", card)
+  assert code == 0 and "idle: U01" in out and "merge round" not in out, out
+
+
+def test_conflict_cleared_is_an_event(world, monkeypatch):
+  # astra-2-3: a head GitHub reads MERGEABLE again, its CI unchanged, wakes `tick_trigger` and `wait_events`
+  gh, st, card = status_seed(world, monkeypatch)
+  node = status_pr(gh, "green")
+  node["mergeable"] = "CONFLICTING"
+  state = json.loads(st.path("state").read_text(encoding="utf-8"))
+  handoff = superegm.Handoff(Path(state["plan"]), st, state)
+  saved_view = status.fingerprint(status.unit_view(handoff, "U01"))
+  node["mergeable"] = "MERGEABLE"
+  view = status.fingerprint(status.unit_view(handoff, "U01"))
+  assert [line.split(" pr=")[0] for line in status.unit_events("U01", saved_view, view)] == ["U01 conflict cleared"]
+
+
+def test_wave_skill_names_the_merge_round_end():
+  # change-review-2-2, codebase-details-2-1, codebase-details-2-4: the skill's end condition and its `conflict` line
+  wave_skill = " ".join((ROOT / "skills/wave/SKILL.md").read_text(encoding="utf-8").split())
+  assert "no ready unlaunched unit with a free slot, nor a merge round `launch` would mark" in wave_skill
+  assert "`conflict` lines need nothing before step 6" in wave_skill
