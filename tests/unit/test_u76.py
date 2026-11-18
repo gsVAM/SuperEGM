@@ -48,12 +48,15 @@ def test_review_open_takes_a_loaded_reviewer_for_its_kinds(world, kind, reviewer
   """A loaded id whose kinds holds the review's kind opens; one that does not is refused; an overridden design keeps its id."""
   from test_review import SKILL_OF, approve, card, converged_spec, rjson, seed_handoff, spec_file
   from test_u37 import commit_file
-  commit_file(world, ".superegm/reviewers/security.md", "---\nname: Security\nkinds: [spec]\n---\nHunt for secrets.\n")
-  commit_file(world, ".superegm/reviewers/design.md", "---\nname: Design\nkinds: [spec]\n---\nA new design persona.\n")
+  def commit_files():
+    commit_file(world, ".superegm/reviewers/security.md", "---\nname: Security\nkinds: [spec]\n---\nHunt for secrets.\n")
+    commit_file(world, ".superegm/reviewers/design.md", "---\nname: Design\nkinds: [spec]\n---\nA new design persona.\n")
   if kind == "spec":
+    commit_files()
     spec = spec_file(world)
-  else:  # a plan, head or integrate review reads the frozen files: approve the spec first
+  else:  # a plan, head or integrate review reads the frozen files: approve the spec first (converged before the override, which a spec round would need the read of)
     spec, acid, _ = converged_spec(world)
+    commit_files()
     assert approve(world, spec, acid, "--yes")[0] == 0
   seed_handoff(world, spec)
   cid = card(world, spec, SKILL_OF[kind])
@@ -105,9 +108,9 @@ def approved_with(world, files):
   import json
   from test_review import SLUG, approve, card, converged_spec, hstore, seed_handoff
   from test_u37 import commit_file
+  spec, cid, rid = converged_spec(world)  # converged before the files, so no round of its own needs a design override's read
   for name, data in files.items():
     commit_file(world, f".superegm/reviewers/{name}", data)
-  spec, cid, rid = converged_spec(world)
   code, out = approve(world, spec, cid, "--yes")
   assert code == 0, out
   st = hstore(world)

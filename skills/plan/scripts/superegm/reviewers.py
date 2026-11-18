@@ -72,7 +72,7 @@ def frontmatter(rel: str, text: str) -> tuple[dict, str]:
 def parse(rel: str, data: bytes) -> dict:
   """The reviewer the file `rel` holds, `{id, name, kinds, model, effort, text, sha, source}` (`source` the file's text, which
   the store copy keeps so that its sha can be re-derived); refused naming `rel` and the reason.
-  The size limit counts the body as written, less the file's last newlines; the persona is the body without its leading
+  The size limit counts the body as written, less the file's one last newline; the persona is the body without its leading
   blank lines and trailing whitespace, so the first line keeps its indentation."""
   stem = Path(rel).stem
   if not ID_RE.match(stem):
@@ -96,7 +96,7 @@ def parse(rel: str, data: bytes) -> dict:
   efforts = (*core.EFFORTS, "max")  # the forms `config.reviewers.effort` takes
   if effort is not None and effort not in efforts:
     raise refuse(rel, f"effort {effort!r} is not one of {', '.join(efforts)}")
-  size = len(body.rstrip("\n").encode("utf-8"))
+  size = len(body.encode("utf-8")) - body.endswith("\n")
   if size > LIMIT:
     raise refuse(rel, f"the body is {size} bytes, over {LIMIT}")
   persona = re.sub(r"\A(?:[ \t]*\n)+", "", body).rstrip()
@@ -185,8 +185,9 @@ def persona_of(st: core.Store, review: dict, rid: str, n: int, reviewer: str) ->
   """`{id, sha}` the round's record of `reviewer` carries, the persona it read: a spec review's stored read
   (`persona-<n>-<id>.json`, which a `--brief` stores; none stored, none recorded, so HEAD is never inferred at record
   time), any other kind's the handoff's frozen copy of that one reviewer; None for a built-in with no file and for any
-  name that is not a reviewer. A repository reviewer (not a built-in) of a spec round with no stored read is refused:
-  its record would carry no evidence of the persona it read."""
+  name that is not a reviewer. A spec round with no stored read is refused for a repository reviewer and for a built-in
+  that has a file at HEAD (an override; that one file is looked up, so no other bad file blocks the record): its record
+  would carry no evidence of the persona it read."""
   from superegm import review as reviews
   if reviewer == "astra" or reviewer == "foreman" or reviewer.startswith("external:"):
     return None
@@ -195,9 +196,12 @@ def persona_of(st: core.Store, review: dict, rid: str, n: int, reviewer: str) ->
     if path.is_file():
       read = stored_read(path)
       return {"id": read["id"], "sha": read["sha"]}
-    if reviewer not in reviews.REVIEWERS:
-      raise core.HandoffError(f"{reviewer} has no stored persona read for round {n}; run `reviewers --brief {reviewer} --spec ... --review {rid} --round {n}` first")
-    return None
+    if reviewer in reviews.REVIEWERS:
+      from superegm import instructions
+      root = core.git_toplevel(Path(review["artifact"]))
+      if instructions.blob(root, "HEAD", f"{DIR}/{reviewer}.md") is None:
+        return None  # a built-in with no override
+    raise core.HandoffError(f"{reviewer} has no stored persona read for round {n}; run `reviewers --brief {reviewer} --spec ... --review {rid} --round {n}` first")
   found = (frozen(st, review.get("handoff_id"), {reviewer}) or {}).get(reviewer)
   return {"id": reviewer, "sha": found["sha"]} if found else None
 
@@ -227,6 +231,9 @@ def brief(args, st: core.Store) -> str:
     return stored_read(path)["text"]
   found = load(core.git_toplevel(design), "HEAD").get(args.brief)
   if found is None:
+    from superegm import review as reviews
+    if args.brief in reviews.REVIEWERS:
+      raise core.HandoffError(f"{args.brief} is a built-in with no {DIR}/{args.brief}.md at HEAD")
     raise core.HandoffError(f"unknown reviewer {args.brief}")
   core.atomic_write(path, {"id": args.brief, "sha": found["sha"], "text": found["text"]})
   return found["text"]
