@@ -27,7 +27,7 @@ def blob_sha(data: bytes) -> str:
 
 def refuse(rel: str, reason: str) -> core.HandoffError:
   """The refusal for the file `rel`, naming it."""
-  return core.HandoffError(f"reviewers: {rel}: {reason}")
+  return core.HandoffError(f"{rel}: {reason}")
 
 
 def frontmatter(rel: str, text: str) -> tuple[dict, str]:
