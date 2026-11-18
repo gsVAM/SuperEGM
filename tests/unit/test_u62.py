@@ -136,3 +136,55 @@ def test_conflict_relaunches_once(world, monkeypatch, case, marked_first, marked
     write_launches(s, "U01", *runs)
   code, out = world.run("launch", "--runcard", card)
   assert code == 0 and marked(out) == marked_second, out
+
+
+# ---------------------------------------------------------------- S3: the merge orders on a launch
+
+
+def first_round(world, s, card, uid="U07", number=71):
+  """`launch`, round 1 launched and exited, its pull request #`number` open at the base's commit; the head returned."""
+  assert world.run("launch", "--runcard", card)[0] == 0
+  assert world.run("launch-builder", "--unit", uid, "--round", 1, "--runcard", card)[0] == 0
+  Path(launches_of(s, uid)[0]["result_file"] + ".exit").write_text("0\n", encoding="utf-8")
+  assert world.run("record-launch", "--unit", uid, "--exit", 0, "--runcard", card)[0] == 0
+  head = git(["rev-parse", "refs/superegm/base"], world.repo).strip()
+  git(["update-ref", f"refs/pull/{number}/head", head], world.repo.parent / "origin.git")
+  make_pr(world.gh, number, head, closes=[(REPO, 7)])
+  return head
+
+
+def save_pr(s, uid, number, head, mergeable):
+  """The saved pull request (`status.py`'s `record["pr"]`) as the last status pass read it."""
+  state = json.loads(s.path("state").read_text(encoding="utf-8"))
+  state["units"][uid]["pr"] = {"number": number, "head": head, "base_ref": "main", "mergeable": mergeable}
+  s.path("state").write_text(json.dumps(state), encoding="utf-8")
+
+
+@pytest.mark.parametrize("latest, mergeable, rounds, merge, reason", [
+  ("clean", "CONFLICTING", 3, "alone", "merge"),
+  ("proceeded", "CONFLICTING", 3, "alone", "merge"),
+  ("revise", "CONFLICTING", 3, "with-fix", "review"),
+  ("revise", "MERGEABLE", 3, None, "review"),
+  ("revise", "CONFLICTING", None, None, "review"),
+])
+def test_merge_orders_on_launch(world, monkeypatch, spawn_fake, latest, mergeable, rounds, merge, reason):
+  # §6.1: orders from the saved mergeable; git merge admitted on this launch only
+  s, card, hid, _ = seed(world)
+  if rounds is not None:
+    with_rounds(s, world, rounds)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  head = first_round(world, s, card)
+  posted = {**CLEAN, "head": head, "posted_at": "2099-01-01T00:00:00Z"}  # posted after round 1 started
+  round_one = {**posted, "outcome": "clean" if latest == "clean" else "revise"}
+  write_foreman(s, "U07", [round_one], [proceed_entry(1, head)] if latest == "proceeded" else [])
+  save_pr(s, "U07", 71, head, mergeable)
+  code, out = world.run("launch-builder", "--unit", "U07", "--round", 2, "--runcard", card)
+  assert code == 0, out
+  entry = launches_of(s, "U07")[-1]
+  prompt = s.path("launches", "U07_r2_prompt.md").read_text(encoding="utf-8")
+  tools = entry["command"]
+  assert entry.get("merge") == merge and entry["reason"] == reason
+  assert ("Merge orders" in prompt) == (merge is not None)
+  assert ("Bash(git merge:*)" in tools) == (merge is not None)
+  first = launches_of(s, "U07")[0]
+  assert "merge" not in first and "Bash(git merge:*)" not in first["command"]  # the first launch carried none
