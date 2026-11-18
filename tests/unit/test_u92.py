@@ -353,4 +353,4 @@ def test_head_less_proceed_asks_for_a_proceed_again(world):
   atomic_write(s.path("foreman", "U01"), f)
   head = reading(s, card)[0]["head"]
   assert head
-  assert [i["action"].split(" · ")[0] for i in proceed_items(s)] == [f"proceed again: U01 head {head}"]
+  assert [i["action"].split(" on ")[0] for i in proceed_items(s)] == [f"proceed again: U01 head {head}"]

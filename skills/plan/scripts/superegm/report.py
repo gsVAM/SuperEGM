@@ -147,8 +147,9 @@ def board_table(handoff, state: dict, card: dict, now: float) -> str:
     waits += [p for p in handoff.graph.order if p in handoff.graph.preds[uid] and not views[p]["landed"]]
     waits += [f"{uid}/{d}" for d in open_blocking.get(uid) or []]
     # spec section 4.2: a head made clean by a proceed reads its proceed, never its latest posted round alone
+    auth = authorizing(foreman) or {}
     action = next_action(word, latest, launch, decisions, reasons.get(uid),
-                         proceeded=bool((authorizing(foreman) or {}).get("ruling")))
+                         proceeded=bool(auth.get("ruling")), pinned=bool(auth.get("head")))
     # U61: a clean head whose shared-file merge order is not all landed waits for those merges; `waits on` keeps the blockers.
     unmerged = [p for p in handoff.graph.order if p in handoff.graph.merge_after[uid] and not views[p]["landed"]]
     if word == "clean" and action == "await-merge" and unmerged:
@@ -173,11 +174,14 @@ def round_cell(latest) -> str:
   return f"r{latest.get('round')} {latest.get('phase')}" + (f" {latest['outcome']}" if latest.get("outcome") else "")
 
 
-def next_action(word: str, latest, launch, decisions: list, reason, proceeded: bool = False) -> str:
+def next_action(word: str, latest, launch, decisions: list, reason, proceeded: bool = False,
+                pinned: bool = True) -> str:
   """The board's `next action` by state: `launch-builder` for `ready`, the decision for `pending`, the idle
   reason for `idle`, `proceed again` for `waiting proceed` (spec section 4.2), none for `waiting`, `landed` and
-  `stopped`; `await-merge` for a `clean` unit whose authorizing outcome is a proceed (`proceeded`, spec section
-  4.2: its latest posted round, if any, is not what authorizes it); otherwise an `active` or `clean` unit's from
+  `stopped`; for a `clean` unit whose authorizing outcome is a proceed (`proceeded`, spec section 4.2: its latest
+  posted round, if any, is not what authorizes it), `await-merge` when the proceed pinned a head and `proceed
+  again` when it did not (`pinned` False: `inbox` offers no merge without a head for `--match-head-commit`, and
+  lists `proceed again` on the pull request's head); otherwise an `active` or `clean` unit's from
   the word of a posted round not older than the latest launch, else none while a launch runs, `foreman dispatch`
   once it is terminal or when there is none."""
   if word == "ready":
@@ -191,7 +195,7 @@ def next_action(word: str, latest, launch, decisions: list, reason, proceeded: b
   if word not in ("active", "clean"):
     return "none"
   if word == "clean" and proceeded:
-    return "await-merge"
+    return "await-merge" if pinned else "proceed again"
   if (latest and latest.get("phase") == "posted" and latest.get("outcome")
       and not (launch and launch["round"] > (latest.get("launch") or 0))):
     return word_action(latest["outcome"], 0)
@@ -332,6 +336,10 @@ def loop_ended(states: dict, ready_unlaunched: list, free_slots: int) -> tuple:
     return False, "ready, unlaunched: " + ", ".join(ready_unlaunched)
   if ready_unlaunched:
     return True, "no free slot for " + ", ".join(ready_unlaunched)
+  waiting = [uid for uid, state in states.items() if state == "waiting proceed"]
+  if waiting:  # spec section 4.2: holds no slot, so the wave ends; the reason names the units the owner proceeds on
+    return True, ("every launched unit is clean, landed, stopped, pending, idle or waiting proceed"
+                  f" (waiting proceed: {', '.join(waiting)})")
   return True, "every launched unit is clean, landed, stopped, pending or idle"
 
 

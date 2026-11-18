@@ -86,7 +86,8 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
   """The decisions, test-delta, owner-only and merge-ready lines of one unit neither stopped nor landed, and its
   `proceed again: <unit> head <sha>` line while it is waiting proceed (spec section 4.2), keyed on the later launch
   and the head. A merge a proceed authorizes names the owner's `gh pr merge <pr> --match-head-commit <sha>` on the
-  proceed's pinned head and is keyed `<review>/<head>`; a proceed without a pinned head offers no merge."""
+  proceed's pinned head and is keyed `<review>/<head>`; a proceed without a pinned head offers no merge, and lists
+  `proceed again` on the pull request's head once it has one."""
   out = []
   number = (state["units"].get(uid) or {}).get("number")
   on_issue = f" on {GITHUB}/{repo}/issues/{number}"
@@ -146,8 +147,13 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
     last = launches[-1]["round"] if launches else 0
     out.append(item(repo, uid, "proceed", f"proceed again: {uid} head {shown}{on_issue}", f"{last}/{shown}"))
   auth = authorizing(foreman) or {}
-  # a proceed with no pinned head has nothing for `--match-head-commit` to pin: no merge is offered on it
-  if latest_clean(foreman, launches, head) and not (auth.get("ruling") and not auth.get("head")):
+  # a proceed with no pinned head has nothing for `--match-head-commit` to pin: no merge is offered on it, and
+  # once the pull request has a head the owner is asked to proceed again on it, as the board's action says
+  unpinned = bool(auth.get("ruling")) and not auth.get("head")
+  if unpinned and head and latest_clean(foreman, launches, head):
+    last = launches[-1]["round"] if launches else 0
+    out.append(item(repo, uid, "proceed", f"proceed again: {uid} head {head}{on_issue}", f"{last}/{head}"))
+  if latest_clean(foreman, launches, head) and not unpinned:
     pr = report.unit_view(state, uid)["pr"] or ((state["units"].get(uid) or {}).get("pr") or {}).get("number")
     rounds = foreman.get("rounds") or []
     url = f"{GITHUB}/{repo}/pull/{pr}"

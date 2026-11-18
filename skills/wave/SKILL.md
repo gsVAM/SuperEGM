@@ -180,7 +180,7 @@ slot); a new head restarts the clock.
 dispatch):
 
 - `clean` → await-merge: nothing runs; the unit awaits the owner's merge and
-  its slot is free. A head made `clean` by accept (Decision point 5) or proceed awaits merge alike.
+  its slot is free. A head made `clean` by accept (point 5) or a head-pinning proceed awaits merge alike.
 - `revise` → in normal mode, when `review status` printed `acceptable: yes` → Decision point 5 first (no launch
   while it is pending). Otherwise, and on a ruled `revise`, `launch-builder` for the next
   round as today (the prompt carries the review); a ruled `revise` spends no relaunch.
