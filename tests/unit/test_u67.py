@@ -1,9 +1,10 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U67
 
-"""U67 (spec section 6.3): `superegm precheck` runs the foreman's worktree checks in the builder's worktree,
-through the one function `collect` calls too, before every push. Fixtures: conftest's `world` and
-test_foreman's `seed`, `pr_repo` and `open_head_review`."""
+"""U67 (spec section 6.3): `superegm precheck`, run from the builder's worktree before every push, runs the
+foreman's worktree checks through the one function `collect` calls too, its `Run` items in a separate clone of
+HEAD under a temporary directory. Fixtures: conftest's `world` and test_foreman's `seed`, `pr_repo` and
+`open_head_review`."""
 
 import json
 import os
@@ -28,30 +29,40 @@ CASES = {
     "clean": {},
     "round_2_overruled_scope": dict(commits=GOOD + (("feat(S1): more", "src/other.py"),), round_2=True),
 }
-RULING = ("builder: builder-bot\n### issue #2 comment 13 by owner at 2026-11-02T13:00:00Z\n"
-          "**Ruling:** foreman-1-2 finding overruled — Scope widened to src/other.py\n")
+SCOPE_FINDING = "src/other.py | regression: no | changed path outside Scope paths"
+SCOPE_RULING = "foreman-1-2 finding overruled — Scope widened to src/other.py"
+ruling_comment = lambda text: f"builder: builder-bot\n### issue #2 comment 13 by owner at 2026-11-02T13:00:00Z\n**Ruling:** {text}\n"
+RULING = ruling_comment(SCOPE_RULING)
 
 
-def builder_worktree(world, tmp_path, monkeypatch, commits=GOOD, round_2=False, ruling="launch", **kw):
+def builder_worktree(world, tmp_path, monkeypatch, commits=GOOD, round_2=False, ruling="launch", base_files=None,
+                     finding=SCOPE_FINDING, ruling_text=SCOPE_RULING, posted=POSTED_R1, **kw):
   """The builder's worktree on its branch, `refs/superegm/base` at the base as `launch` fetches it, the
-  working directory inside it; on round 2 a posted round whose out-of-Scope finding the owner overruled after
-  the round was posted: by an issue comment round 2's launch fetched (`ruling="launch"`), or by the foreman
-  file's recorded `rulings[]` alone (`ruling="recorded"`)."""
-  target, base, head, g = pr_repo(world, tmp_path, monkeypatch, commits=commits)
+  working directory inside it; on round 2 a posted round (`posted`) whose foreman-1-2 (`finding`, by default
+  the out-of-Scope src/other.py) the owner ruled (`ruling_text`) after the round was posted: by an issue comment
+  round 2's launch fetched (`ruling="launch"`), by the foreman file's recorded `rulings[]` alone
+  (`ruling="recorded"`), by an issue comment in a posted round's own comments.md (`ruling="round"`), or not at
+  all (`ruling=None`)."""
+  target, base, head, g = pr_repo(world, tmp_path, monkeypatch, commits=commits, base_files=base_files)
   if round_2:
-    kw.update(rounds=[POSTED_R1], launches=TWO_LAUNCHES)
+    kw.update(rounds=[posted], launches=TWO_LAUNCHES)
   if round_2 and ruling == "recorded":
     kw.update(decisions=[{"id": "q1", "point": 1, "source": "review r round 1"}],
-              rulings=[{"decision": "q1", "ruling": "foreman-1-2 finding overruled — Scope widened to src/other.py",
+              rulings=[{"decision": "q1", "ruling": ruling_text,
                         "by": "owner", "reason": None, "posted": "comment 13", "posted_at": "2026-11-02T13:00:00Z"}])
   st, card, _ = seed(world, head=head, **kw)
   if round_2:
     open_head_review(world, st, card, "0" * 40, {
         "change-review": "",
         "foreman": "foreman-1-1 | high | ci | regression: no | CI not green on this head: ci red (tests)\n"
-                   "foreman-1-2 | high | src/other.py | regression: no | changed path outside Scope paths\n"})
+                   f"foreman-1-2 | high | {finding}\n"})
     if ruling == "launch":  # posted after round 1: in round 2's launch snapshot, never in round 1's comments.md
-      st.path("launches", "U01_r2_comments.md").write_text(RULING, encoding="utf-8")
+      st.path("launches", "U01_r2_comments.md").write_text(ruling_comment(ruling_text), encoding="utf-8")
+    if ruling == "round":  # no launch snapshot: the latest posted round's own comments.md is read
+      st.path("launches", "U01_r2_comments.md").unlink(missing_ok=True)
+      seen = st.path("review", "U01", "pr70") / "r1" / "comments.md"
+      seen.parent.mkdir(parents=True, exist_ok=True)
+      seen.write_text(ruling_comment(ruling_text), encoding="utf-8")
   g("fetch", "-q", "--no-write-fetch-head", "origin", "+refs/heads/main:refs/superegm/base",
     f"+refs/pull/70/head:refs/heads/{BRANCH}", cwd=world.repo)
   worktree = tmp_path / "wt"
@@ -88,6 +99,8 @@ def test_collect_and_precheck_share_the_worktree_checks(world, tmp_path, monkeyp
   from superegm import collect as collect_mod
   calls, shared = [], collect_mod.worktree_checks  # each caller goes through the one function
   monkeypatch.setattr(collect_mod, "worktree_checks", lambda *a, **kw: calls.append(a) or shared(*a, **kw))
+  read, posted = [], collect_mod.posted_findings  # and reads what the posted rounds settled through one function
+  monkeypatch.setattr(collect_mod, "posted_findings", lambda *a, **kw: read.append(a) or posted(*a, **kw))
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
   st, _, _ = builder_worktree(world, tmp_path, monkeypatch, pr_body="U01\n\nCloses #2\n")
   code, out = precheck(world, st, tmp_path, "U01\n\nCloses #2\n")
@@ -101,7 +114,7 @@ def test_collect_and_precheck_share_the_worktree_checks(world, tmp_path, monkeyp
   code, out = world.run("collect", "--unit", "U01", "--dispatch", did, "--runcard", child)
   assert code == 0, out
   collect_lines = (st.path("review", "U01", "pr70") / "r1" / "foreman.findings").read_text(encoding="utf-8").splitlines()
-  assert len(calls) == 2
+  assert len(calls) == 2 and len(read) == 2
   assert collect_lines == precheck_lines and "Run item 2: no fenced output" in " ".join(precheck_lines)
 
 
@@ -235,8 +248,9 @@ def test_precheck_reads_the_store_of_the_checkout_its_script_names(world, tmp_pa
   assert precheck(world, st, tmp_path) == (0, "")
 
 
-def launched(world, monkeypatch, **builder):
-  """test_builders' machine-account launch of round 1, its config's `builder` keys updated by `builder`."""
+def launched(world, monkeypatch, comments=None, **builder):
+  """test_builders' machine-account launch of round 1, its config's `builder` keys updated by `builder`, the
+  faked issue comments `comments` (issue number → comments) when given."""
   import shutil
   from superegm import orient
   monkeypatch.setattr(orient, "GRAPHIFY", "superegm-no-such-tool")
@@ -248,6 +262,7 @@ def launched(world, monkeypatch, **builder):
   path.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
   assert world.run("launch", "--runcard", card)[0] == 0
+  world.gh.comments.update(comments or {})
   return s, world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)
 
 
@@ -274,3 +289,98 @@ def test_a_bad_precheck_attempts_is_refused(world, monkeypatch, spawn_fake, valu
 def test_the_orders_self_review_merge_and_round_1_wording(phrase, present):
   text = Path("skills/wave/references/builder_orders.md").read_text()
   assert (phrase in text) == present
+
+
+# Round 3's review (PR #227): the fixes, each pinned.
+
+TWO_ASSERTS, ONE_ASSERT = "def test_a():\n  assert 1 == 1\n  assert 2 == 2\n", "def test_a():\n  assert 1 == 1\n"
+Q = "tests/unit/test_q.py"
+SETTLED = {  # each kind a posted round raised: its worktree, round 1's finding and the owner's ruling
+  "scope": ({"commits": GOOD + (("feat(S1): more", "src/other.py"),)}, SCOPE_FINDING, SCOPE_RULING),
+  "tdd": ({"commits": CASES["tdd_order"]["commits"]},
+          "tests/unit/test_hooks.py | regression: no | tdd-order: S1: feat(S1) precedes test(S1)",
+          "foreman-1-2 finding overruled — the order is the owner's"),
+  "dod": ({"dod": "false"}, "dod/2.txt | regression: no | dod-2: ran red (exit 1)", "foreman-1-2 allowed — red by design"),
+  "delta": ({"commits": GOOD + (("chore: trim", Q, ONE_ASSERT),), "base_files": {Q: TWO_ASSERTS}},
+            f"{Q}:3 | regression: no | test-delta: {Q}:3 removed", "foreman-1-2 allowed — the assertion moved")}
+
+
+@pytest.mark.parametrize("ruling", ["launch", "recorded", "round", None])
+@pytest.mark.parametrize("kind", list(SETTLED))
+def test_precheck_skips_each_kind_a_ruling_settled(world, tmp_path, monkeypatch, kind, ruling):
+  # an out-of-Scope path, a tdd-order failure, a `dod-<n>` and a test-delta entry round 1 raised: skipped once the owner
+  # ruled them, from the launch snapshot, the record or the round's own comments.md; reported again when nobody did
+  setup, finding, text = SETTLED[kind]
+  setup = dict(setup)
+  dod = setup.pop("dod", None)
+  st, worktree, g = builder_worktree(world, tmp_path, monkeypatch, round_2=True, ruling=ruling or "none",
+                                     finding=finding, ruling_text=text, **setup)
+  if kind == "delta":  # round 1's entry, taken at this base
+    data = json.loads(st.path("foreman", "U01").read_text(encoding="utf-8"))
+    data["rounds"][0]["test_delta"] = [{"file": Q, "line": 3, "base_line": 3, "kind": "removed",
+                                        "base_commit": g("rev-parse", "refs/superegm/base", cwd=worktree)}]
+    st.path("foreman", "U01").write_text(json.dumps(data), encoding="utf-8")
+  if dod:
+    unit = st.path("unit", "U01")
+    unit.write_text(unit.read_text(encoding="utf-8").replace("Run `true`", f"Run `{dod}`"), encoding="utf-8")
+  code, out = precheck(world, st, tmp_path)
+  if ruling:
+    assert (code, out) == (0, ""), out
+  else:
+    claim = finding.rsplit(" | ", 1)[1]
+    assert code == 1 and len(out.splitlines()) == 1 and out.startswith("foreman-2-1 | high | ") \
+        and out.rstrip("\n").endswith(f" | regression: no | {claim}"), out
+
+
+def test_precheck_keeps_a_changed_path_with_a_space_whole(world, tmp_path, monkeypatch):
+  # `git diff --name-only` read NUL-separated: one path, one finding
+  st, _, _ = builder_worktree(world, tmp_path, monkeypatch, commits=GOOD + (("feat(S1): notes", "src/my notes.py"),))
+  code, out = precheck(world, st, tmp_path)
+  assert code == 1 and out == "foreman-1-1 | high | src/my notes.py | regression: no | changed path outside Scope paths\n"
+
+
+def test_precheck_runs_leave_the_builders_refs_and_config_alone(world, tmp_path, monkeypatch):
+  # a Run item that moves the branch and the base, tags HEAD and sets a config key changes none of the builder's repository
+  from superegm import collect as collect_mod
+  st, worktree, g = builder_worktree(world, tmp_path, monkeypatch)
+  config = Path(g("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=worktree).strip()) / "config"
+  real = collect_mod.dod_runs
+
+  def fake(items, cwd, env, deadline, out_dir):
+    edit = (f"git update-ref refs/heads/{BRANCH} HEAD~1; git tag precheck-probe; git config superegm.probe yes; "
+            "git update-ref refs/superegm/base HEAD; ")
+    return real([(n, edit + f"echo '{paste}'", paste) for n, _, paste in items], cwd, env, deadline, out_dir)
+  monkeypatch.setattr(collect_mod, "dod_runs", fake)
+  refs = lambda: g("for-each-ref", "--format=%(refname) %(objectname)", cwd=worktree)
+  before = (refs(), config.read_bytes(), g("rev-parse", "HEAD", cwd=worktree))
+  assert precheck(world, st, tmp_path) == (0, "")
+  assert (refs(), config.read_bytes(), g("rev-parse", "HEAD", cwd=worktree)) == before
+
+
+def test_precheck_names_where_a_failed_runs_output_is_kept(world, tmp_path, monkeypatch):
+  # `dod/<n>.txt` is collect's path in the store; precheck names the file its run's output is kept in
+  st, worktree, _ = builder_worktree(world, tmp_path, monkeypatch)
+  unit = st.path("unit", "U01")
+  unit.write_text(unit.read_text(encoding="utf-8").replace("Run `true`", "Run `echo boom; false`"), encoding="utf-8")
+  code, out = precheck(world, st, tmp_path)
+  location = out.split(" | ")[2]
+  assert code == 1 and "dod-2: ran red" in out and location.endswith("2.out"), out
+  kept = Path(location)
+  assert kept.is_absolute() and "boom" in kept.read_text(encoding="utf-8")
+  assert not kept.is_relative_to(st.root) and not kept.is_relative_to(worktree)
+
+
+def test_the_launch_snapshot_holds_each_issue_comment_precheck_reads(world, monkeypatch, spawn_fake):
+  # launch-builder's own snapshot, parsed as precheck parses it: a comment with no author or date keeps its entry
+  from superegm.collect import parse_comments
+  from test_builders import ISSUE
+  comments = [{"id": 21, "user": {"login": "owner"}, "created_at": "2026-11-02T13:00:00Z",
+               "body": "**Ruling:** foreman-1-2 finding overruled — wide"},
+              {"id": 22, "user": None, "body": "from a deleted account"}]
+  s, (code, out) = launched(world, monkeypatch, comments={ISSUE: comments})
+  assert code == 0, out
+  login, read = parse_comments(s.path("launches", f"{UNIT}_r1_comments.md").read_text(encoding="utf-8"))
+  assert [(c["kind"], c["number"], c["id"], c["login"], c["body"]) for c in read] == [
+      ("issue", ISSUE, 21, "owner", "**Ruling:** foreman-1-2 finding overruled — wide"),
+      ("issue", ISSUE, 22, "ghost", "from a deleted account")]
+  assert login == "builder-bot" and read[0]["at"] == "2026-11-02T13:00:00Z"
