@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING` (U62).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch, started
 detached and recorded `running`."""
@@ -19,7 +19,7 @@ from superegm import body, instructions, orient, scan
 from superegm.body import consumes
 from superegm.builder_token import key_path, tool
 from superegm.decision import deleted_rulings, overridden_comments, parse_form, recorded_rulings
-from superegm.launch import builder_email, builder_login, load_launches, terminal
+from superegm.launch import authorizing, builder_email, builder_login, load_launches, terminal
 from superegm.review_plan import SPEC_LINE_RE
 from superegm.status import STATUS_RE
 
@@ -96,14 +96,16 @@ def prepare(args, card):
   branch, number = handoff.branch(unit), record["number"]
   issue_body = filed_body(state, unit)
   launched_gh = str(st.path("launches", f"{unit}_r{rnd}_bin", "gh")) if app else gh  # the shim, or the real gh by absolute path
-  tools = allowed_tools(builder_config["allowed_tools"], branch, issue_body, launched_gh)
+  foreman_data = core.load_foreman(st, unit)
+  pr = (record.get("pr") or {}).get("number") if rnd >= 2 else None
+  merge = merge_mode(handoff.graph.parallel, record.get("pr") if pr else None, foreman_data)  # spec section 6.1
+  tools = allowed_tools(builder_config["allowed_tools"], branch, issue_body, launched_gh, merge=merge is not None)
   identity = (card.get("builder") or [None])[-1]
   if not identity and app:  # a re-typed wave relaunching while launch is held off: every reader derives the App login (spec section 11)
     identity = {"login": builder, "email": builder_email(builder)}  # `builder` is `app_login(config)`, `<slug>[bot]`, on this path
   if not identity:
     raise core.HandoffError("the wave card records no builder: run launch first")
-  pr = (record.get("pr") or {}).get("number") if rnd >= 2 else None
-  ref = "refs/superegm/base"  # the launch's ref: origin/<base> as `launch` fetched it, the PR tip from round 2
+  ref ="refs/superegm/base"  # the launch's ref: origin/<base> as `launch` fetched it, the PR tip from round 2
   if pr:
     ref = f"refs/superegm/pr/{pr}"
     core.run_git(["fetch", "--no-write-fetch-head", st.config["remote"], f"+refs/pull/{pr}/head:{ref}"], handoff.repo_root)
@@ -117,10 +119,11 @@ def prepare(args, card):
   reviews = core.gh_pages(f"repos/{repo}/pulls/{pr}/reviews") if pr else []
   audit = AUDIT_LINE.format(owner=record["launched"].get("by", "unknown"),  # a pre-upgrade mark records no login
                             runcard=args.runcard, unit=unit, handoff=st.handoff_id)
-  foreman_data = core.load_foreman(st, unit)
   text = prompt_text(number, unit, issue_body, orders_text(tools, launched_gh, builder_config["max_subagent_calls"]), orient_text, comments, reviews, pr, builder, audit, pr_block,
                      spec_range=range_text, owners=config.get("owners") or [], foreman=foreman_data,
                      amendments=amendments_for(st, unit, issue_body))
+  if merge:
+    text = text.rstrip("\n") + "\n\n---\n\n" + merge_brief(merge)
   # the builder's `# Repository instructions`, the handoff's frozen files, rendered once per card and placed last (U37)
   manifest, section = instructions.render_stored(st, "builder", "local", card=args.runcard, handoff_id=st.handoff_id)
   if section:
@@ -142,11 +145,14 @@ def prepare(args, card):
   # the one behaviour (amendment 10): the wrapper started detached, then the launch recorded `running`
   pid = start_detached(["/bin/sh", "-c", line], st.path("launches", f"{unit}_r{rnd}.log"), dict(os.environ))
   launches = load_launches(st, unit)
-  launches.append({"round": rnd, "reason": launch_reason(launches, foreman_data), "worktree": str(worktree), "branch": branch,
-                   "started_at": core.now_iso(), "status": "running",
-                   "model": pair[0], "effort": pair[1], "tier": tier,  # the requested pair (U28), picked by the tier (U33)
-                   "result_file": str(result), "prompt_sha256": core.sha256_file(prompt), "boot_id": core.boot_id(), "pid": pid, "command": line, "session_id": session_id,
-                   "instructions": manifest})  # the files that reached the prompt, [] when none was addressed (U37)
+  entry = {"round": rnd, "reason": "merge" if merge == "alone" else launch_reason(launches, foreman_data), "worktree": str(worktree), "branch": branch,
+           "started_at": core.now_iso(), "status": "running",
+           "model": pair[0], "effort": pair[1], "tier": tier,  # the requested pair (U28), picked by the tier (U33)
+           "result_file": str(result), "prompt_sha256": core.sha256_file(prompt), "boot_id": core.boot_id(), "pid": pid, "command": line, "session_id": session_id,
+           "instructions": manifest}  # the files that reached the prompt, [] when none was addressed (U37)
+  if merge:  # spec section 6.1: absent on a launch with no merge orders
+    entry["merge"] = merge
+  launches.append(entry)
   core.atomic_write(st.path("launches", unit), {"launches": launches})
   done = f"{unit} launch {rnd} running (pid {pid})"
   core.journal(st, done)
@@ -386,11 +392,12 @@ def pr_block_text(repo_root, ref, path):
   return result.stdout.decode("utf-8")
 
 
-def allowed_tools(configured, branch, body_text, gh):
+def allowed_tools(configured, branch, body_text, gh, merge=False):
   """The configured allow-list with its `gh` prefixes rewritten to `gh`'s absolute path (a bare `gh …`
   is refused, so no PATH order is assumed), plus a push prefix for the unit's own branch and
   `Bash(<first word>:*)` for the first word of every `&&`/`;` segment of every command the body runs (U25's D1 (a));
-  a bare `Skill` and unrestricted Bash are refused; `Agent` passes, the owner's opt-in (amendment 15, U27)."""
+  a bare `Skill` and unrestricted Bash are refused; `Agent` passes, the owner's opt-in (amendment 15, U27).
+  `merge`: the launch carries merge orders (spec section 6.1), and on it alone `Bash(git merge:*)` is admitted."""
   for entry in ("Skill", "Bash", "Bash(*)"):
     if entry in configured:
       raise core.HandoffError(f"allowed_tools carries {entry}: a builder invokes no skill bare, never runs unrestricted Bash")
@@ -399,7 +406,31 @@ def allowed_tools(configured, branch, body_text, gh):
     for first in segment_heads(command):
       if f"Bash({first}:*)" not in tools:
         tools.append(f"Bash({first}:*)")
+  if merge and "Bash(git merge:*)" not in tools:
+    tools.append("Bash(git merge:*)")
   return tools
+
+
+def merge_mode(parallel: bool, saved_pr, foreman: dict):
+  """Spec section 6.1: the launch's merge orders, read from the saved pull request (`status.py`'s `record["pr"]`,
+  None before round 2): `alone` when it reads `CONFLICTING` and the foreman's latest round is clean or proceeded
+  (the authorizing outcome of spec section 4.2 is at or after the latest posted round's launch), `with-fix` when it
+  reads `CONFLICTING` otherwise, None when it does not or the handoff's approval entry carries no `rounds`."""
+  if not (parallel and saved_pr and saved_pr.get("mergeable") == "CONFLICTING"):
+    return None
+  posted = [r for r in foreman.get("rounds") or [] if r.get("phase") == "posted"]
+  latest = max(posted, key=lambda r: r.get("round") or 0, default=None)
+  auth = authorizing(foreman)
+  if auth is not None and (latest is None or (auth.get("launch") or 0) >= (latest.get("launch") or 0)):
+    return "alone"
+  return "with-fix"
+
+
+def merge_brief(merge: str) -> str:
+  """The prompt's `# Merge orders` section (spec section 6.1)."""
+  kind = "a merge round alone" if merge == "alone" else "the merge orders with this round's fixes"
+  return (f"# Merge orders\n\nThis launch is {kind} (`merge: {merge}`): GitHub reads your pull request `CONFLICTING`. "
+          "Merge `refs/superegm/base` into your branch as the builder orders' merge orders say.\n")
 
 
 def segment_heads(command: str) -> list:
