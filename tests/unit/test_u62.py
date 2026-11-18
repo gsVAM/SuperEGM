@@ -250,3 +250,23 @@ def test_merge_orders_text():
   merging = launch_builder.orders_text(["Bash(git merge:*)"], "/bin/gh", 0, merge=True)
   assert "<!-- merge: " not in plain and "merge commit" not in plain  # an ordinary launch reads no merge orders
   assert "<!-- merge: " not in merging and "merge commit" in merging and "keeping both units' intent" in merging
+
+
+# ---------------------------------------------------------------- S6: the board and the inbox
+
+
+def test_conflict_on_board_and_inbox(world):
+  # §6.1: a unit whose saved view is `conflict` shows it on the board and in the inbox
+  import superegm as core
+  from superegm import report, inbox
+  from test_wave import wave_store, open_wave_card, CLEAN as WAVE_CLEAN
+  s = wave_store(world, U01={"pr": 71, "head": HEAD, "ci": "green", **WAVE_CLEAN})
+  state = json.loads(s.path("state").read_text(encoding="utf-8"))
+  state["status"]["units"]["U01"] |= {"status": "conflict", "conflict": True}
+  s.path("state").write_text(json.dumps(state), encoding="utf-8")
+  card = json.loads(s.path("runcards", open_wave_card(world)).read_text(encoding="utf-8"))
+  handoff = core.Handoff(core.here(state["plan"]), s)
+  hid = s.handoff_id
+  row = next(r for r in report.board_table(handoff, handoff.state, card, 0).splitlines() if "U01 #" in r)
+  assert "conflict" in row
+  assert any("U01" in line and "conflict" in line for line in map(inbox.line_of, inbox.inbox_items(s, [hid])))
