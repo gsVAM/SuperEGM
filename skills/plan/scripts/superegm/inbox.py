@@ -82,8 +82,7 @@ def review_dirs(hs: core.Store, spec, read: bool = False) -> list:
   return sorted(p for p in set(hs.path("reviews").glob("*")) | set(shared.glob("spec-*")) if keep(p))
 
 
-def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, mode: str = "normal",
-               parallel: bool = False) -> list:
+def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, mode: str = "normal") -> list:
   """The decisions, test-delta, owner-only and merge-ready lines of one unit neither stopped nor landed, and its
   `proceed again: <unit> head <sha>` line while it is waiting proceed (spec section 4.2), keyed on the later launch
   and the head (the pull request's, else the proceed's pinned one; none listed while neither exists). A merge a proceed authorizes names the owner's `gh pr merge <pr> --match-head-commit <sha>` on the
@@ -143,8 +142,7 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
               for fid in (x.strip() for x in outcome.removeprefix("owner: ").split(","))
               if fid and fid not in deltas and open_fid(fid)]
   launches, head = load_launches(hs, uid), report.unit_view(state, uid).get("head")
-  conflict = conflict_items(repo, state, uid, foreman, launches, parallel)
-  out += conflict
+  conflict = report.conflicting(state, uid)  # U62: its `conflict` item is `conflict_items`', beside this unit's
   shown = head or (authorizing(foreman) or {}).get("head")
   # spec section 4.2: keyed on the later launch and the head it left; with no head at all there is none to
   # proceed on, so nothing is listed until the pull request has one
@@ -396,7 +394,8 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
       if report.unit_view(state, uid)["landed"]:
         continue
       live.add(uid)
-      found += unit_items(hs, repo, state, uid, foreman, mode, parallel)
+      found += unit_items(hs, repo, state, uid, foreman, mode)
+      found += conflict_items(repo, state, uid, foreman, load_launches(hs, uid), parallel)  # U62 (spec section 6.1)
     if units:
       for path in review_dirs(hs, spec, spec in read_specs):
         rev = json.loads(core.read_text(path / "review.json"))
