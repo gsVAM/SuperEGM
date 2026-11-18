@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the foreman subcommand (spec section 11); `runner_path`, the claudex-loop runner's lookup (U17); a launch `interrupted (reboot)` is terminal (U24); doctor's `astra:` line as its DOCTOR_CHECKS (U32); each round's `instructions`, the manifest stored for role `foreman` on its card (U38).
+# Added by SuperEGM (gsVAM), 2026: the foreman subcommand (spec section 11); `runner_path`, the claudex-loop runner's lookup (U17); a launch `interrupted (reboot)` is terminal (U24); doctor's `astra:` line as its DOCTOR_CHECKS (U32); each round's `instructions`, the manifest stored for role `foreman` on its card (U38); the round of a merge launch marked `merge: true` and a proceeded head refused dispatch (U66).
 
 """superegm foreman dispatch: one evaluation of the dispatch predicate, the supersede of a non-terminal
 round, the head review and the child card of a round."""
@@ -71,10 +71,9 @@ def run(args):
     print(f"recovered {recovered}")
     return 1
   status_exit = review.status_code(rid, args.runcard) if rid else 0
-  ruling = review.last_proceed(review.load_review(st, rid)) if rid else None
-  given = next((e for e in reversed(data.get("proceeds") or []) if ruling and e.get("ruling") == ruling["id"]), None)
-  # spec section 6.1: a launch recorded after the proceed is its merge launch, and its head is not reviewed
-  proceeded = rid if given and launches and launches[-1]["round"] > (given.get("launch") or 0) else None
+  # spec sections 4.2 and 6.1: a proceed is final for its head, so no round of a proceeded cycle is dispatched, the
+  # merge launch's head included, whether or not the owner has proceeded again since
+  proceeded = rid if rid and review.last_proceed(review.load_review(st, rid)) else None
   reason = dispatch_refusal(pr, core.read_ci(repo, pr["headRefOid"]), launches, rounds, data["decisions"],
                             data["rulings"], status_exit, proceeded)
   if reason:
@@ -120,8 +119,8 @@ def recover_posted(st, unit: str, data: dict, reviews: list, runcard: str):
 def dispatch_refusal(pr: dict, ci: dict, launches: list, rounds: list, decisions: list, rulings: list,
                      status_exit: int, proceeded: str | None = None):
   """Spec section 11's predicate, its first failing clause: CI concluded on the head, the latest launch
-  terminal, the head not a proceeded review's merge launch (`proceeded`, that review's id: the owner proceeds
-  again, spec section 4.2), no round posted since it, no decision pending, the review not stalled."""
+  terminal, the review not proceeded (`proceeded`, that review's id: a proceed is final for its head, and the
+  owner proceeds again on a merge launch's, spec section 4.2), no round posted since it, no decision pending, the review not stalled."""
   if not ci["check_runs"] and not ci["statuses"]:
     return "ci absent"
   if core.ci_verdict(ci) == "waiting-for-ci":
