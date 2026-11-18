@@ -114,23 +114,25 @@ def prepare(args, card):
     ref = f"refs/heads/{branch}"
   base_commit = conflicts = None
   if merge:  # spec section 6.1: the base as it is now, never the batch's fetch, pinned for the brief, the command and the entry
-    # fetched into a scratch ref and checked as `launch` checks its fetch; only a base that passes moves the shared
-    # `refs/superegm/base`, so a refused one never reaches a later launch of the batch
-    scratch = "refs/superegm/merge-base"
-    core.run_git(["fetch", "--no-write-fetch-head", st.config["remote"], f"+refs/heads/{config['base']}:{scratch}"], handoff.repo_root)
+    # fetched into this invocation's own scratch ref (a concurrent card's fetch neither moves nor deletes it), resolved
+    # to its commit at once, and that commit checked as `launch` checks its fetch; only a commit that passes moves the
+    # shared `refs/superegm/base`, so a refused one never reaches a later launch of the batch
+    scratch = f"refs/superegm/scratch/{uuid.uuid4().hex}"
     try:
-      problems = base_problems(handoff.repo_root, st, handoff.design_path, config["base"], ref=scratch)
-      if problems:
-        raise core.HandoffError(problems[0])
+      core.run_git(["fetch", "--no-write-fetch-head", st.config["remote"], f"+refs/heads/{config['base']}:{scratch}"], handoff.repo_root)
       base_commit = core.run_git(["rev-parse", f"{scratch}^{{commit}}"], handoff.repo_root).strip()
-      core.run_git(["update-ref", "refs/superegm/base", base_commit], handoff.repo_root)
     finally:
       core.run_git(["update-ref", "-d", scratch], handoff.repo_root, check=False)
-    conflicts = [(path, landed_holders(handoff, state, path)) for path in conflicting_paths(handoff.repo_root, ref, base_commit)]
+    problems = base_problems(handoff.repo_root, st, handoff.design_path, config["base"], ref=base_commit)
+    if problems:
+      raise core.HandoffError(problems[0])
+    core.run_git(["update-ref", "refs/superegm/base", base_commit], handoff.repo_root)
+    conflicts = [(path, *landed_holders(handoff, state, path, ref, base_commit))
+                 for path in conflicting_paths(handoff.repo_root, ref, base_commit)]
   pr_block = pr_block_text(handoff.repo_root, ref, config["pr_block_file"]) if config["pr_block_file"] else None
   # The launch's tree, before any worktree: an orient or spec-range refusal is an ordinary precondition.
   orient_text = core.read_text(orient.orient_unit(st, handoff.repo_root, ref, unit))
-  range_text = spec_range_text(handoff.repo_root, st, issue_body, "refs/superegm/base")
+  range_text = spec_range_text(handoff.repo_root, st, issue_body, base_commit or "refs/superegm/base")
   comments = core.gh_pages(f"repos/{repo}/issues/{number}/comments")
   reviews = core.gh_pages(f"repos/{repo}/pulls/{pr}/reviews") if pr else []
   audit = AUDIT_LINE.format(owner=record["launched"].get("by", "unknown"),  # a pre-upgrade mark records no login
@@ -465,23 +467,44 @@ def conflicting_paths(repo_root: Path, head: str, base: str) -> list[str]:
   return paths
 
 
-def landed_holders(handoff, state: dict, path: str) -> list[str]:
-  """The handoff's landed units (the saved status pass) whose Scope paths hold `path`, in the plan's order."""
+UNIT_BRANCH_RE = re.compile(rf"\b{core.BRANCH_PREFIX}/([^/\s]+)/(U\d+)\b")  # a unit branch a merge commit names
+PR_NUMBER_RE = re.compile(r"#(\d+)\b")
+BRIEF_COMMITS = 5  # the base commits named under one path
+
+
+def landed_holders(handoff, state: dict, path: str, head: str, base: str) -> tuple[list[str], list[tuple[str, str]]]:
+  """The landed units whose scope holds `path` (spec section 6.1), and the commits `base` holds past `head` that touch
+  it (sha, subject), newest first. Read from those commits, not the saved status pass alone, which may predate a
+  landing: the handoff's units, in the plan's order, whose Scope paths hold `path` and which the saved status reads
+  landed or whose saved pull request or unit branch a commit names; then a unit of another handoff whose unit branch
+  a commit names, as `<handoff>/<unit>`."""
   from superegm.report import unit_view  # the one reader of the saved status
+  out = core.run_git(["log", "-z", "--format=%H%x1f%s%x1f%B", f"{head}..{base}", "--", path], handoff.repo_root)
+  commits = [c.split("\x1f", 2) for c in out.split("\0") if c.strip("\n")]
+  text = "\n".join(c[2] if len(c) > 2 else "" for c in commits)
+  numbers = {int(n) for n in PR_NUMBER_RE.findall(text)}
+  branches = list(dict.fromkeys(UNIT_BRANCH_RE.findall(text)))
   holders = []
   for uid in handoff.graph.order:
-    if not unit_view(state, uid)["landed"]:
+    if not any(path == s or path.startswith(s.rstrip("/") + "/") for s, _kind in handoff.plan.units[uid].scope):
       continue
-    if any(path == s or path.startswith(s.rstrip("/") + "/") for s, _kind in handoff.plan.units[uid].scope):
+    number = ((state["units"].get(uid) or {}).get("pr") or {}).get("number")
+    if unit_view(state, uid)["landed"] or number in numbers or (handoff.handoff_id, uid) in branches:
       holders.append(uid)
-  return holders
+  holders += [f"{hid}/{uid}" for hid, uid in branches if hid != handoff.handoff_id]
+  return holders, [(c[0].strip("\n"), c[1] if len(c) > 1 else "") for c in commits]
 
 
 def merge_brief(merge: str, base: str, conflicts: list) -> str:
   """The prompt's `# Merge orders` section (spec section 6.1): the pinned base commit, the merge command and the
-  conflicting paths, each with the landed units whose scope holds it."""
+  conflicting paths, each with the landed units whose scope holds it and the base commits that touch it."""
   kind = "a merge round alone" if merge == "alone" else "the merge orders with this round's fixes"
-  lines = [f"- `{path}`" + (f" (landed: {', '.join(units)})" if units else "") for path, units in conflicts]
+  lines = []
+  for path, units, commits in conflicts:
+    lines.append(f"- `{path}`" + (f" (landed: {', '.join(units)})" if units else ""))
+    lines += [f"  - base commit `{sha[:12]}`: {subject}" for sha, subject in commits[:BRIEF_COMMITS]]
+    if len(commits) > BRIEF_COMMITS:
+      lines.append(f"  - and {len(commits) - BRIEF_COMMITS} more")
   return (f"# Merge orders\n\nThis launch is {kind} (`merge: {merge}`): GitHub reads your pull request `CONFLICTING`. "
           f"The base is pinned at `{base}` (`refs/superegm/base`); merge it with `git merge {base}`, as the builder "
           "orders' merge orders say.\n\nConflicting paths (`git merge-tree --write-tree` of your head and the base):\n\n"
