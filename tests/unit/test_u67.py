@@ -6,12 +6,18 @@ through the one function `collect` calls too, before every push. Fixtures: conft
 test_foreman's `seed`, `pr_repo` and `open_head_review`."""
 
 import json
+import os
 import re
+import sys
 from pathlib import Path
 
 import pytest
 
 from test_foreman import POSTED_R1, PR_BODY, TWO_LAUNCHES, open_head_review, pr_repo, seed
+# test_builders' launch fixtures, by name (its two autouse fixtures are not imported: the S4 test applies them itself)
+from test_builders import UNIT, app_seed, launches_of, seed as builders_seed, spawn_fake  # noqa: F401
+from test_builder_token import OPENSSL, key  # noqa: F401  the App key fixture
+from superegm.launch_builder import HELPER
 
 BRANCH = "superegm/sample-42aff4/U01"
 GOOD = (("test(S1): hook", "tests/unit/test_hooks.py"), ("feat(S1): hook", "src/hooks.py"))
@@ -130,3 +136,40 @@ def test_precheck_runs_every_item_without_a_draft_and_writes_nothing(world, tmp_
   assert (store_bytes_after, git_status_after) == (store_bytes_before, git_status_before)
   assert (code, out) == (0, "")
   assert not dirs[0].exists() and not dirs[0].is_relative_to(st.root) and not dirs[0].is_relative_to(worktree)
+
+
+@pytest.mark.parametrize("app", [True, False])
+def test_every_launch_writes_and_allows_the_precheck_script(app, world, monkeypatch, key, tmp_path, spawn_fake):
+  # the App and machine-account paths alike
+  import shutil
+  import superegm
+  from superegm import orient
+  from superegm.launch_builder import CONFIG_DEFAULTS
+  monkeypatch.setattr(orient, "GRAPHIFY", "superegm-no-such-tool")  # test_builders' autouse fixtures, applied here alone
+  monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: {"gh": "/usr/local/bin/gh", "openssl": OPENSSL}.get(cmd))
+  if app:
+    s, card, _, _, _ = app_seed(world, monkeypatch, key, tmp_path)
+  else:
+    s, card, _, _ = builders_seed(world)
+    monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0
+  real = superegm.Handoff
+
+  class Spaced(real):  # the config as read with `artifacts_dir` holding a space; the store stays where it is
+    def __init__(self, *a, **k):
+      super().__init__(*a, **k)
+      self.config = {**self.config, "artifacts_dir": "/tmp/a b"}
+  monkeypatch.setattr(superegm, "Handoff", Spaced)
+  whitespace_code, whitespace_out = world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)
+  monkeypatch.setattr(superegm, "Handoff", real)
+  code, out = world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)
+  assert code == 0, out
+  script = s.path("launches", f"{UNIT}_r1_bin", "superegm-precheck")
+  tools = launches_of(s)[-1]["command"].split("--allowedTools '")[1].split("'")[0].split(",")
+  prompt = s.path("launches", f"{UNIT}_r1_prompt.md").read_text(encoding="utf-8")
+  assert (script.name, script.parent.name, os.access(script, os.X_OK)) == ("superegm-precheck", "U07_r1_bin", True)
+  assert f"Bash({script.parent}/superegm-precheck:*)" in tools and "Bash(git reset --hard:*)" in tools
+  assert str(script) in prompt and "{{precheck}}" not in prompt
+  assert CONFIG_DEFAULTS["builder"]["precheck_attempts"] == 3
+  assert whitespace_code == 1 and "artifacts_dir /tmp/a b holds whitespace" in whitespace_out
+  assert f"'{sys.executable}' '{HELPER}' precheck --handoff '{s.handoff_id}' --unit '{UNIT}' \"$@\"" in script.read_text(encoding="utf-8")

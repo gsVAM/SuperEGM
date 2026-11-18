@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the builders' tests (U09): launch, launch-builder, record-launch, interrupt, clean, the orders and the two skill bodies; the App path (U15); the watchdog's trap and `--exit stalled` (U31); the idempotent re-run (U32).
+# Modified by SuperEGM (gsVAM), 2026: the builders' tests (U09): launch, launch-builder, record-launch, interrupt, clean, the orders and the two skill bodies; the App path (U15); the watchdog's trap and `--exit stalled` (U31); the idempotent re-run (U32); the precheck script's two allow rules and the fourth `orders_text` argument (U67).
 
 """The builders (spec section 11): `launch` and its preconditions, `launch-builder`'s worktree,
 prompt file and command line, `record-launch`, `interrupt`, `clean`, the builder orders and the
@@ -444,7 +444,8 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   assert git(["rev-parse", "HEAD"], wt).strip() == git(["rev-parse", "refs/superegm/base"], world.repo).strip()
   prompt_file = s.path("launches", f"{UNIT}_r1_prompt.md")
   prompt = prompt_file.read_text(encoding="utf-8")
-  orders = orders_text(DEFAULT_CONFIG["builder"]["allowed_tools"], "/usr/local/bin/gh", 12)
+  precheck = s.path("launches", f"{UNIT}_r1_bin", "superegm-precheck")
+  orders = orders_text(DEFAULT_CONFIG["builder"]["allowed_tools"], "/usr/local/bin/gh", 12, str(precheck))
   assert prompt.startswith(f"# Issue #{ISSUE} — U07\n\n{world.gh.issues[ISSUE]['body']}")
   assert f"\n\n---\n\n# Builder orders\n\n{orders}" in prompt
   assert f"\n\n---\n\n# Comments on issue #{ISSUE}\n\n## owner · comment 1\n**Decision D1:** (a) five\n\n## builder-bot · comment 3\n**Deviation (other):** renamed a fixture\n\n## owner · comment 4\n**Ruling:** (3) (a) — proceed\n" in prompt
@@ -456,7 +457,8 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   mcp_file = s.path("launches", f"{UNIT}_r1_mcp.json")
   assert f" claude -p \"$(cat '{prompt_file}')\" --session-id '{launches_of(s)[-1]['session_id']}' --model '{cfg['model']}' --effort '{cfg['effort']}' --permission-mode '{cfg['permission_mode']}' --setting-sources user --mcp-config '{mcp_file}' --strict-mcp-config --allowedTools '" in line, line
   tools = line.split("--allowedTools '")[1].split("'")[0].split(",")
-  assert tools == [t.replace("Bash(gh ", "Bash(/usr/local/bin/gh ") for t in cfg["allowed_tools"]] + [f"Bash(git push origin {branch}:*)"]
+  assert tools == [t.replace("Bash(gh ", "Bash(/usr/local/bin/gh ") for t in cfg["allowed_tools"]] + [f"Bash(git push origin {branch}:*)",
+      f"Bash({precheck.parent}/superegm-precheck:*)", "Bash(git reset --hard:*)"]
   assert line.endswith(f"' --output-format json > '{result}'; echo $? > '{result}.exit'")
   assert "ghp_builder" not in out
   tree = git(["rev-parse", "refs/superegm/base^{tree}"], world.repo).strip()
@@ -657,7 +659,8 @@ def test_launch_builder_appends_the_pr_block(world, monkeypatch, key, spawn_fake
     assert not s.path("worktrees", UNIT).exists() and not s.path("launches", f"{UNIT}_r1_prompt.md").exists()
     return
   assert code == 0, out
-  orders = orders_text(DEFAULT_CONFIG["builder"]["allowed_tools"], "/usr/local/bin/gh", 12)
+  orders = orders_text(DEFAULT_CONFIG["builder"]["allowed_tools"], "/usr/local/bin/gh", 12,
+                       str(s.path("launches", f"{UNIT}_r1_bin", "superegm-precheck")))
   prompt = s.path("launches", f"{UNIT}_r1_prompt.md").read_text(encoding="utf-8")
   if key:
     assert f"\n\n---\n\n# Builder orders\n\n{orders}\n\n---\n\n# PR block\n\n<!-- coord/v1 task=7 -->\n\n\n---\n\n# " in prompt
@@ -912,10 +915,13 @@ def test_launch_builder_derives_the_app_identity_on_a_fresh_card(world, monkeypa
 import superegm  # the harness reloads the package per test: read HandoffError at call time
 from superegm.launch_builder import allowed_tools
 
+PRECHECK = ["Bash(/bin/U07_r1_bin/superegm-precheck:*)", "Bash(git reset --hard:*)"]  # the two rules a given bin adds (U67)
+
+
 @pytest.mark.parametrize("configured, expect", [
-  (["Read", "Edit", "Bash(git add:*)"], ["Read", "Edit", "Bash(git add:*)", "Bash(git push origin superegm/h/U07:*)", "Bash(pytest:*)"]),
-  (["Bash(pytest:*)", "Read"], ["Bash(pytest:*)", "Read", "Bash(git push origin superegm/h/U07:*)"]),
-  (["Read", "Agent", "Workflow"], ["Read", "Agent", "Workflow", "Bash(git push origin superegm/h/U07:*)", "Bash(pytest:*)"]),
+  (["Read", "Edit", "Bash(git add:*)"], ["Read", "Edit", "Bash(git add:*)", "Bash(git push origin superegm/h/U07:*)", "Bash(pytest:*)", *PRECHECK]),
+  (["Bash(pytest:*)", "Read"], ["Bash(pytest:*)", "Read", "Bash(git push origin superegm/h/U07:*)", *PRECHECK]),
+  (["Read", "Agent", "Workflow"], ["Read", "Agent", "Workflow", "Bash(git push origin superegm/h/U07:*)", "Bash(pytest:*)", *PRECHECK]),
   (["Read", "Skill"], "Skill"),
   (["Read", "Bash"], "Bash"),
   (["Read", "Bash(*)"], "Bash(*)"),
@@ -926,7 +932,8 @@ def test_allowed_tools_composition(configured, expect):
     with pytest.raises(superegm.HandoffError, match=re.escape(f"allowed_tools carries {expect}: a builder invokes no skill bare, never runs unrestricted Bash")):
       allowed_tools(configured, "superegm/h/U07", body, "/usr/local/bin/gh")
   else:
-    assert allowed_tools(configured, "superegm/h/U07", body, "/usr/local/bin/gh") == expect
+    assert allowed_tools(configured, "superegm/h/U07", body, "/usr/local/bin/gh", bin=Path("/bin/U07_r1_bin")) == expect
+    assert allowed_tools(configured, "superegm/h/U07", body, "/usr/local/bin/gh") == expect[:-2]  # no bin, no rules
 
 
 def test_interrupt_records_a_launch_or_marks_a_prepared_round(world):
