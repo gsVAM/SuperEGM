@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # From the elephant-goldfish-model (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17); an unreplied external high or medium carried forward (U21); rulings read through `ruling_of` and the record, every folded deviation heading (U22); the DoD re-run and the test delta, two gates before the word (U25); its own `foreman` config key and `init` line, moved from `__init__` and `init` (U32); both `binding_rulings` calls drop the consumed comments, so an edited recorded proceed waives no check (U94); the worktree checks in `worktree_checks`, the one function `collect` and `precheck` call (U67).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17); an unreplied external high or medium carried forward (U21); rulings read through `ruling_of` and the record, every folded deviation heading (U22); the DoD re-run and the test delta, two gates before the word (U25); its own `foreman` config key and `init` line, moved from `__init__` and `init` (U32); both `binding_rulings` calls drop the consumed comments, so an edited recorded proceed waives no check (U94); the worktree checks in `worktree_checks`, the one function `collect` and `precheck` call, the posted rounds' settled findings in `posted_findings`, the reading both share, and the changed paths read NUL-separated (U67).
 
 """superegm collect: the foreman's findings of a round through one `review record --reviewer foreman`, or a
 round that could not complete with `--not-run`."""
@@ -362,22 +362,11 @@ def collect(args, card):
     for f in review.findings_of(review.load_round(st, rid, k) or {"reviewers": {}}):
       holds.setdefault(f["id"], k)
   last = review.load_round(st, rid, prior) or {} if prior and rid else {}
-  for e in data["rounds"]:  # every posted round: an overruled out-of-Scope finding widens the Scope for good;
-    if e.get("phase") == "posted":  # a contest or carried finding names the finding a reply may answer under
-      deltas = [f["id"] for f in prior_foreman_findings(st, rid, e["round"]) if f["claim"].startswith("test-delta: ")]
-      prior_delta.update({fid: (d["file"], d["base_commit"], d["base_line"], d["kind"])
-                          for fid, d in zip(deltas, e.get("test_delta") or [])})
-      for f in prior_foreman_findings(st, rid, e["round"]):
-        if f["claim"] == "changed path outside Scope paths":
-          prior_scope[f["id"]] = f["location"]
-        if f["claim"].startswith("tdd-order: "):  # a ruled tdd-order failure stays ruled in every later round
-          prior_tdd[f["id"]] = f["claim"].removeprefix("tdd-order: ")
-        if (m := re.match(r"dod-(\d+): ", f["claim"])):  # a ruled `dod-<n>` finding stays ruled on its item number
-          prior_dod[f["id"]] = int(m.group(1))
-        if (m := re.match(r"(?:contested|unreplied) (\S+):", f["claim"])):
-          contest_of[f["id"]] = m.group(1)
-          if f.get("disposition") is not None:  # a settled copy settles what it carries
-            disposed.add(f["id"])
+  settled = posted_findings(st, rid, data["rounds"])  # the one reading `precheck` shares
+  prior_scope, prior_tdd, prior_dod, prior_delta = settled["scope"], settled["tdd"], settled["dod"], settled["delta"]
+  contest_of, disposed = settled["links"], settled["disposed"]
+  for e in data["rounds"]:  # every posted round: its external findings and the builder's replies in its window
+    if e.get("phase") == "posted":
       external += external_findings(st, rid, e["round"])
       seen = st.path("review", unit, f"pr{number}") / f"r{e['round']}" / "comments.md"
       if seen.is_file():  # a reply in an earlier round's window still answers its finding
@@ -603,6 +592,34 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
   return lines, contested
 
 
+def posted_findings(st, rid, rounds: list) -> dict:
+  """What the posted rounds' foreman findings settle, the one reading `collect` and `precheck` share (spec section
+  6.3), each fid to: `scope` its out-of-Scope path (an overrule widens the Scope for good), `tdd` its tdd-order
+  failure and `dod` its item number (a ruled one stays ruled in every later round), `delta` its test-delta key
+  `(file, base_commit, base_line, kind)`, `links` the fid a contest or carried copy names (a reply may answer
+  under it); `disposed` the copies with a disposition (a settled copy settles what it carries)."""
+  out = {"scope": {}, "tdd": {}, "dod": {}, "delta": {}, "links": {}, "disposed": set()}
+  for e in rounds or []:
+    if e.get("phase") != "posted":
+      continue
+    findings = prior_foreman_findings(st, rid, e["round"])
+    deltas = [f["id"] for f in findings if f["claim"].startswith("test-delta: ")]
+    out["delta"].update({fid: (d["file"], d["base_commit"], d["base_line"], d["kind"])
+                         for fid, d in zip(deltas, e.get("test_delta") or [])})
+    for f in findings:
+      if f["claim"] == "changed path outside Scope paths":
+        out["scope"][f["id"]] = f["location"]
+      if f["claim"].startswith("tdd-order: "):
+        out["tdd"][f["id"]] = f["claim"].removeprefix("tdd-order: ")
+      if (m := re.match(r"dod-(\d+): ", f["claim"])):
+        out["dod"][f["id"]] = int(m.group(1))
+      if (m := re.match(r"(?:contested|unreplied) (\S+):", f["claim"])):
+        out["links"][f["id"]] = m.group(1)
+        if f.get("disposition") is not None:
+          out["disposed"].add(f["id"])
+  return out
+
+
 def worktree_checks(worktree: Path, merge_base: str, head: str, body: str, scope: list, pr_body: str, rulings: list,
                     links: dict, prior: dict, deadline: float = None, out_dir: Path = None, gh: str = None,
                     hold=(), config: dict = None) -> tuple:
@@ -611,7 +628,8 @@ def worktree_checks(worktree: Path, merge_base: str, head: str, body: str, scope
   output `pr_body` pastes run (`dod_runs`, outputs under `out_dir`; none when it is None) with the worktree's git
   config and every `hold` path held whole and written back, then `worktree_findings` reads them. Returns
   `(found, facts)`: `(location, claim)` per finding and `{changed, commits, present, delta, runs, texts, pasted}`."""
-  changed = core.run_git(["diff", "--name-only", merge_base, "HEAD"], worktree).split()
+  # NUL-separated: a Scope path may hold a space, and a quoted or split name would be reported outside Scope
+  changed = [p for p in core.run_git(["diff", "--name-only", "-z", merge_base, "HEAD"], worktree).split("\0") if p]
   commits = tdd_order.commits_of(worktree, merge_base)
   items = body_mod.dod_items(body)
   present = {path for _, kind, path in items if kind == "exists" and (worktree / path).exists()}

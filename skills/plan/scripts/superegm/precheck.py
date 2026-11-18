@@ -6,12 +6,14 @@ before every push: each DoD item's fenced output and `Run` command, the test del
 test-first order. The merge base is `git merge-base refs/superegm/base HEAD`, the PR body the `--pr-body` file
 and, from round 2, the unit's posted rounds, recorded rulings and issue comments are read from the store as
 `collect` reads them (the issue comments as this launch fetched them), so a finding the owner settled is not
-reported again. The `Run` items run in a detached checkout of HEAD under a temporary directory, never in the
-builder's worktree. One line per finding in the foreman's grammar, numbered for the round the next dispatch
+reported again. The `Run` items run in a separate clone of HEAD under a temporary directory, never in the
+builder's worktree or repository; each run's output is kept in a temporary directory of its own, which a
+`dod-<n>` finding names. One line per finding in the foreman's grammar, numbered for the round the next dispatch
 takes; exit 0 when there is none."""
 
 import os
 import re
+import shutil
 import tempfile
 import time
 from pathlib import Path
@@ -19,7 +21,7 @@ from pathlib import Path
 import superegm as core
 from superegm import collect, review
 from superegm.launch import load_launches
-from superegm.collect import parse_comments, prior_foreman_findings
+from superegm.collect import parse_comments
 from superegm.decision import binding_rulings, consumed_comments, recorded_rulings
 
 WRITES = frozenset()  # the store kinds this subcommand writes: none, it reads
@@ -60,50 +62,38 @@ def run(args):
                             deferred=[row["fid"] for row in data.get("followups") or []], consumed=consumed_comments(data))
   head = core.run_git(["rev-parse", "HEAD"], worktree).strip()
   deadline = time.time() + 60 * handoff.config["foreman"]["run_timeout_minutes"]  # collect's bound on the DoD runs
+  # each run's output is kept, outside the store and the worktree, for the builder to read when a finding names it
+  out_dir = Path(tempfile.mkdtemp(prefix="superegm-precheck-out-"))
   with tempfile.TemporaryDirectory(prefix="superegm-precheck-") as scratch:  # never the store or the builder's worktree
-    tree, out_dir = Path(scratch) / "tree", Path(scratch) / "out"
-    out_dir.mkdir()
-    # the Run items run in a detached checkout of HEAD, as `collect` runs them in its own checkout of the head:
-    # whatever a run writes (a cache, an edit to a tracked file) goes with the temporary directory
-    core.run_git(["worktree", "add", "--quiet", "--detach", str(tree), head], worktree)
-    try:
-      found, _ = collect.worktree_checks(tree, merge_base, head, body, scope, pr_body, rulings, prior["links"], prior,
-                                         deadline=deadline, out_dir=out_dir, config=handoff.config)  # `collect`'s own
-    finally:
-      core.run_git(["worktree", "remove", "--force", str(tree)], worktree, check=False)
-      core.run_git(["worktree", "prune"], worktree, check=False)
+    tree = Path(scratch) / "tree"
+    # the Run items run in a separate clone of HEAD, as `collect` runs them in its own checkout of the head: its own
+    # refs, config and files, so whatever a run writes (a cache, a tracked file, a ref, a config key) goes with it
+    core.run_git(["clone", "--quiet", "--shared", "--no-checkout", str(worktree), str(tree)], worktree)
+    core.run_git(["checkout", "--quiet", "--detach", head], tree)
+    found, _ = collect.worktree_checks(tree, merge_base, head, body, scope, pr_body, rulings, prior["links"], prior,
+                                       deadline=deadline, out_dir=out_dir, config=handoff.config)  # `collect`'s own
+  kept = lambda m: str(out_dir / f"{m.group(1)}.out")
+  named = [(re.sub(r"^dod/(\d+)\.txt$", kept, location), claim) for location, claim in found]
+  if named == found:  # no finding names a run's output: nothing is left behind
+    shutil.rmtree(out_dir, ignore_errors=True)
+  found = named
   for i, (location, claim) in enumerate(found, 1):
     print(f"foreman-{rnd}-{i} | high | {location} | regression: no | {claim}")
   return 1 if found else 0
 
 
 def settled(st, handoff, unit: str, data: dict) -> tuple:
-  """What the posted rounds hold, read-only: the foreman's scope, tdd-order, `dod-<n>` and test-delta findings
-  and the contest links, as `collect` reads them; and the issue comments as they are now, as `collect` reads them
-  after the push: this launch's `launches/<unit>_r<n>_comments.md`, which `launch-builder` fetched for the prompt
-  (a ruling posted after its round is there, a deleted one is not), else the latest posted round's."""
+  """What the posted rounds settle, read-only, through `collect.posted_findings`, the reading `collect` makes;
+  and the issue comments: this launch's `launches/<unit>_r<n>_comments.md`, which `launch-builder` fetched for
+  the prompt when it launched the builder (a ruling posted after its round and before the launch is there; one
+  posted or deleted during the session is not, where `collect`, reading the comments after the push, sees it),
+  else the latest posted round's own comments.md."""
   rid = review.head_review_id(st, unit)
   pr = (handoff.state.get("units", {}).get(unit) or {}).get("pr") or {}
-  prior = {"scope": {}, "tdd": {}, "dod": {}, "delta": {}, "links": {}}
-  seen = None
-  for e in data.get("rounds") or []:
-    if e.get("phase") != "posted":
-      continue
-    findings = prior_foreman_findings(st, rid, e["round"])
-    deltas = [f["id"] for f in findings if f["claim"].startswith("test-delta: ")]
-    prior["delta"].update({fid: (d["file"], d["base_commit"], d["base_line"], d["kind"])
-                           for fid, d in zip(deltas, e.get("test_delta") or [])})
-    for f in findings:
-      if f["claim"] == "changed path outside Scope paths":
-        prior["scope"][f["id"]] = f["location"]
-      if f["claim"].startswith("tdd-order: "):
-        prior["tdd"][f["id"]] = f["claim"].removeprefix("tdd-order: ")
-      if (m := re.match(r"dod-(\d+): ", f["claim"])):
-        prior["dod"][f["id"]] = int(m.group(1))
-      if (m := re.match(r"(?:contested|unreplied) (\S+):", f["claim"])):
-        prior["links"][f["id"]] = m.group(1)
-    if pr.get("number"):
-      seen = st.path("review", unit, f"pr{pr['number']}") / f"r{e['round']}" / "comments.md"
+  prior = collect.posted_findings(st, rid, data.get("rounds") or [])
+  posted = [e["round"] for e in data.get("rounds") or [] if e.get("phase") == "posted"]
+  seen = st.path("review", unit, f"pr{pr['number']}") / f"r{max(posted)}" / "comments.md" \
+      if posted and pr.get("number") else None
   rounds = [entry["round"] for entry in load_launches(st, unit)]
   fetched = st.path("launches", f"{unit}_r{max(rounds)}_comments.md") if rounds else None
   if fetched is not None and fetched.is_file():
