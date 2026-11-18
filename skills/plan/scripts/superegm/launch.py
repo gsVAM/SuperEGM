@@ -137,17 +137,17 @@ def conflict_again(view: dict, foreman: dict, launches: list, parallel: bool) ->
   """Spec section 6.1: a unit whose view reads `conflict` and whose head is clean or proceeded is ready again for one
   merge round when its handoff's approval entry carries `rounds` (`parallel`; an entry approved under 1.2.0 only
   shows the conflict), it has an authorizing outcome (spec section 4.2) with no launch recorded since that outcome's
-  launch, no launch of it is running and it waits on no open decision and no stop. Once the merge launch is recorded
-  the rule no longer holds, so the unit is relaunched once per authorizing outcome."""
+  launch and the pull request's head still its head (`latest_clean`), no launch of it is running, it is not `waiting
+  proceed` and it waits on no open decision and no stop. Once the merge launch is recorded the rule no longer holds,
+  so the unit is relaunched once per authorizing outcome."""
   from superegm.report import pending_decisions  # imported here: `report` imports this module
-  if not (parallel and view.get("conflict")) or foreman.get("stopped") or pending_decisions(foreman):
+  if (not (parallel and view.get("conflict")) or view.get("stopped") or foreman.get("stopped")
+      or pending_decisions(foreman)):
     return False
-  auth = authorizing(foreman)
-  if auth is None:
+  head = view.get("head")
+  if not latest_clean(foreman, launches, head) or waiting_proceed(foreman, launches, head):
     return False
-  if launches and (launches[-1]["round"] > (auth.get("launch") or 0) or not finished(launches[-1])):
-    return False
-  return True
+  return not launches or finished(launches[-1])
 
 
 def authorizing(foreman: dict):
