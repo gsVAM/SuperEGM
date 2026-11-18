@@ -6,7 +6,7 @@
 # ingest once before the refusals, the refusal of an unsettled external finding, an external finding's carried copies
 # as one escalated pair discharged by its latest copy alone, and a re-approval of the same cycle reading that cycle
 # again and keeping the replaced entry's unnamed pairs (U26); `--amend-units` typed by hand opens and closes its own
-# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units`, and a hand-written prior approval read as `since` 0 (U36); the triage section parsed, refused with its line and frozen as `triage` (U39); the run mode frozen as the entry's `mode` (U43); the `instructions` list frozen with each file's blob sha and its verified store copy, and the changed files printed (U37); an opening approval refused over a partly filed handoff, and the last filing restored over an unapplied dry run, and `--void` without `--review` on a handoff with no `state.json` (U53); a `dir` entry's documents validated, frozen by blob sha with their raw copies (U74); a proceeded cycle's unsettled external findings no refusal, its bytes checked against the proceed's pinned sha (U57).
+# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units`, and a hand-written prior approval read as `since` 0 (U36); the triage section parsed, refused with its line and frozen as `triage` (U39); the run mode frozen as the entry's `mode` (U43); the `instructions` list frozen with each file's blob sha and its verified store copy, and the changed files printed (U37); an opening approval refused over a partly filed handoff, and the last filing restored over an unapplied dry run, and `--void` without `--review` on a handoff with no `state.json` (U53); a `dir` entry's documents validated, frozen by blob sha with their raw copies (U74); a proceeded cycle's unsettled external findings no refusal, its bytes checked against the proceed's pinned sha (U57); the reviewer files frozen as the entry's `reviewers` with their store copies and the changed ones printed (U76).
 
 """superegm approve-spec: record the owner's approval of a converged spec (spec section 8)."""
 
@@ -16,14 +16,14 @@ from pathlib import Path
 import re
 
 import superegm as core
-from superegm import close, instructions, runcard
+from superegm import close, instructions, reviewers, runcard
 from superegm.review import Refusal, evaluate, findings_of, ingest_pr, last_proceed, latest_cycle, live_rounds, load_review, load_round, review_id, round_numbers, valid_rounds
 
-WRITES = frozenset(["approvals", "handoffs", "state", "reviews", "runcards", "instructions"])  # the store kinds this subcommand writes
+WRITES = frozenset(["approvals", "handoffs", "state", "reviews", "runcards", "instructions", "reviewers"])  # the store kinds this subcommand writes
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset(["review-spec", "review-plan", "integrate", "approve-spec"])  # the skills whose card this subcommand accepts
 CONFIG = ".superegm/config.json"
-FROZEN_FIELDS = ["rounds", "triage", "mode", "instructions"]  # the entry fields frozen at an approval, which `--amend-units` copies where the extended entry has them (U36, U37, U39, U43)
+FROZEN_FIELDS = ["rounds", "triage", "mode", "instructions", "reviewers"]  # the entry fields frozen at an approval, which `--amend-units` copies where the extended entry has them (U36, U37, U39, U43, U76)
 ANY_H2 = re.compile(r"^ {0,3}##[ \t]+\S")  # an H2 as review.py reads one: up to three spaces of indent, outside a fence
 TRIAGE_FIELDS = {"reach": ("external", "agent", "config", "forged"), "later": ("easy", "migration", "version"),
                  "critical": ("yes", "no"), "verified": ("confirmed", "refuted")}  # a pattern's fields and their values (section 5.1)
@@ -452,6 +452,7 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   try:  # the live `instructions` list, the one the approval commit carries, each file read before the prompt (U37)
     listed = instructions.check(st.config["instructions"])
     freeze(root, "HEAD", listed)
+    reviewers.load(root, "HEAD")  # a bad reviewer file is refused before the prompt, naming it (U76)
   except core.HandoffError as error:
     raise core.HandoffError(f"approve-spec: {error}") from None
   last = core.load_approval(st, spec)
@@ -490,14 +491,25 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
     frozen = freeze(root, commit, listed, at="the approval commit")
   except core.HandoffError as error:
     raise core.HandoffError(f"approve-spec: {error}") from None
+  try:  # the reviewer files at the approval commit, each copied to the store before the entry names it (U76)
+    personas = reviewers.load(root, commit)
+  except core.HandoffError as error:
+    raise core.HandoffError(f"approve-spec: {error}") from None
   for item in instructions.flat(frozen):
     write_copy(st, item, raw="dir" in item)
+  for pid, persona in personas.items():
+    core.atomic_write(st.path("reviewers", persona["sha"]), {"id": pid, **persona})
+  held = {r["id"]: r["sha"] for r in (last or {}).get("reviewers") or []}
+  for pid, persona in personas.items():  # each reviewer whose sha the spec's previous entry does not hold
+    if held.get(pid) != persona["sha"]:
+      print(f"approve-spec: reviewers {reviewers.DIR}/{pid}.md {persona['sha']}")
   previous = {i["file"]: i["sha"] for i in instructions.flat((last or {}).get("instructions") or [])}
   for item in instructions.flat(frozen):  # each file whose sha the spec's previous entry, whatever its handoff, does not hold
     if previous.get(item["file"]) != item["sha"]:
       print(f"approve-spec: instructions {item['file']} {item['sha']}")
   entry = entry_of(sha, commit, args.runcard, rid, handoff_id, kind, escalated,  # an empty list stays absent: absent reads []
-                   {"rounds": rounds, "triage": triage, "mode": mode, **({"instructions": [entry_item(i) for i in frozen]} if frozen else {})})
+                   {"rounds": rounds, "triage": triage, "mode": mode, **({"instructions": [entry_item(i) for i in frozen]} if frozen else {}),
+                    **({"reviewers": [{"id": pid, "sha": p["sha"]} for pid, p in personas.items()]} if personas else {})})
   path = append_entry(st, spec, entry)
   write_handoff_file(st, handoff_id, spec, entry["approved_at"] if kind == "opening" else None)
   core.journal(st, f"approve-spec {kind} {handoff_id} sha256 {sha[:12]} at review {rid} commit {commit[:12]} under {args.runcard}")

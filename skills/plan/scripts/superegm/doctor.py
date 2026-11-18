@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24); the informational `plugins` and `mcp` lines and the profile line's plugin refusals (U27); the informational `model:` role table (U28); the informational `stall:` line (U31); the modules' DOCTOR_CHECKS lines after its own (U32); the three `model: builder <tier>` lines (U33); `chain` in INFORMATIONAL (U54); `--probe`, one headless builder session on the launch's own flags (U60).
+# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24); the informational `plugins` and `mcp` lines and the profile line's plugin refusals (U27); the informational `model:` role table (U28); the informational `stall:` line (U31); the modules' DOCTOR_CHECKS lines after its own (U32); the three `model: builder <tier>` lines (U33); `chain` in INFORMATIONAL (U54); `--probe`, one headless builder session on the launch's own flags (U60); the informational `reviewers:` line after `mcp:` (U76).
 
 """superegm doctor: one line per wave prerequisite, `ok` or the refusal `launch` or `launch-builder`
 would give; read-only, no run card."""
@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 
 import superegm as core
-from superegm import instructions
+from superegm import instructions, reviewers
 from superegm.builder_token import app_lines, key_path, tool
 from superegm.judges import judge_members
 from superegm.launch import app_login, builder_login, origin_problems, protection_problems
@@ -24,7 +24,7 @@ from superegm.launch_builder import (SENTINEL, UNSET, allowed_tools, builder_fla
 WRITES = frozenset()  # doctor writes nothing
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # its own lines are `checks`' (U32)
 INFORMATIONAL = ("graphify", "scanning", "astra", "merge", "python3.12", "hooks", "core.hooksPath", "driver", "sleep", "root", "env",
-                 "notify", "plugins", "mcp", "model", "stall", "chain")  # lines that never fail the exit
+                 "notify", "plugins", "mcp", "reviewers", "model", "stall", "chain")  # lines that never fail the exit
 MERGE = ("gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset "
          "restricts updates to config.owners)")
 
@@ -242,13 +242,14 @@ def first_line(content) -> str:
 def checks(config, repo_root, token):
   """The lines after `config`: `launch`'s and `launch-builder`'s own predicates, each line `ok…` or the
   refusal they would give (a check's HandoffError or GhError text is its line). On the machine-account
-  path the order is owner, origin, token, builder, role, scopes, protection, merge, profile, plugins, mcp, gh,
-  environment; the builder, role, scopes and protection lines need the token and are absent without it.
+  path the order is owner, origin, token, builder, role, scopes, protection, merge, profile, plugins, mcp, reviewers,
+  gh, environment; the builder, role, scopes and protection lines need the token and are absent without it.
   On the App path: owner, origin, credential, key, openssl, artifacts_dir, app, permissions, token,
-  installation, scanning, protection, merge, profile, plugins, mcp, gh, environment; the four App lines are
+  installation, scanning, protection, merge, profile, plugins, mcp, reviewers, gh, environment; the four App lines are
   absent after a failing key or openssl. The environment line is absent after a failing gh line;
   scanning and merge are informational and never fail, as are python3.12, hooks and core.hooksPath (U25)
-  and plugins and mcp (U27, the profile line carrying a listed plugin's refusal), and stall, the watchdog's
+  and plugins and mcp (U27, the profile line carrying a listed plugin's refusal), reviewers (U76: the loaded ids
+  and their kinds, `none`, or the first refused file, read from the working tree), and stall, the watchdog's
   `builder.stall_minutes` after environment (U31).
   The five driver lines (driver, sleep, root, env, notify) follow, informational too, then the `model:`
   role table (U28), informational, then each module's DOCTOR_CHECKS lines in discovery order: foreman's
@@ -352,6 +353,7 @@ def checks(config, repo_root, token):
   check("profile", lambda: profile_problem(Path(config["builder"]["profile_dir"]).expanduser(), config["builder"]["plugins"]) or "ok")
   check("plugins", plugins)
   check("mcp", lambda: ", ".join(sorted(config["builder"]["mcp"])) or "none")
+  check("reviewers", lambda: reviewer_line(repo_root))  # informational (U76)
   check("gh", gh)
   if "gh" in found:
     check("environment", lambda: environment_problem(repo_root, found["gh"], bool(app)) or "ok")
@@ -370,6 +372,12 @@ def checks(config, repo_root, token):
     if module.DOCTOR_CHECKS:
       lines.extend(module.DOCTOR_CHECKS(config, repo_root, token))
   return lines
+
+
+def reviewer_line(repo_root: Path) -> str:
+  """Each loaded reviewer's id and kinds, `none` when `.superegm/reviewers/` holds no `.md` file; a refused file raises its refusal (the line's text)."""
+  loaded = reviewers.load(repo_root)
+  return ", ".join(f"{rid} ({', '.join(r['kinds'])})" for rid, r in loaded.items()) or "none"
 
 
 def role_lines(config):
