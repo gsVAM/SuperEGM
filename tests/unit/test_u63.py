@@ -177,3 +177,34 @@ def test_resumed_launch_counts_own_calls(tmp_path, status):
   jsonl(profile_dir / "projects/-wt-r2/s-2.jsonl", [agent("a1"), agent("a2"), agent("a3")])
   assert traces.launch_subagent_calls(profile_dir, {"session_id": "s-2", "resumed_from": "s-1", "status": status})["count"] == 1
   assert traces.launch_subagent_calls(profile_dir, {"session_id": "s-1", "status": status})["count"] == 2
+
+
+@pytest.mark.parametrize("result, commit, failed", [
+  (None, None, True), ("is_error", None, True), ("ok", None, False), (None, "2026-11-14T10:00:00Z", False),
+])
+def test_failed_resume(world, started, monkeypatch, capsys, result, commit, failed):
+  # §6.2: a resumed launch with no result and no commit of its own; the status stays exited, never point 3
+  from superegm import decision, launch, record_launch
+  from superegm.report import pending_decisions
+  s, card, _ = started
+  resumable(world, s, card)
+  launch_round(world, card, 2)
+  second = launches_of(s)[-1]
+  assert second["resumed_from"] == "s-1"
+  Path(second["result_file"] + ".exit").write_text("1\n", encoding="utf-8")
+  if result is not None:
+    Path(second["result_file"]).write_text(json.dumps(dict(OK, is_error=result == "is_error")), encoding="utf-8")
+  monkeypatch.setattr(record_launch, "own_commit_of", lambda entry: superegm.epoch(commit) if commit else None)
+  capsys.readouterr()
+  code, finish_out = world.run("record-launch", "--unit", UNIT, "--exit", 1, "--runcard", card)
+  assert code == 0, finish_out
+  entry = launches_of(s)[-1]
+  assert entry["status"] == "exited 1" and entry.get("failed_resume", False) == failed
+  assert launch.terminal(entry)  # the report and every terminal reader read it as today
+  assert ("failed resume" in finish_out) == failed
+  assert decision.no_commit(entry) == (commit is None and not failed)
+  if failed:
+    launch_round(world, card, 3)
+    next_entry = launches_of(s)[-1]
+    open_decisions = pending_decisions(superegm.load_foreman(s, UNIT))
+  assert (failed and next_entry["fresh"] == "no result" and open_decisions == []) or not failed
