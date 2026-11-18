@@ -273,10 +273,12 @@ def stopped_line(st, uid: str, stopped: dict, views: dict) -> str:
 
 
 def unit_state(uid: str, view: dict, foreman: dict, launches: list, card: dict, config: dict, now: float) -> str:
-  """One of nine: `waiting proceed` (spec section 4.2: a proceeded head with a later finished launch or a moved
-  head; no slot, U92), `landed` (a merged view, `pr` set and `ci` null, included: it holds no slot, U55), `stopped`, `pending` (a decision without its ruling), `idle` (named on the
-  card, a `running` latest launch with the `kill_failed` mark (U31), or a head whose CI is pending or
-  absent for `ci_wait_minutes` since the card first saw it),
+  """One of nine, read in this order: `landed` (a merged view, `pr` set and `ci` null, included: it holds no
+  slot, U55), `stopped`, `pending` (a decision without its ruling), `idle` (named on the card, or a `running`
+  latest launch with the `kill_failed` mark, U31), `waiting proceed` (spec section 4.2: a proceeded head with a
+  later finished launch or a moved head; no slot, U92; read before the CI wait, so a proceeded unit's new head
+  with CI pending reads `waiting proceed`), `idle` (a head whose CI is pending or absent for `ci_wait_minutes`
+  since the card first saw it),
   `clean` (`launch.latest_clean`: spec section 4.2's authorizing outcome, the newer by launch of the latest round
   posted clean and the newest proceed, with no launch recorded after it and, when both carry one, the pull
   request's head equal to its head), else `active`; an unlaunched

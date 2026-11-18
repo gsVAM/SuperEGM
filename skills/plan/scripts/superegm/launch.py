@@ -100,9 +100,10 @@ def in_flight(store, uid, view, idle):
   """True from the unit's mark (the mark reserves the slot) until `latest_clean` holds on its authorizing outcome
   (spec section 4.2: the newer by launch of the latest round posted `clean` and the newest proceed, the pull
   request's head equal to its head when both carry one), it has landed, it carries the stopped label, or this
-  invocation names it idle; a launch recorded after that outcome holds the slot again while it runs. Once that
-  launch has finished on a proceeded head, or the pull request's head has left the proceeded one, the unit is
-  `waiting proceed` and holds no slot until the owner's second proceed. A unit whose `clean` an ingest rewrote
+  invocation names it idle; a launch recorded after that outcome holds the slot again: after a round posted
+  `clean`, until a newer round posts `clean`; after a proceed, while it runs. Once that launch has finished on a
+  proceeded head, or the pull request's head has left the proceeded one, the unit is `waiting proceed` and holds
+  no slot until the owner's second proceed. A unit whose `clean` an ingest rewrote
   (`ready_again`) holds no slot until its relaunch records a launch, nor does a unit with a decision
   `report.pending_decisions` reads as pending, the read `report`'s free-slot count makes (amendment 5: the batch
   goes on while the owner rules)."""
