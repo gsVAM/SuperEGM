@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45); the `proceed again` item and the merge on the authorizing outcome (U92).
+# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45); the `proceed again` item and the merge on the authorizing outcome (U92); the `conflict` item (U62).
 
 """superegm inbox [--all] [--json] [--handoff <id>]: one line per item that needs the owner across the
 store's open handoffs, read-only and with no run card; superegm notify --runcard <id>: the owner's
@@ -27,7 +27,7 @@ INIT_STEP = ("An executable ~/.superegm/notify, written outside every repository
              "since the last notify on its stdin, bounded by config key notify_timeout_seconds; absent means no hook.")
 DOCTOR_CHECKS = None
 SKILLS = frozenset({"wave", "driver"})
-KINDS = ("decision", "cap", "contested", "merge", "stalled", "escalated", "redesign", "test-delta", "owner",
+KINDS = ("decision", "cap", "contested", "conflict", "merge","stalled", "escalated", "redesign", "test-delta", "owner",
          "proceed", "kill_failed", "wave", "driver")
 GITHUB = "https://github.com"
 
@@ -142,6 +142,9 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
               for fid in (x.strip() for x in outcome.removeprefix("owner: ").split(","))
               if fid and fid not in deltas and open_fid(fid)]
   launches, head = load_launches(hs, uid), report.unit_view(state, uid).get("head")
+  if report.unit_view(state, uid)["conflict"]:  # U62 (spec section 6.1): beside the unit while its view is `conflict`
+    pr = report.unit_view(state, uid)["pr"]
+    out.append(item(repo, uid, "conflict", f"conflict: {uid} pull request {GITHUB}/{repo}/pull/{pr} reads CONFLICTING", head))
   shown = head or (authorizing(foreman) or {}).get("head")
   # spec section 4.2: keyed on the later launch and the head it left; with no head at all there is none to
   # proceed on, so nothing is listed until the pull request has one

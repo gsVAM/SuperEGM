@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the report subcommand (spec section 11): the per-batch wave report, the idle rules
-# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31); its own `ci_wait_minutes` config key, moved from `__init__` (U32); the board's tier column (U33); `waiting proceed` and a proceed closing a point-1 decision (U92).
+# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31); its own `ci_wait_minutes` config key, moved from `__init__` (U32); the board's tier column (U33); `waiting proceed` and a proceed closing a point-1 decision (U92); the `conflict` view and its board action (U62).
 
 """superegm report: rewrite `wave_<n>_report.md` from the store, the plan and the spec and print its path, the
 board and the idle, pending and loop lines. It opens the card's handoff as `status` does (`core.locate`,
@@ -85,11 +85,12 @@ def record_heads(store, card_id: str, views: dict, now: float) -> dict:
 
 
 def unit_view(state: dict, uid: str) -> dict:
-  """The one reader of `status.units[<id>]` (what `status --wait` saves): `pr, head, ci, landed`, plus
+  """The one reader of `status.units[<id>]` (what `status --wait` saves): `pr, head, ci, landed, conflict`, plus
   `launched` (`units[<id>].launched` truthy) and `ready` (`<id>` in the saved `status.ready`)."""
   status = state.get("status") or {}
   saved = (status.get("units") or {}).get(uid) or {}
-  return ({key: saved.get(key) for key in ("pr", "head", "ci")} | {"landed": bool(saved.get("landed"))}
+  return ({key: saved.get(key) for key in ("pr", "head", "ci")}
+          | {"landed": bool(saved.get("landed")), "conflict": bool(saved.get("conflict"))}
           | {"launched": bool(((state.get("units") or {}).get(uid) or {}).get("launched")),
              "ready": uid in (status.get("ready") or [])})
 
@@ -154,12 +155,24 @@ def board_table(handoff, state: dict, card: dict, now: float) -> str:
     unmerged = [p for p in handoff.graph.order if p in handoff.graph.merge_after[uid] and not views[p]["landed"]]
     if word == "clean" and action == "await-merge" and unmerged:
       action = "await-merge after " + ", ".join(unmerged)
+    action = conflict_action(view, word, action, handoff.graph.parallel)
     cells =[f"{uid} #{(units.get(uid) or {}).get('number')}", word, round_cell(latest),
              f"{launch['round']} {launch['status']}" if launch else "none", view["head"][:7] if view["head"] else "none",
              f"#{view['pr']}" if view["pr"] else "none", ", ".join(waits) or "none",
              action, cost_cell(entries), core.unit_tier(st, uid)]
     lines.append("| " + " | ".join(map(board_cell, cells)) + " |")
   return "\n".join(lines)
+
+
+def conflict_action(view: dict, word: str, action: str, parallel: bool) -> str:
+  """U62 (spec section 6.1): a unit whose pull request GitHub reads `CONFLICTING` shows `conflict` beside its
+  action. A clean head awaits no merge: its merge round (an approval with `rounds`) or the owner's hand (one
+  without, 1.2's rule) resolves it; any other state keeps its action, the rule applied once it ends."""
+  if not view.get("conflict") or view.get("landed") or word in ("landed", "stopped"):
+    return action
+  if word == "clean":
+    return "conflict: merge round" if parallel else "conflict: the owner resolves it"
+  return f"conflict; {action}"
 
 
 def board_cell(text: str) -> str:
