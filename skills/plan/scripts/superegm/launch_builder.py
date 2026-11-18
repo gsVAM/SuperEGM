@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING`, its freshly pinned base and its `git merge-tree` brief (U62).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING`, its freshly pinned base and its `git merge-tree` brief (U62); a fix round resuming the previous launch's session, `resumed_from` or `fresh` and `profile_dir` on the entry, and the stale-paths line (U63).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch, started
 detached and recorded `running`."""
@@ -147,6 +147,11 @@ def prepare(args, card):
   if section:
     text = text.rstrip("\n") + "\n\n---\n\n" + section
   worktree = add_worktree(handoff.repo_root, st, unit, rnd, branch, pr)
+  profile_dir = str(Path(config["builder"]["profile_dir"]).expanduser())
+  resume = resume_or_fresh(load_launches(st, unit), pair, profile_dir, manifest)  # spec 1.2.1 section 6.2 (U63)
+  if "resumed_from" in resume:  # one opening line: the resumed session remembers the earlier rounds' paths
+    text = (f"This round's worktree is {worktree}; paths from earlier rounds (their worktrees, prompt files and gh "
+            "shim) are stale.\n") + text
   prompt = st.path("launches", f"{unit}_r{rnd}_prompt.md")
   core.atomic_write(prompt, text)
   if app:
@@ -158,10 +163,8 @@ def prepare(args, card):
   core.journal(st, f"{unit} launch {rnd} prepared" + (f" (managed plugins: {', '.join(managed)})" if managed else ""))
   result = st.path("launches", f"{unit}_r{rnd}_result.json")
   session_id = str(uuid.uuid4())  # the session's transcript `projects/<slug>/<id>.jsonl`, read at the exit (U27)
-  profile_dir = str(Path(config["builder"]["profile_dir"]).expanduser())
-  resume = resume_or_fresh(load_launches(st, unit), pair, profile_dir, manifest)  # spec 1.2.1 section 6.2 (U63)
   line = command_line(config, worktree, prompt, result, args.runcard, tools, launched_gh, identity["login"], identity["email"],
-                      [d["dir"] for d in dirs], mcp_file, pair, session_id=session_id)
+                      [d["dir"] for d in dirs], mcp_file, pair, session_id=session_id, resume_from=resume.get("resumed_from"))
   # the one behaviour (amendment 10): the wrapper started detached, then the launch recorded `running`
   pid = start_detached(["/bin/sh", "-c", line], st.path("launches", f"{unit}_r{rnd}.log"), dict(os.environ))
   launches = load_launches(st, unit)
@@ -768,11 +771,13 @@ def resume_or_fresh(launches: list, pair: tuple, profile_dir: str, manifest: lis
   return {"resumed_from": sid}
 
 
-def builder_flags(config, tools: list, plugin_dirs: list, mcp_file: Path, pair: tuple[str, str]) -> tuple[list[str], list[str]]:
+def builder_flags(config, tools: list, plugin_dirs: list, mcp_file: Path, pair: tuple[str, str],
+                  resume_from: str | None = None) -> tuple[list[str], list[str]]:
   """The builder session's own flags (spec 1.2.1 section 3.3), the one source `command_line` and `doctor --probe`
   build from: `(env words, claude arguments)`. The env words unset `UNSET` (`-u <name>` each) and set the builder
-  profile and `ENABLE_CLAUDEAI_MCP_SERVERS=false`; the arguments run from `--model` through `--allowedTools`. No
-  token, role, card, git pairs, session id or output format: those are the launch's alone."""
+  profile and `ENABLE_CLAUDEAI_MCP_SERVERS=false`; the arguments run from `--model` through `--allowedTools`, then
+  `--resume <resume_from> --fork-session` when given (U63). No token, role, card, git pairs, session id or output
+  format: those are the launch's alone."""
   b, (model, effort) = config["builder"], pair
   env = [word for name in UNSET for word in ("-u", name)]
   env += [f"CLAUDE_CONFIG_DIR={b['profile_dir']}", "ENABLE_CLAUDEAI_MCP_SERVERS=false"]
@@ -780,21 +785,23 @@ def builder_flags(config, tools: list, plugin_dirs: list, mcp_file: Path, pair: 
   for d in plugin_dirs:
     args += ["--plugin-dir", str(d)]
   args += ["--mcp-config", str(mcp_file), "--strict-mcp-config", "--allowedTools", ",".join(tools)]
+  if resume_from:  # spec 1.2.1 section 6.2: the previous launch's session, forked under the launch's own new id
+    args += ["--resume", resume_from, "--fork-session"]
   return env, args
 
 
-QUOTED = {"--model", "--effort", "--permission-mode", "--plugin-dir", "--mcp-config", "--allowedTools"}  # command_line quotes their values
+QUOTED = {"--model", "--effort", "--permission-mode", "--plugin-dir", "--mcp-config", "--allowedTools", "--resume"}  # command_line quotes their values
 
 
 def command_line(config, worktree, prompt, result, runcard, tools, gh, login, email, plugin_dirs: list, mcp_file: Path,
-                 pair: tuple[str, str], session_id: str | None = None) -> str:
+                 pair: tuple[str, str], session_id: str | None = None, resume_from: str | None = None) -> str:
   """The launched command (spec section 11): the owner's prompts and token and `CLAUDE_CODE_EFFORT_LEVEL`
   (which would beat `--effort`, U28) unset, the builder profile,
   `ENABLE_CLAUDEAI_MCP_SERVERS=false` (belt and braces over the profile's `disableClaudeAiConnectors`),
   `GH_TOKEN` as the shell variable expands (never its value) or, on the App path, the sentinel the shim
   overrides, the role and card, the launched git pairs (`gh`, the shim on the App path, as the credential
   helper by absolute path; the identity `login` and `email` from the wave card), `claude -p` on the prompt
-  file (with `--session-id` when given), `--model` and `--effort` from `pair`, the unit's tier's (U28, U33), with `--setting-sources user` (the builder sits in the target repository,
+  file (with `--session-id` when given, and `--resume <resume_from> --fork-session` on a resumed launch, U63), `--model` and `--effort` from `pair`, the unit's tier's (U28, U33), with `--setting-sources user` (the builder sits in the target repository,
   whose project settings and SessionStart hooks it must not run: the profile's settings alone), one `--plugin-dir`
   per listed plugin's directory, `--mcp-config <mcp_file> --strict-mcp-config` (no other MCP configuration loads),
   the result and exit files; prefixed by the watchdog's trap (U31): TERM writes `stalled` to the exit file and ends
@@ -802,11 +809,11 @@ def command_line(config, worktree, prompt, result, runcard, tools, gh, login, em
   b, (model, effort) = config["builder"], pair
   pairs = launched_pairs(gh, login, email)
   for value in (worktree, prompt, result, b["profile_dir"], model, effort, b["permission_mode"], runcard, *tools, *(v for _, v in pairs),
-                *plugin_dirs, mcp_file, session_id or ""):
+                *plugin_dirs, mcp_file, session_id or "", resume_from or ""):
     if "'" in str(value):
       raise core.HandoffError(f"{value} holds a quote and cannot go on the command line")
   token = f"GH_TOKEN={SENTINEL}" if b["app"] else f"GH_TOKEN=\"${b['gh_token_env']}\""
-  env_words, args = builder_flags(config, tools, plugin_dirs, mcp_file, pair)
+  env_words, args = builder_flags(config, tools, plugin_dirs, mcp_file, pair, resume_from=resume_from)
   flags = " ".join(f"'{word}'" if previous in QUOTED else word for previous, word in zip([None, *args], args))
   setting = " ".join(f"CLAUDE_CONFIG_DIR='{word.split('=', 1)[1]}'" if word.startswith("CLAUDE_CONFIG_DIR=") else word
                      for word in env_words)
