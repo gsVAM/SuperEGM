@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: renamed from test_egm_handoff.py; helper and skill paths under skills/plan and skills/wave; approve_spec's runcards and init.steps() (U32); the `units` key of the config `init` writes (U42); the expected config and approval-entry key sets take `review` and `rounds` (U36); the approval-entry key set takes `triage` (U39); `phase` registers `next` (U43); the approve_spec, prepare and launch_builder `WRITES` pins and the `instructions` config key (U37); the `WRITES` map gains `decision` with the `file` kind (U96); the `driver` module writes `tick` and `chain` (U44); the `WRITES` map gains `builder_setup` (U59); the `WRITES` map gains `phase` with the `file` kind (U69).
+# Modified by SuperEGM (gsVAM), 2026: renamed from test_egm_handoff.py; helper and skill paths under skills/plan and skills/wave; approve_spec's runcards and init.steps() (U32); the `units` key of the config `init` writes (U42); the expected config and approval-entry key sets take `review` and `rounds` (U36); the approval-entry key set takes `triage` (U39); `phase` registers `next` (U43); the approve_spec, prepare and launch_builder `WRITES` pins and the `instructions` config key (U37); the `WRITES` map gains `decision` with the `file` kind (U96); the `driver` module writes `tick` and `chain` (U44); the `WRITES` map gains `builder_setup` (U59); the `WRITES` map gains `phase` with the `file` kind (U69); the `WRITES` map gains `precheck`, which writes nothing (U67).
 
 """U03's tests: the helper package, the store, run cards, the gating, init, the body
 parsers, the schemas, the renames and the removals; EGM's tests of the shared names."""
@@ -394,7 +394,7 @@ WRITES = {"approve_spec":{"approvals", "handoffs", "state", "reviews", "runcards
           "dry_run": {"file", "state"}, "apply": {"state", "file"},
           "verify": {"state"}, "status": {"state"}, "launch": {"state", "runcards"}, "decide": {"state", "plan", "units", "unit", "bodies", "file"},
           "record_launch": {"launches"}, "collect": {"foreman", "review", "reviews"}, "prepare": {"foreman", "review", "runcards"},
-          "launch_builder": {"launches", "orient_unit", "runcards"}, "interrupt": {"launches", "foreman"}, "clean": set(),
+          "launch_builder": {"launches", "orient_unit", "runcards"}, "interrupt": {"launches", "foreman"}, "clean": set(), "precheck": set(),
           "orient": {"orient", "orient_unit"},
           "runcard": {"runcards", "launches", "driver"}, "init": set(), "doctor": set(), "builder_token": set(), "builder_setup": set(), "inbox": {"state", "driver"},
           "driver": {"driver", "runcards", "launches", "tick", "chain"}, "phase": {"chain", "runcards", "file"}, "register": set(), "decision": {"foreman", "reviews", "state", "file"}}

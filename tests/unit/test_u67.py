@@ -5,7 +5,9 @@
 through the one function `collect` calls too, before every push. Fixtures: conftest's `world` and
 test_foreman's `seed`, `pr_repo` and `open_head_review`."""
 
+import json
 import re
+from pathlib import Path
 
 import pytest
 
@@ -90,3 +92,41 @@ def test_collect_and_precheck_share_the_worktree_checks(world, tmp_path, monkeyp
   collect_lines = (st.path("review", "U01", "pr70") / "r1" / "foreman.findings").read_text(encoding="utf-8").splitlines()
   assert len(calls) == 2
   assert collect_lines == precheck_lines and "Run item 2: no fenced output" in " ".join(precheck_lines)
+
+
+TWO_RUNS = ("2. Run `pytest tests/unit/test_u07.py -q` — passes\n3. Run `pytest tests/unit -q` — the suite passes\n"
+            "4. Exists `src/hooks.py`\n5. CI green on the head\n")
+TWO_PASTED = ("U01\n\n### DoD 2\n```\n$ pytest tests/unit/test_u07.py -q\n1 passed\n```\n\n"
+              "### DoD 3\n```\n$ pytest tests/unit -q\n9 passed\n```\n\nCloses #2\n")
+
+
+def snapshot(root):
+  return {p: p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+
+
+def test_precheck_runs_every_item_without_a_draft_and_writes_nothing(world, tmp_path, monkeypatch):
+  # no pull request yet: --pr-body alone drives the Run items
+  from superegm import collect as collect_mod
+  st, worktree, g = builder_worktree(world, tmp_path, monkeypatch)
+  unit = st.path("unit", "U01")
+  unit.write_text(unit.read_text(encoding="utf-8").replace("2. Run `true` — passes\n3. Exists `src/hooks.py`\n4. CI green on the head\n",
+                                                           TWO_RUNS), encoding="utf-8")
+  state = json.loads(st.path("state").read_text(encoding="utf-8"))
+  del state["units"]["U01"]["pr"]  # round 1, no draft pull request
+  st.path("state").write_text(json.dumps(state), encoding="utf-8")
+  ran, dirs, real = [], [], collect_mod.dod_runs
+
+  def fake(items, cwd, env, deadline, out_dir):  # each command's output stands in for the run: a count line, no pytest
+    ran.extend(cmd for _, cmd, _ in items)
+    dirs.append(Path(out_dir))
+    return real([(n, f"echo '{paste}'", paste) for n, _, paste in items], cwd, env, deadline, out_dir)
+  monkeypatch.setattr(collect_mod, "dod_runs", fake)
+  store_bytes_before = snapshot(st.root)
+  git_status_before = g("status", "--porcelain", "--ignored", cwd=worktree)
+  code, out = precheck(world, st, tmp_path, TWO_PASTED)
+  store_bytes_after = snapshot(st.root)
+  git_status_after = g("status", "--porcelain", "--ignored", cwd=worktree)
+  assert ran == ["pytest tests/unit/test_u07.py -q", "pytest tests/unit -q"]
+  assert (store_bytes_after, git_status_after) == (store_bytes_before, git_status_before)
+  assert (code, out) == (0, "")
+  assert not dirs[0].exists() and not dirs[0].is_relative_to(st.root) and not dirs[0].is_relative_to(worktree)
