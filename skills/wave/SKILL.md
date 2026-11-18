@@ -180,9 +180,7 @@ slot); a new head restarts the clock.
 dispatch):
 
 - `clean` → await-merge: nothing runs; the unit awaits the owner's merge and
-  its slot is free. A head made `clean` by accept (point 5) or a head-pinning proceed awaits merge alike.
-  A proceed that pinned no head offers no merge: the board's action reads `proceed again`, and the owner
-  proceeds again on the pull request's head (the inbox lists it once the pull request has one).
+  its slot is free; so after accept (point 5) or a proceed, but one pinning no head: `proceed again`.
 - `revise` → in normal mode, when `review status` printed `acceptable: yes` → Decision point 5 first (no launch
   while it is pending). Otherwise, and on a ruled `revise`, `launch-builder` for the next
   round as today (the prompt carries the review); a ruled `revise` spends no relaunch.
