@@ -72,7 +72,8 @@ def frontmatter(rel: str, text: str) -> tuple[dict, str]:
 def parse(rel: str, data: bytes) -> dict:
   """The reviewer the file `rel` holds, `{id, name, kinds, model, effort, text, sha, source}` (`source` the file's text, which
   the store copy keeps so that its sha can be re-derived); refused naming `rel` and the reason.
-  The persona is the body with its surrounding blank lines stripped, and the size limit counts that."""
+  The size limit counts the body as written, less the file's last newlines; the persona is the body without its leading
+  blank lines and trailing whitespace, so the first line keeps its indentation."""
   stem = Path(rel).stem
   if not ID_RE.match(stem):
     raise refuse(rel, f"the id {stem!r} does not match [a-z][a-z0-9-]{{1,31}}")
@@ -92,17 +93,18 @@ def parse(rel: str, data: bytes) -> dict:
   model, effort = fields.get("model"), fields.get("effort")
   if model is not None and (not isinstance(model, str) or not core.MODEL_RE.match(model)):
     raise refuse(rel, f"model {model!r} is not a model alias")
-  if effort is not None and effort not in core.EFFORTS:
-    raise refuse(rel, f"effort {effort!r} is not one of {', '.join(core.EFFORTS)}")
-  persona = body.strip()
-  size = len(persona.encode("utf-8"))
+  efforts = (*core.EFFORTS, "max")  # the forms `config.reviewers.effort` takes
+  if effort is not None and effort not in efforts:
+    raise refuse(rel, f"effort {effort!r} is not one of {', '.join(efforts)}")
+  size = len(body.rstrip("\n").encode("utf-8"))
   if size > LIMIT:
-    raise refuse(rel, f"the persona is {size} bytes, over {LIMIT}")
+    raise refuse(rel, f"the body is {size} bytes, over {LIMIT}")
+  persona = re.sub(r"\A(?:[ \t]*\n)+", "", body).rstrip()
   return {"id": stem, "name": name, "kinds": kinds, "model": model, "effort": effort, "text": persona, "sha": blob_sha(data), "source": text}
 
 
 def load(root: Path, ref: str | None = None) -> dict[str, dict]:
-  """`{id: {name, kinds, model, effort, text, sha}}` from `.superegm/reviewers/*.md` under `root` (the working tree, which
+  """`{id: {name, kinds, model, effort, text, sha, source}}` from `.superegm/reviewers/*.md` under `root` (the working tree, which
   follows a symlink and sees an uncommitted file: what `doctor` shows), or at `ref` when given (what `approve-spec` and a
   spec review read); the first bad file is refused, naming it and the reason, and so is a ref or a blob git cannot read."""
   found = {}
@@ -131,7 +133,8 @@ def load(root: Path, ref: str | None = None) -> dict[str, dict]:
 
 def copy_of(st: core.Store, item: dict) -> dict:
   """The reviewer the store copy of the approval entry's `item` ({id, sha}) holds: its `source` (the file's text) must hash
-  to the sha and parse as the file `<id>.md`, and every field is read from that source. The copy is named by the sha alone,
+  to the sha and parse as the file `<id>.md`, and every field is read from that source, the return being
+  `{name, kinds, model, effort, text, sha, source}`. The copy is named by the sha alone,
   so files of one content (two of one list, or one renamed between approvals) share it, whichever `id` wrote it."""
   rel = f"{DIR}/{item['id']}.md"
   path = st.path("reviewers", item["sha"])
@@ -146,7 +149,7 @@ def copy_of(st: core.Store, item: dict) -> dict:
 
 
 def frozen(st: core.Store, handoff_id: str | None, only=None) -> dict[str, dict] | None:
-  """`{id: {name, kinds, model, effort, text, sha}}` the approval entry of `handoff_id` froze, each read from its verified
+  """`{id: {name, kinds, model, effort, text, sha, source}}` the approval entry of `handoff_id` froze, each read from its verified
   store copy (`{}` for an entry freezing none: an absent field reads `[]`), or None with no such entry; with `only` (ids),
   just those are read, so one missing copy refuses no other reviewer."""
   from superegm import instructions
@@ -166,18 +169,34 @@ def available(st: core.Store, root: Path, kind: str, handoff_id: str | None = No
   return frozen(st, handoff_id, only) or {}
 
 
+def stored_read(path: Path) -> dict:
+  """`{id, sha, text}` the spec cycle's stored read `path` (`persona-<n>-<id>.json`) holds; refused naming the file when it
+  is damaged (not JSON, not an object, or short of a string `id`, `sha` or `text`)."""
+  try:
+    read = json.loads(core.read_text(path))
+  except (OSError, ValueError):
+    read = None
+  if not isinstance(read, dict) or not all(isinstance(read.get(k), str) for k in ("id", "sha", "text")):
+    raise core.HandoffError(f"{path.name}: the stored persona read is damaged; remove it and run `reviewers --brief` again")
+  return read
+
+
 def persona_of(st: core.Store, review: dict, rid: str, n: int, reviewer: str) -> dict | None:
   """`{id, sha}` the round's record of `reviewer` carries, the persona it read: a spec review's stored read
   (`persona-<n>-<id>.json`, which a `--brief` stores; none stored, none recorded, so HEAD is never inferred at record
   time), any other kind's the handoff's frozen copy of that one reviewer; None for a built-in with no file and for any
-  name that is not a reviewer."""
+  name that is not a reviewer. A repository reviewer (not a built-in) of a spec round with no stored read is refused:
+  its record would carry no evidence of the persona it read."""
+  from superegm import review as reviews
   if reviewer == "astra" or reviewer == "foreman" or reviewer.startswith("external:"):
     return None
   if review["kind"] == "spec":
     path = st.path("reviews", rid, f"persona-{n}-{reviewer}.json")
     if path.is_file():
-      read = json.loads(core.read_text(path))
+      read = stored_read(path)
       return {"id": read["id"], "sha": read["sha"]}
+    if reviewer not in reviews.REVIEWERS:
+      raise core.HandoffError(f"{reviewer} has no stored persona read for round {n}; run `reviewers --brief {reviewer} --spec ... --review {rid} --round {n}` first")
     return None
   found = (frozen(st, review.get("handoff_id"), {reviewer}) or {}).get(reviewer)
   return {"id": reviewer, "sha": found["sha"]} if found else None
@@ -205,7 +224,7 @@ def brief(args, st: core.Store) -> str:
   instructions.require_review(st, args.review, design)
   path = st.path("reviews", args.review, f"persona-{args.round}-{args.brief}.json")
   if path.is_file():
-    return json.loads(core.read_text(path))["text"]
+    return stored_read(path)["text"]
   found = load(core.git_toplevel(design), "HEAD").get(args.brief)
   if found is None:
     raise core.HandoffError(f"unknown reviewer {args.brief}")
