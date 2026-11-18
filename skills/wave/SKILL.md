@@ -204,7 +204,7 @@ dispatch):
 
 ## The end
 
-Before the close, run batch step 3b once and `report` again (a thread posted before the last round's review is read now): an `outcome:` line, a merge round marked at batch step 6 or no longer `loop: ended` → back to the batches.
+Before the close, run batch step 3b once and `report` again (a thread posted before the last round's review is read now): an `outcome:` line or no longer `loop: ended` (`merge round: <unit>` included) → back to the batches.
 
 `loop: ended` → run `python3 '<HELPER>' runcard close '<CARD>'`. Then
 report in chat from `wave_<n>_report.md`: per unit its state, head and
