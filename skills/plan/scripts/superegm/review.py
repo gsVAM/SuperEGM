@@ -297,7 +297,8 @@ def out_of_scope(rows: list, spans: list, location: str, spec_name: str = "", ro
   its repository-relative path) answers `none`, and only a spec location goes on through `cited_line` and the
   sections. A file name has an extension that starts with a letter and ends at `:`, `#`, `,` or a space, so a
   section cite such as `§3.5 line 4` or `3.5:4` names no file; a path with a slash, or a name followed by `:<line>`
-  or `#L<line>`, may hold spaces. A listed document is named by its full repository-relative path after one leading
+  or `#L<line>`, may hold spaces (`other/a b.md, line 8` names `other/a b.md`). The spec is named by its full path or
+  its bare file name only, never with a directory in front of its path. A listed document is named by its full repository-relative path after one leading
   `./` or the repository root (`root`, an absolute path) is taken off, or by its bare file name (the spec's own name
   wins a tie); a directory in front of the path names another file."""
   listed = {row[1] for row in rows if row[0] == "changed" and row[2] == row[3] == 0}
@@ -308,8 +309,9 @@ def out_of_scope(rows: list, spans: list, location: str, spec_name: str = "", ro
     named_as = lambda name: loc.startswith(name) and (len(loc) == len(name) or loc[len(name)] in ends)
     if any(named_as(path) for path in listed):
       return None
-    named = re.match(r"([^:#,]+\.[A-Za-z][A-Za-z0-9]*)(?=:\d|#L\d)", loc) or re.match(r"([^\s:#,]+\.[A-Za-z][A-Za-z0-9]*)(?=[:\s#,]|$)", loc)
-    spec_named = bool(named) and bool(spec_name) and (named.group(1) == spec_name or named.group(1).endswith("/" + spec_name) or spec_name.endswith("/" + named.group(1)))
+    named = (re.match(r"([^:#,]+\.[A-Za-z][A-Za-z0-9]*)(?=:\d|#L\d)", loc) or re.match(r"([^:#,]*/[^:#,]*?\.[A-Za-z][A-Za-z0-9]*)(?=[:\s#,]|$)", loc)
+             or re.match(r"([^\s:#,]+\.[A-Za-z][A-Za-z0-9]*)(?=[:\s#,]|$)", loc))
+    spec_named = bool(named) and bool(spec_name) and (named.group(1) == spec_name or spec_name.endswith("/" + named.group(1)))
     if not spec_named:
       if "/" not in loc.split(":")[0].split("#")[0] and any(named_as(path.rsplit("/", 1)[-1]) for path in listed):
         return None  # a listed document by its bare file name (a slash before the first colon is another directory's)
@@ -717,10 +719,14 @@ def record_round(args) -> int:
   if kind == "spec" and rnd.get("refs") is not None and stored_brief_exists(st, rid, n, reviewer):  # U75: the panel read the reference bytes its stored brief listed; the round's `refs` are those
     read = {item["file"]: item.get("sha") for item in manifest}
     moved = [ref["file"] for ref in rnd["refs"] if ref["file"] in read and read[ref["file"]] != ref["sha"]]
-    unseen = [ref["file"] for ref in rnd["refs"] if ref["sha"] is not None and ref["file"] not in read]  # added after the render, or never addressed to the reviewers
-    if moved or unseen:
+    folders = tuple(e["dir"].rstrip("/") + "/" for e in st.config.get("instructions") or []
+                    if isinstance(e, dict) and isinstance(e.get("dir"), str) and "reviewers" in (e.get("to") or []))  # the folders the brief lists: the entries addressed to the reviewers, never a builder-only folder
+    unseen = [ref["file"] for ref in rnd["refs"] if ref["sha"] is not None and ref["file"] not in read and ref["file"].startswith(folders)]  # added after the render
+    if moved or unseen:  # the stored brief is stale: drop it, so `instructions --spec` renders it again from HEAD and this round can still be recorded
+      st.path("reviews", rid, f"instructions-{n}-reviewers-{'astra' if reviewer == 'astra' else 'local'}.json").unlink(missing_ok=True)
       raise core.HandoffError("; ".join([f"review record: {path}: differs from the reviewers' brief" for path in moved]
-                                        + [f"review record: {path}: not in the reviewers' brief (render it again)" for path in unseen]))
+                                        + [f"review record: {path}: not in the reviewers' brief" for path in unseen])
+                              + " (the stored brief is dropped: render it again with `superegm instructions --spec`, the reviewers read it, then record; a `dir` entry is listed once committed)")
   from superegm import reviewers as repository  # at call time: that module's import chain reaches this one
   try:  # a repository or overridden reviewer's record carries the persona it read; a built-in with no file's has none, and a not-run read none (U76)
     persona = None if args.not_run else repository.persona_of(st, review, rid, n, reviewer)
