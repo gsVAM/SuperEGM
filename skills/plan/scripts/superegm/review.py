@@ -2069,6 +2069,8 @@ def rule_proceed(st: core.Store, rid: str, review: dict, card: dict, args) -> in
             "reason": reason}
   if not head:
     ruling["sha256"] = current_sha(st, review["kind"], review["artifact"])
+    if review["kind"] == "spec":  # U75: the reference manifest the proceed pins, `approve-spec` compares against it
+      ruling["refs"] = reference_manifest(st, core.git_toplevel(Path(review["artifact"]).parent))
     review["rulings"].append(ruling)
     save_review(st, rid, review)
     return proceeded(st, rid, review, ruling, card, args)
