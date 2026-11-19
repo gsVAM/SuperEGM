@@ -615,7 +615,8 @@ STORED_LETTER_RE = re.compile(r"^\([a-z]\) ")  # a stored option's own letter pr
 
 
 def decision_question(st, unit: str, did: str) -> str:
-  """A plan-time `D<n>` with its options as stored, `respec` (the owner's alone, §7.6) left out; a runtime `q<n>` is
+  """A plan-time `D<n>` with its options as stored, `respec` (the owner's alone, §7.6) left out and `amend` kept (a
+  plan-time decision's options come from the plan, `tests/unit/test_u96.py` pins `amend` there); a runtime `q<n>` is
   refused (`--blocked` renders it through `stored_options_text`, `amend` and `respec` left out)."""
   if re.fullmatch(r"q\d+", did):
     raise core.HandoffError(f"question: {did} is a runtime decision: use --blocked <comment-id> | launch <n> | closed <n>")
