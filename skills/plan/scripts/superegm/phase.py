@@ -8,7 +8,6 @@ The module is `phase`, not `next`: `discover()` imports every submodule onto the
 `refs/superegm/tick-base` as the tick left them."""
 
 import argparse
-import hashlib
 import json
 import re
 import subprocess
@@ -32,7 +31,7 @@ def register(subparsers):
   p.add_argument("--handoff", help="the handoff whose next phase is printed")
   p.set_defaults(run=run, writes=WRITES, action=None)
   sub = p.add_subparsers(dest="action")
-  w = core.add_parser(sub, "wait", "write the handoff's wait record and close the card (spec section 7.2)")
+  w = core.add_parser(sub, "wait", "write the handoff's wait record, keep its question under waits/ and journal it, close the card (spec sections 7.2, 7.5)")
   w.add_argument("--handoff", default=argparse.SUPPRESS, help="the handoff that waits")
   w.add_argument("--phase", required=True, choices=sorted(SKILLS), help="the phase that waits")
   w.add_argument("--question", required=True, help="what the owner is asked")
@@ -213,17 +212,28 @@ def next_line(st: core.Store, hid: str, read_wait: bool = True) -> str:
 
 
 def wait(args, st: core.Store, hid: str) -> int:
-  """Write `chain/<handoff>.json` (`review` kept from the stored record on a re-ask without one) and close the card."""
+  """Write `chain/<handoff>.json` (`review` kept from the stored record on a re-ask without one) and close the card.
+  The question is kept as `waits/<phase>-<at>.md` and journaled as `next wait` or, on a phase whose record holds an
+  answer, `next reask` (`keep_question`)."""
   card_id = args.runcard
   path = st.path("chain", hid)
   stored = read_json(path) or {}
-  at = core.now_iso()
-  keep_question(core.handoff_store(st, hid), args.phase, at, args.question, card_id,
+  hs = core.handoff_store(st, hid)
+  at = fresh_at(hs, args.phase, core.now_iso())
+  keep_question(hs, args.phase, at, args.question, card_id,
                 reask=bool(stored.get("answer")) and stored.get("phase") == args.phase)
   core.atomic_write(path, {"phase": args.phase, "question": args.question, "since": at,
                            "review": args.review or stored.get("review")})
   runcard.close_card(st, card_id)
   return 0
+
+
+def fresh_at(hs: core.Store, phase: str, at: str) -> str:
+  """`at`, or the next second no wait of `phase` has kept a question under: the store's stamps have one-second
+  precision and a wait's files are keyed by its stamp, so a wait in the second of an earlier one would overwrite it."""
+  while hs.path("file", "waits", f"{phase}-{at}.md").is_file():
+    at = core.iso(core.epoch(at) + 1)
+  return at
 
 
 def keep_question(hs: core.Store, phase: str, at: str, question: str, source: str, reask: bool = False) -> None:
@@ -232,7 +242,7 @@ def keep_question(hs: core.Store, phase: str, at: str, question: str, source: st
   <sha>` for a re-ask (a `next wait` on a phase whose record holds an answer). The history of a wait lives in these
   lines and files: the record itself is rewritten and removed (spec section 7.5)."""
   core.atomic_write(hs.path("file", "waits", f"{phase}-{at}.md"), question)
-  sha = hashlib.sha256(question.encode("utf-8")).hexdigest()
+  sha = core.sha256_text(question)
   core.journal(hs, f"next reask {hs.handoff_id} {phase} at {at} question {sha}" if reask
                else f"next wait {hs.handoff_id} {phase} since {at} source {source} question {sha}")
 
@@ -240,7 +250,9 @@ def keep_question(hs: core.Store, phase: str, at: str, question: str, source: st
 def clear(args, st: core.Store, hid: str) -> int:
   """Remove the wait record on confirmed progress (`next` without it prints a later phase, or a `proceed` ruling
   resolves it); a `waiting` row keeps it as it is, answered or not; otherwise an unanswered record stays and an
-  answered one is asked again. The card closes.
+  answered one is asked again (a Stop: the record is rewritten with a new `since`, its question kept as
+  `waits/<phase>-<since>.md` and journaled `next wait ... source clear`). Each removal or rewrite journals `next
+  clear` (`journal_clear`). The card closes.
   Section 7.2's third removal, `next` showing "the unit withdrawn", is not read: section 7.1's table prints no
   such line and no unit of this build defines withdrawal, so a withdrawn unit's record clears only through a later
   phase."""
@@ -255,7 +267,7 @@ def clear(args, st: core.Store, hid: str) -> int:
       path.unlink()
     elif record.get("answer") and not line.startswith("waiting "):
       journal_clear(hs, record)
-      at = core.now_iso()
+      at = fresh_at(hs, record["phase"], core.now_iso())
       question = f"stopped at {record['phase']} by {record.get('by')}: answer to go on"
       keep_question(hs, record["phase"], at, question, "clear")
       core.atomic_write(path, {"phase": record["phase"], "since": at, "review": record.get("review"), "question": question})
@@ -271,16 +283,17 @@ def journal_clear(hs: core.Store, record: dict) -> None:
     by, at, text = record.get("by"), record.get("at"), record["answer"]
   else:
     data = review.load_review(hs, record.get("review")) if record.get("review") else None
-    ruling = next((r for r in reversed((data or {}).get("rulings") or []) if r.get("ruling") == "proceed"), {})
+    ruling = next((r for r in reversed((data or {}).get("rulings") or [])
+                   if r.get("ruling") == "proceed" and str(r.get("at") or "") > str(record.get("since") or "")), {})
     by, at, text = ruling.get("by") or "progress", ruling.get("at") or core.now_iso(), ""
   core.journal(hs, f"next clear {hs.handoff_id} {record['phase']} answered by {by} at {at} "
-                   f"answer {hashlib.sha256(text.encode('utf-8')).hexdigest()}")
+                   f"answer {core.sha256_text(text)}")
 
 
 def answer(args, st: core.Store, hid: str) -> int:
   """Record `--answer` on the handoff's wait record as the login `gh api user` reports: `answer`, `by` and `at` on
-  `chain/<handoff>.json`, and `{by, at, sha}` (the answer's sha256) as `waits/<phase>-<since>.answer.json` in the
-  handoff's directory. No run card: the phase session that runs next holds the card."""
+  `chain/<handoff>.json`, the words as `waits/<phase>-<since>.answer.md` and `{by, at, sha}` (the answer's sha256) as
+  `waits/<phase>-<since>.answer.json` in the handoff's directory, both keyed by the wait's `since`, never rewritten. No run card: the phase session that runs next holds the card."""
   path = st.path("chain", hid)
   record = read_json(path)
   if not record:
@@ -291,7 +304,7 @@ def answer(args, st: core.Store, hid: str) -> int:
   if login not in ((st.config or {}).get("owners") or []):
     raise core.HandoffError(f"next answer: {login or 'no login'} is not in config.owners")
   at = core.now_iso()
-  sha = hashlib.sha256(args.answer.encode("utf-8")).hexdigest()
+  sha = core.sha256_text(args.answer)
   waits = core.handoff_store(st, hid).path("file", "waits")
   core.atomic_write(waits / f"{record['phase']}-{record['since']}.answer.md", args.answer)  # keyed by `since`: it pairs with its question
   core.atomic_write(waits / f"{record['phase']}-{record['since']}.answer.json", {"by": login, "at": at, "sha": sha})
