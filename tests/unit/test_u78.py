@@ -342,3 +342,28 @@ def test_integrate_reports_the_postmortem():
   for phrase in ("total wall time", "the most rounds", "the most overruled"):
     assert phrase in text
   assert "Header, total wall seconds" in text  # the one field the report holds it in: the skill works none out
+
+
+def reviewer_names(report):
+  return set(table(report, "Reviewers"))
+
+
+def test_spec_reviews_stop_at_the_handoffs_own_approval(world):
+  """Spec reviews sit at the store's root, shared by every handoff of the spec: this handoff reports those after the
+  previous approval's review cycle up to its own approval's (`approvals/<slug>.json`'s `review`), and no others."""
+  from test_review import SLUG
+  c, _, _ = two_units(world)
+  path = c.root / "approvals" / f"{SLUG}.json"
+  record = jread(path)
+  own = {**record["entries"][-1], "review": f"spec-{SLUG}-c3"}
+  earlier = {**own, "review": f"spec-{SLUG}-c1", "handoff_id": "2026-11-03-sample-de-ffffff"}
+  jwrite(path, {**record, "entries": [earlier, own]})
+  for n, name in ((1, "earlier-only"), (2, "ours-two"), (3, "ours-three"), (4, "later-only")):
+    rid = f"spec-{SLUG}-c{n}"
+    jwrite(c.hs.path("reviews", rid, "review.json"), {"kind": "spec", "artifact": str(c.spec), "cycle": n,
+                                                      "reviewers": [name], "runcard": "rc", "converged": "no", "rulings": []})
+    jwrite(c.hs.path("reviews", rid, "round-1.json"), {"round": 1, "runcard": "rc", "reviewers": {name: {"findings": []}}})
+  code, out = world.run("postmortem", "--handoff", c.hid)
+  assert code == 0, out
+  names = reviewer_names(c.hs.path("file", "postmortem.md").read_text(encoding="utf-8"))
+  assert {"ours-two", "ours-three"} <= names and not names & {"earlier-only", "later-only"}
