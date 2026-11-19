@@ -31,7 +31,7 @@ INIT_STEP = ("An executable ~/.superegm/notify, written outside every repository
 DOCTOR_CHECKS = None
 SKILLS = frozenset({"wave", "driver"})
 KINDS = ("decision", "cap", "contested", "conflict", "merge", "stalled", "escalated", "redesign", "test-delta", "owner",
-         "proceed", "kill_failed", "wave", "driver")
+         "proceed", "undo", "kill_failed", "wave", "driver")
 GITHUB = "https://github.com"
 
 
@@ -127,7 +127,8 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
   proceed's pinned head, else the clean round's) and is offered only while no decision is pending and the latest
   launch has ended (U72's merge guards); a merge a proceed authorizes names `gh pr merge <pr> --match-head-commit
   <sha>` on the proceed's pinned head and is keyed `<review>/<head>`; a proceed without a pinned head offers no
-  merge, and lists its `proceed` item on the pull request's head once it has one."""
+  merge, and lists its `proceed` item on the pull request's head once it has one. The latest posted round's triage
+  deferrals ride on the merge item as `undo` while one is offered, else they are their own `undo` item."""
   out = []
   number = (state["units"].get(uid) or {}).get("number")
   ruled_of = lambda did: {r["ruling"].partition(" — ")[0].strip().split(" ")[0]
@@ -193,10 +194,15 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
   # U62: no merge is offered while GitHub reads the pull request `CONFLICTING`: it would refuse it
   # U72: no merge is offered while a decision is pending or a launch is live (a proceed may rule on a running one)
   live = bool(launches) and not finished(launches[-1])
+  # spec 1.2.1 section 7.3, 5.2: the owner's undo of a triage deferral, a medium the latest posted round deferred
+  # (decision.refuse_undo refuses an earlier round's), posted on the unit's issue as a ruling with no decision; no
+  # merge guard holds it back: on the merge item while one is offered, else its own `undo` item
+  rounds = foreman.get("rounds") or []
+  latest = max((e["round"] for e in rounds if e.get("phase") == "posted"), default=None)
+  undo = [ruling_form(1, r["fid"], "finding upheld") for r in foreman.get("followups") or [] if r.get("round") == latest]
   if (latest_clean(foreman, launches, head) and not unpinned and not conflict and not live
       and not report.pending_decisions(foreman)):
     pr = report.unit_view(state, uid)["pr"] or ((state["units"].get(uid) or {}).get("pr") or {}).get("number")
-    rounds = foreman.get("rounds") or []
     url = f"{GITHUB}/{repo}/pull/{pr}"
     # U61: the shared-file merge order from `handoff_units.json`, none when the file or the key is absent
     order, merge_after = merge_order(hs)
@@ -211,13 +217,11 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
     # lands, the last one included
     key = "".join([base] + [f"/after-{m}" for m in after])
     merge = item(repo, uid, "merge", action, key) | {"head": auth.get("head") or head}
-    # spec 1.2.1 section 7.3, 5.2: the owner's undo of a triage deferral, a medium the latest posted round deferred
-    # (decision.refuse_undo refuses an earlier round's), posted on the unit's issue as a ruling with no decision
-    latest = max((e["round"] for e in rounds if e.get("phase") == "posted"), default=None)
-    undo = [ruling_form(1, r["fid"], "finding upheld") for r in foreman.get("followups") or [] if r.get("round") == latest]
     if undo:
       merge |= {"undo": undo, "on": f"{GITHUB}/{repo}/issues/{number}"}
     out.append(merge)
+  elif undo:
+    out.append(ruling_item(repo, uid, "undo", undo, number, f"{latest}/undo"))
   return out
 
 
@@ -417,7 +421,7 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
   """What needs the owner across the handoffs `handoff_ids` (spec section 11.2), one dict per item: `repo`,
   `subject`, `kind`, `action`, `fingerprint` and `handoff`, a ruling's `forms` and `on` too (U72), a `merge`,
   `proceed` or `stalled` item's `head`, and a `merge` item's `undo` and `on` while its latest posted round deferred a
-  medium by triage; ordered by handoff id, subject, then kind, the `wave` card and the
+  medium by triage (an `undo` item carrying them as its `forms` while no merge is offered); ordered by handoff id, subject, then kind, the `wave` card and the
   driver's lines last, except that a handoff's `merge` items follow the `order` list of its `handoff_units.json` (U61)."""
   repo, rows = store.config["repo"], {r["id"]: r for r in core.handoffs(store.root)}
   out, read_specs, seen = [], set(), set()  # a spec's store-level reviews are read once, under its first handoff
