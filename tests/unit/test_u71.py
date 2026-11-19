@@ -25,7 +25,7 @@ from test_driver import registered
 from test_u44 import edit_config
 
 
-def install_marker(tmp_path):
+def install_marker():
   """The installed driver as the kick reads it: the launchd plist file under the patched `HOME`."""
   put(driver.plist_path(), "<plist/>")
 
@@ -47,7 +47,7 @@ def test_kick_ticks_one_store_or_nothing(world, monkeypatch, tmp_path, registere
   monkeypatch.delenv("GH_X", raising=False)
   edit_config(world.repo, driver=None if chain is None else {"chain": chain})
   if installed:
-    install_marker(tmp_path)
+    install_marker()
   ticked = fake_tick_store(monkeypatch)
   root = world.repo if registered_ else tmp_path / "elsewhere"
   root.mkdir(exist_ok=True)
@@ -64,7 +64,7 @@ def chain_store(world, monkeypatch, tmp_path):
   """A registered, installed, chain-on store (`s1`); returns its artifacts dir."""
   registered(world, monkeypatch, tmp_path)
   edit_config(world.repo, driver={"chain": True})
-  install_marker(tmp_path)
+  install_marker()
   return world.artifacts
 
 
@@ -248,3 +248,140 @@ def test_a_builder_wrapper_without_a_registry_entry_has_no_kick(world, monkeypat
   assert world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)[0] == 0
   command = spawn_fake[-1][0][2]
   assert "driver kick" not in command and len(command.rstrip().splitlines()) == 1
+
+
+def test_a_chain_off_tick_holds_a_kick_until_it_ends(world, monkeypatch, tmp_path):
+  """Round 2 (astra-1-1): a timer tick that read the chain off and is still ticking, then the owner turns the
+  chain on and a kick comes: the kick's `tick_store` waits for the tick's to end (the store's lock, which writes
+  nothing), so the two never tick one store at once."""
+  import threading
+  import time
+  chain_store(world, monkeypatch, tmp_path)
+  edit_config(world.repo, driver={"chain": False})
+  events, kicker = [], []
+
+  def fake(entry):
+    if threading.current_thread() is threading.main_thread():
+      events.append("tick start")
+      edit_config(world.repo, driver={"chain": True})
+      kicker.append(threading.Thread(target=driver.kick, args=(world.repo,)))
+      kicker[0].start()
+      time.sleep(0.5)
+      events.append("tick end")
+    else:
+      events.append("kick")
+  monkeypatch.setattr(driver, "tick_store", fake)
+  entry = json.loads(superegm.registry_path().read_text(encoding="utf-8"))[0]
+  driver.locked_tick(entry)
+  kicker[0].join(timeout=10)
+  assert events == ["tick start", "tick end", "kick"]
+
+
+def test_a_chain_off_tick_skips_a_store_a_kick_holds(world, monkeypatch, tmp_path):
+  """The other order: a tick that reads the chain off over a store whose lock a kick holds skips it, writing
+  nothing (1.2's tick that finds nothing writes nothing)."""
+  store = chain_store(world, monkeypatch, tmp_path)
+  edit_config(world.repo, driver={"chain": False})
+  calls = fake_tick_store(monkeypatch)
+  entry = json.loads(superegm.registry_path().read_text(encoding="utf-8"))[0]
+  fd = os.open(store, os.O_RDONLY)
+  try:
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    driver.locked_tick(entry)
+  finally:
+    os.close(fd)
+  assert calls == [] and not (store / "tick").exists()
+
+
+def test_a_kick_reads_the_chain_with_the_env_files_path(world, monkeypatch, tmp_path):
+  """Round 2 (astra-1-2): git only on the env file's `PATH`: the kick applies the env file before it reads the
+  registered root's config, so the chain reads on and the store ticks."""
+  chain_store(world, monkeypatch, tmp_path)
+  empty = tmp_path / "no-git"; empty.mkdir()
+  monkeypatch.setenv("PATH", str(empty))
+  calls = fake_tick_store(monkeypatch)
+  assert driver.kick(world.repo) == 0 and len(calls) == 1
+  assert os.environ["PATH"] == str(empty)
+
+
+def test_a_kick_over_a_root_that_fails_root_ok_ticks_nothing(world, monkeypatch, tmp_path):
+  """Round 2 (change-review-1-3): a registered, installed root that is no longer a worktree of the repository:
+  `registered_store` falls back to the defaults, the chain reads off, nothing ticks."""
+  chain_store(world, monkeypatch, tmp_path)
+  monkeypatch.setattr(driver, "root_ok", lambda root, store: False)
+  calls = fake_tick_store(monkeypatch)
+  code, out = world.run("driver", "kick", "--root", world.repo, card=None)
+  assert (code, out, calls) == (0, "", [])
+
+
+def test_a_kick_prints_a_stores_error_and_exits_1(world, monkeypatch, tmp_path):
+  """Round 2 (change-review-1-3): a store's error is printed `driver: <dir>: <error>` and exits 1, which the
+  kicking wrapper's `||` logs."""
+  store = chain_store(world, monkeypatch, tmp_path)
+
+  def broken(entry):
+    raise superegm.HandoffError("broken store")
+  monkeypatch.setattr(driver, "tick_store", broken)
+  code, out = world.run("driver", "kick", "--root", world.repo, card=None)
+  assert code == 1 and f"driver: {store}: broken store" in out
+
+
+def test_a_stopped_builder_still_kicks(tmp_path, monkeypatch):
+  """Round 2 (astra-1-3): the watchdog's TERM writes `stalled` to the exit file, then the trap runs the kick, so a
+  stopped builder kicks as one that ends does."""
+  import signal
+  import time
+  from superegm.launch_builder import command_line
+  fake = tmp_path / "bin"
+  put(fake / "claude", "#!/bin/sh\nexec sleep 30\n"); (fake / "claude").chmod(0o755)
+  record = tmp_path / "kicked"
+  put(fake / "env", f'#!/bin/sh\nif [ "$1" = "-i" ]; then echo "$@" > \'{record}\'; exit 0; fi\nexec /usr/bin/env "$@"\n')
+  (fake / "env").chmod(0o755)
+  monkeypatch.setenv("PATH", f"{fake}:{os.environ['PATH']}")
+  result = tmp_path / "r.json"
+  cfg = {"builder": {**superegm.DEFAULT_CONFIG["builder"], "profile_dir": str(tmp_path)}}
+  kick = driver.kick_line(tmp_path / "the root")
+  line = command_line(cfg, tmp_path, tmp_path / "p.md", result, "wave-1", ["Read"], "/usr/local/bin/gh", "b", "b@x", [],
+                      tmp_path / "m.json", superegm.tier_pair(cfg, "doable"), kick=kick) + "\n" + kick
+  wrapper = subprocess.Popen(["/bin/sh", "-c", line], start_new_session=True)
+  time.sleep(1)
+  os.killpg(wrapper.pid, signal.SIGTERM)
+  wrapper.wait(timeout=10)
+  assert Path(f"{result}.exit").read_text(encoding="utf-8") == "stalled\n"
+  assert f"driver kick --root {tmp_path / 'the root'}" in record.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("case", ["replace", "newline", "trailing blank"])
+def test_driver_env_replaces_on_request_and_refuses_a_value_it_cannot_keep(world, monkeypatch, tmp_path, case):
+  """Round 2 (change-review-1-1, astra-1-4): `--replace` rewrites an existing file with the configured names, mode
+  `0600`; a value `read_env` would not read back as written (a newline, a leading or trailing blank) is refused,
+  nothing written, the value never printed."""
+  registered(world, monkeypatch, tmp_path)
+  env_file = tmp_path / ".superegm" / "env"
+  put(env_file, "OLD=1\n"); env_file.chmod(0o644)
+  profile = tmp_path / "driver-profile"; profile.mkdir()
+  monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(profile))
+  value = {"replace": "secret-value", "newline": "secret-value\nX=1", "trailing blank": "secret-value "}[case]
+  monkeypatch.setenv("GH_X", value)
+  set_builder(world.repo, gh_token_env="GH_X")
+  card = world.open_card("driver", world.spec)
+  code, out = world.run("driver", "env", "--replace", "--runcard", card)
+  assert "secret-value" not in out
+  text = env_file.read_text(encoding="utf-8")
+  if case == "replace":
+    assert code == 0 and {l.split("=", 1)[0] for l in text.splitlines()} == {"PATH", "CLAUDE_CONFIG_DIR", "GH_X"}
+    assert "GH_X=secret-value\n" in text and oct(env_file.stat().st_mode & 0o777) == "0o600"
+  else:
+    assert (code, text) == (1, "OLD=1\n") and "env: GH_X cannot be written literally" in out
+
+
+@pytest.mark.parametrize("names, line", [(("PATH", "CLAUDE_CONFIG_DIR", "GH_X"), "env: ok"),
+                                         (("PATH", "CLAUDE_CONFIG_DIR", "SUPEREGM_BUILDER_TOKEN"), "env: missing GH_X")])
+def test_doctor_env_line_reads_the_configured_name(world, monkeypatch, tmp_path, names, line):
+  """Round 2 (astra-1-5): the `env:` line checks the configured identity name, as `driver env` writes it."""
+  registered(world, monkeypatch, tmp_path)
+  env_file = tmp_path / ".superegm" / "env"
+  put(env_file, "".join(f"{n}=x\n" for n in names)); env_file.chmod(0o600)
+  set_builder(world.repo, gh_token_env="GH_X")
+  code, out = world.run("doctor")
+  assert line in out.splitlines(), out
