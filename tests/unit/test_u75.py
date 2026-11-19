@@ -161,16 +161,16 @@ REF_ROW = ("changed", "docs/reference/domain model.md", 0, 0)
 @pytest.mark.parametrize("rows, location, answer", [
   ([REF_ROW], "docs/reference/domain model.md:500", None),                       # a listed path with a space, any line
   ([REF_ROW], "docs/reference/unlisted.md:4", "none"),                           # any other file
-  ([REF_ROW], "§3.5 line 4", "A"),                                                # a dotted section cite is no file
-  ([REF_ROW], "3.5:4", "A"),
+  ([REF_ROW], "§3.5 line 4", "## A"),                                             # a dotted section cite is no file
+  ([REF_ROW], "3.5:4", "## A"),
   ([("whole", "(no approval)", 1, 9), REF_ROW], "§3.5 line 4", None),             # a whole round exempts a spec location
-  ([("changed", "B", 7, 9)], "skills/x.py:8", "none"),                            # no reference listed: still a file, still none
-  ([("whole", "(whole)", 1, 9)], "skills/x.py:8", "none"),
-  ([("changed", "B", 7, 9)], "other/design.md:8", "none"),                        # a same-named file of another directory
-  ([("changed", "B", 7, 9)], "docs/specs/design.md:8", None),
-  ([("changed", "B", 7, 9)], "design.md:8", None),
-  ([("changed", "B", 7, 9)], "/abs/repo/docs/specs/design.md:8", None),
-  ([("changed", "B", 7, 9)], "§2 line 8", None)])
+  ([("changed", "B", 7, 9), REF_ROW], "skills/x.py:8", "none"),                  # a reference is listed: any other file answers none
+  ([("whole", "(whole)", 1, 9), REF_ROW], "skills/x.py:8", "none"),
+  ([("changed", "B", 7, 9), REF_ROW], "other/design.md:8", "none"),              # a same-named file of another directory
+  ([("changed", "B", 7, 9), REF_ROW], "docs/specs/design.md:8", None),
+  ([("changed", "B", 7, 9), REF_ROW], "design.md:8", None),
+  ([("changed", "B", 7, 9), REF_ROW], "/abs/repo/docs/specs/design.md:8", None),
+  ([("changed", "B", 7, 9), REF_ROW], "§2 line 8", None)])
 def test_the_scope_filter_reads_a_path_before_its_line(rows, location, answer):
   """Only a spec location goes through cited_line and the sections; a path other than the spec's or a changed document answers none."""
   from superegm.review import out_of_scope, sections

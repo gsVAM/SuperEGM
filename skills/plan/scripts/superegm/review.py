@@ -293,15 +293,20 @@ def out_of_scope(rows: list, spans: list, location: str, spec_name: str = ""):
   """The heading of the section a finding cites when no scope row holds its line, else None; in a scoped
   round a location naming no line, or a line the spec does not hold, answers `none` (U32); a `whole` round
   exempts every finding. A round that lists reference documents (`("changed", <path>, 0, 0)` rows, U75) reads a
-  location's path first: a listed document is in scope whatever its line, any other file but the spec (`spec_name`)
-  answers `none`, and only a spec location goes on through `cited_line` and the sections."""
+  location's path first: a listed document is in scope whatever its line, any other file but the spec (`spec_name`,
+  its repository-relative path) answers `none`, and only a spec location goes on through `cited_line` and the
+  sections. A file name has an extension that starts with a letter, so a section cite such as `§3.5 line 4` or
+  `3.5:4` names no file."""
   listed = {row[1] for row in rows if row[0] == "changed" and row[2] == row[3] == 0}
   if listed:
-    named = re.match(r"([^\s:]+\.[A-Za-z0-9]+)(?=[:\s]|$)", location)
-    if named and named.group(1) in listed:
-      return None
-    if named and Path(named.group(1)).name != spec_name:
-      return "none"
+    for path in sorted(listed, key=len, reverse=True):
+      if location == path or (location.startswith(path) and location[len(path)] in ": \t"):
+        return None
+    named = re.match(r"([^\s:]+\.[A-Za-z][A-Za-z0-9]*)(?=[:\s]|$)", location)
+    if named:
+      cited = named.group(1).removeprefix("./")
+      if not (spec_name and (cited == spec_name or cited.endswith("/" + spec_name) or spec_name.endswith("/" + cited))):
+        return "none"
     rows = [row for row in rows if not (row[0] == "changed" and row[2] == row[3] == 0)]
   if rows and rows[0][0] == "whole":
     return None
@@ -326,27 +331,27 @@ def approved_text(spec: Path, approval: dict):
 
 def reference_manifest(st: core.Store, root: Path) -> list[dict]:
   """`[{file, sha}]` (U75) of the `*.md` files under a configured `instructions` `dir` that changed between the merge
-  base with `<base>` and the working tree (`HEAD`'s commits and an edit not yet committed), in path order, each with
-  the 12-hex blob sha of its working-tree bytes; a changed file the working tree no longer holds is left out. `[]` with
-  no `dir` entry or no merge base."""
+  base with `<base>` and `HEAD` (committed bytes only, as the approval freezes them), in path order, each with the
+  12-hex blob sha of its bytes at `HEAD`; a file `HEAD` no longer holds (a deletion is a change) has `sha` None.
+  `[]` with no `dir` entry or no merge base."""
   from superegm import instructions  # at call time: that module's import chain reaches this one
   folders = [e["dir"].rstrip("/") for e in st.config.get("instructions") or [] if isinstance(e, dict) and isinstance(e.get("dir"), str)]
   if not folders:
     return []
   base = core.run_git(["merge-base", st.config["base"], "HEAD"], root, check=False).strip()
-  if not base:
+  head = core.run_git(["rev-parse", "HEAD"], root, check=False).strip()
+  if not base or not head:
     return []
-  names = core.run_git(["diff", "--name-only", "-z", base, "--", *[f + "/" for f in folders]], root, check=False)
+  names = core.run_git(["diff", "--name-only", "-z", base, head, "--", *[f + "/" for f in folders]], root, check=False)
   found = []
   for name in sorted({n for n in names.split("\0") if n.endswith(".md")}):
-    path = root / name
-    if path.is_file():
-      found.append({"file": name, "sha": instructions.blob_sha(path.read_bytes())})
+    data = instructions.blob(root, head, name)
+    found.append({"file": name, "sha": None if data is None else instructions.blob_sha(data)})
   return found
 
 
 def refs_moved(st: core.Store, review: dict, rnd: dict) -> bool:
-  """Whether a spec round's `refs` differ from the working tree's manifest now (U75); a round with no `refs` key, one
+  """Whether a spec round's `refs` differ from the manifest at `HEAD` now (U75); a round with no `refs` key, one
   written before U75, never does."""
   if review["kind"] != "spec" or "refs" not in rnd:
     return False
@@ -612,7 +617,8 @@ def scope_form(st: core.Store, artifact: str, given) -> str | list:
 
 
 def scope_review(args) -> int:
-  """Prints the round's scope, `<changed|neighbour|whole> <start>-<end> <heading>` per section; writes nothing."""
+  """Prints the round's scope, `<changed|neighbour|whole> <start>-<end> <heading>` per spec section and
+  `changed <path>` per changed reference document (U75); writes nothing."""
   st = core.store(core.git_toplevel(Path.cwd()))
   review = load_review(st, args.review)
   if review is None:
@@ -671,6 +677,8 @@ def record_round(args) -> int:
       raise core.HandoffError(f"review record: --sha256 required for kind {kind}")
   if existing and existing["artifact_sha256"] != sha:
     raise core.HandoffError("review record: sha256 differs from the round's")
+  if kind == "spec" and existing and refs_moved(st, review, existing):  # one round, one reference snapshot (U75)
+    raise core.HandoffError("review record: reference documents differ from the round's")
   entry = None
   if kind == "head":  # a head's rounds are the unit's `rounds[]` entries
     entry = head_entry(st, review["artifact"], n)
@@ -715,7 +723,9 @@ def record_round(args) -> int:
     findings = [finding for finding, _ in pairs]
     if kind == "spec" and not external:  # a thread's location is a file of the PR, never a spec section
       spans = sections(core.read_text(Path(review["artifact"])))
-      verdicts = [(finding, line, out_of_scope(rnd["scope"], spans, finding["location"], Path(review["artifact"]).name)) for finding, line in pairs]
+      artifact = Path(review["artifact"])
+      spec_rel = artifact.resolve().relative_to(core.git_toplevel(artifact.parent).resolve()).as_posix()
+      verdicts = [(finding, line, out_of_scope(rnd["scope"], spans, finding["location"], spec_rel)) for finding, line in pairs]
       findings = [finding for finding, _, section in verdicts if section is None]
       refused = [(finding["id"], line, section) for finding, line, section in verdicts if section is not None]
       mine = lambda line: line.split(" | ", 1)[0].rsplit("-", 2)[0] == reviewer
@@ -1215,7 +1225,7 @@ def evaluate(st: core.Store, review: dict, runcard: str) -> Status:
     accept = None
   latest_sha = latest["artifact_sha256"] if latest else None
   moved = latest is not None and review["kind"] != "head" \
-      and latest_sha != current_sha(st, review["kind"], review["artifact"])
+      and (latest_sha != current_sha(st, review["kind"], review["artifact"]) or refs_moved(st, review, latest))
   converged, converged_round = "no", None
   if fix_design:
     pass

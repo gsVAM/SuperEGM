@@ -414,6 +414,13 @@ def reviewed_manifest(st: core.Store, rid: str, review: dict, status) -> list | 
   return load_round(st, rid, status.converged_round).get("refs")
 
 
+def refs_differing(reviewed: list, now: list) -> list[str]:
+  """The paths, sorted, whose `(file, sha)` pair is in one manifest and not the other; pairs, so a deletion (sha
+  None) and an absent path are different."""
+  pairs = lambda manifest: {(r["file"], r["sha"]) for r in manifest}
+  return sorted({file for file, _ in pairs(reviewed) ^ pairs(now)})
+
+
 def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   slug = core.spec_slug(spec)
   if args.void or args.amend_units:  # an older handoff is frozen (spec section 7)
@@ -450,6 +457,13 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
       pr = next((f.get("pr") for f in findings_of(latest) if f["id"] == fid and f.get("pr")), number)
       raise core.HandoffError(f"approve-spec: {fid.rsplit('-', 2)[0]} {fid} unsettled on PR {pr}")
   status = evaluate(st, review, card.get("parent") or args.runcard)
+  if status.code != 0 and status.fixed and status.latest_sha == core.sha256_file(spec):
+    # U75: the spec bytes are the round's and only a reference document moved: say which one, not just "not converged"
+    held = load_round(st, rid, round_numbers(st, rid)[-1]).get("refs")
+    if held is not None:
+      differing = refs_differing(held, reference_manifest(st, root))
+      if differing:
+        raise core.HandoffError(f"approve-spec: {differing[0]}: differs from the reviewed round")
   if status.code != 0:
     raise core.HandoffError(f"approve-spec: review {rid} is not converged (review status exit {status.code})")
   sha = core.sha256_file(spec)
@@ -457,9 +471,7 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
     raise core.HandoffError("approve-spec: spec bytes differ from the converged round's")
   reviewed_refs = reviewed_manifest(st, rid, review, status)
   if reviewed_refs is not None:  # U75: the reference documents the review read, unchanged since
-    now = reference_manifest(st, root)
-    held, moved = {r["file"]: r["sha"] for r in reviewed_refs}, {r["file"]: r["sha"] for r in now}
-    differing = sorted(f for f in held.keys() | moved.keys() if held.get(f) != moved.get(f))
+    differing = refs_differing(reviewed_refs, reference_manifest(st, root))
     if differing:
       raise core.HandoffError(f"approve-spec: {differing[0]}: differs from the reviewed round")
   if not units_is_last_h2(core.read_text(spec)):
