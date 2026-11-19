@@ -106,3 +106,13 @@ def test_spec_deviation_needs_the_line_and_the_evidence(world, body, refusal):
   rule_respec_rc, err = rule_on(world, card, qid, "respec")
   assert rule_respec_rc != 0 and refusal in err
   assert not s.path("file", "respec", "R1.open.json").exists() and not any(world.gh.comments.values())  # refused before anything is posted
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.parametrize("path", ["skills/wave/references/builder_orders.md", "skills/wave/references/foreman_brief.md"])
+def test_builder_orders_and_foreman_brief_define_spec(path):
+  # both docs define the `spec` kind with its two parts; the foreman raises it as a finding of kind `spec`
+  text = (ROOT / path).read_text(encoding="utf-8")
+  assert all(p in text for p in ("**Deviation (spec):**", "`path:line`", "evidence", "stays `interface`"))
