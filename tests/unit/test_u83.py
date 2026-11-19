@@ -17,7 +17,7 @@ import urllib.request
 
 import pytest
 
-from conftest import ROOT
+from conftest import ROOT, Harness, make_repo
 
 # source: superpowers 7.0.0 at ~/.claude/plugins/cache/claude-plugins-official/superpowers/7.0.0/skills/brainstorming/, or where that cache is absent https://github.com/obra/superpowers at tag v7.0.0, skills/brainstorming/ (the README's credited source); copied into the test as constants
 SHA_7_0_0 = {  # files restored byte for byte
@@ -83,3 +83,18 @@ def test_skill_names_piles_offer_and_retro():
                  "## Visual Companion", "## Play It Back", ".superegm/brainstorm.md"):
     assert phrase in text
   assert text.index("builder check") < text.index("SDLC")
+
+
+@pytest.mark.parametrize("before", ["node_modules/\n", "node_modules/\n.superegm/brainstorm/\n"])
+def test_init_ignores_the_session_dir_once(before, tmp_path, capsys, monkeypatch):
+  # a fresh init (no .superegm/config.json) in a repo whose .gitignore holds `before`, gh stubbed as in test_init_writes_the_config_with_every_key_and_refuses_another_base
+  repo = make_repo(tmp_path / "fresh")
+  gitignore = repo / ".gitignore"
+  gitignore.write_text(before, encoding="utf-8")
+  monkeypatch.chdir(repo)
+  harness = Harness(capsys)
+  harness.gh.extend("api", lambda args, cwd, token=None: (0, "octocat\n", "") if args[1:] == ["user", "-q", ".login"] else (1, "", "unexpected"))
+  code, _ = harness.run("init", "--artifacts-dir", str(tmp_path / "store"))
+  assert code == 0
+  assert gitignore.read_text().splitlines().count(".superegm/brainstorm/") == 1
+  assert gitignore.read_text().startswith("node_modules/\n")
