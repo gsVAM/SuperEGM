@@ -512,7 +512,7 @@ def stop_reason(foreman: dict, launches: list, source: str):
 def options_for(point: int, source: str, question: str, foreman: dict, head: str) -> list:
   """Spec section 13.2's options: point 1 upheld|overruled; point 2 one more round|stop; point 3 the
   comment's own `- (a)` lines plus `stop the unit`, or `relaunch; stop the unit` for a launch, a close,
-  or a third `blocked` comment on the same head; point 5 (a head's accept below the cap) accept|revise. Point 1 on
+  or a third `blocked` comment on the same head (a `spec` deviation's keeps `respec` between them, §7.6); point 5 (a head's accept below the cap) accept|revise. Point 1 on
   an `owner: <ids>` word (the latest posted round's outcome) offers `<fid> allowed`, one per id the question names (U25)."""
   if point == 5:
     return ["accept", "revise"]
