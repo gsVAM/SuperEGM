@@ -510,3 +510,15 @@ def test_a_decision_with_an_unruled_option_is_still_waiting(world):
     rows.append(table(c.hs.path("file", "postmortem.md").read_text(encoding="utf-8"), "Owner time")["U01 D1"])
   assert (rows[0]["answered by"], rows[0]["answered at"]) == ("waiting", "")
   assert (rows[1]["answered by"], rows[1]["answered at"], rows[1]["waited"]) == ("owner", t + "08:00:00Z", str(3 * 3600))
+
+
+def test_a_prepared_round_is_no_head_round(world):
+  """`prepare` writes a round `prepared` before any reviewer runs: like a `fetched` one, it is no head round yet."""
+  c, _, _ = two_units(world)
+  jwrite(c.hs.path("foreman", "U02"), {"dispatch_id": None, "decisions": [], "rulings": [], "rounds": [
+      {"round": 1, "phase": "posted", "outcome": "posted"}, {"round": 2, "phase": "prepared"}]})
+  code, out = world.run("postmortem", "--handoff", c.hid)
+  assert code == 0, out
+  report = c.hs.path("file", "postmortem.md").read_text(encoding="utf-8")
+  assert table(report, "Units")["U02"]["head rounds"] == "1"
+  assert table(report, "Plan against actual")["U02"]["head rounds"] == "1"
