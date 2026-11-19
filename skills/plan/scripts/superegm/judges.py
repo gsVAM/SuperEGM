@@ -648,7 +648,11 @@ def blocked_question(st, unit: str, what: list, mode=None) -> tuple[str, list[in
     held = pending.get("options") or RELAUNCH if pending is not None else comment_options(body)  # the decision's frozen options, else the comment's
     if mode == "leavemealone" and "respec" in (STORED_LETTER_RE.sub("", o) for o in held):
       raise core.HandoffError(f"question: comment {what[0]} is a spec deviation: in leavemealone-mode it waits for the owner (respec is the owner's alone)")
-    shown = stored_options_text(held)  # `amend` and `respec` left out, every other option keeping its letter
+    plain = [STORED_LETTER_RE.sub("", o) for o in held]
+    if pending is None and "respec" not in plain:  # a comment with nothing decided and no `respec`: `amend` left out, the rest lettered afresh as before
+      shown = options_text([o for o in plain if o != "amend"])
+    else:  # `amend` and `respec` left out, every other option keeping its letter (a later `respec` decision stores these letters)
+      shown = stored_options_text(held)
     consumers = []
     if heading.startswith("**Deviation (interface):**"):
       from superegm.decision import INTERFACE
