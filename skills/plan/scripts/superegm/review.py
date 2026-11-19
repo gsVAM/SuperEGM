@@ -289,26 +289,29 @@ def cited_line(location: str) -> int | None:
   return int(match.group(1)) if match else None
 
 
-def out_of_scope(rows: list, spans: list, location: str, spec_name: str = ""):
+def out_of_scope(rows: list, spans: list, location: str, spec_name: str = "", root: str = ""):
   """The heading of the section a finding cites when no scope row holds its line, else None; in a scoped
   round a location naming no line, or a line the spec does not hold, answers `none` (U32); a `whole` round
   exempts every finding. A round that lists reference documents (`("changed", <path>, 0, 0)` rows, U75) reads a
   location's path first: a listed document is in scope whatever its line, any other file but the spec (`spec_name`,
   its repository-relative path) answers `none`, and only a spec location goes on through `cited_line` and the
   sections. A file name has an extension that starts with a letter and ends at `:`, `#`, `,` or a space, so a
-  section cite such as `§3.5 line 4` or `3.5:4` names no file. A listed document is named by its repository-relative
-  path, with a leading `./` or an absolute prefix, or by its bare file name (the spec's own name wins a tie)."""
+  section cite such as `§3.5 line 4` or `3.5:4` names no file; a path with a slash, or a name followed by `:<line>`
+  or `#L<line>`, may hold spaces. A listed document is named by its full repository-relative path after one leading
+  `./` or the repository root (`root`, an absolute path) is taken off, or by its bare file name (the spec's own name
+  wins a tie); a directory in front of the path names another file."""
   listed = {row[1] for row in rows if row[0] == "changed" and row[2] == row[3] == 0}
   if listed:
     loc, ends = location.removeprefix("./"), ": \t,#"
-    tails = [0] + [i + 1 for i, c in enumerate(loc) if c == "/"]  # the whole location, or what follows any slash (an absolute path)
-    named_at = lambda path, text: any(text.startswith(path, at) and (at + len(path) == len(text) or text[at + len(path)] in ends) for at in tails)
-    if any(named_at(path, loc) for path in listed):
+    for prefix in {root.rstrip("/"), str(Path(root).resolve()).rstrip("/")} - {"", "."}:
+      loc = loc.removeprefix(prefix + "/")
+    named_as = lambda name: loc.startswith(name) and (len(loc) == len(name) or loc[len(name)] in ends)
+    if any(named_as(path) for path in listed):
       return None
-    named = re.match(r"([^\s:#,]+\.[A-Za-z][A-Za-z0-9]*)(?=[:\s#,]|$)", loc)
+    named = re.match(r"([^:#,]+\.[A-Za-z][A-Za-z0-9]*)(?=:\d|#L\d)", loc) or re.match(r"([^\s:#,]+\.[A-Za-z][A-Za-z0-9]*)(?=[:\s#,]|$)", loc)
     spec_named = bool(named) and bool(spec_name) and (named.group(1) == spec_name or named.group(1).endswith("/" + spec_name) or spec_name.endswith("/" + named.group(1)))
     if not spec_named:
-      if "/" not in loc.split(":")[0] and any(named_at(path.rsplit("/", 1)[-1], loc) for path in listed):
+      if "/" not in loc.split(":")[0].split("#")[0] and any(named_as(path.rsplit("/", 1)[-1]) for path in listed):
         return None  # a listed document by its bare file name (a slash before the first colon is another directory's)
       if named:
         return "none"
@@ -338,16 +341,14 @@ def reference_manifest(st: core.Store, root: Path) -> list[dict]:
   """`[{file, sha}]` (U75) of the `*.md` files under a configured `instructions` `dir` that changed between the merge
   base with `<base>` and `HEAD` (committed bytes only, as the approval freezes them), in path order, each with the
   12-hex blob sha of its bytes at `HEAD`; a file `HEAD` no longer holds (a deletion is a change) has `sha` None.
-  `[]` with no `dir` entry or no merge base."""
+  `[]` with no `dir` entry; a git failure (no merge base, no `HEAD`, a failed diff) raises with git's own error."""
   from superegm import instructions  # at call time: that module's import chain reaches this one
   folders = [e["dir"].rstrip("/") for e in st.config.get("instructions") or [] if isinstance(e, dict) and isinstance(e.get("dir"), str)]
   if not folders:
     return []
-  base = core.run_git(["merge-base", st.config["base"], "HEAD"], root, check=False).strip()
-  head = core.run_git(["rev-parse", "HEAD"], root, check=False).strip()
-  if not base or not head:
-    return []
-  names = core.run_git(["diff", "--name-only", "--no-renames", "-z", base, head, "--", *[f + "/" for f in folders]], root, check=False)  # a rename lists both paths: its old one is a deletion
+  base = core.run_git(["merge-base", st.config["base"], "HEAD"], root).strip()
+  head = core.run_git(["rev-parse", "HEAD"], root).strip()
+  names = core.run_git(["diff", "--name-only", "--no-renames", "-z", base, head, "--", *[f + "/" for f in folders]], root)  # a rename lists both paths: its old one is a deletion
   found = []
   for name in sorted({n for n in names.split("\0") if n.endswith(".md")}):
     data = instructions.blob(root, head, name)
@@ -653,6 +654,13 @@ def stored_manifest(st, rid: str, review: dict, n: int, reviewer: str, card: dic
   return list(stored.get("manifest") or [])
 
 
+def stored_brief_exists(st, rid: str, n: int, reviewer: str) -> bool:
+  """Whether a spec round holds a stored brief for this reviewer's lane; the foreman's and a thread's findings have none."""
+  if reviewer == "foreman" or reviewer.startswith("external:"):
+    return False
+  return st.path("reviews", rid, f"instructions-{n}-reviewers-{'astra' if reviewer == 'astra' else 'local'}.json").exists()
+
+
 def record_round(args) -> int:
   st = core.store(core.git_toplevel(Path.cwd()))
   rid, n, reviewer = args.review, args.round, args.reviewer
@@ -706,11 +714,13 @@ def record_round(args) -> int:
   if args.not_run and external:  # an ingest's record holds findings: a not-run would erase them
     raise core.HandoffError(f"review record: --not-run is refused for an external reviewer ({reviewer})")
   manifest = stored_manifest(st, rid, review, n, reviewer, card)
-  if kind == "spec" and rnd.get("refs") is not None:  # U75: the panel read the reference bytes its stored brief listed; the round's `refs` are those
+  if kind == "spec" and rnd.get("refs") is not None and stored_brief_exists(st, rid, n, reviewer):  # U75: the panel read the reference bytes its stored brief listed; the round's `refs` are those
     read = {item["file"]: item.get("sha") for item in manifest}
-    for ref in rnd["refs"]:
-      if ref["file"] in read and read[ref["file"]] != ref["sha"]:
-        raise core.HandoffError(f"review record: {ref['file']}: differs from the reviewers' brief")
+    moved = [ref["file"] for ref in rnd["refs"] if ref["file"] in read and read[ref["file"]] != ref["sha"]]
+    unseen = [ref["file"] for ref in rnd["refs"] if ref["sha"] is not None and ref["file"] not in read]  # added after the render, or never addressed to the reviewers
+    if moved or unseen:
+      raise core.HandoffError("; ".join([f"review record: {path}: differs from the reviewers' brief" for path in moved]
+                                        + [f"review record: {path}: not in the reviewers' brief (render it again)" for path in unseen]))
   from superegm import reviewers as repository  # at call time: that module's import chain reaches this one
   try:  # a repository or overridden reviewer's record carries the persona it read; a built-in with no file's has none, and a not-run read none (U76)
     persona = None if args.not_run else repository.persona_of(st, review, rid, n, reviewer)
@@ -735,7 +745,7 @@ def record_round(args) -> int:
       spans = sections(core.read_text(Path(review["artifact"])))
       artifact = Path(review["artifact"])
       spec_rel = artifact.resolve().relative_to(core.git_toplevel(artifact.parent).resolve()).as_posix()
-      verdicts = [(finding, line, out_of_scope(rnd["scope"], spans, finding["location"], spec_rel)) for finding, line in pairs]
+      verdicts = [(finding, line, out_of_scope(rnd["scope"], spans, finding["location"], spec_rel, str(core.git_toplevel(artifact.parent)))) for finding, line in pairs]
       findings = [finding for finding, _, section in verdicts if section is None]
       refused = [(finding["id"], line, section) for finding, line, section in verdicts if section is not None]
       mine = lambda line: line.split(" | ", 1)[0].rsplit("-", 2)[0] == reviewer
