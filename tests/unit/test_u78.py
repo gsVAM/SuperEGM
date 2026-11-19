@@ -413,7 +413,7 @@ def test_owner_time_keys_a_proceed_by_its_review_and_lists_open_decisions(world)
   assert code == 0, out
   rows = table(c.hs.path("file", "postmortem.md").read_text(encoding="utf-8"), "Owner time")
   assert (rows["U01 D2"]["answered at"], rows["U01 D2"]["waited"]) == (t + "06:00:00Z", "3600")
-  assert (rows["U02 D1"]["kind"], rows["U02 D1"]["answered by"], rows["U02 D1"]["answered at"]) == ("decision", "waiting", "")
+  assert (rows["U02/D1"]["kind"], rows["U02/D1"]["answered by"], rows["U02/D1"]["answered at"]) == ("decision", "waiting", "")
   assert (rows["review-plan"]["waited"], rows["review-plan"]["answered at"]) == ("600", t + "12:10:00Z")
   assert rows["review-code"]["waited"] == "1200"
 
