@@ -9,7 +9,7 @@ import re
 
 import pytest
 from conftest import CONFIG, ROOT
-from test_u43 import Chain, jread
+from test_u43 import UNITS, Chain, jread
 from test_u43 import registry  # noqa: F401  (the autouse fixture: no test reads the owner's registry)
 import superegm
 
@@ -131,6 +131,24 @@ def test_same_second_reask_keeps_the_first_wait(world):
   assert (waits / f"plan-{since1}.answer.json").read_bytes() == first_json
   assert (waits / f"plan-{since2}.answer.md").read_text(encoding="utf-8") == "second answer"
   assert journal_of(c)[-1] == f"next reask {c.hid} plan at {since2} question {sha('second question?')}"
+
+
+def test_clear_of_a_proceeded_wait_journals_the_ruling_after_since(world):
+  """A wait record a `proceed` ruling resolves holds no answer: its clear line names the latest `proceed` ruling made
+  after the wait's `since` (not an older one), with the empty answer's sha256."""
+  c = chain_world(world)
+  c.plan(*UNITS)
+  c.state["units"] = {}
+  c.review("U01", converged="no", rulings=[
+      {"id": "R1", "ruling": "proceed", "by": "bob", "at": "2026-11-14T00:00:00Z"},  # before the wait: not its answer
+      {"id": "R2", "ruling": "proceed", "by": "carol", "at": "2026-11-15T02:00:00Z"}])
+  c.wait(phase="review-plan", question="q", review="plan-U01-c1")  # since 2026-11-15T00:00:00Z
+  c.save()
+  card = world.open_card("plan", c.spec)
+  code, out = world.run("next", "clear", "--handoff", c.hid, "--runcard", card)
+  assert code == 0, out
+  assert not (c.root / "chain" / f"{c.hid}.json").is_file()
+  assert journal_of(c)[-1] == f"next clear {c.hid} review-plan answered by carol at 2026-11-15T02:00:00Z answer {sha('')}"
 
 
 def jwrite(path, obj):
