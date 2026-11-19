@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from conftest import git
 import superegm  # the harness reloads the package per test: read its names at call time
 from superegm import driver
 from test_builders import put, seed, spawn_fake, UNIT  # noqa: F401 (spawn_fake is a fixture)
@@ -191,6 +192,35 @@ def test_wrappers_end_with_the_env_i_kick(world, monkeypatch, tmp_path, spawn_fa
   assert world.run("driver", "install", "--runcard", dcard)[0] == 0
   install_interval_default = plistlib.loads(driver.plist_path().read_bytes())["StartInterval"] // 60
   assert install_interval_default == 5
+
+
+@pytest.mark.parametrize("base_config, on_base, code", [(None, True, 0), ("older store", True, 0), (None, False, 1)])
+def test_register_root_names_the_base_worktree(world, monkeypatch, tmp_path, base_config, on_base, code):
+  # run from a spec worktree; the store and card resolve from the current checkout
+  monkeypatch.setenv("HOME", str(tmp_path / "home"))
+  seed(world)  # an approved handoff: the card's spec is the handoff's
+  base_wt, current_store = world.repo, world.artifacts
+  spec_wt, other_wt = tmp_path / "spec-wt", tmp_path / "other-wt"
+  git(["worktree", "add", "-q", "-b", "spec/x", str(spec_wt)], base_wt)
+  git(["worktree", "add", "-q", "-b", "feature", str(other_wt)], base_wt)
+  config = base_wt / ".superegm" / "config.json"
+  if base_config == "older store":
+    data = json.loads(config.read_text(encoding="utf-8")); data["artifacts_dir"] = str(tmp_path / "older-artifacts")
+    config.write_text(json.dumps(data), encoding="utf-8")
+  else:
+    config.unlink()
+  monkeypatch.chdir(spec_wt)
+  card = world.open_card("driver", spec_wt / "docs/designs/sample.md")
+  root = base_wt if on_base else other_wt
+  result_code, out = world.run("register", "--root", root, "--runcard", card)
+  assert result_code == code, out
+  entries = json.loads(superegm.registry_path().read_text(encoding="utf-8")) if superegm.registry_path().is_file() else []
+  found = next((e for e in entries if os.path.realpath(e["artifacts_dir"]) == os.path.realpath(current_store)), None)
+  entry = found and {"root": found["root"], "store": found["artifacts_dir"]}
+  if code == 0:
+    assert (entry["root"], entry["store"]) == (str(base_wt), str(current_store))
+  else:
+    assert entry is None and f"register: {other_wt}: not a checkout on main" in out
 
 
 def test_a_builder_wrapper_without_a_registry_entry_has_no_kick(world, monkeypatch, tmp_path, spawn_fake):
