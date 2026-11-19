@@ -289,17 +289,19 @@ def offered(r: "Ruling", comments: list, decisions: list) -> bool:
   issue, or a mistyped id: both bind, unchecked) and a named comment with no `- (` lines (any option binds); a
   decision id the record lacks binds nothing."""
   decision = next((d for d in decisions if d.get("point") in (3, 5) and r.subject == option_name(d)), None)
+  text = ""  # what the options were read from: a `respec` binds only on a spec deviation that passes `check_respec`
   if decision is not None:
-    options = decision.get("options") or []
+    options, text = decision.get("options") or [], decision.get("question") or ""
   else:
     named = next((c for c in comments if str(c.get("id")) == r.subject), None)
     if named is None:  # a comment id this issue lacks: an interface ruling copied from its producer's issue (spec
       return r.subject.isdigit()  # section 13.2), nothing here to check it against; a decision id it lacks binds nothing
     if not any(line.startswith("- (") for line in (named.get("body") or "").splitlines()):
       return True  # a comment with no option lines (a kind-`other` deviation): nothing to check the option against
-    options = comment_options(named.get("body") or "")
+    options, text = comment_options(named.get("body") or ""), named.get("body") or ""
   try:
-    check_ruling(3, options, r.option or "")
+    if check_ruling(3, options, r.option or "") == "respec":
+      check_respec(text)
   except Refusal:
     return False
   return True
@@ -878,8 +880,6 @@ def check_ruling(point: int, options: list, ruling: str, by: str = "") -> str:
     place = ord(text[1]) - ord("a")
     if place < len(options):
       text = options[place]
-  if point == 3 and text in ("amend", "respec") and text in options and by.startswith("judges:"):  # on the option the ruling resolves to
-    raise Refusal(f"decision: {text} is the owner's alone")
   if point == 1 and options and all(o.endswith(" allowed") for o in options):
     said = text.partition(" — ")[0].strip()
     option = next((o for o in options if o.split(" ")[0] == fid and said in ("allowed", "finding overruled", "finding upheld")), None)
@@ -890,6 +890,8 @@ def check_ruling(point: int, options: list, ruling: str, by: str = "") -> str:
   for option in options:
     letter, _, rest = option.partition(" ") if option.startswith("(") else ("", "", option)
     if text and text in (option, letter, rest) and (point != 1 or fid):
+      if point == 3 and rest in ("amend", "respec") and by.startswith("judges:"):  # on the option the ruling resolves to, its own `(x) ` prefix dropped
+        raise Refusal(f"decision: {rest} is the owner's alone")
       return f"{fid} {rest}" if point == 1 else rest
   extra = ["redesign — <one sentence why>"] if point in (1, 2) else []  # a head's third ruling, in no option list
   raise Refusal("decision: ruling is none of the options: " + "; ".join(options + extra))

@@ -611,18 +611,19 @@ def redesign_option(st, rid: str) -> str:
   return f"redesign — the head is at its cap after {len(numbers)} rounds" + (": " + "; ".join(claims) if claims else "")
 
 
+STORED_LETTER_RE = re.compile(r"^\([a-z]\) ")  # a stored option's own letter prefix
+
+
 def decision_question(st, unit: str, did: str) -> str:
-  """A plan-time `D<n>` with its options as stored; a runtime `q<n>` is refused (`--blocked` renders it, `amend` left out)."""
+  """A plan-time `D<n>` with its options as stored, `respec` (the owner's alone, §7.6) left out; a runtime `q<n>` is
+  refused (`--blocked` renders it through `stored_options_text`, `amend` and `respec` left out)."""
   if re.fullmatch(r"q\d+", did):
     raise core.HandoffError(f"question: {did} is a runtime decision: use --blocked <comment-id> | launch <n> | closed <n>")
   units = json.loads(core.read_text(st.path("units"))).get("units") or {}
   decision = next((d for d in units.get(unit, {}).get("decisions") or [] if d["id"] == did), None)
   if decision is None:
     raise core.HandoffError(f"question: {unit} has no decision {did}")
-  return f"## Q1 {unit} {did}: {decision['question']}\n" + "".join(f"- {o}\n" for o in decision["options"] if o != "respec")
-
-
-STORED_LETTER_RE = re.compile(r"^\([a-z]\) ")  # a stored option's own letter prefix
+  return f"## Q1 {unit} {did}: {decision['question']}\n" + "".join(f"- {o}\n" for o in decision["options"] if STORED_LETTER_RE.sub("", o) != "respec")
 
 
 def stored_options_text(options: list) -> str:
@@ -630,7 +631,7 @@ def stored_options_text(options: list) -> str:
   §7.6) left out and the others keeping the letter of their stored position; a stored `(x) ` prefix is dropped so a
   letter prints once."""
   return "".join(f"- ({chr(ord('a') + i)}) {STORED_LETTER_RE.sub('', option)}\n"
-                 for i, option in enumerate(options) if option not in ("amend", "respec"))
+                 for i, option in enumerate(options) if STORED_LETTER_RE.sub("", option) not in ("amend", "respec"))
 
 
 def blocked_question(st, unit: str, what: list) -> tuple[str, list[int]]:
@@ -641,7 +642,7 @@ def blocked_question(st, unit: str, what: list) -> tuple[str, list[int]]:
     from superegm.report import pending_decisions
     pending = next((d for d in pending_decisions(core.load_foreman(st, unit))
                     if d.get("point") == 3 and d.get("source") == f"comment {what[0]}"), None)
-    if pending is not None:  # the stored options, `amend` left out and the letters kept
+    if pending is not None:  # the stored options, `amend` and `respec` left out and the letters kept
       shown = stored_options_text(pending.get("options") or RELAUNCH)
     else:  # no decision opened on the comment: its `- (` lines, then `stop the unit`
       options = [line[2:].strip() for line in rest if line.startswith("- (")]
