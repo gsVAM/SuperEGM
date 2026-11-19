@@ -110,6 +110,26 @@ def test_answer_json_is_never_rewritten(world, event):
   assert set(second) == {"by", "at", "sha"}
 
 
+def test_same_second_reask_keeps_the_first_wait(world):
+  """The store's stamps have one-second precision: a re-ask in the second of the first wait and answer must not
+  reuse the first `since`, whose question and answer files stay as they were."""
+  c = chain_world(world)
+  waits = c.hs.path("file", "waits")
+  since1 = wait(world, c, "plan", "first question?")
+  answer(world, c, "first answer")
+  wait(world, c, "plan", "second question?")  # the clock has not moved
+  since2 = jread(c.root / "chain" / f"{c.hid}.json")["since"]
+  assert since2 != since1
+  assert (waits / f"plan-{since1}.md").read_text(encoding="utf-8") == "first question?"
+  assert (waits / f"plan-{since2}.md").read_text(encoding="utf-8") == "second question?"
+  first_json = (waits / f"plan-{since1}.answer.json").read_bytes()
+  answer(world, c, "second answer")
+  assert (waits / f"plan-{since1}.answer.md").read_text(encoding="utf-8") == "first answer"
+  assert (waits / f"plan-{since1}.answer.json").read_bytes() == first_json
+  assert (waits / f"plan-{since2}.answer.md").read_text(encoding="utf-8") == "second answer"
+  assert journal_of(c)[-1] == f"next reask {c.hid} plan at {since2} question {sha('second question?')}"
+
+
 def jwrite(path, obj):
   path.parent.mkdir(parents=True, exist_ok=True)
   path.write_text(json.dumps(obj), encoding="utf-8")
