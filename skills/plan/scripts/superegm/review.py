@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76); a spec cycle's changed reference documents as whole-file `changed <path>` scope lines, their `refs` manifest on each round, in the scope filter, the settle check and the proceed ruling (U75).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest|triage: the one review loop (spec section 8)."""
 
@@ -289,10 +289,35 @@ def cited_line(location: str) -> int | None:
   return int(match.group(1)) if match else None
 
 
-def out_of_scope(rows: list, spans: list, location: str):
+def out_of_scope(rows: list, spans: list, location: str, spec_name: str = "", root: str = ""):
   """The heading of the section a finding cites when no scope row holds its line, else None; in a scoped
   round a location naming no line, or a line the spec does not hold, answers `none` (U32); a `whole` round
-  exempts every finding."""
+  exempts every finding. A round that lists reference documents (`("changed", <path>, 0, 0)` rows, U75) reads a
+  location's path first: a listed document is in scope whatever its line, any other file but the spec (`spec_name`,
+  its repository-relative path) answers `none`, and only a spec location goes on through `cited_line` and the
+  sections. A file name has an extension that starts with a letter and ends at `:`, `#`, `,` or a space, so a
+  section cite such as `§3.5 line 4` or `3.5:4` names no file; a path with a slash, or a name followed by `:<line>`
+  or `#L<line>`, may hold spaces (`other/a b.md, line 8` names `other/a b.md`). The spec is named by its full path or
+  its bare file name only, never with a directory in front of its path. A listed document is named by its full repository-relative path after one leading
+  `./` or the repository root (`root`, an absolute path) is taken off, or by its bare file name (the spec's own name
+  wins a tie); a directory in front of the path names another file."""
+  listed = {row[1] for row in rows if row[0] == "changed" and row[2] == row[3] == 0}
+  if listed:
+    loc, ends = location.removeprefix("./"), ": \t,#"
+    for prefix in {root.rstrip("/"), str(Path(root).resolve()).rstrip("/")} - {"", "."}:
+      loc = loc.removeprefix(prefix + "/")
+    named_as = lambda name: loc.startswith(name) and (len(loc) == len(name) or loc[len(name)] in ends)
+    if any(named_as(path) for path in listed):
+      return None
+    named = (re.match(r"([^:#,]+\.[A-Za-z][A-Za-z0-9]*)(?=:\d|#L\d)", loc) or re.match(r"([^:#,]*?/[^:#,]*?\.[A-Za-z][A-Za-z0-9]*)(?=[:\s#,]|$)", loc)
+             or re.match(r"([^\s:#,]+\.[A-Za-z][A-Za-z0-9]*)(?=[:\s#,]|$)", loc))
+    spec_named = bool(named) and bool(spec_name) and (named.group(1) == spec_name or ("/" not in named.group(1) and spec_name.rsplit("/", 1)[-1] == named.group(1)))
+    if not spec_named:
+      if "/" not in loc.split(":")[0].split("#")[0] and any(named_as(path.rsplit("/", 1)[-1]) for path in listed):
+        return None  # a listed document by its bare file name (a slash before the first colon is another directory's)
+      if named:
+        return "none"
+    rows = [row for row in rows if not (row[0] == "changed" and row[2] == row[3] == 0)]
   if rows and rows[0][0] == "whole":
     return None
   line = cited_line(location)
@@ -314,7 +339,41 @@ def approved_text(spec: Path, approval: dict):
   return core.spec_blob(root, rel, approval["sha256"])
 
 
+def reference_manifest(st: core.Store, root: Path) -> list[dict]:
+  """`[{file, sha}]` (U75) of the `*.md` files under a configured `instructions` `dir` that changed between the merge
+  base with `<base>` and `HEAD` (committed bytes only, as the approval freezes them), in path order, each with the
+  12-hex blob sha of its bytes at `HEAD`; a file `HEAD` no longer holds (a deletion is a change) has `sha` None.
+  `[]` with no `dir` entry; a git failure (no merge base, no `HEAD`, a failed diff) raises with git's own error."""
+  from superegm import instructions  # at call time: that module's import chain reaches this one
+  folders = [e["dir"].rstrip("/") for e in st.config.get("instructions") or [] if isinstance(e, dict) and isinstance(e.get("dir"), str)]
+  if not folders:
+    return []
+  base = core.run_git(["merge-base", st.config["base"], "HEAD"], root).strip()
+  head = core.run_git(["rev-parse", "HEAD"], root).strip()
+  names = core.run_git(["diff", "--name-only", "--no-renames", "-z", base, head, "--", *[f + "/" for f in folders]], root)  # a rename lists both paths: its old one is a deletion
+  found = []
+  for name in sorted({n for n in names.split("\0") if n.endswith(".md")}):
+    data = instructions.blob(root, head, name)
+    found.append({"file": name, "sha": None if data is None else instructions.blob_sha(data)})
+  return found
+
+
+def refs_moved(st: core.Store, review: dict, rnd: dict) -> bool:
+  """Whether a spec round's `refs` differ from the manifest at `HEAD` now (U75); a round with no `refs` key, one
+  written before U75, never does."""
+  if review["kind"] != "spec" or "refs" not in rnd:
+    return False
+  return reference_manifest(st, core.git_toplevel(Path(review["artifact"]).parent)) != rnd["refs"]
+
+
 def scope_of(st: core.Store, review: dict, spec: Path) -> list:
+  """The spec's scope rows (`spec_scope`), then one `("changed", <path>, 0, 0)` row per changed reference document
+  (`reference_manifest`): a whole file, which has no lines (U75)."""
+  root = core.git_toplevel(spec.parent)
+  return spec_scope(st, review, spec) + [("changed", row["file"], 0, 0) for row in reference_manifest(st, root)]
+
+
+def spec_scope(st: core.Store, review: dict, spec: Path) -> list:
   """The round's scope rows, `(changed|neighbour|whole, heading, start, end)`, from the current bytes: under
   `auto` (a review opened before U19 reads as `auto`) the sections `scope_sections` finds against the
   approved bytes; a section list adds its headings as `changed`, without neighbours (a heading the bytes no
@@ -566,7 +625,8 @@ def scope_form(st: core.Store, artifact: str, given) -> str | list:
 
 
 def scope_review(args) -> int:
-  """Prints the round's scope, `<changed|neighbour|whole> <start>-<end> <heading>` per section; writes nothing."""
+  """Prints the round's scope, `<changed|neighbour|whole> <start>-<end> <heading>` per spec section and
+  `changed <path>` per changed reference document (U75); writes nothing."""
   st = core.store(core.git_toplevel(Path.cwd()))
   review = load_review(st, args.review)
   if review is None:
@@ -575,7 +635,7 @@ def scope_review(args) -> int:
     raise core.HandoffError(f"review scope: {args.review} is not a spec review")
   bind(args, review)
   for kind, heading, start, end in scope_of(st, review, Path(review["artifact"])):
-    print(f"{kind} {start}-{end} {heading}")
+    print(f"{kind} {heading}" if start == end == 0 else f"{kind} {start}-{end} {heading}")  # a reference document is a whole file
   return 0
 
 
@@ -594,6 +654,13 @@ def stored_manifest(st, rid: str, review: dict, n: int, reviewer: str, card: dic
     return (json.loads(core.read_text(path)).get("manifest") or []) if path.exists() else []
   stored = ((card.get("instructions") or {}).get("reviewers") or {}).get(lane) or {}
   return list(stored.get("manifest") or [])
+
+
+def stored_brief_exists(st, rid: str, n: int, reviewer: str) -> bool:
+  """Whether a spec round holds a stored brief for this reviewer's lane; the foreman's and a thread's findings have none."""
+  if reviewer == "foreman" or reviewer.startswith("external:"):
+    return False
+  return st.path("reviews", rid, f"instructions-{n}-reviewers-{'astra' if reviewer == 'astra' else 'local'}.json").exists()
 
 
 def record_round(args) -> int:
@@ -625,6 +692,8 @@ def record_round(args) -> int:
       raise core.HandoffError(f"review record: --sha256 required for kind {kind}")
   if existing and existing["artifact_sha256"] != sha:
     raise core.HandoffError("review record: sha256 differs from the round's")
+  if kind == "spec" and existing and refs_moved(st, review, existing):  # one round, one reference snapshot (U75)
+    raise core.HandoffError("review record: reference documents differ from the round's")
   entry = None
   if kind == "head":  # a head's rounds are the unit's `rounds[]` entries
     entry = head_entry(st, review["artifact"], n)
@@ -637,6 +706,8 @@ def record_round(args) -> int:
     return 2
   rnd = existing or {"round": n, "runcard": card.get("parent") or args.runcard, "artifact_sha256": sha,
                      "builder_contested": [], "reviewers": {}}
+  if kind == "spec" and not existing:  # the reference documents the round reviewed (U75): beside the spec's own sha, never in it
+    rnd["refs"] = reference_manifest(st, core.git_toplevel(Path(review["artifact"]).parent))
   if kind == "spec" and "scope" not in rnd:  # the round's scope, stored by its first record, checked by every later one
     rows = [list(row) for row in scope_of(st, review, Path(review["artifact"]))]
     rnd.update({"scope": rows, "out_of_scope": [],
@@ -645,6 +716,26 @@ def record_round(args) -> int:
   if args.not_run and external:  # an ingest's record holds findings: a not-run would erase them
     raise core.HandoffError(f"review record: --not-run is refused for an external reviewer ({reviewer})")
   manifest = stored_manifest(st, rid, review, n, reviewer, card)
+  lane = "astra" if reviewer == "astra" else "local"
+  dropped = st.path("reviews", rid, f"instructions-{n}-reviewers-{lane}.dropped")  # marks a stale brief the check dropped (U75): no record follows until a render
+  render = (f"render it again with `superegm instructions --spec {review['artifact']} --review {rid} --round {n} "
+            f"--role reviewers --lane {lane} --runcard {args.runcard}`")
+  if kind == "spec" and reviewer != "foreman" and not external and dropped.exists():
+    if not stored_brief_exists(st, rid, n, reviewer):  # a retry or the lane's next reviewer would otherwise skip the check below
+      raise core.HandoffError(f"review record: the reviewers' {lane} brief for round {n} was dropped as stale: {render}, the reviewers read it, then record")
+    dropped.unlink()  # rendered again: the check below reads the new brief
+  if kind == "spec" and rnd.get("refs") is not None and stored_brief_exists(st, rid, n, reviewer):  # U75: the panel read the reference bytes its stored brief listed; the round's `refs` are those
+    read = {item["file"]: item.get("sha") for item in manifest}
+    moved = [ref["file"] for ref in rnd["refs"] if ref["file"] in read and read[ref["file"]] != ref["sha"]]
+    folders = tuple(e["dir"].rstrip("/") + "/" for e in st.config.get("instructions") or []
+                    if isinstance(e, dict) and isinstance(e.get("dir"), str) and "reviewers" in (e.get("to") or []))  # the folders the brief lists: the entries addressed to the reviewers, never a builder-only folder
+    unseen = [ref["file"] for ref in rnd["refs"] if ref["sha"] is not None and ref["file"] not in read and ref["file"].startswith(folders)]  # added after the render
+    if moved or unseen:  # the stored brief is stale: drop it, so `instructions --spec` renders it again from HEAD and this round can still be recorded
+      st.path("reviews", rid, f"instructions-{n}-reviewers-{lane}.json").unlink(missing_ok=True)
+      core.atomic_write(dropped, "dropped\n")
+      raise core.HandoffError("; ".join([f"review record: {path}: differs from the reviewers' brief" for path in moved]
+                                        + [f"review record: {path}: not in the reviewers' brief" for path in unseen])
+                              + f" (the stored brief is dropped: {render}, the reviewers read it, then record; a `dir` entry is listed once committed)")
   from superegm import reviewers as repository  # at call time: that module's import chain reaches this one
   try:  # a repository or overridden reviewer's record carries the persona it read; a built-in with no file's has none, and a not-run read none (U76)
     persona = None if args.not_run else repository.persona_of(st, review, rid, n, reviewer)
@@ -667,7 +758,9 @@ def record_round(args) -> int:
     findings = [finding for finding, _ in pairs]
     if kind == "spec" and not external:  # a thread's location is a file of the PR, never a spec section
       spans = sections(core.read_text(Path(review["artifact"])))
-      verdicts = [(finding, line, out_of_scope(rnd["scope"], spans, finding["location"])) for finding, line in pairs]
+      artifact = Path(review["artifact"])
+      spec_rel = artifact.resolve().relative_to(core.git_toplevel(artifact.parent).resolve()).as_posix()
+      verdicts = [(finding, line, out_of_scope(rnd["scope"], spans, finding["location"], spec_rel, str(core.git_toplevel(artifact.parent)))) for finding, line in pairs]
       findings = [finding for finding, _, section in verdicts if section is None]
       refused = [(finding["id"], line, section) for finding, line, section in verdicts if section is not None]
       mine = lambda line: line.split(" | ", 1)[0].rsplit("-", 2)[0] == reviewer
@@ -952,7 +1045,8 @@ def check_settle(st: core.Store, rid: str, review: dict, card: dict, args, fid: 
     raise core.HandoffError("review settle: fix-design is refused on a frozen handoff's integrate: settle it escalated")
   if reviewer == "foreman" and finding["location"] == "ci":  # D2 (a): `collect` records it afresh each round
     raise core.HandoffError("review settle: the CI finding is settled by no one")
-  if disposition == "fixed" and rnd["artifact_sha256"] == current_sha(st, review["kind"], review["artifact"]):
+  if disposition == "fixed" and rnd["artifact_sha256"] == current_sha(st, review["kind"], review["artifact"]) \
+      and not refs_moved(st, review, rnd):  # a spec round's changed reference document counts as changed bytes (U75)
     raise core.HandoffError("review settle: fixed needs changed bytes")  # a head's current bytes are unknown: never
   if finding["claim"].startswith("test-delta:") and not args.owner:  # U25: the owner's alone, in either mode
     raise core.HandoffError(f"review settle: {fid} is the owner's alone: --owner required")
@@ -1100,7 +1194,7 @@ class Status:
   converged: str
   converged_round: int | None
   sha: str | None
-  moved: bool = False          # the latest completed round's bytes are no longer the artifact's (never on a head)
+  moved: bool = False          # the latest completed round's bytes are no longer the artifact's, or a spec round's `refs` are no longer HEAD's reference manifest (never on a head)
   latest_sha: str | None = None
   fixed: bool = False          # that round would have converged but for the move: re-review on the current bytes
 
@@ -1166,7 +1260,7 @@ def evaluate(st: core.Store, review: dict, runcard: str) -> Status:
     accept = None
   latest_sha = latest["artifact_sha256"] if latest else None
   moved = latest is not None and review["kind"] != "head" \
-      and latest_sha != current_sha(st, review["kind"], review["artifact"])
+      and (latest_sha != current_sha(st, review["kind"], review["artifact"]) or refs_moved(st, review, latest))
   converged, converged_round = "no", None
   if fix_design:
     pass
@@ -2020,6 +2114,8 @@ def rule_proceed(st: core.Store, rid: str, review: dict, card: dict, args) -> in
             "reason": reason}
   if not head:
     ruling["sha256"] = current_sha(st, review["kind"], review["artifact"])
+    if review["kind"] == "spec":  # U75: the reference manifest the proceed pins, `approve-spec` compares against it
+      ruling["refs"] = reference_manifest(st, core.git_toplevel(Path(review["artifact"]).parent))
     review["rulings"].append(ruling)
     save_review(st, rid, review)
     return proceeded(st, rid, review, ruling, card, args)
