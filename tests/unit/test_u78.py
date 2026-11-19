@@ -286,7 +286,7 @@ def test_owner_time_holds_every_decision_proceed_and_stop(world):
   c.save()
   jwrite(c.hs.path("foreman", "U01"), {
       "dispatch_id": None, "rounds": [{"round": 1, "phase": "posted", "outcome": "posted"}],
-      "decisions": [{"id": "D2", "asked_at": t + "05:00:00Z", "source": "cap"}],
+      "decisions": [{"id": "D2", "asked_at": t + "05:00:00Z", "source": "review head-U01-c1 cap"}],
       "rulings": [{"decision": "D2", "ruling": "proceed", "by": "owner", "reason": "ok", "review": "R1"}]})
   jwrite(c.hs.path("foreman", "U02"), {"dispatch_id": None, "rounds": [], "decisions": [], "rulings": [],
                                        "stopped": {"by": "superegm", "at": t + "08:00:00Z", "reason": "cap"}})
@@ -384,6 +384,38 @@ def test_units_count_run_rounds_and_named_models(world):
   row = table(c.hs.path("file", "postmortem.md").read_text(encoding="utf-8"), "Units")["U02"]
   assert row["head rounds"] == "1"
   assert row["models"] == "claude-sonnet-5-5, claude-haiku-5-5"
+
+
+def test_owner_time_keys_a_proceed_by_its_review_and_lists_open_decisions(world):
+  """Rulings number from R1 in each head cycle: a decision answered by a proceed takes the time of the review its
+  `source` names; a decision the plan declared and nobody answered yet is a row, waiting; a wait a later wait of another
+  phase replaced ends at that wait (the chain record holds one wait at a time)."""
+  c, _, _ = two_units(world)
+  t = "2026-11-15T"
+  jwrite(c.hs.path("foreman", "U01"), {
+      "dispatch_id": None, "rounds": [{"round": 1, "phase": "posted", "outcome": "posted"}],
+      "decisions": [{"id": "D2", "asked_at": t + "05:00:00Z", "source": "review head-U01-c1 cap"}],
+      "rulings": [{"decision": "D2", "ruling": "proceed", "by": "owner", "reason": "ok", "review": "R1"}]})
+  for n, hour in ((1, "06"), (2, "09")):
+    reviewed(c, f"head-U01-c{n}", "head", "U01", ["codebase-details"], {})
+    cycle = jread(c.hs.path("reviews", f"head-U01-c{n}", "review.json"))
+    cycle["rulings"] = [{"id": "R1", "ruling": "proceed", "by": LOGIN, "at": f"{t}{hour}:00:00Z", "reason": "ok"}]
+    jwrite(c.hs.path("reviews", f"head-U01-c{n}", "review.json"), cycle)
+  units = jread(c.hs.path("units"))
+  units["units"]["U02"]["decisions"] = [{"id": "D1", "question": "split it?", "options": ["(a) yes", "(b) no"]}]
+  jwrite(c.hs.path("units"), units)
+  journal_add(
+      c,
+      f"{t}12:00:00Z next wait {c.hid} review-plan since {t}12:00:00Z source rc question aa",
+      f"{t}12:10:00Z next wait {c.hid} review-code since {t}12:10:00Z source rc question bb",
+      f"{t}12:30:00Z next clear {c.hid} review-code answered by progress at {t}12:30:00Z answer cc")
+  code, out = world.run("postmortem", "--handoff", c.hid)
+  assert code == 0, out
+  rows = table(c.hs.path("file", "postmortem.md").read_text(encoding="utf-8"), "Owner time")
+  assert (rows["U01 D2"]["answered at"], rows["U01 D2"]["waited"]) == (t + "06:00:00Z", "3600")
+  assert (rows["U02 D1"]["kind"], rows["U02 D1"]["answered by"], rows["U02 D1"]["answered at"]) == ("decision", "waiting", "")
+  assert (rows["review-plan"]["waited"], rows["review-plan"]["answered at"]) == ("600", t + "12:10:00Z")
+  assert rows["review-code"]["waited"] == "1200"
 
 
 def reviewer_names(report):
