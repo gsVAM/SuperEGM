@@ -13,7 +13,8 @@ import pytest
 
 import superegm
 from conftest import REPO, ROOT
-from superegm import atomic_write
+from superegm import atomic_write, phase
+from superegm.decision import check_ruling, parse_form
 from superegm.inbox import inbox_items, registry_items
 from test_inbox import D, F, HEAD, POSTED, REVIEW, ROUND, U, seed
 from test_wave import open_wave_card, wave_store
@@ -124,8 +125,9 @@ def test_a_head_cap_without_its_decision_offers_no_form(world):
 
 
 def test_a_chained_handoff_leaves_a_plan_decision_to_its_wait_record(world, monkeypatch):
-  """Round 3 (change-review-2-1): on a chained handoff a plan's unanswered `blocking: yes` D<n> line reaches the
-  owner as the wait record (spec 1.2.1 section 7.3), so no `escalated` item is listed; unchained it is."""
+  """Round 3 (change-review-2-1), round 4 (change-review-3-1): on a chained handoff a plan's unanswered `blocking:
+  yes` D<n> line reaches the owner as the wait record (spec 1.2.1 section 7.3): the inbox lists that record's
+  `waiting plan:` line in place of the `escalated` item; unchained the `escalated` item is listed."""
   open_wave_card(world)
   s = seed(world, escalated=["spec-sample-c1:design-1-1"], **U())
   state = json.loads(s.path("state").read_text(encoding="utf-8"))
@@ -133,13 +135,33 @@ def test_a_chained_handoff_leaves_a_plan_decision_to_its_wait_record(world, monk
   atomic_write(s.path("state"), state)
   plan = Path(state["plan"])
   plan.write_text(plan.read_text(encoding="utf-8").replace("D2 Page size for the listing?", "D2 Page size (spec-sample-c1:design-1-1: c)?"), encoding="utf-8")
-  esc = lambda: [i["action"] for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "escalated"]
-  assert esc() == ["answer in your plan session"]
+  listed = lambda kind: [i["action"] for i in inbox_items(s, [s.handoff_id]) if i["kind"] == kind]
+  assert listed("escalated") == ["answer in your plan session"]
   core = inbox_items.__globals__["core"]
   monkeypatch.setattr(core, "frozen_mode", lambda hs: "normal")
   monkeypatch.setattr(core, "chain_on", lambda config: True)
-  monkeypatch.setitem(inbox_items.__globals__, "chain_items", lambda *a: [])  # no driver record in this store
-  assert esc() == []
+  # the driven plan's wait record names D2; `next` reads the record as its wait row does (the fetch and tick rows
+  # before it need a remote, and are test_u45's)
+  atomic_write(s.path("chain", s.handoff_id), {"phase": "plan", "question": "D2 Page size: (a) 20 | (b) 50?"})
+
+  def wait_line(st, hid, read_wait=True):
+    record = json.loads(st.path("chain", hid).read_text(encoding="utf-8"))
+    return "waiting " + record["phase"] + ": " + record["question"]
+  monkeypatch.setattr(phase, "next_line", wait_line)
+  assert listed("escalated") == [] and listed("driver") == ["waiting plan: D2 Page size: (a) 20 | (b) 50?"]
+
+
+@pytest.mark.parametrize("options", [["(a) keep cache — avoid churn", "(b) drop cache"], ["keep cache — avoid churn", "drop cache"]])
+def test_a_point_3_form_rules_the_option_it_names(world, options):
+  """Round 4 (astra-3-1): an option whose text holds ` — ` is named by its letter, so the posted form's first em dash
+  is the reason's and the ruling resolves to the option the form was made from."""
+  open_wave_card(world)
+  s = seed(world, **U(decisions=D(3, "comment 77", options=options)))
+  [d] = [i for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "decision"]
+  for option, form in zip(options, d["forms"], strict=True):
+    kind, subject, said, reason = parse_form(form.replace("<reason>", "why"))
+    assert (kind, subject, reason) == ("option", "77", "why")
+    assert check_ruling(3, options, said) == (option.partition(" ")[2] if option.startswith("(") else option)
 
 
 def test_a_bad_root_line_names_its_handoff(world, tmp_path):
@@ -165,9 +187,17 @@ def test_inbox_withdrawn_refusal_names_the_flags_it_parses(world):
 
 @pytest.mark.parametrize("phrase", [
   "`registry.json`", "`artifacts_dir`", "`conflict`", "pinned head", "CONFLICTING",
-  "its decision point 2 opens at the next wave", "the listing never reads the respec mark"])
+  "its decision point 2 opens at the next wave"])
 def test_the_inbox_skill_names_round_three_text(phrase):
-  # round 3: the registered root, the conflict kind and every merge guard, the cap with no decision yet, the respec mark
+  # round 3: the registered root, the conflict kind and every merge guard, the cap with no decision yet
+  assert phrase in SKILL.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("phrase", [
+  "no store records one before U86", "asked again, with the new head, once",
+  "the inbox asks nothing, and the owner's answer is recorded with", "and for a head cap with no decision open yet"])
+def test_the_inbox_skill_names_round_four_text(phrase):
+  # round 4: the respec mark not yet recorded, a moved head re-asked once a verdict covers it, the integrate recorder, the kick
   assert phrase in SKILL.read_text(encoding="utf-8")
 
 
