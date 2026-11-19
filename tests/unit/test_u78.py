@@ -366,6 +366,26 @@ def test_settled_head_findings_and_carried_externals(world):
   assert (astra["high"], astra["fixed"]) == ("1", "1")
 
 
+def test_units_count_run_rounds_and_named_models(world):
+  """A fetched round no reviewer ran in and a collected round that was never run are no head rounds; a launch whose
+  result file was unreadable (`effective_model` `requested only`) lists its requested model; one that used several
+  models stores them joined, and each is listed once."""
+  c, _, _ = two_units(world)
+  jwrite(c.hs.path("foreman", "U02"), {"dispatch_id": None, "decisions": [], "rulings": [], "rounds": [
+      {"round": 1, "phase": "posted", "outcome": "posted"},
+      {"round": 2, "phase": "collected", "outcome": "not run (target-moved)"},
+      {"round": 3, "phase": "fetched"}]})
+  launch = {"status": "exited 0", "subagent_calls": {"count": 0, "calls": []}, "started_at": "2026-11-15T02:00:00Z"}
+  jwrite(c.hs.path("launches", "U02"), {"launches": [
+      {**launch, "round": 1, "model": "claude-sonnet-5-5", "effective_model": "requested only"},
+      {**launch, "round": 2, "model": "claude-opus-5-5", "effective_model": "claude-sonnet-5-5, claude-haiku-5-5"}]})
+  code, out = world.run("postmortem", "--handoff", c.hid)
+  assert code == 0, out
+  row = table(c.hs.path("file", "postmortem.md").read_text(encoding="utf-8"), "Units")["U02"]
+  assert row["head rounds"] == "1"
+  assert row["models"] == "claude-sonnet-5-5, claude-haiku-5-5"
+
+
 def reviewer_names(report):
   return set(table(report, "Reviewers"))
 
