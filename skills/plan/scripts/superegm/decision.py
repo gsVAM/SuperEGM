@@ -9,6 +9,7 @@
 import argparse
 import contextlib
 import io
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -21,7 +22,7 @@ from superegm.report import pending_decisions, unit_view
 from superegm import review, scan
 from superegm.review import Refusal
 
-WRITES = frozenset({"foreman", "reviews", "state", "file"})  # the store kinds this subcommand writes (`reviews`: a fifth point's accept, U35; `state`: the other writers' fields; `file`: `amendments/<comment id>.json`, §6.5)
+WRITES = frozenset({"foreman", "reviews", "state", "file"})  # the store kinds this subcommand writes (`reviews`: a fifth point's accept, U35; `state`: the other writers' fields; `file`: `amendments/<comment id>.json`, §6.5, and `respec/R<n>.open.json`, §7.6)
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset({"wave"})  # the skills whose card this subcommand accepts
 RELAUNCH = ["relaunch", "stop the unit"]
@@ -66,6 +67,29 @@ def amendments_of(text: str, chosen: str, reason: str, comment_id: int, now: str
   return [{"unit": h["unit"], "name": heading_name(h["name"], produced_names(st, h["unit"])),
            "text": reason.strip() if chosen == "amend" else chosen, "comment_id": comment_id, "at": now}
           for h in heads if h]
+
+
+RESPEC_FILE = re.compile(r"R(\d+)\.")
+
+
+def open_respec(st, unit: str, comment_id: int, now: str) -> str:
+  """Spec §7.6: the owner's `respec` on a `spec` deviation writes `respec/R<n>.open.json` (`{id, unit, comment_id,
+  at}`, the store's `file` kind, never `state.json`) in the handoff's directory; `R<n>` is the next number no
+  `respec/` file uses. A rerun after a crash finds the file for the same unit and comment and keeps it."""
+  folder = st.path("file", "respec")
+  files = sorted(folder.iterdir()) if folder.is_dir() else []
+  for file in files:
+    if file.name.endswith(".open.json"):
+      try:
+        held = json.loads(file.read_text(encoding="utf-8"))
+      except ValueError:
+        continue
+      if isinstance(held, dict) and held.get("unit") == unit and held.get("comment_id") == comment_id:
+        return held["id"]
+  used = [int(m.group(1)) for f in files if (m := RESPEC_FILE.match(f.name))]
+  rid = f"R{max(used, default=0) + 1}"
+  core.atomic_write(st.path("file", "respec", f"{rid}.open.json"), {"id": rid, "unit": unit, "comment_id": comment_id, "at": now})
+  return rid
 
 
 def check_amend(st, text: str, reason: str) -> None:
@@ -637,6 +661,8 @@ def rule(args) -> int:
       core.atomic_write(file, [entry | {"recorded_at": recorded_at} for entry in added])
     elif file.exists():
       file.unlink()
+    if chosen == "respec" and not closed:  # spec §7.6: written before the ruling is saved, so a crash leaves a file a rerun keeps
+      open_respec(st, unit, int(str(decision["source"]).split()[1]), now)
   # recorded before the read-back, the session's post marked `unread` (its GitHub time not yet read), so a
   # `status --wait` pass in between compares its edits with its own `created_at` and skips the unedited post
   core.save_foreman(st, unit, data)
