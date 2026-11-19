@@ -182,6 +182,43 @@ def test_a_record_refuses_reviewers_who_read_other_reference_bytes(world):
   assert code == 1 and f"review record: {INV}: differs from the reviewers' brief" in out, out
 
 
+def test_a_record_refuses_a_reference_the_brief_did_not_list(world):
+  """A document committed after the brief was rendered is in the round's `refs` but not in what the panel read: refused by name."""
+  from superegm.instructions import render_stored
+  from test_review import hstore, record
+  branch_with_changed_invariants(world)
+  spec, cid, rid = opened(world)
+  git(["commit", "-qam", "config", "--allow-empty"], world.repo)
+  render_stored(hstore(world), "reviewers", "local", review=rid, round=1, root=world.repo)
+  added = f"{DIR}/architecture.md"
+  commit_files(world, {added: "Architecture.\n"})
+  code, out = record(world, rid, 1, "design", [], cid)
+  assert code == 1 and f"review record: {added}: not in the reviewers' brief" in out, out
+
+
+def test_a_record_refuses_a_reference_the_rendered_brief_never_addressed(world):
+  """A `dir` entry the committed config lacks renders no documents: the changed one is in `refs` and not in the brief."""
+  from superegm.instructions import render_stored
+  from test_review import hstore, record
+  commit_files(world, {INV: "Invariants.\n"})
+  git(["switch", "-q", "-c", "spec-branch"], world.repo)
+  commit_files(world, {INV: "Invariants, revised.\n"})
+  spec, cid, rid = opened(world)
+  render_stored(hstore(world), "reviewers", "local", review=rid, round=1, root=world.repo)   # no `dir` entry committed: the brief lists no document
+  configure(world, [{"dir": DIR, "to": ROLES}])
+  code, out = record(world, rid, 1, "design", [], cid)
+  assert code == 1 and f"review record: {INV}: not in the reviewers' brief" in out, out
+
+
+def test_a_git_failure_in_the_manifest_is_not_an_empty_manifest(world):
+  """A merge base git cannot find raises with git's own error: the manifest never comes back empty."""
+  branch_with_changed_invariants(world)
+  spec, cid, rid = opened(world)
+  git(["update-ref", "-d", "refs/heads/main"], world.repo)
+  code, out = world.run("review", "scope", "--review", rid, "--runcard", cid)
+  assert code == 1 and "git merge-base main HEAD failed" in out, out
+
+
 def test_approve_names_the_moved_reference_when_a_later_round_is_partly_recorded(world):
   """A later round only partly recorded holds the current manifest but is not completed: approval still names the path."""
   from test_review import approve, record, rounds
@@ -217,11 +254,19 @@ REF_ROW = ("changed", "docs/reference/domain model.md", 0, 0)
   ([("changed", "B", 7, 9), REF_ROW], "docs/reference/domain model.md#L12", None),
   ([("changed", "B", 7, 9), REF_ROW], "docs/specs/design.md#L8", None),                       # `#` and `,` end a file name as `:` does
   ([("changed", "B", 7, 9), REF_ROW], "skills/x.py, line 8", "none"),
-  ([("changed", "B", 7, 9), REF_ROW], "other/domain model.md:12", "none")])               # another directory's same-named document
+  ([("changed", "B", 7, 9), REF_ROW], "other/domain model.md:12", "none"),               # another directory's same-named document
+  ([("changed", "B", 7, 9), REF_ROW], "other/domain model.md:8", "none"),                # a path with a space is a file, not a spec line 8
+  ([("changed", "B", 7, 9), REF_ROW], "docs/reference/unlisted doc.md:8", "none"),
+  ([("changed", "B", 7, 9), REF_ROW], "unlisted doc.md:8", "none"),
+  ([("changed", "B", 7, 9), REF_ROW], "other/domain model.md#L8", "none"),
+  ([("changed", "B", 7, 9), REF_ROW], "vendor/docs/reference/domain model.md:12", "none"),    # a prefix in front of a listed path names another file
+  ([("changed", "B", 7, 9), REF_ROW], "other/docs/reference/domain model.md:8", "none"),
+  ([("changed", "B", 7, 9), REF_ROW], "/elsewhere/docs/reference/domain model.md:12", "none"),  # an absolute path outside the repository root
+  ([("changed", "B", 7, 9), REF_ROW], "/abs/repo/other/docs/reference/domain model.md:12", "none")])
 def test_the_scope_filter_reads_a_path_before_its_line(rows, location, answer):
   """Only a spec location goes through cited_line and the sections; a path other than the spec's or a changed document answers none."""
   from superegm.review import out_of_scope, sections
-  assert out_of_scope(rows, sections(SPEC_TEXT), location, "docs/specs/design.md") == answer
+  assert out_of_scope(rows, sections(SPEC_TEXT), location, "docs/specs/design.md", "/abs/repo") == answer
 
 
 @pytest.mark.parametrize("phrase", ["reference documents", "offer once", "docs/reference/", "`dir` entry", "all four roles",
