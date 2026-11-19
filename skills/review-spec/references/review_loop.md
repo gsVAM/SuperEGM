@@ -1,6 +1,6 @@
 <!-- Copyright 2026 Google LLC. SPDX-License-Identifier: Apache-2.0. -->
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: Astra lane, per-reviewer model and effort, persisted dispositions. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: EGM's review-loop skill rewritten as the one review loop over the helper's `superegm review` subcommands (spec section 8); the stages, the report files and the second clean round are gone; a spec round's scope, `out_of_scope[]` and the batch settle (U19); the accept below the cap and its `acceptable:` line (U35); section 2's model and effort paragraph is the one rule, the config pair before the session pair (U28); a lineless finding out of scope and the per-handoff review ids (U32); the cap is `review.rounds` and the loop dispatches the panel `review open` printed (U36); the instructions section, Astra's resume (U38). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: EGM's review-loop skill rewritten as the one review loop over the helper's `superegm review` subcommands (spec section 8); the stages, the report files and the second clean round are gone; a spec round's scope, `out_of_scope[]` and the batch settle (U19); the accept below the cap and its `acceptable:` line (U35); section 2's model and effort paragraph is the one rule, the config pair before the session pair (U28); a lineless finding out of scope and the per-handoff review ids (U32); the cap is `review.rounds` and the loop dispatches the panel `review open` printed (U36); the instructions section, Astra's resume (U38); the repository-reviewer dispatch (U77). -->
 
 # The review loop
 
@@ -27,7 +27,8 @@ other grammar (`review record: <file>:<line>: <reason>`).
    gave `--reviewers`; the kind's first reviewer is fixed (`design` for a spec, `readiness` for a
    plan, `change-review` for a head; `integrate` has no fixed first). One to six ids from
    `design, zoom-out, comprehension, readiness, structural, style, codebase-details,
-   change-review, set, proportion`. A cycle's panel is fixed when it opens, with one exception: a
+   change-review, set, proportion`, or a repository reviewer's id (spec section 3.6; `review open`
+   refuses an id that is neither, or whose `kinds` lacks the review's). A cycle's panel is fixed when it opens, with one exception: a
    re-typed spec review may narrow it (step 4); the owner otherwise changes it between reviews.
 3. The Astra preflight, for kinds `spec`, `plan` and `integrate` when `config.astra.enabled` is
    true: `resources/astra_lane.md` section 1, read with the config keys in place of its
@@ -71,7 +72,16 @@ context fresh, whether or not the call is named; a general-purpose agent reading
 is not a goldfish. Goldfish never spawn. `set` and `proportion` are the `readiness` and
 `zoom-out` adapters with the briefs `review-plan` names (spec section 9.2).
 
-Each goldfish receives only:
+A repository reviewer or an overridden built-in (spec section 3.6) goes through `superegm:repo-reviewer`, not
+its own adapter; a plain built-in goes through its own. Overridden means: on a `spec` review,
+`.superegm/reviewers/<id>.md` exists at `HEAD`; on `plan`, `head` and `integrate`, the last approval entry for the handoff's id (a re-approval after a void appends another with the same id) froze
+`<id>` (`reviewers: [{id, sha}]`), whatever the working tree or a pull request's head holds. Paste the output of
+`superegm reviewers --brief <id> --spec <path> --review <review id> --round <n> --runcard <card>` (`spec`) or
+`superegm reviewers --brief <id> --handoff <handoff id> --runcard <card>` (the other kinds; a foreman adds `--unit`)
+unedited under `# Reviewer persona` in the prompt, before the artifact. An overridden `set` or `proportion` keeps its
+brief; the persona is all the override replaces.
+
+Each goldfish receives only (a repository or overridden reviewer's `# Reviewer persona` section first):
 
 - the artifact (the spec; a unit's rendered body; a pull request's diff and unit body; for
   `integrate`, the frozen spec and `git diff <base_at_start>..<base>`), named by absolute path;
@@ -96,10 +106,12 @@ Each goldfish receives only:
   --runcard <id>` on `plan` and `integrate` (a head's is the foreman's); no file for `reviewers`, nothing.
 
 Model and effort, one rule: every panel goldfish of the four kinds runs on
-`config.reviewers.model` at `config.reviewers.effort` (`opus` / `xhigh` by default, the Agent tool's alias and level),
+the file's `model` and `effort` when a repository or overridden reviewer's file sets them (a `spec` review reads the
+file at `HEAD`; the other kinds the frontmatter of `source` in the frozen copy, the store's `reviewers/<sha>.json`),
+else `config.reviewers.model` at `config.reviewers.effort` (`opus` / `xhigh` by default, the Agent tool's alias and level),
 passed on each dispatch as the adapter's `model:` and `effort:` override (the adapters stay `model: inherit`),
 and the round record stores requested -> effective (`review record`'s `--model` and `--effort`, section 3).
-`SUPEREGM_GOLDFISH_MODEL` and `SUPEREGM_GOLDFISH_EFFORT`, when set, override the config's values for the session,
+`SUPEREGM_GOLDFISH_MODEL` and `SUPEREGM_GOLDFISH_EFFORT`, when set, override both the file's and the config's values for the session,
 `inherit` meaning pass nothing; this session pair stops at the review panels and never reaches a judge; they are read once with `printenv` and validated against
 (`inherit`, `sonnet`, `opus`, `haiku`, `fable`) and (`inherit`, `low`, `medium`, `high`, `xhigh`, `max`).
 An exported `CLAUDE_CODE_EFFORT_LEVEL` is the effective effort of every goldfish, and with
@@ -272,7 +284,7 @@ with `requested -> effective`:
 | Role | Model: requested -> effective | Effort: requested -> effective |
 | --- | --- | --- |
 | Elephant | the session's model -> same | session setting -> session setting |
-| Claude goldfish | `config.reviewers.model`, or `SUPEREGM_GOLDFISH_MODEL` when set -> the alias passed, or the session's model for `inherit`, or the forced model | `config.reviewers.effort`, or `SUPEREGM_GOLDFISH_EFFORT` when set -> the value passed, `CLAUDE_CODE_EFFORT_LEVEL` when exported, or `inherit` |
+| Claude goldfish | `config.reviewers.model`, or `SUPEREGM_GOLDFISH_MODEL` when set; a file's `model` replaces the config's, never the session pair -> the alias passed, or the session's model for `inherit`, or the forced model | `config.reviewers.effort`, or `SUPEREGM_GOLDFISH_EFFORT` when set; a file's `effort` replaces the config's, never the session pair -> the value passed, `CLAUDE_CODE_EFFORT_LEVEL` when exported, or `inherit` |
 | Astra goldfish | `config.astra.model` -> `result.json`'s `effective_model`, `requested only` before the run | `config.astra.effort` -> `effective_effort`, `requested only` before the run |
 
 Any value you cannot know is `unknown`; never present a configuration value as an observed

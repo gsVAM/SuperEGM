@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Reviews a handoff plan against its design through the judge panel before any issue is filed.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the body: plan review over the helper's review-plan and review subcommands (U06); `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the accept below the cap's one question per round (U35); the `width:` line, the plan header, the chain check and the split check (U29); the readiness plan remit (1.2.1 §6.5); the driven wait and the typed run on a wait record, the frozen mode (U45); proceed offered at the cap and on a stall (U58); the answered chain record taken as the owner's (U70). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the body: plan review over the helper's review-plan and review subcommands (U06); `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the accept below the cap's one question per round (U35); the `width:` line, the plan header, the chain check and the split check (U29); the readiness plan remit (1.2.1 §6.5); the driven wait and the typed run on a wait record, the frozen mode (U45); proceed offered at the cap and on a stall (U58); the answered chain record taken as the owner's (U70); the repository-reviewer dispatch (U77). -->
 
 # Plan review (phase 3)
 
@@ -103,6 +103,8 @@ Everything a round dispatches goes in one message so it runs concurrently: every
 goldfish and the one set read, each through its adapter `superegm:<id>` with the Agent tool
 (`.claude-plugin/agents/<id>.md`; a reviewer spawned any other way is not a goldfish). `k` is
 this invocation's round count, 1 at its first Step 2.
+
+A repository reviewer or an overridden built-in (spec section 3.6) is dispatched through `superegm:repo-reviewer`, not its own adapter: run `superegm reviewers --brief <id> --handoff <handoff id> --runcard <card>` (a plan review reads the copy frozen at the handoff's approval) and put its output, unedited, under `# Reviewer persona` in the brief, before the artifact. An override of `proportion` or `set` keeps its brief (items 3 and 4 below) and goes through `superegm:repo-reviewer` too: the persona is all the override replaces. A reviewer is overridden when the last approval entry for the handoff's id (a re-approval after a void appends another with the same id) froze a file for its id (`reviewers: [{id, sha}]`), not by what the working tree holds; a plain built-in with no frozen file goes through its own adapter. Its model and effort are `SUPEREGM_GOLDFISH_MODEL` and `SUPEREGM_GOLDFISH_EFFORT` when set (read with `printenv`; `inherit` means pass nothing, and a value outside the allowed model and effort lists of `${CLAUDE_PLUGIN_ROOT}/skills/review-spec/references/review_loop.md` section 2 is refused, not passed), else the file's `model` and `effort` when set (the frontmatter of `source` in the frozen copy, the store's `reviewers/<sha>.json`), else `config.reviewers.model` and `config.reviewers.effort`.
 
 1. Once per round, `python3 '<HELPER>' review-plan set-input --spec '<spec>'` prints the set
    text: the `width:` line (`graph`'s, from `handoff_units.json`), the `## Plan header` section
