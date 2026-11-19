@@ -55,6 +55,15 @@ def ruling_item(repo: str, subject: str, kind: str, forms: list, number, key) ->
   return item(repo, subject, kind, INBOX, key) | {"forms": forms, "on": f"{GITHUB}/{repo}/issues/{number}"}
 
 
+def option_named(option: str, n: int) -> str:
+  """The option as a form names it: its text, or, when the text holds ` — ` (which `decision.parse_form` reads as
+  the reason's start), its own `(<letter>)` or its position's, the letter `decision.check_ruling` resolves."""
+  if " — " not in option:
+    return option
+  letter = re.match(r"\([a-z]\)", option)
+  return letter.group(0) if letter else f"({chr(97 + n)})"
+
+
 def cap_forms(foreman: dict) -> list:
   """A head's cap menu, one form per choice; `one more round` is spent once ruled on any cap decision of the unit
   (decision.rule)."""
@@ -132,7 +141,7 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
     elif point in (3, 5):
       words = (d.get("source") or "").split()
       subject = words[1] if len(words) == 2 and words[0] == "comment" else did
-      forms = [ruling_form(3, subject, o) for o in d.get("options") or ["<option>"]]
+      forms = [ruling_form(3, subject, option_named(o, n)) for n, o in enumerate(d.get("options") or ["<option>"])]
       out.append(ruling_item(repo, uid, "decision", forms, number, did))
     elif point == 1:
       rid, n = source_round(d.get("source"))
