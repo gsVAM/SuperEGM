@@ -345,9 +345,11 @@ def test_integrate_reports_the_postmortem():
   assert "summed across its rows" in text  # a reviewer has a Reviewers row per kind: the skill says to sum them
 
 
-def test_settled_head_findings_and_carried_externals(world):
+def test_settled_head_findings_and_spec_carried_externals(world):
   """A head finding `review settle` contested or declined is overruled though the foreman ruled nothing; one the foreman
-  allowed is allowed, not overruled; an external finding `collect` carried into a later round is one finding."""
+  allowed is allowed, not overruled; an external finding `carry_externals` copied into a spec cycle's later round
+  is one finding."""
+  from test_review import SLUG
   c, _, _ = two_units(world)
   posted = {"round": 1, "phase": "posted", "outcome": "posted"}
   jwrite(c.hs.path("foreman", "U01"), {"dispatch_id": None, "decisions": [], "rounds": [posted],
@@ -355,10 +357,16 @@ def test_settled_head_findings_and_carried_externals(world):
   reviewed(c, "head-U01-c1", "head", "U01", ["codebase-details"],
            {"codebase-details": {"findings": [{"id": "codebase-details-1-1", "severity": "low", "disposition": "declined"},
                                               {"id": "codebase-details-1-2", "severity": "low", "disposition": "contested"}]}})
+  path = c.root / "approvals" / f"{SLUG}.json"
+  record = jread(path)
+  jwrite(path, {**record, "entries": [{**record["entries"][-1], "review": f"spec-{SLUG}-c1"}]})
   claim = {"id": "external:astra-1-1", "claim": "a defect", "severity": "high", "disposition": "fixed"}
-  reviewed(c, "plan-U01-c1", "plan", "U01", ["external:astra"], {"external:astra": {"findings": [claim]}})
-  jwrite(c.hs.path("reviews", "plan-U01-c1", "round-2.json"),
-         {"round": 2, "runcard": "rc", "reviewers": {"external:astra": {"findings": [dict(claim)]}}})
+  rid = f"spec-{SLUG}-c1"
+  jwrite(c.hs.path("reviews", rid, "review.json"), {"kind": "spec", "artifact": str(c.spec), "cycle": 1,
+                                                    "reviewers": ["external:astra"], "runcard": "rc", "converged": "no", "rulings": []})
+  for n in (1, 2):
+    jwrite(c.hs.path("reviews", rid, f"round-{n}.json"),
+           {"round": n, "runcard": "rc", "reviewers": {"external:astra": {"findings": [dict(claim)]}}})
   code, out = world.run("postmortem", "--handoff", c.hid)
   assert code == 0, out
   reviewers = table(c.hs.path("file", "postmortem.md").read_text(encoding="utf-8"), "Reviewers")
@@ -442,3 +450,23 @@ def test_spec_reviews_stop_at_the_handoffs_own_approval(world):
   assert code == 0, out
   names = reviewer_names(c.hs.path("file", "postmortem.md").read_text(encoding="utf-8"))
   assert {"ours-two", "ours-three"} <= names and not names & {"earlier-only", "later-only"}
+
+
+def test_carried_foreman_findings_are_one_finding(world):
+  """`collect.carry` copies an open foreman finding into the next round under its own id with `carried_from`: the
+  Units table and the Reviewers table count it once, and its one overrule is one overrule."""
+  c, _, _ = two_units(world)
+  jwrite(c.hs.path("foreman", "U01"), {
+      "dispatch_id": None, "decisions": [], "rounds": [{"round": n, "phase": "posted", "outcome": "posted"} for n in (1, 2, 3)],
+      "rulings": [{"ruling": "foreman-1-1 finding overruled — not a defect", "by": "owner"}]})
+  finding = {"id": "foreman-1-1", "severity": "high", "claim": "a check fails", "location": "a.py:1"}
+  reviewed(c, "head-U01-c1", "head", "U01", ["foreman"], {"foreman": {"findings": [finding]}})
+  for n in (2, 3):
+    jwrite(c.hs.path("reviews", "head-U01-c1", f"round-{n}.json"),
+           {"round": n, "runcard": "rc", "reviewers": {"foreman": {"findings": [{**finding, "carried_from": n - 1}]}}})
+  code, out = world.run("postmortem", "--handoff", c.hid)
+  assert code == 0, out
+  report = c.hs.path("file", "postmortem.md").read_text(encoding="utf-8")
+  assert table(report, "Units")["U01"]["high"] == "1"
+  foreman = table(report, "Reviewers")["foreman"]
+  assert (foreman["high"], foreman["overruled"]) == ("1", "1")
