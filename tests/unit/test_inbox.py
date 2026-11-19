@@ -173,6 +173,39 @@ def test_inbox_handoff_reads_the_named_handoff_alone(world):
   assert code == 1 and "store: sample-000000: no such handoff" in out
 
 
+def test_inbox_withdrawn_journals(world):
+  """U72: the inbox's merge step withdraws an offer whose state changed since the question with
+  `inbox withdrawn --pr <n> --reason <text>`: the named handoff's journal gains `merge withdrawn <pr> <reason>`;
+  typed without a card it opens and closes its own `inbox` card around the write; a given card is a wave,
+  driver or inbox one; with neither a card nor `--handoff` nothing names the handoff and nothing is written."""
+  s = seed(world, **U(decisions=D(3, "comment 77")))
+  journal, cards = s.path("journal"), lambda: sorted((world.artifacts / s.handoff_id / "runcards").glob("inbox-*.json"))
+  before = journal.read_text(encoding="utf-8") if journal.exists() else None
+  withdraw = ["inbox", "withdrawn", "--pr", "12", "--reason", "head moved"]
+  args = superegm.build_parser().parse_args(withdraw)
+  superegm.CURRENT_WRITES, superegm.CURRENT_SUBCOMMAND = args.writes, args.command
+  try:
+    with pytest.raises(superegm.HandoffError):  # nothing names the handoff: refused before any write
+      args.run(args)
+  finally:
+    superegm.CURRENT_WRITES = superegm.CURRENT_SUBCOMMAND = None
+  assert (journal.read_text(encoding="utf-8") if journal.exists() else None) == before and cards() == []
+  code, out = world.run(*withdraw, "--handoff", s.handoff_id, card=None)
+  [path] = cards()
+  own = json.loads(path.read_text(encoding="utf-8")) | {"id": path.stem}
+  assert own["skill"] == "inbox" and own["closed_at"]  # its own card, closed
+  assert (code, out) == (0, f"closed {own['id']}\n")  # `runcard close`'s line, as approve-spec's own card prints it
+  # the named handoff's journal ends with the withdrawn line, then the close every card journals (`runcard.close_card`)
+  tail = [l.split(" ", 1)[1] for l in journal.read_text(encoding="utf-8").splitlines()[-2:]]
+  assert tail == ["merge withdrawn 12 head moved", f"runcard close {own['id']}"]
+  wave = open_wave_card(world)
+  assert world.run("inbox", "withdrawn", "--pr", "13", "--reason", "stopped", "--runcard", wave, card=None) == (0, "")
+  assert journal.read_text(encoding="utf-8").rstrip().endswith("merge withdrawn 13 stopped") and len(cards()) == 1
+  code, out = world.run("inbox", "withdrawn", "--pr", "14", "--reason", "x", "--runcard", world.card("plan"), card=None)
+  assert code == 1 and "runcard: " in out and "merge withdrawn 14" not in journal.read_text(encoding="utf-8")
+  assert f"{REPO} U01 | decision | " in world.run("inbox", "--handoff", s.handoff_id)[1]  # bare inbox still lists
+
+
 def test_notify_lines_reads_the_cards_handoff(world):
   """Round 2 (astra-1-2): the card's `handoff`, the key `runcard open` writes, chooses the handoff."""
   open_wave_card(world)
