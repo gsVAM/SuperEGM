@@ -84,3 +84,13 @@ def test_action_text_points_to_the_inbox(world, kind, action):
 def test_the_inbox_skill_names_each_step(phrase):
   # the skill asks in words and does the rest; listing stays read-only
   assert phrase in SKILL.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("phrase", [
+  "gh pr merge <n> -R <repo> --<method> --match-head-commit <sha>", "gh repo view -R <repo> --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed",
+  "`merge`, `squash` and `rebase`", "moved since", "merge with the admin bypass?", "`--admin` only on yes",
+  "merges after", "did not name", "stopped", "respec mark", "pending decision", "live launch",
+  "clean or proceeded", "superegm inbox withdrawn --pr <n> --reason <text> --handoff <id>", "opens and closes its own inbox card"])
+def test_the_merge_step_guards_each_merge(phrase):
+  # a method always, the bypass only on yes, merge order, and the state read again before each merge
+  assert phrase in SKILL.read_text(encoding="utf-8")
