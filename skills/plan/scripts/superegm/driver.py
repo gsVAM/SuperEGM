@@ -8,6 +8,7 @@ the launchd agent (a systemd user timer on Linux); `status` reads, `reset` is th
 
 import argparse
 import contextlib
+import fcntl
 import io
 import json
 import os
@@ -462,6 +463,35 @@ def wave_trigger(hs: core.Store, entry: dict, state: dict):
   return status.tick_trigger(core.Handoff(core.rebased(state["plan"], entry["root"]), hs))
 
 
+def locked_tick(entry: dict) -> None:
+  """`tick_store` under the store's lock (spec section 7.4), shared by `tick` and `kick`: `tick/again` written
+  first, then a non-blocking `flock` on `tick/lock` tried; one that cannot take it leaves `tick/again` and skips
+  the store. The holder removes `tick/again` before each `tick_store` and, after it releases, takes the lock again
+  while `tick/again` exists: two kicks never tick twice at once, and a kick during a tick is never lost. A
+  chain-off store, which no kick ticks, ticks unlocked, so 1.2's tick that finds nothing still writes nothing."""
+  st, _ = registered_store(entry)
+  if not chain_on(st.config):
+    tick_store(entry)
+    return
+  folder = Path(entry["artifacts_dir"]) / "tick"
+  again, lock = folder / "again", folder / "lock"
+  core.atomic_write(again, "")
+  folder.mkdir(parents=True, exist_ok=True)
+  while again.exists():
+    # created once and never replaced: a renamed-over lock file would let a second holder in on the new inode
+    fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+      try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+      except BlockingIOError:
+        return  # the holder ticks again for us
+      while again.exists():
+        again.unlink()
+        tick_store(entry)
+    finally:
+      os.close(fd)  # releases the lock; the outer loop retakes it for a `tick/again` written meanwhile
+
+
 def tick() -> int:
   """`driver tick`: `~/.superegm/env` applied first (restored after), then every registered store."""
   saved, code = dict(os.environ), 0
@@ -469,7 +499,7 @@ def tick() -> int:
   try:
     for entry in core.load_registry():
       try:
-        tick_store(entry)
+        locked_tick(entry)
       except (core.HandoffError, core.GhError, OSError, ValueError, KeyError) as error:  # one store's error never stops the next
         print(f"driver: {entry.get('artifacts_dir')}: {error}")
         code = 1
@@ -502,7 +532,7 @@ def kick(root) -> int:
   os.environ.update(read_env())
   try:
     with contextlib.redirect_stdout(io.StringIO()):
-      tick_store(entry)
+      locked_tick(entry)
   except (core.HandoffError, core.GhError, OSError, ValueError, KeyError) as error:
     print(f"driver: {entry.get('artifacts_dir')}: {error}")
     return 1
