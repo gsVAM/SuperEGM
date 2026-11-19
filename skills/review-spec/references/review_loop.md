@@ -27,7 +27,8 @@ other grammar (`review record: <file>:<line>: <reason>`).
    gave `--reviewers`; the kind's first reviewer is fixed (`design` for a spec, `readiness` for a
    plan, `change-review` for a head; `integrate` has no fixed first). One to six ids from
    `design, zoom-out, comprehension, readiness, structural, style, codebase-details,
-   change-review, set, proportion`. A cycle's panel is fixed when it opens, with one exception: a
+   change-review, set, proportion`, or a repository reviewer's id (spec section 3.6; `review open`
+   refuses an id that is neither, or whose `kinds` lacks the review's). A cycle's panel is fixed when it opens, with one exception: a
    re-typed spec review may narrow it (step 4); the owner otherwise changes it between reviews.
 3. The Astra preflight, for kinds `spec`, `plan` and `integrate` when `config.astra.enabled` is
    true: `resources/astra_lane.md` section 1, read with the config keys in place of its
@@ -37,13 +38,13 @@ other grammar (`review record: <file>:<line>: <reason>`).
 4. `superegm review open --kind spec|plan|head|integrate --artifact <path or unit id>
    [--sha256 <hex>] --reviewers a,b,c [--astra on|off] --runcard <id>` prints the review id
    (`spec-<slug>-c<n>`, `spec-<slug>-integrate-c<n>`, `plan-<unit>-c<n>`,
-   `head-<unit>-c<n>`, in the handoff's directory; a flat 1.0/1.1 store keeps its 6-hex prefix
-   before plan and head ids) on its first line. An artifact whose latest cycle is still open
+   `head-<unit>-c<n>`, under the handoff's own directory; a flat 1.0/1.1 store keeps its 6-hex prefix
+   before the plan and head ids) on its first line. An artifact whose latest cycle is still open
    resumes it. On kind `spec` the
    second line is `panel <a,b,astra> from round <n>`, the panel of the next unrecorded round `<n>`
    (the Astra lane last, when the cycle has it), and a resume whose `--reviewers` is a proper
-   subset of that panel, `design` first, narrows it from round `<n>` on. An equal panel (any
-   order) changes nothing; a panel naming a reviewer off the round's panel
+   subset of that panel, `design` first, narrows it from round `<n>` on. An equal panel (in any
+   order) changes nothing and the line ends there; a panel naming a reviewer off the round's panel
    (wider or overlapping) changes nothing and the line ends ` (unchanged: <reviewer> is not on the
    panel)`; a panel not starting with `design` is refused (`review open: first reviewer must be
    design`, exit 1) before any line prints. A resume cannot drop the Astra lane: it stays when the
@@ -55,8 +56,8 @@ other grammar (`review record: <file>:<line>: <reason>`).
    then dispatch the printed one. If the spec was edited since that round's first record, it takes
    no more records (`review record: sha256 differs from the round's`): leave it, dispatch the printed one.
    A new cycle and every other kind print the review id alone: dispatch the panel the cycle opened
-   with (as passed, the Astra lane as seated); a plan, head or integrate resume never changes it,
-   so pass the same `--reviewers`. A closed
+   with (the one you passed at its open, and the Astra lane as the open seated it); a resume of a
+   plan, head or integrate cycle never changes that panel, so pass the same `--reviewers`. A closed
    cycle (an `accept` or `stop` ruling, a spec edited after the approval that names it, or an
    integrate review whose handoff closed or whose `## Units` were amended past the bytes it
    reviewed) gets the next number with a fresh cap (section 6: each kind reads its own). The
@@ -66,15 +67,22 @@ other grammar (`review record: <file>:<line>: <reason>`).
 
 Each round the whole panel of that round (on a spec resume the one `review open` printed, else the
 one the cycle opened with) is dispatched **concurrently**, one message with every Agent call, each through its own adapter `superegm:<id>` (`.claude-plugin/agents/<id>.md`: `model:
-inherit`, `omitClaudeMd: true`, tools `Read, Grep, Glob`). A general-purpose agent reading the persona
+inherit`, `omitClaudeMd: true`, tools `Read, Grep, Glob`). The adapter is what keeps the
+context fresh, whether or not the call is named; a general-purpose agent reading the persona
 is not a goldfish. Goldfish never spawn. `set` and `proportion` are the `readiness` and
 `zoom-out` adapters with the briefs `review-plan` names (spec section 9.2).
 
-A repository reviewer or an overridden built-in (spec section 3.6) goes through `superegm:repo-reviewer`, a plain built-in through its own adapter; the output of `superegm reviewers --brief <id> --spec <path> --review <id> --round <n> --runcard <card>` (`HEAD` copy; `--handoff <handoff-id>`, the frozen one, on `plan`, `integrate`) goes under `# Reviewer persona`, before the artifact. An overridden `set`/`proportion` keeps its brief.
+A repository reviewer or an overridden built-in (spec section 3.6) goes through `superegm:repo-reviewer`, not
+its own adapter; a plain built-in goes through its own. Overridden means: on a `spec` review,
+`.superegm/reviewers/<id>.md` exists at `HEAD`; on `plan`, `head` and `integrate`, the handoff's approval entry froze
+`<id>` (`reviewers: [{id, sha}]`), whatever the working tree or a pull request's head holds. Paste the output of
+`superegm reviewers --brief <id> --spec <path> --review <review id> --round <n> --runcard <card>` (`spec`) or
+`superegm reviewers --brief <id> --handoff <handoff id> --runcard <card>` (the other kinds; a foreman adds `--unit`)
+unedited under `# Reviewer persona` in the prompt, before the artifact. An overridden `set` or `proportion` keeps its
+brief; the persona is all the override replaces.
 
-Each goldfish receives only:
+Each goldfish receives only (a repository or overridden reviewer's `# Reviewer persona` section first):
 
-- the `# Reviewer persona` section, when it has one, before the artifact;
 - the artifact (the spec; a unit's rendered body; a pull request's diff and unit body; for
   `integrate`, the frozen spec and `git diff <base_at_start>..<base>`), named by absolute path;
 - the standard the kind names: `resources/document_standards/feature-spec-standard.md` for a
@@ -98,11 +106,13 @@ Each goldfish receives only:
   --runcard <id>` on `plan` and `integrate` (a head's is the foreman's); no file for `reviewers`, nothing.
 
 Model and effort, one rule: every panel goldfish of the four kinds runs on
-the file's `model` and `effort` when set, else `config.reviewers.model` at `config.reviewers.effort` (`opus`/`xhigh` by default),
+the file's `model` and `effort` when a repository or overridden reviewer's file sets them (a `spec` review reads the
+file at `HEAD`; the other kinds the frontmatter of `source` in the frozen copy, the store's `reviewers/<sha>.json`),
+else `config.reviewers.model` at `config.reviewers.effort` (`opus` / `xhigh` by default, the Agent tool's alias and level),
 passed on each dispatch as the adapter's `model:` and `effort:` override (the adapters stay `model: inherit`),
-and the record stores requested -> effective (`--model`, `--effort`, section 3).
+and the round record stores requested -> effective (`review record`'s `--model` and `--effort`, section 3).
 `SUPEREGM_GOLDFISH_MODEL` and `SUPEREGM_GOLDFISH_EFFORT`, when set, override both the file's and the config's values for the session,
-`inherit` meaning pass nothing; read once with `printenv`, validated against
+`inherit` meaning pass nothing; this session pair stops at the review panels and never reaches a judge; they are read once with `printenv` and validated against
 (`inherit`, `sonnet`, `opus`, `haiku`, `fable`) and (`inherit`, `low`, `medium`, `high`, `xhigh`, `max`).
 An exported `CLAUDE_CODE_EFFORT_LEVEL` is the effective effort of every goldfish, and with
 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` on no per-call `model` is passed and the forced model is the
@@ -110,7 +120,8 @@ effective one; the record says so in both cases. An `effort:` is passed only whe
 offers the parameter. The judges use their member's model and effort (`skills/judges/SKILL.md`);
 builders use `config.builder`; the foreman's Astra lane runs at `astra.heads_effort`
 (`skills/wave/references/foreman_brief.md`), the elephant's lanes at `astra.effort`.
-The elephant is the session's model, never in config. Never put an environment value into a shell command.
+The elephant is the session's model, never in config. `resources/review_panels.md` section 6
+holds the per-call mechanics. Never put an environment value into a shell command.
 
 The Astra lane (kinds `spec`, `plan`, `integrate`, when the review opened with it):
 
@@ -120,7 +131,7 @@ The Astra lane (kinds `spec`, `plan`, `integrate`, when the review opened with i
   rendered from `round-<n-1>.json`, and no other reviewer's. The section (`--lane astra`, rendered first) follows, last.
 - The launch, from the main conversation with the Bash tool, `run_in_background: true`, and the
   tool's `timeout` set to the runner's plus 300 seconds in milliseconds (`2100000`); never from
-  a subagent (a background command dies with its agent). One command,
+  a subagent, because a background command dies with the agent that started it. One command,
   absolute paths in single quotes, nothing chained:
 
       env SUPEREGM_ROLE=goldfish SUPEREGM_RUNCARD=<card> python3 '<RUNNER>' review --host claude --repo '<REPO_ROOT>' --plan '<ARTIFACT>' --feedback '<artifacts_dir>/reviews/<id>/astra_brief_r<n>.md' --model <config.astra.model> --effort <config.astra.effort> --timeout 1800 --artifacts "${TMPDIR:-/tmp}/superegm-astra"
@@ -130,16 +141,16 @@ The Astra lane (kinds `spec`, `plan`, `integrate`, when the review opened with i
   `resources/astra_lane.md` says the previous round is resumable (`status` completed, the same
   model, effort, repository and artifact, a UUID `session_id`) and the round's Astra manifest (`reviews/<id>/instructions-<n>-reviewers-astra.json` on `spec`, else the card's `instructions.reviewers.astra`)
   equals the `instructions[]` recorded on round n-1's Astra record (none: fresh), else it launches fresh and says so. Dispatch the Claude panel right after, in the same turn; do not edit the artifact while
-  it runs.
+  the run is live.
 - Collect from the run's `result.json` as section 5 of `resources/astra_lane.md` says: a
   `completed` run with a verdict maps each finding to a line `astra-<round>-<n> | <severity> |
   <path> | regression: yes|no | <claim>`; anything else is recorded `--not-run "<reason>"`
   (`killed`, `failed: <error>`, `blocked: <limitations>`, `skipped by user`). The lane is never
   retried within a round, and after two incomplete runs in one review it is not launched again:
-  the helper counts them (`astra_incomplete`) and excuses the lane from `what_ran`.
+  the helper counts them (`astra_incomplete`) and excuses the lane from `what_ran` from then on.
 - Data notice, once per session when the lane first starts: the whole artifact, the brief and
   any file Astra opens in the repository go to OpenAI under the account `codex login status`
-  reports; reply `skip astra` to skip it.
+  reports; reply `skip astra` to stop waiting for it in this review.
 
 ## 3. Record
 
@@ -153,7 +164,8 @@ Record every reviewer of the round, the lane included, as its result arrives:
   `<artifacts_dir>/reviews/<id>/round-<n>-<reviewer>.txt`. An empty file is a record: a
   reviewer with no findings ran.
 - `--isolation clean` when the goldfish reported seeing nothing beyond its brief, else
-  `exposed:<what it reported>`; `--model` and `--effort` as `requested:effective` (section 7).
+  `exposed:<what it reported>`; `--model` and `--effort` as `requested:effective` from the run
+  card line (section 7).
 - A dispatch that times out, fails or returns no file did not review: re-dispatch it once within
   the round; when it fails again record it with `--not-run "<reason>"` instead of `--findings`.
   Never record a failed reviewer as one with zero findings. The Astra lane is the exception:
@@ -163,19 +175,19 @@ Record every reviewer of the round, the lane included, as its result arrives:
   findings (CI, scope, deviations) outside the panel.
 - The helper derives the round's `what_ran` from the records: `completed` when every panel
   reviewer has a record (an empty file counts; the lane's `--not-run` counts) and, on a head,
-  the round is `posted`; otherwise `not run (<first reviewer without a record, or the
-  reason>)`. Only a `completed` round counts toward the cap or can
+  the round is `posted`; otherwise `not run (<the first reviewer without a record, or the
+  reason>)`, printed on every record. Only a `completed` round counts toward the cap or can
   converge; the findings of any other round settle nothing and block nothing.
 - On kind `spec` the round's first record stores the round's `scope` (headings with their line
   ranges) and every record checks against it: a finding whose cited line (the first number after
   `line `, `lines `, `L` or `:` in its location) falls outside every changed section and neighbour
   is refused, `record: <fid> out of scope (<section>): not recorded`, and kept verbatim in the round's
-  `out_of_scope[]` with one journal line: no disposition, never counted. A location
+  `out_of_scope[]` with one journal line: no disposition, never counted, never a fix round. A location
   citing no line, or a line the spec does not hold, takes the same path under section `none`, journaled
   `<fid>: no line number`; a `whole` round refuses nothing. The record
   still succeeds for the reviewer's other lines; a re-record replaces its own `out_of_scope[]` lines. The round's `note` is the `whole` row's reason
   (`whole`, `no approval`, `no change`, `no commit holds <sha7>`), else null. `review scope` writes
-  nothing: never edit the spec before the round's records.
+  nothing: never edit the spec between `review scope` and the round's records.
 - The first record of a new round is refused with `review record: review at its cap: rule
   first` (exit 2) while the review is at its cap (section 6). A record with a grammar error
   writes nothing: fix the goldfish's file and record again.
@@ -188,7 +200,7 @@ written with `superegm review settle`. A high or medium `contested` or `declined
 call in normal mode (`--owner`) and the judges' in leavemealone-mode (`--judges <id>`); the
 helper refuses it without. `fixed` changes the artifact, so its bytes differ from the round's
 sha (on a spec, plan or integrate round whose bytes are still the current ones the helper refuses
-`review settle: fixed needs changed bytes`).
+`review settle: fixed needs changed bytes`): the next round reviews the new bytes.
 
 A round's dispositions may go in one call: `superegm review settle --review <id> --file <dispositions>
 [--owner | --judges <id>] --runcard <id>`, one `<fid> | <disposition> | <note>` per line. Every line is
@@ -210,7 +222,8 @@ It prints one line, `round <n>: <clean|not clean>, regressions <k>, converged <y
 R<n>>, cap <yes|no>, stalled <yes|no>, sha256 <hex of the converged round|none>`, and the trend
 line `rounds: a -> b -> c (regressions x, y, z)`: the findings per round and the regressions
 among them. A third line, `fixed: re-review on the current bytes`, follows when the latest completed
-round is clean but the artifact's bytes moved since it (exit 3, or 2 at the cap). On a round below the cap that the owner may accept (section 6) the line
+round is clean but the artifact's bytes moved since it (exit 3, or 2 at the cap): the next round
+reviews the current bytes. On a round below the cap that the owner may accept (section 6) the line
 `acceptable: yes (<n> medium, <m> low)` follows the trend line; nothing otherwise.
 The exit code is the verdict, and the skill's next action follows from it alone:
 
@@ -234,12 +247,13 @@ foreman and integrate:
 - A round is **clean** when no high or medium finding in it is unsettled. Lows never block.
 - The artifact is **converged** when a round is `completed` and clean, no high or medium
   finding in it is `regression: yes`, and its sha256 equals the artifact's current bytes (a head has no byte test):
-  one `completed`, clean, non-regressing round converges every kind.
+  one `completed`, clean, non-regressing round converges every kind, on the bytes it reviewed.
   EGM's second consecutive clean round for document reviews is dropped.
 - The review is **at its cap** when its `completed` rounds number its `cap` plus its `continue` rulings. The `cap` is
   `review.rounds` (1 to 10, default 3) read when the cycle opened and kept: a spec's cycle reads the live value; a plan, head or
   integrate cycle reads the `rounds` its own handoff's latest approval entry froze (the spec's `Rounds: <n>` line before its first H2, else the
-  live value at the approval; another handoff's entry never counts); a record without a `cap`, a handoff with no approval entry, and an entry whose `rounds` is missing or outside 1 to 10 all read 5.
+  live value at the approval; another handoff's entry never counts); a record without a `cap`, a handoff with no approval entry of its
+  own, and an entry whose `rounds` is missing or outside 1 to 10 all read 5.
   `continue` may be ruled once per cycle, `accept` converges the artifact (`converged: by ruling
   R<n>`, never on a head, and never while the reviewed bytes moved: then `continue` or `stop`, and
   `stop` alone, ruled by no one, once `continue` is spent), and after `stop` no ruling is accepted and the cycle stays at its cap
@@ -270,7 +284,7 @@ with `requested -> effective`:
 | Role | Model: requested -> effective | Effort: requested -> effective |
 | --- | --- | --- |
 | Elephant | the session's model -> same | session setting -> session setting |
-| Claude goldfish | `config.reviewers.model`, or `SUPEREGM_GOLDFISH_MODEL` when set; the file's `model` first -> the alias passed, or the session's model for `inherit`, or the forced model | `config.reviewers.effort`, or `SUPEREGM_GOLDFISH_EFFORT` when set; the file's `effort` first -> the value passed, `CLAUDE_CODE_EFFORT_LEVEL` when exported, or `inherit` |
+| Claude goldfish | `config.reviewers.model`, or `SUPEREGM_GOLDFISH_MODEL` when set; a file's `model` replaces the config's, never the session pair -> the alias passed, or the session's model for `inherit`, or the forced model | `config.reviewers.effort`, or `SUPEREGM_GOLDFISH_EFFORT` when set; a file's `effort` replaces the config's, never the session pair -> the value passed, `CLAUDE_CODE_EFFORT_LEVEL` when exported, or `inherit` |
 | Astra goldfish | `config.astra.model` -> `result.json`'s `effective_model`, `requested only` before the run | `config.astra.effort` -> `effective_effort`, `requested only` before the run |
 
 Any value you cannot know is `unknown`; never present a configuration value as an observed

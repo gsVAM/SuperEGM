@@ -1013,7 +1013,7 @@ def test_review_loop_and_resolve_references():
   for phrase in ("fixed", "contested", "declined", "escalated", "fix-design", "superegm review settle",
                  "A contest must be checkable", "Do not contest a comprehension gap", "Do not change a severity"):
     assert phrase in resolve, phrase
-  assert len(loop.encode()) < 24_000 and len(resolve.encode()) < 12_000
+  assert len(loop.encode()) < 28_000 and len(resolve.encode()) < 12_000
 
 
 # ---------------------------------------------------------------- S18: the skill body
