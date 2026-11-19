@@ -67,8 +67,10 @@ def uids_of(hs: core.Store, units: dict, state: dict) -> list:
 
 
 def superseded(entry: dict) -> bool:
-  """A foreman round `foreman.supersede` collected unreviewed: it never ran, so it is no round."""
-  return entry.get("phase") == "collected" and str(entry.get("outcome") or "").startswith("not run")
+  """A foreman round that was never run: collected as `not run (...)`, by `foreman.supersede`, a moved target
+  (`review`), an owner's interrupt or `collect --not-run`; or only fetched, with no reviewer started. It is no round."""
+  return entry.get("phase") == "fetched" or (
+      entry.get("phase") == "collected" and str(entry.get("outcome") or "").startswith("not run"))
 
 
 def unit_facts(hs: core.Store, uid: str, state: dict) -> dict:
@@ -82,9 +84,12 @@ def unit_facts(hs: core.Store, uid: str, state: dict) -> dict:
            and not isinstance(x.get("total_cost_usd"), bool)]
   models = []
   for entry in launches:
-    model = entry.get("effective_model") or entry.get("model")
-    if model and model not in models:
-      models.append(model)
+    used = entry.get("effective_model")
+    if not used or used == "requested only":  # an unreadable result file: the requested model is all there is
+      used = entry.get("model")
+    for model in str(used or "").split(", "):  # a launch that used several models stores them joined
+      if model and model not in models:
+        models.append(model)
   merge_rounds = [r for r in rounds if r.get("merge")]
   return {
       "launches": launches, "models": models,
