@@ -25,3 +25,25 @@ def test_review_scope_lists_a_changed_reference_document(world):
   spec, cid, rid = opened(world)
   code, out = world.run("review", "scope", "--review", rid, "--runcard", cid)
   assert code == 0 and [l for l in out.splitlines() if l.startswith("changed docs/")] == ["changed docs/reference/invariants.md"], out
+
+
+def test_a_reference_only_edit_is_a_changed_round(world):
+  """Every sha stays the spec's raw sha256; the reference manifest rides beside it as `refs`."""
+  from test_review import approval, approve, rjson, rounds, status
+  from superegm import launch, sha256_file
+  branch_with_changed_invariants(world)
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [[]])
+  (world.repo / INV).write_text("Invariants, revised again.\n", encoding="utf-8")   # a reference document alone moves
+  rounds(world, rid, cid, [[]], start=2)
+  round1, round2, spec_sha256 = rjson(world, rid, "round-1.json"), rjson(world, rid, "round-2.json"), sha256_file(spec)
+  assert [r["file"] for r in round1["refs"]] == [INV] and round2["refs"] != round1["refs"]
+  assert round2["artifact_sha256"] == round1["artifact_sha256"] == spec_sha256
+  assert status(world, rid, cid)[0] == 0
+  code, out = approve(world, spec, cid, "--yes")
+  assert code == 0, out
+  entry = approval(world)["entries"][-1]
+  graph_sha = entry["sha256"]   # what `graph` reads as the handoff's spec sha
+  # `launch` reads the spec at origin against that same sha: the approved bytes pass its check
+  assert launch.origin_problems(world.repo, "main", {**entry, "path": str(spec)}, ref="HEAD", spec_only=True) == []
+  assert graph_sha == entry["sha256"] == spec_sha256
