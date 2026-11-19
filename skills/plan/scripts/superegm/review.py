@@ -289,10 +289,20 @@ def cited_line(location: str) -> int | None:
   return int(match.group(1)) if match else None
 
 
-def out_of_scope(rows: list, spans: list, location: str):
+def out_of_scope(rows: list, spans: list, location: str, spec_name: str = ""):
   """The heading of the section a finding cites when no scope row holds its line, else None; in a scoped
   round a location naming no line, or a line the spec does not hold, answers `none` (U32); a `whole` round
-  exempts every finding."""
+  exempts every finding. A round that lists reference documents (`("changed", <path>, 0, 0)` rows, U75) reads a
+  location's path first: a listed document is in scope whatever its line, any other file but the spec (`spec_name`)
+  answers `none`, and only a spec location goes on through `cited_line` and the sections."""
+  listed = {row[1] for row in rows if row[0] == "changed" and row[2] == row[3] == 0}
+  if listed:
+    named = re.match(r"([^\s:]+\.[A-Za-z0-9]+)(?=[:\s]|$)", location)
+    if named and named.group(1) in listed:
+      return None
+    if named and Path(named.group(1)).name != spec_name:
+      return "none"
+    rows = [row for row in rows if not (row[0] == "changed" and row[2] == row[3] == 0)]
   if rows and rows[0][0] == "whole":
     return None
   line = cited_line(location)
@@ -333,6 +343,14 @@ def reference_manifest(st: core.Store, root: Path) -> list[dict]:
     if path.is_file():
       found.append({"file": name, "sha": instructions.blob_sha(path.read_bytes())})
   return found
+
+
+def refs_moved(st: core.Store, review: dict, rnd: dict) -> bool:
+  """Whether a spec round's `refs` differ from the working tree's manifest now (U75); a round with no `refs` key, one
+  written before U75, never does."""
+  if review["kind"] != "spec" or "refs" not in rnd:
+    return False
+  return reference_manifest(st, core.git_toplevel(Path(review["artifact"]).parent)) != rnd["refs"]
 
 
 def scope_of(st: core.Store, review: dict, spec: Path) -> list:
@@ -697,7 +715,7 @@ def record_round(args) -> int:
     findings = [finding for finding, _ in pairs]
     if kind == "spec" and not external:  # a thread's location is a file of the PR, never a spec section
       spans = sections(core.read_text(Path(review["artifact"])))
-      verdicts = [(finding, line, out_of_scope(rnd["scope"], spans, finding["location"])) for finding, line in pairs]
+      verdicts = [(finding, line, out_of_scope(rnd["scope"], spans, finding["location"], Path(review["artifact"]).name)) for finding, line in pairs]
       findings = [finding for finding, _, section in verdicts if section is None]
       refused = [(finding["id"], line, section) for finding, line, section in verdicts if section is not None]
       mine = lambda line: line.split(" | ", 1)[0].rsplit("-", 2)[0] == reviewer
@@ -982,7 +1000,8 @@ def check_settle(st: core.Store, rid: str, review: dict, card: dict, args, fid: 
     raise core.HandoffError("review settle: fix-design is refused on a frozen handoff's integrate: settle it escalated")
   if reviewer == "foreman" and finding["location"] == "ci":  # D2 (a): `collect` records it afresh each round
     raise core.HandoffError("review settle: the CI finding is settled by no one")
-  if disposition == "fixed" and rnd["artifact_sha256"] == current_sha(st, review["kind"], review["artifact"]):
+  if disposition == "fixed" and rnd["artifact_sha256"] == current_sha(st, review["kind"], review["artifact"]) \
+      and not refs_moved(st, review, rnd):  # a spec round's changed reference document counts as changed bytes (U75)
     raise core.HandoffError("review settle: fixed needs changed bytes")  # a head's current bytes are unknown: never
   if finding["claim"].startswith("test-delta:") and not args.owner:  # U25: the owner's alone, in either mode
     raise core.HandoffError(f"review settle: {fid} is the owner's alone: --owner required")
