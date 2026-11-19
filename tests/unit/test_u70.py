@@ -24,3 +24,11 @@ def test_merge_lines_point_to_the_inbox(path):
   # the merge happens in the inbox; the admin-bypass literal stays
   line = next(l for l in Path(path).read_text().splitlines() if "gh pr merge --admin" in l)
   assert "inbox" in line
+
+
+@pytest.mark.parametrize("path", [
+  "skills/plan/SKILL.md", "skills/review-plan/SKILL.md", "skills/file/SKILL.md", "skills/wave/SKILL.md",
+  "skills/integrate/SKILL.md", "skills/wave/references/decision_points.md"])
+def test_no_skill_asks_for_a_paste(path):
+  # the owner answers in the inbox, never by a pasted command or a posted comment
+  assert not re.search(r"(?i)\b(paste|the owner posts|owner types)\b", Path(path).read_text())
