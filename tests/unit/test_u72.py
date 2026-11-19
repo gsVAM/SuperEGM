@@ -73,3 +73,14 @@ def test_action_text_points_to_the_inbox(world, kind, action):
   assert item["action"] == action
   assert kind in ("kill_failed", "plan cap") or item["forms"] and all(f.startswith("**Ruling:**") for f in item["forms"]) and item["on"].startswith("https://")
   assert kind == "kill_failed" or "**Ruling:**" not in item["action"] and "superegm " not in item["action"]
+
+
+@pytest.mark.parametrize("phrase", [
+  "gh api user --jq .login", "`config.owners`", "recommended", "one-line reason",
+  "leavemealone", "did not converge", "back once", "gh issue comment <n> -R <repo> --body-file",
+  "proceed again", "**Ruling:** proceed — <reason>", "superegm next answer --handoff",
+  "handoff_dryrun.md", "superegm approve-spec --void --spec", "answer in your",
+  "superegm driver kick --root", "No skill asks the owner to post a comment or to paste a command"])
+def test_the_inbox_skill_names_each_step(phrase):
+  # the skill asks in words and does the rest; listing stays read-only
+  assert phrase in SKILL.read_text(encoding="utf-8")
