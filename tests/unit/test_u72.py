@@ -233,6 +233,23 @@ def test_a_merge_offers_the_undo_of_its_latest_rounds_deferrals(world):
   assert "**Ruling:**" not in merge["action"]
 
 
+def test_an_undo_is_offered_while_no_merge_is(world):
+  """Round 6 (astra-5-1): an undo of a triage deferral does not hang on the merge's guards (decision.refuse_undo
+  refuses none of them): with a decision pending, so no merge is offered, the deferral is its own `undo` ruling item,
+  answered in the inbox, posted on the unit's issue."""
+  open_wave_card(world)
+  s = seed(world, **U(rounds=POSTED(2, "clean"), launches=[{"round": 2, "status": "exited 0"}],
+                      decisions=D(3, "comment 77")))
+  foreman = json.loads(s.path("foreman", "U01").read_text(encoding="utf-8"))
+  rows = [{"fid": fid, "round": n, "claim": "c", "triage": {}, "pattern": 1} for fid, n in (("f-1-1", 1), ("f-2-1", 2))]
+  atomic_write(s.path("foreman", "U01"), foreman | {"followups": rows})
+  found = inbox_items(s, [s.handoff_id])
+  assert not [i for i in found if i["kind"] == "merge"]
+  [undo] = [i for i in found if i["kind"] == "undo"]
+  assert undo["forms"] == ["**Ruling:** f-2-1 finding upheld"] and undo["on"].endswith(f"/{REPO}/issues/2")
+  assert undo["action"] == "answer in the inbox"
+
+
 @pytest.mark.parametrize("phrase", [
   "gh api user --jq .login", "`config.owners`", "recommended", "one-line reason",
   "leavemealone", "did not converge", "back once", "gh issue comment <n> -R <repo> --body-file",
