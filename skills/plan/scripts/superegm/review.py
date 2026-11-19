@@ -665,6 +665,8 @@ def record_round(args) -> int:
     return 2
   rnd = existing or {"round": n, "runcard": card.get("parent") or args.runcard, "artifact_sha256": sha,
                      "builder_contested": [], "reviewers": {}}
+  if kind == "spec" and not existing:  # the reference documents the round reviewed (U75): beside the spec's own sha, never in it
+    rnd["refs"] = reference_manifest(st, core.git_toplevel(Path(review["artifact"]).parent))
   if kind == "spec" and "scope" not in rnd:  # the round's scope, stored by its first record, checked by every later one
     rows = [list(row) for row in scope_of(st, review, Path(review["artifact"]))]
     rnd.update({"scope": rows, "out_of_scope": [],
