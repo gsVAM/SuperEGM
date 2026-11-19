@@ -190,7 +190,8 @@ def test_the_judges_blocked_question_without_a_decision_leaves_out_respec(world)
   card, s = spec_world(world, text=text)
   code, out = world.run("judges", "question", "--unit", "U02", "--blocked", "101", "--runcard", card)
   assert code == 0, out
-  assert Path(out.splitlines()[0]).read_text(encoding="utf-8").endswith("- (b) follow the code\n- (c) stop the unit\n")
+  asked = Path(out.splitlines()[0]).read_text(encoding="utf-8")
+  assert "respec" not in asked and asked.endswith("- (a) follow the code\n- (b) stop the unit\n")
 
 
 def test_judges_cannot_reach_amend_by_a_lettered_option(world):
