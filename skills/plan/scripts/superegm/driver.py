@@ -13,6 +13,7 @@ import io
 import json
 import os
 import plistlib
+import re
 import shlex
 import subprocess
 import sys
@@ -24,7 +25,7 @@ WRITES = frozenset({"driver", "runcards", "launches", "tick", "chain"})
 CONFIG_DEFAULTS, INIT_STEP = {}, ""  # no written config key or init line of its own (U32)
 CONFIG_UNWRITTEN = {"driver": {"chain": False}}  # its own key, registered but never written by `init`: absent reads false (U44)
 SKILLS = frozenset({"driver"})
-ACTIONS = ("tick", "install", "uninstall", "status", "reset", "kick")
+ACTIONS = ("tick", "install", "uninstall", "status", "reset", "kick", "env")
 LABEL = "com.superegm.driver"
 RUN = subprocess.run  # launchctl and systemctl: a test fakes it
 PLATFORM = sys.platform
@@ -94,6 +95,7 @@ def register(subparsers):
   p.add_argument("action", choices=ACTIONS)
   p.add_argument("--interval", type=int, help="install: minutes between ticks (default 15)")
   p.add_argument("--root", help="kick: the registered root whose store ticks now")
+  p.add_argument("--replace", action="store_true", help="env: rewrite an existing ~/.superegm/env")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -108,6 +110,8 @@ def run(args):
         raise core.HandoffError("kick: --root is required")
       return kick(args.root)
     core.require_runcard(args, SKILLS)
+    if args.action == "env":
+      return write_env(args.replace)
     if args.action == "install":
       return install(15 if args.interval is None else args.interval)
     if args.action == "uninstall":
@@ -507,6 +511,62 @@ def tick() -> int:
     os.environ.clear()
     os.environ.update(saved)
   return code
+
+
+def credential_names(config: dict) -> list:
+  """The credential names the driver's sessions need (spec section 3.4 area 7): `builder.app`'s `private_key_env`
+  alone when the App is set, else `builder.gh_token_env` alone (one identity per repository), then every `${NAME}`
+  a `builder.mcp` server's `env` or `headers` values name; in order, each once."""
+  b = config["builder"]
+  names = [b["app"]["private_key_env"]] if b.get("app") else [b["gh_token_env"]]
+  for server in (b.get("mcp") or {}).values():
+    for key in ("env", "headers"):
+      for value in ((server.get(key) or {}).values() if isinstance(server.get(key), dict) else ()):
+        names += re.findall(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", str(value))
+  return list(dict.fromkeys(names))
+
+
+def settings_hooks(profile: Path) -> list:
+  """The hook events a profile's own `settings.json` names; [] when absent or not JSON."""
+  try:
+    hooks = json.loads(core.read_text(Path(profile) / "settings.json")).get("hooks")
+  except (OSError, ValueError, AttributeError):
+    return []
+  return sorted(hooks) if isinstance(hooks, dict) else []
+
+
+def write_env(replace: bool) -> int:
+  """`driver env --runcard <card> [--replace]`: `~/.superegm/env` (mode `0600`, literal `KEY=value` lines) from the
+  helper's own environment, so no value passes through a transcript: `PATH`, `CLAUDE_CONFIG_DIR` and
+  `credential_names`. Refuses `env: <NAME> unset` and `env: <dir>: SubagentStart hooks` writing nothing; keeps an
+  existing file unless `--replace`. Prints names, never a value."""
+  config = core.load_config(core.git_toplevel(Path.cwd()))
+  names = ["PATH", "CLAUDE_CONFIG_DIR", *[n for n in credential_names(config) if n not in ("PATH", "CLAUDE_CONFIG_DIR")]]
+  for name in names:
+    if not os.environ.get(name):
+      print(f"env: {name} unset")
+      return 1
+  profile = os.environ["CLAUDE_CONFIG_DIR"]
+  if "SubagentStart" in settings_hooks(Path(profile).expanduser()):
+    print(f"env: {profile}: SubagentStart hooks")
+    return 1
+  path = env_file()
+  if path.exists() and not replace:
+    print(f"env: {path} kept (--replace to rewrite it)")
+    return 0
+  for name in names:
+    if "\n" in os.environ[name] or "\r" in os.environ[name]:
+      print(f"env: {name} holds a newline")
+      return 1
+  path.parent.mkdir(parents=True, exist_ok=True)
+  tmp = path.with_name(path.name + f".tmp{os.getpid()}")
+  fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # never readable by others, not even for a moment
+  with os.fdopen(fd, "w", encoding="utf-8") as out:
+    out.write("".join(f"{name}={os.environ[name]}\n" for name in names))
+  os.chmod(tmp, 0o600)
+  os.replace(tmp, path)
+  print(f"env: {path} written ({', '.join(names)})")
+  return 0
 
 
 def installed() -> bool:
