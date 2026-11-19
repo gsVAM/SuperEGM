@@ -14,6 +14,9 @@ from test_u43 import registry  # noqa: F401  (the autouse fixture: no test reads
 import superegm
 
 
+LOGIN = "alice"  # the owner's GitHub login: the report calls it `owner`
+
+
 def sha(text):
   return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -24,11 +27,11 @@ def stamp(world):
 
 
 def chain_world(world):
-  """A chained handoff whose owner is `owner` and whose `gh api user` answers `owner`."""
+  """A chained handoff whose owner is the login `alice` and whose `gh api user` answers `alice`."""
   path = world.repo / CONFIG
   config = json.loads(path.read_text(encoding="utf-8"))
-  path.write_text(json.dumps({**config, "owners": ["owner"]}), encoding="utf-8")
-  world.gh.extend("api", lambda args, cwd, token=None: (0, "owner\n", ""))
+  path.write_text(json.dumps({**config, "owners": [LOGIN]}), encoding="utf-8")
+  world.gh.extend("api", lambda args, cwd, token=None: (0, LOGIN + "\n", ""))
   return Chain(world)
 
 
@@ -97,7 +100,7 @@ def test_answer_json_is_never_rewritten(world, event):
     assert code == 0, out
     # the stopped record is a new wait: its own since, its question kept, the answered one's line journaled
     assert jread(c.root / "chain" / f"{c.hid}.json")["since"] == since2
-    assert f"next clear {c.hid} plan answered by owner at {at1} answer {sha('first answer')}" in journal_of(c)
+    assert f"next clear {c.hid} plan answered by {LOGIN} at {at1} answer {sha('first answer')}" in journal_of(c)
     assert (waits / f"plan-{since2}.md").is_file()
   assert (waits / f"plan-{since1}.answer.json").read_bytes() == first_bytes
   assert (waits / f"plan-{since1}.answer.md").read_text(encoding="utf-8") == "first answer"
@@ -106,7 +109,7 @@ def test_answer_json_is_never_rewritten(world, event):
   at2 = answer(world, c, "second answer")
   assert (waits / f"plan-{since1}.answer.json").read_bytes() == first_bytes
   second = json.loads((waits / f"plan-{since2}.answer.json").read_text(encoding="utf-8"))
-  assert second == {"by": "owner", "at": at2, "sha": sha("second answer")}
+  assert second == {"by": LOGIN, "at": at2, "sha": sha("second answer")}
   assert set(second) == {"by", "at", "sha"}
 
 
@@ -248,6 +251,52 @@ def test_reviewers_count_each_units_own_verdicts(world):
   assert reviewers["codex"]["quiet rounds"] == "1"  # U02's empty record; U01's `not_run` is no round
   assert (reviewers["readiness"]["overruled"], reviewers["readiness"]["deferred"]) == ("1", "1")
   assert table(report, "Units")["U01"]["head rounds"] == "1"
+
+
+def journal_add(c, *lines):
+  path = c.hs.path("journal")
+  with path.open("a", encoding="utf-8") as handle:
+    handle.write("".join(line + "\n" for line in lines))
+
+
+def test_owner_time_holds_every_decision_proceed_and_stop(world):
+  """Every wait, decision, `proceed` and stop is a row; a wait the driver removed ends there, an unanswered wait a later
+  wait replaces ends at that wait, a decision's answer time falls back to its review's ruling; logins read as `owner`."""
+  c, _, _ = two_units(world)
+  hid, t = c.hid, "2026-11-15T"
+  c.state["decisions"] = {"U01/D1": {"answer": "(a)", "by": "owner", "decided_at": t + "00:30:00Z", "mode": "typed"}}
+  c.save()
+  jwrite(c.hs.path("foreman", "U01"), {
+      "dispatch_id": None, "rounds": [{"round": 1, "phase": "posted", "outcome": "posted"}],
+      "decisions": [{"id": "D2", "asked_at": t + "05:00:00Z", "source": "cap"}],
+      "rulings": [{"decision": "D2", "ruling": "proceed", "by": "owner", "reason": "ok", "review": "R1"}]})
+  jwrite(c.hs.path("foreman", "U02"), {"dispatch_id": None, "rounds": [], "decisions": [], "rulings": [],
+                                       "stopped": {"by": "superegm", "at": t + "08:00:00Z", "reason": "cap"}})
+  reviewed(c, "head-U01-c1", "head", "U01", ["codebase-details"], {})
+  review = jread(c.hs.path("reviews", "head-U01-c1", "review.json"))
+  review["rulings"] = [{"id": "R1", "ruling": "proceed", "by": LOGIN, "at": t + "06:00:00Z", "reason": "ok"}]
+  jwrite(c.hs.path("reviews", "head-U01-c1", "review.json"), review)
+  reviewed(c, "plan-U02-c1", "plan", "U02", ["readiness"], {})
+  review = jread(c.hs.path("reviews", "plan-U02-c1", "review.json"))
+  review["rulings"] = [{"id": "R1", "ruling": "stop", "by": "owner", "at": t + "03:00:00Z"}]
+  jwrite(c.hs.path("reviews", "plan-U02-c1", "review.json"), review)
+  journal_add(
+      c,
+      f"{t}10:00:00Z next wait {hid} review-plan since {t}10:00:00Z source rc question aa",
+      f"{t}10:05:00Z driver: {hid} superseded: wait record removed",
+      f"{t}11:00:00Z next wait {hid} review-code since {t}11:00:00Z source rc question bb",
+      f"{t}11:01:40Z next wait {hid} review-code since {t}11:01:40Z source rc question cc",
+      f"{t}11:06:40Z next clear {hid} review-code answered by progress at {t}11:06:40Z answer dd")
+  code, out = world.run("postmortem", "--handoff", c.hid)
+  assert code == 0, out
+  rows = table(c.hs.path("file", "postmortem.md").read_text(encoding="utf-8"), "Owner time")
+  assert (rows["review-plan"]["waited"], rows["review-plan"]["answered at"]) == ("300", t + "10:05:00Z")
+  assert rows["review-code"]["waited"] == "400"  # 100 until the second wait replaced the first, 300 more until the clear
+  assert (rows["U01/D1"]["kind"], rows["U01/D1"]["answered by"], rows["U01/D1"]["answered at"]) == ("decision", "owner", t + "00:30:00Z")
+  assert (rows["U01 D2"]["waited"], rows["U01 D2"]["answered by"], rows["U01 D2"]["answered at"]) == ("3600", "owner", t + "06:00:00Z")
+  assert (rows["head-U01-c1 R1"]["kind"], rows["head-U01-c1 R1"]["answered by"]) == ("proceed", "owner")
+  assert (rows["plan-U02-c1 R1"]["kind"], rows["plan-U02-c1 R1"]["answered at"]) == ("stop", t + "03:00:00Z")
+  assert (rows["U02 stopped"]["kind"], rows["U02 stopped"]["answered by"]) == ("stop", "default")
 
 
 def snapshot(root):
