@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
-# Modified by SuperEGM (gsVAM), 2026: the wave's `destructive-local` effect kind (U31).
+# Modified by SuperEGM (gsVAM), 2026: the wave's `destructive-local` effect kind (U31); the inbox typed and external (U72).
 """The hook, the effects frontmatter and the section 14 skill edits (U02)."""
 import hashlib
 import json
@@ -27,6 +27,7 @@ EXTERNAL = {
     "judges": ("start-session", "state-store", "github-write"),
     "orient": ("state-store",),
     "driver": ("start-session", "state-store"),
+    "inbox": ("github-write", "state-store", "start-session"),
 }
 WORKING_TREE = {"brainstorming", "draft", "drift-report", "test-driven-development",
                 "systematic-debugging", "verification-before-completion", "writing-skills"}
@@ -44,7 +45,7 @@ def skill_text(skill: str) -> str:
 
 
 def test_skill_set_is_section_14() -> None:
-  assert set(SKILLS) == set(EXTERNAL) | WORKING_TREE | {"using-superegm", "inbox"}
+  assert set(SKILLS) == set(EXTERNAL) | WORKING_TREE | {"using-superegm"}
 
 
 @pytest.mark.parametrize("skill", SKILLS)
@@ -53,7 +54,7 @@ def test_frontmatter_order_and_opening_line(skill: str) -> None:
   assert text.startswith("---\n"), f"{skill}: the frontmatter must open the file"
   fm = PACKER["read_frontmatter"](ROOT / "skills" / skill / "SKILL.md")
   effects = ("external" if skill in EXTERNAL
-             else "none" if skill in ("using-superegm", "inbox") else "working-tree")
+             else "none" if skill == "using-superegm" else "working-tree")
   expected = ["name", "license", "effects"]
   if effects == "external":
     expected.append("effect_kinds")

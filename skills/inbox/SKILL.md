@@ -1,7 +1,9 @@
 ---
 name: inbox
 license: Apache-2.0
-effects: none
+effects: external
+effect_kinds: [github-write, state-store, start-session]
+disable-model-invocation: true
 description: Use when the owner asks what needs them - lists, read-only, every open decision, cap ruling, contested finding, merge-ready PR, stalled unit, escalation, redesign, test-delta finding and owner-only finding across the store's open handoffs, one line each with the comment, command or PR URL that moves it, and each open wave card as information.
 ---
 
