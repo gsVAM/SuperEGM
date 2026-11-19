@@ -9,6 +9,7 @@ skills/brainstorming/: the restored files, the loopback-only keyed server, the s
 import hashlib
 import json
 import os
+import re
 import runpy
 import shutil
 import socket
@@ -116,3 +117,13 @@ def test_pack_holds_the_scripts(tmp_path):
     packed_paths = bundle.namelist()
   names = set(packed_paths)
   assert {f"skills/brainstorming/scripts/{n}" for n in ("frame-template.html", "helper.js", "server.cjs", "start-server.sh", "stop-server.sh")} <= names
+
+
+def test_licence_lists_the_restored_notices():
+  # every restored file carrying the provenance notice is named in the README Licence paragraph
+  readme = (ROOT / "README.md").read_text(encoding="utf-8")
+  paragraph = next(p for p in readme.split("\n\n") if p.startswith("**Licence.**"))
+  restored_with_notice = {f"skills/brainstorming/{path}" for path in (*SHA_7_0_0, *EDITED)
+                          if "modified by SuperEGM (gsVAM), 2026: " in (ROOT / "skills/brainstorming" / path).read_text(encoding="utf-8")}
+  assert len(restored_with_notice) == len(EDITED)
+  assert restored_with_notice <= set(re.findall(r"`([^`]+)`", paragraph))
