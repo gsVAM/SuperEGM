@@ -11,14 +11,15 @@ What the store does not hold, the report does not invent: launches record no tok
 only); a head finding's allowed outcome is the foreman's ruling text `<fid> allowed` read per unit (a unit's several
 head cycles share them), its overruled outcome the text `<fid> finding overruled`, or a settled disposition; a
 finding of any kind settled `contested` or `declined` counts overruled; a decision's wait has no start but the foreman's `asked_at`, so a `decide`
-answer is a row without a waiting time."""
+answer is a row without a waiting time; who answered is a config owner's login as `owner`, the foreman's `superegm`
+as `default`, a judged answer as `judges:<panel>`, and a `decide --default` answer, stored by `owner`, as `owner`."""
 
 import json
 import re
 from pathlib import Path
 
 import superegm as core
-from superegm import approve_spec, body, inbox, launch, review
+from superegm import approve_spec, body, inbox, launch, report, review
 
 WRITES = frozenset(['file'])  # the store kinds this subcommand writes: the derived `postmortem.md`
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
@@ -268,7 +269,8 @@ def wait_episodes(hs: core.Store) -> dict:
 def owner_rows(st: core.Store, hs: core.Store, uids: list, spec) -> list:
   """The Owner time rows: each phase's waits; each decision (the plan's `decide` answers, the foreman's); each review's
   `proceed` and `stop` rulings; each stopped unit. Who answered reads `owner` for a config owner's login, `default` for
-  the foreman's own."""
+  the foreman's own `superegm`, and a judged `decide` answer its raw `judges:<panel>`; a `decide --default` answer is
+  stored by `owner` (decide.py), so it reads `owner`: the store cannot tell it from an owner's own."""
   owners = set((st.config or {}).get("owners") or [])
 
   def who(by):
@@ -296,9 +298,12 @@ def owner_rows(st: core.Store, hs: core.Store, uids: list, spec) -> list:
     foreman = core.load_foreman(hs, uid)
     heads = [f for _, f in reviews if f and f.get("kind") == "head" and f.get("artifact") == uid]
     stamps = {(rid, r.get("id")): r.get("at") for rid, f in reviews if f in heads for r in f.get("rulings") or []}
-    rulings = {r.get("decision"): r for r in foreman.get("rulings") or [] if r.get("decision")}
     for decision in foreman.get("decisions") or []:
-      ruling = rulings.get(decision.get("id")) or {}
+      # a decision may take several rulings (one per `<fid> allowed` option): the last one ends it, and while
+      # `report.pending_decisions` still holds it, it waits
+      given = [r for r in foreman.get("rulings") or [] if r.get("decision") == decision.get("id")]
+      pending = bool(report.pending_decisions({"decisions": [decision], "rulings": given}))
+      ruling = given[-1] if given and not pending else {}
       named = (decision.get("source") or "").split()  # `review <id> cap|round <n>`: the review that ruled it, if a proceed
       end = ruling.get("posted_at") or ruling.get("at") or stamps.get((named[1] if len(named) > 1 else None, ruling.get("review")))
       rows.append([f"{uid} {decision.get('id')}", "decision", decision.get("source") or decision.get("point"),
