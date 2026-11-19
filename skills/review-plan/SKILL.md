@@ -104,7 +104,7 @@ goldfish and the one set read, each through its adapter `superegm:<id>` with the
 (`.claude-plugin/agents/<id>.md`; a reviewer spawned any other way is not a goldfish). `k` is
 this invocation's round count, 1 at its first Step 2.
 
-A repository reviewer or an overridden built-in (a file under `.superegm/reviewers/`, spec section 3.6) is dispatched through `superegm:repo-reviewer`, not its own adapter: run `superegm reviewers --brief <id> ...` and paste its output, unedited, under `# Reviewer persona` in the brief, before the artifact. A plain built-in with no override goes through its own adapter. Its model and effort are the file's `model` and `effort` when set, else `config.reviewers.model` and `config.reviewers.effort`; `SUPEREGM_GOLDFISH_MODEL` and `SUPEREGM_GOLDFISH_EFFORT` override both.
+A repository reviewer or an overridden built-in (a file under `.superegm/reviewers/`, spec section 3.6) is dispatched through `superegm:repo-reviewer`, not its own adapter: run `superegm reviewers --brief <id> --handoff <handoff id> --runcard <card>` (a plan review reads the copy frozen at the handoff's approval) and paste its output, unedited, under `# Reviewer persona` in the brief, before the artifact. A plain built-in with no override goes through its own adapter. Its model and effort are the file's `model` and `effort` when set, else `config.reviewers.model` and `config.reviewers.effort`; `SUPEREGM_GOLDFISH_MODEL` and `SUPEREGM_GOLDFISH_EFFORT` override both.
 
 1. Once per round, `python3 '<HELPER>' review-plan set-input --spec '<spec>'` prints the set
    text: the `width:` line (`graph`'s, from `handoff_units.json`), the `## Plan header` section

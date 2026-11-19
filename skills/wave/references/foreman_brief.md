@@ -17,7 +17,7 @@ not the absence of a name, is what keeps a reviewer's context fresh.
 `config.reviewers.effort`, or the session's `SUPEREGM_GOLDFISH_MODEL` and `SUPEREGM_GOLDFISH_EFFORT` when
 set, by the one rule of `skills/review-spec/references/review_loop.md` section 2.
 
-A repository reviewer or an overridden built-in (a file under `.superegm/reviewers/`, spec section 3.6) is dispatched through `superegm:repo-reviewer`, not its own adapter: run `superegm reviewers --brief <id> ...` and paste its output, unedited, under `# Reviewer persona` in the brief, before the artifact. A plain built-in with no override goes through its own adapter. Its model and effort are the file's `model` and `effort` when set, else `config.reviewers.model` and `config.reviewers.effort`; `SUPEREGM_GOLDFISH_MODEL` and `SUPEREGM_GOLDFISH_EFFORT` override both.
+A repository reviewer or an overridden built-in (a file under `.superegm/reviewers/`, spec section 3.6) is dispatched through `superegm:repo-reviewer`, not its own adapter: run `superegm reviewers --brief <id> --handoff <handoff-id> --runcard <child-card>` (the head review reads the copy frozen at the handoff's approval; the child card, and no `--dispatch`: the brief command takes none, though the brief's Facts line gives the dispatch id to the other helper calls) and paste its output, unedited, under `# Reviewer persona` in the brief, before the artifact. A plain built-in with no override goes through its own adapter. Its model and effort are the file's `model` and `effort` when set, else `config.reviewers.model` and `config.reviewers.effort`; `SUPEREGM_GOLDFISH_MODEL` and `SUPEREGM_GOLDFISH_EFFORT` override both.
 
 ## Brief
 
