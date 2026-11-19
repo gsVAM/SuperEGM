@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24); the informational `plugins` and `mcp` lines and the profile line's plugin refusals (U27); the informational `model:` role table (U28); the informational `stall:` line (U31); the modules' DOCTOR_CHECKS lines after its own (U32); the three `model: builder <tier>` lines (U33); `chain` in INFORMATIONAL (U54); `--probe`, one headless builder session on the launch's own flags (U60); the informational `reviewers:` line after `mcp:` (U76).
+# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24); the informational `plugins` and `mcp` lines and the profile line's plugin refusals (U27); the informational `model:` role table (U28); the informational `stall:` line (U31); the modules' DOCTOR_CHECKS lines after its own (U32); the three `model: builder <tier>` lines (U33); `chain` in INFORMATIONAL (U54); `--probe`, one headless builder session on the launch's own flags (U60); the informational `reviewers:` line after `mcp:` (U76); the `driver:` findings of a credential the env file lacks and an enabled plugin's `SubagentStart` hook (U71).
 
 """superegm doctor: one line per wave prerequisite, `ok` or the refusal `launch` or `launch-builder`
 would give; read-only, no run card."""
@@ -406,8 +406,8 @@ def hooks_of(repo_root: Path):
 
 
 def driver_lines(config):
-  """The five informational lines of the owner's timer (spec section 11.2): `driver:`, `sleep:`, `root:`, `env:`
-  and `notify:`."""
+  """The informational lines of the owner's timer (spec section 11.2): `driver:`, up to two `driver:` findings of
+  `env_findings` (U71), `sleep:`, `root:`, `env:` and `notify:`."""
   from superegm import driver
   from superegm.launch_builder import HELPER
   lines, helper, mine = [], driver.plist_helper(), str(HELPER.parents[3])
@@ -417,6 +417,7 @@ def driver_lines(config):
     lines.append(("driver", f"stale ({driver.helper_root(helper)}; the env profile's root {mine})"))
   else:
     lines.append(("driver", f"installed ({timer_minutes(driver)} min) at {mine}"))
+  lines += env_findings(config, driver)
   lines.append(("sleep", sleep_setting()))
   entries = registry_entries()
   entry = None if isinstance(entries, str) else next(
@@ -429,9 +430,40 @@ def driver_lines(config):
   else:
     lines.append(("root", "ok" if driver.root_ok(entry["root"], entry["artifacts_dir"])
                   else f"{entry['root']} is not a worktree of {entry['repo']}"))
-  lines.append(("env", env_setting(driver.env_file())))
+  lines.append(("env", env_setting(driver.env_file(), driver.credential_names(config)[0])))
   hook = Path.home() / ".superegm" / "notify"
   lines.append(("notify", f"ok ({core.sha256_file(hook)})" if hook.is_file() else "absent"))
+  return lines
+
+
+def env_findings(config, driver):
+  """U71's two `driver:` findings (spec section 3.4 area 7): a configured credential name `~/.superegm/env` lacks,
+  and an enabled plugin of the driver's profile (the env file's `CLAUDE_CONFIG_DIR`, else this session's) with a
+  `SubagentStart` hook. Names only, never a value; none without an env file, which `env: absent` already shows."""
+  from superegm.launch_builder import elephant_profile, hook_events
+  if not driver.env_file().is_file():
+    return []
+  env = driver.read_env()
+  lacking = [n for n in driver.credential_names(config) if n not in env]
+  lines = [("driver", f"env file lacks {', '.join(lacking)}")] if lacking else []
+  profile = Path(env["CLAUDE_CONFIG_DIR"]).expanduser() if env.get("CLAUDE_CONFIG_DIR") else elephant_profile()
+  try:
+    enabled = json.loads(core.read_text(profile / "settings.json")).get("enabledPlugins") or {}
+  except (OSError, ValueError, AttributeError):
+    enabled = {}
+  try:
+    raw = json.loads(core.read_text(profile / "plugins" / "installed_plugins.json")).get("plugins") or {}
+  except (OSError, ValueError, AttributeError):
+    raw = {}
+  hooked = []
+  for pid, on in sorted(enabled.items() if isinstance(enabled, dict) and isinstance(raw, dict) else []):
+    if on is not True:
+      continue
+    dirs = [e["installPath"] for e in raw.get(pid) or [] if isinstance(e, dict) and isinstance(e.get("installPath"), str)]
+    if any("SubagentStart" in hook_events(Path(d)) for d in dirs):
+      hooked.append(pid)
+  if hooked:
+    lines.append(("driver", f"{profile}: enabled plugin {', '.join(hooked)} has a SubagentStart hook"))
   return lines
 
 
@@ -472,7 +504,9 @@ def registry_entries():
     return str(error)
 
 
-def env_setting(path: Path) -> str:
+def env_setting(path: Path, identity: str) -> str:
+  """The `env:` line: `absent`, `readable by others`, `missing <name>` (`PATH`, `CLAUDE_CONFIG_DIR`, then the
+  configured identity name, `builder.app.private_key_env` or `builder.gh_token_env`) or `ok`."""
   if not path.is_file():
     return "absent"
   if path.stat().st_mode & 0o077:
@@ -481,8 +515,8 @@ def env_setting(path: Path) -> str:
   for key in ("PATH", "CLAUDE_CONFIG_DIR"):
     if key not in keys:
       return f"missing {key}"
-  if not keys & {"SUPEREGM_APP_KEY", "SUPEREGM_BUILDER_TOKEN"}:
-    return "missing SUPEREGM_APP_KEY or SUPEREGM_BUILDER_TOKEN"
+  if identity not in keys:
+    return f"missing {identity}"
   return "ok"
 
 

@@ -6,7 +6,7 @@
 prompt file and command line, `record-launch`, `interrupt`, `clean`, the builder orders and the
 `interrupt` and `clean` skill bodies."""
 
-import hashlib, json, os, re, shutil, signal, subprocess, time
+import hashlib, json, os, re, shlex, shutil, signal, subprocess, time
 from pathlib import Path
 import pytest
 from superegm import store, spec_slug, DEFAULT_CONFIG
@@ -428,6 +428,8 @@ def test_launch_reads_a_partly_ruled_owner_decision_as_pending(world, monkeypatc
 
 def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monkeypatch, spawn_fake):
   s, card, hid, bodies = seed(world)
+  monkeypatch.setenv("HOME", str(world.repo.parent))
+  put(world.repo.parent / ".superegm/registry.json", json.dumps([{"repo": REPO, "root": str(world.repo), "artifacts_dir": str(s.root)}]))
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
   assert world.run("launch", "--runcard", card)[0] == 0
   world.gh.comments[ISSUE] = [
@@ -453,13 +455,17 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   cfg = json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]
   result = s.path("launches", f"{UNIT}_r1_result.json")
   pairs = " ".join(f"{k}='{v.format(gh='/usr/local/bin/gh', login='builder-bot', email='1001+builder-bot@users.noreply.github.com')}'" for k, v in PAIRS)
-  assert line.startswith(f"SUPEREGM_EXIT='{result}.exit'; trap 'echo stalled > \"$SUPEREGM_EXIT\"; exit' TERM; cd '{wt}' && env -u GIT_ASKPASS -u SSH_ASKPASS -u GITHUB_TOKEN -u CLAUDE_CODE_EFFORT_LEVEL CLAUDE_CONFIG_DIR='{cfg['profile_dir']}' ENABLE_CLAUDEAI_MCP_SERVERS=false GH_TOKEN=\"$SUPEREGM_BUILDER_TOKEN\" SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{card}' {pairs} claude -p "), line
+  from superegm import driver
+  on_term = f"SUPEREGM_KICK={shlex.quote(driver.kick_line(world.repo))}; trap 'echo stalled > \"$SUPEREGM_EXIT\"; eval \"$SUPEREGM_KICK\"; exit' TERM"
+  assert line.startswith(f"SUPEREGM_EXIT='{result}.exit'; {on_term}; cd '{wt}' && env -u GIT_ASKPASS -u SSH_ASKPASS -u GITHUB_TOKEN -u CLAUDE_CODE_EFFORT_LEVEL CLAUDE_CONFIG_DIR='{cfg['profile_dir']}' ENABLE_CLAUDEAI_MCP_SERVERS=false GH_TOKEN=\"$SUPEREGM_BUILDER_TOKEN\" SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{card}' {pairs} claude -p "), line
   mcp_file = s.path("launches", f"{UNIT}_r1_mcp.json")
   assert f" claude -p \"$(cat '{prompt_file}')\" --session-id '{launches_of(s)[-1]['session_id']}' --model '{cfg['model']}' --effort '{cfg['effort']}' --permission-mode '{cfg['permission_mode']}' --setting-sources user --mcp-config '{mcp_file}' --strict-mcp-config --allowedTools '" in line, line
   tools = line.split("--allowedTools '")[1].split("'")[0].split(",")
   assert tools == [t.replace("Bash(gh ", "Bash(/usr/local/bin/gh ") for t in cfg["allowed_tools"]] + [f"Bash(git push origin {branch}:*)",
       f"Bash({precheck.parent}/superegm-precheck:*)", "Bash(git reset --hard:*)"]
-  assert line.endswith(f"' --output-format json > '{result}'; echo $? > '{result}.exit'")
+  wrapper, kick = line.splitlines()  # the store is registered: the wrapper ends with the kick (U71)
+  assert wrapper.endswith(f"' --output-format json > '{result}'; echo $? > '{result}.exit'")
+  assert kick == driver.kick_line(world.repo)
   assert "ghp_builder" not in out
   tree = git(["rev-parse", "refs/superegm/base^{tree}"], world.repo).strip()
   unit_file = s.path("orient_unit", f"{UNIT}.md").read_text(encoding="utf-8")

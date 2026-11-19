@@ -189,8 +189,14 @@ def prepare(args, card):
   core.journal(st, f"{unit} launch {rnd} prepared" + (f" (managed plugins: {', '.join(managed)})" if managed else ""))
   result = st.path("launches", f"{unit}_r{rnd}_result.json")
   session_id = str(uuid.uuid4())  # the session's transcript `projects/<slug>/<id>.jsonl`, read at the exit (U27)
+  from superegm import driver
+  kick_root = driver.kick_root_of(st.root)  # the registered root of this store, resolved now; none: no kick (U71)
+  kick = "" if kick_root is None else driver.kick_line(kick_root)
   line = command_line(config, worktree, prompt, result, args.runcard, tools, launched_gh, identity["login"], identity["email"],
-                      [d["dir"] for d in dirs], mcp_file, pair, session_id=session_id, resume_from=resume.get("resumed_from"))
+                      [d["dir"] for d in dirs], mcp_file, pair, session_id=session_id, resume_from=resume.get("resumed_from"),
+                      kick=kick)
+  if kick:
+    line += "\n" + kick  # after `.exit`; the trap runs the same line on TERM
   # the one behaviour (amendment 10): the wrapper started detached, then the launch recorded `running`
   pid = start_detached(["/bin/sh", "-c", line], st.path("launches", f"{unit}_r{rnd}.log"), dict(os.environ))
   launches = load_launches(st, unit)
@@ -886,7 +892,8 @@ QUOTED = {"--model", "--effort", "--permission-mode", "--plugin-dir", "--mcp-con
 
 
 def command_line(config, worktree, prompt, result, runcard, tools, gh, login, email, plugin_dirs: list, mcp_file: Path,
-                 pair: tuple[str, str], session_id: str | None = None, resume_from: str | None = None) -> str:
+                 pair: tuple[str, str], session_id: str | None = None, resume_from: str | None = None,
+                 kick: str = "") -> str:
   """The launched command (spec section 11): the owner's prompts and token and `CLAUDE_CODE_EFFORT_LEVEL`
   (which would beat `--effort`, U28) unset, the builder profile,
   `ENABLE_CLAUDEAI_MCP_SERVERS=false` (belt and braces over the profile's `disableClaudeAiConnectors`),
@@ -897,7 +904,8 @@ def command_line(config, worktree, prompt, result, runcard, tools, gh, login, em
   whose project settings and SessionStart hooks it must not run: the profile's settings alone), one `--plugin-dir`
   per listed plugin's directory, `--mcp-config <mcp_file> --strict-mcp-config` (no other MCP configuration loads),
   the result and exit files; prefixed by the watchdog's trap (U31): TERM writes `stalled` to the exit file and ends
-  the wrapper, no code written after it."""
+  the wrapper, no code written after it; with `kick` (U71), the trap runs that kick line after it writes `stalled`,
+  so a stopped builder kicks as one that ends does."""
   b, (model, effort) = config["builder"], pair
   pairs = launched_pairs(gh, login, email)
   for value in (worktree, prompt, result, b["profile_dir"], model, effort, b["permission_mode"], runcard, *tools, *(v for _, v in pairs),
@@ -911,7 +919,9 @@ def command_line(config, worktree, prompt, result, runcard, tools, gh, login, em
                      for word in env_words)
   env = " ".join(f"{k}='{v}'" for k, v in pairs)
   session = f" --session-id '{session_id}'" if session_id else ""
-  return (f"SUPEREGM_EXIT='{result}.exit'; trap 'echo stalled > \"$SUPEREGM_EXIT\"; exit' TERM; "
+  on_term = (f"SUPEREGM_KICK={shlex.quote(kick)}; trap 'echo stalled > \"$SUPEREGM_EXIT\"; eval \"$SUPEREGM_KICK\"; exit' TERM; "
+             if kick else "trap 'echo stalled > \"$SUPEREGM_EXIT\"; exit' TERM; ")
+  return (f"SUPEREGM_EXIT='{result}.exit'; {on_term}"
           f"cd '{worktree}' && env {setting} {token} "
           f"SUPEREGM_ROLE=builder SUPEREGM_RUNCARD='{runcard}' {env} "
           f"claude -p \"$(cat '{prompt}')\"{session} {flags} --output-format json > '{result}'; echo $? > '{result}.exit'")

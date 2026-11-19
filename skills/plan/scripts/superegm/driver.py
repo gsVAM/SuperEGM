@@ -1,15 +1,20 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the driver
 
-"""superegm driver tick|install|uninstall|status|reset (spec section 11.2): the owner's timer. `tick` launches one
-`wave --leavemealone` session per store when there is something to do (with `driver.chain` on, the session of the
-chain phase `superegm next` names, U44); `install` and `uninstall` write and remove
+"""superegm driver tick|kick|env|install|uninstall|status|reset (spec section 11.2): the owner's timer. `tick`
+launches one `wave --leavemealone` session per store when there is something to do (with `driver.chain` on, the
+session of the chain phase `superegm next` names, U44); `kick` ticks one chain-on store now and `env` writes
+`~/.superegm/env` (spec 1.2.1 section 7.4, U71); `install` and `uninstall` write and remove
 the launchd agent (a systemd user timer on Linux); `status` reads, `reset` is the owner's interrupt."""
 
 import argparse
+import contextlib
+import fcntl
+import io
 import json
 import os
 import plistlib
+import re
 import shlex
 import subprocess
 import sys
@@ -21,7 +26,7 @@ WRITES = frozenset({"driver", "runcards", "launches", "tick", "chain"})
 CONFIG_DEFAULTS, INIT_STEP = {}, ""  # no written config key or init line of its own (U32)
 CONFIG_UNWRITTEN = {"driver": {"chain": False}}  # its own key, registered but never written by `init`: absent reads false (U44)
 SKILLS = frozenset({"driver"})
-ACTIONS = ("tick", "install", "uninstall", "status", "reset")
+ACTIONS = ("tick", "install", "uninstall", "status", "reset", "kick", "env")
 LABEL = "com.superegm.driver"
 RUN = subprocess.run  # launchctl and systemctl: a test fakes it
 PLATFORM = sys.platform
@@ -87,9 +92,11 @@ TWICE_CHAIN = "two launches failed their phase's outcome test"  # the chain on: 
 
 
 def register(subparsers):
-  p = core.add_parser(subparsers, "driver", "the owner's timer: tick, install, uninstall, status, reset")
+  p = core.add_parser(subparsers, "driver", "the owner's timer: tick, kick, env, install, uninstall, status, reset")
   p.add_argument("action", choices=ACTIONS)
-  p.add_argument("--interval", type=int, help="install: minutes between ticks (default 15)")
+  p.add_argument("--interval", type=int, help="install: minutes between ticks (default 5)")
+  p.add_argument("--root", help="kick: the registered root whose store ticks now")
+  p.add_argument("--replace", action="store_true", help="env: rewrite an existing ~/.superegm/env")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -99,9 +106,15 @@ def run(args):
       return tick()
     if args.action == "status":
       return status()
+    if args.action == "kick":
+      if not args.root:
+        raise core.HandoffError("kick: --root is required")
+      return kick(args.root)
     core.require_runcard(args, SKILLS)
+    if args.action == "env":
+      return write_env(args.replace)
     if args.action == "install":
-      return install(15 if args.interval is None else args.interval)
+      return install(5 if args.interval is None else args.interval)
     if args.action == "uninstall":
       return uninstall()
     return reset()
@@ -164,13 +177,33 @@ def tick_prompt(spec, hid: str, phase: str = "wave", leavemealone: bool = True) 
 
 
 def tick_command(root, prompt: str, result, exit_file) -> str:
-  """The shell line the detached wrapper runs: the session in the registered root, its exit code to the exit file
-  on any exit (spec section 4's wrapper); a `'` refused, as `command_line` refuses one."""
+  """The shell lines the detached wrapper runs: the session in the registered root, its exit code to the exit file
+  on any exit (spec section 4's wrapper), then `kick_line` (spec 1.2.1 section 7.4), which does nothing for a
+  chain-off store; a `'` refused, as `command_line` refuses one."""
   for value in (root, prompt, result, exit_file):
     if "'" in str(value):
       raise core.HandoffError(f"{value} holds a quote and cannot go on the command line")
   return (f"cd '{root}' && claude -p '{prompt}' --permission-mode bypassPermissions --output-format json "
-          f"> '{result}'; echo $? > '{exit_file}'")
+          f"> '{result}'; echo $? > '{exit_file}'\n{kick_line(root)}")
+
+
+def kick_line(root) -> str:
+  """The wrapper's last line (spec section 7.4): `driver kick --root <root>` under `env -i` with `HOME` and `PATH`
+  alone, so no builder token, profile variable or session environment reaches the tick (the kick applies the env
+  file itself); the interpreter, the helper and the root quoted; a failure ignored and logged to the launch's log."""
+  from superegm.launch_builder import HELPER
+  argv = shlex.join([sys.executable, str(HELPER), "driver", "kick", "--root", str(root)])
+  return f'env -i HOME="$HOME" PATH="$PATH" {argv} || echo "driver kick failed ($?)"'
+
+
+def kick_root_of(store_root):
+  """The `root` of the registry entry whose `artifacts_dir` is `store_root`, else None (no kick)."""
+  try:
+    entries = core.load_registry()
+  except core.HandoffError:
+    return None
+  want = os.path.realpath(store_root)
+  return next((e["root"] for e in entries if os.path.realpath(e["artifacts_dir"]) == want), None)
 
 
 def exit_code(entry: dict):
@@ -455,6 +488,62 @@ def wave_trigger(hs: core.Store, entry: dict, state: dict):
   return status.tick_trigger(core.Handoff(core.rebased(state["plan"], entry["root"]), hs))
 
 
+@contextlib.contextmanager
+def store_lock(entry: dict, block: bool):
+  """A `flock` on the store's directory itself, which writes nothing: yields whether it was taken (always, when
+  `block`); no store directory, nothing to lock. Every `tick_store` runs under it, chain on or off, so a tick that
+  read the chain off and a kick after the owner turned it on never tick one store at once."""
+  try:
+    fd = os.open(entry["artifacts_dir"], os.O_RDONLY)
+  except FileNotFoundError:
+    yield True
+    return
+  try:
+    try:
+      fcntl.flock(fd, fcntl.LOCK_EX | (0 if block else fcntl.LOCK_NB))
+    except BlockingIOError:
+      yield False
+      return
+    yield True
+  finally:
+    os.close(fd)
+
+
+def locked_tick(entry: dict) -> None:
+  """`tick_store` under the store's lock (spec section 7.4), shared by `tick` and `kick`: `tick/again` written
+  first, then a non-blocking `flock` on `tick/lock` tried; one that cannot take it leaves `tick/again` and skips
+  the store. The holder removes `tick/again` before each `tick_store` and, after it releases, takes the lock again
+  while `tick/again` exists: two kicks never tick twice at once, and a kick during a tick is never lost.
+  A chain-off store, which no kick ticks, writes neither file, so 1.2's tick that finds nothing still writes
+  nothing (a deviation recorded on the issue). Every `tick_store`, chain on or off, also runs under `store_lock`,
+  which writes nothing: a chain-off tick skips a store whose lock is held, and a chain-on holder waits for it, so
+  a tick that read the chain off and a kick after it turned on never tick one store at once."""
+  st, _ = registered_store(entry)
+  if not chain_on(st.config):
+    with store_lock(entry, block=False) as taken:
+      if taken:
+        tick_store(entry)
+    return
+  folder = Path(entry["artifacts_dir"]) / "tick"
+  again, lock = folder / "again", folder / "lock"
+  core.atomic_write(again, "")
+  folder.mkdir(parents=True, exist_ok=True)
+  while again.exists():
+    # created once and never replaced: a renamed-over lock file would let a second holder in on the new inode
+    fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+      try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+      except BlockingIOError:
+        return  # the holder ticks again for us
+      while again.exists():
+        again.unlink()
+        with store_lock(entry, block=True):
+          tick_store(entry)
+    finally:
+      os.close(fd)  # releases the lock; the outer loop retakes it for a `tick/again` written meanwhile
+
+
 def tick() -> int:
   """`driver tick`: `~/.superegm/env` applied first (restored after), then every registered store."""
   saved, code = dict(os.environ), 0
@@ -462,7 +551,7 @@ def tick() -> int:
   try:
     for entry in core.load_registry():
       try:
-        tick_store(entry)
+        locked_tick(entry)
       except (core.HandoffError, core.GhError, OSError, ValueError, KeyError) as error:  # one store's error never stops the next
         print(f"driver: {entry.get('artifacts_dir')}: {error}")
         code = 1
@@ -470,6 +559,97 @@ def tick() -> int:
     os.environ.clear()
     os.environ.update(saved)
   return code
+
+
+def credential_names(config: dict) -> list:
+  """The credential names the driver's sessions need (spec section 3.4 area 7): `builder.app`'s `private_key_env`
+  alone when the App is set, else `builder.gh_token_env` alone (one identity per repository), then every `${NAME}`
+  a `builder.mcp` server's `env` or `headers` values name; in order, each once."""
+  b = config["builder"]
+  names = [b["app"]["private_key_env"]] if b.get("app") else [b["gh_token_env"]]
+  for server in (b.get("mcp") or {}).values():
+    for key in ("env", "headers"):
+      for value in ((server.get(key) or {}).values() if isinstance(server.get(key), dict) else ()):
+        names += re.findall(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", str(value))
+  return list(dict.fromkeys(names))
+
+
+def settings_hooks(profile: Path) -> list:
+  """The hook events a profile's own `settings.json` names; [] when absent or not JSON."""
+  try:
+    hooks = json.loads(core.read_text(Path(profile) / "settings.json")).get("hooks")
+  except (OSError, ValueError, AttributeError):
+    return []
+  return sorted(hooks) if isinstance(hooks, dict) else []
+
+
+def write_env(replace: bool) -> int:
+  """`driver env --runcard <card> [--replace]`: `~/.superegm/env` (mode `0600`, literal `KEY=value` lines) from the
+  helper's own environment, so no value passes through a transcript: `PATH`, `CLAUDE_CONFIG_DIR` and
+  `credential_names`. Refuses `env: <NAME> unset`, `env: <dir>: SubagentStart hooks` and `env: <NAME> cannot be
+  written literally` (a newline, or a leading or trailing blank `read_env` would strip), writing nothing; keeps an
+  existing file unless `--replace`. Prints names, never a value."""
+  config = core.load_config(core.git_toplevel(Path.cwd()))
+  names = ["PATH", "CLAUDE_CONFIG_DIR", *[n for n in credential_names(config) if n not in ("PATH", "CLAUDE_CONFIG_DIR")]]
+  for name in names:
+    if not os.environ.get(name):
+      print(f"env: {name} unset")
+      return 1
+  profile = os.environ["CLAUDE_CONFIG_DIR"]
+  if "SubagentStart" in settings_hooks(Path(profile).expanduser()):
+    print(f"env: {profile}: SubagentStart hooks")
+    return 1
+  path = env_file()
+  if path.exists() and not replace:
+    print(f"env: {path} kept (--replace to rewrite it)")
+    return 0
+  for name in names:
+    value = os.environ[name]
+    if "\n" in value or "\r" in value or value != value.strip():
+      print(f"env: {name} cannot be written literally")
+      return 1
+  path.parent.mkdir(parents=True, exist_ok=True)
+  tmp = path.with_name(path.name + f".tmp{os.getpid()}")
+  fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # never readable by others, not even for a moment
+  with os.fdopen(fd, "w", encoding="utf-8") as out:
+    out.write("".join(f"{name}={os.environ[name]}\n" for name in names))
+  os.chmod(tmp, 0o600)
+  os.replace(tmp, path)
+  print(f"env: {path} written ({', '.join(names)})")
+  return 0
+
+
+def installed() -> bool:
+  """The driver is installed: its launchd plist or its systemd unit file exists."""
+  return plist_path().is_file() or service_path().is_file()
+
+
+def kick(root) -> int:
+  """`driver kick --root <root>` (spec section 7.4): one store's tick now, for the registry entry whose `root` is
+  `<root>`, `~/.superegm/env` applied and restored around it as `tick` does; nothing for an unregistered root, an
+  uninstalled driver or a store whose `driver.chain` (read from `registered_store`'s config) is not `true`. Prints
+  nothing; a store's error is printed and exits 1, which the kicking wrapper logs."""
+  if not installed():
+    return 0
+  want = Path(root).resolve()
+  entry = next((e for e in core.load_registry() if Path(e.get("root") or "").resolve() == want), None)
+  if entry is None:
+    return 0
+  saved = dict(os.environ)
+  os.environ.update(read_env())  # before `registered_store`, whose `root_ok` runs git on the env file's PATH
+  try:
+    st, _ = registered_store(entry)
+    if not chain_on(st.config):
+      return 0
+    with contextlib.redirect_stdout(io.StringIO()):
+      locked_tick(entry)
+  except (core.HandoffError, core.GhError, OSError, ValueError, KeyError) as error:
+    print(f"driver: {entry.get('artifacts_dir')}: {error}")
+    return 1
+  finally:
+    os.environ.clear()
+    os.environ.update(saved)
+  return 0
 
 
 # ---------------------------------------------------------------- install, uninstall, status

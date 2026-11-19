@@ -11,7 +11,7 @@ description: >-
   Zoom Out Review, and Implementation Readiness.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: renamed to review-spec; the body is spec section 8's one review loop over the helper (the stages, presets, semantic split, checkpoint gates and report files are gone); persona path agents/zoom-out.md; the amendment scope, the branch sentence and the batch settle (U19); the spec PR, the pushes and the PR's ingest (U26); step 3's accept below the cap (U35); the resumed panel line and the cap read from `review.rounds` (U36); proceed offered at the cap and on a stall (U58). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: renamed to review-spec; the body is spec section 8's one review loop over the helper (the stages, presets, semantic split, checkpoint gates and report files are gone); persona path agents/zoom-out.md; the amendment scope, the branch sentence and the batch settle (U19); the spec PR, the pushes and the PR's ingest (U26); step 3's accept below the cap (U35); the resumed panel line and the cap read from `review.rounds` (U36); proceed offered at the cap and on a stall (U58); the driver's setup after the approval when the chain is on (U71). -->
 
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: run card, panel presets, Astra lane. -->
 
@@ -173,6 +173,21 @@ into later rounds is one pair: name the listed id, the latest copy's (an earlier
 
 The helper ingests the spec PR once before its refusals (never under `--amend-units`; with no open PR on the current branch, or no round in the cycle yet, it reads nothing); an unsettled external high or medium there refuses with `approve-spec: external:<login> <fid> unsettled on PR <n>`, ruled or not; `<n>` there is the PR the finding's thread is on: a finding carried from an earlier PR names that PR, not the current branch's. Settle it: `declined` or `escalated` edits nothing, so run `approve-spec` again; `contested` goes to its ruler (decision point 1); `fixed` edits the spec, so run `superegm review status` and act on its exit code (3: back to step 3, the next round; 2: step 5), except when the cycle was closed by an `accept`: the edit opens the next cycle with a fresh cap, so run step 2's `review open` first, then back to step 3. A reply the ingest could not post is named (`review ingest: reply <fid> not posted: <error>`) and retried on the next ingest; it never refuses.
 After the approval commit, `git push origin <branch>`, so the PR's head is the approved commit.
+
+**The driver's setup (the chain).** Only after `approve-spec` exits 0, and only when `.superegm/config.json`
+sets `driver.chain` to `true` (the owner's yes in the brainstorm's SDLC step) and the setup is not current:
+`superegm doctor`'s `root:` line is not `ok`, its first `driver:` line does not read `installed (<N> min) at
+<this plugin root>`, its `env:` line is not `ok`, or a later `driver:` line names a name the env file lacks
+(a `driver:` line naming a plugin's `SubagentStart` hook is shown to the owner, never fixed here): open a `driver` card on the new handoff's spec
+(`superegm runcard open --skill driver --artifact <spec-path>`), then, under it, in this order:
+`superegm driver env --runcard <card>` (add `--replace` only when the owner agreed to rewrite an existing
+`~/.superegm/env`; it writes the values from the helper's own environment, so never print or paste one);
+`superegm register` — skip `register` for a registered store, so its `root` never moves; on a fresh store
+read `git worktree list` for the checkout that has `<base>` checked out, never this spec worktree, and run
+`superegm register --root <that path> --runcard <card>` (with no such checkout, tell the owner
+`register: no checkout on <base>: type /superegm:driver register from it`); then
+`superegm driver install --runcard <card>`; then close that card. A refusal from any of them is shown
+to the owner and the approval stands: the owner can type `/superegm:driver` later for the same setup.
 
 Tell the owner, in one line: push the approval commit to `origin/<base>` (only the owner updates
 the base branch; `launch` refuses the first wave until the spec there hashes to the approval; GitHub records that push as the PR's merge),

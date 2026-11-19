@@ -117,7 +117,7 @@ def test_tick_predicate(world, monkeypatch, tmp_path, spawn_fake, case, expect):
   if expect == "launch":
     last, (command, log, env) = launches[-1], SPAWNED[-1]; reason = {"thread": "U07 threads 1 un-ingested", "reboot": "reboot 1", "exited-open-card": f"exit-file {live}"}.get(case, "first launch" if case in ("first", "reset", "child-card") else f"U07 head pr=70 sha={A} ci=pending")
     assert (last["status"], last["pid"], last["boot_id"], last["reason"], last["command"]) == ("running", 4242, "boot-1", reason, command[2]) and command[:2] == ["/bin/sh", "-c"]
-    assert command[2] == f"cd '{world.repo.resolve()}' && claude -p '/superegm:wave {world.spec.resolve()} --handoff {hid} --leavemealone' --permission-mode bypassPermissions --output-format json > '{last['result_file']}'; echo $? > '{last['exit_file']}'"
+    assert command[2] == f"cd '{world.repo.resolve()}' && claude -p '/superegm:wave {world.spec.resolve()} --handoff {hid} --leavemealone' --permission-mode bypassPermissions --output-format json > '{last['result_file']}'; echo $? > '{last['exit_file']}'\n{driver.kick_line(world.repo.resolve())}"
     assert (env["SUPEREGM_ROLE"], env["SUPEREGM_RUNCARD"], env["PATH"]) == ("driver", last["card"], f"{tmp_path}/bin") and (tmp_path / "git-path").read_text().strip() == env["PATH"] and card_of(s, last["card"])["closed_at"] and f"tick: {hid} launch {last['round']} running (pid 4242)" in journal
     assert f"launch:{hid}:{last['round']}" in json.loads((s.root / hid / "driver" / f"{hid}.json").read_text())["notified"] and (case != "child-card" or not card_of(s, live)["interrupted_at"])
     assert case not in ("reboot", "exited-open-card") or (card_of(s, live)["interrupted_at"] and launches[0]["status"] == ("interrupted (reboot)" if case == "reboot" else "running")); return
@@ -136,7 +136,7 @@ def test_a_systemd_unit_quotes_a_helper_path_with_a_space(world, monkeypatch, tm
 
 @pytest.mark.parametrize("platform, interval", [("darwin", None), ("darwin", 5), ("linux", None)])
 def test_driver_install_status_and_reset(world, monkeypatch, tmp_path, platform, interval):
-  s, hid = registered(world, monkeypatch, tmp_path); dcard, uid, minutes, calls = world.open_card("driver", world.spec), os.getuid(), interval or 15, []
+  s, hid = registered(world, monkeypatch, tmp_path); dcard, uid, minutes, calls = world.open_card("driver", world.spec), os.getuid(), interval or 5, []
   monkeypatch.setattr(driver, "RUN", lambda argv, **k: (calls.append(argv), subprocess.CompletedProcess(argv, 0))[1]); monkeypatch.setattr(driver, "PLATFORM", platform)
   code, out = world.run("driver", "install", *(["--interval", interval] if interval else []), "--runcard", dcard); plist = tmp_path / "Library/LaunchAgents/com.superegm.driver.plist"
   if platform == "darwin":
