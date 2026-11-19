@@ -217,10 +217,24 @@ def wait(args, st: core.Store, hid: str) -> int:
   card_id = args.runcard
   path = st.path("chain", hid)
   stored = read_json(path) or {}
-  core.atomic_write(path, {"phase": args.phase, "question": args.question, "since": core.now_iso(),
+  at = core.now_iso()
+  keep_question(core.handoff_store(st, hid), args.phase, at, args.question, card_id,
+                reask=bool(stored.get("answer")) and stored.get("phase") == args.phase)
+  core.atomic_write(path, {"phase": args.phase, "question": args.question, "since": at,
                            "review": args.review or stored.get("review")})
   runcard.close_card(st, card_id)
   return 0
+
+
+def keep_question(hs: core.Store, phase: str, at: str, question: str, source: str, reask: bool = False) -> None:
+  """Keep a wait's question as `waits/<phase>-<at>.md` in the handoff's directory and journal it: `next wait
+  <handoff> <phase> since <at> source <source> question <sha>`, or `next reask <handoff> <phase> at <at> question
+  <sha>` for a re-ask (a `next wait` on a phase whose record holds an answer). The history of a wait lives in these
+  lines and files: the record itself is rewritten and removed (spec section 7.5)."""
+  core.atomic_write(hs.path("file", "waits", f"{phase}-{at}.md"), question)
+  sha = hashlib.sha256(question.encode("utf-8")).hexdigest()
+  core.journal(hs, f"next reask {hs.handoff_id} {phase} at {at} question {sha}" if reask
+               else f"next wait {hs.handoff_id} {phase} since {at} source {source} question {sha}")
 
 
 def clear(args, st: core.Store, hid: str) -> int:
@@ -259,8 +273,9 @@ def answer(args, st: core.Store, hid: str) -> int:
     raise core.HandoffError(f"next answer: {login or 'no login'} is not in config.owners")
   at = core.now_iso()
   sha = hashlib.sha256(args.answer.encode("utf-8")).hexdigest()
-  core.atomic_write(core.handoff_store(st, hid).path("file", "waits", f"{record['phase']}-{record['since']}.answer.json"),
-                    {"by": login, "at": at, "sha": sha})
+  waits = core.handoff_store(st, hid).path("file", "waits")
+  core.atomic_write(waits / f"{record['phase']}-{record['since']}.answer.md", args.answer)  # keyed by `since`: it pairs with its question
+  core.atomic_write(waits / f"{record['phase']}-{record['since']}.answer.json", {"by": login, "at": at, "sha": sha})
   core.atomic_write(path, {**record, "answer": args.answer, "by": login, "at": at})
   return 0
 
