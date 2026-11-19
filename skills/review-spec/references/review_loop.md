@@ -74,7 +74,7 @@ is not a goldfish. Goldfish never spawn. `set` and `proportion` are the `readine
 
 A repository reviewer or an overridden built-in (spec section 3.6) goes through `superegm:repo-reviewer`, not
 its own adapter; a plain built-in goes through its own. Overridden means: on a `spec` review,
-`.superegm/reviewers/<id>.md` exists at `HEAD`; on `plan`, `head` and `integrate`, the handoff's approval entry froze
+`.superegm/reviewers/<id>.md` exists at `HEAD`; on `plan`, `head` and `integrate`, the last approval entry for the handoff's id (a re-approval after a void appends another with the same id) froze
 `<id>` (`reviewers: [{id, sha}]`), whatever the working tree or a pull request's head holds. Paste the output of
 `superegm reviewers --brief <id> --spec <path> --review <review id> --round <n> --runcard <card>` (`spec`) or
 `superegm reviewers --brief <id> --handoff <handoff id> --runcard <card>` (the other kinds; a foreman adds `--unit`)
