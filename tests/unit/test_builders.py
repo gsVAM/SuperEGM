@@ -428,6 +428,8 @@ def test_launch_reads_a_partly_ruled_owner_decision_as_pending(world, monkeypatc
 
 def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monkeypatch, spawn_fake):
   s, card, hid, bodies = seed(world)
+  monkeypatch.setenv("HOME", str(world.repo.parent))
+  put(world.repo.parent / ".superegm/registry.json", json.dumps([{"repo": REPO, "root": str(world.repo), "artifacts_dir": str(s.root)}]))
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
   assert world.run("launch", "--runcard", card)[0] == 0
   world.gh.comments[ISSUE] = [
@@ -459,7 +461,10 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   tools = line.split("--allowedTools '")[1].split("'")[0].split(",")
   assert tools == [t.replace("Bash(gh ", "Bash(/usr/local/bin/gh ") for t in cfg["allowed_tools"]] + [f"Bash(git push origin {branch}:*)",
       f"Bash({precheck.parent}/superegm-precheck:*)", "Bash(git reset --hard:*)"]
-  assert line.endswith(f"' --output-format json > '{result}'; echo $? > '{result}.exit'")
+  from superegm import driver
+  wrapper, kick = line.splitlines()  # the store is registered: the wrapper ends with the kick (U71)
+  assert wrapper.endswith(f"' --output-format json > '{result}'; echo $? > '{result}.exit'")
+  assert kick == driver.kick_line(world.repo)
   assert "ghp_builder" not in out
   tree = git(["rev-parse", "refs/superegm/base^{tree}"], world.repo).strip()
   unit_file = s.path("orient_unit", f"{UNIT}.md").read_text(encoding="utf-8")

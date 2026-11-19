@@ -93,7 +93,7 @@ TWICE_CHAIN = "two launches failed their phase's outcome test"  # the chain on: 
 def register(subparsers):
   p = core.add_parser(subparsers, "driver", "the owner's timer: tick, install, uninstall, status, reset")
   p.add_argument("action", choices=ACTIONS)
-  p.add_argument("--interval", type=int, help="install: minutes between ticks (default 15)")
+  p.add_argument("--interval", type=int, help="install: minutes between ticks (default 5)")
   p.add_argument("--root", help="kick: the registered root whose store ticks now")
   p.add_argument("--replace", action="store_true", help="env: rewrite an existing ~/.superegm/env")
   p.set_defaults(run=run, writes=WRITES)
@@ -113,7 +113,7 @@ def run(args):
     if args.action == "env":
       return write_env(args.replace)
     if args.action == "install":
-      return install(15 if args.interval is None else args.interval)
+      return install(5 if args.interval is None else args.interval)
     if args.action == "uninstall":
       return uninstall()
     return reset()
@@ -182,7 +182,26 @@ def tick_command(root, prompt: str, result, exit_file) -> str:
     if "'" in str(value):
       raise core.HandoffError(f"{value} holds a quote and cannot go on the command line")
   return (f"cd '{root}' && claude -p '{prompt}' --permission-mode bypassPermissions --output-format json "
-          f"> '{result}'; echo $? > '{exit_file}'")
+          f"> '{result}'; echo $? > '{exit_file}'\n{kick_line(root)}")
+
+
+def kick_line(root) -> str:
+  """The wrapper's last line (spec section 7.4): `driver kick --root <root>` under `env -i` with `HOME` and `PATH`
+  alone, so no builder token, profile variable or session environment reaches the tick (the kick applies the env
+  file itself); the interpreter, the helper and the root quoted; a failure ignored and logged to the launch's log."""
+  from superegm.launch_builder import HELPER
+  argv = shlex.join([sys.executable, str(HELPER), "driver", "kick", "--root", str(root)])
+  return f'env -i HOME="$HOME" PATH="$PATH" {argv} || echo "driver kick failed ($?)"'
+
+
+def kick_root_of(store_root):
+  """The `root` of the registry entry whose `artifacts_dir` is `store_root`, else None (no kick)."""
+  try:
+    entries = core.load_registry()
+  except core.HandoffError:
+    return None
+  want = os.path.realpath(store_root)
+  return next((e["root"] for e in entries if os.path.realpath(e["artifacts_dir"]) == want), None)
 
 
 def exit_code(entry: dict):

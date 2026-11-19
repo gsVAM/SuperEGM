@@ -14,7 +14,7 @@ description: Installs, inspects and resets the owner's timer that types one leav
 In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.
 
 Typed by the owner, never invoked by a model: `/superegm:driver install [--interval <minutes>] | uninstall | status | register [--remove] | reset [--handoff <id>]`.
-The driver runs on the owner's machine alone. A timer runs `superegm driver tick` every interval (15 minutes
+The driver runs on the owner's machine alone. A timer runs `superegm driver tick` every interval (5 minutes
 by default; the machine's, never a repository's key); each tick reads one `status` per open handoff of each
 registered store and, when there is something to do and no session of that store is live, starts one
 `claude -p '/superegm:wave <spec> --handoff <id> --leavemealone' --permission-mode bypassPermissions --output-format json`

@@ -191,6 +191,10 @@ def prepare(args, card):
   session_id = str(uuid.uuid4())  # the session's transcript `projects/<slug>/<id>.jsonl`, read at the exit (U27)
   line = command_line(config, worktree, prompt, result, args.runcard, tools, launched_gh, identity["login"], identity["email"],
                       [d["dir"] for d in dirs], mcp_file, pair, session_id=session_id, resume_from=resume.get("resumed_from"))
+  from superegm import driver
+  kick_root = driver.kick_root_of(st.root)  # the registered root of this store, resolved now; none: no kick (U71)
+  if kick_root is not None:
+    line += "\n" + driver.kick_line(kick_root)
   # the one behaviour (amendment 10): the wrapper started detached, then the launch recorded `running`
   pid = start_detached(["/bin/sh", "-c", line], st.path("launches", f"{unit}_r{rnd}.log"), dict(os.environ))
   launches = load_launches(st, unit)
