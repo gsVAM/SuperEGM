@@ -309,9 +309,9 @@ def out_of_scope(rows: list, spans: list, location: str, spec_name: str = "", ro
     named_as = lambda name: loc.startswith(name) and (len(loc) == len(name) or loc[len(name)] in ends)
     if any(named_as(path) for path in listed):
       return None
-    named = (re.match(r"([^:#,]+\.[A-Za-z][A-Za-z0-9]*)(?=:\d|#L\d)", loc) or re.match(r"([^:#,]*/[^:#,]*?\.[A-Za-z][A-Za-z0-9]*)(?=[:\s#,]|$)", loc)
+    named = (re.match(r"([^:#,]+\.[A-Za-z][A-Za-z0-9]*)(?=:\d|#L\d)", loc) or re.match(r"([^:#,]*?/[^:#,]*?\.[A-Za-z][A-Za-z0-9]*)(?=[:\s#,]|$)", loc)
              or re.match(r"([^\s:#,]+\.[A-Za-z][A-Za-z0-9]*)(?=[:\s#,]|$)", loc))
-    spec_named = bool(named) and bool(spec_name) and (named.group(1) == spec_name or spec_name.endswith("/" + named.group(1)))
+    spec_named = bool(named) and bool(spec_name) and (named.group(1) == spec_name or ("/" not in named.group(1) and spec_name.rsplit("/", 1)[-1] == named.group(1)))
     if not spec_named:
       if "/" not in loc.split(":")[0].split("#")[0] and any(named_as(path.rsplit("/", 1)[-1]) for path in listed):
         return None  # a listed document by its bare file name (a slash before the first colon is another directory's)
@@ -716,6 +716,14 @@ def record_round(args) -> int:
   if args.not_run and external:  # an ingest's record holds findings: a not-run would erase them
     raise core.HandoffError(f"review record: --not-run is refused for an external reviewer ({reviewer})")
   manifest = stored_manifest(st, rid, review, n, reviewer, card)
+  lane = "astra" if reviewer == "astra" else "local"
+  dropped = st.path("reviews", rid, f"instructions-{n}-reviewers-{lane}.dropped")  # marks a stale brief the check dropped (U75): no record follows until a render
+  render = (f"render it again with `superegm instructions --spec {review['artifact']} --review {rid} --round {n} "
+            f"--role reviewers --lane {lane} --runcard {args.runcard}`")
+  if kind == "spec" and reviewer != "foreman" and not external and dropped.exists():
+    if not stored_brief_exists(st, rid, n, reviewer):  # a retry or the lane's next reviewer would otherwise skip the check below
+      raise core.HandoffError(f"review record: the reviewers' {lane} brief for round {n} was dropped as stale: {render}, the reviewers read it, then record")
+    dropped.unlink()  # rendered again: the check below reads the new brief
   if kind == "spec" and rnd.get("refs") is not None and stored_brief_exists(st, rid, n, reviewer):  # U75: the panel read the reference bytes its stored brief listed; the round's `refs` are those
     read = {item["file"]: item.get("sha") for item in manifest}
     moved = [ref["file"] for ref in rnd["refs"] if ref["file"] in read and read[ref["file"]] != ref["sha"]]
@@ -723,10 +731,11 @@ def record_round(args) -> int:
                     if isinstance(e, dict) and isinstance(e.get("dir"), str) and "reviewers" in (e.get("to") or []))  # the folders the brief lists: the entries addressed to the reviewers, never a builder-only folder
     unseen = [ref["file"] for ref in rnd["refs"] if ref["sha"] is not None and ref["file"] not in read and ref["file"].startswith(folders)]  # added after the render
     if moved or unseen:  # the stored brief is stale: drop it, so `instructions --spec` renders it again from HEAD and this round can still be recorded
-      st.path("reviews", rid, f"instructions-{n}-reviewers-{'astra' if reviewer == 'astra' else 'local'}.json").unlink(missing_ok=True)
+      st.path("reviews", rid, f"instructions-{n}-reviewers-{lane}.json").unlink(missing_ok=True)
+      core.atomic_write(dropped, "dropped\n")
       raise core.HandoffError("; ".join([f"review record: {path}: differs from the reviewers' brief" for path in moved]
                                         + [f"review record: {path}: not in the reviewers' brief" for path in unseen])
-                              + " (the stored brief is dropped: render it again with `superegm instructions --spec`, the reviewers read it, then record; a `dir` entry is listed once committed)")
+                              + f" (the stored brief is dropped: {render}, the reviewers read it, then record; a `dir` entry is listed once committed)")
   from superegm import reviewers as repository  # at call time: that module's import chain reaches this one
   try:  # a repository or overridden reviewer's record carries the persona it read; a built-in with no file's has none, and a not-run read none (U76)
     persona = None if args.not_run else repository.persona_of(st, review, rid, n, reviewer)
