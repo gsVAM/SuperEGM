@@ -118,8 +118,8 @@ After `close` succeeds, run the post-mortem (no card of its own, it writes only 
 
 It prints the path of `<handoff dir>/postmortem.md`. Tell the owner that path and three lines read from its
 tables: the total wall time (Header, total wall seconds: the earliest first launch to the latest merge), the unit with the most rounds
-(Units, head rounds) and the reviewer with the most overruled findings (Reviewers, overruled); the numbers
-are the report's, none worked out here. A refused `close` ends the skill without it.
+(Units, head rounds) and the reviewer with the most overruled findings (Reviewers, overruled,
+summed across its rows: a reviewer has one row per kind); the figures are the report's, the one sum aside. A refused `close` ends the skill without it.
 
 ## Step 4: the end
 
