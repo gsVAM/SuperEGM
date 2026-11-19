@@ -160,14 +160,15 @@ def verdicts(hs: core.Store, uid: str) -> tuple:
 
 
 def spec_cycles(hs: core.Store, spec) -> range:
-  """The spec-review cycles this handoff owns: after the previous approval entry's review cycle, up to its own
-  approval's. Spec reviews sit at the store's root, shared by every handoff of the spec; no approval of its own, none."""
+  """The spec-review cycles this handoff owns: after the review cycle of the entry before its first approval entry, up
+  to its last entry's (a re-approval after a void, and `amend-units`, keep the id and add entries). Spec reviews sit at
+  the store's root, shared by every handoff of the spec; no approval of its own, none."""
   entries = core.load_approvals(hs, spec) if spec else []
-  for i, entry in enumerate(entries):
-    if entry.get("handoff_id") == hs.handoff_id:
-      before = max((approve_spec.cycle_of(e.get("review")) for e in entries[:i]), default=0)
-      return range(before + 1, approve_spec.cycle_of(entry.get("review")) + 1)
-  return range(0)
+  own = [i for i, entry in enumerate(entries) if entry.get("handoff_id") == hs.handoff_id]
+  if not own:
+    return range(0)
+  before = max((approve_spec.cycle_of(e.get("review")) for e in entries[:own[0]]), default=0)
+  return range(before + 1, max(approve_spec.cycle_of(entries[i].get("review")) for i in own) + 1)
 
 
 def reviews_of(st: core.Store, hs: core.Store, spec) -> list:
