@@ -6,11 +6,16 @@ never in the judges' question), `decision rule ... respec` writes `respec/R<n>.o
 and the builder orders and the foreman brief define the kind."""
 
 import json
+from pathlib import Path
 
 import pytest
 
+from conftest import set_config
 from superegm.collect import DEVIATION_RE
+from superegm.decision import comment_options
+from superegm.judges import decision_question
 from test_foreman import UNIT, c, prepared
+from test_wave import REPO, fake_gh, foreman_of, question, wave_store
 
 SPEC_LINE = "**Deviation (spec):** docs/specs/x.md:12 says 3; `pytest -k t` fails"
 SPEC_COMMENT = SPEC_LINE + "\n- (a) keep the spec\n- (b) follow the code\n**Builder status:** BLOCKED"
@@ -26,3 +31,44 @@ def test_spec_deviation_blocks_until_ruled(world, tmp_path, monkeypatch, ruled, 
   assert (code, out.strip()) == (0, f"collected: {blockers} foreman findings"), out
   lines = (w.dir / "r1/foreman.findings").read_text(encoding="utf-8").splitlines()
   assert lines == (["foreman-1-1 | high | issue #2 comment 12 | regression: no | deviation (spec) unruled"] if blockers else [])
+
+
+def spec_world(world, mode="normal", text=SPEC_COMMENT, cid=101):
+  """A wave card in `mode`, U02 with a pull request, the owner `owner`, the builder's comment `cid` on the issue."""
+  extra = ["--mode", "leavemealone"] if mode == "leavemealone" else []
+  card = world.run("runcard", "open", "--skill", "wave", "--artifact", world.spec, *extra, card=None)[1].strip()
+  s = wave_store(world, U02={"pr": 70, "head": "a" * 40, "ci": "green"})
+  set_config(world, repo=REPO, owners=["owner"])
+  fake_gh(world, {f"repos/{REPO}/issues/comments/{cid}": {"id": cid, "user": {"login": "builder-bot"}, "body": text}})
+  return card, s
+
+
+def open_decision(world, card, text, cid=101):
+  return world.run("decision", "open", "--unit", "U02", "--point", 3, "--question", question(world, text),
+                   "--source", f"comment {cid}", "--runcard", card)[1].splitlines()[0]
+
+
+def rule_on(world, card, qid, ruling, by="owner"):
+  return world.run("decision", "rule", "--unit", "U02", "--decision", qid, "--ruling", ruling, "--by", by, "--runcard", card)
+
+
+@pytest.mark.parametrize("mode", ["normal", "leavemealone"])
+def test_respec_is_the_owners_alone(world, mode):
+  # respec, like amend, is offered on a spec deviation but refused to the judges and absent from their question
+  assert comment_options(SPEC_COMMENT)[-2:] == ["respec", "stop the unit"]
+  assert "respec" not in comment_options(SPEC_COMMENT.replace("(spec)", "(interface)"))
+  card, s = spec_world(world, mode)
+  qid = open_decision(world, card, SPEC_COMMENT)
+  stored = foreman_of(s, "U02")["decisions"][-1]["options"]
+  assert stored == ["(a) keep the spec", "(b) follow the code", "respec", "stop the unit"]
+  code, err = rule_on(world, card, qid, "respec", "judges:p-1")
+  assert code != 0 and "decision: respec is the owner's alone" in err
+  assert not (s.base() / "respec").exists()
+  # the judges' question for the blocked comment, and a plan-time decision's, list every option but respec
+  code, out = world.run("judges", "question", "--unit", "U02", "--blocked", "101", "--runcard", card)
+  assert code == 0, out
+  blocked = Path(out.splitlines()[0]).read_text(encoding="utf-8")
+  assert "respec" not in blocked and blocked.endswith("- (a) keep the spec\n- (b) follow the code\n- (d) stop the unit\n")
+  s.path("units").write_text(json.dumps({"units": {"U01": {"decisions": [{"id": "d1", "question": "Which?", "options": stored}]}}}), encoding="utf-8")
+  asked = decision_question(s, "U01", "d1")
+  assert "- respec\n" not in asked and "- stop the unit\n" in asked and "- (a) keep the spec\n" in asked
