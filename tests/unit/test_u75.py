@@ -197,7 +197,7 @@ def test_a_record_refuses_a_reference_the_brief_did_not_list(world):
 
 
 def test_a_refused_brief_is_rendered_again_so_the_record_can_follow(world):
-  """The refusal rewrites the stored brief from HEAD, so the panel reads the new document and the same round then records."""
+  """The refusal drops the stored brief, so a render lists the new document from HEAD and the same round then records."""
   from superegm.instructions import render_stored
   from test_review import hstore, record
   branch_with_changed_invariants(world)
@@ -207,7 +207,7 @@ def test_a_refused_brief_is_rendered_again_so_the_record_can_follow(world):
   added = f"{DIR}/architecture.md"
   commit_files(world, {added: "Architecture.\n"})
   code, out = record(world, rid, 1, "design", [], cid)
-  assert code == 1 and f"review record: {added}: not in the reviewers' brief" in out and "rendered again" in out, out
+  assert code == 1 and f"review record: {added}: not in the reviewers' brief" in out and "render it again" in out, out
   manifest, _ = render_stored(hstore(world), "reviewers", "local", review=rid, round=1, root=world.repo)
   assert added in [item["file"] for item in manifest], manifest   # the stored brief now lists it
   assert record(world, rid, 1, "design", [], cid)[0] == 0
