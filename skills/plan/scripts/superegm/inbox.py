@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45); the `proceed again` item and the merge on the authorizing outcome (U92); the `conflict` item (U62).
+# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45); the `proceed again` item and the merge on the authorizing outcome (U92); the `conflict` item (U62); a ruling's action the inbox with its `forms` and `on`, a review's its skill session (U72).
 
 """superegm inbox [--all] [--json] [--handoff <id>]: one line per item that needs the owner across the
 store's open handoffs, read-only and with no run card; superegm notify --runcard <id>: the owner's
@@ -34,6 +34,31 @@ GITHUB = "https://github.com"
 
 def item(repo: str, subject: str, kind: str, action: str, key) -> dict:
   return {"repo": repo, "subject": subject, "kind": kind, "action": action, "fingerprint": f"{subject}/{kind}/{key}"}
+
+
+INBOX = "answer in the inbox"  # spec 1.2.1 section 7.3: the owner answers a ruling in words in the inbox (U72)
+PROCEED = "**Ruling:** proceed — <reason>"  # spec section 4.2: the owner's go-ahead on a head
+SESSION = {"spec": "review-spec", "plan": "review-plan", "integrate": "integrate"}  # a review's kind -> its skill
+
+
+def session(skill: str) -> str:
+  """The action of a question the owner answers in that skill's interactive session (spec 1.2.1 section 7.3)."""
+  return f"answer in your {skill} session"
+
+
+def ruling_item(repo: str, subject: str, kind: str, forms: list, number, key) -> dict:
+  """A ruling the inbox asks in words (U72): its action the inbox, `forms` the `**Ruling:**` forms of the choices
+  still open, `on` the issue the ruling reader looks at."""
+  return item(repo, subject, kind, INBOX, key) | {"forms": forms, "on": f"{GITHUB}/{repo}/issues/{number}"}
+
+
+def cap_forms(foreman: dict) -> list:
+  """A head's cap menu, one form per choice; `one more round` is spent once ruled on any cap decision of the unit
+  (decision.rule)."""
+  caps = {c["id"] for c in foreman.get("decisions") or [] if c.get("point") == 2}
+  spent = any(r.get("decision") in caps and r["ruling"].partition(" — ")[0].strip() == "one more round"
+              for r in foreman.get("rulings") or [])
+  return [ruling_form(2, o) for o in ("one more round", "stop", "redesign")[spent:]]
 
 
 def latest_posted(foreman: dict):
@@ -90,7 +115,6 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
   `proceed again` on the pull request's head once it has one."""
   out = []
   number = (state["units"].get(uid) or {}).get("number")
-  on_issue = f" on {GITHUB}/{repo}/issues/{number}"
   ruled_of = lambda did: {r["ruling"].partition(" — ")[0].strip().split(" ")[0]
                           for r in foreman.get("rulings") or [] if r.get("decision") == did}
   # point 1 takes one ruling per contested finding (decision.rule): its decision stays open for the fids no
@@ -98,17 +122,12 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
   for d in [d for d in foreman.get("decisions") or [] if d.get("point") == 1 or d in report.pending_decisions(foreman)]:
     point, did = d.get("point"), d["id"]
     if point == 2:
-      # one form per choice; `one more round` is spent once ruled on any cap decision of the unit (decision.rule)
-      caps = {c["id"] for c in foreman.get("decisions") or [] if c.get("point") == 2}
-      spent = any(r.get("decision") in caps and r["ruling"].partition(" — ")[0].strip() == "one more round"
-                  for r in foreman.get("rulings") or [])
-      menu = " | ".join(ruling_form(2, o) for o in ("one more round", "stop", "redesign")[spent:])
-      out.append(item(repo, uid, "cap", menu + on_issue, did))
+      out.append(ruling_item(repo, uid, "cap", cap_forms(foreman), number, did))
     elif point in (3, 5):
       words = (d.get("source") or "").split()
       subject = words[1] if len(words) == 2 and words[0] == "comment" else did
-      menu = f" ({' | '.join(d['options'])})" if d.get("options") else ""
-      out.append(item(repo, uid, "decision", ruling_form(3, subject, "<option>") + menu + on_issue, did))
+      forms = [ruling_form(3, subject, o) for o in d.get("options") or ["<option>"]]
+      out.append(ruling_item(repo, uid, "decision", forms, number, did))
     elif point == 1:
       rid, n = source_round(d.get("source"))
       rev = review.load_review(hs, rid) if rid else None
@@ -118,8 +137,8 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
       rnd = review.load_round(hs, rid, n) or {}
       fids = review.contested_fids(rnd) or [c["fid"] for c in rnd.get("builder_contested") or []]
       ruled = ruled_of(did)
-      menu = lambda fid: " | ".join(ruling_form(1, fid, o) for o in ("finding upheld", "finding overruled"))
-      out += [item(repo, uid, "contested", menu(fid) + on_issue, f"{did}/{fid}") for fid in fids if fid not in ruled]
+      menu = lambda fid: [ruling_form(1, fid, o) for o in ("finding upheld", "finding overruled")]
+      out += [ruling_item(repo, uid, "contested", menu(fid), number, f"{did}/{fid}") for fid in fids if fid not in ruled]
   entry = latest_posted(foreman)
   if entry:
     n, rid = entry["round"], review.head_review_id(hs, uid)
@@ -131,14 +150,14 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
     # the outcome keeps naming a fid settled since until the round converges (review.settle_finding)
     open_fid = lambda fid: fid not in settled and not decision.fid_ruled(book, fid)
     # in leavemealone-mode `decision rule` refuses an allowance naming an open point-1 decision (refuse_allowance)
-    form = lambda fid: ruling_form(1, fid, "finding overruled" if mode == "leavemealone"
-                                   and decision.fid_decisions(book, fid, strict=True) else "allowed") + on_issue
+    form = lambda fid: [ruling_form(1, fid, "finding overruled" if mode == "leavemealone"
+                                    and decision.fid_decisions(book, fid, strict=True) else "allowed")]
     deltas = [f["id"] for f in ((rnd.get("reviewers") or {}).get("foreman") or {}).get("findings") or []
               if f["disposition"] is None and f["claim"].startswith("test-delta")]
-    out += [item(repo, uid, "test-delta", form(fid), f"{n}/{fid}") for fid in deltas if open_fid(fid)]
+    out += [ruling_item(repo, uid, "test-delta", form(fid), number, f"{n}/{fid}") for fid in deltas if open_fid(fid)]
     outcome = entry.get("outcome") or ""
     if outcome.startswith("owner: "):  # a finding the test-delta line names already is one line, not two
-      out += [item(repo, uid, "owner", form(fid), f"{n}/{fid}")
+      out += [ruling_item(repo, uid, "owner", form(fid), number, f"{n}/{fid}")
               for fid in (x.strip() for x in outcome.removeprefix("owner: ").split(","))
               if fid and fid not in deltas and open_fid(fid)]
   launches, head = load_launches(hs, uid), report.unit_view(state, uid).get("head")
@@ -148,14 +167,14 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
   # proceed on, so nothing is listed until the pull request has one
   if shown and waiting_proceed(foreman, launches, head):
     last = launches[-1]["round"] if launches else 0
-    out.append(item(repo, uid, "proceed", f"proceed again: {uid} head {shown}{on_issue}", f"{last}/{shown}"))
+    out.append(ruling_item(repo, uid, "proceed", [PROCEED], number, f"{last}/{shown}"))
   auth = authorizing(foreman) or {}
   # a proceed with no pinned head has nothing for `--match-head-commit` to pin: no merge is offered on it, and
   # once the pull request has a head the owner is asked to proceed again on it, as the board's action says
   unpinned = bool(auth.get("ruling")) and not auth.get("head")
   if unpinned and head and latest_clean(foreman, launches, head):
     last = launches[-1]["round"] if launches else 0
-    out.append(item(repo, uid, "proceed", f"proceed again: {uid} head {head}{on_issue}", f"{last}/{head}"))
+    out.append(ruling_item(repo, uid, "proceed", [PROCEED], number, f"{last}/{head}"))
   # U62: no merge is offered while GitHub reads the pull request `CONFLICTING`: it would refuse it
   if latest_clean(foreman, launches, head) and not unpinned and not conflict:
     pr = report.unit_view(state, uid)["pr"] or ((state["units"].get(uid) or {}).get("pr") or {}).get("number")
@@ -244,19 +263,19 @@ def kill_failed_items(hs: core.Store, repo: str, uid: str) -> list:
            "action": f"/superegm:interrupt --unit {uid} --launch {n}, then /superegm:wave", "fingerprint": f"{uid} launch {n} kill_failed"}]
 
 
-def review_items(hs: core.Store, repo: str, spec: str, rid: str, rev: dict, foremen: dict, mode: str = "normal") -> list:
+def review_items(hs: core.Store, repo: str, spec: str, rid: str, rev: dict, foremen: dict, mode: str = "normal",
+                 state: dict | None = None) -> list:
   """A review's cap or stalled line (cap: `review status` exit 2 with no `stop` ruled; stalled: a head's exit 5)
-  and an integrate review's `escalated` findings (in leavemealone the owner declines a blocking one with the id of
-  their `**Ruling:** <fid> finding overruled — <reason>` comment, `--posted`, review.check_settle)."""
+  and an integrate review's `escalated` findings. A head's cap or stall is a ruling the inbox asks, posted on the
+  unit's issue (`state`'s number); a spec, plan or integrate review's is answered in that review's skill session
+  (spec 1.2.1 section 7.3, U72)."""
   out = []
   if rev["kind"] == "integrate":
     for rnd in review.rounds_of(hs, rid, rev):
       for f in review.findings_of(rnd):
         if f.get("disposition") != "escalated":
           continue
-        posted = " --posted <comment id>" if mode == "leavemealone" and review.blocking(f) else ""
-        out.append(item(repo, rid, "escalated", f"superegm review settle --review {rid} --finding {f['id']} "
-                        f"--disposition fixed | declined --owner{posted} --runcard <card>", f["id"]))
+        out.append(item(repo, rid, "escalated", session(SESSION["integrate"]), f["id"]))
   if rev.get("converged") != "no" or any(r["ruling"] == "stop" for r in rev.get("rulings") or []):
     return out
   status = status_of(hs, rid, rev)
@@ -265,15 +284,13 @@ def review_items(hs: core.Store, repo: str, spec: str, rid: str, rev: dict, fore
   rounds = review.rounds_of(hs, rid, rev)
   if rev["kind"] == "head":
     unit = rev["artifact"]
+    foreman, number = foremen.get(unit) or {}, (((state or {}).get("units") or {}).get(unit) or {}).get("number")
     if status.code == 5:
-      out.append(item(repo, unit, "stalled", f"/superegm:wave {spec}", f"{rid}/{rounds[-1]['round']}"))
-    elif status.code == 2 and not any(d.get("point") == 2 for d in report.pending_decisions(foremen.get(unit) or {})):
-      out.append(item(repo, unit, "cap", f"/superegm:wave {spec}", rid))
-  elif status.code == 2:  # `continue` is spent once ruled (review rule)
-    spent = any(r["ruling"] == "continue" for r in rev.get("rulings") or [])
-    choices = "accept|stop" if spent else "continue|accept|stop"
-    out.append(item(repo, rid, "cap", f"superegm review rule --review {rid} --ruling {choices} --owner "
-                    "--runcard <card>", rounds[-1]["round"] if rounds else 0))
+      out.append(ruling_item(repo, unit, "stalled", cap_forms(foreman), number, f"{rid}/{rounds[-1]['round']}"))
+    elif status.code == 2 and not any(d.get("point") == 2 for d in report.pending_decisions(foreman)):
+      out.append(ruling_item(repo, unit, "cap", cap_forms(foreman), number, rid))
+  elif status.code == 2:
+    out.append(item(repo, rid, "cap", session(SESSION.get(rev["kind"], rev["kind"])), rounds[-1]["round"] if rounds else 0))
   return out
 
 
@@ -402,7 +419,7 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
         rev = json.loads(core.read_text(path / "review.json"))
         if rev["kind"] in ("head", "plan") and rev["artifact"] not in live:
           continue
-        found += review_items(hs, repo, spec, path.name, rev, foremen, mode)
+        found += review_items(hs, repo, spec, path.name, rev, foremen, mode, state)
       read_specs.add(spec)
     found.sort(key=lambda i: (i["subject"], KINDS.index(i["kind"].split(" ")[0])))
     found = in_merge_order(hs, found)
@@ -457,9 +474,7 @@ def escalations(hs: core.Store, repo: str, hid: str, spec, foremen: dict, state:
     plan_ds = [(uid, d) for uid, d in routed if pair in d["question"]]
     if any(f"{uid}/{d['id']}" in answered for uid, d in plan_ds):
       continue
-    action = (f"superegm decide --unit {plan_ds[0][0]} --decision {plan_ds[0][1]['id']} --answer <option> --runcard <card>"
-              if plan_ds else f"/superegm:plan {spec}")
-    out.append(item(repo, rid, "escalated", action, fid))
+    out.append(item(repo, rid, "escalated", session("plan"), fid))  # a plan decision or the plan's own question (U72)
   return out
 
 
