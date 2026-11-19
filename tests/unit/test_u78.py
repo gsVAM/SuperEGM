@@ -522,3 +522,16 @@ def test_a_prepared_round_is_no_head_round(world):
   report = c.hs.path("file", "postmortem.md").read_text(encoding="utf-8")
   assert table(report, "Units")["U02"]["head rounds"] == "1"
   assert table(report, "Plan against actual")["U02"]["head rounds"] == "1"
+
+
+def test_only_a_merge_alone_launch_is_a_merge_round(world):
+  """`merge` on a launch is `alone` (a merge round, left out of the cap's count) or `with-fix` (an ordinary fix round)."""
+  c, _, _ = two_units(world)
+  launch = {"status": "exited 0", "subagent_calls": {"count": 0, "calls": []}, "started_at": "2026-11-15T02:00:00Z"}
+  jwrite(c.hs.path("launches", "U01"), {"launches": [{**launch, "round": 1, "merge": "with-fix"},
+                                                     {**launch, "round": 2, "merge": "alone"}]})
+  jwrite(c.hs.path("launches", "U02"), {"launches": [{**launch, "round": 1, "merge": "with-fix"}]})
+  code, out = world.run("postmortem", "--handoff", c.hid)
+  assert code == 0, out
+  units = table(c.hs.path("file", "postmortem.md").read_text(encoding="utf-8"), "Units")
+  assert (units["U01"]["merge rounds"], units["U02"]["merge rounds"]) == ("1", "0")
