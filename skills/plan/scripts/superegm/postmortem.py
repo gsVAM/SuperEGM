@@ -92,11 +92,11 @@ def unit_facts(hs: core.Store, uid: str, state: dict) -> dict:
     for model in str(used or "").split(", "):  # a launch that used several models stores them joined
       if model and model not in models:
         models.append(model)
-  merge_rounds = [r for r in rounds if r.get("merge")]
   return {
       "launches": launches, "models": models,
       "rounds": [r for r in rounds if not r.get("merge") and not superseded(r)],
-      "merge_rounds": len(merge_rounds) or len([x for x in launches if x.get("merge")]),
+      # a launch's `merge` is `alone` (a merge round: foreman.py flags the round from it) or `with-fix` (a fix round)
+      "merge_rounds": sum(1 for x in launches if x.get("merge") == "alone"),
       "merged_at": pr.get("merged_at"), "cost": round(sum(costs), 6) if costs else None,
       "first": launches[0].get("started_at") if launches else None,
       "subagent_calls": sum((x.get("subagent_calls") or {}).get("count", 0) for x in launches)}
