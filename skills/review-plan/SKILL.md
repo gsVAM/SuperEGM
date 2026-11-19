@@ -277,7 +277,7 @@ dispatch of the `judges` skill (Astra through the runner, the Claude judges thro
 `python3 '<HELPER>' judges verdict --panel <id> --runcard <card>`. Apply each converged answer
 through its row as it converges (`review settle … --judges '<panel>'`, `review rule … --judges '<panel>'`);
 the verdict's `open[]` are the unconverged questions: end the invocation for that unit naming
-them and `judges/<id>/verdict.json`, the other units continue, and the owner rules by hand. Under
+them and `judges/<id>/verdict.json`, the other units continue, and the owner rules in a typed `/superegm:review-plan` session. Under
 the driver that ending is a wait record, never a new panel on the next tick: once the units are
 handled, run
 `superegm next wait --handoff '<id>' --phase review-plan --question '<text>' --review '<review id>' --runcard '<card>'`

@@ -252,4 +252,5 @@ re-renders its body, so `graph` and `scan` again; a filed unit gets the comment
 file of Step 4 item 3. An unconverged question stays open: under the driver run
 `superegm next wait --handoff '<id>' --phase plan --question '<text>' --runcard '<CARD>'` naming it
 and `judges/<id>/verdict.json` (a wait record, never a new panel on the next tick); typed, end the
-invocation naming them, close the card, and the owner answers it in the inbox.
+invocation naming them and close the card; no wait record exists, so the inbox has nothing to answer, and the owner
+answers in a typed `/superegm:plan` session.
