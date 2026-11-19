@@ -196,6 +196,40 @@ def test_a_record_refuses_a_reference_the_brief_did_not_list(world):
   assert code == 1 and f"review record: {added}: not in the reviewers' brief" in out, out
 
 
+def test_a_refused_brief_is_rendered_again_so_the_record_can_follow(world):
+  """The refusal rewrites the stored brief from HEAD, so the panel reads the new document and the same round then records."""
+  from superegm.instructions import render_stored
+  from test_review import hstore, record
+  branch_with_changed_invariants(world)
+  spec, cid, rid = opened(world)
+  git(["commit", "-qam", "config", "--allow-empty"], world.repo)
+  render_stored(hstore(world), "reviewers", "local", review=rid, round=1, root=world.repo)
+  added = f"{DIR}/architecture.md"
+  commit_files(world, {added: "Architecture.\n"})
+  code, out = record(world, rid, 1, "design", [], cid)
+  assert code == 1 and f"review record: {added}: not in the reviewers' brief" in out and "rendered again" in out, out
+  manifest, _ = render_stored(hstore(world), "reviewers", "local", review=rid, round=1, root=world.repo)
+  assert added in [item["file"] for item in manifest], manifest   # the stored brief now lists it
+  assert record(world, rid, 1, "design", [], cid)[0] == 0
+  assert record(world, rid, 1, "zoom-out", [], cid)[0] == 0
+
+
+def test_a_reference_under_a_folder_not_addressed_to_the_reviewers_does_not_block_a_record(world):
+  """The brief lists only the entries addressed to the reviewers: a changed document of a builder-only folder is in `refs` and needs no listing."""
+  from superegm.instructions import render_stored
+  from test_review import hstore, record
+  notes = "docs/builder-notes/n.md"
+  commit_files(world, {INV: "Invariants.\n", notes: "Notes.\n"})
+  git(["switch", "-q", "-c", "spec-branch"], world.repo)
+  commit_files(world, {notes: "Notes, revised.\n"})
+  configure(world, [{"dir": DIR, "to": ROLES}, {"dir": "docs/builder-notes", "to": ["builder"]}])
+  spec, cid, rid = opened(world)
+  git(["commit", "-qam", "config", "--allow-empty"], world.repo)
+  manifest, _ = render_stored(hstore(world), "reviewers", "local", review=rid, round=1, root=world.repo)
+  assert notes not in [item["file"] for item in manifest], manifest
+  assert record(world, rid, 1, "design", [], cid)[0] == 0
+
+
 def test_a_record_refuses_a_reference_the_rendered_brief_never_addressed(world):
   """A `dir` entry the committed config lacks renders no documents: the changed one is in `refs` and not in the brief."""
   from superegm.instructions import render_stored
@@ -262,7 +296,13 @@ REF_ROW = ("changed", "docs/reference/domain model.md", 0, 0)
   ([("changed", "B", 7, 9), REF_ROW], "vendor/docs/reference/domain model.md:12", "none"),    # a prefix in front of a listed path names another file
   ([("changed", "B", 7, 9), REF_ROW], "other/docs/reference/domain model.md:8", "none"),
   ([("changed", "B", 7, 9), REF_ROW], "/elsewhere/docs/reference/domain model.md:12", "none"),  # an absolute path outside the repository root
-  ([("changed", "B", 7, 9), REF_ROW], "/abs/repo/other/docs/reference/domain model.md:12", "none")])
+  ([("changed", "B", 7, 9), REF_ROW], "/abs/repo/other/docs/reference/domain model.md:12", "none"),
+  ([("changed", "B", 7, 9), REF_ROW], "other/domain model.md, line 8", "none"),           # a slash path with a space, its line spelled in words
+  ([("changed", "B", 7, 9), REF_ROW], "other/domain model.md line 8", "none"),
+  ([("changed", "B", 7, 9), REF_ROW], "docs/reference/unlisted doc.md: line 8", "none"),
+  ([("changed", "B", 7, 9), REF_ROW], "vendor/docs/specs/design.md:8", "none"),           # a prefix in front of the spec's own path names another file
+  ([("changed", "B", 7, 9), REF_ROW], "/elsewhere/docs/specs/design.md:8", "none"),
+  ([("changed", "B", 7, 9), REF_ROW], "docs/specs/design.md line 8", None)])
 def test_the_scope_filter_reads_a_path_before_its_line(rows, location, answer):
   """Only a spec location goes through cited_line and the sections; a path other than the spec's or a changed document answers none."""
   from superegm.review import out_of_scope, sections
