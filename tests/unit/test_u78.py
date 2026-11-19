@@ -75,3 +75,35 @@ def test_reask_keeps_the_first_answer(world):
   answer(world, c, "second answer")
   assert (waits / f"plan-{at2}.answer.md").read_text(encoding="utf-8") == "second answer"
   assert (waits / f"plan-{since1}.answer.md").read_text(encoding="utf-8") == "first answer"
+
+
+@pytest.mark.parametrize("event", ["reask", "stop then next clear then a second answer"])
+def test_answer_json_is_never_rewritten(world, event):
+  c = chain_world(world)
+  c.save()
+  waits = c.hs.path("file", "waits")
+  since1 = wait(world, c, "plan", "split U02?")
+  world.advance(60)
+  at1 = answer(world, c, "first answer")
+  first_bytes = (waits / f"plan-{since1}.answer.json").read_bytes()
+  world.advance(60)
+  if event == "reask":
+    since2 = wait(world, c, "plan", "split U02 and U03?")
+  else:
+    since2 = stamp(world)
+    card = world.open_card("plan", c.spec)
+    code, out = world.run("next", "clear", "--handoff", c.hid, "--runcard", card)
+    assert code == 0, out
+    # the stopped record is a new wait: its own since, its question kept, the answered one's line journaled
+    assert jread(c.root / "chain" / f"{c.hid}.json")["since"] == since2
+    assert f"next clear {c.hid} plan answered by owner at {at1} answer {sha('first answer')}" in journal_of(c)
+    assert (waits / f"plan-{since2}.md").is_file()
+  assert (waits / f"plan-{since1}.answer.json").read_bytes() == first_bytes
+  assert (waits / f"plan-{since1}.answer.md").read_text(encoding="utf-8") == "first answer"
+  assert (waits / f"plan-{since1}.md").read_text(encoding="utf-8") == "split U02?"
+  world.advance(60)
+  at2 = answer(world, c, "second answer")
+  assert (waits / f"plan-{since1}.answer.json").read_bytes() == first_bytes
+  second = json.loads((waits / f"plan-{since2}.answer.json").read_text(encoding="utf-8"))
+  assert second == {"by": "owner", "at": at2, "sha": sha("second answer")}
+  assert set(second) == {"by", "at", "sha"}
