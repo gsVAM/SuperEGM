@@ -154,6 +154,42 @@ def test_a_later_record_into_a_round_refuses_a_moved_reference(world):
   assert code == 1 and "review record: reference documents differ from the round's" in out, out
 
 
+def test_a_renamed_reference_document_is_a_changed_path(world):
+  """Rename detection never hides the old path: moving a reviewed folder's document is a deletion plus an addition."""
+  from test_review import approve, rounds
+  branch_with_changed_invariants(world)
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [[]])
+  git(["mv", GLOSSARY, GLOSSARY.replace(".md", ".txt")], world.repo)
+  git(["commit", "-qm", "rename the glossary out of the folder's documents"], world.repo)
+  code, out = approve(world, spec, cid)
+  assert code == 1 and f"approve-spec: {GLOSSARY}: differs from the reviewed round" in out, out
+
+
+def test_a_record_refuses_reviewers_who_read_other_reference_bytes(world):
+  """The round's `refs` are what its panel's stored brief listed: a commit between the render and the first record is refused."""
+  from superegm.instructions import render_stored
+  from test_review import hstore, record
+  branch_with_changed_invariants(world)
+  spec, cid, rid = opened(world)
+  render_stored(hstore(world), "reviewers", "local", review=rid, round=1, root=world.repo)   # the brief the panel reads: version A
+  commit_files(world, {INV: "Invariants, committed after the brief was rendered.\n"})
+  code, out = record(world, rid, 1, "design", [], cid)
+  assert code == 1 and f"review record: {INV}: differs from the reviewers' brief" in out, out
+
+
+def test_approve_names_the_moved_reference_when_a_later_round_is_partly_recorded(world):
+  """A later round only partly recorded holds the current manifest but is not completed: approval still names the path."""
+  from test_review import approve, record, rounds
+  branch_with_changed_invariants(world)
+  spec, cid, rid = opened(world)
+  rounds(world, rid, cid, [[]])
+  commit_files(world, {INV: "Invariants, edited after the review.\n"})
+  assert record(world, rid, 2, "design", [], cid)[0] == 0   # round 2 pins the new manifest; zoom-out has not recorded
+  code, out = approve(world, spec, cid)
+  assert code == 1 and f"approve-spec: {INV}: differs from the reviewed round" in out, out
+
+
 SPEC_TEXT = "# Spec\n\n## A\nline\nline\n\n## B\nline\nline\n"
 REF_ROW = ("changed", "docs/reference/domain model.md", 0, 0)
 
@@ -170,7 +206,14 @@ REF_ROW = ("changed", "docs/reference/domain model.md", 0, 0)
   ([("changed", "B", 7, 9), REF_ROW], "docs/specs/design.md:8", None),
   ([("changed", "B", 7, 9), REF_ROW], "design.md:8", None),
   ([("changed", "B", 7, 9), REF_ROW], "/abs/repo/docs/specs/design.md:8", None),
-  ([("changed", "B", 7, 9), REF_ROW], "§2 line 8", None)])
+  ([("changed", "B", 7, 9), REF_ROW], "§2 line 8", None),
+  ([("changed", "B", 7, 9), REF_ROW], "./docs/reference/domain model.md:12", None),           # a listed document by any form of its path
+  ([("changed", "B", 7, 9), REF_ROW], "/abs/repo/docs/reference/domain model.md:12", None),
+  ([("changed", "B", 7, 9), REF_ROW], "domain model.md:12", None),
+  ([("changed", "B", 7, 9), REF_ROW], "docs/reference/domain model.md#L12", None),
+  ([("changed", "B", 7, 9), REF_ROW], "docs/specs/design.md#L8", None),                       # `#` and `,` end a file name as `:` does
+  ([("changed", "B", 7, 9), REF_ROW], "skills/x.py, line 8", "none"),
+  ([("changed", "B", 7, 9), REF_ROW], "other/domain model.md:12", "none")])               # another directory's same-named document
 def test_the_scope_filter_reads_a_path_before_its_line(rows, location, answer):
   """Only a spec location goes through cited_line and the sections; a path other than the spec's or a changed document answers none."""
   from superegm.review import out_of_scope, sections
