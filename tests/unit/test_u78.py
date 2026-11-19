@@ -212,6 +212,44 @@ def test_header_carries_the_total_wall_time(world):
   assert header["closed"]["value"] == "in progress"
 
 
+def reviewed(c, rid, kind, uid, reviewers, found):
+  """A review cycle of `uid` with its round 1: `found` is `{reviewer: record}`."""
+  jwrite(c.hs.path("reviews", rid, "review.json"), {"kind": kind, "artifact": uid, "cycle": 1, "reviewers": reviewers,
+                                                    "runcard": "rc", "converged": "no", "rulings": []})
+  jwrite(c.hs.path("reviews", rid, "round-1.json"), {"round": 1, "runcard": "rc", "reviewers": found})
+
+
+def test_reviewers_count_each_units_own_verdicts(world):
+  """Finding ids repeat across units (`<reviewer>-<round>-<n>`): U01's overrule is not U02's; a reviewer that was not
+  run (its own `not_run`) has no quiet round; a settled plan finding `declined` is overruled; a superseded round is none."""
+  c, _, _ = two_units(world)
+  posted = {"round": 1, "phase": "posted", "outcome": "posted"}
+  jwrite(c.hs.path("foreman", "U01"), {"dispatch_id": None, "decisions": [], "rounds": [posted],
+                                       "rulings": [{"ruling": "codebase-details-1-1 finding overruled — not a defect", "by": "owner"}]})
+  jwrite(c.hs.path("foreman", "U02"), {"dispatch_id": None, "decisions": [], "rounds": [posted], "rulings": []})
+  panel = ["codebase-details", "codex"]
+  reviewed(c, "head-U01-c1", "head", "U01", panel,
+           {"codebase-details": {"findings": [{"id": "codebase-details-1-1", "severity": "high", "regression": "no"}]},
+            "codex": {"findings": [], "not_run": "unavailable"}})
+  reviewed(c, "head-U02-c1", "head", "U02", panel,
+           {"codebase-details": {"findings": [{"id": "codebase-details-1-1", "severity": "medium", "regression": "yes",
+                                                "disposition": "fixed"}]},
+            "codex": {"findings": []}})
+  reviewed(c, "plan-U01-c1", "plan", "U01", ["readiness"],
+           {"readiness": {"findings": [{"id": "readiness-1-1", "severity": "low", "disposition": "declined", "ruling": "owner"},
+                                       {"id": "readiness-1-2", "severity": "low", "disposition": "deferred: triage 2"}]}})
+  code, out = world.run("postmortem", "--handoff", c.hid)
+  assert code == 0, out
+  report = c.hs.path("file", "postmortem.md").read_text(encoding="utf-8")
+  reviewers = table(report, "Reviewers")
+  details = reviewers["codebase-details"]
+  assert (details["kind"], details["high"], details["medium"], details["fixed"]) == ("head", "1", "1", "1")
+  assert (details["overruled"], details["allowed"], details["regressions"], details["quiet rounds"]) == ("1", "0", "1", "0")
+  assert reviewers["codex"]["quiet rounds"] == "1"  # U02's empty record; U01's `not_run` is no round
+  assert (reviewers["readiness"]["overruled"], reviewers["readiness"]["deferred"]) == ("1", "1")
+  assert table(report, "Units")["U01"]["head rounds"] == "1"
+
+
 def snapshot(root):
   return {p: p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
 
