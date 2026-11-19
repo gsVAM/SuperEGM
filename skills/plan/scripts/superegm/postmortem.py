@@ -131,15 +131,15 @@ def units_table(hs: core.Store, uids: list, units: dict, state: dict) -> str:
                  "head rounds", "high", "medium", "low", "subagent calls", "wall seconds", "cost usd"], rows)
 
 
-def verdicts(hs: core.Store, uids: list) -> tuple:
-  """The finding ids the foreman's rulings overruled and allowed, over the handoff's units."""
+def verdicts(hs: core.Store, uid: str) -> tuple:
+  """The finding ids the foreman's rulings on one unit overruled and allowed. Finding ids (`<reviewer>-<round>-<n>`)
+  repeat across units, so a head review reads its own unit's rulings alone; a unit's several head cycles share them."""
   overruled, allowed = set(), set()
-  for uid in uids:
-    for ruling in core.load_foreman(hs, uid).get("rulings") or []:
-      text = str(ruling.get("ruling") or "").strip()
-      for rx, found in ((OVERRULED_RE, overruled), (ALLOWED_RE, allowed)):
-        if m := rx.match(text):
-          found.add(m.group(1))
+  for ruling in core.load_foreman(hs, uid).get("rulings") or []:
+    text = str(ruling.get("ruling") or "").strip()
+    for rx, found in ((OVERRULED_RE, overruled), (ALLOWED_RE, allowed)):
+      if m := rx.match(text):
+        found.add(m.group(1))
   return overruled, allowed
 
 
@@ -152,15 +152,16 @@ def reviews_of(st: core.Store, hs: core.Store, spec) -> list:
 
 
 def reviewers_table(st: core.Store, hs: core.Store, uids: list, spec) -> str:
-  overruled, allowed = verdicts(hs, uids)
   stats = {}
   for rid, found in reviews_of(st, hs, spec):
     if not found:
       continue
+    head = found["kind"] == "head"  # a head's outcomes are the foreman's rulings; any other kind's, `review settle`'s
+    overruled, allowed = verdicts(hs, found["artifact"]) if head else (set(), set())
     for rnd in review.rounds_of(hs, rid, found):
-      if rnd.get("what_ran") == "not run":
-        continue
       for name, entry in (rnd.get("reviewers") or {}).items():
+        if entry.get("not_run"):  # a reviewer that did not run raised nothing and kept no quiet round
+          continue
         row = stats.setdefault((name, found["kind"]), {**dict.fromkeys(SEVERITIES, 0), "fixed": 0, "overruled": 0,
                                                        "allowed": 0, "deferred": 0, "regressions": 0, "quiet": 0})
         findings = entry.get("findings") or []
@@ -170,7 +171,7 @@ def reviewers_table(st: core.Store, hs: core.Store, uids: list, spec) -> str:
           disposition = str(finding.get("disposition") or "")
           row["fixed"] += disposition == "fixed"
           row["deferred"] += disposition.startswith("deferred")
-          row["overruled"] += finding.get("id") in overruled
+          row["overruled"] += finding.get("id") in overruled or (not head and disposition in ("contested", "declined"))
           row["allowed"] += finding.get("id") in allowed
           row["regressions"] += finding.get("regression") == "yes"
   rows = [[name, kind, *(s[k] for k in (*SEVERITIES, "fixed", "overruled", "allowed", "deferred", "regressions", "quiet"))]
