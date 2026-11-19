@@ -63,6 +63,7 @@ every writing call carries `--runcard`.
    `<reviewer>-1-<n> | high|medium|low | <location> | regression: no | <claim>`, written to
    `<artifacts_dir>/<handoff id>/reviews/<id>/round-1-<reviewer>.txt`, empty when it found nothing. The Astra
    lane runs through the runner from this conversation, as `resources/astra_lane.md` says.
+   A repository reviewer or an overridden built-in (a file under `.superegm/reviewers/`, spec section 3.6) is dispatched through `superegm:repo-reviewer`, not its own adapter: run `superegm reviewers --brief <id> ...` and paste its output, unedited, under `# Reviewer persona` in the brief, before the artifact. A plain built-in with no override goes through its own adapter. Its model and effort are the file's `model` and `effort` when set, else `config.reviewers.model` and `config.reviewers.effort`; `SUPEREGM_GOLDFISH_MODEL` and `SUPEREGM_GOLDFISH_EFFORT` override both.
 4. Record each result as it arrives:
    `superegm review record --review <id> --round 1 --sha256 <spec sha256> --reviewer <reviewer> --findings <file> --isolation <clean|exposed:what> --model <requested>:<effective> --effort <requested>:<effective> --runcard <card>`
    (one re-dispatch on a failed or empty return, then `--not-run '<reason>'`).
