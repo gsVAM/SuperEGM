@@ -98,12 +98,14 @@ with no new panel.
 
 A driven run on an answered record (`answer`, `by` and `at` in the record) has
 opened its card with `runcard open --mode normal` and takes the answer
-as the owner's, never as its own pick, with the record's `by` and `at` in
-the card's note. The owner's words are mapped to one of the question's options (Create,
+as the owner's, never as its own pick. `next clear` closes the card itself
+(`runcard close --note` would close it first), so the record's `by` and `at` stay
+where `next answer` wrote them, in `waits/<phase>-<since>.answer.json`. The owner's
+words are mapped to one of the question's options (Create,
 Change the plan, Stop for a Create record). An answer that cannot be mapped to
 one of them is not guessed at: run `next wait` (above) with a new `--question`
-naming what it cannot be mapped to, no `answer`, and end (the unmapped answer
-stays in `waits/`). What the owner does by hand still counts: a typed run asks
+naming what it cannot be mapped to, no `answer`, and end (the receipt of the
+unmapped answer stays in `waits/`). What the owner does by hand still counts: a typed run asks
 and takes the owner's answer as it did before the inbox.
 
 At its end the run runs

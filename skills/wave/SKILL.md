@@ -13,7 +13,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30); the batch's `notify` (U23); the decision points, rulings and leavemealone-mode moved to `references/`; a head's Decision point 5 and `clean` by accept (U35); `launch-builder` alone and the driver role (U24); `stalled` (U31); the frozen mode, driven normal-mode decisions (U45); `waiting proceed` (U92); the merge round (U62); failed resume (U63). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30); the batch's `notify` (U23); the decision points, rulings and leavemealone-mode moved to `references/`; a head's Decision point 5 and `clean` by accept (U35); `launch-builder` alone and the driver role (U24); `stalled` (U31); the frozen mode, driven normal-mode decisions (U45); `waiting proceed` (U92); the merge round (U62); failed resume (U63); the merge line's inbox (U70). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the wave skill. Not part of google/elephant-goldfish-model. -->
 
@@ -35,7 +35,7 @@ elephant dispatched through its own adapter (`superegm:foreman`,
 `omitClaudeMd: true`), which dispatches the head's goldfish panel
 (zero-context, read-only, each through its own adapter), records the
 findings, posts one review comment bound to the reviewed commit, and returns
-one word (the word table). The builder answers it in its next launch.
+one word (the word table).
 
 Your only GitHub writes are the `**Ruling:**` comment `decision rule` posts,
 the `superegm:stopped` label a stop adds and the board `status` writes into
@@ -53,7 +53,7 @@ unconverged judges' question stays open alike). That unit is `pending a decision
 (no slot) and the batch goes on handling every event of the batch; the session ends on the
 loop's condition alone: `status.wait_events` acked every event, so an early exit loses another unit's exit.
 
-Open a reference only when this file sends you to it:
+Open a reference only when sent to it:
 
 - `references/foreman_brief.md`: the brief every foreman is dispatched with (batch step 5).
 - `references/decision_points.md`: the `owner:` row and Decision points 1–3 and 5 (`decision open`, then
@@ -136,4 +136,4 @@ dispatch):
 Before the close, run batch step 3b once and `report` again (a thread posted before the last round's review is read now): an `outcome:` line or no longer `loop: ended` → back to the batches.
 
 `loop: ended` → run `python3 '<HELPER>' runcard close '<CARD>'`. Then report in chat from `wave_<n>_report.md`: per unit its state, head and rounds; the non-terminal launches (builders still running report to the next `wave`); the heads with pending or absent CI; the idle units and why; the ready units without a slot; the pending decisions; the stopped units with their unlanded dependants: what stayed open for the owner to merge,
-close, or re-type `/superegm:wave`. The owner merges in the inbox, which runs `gh pr merge --admin` where the base ruleset restricts updates to config.owners.
+close, or re-type `/superegm:wave`. The owner merges in the inbox, which runs `gh pr merge --admin` once the owner says yes, where the base ruleset restricts updates to config.owners.

@@ -245,13 +245,15 @@ record only on confirmed progress and otherwise keeps it, asked again as
 
 A driven run on an answered record (`answer`, `by` and `at` in `chain/<handoff>.json`) has opened its card with
 `runcard open --mode normal` (above) and records the answer as the owner's, never as its own pick:
-`review settle … --owner` for a contested or declined finding, `review rule … --owner` with the `accept`, `proceed` or `stop`
-ruling the answer names, with the record's `by` and `at` in the note (`proceed` through `--reason`). The
+`review settle … --owner` for a contested or declined finding, `review rule … --owner` with the `continue`, `accept`,
+`proceed` or `stop` ruling the answer names. Only `proceed` takes a note: put the record's `by` and `at` in its
+`--reason`. For the others `next clear` closes the card itself (`runcard close --note` would close it first), so
+the `by` and `at` stay where `next answer` wrote them, in `waits/<phase>-<since>.answer.json`. The
 owner's words are mapped to one of the question's options. An answer that cannot be mapped to one of them
 is not guessed at: run
 `superegm next wait --handoff '<id>' --phase review-plan --question '<text>' --review '<review id>' --runcard '<card>'`
-with a new question naming what it cannot be mapped to, no `answer`, and end (the unmapped answer stays in
-`waits/`). What the owner does by hand still counts: a typed run of this skill takes the owner's answer as it
+with a new question naming what it cannot be mapped to, no `answer`, and end (the receipt of the unmapped
+answer stays in `waits/`). What the owner does by hand still counts: a typed run of this skill takes the owner's answer as it
 did before the inbox. When a driven review-plan stops, write a wait record as for a stall (a split that needs
 `approve-spec --amend-units` included), so `proceed` on a stopped plan review goes the same way.
 
