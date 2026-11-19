@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Files a confirmed handoff plan as GitHub issues, with the tracking issue, one sub-issue per unit and the blocked-by links.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the file skill body, phase 4 of the SuperEGM loop (design section 10); `[--handoff <id>]` and a frozen handoff's refusal (U20); the resume of a started filing, the frozen mode, `next wait` and `next clear` under the chain (U56). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the file skill body, phase 4 of the SuperEGM loop (design section 10); `[--handoff <id>]` and a frozen handoff's refusal (U20); the resume of a started filing, the frozen mode, `next wait` and `next clear` under the chain (U56); the answered chain record taken as the owner's (U70). -->
 
 # file
 
@@ -72,9 +72,9 @@ ends a driven run on its line, as it does a typed one. A typed run asks as
 written.
 
 A run, typed or driven, that finds a wait record for this handoff
-(`chain/<handoff>.json` in the store) opens its card with `runcard open --mode
-normal` whatever the frozen mode (Step 1) and runs Steps 2 to 4 as for any
-filing. A typed run that names no `--handoff` has no `<id>` before its card
+(`chain/<handoff>.json` in the store) opens its card with
+`runcard open --mode normal` whatever the frozen mode (Step 1) and runs
+Steps 2 to 4 as for any filing. A typed run that names no `--handoff` has no `<id>` before its card
 exists: it opens the card as Step 1 says, reads `<id>` from the card's
 record, and when `chain/<id>.json` exists opens its card again with `--mode
 normal` (the new card marks the first interrupted) and passes `--handoff
@@ -93,10 +93,20 @@ with no new panel.
     is void; a typed run asks Step 4's own question, a driven run runs `next
     wait` with the fresh question.
 
+A driven run on an answered record (`answer`, `by` and `at` in the record) has
+opened its card with `runcard open --mode normal` and takes the answer
+as the owner's, never as its own pick, with the record's `by` and `at` in
+the card's note. The owner's words are mapped to one of the question's options (Create,
+Change the plan, Stop for a Create record). An answer that cannot be mapped to
+one of them is not guessed at: run `next wait` (above) with a new `--question`
+naming what it cannot be mapped to, no `answer`, and end (the unmapped answer
+stays in `waits/`). What the owner does by hand still counts: a typed run asks
+and takes the owner's answer as it did before the inbox.
+
 At its end the run runs
-`python3 '<HELPER>' next clear --handoff '<id>' --runcard '<CARD>'` in place
-of `runcard close`, which removes the record only on confirmed progress and
-closes the card.
+`python3 '<HELPER>' next clear --handoff '<id>' --runcard '<CARD>'` (the
+`superegm next clear` of the chain) in place of `runcard close`, which removes
+the record only on confirmed progress and closes the card.
 
 ## Step 1: Run card
 

@@ -12,7 +12,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: phase 2 of the SuperEGM loop (the plan file, graph, scan, decide); EGM's approval, review gate, dry run and filing steps live in review-spec, review-plan and file; `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the `Tier:` field (U33); the split rules, the `width:` line and the header's wave plan (U29); what a Step holds (1.2.1 §6.5); the scope-cite warning stated (U79); the `units.*` limits stated (U42); the driven wait and the typed run on a wait record, the frozen mode (U45); shared files are a merge order, `Blocked by` carries code dependencies (U65). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: phase 2 of the SuperEGM loop (the plan file, graph, scan, decide); EGM's approval, review gate, dry run and filing steps live in review-spec, review-plan and file; `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the `Tier:` field (U33); the split rules, the `width:` line and the header's wave plan (U29); what a Step holds (1.2.1 §6.5); the scope-cite warning stated (U79); the `units.*` limits stated (U42); the driven wait and the typed run on a wait record, the frozen mode (U45); shared files are a merge order, `Blocked by` carries code dependencies (U65); the answered chain record taken as the owner's (U70). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the handoff skill. Not part of google/elephant-goldfish-model. -->
 
@@ -217,6 +217,16 @@ the same question. While that card is open the tick skips the handoff. At its en
 `superegm next clear --handoff '<id>' --runcard '<CARD>'` through the helper in place of
 `runcard close` (it closes the card itself): it removes the record only on confirmed progress and
 otherwise keeps it, asked again as `stopped at plan by <by>: answer to go on`.
+
+A driven run on an answered record (`answer`, `by` and `at` in `chain/<handoff>.json`) has opened its card with
+`runcard open --mode normal` (above) and records the answer as the owner's, never as its own pick:
+`decide --unit <U> --decision D<n> --answer '(<id>)' --runcard '<CARD>'` for the item the question named,
+with the record's `by` and `at` in the card's note. The owner's words are mapped to one of the question's
+options. An answer that cannot be mapped to one of them is not guessed at: run
+`superegm next wait --handoff '<id>' --phase plan --question '<text>' --runcard '<CARD>'` with a new
+question naming what it cannot be mapped to, no `answer`, and end (`next wait` closes the card; the unmapped
+answer stays in `waits/`). Otherwise the run ends with `superegm next clear`, as above. What the owner
+does by hand still counts: a typed run of this skill takes the owner's answer as it did before the inbox.
 
 ## Leavemealone-mode
 
