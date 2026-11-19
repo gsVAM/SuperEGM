@@ -5,7 +5,7 @@ effects: working-tree
 description: "You MUST use this before any creative work - creating features, building components, adding functionality, modifying behavior, or planning anything new, in software or out of it (a talk, a business, a renovation)."
 ---
 
-<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: spec path docs/specs, the Units section, the review-spec gate, the brainstorm-brief lookup; builder check and the mockups section removed; the brief in the handoff's own directory (U32); the team brainstorm (U34); the triage section offered (U39); the SDLC workflow step (U64); the chain offered after doctor passes, nothing written outside the repository (U71). -->
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: spec path docs/specs, the Units section, the review-spec gate, the brainstorm-brief lookup; builder check and the mockups section removed; the brief in the handoff's own directory (U32); the team brainstorm (U34); the triage section offered (U39); the SDLC workflow step (U64); the chain offered after doctor passes, nothing written outside the repository (U71); the reference documents offered once in the SDLC workflow step (U75). -->
 
 # Brainstorming
 
@@ -263,6 +263,17 @@ changes only what the owner agrees to:
    written as `.superegm/reviewers/<id>.md` and shown to them before it is
    written.
 2. Instructions: the `instructions` entries, then the reference documents.
+   Reference documents (invariants, an architecture note, a glossary) are
+   offered once, never required: offer once to draft or update the ones
+   the spec's design implies (for example `invariants.md`,
+   `architecture.md`), in this same session, under the configured `dir`
+   or, with none, under `docs/reference/` with a `dir` entry added to
+   `instructions` addressed to all four roles (`builder`, `foreman`,
+   `reviewers`, `judges`). On their yes, draft each document from the
+   spec and the code you already read and show each; area 5 saves them
+   with the rest, so the approval freezes them. A no, or
+   silence, records nothing and the step goes on; nothing later checks
+   that the documents exist.
 3. The round cap: `review.rounds`, or a `Rounds:` line in the spec.
 4. The mode: normal or leavemealone (`mode`).
 5. The builder: first show the MCP server names they already have, from
@@ -272,7 +283,9 @@ changes only what the owner agrees to:
    commands it may run. Then `superegm builder-setup`, each server name
    passed as `--mcp` and each command as `--allow`. Now commit the config, reviewer and
    reference-document changes of areas 1 to 5 on the current branch, so
-   that doctor and the probe read what `HEAD` will freeze with the spec.
+   that doctor and the probe read what `HEAD` will freeze with the spec;
+   the reference documents the owner said yes to at area 2 go in the
+   same way: this session commits them with the step's commit.
 6. `superegm doctor`: an exit of 0 passes. Otherwise show the failing
    lines, work through each with them, and commit each fix by path
    before you run doctor or the probe again. Then offer `doctor --probe`
