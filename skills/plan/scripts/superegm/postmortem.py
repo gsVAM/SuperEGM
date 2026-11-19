@@ -67,11 +67,18 @@ def uids_of(hs: core.Store, units: dict, state: dict) -> list:
   return found + [u for u in sorted(state.get("units") or {}) if u not in found]
 
 
-def superseded(entry: dict) -> bool:
+def recorded_rounds(hs: core.Store, uid: str) -> set:
+  """The round numbers of the unit's head reviews in which a reviewer's result is recorded: `review.record_round` writes
+  them without advancing the foreman's phase, so a `prepared` round holding one is a round in progress."""
+  return {n for rid in review.cycle_ids(hs, "head", uid) for n in review.round_numbers(hs, rid)
+          if review.load_round(hs, rid, n).get("reviewers")}
+
+
+def superseded(entry: dict, recorded: set = frozenset()) -> bool:
   """A foreman round that was never run: collected as `not run (...)`, by `foreman.supersede`, a moved target
-  (`review`), an owner's interrupt or `collect --not-run`; or only fetched or prepared, with no reviewer started yet.
-  It is no round."""
-  return entry.get("phase") in ("fetched", "prepared") or (
+  (`review`), an owner's interrupt or `collect --not-run`; or only fetched or prepared, with no reviewer's result
+  recorded in it yet (`recorded`, the round numbers that hold one). It is no round."""
+  return (entry.get("phase") in ("fetched", "prepared") and entry.get("round") not in recorded) or (
       entry.get("phase") == "collected" and str(entry.get("outcome") or "").startswith("not run"))
 
 
@@ -80,6 +87,7 @@ def unit_facts(hs: core.Store, uid: str, state: dict) -> dict:
   launches = launch.load_launches(hs, uid)
   foreman = core.load_foreman(hs, uid)
   rounds = foreman.get("rounds") or []
+  recorded = recorded_rounds(hs, uid)
   pr = ((state.get("units") or {}).get(uid) or {}).get("pr")  # the whole PR; `status.units[uid].pr` is its number
   pr = pr if isinstance(pr, dict) else {}
   costs = [x["total_cost_usd"] for x in launches if isinstance(x.get("total_cost_usd"), (int, float))
@@ -94,7 +102,7 @@ def unit_facts(hs: core.Store, uid: str, state: dict) -> dict:
         models.append(model)
   return {
       "launches": launches, "models": models,
-      "rounds": [r for r in rounds if not r.get("merge") and not superseded(r)],
+      "rounds": [r for r in rounds if not r.get("merge") and not superseded(r, recorded)],
       # a launch's `merge` is `alone` (a merge round: foreman.py flags the round from it) or `with-fix` (a fix round)
       "merge_rounds": sum(1 for x in launches if x.get("merge") == "alone"),
       "merged_at": pr.get("merged_at"), "cost": round(sum(costs), 6) if costs else None,
