@@ -92,6 +92,27 @@ def open_respec(st, unit: str, comment_id: int, now: str) -> str:
   return rid
 
 
+PATH_LINE = re.compile(r"[\w./-]+\.[A-Za-z]\w*:\d+(?:-\d+)?")  # a `path:line` (or `path:a-b`) reference
+BACKTICKED = re.compile(r"`([^`\n]+)`")
+
+
+def check_respec(text: str) -> None:
+  """Refuse a `respec` that is not on one `spec` deviation alone, whose comment does not quote the frozen spec's
+  `path:line`, or that shows no evidence: a command (a backticked span that is not itself a `path:line`) or a second,
+  different `path:line` in the base (spec §7.6). The comment is the heading and the lines after it, less its options."""
+  heads = list(DEVIATION.finditer(text))
+  if len(heads) != 1 or heads[0]["kind"] != "spec":
+    raise Refusal("decision: respec needs a comment with one spec deviation and no other")
+  said = text[heads[0].start("rest"):].split("**Builder status:**")[0]
+  said = "\n".join(line for line in said.splitlines() if not line.startswith("- ("))
+  refs = list(dict.fromkeys(m.group(0) for m in PATH_LINE.finditer(said)))
+  if not refs:
+    raise Refusal("decision: respec needs the frozen spec's path:line in the deviation")
+  commands = [s for s in BACKTICKED.findall(said) if not PATH_LINE.fullmatch(s.strip())]
+  if len(refs) < 2 and not commands:
+    raise Refusal("decision: respec needs the evidence: a command and its output, or a path:line in the base")
+
+
 def check_amend(st, text: str, reason: str) -> None:
   """Refuse an `amend` that has no Interfaces line, is not on one interface deviation alone, or names a `<name>`
   its unit's Interfaces lines lack (spec §6.5)."""
@@ -599,6 +620,8 @@ def rule(args) -> int:
   amends = decision["point"] == 3 and str(decision["source"]).startswith("comment")
   if amends and chosen == "amend":  # refused before anything is posted
     check_amend(st, decision["question"], reason)
+  if amends and chosen == "respec":  # the spec line and the evidence, refused before anything is posted
+    check_respec(decision["question"])
   if decision["point"] == 5:  # a head's fifth point (U35): the owner's alone, applied before anything is posted
     if args.by.startswith("judges:"):
       raise Refusal("decision: point 5 is the owner's alone")
