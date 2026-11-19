@@ -394,6 +394,7 @@ def collect(args, card):
     if run["summary"] is not None:
       core.atomic_write(r / "dod" / f"{i}.txt", f"exit: {'none' if run['exit'] is None else run['exit']}\n"
                         f"summary: {run['summary']}\ntimed_out: {'yes' if run['timed_out'] else 'no'}\n")
+  specs += [s for s in unruled_specs(last, rulings) if s not in specs]  # a spec finding stays open until the owner rules it (§7.6)
   lines, contested = foreman_findings(n, verdict, text, scope, worktree, facts["changed"], pr_body, comments, login, prior, prior_ci_fid,
                                       commits, prior_tdd, prior_scope, contest_of,
                                       external, earlier, disposed, posted, handoff.config.get("owners") or [],
@@ -436,8 +437,22 @@ def spec_findings(texts: list, spec: str) -> list:
   for text in texts:
     text = " ".join(text.split()).replace(" | ", " / ")
     check_respec("**Deviation (spec):** " + text, spec)
-    found.append((next(m.group(0) for m in PATH_LINE.finditer(text) if not spec or cites(m.group(0), spec)), f"deviation (spec) unruled: {text}"))
+    found.append((next(m.group(0) for m in PATH_LINE.finditer(text) if not spec or cites(m.group(0), spec)), SPEC_CLAIM + text))
   return found
+
+
+SPEC_CLAIM = "deviation (spec) unruled: "
+
+
+def unruled_specs(last: dict, rulings: list) -> list:
+  """The foreman's spec findings the previous posted round (`last`) holds open, `(location, claim)` each as
+  `spec_findings` makes them: a finding of kind `spec` blocks until the owner rules it (§7.6), so a round that is
+  not given `--spec` again still raises it, and `carry` keeps its id. A finding an `upheld`, `overruled` or
+  `allowed` ruling names, or a recorded `<fid> respec` (read as an overrule), is settled and not raised again."""
+  settled = {r.subject for r in rulings if r.kind in ("upheld", "overruled", "allowed")}
+  prev = ((last.get("reviewers") or {}).get("foreman") or {}).get("findings") or []
+  return [(f["location"], f["claim"]) for f in prev
+          if f["disposition"] is None and f["claim"].startswith(SPEC_CLAIM) and f["id"] not in settled]
 
 
 def require_non_terminal(unit: str, entry: dict) -> None:
@@ -501,7 +516,10 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
                      consumed: frozenset = frozenset(), checked: list = None, specs: list = ()) -> tuple:
   """The foreman's high findings of spec section 11 in this order, which numbers the `foreman-<r>-<k>` ids: CI,
   the DoD items' fenced-output and `Exists` checks, the `dod-<n>` re-runs, the `test-delta:` entries, scope,
-  tdd-order, deviations, contested, upheld, unreplied external; and `builder_contested[]` for the contested ones. Rulings
+  tdd-order, deviations, the foreman's spec findings, contested, upheld, unreplied external; and `builder_contested[]` for the contested ones.
+  `specs`, `(location, claim)` each, is the foreman's findings of kind `spec` (§7.6): the ones `--spec` raises in this round
+  (`spec_findings`) and the ones the previous posted round holds open (`unruled_specs`), which `carry` then keeps under
+  their ids; each is a blocker as a comment's deviation is, and numbered right after the comment deviations. Rulings
   and replies count only from the right author: a ruling is a `config.owners` login's comment `ruling_of` reads
   (spec section 13.2's one grammar) on the unit's issue, never the PR, or an entry of the record (`recorded`,
   `recorded_rulings`), replies come from the builder. Every `**Deviation**` line of a comment is one deviation; an `allowed` ruling on a posted
