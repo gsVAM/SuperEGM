@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76); a spec cycle's changed reference documents as whole-file `changed <path>` scope lines, their `refs` manifest on each round, in the scope filter, the settle check and the proceed ruling (U75).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest|triage: the one review loop (spec section 8)."""
 
@@ -314,7 +314,35 @@ def approved_text(spec: Path, approval: dict):
   return core.spec_blob(root, rel, approval["sha256"])
 
 
+def reference_manifest(st: core.Store, root: Path) -> list[dict]:
+  """`[{file, sha}]` (U75) of the `*.md` files under a configured `instructions` `dir` that changed between the merge
+  base with `<base>` and the working tree (`HEAD`'s commits and an edit not yet committed), in path order, each with
+  the 12-hex blob sha of its working-tree bytes; a changed file the working tree no longer holds is left out. `[]` with
+  no `dir` entry or no merge base."""
+  from superegm import instructions  # at call time: that module's import chain reaches this one
+  folders = [e["dir"].rstrip("/") for e in st.config.get("instructions") or [] if isinstance(e, dict) and isinstance(e.get("dir"), str)]
+  if not folders:
+    return []
+  base = core.run_git(["merge-base", st.config["base"], "HEAD"], root, check=False).strip()
+  if not base:
+    return []
+  names = core.run_git(["diff", "--name-only", "-z", base, "--", *[f + "/" for f in folders]], root, check=False)
+  found = []
+  for name in sorted({n for n in names.split("\0") if n.endswith(".md")}):
+    path = root / name
+    if path.is_file():
+      found.append({"file": name, "sha": instructions.blob_sha(path.read_bytes())})
+  return found
+
+
 def scope_of(st: core.Store, review: dict, spec: Path) -> list:
+  """The spec's scope rows (`spec_scope`), then one `("changed", <path>, 0, 0)` row per changed reference document
+  (`reference_manifest`): a whole file, which has no lines (U75)."""
+  root = core.git_toplevel(spec.parent)
+  return spec_scope(st, review, spec) + [("changed", row["file"], 0, 0) for row in reference_manifest(st, root)]
+
+
+def spec_scope(st: core.Store, review: dict, spec: Path) -> list:
   """The round's scope rows, `(changed|neighbour|whole, heading, start, end)`, from the current bytes: under
   `auto` (a review opened before U19 reads as `auto`) the sections `scope_sections` finds against the
   approved bytes; a section list adds its headings as `changed`, without neighbours (a heading the bytes no
@@ -575,7 +603,7 @@ def scope_review(args) -> int:
     raise core.HandoffError(f"review scope: {args.review} is not a spec review")
   bind(args, review)
   for kind, heading, start, end in scope_of(st, review, Path(review["artifact"])):
-    print(f"{kind} {start}-{end} {heading}")
+    print(f"{kind} {heading}" if start == end == 0 else f"{kind} {start}-{end} {heading}")  # a reference document is a whole file
   return 0
 
 
