@@ -360,13 +360,18 @@ def test_settled_head_findings_and_spec_carried_externals(world):
   path = c.root / "approvals" / f"{SLUG}.json"
   record = jread(path)
   jwrite(path, {**record, "entries": [{**record["entries"][-1], "review": f"spec-{SLUG}-c1"}]})
-  claim = {"id": "external:astra-1-1", "claim": "a defect", "severity": "high", "disposition": "fixed"}
+  from superegm import review
+  original = {"id": "external:astra-1-1", "claim": "a defect", "severity": "high", "disposition": None, "regression": "no"}
   rid = f"spec-{SLUG}-c1"
   jwrite(c.hs.path("reviews", rid, "review.json"), {"kind": "spec", "artifact": str(c.spec), "cycle": 1,
                                                     "reviewers": ["external:astra"], "runcard": "rc", "converged": "no", "rulings": []})
-  for n in (1, 2):
-    jwrite(c.hs.path("reviews", rid, f"round-{n}.json"),
-           {"round": n, "runcard": "rc", "reviewers": {"external:astra": {"findings": [dict(claim)]}}})
+  jwrite(c.hs.path("reviews", rid, "round-1.json"), {"round": 1, "runcard": "rc", "reviewers": {
+      "external:astra": {"findings": [original], "not_run": None, "isolation": "exposed:ingest", "model": "none:none",
+                         "effort": "none:none"}}})
+  later = {"round": 2, "reviewers": {}}  # round 2 holds what `carry_externals` copies of round 1; the fix settles that copy alone
+  assert review.carry_externals(c.hs, str(c.spec), rid, later) == ["external:astra-1-1"]
+  later["reviewers"]["external:astra"]["findings"][0]["disposition"] = "fixed"
+  jwrite(c.hs.path("reviews", rid, "round-2.json"), {"round": 2, "runcard": "rc", "reviewers": later["reviewers"]})
   code, out = world.run("postmortem", "--handoff", c.hid)
   assert code == 0, out
   reviewers = table(c.hs.path("file", "postmortem.md").read_text(encoding="utf-8"), "Reviewers")
@@ -582,6 +587,22 @@ def test_a_prepared_round_is_no_head_round(world):
   report = c.hs.path("file", "postmortem.md").read_text(encoding="utf-8")
   assert table(report, "Units")["U02"]["head rounds"] == "1"
   assert table(report, "Plan against actual")["U02"]["head rounds"] == "1"
+
+
+def test_a_prepared_round_with_recorded_reviewers_is_a_round(world):
+  """`review.record_round` writes a round's reviewer results without advancing the foreman's phase from `prepared`: a
+  prepared round whose round file holds a reviewer's record is a round in progress, and counts."""
+  c, _, _ = two_units(world)
+  jwrite(c.hs.path("foreman", "U02"), {"dispatch_id": None, "decisions": [], "rulings": [], "rounds": [
+      {"round": 1, "phase": "posted", "outcome": "posted"}, {"round": 2, "phase": "prepared"}, {"round": 3, "phase": "prepared"}]})
+  panel = {"codebase-details": {"findings": []}}
+  reviewed(c, "head-U02-c1", "head", "U02", ["codebase-details"], panel)
+  jwrite(c.hs.path("reviews", "head-U02-c1", "round-2.json"), {"round": 2, "runcard": "rc", "reviewers": panel})
+  code, out = world.run("postmortem", "--handoff", c.hid)
+  assert code == 0, out
+  report = c.hs.path("file", "postmortem.md").read_text(encoding="utf-8")
+  assert table(report, "Units")["U02"]["head rounds"] == "2"  # round 3 was prepared and nothing recorded in it
+  assert table(report, "Plan against actual")["U02"]["head rounds"] == "2"
 
 
 def test_only_a_merge_alone_launch_is_a_merge_round(world):
