@@ -249,13 +249,32 @@ def clear(args, st: core.Store, hid: str) -> int:
   if record:
     line = next_line(st, hid, read_wait=False)
     later = line in ORDER and ORDER.index(line) > ORDER.index(record["phase"])
-    if later or proceeded(core.handoff_store(st, hid), record.get("review"), record.get("since")):
+    hs = core.handoff_store(st, hid)
+    if later or proceeded(hs, record.get("review"), record.get("since")):
+      journal_clear(hs, record)
       path.unlink()
     elif record.get("answer") and not line.startswith("waiting "):
-      core.atomic_write(path, {"phase": record["phase"], "since": core.now_iso(), "review": record.get("review"),
-                               "question": f"stopped at {record['phase']} by {record.get('by')}: answer to go on"})
+      journal_clear(hs, record)
+      at = core.now_iso()
+      question = f"stopped at {record['phase']} by {record.get('by')}: answer to go on"
+      keep_question(hs, record["phase"], at, question, "clear")
+      core.atomic_write(path, {"phase": record["phase"], "since": at, "review": record.get("review"), "question": question})
   runcard.close_card(st, args.runcard)
   return 0
+
+
+def journal_clear(hs: core.Store, record: dict) -> None:
+  """Journal the end of a wait record `next clear` removes or rewrites: `next clear <handoff> <phase> answered by
+  <by> at <at> answer <sha>`, the answer's sha256. Every `waits/` file stays where it is. A record a `proceed` ruling
+  resolves holds no answer: its `by` and `at` are the ruling's, else `progress` and now, the answer's text empty."""
+  if record.get("answer") is not None:
+    by, at, text = record.get("by"), record.get("at"), record["answer"]
+  else:
+    data = review.load_review(hs, record.get("review")) if record.get("review") else None
+    ruling = next((r for r in reversed((data or {}).get("rulings") or []) if r.get("ruling") == "proceed"), {})
+    by, at, text = ruling.get("by") or "progress", ruling.get("at") or core.now_iso(), ""
+  core.journal(hs, f"next clear {hs.handoff_id} {record['phase']} answered by {by} at {at} "
+                   f"answer {hashlib.sha256(text.encode('utf-8')).hexdigest()}")
 
 
 def answer(args, st: core.Store, hid: str) -> int:
