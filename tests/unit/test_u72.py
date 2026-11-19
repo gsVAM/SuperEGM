@@ -202,6 +202,38 @@ def test_the_inbox_skill_names_round_four_text(phrase):
 
 
 @pytest.mark.parametrize("phrase", [
+  "--owner --runcard <card>", "a `contested` or `declined` one", "`undo`", "the undo of a triage deferral",
+  "a `stalled` item's `head` too"])
+def test_the_inbox_skill_names_round_five_text(phrase):
+  # round 5: the settle recorder's card, `--posted` only where check_settle asks it, the undo of a triage deferral,
+  # a stall's head read from its item
+  assert phrase in SKILL.read_text(encoding="utf-8")
+
+
+def test_a_stalled_item_carries_the_head_a_proceed_pins(world):
+  """Round 5 (codebase-details-4-3): a stall's item names the head its proceed would pin (review.pinned_head: the
+  pull request's saved head, else the latest round's)."""
+  item = item_of(world, "stalled")
+  assert item["head"] == SEEDS["stalled"]["U01"]["head"]
+
+
+def test_a_merge_offers_the_undo_of_its_latest_rounds_deferrals(world):
+  """Round 5 (astra-4-2): the owner undoes a triage deferral in the inbox (spec 1.2.1 section 7.3, 5.2): a merge item
+  carries `undo`, the `**Ruling:** <fid> finding upheld` form of each medium the latest posted round deferred
+  (`decision.refuse_undo` refuses an earlier round's), and `on`, the unit's issue; none without a deferral."""
+  open_wave_card(world)
+  s = seed(world, **U(rounds=POSTED(2, "clean"), launches=[{"round": 2, "status": "exited 0"}]))
+  [plain] = [i for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "merge"]
+  assert "undo" not in plain
+  foreman = json.loads(s.path("foreman", "U01").read_text(encoding="utf-8"))
+  rows = [{"fid": fid, "round": n, "claim": "c", "triage": {}, "pattern": 1} for fid, n in (("f-1-1", 1), ("f-2-1", 2))]
+  atomic_write(s.path("foreman", "U01"), foreman | {"followups": rows})
+  [merge] = [i for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "merge"]
+  assert merge["undo"] == ["**Ruling:** f-2-1 finding upheld"] and merge["on"].endswith(f"/{REPO}/issues/2")
+  assert "**Ruling:**" not in merge["action"]
+
+
+@pytest.mark.parametrize("phrase", [
   "gh api user --jq .login", "`config.owners`", "recommended", "one-line reason",
   "leavemealone", "did not converge", "back once", "gh issue comment <n> -R <repo> --body-file",
   "proceed again", "**Ruling:** proceed — <reason>", "superegm next answer --handoff",
