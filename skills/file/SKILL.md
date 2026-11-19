@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Files a confirmed handoff plan as GitHub issues, with the tracking issue, one sub-issue per unit and the blocked-by links.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the file skill body, phase 4 of the SuperEGM loop (design section 10); `[--handoff <id>]` and a frozen handoff's refusal (U20); the resume of a started filing, the frozen mode, `next wait` and `next clear` under the chain (U56). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the file skill body, phase 4 of the SuperEGM loop (design section 10); `[--handoff <id>]` and a frozen handoff's refusal (U20); the resume of a started filing, the frozen mode, `next wait` and `next clear` under the chain (U56); the answered chain record taken as the owner's (U70). -->
 
 # file
 
@@ -72,9 +72,9 @@ ends a driven run on its line, as it does a typed one. A typed run asks as
 written.
 
 A run, typed or driven, that finds a wait record for this handoff
-(`chain/<handoff>.json` in the store) opens its card with `runcard open --mode
-normal` whatever the frozen mode (Step 1) and runs Steps 2 to 4 as for any
-filing. A typed run that names no `--handoff` has no `<id>` before its card
+(`chain/<handoff>.json` in the store) opens its card with
+`runcard open --mode normal` whatever the frozen mode (Step 1) and runs
+Steps 2 to 4 as for any filing. A typed run that names no `--handoff` has no `<id>` before its card
 exists: it opens the card as Step 1 says, reads `<id>` from the card's
 record, and when `chain/<id>.json` exists opens its card again with `--mode
 normal` (the new card marks the first interrupted) and passes `--handoff
@@ -84,19 +84,34 @@ with no new panel.
 
 *   A verification record (its question is the `MISMATCH` lines): the typed
     run asks that question first, then goes on from Step 2.
-*   A Create record (its question names `handoff_dryrun.md` and a `Confirmed
-    write list sha256`): the answer is for that write list only. At Step 4,
-    after the dry run, compare the `Confirmed write list sha256` of the fresh
-    `handoff_dryrun.md` with the record's. Equal: the record's question
-    replaces Step 4's, and its answer is Create (Step 5), Change the plan or
-    Stop (the run ends). Different: the answer is for another write list and
-    is void; a typed run asks Step 4's own question, a driven run runs `next
-    wait` with the fresh question.
+*   A Create record (its question is `Create these <n> issues and <m> links`
+    and names `handoff_dryrun.md`, its `sha256` and its `Confirmed write list
+    sha256`): the answer is for that dry run only. The `sha256` is that of
+    `handoff_dryrun.md`'s bytes, never `confirmed_sha256`: the dry run is
+    redone at Step 4 whatever the answer, and `shasum -a 256` of the file it
+    wrote is compared with the `sha256` in the record's question. Equal: the
+    record's question replaces Step 4's, and its answer is Create (Step 5),
+    Change the plan or Stop (the run ends). Different: the answer is for
+    another write list and is void, nothing is created; a typed run asks
+    Step 4's own question, a driven run runs `next wait --phase file` with
+    the fresh question and its fresh `sha256`, and ends (ask again).
+
+A driven run on an answered record (`answer`, `by` and `at` in the record) has
+opened its card with `runcard open --mode normal` and takes the answer
+as the owner's, never as its own pick. `next clear` closes the card itself
+(`runcard close --note` would close it first), so the record's `by` and `at` stay
+where `next answer` wrote them, in `waits/<phase>-<since>.answer.json`. The owner's
+words are mapped to one of the question's options (Create,
+Change the plan, Stop for a Create record). An answer that cannot be mapped to
+one of them is not guessed at: run `next wait` (above) with a new `--question`
+naming what it cannot be mapped to, no `answer`, and end (the receipt of the
+unmapped answer stays in `waits/`). What the owner does by hand still counts: a typed run asks
+and takes the owner's answer as it did before the inbox.
 
 At its end the run runs
-`python3 '<HELPER>' next clear --handoff '<id>' --runcard '<CARD>'` in place
-of `runcard close`, which removes the record only on confirmed progress and
-closes the card.
+`python3 '<HELPER>' next clear --handoff '<id>' --runcard '<CARD>'` (the
+`superegm next clear` of the chain) in place of `runcard close`, which removes
+the record only on confirmed progress and closes the card.
 
 ## Step 1: Run card
 
@@ -197,10 +212,15 @@ In leavemealone-mode there is no question: go to Step 5, where the helper
 journals `Create: automatic (leavemealone)` once per filing.
 
 A driven run in normal mode asks nothing either: unless a wait record's
-`answer` applies to this write list (Under the chain), it runs `next wait`
-with `--phase file` and a `--question` that reads as the question above,
-adding `handoff_dryrun.md` and the `Confirmed write list sha256` from it, and
-ends.
+`answer` applies to this dry run (Under the chain), it runs
+`next wait --phase file` with a `--question` that reads `Create these <n>
+issues and <m> links on OWNER/NAME as handoff_dryrun.md shows?`, adding
+`handoff_dryrun.md`, `sha256 <hex>` (`shasum -a 256` of the file the dry run
+just wrote) and the `Confirmed write list sha256` from it, and ends. Launched
+again on the answered record, the run makes the dry run again (it must
+redo the dry run, never reuse the old file) and creates only when the new
+file's sha256 is the one in the question; otherwise it must ask again, with
+the fresh sha256.
 
 ## Step 5: The writes
 

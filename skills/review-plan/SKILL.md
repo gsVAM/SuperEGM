@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Reviews a handoff plan against its design through the judge panel before any issue is filed.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the body: plan review over the helper's review-plan and review subcommands (U06); `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the accept below the cap's one question per round (U35); the `width:` line, the plan header, the chain check and the split check (U29); the readiness plan remit (1.2.1 §6.5); the driven wait and the typed run on a wait record, the frozen mode (U45); proceed offered at the cap and on a stall (U58). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the body: plan review over the helper's review-plan and review subcommands (U06); `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the accept below the cap's one question per round (U35); the `width:` line, the plan header, the chain check and the split check (U29); the readiness plan remit (1.2.1 §6.5); the driven wait and the typed run on a wait record, the frozen mode (U45); proceed offered at the cap and on a stall (U58); the answered chain record taken as the owner's (U70). -->
 
 # Plan review (phase 3)
 
@@ -213,7 +213,7 @@ of every path, including an error you cannot recover from, except that `next wai
 - The readiness goldfish reads one body, except as `set`, when it reads the set text alone and
   no body.
 - Findings live in the store and dispositions in the round files: name the review id and the
-  `review status` line in chat, never paste a report.
+  `review status` line in chat, never a report pasted in.
 
 ## Under the driver, and on a wait record
 
@@ -243,6 +243,20 @@ through the helper in place of `runcard close` (Step 5; it closes the card itsel
 record only on confirmed progress and otherwise keeps it, asked again as
 `stopped at review-plan by <by>: answer to go on`.
 
+A driven run on an answered record (`answer`, `by` and `at` in `chain/<handoff>.json`) has opened its card with
+`runcard open --mode normal` (above) and records the answer as the owner's, never as its own pick:
+`review settle … --owner` for a contested or declined finding, `review rule … --owner` with the `continue`, `accept`,
+`proceed` or `stop` ruling the answer names. Only `proceed` takes a note: put the record's `by` and `at` in its
+`--reason`. For the others `next clear` closes the card itself (`runcard close --note` would close it first), so
+the `by` and `at` stay where `next answer` wrote them, in `waits/<phase>-<since>.answer.json`. The
+owner's words are mapped to one of the question's options. An answer that cannot be mapped to one of them
+is not guessed at: run
+`superegm next wait --handoff '<id>' --phase review-plan --question '<text>' --review '<review id>' --runcard '<card>'`
+with a new question naming what it cannot be mapped to, no `answer`, and end (the receipt of the unmapped
+answer stays in `waits/`). What the owner does by hand still counts: a typed run of this skill takes the owner's answer as it
+did before the inbox. When a driven review-plan stops, write a wait record as for a stall (a split that needs
+`approve-spec --amend-units` included), so `proceed` on a stopped plan review goes the same way.
+
 ## Leavemealone-mode
 
 In leavemealone-mode (`--leavemealone` on the invocation, or the approval's frozen `mode`, else
@@ -263,7 +277,7 @@ dispatch of the `judges` skill (Astra through the runner, the Claude judges thro
 `python3 '<HELPER>' judges verdict --panel <id> --runcard <card>`. Apply each converged answer
 through its row as it converges (`review settle … --judges '<panel>'`, `review rule … --judges '<panel>'`);
 the verdict's `open[]` are the unconverged questions: end the invocation for that unit naming
-them and `judges/<id>/verdict.json`, the other units continue, and the owner rules by hand. Under
+them and `judges/<id>/verdict.json`, the other units continue, and the owner rules in a typed `/superegm:review-plan` session. Under
 the driver that ending is a wait record, never a new panel on the next tick: once the units are
 handled, run
 `superegm next wait --handoff '<id>' --phase review-plan --question '<text>' --review '<review id>' --runcard '<card>'`
