@@ -128,6 +128,11 @@ def test_builder_orders_and_foreman_brief_define_spec(path):
     assert "No GitHub write but the one `review post` makes." in text and "its `**Deviation (spec):**` comment" not in text
   else:  # what is refused is the owner's `respec` ruling (check_respec); the comment itself is held by collect
     assert "both or it is refused" not in text and "`respec` ruling" in text
+  # what `check_respec` counts as evidence: the command on one line in inline backticks, then its output, or a base path:line
+  assert "on one line in inline backticks" in text and "any other form is refused" in text
+  if path.endswith("foreman_brief.md"):  # collect carries the finding until ruled; its decision offers `<fid> respec`
+    assert "need not repeat `--spec`" in text and "`<fid> respec`" in text
+    assert "which the owner's alone" not in text and "offered on a builder's `**Deviation (spec):**` comment, the owner's alone" not in text
 
 
 @pytest.mark.parametrize("text, spec, refusal", [
