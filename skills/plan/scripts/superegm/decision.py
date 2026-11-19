@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3/5
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
-# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63).
+# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63); `respec`, a `spec` deviation's option, the owner's alone (spec §7.6, U84).
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
@@ -31,9 +31,11 @@ INTERFACE = re.compile(r"(?P<unit>U\d+) (?P<name>[^:]+):")  # an interface headi
 
 def comment_options(text: str) -> list:
   """A builder comment's point-3 options: its `- (` lines, `amend` when its one deviation heading is an interface
-  one (the owner's alone, spec §6.5; `check_amend` refuses any other), then `stop the unit`."""
-  amend = ["amend"] if [m["kind"] for m in DEVIATION.finditer(text)] == ["interface"] else []
-  return [line[2:].strip() for line in text.splitlines() if line.startswith("- (")] + amend + ["stop the unit"]
+  one (the owner's alone, spec §6.5; `check_amend` refuses any other), `respec` when it is a `spec` one (the owner's
+  alone, spec §7.6), then `stop the unit`."""
+  kinds = [m["kind"] for m in DEVIATION.finditer(text)]
+  extra = ["amend"] if kinds == ["interface"] else ["respec"] if kinds == ["spec"] else []
+  return [line[2:].strip() for line in text.splitlines() if line.startswith("- (")] + extra + ["stop the unit"]
 
 
 def produced_names(st, unit: str) -> list:
@@ -827,8 +829,8 @@ def check_ruling(point: int, options: list, ruling: str, by: str = "") -> str:
     place = ord(text[1]) - ord("a")
     if place < len(options):
       text = options[place]
-  if point == 3 and text == "amend" and "amend" in options and by.startswith("judges:"):  # on the option the ruling resolves to
-    raise Refusal("decision: amend is the owner's alone")
+  if point == 3 and text in ("amend", "respec") and text in options and by.startswith("judges:"):  # on the option the ruling resolves to
+    raise Refusal(f"decision: {text} is the owner's alone")
   if point == 1 and options and all(o.endswith(" allowed") for o in options):
     said = text.partition(" — ")[0].strip()
     option = next((o for o in options if o.split(" ")[0] == fid and said in ("allowed", "finding overruled", "finding upheld")), None)

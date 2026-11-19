@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the judges subcommand (spec section 13.1) and `judges question`, the
-# leavemealone-mode question renderer of section 13.2 (U11); the cap question names a spec review's scope (U19); the default members read from `DEFAULT_CONFIG` (U28); a `launch <n>` or `closed <n>` question renders its pending decision's options, a stall's heading its facts (U31); its own `judges` config key, moved from `__init__` (U32); the panel's instructions section rendered once at open by its parent card's skill, placed last in each brief and copied to each member's record (U38).
+# leavemealone-mode question renderer of section 13.2 (U11); the cap question names a spec review's scope (U19); the default members read from `DEFAULT_CONFIG` (U28); a `launch <n>` or `closed <n>` question renders its pending decision's options, a stall's heading its facts (U31); its own `judges` config key, moved from `__init__` (U32); the panel's instructions section rendered once at open by its parent card's skill, placed last in each brief and copied to each member's record (U38); `respec`, the owner's alone, left out of the judges' question (U84).
 
 """superegm judges open|record|diff|verdict|question: the judge panel over a question file, and the
 question file rendered from the record at a decision point."""
@@ -619,17 +619,18 @@ def decision_question(st, unit: str, did: str) -> str:
   decision = next((d for d in units.get(unit, {}).get("decisions") or [] if d["id"] == did), None)
   if decision is None:
     raise core.HandoffError(f"question: {unit} has no decision {did}")
-  return f"## Q1 {unit} {did}: {decision['question']}\n" + "".join(f"- {o}\n" for o in decision["options"])
+  return f"## Q1 {unit} {did}: {decision['question']}\n" + "".join(f"- {o}\n" for o in decision["options"] if o != "respec")
 
 
 STORED_LETTER_RE = re.compile(r"^\([a-z]\) ")  # a stored option's own letter prefix
 
 
 def stored_options_text(options: list) -> str:
-  """A pending decision's stored options with `amend` (the owner's alone, §6.5) left out and the others keeping the
-  letter of their stored position; a stored `(x) ` prefix is dropped so a letter prints once."""
+  """A pending decision's stored options with `amend` (the owner's alone, §6.5) and `respec` (the owner's alone,
+  §7.6) left out and the others keeping the letter of their stored position; a stored `(x) ` prefix is dropped so a
+  letter prints once."""
   return "".join(f"- ({chr(ord('a') + i)}) {STORED_LETTER_RE.sub('', option)}\n"
-                 for i, option in enumerate(options) if option != "amend")
+                 for i, option in enumerate(options) if option not in ("amend", "respec"))
 
 
 def blocked_question(st, unit: str, what: list) -> tuple[str, list[int]]:
