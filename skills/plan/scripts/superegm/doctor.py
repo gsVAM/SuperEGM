@@ -406,8 +406,8 @@ def hooks_of(repo_root: Path):
 
 
 def driver_lines(config):
-  """The five informational lines of the owner's timer (spec section 11.2): `driver:`, `sleep:`, `root:`, `env:`
-  and `notify:`."""
+  """The informational lines of the owner's timer (spec section 11.2): `driver:`, up to two `driver:` findings of
+  `env_findings` (U71), `sleep:`, `root:`, `env:` and `notify:`."""
   from superegm import driver
   from superegm.launch_builder import HELPER
   lines, helper, mine = [], driver.plist_helper(), str(HELPER.parents[3])
@@ -430,7 +430,7 @@ def driver_lines(config):
   else:
     lines.append(("root", "ok" if driver.root_ok(entry["root"], entry["artifacts_dir"])
                   else f"{entry['root']} is not a worktree of {entry['repo']}"))
-  lines.append(("env", env_setting(driver.env_file())))
+  lines.append(("env", env_setting(driver.env_file(), driver.credential_names(config)[0])))
   hook = Path.home() / ".superegm" / "notify"
   lines.append(("notify", f"ok ({core.sha256_file(hook)})" if hook.is_file() else "absent"))
   return lines
@@ -504,7 +504,9 @@ def registry_entries():
     return str(error)
 
 
-def env_setting(path: Path) -> str:
+def env_setting(path: Path, identity: str) -> str:
+  """The `env:` line: `absent`, `readable by others`, `missing <name>` (`PATH`, `CLAUDE_CONFIG_DIR`, then the
+  configured identity name, `builder.app.private_key_env` or `builder.gh_token_env`) or `ok`."""
   if not path.is_file():
     return "absent"
   if path.stat().st_mode & 0o077:
@@ -513,8 +515,8 @@ def env_setting(path: Path) -> str:
   for key in ("PATH", "CLAUDE_CONFIG_DIR"):
     if key not in keys:
       return f"missing {key}"
-  if not keys & {"SUPEREGM_APP_KEY", "SUPEREGM_BUILDER_TOKEN"}:
-    return "missing SUPEREGM_APP_KEY or SUPEREGM_BUILDER_TOKEN"
+  if identity not in keys:
+    return f"missing {identity}"
   return "ok"
 
 

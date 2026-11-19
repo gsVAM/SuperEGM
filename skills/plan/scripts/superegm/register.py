@@ -4,7 +4,7 @@
 """superegm register [--remove] [--root <path>] --runcard <id>: `~/.superegm/registry.json`'s entry `{repo, root,
 artifacts_dir}` for the current store, added or removed (spec section 11.2). An entry is keyed on `artifacts_dir`: a
 second worktree of a listed store updates its `root`, never adds a second entry. `--root` names the base worktree
-from a spec worktree (spec 1.2.1 section 7.4)."""
+from a spec worktree (spec 1.2.1 section 3.4, area 7)."""
 
 import os
 from pathlib import Path
@@ -58,7 +58,7 @@ def update(args) -> int:
 
 
 def base_worktree(given, toplevel, base) -> str:
-  """`--root <path>` (spec 1.2.1 section 7.4): a worktree of this repository (`git worktree list`) with `<base>`
+  """`--root <path>` (spec 1.2.1 section 3.4, area 7): a worktree of this repository (`git worktree list`) with `<base>`
   checked out, its path as git lists it; the current store is registered there whatever that worktree's own
   configuration says (none yet, or an older store)."""
   want = os.path.realpath(given)
