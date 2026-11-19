@@ -123,8 +123,11 @@ def test_builder_orders_and_foreman_brief_define_spec(path):
   text = (ROOT / path).read_text(encoding="utf-8")
   assert all(p in text for p in ("**Deviation (spec):**", "`path:line`", "evidence", "stays `interface`"))
   assert "which the foreman never posts" not in text
-  if path.endswith("foreman_brief.md"):  # the foreman raises it by posting the deviation comment, so the blocker and the respec decision apply
-    assert "posting a `**Deviation (spec):**` comment" in text
+  if path.endswith("foreman_brief.md"):  # the foreman raises it in its own findings through `collect --spec`, posting no comment (§7.6)
+    assert "posting a `**Deviation (spec):**` comment" not in text and "--spec" in text
+    assert "No GitHub write but the one `review post` makes." in text and "its `**Deviation (spec):**` comment" not in text
+  else:  # what is refused is the owner's `respec` ruling (check_respec); the comment itself is held by collect
+    assert "both or it is refused" not in text and "`respec` ruling" in text
 
 
 @pytest.mark.parametrize("text, spec, refusal", [
@@ -191,7 +194,7 @@ def test_the_judges_blocked_question_without_a_decision_leaves_out_respec(world)
   code, out = world.run("judges", "question", "--unit", "U02", "--blocked", "101", "--runcard", card)
   assert code == 0, out
   asked = Path(out.splitlines()[0]).read_text(encoding="utf-8")
-  assert "respec" not in asked and asked.endswith("- (a) follow the code\n- (b) stop the unit\n")
+  assert "respec" not in asked and asked.endswith("- (b) follow the code\n- (d) stop the unit\n")  # each option keeps its letter
 
 
 def test_judges_cannot_reach_amend_by_a_lettered_option(world):
@@ -208,3 +211,67 @@ def test_a_rerun_keeps_the_open_file_of_the_same_deviation(world):
   card, s = spec_world(world)
   assert [decision.open_respec(s, "U02", cid, core.now_iso()) for cid in (101, 101, 102, 101)] == ["R1", "R1", "R2", "R1"]
   assert sorted(p.name for p in (s.base() / "respec").iterdir()) == ["R1.open.json", "R2.open.json"]
+
+
+def test_a_third_spec_decision_after_a_used_relaunch_offers_respec_and_stop(world):
+  # relaunch is offered once per unit (§4.1): a later spec deviation's decision keeps respec and stop the unit, and drops a spent relaunch
+  card, s = spec_world(world)
+  for cid in (101, 102):
+    body = f"**Deviation (other):** x{cid}\n- (a) go on\n**Builder status:** BLOCKED"
+    fake_gh(world, {f"repos/{REPO}/issues/comments/{cid}": {"id": cid, "user": {"login": "builder-bot"}, "body": body}})
+    assert rule_on(world, card, open_decision(world, card, body, cid=cid), "(a)")[0] == 0
+  body = "**Deviation (other):** z\n**Builder status:** BLOCKED"
+  fake_gh(world, {f"repos/{REPO}/issues/comments/103": {"id": 103, "user": {"login": "builder-bot"}, "body": body}})
+  third = open_decision(world, card, body, cid=103)
+  assert foreman_of(s, "U02")["decisions"][-1]["options"] == ["relaunch", "stop the unit"]
+  assert rule_on(world, card, third, "relaunch")[0] == 0  # spends the one relaunch
+  fake_gh(world, {f"repos/{REPO}/issues/comments/104": {"id": 104, "user": {"login": "builder-bot"}, "body": SPEC_COMMENT}})
+  fourth = open_decision(world, card, SPEC_COMMENT, cid=104)
+  assert foreman_of(s, "U02")["decisions"][-1]["options"] == ["respec", "stop the unit"]
+  assert rule_on(world, card, fourth, "relaunch")[0] != 0
+  assert rule_on(world, card, fourth, "respec")[0] == 0
+
+
+FOREMAN_SHAPED = SPEC_LINE + "\n**Builder status:** BLOCKED"  # the two parts and no option lines
+
+
+@pytest.mark.parametrize("ruling, bound", [("(a)", False), ("respec", False), ("stop the unit", True), ("(z)", False)])
+def test_a_letter_that_resolves_to_respec_binds_nothing_on_a_comment_without_option_lines(ruling, bound):
+  # `(a)` resolves through comment_options to `respec` on a spec deviation: an unrecorded ruling comment clears no blocker
+  r = decision.Ruling("option", "12", ruling, "the spec is wrong", "owner", 20)
+  assert decision.offered(r, [{"id": 12, "body": FOREMAN_SHAPED}], []) is bound
+  other = "**Deviation (other):** x\n**Builder status:** BLOCKED"  # a kind-`other` comment with no option lines: any option still binds
+  assert decision.offered(decision.Ruling("option", "12", "(a)", "go on", "owner", 20), [{"id": 12, "body": other}], []) is True
+
+
+def test_the_leavemealone_wait_reads_the_whole_comment_and_the_frozen_options(world):
+  # a spec heading below a preamble still offers respec, so the question waits for the owner; so does a decision whose comment was edited
+  text = "The retry count looks wrong.\n" + SPEC_COMMENT
+  card, s = spec_world(world, "leavemealone", text=text)
+  assert "respec" in comment_options(text)
+  code, out = world.run("judges", "question", "--unit", "U02", "--blocked", "101", "--runcard", card)
+  assert code != 0 and "waits for the owner" in out and not (s.base() / "questions").exists()
+  open_decision(world, card, text)
+  fake_gh(world, {f"repos/{REPO}/issues/comments/101": {"id": 101, "user": {"login": "builder-bot"}, "body": "edited\n- (a) keep the spec"}})
+  code, out = world.run("judges", "question", "--unit", "U02", "--blocked", "101", "--runcard", card)
+  assert code != 0 and "waits for the owner" in out and not (s.base() / "questions").exists()
+
+
+def test_the_foreman_spec_finding_is_held_in_the_round_that_raises_it(world, tmp_path, monkeypatch):
+  # the foreman raises a spec deviation in its own findings, `collect --spec`, not as a comment: a blocker in the same round
+  w = prepared(world, tmp_path, monkeypatch, comments={2: []})
+  code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child,
+                        "--spec", "docs/designs/sample.md:12 says 3; `pytest -k t` fails")
+  assert (code, out.strip()) == (0, "collected: 1 foreman findings"), out
+  lines = (w.dir / "r1/foreman.findings").read_text(encoding="utf-8").splitlines()
+  assert lines == ["foreman-1-1 | high | docs/designs/sample.md:12 | regression: no | deviation (spec) unruled: "
+                   "docs/designs/sample.md:12 says 3; `pytest -k t` fails"]
+
+
+@pytest.mark.parametrize("text, refusal", [("the retry count is wrong; `pytest -k retry` fails", "frozen spec's path:line"),
+                                           ("docs/designs/sample.md:12 says 3 retries", "needs the evidence"),
+                                           ("src/retry.py:12 says 3; `pytest -k retry` fails", "frozen spec's path:line")])
+def test_the_foreman_spec_finding_needs_the_line_and_the_evidence(world, tmp_path, monkeypatch, text, refusal):
+  w = prepared(world, tmp_path, monkeypatch, comments={2: []})
+  code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child, "--spec", text)
+  assert code != 0 and refusal in out and not (w.dir / "r1/foreman.findings").exists()
