@@ -32,3 +32,11 @@ def test_merge_lines_point_to_the_inbox(path):
 def test_no_skill_asks_for_a_paste(path):
   # the owner answers in the inbox, never by a pasted command or a posted comment
   assert not re.search(r"(?i)\b(paste|the owner posts|owner types)\b", Path(path).read_text())
+
+
+def test_inbox_is_typed_and_the_rule_is_one_line():
+  # inbox joins the typed list; one line says no skill asks the owner to paste
+  text = Path("skills/using-superegm/SKILL.md").read_text()
+  typed, auto = text.split("## Typed only")[1].split("## May be auto-invoked")
+  assert "/superegm:inbox" in typed and "/superegm:inbox" not in auto.split("## Four rules")[0]
+  assert sum("paste" in l and "inbox" in l for l in text.splitlines()) == 1
