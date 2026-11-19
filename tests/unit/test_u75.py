@@ -45,10 +45,12 @@ def test_a_reference_only_edit_is_a_changed_round(world):
   code, out = approve(world, spec, cid, "--yes")
   assert code == 0, out
   entry = approval(world)["entries"][-1]
-  graph_sha = entry["sha256"]   # what `graph` reads as the handoff's spec sha
+  commit_files(world, {INV: "Invariants, edited after the approval.\n"})   # a reference alone, after the approval
+  # `graph` (graph.py:233) accepts the design when `sha256_file(design)` is the approval entry's `sha256`: both stay the spec's raw sha256
+  graph_sha = sha256_file(spec)
+  assert graph_sha == entry["sha256"] == spec_sha256
   # `launch` reads the spec at origin against that same sha: the approved bytes pass its check
   assert launch.origin_problems(world.repo, "main", {**entry, "path": str(spec)}, ref="HEAD", spec_only=True) == []
-  assert graph_sha == entry["sha256"] == spec_sha256
 
 
 @pytest.mark.parametrize("location, recorded, settled", [
@@ -172,7 +174,9 @@ def test_a_record_refuses_reviewers_who_read_other_reference_bytes(world):
   from test_review import hstore, record
   branch_with_changed_invariants(world)
   spec, cid, rid = opened(world)
-  render_stored(hstore(world), "reviewers", "local", review=rid, round=1, root=world.repo)   # the brief the panel reads: version A
+  git(["commit", "-qam", "config", "--allow-empty"], world.repo)   # the brief reads the config committed at HEAD
+  manifest, _ = render_stored(hstore(world), "reviewers", "local", review=rid, round=1, root=world.repo)   # the brief the panel reads: version A
+  assert INV in [item["file"] for item in manifest], manifest   # the render listed the changed document
   commit_files(world, {INV: "Invariants, committed after the brief was rendered.\n"})
   code, out = record(world, rid, 1, "design", [], cid)
   assert code == 1 and f"review record: {INV}: differs from the reviewers' brief" in out, out
