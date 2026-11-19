@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3/5
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
-# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63); `respec`, a `spec` deviation's option, the owner's alone (spec §7.6, U84).
+# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63); `respec`, a `spec` deviation's option, the owner's alone, a spent `relaunch` dropped beside it, and a letter that resolves to it binding nothing unrecorded (spec §7.6, U84).
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
@@ -106,7 +106,8 @@ def check_respec(text: str, spec: str = "") -> None:
   """Refuse a `respec` that is not on one `spec` deviation alone, whose comment does not quote a `path:line` of the
   frozen spec (`spec`, the handoff's spec path; empty when none is known, then any `path:line` counts), or that shows
   no evidence: a command (a backticked span that is not itself a `path:line`) or a `path:line` outside the spec, in
-  the base (spec §7.6). The comment is the heading and the lines after it, less its options."""
+  the base (spec §7.6). The comment is the heading and the lines after it, less its options and cut at the
+  `**Builder status:**` line: a `path:line` or a command after it does not count."""
   heads = list(DEVIATION.finditer(text))
   if len(heads) != 1 or heads[0]["kind"] != "spec":
     raise Refusal("decision: respec needs a comment with one spec deviation and no other")
@@ -255,7 +256,8 @@ def binding_rulings(comments: list, owners: list, recorded: list, decisions=None
   `stop the unit`), as `decision rule` would accept it, with two exceptions `offered` names: an option naming a
   comment id this issue lacks binds unchecked (an interface ruling copied from its producer's issue, which
   `decision rule` drops here as naming no open decision, and which a mistyped id cannot be told apart from), and an
-  option on a named comment with no `- (` lines binds whatever its text. Given `pending` (the open decisions, `pending_decisions`),
+  option on a named comment with no `- (` lines (and no `spec` deviation) binds whatever its text; an unrecorded
+  `respec`, or a letter resolving to it, binds nothing (`offered`: only `rule` writes the open file). Given `pending` (the open decisions, `pending_decisions`),
   an unrecorded `one more round` or `stop` binds only while a point-2 decision is open and a `redesign` only while
   a head's (point 1 or 2) is: otherwise `decision rule` drops it, and at point 3 a redesign is text. Once a point-1
   question exists, an unrecorded `finding upheld` binds only on a fid one asks about (`fid_decisions`, whose
@@ -295,8 +297,10 @@ def binding_rulings(comments: list, owners: list, recorded: list, decisions=None
 def offered(r: "Ruling", comments: list, decisions: list) -> bool:
   """Whether an option ruling names one of its decision's options (`check_ruling` at point 3), except where there
   is nothing to check it against: a numeric id this issue's comments lack (a ruling copied from a producer's
-  issue, or a mistyped id: both bind, unchecked) and a named comment with no `- (` lines (any option binds); a
-  decision id the record lacks binds nothing."""
+  issue, or a mistyped id: both bind, unchecked) and a named comment with no `- (` lines and no `spec` deviation
+  (any option binds); a decision id the record lacks binds nothing. A `respec` never binds unrecorded: `rule` writes
+  its open file and records it, whether the ruling names it or a letter resolves to it (a `spec` comment with no
+  option lines offers `respec` and `stop the unit`, so `(a)` is `respec`)."""
   decision = next((d for d in decisions if d.get("point") in (3, 5) and r.subject == option_name(d)), None)
   if (r.option or "").strip() == "respec":  # a ruling comment alone binds no `respec`: `rule` writes the open file and
     return False  # records it (`recorded_rulings`), so a recorded one needs no check here, an unrecorded one clears no blocker
@@ -306,9 +310,9 @@ def offered(r: "Ruling", comments: list, decisions: list) -> bool:
     named = next((c for c in comments if str(c.get("id")) == r.subject), None)
     if named is None:  # a comment id this issue lacks: an interface ruling copied from its producer's issue (spec
       return r.subject.isdigit()  # section 13.2), nothing here to check it against; a decision id it lacks binds nothing
-    if not any(line.startswith("- (") for line in (named.get("body") or "").splitlines()):
-      return True  # a comment with no option lines (a kind-`other` deviation): nothing to check the option against
     options = comment_options(named.get("body") or "")
+    if "respec" not in options and not any(line.startswith("- (") for line in (named.get("body") or "").splitlines()):
+      return True  # a comment with no option lines (a kind-`other` deviation): nothing to check the option against
   try:
     return check_ruling(3, options, r.option or "") != "respec"  # a lettered `(a) respec` resolves to it too
   except Refusal:
@@ -458,7 +462,11 @@ def open_decision(args) -> int:
   qid, now = f"q{len(data['decisions']) + 1}", core.now_iso()
   data["decisions"].append({"id": qid, "point": args.point, "source": args.source, "head": head,
                             "question": question, "asked_at": now, "options": options})
-  reason = stop_reason(data, load_launches(st, unit), args.source) if options == RELAUNCH else None
+  reason = stop_reason(data, load_launches(st, unit), args.source) if "relaunch" in options else None
+  if reason and "respec" in options:  # a spec deviation keeps `respec` (§7.6): the spent relaunch is dropped, the decision is asked
+    options.remove("relaunch")
+    data["decisions"][-1]["options"] = options
+    reason = None
   if reason:
     data["rulings"].append({"decision": qid, "ruling": "stop the unit", "by": "superegm",
                             "reason": reason, "posted": None, "posted_at": now})
@@ -512,7 +520,7 @@ def stop_reason(foreman: dict, launches: list, source: str):
 def options_for(point: int, source: str, question: str, foreman: dict, head: str) -> list:
   """Spec section 13.2's options: point 1 upheld|overruled; point 2 one more round|stop; point 3 the
   comment's own `- (a)` lines plus `stop the unit`, or `relaunch; stop the unit` for a launch, a close,
-  or a third `blocked` comment on the same head (a `spec` deviation's keeps `respec` between them, §7.6); point 5 (a head's accept below the cap) accept|revise. Point 1 on
+  or a third `blocked` comment on the same head (a `spec` deviation's keeps `respec` between them, §7.6, `open_decision` dropping a `relaunch` already used); point 5 (a head's accept below the cap) accept|revise. Point 1 on
   an `owner: <ids>` word (the latest posted round's outcome) offers `<fid> allowed`, one per id the question names (U25)."""
   if point == 5:
     return ["accept", "revise"]

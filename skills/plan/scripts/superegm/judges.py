@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the judges subcommand (spec section 13.1) and `judges question`, the
-# leavemealone-mode question renderer of section 13.2 (U11); the cap question names a spec review's scope (U19); the default members read from `DEFAULT_CONFIG` (U28); a `launch <n>` or `closed <n>` question renders its pending decision's options, a stall's heading its facts (U31); its own `judges` config key, moved from `__init__` (U32); the panel's instructions section rendered once at open by its parent card's skill, placed last in each brief and copied to each member's record (U38); `respec`, the owner's alone, left out of the judges' question (U84).
+# leavemealone-mode question renderer of section 13.2 (U11); the cap question names a spec review's scope (U19); the default members read from `DEFAULT_CONFIG` (U28); a `launch <n>` or `closed <n>` question renders its pending decision's options, a stall's heading its facts (U31); its own `judges` config key, moved from `__init__` (U32); the panel's instructions section rendered once at open by its parent card's skill, placed last in each brief and copied to each member's record (U38); `respec`, the owner's alone, left out of the judges' question with every other option keeping its letter, its leavemealone wait read off the options (U84).
 
 """superegm judges open|record|diff|verdict|question: the judge panel over a question file, and the
 question file rendered from the record at a decision point."""
@@ -640,17 +640,15 @@ def blocked_question(st, unit: str, what: list, mode=None) -> tuple[str, list[in
   from superegm.launch import load_launches
   if len(what) == 1 and what[0].isdigit():
     body = (core.gh_json(["api", f"repos/{st.config['repo']}/issues/comments/{what[0]}"]) or {}).get("body") or ""
-    heading, *rest = body.splitlines() or [""]
-    if mode == "leavemealone" and heading.startswith("**Deviation (spec):**"):
-      raise core.HandoffError(f"question: comment {what[0]} is a spec deviation: in leavemealone-mode it waits for the owner (respec is the owner's alone)")
+    heading = (body.splitlines() or [""])[0]
+    from superegm.decision import comment_options
     from superegm.report import pending_decisions
     pending = next((d for d in pending_decisions(core.load_foreman(st, unit))
                     if d.get("point") == 3 and d.get("source") == f"comment {what[0]}"), None)
-    if pending is not None:  # the stored options, `amend` and `respec` left out and the letters kept
-      shown = stored_options_text(pending.get("options") or RELAUNCH)
-    else:  # no decision opened on the comment: its `- (` lines, then `stop the unit`
-      options = [o.partition(" ")[2] for o in (line[2:].strip() for line in rest if line.startswith("- ("))]
-      shown = options_text([o for o in options if o not in ("amend", "respec")] + ["stop the unit"])  # the owner's alone left out
+    held = pending.get("options") or RELAUNCH if pending is not None else comment_options(body)  # the decision's frozen options, else the comment's
+    if mode == "leavemealone" and "respec" in (STORED_LETTER_RE.sub("", o) for o in held):
+      raise core.HandoffError(f"question: comment {what[0]} is a spec deviation: in leavemealone-mode it waits for the owner (respec is the owner's alone)")
+    shown = stored_options_text(held)  # `amend` and `respec` left out, every other option keeping its letter
     consumers = []
     if heading.startswith("**Deviation (interface):**"):
       from superegm.decision import INTERFACE
