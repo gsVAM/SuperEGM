@@ -214,6 +214,26 @@ def test_a_refused_brief_is_rendered_again_so_the_record_can_follow(world):
   assert record(world, rid, 1, "zoom-out", [], cid)[0] == 0
 
 
+@pytest.mark.parametrize("lane, reviewer", [("local", "design"), ("astra", "astra")])
+def test_a_dropped_brief_is_not_a_way_around_the_check(world, lane, reviewer):
+  """After the refusal drops the brief, the same record again and another reviewer of the lane are refused until a render; the refusal names the whole command."""
+  from superegm.instructions import render_stored
+  from test_review import hstore, record
+  branch_with_changed_invariants(world)
+  spec, cid, rid = opened(world, astra="on" if lane == "astra" else "off")
+  git(["commit", "-qam", "config", "--allow-empty"], world.repo)
+  render_stored(hstore(world), "reviewers", lane, review=rid, round=1, root=world.repo)
+  added = f"{DIR}/architecture.md"
+  commit_files(world, {added: "Architecture.\n"})
+  code, out = record(world, rid, 1, reviewer, [], cid)
+  assert code == 1 and f"--review {rid} --round 1 --role reviewers --lane {lane}" in out, out
+  for who in {reviewer, "zoom-out" if lane == "local" else "astra"}:
+    code, out = record(world, rid, 1, who, [], cid)
+    assert code == 1 and "render it again" in out, out
+  render_stored(hstore(world), "reviewers", lane, review=rid, round=1, root=world.repo)
+  assert record(world, rid, 1, reviewer, [], cid)[0] == 0
+
+
 def test_a_reference_under_a_folder_not_addressed_to_the_reviewers_does_not_block_a_record(world):
   """The brief lists only the entries addressed to the reviewers: a changed document of a builder-only folder is in `refs` and needs no listing."""
   from superegm.instructions import render_stored
@@ -302,6 +322,9 @@ REF_ROW = ("changed", "docs/reference/domain model.md", 0, 0)
   ([("changed", "B", 7, 9), REF_ROW], "docs/reference/unlisted doc.md: line 8", "none"),
   ([("changed", "B", 7, 9), REF_ROW], "vendor/docs/specs/design.md:8", "none"),           # a prefix in front of the spec's own path names another file
   ([("changed", "B", 7, 9), REF_ROW], "/elsewhere/docs/specs/design.md:8", "none"),
+  ([("changed", "B", 7, 9), REF_ROW], "specs/design.md:8", "none"),                      # a trailing part of the spec's path is another file
+  ([("changed", "B", 7, 9), REF_ROW], "specs/design.md#L8", "none"),
+  ([("changed", "B", 7, 9), REF_ROW], "docs/specs/design.md line 8 contradicts docs/reference/domain model.md", None),   # the first path names the file
   ([("changed", "B", 7, 9), REF_ROW], "docs/specs/design.md line 8", None)])
 def test_the_scope_filter_reads_a_path_before_its_line(rows, location, answer):
   """Only a spec location goes through cited_line and the sections; a path other than the spec's or a changed document answers none."""
