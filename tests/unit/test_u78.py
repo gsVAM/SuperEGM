@@ -341,3 +341,4 @@ def test_integrate_reports_the_postmortem():
   assert "superegm postmortem --handoff" in text
   for phrase in ("total wall time", "the most rounds", "the most overruled"):
     assert phrase in text
+  assert "Header, total wall seconds" in text  # the one field the report holds it in: the skill works none out
