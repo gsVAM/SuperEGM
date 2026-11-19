@@ -8,7 +8,7 @@ import json
 import re
 
 import pytest
-from conftest import CONFIG
+from conftest import CONFIG, ROOT
 from test_u43 import Chain, jread
 from test_u43 import registry  # noqa: F401  (the autouse fixture: no test reads the owner's registry)
 import superegm
@@ -196,3 +196,10 @@ def test_postmortem_reads_the_store_only(world):
   assert set(after) - set(before) == {report_path}
   assert {p for p in before if after[p] != before[p]} == set()
   assert "in progress" in report_path.read_text(encoding="utf-8").split("## Units")[0]
+
+
+def test_integrate_reports_the_postmortem():
+  text = (ROOT / "skills/integrate/SKILL.md").read_text(encoding="utf-8")
+  assert "superegm postmortem --handoff" in text
+  for phrase in ("total wall time", "the most rounds", "the most overruled"):
+    assert phrase in text
