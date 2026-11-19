@@ -18,7 +18,7 @@ import re
 from pathlib import Path
 
 import superegm as core
-from superegm import body, launch, review
+from superegm import approve_spec, body, inbox, launch, review
 
 WRITES = frozenset(['file'])  # the store kinds this subcommand writes: the derived `postmortem.md`
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
@@ -150,12 +150,27 @@ def verdicts(hs: core.Store, uid: str) -> tuple:
   return overruled, allowed
 
 
+def spec_cycles(hs: core.Store, spec) -> range:
+  """The spec-review cycles this handoff owns: after the previous approval entry's review cycle, up to its own
+  approval's. Spec reviews sit at the store's root, shared by every handoff of the spec; no approval of its own, none."""
+  entries = core.load_approvals(hs, spec) if spec else []
+  for i, entry in enumerate(entries):
+    if entry.get("handoff_id") == hs.handoff_id:
+      before = max((approve_spec.cycle_of(e.get("review")) for e in entries[:i]), default=0)
+      return range(before + 1, approve_spec.cycle_of(entry.get("review")) + 1)
+  return range(0)
+
+
 def reviews_of(st: core.Store, hs: core.Store, spec) -> list:
-  folder = hs.path("reviews", "x").parent
-  ids = sorted(p.parent.name for p in folder.glob("*/review.json")) if folder.is_dir() else []
-  if spec and not hs.legacy:
-    ids += [rid for rid in review.cycle_ids(st, "spec", spec) if rid not in ids]
-  return [(rid, review.load_review(hs, rid)) for rid in ids]
+  """This handoff's reviews: its own (`inbox.review_dirs`, which a legacy flat store's shared folder needs) and the
+  spec cycles it owns."""
+  owned = spec_cycles(hs, spec)
+  found = []
+  for path in inbox.review_dirs(hs, spec):
+    m = re.fullmatch(r"spec-(?:(?!-integrate-).)+-c(\d+)", path.name)  # an integrate review is no spec cycle
+    if m is None or int(m.group(1)) in owned:
+      found.append(path.name)
+  return [(rid, review.load_review(hs, rid)) for rid in found]
 
 
 def reviewers_table(st: core.Store, hs: core.Store, uids: list, spec) -> str:
