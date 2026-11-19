@@ -96,20 +96,29 @@ PATH_LINE = re.compile(r"[\w./-]+\.[A-Za-z]\w*:\d+(?:-\d+)?")  # a `path:line` (
 BACKTICKED = re.compile(r"`([^`\n]+)`")
 
 
-def check_respec(text: str) -> None:
-  """Refuse a `respec` that is not on one `spec` deviation alone, whose comment does not quote the frozen spec's
-  `path:line`, or that shows no evidence: a command (a backticked span that is not itself a `path:line`) or a second,
-  different `path:line` in the base (spec §7.6). The comment is the heading and the lines after it, less its options."""
+def cites(ref: str, spec: str) -> bool:
+  """Whether a `path:line` reference names the frozen spec: its path is the spec's, or ends it on a path boundary."""
+  path, spec = ref.rpartition(":")[0].removeprefix("./"), spec.removeprefix("./")
+  return spec == path or spec.endswith("/" + path)
+
+
+def check_respec(text: str, spec: str = "") -> None:
+  """Refuse a `respec` that is not on one `spec` deviation alone, whose comment does not quote a `path:line` of the
+  frozen spec (`spec`, the handoff's spec path; empty when none is known, then any `path:line` counts), or that shows
+  no evidence: a command (a backticked span that is not itself a `path:line`) or a `path:line` outside the spec, in
+  the base (spec §7.6). The comment is the heading and the lines after it, less its options."""
   heads = list(DEVIATION.finditer(text))
   if len(heads) != 1 or heads[0]["kind"] != "spec":
     raise Refusal("decision: respec needs a comment with one spec deviation and no other")
   said = text[heads[0].start("rest"):].split("**Builder status:**")[0]
   said = "\n".join(line for line in said.splitlines() if not line.startswith("- ("))
   refs = list(dict.fromkeys(m.group(0) for m in PATH_LINE.finditer(said)))
-  if not refs:
+  in_spec = [r for r in refs if not spec or cites(r, spec)]
+  if not in_spec:
     raise Refusal("decision: respec needs the frozen spec's path:line in the deviation")
   commands = [s for s in BACKTICKED.findall(said) if not PATH_LINE.fullmatch(s.strip())]
-  if len(refs) < 2 and not commands:
+  base = [r for r in refs if r not in in_spec] if spec else refs[1:]
+  if not commands and not base:
     raise Refusal("decision: respec needs the evidence: a command and its output, or a path:line in the base")
 
 
@@ -289,22 +298,21 @@ def offered(r: "Ruling", comments: list, decisions: list) -> bool:
   issue, or a mistyped id: both bind, unchecked) and a named comment with no `- (` lines (any option binds); a
   decision id the record lacks binds nothing."""
   decision = next((d for d in decisions if d.get("point") in (3, 5) and r.subject == option_name(d)), None)
-  text = ""  # what the options were read from: a `respec` binds only on a spec deviation that passes `check_respec`
+  if (r.option or "").strip() == "respec":  # a ruling comment alone binds no `respec`: `rule` writes the open file and
+    return False  # records it (`recorded_rulings`), so a recorded one needs no check here, an unrecorded one clears no blocker
   if decision is not None:
-    options, text = decision.get("options") or [], decision.get("question") or ""
+    options = decision.get("options") or []
   else:
     named = next((c for c in comments if str(c.get("id")) == r.subject), None)
     if named is None:  # a comment id this issue lacks: an interface ruling copied from its producer's issue (spec
       return r.subject.isdigit()  # section 13.2), nothing here to check it against; a decision id it lacks binds nothing
     if not any(line.startswith("- (") for line in (named.get("body") or "").splitlines()):
       return True  # a comment with no option lines (a kind-`other` deviation): nothing to check the option against
-    options, text = comment_options(named.get("body") or ""), named.get("body") or ""
+    options = comment_options(named.get("body") or "")
   try:
-    if check_ruling(3, options, r.option or "") == "respec":
-      check_respec(text)
+    return check_ruling(3, options, r.option or "") != "respec"  # a lettered `(a) respec` resolves to it too
   except Refusal:
     return False
-  return True
 
 
 def overridden_comments(comments: list, owners: list, foreman: dict) -> dict:
@@ -523,6 +531,8 @@ def options_for(point: int, source: str, question: str, foreman: dict, head: str
             if d.get("point") == 3 and str(d.get("source", "")).startswith("comment") and d.get("head") == head]
     if len(same) < 2:
       return comment_options(question)
+    if "respec" in comment_options(question):  # a spec deviation's decision always offers `respec` (§7.6)
+      return RELAUNCH[:1] + ["respec"] + RELAUNCH[1:]
   return list(RELAUNCH)
 
 
@@ -623,7 +633,7 @@ def rule(args) -> int:
   if amends and chosen == "amend":  # refused before anything is posted
     check_amend(st, decision["question"], reason)
   if amends and chosen == "respec":  # the spec line and the evidence, refused before anything is posted
-    check_respec(decision["question"])
+    check_respec(decision["question"], core.handoff_spec(args, st))
   if decision["point"] == 5:  # a head's fifth point (U35): the owner's alone, applied before anything is posted
     if args.by.startswith("judges:"):
       raise Refusal("decision: point 5 is the owner's alone")

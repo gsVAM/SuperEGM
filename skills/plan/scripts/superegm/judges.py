@@ -503,8 +503,8 @@ def question(args, st) -> int:
       args.design = found["artifact"]
     else:
       args.unit = found["artifact"]
-  core.require_runcard(args, QUESTION_SKILLS)
-  text, consumers = render(st, args)
+  card = core.require_runcard(args, QUESTION_SKILLS)
+  text, consumers = render(st, args, card.get("mode"))
   path = st.path("questions", question_name(args))
   core.atomic_write(path, text)
   core.journal(st, f"question rendered: {path}")
@@ -522,7 +522,7 @@ def question_name(args) -> str:
   return f"{args.unit}-blocked-{'-'.join(args.blocked)}.md"
 
 
-def render(st, args) -> tuple[str, list[int]]:
+def render(st, args, mode=None) -> tuple[str, list[int]]:
   """The question text of one section 13.2 point and, for an `interface` deviation, the consumers to post on."""
   if args.review and args.cap:
     return cap_question(st, args.review), []
@@ -531,7 +531,7 @@ def render(st, args) -> tuple[str, list[int]]:
   if args.unit and args.decision:
     return decision_question(st, args.unit, args.decision), []
   if args.unit and args.blocked:
-    return blocked_question(st, args.unit, args.blocked)
+    return blocked_question(st, args.unit, args.blocked, mode)
   raise core.HandoffError("question: --review <id> (--round <n> | --cap) or --unit <U> (--decision D<n> | --blocked ...)")
 
 
@@ -634,19 +634,23 @@ def stored_options_text(options: list) -> str:
                  for i, option in enumerate(options) if STORED_LETTER_RE.sub("", option) not in ("amend", "respec"))
 
 
-def blocked_question(st, unit: str, what: list) -> tuple[str, list[int]]:
+def blocked_question(st, unit: str, what: list, mode=None) -> tuple[str, list[int]]:
+  """The question for a blocked comment, launch or close. In leavemealone-mode (`mode`) a `spec` deviation's question
+  waits for the owner (§7.6): the judges are given none, since `respec` is the owner's alone."""
   from superegm.launch import load_launches
   if len(what) == 1 and what[0].isdigit():
     body = (core.gh_json(["api", f"repos/{st.config['repo']}/issues/comments/{what[0]}"]) or {}).get("body") or ""
     heading, *rest = body.splitlines() or [""]
+    if mode == "leavemealone" and heading.startswith("**Deviation (spec):**"):
+      raise core.HandoffError(f"question: comment {what[0]} is a spec deviation: in leavemealone-mode it waits for the owner (respec is the owner's alone)")
     from superegm.report import pending_decisions
     pending = next((d for d in pending_decisions(core.load_foreman(st, unit))
                     if d.get("point") == 3 and d.get("source") == f"comment {what[0]}"), None)
     if pending is not None:  # the stored options, `amend` and `respec` left out and the letters kept
       shown = stored_options_text(pending.get("options") or RELAUNCH)
     else:  # no decision opened on the comment: its `- (` lines, then `stop the unit`
-      options = [line[2:].strip() for line in rest if line.startswith("- (")]
-      shown = options_text([o.partition(" ")[2] for o in options] + ["stop the unit"])
+      options = [o.partition(" ")[2] for o in (line[2:].strip() for line in rest if line.startswith("- ("))]
+      shown = options_text([o for o in options if o not in ("amend", "respec")] + ["stop the unit"])  # the owner's alone left out
     consumers = []
     if heading.startswith("**Deviation (interface):**"):
       from superegm.decision import INTERFACE
