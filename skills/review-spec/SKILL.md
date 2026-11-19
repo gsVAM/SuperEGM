@@ -175,8 +175,10 @@ The helper ingests the spec PR once before its refusals (never under `--amend-un
 After the approval commit, `git push origin <branch>`, so the PR's head is the approved commit.
 
 **The driver's setup (the chain).** Only after `approve-spec` exits 0, and only when `.superegm/config.json`
-sets `driver.chain` to `true` (the owner's yes in the brainstorm's SDLC step) and the store is not registered
-or `superegm doctor`'s `driver:` line is not current: open a `driver` card on the new handoff's spec
+sets `driver.chain` to `true` (the owner's yes in the brainstorm's SDLC step) and the setup is not current:
+`superegm doctor`'s `root:` line is not `ok`, its first `driver:` line does not read `installed (<N> min) at
+<this plugin root>`, its `env:` line is not `ok`, or a later `driver:` line names a name the env file lacks
+(a `driver:` line naming a plugin's `SubagentStart` hook is shown to the owner, never fixed here): open a `driver` card on the new handoff's spec
 (`superegm runcard open --skill driver --artifact <spec-path>`), then, under it, in this order:
 `superegm driver env --runcard <card>` (add `--replace` only when the owner agreed to rewrite an existing
 `~/.superegm/env`; it writes the values from the helper's own environment, so never print or paste one);

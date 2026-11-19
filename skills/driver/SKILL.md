@@ -13,7 +13,8 @@ description: Installs, inspects and resets the owner's timer that types one leav
 
 In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.
 
-Typed by the owner, never invoked by a model: `/superegm:driver install [--interval <minutes>] | uninstall | status | register [--remove] | reset [--handoff <id>]`.
+Typed by the owner, never invoked by a model: `/superegm:driver env [--replace] | install [--interval <minutes>] | uninstall | status | register [--remove] [--root <path>] | reset [--handoff <id>]`.
+Typed with no action, it runs review-spec's setup in order: `env`, `register` (skipped for a registered store), `install`.
 The driver runs on the owner's machine alone. A timer runs `superegm driver tick` every interval (5 minutes
 by default; the machine's, never a repository's key); each tick reads one `status` per open handoff of each
 registered store and, when there is something to do and no session of that store is live, starts one
@@ -59,12 +60,16 @@ refusal included. `status` is read-only and takes no card.
 
 ## Before the first install (by hand, once)
 
-1. Write `~/.superegm/env`, mode `0600` (`chmod 600 ~/.superegm/env`), as `KEY=value` lines: a timer has no
-   shell, so each value literal: no quotes, no `$VAR`, no `~` (write `PATH=/opt/homebrew/bin:/usr/bin:/bin`, absolute
-   paths alone). `PATH` (where `claude`, `gh`, `python3` and `openssl` resolve), `CLAUDE_CONFIG_DIR` (the profile the
-   tick's session runs under, one without SubagentStart hooks) and the credential the shell holds today,
-   `SUPEREGM_APP_KEY` (a path; the App is the driver's credential of choice) or `SUPEREGM_BUILDER_TOKEN`. The
-   timer file carries no secret and no environment of its own.
+1. Write `~/.superegm/env` with `python3 '<HELPER>' driver env --runcard '<CARD>'` (`--replace` to rewrite an
+   existing file): it writes, mode `0600`, `KEY=value` lines from the helper's own environment (a timer has no
+   shell, so each value literal: no quotes, no `$VAR`, no `~`), so no value passes through a transcript and none is
+   printed: `PATH` (where `claude`, `gh`, `python3`
+   and `openssl` resolve), `CLAUDE_CONFIG_DIR` (the profile the tick's session runs under) and the configured
+   credential names, `builder.app.private_key_env` (the App is the driver's credential of choice) or else
+   `builder.gh_token_env`, plus every `${NAME}` a `builder.mcp` server's `env` or `headers` names. It refuses
+   `env: <NAME> unset`, `env: <dir>: SubagentStart hooks` (a profile whose settings name one) and `env: <NAME>
+   cannot be written literally`, writing nothing; `doctor`'s `driver:` lines name a configured name the file lacks
+   and an enabled plugin's `SubagentStart` hook. The timer file carries no secret and no environment of its own.
 2. Optionally write `~/.superegm/notify`, the hook `notify` feeds the inbox's new lines.
 3. On Linux, run `loginctl enable-linger` so the user timer runs while you are logged out.
 4. On macOS, check `pmset -g`: a sleeping machine runs no tick; `doctor`'s `sleep:` line shows the setting.
@@ -73,7 +78,13 @@ refusal included. `status` is read-only and takes no card.
 
 - `register`: from a checkout of the repository, `python3 '<HELPER>' register --runcard '<CARD>'` adds this
   store to `~/.superegm/registry.json` (`--remove` removes it). One entry per store: registering from another
-  worktree moves its `root`, the one checkout a tick's sessions run in.
+  worktree moves its `root`, the one checkout a tick's sessions run in. From a spec worktree, add `--root <path>`
+  with the base worktree's path (`git worktree list`): the current store is registered with that root, which must
+  be a checkout of the repository on `<base>` (`register: <path>: not a checkout on <base>` otherwise).
+- `kick`: no card and never typed: `superegm driver kick --root <root>` ticks that registered root's store now when
+  the driver is installed and its `driver.chain` is `true`, `~/.superegm/env` applied, and does nothing otherwise.
+  The builder's wrapper and the tick's phase wrapper run it under `env -i` when they end; it shares `tick/lock` and
+  `tick/again` with `tick`, so a kick during a tick is never lost and two never launch twice.
 - `/superegm:driver install [--interval <minutes>]`: `python3 '<HELPER>' driver install [--interval <minutes>] --runcard '<CARD>'`
   writes the launchd agent (`~/Library/LaunchAgents/com.superegm.driver.plist`, bootstrapped at once) or the
   systemd user timer, naming this plugin root's helper. The root is versioned: re-type `install`
