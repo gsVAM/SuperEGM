@@ -492,3 +492,21 @@ def test_spec_reviews_span_a_reapproved_handoffs_entries(world):
   assert code == 0, out
   names = reviewer_names(c.hs.path("file", "postmortem.md").read_text(encoding="utf-8"))
   assert {"opening", "between", "after-void"} <= names and not names & {"earlier-only", "later-only"}
+
+
+def test_a_decision_with_an_unruled_option_is_still_waiting(world):
+  """A point-1 decision whose options each end ` allowed` stays pending until every option has a ruling
+  (`report.pending_decisions`): its row waits, with no answer time, until the last one is ruled."""
+  c, _, _ = two_units(world)
+  t = "2026-11-15T"
+  decision = {"id": "D1", "point": 1, "asked_at": t + "05:00:00Z", "options": ["foreman-1-1 allowed", "foreman-1-2 allowed"]}
+  first = {"decision": "D1", "ruling": "foreman-1-1 allowed — fine", "by": "owner", "posted_at": t + "06:00:00Z"}
+  second = {"decision": "D1", "ruling": "foreman-1-2 allowed — fine", "by": "owner", "posted_at": t + "08:00:00Z"}
+  rows = []
+  for rulings in ([first], [first, second]):
+    jwrite(c.hs.path("foreman", "U01"), {"dispatch_id": None, "rounds": [], "decisions": [decision], "rulings": rulings})
+    code, out = world.run("postmortem", "--handoff", c.hid)
+    assert code == 0, out
+    rows.append(table(c.hs.path("file", "postmortem.md").read_text(encoding="utf-8"), "Owner time")["U01 D1"])
+  assert (rows[0]["answered by"], rows[0]["answered at"]) == ("waiting", "")
+  assert (rows[1]["answered by"], rows[1]["answered at"], rows[1]["waited"]) == ("owner", t + "08:00:00Z", str(3 * 3600))
