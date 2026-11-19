@@ -9,11 +9,13 @@ skills/brainstorming/: the restored files, the loopback-only keyed server, the s
 import hashlib
 import json
 import os
+import runpy
 import shutil
 import socket
 import subprocess
 import urllib.error
 import urllib.request
+import zipfile
 
 import pytest
 
@@ -98,3 +100,19 @@ def test_init_ignores_the_session_dir_once(before, tmp_path, capsys, monkeypatch
   assert code == 0
   assert gitignore.read_text().splitlines().count(".superegm/brainstorm/") == 1
   assert gitignore.read_text().startswith("node_modules/\n")
+
+
+def test_pack_holds_the_scripts(tmp_path):
+  # the built plugin carries the five companion scripts
+  source = tmp_path / "source"
+  source.mkdir()
+  for name in ("plugin.json", "LICENSE", "LICENSE-MIT", "README.md", "pyproject.toml"):
+    shutil.copyfile(ROOT / name, source / name)
+  for name in ("skills", "agents", "resources", "docs", ".claude-plugin", "hooks"):
+    shutil.copytree(ROOT / name, source / name)
+  build = runpy.run_path(str(ROOT / "scripts/pack_plugin.py"))["build"]
+  _, archive = build(source, tmp_path / "out")
+  with zipfile.ZipFile(archive) as bundle:
+    packed_paths = bundle.namelist()
+  names = set(packed_paths)
+  assert {f"skills/brainstorming/scripts/{n}" for n in ("frame-template.html", "helper.js", "server.cjs", "start-server.sh", "stop-server.sh")} <= names
