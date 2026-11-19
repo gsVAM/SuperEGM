@@ -74,11 +74,12 @@ def test_waiting_proceed_after_a_later_launch(world, case, merge_offered):
   assert report.unit_state("U01", view, foreman, entries, card_json, {}, NOW) == ("clean" if merge_offered else "waiting proceed")
   assert launch.in_flight(s, "U01", view, set()) is False
   text = inbox_text(s)
-  assert ("proceed again: U01 head" in text) is not merge_offered, text
+  proceeds = [i for i in inbox_items(s, [s.handoff_id]) if i["subject"] == "U01" and i["kind"] == "proceed"]
+  assert bool(proceeds) is not merge_offered, text
   assert any(i["subject"] == "U01" and i["kind"] == "merge" for i in inbox_items(s, [s.handoff_id])) is merge_offered, text
   if not merge_offered:
     head = view["head"]
-    assert f"proceed again: U01 head {head}" in text, text
+    assert [(i["action"], i["fingerprint"].rsplit("/", 1)[1]) for i in proceeds] == [("answer in the inbox", head)], text
     word = report.unit_state("U01", view, foreman, entries, card_json, {}, NOW)
     assert report.next_action(word, None, entries[-1], [], None) == "proceed again"
 
@@ -353,7 +354,7 @@ def test_head_less_proceed_asks_for_a_proceed_again(world):
   atomic_write(s.path("foreman", "U01"), f)
   head = reading(s, card)[0]["head"]
   assert head
-  assert [i["action"].split(" on ")[0] for i in proceed_items(s)] == [f"proceed again: U01 head {head}"]
+  assert [(i["action"], i["fingerprint"].rsplit("/", 1)[1]) for i in proceed_items(s)] == [("answer in the inbox", head)]
 
 
 # ---------------------------------------------------------------- round 3 review

@@ -396,7 +396,7 @@ WRITES = {"approve_spec":{"approvals", "handoffs", "state", "reviews", "runcards
           "record_launch": {"launches"}, "collect": {"foreman", "review", "reviews"}, "prepare": {"foreman", "review", "runcards"},
           "launch_builder": {"launches", "orient_unit", "runcards"}, "interrupt": {"launches", "foreman"}, "clean": set(), "precheck": set(),
           "orient": {"orient", "orient_unit"},
-          "runcard": {"runcards", "launches", "driver"}, "init": set(), "doctor": set(), "builder_token": set(), "builder_setup": set(), "inbox": {"state", "driver"},
+          "runcard": {"runcards", "launches", "driver"}, "init": set(), "doctor": set(), "builder_token": set(), "builder_setup": set(), "inbox": {"state", "driver", "runcards", "journal"},
           "driver": {"driver", "runcards", "launches", "tick", "chain"}, "phase": {"chain", "runcards", "file"}, "register": set(), "decision": {"foreman", "reviews", "state", "file"}}
 
 
