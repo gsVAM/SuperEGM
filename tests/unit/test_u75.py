@@ -69,3 +69,28 @@ def test_a_finding_on_a_reference_document_is_in_scope_and_settles(world, locati
     assert code == 0, out
     disposition = rjson(world, rid, "round-1.json")["reviewers"]["design"]["findings"][0]["disposition"]
   assert ("not recorded" not in record_out) == recorded and disposition == settled
+
+
+@pytest.mark.parametrize("cycle", ["converged", "proceed at round 0", "proceed after the cap"])
+def test_approve_spec_refuses_a_reference_edit_after_review(world, cycle):
+  """Unchanged passes; a reference-only edit after the reviewed manifest refuses until a new proceed."""
+  from test_review import HIGH, approve, rounds
+  branch_with_changed_invariants(world)
+  spec, cid, rid = opened(world)
+  proceed = lambda: world.run("review", "rule", "--review", rid, "--ruling", "proceed", "--owner", "--reason", "accepted risk", "--runcard", cid)
+  if cycle == "converged":
+    rounds(world, rid, cid, [[]])
+  elif cycle == "proceed after the cap":
+    rounds(world, rid, cid, [HIGH(n) for n in range(1, 4)])   # `configure` leaves the default cap, 3 rounds
+  if cycle != "converged":
+    assert proceed()[0] == 0
+  code, out = approve(world, spec, cid)   # no --yes: the refusals run, the prompt is printed, nothing is written
+  approve_unchanged = code
+  (world.repo / INV).write_text("Invariants, edited after the review.\n", encoding="utf-8")
+  refused_code, refused_out = approve(world, spec, cid)
+  assert approve_unchanged == 0, out
+  assert refused_code == 1 and "approve-spec: docs/reference/invariants.md: differs from the reviewed round" in refused_out, refused_out
+  if cycle != "converged":
+    assert proceed()[0] == 0
+    approve_after_new_proceed = approve(world, spec, cid)[0]
+    assert approve_after_new_proceed == 0
