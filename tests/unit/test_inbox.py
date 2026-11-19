@@ -413,7 +413,8 @@ def test_a_legacy_handoff_lists_its_own_specs_reviews_alone(world, tmp_path):
 @pytest.mark.parametrize("mode, severity", [("normal", "high"), ("leavemealone", "low"), ("leavemealone", "high")])
 def test_an_escalated_integrate_findings_settle_line_carries_what_its_mode_needs(world, mode, severity):
   """Round 7 (astra-6-3); U72: in either mode the owner settles an escalated integrate finding in the integrate
-  session, which asks in words; the line names that session, never a command."""
+  session, where the owner's answer is recorded (the inbox asks nothing); the line names that session, never a
+  command."""
   set_config(world, repo=REPO, mode=mode)
   open_wave_card(world)
   rid = "spec-sample-integrate-c1"

@@ -210,7 +210,14 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
     # the unlanded `after` list is in the fingerprint: the item is new again to `notify` each time an `after` unit
     # lands, the last one included
     key = "".join([base] + [f"/after-{m}" for m in after])
-    out.append(item(repo, uid, "merge", action, key) | {"head": auth.get("head") or head})
+    merge = item(repo, uid, "merge", action, key) | {"head": auth.get("head") or head}
+    # spec 1.2.1 section 7.3, 5.2: the owner's undo of a triage deferral, a medium the latest posted round deferred
+    # (decision.refuse_undo refuses an earlier round's), posted on the unit's issue as a ruling with no decision
+    latest = max((e["round"] for e in rounds if e.get("phase") == "posted"), default=None)
+    undo = [ruling_form(1, r["fid"], "finding upheld") for r in foreman.get("followups") or [] if r.get("round") == latest]
+    if undo:
+      merge |= {"undo": undo, "on": f"{GITHUB}/{repo}/issues/{number}"}
+    out.append(merge)
   return out
 
 
@@ -305,7 +312,8 @@ def review_items(hs: core.Store, repo: str, spec: str, rid: str, rev: dict, fore
     foreman, number = foremen.get(unit) or {}, (((state or {}).get("units") or {}).get(unit) or {}).get("number")
     if status.code == 5:  # spec section 4.2: a stall ends the invocation and `proceed` is the way past it; no point-2
       # decision is open on a stall, so a cap form would rule nothing (decision.verify_posted)
-      out.append(ruling_item(repo, unit, "stalled", [PROCEED], number, f"{rid}/{rounds[-1]['round']}"))
+      out.append(ruling_item(repo, unit, "stalled", [PROCEED], number, f"{rid}/{rounds[-1]['round']}")
+                 | {"head": review.pinned_head(hs, rid, rev, state or {})})  # the head its proceed would pin
     elif status.code == 2 and not any(d.get("point") == 2 for d in report.pending_decisions(foreman)):
       # the capped round is posted but its point-2 decision is not open yet: a posted cap form would name no open
       # decision (decision.verify_posted drops it), so the item offers none until the next wave opens it
@@ -407,8 +415,9 @@ def chain_items(store: core.Store, hs: core.Store, repo: str, hid: str, state: d
 
 def inbox_items(store: core.Store, handoff_ids: list) -> list:
   """What needs the owner across the handoffs `handoff_ids` (spec section 11.2), one dict per item: `repo`,
-  `subject`, `kind`, `action`, `fingerprint` and `handoff`, a ruling's `forms` and `on` too (U72) and a `merge` or
-  `proceed` item's `head`; ordered by handoff id, subject, then kind, the `wave` card and the
+  `subject`, `kind`, `action`, `fingerprint` and `handoff`, a ruling's `forms` and `on` too (U72), a `merge`,
+  `proceed` or `stalled` item's `head`, and a `merge` item's `undo` and `on` while its latest posted round deferred a
+  medium by triage; ordered by handoff id, subject, then kind, the `wave` card and the
   driver's lines last, except that a handoff's `merge` items follow the `order` list of its `handoff_units.json` (U61)."""
   repo, rows = store.config["repo"], {r["id"]: r for r in core.handoffs(store.root)}
   out, read_specs, seen = [], set(), set()  # a spec's store-level reviews are read once, under its first handoff
