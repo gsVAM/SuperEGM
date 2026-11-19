@@ -7,6 +7,8 @@ chain phase `superegm next` names, U44); `install` and `uninstall` write and rem
 the launchd agent (a systemd user timer on Linux); `status` reads, `reset` is the owner's interrupt."""
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import plistlib
@@ -21,7 +23,7 @@ WRITES = frozenset({"driver", "runcards", "launches", "tick", "chain"})
 CONFIG_DEFAULTS, INIT_STEP = {}, ""  # no written config key or init line of its own (U32)
 CONFIG_UNWRITTEN = {"driver": {"chain": False}}  # its own key, registered but never written by `init`: absent reads false (U44)
 SKILLS = frozenset({"driver"})
-ACTIONS = ("tick", "install", "uninstall", "status", "reset")
+ACTIONS = ("tick", "install", "uninstall", "status", "reset", "kick")
 LABEL = "com.superegm.driver"
 RUN = subprocess.run  # launchctl and systemctl: a test fakes it
 PLATFORM = sys.platform
@@ -90,6 +92,7 @@ def register(subparsers):
   p = core.add_parser(subparsers, "driver", "the owner's timer: tick, install, uninstall, status, reset")
   p.add_argument("action", choices=ACTIONS)
   p.add_argument("--interval", type=int, help="install: minutes between ticks (default 15)")
+  p.add_argument("--root", help="kick: the registered root whose store ticks now")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -99,6 +102,10 @@ def run(args):
       return tick()
     if args.action == "status":
       return status()
+    if args.action == "kick":
+      if not args.root:
+        raise core.HandoffError("kick: --root is required")
+      return kick(args.root)
     core.require_runcard(args, SKILLS)
     if args.action == "install":
       return install(15 if args.interval is None else args.interval)
@@ -470,6 +477,39 @@ def tick() -> int:
     os.environ.clear()
     os.environ.update(saved)
   return code
+
+
+def installed() -> bool:
+  """The driver is installed: its launchd plist or its systemd unit file exists."""
+  return plist_path().is_file() or service_path().is_file()
+
+
+def kick(root) -> int:
+  """`driver kick --root <root>` (spec section 7.4): one store's tick now, for the registry entry whose `root` is
+  `<root>`, `~/.superegm/env` applied and restored around it as `tick` does; nothing for an unregistered root, an
+  uninstalled driver or a store whose `driver.chain` (read from `registered_store`'s config) is not `true`. Prints
+  nothing; a store's error is printed and exits 1, which the kicking wrapper logs."""
+  if not installed():
+    return 0
+  want = Path(root).resolve()
+  entry = next((e for e in core.load_registry() if Path(e.get("root") or "").resolve() == want), None)
+  if entry is None:
+    return 0
+  st, _ = registered_store(entry)
+  if not chain_on(st.config):
+    return 0
+  saved = dict(os.environ)
+  os.environ.update(read_env())
+  try:
+    with contextlib.redirect_stdout(io.StringIO()):
+      tick_store(entry)
+  except (core.HandoffError, core.GhError, OSError, ValueError, KeyError) as error:
+    print(f"driver: {entry.get('artifacts_dir')}: {error}")
+    return 1
+  finally:
+    os.environ.clear()
+    os.environ.update(saved)
+  return 0
 
 
 # ---------------------------------------------------------------- install, uninstall, status
