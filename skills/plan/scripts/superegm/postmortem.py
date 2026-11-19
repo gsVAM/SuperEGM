@@ -8,9 +8,9 @@ Owner time and Plan against actual. The command reads the store, needs no run ca
 file, as `scan` does; it runs on an open handoff too, the header then saying `in progress`.
 
 What the store does not hold, the report does not invent: launches record no token counts (the Units table has cost
-only); a head finding's overruled and allowed outcomes are the foreman's ruling texts (`<fid> finding overruled`,
-`<fid> allowed`) read per unit, and a unit's several head cycles share them; a spec, plan or integrate finding settled
-`contested` or `declined` counts overruled; a decision's wait has no start but the foreman's `asked_at`, so a `decide`
+only); a head finding's allowed outcome is the foreman's ruling text `<fid> allowed` read per unit (a unit's several
+head cycles share them), its overruled outcome the text `<fid> finding overruled`, or a settled disposition; a
+finding of any kind settled `contested` or `declined` counts overruled; a decision's wait has no start but the foreman's `asked_at`, so a `decide`
 answer is a row without a waiting time."""
 
 import json
@@ -215,7 +215,7 @@ def reviewers_table(st: core.Store, hs: core.Store, uids: list, spec) -> str:
 
 def wait_episodes(hs: core.Store) -> dict:
   """Per phase, its waits from the journal: `{since, source, by, at}`, in order. A wait ends at its `answer.json`'s `at`;
-  else at the `next clear` that removed it; else at the next wait or re-ask of its phase that replaced it; else at the
+  else at the `next clear` that removed it; else at the next wait or re-ask, of any phase, that replaced it (the chain record holds one wait); else at the
   journal line where the driver removed a superseded handoff's wait record; else it is still going (`at` None)."""
   journal = hs.path("journal")
   lines = core.read_text(journal).splitlines() if journal.is_file() else []
@@ -226,8 +226,9 @@ def wait_episodes(hs: core.Store) -> dict:
             and not hs.path("file", "waits", f"{e['phase']}-{e['since']}.answer.json").is_file()]
 
   def begin(phase: str, since: str, source: str) -> None:
-    for episode in unanswered(phases.get(phase, [])):  # replaced before anyone answered it
-      episode["by"], episode["at"] = "replaced", since
+    for found in phases.values():  # the chain record holds one wait whatever its phase: a new one replaces it
+      for episode in unanswered(found):  # replaced before anyone answered it
+        episode["by"], episode["at"] = "replaced", since
     phases.setdefault(phase, []).append({"phase": phase, "since": since, "source": source, "by": None, "at": None})
 
   for line in lines:
@@ -272,6 +273,10 @@ def owner_rows(st: core.Store, hs: core.Store, uids: list, spec) -> list:
   state = core.load_state(hs.root) if hs.path("state").is_file() else {}
   for key, found in sorted((state.get("decisions") or {}).items()):
     rows.append([key, "decision", "decide", None, who(found.get("by")), found.get("decided_at")])
+  for uid, unit in sorted(((read_json(hs.path("units")) or {}).get("units") or {}).items()):
+    for declared in unit.get("decisions") or []:  # declared by the plan, not yet answered: `decide` records an answer
+      if f"{uid}/{declared.get('id')}" not in (state.get("decisions") or {}):
+        rows.append([f"{uid}/{declared.get('id')}", "decision", "plan", None, "waiting", None])
   reviews = reviews_of(st, hs, spec)
   for rid, found in reviews:
     for ruling in (found or {}).get("rulings") or []:
@@ -280,11 +285,12 @@ def owner_rows(st: core.Store, hs: core.Store, uids: list, spec) -> list:
   for uid in uids:
     foreman = core.load_foreman(hs, uid)
     heads = [f for _, f in reviews if f and f.get("kind") == "head" and f.get("artifact") == uid]
-    stamps = {r.get("id"): r.get("at") for f in heads for r in f.get("rulings") or []}
+    stamps = {(rid, r.get("id")): r.get("at") for rid, f in reviews if f in heads for r in f.get("rulings") or []}
     rulings = {r.get("decision"): r for r in foreman.get("rulings") or [] if r.get("decision")}
     for decision in foreman.get("decisions") or []:
       ruling = rulings.get(decision.get("id")) or {}
-      end = ruling.get("posted_at") or ruling.get("at") or stamps.get(ruling.get("review"))  # a proceed's carries none
+      named = (decision.get("source") or "").split()  # `review <id> cap|round <n>`: the review that ruled it, if a proceed
+      end = ruling.get("posted_at") or ruling.get("at") or stamps.get((named[1] if len(named) > 1 else None, ruling.get("review")))
       rows.append([f"{uid} {decision.get('id')}", "decision", decision.get("source") or decision.get("point"),
                    seconds(decision.get("asked_at"), end or core.now_iso()), who(ruling.get("by")) or "waiting", end])
     if foreman.get("stopped"):
