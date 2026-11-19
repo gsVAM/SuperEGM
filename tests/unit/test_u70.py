@@ -17,3 +17,10 @@ def test_driven_skills_act_on_an_answered_record(skill, phrase):
 def test_file_creates_only_on_a_matching_sha256(phrase):
   # the sha256 is of handoff_dryrun.md's bytes, carried in the question
   assert phrase in Path("skills/file/SKILL.md").read_text()
+
+
+@pytest.mark.parametrize("path", ["skills/wave/SKILL.md", "skills/integrate/SKILL.md", "skills/using-superegm/SKILL.md"])
+def test_merge_lines_point_to_the_inbox(path):
+  # the merge happens in the inbox; the admin-bypass literal stays
+  line = next(l for l in Path(path).read_text().splitlines() if "gh pr merge --admin" in l)
+  assert "inbox" in line
