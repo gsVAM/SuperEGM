@@ -452,6 +452,26 @@ def test_spec_reviews_stop_at_the_handoffs_own_approval(world):
   assert {"ours-two", "ours-three"} <= names and not names & {"earlier-only", "later-only"}
 
 
+FOREMAN_FINDING = {"id": "foreman-1-1", "severity": "high", "claim": "a check fails", "location": "a.py:1",
+                   "regression": "no", "disposition": None}
+
+
+def carried_foreman(c, rid, finding, rounds, settled=None):
+  """Round 1 of head cycle `rid` holds `finding`; each later round holds what `collect.carry` makes of the round before
+  (the same id, `carried_from`), as `collect` writes it. `settled` is the disposition `review settle` or triage writes on
+  the newest copy alone (`review.locate_finding`)."""
+  from superegm import collect
+  reviewed(c, rid, "head", "U01", ["foreman"], {"foreman": {"findings": [finding]}})
+  last = {"reviewers": {"foreman": {"findings": [finding]}}}
+  for n in range(2, rounds + 1):
+    line = f"foreman-{n}-1 | {finding['severity']} | {finding['location']} | regression: no | {finding['claim']}"
+    kept, slots, _ = collect.carry([line], [], last, n - 1, {}, [])
+    assert kept == [] and slots[0]["carried_from"] == n - 1
+    copy = {**slots[0], "disposition": settled if n == rounds else None}
+    last = {"reviewers": {"foreman": {"findings": [copy]}}}
+    jwrite(c.hs.path("reviews", rid, f"round-{n}.json"), {"round": n, "runcard": "rc", **last})
+
+
 def test_carried_foreman_findings_are_one_finding(world):
   """`collect.carry` copies an open foreman finding into the next round under its own id with `carried_from`: the
   Units table and the Reviewers table count it once, and its one overrule is one overrule."""
@@ -459,17 +479,57 @@ def test_carried_foreman_findings_are_one_finding(world):
   jwrite(c.hs.path("foreman", "U01"), {
       "dispatch_id": None, "decisions": [], "rounds": [{"round": n, "phase": "posted", "outcome": "posted"} for n in (1, 2, 3)],
       "rulings": [{"ruling": "foreman-1-1 finding overruled — not a defect", "by": "owner"}]})
-  finding = {"id": "foreman-1-1", "severity": "high", "claim": "a check fails", "location": "a.py:1"}
-  reviewed(c, "head-U01-c1", "head", "U01", ["foreman"], {"foreman": {"findings": [finding]}})
-  for n in (2, 3):
-    jwrite(c.hs.path("reviews", "head-U01-c1", f"round-{n}.json"),
-           {"round": n, "runcard": "rc", "reviewers": {"foreman": {"findings": [{**finding, "carried_from": n - 1}]}}})
+  carried_foreman(c, "head-U01-c1", FOREMAN_FINDING, 3)
   code, out = world.run("postmortem", "--handoff", c.hid)
   assert code == 0, out
   report = c.hs.path("file", "postmortem.md").read_text(encoding="utf-8")
   assert table(report, "Units")["U01"]["high"] == "1"
   foreman = table(report, "Reviewers")["foreman"]
   assert (foreman["high"], foreman["overruled"]) == ("1", "1")
+
+
+@pytest.mark.parametrize("disposition,column", [("fixed", "fixed"), ("declined", "overruled"), ("contested", "overruled"),
+                                                ("deferred: triage 2", "deferred")])
+def test_a_carried_finding_ends_as_its_newest_copy_says(world, disposition, column):
+  """`review settle` and triage write a disposition on the newest copy of a carried finding, the original's staying
+  unset: the Reviewers table counts the finding once, under the outcome the newest copy holds."""
+  c, _, _ = two_units(world)
+  jwrite(c.hs.path("foreman", "U01"), {"dispatch_id": None, "decisions": [], "rulings": [],
+                                       "rounds": [{"round": n, "phase": "posted", "outcome": "posted"} for n in (1, 2, 3)]})
+  carried_foreman(c, "head-U01-c1", FOREMAN_FINDING, 3, settled=disposition)
+  code, out = world.run("postmortem", "--handoff", c.hid)
+  assert code == 0, out
+  report = c.hs.path("file", "postmortem.md").read_text(encoding="utf-8")
+  assert table(report, "Units")["U01"]["high"] == "1"
+  foreman = table(report, "Reviewers")["foreman"]
+  assert foreman["high"] == "1"
+  assert {k: foreman[k] for k in ("fixed", "overruled", "deferred")} == {
+      k: "1" if k == column else "0" for k in ("fixed", "overruled", "deferred")}
+
+
+def test_an_unreplied_copy_of_an_external_finding_is_not_a_new_one(world):
+  """`collect` raises a foreman `unreplied <fid>: <claim>` high for an external finding no reply answered: it repeats
+  the finding the external reviewer's record holds, so the Units table and the Reviewers table count the defect once."""
+  from superegm import collect
+  c, _, _ = two_units(world)
+  jwrite(c.hs.path("foreman", "U01"), {"dispatch_id": None, "decisions": [], "rulings": [],
+                                       "rounds": [{"round": n, "phase": "posted", "outcome": "posted"} for n in (1, 2)]})
+  external = {"id": "external:astra-1-1", "severity": "high", "claim": "a defect", "location": "a.py:1",
+              "regression": "no", "disposition": None}
+  lines, _ = collect.foreman_findings(2, "ci green", "", [], c.root, [], "", [], "builder-bot", None, None, external=[external])
+  assert [l.split(" | ", 4)[4] for l in lines] == ["unreplied external:astra-1-1: a defect"], lines
+  fid, severity, location, _, claim = lines[0].split(" | ", 4)
+  reviewed(c, "head-U01-c1", "head", "U01", ["external:astra", "foreman"], {"external:astra": {"findings": [external]}})
+  jwrite(c.hs.path("reviews", "head-U01-c1", "round-2.json"), {"round": 2, "runcard": "rc", "reviewers": {
+      "foreman": {"findings": [{"id": fid, "severity": severity, "location": location, "claim": claim,
+                                "regression": "no", "disposition": None}]}}})
+  code, out = world.run("postmortem", "--handoff", c.hid)
+  assert code == 0, out
+  report = c.hs.path("file", "postmortem.md").read_text(encoding="utf-8")
+  assert table(report, "Units")["U01"]["high"] == "1"
+  reviewers = table(report, "Reviewers")
+  assert reviewers["external:astra"]["high"] == "1"
+  assert reviewers["foreman"]["high"] == "0"
 
 
 def test_spec_reviews_span_a_reapproved_handoffs_entries(world):
