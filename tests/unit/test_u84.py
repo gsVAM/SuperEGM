@@ -19,13 +19,13 @@ from superegm.judges import decision_question, stored_options_text
 from test_foreman import UNIT, c, prepared
 from test_wave import REPO, fake_gh, foreman_of, question, wave_store
 
-SPEC_LINE = "**Deviation (spec):** docs/specs/x.md:12 says 3; `pytest -k t` fails"
+SPEC_LINE = "**Deviation (spec):** docs/designs/sample.md:12 says 3; `pytest -k t` fails"  # the test world's frozen spec path
 SPEC_COMMENT = SPEC_LINE + "\n- (a) keep the spec\n- (b) follow the code\n**Builder status:** BLOCKED"
 
 
 @pytest.mark.parametrize("ruled, blockers", [(False, 1), (True, 0)])
 def test_spec_deviation_blocks_until_ruled(world, tmp_path, monkeypatch, ruled, blockers):
-  # a `spec` deviation is a blocker as `interface`, `dod` and `test` are (collect.py:600-605)
+  # a `spec` deviation is a blocker as `interface`, `dod` and `test` are (collect.py:550-554)
   assert DEVIATION_RE.match(SPEC_LINE).group(1) == "spec"
   comments = [c(12, "builder-bot", SPEC_COMMENT)] + ([c(13, "owner", "**Ruling:** (12) (a) — the spec stands")] if ruled else [])
   w = prepared(world, tmp_path, monkeypatch, comments={2: comments})
@@ -66,11 +66,14 @@ def test_respec_is_the_owners_alone(world, mode):
   code, err = rule_on(world, card, qid, "respec", "judges:p-1")
   assert code != 0 and "decision: respec is the owner's alone" in err
   assert not (s.base() / "respec").exists()
-  # the judges' question for the blocked comment, and a plan-time decision's, list every option but respec
+  # the judges' question for the blocked comment lists every option but respec; in leavemealone it waits for the owner (§7.6)
   code, out = world.run("judges", "question", "--unit", "U02", "--blocked", "101", "--runcard", card)
-  assert code == 0, out
-  blocked = Path(out.splitlines()[0]).read_text(encoding="utf-8")
-  assert "respec" not in blocked and blocked.endswith("- (a) keep the spec\n- (b) follow the code\n- (d) stop the unit\n")
+  if mode == "leavemealone":
+    assert code != 0 and "waits for the owner" in out and not (s.base() / "questions").exists()
+  else:
+    assert code == 0, out
+    blocked = Path(out.splitlines()[0]).read_text(encoding="utf-8")
+    assert "respec" not in blocked and blocked.endswith("- (a) keep the spec\n- (b) follow the code\n- (d) stop the unit\n")
   s.path("units").write_text(json.dumps({"units": {"U01": {"decisions": [{"id": "d1", "question": "Which?", "options": stored}]}}}), encoding="utf-8")
   asked = decision_question(s, "U01", "d1")
   assert "- respec\n" not in asked and "- stop the unit\n" in asked and "- (a) keep the spec\n" in asked
@@ -88,7 +91,7 @@ def test_respec_ruling_writes_the_open_file_only(world):
   assert json.loads(open_file.read_text(encoding="utf-8")) == {"id": "R1", "unit": "U02", "comment_id": 101, "at": AT}
   assert foreman_of(s, "U02")["rulings"][-1]["ruling"] == "respec"
   assert sorted(p.name for p in (s.base() / "respec").iterdir()) == ["R1.open.json"]
-  second = open_decision(world, card, SPEC_COMMENT.replace("x.md:12", "x.md:40"), cid=102)
+  second = open_decision(world, card, SPEC_COMMENT.replace("sample.md:12", "sample.md:40"), cid=102)
   assert rule_on(world, card, second, "respec")[0] == 0
   second_open_file = s.path("file", "respec", "R2.open.json")
   assert second_open_file.name == "R2.open.json" and json.loads(second_open_file.read_text(encoding="utf-8"))["comment_id"] == 102
@@ -97,7 +100,10 @@ def test_respec_ruling_writes_the_open_file_only(world):
 
 @pytest.mark.parametrize("body, refusal", [
     ("**Deviation (spec):** the retry count is wrong; `pytest -k retry` fails", "decision: respec needs the frozen spec's path:line"),
-    ("**Deviation (spec):** docs/specs/x.md:12 says 3 retries", "decision: respec needs the evidence")])
+    ("**Deviation (spec):** docs/designs/sample.md:12 says 3 retries", "decision: respec needs the evidence"),
+    ("**Deviation (spec):** docs/designs/sample.md:12 says 3; docs/designs/sample.md:40 says 4", "decision: respec needs the evidence"),
+    ("**Deviation (spec):** src/retry.py:12 says 3; `pytest -k retry` fails", "decision: respec needs the frozen spec's path:line"),
+    ("**Deviation (spec):** src/a.py:1 says 3; src/b.py:2 sets 5", "decision: respec needs the frozen spec's path:line")])
 def test_spec_deviation_needs_the_line_and_the_evidence(world, body, refusal):
   # a spec deviation quotes the frozen spec's path:line AND the evidence (a command and output, or a base path:line)
   text = body + "\n- (a) keep the spec\n- (b) follow the code\n**Builder status:** BLOCKED"
@@ -116,11 +122,29 @@ def test_builder_orders_and_foreman_brief_define_spec(path):
   # both docs define the `spec` kind with its two parts; the foreman raises it as a finding of kind `spec`
   text = (ROOT / path).read_text(encoding="utf-8")
   assert all(p in text for p in ("**Deviation (spec):**", "`path:line`", "evidence", "stays `interface`"))
+  assert "which the foreman never posts" not in text
+  if path.endswith("foreman_brief.md"):  # the foreman raises it by posting the deviation comment, so the blocker and the respec decision apply
+    assert "posting a `**Deviation (spec):**` comment" in text
+
+
+@pytest.mark.parametrize("text, spec, refusal", [
+    (SPEC_LINE, "/r/docs/designs/sample.md", None),
+    ("**Deviation (spec):** docs/designs/sample.md:12 says 3; src/retry.py:9 sets 5", "/r/docs/designs/sample.md", None),
+    ("**Deviation (spec):** ./docs/designs/sample.md:12 says 3; `pytest` fails", "/r/docs/designs/sample.md", None),
+    ("**Deviation (spec):** src/retry.py:12 says 3; `pytest` fails", "/r/docs/designs/sample.md", "frozen spec's path:line"),
+    ("**Deviation (spec):** other/sample.md:12 says 3; `pytest` fails", "/r/docs/designs/sample.md", "frozen spec's path:line"),
+    ("**Deviation (spec):** src/retry.py:12 says 3; `pytest` fails", "", None)])  # no spec known: nothing to compare with
+def test_check_respec_compares_the_cited_path_with_the_frozen_spec(text, spec, refusal):
+  if refusal is None:
+    decision.check_respec(text, spec)
+  else:
+    with pytest.raises(decision.Refusal, match=refusal):
+      decision.check_respec(text, spec)
 
 
 def test_judges_cannot_reach_respec_by_a_lettered_option(world):
   # a comment whose own option line reads `- (a) respec` stores `(a) respec`: the judges' letter still resolves to the owner's alone
-  text = "**Deviation (spec):** docs/specs/x.md:12 says 3; `pytest -k t` fails\n- (a) respec\n- (b) follow the code\n**Builder status:** BLOCKED"
+  text = SPEC_LINE + "\n- (a) respec\n- (b) follow the code\n**Builder status:** BLOCKED"
   card, s = spec_world(world, text=text)
   qid = open_decision(world, card, text)
   code, err = rule_on(world, card, qid, "(a)", "judges:p-1")
@@ -130,12 +154,52 @@ def test_judges_cannot_reach_respec_by_a_lettered_option(world):
   assert "respec" not in decision_question(s, "U01", "d1")
 
 
-@pytest.mark.parametrize("body, binds", [(SPEC_COMMENT, True), (SPEC_COMMENT.replace(" says 3; `pytest -k t` fails", ""), False)])
-def test_an_owner_respec_ruling_binds_only_on_a_comment_that_passes_the_check(body, binds):
-  # the ruling on a `spec` deviation lacking its evidence clears no blocker: it names an option the check refuses
+@pytest.mark.parametrize("body", [SPEC_COMMENT, SPEC_COMMENT.replace(" says 3; `pytest -k t` fails", ""), SPEC_LINE])
+def test_an_unrecorded_respec_ruling_binds_nothing(body):
+  # only `decision rule` records a respec, after writing the open file: a ruling comment alone clears no blocker, on a
+  # comment with or without option lines, on a decision, or on a comment id this issue lacks
   ruling = decision.Ruling("option", "12", "respec", "the spec is wrong", "owner", 20)
-  assert decision.offered(ruling, [{"id": 12, "body": body}], []) is binds
-  assert decision.offered(ruling, [], [{"point": 3, "source": "comment 12", "question": body, "options": decision.comment_options(body)}]) is binds
+  assert decision.offered(ruling, [{"id": 12, "body": body}], []) is False
+  assert decision.offered(ruling, [], [{"point": 3, "source": "comment 12", "question": body, "options": decision.comment_options(body)}]) is False
+  assert decision.offered(ruling, [], []) is False
+  assert decision.offered(decision.Ruling("option", "12", "(a)", "the spec stands", "owner", 20), [{"id": 12, "body": SPEC_COMMENT}], []) is True
+
+
+def test_an_unrecorded_respec_comment_keeps_the_spec_blocker(world, tmp_path, monkeypatch):
+  comments = [c(12, "builder-bot", SPEC_COMMENT), c(13, "owner", "**Ruling:** (12) respec — the spec is wrong")]
+  w = prepared(world, tmp_path, monkeypatch, comments={2: comments})
+  code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
+  assert (code, out.strip()) == (0, "collected: 1 foreman findings"), out
+
+
+def test_a_third_comment_decision_still_offers_respec(world):
+  # the relaunch/stop carve-out for a third comment on one head keeps `respec` on a spec deviation (§7.6: every spec deviation's decision)
+  card, s = spec_world(world)
+  for cid in (101, 102):
+    qid = open_decision(world, card, "**Deviation (other):** x\n- (a) go on\n**Builder status:** BLOCKED", cid=cid)
+    assert rule_on(world, card, qid, "(a)")[0] == 0
+  fake_gh(world, {f"repos/{REPO}/issues/comments/103": {"id": 103, "user": {"login": "builder-bot"}, "body": SPEC_COMMENT}})
+  third = open_decision(world, card, SPEC_COMMENT, cid=103)
+  assert foreman_of(s, "U02")["decisions"][-1]["options"] == ["relaunch", "respec", "stop the unit"]
+  assert rule_on(world, card, third, "respec")[0] == 0 and s.path("file", "respec", "R1.open.json").exists()
+
+
+def test_the_judges_blocked_question_without_a_decision_leaves_out_respec(world):
+  # no decision opened on the comment: the options are read off its lines, a lettered `respec` and `amend` still left out
+  text = SPEC_LINE + "\n- (a) respec\n- (b) follow the code\n**Builder status:** BLOCKED"
+  card, s = spec_world(world, text=text)
+  code, out = world.run("judges", "question", "--unit", "U02", "--blocked", "101", "--runcard", card)
+  assert code == 0, out
+  assert Path(out.splitlines()[0]).read_text(encoding="utf-8").endswith("- (b) follow the code\n- (c) stop the unit\n")
+
+
+def test_judges_cannot_reach_amend_by_a_lettered_option(world):
+  # amend, like respec, is the owner's alone: a stored `(a) amend` resolved by the judges' letter is refused too
+  text = "**Deviation (interface):** U02 load: takes two\n- (a) amend\n- (b) keep\n**Builder status:** BLOCKED"
+  card, s = spec_world(world, text=text)
+  qid = open_decision(world, card, text)
+  code, err = rule_on(world, card, qid, "(a)", "judges:p-1")
+  assert code != 0 and "amend" in err and "owner" in err
 
 
 def test_a_rerun_keeps_the_open_file_of_the_same_deviation(world):
