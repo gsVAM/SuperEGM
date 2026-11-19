@@ -3,6 +3,8 @@
 
 """U75: reference documents, reviewed with the spec."""
 
+import pytest
+
 from conftest import git
 from test_review import opened
 from test_u37 import configure
@@ -47,3 +49,23 @@ def test_a_reference_only_edit_is_a_changed_round(world):
   # `launch` reads the spec at origin against that same sha: the approved bytes pass its check
   assert launch.origin_problems(world.repo, "main", {**entry, "path": str(spec)}, ref="HEAD", spec_only=True) == []
   assert graph_sha == entry["sha256"] == spec_sha256
+
+
+@pytest.mark.parametrize("location, recorded, settled", [
+  ("docs/reference/invariants.md:12", True, "fixed"),
+  ("docs/reference/unlisted.md:12", False, None)])
+def test_a_finding_on_a_reference_document_is_in_scope_and_settles(world, location, recorded, settled):
+  """A `changed <path>` file is in scope whatever its line; any other non-spec path answers `none`."""
+  from test_review import F, record, rjson, settle
+  branch_with_changed_invariants(world)
+  spec, cid, rid = opened(world)
+  code, record_out = record(world, rid, 1, "design", [F("design", 1, 1, loc=location)], cid)
+  assert code == 0, record_out
+  found = rjson(world, rid, "round-1.json")["reviewers"]["design"]["findings"]
+  disposition = None
+  if found:
+    (world.repo / INV).write_text("Invariants, fixed.\n", encoding="utf-8")   # the fix: a reference document alone
+    code, out = settle(world, rid, "design-1-1", "fixed", cid)
+    assert code == 0, out
+    disposition = rjson(world, rid, "round-1.json")["reviewers"]["design"]["findings"][0]["disposition"]
+  assert ("not recorded" not in record_out) == recorded and disposition == settled
