@@ -470,3 +470,25 @@ def test_carried_foreman_findings_are_one_finding(world):
   assert table(report, "Units")["U01"]["high"] == "1"
   foreman = table(report, "Reviewers")["foreman"]
   assert (foreman["high"], foreman["overruled"]) == ("1", "1")
+
+
+def test_spec_reviews_span_a_reapproved_handoffs_entries(world):
+  """A handoff approved again after a void keeps its id and holds two approval entries: its spec reviews run from after
+  the previous handoff's entry to its last entry's cycle, the cycle between the two included."""
+  from test_review import SLUG
+  c, _, _ = two_units(world)
+  path = c.root / "approvals" / f"{SLUG}.json"
+  record = jread(path)
+  own = record["entries"][-1]
+  entries = [{**own, "review": f"spec-{SLUG}-c1", "handoff_id": "2026-11-03-sample-de-ffffff"},
+             {**own, "review": f"spec-{SLUG}-c2"}, {**own, "review": f"spec-{SLUG}-c4"}]
+  jwrite(path, {**record, "entries": entries})
+  for n, name in ((1, "earlier-only"), (2, "opening"), (3, "between"), (4, "after-void"), (5, "later-only")):
+    rid = f"spec-{SLUG}-c{n}"
+    jwrite(c.hs.path("reviews", rid, "review.json"), {"kind": "spec", "artifact": str(c.spec), "cycle": n,
+                                                      "reviewers": [name], "runcard": "rc", "converged": "no", "rulings": []})
+    jwrite(c.hs.path("reviews", rid, "round-1.json"), {"round": 1, "runcard": "rc", "reviewers": {name: {"findings": []}}})
+  code, out = world.run("postmortem", "--handoff", c.hid)
+  assert code == 0, out
+  names = reviewer_names(c.hs.path("file", "postmortem.md").read_text(encoding="utf-8"))
+  assert {"opening", "between", "after-void"} <= names and not names & {"earlier-only", "later-only"}
