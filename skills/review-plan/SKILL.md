@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Reviews a handoff plan against its design through the judge panel before any issue is filed.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the body: plan review over the helper's review-plan and review subcommands (U06); `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the accept below the cap's one question per round (U35); the `width:` line, the plan header, the chain check and the split check (U29); the readiness plan remit (1.2.1 §6.5); the driven wait and the typed run on a wait record, the frozen mode (U45); proceed offered at the cap and on a stall (U58); the answered chain record taken as the owner's (U70). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the body: plan review over the helper's review-plan and review subcommands (U06); `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the accept below the cap's one question per round (U35); the `width:` line, the plan header, the chain check and the split check (U29); the readiness plan remit (1.2.1 §6.5); the driven wait and the typed run on a wait record, the frozen mode (U45); proceed offered at the cap and on a stall (U58); the answered chain record taken as the owner's (U70); the repository-reviewer dispatch (U77). -->
 
 # Plan review (phase 3)
 
@@ -104,7 +104,7 @@ goldfish and the one set read, each through its adapter `superegm:<id>` with the
 (`.claude-plugin/agents/<id>.md`; a reviewer spawned any other way is not a goldfish). `k` is
 this invocation's round count, 1 at its first Step 2.
 
-A repository reviewer or an overridden built-in (a file under `.superegm/reviewers/`, spec section 3.6) is dispatched through `superegm:repo-reviewer`, not its own adapter: run `superegm reviewers --brief <id> --handoff <handoff id> --runcard <card>` (a plan review reads the copy frozen at the handoff's approval) and paste its output, unedited, under `# Reviewer persona` in the brief, before the artifact. A plain built-in with no override goes through its own adapter. Its model and effort are the file's `model` and `effort` when set, else `config.reviewers.model` and `config.reviewers.effort`; `SUPEREGM_GOLDFISH_MODEL` and `SUPEREGM_GOLDFISH_EFFORT` override both.
+A repository reviewer or an overridden built-in (a file under `.superegm/reviewers/`, spec section 3.6) is dispatched through `superegm:repo-reviewer`, not its own adapter: run `superegm reviewers --brief <id> --handoff <handoff id> --runcard <card>` (a plan review reads the copy frozen at the handoff's approval) and put its output, unedited, under `# Reviewer persona` in the brief, before the artifact. A plain built-in with no override goes through its own adapter. Its model and effort are the file's `model` and `effort` when set, else `config.reviewers.model` and `config.reviewers.effort`; `SUPEREGM_GOLDFISH_MODEL` and `SUPEREGM_GOLDFISH_EFFORT` override both.
 
 1. Once per round, `python3 '<HELPER>' review-plan set-input --spec '<spec>'` prints the set
    text: the `width:` line (`graph`'s, from `handoff_units.json`), the `## Plan header` section

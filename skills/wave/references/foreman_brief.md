@@ -1,7 +1,7 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 From the elephant-goldfish-model (gsVAM), 2026. Modified by SuperEGM (gsVAM), 2026: EGM's two-step brief
 rewritten as spec section 11's one round, every write through the helper, one return word; Step 2b, the Astra lane on every head review (U17);
-the handoff's directory, `--handoff <handoff-id>` on every call and `spec_range.md` (U20); the two gates before the word and the `owner:` word (U25); the goldfish pair from `config.reviewers` and the head lane at `astra.heads_effort` (U28); Step 2.0, the reviewers' repository instructions rendered under the child card with `--unit` (U38); Step 3b, the triage goldfish (U41). -->
+the handoff's directory, `--handoff <handoff-id>` on every call and `spec_range.md` (U20); the two gates before the word and the `owner:` word (U25); the goldfish pair from `config.reviewers` and the head lane at `astra.heads_effort` (U28); Step 2.0, the reviewers' repository instructions rendered under the child card with `--unit` (U38); Step 3b, the triage goldfish (U41); the repository-reviewer dispatch (U77). -->
 
 # The foreman brief
 
