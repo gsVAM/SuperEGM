@@ -102,19 +102,42 @@ def unit_facts(hs: core.Store, uid: str, state: dict) -> dict:
       "subagent_calls": sum((x.get("subagent_calls") or {}).get("count", 0) for x in launches)}
 
 
+def note_finding(entries: list, latest: dict, scope: tuple, name: str, finding: dict, item) -> None:
+  """Count `finding` once: `item` (what the caller tallies it by) joins `entries`, or, for a finding carried into a later
+  round, replaces the copy before it. `collect.carry` copies a still-open foreman finding under its own id with
+  `carried_from`; `review.carry_externals` copies an external one with the same id and claim; `review settle` and
+  triage write a carried finding's outcome on its newest copy (`review.locate_finding`), so the newest copy stands.
+  A foreman `unreplied <fid>: ...` high repeats an external finding its reviewer's record holds: it is no finding.
+  Findings of one `scope` (the review kind and artifact) are told apart by reviewer and id."""
+  if str(finding.get("claim") or "").startswith("unreplied "):
+    return
+  external = name.startswith("external:")
+  key = (*scope, name, finding.get("id")) + ((finding.get("claim"),) if external else ())
+  if (external or finding.get("carried_from")) and key in latest:
+    entries[latest[key]] = item
+  else:
+    latest[key] = len(entries)
+    entries.append(item)
+
+
+def cycle_order(rid: str) -> tuple:
+  """A review's place among its artifact's cycles: `head-U01-c2` before `head-U01-c10`, which the names' order is not."""
+  m = re.search(r"-c(\d+)$", rid)
+  return (rid[:m.start()], int(m.group(1))) if m else (rid, 0)
+
+
 def head_findings(hs: core.Store, uid: str) -> dict:
-  """The unit's head-review findings counted by severity, over every round of every cycle."""
-  count, seen = dict.fromkeys(SEVERITIES, 0), set()
-  for rid in review.cycle_ids(hs, "head", uid):
+  """The unit's head-review findings counted by severity, over every round of every cycle, each once."""
+  found, latest = [], {}
+  for rid in sorted(review.cycle_ids(hs, "head", uid), key=cycle_order):
     for rnd in review.rounds_of(hs, rid, review.load_review(hs, rid)):
       for name, entry in (rnd.get("reviewers") or {}).items():
         for finding in entry.get("findings") or []:
-          if finding.get("carried_from"):  # `collect.carry` posts a still-open finding once: its copies are not new
-            if (name, finding.get("id")) in seen:
-              continue
-          seen.add((name, finding.get("id")))
-          if finding.get("severity") in count:
-            count[finding["severity"]] += 1
+          note_finding(found, latest, ("head", uid), name, finding, finding)
+  count = dict.fromkeys(SEVERITIES, 0)
+  for finding in found:
+    if finding.get("severity") in count:
+      count[finding["severity"]] += 1
   return count
 
 
@@ -186,39 +209,31 @@ def reviews_of(st: core.Store, hs: core.Store, spec) -> list:
 
 
 def reviewers_table(st: core.Store, hs: core.Store, uids: list, spec) -> str:
-  stats, carried = {}, set()
-  for rid, found in reviews_of(st, hs, spec):
-    if not found:
+  stats, found, latest = {}, [], {}
+  for rid, cycle in sorted(reviews_of(st, hs, spec), key=lambda r: cycle_order(r[0])):
+    if not cycle:
       continue
-    head = found["kind"] == "head"  # a head's outcomes are the foreman's rulings; any other kind's, `review settle`'s
-    overruled, allowed = verdicts(hs, found["artifact"]) if head else (set(), set())
-    for rnd in review.rounds_of(hs, rid, found):
+    kind = cycle["kind"]
+    head = kind == "head"  # a head's outcomes are the foreman's rulings; any other kind's, `review settle`'s
+    overruled, allowed = verdicts(hs, cycle["artifact"]) if head else (set(), set())
+    for rnd in review.rounds_of(hs, rid, cycle):
       for name, entry in (rnd.get("reviewers") or {}).items():
         if entry.get("not_run"):  # a reviewer that did not run raised nothing and kept no quiet round
           continue
-        row = stats.setdefault((name, found["kind"]), {**dict.fromkeys(SEVERITIES, 0), "fixed": 0, "overruled": 0,
-                                                       "allowed": 0, "deferred": 0, "regressions": 0, "quiet": 0})
+        row = stats.setdefault((name, kind), {**dict.fromkeys(SEVERITIES, 0), "fixed": 0, "overruled": 0,
+                                              "allowed": 0, "deferred": 0, "regressions": 0, "quiet": 0})
         findings = entry.get("findings") or []
         row["quiet"] += 0 if findings else 1
         for finding in findings:
-          if name.startswith("external:"):  # `carry_externals` copies an unsettled one into later rounds: one finding
-            key = (found["kind"], found["artifact"], name, finding.get("id"), finding.get("claim"))
-            if key in carried:
-              continue
-            carried.add(key)
-          elif finding.get("carried_from"):  # `collect.carry` copies an open foreman finding, same id: one finding
-            key = (found["kind"], found["artifact"], name, finding.get("id"))
-            if key in carried:
-              continue
-          carried.add((found["kind"], found["artifact"], name, finding.get("id")))
-          row[finding.get("severity")] = row.get(finding.get("severity"), 0) + 1
-          disposition = str(finding.get("disposition") or "")
-          fid = finding.get("id")
-          row["fixed"] += disposition == "fixed"
-          row["deferred"] += disposition.startswith("deferred")
-          row["allowed"] += fid in allowed
-          row["overruled"] += fid not in allowed and (fid in overruled or disposition in ("contested", "declined"))
-          row["regressions"] += finding.get("regression") == "yes"
+          note_finding(found, latest, (kind, cycle["artifact"]), name, finding, (name, kind, overruled, allowed, finding))
+  for name, kind, overruled, allowed, finding in found:
+    row, disposition, fid = stats[(name, kind)], str(finding.get("disposition") or ""), finding.get("id")
+    row[finding.get("severity")] = row.get(finding.get("severity"), 0) + 1
+    row["fixed"] += disposition == "fixed"
+    row["deferred"] += disposition.startswith("deferred")
+    row["allowed"] += fid in allowed
+    row["overruled"] += fid not in allowed and (fid in overruled or disposition in ("contested", "declined"))
+    row["regressions"] += finding.get("regression") == "yes"
   rows = [[name, kind, *(s[k] for k in (*SEVERITIES, "fixed", "overruled", "allowed", "deferred", "regressions", "quiet"))]
           for (name, kind), s in sorted(stats.items())]
   return render(["reviewer", "kind", "high", "medium", "low", "fixed", "overruled", "allowed", "deferred", "regressions",
