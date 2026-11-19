@@ -94,3 +94,67 @@ def test_lock_never_loses_or_doubles_a_kick(world, monkeypatch, tmp_path, case, 
   else:
     again = (store / "tick" / "again").exists()
   assert (calls, again) == (ticked, again_left)
+
+
+def set_builder(repo, **keys):
+  """The repository config's `builder` with `keys` set, its other keys kept."""
+  path = repo / ".superegm" / "config.json"
+  config = json.loads(path.read_text(encoding="utf-8"))
+  config["builder"] = {**config.get("builder", {}), **keys}
+  path.write_text(json.dumps(config), encoding="utf-8")
+
+
+def profile_with_hook_plugin(profile, subagent_hook):
+  """A Claude Code profile enabling `hook-plugin@market`, whose `hooks/hooks.json` has a `SubagentStart` hook; its
+  own `settings.json` names a `SubagentStart` hook only when `subagent_hook`."""
+  plugin = profile / "plugins" / "cache" / "hook-plugin"
+  put(plugin / "hooks" / "hooks.json", json.dumps({"hooks": {"SubagentStart": [{"hooks": [{"type": "command", "command": "true"}]}]}}))
+  put(profile / "plugins" / "installed_plugins.json",
+      json.dumps({"version": 2, "plugins": {"hook-plugin@market": [{"scope": "user", "installPath": str(plugin)}]}}))
+  settings = {"enabledPlugins": {"hook-plugin@market": True}}
+  if subagent_hook:
+    settings["hooks"] = {"SubagentStart": [{"hooks": [{"type": "command", "command": "true"}]}]}
+  put(profile / "settings.json", json.dumps(settings))
+
+
+@pytest.mark.parametrize("case, keys, code, out_part", [
+  ("token and mcp", {"PATH", "CLAUDE_CONFIG_DIR", "GH_X", "API_Y"}, 0, None), ("API_Y unset", None, 1, "env: API_Y unset"),
+  ("app key KEY_Z, token unset", {"PATH", "CLAUDE_CONFIG_DIR", "KEY_Z", "API_Y"}, 0, None), ("existing file, no --replace", {"OLD"}, 0, None),
+  ("SubagentStart hook", None, 1, "SubagentStart")])
+def test_driver_env_writes_the_configured_names(world, monkeypatch, tmp_path, case, keys, code, out_part):
+  # values never printed; doctor names a configured name the file lacks and an enabled plugin's SubagentStart hook
+  from superegm import doctor
+  registered(world, monkeypatch, tmp_path)
+  env_file = tmp_path / ".superegm" / "env"
+  env_file.unlink()
+  if case == "existing file, no --replace":
+    put(env_file, "OLD=1\n"); env_file.chmod(0o600)
+  profile = tmp_path / "driver-profile"
+  profile_with_hook_plugin(profile, case == "SubagentStart hook")
+  monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(profile))
+  for name in ("GH_X", "API_Y", "KEY_Z"):
+    monkeypatch.setenv(name, "secret-value")
+  mcp = {"api": {"type": "http", "url": "https://example.invalid/mcp", "headers": {"Authorization": "Bearer ${API_Y}"}}}
+  set_builder(world.repo, gh_token_env="GH_X", mcp=mcp)
+  if case == "API_Y unset":
+    monkeypatch.delenv("API_Y")
+  if case.startswith("app key"):
+    monkeypatch.delenv("GH_X")
+    set_builder(world.repo, app={"app_id": 7, "slug": "the-app", "private_key_env": "KEY_Z"})
+  card = world.open_card("driver", world.spec)
+  result_code, out = world.run("driver", "env", "--runcard", card)
+  assert result_code == code and (out_part is None or out_part in out)
+  env_file_exists = env_file.is_file()
+  env_keys = {line.split("=", 1)[0] for line in env_file.read_text(encoding="utf-8").splitlines()} if env_file_exists else set()
+  assert (env_keys if keys else env_file_exists) == (keys if keys else (case == "existing file, no --replace"))
+  assert not keys or oct(env_file.stat().st_mode & 0o777) == "0o600"
+  if keys and "GH_X" in keys:
+    assert "GH_X=secret-value" in env_file.read_text(encoding="utf-8")
+  if not env_file_exists:  # doctor reads the driver's profile from the env file: one naming it, no credential
+    put(env_file, f"PATH=/usr/bin\nCLAUDE_CONFIG_DIR={profile}\n"); env_file.chmod(0o600)
+  set_builder(world.repo, gh_token_env="GH_Q", app=None)
+  lines = [text for name, text in doctor.driver_lines(superegm.load_config(world.repo)) if name == "driver"]
+  doctor_out = "\n".join(lines)
+  doctor_lacks_line = next((t for t in lines if "lacks" in t), "")
+  doctor_hook_line = next((t for t in lines if "SubagentStart" in t), "")
+  assert "secret-value" not in out + doctor_out and "GH_Q" in doctor_lacks_line and "hook-plugin" in doctor_hook_line
