@@ -6,6 +6,8 @@ env file applied, under a `tick/lock` shared with `tick`; `driver env` writes th
 the `env -i` kick; `register --root` names the base worktree; the SDLC step and review-spec's approval name the
 chain's setup. Every path is under `tmp_path` (`HOME` patched); no test reaches launchd, systemd or `claude`."""
 
+import fcntl
+import json
 import os
 
 import pytest
@@ -50,3 +52,45 @@ def test_kick_ticks_one_store_or_nothing(world, monkeypatch, tmp_path, registere
   assert out == ""
   if ticks:
     assert ticked[0][0] == str(world.artifacts) or os.path.samefile(ticked[0][0], world.artifacts)
+
+
+def chain_store(world, monkeypatch, tmp_path):
+  """A registered, installed, chain-on store (`s1`); returns its artifacts dir."""
+  registered(world, monkeypatch, tmp_path)
+  edit_config(world.repo, driver={"chain": True})
+  install_marker(tmp_path)
+  return world.artifacts
+
+
+@pytest.mark.parametrize("case, ticked, again_left", [
+  ("kick while held", ["s1", "s1"], False), ("kick while held, holder still running", ["s1"], True),
+  ("tick over a held store", ["s2"], True)])
+def test_lock_never_loses_or_doubles_a_kick(world, monkeypatch, tmp_path, case, ticked, again_left):
+  # tick/again is written before the non-blocking flock on tick/lock is tried
+  store = chain_store(world, monkeypatch, tmp_path)
+  other = tmp_path / "artifacts2"
+  names = {os.path.realpath(store): "s1", os.path.realpath(other): "s2"}
+  calls, seen = [], {}
+
+  def fake(entry):
+    calls.append(names[os.path.realpath(entry["artifacts_dir"])])
+    if case != "tick over a held store" and len(calls) == 1:
+      assert driver.kick(world.repo) == 0  # a second kick while this one holds the lock
+      seen["calls"], seen["again"] = list(calls), (store / "tick" / "again").exists()
+  monkeypatch.setattr(driver, "tick_store", fake)
+  if case == "tick over a held store":
+    registry = superegm.registry_path()
+    entries = json.loads(registry.read_text(encoding="utf-8"))
+    entries.append({"repo": entries[0]["repo"], "root": str(tmp_path / "root2"), "artifacts_dir": str(other)})
+    put(registry, json.dumps(entries))
+    put(store / "tick" / "lock", "")
+    with open(store / "tick" / "lock", "r") as held:
+      fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+      assert world.run("driver", "tick", card=None)[0] == 0
+  else:
+    assert world.run("driver", "kick", "--root", world.repo, card=None)[0] == 0
+  if case == "kick while held, holder still running":
+    calls, again = seen["calls"], seen["again"]
+  else:
+    again = (store / "tick" / "again").exists()
+  assert (calls, again) == (ticked, again_left)
