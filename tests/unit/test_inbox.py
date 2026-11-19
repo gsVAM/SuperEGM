@@ -74,9 +74,12 @@ KINDS = {"decision", "cap", "contested", "merge", "stalled", "escalated", "redes
   (U(reviews=REVIEW("plan", "plan-U01-c1", {n: ROUND(n, F("high")) for n in range(1, 6)})),
    [("plan-U01-c1", "cap", "answer in your review-plan session", "plan-U01-c1/cap/5")]),
   (U(reviews=REVIEW("plan", "plan-U01-c1", {n: ROUND(n, F("high")) for n in range(1, 6)}, rulings=[{"ruling": "stop"}])), []),
-  (U(rounds=POSTED(1, "clean")), [("U01", "merge", PULL, "U01/merge/1")]),
+  # U72's merge guards: a clean verdict is offered once its launch has ended, never beside a live one
+  (U(rounds=POSTED(1, "clean"), launches=[{"round": 1, "status": "exited 0"}]), [("U01", "merge", PULL, "U01/merge/1")]),
+  (U(rounds=POSTED(1, "clean")), []),
+  # a stall opens no decision, so `proceed` is its way past (spec section 4.2), not a cap form
   (U(rounds=[{"round": n, "phase": "collected", "outcome": "not run (error: x)", "runcard": "wave-1"} for n in (1, 2)], reviews=HEAD(0, [])),
-   [("U01", "stalled", CAP.split(" | "), "U01/stalled/head-U01-c1/2")]),
+   [("U01", "stalled", ["**Ruling:** proceed — <reason>"], "U01/stalled/head-U01-c1/2")]),
   ({"escalated": ["spec-sample-c1:design-1-1"], **U()}, [("spec-sample-c1", "escalated", "answer in your plan session", "spec-sample-c1/escalated/design-1-1")]),
   (U(reviews=REVIEW("integrate", "spec-sample-integrate-c1", {1: ROUND(1, [{**F("high")[0], "disposition": "escalated"}])})),
    [("spec-sample-integrate-c1", "escalated", "answer in your integrate session", "spec-sample-integrate-c1/escalated/foreman-1-1")]),
@@ -101,7 +104,8 @@ def test_inbox_prints_one_line_per_item(world):
   hid, line = s.handoff_id, f"{REPO} U01 | decision | answer in the inbox"
   assert world.run("inbox") == (0, f"{line}\n{REPO} {card} | wave | information: open 0 min\n")
   assert json.loads(world.run("inbox", "--json")[1].splitlines()[0]) == {"repo": REPO, "subject": "U01", "kind": "decision", "action": line.split(" | ", 2)[2],
-                                                                      "fingerprint": "U01/decision/q1", "forms": [OPTION('77')], "on": ISSUE}
+                                                                      "fingerprint": "U01/decision/q1", "forms": [OPTION('77')], "on": ISSUE,
+                                                                      "handoff": hid}  # U72 round 2: the item's handoff
   assert world.run("inbox", "--all")[1] == "registry: none\n" + world.run("inbox")[1]
   atomic_write(s.path("handoffs", hid), json.loads(s.path("handoffs", hid).read_text(encoding="utf-8")) | {"closed_at": "t"})
   assert world.run("inbox") == (0, "") and "notified" not in json.loads(s.path("state").read_text(encoding="utf-8"))
@@ -204,6 +208,20 @@ def test_inbox_withdrawn_journals(world):
   code, out = world.run("inbox", "withdrawn", "--pr", "14", "--reason", "x", "--runcard", world.card("plan"), card=None)
   assert code == 1 and "runcard: " in out and "merge withdrawn 14" not in journal.read_text(encoding="utf-8")
   assert f"{REPO} U01 | decision | " in world.run("inbox", "--handoff", s.handoff_id)[1]  # bare inbox still lists
+
+
+def test_inbox_withdrawn_under_a_card_journals_the_cards_handoff(world):
+  """Round 2 (astra-1-3): under `--runcard` the line goes to the card's handoff's journal; a `--handoff` naming
+  another handoff is refused and writes nothing."""
+  s = seed(world, **U(decisions=D(3, "comment 77")))
+  wave = open_wave_card(world)
+  b = second_handoff(world, s)
+  journal = lambda st: st.path("journal").read_text(encoding="utf-8") if st.path("journal").exists() else ""
+  before = journal(b)
+  code, out = world.run("inbox", "withdrawn", "--pr", "15", "--reason", "x", "--runcard", wave, "--handoff", b.handoff_id, card=None)
+  assert code == 1 and "merge withdrawn 15" not in journal(s) + journal(b) and journal(b) == before
+  assert world.run("inbox", "withdrawn", "--pr", "16", "--reason", "y", "--runcard", wave, card=None) == (0, "")
+  assert journal(s).rstrip().endswith("merge withdrawn 16 y") and "merge withdrawn 16" not in journal(b)
 
 
 def test_notify_lines_reads_the_cards_handoff(world):

@@ -75,6 +75,42 @@ def test_action_text_points_to_the_inbox(world, kind, action):
   assert kind == "kill_failed" or "**Ruling:**" not in item["action"] and "superegm " not in item["action"]
 
 
+MERGE_SEEDS = {  # round 2 (change-review-1-2, astra-1-2): the head a merge covers, and what offers none
+  "covered head": (U(rounds=POSTED(1, "clean"), launches=[{"round": 1, "status": "exited 0"}]), ["merge"]),
+  "pending decision": (U(rounds=POSTED(1, "clean"), launches=[{"round": 1, "status": "exited 0"}], decisions=D(3, "comment 77")),
+                       ["decision"]),
+  "live launch": (U(rounds=POSTED(1, "clean"), launches=[{"round": 1, "status": "running"}]), []),
+}
+
+
+@pytest.mark.parametrize("case", MERGE_SEEDS)
+def test_a_merge_carries_its_head_and_is_offered_only_past_the_guards(world, case):
+  open_wave_card(world)
+  seeded, kinds = MERGE_SEEDS[case]
+  s = seed(world, **seeded)
+  found = [i for i in inbox_items(s, [s.handoff_id]) if i["kind"] in ("merge", "decision")]
+  assert [i["kind"] for i in found] == kinds
+  assert case != "covered head" or found[0]["head"] == seeded["U01"]["head"]  # the head the clean verdict covered
+
+
+def test_a_proceed_item_carries_the_head_it_covers(world):
+  """Round 2 (change-review-1-5): the head no longer in the action is the item's `head`."""
+  item = item_of(world, "proceed again")
+  assert item["head"] and item["fingerprint"].endswith("/" + item["head"])
+
+
+def test_a_chained_handoff_leaves_a_plan_reviews_cap_to_its_wait_record(world, monkeypatch):
+  """Round 2 (change-review-1-1): on a chained handoff (the chain on, a frozen mode) a plan review's cap reaches the
+  owner as the wait record (spec 1.2.1 section 7.3), so the inbox lists no `answer in your review-plan session`."""
+  open_wave_card(world)
+  s = seed(world, **SEEDS["plan cap"])
+  core = inbox_items.__globals__["core"]
+  monkeypatch.setattr(core, "frozen_mode", lambda hs: "normal")
+  monkeypatch.setattr(core, "chain_on", lambda config: True)
+  monkeypatch.setitem(inbox_items.__globals__, "chain_items", lambda *a: [])  # no driver record in this store
+  assert not [i for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "cap"]
+
+
 @pytest.mark.parametrize("phrase", [
   "gh api user --jq .login", "`config.owners`", "recommended", "one-line reason",
   "leavemealone", "did not converge", "back once", "gh issue comment <n> -R <repo> --body-file",
