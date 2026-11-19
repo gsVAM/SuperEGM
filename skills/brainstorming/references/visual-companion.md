@@ -1,4 +1,4 @@
-<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the session directory is .superegm/brainstorm/; the non-loopback host fallback removed, so a remote or containerised session stays in text (U83). -->
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the session directory is .superegm/brainstorm/; the non-loopback host fallback removed, so a remote or containerised session stays in text; the .gitignore line checked before every start (U83). -->
 
 # Visual Companion Guide
 
@@ -56,7 +56,7 @@ a cookie, so reloads and `/files/*` assets work without repeating it.
 
 **Finding connection info:** The server writes its startup JSON to `$STATE_DIR/server-info`. If you launched the server in the background and didn't capture stdout, read that file to get the URL and port. When using `--project-dir`, check `<project>/.superegm/brainstorm/` for the session directory.
 
-**Note:** Pass the project root as `--project-dir` so mockups persist in `.superegm/brainstorm/` and survive server restarts. Without it, files go to `/tmp` and get cleaned up. `superegm init` adds `.superegm/brainstorm/` to `.gitignore`; in a repository it did not set up, check the line is there before you start.
+**Note:** Pass the project root as `--project-dir` so mockups persist in `.superegm/brainstorm/` and survive server restarts. Without it, files go to `/tmp` and get cleaned up. `superegm init` adds `.superegm/brainstorm/` to `.gitignore` on a fresh setup, but a repository set up earlier lacks the line: before every start, check `.gitignore` holds it and add it if not, since the session key sits in that directory.
 
 **Launching the server by platform:**
 

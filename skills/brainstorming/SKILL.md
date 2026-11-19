@@ -123,7 +123,7 @@ conversation.
 This section runs only when the owner asks for it: they typed `/superegm:brainstorming --team`, or `brainstorm.team` is true in `.superegm/config.json`.
 Reading the config yourself, a missing key reads false; `false` or a missing key is no ask, and you say nothing.
 Only a value neither `true` nor `false` (such as `"yes"`, which the helper's `load_config` refuses) is worth a word: tell the owner it is malformed and go on without the team unless they typed `--team`.
-A brainstorm not asked for runs neither teammates nor subagents: the skill as above, nothing more.
+A brainstorm not asked for runs neither teammates nor the team's subagents: the skill as above, nothing more (the builder check below is its own dispatch).
 Run it once you know the topic well enough to state it in one line, before you propose anything.
 
 **Teams or the fallback.** Read the variable with one Bash `echo "$CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"`.
@@ -140,7 +140,7 @@ Each works one approach in its own context and reports it to you by message; the
 **The wait.** The same for each spawn: note one Bash `date` at the spawn and end your turn, with no `sleep`.
 After the cartographer's spawn, tell the owner you are waiting on the cartographer: if it has sent you nothing at all, their message ten minutes or more after the spawn takes the fallback; if it has written but its notes are late, you ask it once and keep waiting; `fallback` typed takes it at once.
 After the three's spawn, tell the owner you are waiting on the three: their message ten minutes or more after the spawn has you ask each silent one once, then write its approach `not reported`; there is no fallback once the three run.
-Read your inbox at its next turn, with a second Bash `date` to tell how long it has been: the mailbox shows no arrival time, so a report in your inbox at that turn is merged, whenever it came: ten minutes counts per teammate, only for one whose report is not in (a report within ten minutes is the ordinary case).
+Read your inbox at its next turn, with a second Bash `date` to tell how long it has been: the mailbox shows no arrival time, so a report in your inbox at that turn is merged, whenever it came: ten minutes counts per teammate, only for one whose report is not in.
 At a next turn less than ten minutes after the `date` with nothing in the inbox, answer what the owner asked, repeat the one-line notice and end your turn.
 At such a turn with some of the three's reports in, merge those that are in, repeat the notice naming the silent ones, and end your turn.
 That partial merge only holds the reports side by side: rank no question and ask the owner nothing until all three are in or written `not reported`.
@@ -211,8 +211,10 @@ could plan from without going back to your human partner. Cover:
 - the parts of the how they decided, as they decided them
 - what's left to the builder
 - the current state: what exists now, with the cartographer's notes
+  when the team or its fallback ran
 - `## Alternatives Considered`, ahead of `## Units`: the approaches weighed
   and why the chosen one won, with the `team:` line
+  when the team or its fallback ran
 - the owner's answers to the team's questions, under `## Alternatives Considered`, when the team or its fallback ran
 - a final `## Units` section, the last H2 of the document: one row per
   buildable unit (id, title, blocked by)
@@ -223,12 +225,16 @@ could plan from without going back to your human partner. Cover:
   line and the run of `- ` lines directly after it; each line is one
   pattern, `field: value` pairs separated by `, ` that must all hold, and a
   pattern applies to mediums only. The fields: `reach` (`external`,
-  `agent`, `config` or `forged`: who can trigger it), `later` (`easy`,
-  `migration` or `version`: what fixing it later needs), `critical` (`yes`
-  or `no`: on the critical path) and `verified` (`confirmed` or `refuted`:
-  whether the triager found the defect), as in `- reach: forged, later: easy`.
-  Write only the patterns they say. Approval parses the section, refuses a
-  malformed one with its line and freezes it.
+  `agent`, `config` or `forged`: an HTTP caller, an agent action, a
+  configuration mistake, or only a hand-forged in-process object can trigger
+  it), `later` (`easy`, `migration` or `version`: easy to fix later, or the
+  fix needs a migration or a new declaration version), `critical` (`yes` or
+  `no`: on the critical path) and `verified`
+  (`confirmed` or `refuted`: the triager found the defect, or none), as in
+  `- reach: forged, later: easy`. Ask what they would be content to see
+  deferred, and write only the patterns they say. Approval parses the
+  section, refuses a malformed one with its line and freezes the patterns;
+  editing it later needs a new approval.
 
 **Where it goes:** in a software repo,
 `docs/specs/YYYY-MM-DD-<topic>-design.md`, committed.
@@ -249,8 +255,7 @@ Sort what the builder asks into three piles:
   what gets built.
 Bring the "theirs" pile in one message, most important first. Update the
 document with their answers, then hand it over with a short list of calls
-you made. One dispatch, one round
-of questions, never a loop. Commit the document's edits by path before the
+you made. One dispatch, never a loop. Commit the document's edits by path before the
 SDLC workflow step and `/superegm:review-spec`, so the reviewers read the
 checked text at `HEAD`. Without a subagent tool, read the document as that
 builder yourself.
@@ -260,9 +265,9 @@ builder yourself.
 Once a project's document is written and saved in git, with any edits
 the builder check made, and before you name `/superegm:review-spec`,
 design with your human partner the workflow that will review and build
-it. It comes after the spec because most of the choices follow from it. A quick, clear task skips this step, as does a
-brainstorm that ended without a spec. In Cowork, where the helper cannot
-run, skip the walk and say only what the last paragraph says.
+it. A quick, clear task skips this step, as does a brainstorm that ended
+without a spec. In Cowork, where the helper cannot run, skip the walk and
+say only what the last paragraph says.
 
 With no `.superegm/config.json`, offer `superegm init`; once they agree,
 run it and walk them through the by-hand steps it prints. Then take the
@@ -276,13 +281,13 @@ changes only what the owner agrees to:
    written.
 2. Instructions: the `instructions` entries, then the reference documents
    (invariants, an architecture note, a glossary), offered once, never
-   required: offer once to draft or update the ones the spec implies (say
+   required: offer to draft or update the ones the spec implies (say
    `invariants.md`, `architecture.md`) under the configured `dir` or, with
    none, `docs/reference/` with a `dir` entry added to `instructions` for
    all four roles (`builder`, `foreman`, `reviewers`, `judges`). On their
    yes, draft each from the spec and the code you read and show it; area 5
-   saves them with the rest, so the approval freezes them. A no, or
-   silence, records nothing; nothing later checks the documents exist.
+   saves them, so the approval freezes them. A no, or silence, records
+   nothing; nothing later checks the documents exist.
 3. The round cap: `review.rounds`, or a `Rounds:` line in the spec.
 4. The mode: normal or leavemealone (`mode`).
 5. The builder: first show the MCP server names they already have, from
@@ -299,7 +304,7 @@ changes only what the owner agrees to:
    before you run doctor or the probe again. Then offer `doctor --probe`
    once: it makes a model call, so run it only when the owner agrees.
 7. The chain, offered once, after doctor passes: on their yes, set `driver.chain` to
-   `true` and commit it (the driver reads it live). Without their yes, leave it unset: an absent `driver.chain`
+   `true` and commit it. Without their yes, leave it unset: an absent `driver.chain`
    reads `false`. The same question offers the driver's setup: it names
    the env file it would write (`~/.superegm/env`, mode `0600`, literal
    `KEY=value` lines: `PATH`, `CLAUDE_CONFIG_DIR` and the credentials the
@@ -354,13 +359,11 @@ comes up, never upfront, as its own message with nothing else in it:
 > "This might be easier if I show you. Want me to open a browser tab with some mockups?"
 
 If they decline, stay in text and don't offer again unless they raise it.
-Start the server only on their yes; run `scripts/stop-server.sh` when the
-brainstorm ends. Where the helper cannot run (Cowork), loopback cannot be
+Start the server only on their yes; run `bash scripts/stop-server.sh
+<session_dir>` when the brainstorm ends. Where the helper cannot run (Cowork), loopback cannot be
 reached (a remote or containerised session) or no browser opens, say so
 once and stay in text.
 
 **Per question, ask: would they understand this better by seeing it?**
-Mockups, layouts, diagrams, and side-by-side designs go in the browser;
-requirements, scope, tradeoffs, and conceptual choices stay in text. If
-they accept, read `references/visual-companion.md` before starting the
+If they accept, read `references/visual-companion.md` before starting the
 server.

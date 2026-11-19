@@ -1,7 +1,7 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the init subcommand; `owners` from `gh api user` and the pointer to the README's token recipe and to `doctor` (spec section 11); the astra.enabled and astra.heads sentence (U17); the ingest sentence (U21); the ~/.superegm/notify sentence (U23); the foreman.run_timeout_minutes sentence (U25); step 2's disableClaudeAiConnectors, builder.plugins and builder.mcp (U27); `steps()` composing the modules' INIT_STEPs, those four sentences moved to their modules (U32); step 2 pointing to `superegm builder-setup` and `doctor --probe` (U59); the `.superegm/brainstorm/` line added to `.gitignore` once (U83).
 
-"""superegm init: write .superegm/config.json with every key's default; print the owner's by-hand steps."""
+"""superegm init: write .superegm/config.json with every key's default and add `.superegm/brainstorm/` to .gitignore; print the owner's by-hand steps."""
 
 import json
 from pathlib import Path
@@ -29,7 +29,7 @@ By hand, before the first typed skill runs:
    ruleset whose include pattern is exactly `refs/heads/superegm/**/*` (`refs/heads/superegm/**`
    matches no branch on GitHub).
 4. Add a workflow triggered on `pull_request` so every builder head gets CI.
-5. Commit {path}; approve-spec commits it with the spec.
+5. Commit {path}; approve-spec commits it with the spec. init also added `.superegm/brainstorm/` to .gitignore: commit that file yourself, approve-spec does not, and the checkout stays dirty until you do.
 The store is {artifacts_dir} (config key artifacts_dir); it is never committed."""
 LAST = "then run `superegm doctor`"
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # its own text is OWN (U32)
@@ -48,7 +48,7 @@ def __getattr__(name):
 
 
 def register(subparsers):
-  p = core.add_parser(subparsers, "init", "write .superegm/config.json with every key's default; print the owner's by-hand steps",
+  p = core.add_parser(subparsers, "init", "write .superegm/config.json with every key's default and ignore .superegm/brainstorm/; print the owner's by-hand steps",
                       runcard=False)
   p.add_argument("--artifacts-dir", dest="artifacts_dir",
                  help="the store, outside the working tree (default: ~/.superegm/<owner>/<name>)")

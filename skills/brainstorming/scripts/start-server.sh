@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the session directory is .superegm/brainstorm/; the --host option and the non-loopback bind removed, the server binds 127.0.0.1 only (U83).
+# From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the session directory is .superegm/brainstorm/; the --host option and the non-loopback bind removed, the server binds 127.0.0.1 only; the remote brand image is switched off, so no page loads anything from outside the machine; the retry hint runs through bash (U83).
 # Start the brainstorm server and output connection info
 # Usage: start-server.sh [--project-dir <path>] [--url-host <display-host>] [--foreground] [--background]
 #
@@ -17,6 +17,9 @@
 #   --background          Force background mode (overrides Codex auto-foreground).
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Nothing the companion shows leaves the machine: server.cjs adds a remote brand image unless this is set.
+export SUPERPOWERS_DISABLE_TELEMETRY=1
 
 # Parse arguments
 PROJECT_DIR=""
@@ -185,7 +188,7 @@ for _ in {1..50}; do
       sleep 0.1
     done
     if [[ "$alive" != "true" ]]; then
-      echo "{\"error\": \"Server started but was killed. Retry in a persistent terminal with: $SCRIPT_DIR/start-server.sh${PROJECT_DIR:+ --project-dir $PROJECT_DIR} --url-host $URL_HOST --foreground\"}"
+      echo "{\"error\": \"Server started but was killed. Retry in a persistent terminal with: bash $SCRIPT_DIR/start-server.sh${PROJECT_DIR:+ --project-dir $PROJECT_DIR} --url-host $URL_HOST --foreground\"}"
       exit 1
     fi
     grep "server-started" "$LOG_FILE" | head -1

@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
-# Modified by SuperEGM (gsVAM), 2026: the wave's `destructive-local` effect kind (U31); the inbox typed and external (U72).
+# Modified by SuperEGM (gsVAM), 2026: the wave's `destructive-local` effect kind (U31); the inbox typed and external (U72); the brainstorming bans on the builder check and the visual companion dropped (U83).
 """The hook, the effects frontmatter and the section 14 skill edits (U02)."""
 import hashlib
 import json

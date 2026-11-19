@@ -78,6 +78,31 @@ def test_server_is_loopback_and_keyed(tmp_path):
     proc.wait(timeout=10)
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_started_page_loads_nothing_external(tmp_path):
+  # started through start-server.sh with no telemetry variable set, the served page names no external src (nothing leaves the machine)
+  scripts = ROOT / "skills/brainstorming/scripts"
+  env = {k: v for k, v in os.environ.items()
+         if k not in ("SUPERPOWERS_DISABLE_TELEMETRY", "DISABLE_TELEMETRY", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "BRAINSTORM_OPEN")}
+  project = tmp_path / "project"
+  project.mkdir()
+  started = subprocess.run(["bash", str(scripts / "start-server.sh"), "--project-dir", str(project)], env=env,
+                           capture_output=True, text=True, timeout=30, cwd=tmp_path)
+  info = json.loads(started.stdout.strip().splitlines()[-1])
+  try:
+    assert info["type"] == "server-started" and info["host"] == "127.0.0.1"
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor())  # the key URL sets the cookie, then `/` is the page
+    opener.open(info["url"], timeout=10).read()
+    with opener.open(info["url"].split("?")[0], timeout=10) as reply:
+      page = reply.read().decode()
+    assert "Brainstorm Companion" in page
+    assert not re.search(r"""\bsrc\s*=\s*["']?(https?:)?//""", page)
+    assert "primeradiant.com" not in page
+  finally:
+    subprocess.run(["bash", str(scripts / "stop-server.sh"), info["screen_dir"].rsplit("/", 1)[0]], env=env,
+                   capture_output=True, timeout=30)
+
+
 def test_skill_names_piles_offer_and_retro():
   # the skill runs the builder check before hand-over and the SDLC step, sorts three piles, offers the companion
   text = (ROOT / "skills/brainstorming/SKILL.md").read_text()
@@ -86,21 +111,23 @@ def test_skill_names_piles_offer_and_retro():
                  "## Visual Companion", "## Play It Back", ".superegm/brainstorm.md"):
     assert phrase in text
   assert text.index("builder check") < text.index("SDLC")
+  assert text.index("**Builder check:**") < text.index("## Design the SDLC Workflow")
 
 
-@pytest.mark.parametrize("before", ["node_modules/\n", "node_modules/\n.superegm/brainstorm/\n"])
+@pytest.mark.parametrize("before", ["node_modules/\n", "node_modules/\n.superegm/brainstorm/\n", "node_modules/", None])
 def test_init_ignores_the_session_dir_once(before, tmp_path, capsys, monkeypatch):
-  # a fresh init (no .superegm/config.json) in a repo whose .gitignore holds `before`, gh stubbed as in test_init_writes_the_config_with_every_key_and_refuses_another_base
+  # a fresh init (no .superegm/config.json) in a repo whose .gitignore holds `before` (None: no .gitignore, "node_modules/": no trailing newline), gh stubbed as in test_init_writes_the_config_with_every_key_and_refuses_another_base
   repo = make_repo(tmp_path / "fresh")
   gitignore = repo / ".gitignore"
-  gitignore.write_text(before, encoding="utf-8")
+  if before is not None:
+    gitignore.write_text(before, encoding="utf-8")
   monkeypatch.chdir(repo)
   harness = Harness(capsys)
   harness.gh.extend("api", lambda args, cwd, token=None: (0, "octocat\n", "") if args[1:] == ["user", "-q", ".login"] else (1, "", "unexpected"))
   code, _ = harness.run("init", "--artifacts-dir", str(tmp_path / "store"))
   assert code == 0
   assert gitignore.read_text().splitlines().count(".superegm/brainstorm/") == 1
-  assert gitignore.read_text().startswith("node_modules/\n")
+  assert gitignore.read_text().startswith("node_modules/\n" if before is not None else ".superegm/brainstorm/\n")
 
 
 def test_pack_holds_the_scripts(tmp_path):
