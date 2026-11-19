@@ -150,7 +150,8 @@ def two_units(world):
   c.plan("U01", "U02")
   merged = {"U01": "2026-11-15T09:00:00Z", "U02": "2026-11-15T07:00:00Z"}
   for n, uid in enumerate(("U01", "U02"), 1):
-    c.filed(uid, n, pr={"number": 10 + n, "merged_at": merged[uid]}, ci=None, landed=True)
+    c.filed(uid, n, pr=10 + n, ci=None, landed=True)  # the status view holds the PR's number ...
+    c.state["units"][uid]["pr"] = {"number": 10 + n, "merged_at": merged[uid]}  # ... the unit's record the whole PR
     c.hs.path("unit", uid).write_text(
         "## Issue body as posted\n\n````markdown\n## Steps\n1. Write the failing test `a` in `t.py`:\n"
         "2. Write the failing test `b` in `t.py`:\n````\n", encoding="utf-8")
@@ -167,7 +168,8 @@ def two_units(world):
   jwrite(c.hs.path("launches", "U02"), {"launches": [
       {**launch, "round": 1, "started_at": "2026-11-15T02:00:00Z", "model": "claude-sonnet-5-5", "fresh": "first round"}]})
   jwrite(c.hs.path("foreman", "U01"), {"dispatch_id": None, "decisions": [], "rulings": [],
-                                       "rounds": [{"round": 1, "outcome": "posted"}]})
+                                       "rounds": [{"round": 1, "phase": "posted", "outcome": "posted"},
+                                                  {"round": 2, "phase": "collected", "outcome": "not run (superseded)"}]})
   world.advance(100)
   wait1, wait2 = 600, 300
   wait(world, c, "plan", "split U02?")
@@ -197,6 +199,17 @@ def test_tables_carry_the_store_numbers(world):
   plan = table(report, "Plan against actual")
   assert (plan["U01"]["planned steps"], plan["U01"]["wave"], plan["U01"]["merge order"]) == ("2", "1", "2")
   assert plan["U02"]["merge order"] == "1"
+
+
+def test_header_carries_the_total_wall_time(world):
+  """First launch to last merge, in one Header field, and the Header's other fields: the integrate skill reads them."""
+  c, _, _ = two_units(world)
+  code, out = world.run("postmortem", "--handoff", c.hid)
+  assert code == 0, out
+  header = table(c.hs.path("file", "postmortem.md").read_text(encoding="utf-8"), "Header")
+  assert header["total wall seconds"]["value"] == str(8 * 3600)  # U01's first launch 01:00 to U01's merge 09:00
+  assert (header["units"]["value"], header["waves"]["value"], header["handoff"]["value"]) == ("2", "2", c.hid)
+  assert header["closed"]["value"] == "in progress"
 
 
 def snapshot(root):
