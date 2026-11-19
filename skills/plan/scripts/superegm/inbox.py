@@ -298,7 +298,9 @@ def review_items(hs: core.Store, repo: str, spec: str, rid: str, rev: dict, fore
       # decision is open on a stall, so a cap form would rule nothing (decision.verify_posted)
       out.append(ruling_item(repo, unit, "stalled", [PROCEED], number, f"{rid}/{rounds[-1]['round']}"))
     elif status.code == 2 and not any(d.get("point") == 2 for d in report.pending_decisions(foreman)):
-      out.append(ruling_item(repo, unit, "cap", cap_forms(foreman), number, rid))
+      # the capped round is posted but its point-2 decision is not open yet: a posted cap form would name no open
+      # decision (decision.verify_posted drops it), so the item offers none until the next wave opens it
+      out.append(item(repo, unit, "cap", "its decision point 2 opens at the next wave", rid))
   elif status.code == 2:
     out.append(item(repo, rid, "cap", session(SESSION.get(rev["kind"], rev["kind"])), rounds[-1]["round"] if rounds else 0))
   return out
@@ -396,7 +398,8 @@ def chain_items(store: core.Store, hs: core.Store, repo: str, hid: str, state: d
 
 def inbox_items(store: core.Store, handoff_ids: list) -> list:
   """What needs the owner across the handoffs `handoff_ids` (spec section 11.2), one dict per item: `repo`,
-  `subject`, `kind`, `action`, `fingerprint`; ordered by handoff id, subject, then kind, the `wave` card and the
+  `subject`, `kind`, `action`, `fingerprint` and `handoff`, a ruling's `forms` and `on` too (U72) and a `merge` or
+  `proceed` item's `head`; ordered by handoff id, subject, then kind, the `wave` card and the
   driver's lines last, except that a handoff's `merge` items follow the `order` list of its `handoff_units.json` (U61)."""
   repo, rows = store.config["repo"], {r["id"]: r for r in core.handoffs(store.root)}
   out, read_specs, seen = [], set(), set()  # a spec's store-level reviews are read once, under its first handoff
@@ -452,7 +455,7 @@ def registry_items(entry: dict) -> list:
   ids = [r["id"] for r in core.handoffs(st.root) if r["id"] and not r.get("closed_at")]
   items = inbox_items(st, ids)
   if not ok:
-    items += [{"repo": entry["repo"], "subject": hid, "kind": "driver", "fingerprint": f"root:{hid}",
+    items += [{"repo": entry["repo"], "subject": hid, "kind": "driver", "fingerprint": f"root:{hid}", "handoff": hid,
                "action": f"root {root} is not a worktree of {entry['repo']}; /superegm:driver register"} for hid in sorted(ids)]
   return items
 
@@ -533,7 +536,7 @@ def run_withdrawn(args):
   """`inbox withdrawn --pr <n> --reason <text>` (U72): `merge withdrawn <pr> <reason>` in the journal of the handoff
   the card or `--handoff` names. Under `--runcard` the card is a wave, driver or inbox one and its handoff's journal
   is written (a `--handoff` naming another handoff is refused); typed without it the handoff is the one
-  `core.resolve_handoff` names from `--handoff` (or `--spec`/`--plan`'s latest approval; refused before any write
+  `core.resolve_handoff` names from `--handoff` (or `--plan`'s spec's latest approval; refused before any write
   when nothing names it) and its own `inbox` card is opened and closed around the write, as `approve-spec
   --amend-units` does."""
   if not (args.pr and args.reason):
@@ -549,7 +552,7 @@ def run_withdrawn(args):
   root = core.git_toplevel(Path.cwd())
   config = core.load_config(root)
   if core.resolve_handoff(core.Store(Path(config["artifacts_dir"]), config=config), args) is None:
-    raise core.HandoffError("inbox withdrawn: no handoff named: pass --handoff <id> (or --spec/--plan) or --runcard <card>")
+    raise core.HandoffError("inbox withdrawn: no handoff named: pass --handoff <id> (or --plan) or --runcard <card>")
   st = core.store(root, args)
   args.runcard = core.open_runcard(st, "inbox", core.handoff_spec(args, st))
   try:
