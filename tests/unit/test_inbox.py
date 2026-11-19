@@ -70,7 +70,8 @@ KINDS = {"decision", "cap", "contested", "merge", "stalled", "escalated", "redes
    [("U01", "contested", CONTESTED(f'foreman-1-{i}').split(" | "), f"U01/contested/q1/foreman-1-{i}") for i in (1, 2)]),
   (U(decisions=D(1, "review head-U01-c1 round 5") + D(2, "review head-U01-c1 cap", id="q2"), rounds=POSTED(5), reviews=HEAD(5, F("high"), builder_contested=[{"fid": "foreman-1-1", "reason": "r"}])),
    [("U01", "cap", CAP.split(" | "), "U01/cap/q2")]),
-  (U(rounds=POSTED(5), reviews=HEAD(5, F("high"))), [("U01", "cap", CAP.split(" | "), "U01/cap/head-U01-c1")]),
+  # round 3 (astra-2-1): a head cap with no decision open yet offers no form, as a posted one would rule nothing
+  (U(rounds=POSTED(5), reviews=HEAD(5, F("high"))), [("U01", "cap", "its decision point 2 opens at the next wave", "U01/cap/head-U01-c1")]),
   (U(reviews=REVIEW("plan", "plan-U01-c1", {n: ROUND(n, F("high")) for n in range(1, 6)})),
    [("plan-U01-c1", "cap", "answer in your review-plan session", "plan-U01-c1/cap/5")]),
   (U(reviews=REVIEW("plan", "plan-U01-c1", {n: ROUND(n, F("high")) for n in range(1, 6)}, rulings=[{"ruling": "stop"}])), []),

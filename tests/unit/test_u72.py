@@ -5,13 +5,16 @@
 rest; every ruling item's action points to the inbox, with its `**Ruling:**` forms and the URL it is posted on; a
 review's cap or escalation points to that review's skill session; the machine steps stay typed commands."""
 
+import json
 import runpy
 from pathlib import Path
 
 import pytest
 
-from conftest import ROOT
-from superegm.inbox import inbox_items
+import superegm
+from conftest import REPO, ROOT
+from superegm import atomic_write
+from superegm.inbox import inbox_items, registry_items
 from test_inbox import D, F, HEAD, POSTED, REVIEW, ROUND, U, seed
 from test_wave import open_wave_card, wave_store
 from test_u57 import head_world, launches, proceed
@@ -27,7 +30,7 @@ SEEDS = {  # one unit's state per kind, as test_inbox's table seeds it
                  reviews=HEAD(1, F("high"), builder_contested=[{"fid": "foreman-1-1", "reason": "r"}])),
   "test-delta": U(rounds=POSTED(), reviews=HEAD(1, [{**F("high")[0], "claim": "test-delta: tests/test_x.py:3 removed"}])),
   "owner": U(rounds=POSTED(1, "owner: foreman-1-1")),
-  "cap": U(rounds=POSTED(5), reviews=HEAD(5, F("high"))),
+  "cap": U(rounds=POSTED(5), reviews=HEAD(5, F("high")), decisions=D(2, "review head-U01-c1 cap")),
   "stalled": U(rounds=[{"round": n, "phase": "collected", "outcome": "not run (error: x)", "runcard": "wave-1"} for n in (1, 2)],
                reviews=HEAD(0, [])),
   "plan cap": U(reviews=REVIEW("plan", "plan-U01-c1", {n: ROUND(n, F("high")) for n in range(1, 6)})),
@@ -109,6 +112,63 @@ def test_a_chained_handoff_leaves_a_plan_reviews_cap_to_its_wait_record(world, m
   monkeypatch.setattr(core, "chain_on", lambda config: True)
   monkeypatch.setitem(inbox_items.__globals__, "chain_items", lambda *a: [])  # no driver record in this store
   assert not [i for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "cap"]
+
+
+def test_a_head_cap_without_its_decision_offers_no_form(world):
+  """Round 3 (astra-2-1): a head at its cap whose point-2 decision is not open yet has no decision a posted ruling
+  could rule (decision.verify_posted drops it), so the item offers no form until the wave opens the decision."""
+  open_wave_card(world)
+  s = seed(world, **U(rounds=POSTED(5), reviews=HEAD(5, F("high"))))
+  [cap] = [i for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "cap"]
+  assert cap["action"] == "its decision point 2 opens at the next wave" and "forms" not in cap and "on" not in cap
+
+
+def test_a_chained_handoff_leaves_a_plan_decision_to_its_wait_record(world, monkeypatch):
+  """Round 3 (change-review-2-1): on a chained handoff a plan's unanswered `blocking: yes` D<n> line reaches the
+  owner as the wait record (spec 1.2.1 section 7.3), so no `escalated` item is listed; unchained it is."""
+  open_wave_card(world)
+  s = seed(world, escalated=["spec-sample-c1:design-1-1"], **U())
+  state = json.loads(s.path("state").read_text(encoding="utf-8"))
+  state.pop("decisions")  # D2 still unanswered
+  atomic_write(s.path("state"), state)
+  plan = Path(state["plan"])
+  plan.write_text(plan.read_text(encoding="utf-8").replace("D2 Page size for the listing?", "D2 Page size (spec-sample-c1:design-1-1: c)?"), encoding="utf-8")
+  esc = lambda: [i["action"] for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "escalated"]
+  assert esc() == ["answer in your plan session"]
+  core = inbox_items.__globals__["core"]
+  monkeypatch.setattr(core, "frozen_mode", lambda hs: "normal")
+  monkeypatch.setattr(core, "chain_on", lambda config: True)
+  monkeypatch.setitem(inbox_items.__globals__, "chain_items", lambda *a: [])  # no driver record in this store
+  assert esc() == []
+
+
+def test_a_bad_root_line_names_its_handoff(world, tmp_path):
+  """Round 3 (codebase-details-2-6): every `--json` object names its handoff, a registry entry's bad-root line too."""
+  open_wave_card(world)
+  s = seed(world, **U(decisions=D(3, "comment 77")))
+  items = registry_items({"repo": REPO, "root": str(tmp_path / "x"), "artifacts_dir": str(s.root)})
+  assert [i for i in items if i["fingerprint"].startswith("root:")] and all(i.get("handoff") == s.handoff_id for i in items)
+
+
+def test_inbox_withdrawn_refusal_names_the_flags_it_parses(world):
+  """Round 3 (codebase-details-2-2): the refusal names only flags the inbox parser registers."""
+  seed(world, **U())
+  args = superegm.build_parser().parse_args(["inbox", "withdrawn", "--pr", "12", "--reason", "head moved"])
+  superegm.CURRENT_WRITES, superegm.CURRENT_SUBCOMMAND = args.writes, args.command
+  try:
+    with pytest.raises(superegm.HandoffError) as refused:
+      args.run(args)
+  finally:
+    superegm.CURRENT_WRITES = superegm.CURRENT_SUBCOMMAND = None
+  assert "--plan" in str(refused.value) and "--spec" not in str(refused.value)
+
+
+@pytest.mark.parametrize("phrase", [
+  "`registry.json`", "`artifacts_dir`", "`conflict`", "pinned head", "CONFLICTING",
+  "its decision point 2 opens at the next wave", "the listing never reads the respec mark"])
+def test_the_inbox_skill_names_round_three_text(phrase):
+  # round 3: the registered root, the conflict kind and every merge guard, the cap with no decision yet, the respec mark
+  assert phrase in SKILL.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("phrase", [
