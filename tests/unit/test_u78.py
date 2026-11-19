@@ -344,6 +344,28 @@ def test_integrate_reports_the_postmortem():
   assert "Header, total wall seconds" in text  # the one field the report holds it in: the skill works none out
 
 
+def test_settled_head_findings_and_carried_externals(world):
+  """A head finding `review settle` contested or declined is overruled though the foreman ruled nothing; one the foreman
+  allowed is allowed, not overruled; an external finding `collect` carried into a later round is one finding."""
+  c, _, _ = two_units(world)
+  posted = {"round": 1, "phase": "posted", "outcome": "posted"}
+  jwrite(c.hs.path("foreman", "U01"), {"dispatch_id": None, "decisions": [], "rounds": [posted],
+                                       "rulings": [{"ruling": "codebase-details-1-2 allowed — fine", "by": "owner"}]})
+  reviewed(c, "head-U01-c1", "head", "U01", ["codebase-details"],
+           {"codebase-details": {"findings": [{"id": "codebase-details-1-1", "severity": "low", "disposition": "declined"},
+                                              {"id": "codebase-details-1-2", "severity": "low", "disposition": "contested"}]}})
+  claim = {"id": "external:astra-1-1", "claim": "a defect", "severity": "high", "disposition": "fixed"}
+  reviewed(c, "plan-U01-c1", "plan", "U01", ["external:astra"], {"external:astra": {"findings": [claim]}})
+  jwrite(c.hs.path("reviews", "plan-U01-c1", "round-2.json"),
+         {"round": 2, "runcard": "rc", "reviewers": {"external:astra": {"findings": [dict(claim)]}}})
+  code, out = world.run("postmortem", "--handoff", c.hid)
+  assert code == 0, out
+  reviewers = table(c.hs.path("file", "postmortem.md").read_text(encoding="utf-8"), "Reviewers")
+  details, astra = reviewers["codebase-details"], reviewers["external:astra"]
+  assert (details["low"], details["overruled"], details["allowed"]) == ("2", "1", "1")
+  assert (astra["high"], astra["fixed"]) == ("1", "1")
+
+
 def reviewer_names(report):
   return set(table(report, "Reviewers"))
 
