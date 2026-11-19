@@ -7,6 +7,13 @@ skills/brainstorming/: the restored files, the loopback-only keyed server, the s
 `tmp_path`; the server test binds 127.0.0.1 on a free port and reaches nothing else."""
 
 import hashlib
+import json
+import os
+import shutil
+import socket
+import subprocess
+import urllib.error
+import urllib.request
 
 import pytest
 
@@ -30,3 +37,39 @@ def test_restored_files_match_7_0_0(path):
     text = data.decode()
     assert ".superpowers/" not in text and "0.0.0.0" not in text and "BRAINSTORM_HOST" not in text
     assert ".superegm/brainstorm/" in text or path == "scripts/server.cjs"
+
+
+def _free_port():
+  with socket.socket() as probe:
+    probe.bind(("127.0.0.1", 0))
+    return probe.getsockname()[1]
+
+
+def _status(url):
+  try:
+    with urllib.request.urlopen(url, timeout=10) as reply:
+      return reply.status
+  except urllib.error.HTTPError as err:
+    return err.code
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_server_is_loopback_and_keyed(tmp_path):
+  # the started server listens on 127.0.0.1 only and answers 403 without ?key=
+  src = (ROOT / "skills/brainstorming/scripts/server.cjs").read_text()
+  assert "'127.0.0.1'" in src and "BRAINSTORM_HOST" not in src and "0.0.0.0" not in src
+  port, key = _free_port(), "ab12" * 16
+  env = {**os.environ, "BRAINSTORM_DIR": str(tmp_path / "session"), "BRAINSTORM_PORT": str(port),
+         "BRAINSTORM_TOKEN": key, "SUPERPOWERS_DISABLE_TELEMETRY": "1"}
+  env.pop("BRAINSTORM_OPEN", None)
+  proc = subprocess.Popen(["node", str(ROOT / "skills/brainstorming/scripts/server.cjs")], env=env,
+                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+  try:
+    started = json.loads(proc.stdout.readline())
+    assert started["type"] == "server-started" and started["host"] == "127.0.0.1" and started["port"] == port
+    assert _status(f"http://127.0.0.1:{port}/") == 403
+    assert _status(f"http://127.0.0.1:{port}/?key=wrong") == 403
+    assert _status(f"http://127.0.0.1:{port}/?key={key}") == 200
+  finally:
+    proc.terminate()
+    proc.wait(timeout=10)
