@@ -69,8 +69,9 @@ def uids_of(hs: core.Store, units: dict, state: dict) -> list:
 
 def superseded(entry: dict) -> bool:
   """A foreman round that was never run: collected as `not run (...)`, by `foreman.supersede`, a moved target
-  (`review`), an owner's interrupt or `collect --not-run`; or only fetched, with no reviewer started. It is no round."""
-  return entry.get("phase") == "fetched" or (
+  (`review`), an owner's interrupt or `collect --not-run`; or only fetched or prepared, with no reviewer started yet.
+  It is no round."""
+  return entry.get("phase") in ("fetched", "prepared") or (
       entry.get("phase") == "collected" and str(entry.get("outcome") or "").startswith("not run"))
 
 
