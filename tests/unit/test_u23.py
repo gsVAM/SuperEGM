@@ -34,9 +34,10 @@ def test_the_notify_step_and_the_bar_prose(path, needle):
   assert needle in (ROOT / path).read_text(encoding="utf-8"), (path, needle)
 
 
-def test_the_inbox_skill_is_auto_invokable_with_effects_none():
+def test_the_inbox_skill_is_typed_and_external():
+  """U72: the inbox posts rulings, merges and kicks, so it is typed with external effects."""
   text = (ROOT / "skills/inbox/SKILL.md").read_text(encoding="utf-8")
-  assert "disable-model-invocation" not in text
+  assert "effects: external" in text and "disable-model-invocation: true" in text
   for needle in ("superegm inbox", "--all", "--json", "--handoff", "never notifies", "no run card", "Added by SuperEGM"):
     assert needle in text, needle
 

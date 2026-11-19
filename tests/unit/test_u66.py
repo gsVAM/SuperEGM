@@ -99,7 +99,8 @@ def test_proceeded_merge_head_is_not_reviewed(world):
   foreman = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))
   assert [r["round"] for r in foreman["rounds"]] == [1]  # the refusal opened no round
   items = [inbox.line_of(i) for i in inbox.inbox_items(st, [st.handoff_id]) if i["subject"] == UNIT]
-  assert any(f"proceed again: {UNIT} head {MERGE_HEAD}" in line for line in items), items
+  assert any(i["kind"] == "proceed" and i["action"] == "answer in the inbox" and i["fingerprint"].endswith(f"/{MERGE_HEAD}")
+             for i in inbox.inbox_items(st, [st.handoff_id]) if i["subject"] == UNIT), items
   assert not any("gh pr merge" in line for line in items), items
   assert unit_state(st, card, foreman) == "waiting proceed"
   # the second proceed names launch 2: the merge is offered on the merge head

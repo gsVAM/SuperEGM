@@ -1523,7 +1523,8 @@ def test_the_fifth_decision_point_opens_on_a_head(world):
   assert (entry["point"], entry["source"], entry["options"]) == (5, f"review {rid} round 1", ["accept", "revise"])
   assert f"pending: U01 q1 (point 5, review {rid} round 1)" in world.run("report", "--runcard", card)[1]
   [item] = [i for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "decision"]
-  assert item["action"].startswith("**Ruling:** (q1) ") and "accept" in item["action"] and "revise" in item["action"]
+  assert item["action"] == "answer in the inbox"  # U72: the inbox asks it in words, from the forms
+  assert item["forms"] == ["**Ruling:** (q1) accept — <reason>", "**Ruling:** (q1) revise — <reason>"]
 
 
 def fifth_point_open(world):

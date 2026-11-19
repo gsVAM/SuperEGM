@@ -1,12 +1,14 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45); the `proceed again` item and the merge on the authorizing outcome (U92); the `conflict` item (U62).
+# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45); the `proceed again` item and the merge on the authorizing outcome (U92); the `conflict` item (U62); a ruling's action the inbox with its `forms` and `on`, a review's its skill session, and `inbox withdrawn` (U72).
 
 """superegm inbox [--all] [--json] [--handoff <id>]: one line per item that needs the owner across the
-store's open handoffs, read-only and with no run card; superegm notify --runcard <id>: the owner's
+store's open handoffs, read-only and with no run card; superegm inbox withdrawn --pr <n> --reason <text>: the merge
+step's `merge withdrawn <pr> <reason>` journal line, under its own inbox card unless --runcard names one (U72); superegm notify --runcard <id>: the owner's
 ~/.superegm/notify hook run once with the lines new since the last notify, a line being new when neither
 `state.json.notified` nor `driver/<handoff>.json`'s `notified` holds it; the caller's set is rewritten,
 `state.json`'s under a `wave` card, `driver/<handoff>.json`'s under a `driver` card (U24)."""
 
+import argparse
 import json
 import os
 import re
@@ -15,11 +17,12 @@ import subprocess
 from pathlib import Path
 
 import superegm as core
-from superegm import approve_spec, decision, report, review
+from superegm import approve_spec, decision, report, review, runcard
 from superegm.decision import ruling_form
 from superegm.launch import authorizing, conflict_again, finished, latest_clean, load_launches, waiting_proceed
 
-WRITES = frozenset({"state", "driver"})  # notify's `notified` (a driver card's in `driver/`); inbox writes nothing
+WRITES = frozenset({"state", "driver", "runcards", "journal"})  # notify's `notified` (a driver card's in `driver/`); `inbox withdrawn`'s card and journal line (U72); a bare inbox writes nothing
+WITHDRAW_SKILLS = frozenset({"wave", "driver", "inbox"})  # the open cards `inbox withdrawn --runcard` runs under (U72)
 CONFIG_DEFAULTS = {  # its own config key and init line (U32)
     "notify_timeout_seconds": 30,  # how long `notify` waits on the owner's ~/.superegm/notify hook (spec section 11.2)
 }
@@ -28,12 +31,46 @@ INIT_STEP = ("An executable ~/.superegm/notify, written outside every repository
 DOCTOR_CHECKS = None
 SKILLS = frozenset({"wave", "driver"})
 KINDS = ("decision", "cap", "contested", "conflict", "merge", "stalled", "escalated", "redesign", "test-delta", "owner",
-         "proceed", "kill_failed", "wave", "driver")
+         "proceed", "undo", "kill_failed", "wave", "driver")
 GITHUB = "https://github.com"
 
 
 def item(repo: str, subject: str, kind: str, action: str, key) -> dict:
   return {"repo": repo, "subject": subject, "kind": kind, "action": action, "fingerprint": f"{subject}/{kind}/{key}"}
+
+
+INBOX = "answer in the inbox"  # spec 1.2.1 section 7.3: the owner answers a ruling in words in the inbox (U72)
+PROCEED = "**Ruling:** proceed — <reason>"  # spec section 4.2: the owner's go-ahead on a head
+SESSION = {"spec": "review-spec", "plan": "review-plan", "integrate": "integrate"}  # a review's kind -> its skill
+
+
+def session(skill: str) -> str:
+  """The action of a question the owner answers in that skill's interactive session (spec 1.2.1 section 7.3)."""
+  return f"answer in your {skill} session"
+
+
+def ruling_item(repo: str, subject: str, kind: str, forms: list, number, key) -> dict:
+  """A ruling the inbox asks in words (U72): its action the inbox, `forms` the `**Ruling:**` forms of the choices
+  still open, `on` the issue the ruling reader looks at."""
+  return item(repo, subject, kind, INBOX, key) | {"forms": forms, "on": f"{GITHUB}/{repo}/issues/{number}"}
+
+
+def option_named(option: str, n: int) -> str:
+  """The option as a form names it: its text, or, when the text holds ` — ` (which `decision.parse_form` reads as
+  the reason's start), its own `(<letter>)` or its position's, the letter `decision.check_ruling` resolves."""
+  if " — " not in option:
+    return option
+  letter = re.match(r"\([a-z]\)", option)
+  return letter.group(0) if letter else f"({chr(97 + n)})"
+
+
+def cap_forms(foreman: dict) -> list:
+  """A head's cap menu, one form per choice; `one more round` is spent once ruled on any cap decision of the unit
+  (decision.rule)."""
+  caps = {c["id"] for c in foreman.get("decisions") or [] if c.get("point") == 2}
+  spent = any(r.get("decision") in caps and r["ruling"].partition(" — ")[0].strip() == "one more round"
+              for r in foreman.get("rulings") or [])
+  return [ruling_form(2, o) for o in ("one more round", "stop", "redesign")[spent:]]
 
 
 def latest_posted(foreman: dict):
@@ -84,13 +121,16 @@ def review_dirs(hs: core.Store, spec, read: bool = False) -> list:
 
 def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, mode: str = "normal") -> list:
   """The decisions, test-delta, owner-only and merge-ready lines of one unit neither stopped nor landed, and its
-  `proceed again: <unit> head <sha>` line while it is waiting proceed (spec section 4.2), keyed on the later launch
-  and the head (the pull request's, else the proceed's pinned one; none listed while neither exists). A merge a proceed authorizes names the owner's `gh pr merge <pr> --match-head-commit <sha>` on the
-  proceed's pinned head and is keyed `<review>/<head>`; a proceed without a pinned head offers no merge, and lists
-  `proceed again` on the pull request's head once it has one."""
+  `proceed` item (the owner's proceed again, answered in the inbox, its `head` the head it covers) while it is
+  waiting proceed (spec section 4.2), keyed on the later launch and the head (the pull request's, else the proceed's
+  pinned one; none listed while neither exists). A merge item carries the `head` its authorizing outcome covers (a
+  proceed's pinned head, else the clean round's) and is offered only while no decision is pending and the latest
+  launch has ended (U72's merge guards); a merge a proceed authorizes names `gh pr merge <pr> --match-head-commit
+  <sha>` on the proceed's pinned head and is keyed `<review>/<head>`; a proceed without a pinned head offers no
+  merge, and lists its `proceed` item on the pull request's head once it has one. The latest posted round's triage
+  deferrals ride on the merge item as `undo` while one is offered, else they are their own `undo` item."""
   out = []
   number = (state["units"].get(uid) or {}).get("number")
-  on_issue = f" on {GITHUB}/{repo}/issues/{number}"
   ruled_of = lambda did: {r["ruling"].partition(" — ")[0].strip().split(" ")[0]
                           for r in foreman.get("rulings") or [] if r.get("decision") == did}
   # point 1 takes one ruling per contested finding (decision.rule): its decision stays open for the fids no
@@ -98,17 +138,12 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
   for d in [d for d in foreman.get("decisions") or [] if d.get("point") == 1 or d in report.pending_decisions(foreman)]:
     point, did = d.get("point"), d["id"]
     if point == 2:
-      # one form per choice; `one more round` is spent once ruled on any cap decision of the unit (decision.rule)
-      caps = {c["id"] for c in foreman.get("decisions") or [] if c.get("point") == 2}
-      spent = any(r.get("decision") in caps and r["ruling"].partition(" — ")[0].strip() == "one more round"
-                  for r in foreman.get("rulings") or [])
-      menu = " | ".join(ruling_form(2, o) for o in ("one more round", "stop", "redesign")[spent:])
-      out.append(item(repo, uid, "cap", menu + on_issue, did))
+      out.append(ruling_item(repo, uid, "cap", cap_forms(foreman), number, did))
     elif point in (3, 5):
       words = (d.get("source") or "").split()
       subject = words[1] if len(words) == 2 and words[0] == "comment" else did
-      menu = f" ({' | '.join(d['options'])})" if d.get("options") else ""
-      out.append(item(repo, uid, "decision", ruling_form(3, subject, "<option>") + menu + on_issue, did))
+      forms = [ruling_form(3, subject, option_named(o, n)) for n, o in enumerate(d.get("options") or ["<option>"])]
+      out.append(ruling_item(repo, uid, "decision", forms, number, did))
     elif point == 1:
       rid, n = source_round(d.get("source"))
       rev = review.load_review(hs, rid) if rid else None
@@ -118,8 +153,8 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
       rnd = review.load_round(hs, rid, n) or {}
       fids = review.contested_fids(rnd) or [c["fid"] for c in rnd.get("builder_contested") or []]
       ruled = ruled_of(did)
-      menu = lambda fid: " | ".join(ruling_form(1, fid, o) for o in ("finding upheld", "finding overruled"))
-      out += [item(repo, uid, "contested", menu(fid) + on_issue, f"{did}/{fid}") for fid in fids if fid not in ruled]
+      menu = lambda fid: [ruling_form(1, fid, o) for o in ("finding upheld", "finding overruled")]
+      out += [ruling_item(repo, uid, "contested", menu(fid), number, f"{did}/{fid}") for fid in fids if fid not in ruled]
   entry = latest_posted(foreman)
   if entry:
     n, rid = entry["round"], review.head_review_id(hs, uid)
@@ -131,14 +166,14 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
     # the outcome keeps naming a fid settled since until the round converges (review.settle_finding)
     open_fid = lambda fid: fid not in settled and not decision.fid_ruled(book, fid)
     # in leavemealone-mode `decision rule` refuses an allowance naming an open point-1 decision (refuse_allowance)
-    form = lambda fid: ruling_form(1, fid, "finding overruled" if mode == "leavemealone"
-                                   and decision.fid_decisions(book, fid, strict=True) else "allowed") + on_issue
+    form = lambda fid: [ruling_form(1, fid, "finding overruled" if mode == "leavemealone"
+                                    and decision.fid_decisions(book, fid, strict=True) else "allowed")]
     deltas = [f["id"] for f in ((rnd.get("reviewers") or {}).get("foreman") or {}).get("findings") or []
               if f["disposition"] is None and f["claim"].startswith("test-delta")]
-    out += [item(repo, uid, "test-delta", form(fid), f"{n}/{fid}") for fid in deltas if open_fid(fid)]
+    out += [ruling_item(repo, uid, "test-delta", form(fid), number, f"{n}/{fid}") for fid in deltas if open_fid(fid)]
     outcome = entry.get("outcome") or ""
     if outcome.startswith("owner: "):  # a finding the test-delta line names already is one line, not two
-      out += [item(repo, uid, "owner", form(fid), f"{n}/{fid}")
+      out += [ruling_item(repo, uid, "owner", form(fid), number, f"{n}/{fid}")
               for fid in (x.strip() for x in outcome.removeprefix("owner: ").split(","))
               if fid and fid not in deltas and open_fid(fid)]
   launches, head = load_launches(hs, uid), report.unit_view(state, uid).get("head")
@@ -148,18 +183,26 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
   # proceed on, so nothing is listed until the pull request has one
   if shown and waiting_proceed(foreman, launches, head):
     last = launches[-1]["round"] if launches else 0
-    out.append(item(repo, uid, "proceed", f"proceed again: {uid} head {shown}{on_issue}", f"{last}/{shown}"))
+    out.append(ruling_item(repo, uid, "proceed", [PROCEED], number, f"{last}/{shown}") | {"head": shown})
   auth = authorizing(foreman) or {}
   # a proceed with no pinned head has nothing for `--match-head-commit` to pin: no merge is offered on it, and
   # once the pull request has a head the owner is asked to proceed again on it, as the board's action says
   unpinned = bool(auth.get("ruling")) and not auth.get("head")
   if unpinned and head and latest_clean(foreman, launches, head):
     last = launches[-1]["round"] if launches else 0
-    out.append(item(repo, uid, "proceed", f"proceed again: {uid} head {head}{on_issue}", f"{last}/{head}"))
+    out.append(ruling_item(repo, uid, "proceed", [PROCEED], number, f"{last}/{head}") | {"head": head})
   # U62: no merge is offered while GitHub reads the pull request `CONFLICTING`: it would refuse it
-  if latest_clean(foreman, launches, head) and not unpinned and not conflict:
+  # U72: no merge is offered while a decision is pending or a launch is live (a proceed may rule on a running one)
+  live = bool(launches) and not finished(launches[-1])
+  # spec 1.2.1 section 7.3, 5.2: the owner's undo of a triage deferral, a medium the latest posted round deferred
+  # (decision.refuse_undo refuses an earlier round's), posted on the unit's issue as a ruling with no decision; no
+  # merge guard holds it back: on the merge item while one is offered, else its own `undo` item
+  rounds = foreman.get("rounds") or []
+  latest = max((e["round"] for e in rounds if e.get("phase") == "posted"), default=None)
+  undo = [ruling_form(1, r["fid"], "finding upheld") for r in foreman.get("followups") or [] if r.get("round") == latest]
+  if (latest_clean(foreman, launches, head) and not unpinned and not conflict and not live
+      and not report.pending_decisions(foreman)):
     pr = report.unit_view(state, uid)["pr"] or ((state["units"].get(uid) or {}).get("pr") or {}).get("number")
-    rounds = foreman.get("rounds") or []
     url = f"{GITHUB}/{repo}/pull/{pr}"
     # U61: the shared-file merge order from `handoff_units.json`, none when the file or the key is absent
     order, merge_after = merge_order(hs)
@@ -173,7 +216,12 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
     # the unlanded `after` list is in the fingerprint: the item is new again to `notify` each time an `after` unit
     # lands, the last one included
     key = "".join([base] + [f"/after-{m}" for m in after])
-    out.append(item(repo, uid, "merge", action, key))
+    merge = item(repo, uid, "merge", action, key) | {"head": auth.get("head") or head}
+    if undo:
+      merge |= {"undo": undo, "on": f"{GITHUB}/{repo}/issues/{number}"}
+    out.append(merge)
+  elif undo:
+    out.append(ruling_item(repo, uid, "undo", undo, number, f"{latest}/undo"))
   return out
 
 
@@ -244,19 +292,19 @@ def kill_failed_items(hs: core.Store, repo: str, uid: str) -> list:
            "action": f"/superegm:interrupt --unit {uid} --launch {n}, then /superegm:wave", "fingerprint": f"{uid} launch {n} kill_failed"}]
 
 
-def review_items(hs: core.Store, repo: str, spec: str, rid: str, rev: dict, foremen: dict, mode: str = "normal") -> list:
+def review_items(hs: core.Store, repo: str, spec: str, rid: str, rev: dict, foremen: dict, mode: str = "normal",
+                 state: dict | None = None) -> list:
   """A review's cap or stalled line (cap: `review status` exit 2 with no `stop` ruled; stalled: a head's exit 5)
-  and an integrate review's `escalated` findings (in leavemealone the owner declines a blocking one with the id of
-  their `**Ruling:** <fid> finding overruled — <reason>` comment, `--posted`, review.check_settle)."""
+  and an integrate review's `escalated` findings. A head's cap or stall is a ruling the inbox asks, posted on the
+  unit's issue (`state`'s number); a spec, plan or integrate review's is answered in that review's skill session
+  (spec 1.2.1 section 7.3, U72)."""
   out = []
   if rev["kind"] == "integrate":
     for rnd in review.rounds_of(hs, rid, rev):
       for f in review.findings_of(rnd):
         if f.get("disposition") != "escalated":
           continue
-        posted = " --posted <comment id>" if mode == "leavemealone" and review.blocking(f) else ""
-        out.append(item(repo, rid, "escalated", f"superegm review settle --review {rid} --finding {f['id']} "
-                        f"--disposition fixed | declined --owner{posted} --runcard <card>", f["id"]))
+        out.append(item(repo, rid, "escalated", session(SESSION["integrate"]), f["id"]))
   if rev.get("converged") != "no" or any(r["ruling"] == "stop" for r in rev.get("rulings") or []):
     return out
   status = status_of(hs, rid, rev)
@@ -265,15 +313,17 @@ def review_items(hs: core.Store, repo: str, spec: str, rid: str, rev: dict, fore
   rounds = review.rounds_of(hs, rid, rev)
   if rev["kind"] == "head":
     unit = rev["artifact"]
-    if status.code == 5:
-      out.append(item(repo, unit, "stalled", f"/superegm:wave {spec}", f"{rid}/{rounds[-1]['round']}"))
-    elif status.code == 2 and not any(d.get("point") == 2 for d in report.pending_decisions(foremen.get(unit) or {})):
-      out.append(item(repo, unit, "cap", f"/superegm:wave {spec}", rid))
-  elif status.code == 2:  # `continue` is spent once ruled (review rule)
-    spent = any(r["ruling"] == "continue" for r in rev.get("rulings") or [])
-    choices = "accept|stop" if spent else "continue|accept|stop"
-    out.append(item(repo, rid, "cap", f"superegm review rule --review {rid} --ruling {choices} --owner "
-                    "--runcard <card>", rounds[-1]["round"] if rounds else 0))
+    foreman, number = foremen.get(unit) or {}, (((state or {}).get("units") or {}).get(unit) or {}).get("number")
+    if status.code == 5:  # spec section 4.2: a stall ends the invocation and `proceed` is the way past it; no point-2
+      # decision is open on a stall, so a cap form would rule nothing (decision.verify_posted)
+      out.append(ruling_item(repo, unit, "stalled", [PROCEED], number, f"{rid}/{rounds[-1]['round']}")
+                 | {"head": review.pinned_head(hs, rid, rev, state or {})})  # the head its proceed would pin
+    elif status.code == 2 and not any(d.get("point") == 2 for d in report.pending_decisions(foreman)):
+      # the capped round is posted but its point-2 decision is not open yet: a posted cap form would name no open
+      # decision (decision.verify_posted drops it), so the item offers none until the next wave opens it
+      out.append(item(repo, unit, "cap", "its decision point 2 opens at the next wave", rid))
+  elif status.code == 2:
+    out.append(item(repo, rid, "cap", session(SESSION.get(rev["kind"], rev["kind"])), rounds[-1]["round"] if rounds else 0))
   return out
 
 
@@ -369,7 +419,9 @@ def chain_items(store: core.Store, hs: core.Store, repo: str, hid: str, state: d
 
 def inbox_items(store: core.Store, handoff_ids: list) -> list:
   """What needs the owner across the handoffs `handoff_ids` (spec section 11.2), one dict per item: `repo`,
-  `subject`, `kind`, `action`, `fingerprint`; ordered by handoff id, subject, then kind, the `wave` card and the
+  `subject`, `kind`, `action`, `fingerprint` and `handoff`, a ruling's `forms` and `on` too (U72), a `merge`,
+  `proceed` or `stalled` item's `head`, and a `merge` item's `undo` and `on` while its latest posted round deferred a
+  medium by triage (an `undo` item carrying them as its `forms` while no merge is offered); ordered by handoff id, subject, then kind, the `wave` card and the
   driver's lines last, except that a handoff's `merge` items follow the `order` list of its `handoff_units.json` (U61)."""
   repo, rows = store.config["repo"], {r["id"]: r for r in core.handoffs(store.root)}
   out, read_specs, seen = [], set(), set()  # a spec's store-level reviews are read once, under its first handoff
@@ -379,7 +431,8 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
     units = state.get("units") or {}
     foremen = {uid: core.load_foreman(hs, uid) for uid in units}
     # an escalation is the spec's: two handoffs of one spec list it once; unit ids repeat across handoffs
-    found = [i for i in escalations(hs, repo, hid, spec, foremen, state) if i["fingerprint"] not in seen]
+    chained = bool(core.chain_on(store.config) and core.frozen_mode(hs))  # as `chain_items` reads it
+    found = [i for i in escalations(hs, repo, hid, spec, foremen, state, chained) if i["fingerprint"] not in seen]
     seen |= {i["fingerprint"] for i in found}
     cards = wave_cards(hs, hid)
     mode = (cards[-1][1].get("mode") if cards else None) or core.run_mode(hs)  # the card's, else the frozen, else config.mode
@@ -402,11 +455,14 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
         rev = json.loads(core.read_text(path / "review.json"))
         if rev["kind"] in ("head", "plan") and rev["artifact"] not in live:
           continue
-        found += review_items(hs, repo, spec, path.name, rev, foremen, mode)
+        if chained and rev["kind"] == "plan":  # spec 1.2.1 section 7.3: a plan review's cap is the wait record's
+          continue
+        found += review_items(hs, repo, spec, path.name, rev, foremen, mode, state)
       read_specs.add(spec)
     found.sort(key=lambda i: (i["subject"], KINDS.index(i["kind"].split(" ")[0])))
     found = in_merge_order(hs, found)
-    out += found + wave_items(hs, repo, hid) + driver_items(hs, repo, hid) + chain_items(store, hs, repo, hid, state, foremen)
+    found += wave_items(hs, repo, hid) + driver_items(hs, repo, hid) + chain_items(store, hs, repo, hid, state, foremen)
+    out += [i | {"handoff": hid} for i in found]  # U72: the inbox answers each item under its own handoff
   return out
 
 
@@ -421,16 +477,17 @@ def registry_items(entry: dict) -> list:
   ids = [r["id"] for r in core.handoffs(st.root) if r["id"] and not r.get("closed_at")]
   items = inbox_items(st, ids)
   if not ok:
-    items += [{"repo": entry["repo"], "subject": hid, "kind": "driver", "fingerprint": f"root:{hid}",
+    items += [{"repo": entry["repo"], "subject": hid, "kind": "driver", "fingerprint": f"root:{hid}", "handoff": hid,
                "action": f"root {root} is not a worktree of {entry['repo']}; /superegm:driver register"} for hid in sorted(ids)]
   return items
 
 
-def escalations(hs: core.Store, repo: str, hid: str, spec, foremen: dict, state: dict) -> list:
+def escalations(hs: core.Store, repo: str, hid: str, spec, foremen: dict, state: dict, chained: bool = False) -> list:
   """The `escalated[]` pairs of the latest approval entry the handoff owns (the spec's latest when no entry names
   a handoff) that the owner has not handled: a pair the spec's `## Units` section names, or a unit's decision
   carries in its question, is handled; a pair a plan's `blocking: yes` D<n> line names (graph's other route) is
-  handled once `decide` records its answer in `state.decisions`, and until then the line is that `decide` call."""
+  handled once `decide` records its answer in `state.decisions`, and until then it is answered in the plan session
+  (U72), except on a `chained` handoff, where the driven plan's wait record asks it (spec 1.2.1 section 7.3)."""
   entries = core.load_approvals(hs, Path(spec)) if spec else []
   owned = [e for e in entries if e.get("handoff_id") == hid]
   if not owned and not any(e.get("handoff_id") for e in entries):
@@ -457,17 +514,23 @@ def escalations(hs: core.Store, repo: str, hid: str, spec, foremen: dict, state:
     plan_ds = [(uid, d) for uid, d in routed if pair in d["question"]]
     if any(f"{uid}/{d['id']}" in answered for uid, d in plan_ds):
       continue
-    action = (f"superegm decide --unit {plan_ds[0][0]} --decision {plan_ds[0][1]['id']} --answer <option> --runcard <card>"
-              if plan_ds else f"/superegm:plan {spec}")
-    out.append(item(repo, rid, "escalated", action, fid))
+    if plan_ds and chained:  # the chain's `waiting …` line carries the plan's question
+      continue
+    out.append(item(repo, rid, "escalated", session("plan"), fid))  # a plan decision or the plan's own question (U72)
   return out
 
 
 def register(subparsers):
-  p = core.add_parser(subparsers, "inbox", "list what needs the owner across the open handoffs (read-only, no run card)",
+  p = core.add_parser(subparsers, "inbox", "list what needs the owner across the open handoffs (read-only, no run "
+                      "card); withdrawn: journal a withdrawn merge under its own inbox card or --runcard's",
                       runcard=False)
   p.add_argument("--all", action="store_true", help="every store the registry lists")
   p.add_argument("--json", action="store_true", help="one JSON object per line")
+  # U72: on the leaf parser, not a nested subparser, so the leaf keeps the common --handoff flag and a bare inbox lists
+  p.add_argument("action", nargs="?", choices=["withdrawn"], help="withdrawn: journal `merge withdrawn <pr> <reason>`")
+  p.add_argument("--pr", help="withdrawn: the pull request whose merge offer is withdrawn")
+  p.add_argument("--reason", help="withdrawn: what changed since the question")
+  p.add_argument("--runcard", help="withdrawn: an open wave, driver or inbox card (default: its own inbox card)")
   p.set_defaults(run=run, writes=WRITES)
   p = core.add_parser(subparsers, "notify", "run ~/.superegm/notify once with the inbox lines new since the last notify")
   p.set_defaults(run=run, writes=WRITES)
@@ -491,7 +554,40 @@ def open_store(args) -> tuple:
   return st, [r["id"] for r in rows if r["id"] and not r.get("closed_at")]
 
 
+def run_withdrawn(args):
+  """`inbox withdrawn --pr <n> --reason <text>` (U72): `merge withdrawn <pr> <reason>` in the journal of the handoff
+  the card or `--handoff` names. Under `--runcard` the card is a wave, driver or inbox one and its handoff's journal
+  is written (a `--handoff` naming another handoff is refused); typed without it the handoff is the one
+  `core.resolve_handoff` names from `--handoff` (or `--plan`'s spec's latest approval; refused before any write
+  when nothing names it) and its own `inbox` card is opened and closed around the write, as `approve-spec
+  --amend-units` does."""
+  if not (args.pr and args.reason):
+    raise core.HandoffError("inbox withdrawn: --pr and --reason are required")
+  if args.runcard:
+    card = core.require_runcard(args, WITHDRAW_SKILLS)
+    hid = card.get("handoff") or core.STORE.handoff_id
+    named = getattr(args, "handoff", None)
+    if named and named != hid:  # the card's handoff is the journal's; a different --handoff is refused, not followed
+      raise core.HandoffError(f"inbox withdrawn: --handoff {named} is not card {args.runcard}'s handoff {hid}")
+    core.journal(core.handoff_store(core.STORE, hid), f"merge withdrawn {args.pr} {args.reason}")
+    return 0
+  root = core.git_toplevel(Path.cwd())
+  config = core.load_config(root)
+  if core.resolve_handoff(core.Store(Path(config["artifacts_dir"]), config=config), args) is None:
+    raise core.HandoffError("inbox withdrawn: no handoff named: pass --handoff <id> (or --plan) or --runcard <card>")
+  st = core.store(root, args)
+  args.runcard = core.open_runcard(st, "inbox", core.handoff_spec(args, st))
+  try:
+    core.require_runcard(args, WITHDRAW_SKILLS)
+    core.journal(st, f"merge withdrawn {args.pr} {args.reason}")
+  finally:
+    runcard.run(argparse.Namespace(action="close", id=args.runcard, note=None))
+  return 0
+
+
 def run(args):
+  if args.command == "inbox" and args.action == "withdrawn":
+    return run_withdrawn(args)
   if args.command == "inbox":
     entries = core.load_registry() if args.all else []
     if entries:
