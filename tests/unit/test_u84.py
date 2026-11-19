@@ -16,7 +16,7 @@ from superegm import decision
 from superegm.collect import DEVIATION_RE
 from superegm.decision import comment_options
 from superegm.judges import decision_question, stored_options_text
-from test_foreman import UNIT, c, prepared
+from test_foreman import POSTED_R1, TWO_LAUNCHES, UNIT, c, open_head_review, prepared, record, seed
 from test_wave import REPO, fake_gh, foreman_of, question, wave_store
 
 SPEC_LINE = "**Deviation (spec):** docs/designs/sample.md:12 says 3; `pytest -k t` fails"  # the test world's frozen spec path
@@ -25,7 +25,7 @@ SPEC_COMMENT = SPEC_LINE + "\n- (a) keep the spec\n- (b) follow the code\n**Buil
 
 @pytest.mark.parametrize("ruled, blockers", [(False, 1), (True, 0)])
 def test_spec_deviation_blocks_until_ruled(world, tmp_path, monkeypatch, ruled, blockers):
-  # a `spec` deviation is a blocker as `interface`, `dod` and `test` are (collect.py:550-554)
+  # a `spec` deviation is a blocker as `interface`, `dod` and `test` are (`foreman_findings`' deviation loop)
   assert DEVIATION_RE.match(SPEC_LINE).group(1) == "spec"
   comments = [c(12, "builder-bot", SPEC_COMMENT)] + ([c(13, "owner", "**Ruling:** (12) (a) — the spec stands")] if ruled else [])
   w = prepared(world, tmp_path, monkeypatch, comments={2: comments})
@@ -275,3 +275,23 @@ def test_the_foreman_spec_finding_needs_the_line_and_the_evidence(world, tmp_pat
   w = prepared(world, tmp_path, monkeypatch, comments={2: []})
   code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child, "--spec", text)
   assert code != 0 and refusal in out and not (w.dir / "r1/foreman.findings").exists()
+
+
+SPEC_TEXT = "docs/designs/sample.md:12 says 3; `pytest -k t` fails"
+SPEC_FINDING = f"foreman-1-1 | high | docs/designs/sample.md:12 | regression: no | deviation (spec) unruled: {SPEC_TEXT}\n"
+
+
+@pytest.mark.parametrize("ruling, held", [(None, 1), ("**Ruling:** foreman-1-1 finding overruled — the spec stands", 0)])
+def test_an_unruled_foreman_spec_finding_is_carried_into_a_round_without_spec(world, tmp_path, monkeypatch, ruling, held):
+  # round 1 raised the finding through `--spec`; round 2 passes none: it stays open (carried under its id) until the owner rules it
+  kw = dict(rounds=[POSTED_R1], launches=TWO_LAUNCHES, comments={2: [c(20, "owner", ruling)] if ruling else []})
+  st0, card0, _ = seed(world, **kw)
+  open_head_review(world, st0, card0, "0" * 40, {"change-review": "", "foreman": SPEC_FINDING})
+  w = prepared(world, tmp_path, monkeypatch, **kw)
+  record(world, w.st, w.rid, 2, w.head, w.child, {"change-review": ""})
+  code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
+  assert code == 0, out
+  rnd = json.loads(w.st.path("reviews", w.rid, "round-2.json").read_text(encoding="utf-8"))
+  found = rnd["reviewers"]["foreman"]["findings"]
+  assert [(f["id"], f["carried_from"]) for f in found] == [("foreman-1-1", 1)] * held
+  assert (w.dir / "r2/foreman.findings").read_text(encoding="utf-8") == ""  # carried, not posted again
