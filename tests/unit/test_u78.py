@@ -5,6 +5,7 @@
 
 import hashlib
 import json
+import re
 
 import pytest
 from conftest import CONFIG
@@ -107,3 +108,72 @@ def test_answer_json_is_never_rewritten(world, event):
   second = json.loads((waits / f"plan-{since2}.answer.json").read_text(encoding="utf-8"))
   assert second == {"by": "owner", "at": at2, "sha": sha("second answer")}
   assert set(second) == {"by", "at", "sha"}
+
+
+def jwrite(path, obj):
+  path.parent.mkdir(parents=True, exist_ok=True)
+  path.write_text(json.dumps(obj), encoding="utf-8")
+
+
+def table(report, section):
+  """A section's table, first column to row: `{key: {column: cell}}`."""
+  body = report.split(f"## {section}\n", 1)[1].split("\n## ", 1)[0]
+  rows = [[cell.strip() for cell in line.strip().strip("|").split("|")] for line in body.splitlines() if line.startswith("|")]
+  return {row[0]: dict(zip(rows[0], row)) for row in rows[2:]}
+
+
+def two_units(world):
+  """A chained handoff of U01 (two launches, the second escalated, one head round) and U02 (one launch), both merged;
+  the plan phase waited twice, the second wait a re-ask, each answered by the owner. Returns the chain and the two
+  waits' lengths in seconds."""
+  c = chain_world(world)
+  c.plan("U01", "U02")
+  merged = {"U01": "2026-11-15T09:00:00Z", "U02": "2026-11-15T07:00:00Z"}
+  for n, uid in enumerate(("U01", "U02"), 1):
+    c.filed(uid, n, pr={"number": 10 + n, "merged_at": merged[uid]}, ci=None, landed=True)
+    c.hs.path("unit", uid).write_text(
+        "## Issue body as posted\n\n````markdown\n## Steps\n1. Write the failing test `a` in `t.py`:\n"
+        "2. Write the failing test `b` in `t.py`:\n````\n", encoding="utf-8")
+  c.save()
+  jwrite(c.hs.path("units"), {"order": ["U01", "U02"], "waves": {"1": ["U01"], "2": ["U02"]}, "critical_path": ["U01"],
+                              "units": {"U01": {"wave": 1, "tier": "doable", "size": "M"},
+                                        "U02": {"wave": 2, "tier": "easy", "size": "S"}}})
+  launch = {"status": "exited 0", "subagent_calls": {"count": 1, "calls": []}}
+  jwrite(c.hs.path("launches", "U01"), {"launches": [
+      {**launch, "round": 1, "started_at": "2026-11-15T01:00:00Z", "model": "claude-sonnet-5-5", "fresh": "first round",
+       "effective_model": "claude-sonnet-5-5", "total_cost_usd": 0.5},
+      {**launch, "round": 2, "started_at": "2026-11-15T05:00:00Z", "model": "claude-opus-5-5", "resumed_from": "s1",
+       "escalated": True, "effective_model": "claude-opus-5-5", "total_cost_usd": 0.25}]})
+  jwrite(c.hs.path("launches", "U02"), {"launches": [
+      {**launch, "round": 1, "started_at": "2026-11-15T02:00:00Z", "model": "claude-sonnet-5-5", "fresh": "first round"}]})
+  jwrite(c.hs.path("foreman", "U01"), {"dispatch_id": None, "decisions": [], "rulings": [],
+                                       "rounds": [{"round": 1, "outcome": "posted"}]})
+  world.advance(100)
+  wait1, wait2 = 600, 300
+  wait(world, c, "plan", "split U02?")
+  world.advance(wait1)
+  answer(world, c, "first answer")
+  world.advance(50)
+  wait(world, c, "plan", "split U02 and U03?")
+  world.advance(wait2)
+  answer(world, c, "second answer")
+  return c, wait1, wait2
+
+
+def test_tables_carry_the_store_numbers(world):
+  c, wait1, wait2 = two_units(world)
+  code, out = world.run("postmortem", "--handoff", c.hid)
+  assert code == 0, out
+  report = c.hs.path("file", "postmortem.md").read_text(encoding="utf-8")
+  assert re.findall(r"^## (.+)$", report, re.M) == ["Header", "Units", "Reviewers", "Owner time", "Plan against actual"]
+  units = table(report, "Units")
+  assert units["U01"]["escalated"] == "1" and units["U02"]["escalated"] == "0"
+  assert (units["U01"]["launches"], units["U01"]["fresh"], units["U01"]["resumed"]) == ("2", "1", "1")
+  assert units["U01"]["wall seconds"] == str(8 * 3600) and units["U02"]["wall seconds"] == str(5 * 3600)
+  assert units["U01"]["cost usd"] == "0.75" and units["U01"]["head rounds"] == "1"
+  owner_time = table(report, "Owner time")
+  assert owner_time["plan"]["waited"] == str(wait1 + wait2)
+  assert owner_time["plan"]["answered by"] == "owner"
+  plan = table(report, "Plan against actual")
+  assert (plan["U01"]["planned steps"], plan["U01"]["wave"], plan["U01"]["merge order"]) == ("2", "1", "2")
+  assert plan["U02"]["merge order"] == "1"
