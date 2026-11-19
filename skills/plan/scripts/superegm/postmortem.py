@@ -174,7 +174,7 @@ def reviews_of(st: core.Store, hs: core.Store, spec) -> list:
 
 
 def reviewers_table(st: core.Store, hs: core.Store, uids: list, spec) -> str:
-  stats = {}
+  stats, carried = {}, set()
   for rid, found in reviews_of(st, hs, spec):
     if not found:
       continue
@@ -189,12 +189,18 @@ def reviewers_table(st: core.Store, hs: core.Store, uids: list, spec) -> str:
         findings = entry.get("findings") or []
         row["quiet"] += 0 if findings else 1
         for finding in findings:
+          if name.startswith("external:"):  # `carry_externals` copies an unsettled one into later rounds: one finding
+            key = (found["kind"], found["artifact"], name, finding.get("id"), finding.get("claim"))
+            if key in carried:
+              continue
+            carried.add(key)
           row[finding.get("severity")] = row.get(finding.get("severity"), 0) + 1
           disposition = str(finding.get("disposition") or "")
+          fid = finding.get("id")
           row["fixed"] += disposition == "fixed"
           row["deferred"] += disposition.startswith("deferred")
-          row["overruled"] += finding.get("id") in overruled or (not head and disposition in ("contested", "declined"))
-          row["allowed"] += finding.get("id") in allowed
+          row["allowed"] += fid in allowed
+          row["overruled"] += fid not in allowed and (fid in overruled or disposition in ("contested", "declined"))
           row["regressions"] += finding.get("regression") == "yes"
   rows = [[name, kind, *(s[k] for k in (*SEVERITIES, "fixed", "overruled", "allowed", "deferred", "regressions", "quiet"))]
           for (name, kind), s in sorted(stats.items())]
