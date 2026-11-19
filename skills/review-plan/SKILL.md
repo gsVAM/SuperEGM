@@ -213,7 +213,7 @@ of every path, including an error you cannot recover from, except that `next wai
 - The readiness goldfish reads one body, except as `set`, when it reads the set text alone and
   no body.
 - Findings live in the store and dispositions in the round files: name the review id and the
-  `review status` line in chat, never paste a report.
+  `review status` line in chat, never a report pasted in.
 
 ## Under the driver, and on a wait record
 
