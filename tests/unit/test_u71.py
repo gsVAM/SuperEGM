@@ -9,12 +9,17 @@ chain's setup. Every path is under `tmp_path` (`HOME` patched); no test reaches 
 import fcntl
 import json
 import os
+import plistlib
+import shlex
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
 import superegm  # the harness reloads the package per test: read its names at call time
 from superegm import driver
-from test_builders import put
+from test_builders import put, seed, spawn_fake, UNIT  # noqa: F401 (spawn_fake is a fixture)
 from test_driver import registered
 from test_u44 import edit_config
 
@@ -158,3 +163,42 @@ def test_driver_env_writes_the_configured_names(world, monkeypatch, tmp_path, ca
   doctor_lacks_line = next((t for t in lines if "lacks" in t), "")
   doctor_hook_line = next((t for t in lines if "SubagentStart" in t), "")
   assert "secret-value" not in out + doctor_out and "GH_Q" in doctor_lacks_line and "hook-plugin" in doctor_hook_line
+
+
+@pytest.mark.parametrize("wrapper", ["builder", "phase"])
+def test_wrappers_end_with_the_env_i_kick(world, monkeypatch, tmp_path, spawn_fake, wrapper):
+  # after .exit or the session's end; failure ignored and logged, interpreter and helper quoted
+  from superegm.launch_builder import HELPER
+  s, _ = registered(world, monkeypatch, tmp_path)  # the registry entry: root world.repo, the store world.artifacts
+  root = Path(json.loads(superegm.registry_path().read_text(encoding="utf-8"))[0]["root"])
+  if wrapper == "builder":
+    card = world.open_card("wave", world.spec)
+    monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+    assert world.run("launch", "--runcard", card)[0] == 0
+    code, out = world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)
+    assert code == 0, out
+    command = spawn_fake[-1][0][2]
+    head = command.rstrip().splitlines()[0]
+    assert head.endswith(".exit'")  # the kick comes after the exit file is written
+  else:
+    command = driver.tick_command(root, "/superegm:wave spec", tmp_path / "r.json", tmp_path / "r.exit")
+  tail = command.rstrip().splitlines()[-1]
+  assert tail.startswith('env -i HOME="$HOME" PATH="$PATH" ') and f"driver kick --root {shlex.quote(str(root))}" in tail
+  assert f"{shlex.quote(sys.executable)} {shlex.quote(str(HELPER))} driver kick" in tail
+  assert "||" in tail  # a failed kick is logged, never fails the wrapper
+  monkeypatch.setattr(driver, "RUN", lambda argv, **k: subprocess.CompletedProcess(argv, 0)); monkeypatch.setattr(driver, "PLATFORM", "darwin")
+  dcard = world.open_card("driver", world.spec)
+  assert world.run("driver", "install", "--runcard", dcard)[0] == 0
+  install_interval_default = plistlib.loads(driver.plist_path().read_bytes())["StartInterval"] // 60
+  assert install_interval_default == 5
+
+
+def test_a_builder_wrapper_without_a_registry_entry_has_no_kick(world, monkeypatch, tmp_path, spawn_fake):
+  """No registry entry names the launch's store: the wrapper is the one line it was."""
+  monkeypatch.setenv("HOME", str(tmp_path))
+  _, card, _, _ = seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0
+  assert world.run("launch-builder", "--unit", UNIT, "--round", 1, "--runcard", card)[0] == 0
+  command = spawn_fake[-1][0][2]
+  assert "driver kick" not in command and len(command.rstrip().splitlines()) == 1
