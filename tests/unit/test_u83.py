@@ -28,6 +28,7 @@ SHA_7_0_0 = {  # files restored byte for byte
   "scripts/frame-template.html": "6a8a4e58bd6a44b904e2e3c57de774481d909204597e1498de53f1b2fecc4c4e",
   "scripts/helper.js": "43c6d69954a46ec34a2a262bcc62a9a7e83e839c739f199cb72646d397c686e3"}
 EDITED = ["references/visual-companion.md", "scripts/server.cjs", "scripts/start-server.sh", "scripts/stop-server.sh"]
+MOVED = ["references/conversation-craft.md", "references/red-flags.md", "references/triage.md"]  # SKILL.md sections moved whole into references/
 
 
 @pytest.mark.parametrize("path", [*SHA_7_0_0, *EDITED])
@@ -198,3 +199,25 @@ def test_licence_lists_the_restored_notices():
                           if "modified by SuperEGM (gsVAM), 2026: " in (ROOT / "skills/brainstorming" / path).read_text(encoding="utf-8")}
   assert len(restored_with_notice) == len(EDITED)
   assert restored_with_notice <= set(re.findall(r"`([^`]+)`", paragraph))
+
+
+@pytest.mark.parametrize("path", MOVED)
+def test_moved_sections_carry_the_notice_and_are_licensed(path):
+  # a section moved word for word out of the MIT SKILL.md carries the 7.0.0 notice and is named in the README Licence paragraph
+  text = (ROOT / "skills/brainstorming" / path).read_text(encoding="utf-8")
+  assert text.startswith("<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: moved verbatim from SKILL.md's ")
+  assert "(U83)" in text.splitlines()[0]
+  readme = (ROOT / "README.md").read_text(encoding="utf-8")
+  paragraph = next(p for p in readme.split("\n\n") if p.startswith("**Licence.**"))
+  assert f"skills/brainstorming/{path}" in set(re.findall(r"`([^`]+)`", paragraph))
+
+
+def test_skill_points_at_the_moved_craft_sections_and_keeps_no_rewrite():
+  # one imperative pointer replaces Ground to cover, Offer recon, Questions that work and the spike; no shortened rewrite stays
+  text = (ROOT / "skills/brainstorming/SKILL.md").read_text(encoding="utf-8")
+  assert "read `references/conversation-craft.md` before the first question" in text
+  for rewrite in ("Territory, not a script", "A quick throwaway build is often the", "**Offer recon** once", "**Questions that work** anchor"):
+    assert rewrite not in text
+  craft = (ROOT / "skills/brainstorming/references/conversation-craft.md").read_text(encoding="utf-8")
+  for heading in ("## Offer recon", "## Questions that work", "## Ground to cover", "## Spike to feel things out"):
+    assert heading in craft
