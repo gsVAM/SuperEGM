@@ -1,3 +1,5 @@
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: moved verbatim from SKILL.md's Triage section (U83). -->
+
 # The Triage section
 
 The fields of a `## Triage` pattern, and an example. Every field is one of:

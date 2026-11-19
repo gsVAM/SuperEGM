@@ -1,3 +1,5 @@
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: moved verbatim from SKILL.md's Red Flags section (U83). -->
+
 # Red Flags
 
 | Thought | Reality |

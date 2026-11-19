@@ -5,7 +5,7 @@ effects: working-tree
 description: "You MUST use this before any creative work - creating features, building components, adding functionality, modifying behavior, or planning anything new, in software or out of it (a talk, a business, a renovation)."
 ---
 
-<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: spec path docs/specs, the builder check, the Units section, the review-spec gate, the brainstorm-brief lookup; the brief in the handoff's own directory (U32); the team brainstorm (U34); the triage section offered (U39); the SDLC workflow step (U64); the chain offered after doctor passes, nothing written outside the repository (U71); the reference documents offered once in the SDLC workflow step (U75); the visual companion restored, its session directory .superegm/brainstorm/ (U83); the triage fields, the red flags and the conversation examples moved whole into references/ (U83). -->
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: spec path docs/specs, the builder check, the Units section, the review-spec gate, the brainstorm-brief lookup; the brief in the handoff's own directory (U32); the team brainstorm (U34); the triage section offered (U39); the SDLC workflow step (U64); the chain offered after doctor passes, nothing written outside the repository (U71); the reference documents offered once in the SDLC workflow step (U75); the visual companion restored, its session directory .superegm/brainstorm/ (U83); the triage fields, the red flags, and Ground to cover, Offer recon, Questions that work and Spike to feel things out moved word for word into references/ (U83). -->
 
 # Brainstorming
 
@@ -79,17 +79,7 @@ said in plain words. When there's existing work, build on what it already
 uses. Any choice you make goes in the design as your call, never as
 something they agreed to.
 
-**Ground to cover.** Territory, not a script, never read out as
-questions: what it is, why now, goals and anti-goals, prior art, the
-current state, the details they care about; the list is in
-`references/conversation-craft.md`.
-
-**Questions that work** anchor in specifics; examples are in
-`references/conversation-craft.md`. A guess they can correct often beats
-a question.
-
-**Offer recon** once looking would help; they decide whether you go
-(`references/conversation-craft.md`).
+**Ground to cover, Offer recon, Questions that work and Spike to feel things out:** read `references/conversation-craft.md` before the first question. It holds those four sections word for word, and they apply to every brainstorm.
 
 **Think wide privately.** Before you propose anything, come up with
 several ideas and drop the weak ones, including any that fight what
@@ -103,10 +93,6 @@ steps, options that would look different from each other, a structure
 easier to see than read (a diagram, a timeline, a map). Once they've
 accepted, use it for mockups to react to, side-by-side options, and
 throwaway prototypes they can click.
-
-**Spike to feel things out.** A quick throwaway build is often the
-cheapest way to learn what they want. Offer one when it would help; how
-a spike runs is in `references/conversation-craft.md`.
 
 ## Think Wide With a Team
 

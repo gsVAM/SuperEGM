@@ -1,3 +1,5 @@
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: moved verbatim from SKILL.md's Offer recon, Questions that work, Ground to cover and Spike to feel things out sections (U83). -->
+
 # Ground to cover, questions that work, and the spike
 
 ## Offer recon
