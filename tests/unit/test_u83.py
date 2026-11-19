@@ -103,6 +103,38 @@ def test_started_page_loads_nothing_external(tmp_path):
                    capture_output=True, timeout=30)
 
 
+@pytest.mark.skipif(shutil.which("node") is None or shutil.which("git") is None, reason="node or git is not installed")
+def test_started_session_leaves_the_checkout_clean(tmp_path):
+  # a repository set up before 1.2.1 has no root ignore line: starting the server there writes
+  # .superegm/brainstorm/.gitignore holding `*` before the key, so `git status --porcelain` shows nothing
+  scripts = ROOT / "skills/brainstorming/scripts"
+  env = {k: v for k, v in os.environ.items() if k != "BRAINSTORM_OPEN"}
+  project = tmp_path / "project"
+  project.mkdir()
+  subprocess.run(["git", "init", "-q"], cwd=project, check=True, capture_output=True)
+  started = subprocess.run(["bash", str(scripts / "start-server.sh"), "--project-dir", str(project)], env=env,
+                           capture_output=True, text=True, timeout=30, cwd=tmp_path)
+  info = json.loads(started.stdout.strip().splitlines()[-1])
+  try:
+    assert info["type"] == "server-started"
+    store = project / ".superegm" / "brainstorm"
+    assert (store / ".gitignore").read_text(encoding="utf-8").strip() == "*"
+    assert (store / ".last-token").exists()
+    status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all"], cwd=project, capture_output=True, text=True)
+    assert status.stdout == ""
+  finally:
+    subprocess.run(["bash", str(scripts / "stop-server.sh"), info["screen_dir"].rsplit("/", 1)[0]], env=env,
+                   capture_output=True, timeout=30)
+
+
+def test_companion_guide_never_edits_the_tracked_gitignore():
+  # the guide leaves the ignore rule to start-server.sh and names the session directory stop-server.sh takes
+  guide = (ROOT / "skills/brainstorming/references/visual-companion.md").read_text(encoding="utf-8")
+  assert "add it if not" not in guide and "check `.gitignore`" not in guide
+  assert "$SESSION_DIR" not in guide and "stop-server.sh <session_dir>" in guide
+  assert "parent of the `screen_dir` and `state_dir`" in guide
+
+
 def test_skill_names_piles_offer_and_retro():
   # the skill runs the builder check before hand-over and the SDLC step, sorts three piles, offers the companion
   text = (ROOT / "skills/brainstorming/SKILL.md").read_text()
@@ -114,20 +146,32 @@ def test_skill_names_piles_offer_and_retro():
   assert text.index("**Builder check:**") < text.index("## Design the SDLC Workflow")
 
 
-@pytest.mark.parametrize("before", ["node_modules/\n", "node_modules/\n.superegm/brainstorm/\n", "node_modules/", None])
-def test_init_ignores_the_session_dir_once(before, tmp_path, capsys, monkeypatch):
-  # a fresh init (no .superegm/config.json) in a repo whose .gitignore holds `before` (None: no .gitignore, "node_modules/": no trailing newline), gh stubbed as in test_init_writes_the_config_with_every_key_and_refuses_another_base
+@pytest.mark.parametrize("before, tracked, said", [
+  ("node_modules/\n", False, "a file git does not track yet"),
+  ("node_modules/\n.superegm/brainstorm/\n", False, "was already in .gitignore"),
+  ("node_modules/", False, "a file git does not track yet"),
+  (None, False, "a file git does not track yet"),
+  ("node_modules/", True, "the checkout stays dirty until you do"),
+  ("node_modules/\n.superegm/brainstorm/\n", True, "was already in .gitignore")])
+def test_init_ignores_the_session_dir_once(before, tracked, said, tmp_path, capsys, monkeypatch):
+  # a fresh init (no .superegm/config.json) in a repo whose .gitignore holds `before` (None: no .gitignore, "node_modules/": no trailing newline; `tracked`: committed first), gh stubbed as in test_init_writes_the_config_with_every_key_and_refuses_another_base; step 5 says what init did about .gitignore
   repo = make_repo(tmp_path / "fresh")
   gitignore = repo / ".gitignore"
   if before is not None:
     gitignore.write_text(before, encoding="utf-8")
+  if tracked:
+    subprocess.run(["git", "add", ".gitignore"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "ignore"], cwd=repo, check=True)
   monkeypatch.chdir(repo)
   harness = Harness(capsys)
   harness.gh.extend("api", lambda args, cwd, token=None: (0, "octocat\n", "") if args[1:] == ["user", "-q", ".login"] else (1, "", "unexpected"))
-  code, _ = harness.run("init", "--artifacts-dir", str(tmp_path / "store"))
+  code, out = harness.run("init", "--artifacts-dir", str(tmp_path / "store"))
   assert code == 0
   assert gitignore.read_text().splitlines().count(".superegm/brainstorm/") == 1
   assert gitignore.read_text().startswith("node_modules/\n" if before is not None else ".superegm/brainstorm/\n")
+  assert said in out
+  assert [phrase for phrase in ("a file git does not track yet", "was already in .gitignore", "the checkout stays dirty until you do")
+          if phrase in out] == [said]
 
 
 def test_pack_holds_the_scripts(tmp_path):
