@@ -10,7 +10,9 @@ from pathlib import Path
 
 import pytest
 
+import superegm as core
 from conftest import set_config
+from superegm import decision
 from superegm.collect import DEVIATION_RE
 from superegm.decision import comment_options
 from superegm.judges import decision_question
@@ -72,3 +74,22 @@ def test_respec_is_the_owners_alone(world, mode):
   s.path("units").write_text(json.dumps({"units": {"U01": {"decisions": [{"id": "d1", "question": "Which?", "options": stored}]}}}), encoding="utf-8")
   asked = decision_question(s, "U01", "d1")
   assert "- respec\n" not in asked and "- stop the unit\n" in asked and "- (a) keep the spec\n" in asked
+
+
+def test_respec_ruling_writes_the_open_file_only(world):
+  # the owner's respec writes respec/R<n>.open.json (store kind `file`), never state.json, under write enforcement
+  card, s = spec_world(world)
+  state_file, AT = s.path("state"), core.now_iso()
+  qid = open_decision(world, card, SPEC_COMMENT)
+  before = state_file.read_bytes()
+  rule_rc, out = rule_on(world, card, qid, "respec")
+  assert rule_rc == 0 and state_file.read_bytes() == before, out
+  open_file = s.path("file", "respec", "R1.open.json")
+  assert json.loads(open_file.read_text(encoding="utf-8")) == {"id": "R1", "unit": "U02", "comment_id": 101, "at": AT}
+  assert foreman_of(s, "U02")["rulings"][-1]["ruling"] == "respec"
+  assert sorted(p.name for p in (s.base() / "respec").iterdir()) == ["R1.open.json"]
+  second = open_decision(world, card, SPEC_COMMENT.replace("x.md:12", "x.md:40"), cid=102)
+  assert rule_on(world, card, second, "respec")[0] == 0
+  second_open_file = s.path("file", "respec", "R2.open.json")
+  assert second_open_file.name == "R2.open.json" and json.loads(second_open_file.read_text(encoding="utf-8"))["comment_id"] == 102
+  assert state_file.read_bytes() == before and "file" in decision.WRITES
