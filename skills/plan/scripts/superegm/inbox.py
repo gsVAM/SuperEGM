@@ -1,12 +1,14 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45); the `proceed again` item and the merge on the authorizing outcome (U92); the `conflict` item (U62); a ruling's action the inbox with its `forms` and `on`, a review's its skill session (U72).
+# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45); the `proceed again` item and the merge on the authorizing outcome (U92); the `conflict` item (U62); a ruling's action the inbox with its `forms` and `on`, a review's its skill session, and `inbox withdrawn` (U72).
 
 """superegm inbox [--all] [--json] [--handoff <id>]: one line per item that needs the owner across the
-store's open handoffs, read-only and with no run card; superegm notify --runcard <id>: the owner's
+store's open handoffs, read-only and with no run card; superegm inbox withdrawn --pr <n> --reason <text>: the merge
+step's `merge withdrawn <pr> <reason>` journal line, under its own inbox card unless --runcard names one (U72); superegm notify --runcard <id>: the owner's
 ~/.superegm/notify hook run once with the lines new since the last notify, a line being new when neither
 `state.json.notified` nor `driver/<handoff>.json`'s `notified` holds it; the caller's set is rewritten,
 `state.json`'s under a `wave` card, `driver/<handoff>.json`'s under a `driver` card (U24)."""
 
+import argparse
 import json
 import os
 import re
@@ -15,11 +17,12 @@ import subprocess
 from pathlib import Path
 
 import superegm as core
-from superegm import approve_spec, decision, report, review
+from superegm import approve_spec, decision, report, review, runcard
 from superegm.decision import ruling_form
 from superegm.launch import authorizing, conflict_again, finished, latest_clean, load_launches, waiting_proceed
 
-WRITES = frozenset({"state", "driver"})  # notify's `notified` (a driver card's in `driver/`); inbox writes nothing
+WRITES = frozenset({"state", "driver", "runcards", "journal"})  # notify's `notified` (a driver card's in `driver/`); `inbox withdrawn`'s card and journal line (U72); a bare inbox writes nothing
+WITHDRAW_SKILLS = frozenset({"wave", "driver", "inbox"})  # the open cards `inbox withdrawn --runcard` runs under (U72)
 CONFIG_DEFAULTS = {  # its own config key and init line (U32)
     "notify_timeout_seconds": 30,  # how long `notify` waits on the owner's ~/.superegm/notify hook (spec section 11.2)
 }
@@ -483,6 +486,11 @@ def register(subparsers):
                       runcard=False)
   p.add_argument("--all", action="store_true", help="every store the registry lists")
   p.add_argument("--json", action="store_true", help="one JSON object per line")
+  # U72: on the leaf parser, not a nested subparser, so the leaf keeps the common --handoff flag and a bare inbox lists
+  p.add_argument("action", nargs="?", choices=["withdrawn"], help="withdrawn: journal `merge withdrawn <pr> <reason>`")
+  p.add_argument("--pr", help="withdrawn: the pull request whose merge offer is withdrawn")
+  p.add_argument("--reason", help="withdrawn: what changed since the question")
+  p.add_argument("--runcard", help="withdrawn: an open wave, driver or inbox card (default: its own inbox card)")
   p.set_defaults(run=run, writes=WRITES)
   p = core.add_parser(subparsers, "notify", "run ~/.superegm/notify once with the inbox lines new since the last notify")
   p.set_defaults(run=run, writes=WRITES)
@@ -506,7 +514,34 @@ def open_store(args) -> tuple:
   return st, [r["id"] for r in rows if r["id"] and not r.get("closed_at")]
 
 
+def run_withdrawn(args):
+  """`inbox withdrawn --pr <n> --reason <text>` (U72): `merge withdrawn <pr> <reason>` in the journal of the handoff
+  the card or `--handoff` names. Under `--runcard` the card is a wave, driver or inbox one; typed without it the
+  handoff comes from `--handoff` alone (refused before any write when nothing names it) and its own `inbox` card is
+  opened and closed around the write, as `approve-spec --amend-units` does."""
+  if not (args.pr and args.reason):
+    raise core.HandoffError("inbox withdrawn: --pr and --reason are required")
+  if args.runcard:
+    core.require_runcard(args, WITHDRAW_SKILLS)
+    core.journal(core.STORE, f"merge withdrawn {args.pr} {args.reason}")
+    return 0
+  root = core.git_toplevel(Path.cwd())
+  config = core.load_config(root)
+  if core.resolve_handoff(core.Store(Path(config["artifacts_dir"]), config=config), args) is None:
+    raise core.HandoffError("inbox withdrawn: no handoff named: pass --handoff <id> or --runcard <card>")
+  st = core.store(root, args)
+  args.runcard = core.open_runcard(st, "inbox", core.handoff_spec(args, st))
+  try:
+    core.require_runcard(args, WITHDRAW_SKILLS)
+    core.journal(st, f"merge withdrawn {args.pr} {args.reason}")
+  finally:
+    runcard.run(argparse.Namespace(action="close", id=args.runcard, note=None))
+  return 0
+
+
 def run(args):
+  if args.command == "inbox" and args.action == "withdrawn":
+    return run_withdrawn(args)
   if args.command == "inbox":
     entries = core.load_registry() if args.all else []
     if entries:
