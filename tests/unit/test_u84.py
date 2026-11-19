@@ -295,3 +295,54 @@ def test_an_unruled_foreman_spec_finding_is_carried_into_a_round_without_spec(wo
   found = rnd["reviewers"]["foreman"]["findings"]
   assert [(f["id"], f["carried_from"]) for f in found] == [("foreman-1-1", 1)] * held
   assert (w.dir / "r2/foreman.findings").read_text(encoding="utf-8") == ""  # carried, not posted again
+
+
+def finding_decision(world, card, line=SPEC_FINDING):
+  """A point-1 decision whose question holds the foreman's spec finding and an ordinary one."""
+  text = line + "foreman-1-2 | high | src/a.py:1 | regression: no | the hook never fires\n"
+  return world.run("decision", "open", "--unit", "U02", "--point", 1, "--question", question(world, text),
+                   "--source", "review r1 round 1", "--runcard", card)[1].splitlines()[0]
+
+
+def test_the_decision_on_a_foreman_spec_finding_offers_respec_to_the_owner_alone(world):
+  # §7.6: respec is an option of every spec deviation's decision, the foreman's finding included: `<fid> respec`,
+  # checked as a comment's is, writing `respec/R<n>.open.json` with the finding in place of `comment_id`, never state.json
+  card, s = spec_world(world)
+  state_file, AT = s.path("state"), core.now_iso()
+  qid = finding_decision(world, card)
+  assert foreman_of(s, "U02")["decisions"][-1]["options"] == ["finding upheld", "finding overruled", "foreman-1-1 respec"]
+  before = state_file.read_bytes()
+  assert rule_on(world, card, qid, "foreman-1-2 respec")[0] != 0  # an ordinary finding is not a spec deviation
+  code, err = rule_on(world, card, qid, "foreman-1-1 respec", "judges:p-1")
+  assert code != 0 and "decision: respec is the owner's alone" in err and not (s.base() / "respec").exists()
+  code, out = rule_on(world, card, qid, "foreman-1-1 respec — the spec is wrong")
+  assert code == 0, out
+  open_file = s.path("file", "respec", "R1.open.json")
+  assert json.loads(open_file.read_text(encoding="utf-8")) == {"id": "R1", "unit": "U02", "finding": "foreman-1-1", "at": AT}
+  assert state_file.read_bytes() == before
+  assert [(r.kind, r.subject) for r in decision.recorded_rulings(foreman_of(s, "U02"))] == [("overruled", "foreman-1-1")]  # settles the finding
+
+
+@pytest.mark.parametrize("claim, refusal", [("the retry count is wrong; `pytest -k retry` fails", "frozen spec's path:line"),
+                                            ("docs/designs/sample.md:12 says 3 retries", "needs the evidence")])
+def test_a_respec_on_a_foreman_spec_finding_needs_the_line_and_the_evidence(world, claim, refusal):
+  # a hand-written finding line lacking a part is offered `respec` by its heading alone, and refused when ruled
+  card, s = spec_world(world)
+  qid = finding_decision(world, card, f"foreman-1-1 | high | docs/designs/sample.md:12 | regression: no | deviation (spec) unruled: {claim}\n")
+  code, err = rule_on(world, card, qid, "foreman-1-1 respec")
+  assert code != 0 and refusal in err and not (s.base() / "respec").exists() and not any(world.gh.comments.values())
+
+
+@pytest.mark.parametrize("by_finding", [False, True])
+def test_a_rerun_that_rules_another_option_removes_the_stale_open_file(world, by_finding):
+  # a crash after the open file and before the ruling is saved leaves a file; a rerun ruling another option takes it away
+  card, s = spec_world(world)
+  if by_finding:
+    qid, other = finding_decision(world, card), "foreman-1-1 finding overruled — the spec stands"
+    decision.open_respec(s, "U02", None, core.now_iso(), finding="foreman-1-1")
+  else:
+    qid, other = open_decision(world, card, SPEC_COMMENT), "(b)"
+    decision.open_respec(s, "U02", 101, core.now_iso())
+  assert s.path("file", "respec", "R1.open.json").exists()
+  assert rule_on(world, card, qid, other)[0] == 0
+  assert not s.path("file", "respec", "R1.open.json").exists()
