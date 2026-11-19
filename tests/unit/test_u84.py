@@ -93,3 +93,16 @@ def test_respec_ruling_writes_the_open_file_only(world):
   second_open_file = s.path("file", "respec", "R2.open.json")
   assert second_open_file.name == "R2.open.json" and json.loads(second_open_file.read_text(encoding="utf-8"))["comment_id"] == 102
   assert state_file.read_bytes() == before and "file" in decision.WRITES
+
+
+@pytest.mark.parametrize("body, refusal", [
+    ("**Deviation (spec):** the retry count is wrong; `pytest -k retry` fails", "decision: respec needs the frozen spec's path:line"),
+    ("**Deviation (spec):** docs/specs/x.md:12 says 3 retries", "decision: respec needs the evidence")])
+def test_spec_deviation_needs_the_line_and_the_evidence(world, body, refusal):
+  # a spec deviation quotes the frozen spec's path:line AND the evidence (a command and output, or a base path:line)
+  text = body + "\n- (a) keep the spec\n- (b) follow the code\n**Builder status:** BLOCKED"
+  card, s = spec_world(world, text=text)
+  qid = open_decision(world, card, text)
+  rule_respec_rc, err = rule_on(world, card, qid, "respec")
+  assert rule_respec_rc != 0 and refusal in err
+  assert not s.path("file", "respec", "R1.open.json").exists() and not any(world.gh.comments.values())  # refused before anything is posted
