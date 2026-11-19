@@ -123,7 +123,7 @@ conversation.
 This section runs only when the owner asks for it: they typed `/superegm:brainstorming --team`, or `brainstorm.team` is true in `.superegm/config.json`.
 Reading the config yourself, a missing key reads false; `false` or a missing key is no ask, and you say nothing.
 Only a value neither `true` nor `false` (such as `"yes"`, which the helper's `load_config` refuses) is worth a word: tell the owner it is malformed and go on without the team unless they typed `--team`.
-A brainstorm not asked for runs neither teammates nor the team's subagents: the skill as above, nothing more (the builder check below is its own dispatch).
+A brainstorm not asked for runs neither teammates nor team subagents: the skill as above (the builder check is its own dispatch).
 Run it once you know the topic well enough to state it in one line, before you propose anything.
 
 **Teams or the fallback.** Read the variable with one Bash `echo "$CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"`.
@@ -140,7 +140,7 @@ Each works one approach in its own context and reports it to you by message; the
 **The wait.** The same for each spawn: note one Bash `date` at the spawn and end your turn, with no `sleep`.
 After the cartographer's spawn, tell the owner you are waiting on the cartographer: if it has sent you nothing at all, their message ten minutes or more after the spawn takes the fallback; if it has written but its notes are late, you ask it once and keep waiting; `fallback` typed takes it at once.
 After the three's spawn, tell the owner you are waiting on the three: their message ten minutes or more after the spawn has you ask each silent one once, then write its approach `not reported`; there is no fallback once the three run.
-Read your inbox at its next turn, with a second Bash `date` to tell how long it has been: the mailbox shows no arrival time, so a report in your inbox at that turn is merged, whenever it came: ten minutes counts per teammate, only for one whose report is not in.
+Read the inbox at its next turn, with a second Bash `date` to tell how long it has been: the mailbox shows no arrival time, so a report in your inbox at that turn is merged, whenever it came: ten minutes counts per teammate, only for one whose report is not in (within ten minutes: ordinary).
 At a next turn less than ten minutes after the `date` with nothing in the inbox, answer what the owner asked, repeat the one-line notice and end your turn.
 At such a turn with some of the three's reports in, merge those that are in, repeat the notice naming the silent ones, and end your turn.
 That partial merge only holds the reports side by side: rank no question and ask the owner nothing until all three are in or written `not reported`.
@@ -280,8 +280,8 @@ changes only what the owner agrees to:
    written as `.superegm/reviewers/<id>.md` and shown to them before it is
    written.
 2. Instructions: the `instructions` entries, then the reference documents
-   (invariants, an architecture note, a glossary), offered once, never
-   required: offer to draft or update the ones the spec implies (say
+   (invariants, an architecture note, a glossary), never
+   required: offer once to draft or update the ones the spec implies (say
    `invariants.md`, `architecture.md`) under the configured `dir` or, with
    none, `docs/reference/` with a `dir` entry added to `instructions` for
    all four roles (`builder`, `foreman`, `reviewers`, `judges`). On their
