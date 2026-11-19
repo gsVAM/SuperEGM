@@ -177,3 +177,22 @@ def test_tables_carry_the_store_numbers(world):
   plan = table(report, "Plan against actual")
   assert (plan["U01"]["planned steps"], plan["U01"]["wave"], plan["U01"]["merge order"]) == ("2", "1", "2")
   assert plan["U02"]["merge order"] == "1"
+
+
+def snapshot(root):
+  return {p: p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+
+
+def test_postmortem_reads_the_store_only(world):
+  from superegm import postmortem
+  c, _, _ = two_units(world)
+  before = snapshot(c.root)
+  code, out = world.run("postmortem", "--handoff", c.hid)
+  after = snapshot(c.root)
+  report_path = c.hs.path("file", "postmortem.md")
+  assert code == 0, out
+  assert postmortem.WRITES == frozenset({"file"})
+  assert out.strip() == str(report_path)
+  assert set(after) - set(before) == {report_path}
+  assert {p for p in before if after[p] != before[p]} == set()
+  assert "in progress" in report_path.read_text(encoding="utf-8").split("## Units")[0]
