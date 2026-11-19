@@ -295,17 +295,22 @@ def out_of_scope(rows: list, spans: list, location: str, spec_name: str = ""):
   exempts every finding. A round that lists reference documents (`("changed", <path>, 0, 0)` rows, U75) reads a
   location's path first: a listed document is in scope whatever its line, any other file but the spec (`spec_name`,
   its repository-relative path) answers `none`, and only a spec location goes on through `cited_line` and the
-  sections. A file name has an extension that starts with a letter, so a section cite such as `§3.5 line 4` or
-  `3.5:4` names no file."""
+  sections. A file name has an extension that starts with a letter and ends at `:`, `#`, `,` or a space, so a
+  section cite such as `§3.5 line 4` or `3.5:4` names no file. A listed document is named by its repository-relative
+  path, with a leading `./` or an absolute prefix, or by its bare file name (the spec's own name wins a tie)."""
   listed = {row[1] for row in rows if row[0] == "changed" and row[2] == row[3] == 0}
   if listed:
-    for path in sorted(listed, key=len, reverse=True):
-      if location == path or (location.startswith(path) and location[len(path)] in ": \t"):
-        return None
-    named = re.match(r"([^\s:]+\.[A-Za-z][A-Za-z0-9]*)(?=[:\s]|$)", location)
-    if named:
-      cited = named.group(1).removeprefix("./")
-      if not (spec_name and (cited == spec_name or cited.endswith("/" + spec_name) or spec_name.endswith("/" + cited))):
+    loc, ends = location.removeprefix("./"), ": \t,#"
+    tails = [0] + [i + 1 for i, c in enumerate(loc) if c == "/"]  # the whole location, or what follows any slash (an absolute path)
+    named_at = lambda path, text: any(text.startswith(path, at) and (at + len(path) == len(text) or text[at + len(path)] in ends) for at in tails)
+    if any(named_at(path, loc) for path in listed):
+      return None
+    named = re.match(r"([^\s:#,]+\.[A-Za-z][A-Za-z0-9]*)(?=[:\s#,]|$)", loc)
+    spec_named = bool(named) and bool(spec_name) and (named.group(1) == spec_name or named.group(1).endswith("/" + spec_name) or spec_name.endswith("/" + named.group(1)))
+    if not spec_named:
+      if "/" not in loc.split(":")[0] and any(named_at(path.rsplit("/", 1)[-1], loc) for path in listed):
+        return None  # a listed document by its bare file name (a slash before the first colon is another directory's)
+      if named:
         return "none"
     rows = [row for row in rows if not (row[0] == "changed" and row[2] == row[3] == 0)]
   if rows and rows[0][0] == "whole":
@@ -342,7 +347,7 @@ def reference_manifest(st: core.Store, root: Path) -> list[dict]:
   head = core.run_git(["rev-parse", "HEAD"], root, check=False).strip()
   if not base or not head:
     return []
-  names = core.run_git(["diff", "--name-only", "-z", base, head, "--", *[f + "/" for f in folders]], root, check=False)
+  names = core.run_git(["diff", "--name-only", "--no-renames", "-z", base, head, "--", *[f + "/" for f in folders]], root, check=False)  # a rename lists both paths: its old one is a deletion
   found = []
   for name in sorted({n for n in names.split("\0") if n.endswith(".md")}):
     data = instructions.blob(root, head, name)
@@ -701,6 +706,11 @@ def record_round(args) -> int:
   if args.not_run and external:  # an ingest's record holds findings: a not-run would erase them
     raise core.HandoffError(f"review record: --not-run is refused for an external reviewer ({reviewer})")
   manifest = stored_manifest(st, rid, review, n, reviewer, card)
+  if kind == "spec" and rnd.get("refs") is not None:  # U75: the panel read the reference bytes its stored brief listed; the round's `refs` are those
+    read = {item["file"]: item.get("sha") for item in manifest}
+    for ref in rnd["refs"]:
+      if ref["file"] in read and read[ref["file"]] != ref["sha"]:
+        raise core.HandoffError(f"review record: {ref['file']}: differs from the reviewers' brief")
   from superegm import reviewers as repository  # at call time: that module's import chain reaches this one
   try:  # a repository or overridden reviewer's record carries the persona it read; a built-in with no file's has none, and a not-run read none (U76)
     persona = None if args.not_run else repository.persona_of(st, review, rid, n, reviewer)
@@ -1159,7 +1169,7 @@ class Status:
   converged: str
   converged_round: int | None
   sha: str | None
-  moved: bool = False          # the latest completed round's bytes are no longer the artifact's (never on a head)
+  moved: bool = False          # the latest completed round's bytes are no longer the artifact's, or a spec round's `refs` are no longer HEAD's reference manifest (never on a head)
   latest_sha: str | None = None
   fixed: bool = False          # that round would have converged but for the move: re-review on the current bytes
 

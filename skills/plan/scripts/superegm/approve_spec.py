@@ -17,7 +17,7 @@ import re
 
 import superegm as core
 from superegm import close, instructions, reviewers, runcard
-from superegm.review import Refusal, evaluate, findings_of, ingest_pr, last_proceed, latest_cycle, live_rounds, load_review, load_round, reference_manifest, review_id, round_numbers, valid_rounds
+from superegm.review import Refusal, evaluate, findings_of, ingest_pr, last_proceed, latest_cycle, live_rounds, load_review, load_round, reference_manifest, review_id, round_numbers, rounds_of, valid_rounds
 
 WRITES = frozenset(["approvals", "handoffs", "state", "reviews", "runcards", "instructions", "reviewers"])  # the store kinds this subcommand writes
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
@@ -459,7 +459,8 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   status = evaluate(st, review, card.get("parent") or args.runcard)
   if status.code != 0 and status.fixed and status.latest_sha == core.sha256_file(spec):
     # U75: the spec bytes are the round's and only a reference document moved: say which one, not just "not converged"
-    held = load_round(st, rid, round_numbers(st, rid)[-1]).get("refs")
+    completed = [r for r in rounds_of(st, rid, review) if r["what_ran"] == "completed"]  # the round `evaluate` read, not a later partial one
+    held = completed[-1].get("refs") if completed else None
     if held is not None:
       differing = refs_differing(held, reference_manifest(st, root))
       if differing:
