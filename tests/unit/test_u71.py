@@ -223,6 +223,22 @@ def test_register_root_names_the_base_worktree(world, monkeypatch, tmp_path, bas
     assert entry is None and f"register: {other_wt}: not a checkout on main" in out
 
 
+@pytest.mark.parametrize("skill, phrase", [
+  ("brainstorming", "after doctor passes"), ("brainstorming", "`driver.chain`"), ("brainstorming", "commit"),
+  ("brainstorming", "nothing outside the repository"), ("brainstorming", "effects: working-tree"),
+  ("review-spec", "after `approve-spec` exits 0"), ("review-spec", "driver env"), ("review-spec", "driver install"),
+  ("review-spec", "skip `register` for a registered store"), ("review-spec", "git worktree list"),
+  ("review-spec", "register --root"), ("review-spec", "/superegm:driver register"), ("review-spec", "the approval stands")])
+def test_skills_name_the_chain_setup(skill, phrase):
+  # the owner's word turns the chain on; review-spec's approval sets the driver up only when chain is true and not current
+  assert phrase in (superegm_root() / f"skills/{skill}/SKILL.md").read_text(encoding="utf-8")
+
+
+def superegm_root():
+  """The repository root: the skills read from the checkout under test, whatever the working directory."""
+  return Path(__file__).resolve().parents[2]
+
+
 def test_a_builder_wrapper_without_a_registry_entry_has_no_kick(world, monkeypatch, tmp_path, spawn_fake):
   """No registry entry names the launch's store: the wrapper is the one line it was."""
   monkeypatch.setenv("HOME", str(tmp_path))
