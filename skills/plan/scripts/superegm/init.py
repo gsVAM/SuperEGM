@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the init subcommand; `owners` from `gh api user` and the pointer to the README's token recipe and to `doctor` (spec section 11); the astra.enabled and astra.heads sentence (U17); the ingest sentence (U21); the ~/.superegm/notify sentence (U23); the foreman.run_timeout_minutes sentence (U25); step 2's disableClaudeAiConnectors, builder.plugins and builder.mcp (U27); `steps()` composing the modules' INIT_STEPs, those four sentences moved to their modules (U32); step 2 pointing to `superegm builder-setup` and `doctor --probe` (U59); the `.superegm/brainstorm/` line added to `.gitignore` once (U83).
+# Added by SuperEGM (gsVAM), 2026: the init subcommand; `owners` from `gh api user` and the pointer to the README's token recipe and to `doctor` (spec section 11); the astra.enabled and astra.heads sentence (U17); the ingest sentence (U21); the ~/.superegm/notify sentence (U23); the foreman.run_timeout_minutes sentence (U25); step 2's disableClaudeAiConnectors, builder.plugins and builder.mcp (U27); `steps()` composing the modules' INIT_STEPs, those four sentences moved to their modules (U32); step 2 pointing to `superegm builder-setup` and `doctor --probe` (U59); the `.superegm/brainstorm/` line added to `.gitignore` once; step 5 says whether init wrote the line, found it or left an untracked file (U83).
 
 """superegm init: write .superegm/config.json with every key's default and add `.superegm/brainstorm/` to .gitignore; print the owner's by-hand steps."""
 
@@ -29,7 +29,7 @@ By hand, before the first typed skill runs:
    ruleset whose include pattern is exactly `refs/heads/superegm/**/*` (`refs/heads/superegm/**`
    matches no branch on GitHub).
 4. Add a workflow triggered on `pull_request` so every builder head gets CI.
-5. Commit {path}; approve-spec commits it with the spec. init also added `.superegm/brainstorm/` to .gitignore: commit that file yourself, approve-spec does not, and the checkout stays dirty until you do.
+5. Commit {path}; approve-spec commits it with the spec. {ignore_note}
 The store is {artifacts_dir} (config key artifacts_dir); it is never committed."""
 LAST = "then run `superegm doctor`"
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # its own text is OWN (U32)
@@ -63,13 +63,23 @@ def default_branch(repo_root: Path) -> str:
   return core.run_git(["branch", "--show-current"], repo_root).strip()
 
 
-def ignore_session_dir(root: Path) -> None:
-  """Append the visual companion's session directory to the repository's .gitignore, once (U83)."""
+IGNORE_NOTES = {
+  "present": f"`{SESSION_DIR_IGNORE}` was already in .gitignore: init changed nothing there.",
+  "added": f"init added `{SESSION_DIR_IGNORE}` to .gitignore: commit that file yourself, approve-spec does not, and the checkout stays dirty until you do.",
+  "untracked": f"init wrote `{SESSION_DIR_IGNORE}` into .gitignore, a file git does not track yet: commit it when you choose; "
+               "an untracked file does not make the checkout read dirty."}
+
+
+def ignore_session_dir(root: Path) -> str:
+  """Append the visual companion's session directory to the repository's .gitignore, once, and say what happened:
+  `present` (already there, nothing written), `added` (written to a tracked .gitignore, which is now modified) or
+  `untracked` (written to a .gitignore git does not track, which leaves the checkout clean) (U83)."""
   path = root / ".gitignore"
   text = path.read_text(encoding="utf-8") if path.exists() else ""
   if SESSION_DIR_IGNORE in text.splitlines():
-    return
+    return "present"
   core.atomic_write(path, text + ("" if not text or text.endswith("\n") else "\n") + SESSION_DIR_IGNORE + "\n")
+  return "added" if core.run_git(["ls-files", "--", ".gitignore"], root, check=False).strip() else "untracked"
 
 
 def run(args):
@@ -95,7 +105,7 @@ def run(args):
     raise core.HandoffError(f"owners: {error}") from None
   config = {**core.DEFAULT_CONFIG, "repo": repo, "base": base, "artifacts_dir": str(artifacts), "owners": [owner]}
   core.atomic_write(path, json.dumps(config, indent=2) + "\n")
-  ignore_session_dir(root)
-  print(steps().format(path=path, repo=repo, base=base, artifacts_dir=artifacts,
+  ignore_note = IGNORE_NOTES[ignore_session_dir(root)]
+  print(steps().format(path=path, repo=repo, base=base, artifacts_dir=artifacts, ignore_note=ignore_note,
                      profile_dir=config["builder"]["profile_dir"]))
   return 0

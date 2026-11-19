@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the session directory is .superegm/brainstorm/; the --host option and the non-loopback bind removed, the server binds 127.0.0.1 only; the remote brand image is switched off, so no page loads anything from outside the machine; the retry hint runs through bash (U83).
+# From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the session directory is .superegm/brainstorm/; the --host option and the non-loopback bind removed, the server binds 127.0.0.1 only; the remote brand image is switched off, so no page loads anything from outside the machine; the retry hint runs through bash; a .gitignore holding * is written into .superegm/brainstorm/ before the session key, so no repository can commit the key (U83).
 # Start the brainstorm server and output connection info
 # Usage: start-server.sh [--project-dir <path>] [--url-host <display-host>] [--foreground] [--background]
 #
@@ -112,6 +112,13 @@ if [[ -n "$PROJECT_DIR" ]]; then
   # already-open browser tab reconnects to the same URL with a valid cookie.
   export BRAINSTORM_PORT_FILE="${PROJECT_DIR}/.superegm/brainstorm/.last-port"
   export BRAINSTORM_TOKEN_FILE="${PROJECT_DIR}/.superegm/brainstorm/.last-token"
+  # The key and the mockups must never reach a commit, in a repository set up before
+  # 1.2.1 as in any other: a nested .gitignore holding * (it ignores itself too),
+  # written before the key.
+  mkdir -p "${PROJECT_DIR}/.superegm/brainstorm"
+  if [[ ! -f "${PROJECT_DIR}/.superegm/brainstorm/.gitignore" ]]; then
+    printf '*\n' > "${PROJECT_DIR}/.superegm/brainstorm/.gitignore"
+  fi
 else
   SESSION_DIR="/tmp/brainstorm-${SESSION_ID}"
 fi

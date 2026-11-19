@@ -1,4 +1,4 @@
-<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the session directory is .superegm/brainstorm/; the non-loopback host fallback removed, so a remote or containerised session stays in text; the .gitignore line checked before every start (U83). -->
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the session directory is .superegm/brainstorm/; the non-loopback host fallback removed, so a remote or containerised session stays in text; the start writes a .gitignore holding * into .superegm/brainstorm/, and the guide names the session directory stop-server.sh takes (U83). -->
 
 # Visual Companion Guide
 
@@ -56,7 +56,7 @@ a cookie, so reloads and `/files/*` assets work without repeating it.
 
 **Finding connection info:** The server writes its startup JSON to `$STATE_DIR/server-info`. If you launched the server in the background and didn't capture stdout, read that file to get the URL and port. When using `--project-dir`, check `<project>/.superegm/brainstorm/` for the session directory.
 
-**Note:** Pass the project root as `--project-dir` so mockups persist in `.superegm/brainstorm/` and survive server restarts. Without it, files go to `/tmp` and get cleaned up. `superegm init` adds `.superegm/brainstorm/` to `.gitignore` on a fresh setup, but a repository set up earlier lacks the line: before every start, check `.gitignore` holds it and add it if not, since the session key sits in that directory.
+**Note:** Pass the project root as `--project-dir` so mockups persist in `.superegm/brainstorm/` and survive server restarts. Without it, files go to `/tmp` and get cleaned up. The start writes a `.gitignore` holding `*` into `.superegm/brainstorm/` before it writes the session key, so nothing in that directory can be committed; you edit no `.gitignore` yourself.
 
 **Launching the server by platform:**
 
@@ -280,10 +280,10 @@ If `$STATE_DIR/events` doesn't exist, the user didn't interact with the browser 
 ## Cleaning Up
 
 ```bash
-bash scripts/stop-server.sh $SESSION_DIR
+bash scripts/stop-server.sh <session_dir>
 ```
 
-Run it when the brainstorm ends. If the session used `--project-dir`, mockup files persist in `.superegm/brainstorm/` for later reference. Only `/tmp` sessions get deleted on stop.
+The session directory is the parent of the `screen_dir` and `state_dir` the start returned (`<project>/.superegm/brainstorm/<session>/`); pass that, never `screen_dir`. Run it when the brainstorm ends. If the session used `--project-dir`, mockup files persist in `.superegm/brainstorm/` for later reference. Only `/tmp` sessions get deleted on stop.
 
 ## Reference
 
