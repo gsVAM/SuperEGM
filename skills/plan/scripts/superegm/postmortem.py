@@ -102,11 +102,15 @@ def unit_facts(hs: core.Store, uid: str, state: dict) -> dict:
 
 def head_findings(hs: core.Store, uid: str) -> dict:
   """The unit's head-review findings counted by severity, over every round of every cycle."""
-  count = dict.fromkeys(SEVERITIES, 0)
+  count, seen = dict.fromkeys(SEVERITIES, 0), set()
   for rid in review.cycle_ids(hs, "head", uid):
     for rnd in review.rounds_of(hs, rid, review.load_review(hs, rid)):
-      for entry in (rnd.get("reviewers") or {}).values():
+      for name, entry in (rnd.get("reviewers") or {}).items():
         for finding in entry.get("findings") or []:
+          if finding.get("carried_from"):  # `collect.carry` posts a still-open finding once: its copies are not new
+            if (name, finding.get("id")) in seen:
+              continue
+          seen.add((name, finding.get("id")))
           if finding.get("severity") in count:
             count[finding["severity"]] += 1
   return count
@@ -199,6 +203,11 @@ def reviewers_table(st: core.Store, hs: core.Store, uids: list, spec) -> str:
             if key in carried:
               continue
             carried.add(key)
+          elif finding.get("carried_from"):  # `collect.carry` copies an open foreman finding, same id: one finding
+            key = (found["kind"], found["artifact"], name, finding.get("id"))
+            if key in carried:
+              continue
+          carried.add((found["kind"], found["artifact"], name, finding.get("id")))
           row[finding.get("severity")] = row.get(finding.get("severity"), 0) + 1
           disposition = str(finding.get("disposition") or "")
           fid = finding.get("id")
