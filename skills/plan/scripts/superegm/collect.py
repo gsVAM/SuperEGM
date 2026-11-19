@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # From the elephant-goldfish-model (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17); an unreplied external high or medium carried forward (U21); rulings read through `ruling_of` and the record, every folded deviation heading (U22); the DoD re-run and the test delta, two gates before the word (U25); its own `foreman` config key and `init` line, moved from `__init__` and `init` (U32); both `binding_rulings` calls drop the consumed comments, so an edited recorded proceed waives no check (U94); the worktree checks in `worktree_checks`, the one function `collect` and `precheck` call, the posted rounds' settled findings in `posted_findings`, the reading both share, and the changed paths read NUL-separated, one with a control character shown JSON-quoted (U67).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17); an unreplied external high or medium carried forward (U21); rulings read through `ruling_of` and the record, every folded deviation heading (U22); the DoD re-run and the test delta, two gates before the word (U25); its own `foreman` config key and `init` line, moved from `__init__` and `init` (U32); both `binding_rulings` calls drop the consumed comments, so an edited recorded proceed waives no check (U94); the worktree checks in `worktree_checks`, the one function `collect` and `precheck` call, the posted rounds' settled findings in `posted_findings`, the reading both share, and the changed paths read NUL-separated, one with a control character shown JSON-quoted (U67); the `spec` deviation kind in `DEVIATION_RE` (U84).
 
 """superegm collect: the foreman's findings of a round through one `review record --reviewer foreman`, or a
 round that could not complete with `--not-run`."""
@@ -34,7 +34,7 @@ INIT_STEP = ("`collect` re-runs every DoD `Run` item the PR body pastes under it
              "foreman.run_timeout_minutes (default 8, at most 9, under the Bash tool's 10-minute cap).")
 DOCTOR_CHECKS = None
 SKILLS = frozenset(['wave'])  # the skills whose card this subcommand accepts
-DEVIATION_RE = re.compile(r"^\*\*Deviation \((interface|dod|test|other)\):\*\*")
+DEVIATION_RE = re.compile(r"^\*\*Deviation \((interface|dod|test|spec|other)\):\*\*")
 REPLY_RE = re.compile(r"^\*\*Reply (\S+):\*\* (fixed|contested)(?:\s*[—-]\s*(.*))?", re.S)
 COUNTS_RE = re.compile(r"(\d+) passed|(\d+) failed")  # a pytest summary line's pass and fail counts
 KILL_WAIT = 5  # seconds waited after `kill_group` at the bound before `exit: none` is recorded
