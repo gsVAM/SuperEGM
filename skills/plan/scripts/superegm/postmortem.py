@@ -59,12 +59,18 @@ def uids_of(hs: core.Store, units: dict, state: dict) -> list:
   return found + [u for u in sorted(state.get("units") or {}) if u not in found]
 
 
+def superseded(entry: dict) -> bool:
+  """A foreman round `foreman.supersede` collected unreviewed: it never ran, so it is no round."""
+  return entry.get("phase") == "collected" and str(entry.get("outcome") or "").startswith("not run")
+
+
 def unit_facts(hs: core.Store, uid: str, state: dict) -> dict:
   """Everything the Units and Plan tables read of one unit."""
   launches = launch.load_launches(hs, uid)
   foreman = core.load_foreman(hs, uid)
   rounds = foreman.get("rounds") or []
-  pr = (((state.get("status") or {}).get("units") or {}).get(uid) or {}).get("pr") or {}
+  pr = ((state.get("units") or {}).get(uid) or {}).get("pr")  # the whole PR; `status.units[uid].pr` is its number
+  pr = pr if isinstance(pr, dict) else {}
   costs = [x["total_cost_usd"] for x in launches if isinstance(x.get("total_cost_usd"), (int, float))
            and not isinstance(x.get("total_cost_usd"), bool)]
   models = []
@@ -74,7 +80,8 @@ def unit_facts(hs: core.Store, uid: str, state: dict) -> dict:
       models.append(model)
   merge_rounds = [r for r in rounds if r.get("merge")]
   return {
-      "launches": launches, "models": models, "rounds": [r for r in rounds if not r.get("merge")],
+      "launches": launches, "models": models,
+      "rounds": [r for r in rounds if not r.get("merge") and not superseded(r)],
       "merge_rounds": len(merge_rounds) or len([x for x in launches if x.get("merge")]),
       "merged_at": pr.get("merged_at"), "cost": round(sum(costs), 6) if costs else None,
       "first": launches[0].get("started_at") if launches else None,
@@ -97,9 +104,15 @@ def header_table(st: core.Store, hs: core.Store, units: dict, uids: list) -> str
   row = next((r for r in core.handoffs(st.root) if r.get("id") == hs.handoff_id), {})
   approval = core.own_approval(hs, hs.handoff_id) or {}
   waves = units.get("waves") or {}
+  state = core.load_state(hs.root) if hs.path("state").is_file() else {}
+  facts = [unit_facts(hs, uid, state) for uid in uids]
+  firsts = [f["first"] for f in facts if f["first"]]
+  lasts = [f["merged_at"] for f in facts if f["merged_at"]]
+  total = seconds(min(firsts, key=core.epoch), max(lasts, key=core.epoch)) if firsts and lasts else None
   fields = [("handoff", hs.handoff_id), ("spec", row.get("spec")), ("approval commit", approval.get("commit")),
             ("opened", row.get("opened_at")), ("closed", row.get("closed_at") or "in progress"),
-            ("mode", core.run_mode(hs)), ("units", len(uids)), ("waves", len(waves))]
+            ("mode", core.run_mode(hs)), ("units", len(uids)), ("waves", len(waves)),
+            ("total wall seconds", total)]  # the earliest first launch to the latest merge
   return render(["field", "value"], fields)
 
 
