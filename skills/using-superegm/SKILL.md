@@ -56,7 +56,7 @@ The store is the memory; the session is not (design section 5):
 1. **A fresh session per phase** (or per review cycle) is the normal way to run a long handoff. Never carry a session across phases for hours; after a plugin install or update the next phase starts in a new session, since adapters and skills load at session start.
 2. **Commits land on the current branch.** Every skill that commits (`review-spec`'s fixes, `approve-spec`'s approval commit) works on the checkout's current branch and never switches branches or adds a worktree in the owner's checkout: start on the branch you want the commits on.
 3. **Worktrees:** the recommended layout is one worktree per handoff, each handoff's work in its own checkout, so two handoffs never share a current branch.
-4. **The owner merges with the admin bypass** where the base ruleset restricts updates to the owners: `gh pr merge --admin`. `doctor` says so as information; `wave` and `integrate` say it where they tell you to merge.
+4. **The owner merges in the inbox, with the admin bypass** where the base ruleset restricts updates to the owners: the inbox runs `gh pr merge --admin` once the owner says yes. `doctor` says so as information; `wave` and `integrate` say it where they tell you to merge.
 
 ## Red Flags
 

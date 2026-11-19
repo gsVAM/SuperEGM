@@ -136,4 +136,4 @@ dispatch):
 Before the close, run batch step 3b once and `report` again (a thread posted before the last round's review is read now): an `outcome:` line or no longer `loop: ended` → back to the batches.
 
 `loop: ended` → run `python3 '<HELPER>' runcard close '<CARD>'`. Then report in chat from `wave_<n>_report.md`: per unit its state, head and rounds; the non-terminal launches (builders still running report to the next `wave`); the heads with pending or absent CI; the idle units and why; the ready units without a slot; the pending decisions; the stopped units with their unlanded dependants: what stayed open for the owner to merge,
-close, or re-type `/superegm:wave`. Where the base ruleset restricts updates to config.owners, the owner merges with the admin bypass: `gh pr merge --admin`.
+close, or re-type `/superegm:wave`. The owner merges in the inbox, which runs `gh pr merge --admin` where the base ruleset restricts updates to config.owners.

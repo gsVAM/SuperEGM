@@ -42,7 +42,7 @@ every writing call carries `--runcard`.
    merged PR is a unit with `pr` set and `ci` null (`status` reads no CI of a merged PR). Without `--close`, one listed unit ends the
    invocation here: print the list, say that the owner merges, closes or re-types
    `/superegm:wave`, and go to Step 4. With `--close` (`--patch` or not), go to Step 3.
-   Where the base ruleset restricts updates to config.owners, say that the owner merges with the admin bypass: `gh pr merge --admin`.
+   Say that the owner merges in the inbox (`/superegm:inbox`); where the base ruleset restricts updates to config.owners, the inbox runs the admin bypass, `gh pr merge --admin`, once the owner says yes to it.
 
 ## Step 2: one integrate round
 
