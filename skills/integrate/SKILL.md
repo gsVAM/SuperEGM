@@ -117,7 +117,7 @@ After `close` succeeds, run the post-mortem (no card of its own, it writes only 
     superegm postmortem --handoff '<id>'
 
 It prints the path of `<handoff dir>/postmortem.md`. Tell the owner that path and three lines read from its
-tables: the total wall time (first launch to last merge, from the Units table), the unit with the most rounds
+tables: the total wall time (Header, total wall seconds: the earliest first launch to the latest merge), the unit with the most rounds
 (Units, head rounds) and the reviewer with the most overruled findings (Reviewers, overruled); the numbers
 are the report's, none worked out here. A refused `close` ends the skill without it.
 
