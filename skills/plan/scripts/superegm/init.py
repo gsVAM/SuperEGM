@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the init subcommand; `owners` from `gh api user` and the pointer to the README's token recipe and to `doctor` (spec section 11); the astra.enabled and astra.heads sentence (U17); the ingest sentence (U21); the ~/.superegm/notify sentence (U23); the foreman.run_timeout_minutes sentence (U25); step 2's disableClaudeAiConnectors, builder.plugins and builder.mcp (U27); `steps()` composing the modules' INIT_STEPs, those four sentences moved to their modules (U32); step 2 pointing to `superegm builder-setup` and `doctor --probe` (U59).
+# Added by SuperEGM (gsVAM), 2026: the init subcommand; `owners` from `gh api user` and the pointer to the README's token recipe and to `doctor` (spec section 11); the astra.enabled and astra.heads sentence (U17); the ingest sentence (U21); the ~/.superegm/notify sentence (U23); the foreman.run_timeout_minutes sentence (U25); step 2's disableClaudeAiConnectors, builder.plugins and builder.mcp (U27); `steps()` composing the modules' INIT_STEPs, those four sentences moved to their modules (U32); step 2 pointing to `superegm builder-setup` and `doctor --probe` (U59); the `.superegm/brainstorm/` line added to `.gitignore` once (U83).
 
 """superegm init: write .superegm/config.json with every key's default; print the owner's by-hand steps."""
 
@@ -9,6 +9,7 @@ from pathlib import Path
 import superegm as core
 
 WRITES = frozenset()  # the config is in the working tree, not the store
+SESSION_DIR_IGNORE = ".superegm/brainstorm/"  # the visual companion's session directory (U83)
 
 OWN = """wrote {path}
 By hand, before the first typed skill runs:
@@ -62,6 +63,15 @@ def default_branch(repo_root: Path) -> str:
   return core.run_git(["branch", "--show-current"], repo_root).strip()
 
 
+def ignore_session_dir(root: Path) -> None:
+  """Append the visual companion's session directory to the repository's .gitignore, once (U83)."""
+  path = root / ".gitignore"
+  text = path.read_text(encoding="utf-8") if path.exists() else ""
+  if SESSION_DIR_IGNORE in text.splitlines():
+    return
+  core.atomic_write(path, text + ("" if not text or text.endswith("\n") else "\n") + SESSION_DIR_IGNORE + "\n")
+
+
 def run(args):
   root = core.git_toplevel(Path.cwd())
   path = root / ".superegm" / "config.json"
@@ -85,6 +95,7 @@ def run(args):
     raise core.HandoffError(f"owners: {error}") from None
   config = {**core.DEFAULT_CONFIG, "repo": repo, "base": base, "artifacts_dir": str(artifacts), "owners": [owner]}
   core.atomic_write(path, json.dumps(config, indent=2) + "\n")
+  ignore_session_dir(root)
   print(steps().format(path=path, repo=repo, base=base, artifacts_dir=artifacts,
                      profile_dir=config["builder"]["profile_dir"]))
   return 0
