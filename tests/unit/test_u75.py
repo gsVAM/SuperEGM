@@ -94,3 +94,11 @@ def test_approve_spec_refuses_a_reference_edit_after_review(world, cycle):
     assert proceed()[0] == 0
     approve_after_new_proceed = approve(world, spec, cid)[0]
     assert approve_after_new_proceed == 0
+
+
+@pytest.mark.parametrize("phrase", ["reference documents", "offer once", "docs/reference/", "`dir` entry", "all four roles",
+                                    "commits them with the step's commit", "records nothing"])
+def test_the_brainstorm_offers_reference_documents_once(phrase):
+  """The brainstorm nudges, never requires."""
+  from pathlib import Path
+  assert phrase in (Path(__file__).resolve().parents[2] / "skills/brainstorming/SKILL.md").read_text(encoding="utf-8")
