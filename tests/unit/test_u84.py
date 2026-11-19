@@ -15,7 +15,7 @@ from conftest import set_config
 from superegm import decision
 from superegm.collect import DEVIATION_RE
 from superegm.decision import comment_options
-from superegm.judges import decision_question
+from superegm.judges import decision_question, stored_options_text
 from test_foreman import UNIT, c, prepared
 from test_wave import REPO, fake_gh, foreman_of, question, wave_store
 
@@ -116,3 +116,30 @@ def test_builder_orders_and_foreman_brief_define_spec(path):
   # both docs define the `spec` kind with its two parts; the foreman raises it as a finding of kind `spec`
   text = (ROOT / path).read_text(encoding="utf-8")
   assert all(p in text for p in ("**Deviation (spec):**", "`path:line`", "evidence", "stays `interface`"))
+
+
+def test_judges_cannot_reach_respec_by_a_lettered_option(world):
+  # a comment whose own option line reads `- (a) respec` stores `(a) respec`: the judges' letter still resolves to the owner's alone
+  text = "**Deviation (spec):** docs/specs/x.md:12 says 3; `pytest -k t` fails\n- (a) respec\n- (b) follow the code\n**Builder status:** BLOCKED"
+  card, s = spec_world(world, text=text)
+  qid = open_decision(world, card, text)
+  code, err = rule_on(world, card, qid, "(a)", "judges:p-1")
+  assert code != 0 and "decision: respec is the owner's alone" in err and not (s.base() / "respec").exists()
+  assert stored_options_text(["(a) respec", "(b) follow the code", "respec", "stop the unit"]) == "- (b) follow the code\n- (d) stop the unit\n"
+  s.path("units").write_text(json.dumps({"units": {"U01": {"decisions": [{"id": "d1", "question": "Which?", "options": ["(a) respec", "(b) x"]}]}}}), encoding="utf-8")
+  assert "respec" not in decision_question(s, "U01", "d1")
+
+
+@pytest.mark.parametrize("body, binds", [(SPEC_COMMENT, True), (SPEC_COMMENT.replace(" says 3; `pytest -k t` fails", ""), False)])
+def test_an_owner_respec_ruling_binds_only_on_a_comment_that_passes_the_check(body, binds):
+  # the ruling on a `spec` deviation lacking its evidence clears no blocker: it names an option the check refuses
+  ruling = decision.Ruling("option", "12", "respec", "the spec is wrong", "owner", 20)
+  assert decision.offered(ruling, [{"id": 12, "body": body}], []) is binds
+  assert decision.offered(ruling, [], [{"point": 3, "source": "comment 12", "question": body, "options": decision.comment_options(body)}]) is binds
+
+
+def test_a_rerun_keeps_the_open_file_of_the_same_deviation(world):
+  # open_respec after a crash finds the file of the same unit and comment; another comment takes the next number
+  card, s = spec_world(world)
+  assert [decision.open_respec(s, "U02", cid, core.now_iso()) for cid in (101, 101, 102, 101)] == ["R1", "R1", "R2", "R1"]
+  assert sorted(p.name for p in (s.base() / "respec").iterdir()) == ["R1.open.json", "R2.open.json"]
