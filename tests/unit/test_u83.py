@@ -73,3 +73,13 @@ def test_server_is_loopback_and_keyed(tmp_path):
   finally:
     proc.terminate()
     proc.wait(timeout=10)
+
+
+def test_skill_names_piles_offer_and_retro():
+  # the skill runs the builder check before hand-over and the SDLC step, sorts three piles, offers the companion
+  text = (ROOT / "skills/brainstorming/SKILL.md").read_text()
+  for phrase in ("Answered already", "Minor", "Theirs", "list of calls", "references/builder-check-prompt.md",
+                 "This might be easier if I show you. Want me to open a browser tab with some mockups?",
+                 "## Visual Companion", "## Play It Back", ".superegm/brainstorm.md"):
+    assert phrase in text
+  assert text.index("builder check") < text.index("SDLC")
