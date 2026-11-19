@@ -5,7 +5,13 @@
 
 `<handoff dir>/postmortem.md` holds five fixed sections, each one table of numbers: Header, Units, Reviewers,
 Owner time and Plan against actual. The command reads the store, needs no run card and writes that one derived
-file, as `scan` does; it runs on an open handoff too, the header then saying `in progress`."""
+file, as `scan` does; it runs on an open handoff too, the header then saying `in progress`.
+
+What the store does not hold, the report does not invent: launches record no token counts (the Units table has cost
+only); a head finding's overruled and allowed outcomes are the foreman's ruling texts (`<fid> finding overruled`,
+`<fid> allowed`) read per unit, and a unit's several head cycles share them; a spec, plan or integrate finding settled
+`contested` or `declined` counts overruled; a decision's wait has no start but the foreman's `asked_at`, so a `decide`
+answer is a row without a waiting time."""
 
 import json
 import re
@@ -20,6 +26,7 @@ SECTIONS = ("Header", "Units", "Reviewers", "Owner time", "Plan against actual")
 WAIT_RE = re.compile(r"^(\S+) next wait (\S+) (\S+) since (\S+) source (\S+) question (\S+)$")
 REASK_RE = re.compile(r"^(\S+) next reask (\S+) (\S+) at (\S+) question (\S+)$")
 CLEAR_RE = re.compile(r"^(\S+) next clear (\S+) (\S+) answered by (\S+) at (\S+) answer (\S+)$")
+SUPERSEDED_RE = re.compile(r"^(\S+) driver: (\S+) superseded: wait record removed$")
 OVERRULED_RE = re.compile(r"^(\S+) finding overruled\b")
 ALLOWED_RE = re.compile(r"^(\S+) allowed\b")
 SEVERITIES = ("high", "medium", "low")
@@ -49,7 +56,7 @@ def read_json(path: Path):
 def seconds(start, end):
   """Whole seconds between two store stamps, or None when either is missing or malformed."""
   try:
-    return int(core.epoch(end) - core.epoch(start))
+    return max(0, int(core.epoch(end) - core.epoch(start)))
   except (TypeError, ValueError):
     return None
 
@@ -181,23 +188,38 @@ def reviewers_table(st: core.Store, hs: core.Store, uids: list, spec) -> str:
 
 
 def wait_episodes(hs: core.Store) -> dict:
-  """Per phase, its waits from the journal: `[since, answered_by, answered_at, source]`, in order. A wait ends at its
-  `answer.json`'s `at`, else at the first `next clear` after it, else it is still going."""
+  """Per phase, its waits from the journal: `{since, source, by, at}`, in order. A wait ends at its `answer.json`'s `at`;
+  else at the `next clear` that removed it; else at the next wait or re-ask of its phase that replaced it; else at the
+  journal line where the driver removed a superseded handoff's wait record; else it is still going (`at` None)."""
   journal = hs.path("journal")
   lines = core.read_text(journal).splitlines() if journal.is_file() else []
   phases, hid = {}, hs.handoff_id
+
+  def unanswered(found: list) -> list:
+    return [e for e in found if e["at"] is None
+            and not hs.path("file", "waits", f"{e['phase']}-{e['since']}.answer.json").is_file()]
+
+  def begin(phase: str, since: str, source: str) -> None:
+    for episode in unanswered(phases.get(phase, [])):  # replaced before anyone answered it
+      episode["by"], episode["at"] = "replaced", since
+    phases.setdefault(phase, []).append({"phase": phase, "since": since, "source": source, "by": None, "at": None})
+
   for line in lines:
     if m := WAIT_RE.match(line):
       if m.group(2) == hid:
-        phases.setdefault(m.group(3), []).append({"since": m.group(4), "source": m.group(5), "by": None, "at": None})
+        begin(m.group(3), m.group(4), m.group(5))
     elif m := REASK_RE.match(line):
       if m.group(2) == hid:
-        phases.setdefault(m.group(3), []).append({"since": m.group(4), "source": "reask", "by": None, "at": None})
+        begin(m.group(3), m.group(4), "reask")
     elif m := CLEAR_RE.match(line):
-      if m.group(2) == hid and phases.get(m.group(3)):
-        open_ = [e for e in phases[m.group(3)] if e["at"] is None]
-        if open_ and not (hs.path("file", "waits", f"{m.group(3)}-{open_[-1]['since']}.answer.json")).is_file():
-          open_[-1]["by"], open_[-1]["at"] = m.group(4), m.group(5)
+      if m.group(2) == hid:
+        for episode in unanswered(phases.get(m.group(3), []))[-1:]:
+          episode["by"], episode["at"] = m.group(4), m.group(5)
+    elif m := SUPERSEDED_RE.match(line):
+      if m.group(2) == hid:
+        for found in phases.values():
+          for episode in unanswered(found):
+            episode["by"], episode["at"] = "superseded", m.group(1)
   for phase, found in phases.items():
     for episode in found:
       answer = read_json(hs.path("file", "waits", f"{phase}-{episode['since']}.answer.json"))
@@ -206,30 +228,42 @@ def wait_episodes(hs: core.Store) -> dict:
   return phases
 
 
-def owner_rows(hs: core.Store, uids: list) -> list:
+def owner_rows(st: core.Store, hs: core.Store, uids: list, spec) -> list:
+  """The Owner time rows: each phase's waits; each decision (the plan's `decide` answers, the foreman's); each review's
+  `proceed` and `stop` rulings; each stopped unit. Who answered reads `owner` for a config owner's login, `default` for
+  the foreman's own."""
+  owners = set((st.config or {}).get("owners") or [])
+
+  def who(by):
+    return "owner" if by in owners else "default" if by == "superegm" else by
+
   rows = []
   for phase, found in sorted(wait_episodes(hs).items()):
-    total = 0
-    for episode in found:
-      total += seconds(episode["since"], episode["at"] or core.now_iso()) or 0
+    total = sum(seconds(e["since"], e["at"] or core.now_iso()) or 0 for e in found)
     last = found[-1]
     rows.append([phase, "wait", ",".join(dict.fromkeys(e["source"] for e in found)), total,
-                 last["by"] or "waiting", last["at"]])
+                 who(last["by"]) or "waiting", last["at"]])
+  state = core.load_state(hs.root) if hs.path("state").is_file() else {}
+  for key, found in sorted((state.get("decisions") or {}).items()):
+    rows.append([key, "decision", "decide", None, who(found.get("by")), found.get("decided_at")])
+  reviews = reviews_of(st, hs, spec)
+  for rid, found in reviews:
+    for ruling in (found or {}).get("rulings") or []:
+      if ruling.get("ruling") in ("proceed", "stop"):
+        rows.append([f"{rid} {ruling.get('id')}", ruling["ruling"], rid, None, who(ruling.get("by")), ruling.get("at")])
   for uid in uids:
     foreman = core.load_foreman(hs, uid)
+    heads = [f for _, f in reviews if f and f.get("kind") == "head" and f.get("artifact") == uid]
+    stamps = {r.get("id"): r.get("at") for f in heads for r in f.get("rulings") or []}
     rulings = {r.get("decision"): r for r in foreman.get("rulings") or [] if r.get("decision")}
     for decision in foreman.get("decisions") or []:
       ruling = rulings.get(decision.get("id")) or {}
-      end = ruling.get("posted_at") or ruling.get("at")
-      by = "default" if ruling.get("by") == "superegm" else ruling.get("by")
+      end = ruling.get("posted_at") or ruling.get("at") or stamps.get(ruling.get("review"))  # a proceed's carries none
       rows.append([f"{uid} {decision.get('id')}", "decision", decision.get("source") or decision.get("point"),
-                   seconds(decision.get("asked_at"), end or core.now_iso()), by or "waiting", end])
-    for proceed in foreman.get("proceeds") or []:
-      rows.append([f"{uid} proceed {proceed.get('ruling')}", "proceed", proceed.get("review"), None,
-                   proceed.get("by"), proceed.get("posted_at")])
+                   seconds(decision.get("asked_at"), end or core.now_iso()), who(ruling.get("by")) or "waiting", end])
     if foreman.get("stopped"):
-      rows.append([f"{uid} stopped", "cap stop", None, None, (foreman["stopped"] or {}).get("by"),
-                   (foreman["stopped"] or {}).get("at")])
+      stopped = foreman["stopped"] or {}
+      rows.append([f"{uid} stopped", "stop", stopped.get("reason"), None, who(stopped.get("by")), stopped.get("at")])
   return rows
 
 
@@ -252,7 +286,7 @@ def build(st: core.Store, hs: core.Store) -> str:
   row = next((r for r in core.handoffs(st.root) if r.get("id") == hs.handoff_id), {})
   tables = [header_table(st, hs, units, uids), units_table(hs, uids, units, state),
             reviewers_table(st, hs, uids, row.get("spec")),
-            render(["item", "kind", "asked by", "waited", "answered by", "answered at"], owner_rows(hs, uids)),
+            render(["item", "kind", "asked by", "waited", "answered by", "answered at"], owner_rows(st, hs, uids, row.get("spec"))),
             plan_table(hs, uids, units, state)]
   return f"# Post-mortem {hs.handoff_id}\n\n" + "\n\n".join(f"## {name}\n\n{t}" for name, t in zip(SECTIONS, tables)) + "\n"
 
