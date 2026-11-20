@@ -246,7 +246,9 @@ def frontmatter(path):
 
 @pytest.mark.parametrize("phrase", ["reference document", "reviewer file", "`.superegm/config.json`", "`.superegm/brainstorm.md`",
                                     "owner's yes", "suggested answer", "one question at a time", "`retro: <handoff>`",
-                                    "superegm postmortem --handoff <id> --retro <file>", "never edits the approved spec", "every open handoff"])
+                                    "superegm postmortem --handoff <id> --retro <file>", "never edits the approved spec", "every open handoff",
+                                    "`handoffs/<id>.json`", "latest non-null `closed_at`", "`closed_at` null", "`approvals/<spec-slug>.json`",
+                                    "to the store only `postmortem.md` when it is missing and `retro.md`"])
 def test_retro_skill_text(phrase):
   # the retro skill names its four targets, asks per edit, and never touches an approved spec
   assert phrase in text("skills/retro/SKILL.md") and frontmatter("skills/retro/SKILL.md")["effect_kinds"] == ["state-store"]
