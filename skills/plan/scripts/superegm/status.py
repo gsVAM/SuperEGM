@@ -80,7 +80,23 @@ def run(args):
   if post_board(handoff, card, {**summary, "units": {uid: fingerprint(unit) for uid, unit in summary["units"].items()}}):
     core.save_state(handoff.artifact_dir, handoff.state)
   core.print_status(handoff, summary, open_blocking)
+  print("\n".join(respec_lines(handoff)))
   return 0
+
+
+def respec_lines(handoff) -> list:
+  """Spec section 7.6: `open: respec R<n>` for each open respec (the line integrate refuses on), then `<U> held: respec
+  R<n>` for each unit `respec.marks` marks `respec:` (no merge is offered for its head, however its review ended)."""
+  from superegm import respec  # at call time: `respec` reads `launch`, which this module's callers import
+  hid = handoff.store.handoff_id
+  if not hid:
+    return []
+  try:
+    opened, marks = respec.open(handoff.store, hid), respec.marks(handoff.store, hid)
+  except core.HandoffError:
+    return []
+  return ([f"open: respec {r['id']}" for r in opened]
+          + [f"{uid} held: respec {mark.removeprefix('respec:').strip()}" for uid, mark in marks.items() if mark.startswith("respec:")])
 
 
 def post_board(handoff, card: dict, status: dict) -> bool:
@@ -355,6 +371,14 @@ def tick_trigger(handoff) -> str | None:
     for uid in summary.get("ready") or []:
       if uid not in (saved.get("ready") or []):
         return f"{uid} ready"
+  from superegm import respec  # spec section 7.6: a missing post or a standing mark on an eligible unit buys a wave
+  try:
+    work = respec.actionable(st, st.handoff_id) if st.handoff_id else []
+  except core.HandoffError:
+    work = []
+  if work:
+    _, rid, uid = work[0]
+    return f"respec {rid} {uid}"
   repo, config = handoff.config["repo"], handoff.config
   for uid in handoff.graph.order:
     foreman = core.load_foreman(st, uid)
