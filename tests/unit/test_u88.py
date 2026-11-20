@@ -105,25 +105,67 @@ def journal_of(st):
   return st.path("journal").read_text(encoding="utf-8")
 
 
-@pytest.mark.parametrize("kind, rc, out", [
-    ("head", 0, "Ruling (judges p1, contest): U07 change-review-1-1 declined"),
-    ("spec", 1, "review settle: design-1-1 is high: --owner required in normal mode"),
-    ("plan", 1, "review settle: set-1-1 is high: --owner required in normal mode")])
-def test_settle_judges_by_card_kind(world, kind, rc, out):
-  """`--judges` settles a contested head finding on a normal-mode card; every other review keeps `--owner`."""
-  reviewer = {"head": "change-review", "spec": "design", "plan": "set"}[kind]
+PANEL_QUESTION = ("## Q1 change-review-1-1 (high, src/x.py): claim 1\n- (a) finding upheld\n- (b) finding overruled — the test covers it\n"
+                  "- (c) redesign — claim 1\n")
+
+
+def settled_panel(world, converged="b", pid="p1", question=PANEL_QUESTION):
+  """A panel `pid` in the head's store whose verdict converged on option `converged` of Q1 (None: not converged)."""
+  folder = hstore(world).path("judges", pid, "question.md").parent
+  folder.mkdir(parents=True, exist_ok=True)
+  (folder / "question.md").write_text(question, encoding="utf-8")
+  q1 = {"converged": converged is not None, "option": converged, "round": 1, "positions": {}, "vendors": [], "reason": None}
+  core.atomic_write(folder / "verdict.json", {"panel": pid, "questions": {"Q1": q1}, "open": [] if converged else ["Q1"],
+                                              "converged": converged is not None})
+
+
+@pytest.mark.parametrize("kind, disposition, rc, out", [
+    ("head", "declined", 0, "Ruling (judges p1, contest): U07 change-review-1-1 declined"),
+    ("head", "contested", 0, "Ruling (judges p1, contest): U07 change-review-1-1 contested"),
+    ("spec", "declined", 1, "review settle: design-1-1 is high: --owner required in normal mode"),
+    ("plan", "declined", 1, "review settle: set-1-1 is high: --owner required in normal mode"),
+    ("integrate", "declined", 1, "review settle: design-1-1 is high: --owner required in normal mode")])
+def test_settle_judges_by_card_kind(world, kind, disposition, rc, out):
+  """`--judges` settles a contested head finding on a normal-mode card, opening no owner question; every other review keeps `--owner`."""
+  reviewer = {"head": "change-review", "spec": "design", "plan": "set", "integrate": "design"}[kind]
   spec, cid, rid = opened(world, kind)
   if kind == "head":
     head_round(world, 1, "posted", cid, "revise")
+    settled_panel(world)
   loc = "src/x.py" if kind == "head" else "§1"
   assert record_findings(world, rid, 1, reviewer, [F(reviewer, 1, 1, "high", loc=loc)], cid, sha=A if kind == "head" else None)[0] == 0
-  code, text = settle(world, rid, f"{reviewer}-1-1", "declined", cid, "--judges", "p1")
+  code, text = settle(world, rid, f"{reviewer}-1-1", disposition, cid, "--judges", "p1")
   finding = rjson(world, rid, "round-1.json")["reviewers"][reviewer]["findings"][0]
   journal = journal_of(hstore(world)) if rc == 0 else ""
   assert code == rc and out in (journal if rc == 0 else text), text
-  assert (finding["disposition"], finding["ruling"]) == (("declined", "judges:p1") if rc == 0 else (None, None))
-  if rc == 0:  # the contest line stands in place of the `review settle … by …` line
+  assert (finding["disposition"], finding["ruling"]) == ((disposition, "judges:p1") if rc == 0 else (None, None))
+  if rc == 0:  # the contest line stands in place of the `review settle … by …` line, and no owner question is opened
     assert f"review settle {rid} change-review-1-1" not in journal
+    foreman = foreman_of(hstore(world), "U07")
+    owner_questions = foreman["decisions"] + [e for e in foreman["rounds"] if str(e.get("outcome") or "").startswith("owner:")]
+    assert owner_questions == []
+
+
+OTHER_FINDING = PANEL_QUESTION.replace("change-review-1-1", "change-review-1-2")
+
+
+@pytest.mark.parametrize("panel, why", [
+    (None, "judges p1 has no verdict"),
+    ({"converged": None}, "judges p1 has not converged"),
+    ({"converged": "a"}, "judges p1 did not overrule change-review-1-1"),
+    ({"converged": "c"}, "judges p1 did not overrule change-review-1-1"),
+    ({"converged": "b", "question": OTHER_FINDING}, "judges p1 did not overrule change-review-1-1")])
+def test_settle_judges_needs_a_converged_panel_overruling_the_finding(world, panel, why):
+  """The wider gate stays narrow: a panel with no verdict, an unconverged one, one that upheld or asked for a redesign, or one that
+  ruled another finding settles nothing."""
+  spec, cid, rid = opened(world, "head")
+  head_round(world, 1, "posted", cid, "revise")
+  if panel is not None:
+    settled_panel(world, **panel)
+  assert record_findings(world, rid, 1, "change-review", [F("change-review", 1, 1, "high", loc="src/x.py")], cid, sha=A)[0] == 0
+  code, text = settle(world, rid, "change-review-1-1", "declined", cid, "--judges", "p1")
+  assert code == 1 and f"review settle: change-review-1-1: {why}" in text, text
+  assert rjson(world, rid, "round-1.json")["reviewers"]["change-review"]["findings"][0]["disposition"] is None
 
 
 @pytest.mark.parametrize("mode, word", [("normal", "contest"), ("leavemealone", "leavemealone")])
