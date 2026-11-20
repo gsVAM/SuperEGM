@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the section 9.1 body rules, one named rule per line, over the graph module's bodies; amendment 9's warning values (U29); 1.2.1-pre.1 P3's line cites (section 6.5); the `units` limits registered, validated and refused over, and the bytes warning dropped (U42); the ruler check reads the decision's mode, else the frozen, else `config.mode` (U43); `names_of` strips backticks, the one reader of an interface name (U96).
+# Modified by SuperEGM (gsVAM), 2026: the section 9.1 body rules, one named rule per line, over the graph module's bodies; amendment 9's warning values (U29); 1.2.1-pre.1 P3's line cites (section 6.5); the `units` limits registered, validated and refused over, and the bytes warning dropped (U42); the ruler check reads the decision's mode, else the frozen, else `config.mode` (U43); `names_of` strips backticks, the one reader of an interface name (U96); an unfiled unit measured at its carried Design range (U90).
 
 """superegm scan: the body rules of spec section 9.1, one `<rule>: <unit>: <line>` per problem.
 The one exception is a `units:` line, a `units.*` config value out of range: it names no unit (spec section 6)."""
@@ -170,6 +170,8 @@ def numbers(uid: str, body: str, handoff: graph.Handoff) -> dict:
     inside = inside != fence
     fenced += len(line.encode("utf-8")) if inside or fence else 0
   _, start, end, _ = handoff.plan.units[uid].design_range
+  if handoff.filed(uid) is None:  # U90: the range the body cites, carried through each later approval's line map
+    start, end = handoff.design_span(uid)
   spec_lines = core.read_text(handoff.design_path).splitlines(keepends=True)
   spec_bytes = len("".join(spec_lines[start - 1:end]).encode("utf-8"))
   found = {"bytes": size, "fenced_share": round(fenced / size, 2) if size else 0.0,

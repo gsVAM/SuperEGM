@@ -104,10 +104,9 @@ def plan_review_stopped(hs: core.Store, uid: str):
   return rid if stops and not proceeded(hs, rid, stops[-1].get("at")) else None
 
 
-def plan_review_due(hs: core.Store, uid: str, sha: str, marks: dict | None = None) -> bool:
-  """Absent, not converged, converged on other body bytes, or a round recorded after the converged one; `marks`
-  the caller's one read of `respec.marks` (U90)."""
-  converged, converged_sha = gate.converged_review(hs, uid, marks)  # the gate's two tests
+def plan_review_due(hs: core.Store, uid: str, sha: str) -> bool:
+  """Absent, not converged, converged on other body bytes, or a round recorded after the converged one."""
+  converged, converged_sha = gate.converged_review(hs, uid)  # the gate's two tests
   if not converged or converged_sha != sha:
     return True
   latest, _ = review.latest_cycle(hs, "plan", uid)
@@ -139,9 +138,10 @@ def approved_text(root: Path, spec: Path, entry) -> str:
   return text if text is not None else (core.read_text(spec) if spec.is_file() else "")
 
 
-def planning_line(hs: core.Store, state: dict, spec: Path, text: str) -> str:
+def planning_line(hs: core.Store, state: dict, spec: Path, text: str, root: Path | None = None) -> str:
   """The rows from `waiting plan` down: what the handoff's plan, reviews, filing and units ask for next; `text` is
-  the latest approval's spec, whose `## Units` rows the plan must cover."""
+  the latest approval's spec, whose `## Units` rows the plan must cover; `root` the registered checkout the
+  recorded spec path is rebased onto."""
   section = units_section(text)
   landed = LANDED_RE.search(section)
   done = set(re.findall(r"U\d{2,}", landed.group(1))) if landed else set()
@@ -155,14 +155,18 @@ def planning_line(hs: core.Store, state: dict, spec: Path, text: str) -> str:
     return "plan"
   numbers = {u: (r or {}).get("number") for u, r in (state.get("units") or {}).items()}
   unfiled = [u for u in units["order"] if not numbers.get(u)]
-  marks = gate.handoff_marks(hs)
-  if any((marks.get(u) or "").startswith("replan: ") for u in unfiled):
-    return "plan"  # a respec touched an unfiled unit: its section is rewritten from the corrected spec (U90)
+  if unfiled:  # U90: a respec re-plans an unfiled unit it touched, and re-renders every other one
+    marks = gate.handoff_marks(hs, root)
+    if any((marks.get(u) or "").startswith("replan: ") for u in unfiled):
+      return "plan"  # a respec touched an unfiled unit: its section is rewritten from the corrected spec
+    own = [e for e in core.load_approvals(hs, spec) if e.get("handoff_id") == hs.handoff_id]
+    if own and (units.get("design") or {}).get("sha256") not in (None, own[-1]["sha256"]):
+      return "plan"  # the bodies were rendered under an earlier approval: `graph` carries them to the latest's
   for uid in unfiled:
     rid = plan_review_stopped(hs, uid)
     if rid:
       return f"waiting review-plan: {rid} stopped"
-  if any(plan_review_due(hs, u, units["units"][u]["body_sha256"], marks) for u in unfiled):
+  if any(plan_review_due(hs, u, units["units"][u]["body_sha256"]) for u in unfiled):
     return "review-plan"
   if unfiled or not core.receipt_ok(state):
     return "file"
@@ -207,7 +211,7 @@ def next_line(st: core.Store, hid: str, read_wait: bool = True) -> str:
       return "waiting push"
   answered = bool(wait and wait.get("answer"))
   text = approved_text(root, spec, entries[-1] if entries else None)
-  below = wait["phase"] if answered else planning_line(hs, state, spec, text)
+  below = wait["phase"] if answered else planning_line(hs, state, spec, text, root)
   if answered or below in ("plan", "review-plan", "file"):
     problem = checkout_problem(root, config.get("base", "main"), tick)
     if problem:

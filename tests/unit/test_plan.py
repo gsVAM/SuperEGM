@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: U05's tests of graph, scan, decide and the plan skill; EGM's moved tests re-pointed at the spec-section-9.1 plan; U29's `width:` line, amendment 9's scan values, the split rules and the 1.2 docs sweep; the bytes case and the pins quoting 1.2's limits updated (U42).
+# Modified by SuperEGM (gsVAM), 2026: U05's tests of graph, scan, decide and the plan skill; EGM's moved tests re-pointed at the spec-section-9.1 plan; U29's `width:` line, amendment 9's scan values, the split rules and the 1.2 docs sweep; the bytes case and the pins quoting 1.2's limits updated (U42); the optional-fields pins name `Corrected` (U90).
 
 """U05's tests: `graph --plan`, `scan`, `decide`, the body parsers' Step defaults and
 the `plan` skill's prose; EGM's graph/scan tests, moved here by U03, re-pointed."""
