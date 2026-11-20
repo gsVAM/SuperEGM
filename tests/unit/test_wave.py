@@ -700,7 +700,7 @@ def test_decision_rule_records_posts_and_journals(world, point, source, ruling, 
   assert world.run("decision", "rule", "--unit", "U01", "--decision", q2, "--ruling", "f-2-1", "--by", "owner", "--runcard", card)[0] == 1, \
       "a finding id alone names no option"
   assert world.run("decision", "rule", "--unit", "U01", "--decision", q2, "--ruling", ruling, "--by", "judges:j-1", "--runcard", card)[0] == 0
-  assert f"Ruling (judges j-1, leavemealone): U01 {q2} {ruling}" in s.path("journal").read_text(encoding="utf-8")
+  assert f"Ruling (judges j-1, contest): U01 {q2} {ruling}" in s.path("journal").read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------- S6: a stop ruling and the report's stopped line
@@ -755,7 +755,7 @@ def test_a_by_hand_ruling_naming_the_blocked_comment_rules_its_decision(world):
   assert rule("85", "owner", "f-4-1 finding overruled — again", ()) == (1, "decision: comment 85 does not name an open decision\n")
   q2 = world.run("decision", "open", "--unit", "U01", "--point", 2, "--question", question(world, "cap\n"), "--source", "review head-U01-c1 cap", "--runcard", card)[1].splitlines()[0]
   assert world.run("decision", "rule", "--unit", "U01", "--decision", q2, "--ruling", "stop", "--by", "judges:p-1", "--runcard", card)[0] == 0
-  assert world.gh.comments[2][-1]["body"].splitlines()[:2] == ["**Ruling:** stop", "(judges p-1, leavemealone)"]
+  assert world.gh.comments[2][-1]["body"].splitlines()[:2] == ["**Ruling:** stop", "(judges p-1, contest)"]
 
 
 def test_a_by_hand_ruling_records_the_comments_own_ruling_on_its_own_issue(world):
@@ -806,9 +806,9 @@ def test_a_posted_ruling_is_a_form_ruling_of_reads_and_a_panels_carries_no_sessi
   assert rule(q2, "one more round — once")[0] == 0 and world.gh.comments[2][-1]["body"].splitlines()[0] == "**Ruling:** one more round"
   q3 = opened(3, "comment 77")
   assert rule(q3, "(b)", "judges:p-1")[0] == 0
-  assert world.gh.comments[2][-1]["body"].splitlines()[:2] == ["**Ruling:** (77) use Redis — ruled by judges p-1", "(judges p-1, leavemealone)"]
+  assert world.gh.comments[2][-1]["body"].splitlines()[:2] == ["**Ruling:** (77) use Redis — ruled by judges p-1", "(judges p-1, contest)"]
   assert [r["reason"] for r in foreman_of(s, "U01")["rulings"]] == ["it holds", "once", "ruled by judges p-1"]
-  assert "Ruling (judges p-1, leavemealone): U01 q3 (b) — ruled by judges p-1" in s.path("journal").read_text(encoding="utf-8")
+  assert "Ruling (judges p-1, contest): U01 q3 (b) — ruled by judges p-1" in s.path("journal").read_text(encoding="utf-8")
   from superegm.launch_builder import prompt_text
   comments = [{"id": 1, "user": {"login": "owner"}, "body": world.gh.comments[2][-1]["body"]}]
   kept = prompt_text(2, "U01", "body", "orders", "orient", comments, [], None, BUILDER, "audit", owners=["owner"], foreman=foreman_of(s, "U01"))
