@@ -1136,7 +1136,25 @@ def check_settle(st: core.Store, rid: str, review: dict, card: dict, args, fid: 
       verify_owner_ruling(st.config, finding, args.posted, delta_claim(st, rid, finding["claim"]))
     if card["mode"] != "leavemealone" and not args.owner and not (args.judges and review["kind"] == "head"):  # U88: a head's contest goes to the panel first
       raise core.HandoffError(f"review settle: {fid} is {finding['severity']}: --owner required in normal mode")
+    if card["mode"] != "leavemealone" and args.judges and review["kind"] == "head":
+      check_panel_overrules(st, args.judges, fid)
   return n
+
+
+def check_panel_overrules(st: core.Store, panel: str, fid: str) -> None:
+  """U88: a head contest settles by `--judges <panel>` only when `judges/<panel>/verdict.json` converged on `finding overruled`
+  for the question that asks `fid` (the panel's `question.md` names the finding at the head of its `## Q<n>` line)."""
+  from superegm import judges
+  folder = st.path("judges", panel, "verdict.json").parent
+  if not (folder / "verdict.json").is_file():
+    raise core.HandoffError(f"review settle: {fid}: judges {panel} has no verdict")
+  verdict = json.loads(core.read_text(folder / "verdict.json"))
+  if not verdict.get("converged"):
+    raise core.HandoffError(f"review settle: {fid}: judges {panel} has not converged")
+  asked = next((q for q in judges.parse_questions(core.read_text(folder / "question.md")) if q["text"].split(" ")[0] == fid), None)
+  answer = (verdict["questions"].get(asked["id"]) if asked else None) or {}
+  if not (asked and answer.get("converged") and asked["options"].get(answer.get("option"), "").startswith("finding overruled")):
+    raise core.HandoffError(f"review settle: {fid}: judges {panel} did not overrule {fid}")
 
 
 def delta_claim(st: core.Store, rid: str, claim: str) -> str:
