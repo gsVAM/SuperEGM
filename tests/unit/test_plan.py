@@ -620,7 +620,7 @@ def test_graph_parses_the_optional_issue_field_against_the_spec(world, issue, na
   parsed = json.loads(find(world, "handoff_units.json").read_text(encoding="utf-8"))["units"]
   assert parsed["U02"]["issue"] == 7 and parsed["U01"]["issue"] is None
   assert "| Issue |" not in body_of(world, "U02") and "#7" not in body_of(world, "U02")
-  assert "Issue" not in world.ns["FIELDS"] and world.ns["OPTIONAL_FIELDS"] == ("Issue", "Tier")
+  assert "Issue" not in world.ns["FIELDS"] and world.ns["OPTIONAL_FIELDS"] == ("Issue", "Tier", "Corrected")
 
 
 @pytest.mark.parametrize("tier, message", [(None, None), ("difficult", None), ("easy", None), ("hard", "U02: tier must be difficult, doable or easy")])
@@ -635,7 +635,7 @@ def test_graph_parses_the_optional_tier_field_into_the_units_and_the_body(world,
   parsed = json.loads(find(world, "handoff_units.json").read_text(encoding="utf-8"))["units"]
   assert parsed["U02"]["tier"] == (tier or "doable") and parsed["U01"]["tier"] == "doable"
   assert f"· Risk: low: new module · Size: S · Tier: {tier or 'doable'}\n" in body_of(world, "U02")
-  assert world.ns["OPTIONAL_FIELDS"] == ("Issue", "Tier") and world.ns["TIERS"] == ("difficult", "doable", "easy")
+  assert world.ns["OPTIONAL_FIELDS"] == ("Issue", "Tier", "Corrected") and world.ns["TIERS"] == ("difficult", "doable", "easy")
   (world.repo / ".superegm/body.md").write_text(BODY_TEMPLATE.replace(" · Tier: {{tier}}", ""), encoding="utf-8")
   set_config(world, repo=REPO, issue_template=".superegm/body.md")
   code, out = graph(world, plan, card)

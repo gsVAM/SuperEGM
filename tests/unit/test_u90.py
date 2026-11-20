@@ -101,7 +101,7 @@ def converge_all(world):
 
 def respec(world, lines, touched, rid="R1"):
   """Respec `rid` applied: `respec/<rid>.json` (its `touched`, the `line_map` from the previous approved text) and the
-  `kind: respec` entry; `lines` the corrected spec (the same text keeps every rendered body)."""
+  `kind: respec` entry; `lines` the corrected spec."""
   from superegm import respec as rs
   previous = (world.repo / SPEC_REL).read_text(encoding="utf-8").splitlines()
   core.atomic_write(handoff_store(world).path("file", "respec", f"{rid}.json"),
@@ -136,7 +136,7 @@ def test_gate_refuses_a_replan_unit(world, command):
     assert world.run("gate", "--pass", "--spec", world.spec)[0] == 0
     code, out = world.run("dry-run", "--spec", world.spec)
     assert code == 0, out
-  respec(world, spec_lines(), ["U07"])
+  respec(world, inserted(spec_lines(), 120, 6), ["U07"])  # a real respec: the spec's sha256 and every body change
   assert marks(world) == {"U07": "replan: R1"}
   argv = ["gate", "--pass"] if command == "gate --pass" else ["apply", "--yes"]
   code, out = world.run(*argv, "--spec", world.spec)
@@ -228,3 +228,52 @@ def test_corrected_row_names_respec_ids(world):
   code, out = world.run("graph", "--plan", world.plan)
   assert code == 1
   assert "U07: Corrected names respec ids `R<n>[, R<m>…]`, not 'soon'" in out
+
+
+def test_corrected_row_names_an_applied_respec(world):
+  s_world(world)
+  write_plan(world, corrected="R1")  # no respec applied yet
+  code, out = world.run("graph", "--plan", world.plan)
+  assert code == 1
+  assert f"graph: U07: Corrected names R1, no applied respec of handoff {HID}" in out
+  respec(world, inserted(spec_lines(), 120, 6), ["U07"])
+  write_plan(world, corrected="R1, R2")
+  code, out = world.run("graph", "--plan", world.plan)
+  assert code == 1
+  assert f"graph: U07: Corrected names R2, no applied respec of handoff {HID}" in out
+
+
+def test_graph_maps_through_the_approved_texts_without_a_respec_record(world):
+  # a later entry with no `respec/R<n>.json` is carried by the approved texts' opcodes, as `respec.history` reads them
+  s_world(world)
+  approve(world, inserted(spec_lines(), 120, 6), "respec", "R1")
+  code, out = world.run("graph", "--plan", world.plan)
+  assert code == 0, out
+  assert "docs/specs/s.md:206-246" in unit_file_text(world, "U08")
+
+
+def test_graph_refuses_an_approval_no_commit_holds(world):
+  # an entry between the opening and the latest whose text no commit holds: refused as `respec.history` refuses it
+  s_world(world)
+  path = world.artifacts / "approvals" / f"{core.spec_slug(world.spec)}.json"
+  record = json.loads(path.read_text(encoding="utf-8"))
+  ghost = hashlib.sha256(b"never committed\n").hexdigest()
+  record["entries"].append({**record["entries"][0], "sha256": ghost, "kind": "respec", "respec": "R1"})
+  core.atomic_write(path, record)
+  approve(world, inserted(spec_lines(), 120, 6), "respec", "R2")
+  code, out = world.run("graph", "--plan", world.plan)
+  assert code == 1
+  assert f"respec: no commit holds approval {ghost[:7]} of s.md" in out
+
+
+@pytest.mark.parametrize("argv", [["gate", "--pass"], ["next"]])
+def test_marks_read_once_per_call(world, monkeypatch, argv):
+  from superegm import respec as rs
+  s_world(world)
+  converge_all(world)
+  ticked(world)
+  calls, real = [], rs.marks
+  monkeypatch.setattr(rs, "marks", lambda *a: calls.append(a) or real(*a))
+  code, out = world.run(*argv, *(["--spec", world.spec] if argv[0] == "gate" else ["--handoff", HID]))
+  assert code == 0, out
+  assert len(calls) == 1
