@@ -253,3 +253,41 @@ def test_approve_respec_refusals(world, case, err):
   store_after = snapshot(world.artifacts)
   assert rc == 1 and err in stderr and store_after == store_before
   assert not st.path("file", "respec", "R1.json").exists()
+
+
+FROZEN = ["rounds", "triage", "mode"]
+
+
+def test_approve_respec_writes_entry_and_touched(world, monkeypatch):
+  # the entry copies every frozen field as --amend-units; R1.json and the comment files land in the same command
+  from superegm import approve_spec
+  state_units = {"U0": MERGED_U1["U0"], "U1": {"number": 11}, "U2": {"number": 12}, "U3": {}}
+  spec, st = respec_world(world, [(BASE, None)], state_units=state_units)
+  open_respec(st)
+  spec.write_text("".join(replace(BASE, "Delay is 5s.", "Delay is 6s.")), encoding="utf-8")
+  world.spec = spec
+  world.card("review-spec")
+  store_before = snapshot(world.artifacts)
+  dry_rc, dry_out = world.run("approve-spec", "--spec", spec, "--respec", "R1", "--dry-run")
+  store_after_dry = snapshot(world.artifacts)
+  assert dry_rc == 0 and "touched: U2" in dry_out and "merged_review:" in dry_out and store_after_dry == store_before
+  respec_cycle(world, spec, st)
+  prev = json.loads(st.path("approvals", core.spec_slug(spec)).read_text(encoding="utf-8"))["entries"][-1]
+  real = approve_spec.append_entry
+  monkeypatch.setattr(approve_spec, "append_entry", lambda *a: (_ for _ in ()).throw(RuntimeError("crash")))
+  with pytest.raises(RuntimeError):
+    world.run("approve-spec", "--spec", spec, "--respec", "R1", "--yes")
+  r1 = st.path("file", "respec", "R1.json")
+  assert r1.exists() and len(json.loads(st.path("approvals", core.spec_slug(spec)).read_text(encoding="utf-8"))["entries"]) == 1
+  monkeypatch.setattr(approve_spec, "append_entry", real)
+  rc, out = world.run("approve-spec", "--spec", spec, "--respec", "R1", "--yes")
+  assert rc == 0, out
+  entries = json.loads(st.path("approvals", core.spec_slug(spec)).read_text(encoding="utf-8"))["entries"]
+  entry, rerun_after_crash_entries = entries[-1], sum(e.get("kind") == "respec" for e in entries)
+  r1_json = r1.read_text(encoding="utf-8")
+  comment_file, = st.path("file", "x").parent.glob("respec_comment_*.md")
+  assert entry["kind"] == "respec" and entry["respec"] == "R1" and {k: entry[k] for k in FROZEN} == {k: prev[k] for k in FROZEN}
+  assert entry["review"] == "spec-x-c2" and entry["ranges"] == [[23, 23]] and entry["handoff_id"] == HID
+  assert set(json.loads(r1_json)) == {"touched", "untouched", "follow_ups", "line_map", "merged_review"}
+  assert comment_file.name == "respec_comment_U2_R1.md" and rerun_after_crash_entries == 1 and "file" in approve_spec.WRITES
+  assert "-Delay is 5s." in comment_file.read_text(encoding="utf-8") and "+Delay is 6s." in comment_file.read_text(encoding="utf-8")
