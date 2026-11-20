@@ -171,11 +171,15 @@ def contract_launch(launches: list, head_launch, head: str):
 
 def corrections_of(st, unit: str, launch) -> list[dict]:
   """Spec section 7.6: exactly the respecs the head's launch record names (`respecs`, read at its prompt preparation),
-  each with its comment file's text, so the reviewer holds the contract the builder held; none without that launch."""
+  each with its comment file's text, so the reviewer holds the contract the builder held; none without that launch. A
+  named respec whose comment file is gone refuses the round before `amendments.md` is written: reviewers never get a
+  correction section without its correction."""
   out = []
   for rid in (launch or {}).get("respecs") or []:
     comment = st.path("file", f"respec_comment_{unit}_{rid}.md")
-    out.append({"id": rid, "text": core.read_text(comment) if comment.is_file() else "(comment file missing)"})
+    if not comment.is_file():
+      raise core.HandoffError(f"respec {rid}: {comment.name} is missing: the launch named it, so the round cannot hold its contract")
+    out.append({"id": rid, "text": core.read_text(comment)})
   return out
 
 

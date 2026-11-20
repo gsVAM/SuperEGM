@@ -116,7 +116,7 @@ def prepare(args, card):
   # correction with the merge (`with-fix`)
   corrections, standing = respec_read(st, unit)  # the record's `respecs` are these corrections (U86)
   launches_before = load_launches(st, unit)
-  if standing and launches_before and (record["launched"].get("at") or "") < (launches_before[-1].get("started_at") or ""):
+  if standing and launches_before and not fresh_mark(record["launched"], launches_before):
     # a relaunch of a held unit starts from `launch`'s fresh mark, which took its `max_in_flight` slot, never straight
     # from a word's `launch-builder`
     raise core.HandoffError(f"{unit} holds respec {standing}: its relaunch waits for `launch`'s slot")
@@ -164,7 +164,7 @@ def prepare(args, card):
   reviews = core.gh_pages(f"repos/{repo}/pulls/{pr}/reviews") if pr else []
   audit = AUDIT_LINE.format(owner=record["launched"].get("by", "unknown"),  # a pre-upgrade mark records no login
                             runcard=args.runcard, unit=unit, handoff=st.handoff_id)
-  text =prompt_text(number, unit, issue_body, orders_text(tools, launched_gh, builder_config["max_subagent_calls"], str(bin_dir / "superegm-precheck"),
+  text = prompt_text(number, unit, issue_body, orders_text(tools, launched_gh, builder_config["max_subagent_calls"], str(bin_dir / "superegm-precheck"),
                                                            merge=merge is not None, attempts=attempts), orient_text, comments, reviews, pr, builder, audit, pr_block,
                      spec_range=range_text, owners=config.get("owners") or [], foreman=foreman_data,
                      amendments=amendments_for(st, unit, issue_body), corrections=corrections)
@@ -766,20 +766,33 @@ def corrections_for(st, unit: str) -> list[dict]:
   return out
 
 
+def fresh_mark(launched: dict, launches: list) -> bool:
+  """Whether `launch`'s mark was made after the unit's latest launch: its `after` (the launch count when `launch` marked
+  it) equals the launches recorded now, so a mark made in the same second as that launch's `started_at` (both stamps
+  are to the second) is spent; a mark without `after` (written before U86) is fresh only when strictly later."""
+  if "after" in launched:
+    return launched["after"] == len(launches)
+  return (launched.get("at") or "") > (launches[-1].get("started_at") or "")
+
+
 def respec_read(st, unit: str) -> tuple[list[dict], str | None]:
   """Spec section 7.6, read once before the builder starts: the unit's corrections (`corrections_for`) and the R<n> of
   its standing `respec: R<n>` mark (`respec.marks`), None without one. The corrections are read first: a respec applied
   after that read leaves a standing mark the prompt would not carry, so the launch refuses rather than split its
-  reason, merge mode and `respecs`. Any failed read refuses the launch (fail closed), never a builder running
-  unrecorded or unheld."""
+  reason, merge mode and `respecs`. An open respec the unit raised (`respec.open`, ruled and not yet approved) refuses
+  the launch: the raising unit waits for its correction, never building against the uncorrected spec. Any failed read
+  refuses the launch (fail closed), never a builder running unrecorded or unheld."""
   from superegm import respec
   if not st.handoff_id:
     return [], None
   try:
     corrections = corrections_for(st, unit)
     mark = str(respec.marks(st, st.handoff_id).get(unit) or "")
+    waiting = [r["id"] for r in respec.open(st, st.handoff_id) if r.get("unit") == unit]
   except (core.HandoffError, ValueError, OSError) as error:
     raise core.HandoffError(f"respec marks unreadable: {error}") from None
+  if waiting:
+    raise core.HandoffError(f"{unit} waits for respec {waiting[0]}: its correction is not applied yet")
   standing = mark.split(": ", 1)[1] if mark.startswith("respec: ") else None
   if standing and standing not in {c["id"] for c in corrections}:
     raise core.HandoffError(f"{unit}: respec {standing} was applied while the launch was prepared: launch it again")

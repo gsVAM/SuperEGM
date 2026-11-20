@@ -357,7 +357,10 @@ def tick_trigger(handoff) -> str | None:
   `stalled` line at every tick while its predicate holds, no fingerprint saving it away, U31; a `status word=` event
   by a login no card records as a builder skipped), then, with `driver.chain` on, `<uid> merged pr=<n>` when the pass
   reads its pull request merged (`pr` set, `ci` null) and the saved snapshot does not show it so (U44), before the
-  next unit's lines; `<uid> ready` for a unit the read finds ready and the saved `ready` lacks; an
+  next unit's lines; `<uid> ready` for a unit the read finds ready and the saved `ready` lacks; `respec R<n> <unit>`
+  for the first `respec.actionable` entry (spec section 7.6: a missing post or a standing mark on an eligible unit), a
+  failed respec read (HandoffError, ValueError or OSError, a bad `respec/R<n>.json` among them) journaled
+  `respec: read failed: <error>` and buying no session (`status` prints the same line, which integrate refuses on); an
   un-ingested thread above `low` on the latest posted round's head, by U21's reader, a stopped unit's threads skipped;
   `first launch` while `state.status` is absent; else None, the nothing-to-do predicate."""
   st, state = handoff.store, handoff.state
@@ -391,7 +394,8 @@ def tick_trigger(handoff) -> str | None:
   from superegm import respec  # spec section 7.6: a missing post or a standing mark on an eligible unit buys a wave
   try:
     work = respec.actionable(st, st.handoff_id) if st.handoff_id else []
-  except core.HandoffError:
+  except (core.HandoffError, ValueError, OSError) as error:  # a bad `respec/R<n>.json` never escapes to the driver
+    core.journal(st, f"respec: read failed: {error}")
     work = []
   if work:
     _, rid, uid = work[0]

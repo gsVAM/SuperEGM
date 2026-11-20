@@ -229,7 +229,8 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
 def respec_held(hs: core.Store, uid: str) -> bool:
   """Whether `respec.marks` marks the unit `respec: R<n>` (spec section 7.6): its head is held, no merge offered.
   Read here on every call, never from `state.json`, which other commands replace whole. A failed read holds the unit
-  (fail closed): no merge is offered on a head a mark may hold."""
+  (fail closed): no merge is offered on a head a mark may hold, and the inbox's `respec` item (`respec_read_items`)
+  names the failure, so the owner sees why the merge is withheld."""
   from superegm import respec  # at call time: `respec` reads `launch`'s records
   if not hs.handoff_id:
     return False
@@ -237,6 +238,19 @@ def respec_held(hs: core.Store, uid: str) -> bool:
     return str(respec.marks(hs, hs.handoff_id).get(uid) or "").startswith("respec:")
   except (core.HandoffError, ValueError, OSError):
     return True
+
+
+def respec_read_items(hs: core.Store, repo: str, hid: str) -> list:
+  """Spec section 7.6: one `respec` item when the handoff's marks cannot be read (`respec_held` then holds every
+  unit), naming the error; none when they read."""
+  from superegm import respec  # at call time: `respec` reads `launch`'s records
+  if not hs.handoff_id:
+    return []
+  try:
+    respec.marks(hs, hs.handoff_id)
+  except (core.HandoffError, ValueError, OSError) as error:
+    return [item(repo, hid, "respec", f"read failed: {error}: no merge is offered on a held head until it reads", "read-failed")]
+  return []
 
 
 def conflict_items(repo: str, state: dict, uid: str, foreman: dict, launches: list, parallel: bool,
@@ -480,7 +494,7 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
       read_specs.add(spec)
     found.sort(key=lambda i: (i["subject"], KINDS.index(i["kind"].split(" ")[0])))
     found = in_merge_order(hs, found)
-    found += wave_items(hs, repo, hid) + driver_items(hs, repo, hid) + chain_items(store, hs, repo, hid, state, foremen)
+    found += respec_read_items(hs, repo, hid) + wave_items(hs, repo, hid) + driver_items(hs, repo, hid) + chain_items(store, hs, repo, hid, state, foremen)
     out += [i | {"handoff": hid} for i in found]  # U72: the inbox answers each item under its own handoff
   return out
 
