@@ -30,8 +30,9 @@ carries none of its own). Render the question from the record:
 
 Then the panel sequence of the reference:
 `python3 '<HELPER>' judges open --question <path> --evidence <paths> --parent <card>`
-(the round's `comments.md` and diff, or the builder's comment, are the
-evidence; the panel's child card hangs under `<CARD>`), the dispatch of the
+(a head contest's evidence is the round's `comments.md`, the diff, the unit's body,
+`r<n>/spec_range.md` and `r<n>/amendments.md`, a builder's comment's is that comment;
+the panel's child card hangs under `<CARD>`), the dispatch of the
 `judges` skill (Astra through the runner, the Claude judges through
 `superegm:judge`, `judges record`, `judges diff`, round by round, from this
 main conversation: a foreman never convenes the judges), and
