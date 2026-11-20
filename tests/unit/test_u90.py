@@ -155,3 +155,21 @@ def test_next_routes_a_replan_unit_to_plan(world):
   result_code, stdout = world.run("next", "--handoff", HID)
   assert stdout.strip() == "plan"
   assert result_code == 0
+
+
+def unit_file_text(world, uid):
+  return next(handoff_store(world).root.rglob(f"unit_{uid}.md")).read_text(encoding="utf-8")
+
+
+def test_graph_maps_unfiled_ranges_through_line_map(world):
+  # U08 unfiled, rendered under approval 1 at :200-240; R1 inserts 6 lines at :120 (line_map shifts +6 below it)
+  s_world(world)
+  assert "docs/specs/s.md:200-240" in unit_file_text(world, "U08")
+  respec(world, inserted(spec_lines(), 120, 6), ["U07"])
+  for _ in range(2):  # a second graph run renders :206-246 again, never :212-252
+    code, out = world.run("graph", "--plan", world.plan)
+    assert code == 0, out
+    assert units(world)["U08"]["rendered_under"] == 1  # the plan text still reads in approval-1 lines
+    assert "docs/specs/s.md:206-246" in unit_file_text(world, "U08")
+    assert "docs/specs/s.md:212-252" not in unit_file_text(world, "U08")
+  assert units(world)["U08"]["design_range"]["start"] == 200  # the plan file's own coordinates, never rewritten
