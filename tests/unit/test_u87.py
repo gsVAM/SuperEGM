@@ -289,7 +289,7 @@ def frontmatter(path):
 @pytest.mark.parametrize("phrase", ["reference document", "reviewer file", "`.superegm/config.json`", "`.superegm/brainstorm.md`",
                                     "owner's yes", "suggested answer", "one question at a time", "`retro: <handoff>`",
                                     "superegm postmortem --handoff <id> --retro <file>", "never edits the approved spec", "every open handoff",
-                                    "`handoffs/<id>.json`", "latest non-null `closed_at`", "`closed_at` null", "`approvals/<spec-slug>.json`",
+                                    "`handoffs/<id>.json`", "latest non-null `closed_at`", "`closed_at` is null", "`approvals/<spec-slug>.json`",
                                     "writes nothing to the store but `retro.md`", "`artifacts_dir`", "`<artifacts_dir>/<handoff id>/`",
                                     "`(closed: voided)`", "legacy flat-store handoff", "the helper's write, not this skill's"])
 def test_retro_skill_text(phrase):
