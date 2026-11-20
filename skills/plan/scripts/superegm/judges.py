@@ -467,6 +467,18 @@ def cmd_diff(args, store) -> int:
   return 0
 
 
+def verdict_line(pid: str, verdict: dict, questions: list[dict]) -> str:
+  """The one line an unconverged panel adds to the owner's point 1 question: `judges/<panel>/verdict.json` and, for each
+  open question, each judge's last choice as its option's text."""
+  options = {q["id"]: q["options"] for q in questions}
+  parts = []
+  for qid in verdict["open"]:
+    positions = verdict["questions"][qid]["positions"]
+    choices = sorted((judge, options[qid][oid]) for oid, judges in positions.items() for judge in judges)
+    parts.append(f"{qid} " + "; ".join(f"{judge}: {text}" for judge, text in choices))
+  return f"The judges did not converge (judges/{pid}/verdict.json), their last choices: " + " | ".join(parts) + "\n"
+
+
 def cmd_verdict(args, store) -> int:
   panel = load_panel(store, args.panel)
   panel_card(args, store, panel)
@@ -492,6 +504,8 @@ def cmd_verdict(args, store) -> int:
   line += " (cap reached)" if verdict["cap_reached"] else ""
   line += " (degraded)" if verdict["degraded"] else ""
   core.journal(store, f"judges {pid}: {line}")
+  if verdict["cap_reached"] and not verdict["converged"]:  # section 7.8: the owner keeps the question, with the verdict line
+    core.atomic_write(folder / "owner-question.md", core.read_text(folder / "question.md") + verdict_line(pid, verdict, questions))
   print(json.dumps(verdict, indent=2))
   return 0 if verdict["converged"] else 2
 
