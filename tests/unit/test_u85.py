@@ -186,10 +186,13 @@ def snapshot(root):
 
 
 def respec_cycle(world, spec, st, converged=True, rid="spec-x-c2"):
-  """A spec cycle reviewing respec R1 on `spec`'s working bytes, recorded clean by its two reviewers when `converged`."""
+  """A spec cycle reviewing respec R1 on `spec`'s bytes, committed first (a respec round records `HEAD`'s spec), recorded
+  clean by its two reviewers when `converged`."""
   world.spec = spec
   cid = world.card("review-spec")
   text = spec.read_text(encoding="utf-8")
+  git(["add", "-A"], world.repo)
+  git(["commit", "--allow-empty", "-qm", "respec draft"], world.repo)
   core.atomic_write(st.path("reviews", rid, "review.json"), {
     "kind": "spec", "artifact": str(spec), "cycle": int(rid.rsplit("-c", 1)[1]), "handoff_id": None, "scope": "auto",
     "reviewers": ["design", "codebase-details"], "cap": 2, "runcard": cid, "respec": "R1",
@@ -368,6 +371,8 @@ def marks_world(world, monkeypatch, case):
     "exit-0 BLOCKED launch, same head": [launch(head=old, builder_status="BLOCKED")],
     "exit-0 NEEDS_CONTEXT launch, same head": [launch(head=old, builder_status="NEEDS_CONTEXT")],
   }.get(case)
+  if filed:  # filed at R1's approval: the approval wrote U2's comment file
+    core.atomic_write(st.path("file", "respec_comment_U2_R1.md"), "**Spec correction R1** for U2\n")
   if launches:
     core.atomic_write(st.path("launches", "U2"), {"unit": "U2", "launches": launches})
   if case == "filed touched, unit stopped":
@@ -401,6 +406,7 @@ def actionable_world(world, monkeypatch, case):
   state_units = {"U0": MERGED_U1["U0"], "U1": {"number": 11}, "U3": {}, "U2": {"number": 12, "pr": {"number": 22, "head": old}}}
   spec, st = respec_world(world, [(BASE, None), (R1_TEXT, "R1")], {"R1": ["U2"]}, state_units=state_units)
   open_respec(st)
+  core.atomic_write(st.path("file", "respec_comment_U2_R1.md"), "**Spec correction R1** for U2\n")  # filed at R1's approval
   if case == "handoff superseded":
     another_handoff(st, spec)
   if case == "unit stopped":
@@ -450,3 +456,210 @@ def test_withdrawn_respec_and_actionable(world, monkeypatch, case, opened, items
     assert respec.actionable(st, handoff) == [("relaunch", "R1", "U2")]
   skill_text = (REPO / "skills/review-spec/SKILL.md").read_text(encoding="utf-8")
   assert all(p in skill_text for p in ("--respec R<n>", "one question at a time", "suggested answer", "approve-spec --respec R<n> --dry-run"))
+
+
+# Round 2: the owner's rulings on the round-1 review (issue #169).
+
+
+def test_unfiled_at_approval_then_filed_keeps_its_correction(world, monkeypatch):
+  # filed or unfiled as of the approval naming R1 (its comment file), not state.json's current number
+  from superegm import respec
+  old = commit_at(world, monkeypatch, "old.txt", "2026-11-10T00:00:00Z")
+  units = {u: {"id": u, "design_range": design_range(BASE, h)} for u, h in SECTIONS.items()}
+  units["U2"] |= {"corrected": ["R1"], "rendered_under": 2}
+  state_units = {"U0": MERGED_U1["U0"], "U1": {"number": 11}, "U3": {}, "U2": {"number": 12, "pr": {"number": 22, "head": old}}}
+  spec, st = respec_world(world, [(BASE, None), (R1_TEXT, "R1")], {"R1": ["U2"]}, units=units, state_units=state_units)
+  assert "U2" not in respec.marks(st, HID) and respec.actionable(st, HID) == []
+  units["U2"]["corrected"] = []  # filed without its correction: the replan mark stands, no comment to post
+  core.atomic_write(st.path("units"), {"handoff_id": HID, "units": units})
+  assert respec.marks(st, HID).get("U2") == "replan: R1" and respec.actionable(st, HID) == []
+
+
+def test_replan_mark_stands_after_a_render_without_corrected(world, monkeypatch):
+  # rendered_under reaching R1's entry count clears nothing: only `corrected` naming R1 does
+  from superegm import respec
+  units = {u: {"id": u, "design_range": design_range(BASE, h)} for u, h in SECTIONS.items()}
+  units["U2"] |= {"corrected": [], "rendered_under": 2}
+  spec, st = respec_world(world, [(BASE, None), (R1_TEXT, "R1")], {"R1": ["U2"]}, units=units)
+  assert respec.marks(st, HID).get("U2") == "replan: R1"
+
+
+def new_handoff(st, spec, hid="x-def456"):
+  """A later opening approval of handoff `hid`, naming no respec."""
+  path = st.path("approvals", core.spec_slug(spec))
+  record = json.loads(path.read_text(encoding="utf-8"))
+  last = {k: v for k, v in record["entries"][-1].items() if k not in ("respec", "ranges")}
+  record["entries"].append(dict(last, handoff_id=hid, kind="opening"))
+  core.atomic_write(path, record)
+  core.atomic_write(st.path("handoffs", hid), {"id": hid, "spec": str(spec), "opened_at": None, "closed_at": None})
+  return core.handoff_store(st, hid)
+
+
+def test_respec_ids_are_per_handoff(world):
+  # an R1 open in a new handoff, after an older handoff applied its own R1, opens a respec review
+  spec, st = respec_world(world, [(BASE, None), (R1_TEXT, "R1")], {"R1": ["U2"]})
+  hs = new_handoff(st, spec)
+  core.atomic_write(hs.path("file", "respec", "R1.open.json"), {"id": "R1", "unit": "U2", "comment_id": 902, "at": STARTED})
+  approved(world, spec, replace(R1_TEXT, "Delay is 6s.", "Delay is 7s."), "draft")
+  world.spec = spec
+  cid = world.card("review-spec")
+  code, out = world.run("review", "open", "--kind", "spec", "--artifact", spec, "--reviewers", "design,codebase-details",
+                        "--respec", "R1", "--runcard", cid)
+  assert code == 0, out
+
+
+def hand_cycle(st, spec, cid, rid, respec=None):
+  core.atomic_write(st.path("reviews", rid, "review.json"), {
+    "kind": "spec", "artifact": str(spec.resolve()), "cycle": int(rid.rsplit("-c", 1)[1]), "handoff_id": HID, "scope": "auto",
+    "reviewers": ["design", "codebase-details"], "cap": 2, "runcard": cid, "artifact_sha256": None, "astra_incomplete": 0,
+    "converged": "no", "converged_round": None, "rulings": [], **({"respec": respec, "base": "HEAD"} if respec else {})})
+
+
+@pytest.mark.parametrize("held, asked, expect", [
+  ("R1", "R1", "resumed"), ("R1", "R2", "spec-x-c2 is open"), (None, "R1", "spec-x-c2 is open")])
+def test_respec_review_resumes_only_its_own_cycle(world, held, asked, expect):
+  # --respec is read before the resume branch: the same respec's open cycle resumes, any other spec cycle refuses
+  spec, st = respec_world(world, [(BASE, None)])
+  open_respec(st, "R1")
+  open_respec(st, "R2")
+  approved(world, spec, replace(BASE, "Delay is 5s.", "Delay is 6s."), "draft")
+  world.spec = spec
+  cid = world.card("review-spec")
+  hand_cycle(st, spec, cid, "spec-x-c2", held)
+  code, out = world.run("review", "open", "--kind", "spec", "--artifact", spec, "--reviewers", "design,codebase-details",
+                        "--respec", asked, "--runcard", cid)
+  if expect == "resumed":
+    assert code == 0 and out.splitlines()[0] == "spec-x-c2", out
+  else:
+    assert code == 1 and expect in out and not st.path("reviews", "spec-x-c3", "review.json").exists()
+
+
+def test_respec_round_records_the_committed_spec(world):
+  # the evidence is HEAD's diff, so a round refuses a working-tree spec that differs from HEAD
+  spec, st = respec_world(world, [(BASE, None)])
+  open_respec(st)
+  approved(world, spec, replace(BASE, "Delay is 5s.", "Delay is 6s."), "draft")
+  world.spec = spec
+  cid = world.card("review-spec")
+  code, out = world.run("review", "open", "--kind", "spec", "--artifact", spec, "--reviewers", "design,codebase-details",
+                        "--respec", "R1", "--runcard", cid)
+  assert code == 0, out
+  rid = out.splitlines()[0]
+  committed = spec.read_text(encoding="utf-8")
+  spec.write_text("".join(replace(BASE, "Delay is 5s.", "Delay is 9s.")), encoding="utf-8")  # an uncommitted correction
+  findings = world.repo.parent / "clean.txt"
+  findings.write_text("", encoding="utf-8")
+  argv = ["review", "record", "--review", rid, "--round", "1", "--reviewer", "design", "--runcard", cid,
+          "--findings", str(findings), "--isolation", "clean", "--model", "inherit:opus", "--effort", "inherit:high"]
+  code, out = world.run(*argv)
+  assert code == 1 and "differs from HEAD" in out
+  spec.write_text(committed, encoding="utf-8")
+  code, out = world.run(*argv)
+  assert code == 0, out
+
+
+PLAN_BODIES = {
+  "U1": "### U1: Queue\n\nInterfaces\n- Produces: `retry(job)` returning the delay\n\n## Issue body as posted\n\n````markdown\n"
+        "## Interfaces\n- Produces: `other(x)`\n````\n",
+  "U2": "### U2: Deliver\n\nInterfaces\n- Consumes: send(job) (U9)\n\n## Issue body as posted\n\n````markdown\n"
+        "## Interfaces\n- Consumes: `retry(job)` from U1\n````\n",
+  "U3": "### U3: Admin\n\nInterfaces\n- Consumes: retry(job) (U1)\n\n## Issue body as posted\n\n````markdown\n"
+        "## Interfaces\n- Consumes: `other(x)` from U9\n````\n",
+}
+
+
+def test_interfaces_read_from_the_plan_section(world):
+  # the plan section's Interfaces lines count; the fenced issue body graph writes does not
+  from superegm import respec
+  spec, st = respec_world(world, [(BASE, None)])
+  for uid, body in PLAN_BODIES.items():
+    core.atomic_write(st.path("unit", uid), body)
+  draft = replace(BASE, "- Produces: `retry(job)` returning the delay", "- Produces: `retry(job)` returning the delay in ms")
+  assert respec.touched(st, HID, "".join(draft))["touched"] == ["U1", "U3"]
+
+
+FOLLOW_ROW = "| U9 | Queue follow-up (Follows: U1) | U1 | S |"
+
+
+@pytest.mark.parametrize("row, rc", [
+  ("new Units row", 0), ("fenced example row", 1), ("existing row edited", 1), ("new row following another unit", 1)])
+def test_merged_overlap_follow_up_row(world, row, rc):
+  # only a new row of the Units table whose Follows names the merged unit satisfies the refusal
+  spec, st = respec_world(world, [(PADDED, None)], state_units=MERGED_U1)
+  open_respec(st)
+  start = PADDED.index("## 1. Queue\n")
+  draft = PADDED[:start] + [line.rstrip("\n") + " v2\n" if line.strip() else "Gap.\n" for line in PADDED[start:start + 5]] \
+    + PADDED[start + 5:]
+  if row == "new Units row":
+    draft = draft + [FOLLOW_ROW + "\n"]
+  elif row == "fenced example row":
+    draft = replace(draft, "Preamble goal line.", ["```", FOLLOW_ROW, "```"])
+  elif row == "existing row edited":
+    draft = replace(draft, "| U1 | queue | — | S |", "| U1 | queue (Follows: U1) | — | S |")
+  else:
+    draft = draft + [FOLLOW_ROW.replace("Follows: U1", "Follows: U0") + "\n"]
+  spec.write_text("".join(draft), encoding="utf-8")
+  respec_cycle(world, spec, st)
+  code, out = world.run("approve-spec", "--spec", spec, "--respec", "R1", "--yes")
+  assert code == rc, out
+  if rc:
+    assert "U1 is merged and overlaps" in out and not st.path("file", "respec", "R1.json").exists()
+  else:
+    assert "follow_up: U1 overlaps docs/specs/x.md:40-44: row U9" in out
+
+
+TRIAGE = BASE[:BASE.index("## 5. Units\n")] + ["## Triage\n", "\n", "- defer docs-only findings\n", "\n"] \
+  + BASE[BASE.index("## 5. Units\n"):]
+FENCED_ROUNDS = ["# X\n", "\n", "```\n", "## Example\n", "```\n", "\n", "Rounds: 3\n", "\n", "## 1. A\n", "\n", "Text.\n"]
+
+
+@pytest.mark.parametrize("old, new, field", [
+  (TRIAGE, replace(TRIAGE, "- defer docs-only findings", "- defer every finding"), "triage"),
+  (TRIAGE, replace(TRIAGE, "Delay is 5s.", ["Delay grows."]), None),
+  (FENCED_ROUNDS, replace(FENCED_ROUNDS, "Rounds: 3", "Rounds: 4"), "Rounds"),
+  (FENCED_ROUNDS, replace(FENCED_ROUNDS, "Text.", "Other text."), None)])
+def test_frozen_field_change(old, new, field):
+  # the triage section's body alone, not its position; a fenced heading before the Rounds line hides nothing
+  from superegm import approve_spec
+  assert approve_spec.frozen_change("".join(old), "".join(new)) == field
+
+
+def test_frozen_triage_refusal(world):
+  spec, st = respec_world(world, [(TRIAGE, None)])
+  open_respec(st)
+  spec.write_text("".join(replace(TRIAGE, "- defer docs-only findings", "- defer every finding")), encoding="utf-8")
+  respec_cycle(world, spec, st)
+  store_before = snapshot(world.artifacts)
+  code, out = world.run("approve-spec", "--spec", spec, "--respec", "R1", "--yes")
+  assert code == 1 and "approve-spec: respec R1: changes the frozen triage: void and re-approve" in out
+  assert snapshot(world.artifacts) == store_before
+
+
+@pytest.mark.parametrize("argv, err", [
+  (["--respec", "1", "--unit", "U2"], "respec posted: 1 is not R<n>"),
+  (["--respec", "R7", "--unit", "U2"], "respec posted: respec R7 is not applied"),
+  (["--respec", "R1", "--unit", "U3"], "respec posted: U3 is not touched by R1")])
+def test_respec_posted_refusals(world, monkeypatch, argv, err):
+  spec, st, _ = actionable_world(world, monkeypatch, "open, unposted, idle unit")
+  world.spec = spec
+  cid = world.card("wave")
+  code, out = world.run("respec", "posted", *argv, "--comment", "555", "--runcard", cid)
+  assert code == 1 and err in out and not list(st.path("file", "respec").glob("*.posted"))
+
+
+def test_respec_approval_honours_the_leavemealone_flag(world):
+  # `--leavemealone` approves without `--yes`, as the main approval does
+  spec, st = respec_world(world, [(BASE, None)], state_units={"U0": MERGED_U1["U0"], "U1": {"number": 11}, "U2": {}, "U3": {}})
+  open_respec(st)
+  spec.write_text("".join(replace(BASE, "Delay is 5s.", "Delay is 6s.")), encoding="utf-8")
+  respec_cycle(world, spec, st)
+  code, out = world.run("approve-spec", "--spec", spec, "--respec", "R1", "--leavemealone")
+  entries = json.loads(st.path("approvals", core.spec_slug(spec)).read_text(encoding="utf-8"))["entries"]
+  assert code == 0 and entries[-1].get("respec") == "R1", out
+
+
+def test_skill_respec_dry_run_and_confirmation_text():
+  text = (REPO / "skills/review-spec/SKILL.md").read_text(encoding="utf-8")
+  assert "each `follow_up:`" in text and "each `follow-up:`" not in text
+  step = text[text.index("4. **Approve.**"):text.index("## Data notice")]
+  assert "--yes" in step and "writes nothing" in step and "Stop" in step
