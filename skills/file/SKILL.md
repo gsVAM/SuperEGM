@@ -173,6 +173,12 @@ hashes the rest of the filing is checked against, and prints
     moved the spec's hash or the unit's Design range. The owner runs
     `/superegm:plan` first (its `graph` stores the current body), then one
     more `/superegm:review-plan` round on that body; this skill ends.
+*   `respec: no commit holds approval <sha7> of <spec>`: rendering an
+    unfiled body carries its Design range through each approved text of the
+    handoff, and one of them is in no commit of the repository (a rewritten
+    or unfetched history); the dry run (Step 4) and `apply` refuse the same.
+    Relay the line: the owner restores that commit in the checkout (fetch
+    it, or check out the branch that holds it); this skill ends.
 *   `gate: nothing to file (every unit is filed)`: there is nothing to do;
     report that and close the card (Step 7), never after a resumed verify with problems:
     that run ends at Step 2 or Step 6.
@@ -187,7 +193,7 @@ and writes nothing there. It writes
 with its title, labels and body, every link, the `Writes:` line with the
 counts, and the `Confirmed write list sha256`. On a later filing it names
 the tracking issue it will rewrite. The refusals (`changed after the gate`,
-`gate: <U> needs a re-plan after respec R<n>`, relayed as in Step 3, `split the handoff`, `scan failed`, a missing `extra` label, no push access)
+`gate: <U> needs a re-plan after respec R<n>` and `respec: no commit holds approval <sha7> of <spec>`, relayed as in Step 3, `split the handoff`, `scan failed`, a missing `extra` label, no push access)
 end the skill with the line shown.
 
 A unit whose section carries `Issue: #<n>` is adopted, not created: the dry

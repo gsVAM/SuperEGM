@@ -221,6 +221,8 @@ class Handoff(core.Handoff):
     design = Path(self.plan.design).expanduser()
     if not design.is_absolute():
       design = self.plan_path.parent / design
+    if not design.is_file():  # a Design line written in a worktree since removed: read under this checkout
+      design = core.here(design)
     if not design.is_file():
       raise core.HandoffError(f"graph: design file {design} does not exist")
     self.design_path = design.resolve()

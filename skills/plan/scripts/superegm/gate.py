@@ -61,7 +61,8 @@ def converged_review(store: core.Store, uid: str, marks: dict | None = None):
   `reviews/`, found by kind and artifact, never by id; U04 writes `converged` as `yes | no | by ruling R<n>`, U57 `by proceed R<n>` (the ruling's
   `sha256`, ahead of the converged-round test). A `replan: R<n>` unit (U90) is refused by `require_replanned`
   over `marks`, the caller's one read of `respec.marks`: `run` passes its own; `apply` passes none, its
-  `require_gate` having refused the unit already."""
+  `require_gate` having refused the unit already; `phase.plan_review_due` passes none, `planning_line` having
+  returned `plan` for any unfiled unit carrying a `replan:` mark before it asks (no `require_gate` guards it)."""
   if marks is not None:
     require_replanned(uid, marks)
   latest = None

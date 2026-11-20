@@ -106,8 +106,8 @@ drafting.
     and clears the mark (a `decide` render does not), and the rewritten body goes back through
     `/superegm:review-plan`. The mark is written nowhere: the helper derives it on every read. The marked
     units are those listed in `touched` of an applied respec's `respec/R<n>.json` (in the handoff's
-    directory, under the store's `file` kind) that have no `respec_comment_<U>_R<n>.md` beside it (they
-    were unfiled at R<n>'s approval) and whose `handoff_units.json` `corrected` does not name R<n>.
+    directory, under the store's `file` kind) that have no `respec_comment_<U>_R<n>.md` in the handoff's
+    directory itself, one level above `respec/` (they were unfiled at R<n>'s approval) and whose `handoff_units.json` `corrected` does not name R<n>.
     Read those files to find the sections to rewrite. An untouched unfiled unit is not rewritten: `graph`
     carries its Design range to the new approval's lines.
 2.  Nothing is committed under the repository's docs: the plan file stays
