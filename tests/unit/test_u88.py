@@ -375,20 +375,20 @@ def contested_items(world, question, n=1, findings=("high",), contested=(1,)):
   return [i["fingerprint"] for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "contested"]
 
 
-def test_a_blocking_contest_reaches_the_inbox_only_with_the_panels_verdict_line(world):
-  """Round 4 (astra-3-1): the decision opens before the panel runs, so a high or medium head contest lists no owner form until the
-  panel's unconverged verdict line is in the decision; a low contest, which no panel takes, lists at once."""
-  assert contested_items(world, "foreman-1-1 | high | src/x.py:3 | regression: no | c") == []
-  assert contested_items(world, "foreman-1-1 | medium | src/x.py:3 | regression: no | c", findings=("medium",)) == []
-  assert contested_items(world, "foreman-1-1 | low | src/x.py:3 | regression: no | c", findings=("low",)) == ["U01/contested/q1/foreman-1-1"]
-  assert contested_items(world, "foreman-1-1 | high | src/x.py:3 | regression: no | c\n" + VERDICT_LINE) == ["U01/contested/q1/foreman-1-1"]
+@pytest.mark.parametrize("severity, n, verdict, listed", [
+    ("high", 1, "", False), ("medium", 1, "", False), ("high", 1, VERDICT_LINE, True),
+    ("high", 5, "", False), ("high", 5, VERDICT_LINE, True)])
+def test_a_blocking_contest_reaches_the_inbox_only_with_the_panels_verdict_line(world, severity, n, verdict, listed):
+  """Round 4 (astra-3-1, astra-3-2): the decision opens before the panel runs, so a high or medium head contest lists no owner form
+  until the panel's unconverged verdict line is in the decision, on the capped round (n = 5) too."""
+  question = f"foreman-1-1 | {severity} | src/x.py:3 | regression: no | c\n" + verdict
+  assert contested_items(world, question, n=n, findings=(severity,)) == (["U01/contested/q1/foreman-1-1"] if listed else [])
 
 
-def test_a_contest_on_the_capped_round_reaches_the_inbox_when_its_panel_stays_split(world):
-  """Round 4 (astra-3-2): a head review at its round cap routes a contest to point 1; once the split panel's verdict line is in the
-  decision the contest is listed, not skipped by the cap."""
-  assert contested_items(world, "foreman-1-1 | high | src/x.py:3 | regression: no | c\n" + VERDICT_LINE, n=5) == ["U01/contested/q1/foreman-1-1"]
-  assert contested_items(world, "foreman-1-1 | high | src/x.py:3 | regression: no | c", n=5) == []
+def test_a_low_contest_beside_a_blocking_one_lists_at_once(world):
+  """A low finding goes to no panel, so its owner form lists without a verdict line while the high one waits for it."""
+  question = "foreman-1-1 | high | src/x.py:3 | regression: no | c\nforeman-1-2 | low | src/x.py:3 | regression: no | c\n"
+  assert contested_items(world, question, findings=("high", "low"), contested=(1, 2)) == ["U01/contested/q1/foreman-1-2"]
 
 
 def test_the_wave_report_lists_a_judges_settlement_the_review_recorded(world):
@@ -404,7 +404,7 @@ def test_the_wave_report_lists_a_judges_settlement_the_review_recorded(world):
                             reviews=HEAD(1, findings)))
   assert world.run("report", "--runcard", card)[0] == 0
   section = s.path("wave_report", 1).read_text(encoding="utf-8").split("## Judges' rulings\n")[1].split("\n##")[0]
-  assert section.strip().splitlines() == ["- U01 foreman-1-1 (judges p-3): declined", "- U01 q1 (judges p-4): foreman-1-3 finding overruled — the panel"]
+  assert section.strip().splitlines() == ["- U01 q1 (judges p-4): foreman-1-3 finding overruled — the panel", "- U01 foreman-1-1 (judges p-3): declined"]
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -446,7 +446,7 @@ def test_contest_reference_texts(path, phrases):
 
 
 KEPT_LINES = ("the owner gets `judges/<panel>/verdict.json`'s line only if the panel does not converge",
-                    "the judges' rulings with their panels", "Builders left running and refusals: `references/resume_notes.md`.",
+                    "the judges' rulings with their panels", "- `references/resume_notes.md`: at the entry, before step 5.",
                     "In any other host reply with one line,\n`wave runs in Claude Code only`, and stop.", "the builder pushes its unit branch",
                     "(the helper is single-writer)", "a card still open on this spec")
 
