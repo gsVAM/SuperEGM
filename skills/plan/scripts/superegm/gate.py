@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: `gate --pass` on converged plan reviews at the body hash over the store's plan copy; the unfiled write list; the reviewed pair, accept and readiness forms removed; an adopted unit's two trailing fields (U13); a review with a round after the converged one is not converged (U56); a review the owner's proceed converged, at the ruling's sha256 (U57); a `replan: R<n>` unit refused, an unfiled body hashed as it renders now (U90).
+# Modified by SuperEGM (gsVAM), 2026: `gate --pass` on converged plan reviews at the body hash over the store's plan copy; the unfiled write list; the reviewed pair, accept and readiness forms removed; an adopted unit's two trailing fields (U13); a review with a round after the converged one is not converged (U56); a review the owner's proceed converged, at the ruling's sha256 (U57); a `replan: R<n>` unit refused, an unfiled body hashed as it renders now (U90); refused while a respec from a review's design finding is open (U91).
 
 """superegm gate: pass the gate when every unfiled unit's plan review converged at its body hash."""
 
@@ -62,7 +62,12 @@ def converged_review(store: core.Store, uid: str, marks: dict | None = None):
   `sha256`, ahead of the converged-round test). A `replan: R<n>` unit (U90) is refused by `require_replanned`
   over `marks`, the caller's one read of `respec.marks`: `run` passes its own; `apply` passes none, its
   `require_gate` having refused the unit already; `phase.plan_review_due` passes none, `planning_line` having
-  returned `plan` for any unfiled unit carrying a `replan:` mark before it asks (no `require_gate` guards it)."""
+  returned `plan` for any unfiled unit carrying a `replan:` mark before it asks (no `require_gate` guards it).
+  While a respec raised from a review's design finding (`unit: null`) is open, refused `file: respec R<n> open`
+  (U91): `gate --pass` and a resumed `apply` wait on it; `next` prints its wait row before it asks."""
+  waiting = respec.review_open(store, store.handoff_id) if store.handoff_id else []
+  if waiting:
+    raise core.HandoffError(f"file: respec {waiting[0]['id']} open")
   if marks is not None:
     require_replanned(uid, marks)
   latest = None
