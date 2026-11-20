@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_record_launch` as the record-launch module; it records a builder launch in `launches/<unit>.json` and, with --exit, the exit its exit file proves; the flagless form refused, launch-builder recording the launch (U24); `subagent_calls` read from the session's transcript at the exit (U27); the effective model and `total_cost_usd` read from the result file at the exit (U28); `--exit stalled`, the group check, the signal, `kill_failed` and `last_commit_at` (U31); the exit's `subagent_calls` read through `traces.launch_subagent_calls` (U49); `failed_resume` and `failed resume` on a resumed launch ending with no result and no commit of its own (U63).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_record_launch` as the record-launch module; it records a builder launch in `launches/<unit>.json` and, with --exit, the exit its exit file proves; the flagless form refused, launch-builder recording the launch (U24); `subagent_calls` read from the session's transcript at the exit (U27); the effective model and `total_cost_usd` read from the result file at the exit (U28); `--exit stalled`, the group check, the signal, `kill_failed` and `last_commit_at` (U31); the exit's `subagent_calls` read through `traces.launch_subagent_calls` (U49); `failed_resume` and `failed resume` on a resumed launch ending with no result and no commit of its own (U63); the exit's `head` and `builder_status`, the evidence that clears a respec mark, and the journal line of a failed read (U86).
 
 """superegm record-launch: record a builder launch's exit as `exited <code>`, or a stalled launch's as `exited (stalled)`
 after signalling its group (or `kill_failed`); `launch-builder` records it `running`. A resumed launch's `exited <code>`
@@ -13,7 +13,7 @@ from pathlib import Path
 import superegm as core
 from superegm.launch import load_launches
 from superegm.launch_builder import has_result
-from superegm.status import head_time, own_commit
+from superegm.status import STATUS_RE, builder_logins, head_time, own_commit
 from superegm.traces import launch_subagent_calls
 
 WRITES = frozenset(["launches"])  # the store kinds this subcommand writes
@@ -133,12 +133,57 @@ def finish(st, unit, launches, latest, status, last, line):
             and not has_result(latest.get("result_file")) and last is None)
   if failed:
     latest["failed_resume"] = True
+  # spec 1.2.1 section 7.6 (U86): the evidence that clears a respec mark stays with its launch; a failed read nulls
+  # its field alone (the mark stands), is journaled, and never costs the exit record
+  failures = exit_evidence(st, unit, latest)
   core.atomic_write(st.path("launches", unit), {"launches": launches})
   core.journal(st, line)
+  for field in failures:
+    core.journal(st, f"{unit} launch {latest['round']} exit read failed: {field}")
   print(line)
   if failed:
     print("failed resume")
   return 0
+
+
+def exit_evidence(st, unit, latest) -> list:
+  """U86: set `head`, the unit's PR `headRefOid` (`state.json` `units[<U>].pr.number`; absent with no PR), and
+  `builder_status`, the word of the last builder comment on the unit's issue created at or after the launch's
+  `started_at` (None when none); return the fields whose read failed."""
+  failures = []
+  latest.pop("head", None)
+  latest["builder_status"] = None
+  path = st.path("state")
+  try:
+    record = ((json.loads(core.read_text(path)) if path.is_file() else {}).get("units") or {}).get(unit) or {}
+  except (ValueError, OSError, AttributeError):
+    record = {}
+  repo = st.config.get("repo")
+  number = (record.get("pr") or {}).get("number")
+  if number:
+    try:
+      head = (core.gh_json(["pr", "view", str(number), "-R", repo, "--json", "headRefOid"]) or {}).get("headRefOid")
+      if head:
+        latest["head"] = head
+    except (core.GhError, core.HandoffError, ValueError, AttributeError, OSError):
+      failures.append("head")
+  issue = record.get("number")
+  if not issue:
+    return failures
+  try:
+    comments = core.gh_pages(f"repos/{repo}/issues/{issue}/comments?per_page=100")
+    since, builders = latest.get("started_at") or "", builder_logins(st)
+    for comment in comments:
+      body = comment.get("body") or ""
+      if builders and (comment.get("user") or {}).get("login") not in builders:
+        continue
+      match = STATUS_RE.search(body) if body.startswith(("**Builder status:**", "**Deviation")) else None
+      if match and (comment.get("created_at") or "") >= since:
+        latest["builder_status"] = match.group(1)
+  except (core.GhError, core.HandoffError, ValueError, AttributeError, OSError):
+    latest["builder_status"] = None
+    failures.append("builder_status")
+  return failures
 
 
 def PS(args):
