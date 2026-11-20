@@ -13,7 +13,7 @@ from pathlib import Path
 import superegm as core
 from superegm.launch import load_launches
 from superegm.launch_builder import has_result
-from superegm.status import STATUS_RE, builder_logins, head_time, own_commit
+from superegm.status import STATUS_RE, builder_comment, builder_logins, head_time, own_commit
 from superegm.traces import launch_subagent_calls
 
 WRITES = frozenset(["launches"])  # the store kinds this subcommand writes
@@ -174,10 +174,7 @@ def exit_evidence(st, unit, latest) -> list:
     comments = core.gh_pages(f"repos/{repo}/issues/{issue}/comments?per_page=100")
     since, builders = latest.get("started_at") or "", builder_logins(st)
     for comment in comments:
-      body = comment.get("body") or ""
-      if builders and (comment.get("user") or {}).get("login") not in builders:
-        continue
-      match = STATUS_RE.search(body) if body.startswith(("**Builder status:**", "**Deviation")) else None
+      match = STATUS_RE.search(comment.get("body") or "") if builder_comment(comment, builders) else None
       if match and (comment.get("created_at") or "") >= since:
         latest["builder_status"] = match.group(1)
   except (core.GhError, core.HandoffError, ValueError, AttributeError, OSError):

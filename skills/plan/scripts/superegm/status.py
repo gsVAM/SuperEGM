@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the `ruling` event and a status line after a comment's deviation headings (U22); the board's one write per `wave` pass, `post_board` (U30); the tick's read, `tick_trigger` (U24); the watchdog's `stalled` line, its predicate and `head_time` (U31); `tick_trigger`'s chain-on `merged` line and its proofs over every chain phase's card (U44); `ruling_facts` reads `proceeds[]`, so a recorded proceed comment is no event (U94); the `conflict` view status, its fingerprint key and its event line (U62).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the `ruling` event and a status line after a comment's deviation headings (U22); the board's one write per `wave` pass, `post_board` (U30); the tick's read, `tick_trigger` (U24); the watchdog's `stalled` line, its predicate and `head_time` (U31); `tick_trigger`'s chain-on `merged` line and its proofs over every chain phase's card (U44); `ruling_facts` reads `proceeds[]`, so a recorded proceed comment is no event (U94); the `conflict` view status, its fingerprint key and its event line (U62); `builder_comment`, the filter `builder_facts` and `finish` share, the `open:`/`held: respec` lines and `tick_trigger`'s `respec R<n> <unit>` (U86).
 
 """superegm status: landed and ready sets, PRs, CI; refuses without a complete receipt.
 `--wait <s>` polls, reading only, and prints every unreported event line, or `deadline`. Under a `wave` card
@@ -177,6 +177,16 @@ def stalled(entry: dict, worktree_head_time: float | None, now: float, minutes: 
   return waited if waited >= minutes else None
 
 
+def builder_comment(comment: dict, builders) -> bool:
+  """The builder-comment filter `builder_facts` and `record-launch`'s `finish` share (U86): a builder login (a store
+  whose `launch` recorded no login reads all) and a body opening with `**Builder status:**` or `**Deviation`."""
+  if builders and (comment.get("user") or {}).get("login") not in builders:
+    return False  # a stranger's status line is no builder's (spec section 11.2)
+  # a status comment opens with its status line or its `**Deviation**` headings (the orders' shapes); a status
+  # line quoted below another comment's first line, such as an owner's ruling, is not one
+  return (comment.get("body") or "").startswith(("**Builder status:**", "**Deviation"))
+
+
 def builder_facts(st, uid: str, comments: list, config: dict | None = None) -> tuple:
   """From the latest launch by `round`: `[round, <text of its exit file>]` when that file exists,
   and `[id, word, login]` of the last `**Builder status:**` comment (one opening with that line or with its
@@ -194,12 +204,7 @@ def builder_facts(st, uid: str, comments: list, config: dict | None = None) -> t
   since = latest["started_at"] if latest else ""
   status, builders = None, builder_logins(st)
   for comment in comments:
-    if builders and (comment.get("user") or {}).get("login") not in builders:
-      continue  # a stranger's status line is no builder's (spec section 11.2); a store whose `launch` recorded no login reads all
-    body = comment.get("body") or ""
-    # a status comment opens with its status line or its `**Deviation**` headings (the orders' shapes); a status
-    # line quoted below another comment's first line, such as an owner's ruling, is not one
-    match = STATUS_RE.search(body) if body.startswith(("**Builder status:**", "**Deviation")) else None
+    match = STATUS_RE.search(comment.get("body") or "") if builder_comment(comment, builders) else None
     if match and (comment.get("created_at") or "") >= since:
       status = [comment["id"], match.group(1), (comment.get("user") or {}).get("login")]
   stall = None
