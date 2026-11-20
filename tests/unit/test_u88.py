@@ -401,3 +401,20 @@ def test_contest_reference_texts(path, phrases):
   """The skills route a head contest to the panel first and list the owner-only rulings."""
   body = (ROOT / path).read_text(encoding="utf-8")
   assert all(phrase in body for phrase in phrases), [p for p in phrases if p not in body]
+
+
+KEPT_LINES = ("the owner gets `judges/<panel>/verdict.json`'s line only if the panel does not converge",
+                    "the judges' rulings with their panels", "Builders left running and refusals: `references/resume_notes.md`.",
+                    "In any other host reply with one line,\n`wave runs in Claude Code only`, and stop.", "the builder pushes its unit branch",
+                    "(the helper is single-writer)", "a card still open on this spec")
+
+
+def test_the_wave_skill_keeps_its_unrelated_lines_and_points_to_the_moved_paragraph():
+  """The owner's ruling on #172: U88 makes room under the 15,000-byte pin by moving unpinned text verbatim to `references/`, not by rewording."""
+  body = (ROOT / "skills/wave/SKILL.md").read_text(encoding="utf-8")
+  moved = (ROOT / "skills/wave/references/resume_notes.md").read_text(encoding="utf-8")
+  present = [p for p in KEPT_LINES if p not in body]
+  assert not present, present
+  assert "take a refusal as fact, never retry it" not in body and "take a refusal as fact, never retry it" in moved
+  assert "Builders a previous invocation left running report through `status --wait`'s\n`exit` lines." in moved
+  assert len(body.encode("utf-8")) < 15_000
