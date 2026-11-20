@@ -272,8 +272,60 @@ def test_marks_read_once_per_call(world, monkeypatch, argv):
   s_world(world)
   converge_all(world)
   ticked(world)
+  respec(world, spec_lines(), [])  # an applied respec touching nothing: the marks are read
   calls, real = [], rs.marks
   monkeypatch.setattr(rs, "marks", lambda *a: calls.append(a) or real(*a))
   code, out = world.run(*argv, *(["--spec", world.spec] if argv[0] == "gate" else ["--handoff", HID]))
   assert code == 0, out
   assert len(calls) == 1
+
+
+def test_next_skips_the_marks_without_a_respec_after_the_approving_worktree_is_gone(world, monkeypatch, tmp_path):
+  # the handoff's spec recorded in a worktree since removed: `next` neither reads the marks nor runs git there
+  from superegm import respec as rs
+  s_world(world)
+  converge_all(world)
+  ticked(world)
+  gone = tmp_path / "removed-worktree" / SPEC_REL
+  path = world.artifacts / "handoffs" / f"{HID}.json"
+  core.atomic_write(path, json.loads(path.read_text(encoding="utf-8")) | {"spec": str(gone)})
+  calls, real = [], rs.marks
+  monkeypatch.setattr(rs, "marks", lambda *a: calls.append(a) or real(*a))
+  code, out = world.run("next", "--handoff", HID)
+  assert (code, out.strip()) == (0, "file")
+  assert calls == []
+
+
+def test_a_shifting_respec_invalidates_the_unfiled_reviews(world):
+  # every unit unfiled and converged; R1 inserts 6 lines at :120 and touches none: U08's carried range and every
+  # body's spec hash change, so the gate and `next` hold the filing until `graph` and review-plan run again
+  s_world(world)
+  converge_all(world)
+  ticked(world)
+  respec(world, inserted(spec_lines(), 120, 6), [])
+  assert marks(world) == {}
+  code, out = world.run("gate", "--pass", "--spec", world.spec)
+  assert code == 1
+  assert "body differs from its converged round" in out
+  ticked(world)
+  assert world.run("next", "--handoff", HID)[1].strip() == "plan"
+  code, out = world.run("graph", "--plan", world.plan)
+  assert code == 0, out
+  ticked(world)
+  assert world.run("next", "--handoff", HID)[1].strip() == "review-plan"
+  converge_all(world)
+  code, out = world.run("gate", "--pass", "--spec", world.spec)
+  assert code == 0, out
+
+
+def test_scan_measures_the_carried_range(world):
+  # U08 rendered at :206-246 after R1 inserts 6 lines at :199: `scan` measures those spec lines, never :200-240
+  s_world(world)
+  lines = inserted(spec_lines(), 199, 6)
+  respec(world, lines, [])
+  code, out = world.run("graph", "--plan", world.plan)
+  assert code == 0, out
+  assert "docs/specs/s.md:206-246" in unit_file_text(world, "U08")
+  world.run("scan", "--plan", world.plan)
+  found = json.loads(next(handoff_store(world).root.rglob("scan/U08.json")).read_text(encoding="utf-8"))
+  assert found["spec_range_bytes"] == len("".join(f"{line}\n" for line in lines[205:246]).encode("utf-8"))
