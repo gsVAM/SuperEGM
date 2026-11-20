@@ -9,6 +9,7 @@ import pytest
 
 from superegm import atomic_write
 from test_file import planned, open_card, hp, converge, dry_run, SLUG
+from test_u43 import registry  # noqa: F401 -- autouse: HOME under tmp_path, so `next` never reads the owner's registry
 
 
 def F(reviewer, n, i, sev="high"):
@@ -148,4 +149,38 @@ def test_file_waits_on_an_open_respec(world, state, command, refused):
     assert code == 1 and not world.gh.issues, out  # nothing filed
   if state == "applied":
     assert code == 0, out
+
+
+
+# ---------------------------------------------------------------- S3: next waits
+
+
+@pytest.mark.parametrize("origin, units, printed", [
+  ("plan", "U07 unfiled", "waiting respec R1"),
+  ("integrate", "every unit filed and landed", "waiting respec R1"),
+  ("plan", "U05 filed with a running launch whose exit file exists, U07 unfiled", "wave"),
+])
+def test_next_waits_on_a_review_respec(world, registry, origin, units, printed):
+  """Test_u43's chain of U01-U03: U01 and U02 stand for the filed units, U03 for the unfiled one."""
+  from test_u43 import Chain, jwrite
+  c = Chain(world)
+  if units == "every unit filed and landed":
+    c.all_filed()
+  else:  # U03 unfiled with no plan review: `review-plan` would match
+    c.plan("U01", "U02", "U03")
+    running = units.startswith("U05")
+    for n, uid in enumerate(("U01", "U02"), 1):
+      c.review(uid)
+      c.filed(uid, n, pr={"number": 10 + n}, ci="success", landed=not (running and uid == "U01"))
+    if running:
+      result = world.repo.parent / "U01-r1.result"
+      jwrite(c.hs.path("launches", "U01"), {"launches": [{"round": 1, "status": "running", "result_file": str(result)}]})
+      result.with_name(result.name + ".exit").write_text("0\n", encoding="utf-8")
+  c.save()
+  source = f"{c.hid[-6:]}-plan-U03-c1" if origin == "plan" else f"spec-{SLUG}-integrate-c1"
+  jwrite(c.hs.path("file", "respec", "R1.open.json"),
+         {"id": "R1", "unit": None, "review": source, "finding": "readiness-1-1", "at": "2026-11-15T00:00:00Z"})
+  code, out, before, after = c.next()
+  assert (code, out) == (0, printed)
+  assert before == after  # next writes nothing
 
