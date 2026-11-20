@@ -133,6 +133,24 @@ def test_reviewer_rows_every_reviewer_quiet(world):
   assert signal_rows(world, c, "reviewer most overruled") == []
 
 
+def test_reviewers_table_and_lessons_count_overrules_alike(world):
+  # an allowance is an overrule (spec 13.2): the Reviewers table's `overrules` column and the Lessons row carry one count,
+  # so the reviewer integrate names from the table is the one Lessons names
+  from test_u78 import table
+  c, _, _ = two_units(world)
+  head_review(c, {"a": {"findings": [finding("a", 1), finding("a", 2)]},
+                  "b": {"findings": [finding("b", 1), finding("b", 2), finding("b", 3)]}}, rulings=["a-1-1"])
+  record = jread(c.hs.path("foreman", "U02"))
+  record["rulings"] += [{"ruling": "b-1-1 allowed — a known gap", "by": "owner"}, {"ruling": "b-1-2 allowed — a known gap", "by": "owner"}]
+  jwrite(c.hs.path("foreman", "U02"), record)
+  report = report_of(world, c)
+  rows = table(report, "Reviewers")
+  assert (rows["a"]["overrules"], rows["b"]["overrules"]) == ("1", "2")
+  assert (rows["b"]["overruled"], rows["b"]["allowed"]) == ("0", "2")  # the two columns stay; the sum is the one number
+  [most] = [r for r in lessons(report) if "| reviewer most overruled |" in r]
+  assert "b: 2 of 3 overruled" in most
+
+
 def test_fix_design_rows(world):
   # a fix-design finding is a row naming its review
   c, _, _ = two_units(world)
