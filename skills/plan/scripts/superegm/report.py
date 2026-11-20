@@ -69,8 +69,7 @@ def run(args):
   lines += section("Ready, unlaunched", [f"{uid} ({'slot free' if free > 0 else 'no free slot'})" for uid in ready])
   lines += section("Pending decisions", [f"{uid} {d['id']} (point {d['point']}, {d['source']}): {question_line(d['question'])}"
                                          for uid, d in pending])
-  lines += section("Judges' rulings", [f"{uid} {r.get('decision') or r.get('fid')} (judges {r['by'][7:]}): {r['ruling']}" for uid in launched
-                                       for r in foremen[uid].get("rulings") or [] if str(r.get("by") or "").startswith("judges:")])
+  lines += section("Judges' rulings", [line for uid in launched for line in judges_rulings(st, uid, foremen[uid])])
   lines += section("Stopped", [stopped_line(st, uid, foremen[uid]["stopped"], views) for uid in launched
                                if states[uid] == "stopped"])
   core.atomic_write(path, "\n".join(lines) + "\n")
@@ -80,6 +79,25 @@ def run(args):
   print("pending: " + ("; ".join(f"{uid} {d['id']} (point {d['point']}, {d['source']})" for uid, d in pending) or "none"))
   print(f"loop: {'ended' if ended else 'continuing'} ({why})")
   return 0
+
+
+def judges_rulings(store, uid: str, foreman: dict) -> list:
+  """U88: the unit's judges rulings, each with its panel: the foreman's `rulings[]` made `by judges:<panel>`, then each head-review
+  finding `review settle --judges` marked `ruling: judges:<panel>` (it adds no foreman ruling) that no foreman ruling already names."""
+  rulings = [r for r in foreman.get("rulings") or [] if str(r.get("by") or "").startswith("judges:")]
+  named = {(r["by"], str(r.get("ruling") or "").split(" ")[0]) for r in rulings}
+  lines = [f"{uid} {r.get('decision') or r.get('fid')} (judges {r['by'][7:]}): {r['ruling']}" for r in rulings]
+  for path in sorted(store.path("reviews").glob(f"*head-{uid}-c*/round-*.json")):
+    try:
+      rnd = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+      continue
+    for record in (rnd.get("reviewers") or {}).values():
+      for f in record.get("findings") or []:
+        by = str(f.get("ruling") or "")
+        if by.startswith("judges:") and f.get("disposition") and (by, f["id"]) not in named:
+          lines.append(f"{uid} {f['id']} (judges {by[7:]}): {f['disposition']}")
+  return lines
 
 
 def record_heads(store, card_id: str, views: dict, now: float) -> dict:
@@ -339,7 +357,9 @@ def unit_state(uid: str, view: dict, foreman: dict, launches: list, card: dict, 
 
 def pending_decisions(foreman: dict) -> list:
   """`decisions[]` minus `rulings[]` (spec section 7); a point-1 decision whose options end ` allowed` (an
-  `owner: <ids>` decision, U25) stays pending until every option's fid has a ruling or a `redesign` or a `proceed` rules it whole."""
+  `owner: <ids>` decision, U25) stays pending until every option's fid has a ruling or a `redesign` or a `proceed` rules it whole;
+  so does a point-1 decision whose question holds an unconverged panel's `(judges/<panel>/verdict.json)` line (U88), for each
+  finding its question asks, until every one has a ruling or a `redesign` or a `proceed` rules it whole."""
   rulings = foreman.get("rulings") or []
   ruled = {r.get("decision") for r in rulings}
 

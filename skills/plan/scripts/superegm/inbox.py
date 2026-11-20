@@ -148,15 +148,18 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
       rid, n = source_round(d.get("source"))
       rev = review.load_review(hs, rid) if rid else None
       status = status_of(hs, rid, rev) if rev else None
-      if status is None or status.code != 3:
+      verdict = next((l.strip() for l in (d.get("question") or "").splitlines() if "/verdict.json)" in l), None)  # an unconverged panel's line (U88)
+      if status is None or not (status.code == 3 or status.code == 2 and verdict):  # a split panel's contest on the capped round still reaches the owner
         continue
       rnd = review.load_round(hs, rid, n) or {}
       fids = review.contested_fids(rnd) or [c["fid"] for c in rnd.get("builder_contested") or []]
       ruled = ruled_of(did)
       menu = lambda fid: [ruling_form(1, fid, o) for o in ("finding upheld", "finding overruled")]
-      verdict = next((l.strip() for l in (d.get("question") or "").splitlines() if "/verdict.json)" in l), None)  # an unconverged panel's line (U88)
+      by_id = {f["id"]: f for f in review.findings_of(rnd)} if rnd else {}
+      # a head review's high or medium contest goes to the judges first: no owner form while its panel is open, only once the verdict line is in
+      held = lambda fid: rev["kind"] == "head" and not verdict and review.blocking(by_id.get(fid) or {"severity": "high"})
       out += [ruling_item(repo, uid, "contested", menu(fid), number, f"{did}/{fid}") | ({"verdict": verdict} if verdict else {})
-              for fid in fids if fid not in ruled]
+              for fid in fids if fid not in ruled and not held(fid)]
   entry = latest_posted(foreman)
   if entry:
     n, rid = entry["round"], review.head_review_id(hs, uid)
