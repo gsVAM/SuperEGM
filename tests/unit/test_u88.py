@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import set_config
+import superegm as core
 from test_leavemealone_finish import head_review, seed
 from test_review import A, F, head_round, hstore, opened, rjson, settle
 from test_review import record as record_findings
@@ -82,25 +82,22 @@ def test_settle_judges_by_card_kind(world, kind, rc, out):
     assert f"review settle {rid} change-review-1-1" not in journal
 
 
-def test_the_judges_ruling_word_is_the_cards_mode(world):
+@pytest.mark.parametrize("mode, word", [("normal", "contest"), ("leavemealone", "leavemealone")])
+def test_the_judges_ruling_word_is_the_cards_mode(world, mode, word):
   """`decision rule --by judges:<panel>` journals and posts `contest` on a normal-mode card, `leavemealone` on a leavemealone one;
   `<fid> allowed` stays the owner's alone in normal mode."""
   from test_u84 import SPEC_COMMENT, open_decision, rule_on, spec_world
-  for mode, word in (("normal", "contest"), ("leavemealone", "leavemealone")):
-    card, s = spec_world(world, mode)
-    qid = open_decision(world, card, SPEC_COMMENT)
-    code, text = rule_on(world, card, qid, "(a)", "judges:p1")
-    assert code == 0, text
-    assert f"Ruling (judges p1, {word}): U02 {qid} " in journal_of(s)
-    assert f"\n(judges p1, {word})\n" in world.gh.comments[2][-1]["body"]
-    world.gh.comments.clear()
-    s.path("foreman", "U02").unlink()
-    s.path("journal").unlink()
-  card, s = spec_world(world, "normal")
-  wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "rounds": [{"round": 1, "phase": "posted", "outcome": "owner: foreman-1-1"}]})
+  card, s = spec_world(world, mode)
+  qid = open_decision(world, card, SPEC_COMMENT)
+  code, text = rule_on(world, card, qid, "(a)", "judges:p1")
+  assert code == 0, text
+  assert f"Ruling (judges p1, {word}): U02 {qid} " in journal_of(s)
+  assert f"\n(judges p1, {word})\n" in [c for posted in world.gh.comments.values() for c in posted][-1]["body"]
+  data = foreman_of(s, "U02")  # the owner-only decision: a test-delta finding the foreman raised, which the judges never settle
+  core.atomic_write(s.path("foreman", "U02"), data | {"rounds": [{"round": 1, "phase": "posted", "outcome": "owner: foreman-1-1"}]})
   td = "foreman-1-1 | high | tests/unit/test_q.py:3 | regression: no | test-delta: tests/unit/test_q.py:3 removed\n"
-  qid = world.run("decision", "open", "--unit", "U01", "--point", 1, "--question", write_question(world, td),
-                  "--source", "review head-U01-c1 round 1", "--runcard", card)[1].splitlines()[0]
-  code, text = world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", "foreman-1-1 allowed",
+  owner_qid = world.run("decision", "open", "--unit", "U02", "--point", 1, "--question", write_question(world, td),
+                        "--source", "review head-U02-c1 round 1", "--runcard", card)[1].splitlines()[0]
+  code, text = world.run("decision", "rule", "--unit", "U02", "--decision", owner_qid, "--ruling", "foreman-1-1 allowed",
                          "--by", "judges:p1", "--runcard", card)
   assert code != 0 and "decision: foreman-1-1 allowed is the owner's alone" in text, text
