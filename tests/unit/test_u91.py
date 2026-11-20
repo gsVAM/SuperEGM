@@ -241,3 +241,48 @@ def test_respec_approval_closes_the_source_cycle(world, kind):
   if kind == "plan":  # an integrate cycle of a handoff that is not the store's current one is closed by D1 (a) anyway
     assert review.latest_cycle(other, kind, artifact)[1] is False
 
+
+# ---------------------------------------------------------------- S5: due_rows opens a fresh cycle
+
+
+@pytest.mark.parametrize("case", ["respec closed the cycle at the old cap", "proceeded cycle, body changed by a replan"])
+def test_due_rows_opens_a_fresh_cycle(world, case):
+  """test_file's planned U01 and U02: U01 converged beside U02, the unit under the case."""
+  from superegm import review, review_plan, store
+  spec, _, hid = planned(world, ("U01", "U02"))
+  card = open_card(world, "review-plan", str(spec))
+  code, out = world.run("review", "open", "--kind", "plan", "--artifact", "U01", "--reviewers", "readiness", "--runcard", card)
+  assert code == 0, out
+  record(world, out.splitlines()[0], 1, "readiness", [], card)  # U01 converged on a clean round
+  st = store(world.repo)
+  sha = json.loads(hp(world, "units").read_text(encoding="utf-8"))["units"]["U02"]["body_sha256"]
+  if case.startswith("respec"):
+    rid = source_cycle(st, "plan", "U02", hid)  # cycle 1: a fix-design finding at the cap
+    old = json.loads(st.path("reviews", rid, "review.json").read_text(encoding="utf-8"))
+    atomic_write(st.path("reviews", rid, "review.json"), old | {"cap": 1})
+    assert [r[1] for r in review_plan.due_rows(st, card) if r[0] == "U02"] == ["fix-design"]
+    put_review_respec(world, review=rid)
+    add_entry(world, respec="R1", review=f"spec-{SLUG}-c2", kind="respec", source_review=rid)
+  else:
+    code, out = world.run("review", "open", "--kind", "plan", "--artifact", "U02", "--reviewers", "readiness",
+                          "--runcard", card)
+    assert code == 0, out
+    rid = out.splitlines()[0]
+    code, out = world.run("review", "rule", "--review", rid, "--ruling", "proceed", "--owner", "--reason", "planned enough",
+                          "--runcard", card)
+    assert code == 0, out
+    assert [r[1] for r in review_plan.due_rows(st, card) if r[0] == "U02"] == ["converged"]
+    body = st.path("unit", "U02")
+    body.write_text(body.read_text(encoding="utf-8") + "\nReplanned.\n", encoding="utf-8")
+    units = json.loads(hp(world, "units").read_text(encoding="utf-8"))
+    sha = units["units"]["U02"]["body_sha256"] = review.current_sha.__globals__["core"].sha256_file(body)
+    atomic_write(hp(world, "units"), units)
+  old_review = review.load_review(st, rid)
+  rows = review_plan.due_rows(st, card)
+  assert [r for r in rows if r[0] == "U02"] == [("U02", "due", "-", "1", sha)]  # `due - 1`: the skill runs `review open`
+  assert [r[1] for r in rows if r[0] == "U01"] == ["converged"]  # the converged cycle beside it stays
+  code, out = world.run("review", "open", "--kind", "plan", "--artifact", "U02", "--reviewers", "readiness", "--runcard", card)
+  assert code == 0, out
+  new_review = review.load_review(st, out.splitlines()[0])
+  assert new_review["cycle"] == old_review["cycle"] + 1
+
