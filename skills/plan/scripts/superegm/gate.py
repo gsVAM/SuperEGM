@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: `gate --pass` on converged plan reviews at the body hash over the store's plan copy; the unfiled write list; the reviewed pair, accept and readiness forms removed; an adopted unit's two trailing fields (U13); a review with a round after the converged one is not converged (U56); a review the owner's proceed converged, at the ruling's sha256 (U57).
+# Modified by SuperEGM (gsVAM), 2026: `gate --pass` on converged plan reviews at the body hash over the store's plan copy; the unfiled write list; the reviewed pair, accept and readiness forms removed; an adopted unit's two trailing fields (U13); a review with a round after the converged one is not converged (U56); a review the owner's proceed converged, at the ruling's sha256 (U57); a `replan: R<n>` unit refused (U90).
 
 """superegm gate: pass the gate when every unfiled unit's plan review converged at its body hash."""
 
@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 import superegm as core
-from superegm import graph, review
+from superegm import graph, respec, review
 
 WRITES = frozenset(["state"])  # the store kinds this subcommand writes
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
@@ -39,7 +39,11 @@ def require_latest(handoff, name: str) -> None:
 def converged_review(store: core.Store, uid: str):
   """(converged, the converged round's artifact_sha256) of the unit's latest plan review in the handoff's
   `reviews/`, found by kind and artifact, never by id; U04 writes `converged` as `yes | no | by ruling R<n>`, U57 `by proceed R<n>` (the ruling's
-  `sha256`, ahead of the converged-round test)."""
+  `sha256`, ahead of the converged-round test). A unit carrying `replan: R<n>` (U90) has no reviewed body: refused
+  `gate: <U> needs a re-plan after respec R<n>`, which `run` and `apply` relay."""
+  mark = (respec.marks(store, store.handoff_id) if store.handoff_id else {}).get(uid) or ""
+  if mark.startswith("replan: "):
+    raise core.HandoffError(f"gate: {uid} needs a re-plan after respec {mark.removeprefix('replan: ')}")
   latest = None
   for path in store.path("reviews").glob("*/review.json"):
     record = json.loads(core.read_text(path))
