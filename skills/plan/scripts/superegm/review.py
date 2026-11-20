@@ -534,9 +534,8 @@ def respec_base(st: core.Store, kind: str, artifact: str, respec: str, reviewers
   approval = core.load_approval(st, Path(artifact))
   if not approval:
     raise core.HandoffError(f"review open: respec {respec}: no approval")
-  hs = core.handoff_store(st, approval.get("handoff_id"))
-  applied = any(e.get("respec") == respec for e in core.load_approvals(st, Path(artifact)))
-  if applied or not hs.path("file", "respec", f"{respec}.open.json").is_file():
+  from superegm import respec as respecs  # R ids are per handoff: open in the latest approval's handoff alone
+  if respec not in [r["id"] for r in respecs.open(st, approval.get("handoff_id"))]:
     raise core.HandoffError(f"review open: respec {respec} is not open")
   return approval["commit"]
 
@@ -591,7 +590,11 @@ def open_review(args) -> int:
   given = getattr(args, "scope", None)  # a caller's own Namespace (the foreman's) may omit it
   if given is not None and kind != "spec":
     raise core.HandoffError(f"review open: --scope is refused for kind {kind}")
+  respec = getattr(args, "respec", None)  # read and checked before the resume, which resumes only its own cycle
+  base = respec_base(st, kind, artifact, respec, reviewers, given) if respec else None
   latest, closed = latest_cycle(st, kind, artifact)
+  if respec and latest and not closed and latest.get("respec") != respec:
+    raise core.HandoffError(f"review open: respec {respec}: {review_id(st, kind, artifact, latest['cycle'])} is open")
   if latest and not closed:  # a re-typed skill resumes the open cycle; a spec's panel may narrow, from the next round
     rid = review_id(st, kind, artifact, latest["cycle"])
     core.card_add(st, args.runcard, "produced", rid)
@@ -605,8 +608,6 @@ def open_review(args) -> int:
         core.journal(st, f"review open {rid} panel {','.join(panel_at(latest, nxt))} from round {nxt} under {args.runcard}")
       print(f"panel {','.join(panel_at(latest, nxt))} from round {nxt}" + (f" (unchanged: {refused})" if refused else ""))
     return 0
-  respec = getattr(args, "respec", None)
-  base = respec_base(st, kind, artifact, respec, reviewers, given) if respec else None
   cap = RESPEC_CAP if respec else cap_at_open(args, st, kind, artifact)
   scope = ("respec" if respec else scope_form(st, artifact, given)) if kind == "spec" else None
   cycle = latest["cycle"] + 1 if latest else 1
@@ -734,6 +735,12 @@ def record_round(args) -> int:
   if kind == "plan" and args.sha256:
     raise core.HandoffError("review record: --sha256 is refused for kind plan")
   sha = current_sha(st, kind, review["artifact"])
+  if review.get("respec"):  # its evidence is HEAD's diff: the recorded sha must be of the same bytes
+    spec = Path(review["artifact"])
+    root = core.git_toplevel(spec.parent)
+    head = core.run_git(["show", f"HEAD:{spec.resolve().relative_to(root.resolve()).as_posix()}"], root)
+    if core.sha256_text(head) != sha:
+      raise core.HandoffError(f"review record: respec {review['respec']}: {spec} differs from HEAD: commit the correction")
   if kind == "head":
     sha = args.sha256 or (existing["artifact_sha256"] if existing else review["artifact_sha256"] if n == 1 else None)
     if not sha:

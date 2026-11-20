@@ -260,7 +260,7 @@ The owner's correction of the sections at fault after a `respec` ruling, in plac
 2. **Dry run.** Before the commit, run `approve-spec --respec R<n> --dry-run`
    (`superegm approve-spec --respec R<n> --dry-run --spec <spec-path> --runcard <id>`): it runs the
    approval's touched-unit rule on the working tree, writes nothing and prints `touched:`,
-   `untouched:`, `merged_review:` and each `follow-up:`. Show the owner the list; a
+   `untouched:`, `merged_review:` and each `follow_up:`. Show the owner the list; a
    `merged_review` unit the owner wants rebuilt gets its follow-up row now, then dry-run again.
    Commit the diff on the spec's branch.
 3. **Review.** `superegm review open --kind spec --artifact <spec-path> --reviewers design,codebase-details --respec R<n> [--astra on|off] --runcard <id>`:
@@ -268,9 +268,13 @@ The owner's correction of the sections at fault after a `respec` ruling, in plac
    what `superegm review scope --review <id> --runcard <id>` prints: the diff from the latest
    approval's commit to `HEAD` and the sections it touches. Brief each reviewer with that alone;
    a finding outside those sections is out of remit. Then the loop of step 3.
-4. **Approve.** `superegm approve-spec --spec <spec-path> --respec R<n> --runcard <id>` appends
-   the `respec` entry and writes `respec/R<n>.json` and the comment files in the same command.
-   It refuses, writing nothing, with `approve-spec: respec R<n>: review <id> not converged`,
+4. **Approve.** `superegm approve-spec --spec <spec-path> --respec R<n> --runcard <id>` checks
+   the refusals below and prints the touched units. Without `--yes` (normal mode) it then prints
+   `Approve respec R<n> of <spec> at review <id>?`, writes nothing and exits 0: ask the owner,
+   Approve or Stop. On Approve, run it again with `--yes`; it appends the `respec` entry and
+   writes `respec/R<n>.json` and the comment files in the same command. On Stop, close the card
+   and record nothing. In leavemealone (`--leavemealone` or the config's mode) it approves
+   without the question. It refuses, writing nothing, with `approve-spec: respec R<n>: review <id> not converged`,
    `approve-spec: respec R<n>: <U> is merged and overlaps <path:a-b>: add a follow-up row`,
    `approve-spec: respec R<n>: changes the frozen <field>: void and re-approve`, or the latest
    approval not of this handoff. After a crash, run it again: it rewrites the file and appends

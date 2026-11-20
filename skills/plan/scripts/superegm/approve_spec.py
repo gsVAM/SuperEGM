@@ -556,13 +556,27 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
 def frozen_change(old: str, new: str) -> str | None:
   """The frozen field a respec's diff from `old` to `new` changes a line of: `Rounds` (the `Rounds:` lines before the
   first H2) or `triage` (the triage section); None when neither moved."""
-  def rounds_lines(text):
-    lines = text.splitlines()
-    first = next((i for i, line in enumerate(lines) if ANY_H2.match(line)), len(lines))
-    return [line for line in lines[:first] if line.startswith("Rounds:")]
+  def rounds_lines(text):  # fenced lines are no Rounds lines and a fenced H2 ends nothing, as `rounds_line` reads
+    found, fence = [], None
+    for line in text.splitlines():
+      if fence:
+        if re.match(rf"^ {{0,3}}{fence[0]}{{{fence[1]},}}\s*$", line):
+          fence = None
+        continue
+      if (opener := core.FENCE_RE.match(line)) and not (opener.group(1)[0] == "`" and "`" in opener.group(2)):
+        fence = (opener.group(1)[0], len(opener.group(1)))
+        continue
+      if ANY_H2.match(line):
+        break
+      if line.startswith("Rounds:"):
+        found.append(line)
+    return found
+  def triage_body(text):  # the section's lines alone: a heading moved by a line above it changes nothing
+    section = triage_section(text.splitlines())
+    return None if section is None else section[1]
   if rounds_lines(old) != rounds_lines(new):
     return "Rounds"
-  if triage_section(old.splitlines()) != triage_section(new.splitlines()):
+  if triage_body(old) != triage_body(new):
     return "triage"
   return None
 
@@ -615,7 +629,7 @@ def approve_respec(args, st: core.Store, spec: Path, root: Path, card: dict) -> 
     print(f"follow_up: {follow['unit']} overlaps {follow['overlaps']}: row {follow['row']}")
   if args.dry_run:
     return 0
-  if not (args.yes or st.config.get("mode") == "leavemealone"):
+  if not (args.yes or args.leavemealone or st.config.get("mode") == "leavemealone"):
     print(f"Approve respec {args.respec} of `{spec}` at review {rid}?")
     print("Options: Approve | Stop. Run again with --yes after the owner chose Approve.")
     return 0

@@ -18,6 +18,8 @@ TABLE_SEPARATOR = re.compile(r"^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$")
 HEADING_MARKER = re.compile(r"^\s*#+\s*$")
 FOLLOWS = re.compile(r"Follows:\s*(U\d+)")
 ROW_ID = re.compile(r"^\s*\|\s*(U\d+)\s*\|")
+UNITS_H2 = re.compile(r"^## (?:\d+\.?\s+)?Units\s*$")  # as approve_spec reads the Units heading
+INTERFACE = ("- Produces:", "- Consumes:")
 GLOBAL = "Global constraints"
 
 
@@ -88,6 +90,42 @@ def section_lines(text: str, heading: str) -> set[str]:
     if title.lstrip("#").strip() == heading:
       found |= {line.strip() for line in lines[start:end]}
   return found
+
+
+def unfenced(lines: list[str]) -> list[tuple[int, str]]:
+  """`(index, line)` for each line outside a fenced block, a fence's own lines left out (as `review.sections` reads
+  a fence)."""
+  out, fence = [], None
+  for number, line in enumerate(lines):
+    if fence:
+      if re.match(rf"^ {{0,3}}{fence[0]}{{{fence[1]},}}\s*$", line):
+        fence = None
+    elif (opener := core.FENCE_RE.match(line)) and not (opener.group(1)[0] == "`" and "`" in opener.group(2)):
+      fence = (opener.group(1)[0], len(opener.group(1)))
+    else:
+      out.append((number, line))
+  return out
+
+
+def interface_lines(body: str) -> set[str]:
+  """A unit file's `- Produces:` and `- Consumes:` lines outside fences: its plan section's Interfaces, never the
+  fenced issue body `graph` appends."""
+  return {line.strip() for _, line in unfenced(body.splitlines()) if line.strip().startswith(INTERFACE)}
+
+
+def interface_names(line: str) -> list[str]:
+  """The names an Interfaces line produces: its backticked names, else its text after the colon less a `(U<n>)`."""
+  return BACKTICKED.findall(line) or [re.sub(r"\s*\(U\d+\)\s*$", "", line.split(":", 1)[1]).strip()]
+
+
+def units_rows(text: str) -> dict:
+  """Row id to row line of the spec's last `## Units` table, fenced lines left out."""
+  lines = text.splitlines()
+  spans = [(start, end) for title, start, end in sections(text) if UNITS_H2.match(title)]
+  if not spans:
+    return {}
+  start, end = spans[-1]
+  return {m.group(1): line for n, line in unfenced(lines) if start <= n + 1 <= end and (m := ROW_ID.match(line))}
 
 
 def overlaps(a: tuple[int, int], b: tuple[int, int]) -> bool:
@@ -167,7 +205,7 @@ def touched(store: core.Store, handoff: str, text: str) -> dict:
   bodies = {u: core.read_text(hs.path("unit", u)) if hs.path("unit", u).is_file() else "" for u in units}
   lines_of = {u: {line.strip() for line in body.splitlines()} for u, body in bodies.items()}
   global_of = {u: section_lines(body, GLOBAL) for u, body in bodies.items()}
-  interfaces_of = {u: section_lines(body, "Interfaces") for u, body in bodies.items()}
+  interfaces_of = {u: interface_lines(body) for u, body in bodies.items()}
   for i, entry in enumerate(entries):  # a prior applied respec's added lines are part of each touched unit's body
     if i and entry.get("kind") == "respec" and entry.get("respec"):
       prior = load_json(respec_path(hs, f"{entry['respec']}.json")) or {}
@@ -203,22 +241,22 @@ def touched(store: core.Store, handoff: str, text: str) -> dict:
         if line in lines_of[u]:
           quoted = True
           (review if u in merged else hit).add(u)
-        if line in interfaces_of[u] and "Produces:" in line:  # the producer, and every unit whose Consumes names it
-          names = BACKTICKED.findall(line) or [line]
-          for v, held in interfaces_of.items():
-            if v == u or any("Consumes:" in l and any(name in l for name in names) for l in held):
-              hit.add(v)
-              overlap.setdefault(v, r)
+      if line.startswith("- Produces:"):  # its producer, and every unit whose Consumes names it
+        names = interface_names(line)
+        for v, held in interfaces_of.items():
+          if any(name and name in l for l in held for name in names):
+            hit.add(v)
+            overlap.setdefault(v, r)
     covered = any(overlaps(span, r) for span in carried.values())
     trivial = all(skipped(line) for line in prev[i1:i2] + new[j1:j2])
     if not covered and not quoted and not trivial:
       hit |= set(units) - merged
       review |= merged
-  rows = {}
-  for line in added_lines(ops, new):
-    follows, row = FOLLOWS.search(line), ROW_ID.match(line)
-    if follows and row:
-      rows.setdefault(follows.group(1), row.group(1))
+  rows, held = {}, units_rows(old_text)  # a new row of the Units table, its Follows naming the merged unit
+  for rid, line in units_rows(text).items():
+    follows = FOLLOWS.search(line)
+    if rid not in held and follows:
+      rows.setdefault(follows.group(1), rid)
   follow_ups = [{"unit": u, "overlaps": f"{rel}:{overlap[u][0]}-{overlap[u][1]}", "row": rows.get(u)}
                 for u in sorted(hit & merged)]
   return {"touched": sorted(hit), "untouched": sorted(set(units) - hit), "follow_ups": follow_ups,
@@ -268,11 +306,17 @@ def cleared(store: core.Store, root: Path, unit: str, respec: str, record: dict)
              for e in naming)
 
 
+def filed_at(store: core.Store, unit: str, respec: str) -> bool:
+  """Whether `unit` was filed and unmerged when R<n> was approved: the approval wrote its comment file then
+  (`respec_comment_<unit>_R<n>.md`), and for no other unit, so a unit filed later is still an unfiled one to R<n>."""
+  return store.path("file", f"respec_comment_{unit}_{respec}.md").is_file()
+
+
 def marks(store: core.Store, handoff: str) -> dict:
-  """Unit to `replan: R<n>` (unfiled) or `respec: R<n>` (filed, unmerged), derived on every read from the applied
-  respecs' `respec/R<n>.json` `touched`, `handoff_units.json`'s `corrected` and `rendered_under`, `state.json`'s saved
-  PR heads and the launch records; never written. Stopped and merged units are left out, and a handoff a later approval
-  supersedes carries none."""
+  """Unit to `replan: R<n>` (unfiled at R<n>'s approval, until `handoff_units.json`'s `corrected` names R<n>) or
+  `respec: R<n>` (filed and unmerged then), derived on every read from the applied respecs' `respec/R<n>.json` `touched`,
+  their comment files, `corrected`, `state.json`'s saved PR heads and the launch records; never written. Stopped and
+  merged units are left out, and a handoff a later approval supersedes carries none."""
   spec = spec_of(store, handoff)
   if latest_handoff(store, spec) != handoff:
     return {}
@@ -281,16 +325,15 @@ def marks(store: core.Store, handoff: str) -> dict:
   state = (load_json(hs.path("state")) or {}).get("units") or {}
   root = core.git_toplevel(spec if spec.is_absolute() else Path.cwd() / spec)
   out = {}
-  for count, entry in enumerate(entries_of(store, handoff, spec), start=1):
+  for entry in entries_of(store, handoff, spec):
     respec = entry.get("respec") if entry.get("kind") == "respec" else None
     applied = load_json(respec_path(hs, f"{respec}.json")) if respec else None
     for unit in (applied or {}).get("touched") or []:
       record = state.get(unit) or {}
       if unit in out or is_merged(record) or is_stopped(hs, unit):
         continue
-      if not record.get("number"):
-        row = units.get(unit) or {}
-        if respec not in (row.get("corrected") or []) and (row.get("rendered_under") or 0) < count:
+      if not filed_at(hs, unit, respec):  # unfiled at the approval: only `corrected` naming R<n> clears it
+        if respec not in ((units.get(unit) or {}).get("corrected") or []):
           out[unit] = f"replan: {respec}"
       elif not cleared(hs, root, unit, respec, record):
         out[unit] = f"respec: {respec}"
@@ -352,7 +395,7 @@ def actionable(store: core.Store, handoff: str) -> list:
     applied = load_json(respec_path(hs, f"{respec}.json")) if respec else None
     for unit in (applied or {}).get("touched") or []:
       record = state.get(unit) or {}
-      if not record.get("number") or not eligible(hs, unit, record):
+      if not filed_at(hs, unit, respec) or not eligible(hs, unit, record):  # an unfiled unit's replan posts nothing
         continue
       if not respec_path(hs, f"{respec}.{unit}.posted").is_file():
         out.append(("post", respec, unit))
