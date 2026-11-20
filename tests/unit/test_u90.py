@@ -114,6 +114,18 @@ def marks(world):
   return rs.marks(handoff_store(world), HID)
 
 
+@pytest.fixture(autouse=True)
+def home(tmp_path, monkeypatch):
+  """`~/.superegm` under `tmp_path`: no test reads the owner's registry."""
+  monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+
+def ticked(world):
+  """The tick's fetch record ok and `refs/superegm/tick-base` at HEAD, the root clean on main."""
+  core.atomic_write(world.artifacts / "tick" / "fetch.json", {"at": "2026-11-15T00:00:00Z", "ok": True, "stderr": ""})
+  git(["update-ref", "refs/superegm/tick-base", "HEAD"], world.repo)
+
+
 @pytest.mark.parametrize("command", ["gate --pass", "apply --yes"])
 def test_gate_refuses_a_replan_unit(world, command):
   # U07 unfiled, its plan review converged on its current body, then respec R1 applied with U07 in `touched`
@@ -129,3 +141,17 @@ def test_gate_refuses_a_replan_unit(world, command):
   code, out = world.run(*argv, "--spec", world.spec)
   assert code == 1, out
   assert "gate: U07 needs a re-plan after respec R1" in out
+
+
+def test_next_routes_a_replan_unit_to_plan(world):
+  # every unit has a plan section; U07 unfiled with a converged review on its current body and `replan: R1`
+  s_world(world)
+  converge_all(world)
+  ticked(world)
+  code, out = world.run("next", "--handoff", HID)
+  assert (code, out.strip()) == (0, "file")  # without the mark the handoff is ready to file
+  respec(world, spec_lines(), ["U07"])
+  ticked(world)
+  result_code, stdout = world.run("next", "--handoff", HID)
+  assert stdout.strip() == "plan"
+  assert result_code == 0
