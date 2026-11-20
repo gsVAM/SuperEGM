@@ -244,12 +244,18 @@ class Handoff(core.Handoff):
     # U90: each unit's `rendered_under`, how many of the handoff's entries existed when its section's text was
     # written (a unit new to `handoff_units.json` now; a record without the key the opening, 1), kept until a
     # `Corrected:` row records a new respec; its Design range is carried from there through each later line map.
-    self.entries = [e for e in entries if e.get("handoff_id") == self.handoff_id] or [approval]
+    self.entries = respec.entries_of(store, self.handoff_id, self.design_path) or [approval]
+    applied = {e["respec"] for e in self.entries if e.get("kind") == "respec" and e.get("respec")}
+    for uid, unit in self.plan.units.items():
+      unknown = [r for r in unit.corrected if r not in applied]
+      if unknown:
+        raise core.HandoffError(f"graph: {uid}: Corrected names {', '.join(unknown)}, "
+                                f"no applied respec of handoff {self.handoff_id}")
     prior = json.loads(core.read_text(store.path("units"))) if store.path("units").is_file() else {}
     self.prior_units = (prior.get("units") or {}) if prior.get("handoff_id") == self.handoff_id else {}
     self.rendered_under = {uid: (self.prior_units[uid].get("rendered_under") or 1) if uid in self.prior_units
                            else len(self.entries) for uid in self.plan.units}
-    self._line_maps = {}
+    self._spans = None
     spec_text = core.read_text(self.design_path)
     named = units_section(spec_text)
     for uid, unit in self.plan.units.items():
@@ -299,27 +305,20 @@ class Handoff(core.Handoff):
         raise core.HandoffError(f"graph: {uid} is filed (#{record['number']}) and its section differs "
                                 "from the stored handoff_plan.md")
 
-  def line_map(self, i: int) -> list:
-    """The line map from the handoff's entry `i-1` to entry `i`: a respec's `respec/R<n>.json` `line_map`, else the
-    approved texts' opcodes; none (the identity) when a text is in no commit."""
-    if i not in self._line_maps:
-      entry = self.entries[i]
-      record = (respec.load_json(respec.respec_path(self.store, f"{entry['respec']}.json"))
-                if entry.get("kind") == "respec" and entry.get("respec") else None) or {}
-      ops = record.get("line_map")
-      if ops is None:
-        old, new = (review.approved_text(self.design_path, e) for e in self.entries[i - 1:i + 1])
-        ops = respec.opcodes(old.splitlines(), new.splitlines()) if old is not None and new is not None else []
-      self._line_maps[i] = ops
-    return self._line_maps[i]
-
   def design_span(self, uid: str) -> tuple[int, int]:
     """The unit's Design range at the latest approval: the plan text's, read under `rendered_under` and carried
-    through each later entry's line map (the plan file is never rewritten)."""
-    _, a, b, _ = self.plan.units[uid].design_range
-    for i in range(max(self.rendered_under.get(uid) or 1, 1), len(self.entries)):
-      a, b = respec.carry(self.line_map(i), a, b)
-    return a, b
+    through the line map of each later pair of approved texts by U85's `respec.history` and `respec.carried_spans`
+    (the plan file is never rewritten); `history` refuses an approval no commit holds."""
+    if self._spans is None:
+      records = {u: {"design_range": {"start": unit.design_range[1], "end": unit.design_range[2]},
+                     "rendered_under": self.rendered_under[u]}
+                 for u, unit in self.plan.units.items() if self.filed(u) is None}
+      if any(r["rendered_under"] < len(self.entries) for r in records.values()):
+        _, entries, _, maps = respec.history(self.store, self.handoff_id)
+        self._spans = respec.carried_spans(records, entries, maps)
+      else:  # every section written under the latest approval: nothing to carry
+        self._spans = {u: (r["design_range"]["start"], r["design_range"]["end"]) for u, r in records.items()}
+    return self._spans[uid]
 
   def render_unit(self, uid: str) -> str:
     if self.filed(uid) is not None:
@@ -363,6 +362,7 @@ class Handoff(core.Handoff):
       for u in g.order:
         if set(self.plan.units[u].corrected) - set(corrected[u]):  # the section rewritten in the new coordinates
           self.rendered_under[u] = len(self.entries)
+          self._spans = None
         corrected[u] = list(self.plan.units[u].corrected)
     hashes = {uid: core.sha256_text(self.render_unit(uid)) for uid in g.order}
     core.atomic_write(self.store.path("plan"), self.plan.text)

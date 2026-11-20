@@ -14,7 +14,7 @@ import subprocess
 from pathlib import Path
 
 import superegm as core
-from superegm import gate, graph, launch, report, respec, review, runcard
+from superegm import gate, graph, launch, report, review, runcard
 from superegm.approve_spec import units_section
 
 WRITES = frozenset({"chain", "runcards", "file"})  # the store kinds this subcommand writes
@@ -104,9 +104,10 @@ def plan_review_stopped(hs: core.Store, uid: str):
   return rid if stops and not proceeded(hs, rid, stops[-1].get("at")) else None
 
 
-def plan_review_due(hs: core.Store, uid: str, sha: str) -> bool:
-  """Absent, not converged, converged on other body bytes, or a round recorded after the converged one."""
-  converged, converged_sha = gate.converged_review(hs, uid)  # the gate's two tests
+def plan_review_due(hs: core.Store, uid: str, sha: str, marks: dict | None = None) -> bool:
+  """Absent, not converged, converged on other body bytes, or a round recorded after the converged one; `marks`
+  the caller's one read of `respec.marks` (U90)."""
+  converged, converged_sha = gate.converged_review(hs, uid, marks)  # the gate's two tests
   if not converged or converged_sha != sha:
     return True
   latest, _ = review.latest_cycle(hs, "plan", uid)
@@ -154,14 +155,14 @@ def planning_line(hs: core.Store, state: dict, spec: Path, text: str) -> str:
     return "plan"
   numbers = {u: (r or {}).get("number") for u, r in (state.get("units") or {}).items()}
   unfiled = [u for u in units["order"] if not numbers.get(u)]
-  marks = respec.marks(hs, hs.handoff_id) if hs.handoff_id else {}
+  marks = gate.handoff_marks(hs)
   if any((marks.get(u) or "").startswith("replan: ") for u in unfiled):
     return "plan"  # a respec touched an unfiled unit: its section is rewritten from the corrected spec (U90)
   for uid in unfiled:
     rid = plan_review_stopped(hs, uid)
     if rid:
       return f"waiting review-plan: {rid} stopped"
-  if any(plan_review_due(hs, u, units["units"][u]["body_sha256"]) for u in unfiled):
+  if any(plan_review_due(hs, u, units["units"][u]["body_sha256"], marks) for u in unfiled):
     return "review-plan"
   if unfiled or not core.receipt_ok(state):
     return "file"

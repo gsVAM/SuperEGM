@@ -36,14 +36,26 @@ def require_latest(handoff, name: str) -> None:
     raise core.HandoffError(f"{name}: {error}") from None
 
 
-def converged_review(store: core.Store, uid: str):
-  """(converged, the converged round's artifact_sha256) of the unit's latest plan review in the handoff's
-  `reviews/`, found by kind and artifact, never by id; U04 writes `converged` as `yes | no | by ruling R<n>`, U57 `by proceed R<n>` (the ruling's
-  `sha256`, ahead of the converged-round test). A unit carrying `replan: R<n>` (U90) has no reviewed body: refused
-  `gate: <U> needs a re-plan after respec R<n>`, which `run` and `apply` relay."""
-  mark = (respec.marks(store, store.handoff_id) if store.handoff_id else {}).get(uid) or ""
+def handoff_marks(store: core.Store) -> dict:
+  """U85's `respec.marks` of the store's handoff, read once per call by `run`, `apply` and `next` (U90)."""
+  return respec.marks(store, store.handoff_id) if store.handoff_id else {}
+
+
+def require_replanned(uid: str, marks: dict) -> None:
+  """A unit carrying `replan: R<n>` (U90) has no reviewed body: refused `gate: <U> needs a re-plan after respec R<n>`."""
+  mark = marks.get(uid) or ""
   if mark.startswith("replan: "):
     raise core.HandoffError(f"gate: {uid} needs a re-plan after respec {mark.removeprefix('replan: ')}")
+
+
+def converged_review(store: core.Store, uid: str, marks: dict | None = None):
+  """(converged, the converged round's artifact_sha256) of the unit's latest plan review in the handoff's
+  `reviews/`, found by kind and artifact, never by id; U04 writes `converged` as `yes | no | by ruling R<n>`, U57 `by proceed R<n>` (the ruling's
+  `sha256`, ahead of the converged-round test). A `replan: R<n>` unit (U90) is refused by `require_replanned`
+  over `marks`, the caller's one read of `respec.marks`: `run` and `next` pass theirs; `apply` passes none, its
+  `require_gate` having refused the unit already."""
+  if marks is not None:
+    require_replanned(uid, marks)
   latest = None
   for path in store.path("reviews").glob("*/review.json"):
     record = json.loads(core.read_text(path))
@@ -62,6 +74,12 @@ def converged_review(store: core.Store, uid: str):
 
 
 def require_gate(handoff) -> None:
+  """The gate passed on the current plan and bodies. An unfiled `replan: R<n>` unit is refused first (U90): a
+  respec changes every body's spec hash, so the hash test alone would hide the re-plan from a resumed `apply`."""
+  marks = handoff_marks(handoff.store)
+  for uid in handoff.graph.order:
+    if handoff.filed(uid) is None:
+      require_replanned(uid, marks)
   state = handoff.state
   if not state.get("gate_plan_sha256") or not state.get("gate_bodies_sha256"):
     raise core.HandoffError("the gate has not passed: run gate --pass first")
@@ -106,8 +124,9 @@ def run(args):
   if not unfiled:
     raise core.HandoffError("gate: nothing to file (every unit is filed)")
   hashes = body_hashes(handoff)
+  marks = handoff_marks(handoff.store)
   for uid in unfiled:
-    converged, sha = converged_review(handoff.store, uid)
+    converged, sha = converged_review(handoff.store, uid, marks)
     if not converged:
       raise core.HandoffError(f"gate: {uid} plan review not converged")
     if sha != hashes[uid]:
