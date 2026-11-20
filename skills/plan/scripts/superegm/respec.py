@@ -295,3 +295,102 @@ def marks(store: core.Store, handoff: str) -> dict:
       elif not cleared(hs, root, unit, respec, record):
         out[unit] = f"respec: {respec}"
   return out
+
+
+OPEN_FILE = re.compile(r"^(R\d+)\.open\.json$")
+
+
+def open(store: core.Store, handoff: str) -> list:  # noqa: A001, the interface's name (spec section 7.6)
+  """The open respecs of `handoff`, each its `respec/R<n>.open.json` record: the file exists, no approval entry names
+  it, its unit (when it has one) is not stopped and `handoff` is the latest approval's. Withdrawn and applied respecs
+  are left out."""
+  spec = spec_of(store, handoff)
+  if latest_handoff(store, spec) != handoff:
+    return []
+  hs = core.handoff_store(store, handoff)
+  folder = respec_path(hs)
+  if not folder.is_dir():
+    return []
+  named = {e.get("respec") for e in core.load_approvals(store, spec) if e.get("handoff_id") == handoff}
+  out = []
+  for path in sorted(folder.iterdir(), key=lambda p: (len(p.name), p.name)):
+    match = OPEN_FILE.match(path.name)
+    if not match or match.group(1) in named:
+      continue
+    record = load_json(path) or {}
+    if record.get("unit") and is_stopped(hs, record["unit"]):
+      continue
+    out.append(record | {"id": match.group(1)})
+  return out
+
+
+def live_launch(store: core.Store, unit: str) -> bool:
+  data = load_json(store.path("launches", unit)) or {}
+  return any(isinstance(e, dict) and e.get("status") == "running" for e in data.get("launches") or [])
+
+
+def eligible(store: core.Store, unit: str, record: dict) -> bool:
+  """A unit a respec may post to or relaunch: not stopped or merged, no pending owner decision (section 7.2), no live
+  launch of its own. Launch slots are not read: a relaunch is queued for `launch`'s ready-again set, which takes one."""
+  from superegm.review import open_decisions  # at call time: the review loop is heavy to import
+  return not (is_merged(record) or is_stopped(store, unit) or open_decisions(store, unit) or live_launch(store, unit))
+
+
+def actionable(store: core.Store, handoff: str) -> list:
+  """`("post" | "relaunch", "R<n>", "<unit>")` for each applied respec of `handoff`: a post while the unit's comment file
+  exists and `respec/R<n>.<unit>.posted` is absent, a relaunch while its `respec: R<n>` mark stands, each on an
+  eligible unit only. Nothing is written and nothing launched; a withdrawn handoff has none."""
+  spec = spec_of(store, handoff)
+  if latest_handoff(store, spec) != handoff:
+    return []
+  hs = core.handoff_store(store, handoff)
+  state = (load_json(hs.path("state")) or {}).get("units") or {}
+  standing = marks(store, handoff)
+  out = []
+  for entry in entries_of(store, handoff, spec):
+    respec = entry.get("respec") if entry.get("kind") == "respec" else None
+    applied = load_json(respec_path(hs, f"{respec}.json")) if respec else None
+    for unit in (applied or {}).get("touched") or []:
+      record = state.get(unit) or {}
+      if not record.get("number") or not eligible(hs, unit, record):
+        continue
+      if not respec_path(hs, f"{respec}.{unit}.posted").is_file():
+        out.append(("post", respec, unit))
+      if standing.get(unit) == f"respec: {respec}":
+        out.append(("relaunch", respec, unit))
+  return out
+
+
+SKILLS = frozenset(["wave"])  # the skills whose card `respec posted` accepts: the wave posts the comment
+CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own
+
+
+def register(subparsers):
+  p = subparsers.add_parser("respec", help="a respec's records (spec section 7.6)")
+  action = p.add_subparsers(dest="action", required=True)
+  posted = core.add_parser(action, "posted", "record that the wave posted respec R<n>'s comment on a unit's issue")
+  posted.add_argument("--respec", required=True, help="R<n>")
+  posted.add_argument("--unit", required=True)
+  posted.add_argument("--comment", required=True, help="the posted comment's id")
+  p.set_defaults(run=run, writes=WRITES)
+
+
+def run(args):
+  return {"posted": record_posted}[args.action](args)
+
+
+def record_posted(args) -> int:
+  """`respec posted`: write `respec/R<n>.<unit>.posted` (`{respec, unit, comment, at}`) in the handoff's directory."""
+  core.require_runcard(args, SKILLS)
+  st = core.store(core.git_toplevel(Path.cwd()))
+  if not re.fullmatch(r"R\d+", args.respec):
+    raise core.HandoffError(f"respec posted: {args.respec} is not R<n>")
+  if not respec_path(st, f"{args.respec}.json").is_file():
+    raise core.HandoffError(f"respec posted: respec {args.respec} is not applied")
+  if args.unit not in (load_json(respec_path(st, f"{args.respec}.json")) or {}).get("touched", []):
+    raise core.HandoffError(f"respec posted: {args.unit} is not touched by {args.respec}")
+  path = respec_path(st, f"{args.respec}.{args.unit}.posted")
+  core.atomic_write(path, {"respec": args.respec, "unit": args.unit, "comment": args.comment, "at": core.now_iso()})
+  core.journal(st, f"{args.unit} respec {args.respec} comment {args.comment} posted")
+  print(f"posted: {path.name}")
+  return 0
