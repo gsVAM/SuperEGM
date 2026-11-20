@@ -101,3 +101,27 @@ def test_the_judges_ruling_word_is_the_cards_mode(world, mode, word):
   code, text = world.run("decision", "rule", "--unit", "U02", "--decision", owner_qid, "--ruling", "foreman-1-1 allowed",
                          "--by", "judges:p1", "--runcard", card)
   assert code != 0 and "decision: foreman-1-1 allowed is the owner's alone" in text, text
+
+
+def test_unconverged_verdict_reaches_the_owner(world, tmp_path):
+  """No convergence at the cap: the owner's point 1 question gains one line naming `verdict.json` and each judge's last choice."""
+  pid, question = contest(world, tmp_path)
+  folder = world.artifacts / "judges" / pid
+  card = json.loads((folder / "panel.json").read_text(encoding="utf-8"))["runcard"]
+  votes = {"fable": "a", "opus": "b", "astra": "a"}
+  for rnd in range(1, 6):
+    for judge, option in votes.items():
+      verdict = world.repo.parent / f"{pid}-r{rnd}-{judge}.md"
+      verdict.write_text(f"Q1: ({option})\n", encoding="utf-8")
+      assert world.run("judges", "record", "--panel", pid, "--round", rnd, "--judge", judge, "--verdict", verdict,
+                       "--isolation", "clean", "--runcard", card)[0] == 0
+    assert world.run("judges", "diff", "--panel", pid, "--round", rnd, "--runcard", card)[0] == 0
+    if rnd == 1:  # below the cap the verdict leaves the owner no question
+      assert world.run("judges", "verdict", "--panel", pid, "--runcard", card)[0] == 2
+      assert not (folder / "owner-question.md").exists()
+  assert world.run("judges", "verdict", "--panel", pid, "--runcard", card)[0] == 2
+  owner = (folder / "owner-question.md").read_text(encoding="utf-8")
+  assert owner.startswith(question), "point 1's question as today"
+  added = owner[len(question):].splitlines()
+  assert len(added) == 1, "one added line"
+  assert f"judges/{pid}/verdict.json" in added[0] and "fable: finding upheld" in added[0] and "opus: finding overruled" in added[0]
