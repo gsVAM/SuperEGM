@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Files a confirmed handoff plan as GitHub issues, with the tracking issue, one sub-issue per unit and the blocked-by links.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the file skill body, phase 4 of the SuperEGM loop (design section 10); `[--handoff <id>]` and a frozen handoff's refusal (U20); the resume of a started filing, the frozen mode, `next wait` and `next clear` under the chain (U56); the answered chain record taken as the owner's (U70). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the file skill body, phase 4 of the SuperEGM loop (design section 10); `[--handoff <id>]` and a frozen handoff's refusal (U20); the resume of a started filing, the frozen mode, `next wait` and `next clear` under the chain (U56); the answered chain record taken as the owner's (U70); the gate's re-plan refusal relayed (U90). -->
 
 # file
 
@@ -160,6 +160,11 @@ store holds now (`handoff_units.json`'s `body_sha256`), records the pair of
 hashes the rest of the filing is checked against, and prints
 `gate passed: <k> unfiled units converged`. Its refusals:
 
+*   `gate: <U> needs a re-plan after respec R<n>`: a respec touched the
+    unfiled unit (its `replan: R<n>` mark), whatever its review converged on;
+    a resumed `apply` refuses the same. Relay the line: the owner returns to
+    `/superegm:plan` to rewrite the section with a `Corrected: R<n>` row, then
+    `/superegm:review-plan`; this skill ends.
 *   `gate: <unit> plan review not converged`: the unit has no converged plan
     review, or a round was recorded after the converged one (the review is
     due again). The owner returns to `/superegm:review-plan`; this skill ends.

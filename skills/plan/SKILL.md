@@ -12,7 +12,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: phase 2 of the SuperEGM loop (the plan file, graph, scan, decide); EGM's approval, review gate, dry run and filing steps live in review-spec, review-plan and file; `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the `Tier:` field (U33); the split rules, the `width:` line and the header's wave plan (U29); what a Step holds (1.2.1 §6.5); the scope-cite warning stated (U79); the `units.*` limits stated (U42); the driven wait and the typed run on a wait record, the frozen mode (U45); shared files are a merge order, `Blocked by` carries code dependencies (U65); the answered chain record taken as the owner's (U70). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: phase 2 of the SuperEGM loop (the plan file, graph, scan, decide); EGM's approval, review gate, dry run and filing steps live in review-spec, review-plan and file; `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the `Tier:` field (U33); the split rules, the `width:` line and the header's wave plan (U29); what a Step holds (1.2.1 §6.5); the scope-cite warning stated (U79); the `units.*` limits stated (U42); the driven wait and the typed run on a wait record, the frozen mode (U45); shared files are a merge order, `Blocked by` carries code dependencies (U65); the answered chain record taken as the owner's (U70); a `replan: R<n>` section rewritten with a `Corrected: R<n>` row (U90). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the handoff skill. Not part of google/elephant-goldfish-model. -->
 
@@ -99,6 +99,13 @@ drafting.
     Keep every section already there; a filed unit's section (one with an
     issue number in `state.json`) is frozen and stays byte-identical.
     Set `Tier:` on every section not yet filed (a filed one stays as it is, doable without the row) by section 2's criteria (`difficult`, `doable` or `easy`): it picks the builder's model and effort, and a wrong tier costs rounds.
+    A unit `superegm respec` marks `replan: R<n>` (an unfiled unit a respec touched; `gate` refuses it
+    `gate: <U> needs a re-plan after respec R<n>` and `next` prints `plan`) gets its section rewritten from
+    the corrected spec, its Design range in the new approval's lines, with a `Corrected: R<n>` field row
+    (`| Corrected | R<n> |`, comma-separated when several respecs touched it); `graph` alone records the row
+    and clears the mark (a `decide` render does not), and the rewritten body goes back through
+    `/superegm:review-plan`. An untouched unfiled unit is not rewritten: `graph` carries its Design range to
+    the new approval's lines.
 2.  Nothing is committed under the repository's docs: the plan file stays
     outside the tree, and the store keeps its copy.
 
