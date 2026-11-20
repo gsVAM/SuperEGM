@@ -22,10 +22,10 @@ SPEC_RANGE_TEXT = "### 4.2 Retries\nA retry waits before it tries again.\n"
 AMENDMENTS_TEXT = "amendment 1: the wait is one second.\n"
 
 
-def evidence(world):
+def evidence(world, body=BODY_TEXT):
   """The five evidence files of a head contest, written beside the repo: `comments.md`, the diff, the body, `r1/spec_range.md`, `r1/amendments.md`."""
   folder = world.repo.parent / "evidence"
-  files = {"comments.md": COMMENTS_TEXT, "diff": DIFF_TEXT, "body": BODY_TEXT,
+  files = {"comments.md": COMMENTS_TEXT, "diff": DIFF_TEXT, "body": body,
            "r1/spec_range.md": SPEC_RANGE_TEXT, "r1/amendments.md": AMENDMENTS_TEXT}
   for name, text in files.items():
     (folder / name).parent.mkdir(parents=True, exist_ok=True)
@@ -33,7 +33,7 @@ def evidence(world):
   return [str(folder / name) for name in files]
 
 
-def contest(world, tmp_path):
+def contest(world, tmp_path, body=BODY_TEXT):
   """A normal-mode head review of U07 with a high finding the builder contested; its opened panel and question text."""
   seed(world)
   runcard = world.card("wave")
@@ -42,7 +42,7 @@ def contest(world, tmp_path):
                         "--reason", "change-review-1-1=the test covers it", "--runcard", runcard)
   assert code == 0, out
   path = Path(out.splitlines()[0])
-  flags = [part for item in evidence(world) for part in ("--evidence", item)]
+  flags = [part for item in evidence(world, body) for part in ("--evidence", item)]
   code, out = world.run("judges", "open", "--question", str(path), *flags, "--parent", runcard)
   assert code == 0, out
   return out.strip(), path.read_text(encoding="utf-8")
@@ -55,6 +55,50 @@ def test_head_contest_goes_to_the_panel(world, tmp_path):
   astra_brief = (world.artifacts / "judges" / pid / "round-1" / "brief-astra.md").read_text(encoding="utf-8")
   assert all(name in astra_brief for name in ("comments.md", "diff", "body", "r1/spec_range.md", "r1/amendments.md"))
   assert AMENDMENTS_TEXT in astra_brief and SPEC_RANGE_TEXT in astra_brief and COMMENTS_TEXT in astra_brief
+
+
+def record_round(world, pid, card, rnd, votes):
+  """Record each judge's vote for round `rnd` (`votes` maps judge to option letter), as `judges record` takes it."""
+  for judge, option in votes.items():
+    verdict = world.repo.parent / f"{pid}-r{rnd}-{judge}.md"
+    verdict.write_text(f"Q1: ({option})\n", encoding="utf-8")
+    code, text = world.run("judges", "record", "--panel", pid, "--round", rnd, "--judge", judge, "--verdict", verdict,
+                           "--isolation", "clean", "--runcard", card)
+    assert code == 0, text
+
+
+def test_astra_evidence_fence_outgrows_the_evidence(world, tmp_path):
+  """An evidence file holding a ``` line is fenced by a longer run, so it never ends its block early."""
+  body = "### U07\n\n```python\nretry()\n```\n\n````markdown\nnested\n````\n"
+  pid, _ = contest(world, tmp_path, body)
+  astra = (world.artifacts / "judges" / pid / "round-1" / "brief-astra.md").read_text(encoding="utf-8")
+  assert f"`````\n{body.rstrip(chr(10))}\n`````\n" in astra  # one longer than the body's longest run of four
+  for text in (COMMENTS_TEXT, DIFF_TEXT):  # a file with no backtick keeps the three-backtick fence
+    assert f"```\n{text.rstrip(chr(10))}\n```\n" in astra
+
+
+def panel_with_round_one(world, tmp_path):
+  pid, _ = contest(world, tmp_path)
+  folder = world.artifacts / "judges" / pid
+  card = json.loads((folder / "panel.json").read_text(encoding="utf-8"))["runcard"]
+  record_round(world, pid, card, 1, {"fable": "a", "opus": "b", "astra": "a"})
+  return pid, card, folder
+
+
+@pytest.mark.parametrize("change", ["edited", "removed"])
+def test_a_changed_evidence_file_refuses_the_astra_brief(world, tmp_path, change):
+  """`judges: evidence <path> changed since open` when an evidence file's sha256 differs or the file is gone; the refused
+  `judges diff` leaves the round as it was: no `diff.md`, no next round's briefs."""
+  pid, card, folder = panel_with_round_one(world, tmp_path)
+  target = world.repo.parent / "evidence" / "r1" / "amendments.md"
+  if change == "edited":
+    target.write_text("amendment 1: the wait is two seconds.\n", encoding="utf-8")
+  else:
+    target.unlink()
+  code, text = world.run("judges", "diff", "--panel", pid, "--round", 1, "--runcard", card)
+  assert code != 0 and f"judges: evidence {target.resolve()} changed since open" in text, text
+  assert not (folder / "round-1" / "diff.md").exists()
+  assert not (folder / "round-2").exists()
 
 
 def journal_of(st):
