@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the report subcommand (spec section 11): the per-batch wave report, the idle rules
-# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31); its own `ci_wait_minutes` config key, moved from `__init__` (U32); the board's tier column (U33); `waiting proceed` and a proceed closing a point-1 decision (U92); the `conflict` view and its board action (U62); a unit waiting on an open respec is not active (U86).
+# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31); its own `ci_wait_minutes` config key, moved from `__init__` (U32); the board's tier column (U33); `waiting proceed` and a proceed closing a point-1 decision (U92); the `conflict` view and its board action (U62); a unit waiting on an open respec is not active, its board row and merge round included (U86).
 
 """superegm report: rewrite `wave_<n>_report.md` from the store, the plan and the spec and print its path, the
 board and the idle, pending and loop lines. It opens the card's handoff as `status` does (`core.locate`,
@@ -42,8 +42,7 @@ def run(args):
   foremen = {uid: core.load_foreman(st, uid) for uid in launched}
   entries = {uid: load_launches(st, uid) for uid in launched}
   states = {uid: unit_state(uid, views[uid], foremen[uid], entries[uid], card, config, now) for uid in launched}
-  for uid in respec_waiting(st, [uid for uid in launched if states[uid] == "active"]):
-    states[uid] = "waiting respec"  # spec section 7.6: the raising unit waits, holding no slot, so the wave can end
+  states = with_respec_waiting(st, states)  # spec section 7.6: the raising unit waits, holding no slot, so the wave can end
   free = config["max_in_flight"] - sum(states[uid] == "active" for uid in launched)  # a pending unit holds no slot (amendment 5)
   named_idle = {entry["unit"] for entry in card.get("idle") or []}  # holds no slot, launched or not
   ready = [uid for uid in (state.get("status") or {}).get("ready") or [] if uid not in launched and uid not in named_idle]
@@ -132,7 +131,8 @@ def board_table(handoff, state: dict, card: dict, now: float) -> str:
   views = {uid: unit_view(state, uid) for uid in handoff.graph.order}
   foremen = {uid: core.load_foreman(st, uid) for uid in handoff.graph.order}
   launches = {uid: load_launches(st, uid) for uid in handoff.graph.order}
-  states = {uid: unit_state(uid, views[uid], foremen[uid], launches[uid], card, config, now) for uid in handoff.graph.order}
+  states = with_respec_waiting(st, {uid: unit_state(uid, views[uid], foremen[uid], launches[uid], card, config, now)
+                                    for uid in handoff.graph.order})
   # The card's latest reason for the unit (a later `--idle` replaces the cell; `## Idle` lists them all), else the
   # CI bound without its growing minute count, so an idle row stays equal across passes.
   reasons = dict((e["unit"], e["reason"]) for e in card.get("idle") or [] if e["unit"] in views)
@@ -379,6 +379,14 @@ def loop_ended(states: dict, ready_unlaunched: list, free_slots: int, merge_roun
     return True, (f"every launched unit is clean, landed, stopped, pending, idle or {' or '.join(f'waiting {k}' for k, _ in kinds)}"
                   f" ({'; '.join(f'waiting {k}: ' + ', '.join(uids) for k, uids in kinds)})")
   return True, "every launched unit is clean, landed, stopped, pending or idle"
+
+
+def with_respec_waiting(st, states: dict) -> dict:
+  """The states with `waiting respec` for every `active` or `clean` unit `respec_waiting` names: the loop line, the
+  merge rounds and the board read the same state, so a unit waiting on its correction gets no foreman round, no merge
+  round and no `continuing` (its next action `none`)."""
+  waiting = set(respec_waiting(st, [uid for uid, word in states.items() if word in ("active", "clean")]))
+  return {uid: "waiting respec" if uid in waiting else word for uid, word in states.items()}
 
 
 def respec_waiting(st, active: list) -> list:

@@ -33,7 +33,7 @@ builder per marked unit as the builder account; the builder pushes its unit bran
 with concluded CI gets one review round from a **foreman**: a per-unit
 elephant dispatched through its own adapter (`superegm:foreman`,
 `omitClaudeMd: true`), which dispatches the head's goldfish panel
-(zero-context, read-only, each through its own adapter), records the
+(zero-context, read-only, each via its own adapter), records the
 findings, posts one review comment bound to the reviewed commit, and returns
 one word (the word table).
 
@@ -70,7 +70,7 @@ Open a reference only when sent to it:
    Every `status` pass under this card rewrites the board (the `## Units` table `report` prints) between `<!-- superegm:board -->` and `<!-- /superegm:board -->` in the tracking issue's body:
    one GitHub write per pass and none when the rows are unchanged; the inbox stays the action list.
 3. Run `superegm report --runcard '<CARD>'`. It derives all from the store, the plan and the spec (refusing as `status` does on a spec changed since its approval); idle units come from this card alone. Its lines: the report path, the board, `idle:`, `pending:`, `loop:`.
-4. Rule every `pending:` item first, at its decision point in `references/decision_points.md`: the record's `point`, printed as `(point <p>, <source>)`, names the point, never the source's words (a point-5 decision's source is `review <id> round <n>`, as point 1's is). Before asking, read the issue's comments (`GH_HOST=github.com gh api repos/<repo>/issues/<n>/comments --paginate`): an owner's `**Ruling:**` already posted binds once `decision rule --posted <comment id>` records it, as the `ruling` bullet of `references/rulings.md` says; then an `interrupted` launch with no decision on it → Decision point 3.
+4. Rule every `pending:` item first, at its decision point in `references/decision_points.md`: the record's `point`, printed as `(point <p>, <source>)`, names the point, never the source's words (a point-5 decision's source is `review <id> round <n>`, as point 1's is). Before asking, read the issue's comments (`GH_HOST=github.com gh api repos/<repo>/issues/<n>/comments --paginate`): an owner's `**Ruling:**` already posted binds once `decision rule --posted <comment id>` records it, as `references/rulings.md`'s `ruling` bullet says; then an `interrupted` launch with no decision on it → Decision point 3.
 5. Run `report` again. `loop: ended` and no 5b line in step 2 → The end. Otherwise run batches, the
    first from its step 5: step 2 was its wait, and its lines are handled.
 
@@ -92,15 +92,15 @@ ignored except `landed` and `stalled`; `conflict` lines need nothing before step
 2. `closed` lines: a non-builder actor closed the PR unmerged or the issue → the owner has ruled; run `superegm decision rule --unit <U> --ruling 'stop the unit' --by <login> --posted closed:<n> --runcard '<CARD>'`. The builder account closed it → Decision point 3 (source `closed <n>`).
 3. `exit` and `status` lines, one folded decision per unit. Record the exit: `superegm record-launch --unit <U> --exit <code> --runcard '<CARD>'`. It prints `failed resume` → step 6's `launch-builder` now (fresh), no decision. Then: `DONE` and `DONE_WITH_CONCERNS` need nothing (the head is reviewed at step 5); `BLOCKED` or `NEEDS_CONTEXT`, an exit with no PR (`pr=none`), or an interrupted launch → Decision point 3. `stalled`: `superegm record-launch --unit <U> --exit stalled --runcard '<CARD>'`, then Decision point 3 with the stall facts unless stopped; `kill_failed` idle.
 3b. `superegm review ingest` for every unit with an open PR (never a landed unit), awaiting-merge units included, stopped units excluded: `--unit <U> --runcard '<CARD>'` records the PR's new review threads as `external:<login>` findings into the latest posted round and prints `<n> ingested` (`0 ingested` before its first posted round). `outcome: revise`: the unit is ready again; `launch` marks it at step 6 when a slot is free (never `launch-builder` here). `outcome: cap-reached` → Decision point 2 (source `review <head-review-id> cap`). Exit 1: report the unit and the refusal line in chat; the batch goes on. A GitHub read or record refusal may clear on the next batch's retry, as does `unfinished ingest is not on the latest posted round`; `comment over 65,536 bytes`, `is not set: the builder's login is unknown`, `header present on` and a `review ingest: comment:<n>:` scan refusal repeat until the owner resolves them by hand, so say so each batch.
-4. `ruling` lines: an owner's `**Ruling:**` comment; apply it as the `ruling` bullet of `references/rulings.md` says.
-5. `superegm foreman dispatch` for every active unit with a head, `deadline` included: `--unit <U> --runcard '<CARD>'`. It prints `<dispatch-id> <child-card>` when §11's predicate holds (CI concluded, latest launch terminal, no round posted since it, no decision pending, review not stalled) and refuses otherwise: skip a refused unit, except exit 1 `recovered <word>`, which is the foreman's word for a round the PR already carries. `foreman dispatch` alone evaluates the predicate. Dispatch every accepted unit's foreman **in one message**, each through the `superegm:foreman` adapter, named `foreman-<U>-<dispatch-id>`, in the foreground, with the brief of `references/foreman_brief.md` filled in. Then `word_action` per returned word (the table below).
+4. `ruling` lines: an owner's `**Ruling:**` comment; apply it as `references/rulings.md`'s `ruling` bullet says.
+5. `superegm foreman dispatch` for every active unit with a head, `deadline` included: `--unit <U> --runcard '<CARD>'`. It alone evaluates §11's predicate (CI concluded, latest launch terminal, no round posted since it, no decision pending, review not stalled): it prints `<dispatch-id> <child-card>` when it holds and refuses otherwise: skip a refused unit, except exit 1 `recovered <word>`, which is the foreman's word for a round the PR already carries. Dispatch every accepted unit's foreman **in one message**, each through the `superegm:foreman` adapter, named `foreman-<U>-<dispatch-id>`, in the foreground, with `references/foreman_brief.md`'s brief filled in. Then `word_action` per returned word (the table below).
 5b. `respec.actionable` (§7.6; the raising unit waits): `respec post R<n> <U> #<i> '<f>'` → `superegm scan --comment '<f>'` (a finding: say so, post nothing), then `GH_HOST=github.com gh issue comment <i> -R OWNER/NAME --body-file '<f>'`, then `superegm respec posted --respec R<n> --unit <U> --comment <the URL's id>`; `respec relaunch` → step 6, reason `respec`.
 6. `superegm launch`: `--idle <the report's idle list> --runcard '<CARD>'` (omit `--idle` on `none`) marks the ready units up to the free slots and prints `in flight:` and `marked:`; a clean `conflict` unit is marked once for its **merge round**. Per marked unit: `superegm launch-builder --unit <U> --round <n> --runcard '<CARD>'` (`<n>` is the launch count) alone: `launch-builder` starts the builder and records the launch, detached in its own session, and returns at once. A `launch-builder` refusal makes the unit idle for this invocation, no retry: `superegm report --idle '<U>=launch-builder: <reason>' --runcard '<CARD>'`.
 7. `superegm report`: `python3 '<HELPER>' report --runcard '<CARD>'`, then `python3 '<HELPER>' notify --runcard '<CARD>'` (the owner's `~/.superegm/notify` hook gets the new inbox lines; a failing or slow hook never stops the wave). If a decision was opened this batch, pause (outside SUPEREGM_ROLE=driver, above): ask the owner at its decision point and run `report` again once ruled. Else `loop: ended` and no 5b line of a non-idle unit → The end; else the next batch.
 
 A launched unit's `unit_state`, in order: `landed`, `stopped`, `pending`,
 `idle`, `waiting proceed` (no slot; ask the owner to proceed again), CI-wait
-`idle`, `clean`, else `active`; only `active` is dispatched. `loop_ended`: no
+`idle`, `clean`, else `active`; `active`/`clean` with an open respec: `waiting respec`; only `active` is dispatched. `loop_ended`: no
 active unit, no ready unlaunched unit with a free slot, nor a merge round `launch` would mark. CI pending or absent
 `ci_wait_minutes` (default 30) after the card saw the head: CI-wait `idle`;
 a new head restarts it.
@@ -123,8 +123,8 @@ dispatch):
 - `owner: <ids>` → `decision open` for the owner's findings, ruled by the owner alone (no judge panel):
   no relaunch, no slot.
 - `error`, `target-moved`, or a return that is none of these words (no word
-  included) → redispatch: the head is reviewed again at the
-  next batch's step 5, unless `review status` exits 5 (stalled) →
+  included) → redispatch: the head is reviewed again at
+  the next step 5, unless `review status` exits 5 (stalled) →
   `superegm report --idle '<U>=review stalled' --runcard '<CARD>'`.
 - `blocked` (step 2's builder close, step 3's cases) → Decision point 3.
 - `recovered <word>` from `foreman dispatch` → the row of `<word>`.

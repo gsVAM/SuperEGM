@@ -88,7 +88,7 @@ def run(args):
 
 def respec_lines(handoff) -> list:
   """Spec section 7.6: `open: respec R<n>` for each open respec (the line integrate refuses on), then `<U> held: respec
-  R<n>` for each unit `respec.marks` marks `respec:` (no merge is offered for its head, however its review ended), then
+  R<n>` for each unit `respec.marks` marks `respec:`, or a filed unit it marks `replan:` (its comment file missing) (no merge is offered for its head, however its review ended), then
   the wave's step 5b work, one line per `respec.actionable` entry: `respec post R<n> <U> #<issue> '<comment file>'`
   and `respec relaunch R<n> <U>`. A failed read is never "no respec": it prints the one line `respec: read failed:
   <error>`, which integrate refuses on as it does an open respec."""
@@ -103,7 +103,8 @@ def respec_lines(handoff) -> list:
     return [f"respec: read failed: {error}"]
   units = handoff.state.get("units") or {}
   lines = ([f"open: respec {r['id']}" for r in opened]
-           + [f"{uid} held: respec {mark.removeprefix('respec:').strip()}" for uid, mark in marks.items() if mark.startswith("respec:")])
+           + [f"{uid} held: respec {mark.split(':', 1)[1].strip()}" for uid, mark in marks.items()
+              if mark.startswith("respec:") or (units.get(uid) or {}).get("number")])
   for kind, rid, uid in work:
     if kind == "post":
       comment = handoff.store.path("file", f"respec_comment_{uid}_{rid}.md")

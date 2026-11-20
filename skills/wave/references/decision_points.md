@@ -1,5 +1,5 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
-Added by SuperEGM (gsVAM), 2026: the `owner:` row of the word table and the three decision points, moved out of the wave skill's SKILL.md (the owner's ruling: a 24K skill body is context bloat); the `owner: <ids>` decision's allowed options, one per id, and its leavemealone sentence (U25); Decision point 5, a head's accept below the cap (U35); a stalled launch at point 3 and the carve-out (U31); a failed resume excluded from point 3 (U63). -->
+Added by SuperEGM (gsVAM), 2026: the `owner:` row of the word table and the three decision points, moved out of the wave skill's SKILL.md (the owner's ruling: a 24K skill body is context bloat); the `owner: <ids>` decision's allowed options, one per id, and its leavemealone sentence (U25); Decision point 5, a head's accept below the cap (U35); a stalled launch at point 3 and the carve-out (U31); a failed resume excluded from point 3 (U63); the `held: respec` routes to `launch` and point 3's `respec` route (U86). -->
 
 # The decision points
 

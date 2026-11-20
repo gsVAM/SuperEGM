@@ -227,7 +227,8 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
 
 
 def respec_held(hs: core.Store, uid: str) -> bool:
-  """Whether `respec.marks` marks the unit `respec: R<n>` (spec section 7.6): its head is held, no merge offered.
+  """Whether `respec.marks` marks the unit (spec section 7.6): its head is held, no merge offered. A filed unit whose
+  comment file is missing reads `replan: R<n>` and is held as `respec: R<n>` is: its correction is still to come.
   Read here on every call, never from `state.json`, which other commands replace whole. A failed read holds the unit
   (fail closed): no merge is offered on a head a mark may hold, and the inbox's `respec` item (`respec_read_items`)
   names the failure, so the owner sees why the merge is withheld."""
@@ -235,7 +236,7 @@ def respec_held(hs: core.Store, uid: str) -> bool:
   if not hs.handoff_id:
     return False
   try:
-    return str(respec.marks(hs, hs.handoff_id).get(uid) or "").startswith("respec:")
+    return bool(respec.marks(hs, hs.handoff_id).get(uid))
   except (core.HandoffError, ValueError, OSError):
     return True
 
