@@ -669,3 +669,109 @@ def test_launch_header_names_the_u86_changes():
   header = Path(launch.__file__).read_text(encoding="utf-8").splitlines()[2]
   assert all(p in header for p in ("a held view gets no merge round", "holds no slot while no launch of it runs",
                                    "`ready_again` waits for a pending owner decision"))
+
+
+# ---------------------------------------------------------------- round 5: the review of head 12c1df4
+
+
+def test_a_missing_comment_file_still_holds_the_head(world, monkeypatch):
+  # astra-4-1: a filed unit whose respec comment file is gone reads `replan: R1`: still waiting, never corrected; the inbox
+  # offers no merge and status prints it held (integrate's refusal)
+  import superegm
+  import test_builders as tb
+  from conftest import REPO, make_pr
+  from superegm import inbox, respec
+  s, card, handoff, _ = tb.seed(world, units=("U07", "U08"))
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  world.run("launch", "--runcard", card)
+  head = "c" * 40
+  make_pr(world.gh, 71, head, closes=[(REPO, 8)])
+  world.gh.graphql[8] = [{**world.gh.prs[71], "repository": {"nameWithOwner": REPO}}]
+  tb.launched(s, "U08", "exited 0")
+  tb.foreman(s, "U08", [{"round": 1, "runcard": card, "launch": 1, "head": head, "phase": "posted", "dispatch_id": "d1",
+                         "outcome": "clean", "posted_at": "2026-11-03T01:00:00Z"}])
+  apply_r1(s, "U08")
+  s.path("file", "respec_comment_U08_R1.md").unlink()
+  code, out = world.run("status", "--runcard", card)
+  assert code == 0 and respec.marks(s, handoff).get("U08") == "replan: R1", out
+  assert "U08 held: respec R1" in out.splitlines(), out
+  state, foreman = tb.state_of(s), superegm.load_foreman(s, "U08")
+  assert not [i for i in inbox.unit_items(s, REPO, state, "U08", foreman) if i["kind"] == "merge"]
+  assert inbox.respec_held(s, "U08") is True
+
+
+def test_a_missing_comment_file_gets_no_merge_round(world, monkeypatch):
+  # astra-4-1: `launch`'s merge offer reads the same hold
+  import test_u62 as u62
+  s, card, hid, _ = u62.seed(world)
+  u62.with_rounds(s, world, 3)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  head = u62.first_round(world, s, card)
+  u62.write_foreman(s, "U07", [{**u62.CLEAN, "head": head, "posted_at": "2099-01-01T00:00:00Z"}])
+  u62.save_pr(s, "U07", 71, head, "CONFLICTING")
+  apply_r1(s, "U07")
+  s.path("file", "respec_comment_U07_R1.md").unlink()
+  code, out = world.run("launch", "--runcard", card)
+  assert code == 0 and "marked: none" in out, out
+
+
+def board_row(out, uid):
+  row = next(line for line in out.splitlines() if line.startswith(f"| {uid} #"))
+  return [c.strip() for c in row.strip().strip("|").split("|")]
+
+
+def test_report_waits_on_an_open_respec_of_a_clean_conflicting_unit(world, monkeypatch):
+  # astra-4-2: a clean CONFLICTING unit that raised an open R1 is no merge round in report: it waits for the respec;
+  # codebase-details-4-1: the board shows it `waiting respec`, next action none
+  import test_u62 as u62
+  from test_u85 import open_respec
+  s, card, hid, _ = u62.seed(world)
+  u62.with_rounds(s, world, 3)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  head = u62.first_round(world, s, card)
+  u62.write_foreman(s, "U07", [{**u62.CLEAN, "head": head, "posted_at": "2099-01-01T00:00:00Z"}])
+  u62.save_pr(s, "U07", 71, head, "CONFLICTING")
+  open_respec(s, "R1", "U07")
+  code, out = world.run("report", "--runcard", card)
+  assert code == 0, out
+  loop = next(line for line in out.splitlines() if line.startswith("loop: "))
+  assert "merge round" not in loop and "waiting respec: U07" in loop, loop
+  cells = board_row(out, "U07")
+  assert cells[1] == "waiting respec" and cells[7] == "none", cells  # no merge round offered
+
+
+def test_board_shows_a_respec_waiting_unit_as_waiting(world, monkeypatch):
+  # codebase-details-4-1: the unit with no PR the loop line already ends on: its board row says the same, and the wave
+  # skill names the state
+  import test_builders as tb
+  from test_u85 import open_respec
+  s, card, handoff, _ = tb.seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0
+  tb.launched(s, tb.UNIT, "exited 0")
+  open_respec(s, "R1", tb.UNIT)
+  code, out = world.run("report", "--runcard", card)
+  assert code == 0, out
+  cells = board_row(out, tb.UNIT)
+  assert cells[1] == "waiting respec" and cells[7] == "none", cells
+  assert "`waiting respec`" in text("skills/wave/SKILL.md")
+
+
+@pytest.mark.parametrize("reader, error", [("marks", "ValueError"), ("actionable", "OSError"), ("open", "ValueError")])
+def test_launch_refuses_on_a_malformed_respec_file(world, monkeypatch, reader, error):
+  # change-review-4-1: `launch` refuses in one line naming the read failure, never a traceback; nothing is marked
+  import test_builders as tb
+  from superegm import respec
+  s, card, handoff, _ = tb.seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  exc = ValueError("respec/R1.json: bad JSON") if error == "ValueError" else OSError("respec/R1.json: unreadable")
+  monkeypatch.setattr(respec, reader, lambda store, handoff: (_ for _ in ()).throw(exc))
+  code, out = world.run("launch", "--runcard", card)
+  assert code == 1 and f"launch: respec marks unreadable: {exc}" in out and "Traceback" not in out, out
+  assert f"{tb.UNIT} marked for launch" not in journal_of(s)
+
+
+def test_decision_points_header_names_u86():
+  # codebase-details-4-2
+  header = text("skills/wave/references/decision_points.md").splitlines()[1]
+  assert "(U86)" in header
