@@ -223,3 +223,75 @@ def touched(store: core.Store, handoff: str, text: str) -> dict:
                 for u in sorted(hit & merged)]
   return {"touched": sorted(hit), "untouched": sorted(set(units) - hit), "follow_ups": follow_ups,
           "line_map": ops, "merged_review": sorted(review - hit)}
+
+
+CLEARING = ("DONE", "DONE_WITH_CONCERNS")  # a builder status that clears a mark on an unchanged head
+
+
+def is_stopped(store: core.Store, unit: str) -> bool:
+  return bool(core.load_foreman(store, unit).get("stopped"))
+
+
+def latest_handoff(store: core.Store, spec: Path) -> str | None:
+  latest = core.load_approval(store, spec)
+  return (latest or {}).get("handoff_id")
+
+
+def commit_time(root: Path, sha: str) -> float | None:
+  """The committer time of `sha` in `root`, as `status` reads a worktree head's (U31); None when git cannot."""
+  try:
+    return float(core.run_git(["log", "-1", "--format=%ct", sha], root).strip())
+  except (core.HandoffError, ValueError, OSError):
+    return None
+
+
+def cleared(store: core.Store, root: Path, unit: str, respec: str, record: dict) -> bool:
+  """A filed unit's `respec: R<n>` is cleared when its saved PR head is a commit made after the `started_at` of a
+  launch whose `respecs` name R<n>, or when such a launch exited 0, the saved head equals the `head` it recorded and its
+  `builder_status` is `DONE` or `DONE_WITH_CONCERNS`."""
+  head = (record.get("pr") or {}).get("head")
+  if not head:
+    return False
+  data = load_json(store.path("launches", unit)) or {}
+  naming = [e for e in data.get("launches") or [] if isinstance(e, dict) and respec in (e.get("respecs") or [])]
+  if not naming:
+    return False
+  when = commit_time(root, head)
+  for entry in naming:
+    try:
+      started = core.epoch(entry.get("started_at"))
+    except (TypeError, ValueError):
+      continue
+    if when is not None and when > started:
+      return True
+  return any(e.get("status") == "exited 0" and e.get("head") == head and e.get("builder_status") in CLEARING
+             for e in naming)
+
+
+def marks(store: core.Store, handoff: str) -> dict:
+  """Unit to `replan: R<n>` (unfiled) or `respec: R<n>` (filed, unmerged), derived on every read from the applied
+  respecs' `respec/R<n>.json` `touched`, `handoff_units.json`'s `corrected` and `rendered_under`, `state.json`'s saved
+  PR heads and the launch records; never written. Stopped and merged units are left out, and a handoff a later approval
+  supersedes carries none."""
+  spec = spec_of(store, handoff)
+  if latest_handoff(store, spec) != handoff:
+    return {}
+  hs = core.handoff_store(store, handoff)
+  units = (load_json(hs.path("units")) or {}).get("units") or {}
+  state = (load_json(hs.path("state")) or {}).get("units") or {}
+  root = core.git_toplevel(spec if spec.is_absolute() else Path.cwd() / spec)
+  out = {}
+  for count, entry in enumerate(entries_of(store, handoff, spec), start=1):
+    respec = entry.get("respec") if entry.get("kind") == "respec" else None
+    applied = load_json(respec_path(hs, f"{respec}.json")) if respec else None
+    for unit in (applied or {}).get("touched") or []:
+      record = state.get(unit) or {}
+      if unit in out or is_merged(record) or is_stopped(hs, unit):
+        continue
+      if not record.get("number"):
+        row = units.get(unit) or {}
+        if respec not in (row.get("corrected") or []) and (row.get("rendered_under") or 0) < count:
+          out[unit] = f"replan: {respec}"
+      elif not cleared(hs, root, unit, respec, record):
+        out[unit] = f"respec: {respec}"
+  return out
