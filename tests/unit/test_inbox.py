@@ -58,6 +58,7 @@ HEAD = lambda n, findings, **more: REVIEW("head", "head-U01-c1", {i: ROUND(i, fi
 POSTED = lambda n=1, outcome="revise": [{"round": i, "phase": "posted", "outcome": outcome, "launch": i, "runcard": "wave-1"} for i in range(1, n + 1)]
 D = lambda point, source, **more: [{"id": "q1", "point": point, "source": source, "question": "q", "asked_at": "t", **more}]
 U = lambda **more: {"U01": {"pr": 70, "head": "a" * 40, "ci": "green", **more}}
+PANEL = "q\nThe judges did not converge (judges/p1/verdict.json), their last choices: Q1 fable: finding upheld; opus: finding overruled"  # U88: a high or medium head contest lists only with the unconverged panel's line
 KINDS = {"decision", "cap", "contested", "merge", "stalled", "escalated", "redesign", "test-delta", "owner", "kill_failed", "wave"}
 
 
@@ -66,7 +67,7 @@ KINDS = {"decision", "cap", "contested", "merge", "stalled", "escalated", "redes
   (U(decisions=D(3, "comment 77")), [("U01", "decision", [OPTION('77')], "U01/decision/q1")]),
   (U(decisions=D(5, "review head-U01-c1 round 1", options=["accept", "revise"])),
    [("U01", "decision", [ruling_form(3, "q1", o) for o in ("accept", "revise")], "U01/decision/q1")]),
-  (U(decisions=D(1, "review head-U01-c1 round 1"), rounds=POSTED(), reviews=HEAD(1, F("high", "medium"), builder_contested=[{"fid": f"foreman-1-{i}", "reason": "r"} for i in (1, 2)])),
+  (U(decisions=D(1, "review head-U01-c1 round 1", question=PANEL), rounds=POSTED(), reviews=HEAD(1, F("high", "medium"), builder_contested=[{"fid": f"foreman-1-{i}", "reason": "r"} for i in (1, 2)])),
    [("U01", "contested", CONTESTED(f'foreman-1-{i}').split(" | "), f"U01/contested/q1/foreman-1-{i}") for i in (1, 2)]),
   (U(decisions=D(1, "review head-U01-c1 round 5") + D(2, "review head-U01-c1 cap", id="q2"), rounds=POSTED(5), reviews=HEAD(5, F("high"), builder_contested=[{"fid": "foreman-1-1", "reason": "r"}])),
    [("U01", "cap", CAP.split(" | "), "U01/cap/q2")]),
@@ -137,7 +138,7 @@ def test_notify_runs_the_hook_once_with_the_new_lines(world, tmp_path, monkeypat
 def test_a_point_1_decision_lists_each_finding_until_its_own_ruling(world):
   """Round 2 (astra-1-1): point 1 takes one ruling per contested finding, so a ruled fid leaves and the other stays."""
   card = open_wave_card(world)
-  s = seed(world, **U(decisions=D(1, "review head-U01-c1 round 1"), rulings=[{"decision": "q1", "ruling": "foreman-1-1 finding upheld — r"}],
+  s = seed(world, **U(decisions=D(1, "review head-U01-c1 round 1", question=PANEL), rulings=[{"decision": "q1", "ruling": "foreman-1-1 finding upheld — r"}],
                       rounds=POSTED(), reviews=HEAD(1, F("high", "medium"), builder_contested=[{"fid": f"foreman-1-{i}", "reason": "r"} for i in (1, 2)])))
   assert [i["fingerprint"] for i in inbox_items(s, [s.handoff_id])] == ["U01/contested/q1/foreman-1-2", card]
 
