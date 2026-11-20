@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Merges the landed units of a wave into the base branch and closes the handoff.
 ---
 
-<!-- Added by SuperEGM (gsVAM), 2026: the integrate skill (spec section 12); close's issue closes, `--note` and `--close --patch` (U32); the follow-ups given as known and quoted (U51); the post-mortem run after `close` (U78). -->
+<!-- Added by SuperEGM (gsVAM), 2026: the integrate skill (spec section 12); close's issue closes, `--note` and `--close --patch` (U32); the follow-ups given as known and quoted (U51); the post-mortem run after `close` (U78); the respec refusals (U86). -->
 
 # Integrate (phase 7)
 
@@ -42,6 +42,10 @@ every writing call carries `--runcard`.
    merged PR is a unit with `pr` set and `ci` null (`status` reads no CI of a merged PR). Without `--close`, one listed unit ends the
    invocation here: print the list, say that the owner merges, closes or re-types
    `/superegm:wave`, and go to Step 4. With `--close` (`--patch` or not), go to Step 3.
+4. Respecs (design section 7.6): without `--close`, the same `status` output refuses the integrate round while it prints
+   `open: respec R<n>` (print `integrate: respec R<n> is open`) or `<U> held: respec R<n>` (print
+   `integrate: <U> holds respec R<n>`): say that the wave applies and relaunches it, and go to Step 4. A withdrawn
+   respec or a stopped unit's mark is not printed and does not refuse.
    Say that the owner merges in the inbox (`/superegm:inbox`); where the base ruleset restricts updates to config.owners, the inbox runs the admin bypass, `gh pr merge --admin`, once the owner says yes to it.
 
 ## Step 2: one integrate round
