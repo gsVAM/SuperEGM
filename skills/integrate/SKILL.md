@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Merges the landed units of a wave into the base branch and closes the handoff.
 ---
 
-<!-- Added by SuperEGM (gsVAM), 2026: the integrate skill (spec section 12); close's issue closes, `--note` and `--close --patch` (U32); the follow-ups given as known and quoted (U51); the post-mortem run after `close` (U78); the respec refusals (U86). -->
+<!-- Added by SuperEGM (gsVAM), 2026: the integrate skill (spec section 12); close's issue closes, `--note` and `--close --patch` (U32); the follow-ups given as known and quoted (U51); the post-mortem run after `close` (U78); the respec refusals (U86); the one-time offer of `/superegm:retro` after the post-mortem (U87). -->
 
 # Integrate (phase 7)
 
@@ -127,6 +127,8 @@ It prints the path of `<handoff dir>/postmortem.md`. Tell the owner that path an
 tables: the total wall time (Header, total wall seconds: the earliest first launch to the latest merge), the unit with the most rounds
 (Units, head rounds) and the reviewer with the most overruled findings (Reviewers, overruled,
 summed across its rows: a reviewer has one row per kind); the figures are the report's, the one sum aside. A refused `close` ends the skill without it.
+Then offer the retrospective, once: `/superegm:retro --handoff '<id>'` walks the report's Lessons with the owner and lands
+what they agree in one commit (design section 7.7). The skill runs nothing of it; the owner types the command when they want it.
 
 ## Step 4: the end
 
