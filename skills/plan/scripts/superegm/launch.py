@@ -68,13 +68,17 @@ def launch(args, card):
   stopped_numbers = {issue["number"] for issue in core.gh_pages(f"repos/{config['repo']}/issues?labels={label}&state=all&per_page=100")}
   stopped = {uid for uid, record in state["units"].items() if record.get("number") in stopped_numbers}
   idle = set(filter(None, args.idle.split(",")))
-  views = {uid: {**summary["units"][uid], "launched": state["units"][uid].get("launched"), "stopped": uid in stopped}
-           for uid in handoff.graph.order}
-  flying = [uid for uid in handoff.graph.order if in_flight(st, uid, views[uid], idle)]
-  # spec section 7.6: a unit whose `respec: R<n>` mark is actionable (`respec.actionable`: not stopped, merged, pending a
-  # decision or running) is ready again for its relaunch, and waits for a slot as any ready unit does
+  # spec section 7.6: a unit whose `respec: R<n>` mark stands is held (no merge round, `conflict_again`); one whose mark
+  # is actionable (`respec.actionable`: not stopped, merged, pending a decision or running) is ready again for its
+  # relaunch, holds no slot until that launch is recorded (as `ready_again`) and waits for a free one as any ready unit
   from superegm import respec  # at call time: `respec` reads `launch`'s records
-  again = {unit for kind, _, unit in respec.actionable(st, st.handoff_id) if kind == "relaunch"} if st.handoff_id else set()
+  held = {u for u, m in respec.marks(st, st.handoff_id).items() if m.startswith("respec:")} if st.handoff_id else set()
+  views = {uid: {**summary["units"][uid], "launched": state["units"][uid].get("launched"), "stopped": uid in stopped,
+                 "held": uid in held} for uid in handoff.graph.order}
+  actionable = respec.actionable(st, st.handoff_id) if st.handoff_id else []
+  again = {unit for kind, _, unit in actionable if kind == "relaunch" and unit in views and unit not in stopped
+           and unit not in idle and not views[unit].get("landed") and not merged(views[unit])}
+  flying = [uid for uid in handoff.graph.order if uid not in again and in_flight(st, uid, views[uid], idle)]
   for uid in handoff.graph.order:
     if uid in stopped or uid in idle or views[uid].get("landed") or merged(views[uid]):
       continue
@@ -140,9 +144,10 @@ def conflict_again(view: dict, foreman: dict, launches: list, parallel: bool) ->
   shows the conflict), it has an authorizing outcome (spec section 4.2) with no launch recorded since that outcome's
   launch and the pull request's head still its head (`latest_clean`), no launch of it is running, it is not `waiting
   proceed` and it waits on no open decision and no stop. Once the merge launch is recorded the rule no longer holds,
-  so the unit is relaunched once per authorizing outcome."""
+  so the unit is relaunched once per authorizing outcome. A view `held` by a standing `respec: R<n>` mark (spec section
+  7.6) gets no merge round: its relaunch, reason `respec`, carries the correction instead."""
   from superegm.report import pending_decisions  # imported here: `report` imports this module
-  if (not (parallel and view.get("conflict")) or view.get("stopped") or foreman.get("stopped")
+  if (not (parallel and view.get("conflict")) or view.get("held") or view.get("stopped") or foreman.get("stopped")
       or pending_decisions(foreman)):
     return False
   head = view.get("head")

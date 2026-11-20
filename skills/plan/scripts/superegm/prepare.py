@@ -106,7 +106,8 @@ def prepare(args, card):
   head_launch = own[-1] if own else None  # the latest launch that started before the head commit; `launch` stays the latest launch
   entry["head_launch"] = head_launch["round"] if head_launch else None
   write_amendments(r / "amendments.md", launch_builder.amendments_for(st, unit, core.unit_file_body(st.path("unit", unit))),
-                   head_launch.get("started_at") if head_launch else None, corrections_of(st, unit, head_launch))
+                   head_launch.get("started_at") if head_launch else None,
+                   corrections_of(st, unit, contract_launch(launches, head_launch, head)))
   for key in ("dod_runs", "test_delta"):  # an earlier head's gates never stand for this one: `post` refuses until `collect`
     entry.pop(key, None)
   entry.update({"head": head, "phase": "prepared", "merge_base": merge_base, "worktree": str(tree)})
@@ -155,6 +156,17 @@ def astra_brief(st, root: Path, unit: str, r: Path, diff: bytes, ci: dict, pr_bo
   core.atomic_write(r / "astra_brief.md", "".join(f"# {name}\n\n````\n{text}\n````\n\n" for name, text in sections) + section)
   runner = foreman.runner_path()
   return f"astra: ok {runner}" if runner else "astra: not installed"
+
+
+def contract_launch(launches: list, head_launch, head: str):
+  """The launch whose contract this head is reviewed against (spec section 7.6): the latest launch after `head_launch`
+  that exited 0 reporting `DONE` or `DONE_WITH_CONCERNS` with its recorded `head` this head (a builder that found the
+  head already correct pushes nothing, and `respec.cleared` takes that evidence), else `head_launch` itself."""
+  from superegm.respec import CLEARING  # at call time, as `launch_builder` reads `respec`
+  after = (head_launch or {}).get("round") or 0
+  vouching = [l for l in launches if (l.get("round") or 0) > after and l.get("status") == "exited 0"
+              and l.get("head") == head and l.get("builder_status") in CLEARING]
+  return vouching[-1] if vouching else head_launch
 
 
 def corrections_of(st, unit: str, launch) -> list[dict]:

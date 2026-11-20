@@ -41,12 +41,13 @@ every writing call carries `--runcard`.
    not listed: `close` lands it and closes its issue. The saved snapshot has no merged field: a
    merged PR is a unit with `pr` set and `ci` null (`status` reads no CI of a merged PR). Without `--close`, one listed unit ends the
    invocation here: print the list, say that the owner merges, closes or re-types
-   `/superegm:wave`, and go to Step 4. With `--close` (`--patch` or not), go to Step 3.
-4. Respecs (design section 7.6): without `--close`, the same `status` output refuses the integrate round while it prints
-   `open: respec R<n>` (print `integrate: respec R<n> is open`) or `<U> held: respec R<n>` (print
-   `integrate: <U> holds respec R<n>`): say that the wave applies and relaunches it, and go to Step 4. A withdrawn
-   respec or a stopped unit's mark is not printed and does not refuse.
+   `/superegm:wave`, and go to Step 4. With `--close` (`--patch` or not), go to item 4, then Step 3.
    Say that the owner merges in the inbox (`/superegm:inbox`); where the base ruleset restricts updates to config.owners, the inbox runs the admin bypass, `gh pr merge --admin`, once the owner says yes to it.
+4. Respecs (design section 7.6), `--close` included: item 2's `status --wait` output, after its event lines, refuses
+   the integrate round and the close while it prints `open: respec R<n>` (print `integrate: respec R<n> is open`) or
+   `<U> held: respec R<n>` (print `integrate: <U> holds respec R<n>`): say that the wave applies and relaunches it,
+   and go to Step 4. A withdrawn respec or a stopped unit's mark is not printed and does not refuse. Otherwise go on:
+   to Step 3 with `--close`, else to Step 2.
 
 ## Step 2: one integrate round
 

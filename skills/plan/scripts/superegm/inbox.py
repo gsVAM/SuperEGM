@@ -238,11 +238,13 @@ def respec_held(hs: core.Store, uid: str) -> bool:
     return False
 
 
-def conflict_items(repo: str, state: dict, uid: str, foreman: dict, launches: list, parallel: bool) -> list:
+def conflict_items(repo: str, state: dict, uid: str, foreman: dict, launches: list, parallel: bool,
+                   held: bool = False) -> list:
   """U62 (spec section 6.1): one `conflict` item beside an unlanded unit while its saved view is `conflict`, a
   stopped unit's included, naming what resolves it: the merge round `launch` marks (`launch.conflict_again`), the
   owner's hand (a stopped unit, or an approval without `rounds`, 1.2's rule), or the rule applied again once the
-  running launch ends or the owner rules; a revising unit's next fix round carries the merge orders."""
+  running launch ends or the owner rules; a revising unit's next fix round carries the merge orders. A unit `held` by a
+  standing `respec: R<n>` mark (spec section 7.6) gets no merge round: its respec relaunch carries the correction."""
   view = report.unit_view(state, uid)
   if not report.conflicting(state, uid) or view["landed"]:
     return []
@@ -250,6 +252,8 @@ def conflict_items(repo: str, state: dict, uid: str, foreman: dict, launches: li
     then = "the unit is stopped: the owner resolves it"
   elif not parallel:
     then = "approved under 1.2.0: the owner resolves it"
+  elif held:
+    then = "held by a respec: its relaunch comes first"
   elif conflict_again({**view, "conflict": True}, foreman, launches, parallel):
     then = "a merge round is marked at the next `launch`"
   elif ((latest_posted(foreman) or {}).get("outcome") == "revise" and not report.pending_decisions(foreman)
@@ -462,7 +466,8 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
         continue
       live.add(uid)
       found += unit_items(hs, repo, state, uid, foreman, mode)
-      found += conflict_items(repo, state, uid, foreman, load_launches(hs, uid), parallel)  # U62 (spec section 6.1)
+      held = report.conflicting(state, uid) and respec_held(hs, uid)  # spec section 7.6: read only where it matters
+      found += conflict_items(repo, state, uid, foreman, load_launches(hs, uid), parallel, held)  # U62 (spec section 6.1)
     if units:
       for path in review_dirs(hs, spec, spec in read_specs):
         rev = json.loads(core.read_text(path / "review.json"))

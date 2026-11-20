@@ -111,6 +111,11 @@ def prepare(args, card):
   foreman_data = core.load_foreman(st, unit)
   pr = (record.get("pr") or {}).get("number") if rnd >= 2 else None
   merge = merge_mode(handoff.graph.parallel, record.get("pr") if pr else None, foreman_data)  # spec section 6.1
+  # spec section 7.6: the standing mark, read once and before anything starts; a held unit's merge is never `alone`, whose
+  # orders forbid any change beyond the merge: its relaunch carries the correction with the merge (`with-fix`)
+  standing = respec_standing(st, unit)
+  if standing and merge == "alone":
+    merge = "with-fix"
   bin_dir = st.path("launches", f"{unit}_r{rnd}_bin")
   for value in (sys.executable, HELPER, st.handoff_id, unit, handoff.repo_root):  # write_precheck's values, before any write
     if "'" in str(value):
@@ -201,7 +206,9 @@ def prepare(args, card):
   # the one behaviour (amendment 10): the wrapper started detached, then the launch recorded `running`
   pid = start_detached(["/bin/sh", "-c", line], st.path("launches", f"{unit}_r{rnd}.log"), dict(os.environ))
   launches = load_launches(st, unit)
-  reason = "merge" if merge == "alone" else "respec" if respec_marked(st, unit) else launch_reason(launches, foreman_data)
+  # `respec` when the prompt carries the standing mark's correction: reason and `respecs` from the same reads, before the start
+  reason = ("merge" if merge == "alone" else "respec" if standing in {c["id"] for c in corrections}
+            else launch_reason(launches, foreman_data))
   entry = {"round": rnd, "reason": reason, "worktree": str(worktree), "branch": branch,
            "started_at": core.now_iso(), "status": "running",
            "respecs": [c["id"] for c in corrections],  # the corrections the prompt carries, never one approved after it (U86)
@@ -754,14 +761,17 @@ def corrections_for(st, unit: str) -> list[dict]:
   return out
 
 
-def respec_marked(st, unit: str) -> bool:
-  """Whether the unit carries a `respec: R<n>` mark (`respec.marks`) as its launch is recorded: the launch's reason is then
-  `respec` (spec section 7.6)."""
+def respec_standing(st, unit: str) -> str | None:
+  """The R<n> of the unit's standing `respec: R<n>` mark (`respec.marks`, spec section 7.6), None without one. Read before
+  the builder starts, so a failing read refuses the launch and never leaves a builder running unrecorded."""
   from superegm import respec
+  if not st.handoff_id:
+    return None
   try:
-    return str(respec.marks(st, st.handoff_id).get(unit) or "").startswith("respec:")
+    mark = str(respec.marks(st, st.handoff_id).get(unit) or "")
   except core.HandoffError:
-    return False
+    return None
+  return mark.split(": ", 1)[1] if mark.startswith("respec: ") else None
 
 
 def launch_reason(launches: list, foreman: dict) -> str:

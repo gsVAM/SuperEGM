@@ -65,7 +65,8 @@ def run(args):
     record["pr"] = pr
     record["status"] = None
   if args.wait:
-    print("\n".join(wait_events(handoff, args.wait, card)))
+    # the respec lines follow the events: integrate's Step 1 and the wave's batches run only `status --wait`
+    print("\n".join(wait_events(handoff, args.wait, card) + respec_lines(handoff)))
     return 0
   for uid in args.confirm_landed or []:
     view = unit_view(handoff, uid)
@@ -80,23 +81,35 @@ def run(args):
   if post_board(handoff, card, {**summary, "units": {uid: fingerprint(unit) for uid, unit in summary["units"].items()}}):
     core.save_state(handoff.artifact_dir, handoff.state)
   core.print_status(handoff, summary, open_blocking)
-  print("\n".join(respec_lines(handoff)))
+  if lines := respec_lines(handoff):
+    print("\n".join(lines))
   return 0
 
 
 def respec_lines(handoff) -> list:
   """Spec section 7.6: `open: respec R<n>` for each open respec (the line integrate refuses on), then `<U> held: respec
-  R<n>` for each unit `respec.marks` marks `respec:` (no merge is offered for its head, however its review ended)."""
+  R<n>` for each unit `respec.marks` marks `respec:` (no merge is offered for its head, however its review ended), then
+  the wave's step 5b work, one line per `respec.actionable` entry: `respec post R<n> <U> #<issue> '<comment file>'`
+  and `respec relaunch R<n> <U>`."""
   from superegm import respec  # at call time: `respec` reads `launch`, which this module's callers import
   hid = handoff.store.handoff_id
   if not hid:
     return []
   try:
     opened, marks = respec.open(handoff.store, hid), respec.marks(handoff.store, hid)
+    work = respec.actionable(handoff.store, hid)
   except core.HandoffError:
     return []
-  return ([f"open: respec {r['id']}" for r in opened]
-          + [f"{uid} held: respec {mark.removeprefix('respec:').strip()}" for uid, mark in marks.items() if mark.startswith("respec:")])
+  units = handoff.state.get("units") or {}
+  lines = ([f"open: respec {r['id']}" for r in opened]
+           + [f"{uid} held: respec {mark.removeprefix('respec:').strip()}" for uid, mark in marks.items() if mark.startswith("respec:")])
+  for kind, rid, uid in work:
+    if kind == "post":
+      comment = handoff.store.path("file", f"respec_comment_{uid}_{rid}.md")
+      lines.append(f"respec post {rid} {uid} #{(units.get(uid) or {}).get('number')} '{comment}'")
+    else:
+      lines.append(f"respec relaunch {rid} {uid}")
+  return lines
 
 
 def post_board(handoff, card: dict, status: dict) -> bool:

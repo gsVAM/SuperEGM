@@ -156,8 +156,8 @@ def exit_evidence(st, unit, latest) -> list:
   path = st.path("state")
   try:
     record = ((json.loads(core.read_text(path)) if path.is_file() else {}).get("units") or {}).get(unit) or {}
-  except (ValueError, OSError, AttributeError):
-    record = {}
+  except (ValueError, OSError, AttributeError):  # an unread state.json is two failed reads, never a launch with no PR
+    return ["head", "builder_status"]
   repo = st.config.get("repo")
   number = (record.get("pr") or {}).get("number")
   if number:
