@@ -385,8 +385,10 @@ def scope_of(st: core.Store, review: dict, spec: Path) -> list:
 def spec_scope(st: core.Store, review: dict, spec: Path) -> list:
   """The round's scope rows, `(changed|neighbour|whole, heading, start, end)`, from the current bytes: under
   `auto` (a review opened before U19 reads as `auto`) the sections `scope_sections` finds against the
-  approved bytes; a section list adds its headings as `changed`, without neighbours (a heading the bytes no
-  longer hold is dropped). One `whole` row otherwise, its heading field the reason: `(whole)`, `(no
+  approved bytes; under `respec` (a `review open --respec R<n>` cycle) only the `changed` sections
+  `scope_sections` finds against the latest approved bytes, without neighbours; a section list adds its
+  headings as `changed`, without neighbours (a heading the bytes no longer hold is dropped). One `whole` row
+  otherwise, its heading field the reason: `(whole)`, `(no
   approval)`, `(no commit holds <sha7>)`, or `(no change)` when nothing changed and no listed heading stands."""
   text = core.read_text(spec)
   whole = lambda reason: [("whole", f"({reason})", 1, len(text.splitlines()))]

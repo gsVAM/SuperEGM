@@ -120,19 +120,26 @@ def interface_lines(body: str) -> set[str]:
   return {line.strip() for _, line in unfenced(body.splitlines()) if line.strip().startswith(INTERFACE)}
 
 
-def interface_names(line: str) -> list[str]:
-  """The names an Interfaces line produces: its backticked names, else its text after the colon less a `(U<n>)`."""
-  return BACKTICKED.findall(line) or [re.sub(r"\s*\(U\d+\)\s*$", "", line.split(":", 1)[1]).strip()]
+def interface_name(line: str) -> str:
+  """The one name an Interfaces line declares, compared whole: its first backticked span, else its text after the
+  colon less a trailing `(U<n>)`; any later backticked word (`None`, `file`) is prose, never a name."""
+  found = BACKTICKED.search(line)
+  return found.group(1).strip() if found else re.sub(r"\s*\(U\d+\)\s*$", "", line.split(":", 1)[1]).strip()
+
+
+def units_span(text: str) -> tuple[int, int] | None:
+  """The 1-based inclusive line range of the spec's last `## Units` section, or None."""
+  spans = [(start, end) for title, start, end in sections(text) if UNITS_H2.match(title)]
+  return spans[-1] if spans else None
 
 
 def units_rows(text: str) -> dict:
   """Row id to row line of the spec's last `## Units` table, fenced lines left out."""
-  lines = text.splitlines()
-  spans = [(start, end) for title, start, end in sections(text) if UNITS_H2.match(title)]
-  if not spans:
+  span = units_span(text)
+  if not span:
     return {}
-  start, end = spans[-1]
-  return {m.group(1): line for n, line in unfenced(lines) if start <= n + 1 <= end and (m := ROW_ID.match(line))}
+  return {m.group(1): line for n, line in unfenced(text.splitlines())
+          if span[0] <= n + 1 <= span[1] and (m := ROW_ID.match(line))}
 
 
 def overlaps(a: tuple[int, int], b: tuple[int, int]) -> bool:
@@ -184,8 +191,9 @@ def comment_text(store: core.Store, handoff: str, text: str, unit: str, respec: 
   prev, new = ctx["prev"], ctx["new"]
   lines = [f"**Spec correction {respec}** for {unit}: the frozen spec changed; build to the lines below.", ""]
   picked = [op for op in ctx["ops"] if op[0] != "equal" and unit in set().union(*hunk_units(ctx, op)[:2])]
-  for _, i1, i2, j1, j2 in picked:
-    lines += ["```diff", f"@@ -{i1 + 1},{i2 - i1} +{j1 + 1},{j2 - j1} @@",
+  for _, i1, i2, j1, j2 in picked:  # a zero-length side starts at the line before the gap, as unified diff prints it
+    old_at, new_at = i1 + 1 if i2 > i1 else i1, j1 + 1 if j2 > j1 else j1
+    lines += ["```diff", f"@@ -{old_at},{i2 - i1} +{new_at},{j2 - j1} @@",
               *(f"-{line}" for line in prev[i1:i2]), *(f"+{line}" for line in new[j1:j2]), "```", ""]
   return "\n".join(lines)
 
@@ -246,21 +254,32 @@ def context(store: core.Store, handoff: str, text: str) -> dict:
   for title, start, end in sections("\n".join(prev)):
     if title.lstrip("#").strip() == GLOBAL:
       spec_global |= set(range(start, end + 1))
+  table = lambda lines: (lambda s: set(range(s[0] - 1, s[1])) if s else set())(units_span("\n".join(lines)))
   return {"rel": rel, "prev": prev, "new": new, "ops": ops, "units": units, "merged": merged, "lines_of": lines_of,
-          "global_of": global_of, "interfaces_of": interfaces_of, "spec_global": spec_global,
-          "carried": carried_spans(units, entries, maps)}
+          "global_of": global_of, "names_of": {u: {interface_name(l) for l in held} for u, held in interfaces_of.items()},
+          "spec_global": spec_global, "carried": carried_spans(units, entries, maps),
+          "table_old": table(prev), "table_new": table(new), "rows_old": set(units_rows("\n".join(prev)))}
 
 
 def hunk_units(ctx: dict, op: list) -> tuple[set, set, set, set]:
   """`(hit, review, ranged, interfaced)` for one changed hunk, the rule `touched` and `comment_text` share: a unit whose
   carried Design range the hunk overlaps (`ranged`); a unit whose body quotes a line the hunk removes or changes, a
-  `## Global constraints` line always counting and any other line unless `skipped` (merged: `review`); the producer and
-  every consumer of a `- Produces:` line the hunk removes or inserts (`interfaced`); and, for each changed line no
-  Design range covers, no body quotes and `skipped` passes, every unmerged unit (merged: `review`)."""
+  `## Global constraints` line always counting and any other line unless `skipped` (merged: `review`); every unit whose
+  Interfaces declare the name of a `- Produces:` or `- Consumes:` line the hunk removes or inserts, its producer and
+  every consumer, names compared whole (`interfaced`); a `## Units` table line, the unit its row names and none for a
+  new follow-up row (`Follows: U<n>`), never the uncovered rule (merged: `review`); and, for each other changed line no
+  Design range covers, no body quotes and `skipped` passes, every unmerged unit (merged: `review`). A replace's new
+  line past the old block's length has no old counterpart: it is judged as an insertion, never as quoted."""
   _, i1, i2, j1, j2 = op
   prev, new, units, merged = ctx["prev"], ctx["new"], ctx["units"], ctx["merged"]
   carried = ctx["carried"].values()
   hit, review, interfaced = set(), set(), set()
+  for line, is_new in [(prev[n], False) for n in range(i1, i2) if n in ctx["table_old"]] + \
+                      [(new[n], True) for n in range(j1, j2) if n in ctx["table_new"]]:
+    row = ROW_ID.match(line)
+    if not row or row.group(1) not in units or (is_new and row.group(1) not in ctx["rows_old"] and FOLLOWS.search(line)):
+      continue
+    (review if row.group(1) in merged else hit).add(row.group(1))
   ranged = {u for u, span in ctx["carried"].items() if overlaps(span, span_of(op))}
   covered = lambda n: any(span[0] <= n <= span[1] for span in carried)  # n is 1-based in the old text
   quoted_old = set()
@@ -273,13 +292,16 @@ def hunk_units(ctx: dict, op: list) -> tuple[set, set, set, set]:
         quoted_old.add(n)
         (review if u in merged else hit).add(u)
   for line in [prev[n].strip() for n in range(i1, i2)] + [new[n].strip() for n in range(j1, j2)]:
-    if line.startswith("- Produces:"):  # removed or inserted: its producer, and every unit whose Consumes names it
-      names = interface_names(line)
-      interfaced |= {v for v, held in ctx["interfaces_of"].items() if any(name and name in l for l in held for name in names)}
-  uncovered = any(not skipped(prev[n]) and n not in quoted_old and not covered(n + 1) for n in range(i1, i2))
-  for k in range(j2 - j1):  # a new line stands at the old line it replaces (the last one past their count), an inserted one where it goes
-    n = i1 + min(k, i2 - i1 - 1) if i2 > i1 else None
-    at = n + 1 if n is not None else max(i1, 1)
+    if line.startswith(INTERFACE):  # removed or inserted: the producer and every consumer of the name it declares
+      name = interface_name(line)
+      interfaced |= {v for v, names in ctx["names_of"].items() if name and name in names}
+  uncovered = any(not skipped(prev[n]) and n not in quoted_old and not covered(n + 1)
+                  for n in range(i1, i2) if n not in ctx["table_old"])
+  for k in range(j2 - j1):  # a new line stands at the old line it replaces; one past their count, or inserted, after the block
+    n = i1 + k if k < i2 - i1 else None
+    at = n + 1 if n is not None else max(i2, 1)
+    if j1 + k in ctx["table_new"]:
+      continue
     if not skipped(new[j1 + k]) and (n is None or n not in quoted_old) and not covered(at):
       uncovered = True
   if uncovered:
@@ -450,12 +472,14 @@ def run(args):
 
 
 def record_posted(args) -> int:
-  """`respec posted`: write `respec/R<n>.<unit>.posted` (`{respec, unit, comment, at}`) in the handoff's directory."""
+  """`respec posted`: write `respec/R<n>.<unit>.posted` (`{respec, unit, comment, at}`) in the handoff's directory;
+  refused unless an approval entry of the handoff names R<n> (an `R<n>.json` without one is a crash before the entry)."""
   core.require_runcard(args, SKILLS)
   st = core.store(core.git_toplevel(Path.cwd()))
   if not re.fullmatch(r"R\d+", args.respec):
     raise core.HandoffError(f"respec posted: {args.respec} is not R<n>")
-  if not respec_path(st, f"{args.respec}.json").is_file():
+  applied = any(e.get("respec") == args.respec for e in entries_of(st, st.handoff_id, spec_of(st, st.handoff_id)))
+  if not applied or not respec_path(st, f"{args.respec}.json").is_file():  # the file alone is the crash window's
     raise core.HandoffError(f"respec posted: respec {args.respec} is not applied")
   if args.unit not in (load_json(respec_path(st, f"{args.respec}.json")) or {}).get("touched", []):
     raise core.HandoffError(f"respec posted: {args.unit} is not touched by {args.respec}")
