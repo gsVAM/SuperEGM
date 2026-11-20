@@ -42,7 +42,7 @@ then `review status`; record it with
 `python3 '<HELPER>' decision rule --unit <U> --decision <qid> --ruling '<fid> finding upheld' --by <login> --runcard '<CARD>'`
 or `--ruling '<fid> finding overruled — <reason>'`, which posts the
 `**Ruling:**` comment on the issue. Then by `review status`: 0 → the unit
-awaits merge; 2 → Decision point 2; in normal mode `acceptable: yes` → Decision point 5; else `launch-builder` (a `held: respec` unit: step 6's `launch`).
+awaits merge; 2 → Decision point 2; in normal mode `acceptable: yes` → Decision point 5; else `launch-builder`. For a `held: respec` unit, step 6's `launch`.
 A third ruling, on a head, is `redesign — <one sentence why>` (the sentence the owner's, typed after the dash; a bare `redesign` is refused):
 `python3 '<HELPER>' decision rule --unit <U> --decision <qid> --ruling 'redesign — <one sentence why>' --by <login> --runcard '<CARD>'`.
 It stops the unit by `stop`'s own path (the issue labelled `superegm:stopped`, never relaunched) and writes the
