@@ -485,6 +485,14 @@ def review_open(store: core.Store, handoff: str) -> list:
   return [r for r in open(store, handoff) if r.get("unit") is None]
 
 
+def plan_waiting(store: core.Store, handoff: str) -> list:
+  """The open review-origin respecs of `handoff` raised from a plan review (U91): while one waits, `status`, readiness
+  and `launch` skip the handoff's unfiled units, its filed units going on."""
+  from superegm import review
+  return [r for r in review_open(store, handoff)
+          if (review.load_review(store, r["review"]) or {}).get("kind") == "plan"]
+
+
 def record_open(args) -> int:
   """`respec open` (U91): write `respec/R<n>.open.json` (`{id, unit: null, review, finding, at}`) in the handoff's
   directory, `R<n>` the next number no `respec/` file uses. The owner's alone: refused under `SUPEREGM_ROLE` or a
