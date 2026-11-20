@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3/5
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
-# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63); `respec`, a `spec` deviation's option, the owner's alone, a spent `relaunch` dropped beside it, and a letter that resolves to it binding nothing unrecorded (spec §7.6, U84).
+# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63); `respec`, a `spec` deviation's option, the owner's alone, a spent `relaunch` dropped beside it, and a letter that resolves to it binding nothing unrecorded (spec §7.6, U84); the judges' ruling journalled and posted with `contest` on a normal-mode card (spec §7.8, U88).
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
@@ -174,7 +174,7 @@ FORM_RES = (
 )
 LETTER_RE = re.compile(r"\([a-z]\)")  # a rendered option's letter, the bare answer of the judges
 FILE_RULING_RE = re.compile(r"test-delta (\S+) allowed")  # a recorded whole-file allowance's text
-JUDGES_MARK_RE =re.compile(r"^\(judges \S+, leavemealone\)$", re.M)
+JUDGES_MARK_RE = re.compile(r"^\(judges \S+, (?:leavemealone|contest)\)$", re.M)
 
 
 @dataclass(frozen=True)
@@ -202,7 +202,7 @@ def parse_form(body: str):
 
 def ruling_of(comment: dict, owners: list) -> "Ruling | None":
   """The owner's ruling a comment carries, or None: an author outside `owners`, a body matching no form exactly, or the
-  judges' post (the `(judges <panel>, leavemealone)` marker on any line, recorded from `rulings[]`, never re-read)."""
+  judges' post (the `(judges <panel>, leavemealone | contest)` marker on any line, recorded from `rulings[]`, never re-read)."""
   login = (comment.get("user") or {}).get("login") or comment.get("login")
   body = comment.get("body") or ""
   if login not in owners or JUDGES_MARK_RE.search(body.replace("\r", "")):
@@ -707,7 +707,7 @@ def rule(args) -> int:
   else:
     bare = chosen.endswith(" finding upheld") if decision["point"] == 1 else decision["point"] == 2  # forms with no reason
     body = ruling_comment(decision["point"], decision["source"], chosen + (f" — {reason}" if reason and not brief and not bare else ""),
-                          decision["question"], brief, args.by, decision["id"])
+                          decision["question"], brief, args.by, decision["id"], card.get("mode"))
     path = body_file(body, st.root)
     try:
       url = core.gh(["issue", "comment", str(number), "-R", st.config["repo"], "--body-file", path]).strip()
@@ -773,7 +773,7 @@ def rule(args) -> int:
       words = " ".join(w for w in (found.kind, found.subject, found.option) if w)
       core.journal(st, f"Ruling ({args.by}, comment {args.posted}): {unit} {d['id']} {words}" + (f" — {found.reason}" if found.reason else ""))
     else:
-      who = f"judges {args.by[7:]}, leavemealone" if args.by.startswith("judges:") else args.by
+      who = f"judges {args.by[7:]}, {judges_word(card.get('mode'))}" if args.by.startswith("judges:") else args.by
       typed = args.ruling + (f" — {reason}" if reason and " — " not in args.ruling else "")  # a defaulted reason
       core.journal(st, f"Ruling ({who}): {unit} {d['id']} {typed}")
   if stops:
@@ -970,14 +970,21 @@ def check_ruling(point: int, options: list, ruling: str, by: str = "") -> str:
   raise Refusal("decision: ruling is none of the options: " + "; ".join(options + extra))
 
 
-def ruling_comment(point: int, source: str, ruling: str, question: str, brief=None, by: str = "", qid: str = "") -> str:
+def judges_word(mode) -> str:
+  """The word the judges' ruling carries: `contest` on a normal-mode card (U88), `leavemealone` on a leavemealone-mode card
+  and where no card's mode is given (1.2's word)."""
+  return "contest" if mode == "normal" else "leavemealone"
+
+
+def ruling_comment(point: int, source: str, ruling: str, question: str, brief=None, by: str = "", qid: str = "", mode=None) -> str:
   """Spec section 13.2's `**Ruling:**` form (point 1 `<fid> finding upheld (fix it) | finding overruled — <reason>`,
   point 2 `one more round | stop`, point 3 `(<comment-id>) <option> — <reason>`, `(<qid>)` for a decision opened
-  on no comment), the judges' `(judges <panel>, leavemealone)` marker line when `by` is `judges:<panel>`, a blank
+  on no comment), the judges' `(judges <panel>, leavemealone | contest)` marker line when `by` is `judges:<panel>` (the word
+  `judges_word(mode)` gives, U88), a blank
   line and the quoted question. A redesign ruling (`brief` given) takes the form `**Ruling:** redesign — <why>`,
   the stopped-for-redesign line naming the brief, the close-by-hand line, a blank line and the quoted question."""
   quoted = "\n".join("> " + l for l in question.rstrip("\n").splitlines())
-  marker = f"\n(judges {by[7:]}, leavemealone)" if by.startswith("judges:") else ""
+  marker = f"\n(judges {by[7:]}, {judges_word(mode)})" if by.startswith("judges:") else ""
   if brief:  # a redesign ruling: the unit is stopped, the brief named, the owner closes the issue by hand
     return (f"{ruling_line(ruling)}{marker}\n\nStopped for redesign; the brainstorm brief is `{brief}`.\n"
             f"Close this issue by hand once the re-planned unit is filed.\n\n{quoted}\n")

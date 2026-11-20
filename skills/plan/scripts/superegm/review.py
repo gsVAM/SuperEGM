@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76); a spec cycle's changed reference documents as whole-file `changed <path>` scope lines, their `refs` manifest on each round, in the scope filter, the settle check and the proceed ruling (U75); `review open --respec R<n>`: the diff and its sections as evidence, the `design`, `codebase-details` and Astra panel, cap 2 (U85).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review settle --judges` for a head's contested or declined high or medium on a normal-mode card, journalled `Ruling (judges <panel>, contest)` (U88); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76); a spec cycle's changed reference documents as whole-file `changed <path>` scope lines, their `refs` manifest on each round, in the scope filter, the settle check and the proceed ruling (U75); `review open --respec R<n>`: the diff and its sections as evidence, the `design`, `codebase-details` and Astra panel, cap 2 (U85).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest|triage: the one review loop (spec section 8)."""
 
@@ -1097,6 +1097,9 @@ def settle_finding(args) -> int:
     core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
     copies = settle_set_copies(st, rnd, finding) if (review["kind"], reviewer, disposition) == ("plan", "set", "fixed") \
         else settle_external_copies(st, review, reviewer, finding) if review["kind"] == "spec" and reviewer.startswith("external:") else []
+    if review["kind"] == "head" and args.judges and card["mode"] != "leavemealone" and blocking(finding) and disposition in ("contested", "declined"):
+      core.journal(st, f"Ruling (judges {args.judges}, contest): {review['artifact']} {fid} {disposition}")  # U88
+      continue
     core.journal(st, f"review settle {rid} {fid} {disposition} by {finding['ruling'] or 'the elephant'}"
                  + (f" copied to {', '.join(copies)}" if copies else "") + f" under {args.runcard}")
   status = store_verdict(st, rid, review, runcard)
@@ -1131,9 +1134,31 @@ def check_settle(st: core.Store, rid: str, review: dict, card: dict, args, fid: 
       if not (args.owner and getattr(args, "posted", None)):
         raise core.HandoffError(f"review settle: {fid} is {finding['severity']}: --judges required in leavemealone-mode")
       verify_owner_ruling(st.config, finding, args.posted, delta_claim(st, rid, finding["claim"]))
-    if card["mode"] != "leavemealone" and not args.owner:
+    if card["mode"] != "leavemealone" and not args.owner and not (args.judges and review["kind"] == "head"):  # U88: a head's contest goes to the panel first
       raise core.HandoffError(f"review settle: {fid} is {finding['severity']}: --owner required in normal mode")
+    if args.judges and review["kind"] == "head":  # either mode: a contest settles by a panel that overruled it
+      check_panel_overrules(st, args.judges, fid, rid, n)
   return n
+
+
+def check_panel_overrules(st: core.Store, panel: str, fid: str, rid: str, n: int) -> None:
+  """U88: a head contest settles by `--judges <panel>` only when `judges/<panel>/` was opened for this review and round (its id
+  is `<rid>-r<n>-<6 hex>`, as `judges.panel_id` makes it from `question_name`) and its `verdict.json` converged on `finding
+  overruled` for the question that asks `fid` (the panel's `question.md` names the finding at the head of its `## Q<n>` line);
+  the other questions of the panel, converged or not, do not matter."""
+  from superegm import judges
+  if not re.fullmatch(re.escape(f"{rid}-r{n}-") + "[0-9a-f]{6}", panel):
+    raise core.HandoffError(f"review settle: {fid}: judges {panel} was not opened for {rid} round {n}")
+  folder = st.path("judges", panel, "verdict.json").parent
+  if not (folder / "verdict.json").is_file():
+    raise core.HandoffError(f"review settle: {fid}: judges {panel} has no verdict")
+  verdict = json.loads(core.read_text(folder / "verdict.json"))
+  asked = next((q for q in judges.parse_questions(core.read_text(folder / "question.md")) if q["text"].split(" ")[0] == fid), None)
+  answer = (verdict["questions"].get(asked["id"]) if asked else None) or {}
+  if asked and not answer.get("converged"):
+    raise core.HandoffError(f"review settle: {fid}: judges {panel} has not converged")
+  if not (asked and asked["options"].get(answer.get("option"), "").startswith("finding overruled")):
+    raise core.HandoffError(f"review settle: {fid}: judges {panel} did not overrule {fid}")
 
 
 def delta_claim(st: core.Store, rid: str, claim: str) -> str:

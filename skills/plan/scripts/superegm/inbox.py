@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45); the `proceed again` item and the merge on the authorizing outcome (U92); the `conflict` item (U62); a ruling's action the inbox with its `forms` and `on`, a review's its skill session, and `inbox withdrawn` (U72); no merge item for a head a `respec:` mark holds (U86).
+# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45); the `proceed again` item and the merge on the authorizing outcome (U92); the `conflict` item (U62); a ruling's action the inbox with its `forms` and `on`, a review's its skill session, and `inbox withdrawn` (U72); no merge item for a head a `respec:` mark holds (U86); a contested item carries the unconverged panel's verdict line (U88), a head contest held only while the store's panel record for its review and round is open (U88).
 
 """superegm inbox [--all] [--json] [--handoff <id>]: one line per item that needs the owner across the
 store's open handoffs, read-only and with no run card; superegm inbox withdrawn --pr <n> --reason <text>: the merge
@@ -9,6 +9,7 @@ step's `merge withdrawn <pr> <reason>` journal line, under its own inbox card un
 `state.json`'s under a `wave` card, `driver/<handoff>.json`'s under a `driver` card (U24)."""
 
 import argparse
+import glob
 import json
 import os
 import re
@@ -87,6 +88,26 @@ def source_round(source: str):
   return None, None
 
 
+def panel_state(hs: core.Store, rid: str, n: int):
+  """(`open` | `split` | None, the panel id) of the judges panels the store holds for review `rid` round `n` (`<rid>-r<n>-<6 hex>`,
+  judges.panel_id): `open` while one has no `verdict.json` or an unconverged one with rounds to go (it may still rule), else
+  `split` for one at its cap that did not converge (its verdict line goes to the owner); None for none, or only converged ones."""
+  found = {"open": None, "split": None}
+  for folder in sorted(hs.path("judges").glob(f"{glob.escape(rid)}-r{n}-*")):
+    if not re.fullmatch(rf"{re.escape(rid)}-r{n}-[0-9a-f]{{6}}", folder.name) or not (folder / "panel.json").is_file():
+      continue
+    try:
+      verdict = json.loads((folder / "verdict.json").read_text(encoding="utf-8")) if (folder / "verdict.json").is_file() else None
+    except (OSError, ValueError):
+      verdict = None
+    if verdict is None or not verdict.get("converged") and not verdict.get("cap_reached"):
+      found["open"] = found["open"] or folder.name
+    elif not verdict.get("converged"):
+      found["split"] = found["split"] or folder.name
+  state = "open" if found["open"] else "split" if found["split"] else None
+  return state, found["open"] or found["split"]
+
+
 def status_of(hs: core.Store, rid: str, rev: dict):
   """`review.evaluate` under the last round's run card (the review's own with no round); None when the
   artifact cannot be read."""
@@ -148,13 +169,19 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
       rid, n = source_round(d.get("source"))
       rev = review.load_review(hs, rid) if rid else None
       status = status_of(hs, rid, rev) if rev else None
-      if status is None or status.code != 3:
+      panel, pid = panel_state(hs, rid, n)  # the store's panel record for this review and round, never the question's text (U88)
+      verdict = next((l.strip() for l in (d.get("question") or "").splitlines() if f"(judges/{pid}/verdict.json)" in l), None) if pid else None
+      if status is None or not (status.code == 3 or status.code == 2 and panel == "split"):  # a split panel's contest on the capped round still reaches the owner
         continue
       rnd = review.load_round(hs, rid, n) or {}
       fids = review.contested_fids(rnd) or [c["fid"] for c in rnd.get("builder_contested") or []]
       ruled = ruled_of(did)
       menu = lambda fid: [ruling_form(1, fid, o) for o in ("finding upheld", "finding overruled")]
-      out += [ruling_item(repo, uid, "contested", menu(fid), number, f"{did}/{fid}") for fid in fids if fid not in ruled]
+      by_id = {f["id"]: f for f in review.findings_of(rnd)} if rnd else {}
+      # a head review's high or medium contest goes to the judges first: no owner form while a panel on it is open; with no panel opened, or one converged, none will rule it
+      held = lambda fid: rev["kind"] == "head" and panel == "open" and review.blocking(by_id.get(fid) or {"severity": "high"})
+      out += [ruling_item(repo, uid, "contested", menu(fid), number, f"{did}/{fid}") | ({"verdict": verdict} if verdict else {})
+              for fid in fids if fid not in ruled and not held(fid)]
   entry = latest_posted(foreman)
   if entry:
     n, rid = entry["round"], review.head_review_id(hs, uid)
@@ -571,7 +598,7 @@ def register(subparsers):
 
 
 def line_of(i: dict) -> str:
-  return f"{i['repo']} {i['subject']} | {i['kind']} | {i['action']}"
+  return f"{i['repo']} {i['subject']} | {i['kind']} | {i['action']}" + (f" | {i['verdict']}" if i.get("verdict") else "")
 
 
 def open_store(args) -> tuple:

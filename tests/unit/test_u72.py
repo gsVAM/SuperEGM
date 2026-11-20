@@ -16,7 +16,7 @@ from conftest import REPO, ROOT
 from superegm import atomic_write, phase
 from superegm.decision import check_ruling, parse_form
 from superegm.inbox import inbox_items, registry_items
-from test_inbox import D, F, HEAD, POSTED, REVIEW, ROUND, U, seed
+from test_inbox import D, F, HEAD, PANEL, POSTED, REVIEW, ROUND, U, seed
 from test_wave import open_wave_card, wave_store
 from test_u57 import head_world, launches, proceed
 from test_u43 import registry  # noqa: F401 -- autouse: HOME under tmp_path
@@ -27,7 +27,7 @@ SKILL = ROOT / "skills/inbox/SKILL.md"
 
 SEEDS = {  # one unit's state per kind, as test_inbox's table seeds it
   "decision": U(decisions=D(3, "comment 77")),
-  "contested": U(decisions=D(1, "review head-U01-c1 round 1"), rounds=POSTED(),
+  "contested": U(decisions=D(1, "review head-U01-c1 round 1", question=PANEL), rounds=POSTED(),
                  reviews=HEAD(1, F("high"), builder_contested=[{"fid": "foreman-1-1", "reason": "r"}])),
   "test-delta": U(rounds=POSTED(), reviews=HEAD(1, [{**F("high")[0], "claim": "test-delta: tests/test_x.py:3 removed"}])),
   "owner": U(rounds=POSTED(1, "owner: foreman-1-1")),

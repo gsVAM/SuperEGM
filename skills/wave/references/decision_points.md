@@ -34,9 +34,15 @@ The builder contested findings. Write them (ids, claims, the builder's
 reasons from the round's `comments.md`) to a question file, each finding on a line of its own starting `<fid> |` or `## Q<n> <fid> (`
 (the lines `decision rule` finds a fid's decision by), and run
 `python3 '<HELPER>' decision open --unit <U> --point 1 --question '<file>' --source 'review <head-review-id> round <n>' --runcard '<CARD>'`
-(options `finding upheld; finding overruled`). In normal mode ask the owner,
-one question per finding, the builder's reason verbatim as the overrule
-option's text. Apply each ruling: per overruled finding
+(options `finding upheld; finding overruled`). A contested or declined high or medium finding goes to the
+judges first in both modes (`superegm judges question --review <head-review-id> --round <n>`, then the panel sequence of
+`skills/judges/references/leavemealone.md`; its evidence the round's `comments.md`, the diff, the unit's body,
+`r<n>/spec_range.md` and `r<n>/amendments.md`); a converged ruling follows `leavemealone.md`:
+only `finding overruled` settles through `review settle --judges <panel>` (journalled `Ruling (judges <panel>, contest)` in normal mode); `finding upheld` and `redesign` go through `decision rule --by judges:<panel>` alone. Only a panel that does not
+converge goes to the owner: ask point 1's question, one question per finding, the builder's reason verbatim as the overrule
+option's text, with the line naming `judges/<panel>/verdict.json` and each judge's last choice (the panel's
+`owner-question.md`). The owner alone rules `<fid> allowed`, `amend`, `respec` and the CI finding, in both modes: the
+judges never settle them, and a spec, plan or integrate review's contest is the owner's, asked as before. Apply each ruling: per overruled finding
 `python3 '<HELPER>' review settle --review <head-review-id> --finding <fid> --disposition contested --owner --runcard '<CARD>'`,
 then `review status`; record it with
 `python3 '<HELPER>' decision rule --unit <U> --decision <qid> --ruling '<fid> finding upheld' --by <login> --runcard '<CARD>'`

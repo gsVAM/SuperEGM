@@ -13,7 +13,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30); the batch's `notify` (U23); the decision points, rulings and leavemealone-mode moved to `references/`; a head's Decision point 5 and `clean` by accept (U35); `launch-builder` alone and the driver role (U24); `stalled` (U31); the frozen mode, driven normal-mode decisions (U45); `waiting proceed` (U92); the merge round (U62); failed resume (U63); the merge line's inbox (U70); respecs (U86). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30); the batch's `notify` (U23); the decision points, rulings and leavemealone-mode moved to `references/`; a head's Decision point 5 and `clean` by accept (U35); `launch-builder` alone and the driver role (U24); `stalled` (U31); the frozen mode, driven normal-mode decisions (U45); `waiting proceed` (U92); the merge round (U62); failed resume (U63); the merge line's inbox (U70); respecs (U86); contests (U88). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the wave skill. Not part of google/elephant-goldfish-model. -->
 
@@ -60,6 +60,7 @@ Open a reference only when sent to it:
   `decision rule`, `review settle` or `review rule`), whenever a word, step or `pending:` item names one.
 - `references/rulings.md`: a `ruling` line (batch step 4), a posted owner `**Ruling:**` (entry step 4), the stops.
 - `references/leavemealone_mode.md`: on a `leavemealone` card, before asking the owner at a decision point.
+- `references/resume_notes.md`: at the entry, before step 5.
 
 ## Entry: resume from the store
 
@@ -74,9 +75,6 @@ Open a reference only when sent to it:
 5. Run `report` again. `loop: ended` and no 5b line in step 2 → The end. Otherwise run batches, the
    first from its step 5: step 2 was its wait, and its lines are handled.
 
-Builders a previous invocation left running report through `status --wait`'s
-`exit` lines. Nothing recorded is launched, ruled or reviewed twice (`launch`,
-`launch-builder`, `decision rule` and `foreman dispatch` refuse): take a refusal as fact, never retry it.
 A `held: respec` unit never gets a direct `launch-builder`: step 6's `launch` marks it.
 
 ## A batch
@@ -118,7 +116,7 @@ dispatch):
 - `revise` → in normal mode, when `review status` printed `acceptable: yes` → Decision point 5 first (no launch
   while it is pending). Otherwise, and on a ruled `revise`, `launch-builder` for the next
   round (the prompt carries the review); a ruled `revise` spends no relaunch.
-- `contested: <ids>` → Decision point 1.
+- `contested: <ids>` → Decision point 1: judges first in normal mode as in leavemealone; the owner gets `judges/<panel>/verdict.json`'s line only if the panel does not converge.
 - `cap-reached` → Decision point 2.
 - `owner: <ids>` → `decision open` for the owner's findings, ruled by the owner alone (no judge panel):
   no relaunch, no slot.
@@ -137,5 +135,5 @@ dispatch):
 
 Before the close, run batch step 3b once and `report` again (a thread posted before the last round's review is read now): an `outcome:` line or no longer `loop: ended` → back to the batches.
 
-`loop: ended` → run `superegm runcard close '<CARD>'`. Then report in chat from `wave_<n>_report.md`: per unit: state, head, rounds; non-terminal launches (builders still running report to the next `wave`); heads with pending or absent CI; idle units and why; ready units without a slot; pending decisions; stopped units with their unlanded dependants: what stayed open for the owner to merge,
+`loop: ended` → run `superegm runcard close '<CARD>'`. Then report in chat from `wave_<n>_report.md`: per unit: state, head, rounds; non-terminal launches (builders still running report to the next `wave`); heads with pending or absent CI; idle units and why; ready units without a slot; pending decisions; the judges' rulings with their panels; stopped units with their unlanded dependants: what stayed open for the owner to merge,
 close, or re-type `/superegm:wave`. The owner merges in the inbox, which runs `gh pr merge --admin` once the owner says yes, where the base ruleset restricts updates to config.owners.

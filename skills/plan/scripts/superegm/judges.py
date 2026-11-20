@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the judges subcommand (spec section 13.1) and `judges question`, the
-# leavemealone-mode question renderer of section 13.2 (U11); the cap question names a spec review's scope (U19); the default members read from `DEFAULT_CONFIG` (U28); a `launch <n>` or `closed <n>` question renders its pending decision's options, a stall's heading its facts (U31); its own `judges` config key, moved from `__init__` (U32); the panel's instructions section rendered once at open by its parent card's skill, placed last in each brief and copied to each member's record (U38); `respec`, the owner's alone, left out of the judges' question with every other option keeping its letter, its leavemealone wait read off the options (U84).
+# leavemealone-mode question renderer of section 13.2 (U11); the cap question names a spec review's scope (U19); the default members read from `DEFAULT_CONFIG` (U28); a `launch <n>` or `closed <n>` question renders its pending decision's options, a stall's heading its facts (U31); its own `judges` config key, moved from `__init__` (U32); the panel's instructions section rendered once at open by its parent card's skill, placed last in each brief and copied to each member's record (U38); `respec`, the owner's alone, left out of the judges' question with every other option keeping its letter, its leavemealone wait read off the options (U84); the Astra member's brief embeds each evidence file's contents, re-checked against its recorded sha256, and an unconverged panel's point 1 question gains the verdict line (U88).
 
 """superegm judges open|record|diff|verdict|question: the judge panel over a question file, and the
 question file rendered from the record at a decision point."""
@@ -12,7 +12,7 @@ from pathlib import Path
 import superegm as core
 from superegm import instructions
 
-WRITES = frozenset(["judges", "runcards", "questions", "instructions"])  # the store kinds this subcommand writes (`instructions`: a spec review's reference copies, U74)
+WRITES = frozenset(["judges", "runcards", "questions", "instructions", "foreman"])  # the store kinds this subcommand writes (`instructions`: a spec review's reference copies, U74; `foreman`: an unconverged panel's verdict line on the open decision, U88)
 CONFIG_DEFAULTS = {"judges": {"min_vendors": 1,  # its own config key (U32)
                               "members": [{"name": "fable", "via": "adapter", "effort": "xhigh"},
                                           {"name": "opus", "via": "adapter", "effort": "max"},
@@ -195,6 +195,14 @@ def render_brief(panel: dict, questions: list[dict], round_no: int, open_ids: li
            "Report no findings. Read only the question file and the evidence listed.",
            f"Question file: {panel['question']} (sha256 {panel['question_sha256']})",
            "Evidence: " + (", ".join(e["path"] for e in panel["evidence"]) or "none")]
+  if lane == "astra":  # the Astra lane reads no paths: each evidence file's contents follow, re-checked against the sha256 recorded at open
+    for item in panel["evidence"]:
+      path = Path(item["path"])
+      if not path.is_file() or core.sha256_file(path) != item["sha256"]:
+        raise core.HandoffError(f"judges: evidence {item['path']} changed since open")
+      body = path.read_bytes().decode("utf-8", errors="replace").rstrip("\n")  # a diff of a Latin-1 file is not UTF-8 (prepare.cut_diff decodes it so)
+      fence = "`" * max(3, 1 + max((len(run) for run in re.findall(r"`+", body)), default=0))  # one longer than the file's longest run
+      lines += ["", f"### Evidence: {item['path']}", fence, body, fence]
   if round_no > 1:
     lines += ["", f"Questions still open: {', '.join(open_ids)}",
               "Answer only those. Every prior verdict and every diff follow verbatim; no one adds arguments between rounds:",
@@ -210,8 +218,13 @@ def render_brief(panel: dict, questions: list[dict], round_no: int, open_ids: li
 def write_briefs(folder: Path, round_no: int, panel: dict, *args) -> None:
   """`round-<n>/brief.md` for the local members (the index) and `brief-astra.md` for the Astra member, which cannot read
   the store (the pastes): the same brief, each with its own lane's stored section."""
-  for name, lane in (("brief.md", "local"), ("brief-astra.md", "astra")):
-    core.atomic_write(folder / f"round-{round_no}" / name, render_brief(panel, *args, lane=lane))
+  for name, text in render_briefs(panel, *args).items():
+    core.atomic_write(folder / f"round-{round_no}" / name, text)
+
+
+def render_briefs(panel: dict, *args) -> dict:
+  """Both lanes' briefs by file name, rendered before either is written: a refusal (a changed evidence file) leaves no brief."""
+  return {name: render_brief(panel, *args, lane=lane) for name, lane in (("brief.md", "local"), ("brief-astra.md", "astra"))}
 
 
 def render_panel(store, parent: dict | None) -> dict:
@@ -268,14 +281,16 @@ def cmd_open(args, store) -> int:
   members = judge_members(config)
   min_vendors = (config.get("judges") or {}).get("min_vendors", 1)
   rendered = render_panel(store, parent)  # before the card opens: a refused render leaves no open judges card
-  rid = args.runcard or core.open_runcard(store, "judges", str(question), parent=args.parent)
   panel = {"id": pid, "question": str(question), "question_sha256": core.sha256_file(question),
-           "evidence": evidence, "judges": members, "min_vendors": min_vendors, "runcard": rid,
+           "evidence": evidence, "judges": members, "min_vendors": min_vendors, "runcard": args.runcard,
            "parent": args.parent, "opened_at": core.now_iso(), "rounds": {},
            "instructions": rendered}
+  briefs = render_briefs(panel, questions, 1, [q["id"] for q in questions], [], [])  # before the card opens: a refusal leaves nothing written
+  panel["runcard"] = args.runcard or core.open_runcard(store, "judges", str(question), parent=args.parent)
   core.atomic_write(folder / "question.md", question.read_bytes())
   write_json(folder / "panel.json", panel)
-  write_briefs(folder, 1, panel, questions, 1, [q["id"] for q in questions], [], [])
+  for name, text in briefs.items():
+    core.atomic_write(folder / "round-1" / name, text)
   core.journal(store, f"judges {pid}: opened ({', '.join(members)}; min_vendors {min_vendors})")
   print(pid)
   return 0
@@ -448,17 +463,63 @@ def cmd_diff(args, store) -> int:
   folder = store.path("judges", pid)
   questions = parse_questions(core.read_text(folder / "question.md"))
   diff = neutral_diff(pid, n, questions, entries, open_questions(panel, questions, n))
-  core.atomic_write(folder / f"round-{n}" / "diff.md", diff)
   still_open = open_questions(panel, questions, n + 1)
-  if still_open and n < CAP:
+  briefs = {}
+  if still_open and n < CAP:  # everything that can refuse comes before the first write: a refusal leaves the round untouched
     prior = [(k, judge, core.read_text(folder / f"round-{k}" / f"{judge}.md"))
              for k in range(1, n + 1) for judge in panel["judges"]
              if "options" in panel["rounds"][str(k)].get(judge, {})]
-    diffs = [core.read_text(folder / f"round-{k}" / "diff.md") for k in range(1, n + 1)]
-    write_briefs(folder, n + 1, panel, questions, n + 1, still_open, prior, diffs)
+    diffs = [core.read_text(folder / f"round-{k}" / "diff.md") for k in range(1, n)] + [diff]
+    briefs = render_briefs(panel, questions, n + 1, still_open, prior, diffs)
+  core.atomic_write(folder / f"round-{n}" / "diff.md", diff)
+  for name, text in briefs.items():
+    core.atomic_write(folder / f"round-{n + 1}" / name, text)
   core.journal(store, f"judges {pid}: round {n} diff written, open {', '.join(still_open) or 'none'}")
   print(folder / f"round-{n}" / "diff.md")
   return 0
+
+
+def verdict_line(pid: str, verdict: dict, questions: list[dict]) -> str:
+  """The one line an unconverged panel adds to the owner's point 1 question: `judges/<panel>/verdict.json` and, for each
+  open question, each judge's last recorded choice, from whichever round it made it, as its option's text (a judge
+  that never answered the question reads `no answer`)."""
+  options = {q["id"]: q["options"] for q in questions}
+  parts = []
+  for qid in verdict["open"]:
+    last = {}
+    for key in sorted(verdict["rounds"], key=int):
+      for judge, entry in verdict["rounds"][key].items():
+        if entry.get("options", {}).get(qid):
+          last[judge] = entry["options"][qid]
+    choices = [(judge, options[qid][last[judge]] if judge in last else "no answer") for judge in sorted(verdict["judges"])]
+    parts.append(f"{qid} " + "; ".join(f"{judge}: {text}" for judge, text in choices))
+  return f"The judges did not converge (judges/{pid}/verdict.json), their last choices: " + " | ".join(parts) + "\n"
+
+
+def add_to_open_decisions(store, pid: str, question_text: str, line: str) -> None:
+  """Append the verdict line, once, to the `question` of each point 1 decision of this panel's review and round (its `source` is
+  `review <rid> round <n>`, the panel id being `<rid>-r<n>-<6 hex>`) that still has an unruled finding the panel asks: that record
+  is what `inbox` lists and the ruling comment quotes (section 7.8), `owner-question.md` being only a copy. A finding id recurs
+  in every unit and cycle, so the id alone never picks a decision; one a `redesign` or a `proceed` closed, or whose asked
+  findings all have a ruling, is left as it was."""
+  from superegm.decision import FINDING_LINE_RE
+  m = re.fullmatch(r"(.+)-r(\d+)-[0-9a-f]{6}", pid)
+  if not store.handoff_id or not m:  # a panel outside a wave (a spec review's) has no foreman files
+    return
+  source = f"review {m.group(1)} round {m.group(2)}"
+  fids = lambda text: {a or b for a, b in FINDING_LINE_RE.findall(text or "")}
+  asked = fids(question_text)
+  for path in sorted(store.path("foreman", "x").parent.glob("*.json")):
+    data = json.loads(core.read_text(path))
+    changed = False
+    for decision in data.get("decisions", []):
+      named = {str(r.get("ruling") or "").split(" ")[0] for r in data.get("rulings", []) if r.get("decision") == decision.get("id")}
+      unruled = not named & {"redesign", "proceed"} and any(f not in named for f in fids(decision.get("question")) & asked)
+      if decision.get("point") == 1 and decision.get("source") == source and unruled and f"judges/{pid}/verdict.json" not in decision["question"]:
+        decision["question"] = decision["question"].rstrip("\n") + "\n" + line
+        changed = True
+    if changed:
+      core.save_foreman(store, path.stem, data)
 
 
 def cmd_verdict(args, store) -> int:
@@ -486,6 +547,10 @@ def cmd_verdict(args, store) -> int:
   line += " (cap reached)" if verdict["cap_reached"] else ""
   line += " (degraded)" if verdict["degraded"] else ""
   core.journal(store, f"judges {pid}: {line}")
+  if verdict["cap_reached"] and not verdict["converged"]:  # section 7.8: the owner keeps the question, with the verdict line
+    line = verdict_line(pid, verdict, questions)
+    core.atomic_write(folder / "owner-question.md", core.read_text(folder / "question.md") + line)
+    add_to_open_decisions(store, pid, core.read_text(folder / "question.md"), line)
   print(json.dumps(verdict, indent=2))
   return 0 if verdict["converged"] else 2
 

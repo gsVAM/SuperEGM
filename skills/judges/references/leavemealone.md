@@ -1,6 +1,8 @@
 # Leavemealone-mode: the routing of a converged answer (design section 13.2)
 
-The one routing table for `review-spec`, `review-plan`, `plan` and `wave`. Each row is one form of
+The one routing table for `review-spec`, `review-plan`, `plan` and `wave`. The rows for a head's builder contest
+(`--review <id> --round <n>` on a head) apply in normal mode too, where the judges' ruling is journalled `contest`
+(`Ruling (judges <panel>, contest)`); every other row stays leavemealone's. Each row is one form of
 `superegm judges question`, one option the judges may converge on, the helper command that applies it
 (`Apply`) and what the skill does next (`Then`). `superegm` stands for `python3 '<HELPER>'`;
 `<card>` is the skill's own run card, `<panel>` the panel id `judges open` printed, `<did>` the id
@@ -32,7 +34,7 @@ dispatch in full.
    the one remaining path. A head whose `continue` is spent is asked `stop` and `redesign`, never refused.
 2. `superegm judges open --question <path> --evidence <paths> --parent <card>` opens the panel
    under a child card of the skill's card and prints `<panel>`; the evidence is the artifact under
-   review (the spec; the unit's body; on a head the round's `comments.md` and diff).
+   review (the spec; the unit's body; on a head the round's `comments.md` and diff, `r<n>/spec_range.md` and `r<n>/amendments.md`).
 3. Dispatch the judges as the `judges` skill's step 3 says: Astra through the runner, the two
    Claude judges through the `superegm:judge` adapter, each reply recorded with
    `superegm judges record`, each round closed with `superegm judges diff`; no one adds arguments
@@ -46,6 +48,7 @@ dispatch in full.
    point-1 panel is the one `decision rule` call on that `<did>`, with the sentence of the first question converged on `redesign`, made in place of the other converged questions' `decision rule` calls; their `review
    settle` calls still apply first. The unit is stopped, so no other ruling follows it.
 5. The record: `judges verdict` journals every converged question; `decision rule --by
-   judges:<panel>` journals `Ruling (judges <panel>, leavemealone): …`, and `review settle`,
-   `review rule` and `decide` journal their `by judges:<panel>` lines, so the owner can read and
-   overturn any of them.
+   judges:<panel>` journals `Ruling (judges <panel>, leavemealone | contest): …` (`contest` on a normal-mode card),
+   a normal-mode head contest's `review settle` journals `Ruling (judges <panel>, contest): <unit> <fid> <disposition>`
+   in place of its `by` line, and `review settle`, `review rule` and `decide` otherwise journal their
+   `by judges:<panel>` lines, so the owner can read and overturn any of them.

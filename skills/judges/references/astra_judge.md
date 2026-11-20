@@ -1,7 +1,7 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the Astra
 review lane. Not part of google/elephant-goldfish-model.
-Modified by SuperEGM (gsVAM), 2026: the judge lane; the lane's model and effort read from the panel's `astra` member (U28). -->
+Modified by SuperEGM (gsVAM), 2026: the judge lane; the lane's model and effort read from the panel's `astra` member (U28); inline evidence (U88). -->
 
 # Astra judge lane
 
@@ -72,7 +72,7 @@ so round n never resumes round n-1. `--feedback` is the round's brief, which
 the runner appends to its request; `--plan` is the question file, which the
 runner embeds whole with its hash.
 
-    SUPEREGM_ROLE=goldfish SUPEREGM_RUNCARD=<CARD> python3 '<RUNNER>' review --host claude --repo '<REPO_ROOT>' --plan '<QUESTION_FILE>' --feedback '<STORE>/judges/<PANEL>/round-<n>/brief.md' --model <ASTRA_MODEL> --effort <ASTRA_EFFORT> --timeout 1800 --artifacts "${TMPDIR:-/tmp}/superegm-astra"
+    SUPEREGM_ROLE=goldfish SUPEREGM_RUNCARD=<CARD> python3 '<RUNNER>' review --host claude --repo '<REPO_ROOT>' --plan '<QUESTION_FILE>' --feedback '<STORE>/judges/<PANEL>/round-<n>/brief-astra.md' --model <ASTRA_MODEL> --effort <ASTRA_EFFORT> --timeout 1800 --artifacts "${TMPDIR:-/tmp}/superegm-astra"
 
 Flags: `--host claude` because the judge is Codex; `--repo` is the git root
 (the runner refuses a subfolder of a repository); `--plan` is the question
@@ -93,10 +93,15 @@ plugin's hook silent in the runner's session.
 - Do not edit the question file until the run ends or the user skips it: the
   runner fails a run whose plan changed.
 - Then dispatch the two Claude judges, concurrently, as the skill says.
+- The evidence arrives inline, whatever the lane may read: `brief-astra.md` embeds the contents of every evidence file in the panel's `evidence[]`, for every question form
+  (a head contest's are `comments.md`, the diff, the unit's body, `r<n>/spec_range.md` and `r<n>/amendments.md`), each
+  re-checked against its recorded sha256. Pass `round-<n>/brief-astra.md`, not `brief.md`, as `--feedback`.
 
 **Data notice.** A run sends the question file, the brief and the repository
 folder, which Astra may read in full like any folder it is given, to OpenAI
-under the account `codex login status` reports. Show it in the run card
+under the account `codex login status` reports. The evidence, every file in the
+panel's `evidence[]`, goes into the brief whatever the question's form, and sits outside the repository folder, except the spec, which a spec review, a plan review and a `plan --unit <U> --decision D<n>` panel carry,
+inside the repository folder: that content goes to OpenAI too. Show it in the run card
 before the first launch of a panel.
 
 ## 3. Collect
