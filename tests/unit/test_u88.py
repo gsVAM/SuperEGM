@@ -419,7 +419,7 @@ ROOT = Path(__file__).resolve().parents[2]
     ("skills/judges/references/astra_judge.md",
      ("the judge lane; the lane's model and effort read from the panel's `astra` member (U28); inline evidence (U88)",
       "embeds the contents of every evidence file in the panel's `evidence[]`, for every question form",
-      "whatever the question's form, and sits outside the repository folder: that content goes to OpenAI too"),
+      "whatever the question's form, and sits outside the repository folder, except"),
      ("reads no paths", "On a head contest the brief")),
     ("skills/wave/references/decision_points.md",
      ("only `finding overruled` settles through `review settle --judges <panel>`",
