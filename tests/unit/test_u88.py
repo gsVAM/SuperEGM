@@ -319,7 +319,7 @@ ROOT = Path(__file__).resolve().parents[2]
       "`comments.md`, the diff, the unit's body, `r<n>/spec_range.md` and `r<n>/amendments.md` from the store"),
      ("reads no paths",)),
     ("skills/wave/references/builder_orders.md", ("`(judges <panel>, contest)` is the same ruling in normal mode",), ()),
-    ("skills/plan/scripts/superegm/decision.py", ("`(judges <panel>, leavemealone | contest)` marker",), ())])
+    ("skills/plan/scripts/superegm/decision.py", ("judges' post (the `(judges <panel>, leavemealone | contest)` marker on any line",), ("judges' post (the `(judges <panel>, leavemealone)` marker",))])
 def test_review_round_one_texts(path, present, absent):
   """The reference texts name what the code now does: the five evidence files, the `contest` word, the data sent to OpenAI, the marker."""
   body = (ROOT / path).read_text(encoding="utf-8")
