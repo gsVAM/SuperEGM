@@ -1,11 +1,12 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the respec's touched units, derived marks, open and actionable respecs and `respec posted` (U85).
+# Added by SuperEGM (gsVAM), 2026: the respec's touched units, derived marks, open and actionable respecs and `respec posted` (U85); `respec open` from a review's design finding (U91).
 
 """superegm respec: the units a spec correction touches (spec section 7.6), its derived marks and the posts and
 relaunches it asks for; every mark is derived on read from `respec/` and the launch records, never `state.json`."""
 
 import difflib
 import json
+import os
 from pathlib import Path
 import re
 
@@ -457,6 +458,7 @@ def actionable(store: core.Store, handoff: str) -> list:
 
 
 SKILLS = frozenset(["wave"])  # the skills whose card `respec posted` accepts: the wave posts the comment
+OPEN_SKILLS = frozenset(["review-plan", "integrate"])  # the skills whose card `respec open` accepts (U91)
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own
 
 
@@ -467,11 +469,56 @@ def register(subparsers):
   posted.add_argument("--respec", required=True, help="R<n>")
   posted.add_argument("--unit", required=True)
   posted.add_argument("--comment", required=True, help="the posted comment's id")
+  opened = core.add_parser(action, "open", "the owner opens a respec from a plan or integrate review's fix-design finding")
+  opened.add_argument("--review", required=True, help="the plan or integrate review's id")
+  opened.add_argument("--finding", required=True, help="its fix-design finding's id")
   p.set_defaults(run=run, writes=WRITES)
 
 
 def run(args):
-  return {"posted": record_posted}[args.action](args)
+  return {"posted": record_posted, "open": record_open}[args.action](args)
+
+
+def review_open(store: core.Store, handoff: str) -> list:
+  """The open respecs of `handoff` raised from a review's design finding (`unit: null`, U91): what `file`, `integrate`
+  and `next` wait on."""
+  return [r for r in open(store, handoff) if r.get("unit") is None]
+
+
+def record_open(args) -> int:
+  """`respec open` (U91): write `respec/R<n>.open.json` (`{id, unit: null, review, finding, at}`) in the handoff's
+  directory, `R<n>` the next number no `respec/` file uses. The owner's alone: refused under `SUPEREGM_ROLE` or a
+  leavemealone card; refused on a head review's finding and on a finding not settled `fix-design`. A rerun on the same
+  review and finding keeps the file it wrote."""
+  from superegm import review as review_mod  # at call time, as `eligible` imports it
+  card = core.require_runcard(args, OPEN_SKILLS)
+  if os.environ.get("SUPEREGM_ROLE") or card.get("mode") == "leavemealone":
+    raise core.HandoffError("respec open: owner only")
+  st = core.store(core.git_toplevel(Path.cwd()))
+  found = review_mod.load_review(st, args.review)
+  if found is None:
+    raise core.HandoffError(f"respec open: review {args.review} not opened")
+  if found["kind"] == "head":
+    raise core.HandoffError(f"respec open: {args.review} is a head review: its findings open no respec")
+  if found["kind"] not in ("plan", "integrate"):
+    raise core.HandoffError(f"respec open: {args.review} is a {found['kind']} review, not plan or integrate")
+  disposition = review_mod.locate_finding(st, args.review, args.finding)[3].get("disposition")
+  if disposition != "fix-design":
+    raise core.HandoffError(f"respec open: {args.finding} is {disposition or 'unsettled'}, not fix-design")
+  folder = respec_path(st)
+  files = sorted(folder.iterdir()) if folder.is_dir() else []
+  for path in files:
+    held = load_json(path) if OPEN_FILE.match(path.name) else None
+    if isinstance(held, dict) and held.get("unit") is None and (held.get("review"), held.get("finding")) == (args.review, args.finding):
+      print(f"respec {held['id']} open: {path.name}")
+      return 0
+  used = [int(m.group(1)) for p in files if (m := re.match(r"R(\d+)\.", p.name))]
+  rid = f"R{max(used, default=0) + 1}"
+  path = respec_path(st, f"{rid}.open.json")
+  core.atomic_write(path, {"id": rid, "unit": None, "review": args.review, "finding": args.finding, "at": core.now_iso()})
+  core.journal(st, f"respec {rid} opened from {args.review} {args.finding} under {args.runcard}")
+  print(f"respec {rid} open: {path.name}")
+  return 0
 
 
 def record_posted(args) -> int:
