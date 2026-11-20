@@ -72,7 +72,7 @@ so round n never resumes round n-1. `--feedback` is the round's brief, which
 the runner appends to its request; `--plan` is the question file, which the
 runner embeds whole with its hash.
 
-    SUPEREGM_ROLE=goldfish SUPEREGM_RUNCARD=<CARD> python3 '<RUNNER>' review --host claude --repo '<REPO_ROOT>' --plan '<QUESTION_FILE>' --feedback '<STORE>/judges/<PANEL>/round-<n>/brief.md' --model <ASTRA_MODEL> --effort <ASTRA_EFFORT> --timeout 1800 --artifacts "${TMPDIR:-/tmp}/superegm-astra"
+    SUPEREGM_ROLE=goldfish SUPEREGM_RUNCARD=<CARD> python3 '<RUNNER>' review --host claude --repo '<REPO_ROOT>' --plan '<QUESTION_FILE>' --feedback '<STORE>/judges/<PANEL>/round-<n>/brief-astra.md' --model <ASTRA_MODEL> --effort <ASTRA_EFFORT> --timeout 1800 --artifacts "${TMPDIR:-/tmp}/superegm-astra"
 
 Flags: `--host claude` because the judge is Codex; `--repo` is the git root
 (the runner refuses a subfolder of a repository); `--plan` is the question
@@ -93,6 +93,10 @@ plugin's hook silent in the runner's session.
 - Do not edit the question file until the run ends or the user skips it: the
   runner fails a run whose plan changed.
 - Then dispatch the two Claude judges, concurrently, as the skill says.
+- The Astra lane reads no paths, so the evidence arrives inline: `brief-astra.md` embeds each evidence file's contents
+  (on a head contest `comments.md`, the diff, the unit's body, `r<n>/spec_range.md` and `r<n>/amendments.md`), read from the
+  panel's `evidence[]` paths and each re-checked against its recorded sha256. Pass `round-<n>/brief-astra.md`, not
+  `brief.md`, as `--feedback`.
 
 **Data notice.** A run sends the question file, the brief and the repository
 folder, which Astra may read in full like any folder it is given, to OpenAI

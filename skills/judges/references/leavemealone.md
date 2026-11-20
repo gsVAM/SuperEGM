@@ -1,6 +1,8 @@
 # Leavemealone-mode: the routing of a converged answer (design section 13.2)
 
-The one routing table for `review-spec`, `review-plan`, `plan` and `wave`. Each row is one form of
+The one routing table for `review-spec`, `review-plan`, `plan` and `wave`. The rows for a head's builder contest
+(`--review <id> --round <n>` on a head) apply in normal mode too, where the judges' ruling is journalled `contest`
+(`Ruling (judges <panel>, contest)`); every other row stays leavemealone's. Each row is one form of
 `superegm judges question`, one option the judges may converge on, the helper command that applies it
 (`Apply`) and what the skill does next (`Then`). `superegm` stands for `python3 '<HELPER>'`;
 `<card>` is the skill's own run card, `<panel>` the panel id `judges open` printed, `<did>` the id

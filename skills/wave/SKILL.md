@@ -118,7 +118,9 @@ dispatch):
 - `revise` → in normal mode, when `review status` printed `acceptable: yes` → Decision point 5 first (no launch
   while it is pending). Otherwise, and on a ruled `revise`, `launch-builder` for the next
   round (the prompt carries the review); a ruled `revise` spends no relaunch.
-- `contested: <ids>` → Decision point 1.
+- `contested: <ids>` → Decision point 1: on a head, the judges' panel rules a contested or declined high or medium finding
+  first, in normal mode as in leavemealone; only a panel that does not converge reaches the owner, with point 1's question
+  and the line naming `judges/<panel>/verdict.json`. The owner-only rulings stay the owner's.
 - `cap-reached` → Decision point 2.
 - `owner: <ids>` → `decision open` for the owner's findings, ruled by the owner alone (no judge panel):
   no relaunch, no slot.
