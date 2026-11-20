@@ -173,3 +173,46 @@ def test_graph_maps_unfiled_ranges_through_line_map(world):
     assert "docs/specs/s.md:206-246" in unit_file_text(world, "U08")
     assert "docs/specs/s.md:212-252" not in unit_file_text(world, "U08")
   assert units(world)["U08"]["design_range"]["start"] == 200  # the plan file's own coordinates, never rewritten
+
+
+@pytest.mark.parametrize("render, corrected, marked", [
+  ("graph with Corrected: R1", ["R1"], False),
+  ("graph without the line", [], True),
+  ("decide", [], True),
+])
+def test_corrected_line_clears_the_mark(world, render, corrected, marked):
+  # U07 carries replan: R1; once cleared, gate still reads "gate: U07 plan review not converged" until a review-plan cycle converges on its new sha
+  from superegm import respec as rs
+  s_world(world)
+  converge_all(world)
+  respec(world, inserted(spec_lines(), 120, 6), ["U07"])
+  assert marks(world) == {"U07": "replan: R1"}
+  store, handoff = handoff_store(world), HID
+  if render == "decide":  # a decide render of a section carrying the line records nothing
+    write_plan(world, corrected="R1")
+    code, out = world.run("decide", "--plan", world.plan, "--unit", "U07", "--decision", "D1", "--default")
+  else:
+    write_plan(world, corrected="R1" if render == "graph with Corrected: R1" else None)
+    code, out = world.run("graph", "--plan", world.plan)
+  assert code == 0, out
+  assert units(world)["U07"].get("corrected", []) == corrected
+  assert ("U07" in rs.marks(store, handoff)) is marked
+  assert "Corrected" in core.OPTIONAL_FIELDS
+  assert units(world)["U07"]["rendered_under"] == (1 if marked else 2)  # a recorded rewrite reads in R1's lines
+  code, out = world.run("gate", "--pass", "--spec", world.spec)
+  assert code == 1
+  if marked:
+    assert "gate: U07 needs a re-plan after respec R1" in out
+    return
+  assert "gate: U07 " in out and "needs a re-plan" not in out  # cleared, yet its new body is unreviewed
+  converge_all(world)  # a review-plan cycle converged on every current body
+  code, out = world.run("gate", "--pass", "--spec", world.spec)
+  assert code == 0, out
+
+
+def test_corrected_row_names_respec_ids(world):
+  s_world(world)
+  write_plan(world, corrected="soon")
+  code, out = world.run("graph", "--plan", world.plan)
+  assert code == 1
+  assert "U07: Corrected names respec ids `R<n>[, R<m>…]`, not 'soon'" in out
