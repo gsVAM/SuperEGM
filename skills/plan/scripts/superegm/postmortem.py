@@ -1,27 +1,30 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: `superegm postmortem`, the handoff's report of spec section 7.5 (U78); the Lessons table and `--retro <file>` (U87).
 
-"""superegm postmortem: one report of a handoff from the store alone (spec section 7.5).
+"""superegm postmortem: one report of a handoff from the store (spec section 7.5), and its retrospective's record (7.7).
 
 `<handoff dir>/postmortem.md` holds six fixed sections, each one table: Header, Units, Reviewers, Owner time, Plan against actual and
-Lessons (U87: one fact row per signal, each naming its source record, no proposal). The command reads the store, needs no run card and writes that one derived
-file, as `scan` does; it runs on an open handoff too, the header then saying `in progress`.
+Lessons (U87: one fact row per signal, each naming its source record, no proposal). The command reads the store, plus one
+`gh api repos/<repo>/issues/comments/<id>` read per respec row (the deviation's quoted evidence; `evidence unread (comment
+<id>)` when that read fails), needs no run card and writes that one derived file, as `scan` does; `--retro <file>` writes
+`retro.md`, the file's bytes, instead and builds no report. It runs on an open handoff too, the header then saying `in progress`.
 
 What the store does not hold, the report does not invent: launches record no token counts (the Units table has cost
 only); a head finding's allowed outcome is the foreman's ruling text `<fid> allowed` read per unit (a unit's several
 head cycles share them), its overruled outcome the text `<fid> finding overruled`, or a settled disposition; a
 finding of any kind settled `contested` or `declined` counts overruled; a decision's wait has no start but the foreman's `asked_at`, so a `decide`
 answer is a row without a waiting time; who answered is a config owner's login as `owner`, the foreman's `superegm`
-as `default`, a judged answer as `judges:<panel>`, and a `decide --default` answer, stored by `owner`, as `owner`."""
+as `default`, a judged answer as `judges:<panel>`, and a `decide --default` answer, stored by `owner` with `default: true`
+(U87), as `owner` in the Owner time table; the Lessons table reads the marker."""
 
 import json
 import re
 from pathlib import Path
 
 import superegm as core
-from superegm import approve_spec, body, inbox, launch, report, respec, review
+from superegm import approve_spec, body, inbox, launch, launch_builder, report, respec, review
 
-WRITES = frozenset(['file'])  # the store kinds this subcommand writes: the derived `postmortem.md`
+WRITES = frozenset(['file'])  # the store kinds this subcommand writes: the derived `postmortem.md` and, from `--retro <file>`, `retro.md`
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SECTIONS = ("Header", "Units", "Reviewers", "Owner time", "Plan against actual", "Lessons")
 WAIT_RE = re.compile(r"^(\S+) next wait (\S+) (\S+) since (\S+) source (\S+) question (\S+)$")
@@ -300,7 +303,7 @@ def owner_rows(st: core.Store, hs: core.Store, uids: list, spec) -> list:
   """The Owner time rows: each phase's waits; each decision (the plan's `decide` answers, the foreman's); each review's
   `proceed` and `stop` rulings; each stopped unit. Who answered reads `owner` for a config owner's login, `default` for
   the foreman's own `superegm`, and a judged `decide` answer its raw `judges:<panel>`; a `decide --default` answer is
-  stored by `owner` (decide.py), so it reads `owner`: the store cannot tell it from an owner's own."""
+  stored by `owner` (decide.py) with `default: true`, so it reads `owner` here (the Lessons table reads the marker)."""
   owners = set((st.config or {}).get("owners") or [])
 
   def who(by):
@@ -363,8 +366,8 @@ def deviation_evidence(st: core.Store, comment_id) -> str:
   """The lines under `**Deviation (spec):**` in the comment `gh api repos/<repo>/issues/comments/<id>` returns, up to the
   next bold line; `evidence unread (comment <id>)` when the read fails or the comment holds none."""
   try:
-    text = str((core.gh_json(["api", f"repos/{(st.config or {}).get('repo')}/issues/comments/{comment_id}"]) or {}).get("body") or "")
-  except (core.GhError, ValueError):
+    text = str((core.gh_json(["api", f"repos/{st.config['repo']}/issues/comments/{comment_id}"]) or {}).get("body") or "")
+  except (core.GhError, ValueError, OSError):  # OSError: no `gh` binary
     text = ""
   lines, taking = [], False
   for line in text.splitlines():
@@ -382,7 +385,8 @@ def respec_rows(st: core.Store, hs: core.Store, spec) -> list:
   folder = respec.respec_path(hs)
   if not folder.is_dir():
     return []
-  entries = {e.get("respec"): e for e in core.load_approvals(hs, spec) if e.get("kind") == "respec"} if spec else {}
+  # `R<n>` restarts in each handoff of the spec: only this handoff's approvals name its respecs
+  entries = {e.get("respec"): e for e in respec.entries_of(hs, hs.handoff_id, spec) if e.get("kind") == "respec"} if spec else {}
   try:
     rel = Path(spec).resolve().relative_to(core.git_toplevel(Path.cwd()).resolve()).as_posix()
   except (TypeError, ValueError):
@@ -401,14 +405,12 @@ def respec_rows(st: core.Store, hs: core.Store, spec) -> list:
   return rows
 
 
-def amendment_rows(hs: core.Store, state: dict) -> list:
-  """One row per recorded interface amendment: the files `amendments/<comment id>.json` and the legacy `state.json` list."""
-  found = [("state.json amendments", a) for a in state.get("amendments") or []]
-  folder = hs.path("state").parent / "amendments"
-  for path in sorted(folder.glob("*.json")) if folder.is_dir() else []:
-    found += [(f"amendments/{path.name}", a) for a in read_json(path) or []]
-  return [["interface amendment", a.get("unit"), source, f"{a.get('name')}: {a.get('text')}"]
-          for source, a in sorted(found, key=lambda r: str(r[1].get("at")))]
+def amendment_rows(hs: core.Store, uids: list) -> list:
+  """One row per interface amendment that took effect, read as the builder's launch reads them (`launch_builder.amendments_for`):
+  a file `amendments/<comment id>.json` counts only when a ruling names its comment, and the legacy `state.json` list counts."""
+  found = [a for uid in uids for a in launch_builder.amendments_for(hs, uid, "") if a.get("unit") == uid]
+  return [["interface amendment", a.get("unit"), f"amendments/{a['comment_id']}.json" if a.get("comment_id") else "state.json amendments",
+           f"{a.get('name')}: {a.get('text')}"] for a in sorted(found, key=lambda a: str(a.get("at")))]
 
 
 def fix_design_rows(st: core.Store, hs: core.Store, spec) -> list:
@@ -424,28 +426,25 @@ def fix_design_rows(st: core.Store, hs: core.Store, spec) -> list:
 
 
 def reviewer_rows(st: core.Store, hs: core.Store, spec) -> list:
-  """The reviewers with no finding kept (none raised, or every one overruled) and those overruled most; a handoff in
-  which no reviewer raised anything has neither."""
+  """The reviewers with no finding kept (none raised, or every one overruled), whatever the others raised, and those
+  overruled most; with no finding overruled anywhere (`most` 0) no reviewer is most overruled."""
   total = {}
   for (name, _), s in reviewer_stats(st, hs, spec).items():
     t = total.setdefault(name, {"raised": 0, "overruled": 0})
     t["raised"] += sum(s[k] for k in SEVERITIES)
     t["overruled"] += s["overruled"]
   most = max((t["overruled"] for t in total.values()), default=0)
-  quiet = not any(t["raised"] for t in total.values())  # no reviewer raised anything: silence is no signal
   rows = []
   for name, t in sorted(total.items()):
     if t["raised"] == t["overruled"]:
-      if quiet:
-        continue
       rows.append(["reviewer kept nothing", None, "Reviewers table", f"{name}: {t['raised']} raised, {t['overruled']} overruled"])
-    elif t["overruled"] == most:
+    elif most and t["overruled"] == most:
       rows.append(["reviewer most overruled", None, "Reviewers table", f"{name}: {t['overruled']} of {t['raised']} overruled"])
   return rows
 
 
 def unit_rows(hs: core.Store, uids: list) -> list:
-  """A unit with an escalated launch, and a unit whose cap decision ended in a stop."""
+  """A unit with an escalated launch, and one row per cap decision whose own ruling was a stop."""
   rows = []
   for uid in uids:
     escalated = [e for e in launch.load_launches(hs, uid) if e.get("escalated")]
@@ -455,17 +454,20 @@ def unit_rows(hs: core.Store, uids: list) -> list:
     for decision in foreman.get("decisions") or []:
       if str(decision.get("source") or "").endswith(" cap"):
         given = [r for r in foreman.get("rulings") or [] if r.get("decision") == decision.get("id")]
-        if foreman.get("stopped") or any(str(r.get("ruling") or "").startswith("stop") for r in given):
+        if any(str(r.get("ruling") or "").startswith("stop") for r in given):
           rows.append(["unit stopped at the cap", uid, f"foreman/{uid}.json {decision.get('id')}", str(decision.get("source"))])
   return rows
 
 
 def lessons_table(st: core.Store, hs: core.Store, uids: list, spec, state: dict) -> str:
   """The Lessons table: facts from the store, one row per signal, each naming its source record; no proposal."""
-  rows = respec_rows(st, hs, spec) + fix_design_rows(st, hs, spec) + amendment_rows(hs, state)
+  rows = respec_rows(st, hs, spec) + fix_design_rows(st, hs, spec) + amendment_rows(hs, uids)
   rows += reviewer_rows(st, hs, spec) + unit_rows(hs, uids)
-  rows += [["decision answered by default", row[0].split("/")[0].split()[0], "foreman record" if " " in row[0] else "state.json decisions",
-            f"{row[0]}: {row[2]}"] for row in owner_rows(st, hs, uids, spec) if row[1] == "decision" and row[4] == "default"]
+  # a plan decision answered by `decide --default` carries `default: true`; a foreman decision, answered by `superegm`
+  rows += [["decision answered by default", key.split("/")[0], f"state.json decisions {key}", f"{key}: {found.get('answer')}"]
+           for key, found in sorted((state.get("decisions") or {}).items()) if found.get("default")]
+  rows += [["decision answered by default", row[0].split()[0], f"foreman/{row[0].split()[0]}.json {row[0].split()[1]}", f"{row[0]}: {row[2]}"]
+           for row in owner_rows(st, hs, uids, spec) if row[1] == "decision" and row[4] == "default" and " " in row[0]]
   return render(["signal", "unit", "source", "fact"], rows)
 
 
