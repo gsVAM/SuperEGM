@@ -364,7 +364,7 @@ def plan_table(hs: core.Store, uids: list, units: dict, state: dict) -> str:
 
 
 DEVIATION_RE = re.compile(r"\*\*Deviation \(spec\):\*\*(.*)")
-COMMENT_LABEL_RE = re.compile(r"\*\*(?:Builder status|Ruling|Deviation|Blocked|Status|Reply)\b")  # a comment's own labels; other bold text is evidence
+COMMENT_LABEL_RE = re.compile(r"\*\*(?:Builder status|Ruling|Deviation|Blocked|Status|Reply)(?: \([^)]*\))?:\*\*")  # a whole label of a comment (`**Deviation (spec):**`); other bold text, `**Status mismatch:**` too, is evidence
 
 
 def deviation_evidence(st: core.Store, comment_id) -> str:

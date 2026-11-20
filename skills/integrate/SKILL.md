@@ -127,7 +127,7 @@ It prints the path of `<handoff dir>/postmortem.md`. Tell the owner that path an
 tables: the total wall time (Header, total wall seconds: the earliest first launch to the latest merge), the unit with the most rounds
 (Units, head rounds) and the reviewer with the most overruled findings (Reviewers, overrules, the overruled
 and allowed columns together, an allowance being an overrule, summed across its rows: a reviewer has one row per kind; the Lessons row
-"reviewer most overruled" names the same reviewer); the figures are the report's, the one sum aside. A refused `close` ends the skill without it.
+"reviewer most overruled" names the same reviewer: a tie lists every tied reviewer, each on its own Lessons row in reviewer-id order (sorted by name); a reviewer whose every finding was overruled or allowed gets the row "reviewer kept nothing", not "reviewer most overruled"); the figures are the report's, the one sum aside. A refused `close` ends the skill without it.
 Then offer the retrospective, once: `/superegm:retro --handoff '<id>'` walks the report's Lessons with the owner and lands
 what they agree in one commit (design section 7.7). The skill runs nothing of it; the owner starts it in a session of their own when they want it.
 
