@@ -19,7 +19,7 @@ import superegm as core
 from superegm import close, instructions, reviewers, runcard
 from superegm.review import Refusal, evaluate, findings_of, ingest_pr, last_proceed, latest_cycle, live_rounds, load_review, load_round, reference_manifest, review_id, round_numbers, rounds_of, valid_rounds
 
-WRITES = frozenset(["approvals", "handoffs", "state", "reviews", "runcards", "instructions", "reviewers"])  # the store kinds this subcommand writes
+WRITES = frozenset(["approvals", "handoffs", "state", "reviews", "runcards", "instructions", "reviewers", "file"])  # the store kinds this subcommand writes
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset(["review-spec", "review-plan", "integrate", "approve-spec"])  # the skills whose card this subcommand accepts
 CONFIG = ".superegm/config.json"
@@ -584,6 +584,8 @@ def respec_checks(args, st: core.Store, spec: Path, root: Path, card: dict):
   if not respec.respec_path(hs, f"{rid_n}.open.json").is_file() or any(
       e.get("respec") == rid_n for e in core.load_approvals(st, spec) if e.get("handoff_id") == hid):
     raise fail("not open")
+  if args.dry_run:  # the draft, before its commit and its review: the touched units alone
+    return hid, latest, None, core.read_text(spec), respec.touched(st, hid, core.read_text(spec))
   review, _ = latest_cycle(st, "spec", str(spec))
   rid = review_id(st, "spec", str(spec), review["cycle"]) if review else "none"
   if review is None or review.get("respec") != rid_n:
@@ -604,9 +606,39 @@ def respec_checks(args, st: core.Store, spec: Path, root: Path, card: dict):
 
 
 def approve_respec(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
-  """`--respec R<n>` (spec section 7.6): the four refusals, then the touched units and the entry."""
-  respec_checks(args, st, spec, root, card)
-  raise core.HandoffError(f"approve-spec: respec {args.respec}: not implemented")
+  """`--respec R<n>` (spec section 7.6): the four refusals, then `respec/R<n>.json` and the comment files, then the
+  entry, copying every frozen field as `--amend-units` does; a crash between them leaves the file without an entry,
+  which a re-run rewrites and completes. `--dry-run` prints the touched units of the working tree and writes nothing."""
+  from superegm import respec
+  hid, latest, rid, text, result = respec_checks(args, st, spec, root, card)
+  for key in ("touched", "untouched", "merged_review"):
+    print(f"{key}: {', '.join(result[key])}")
+  for follow in result["follow_ups"]:
+    print(f"follow_up: {follow['unit']} overlaps {follow['overlaps']}: row {follow['row']}")
+  if args.dry_run:
+    return 0
+  if not (args.yes or st.config.get("mode") == "leavemealone"):
+    print(f"Approve respec {args.respec} of `{spec}` at review {rid}?")
+    print("Options: Approve | Stop. Run again with --yes after the owner chose Approve.")
+    return 0
+  hs = core.handoff_store(st, hid)
+  rel = spec.relative_to(root).as_posix()
+  core.atomic_write(respec.respec_path(hs, f"{args.respec}.json"), result)
+  state = (handoff_state(st, hid) or {}).get("units") or {}
+  for unit in result["touched"]:  # a filed, unmerged unit: the comment the wave posts beside its filed body
+    record = state.get(unit) or {}
+    if record.get("number") and not respec.is_merged(record):
+      core.atomic_write(hs.path("file", f"respec_comment_{unit}_{args.respec}.md"),
+                        respec.comment_text(st, hid, text, unit, args.respec))
+  commit = commit_by_path(root, [rel, CONFIG], f"superegm: approve {core.spec_slug(spec)} respec {args.respec} at review {rid}",
+                          st.config["commit_trailer"])
+  entry = entry_of(core.sha256_text(text), commit, args.runcard, rid, hid, "respec", list(latest.get("escalated") or []),
+                   {f: latest[f] for f in FROZEN_FIELDS if f in latest})
+  entry |= {"respec": args.respec, "ranges": [list(r) for r in respec.changed_ranges(result["line_map"])]}
+  path = append_entry(st, spec, entry)
+  core.journal(st, f"approve-spec respec {args.respec} {hid} sha256 {entry['sha256'][:12]} at review {rid} commit {commit[:12]} under {args.runcard}")
+  print(f"approval recorded in {path}")
+  return 0
 
 
 def void_approval(args, st: core.Store, spec: Path) -> int:

@@ -12,7 +12,8 @@ import re
 import superegm as core
 from superegm.review import approved_text, sections
 
-BACKTICKED = re.compile(r"`([^`]+)`")
+WRITES = frozenset(["file"])  # `respec/` and the comment files are the store's `file` kind
+BACKTICKED =re.compile(r"`([^`]+)`")
 TABLE_SEPARATOR = re.compile(r"^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$")
 HEADING_MARKER = re.compile(r"^\s*#+\s*$")
 FOLLOWS = re.compile(r"Follows:\s*(U\d+)")
@@ -114,6 +115,39 @@ def history(store: core.Store, handoff: str):
   return spec, entries, texts, maps
 
 
+def carried_spans(units: dict, entries: list, maps: list) -> dict:
+  """Each unit's Design range, read in the coordinates of the approval it was last rendered under (`rendered_under`,
+  how many of the handoff's entries existed then; absent reads 1, the opening) and carried through each consecutive
+  line map to the latest entry's coordinates."""
+  carried = {}
+  for u, record in units.items():
+    span = record.get("design_range") or {}
+    if not span.get("start"):
+      continue
+    a, b = span["start"], span["end"]
+    for i in range(max(record.get("rendered_under") or 1, 1), len(entries)):
+      a, b = carry(maps[i], a, b)
+    carried[u] = (a, b)
+  return carried
+
+
+def comment_text(store: core.Store, handoff: str, text: str, unit: str, respec: str) -> str:
+  """`respec_comment_<unit>_R<n>.md`: the diff hunks from the latest approved text to `text` in the unit's Design
+  range (every hunk when the unit was touched by shared text alone)."""
+  hs = core.handoff_store(store, handoff)
+  _, entries, texts, maps = history(store, handoff)
+  prev, new = texts[-1], text.splitlines()
+  units = ((load_json(hs.path("units")) or {}).get("units")) or {}
+  span = carried_spans(units, entries, maps).get(unit)
+  hunks = [op for op in opcodes(prev, new) if op[0] != "equal"]
+  own = [op for op in hunks if span and overlaps(span, (op[1] + 1, max(op[2], op[1] + 1)))]
+  lines = [f"**Spec correction {respec}** for {unit}: the frozen spec changed; build to the lines below.", ""]
+  for _, i1, i2, j1, j2 in own or hunks:
+    lines += ["```diff", f"@@ -{i1 + 1},{i2 - i1} +{j1 + 1},{j2 - j1} @@",
+              *(f"-{line}" for line in prev[i1:i2]), *(f"+{line}" for line in new[j1:j2]), "```", ""]
+  return "\n".join(lines)
+
+
 def touched(store: core.Store, handoff: str, text: str) -> dict:
   """The units the diff from the handoff's latest approved text to `text` touches (spec section 7.6), as
   `respec/R<n>.json` holds them: `touched`, `untouched`, `follow_ups` (each merged unit the range or Interfaces
@@ -141,16 +175,7 @@ def touched(store: core.Store, handoff: str, text: str) -> dict:
       for u in prior.get("touched") or []:
         if u in lines_of:
           lines_of[u] |= added
-  # each unit's Design range, in the coordinates of the approval it was last rendered under, carried to `prev`'s
-  carried = {}
-  for u, record in units.items():
-    span = record.get("design_range") or {}
-    if not span.get("start"):
-      continue
-    a, b = span["start"], span["end"]
-    for i in range(max(record.get("rendered_under") or 1, 1), len(entries)):
-      a, b = carry(maps[i], a, b)
-    carried[u] = (a, b)
+  carried = carried_spans(units, entries, maps)
   spec_global = set()
   old_text = "\n".join(prev)
   for title, start, end in sections(old_text):
