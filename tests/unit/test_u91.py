@@ -184,3 +184,60 @@ def test_next_waits_on_a_review_respec(world, registry, origin, units, printed):
   assert (code, out) == (0, printed)
   assert before == after  # next writes nothing
 
+
+# ---------------------------------------------------------------- S4: the approval closes the source cycle
+
+
+def source_cycle(st, kind, artifact, handoff_id):
+  """Cycle 1 of a plan or integrate review in `st`'s handoff directory, its one round holding a `fix-design` finding
+  (exit 4): the review `respec open` read. Its id."""
+  import superegm as core
+  from superegm import review
+  rid = review.review_id(st, kind, artifact, 1)
+  core.atomic_write(st.path("reviews", rid, "review.json"), {
+    "kind": kind, "artifact": artifact, "cycle": 1, "handoff_id": handoff_id, "reviewers": ["readiness"], "cap": 3,
+    "runcard": "rc", "converged": "no", "converged_round": None, "rulings": []})
+  finding = {"id": "readiness-1-1", "severity": "high", "location": "§1", "regression": "no", "claim": "claim 1",
+             "disposition": "fix-design", "reason": None}
+  core.atomic_write(st.path("reviews", rid, "round-1.json"), {
+    "round": 1, "runcard": "rc", "artifact_sha256": "0" * 64, "what_ran": "completed",
+    "reviewers": {"readiness": {"findings": [finding]}}})
+  return rid
+
+
+def review_status(st, rid):
+  """`review status`'s exit code for `rid` in `st`'s handoff: the verdict `evaluate` returns."""
+  from superegm import review
+  return review.evaluate(st, review.load_review(st, rid), None).code
+
+
+@pytest.mark.parametrize("kind", ["plan", "integrate"])
+def test_respec_approval_closes_the_source_cycle(world, kind):
+  import superegm as core
+  from superegm import review
+  from test_u85 import respec_world, respec_cycle, R1_TEXT, BASE, HID
+  spec, st = respec_world(world, [(BASE, None)])
+  artifact = "U2" if kind == "plan" else str(spec)
+  source_id = source_cycle(st, kind, artifact, HID)
+  other = core.handoff_store(st, "x-other")  # a second handoff holding a cycle of the source's id
+  assert source_cycle(other, kind, artifact, "x-other") == source_id
+  core.atomic_write(other.path("unit", "U2"), st.path("unit", "U2").read_text(encoding="utf-8"))
+  core.atomic_write(st.path("file", "respec", "R1.open.json"),
+                    {"id": "R1", "unit": None, "review": source_id, "finding": "readiness-1-1", "at": "2026-11-13T00:00:00Z"})
+  assert review_status(st, source_id) == 4
+  spec.write_text("".join(R1_TEXT), encoding="utf-8")
+  spec_cycle_id = "spec-x-c2"
+  assert spec_cycle_id != source_id
+  respec_cycle(world, spec, st, rid=spec_cycle_id)
+  code, out = world.run("approve-spec", "--spec", spec, "--respec", "R1", "--yes")
+  assert code == 0, out
+  entry = json.loads(st.path("approvals", core.spec_slug(spec)).read_text(encoding="utf-8"))["entries"][-1]
+  assert entry["source_review"] == source_id and entry["review"] == spec_cycle_id
+  assert review_status(st, source_id) != 4
+  assert review.latest_cycle(st, kind, artifact)[1] is True
+  spec_review, _ = review.latest_cycle(st, "spec", str(spec))
+  assert spec_review["cycle"] == 2 and core.load_approval(st, spec)["review"] == spec_cycle_id
+  assert review_status(other, source_id) == 4
+  if kind == "plan":  # an integrate cycle of a handoff that is not the store's current one is closed by D1 (a) anyway
+    assert review.latest_cycle(other, kind, artifact)[1] is False
+
