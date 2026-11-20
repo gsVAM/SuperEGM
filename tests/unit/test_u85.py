@@ -177,3 +177,79 @@ def test_touched_units(world, change, touched, merged_review):
   assert (sorted(result["touched"]), result["merged_review"]) == (touched, merged_review)
   assert set(result) == {"touched", "untouched", "follow_ups", "line_map", "merged_review"}
   assert sorted(result["untouched"]) == sorted(set(SECTIONS) - set(touched))
+
+
+def snapshot(root):
+  return {p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(Path(root).rglob("*")) if p.is_file()}
+
+
+def respec_cycle(world, spec, st, converged=True, rid="spec-x-c2"):
+  """A spec cycle reviewing respec R1 on `spec`'s working bytes, recorded clean by its two reviewers when `converged`."""
+  world.spec = spec
+  cid = world.card("review-spec")
+  text = spec.read_text(encoding="utf-8")
+  core.atomic_write(st.path("reviews", rid, "review.json"), {
+    "kind": "spec", "artifact": str(spec), "cycle": int(rid.rsplit("-c", 1)[1]), "handoff_id": None, "scope": "auto",
+    "reviewers": ["design", "codebase-details"], "cap": 2, "runcard": cid, "respec": "R1",
+    "artifact_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(), "astra_incomplete": 0, "converged": "no",
+    "converged_round": None, "rulings": []})
+  if converged:
+    for reviewer in ("design", "codebase-details"):
+      path = world.repo.parent / f"{rid}-1-{reviewer}.txt"
+      path.write_text("", encoding="utf-8")
+      code, out = world.run("review", "record", "--review", rid, "--round", "1", "--reviewer", reviewer, "--runcard", cid,
+                            "--findings", str(path), "--isolation", "clean", "--model", "inherit:opus", "--effort", "inherit:high")
+      assert code == 0, out
+  return cid
+
+
+def open_respec(st, rid="R1", unit="U2"):
+  core.atomic_write(st.path("file", "respec", f"{rid}.open.json"),
+                    {"id": rid, "unit": unit, "comment_id": 901, "at": "2026-11-13T00:00:00Z"})
+
+
+PADDED = BASE[:3] + [f"Pad {n}.\n" for n in range(26)] + BASE[3:]
+ROUNDS = BASE[:3] + ["Rounds: 3\n"] + BASE[3:]
+MERGED_U1 = {"U0": {"number": 10, "pr": {"number": 20, "head": "e" * 40, "merged_at": "2026-11-11T00:00:00Z"}},
+             "U1": {"number": 11, "pr": {"number": 21, "head": "d" * 40, "merged_at": "2026-11-11T00:00:00Z"}}, "U2": {}, "U3": {}}
+
+
+def another_handoff(st, spec):
+  """A later opening approval of handoff `x-def456`: `HID` is no longer the latest approval's."""
+  path = st.path("approvals", core.spec_slug(spec))
+  record = json.loads(path.read_text(encoding="utf-8"))
+  record["entries"].append(dict(record["entries"][-1], handoff_id="x-def456", kind="opening"))
+  core.atomic_write(path, record)
+  core.atomic_write(st.path("handoffs", "x-def456"), {"id": "x-def456", "spec": str(spec), "opened_at": None, "closed_at": None})
+
+
+@pytest.mark.parametrize("case, err", [
+  ("unconverged", "approve-spec: respec R1: review spec-x-c2 not converged"),
+  ("merged U1 overlaps, no follow-up row", "approve-spec: respec R1: U1 is merged and overlaps docs/specs/x.md:40-44: add a follow-up row"),
+  ("Rounds: line changed", "approve-spec: respec R1: changes the frozen Rounds: void and re-approve"),
+  ("latest approval of another handoff", "approve-spec: respec R1:")])
+def test_approve_respec_refusals(world, case, err):
+  # each refusal writes nothing: no entry, no respec/R1.json
+  opening = {"merged U1 overlaps, no follow-up row": PADDED, "Rounds: line changed": ROUNDS}.get(case, BASE)
+  spec, st = respec_world(world, [(opening, None)], state_units=MERGED_U1 if "merged" in case else None)
+  open_respec(st)
+  if case == "merged U1 overlaps, no follow-up row":
+    start = PADDED.index("## 1. Queue\n")
+    assert start + 1 == 40
+    draft = PADDED[:start] + [line.rstrip("\n") + " v2\n" if line.strip() else "Gap.\n" for line in PADDED[start:start + 5]] \
+      + PADDED[start + 5:]
+  elif case == "Rounds: line changed":
+    draft = replace(ROUNDS, "Rounds: 3", "Rounds: 4")
+  else:
+    draft = replace(BASE, "Delay is 5s.", "Delay is 6s.")
+  spec.write_text("".join(draft), encoding="utf-8")
+  respec_cycle(world, spec, st, converged=case != "unconverged")
+  extra = []
+  if case == "latest approval of another handoff":
+    another_handoff(st, spec)
+    extra = ["--handoff", HID]
+  store_before = snapshot(world.artifacts)
+  rc, stderr = world.run("approve-spec", "--spec", spec, "--respec", "R1", "--yes", *extra)
+  store_after = snapshot(world.artifacts)
+  assert rc == 1 and err in stderr and store_after == store_before
+  assert not st.path("file", "respec", "R1.json").exists()
