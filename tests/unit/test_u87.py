@@ -75,3 +75,20 @@ def test_retro_copy(world, tmp_path):
   assert retro_md.read_bytes() == source.read_bytes() and set(after) - {retro_md} == set(before)
   assert {p for p in before if after[p] != before[p]} == set()
   assert postmortem.WRITES == frozenset(["file"])
+
+
+def text(path):
+  return (ROOT / path).read_text(encoding="utf-8")
+
+
+def frontmatter(path):
+  import yaml
+  return yaml.safe_load(text(path).split("---", 2)[1])
+
+
+@pytest.mark.parametrize("phrase", ["reference document", "reviewer file", "`.superegm/config.json`", "`.superegm/brainstorm.md`",
+                                    "owner's yes", "suggested answer", "one question at a time", "`retro: <handoff>`",
+                                    "superegm postmortem --handoff <id> --retro <file>", "never edits the approved spec", "every open handoff"])
+def test_retro_skill_text(phrase):
+  # the retro skill names its four targets, asks per edit, and never touches an approved spec
+  assert phrase in text("skills/retro/SKILL.md") and frontmatter("skills/retro/SKILL.md")["effect_kinds"] == ["state-store"]
