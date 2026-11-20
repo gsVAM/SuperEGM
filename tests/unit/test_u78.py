@@ -208,7 +208,7 @@ def test_tables_carry_the_store_numbers(world):
   code, out = world.run("postmortem", "--handoff", c.hid)
   assert code == 0, out
   report = c.hs.path("file", "postmortem.md").read_text(encoding="utf-8")
-  assert re.findall(r"^## (.+)$", report, re.M) == ["Header", "Units", "Reviewers", "Owner time", "Plan against actual"]
+  assert re.findall(r"^## (.+)$", report, re.M) == ["Header", "Units", "Reviewers", "Owner time", "Plan against actual", "Lessons"]
   units = table(report, "Units")
   assert units["U01"]["escalated"] == "1" and units["U02"]["escalated"] == "0"
   assert (units["U01"]["launches"], units["U01"]["fresh"], units["U01"]["resumed"]) == ("2", "1", "1")

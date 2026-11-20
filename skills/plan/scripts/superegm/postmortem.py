@@ -3,8 +3,8 @@
 
 """superegm postmortem: one report of a handoff from the store alone (spec section 7.5).
 
-`<handoff dir>/postmortem.md` holds five fixed sections, each one table of numbers: Header, Units, Reviewers,
-Owner time and Plan against actual. The command reads the store, needs no run card and writes that one derived
+`<handoff dir>/postmortem.md` holds six fixed sections, each one table: Header, Units, Reviewers, Owner time, Plan against actual and
+Lessons (U87: one fact row per signal, each naming its source record, no proposal). The command reads the store, needs no run card and writes that one derived
 file, as `scan` does; it runs on an open handoff too, the header then saying `in progress`.
 
 What the store does not hold, the report does not invent: launches record no token counts (the Units table has cost
@@ -19,11 +19,11 @@ import re
 from pathlib import Path
 
 import superegm as core
-from superegm import approve_spec, body, inbox, launch, report, review
+from superegm import approve_spec, body, inbox, launch, report, respec, review
 
 WRITES = frozenset(['file'])  # the store kinds this subcommand writes: the derived `postmortem.md`
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
-SECTIONS = ("Header", "Units", "Reviewers", "Owner time", "Plan against actual")
+SECTIONS = ("Header", "Units", "Reviewers", "Owner time", "Plan against actual", "Lessons")
 WAIT_RE = re.compile(r"^(\S+) next wait (\S+) (\S+) since (\S+) source (\S+) question (\S+)$")
 REASK_RE = re.compile(r"^(\S+) next reask (\S+) (\S+) at (\S+) question (\S+)$")
 CLEAR_RE = re.compile(r"^(\S+) next clear (\S+) (\S+) answered by (\S+) at (\S+) answer (\S+)$")
@@ -216,7 +216,8 @@ def reviews_of(st: core.Store, hs: core.Store, spec) -> list:
   return [(rid, review.load_review(hs, rid)) for rid in found]
 
 
-def reviewers_table(st: core.Store, hs: core.Store, uids: list, spec) -> str:
+def reviewer_stats(st: core.Store, hs: core.Store, spec) -> dict:
+  """Per `(reviewer, kind)`, the counts the Reviewers table shows; the Lessons table reads the same numbers."""
   stats, found, latest = {}, [], {}
   for rid, cycle in sorted(reviews_of(st, hs, spec), key=lambda r: cycle_order(r[0])):
     if not cycle:
@@ -242,8 +243,12 @@ def reviewers_table(st: core.Store, hs: core.Store, uids: list, spec) -> str:
     row["allowed"] += fid in allowed
     row["overruled"] += fid not in allowed and (fid in overruled or disposition in ("contested", "declined"))
     row["regressions"] += finding.get("regression") == "yes"
+  return stats
+
+
+def reviewers_table(st: core.Store, hs: core.Store, uids: list, spec) -> str:
   rows = [[name, kind, *(s[k] for k in (*SEVERITIES, "fixed", "overruled", "allowed", "deferred", "regressions", "quiet"))]
-          for (name, kind), s in sorted(stats.items())]
+          for (name, kind), s in sorted(reviewer_stats(st, hs, spec).items())]
   return render(["reviewer", "kind", "high", "medium", "low", "fixed", "overruled", "allowed", "deferred", "regressions",
                  "quiet rounds"], rows)
 
@@ -350,6 +355,119 @@ def plan_table(hs: core.Store, uids: list, units: dict, state: dict) -> str:
   return render(["unit", "wave", "critical path", "planned steps", "merge order", "head rounds"], rows)
 
 
+DEVIATION_RE = re.compile(r"\*\*Deviation \(spec\):\*\*(.*)")
+
+
+def deviation_evidence(st: core.Store, comment_id) -> str:
+  """The lines under `**Deviation (spec):**` in the comment `gh api repos/<repo>/issues/comments/<id>` returns, up to the
+  next bold line; `evidence unread (comment <id>)` when the read fails or the comment holds none."""
+  try:
+    text = str((core.gh_json(["api", f"repos/{(st.config or {}).get('repo')}/issues/comments/{comment_id}"]) or {}).get("body") or "")
+  except (core.GhError, ValueError):
+    text = ""
+  lines, taking = [], False
+  for line in text.splitlines():
+    if m := DEVIATION_RE.search(line):
+      taking, line = True, m.group(1)
+    elif taking and line.startswith("**"):
+      break
+    if taking and line.strip():
+      lines.append(line.strip())
+  return " ".join(lines) if lines else f"evidence unread (comment {comment_id})"
+
+
+def respec_rows(st: core.Store, hs: core.Store, spec) -> list:
+  """One row per respec: its first approved range as `path:a-b`, its unit and the deviation's quoted evidence."""
+  folder = respec.respec_path(hs)
+  if not folder.is_dir():
+    return []
+  entries = {e.get("respec"): e for e in core.load_approvals(hs, spec) if e.get("kind") == "respec"} if spec else {}
+  try:
+    rel = Path(spec).resolve().relative_to(core.git_toplevel(Path.cwd()).resolve()).as_posix()
+  except (TypeError, ValueError):
+    rel = str(spec)
+  rows = []
+  for path in sorted(folder.iterdir(), key=lambda p: (len(p.name), p.name)):
+    match = respec.OPEN_FILE.match(path.name)
+    if not match:
+      continue
+    record, rid = read_json(path) or {}, match.group(1)
+    ranges = (entries.get(rid) or {}).get("ranges") or []
+    where = f"{rel}:{ranges[0][0]}-{ranges[0][1]}" if ranges else "not approved"
+    evidence = (deviation_evidence(st, record["comment_id"]) if record.get("comment_id")
+                else f"spec finding {record.get('finding')}")
+    rows.append(["respec", record.get("unit"), f"respec/{path.name}", f"{rid} {where}: {evidence}"])
+  return rows
+
+
+def amendment_rows(hs: core.Store, state: dict) -> list:
+  """One row per recorded interface amendment: the files `amendments/<comment id>.json` and the legacy `state.json` list."""
+  found = [("state.json amendments", a) for a in state.get("amendments") or []]
+  folder = hs.path("state").parent / "amendments"
+  for path in sorted(folder.glob("*.json")) if folder.is_dir() else []:
+    found += [(f"amendments/{path.name}", a) for a in read_json(path) or []]
+  return [["interface amendment", a.get("unit"), source, f"{a.get('name')}: {a.get('text')}"]
+          for source, a in sorted(found, key=lambda r: str(r[1].get("at")))]
+
+
+def fix_design_rows(st: core.Store, hs: core.Store, spec) -> list:
+  """One row per `fix-design` finding of any review of the handoff, each counted once."""
+  found, latest = [], {}
+  for rid, cycle in sorted(reviews_of(st, hs, spec), key=lambda r: cycle_order(r[0])):
+    for rnd in review.rounds_of(hs, rid, cycle) if cycle else []:
+      for name, entry in (rnd.get("reviewers") or {}).items():
+        for finding in entry.get("findings") or []:
+          note_finding(found, latest, (cycle["kind"], cycle["artifact"]), name, finding, (cycle, rid, name, finding))
+  return [["fix-design finding", cycle["artifact"], f"reviews/{rid}", f"{name} {finding.get('id')}: {finding.get('claim')}"]
+          for cycle, rid, name, finding in found if finding.get("disposition") == "fix-design"]
+
+
+def reviewer_rows(st: core.Store, hs: core.Store, spec) -> list:
+  """The reviewers with no finding kept (none raised, or every one overruled) and those overruled most; a handoff in
+  which no reviewer raised anything has neither."""
+  total = {}
+  for (name, _), s in reviewer_stats(st, hs, spec).items():
+    t = total.setdefault(name, {"raised": 0, "overruled": 0})
+    t["raised"] += sum(s[k] for k in SEVERITIES)
+    t["overruled"] += s["overruled"]
+  most = max((t["overruled"] for t in total.values()), default=0)
+  quiet = not any(t["raised"] for t in total.values())  # no reviewer raised anything: silence is no signal
+  rows = []
+  for name, t in sorted(total.items()):
+    if t["raised"] == t["overruled"]:
+      if quiet:
+        continue
+      rows.append(["reviewer kept nothing", None, "Reviewers table", f"{name}: {t['raised']} raised, {t['overruled']} overruled"])
+    elif t["overruled"] == most:
+      rows.append(["reviewer most overruled", None, "Reviewers table", f"{name}: {t['overruled']} of {t['raised']} overruled"])
+  return rows
+
+
+def unit_rows(hs: core.Store, uids: list) -> list:
+  """A unit with an escalated launch, and a unit whose cap decision ended in a stop."""
+  rows = []
+  for uid in uids:
+    escalated = [e for e in launch.load_launches(hs, uid) if e.get("escalated")]
+    if escalated:
+      rows.append(["unit escalated", uid, f"launches/{uid}", f"{len(escalated)} escalated launch(es)"])
+    foreman = core.load_foreman(hs, uid)
+    for decision in foreman.get("decisions") or []:
+      if str(decision.get("source") or "").endswith(" cap"):
+        given = [r for r in foreman.get("rulings") or [] if r.get("decision") == decision.get("id")]
+        if foreman.get("stopped") or any(str(r.get("ruling") or "").startswith("stop") for r in given):
+          rows.append(["unit stopped at the cap", uid, f"foreman/{uid}.json {decision.get('id')}", str(decision.get("source"))])
+  return rows
+
+
+def lessons_table(st: core.Store, hs: core.Store, uids: list, spec, state: dict) -> str:
+  """The Lessons table: facts from the store, one row per signal, each naming its source record; no proposal."""
+  rows = respec_rows(st, hs, spec) + fix_design_rows(st, hs, spec) + amendment_rows(hs, state)
+  rows += reviewer_rows(st, hs, spec) + unit_rows(hs, uids)
+  rows += [["decision answered by default", row[0].split("/")[0].split()[0], "foreman record" if " " in row[0] else "state.json decisions",
+            f"{row[0]}: {row[2]}"] for row in owner_rows(st, hs, uids, spec) if row[1] == "decision" and row[4] == "default"]
+  return render(["signal", "unit", "source", "fact"], rows)
+
+
 def build(st: core.Store, hs: core.Store) -> str:
   units = read_json(hs.path("units")) or {}
   state = core.load_state(hs.root) if hs.path("state").is_file() else {}
@@ -358,7 +476,7 @@ def build(st: core.Store, hs: core.Store) -> str:
   tables = [header_table(st, hs, units, uids), units_table(hs, uids, units, state),
             reviewers_table(st, hs, uids, row.get("spec")),
             render(["item", "kind", "asked by", "waited", "answered by", "answered at"], owner_rows(st, hs, uids, row.get("spec"))),
-            plan_table(hs, uids, units, state)]
+            plan_table(hs, uids, units, state), lessons_table(st, hs, uids, row.get("spec"), state)]
   return f"# Post-mortem {hs.handoff_id}\n\n" + "\n\n".join(f"## {name}\n\n{t}" for name, t in zip(SECTIONS, tables)) + "\n"
 
 
