@@ -971,8 +971,9 @@ def check_ruling(point: int, options: list, ruling: str, by: str = "") -> str:
 
 
 def judges_word(mode) -> str:
-  """The word the judges' ruling carries: `leavemealone` on a leavemealone-mode card, `contest` on a normal-mode one (U88)."""
-  return "leavemealone" if mode == "leavemealone" else "contest"
+  """The word the judges' ruling carries: `contest` on a normal-mode card (U88), `leavemealone` on a leavemealone-mode card
+  and where no card's mode is given (1.2's word)."""
+  return "contest" if mode == "normal" else "leavemealone"
 
 
 def ruling_comment(point: int, source: str, ruling: str, question: str, brief=None, by: str = "", qid: str = "", mode=None) -> str:
