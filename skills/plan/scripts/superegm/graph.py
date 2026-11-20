@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema and issue body; the handoff id comes from the approval record; the plan is copied into the store; the optional `Issue` field checked against the spec's `## Units` section (U13); every escalated pair needs a `## Units` row or a blocking decision (U16); `filed_elsewhere[]`, an older handoff frozen, one store of many handoffs (U20); the body's `· Tier:` (U33); the `width:` line (U29); `merge_after`, `merges after` and `merges before` for a handoff whose approval carries `rounds` (U61).
+# Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema and issue body; the handoff id comes from the approval record; the plan is copied into the store; the optional `Issue` field checked against the spec's `## Units` section (U13); every escalated pair needs a `## Units` row or a blocking decision (U16); `filed_elsewhere[]`, an older handoff frozen, one store of many handoffs (U20); the body's `· Tier:` (U33); the `width:` line (U29); `merge_after`, `merges after` and `merges before` for a handoff whose approval carries `rounds` (U61); `rendered_under` and the Design range carried through each later line map (U90).
 
 """superegm graph: parse the plan under its approval; write the store's plan copy,
 units, unit files and bodies."""
@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 
 import superegm as core
-from superegm import review
+from superegm import respec, review
 from superegm.approve_spec import units_section
 
 WRITES = frozenset(['bodies', 'plan', 'state', 'unit', 'units'])  # the store kinds this subcommand writes
@@ -235,6 +235,15 @@ class Handoff(core.Handoff):
                               f"{self.design_sha[:12]}: run /superegm:review-spec (approve-spec) first")
     self.handoff_id, self.spec_sha = approval["handoff_id"], approval["sha256"]
     self.design_commit = approval.get("commit") or ""
+    # U90: each unit's `rendered_under`, how many of the handoff's entries existed when its section's text was
+    # written (a unit new to `handoff_units.json` now; a record without the key the opening, 1), kept until a
+    # `Corrected:` row records a new respec; its Design range is carried from there through each later line map.
+    self.entries = [e for e in entries if e.get("handoff_id") == self.handoff_id] or [approval]
+    prior = json.loads(core.read_text(store.path("units"))) if store.path("units").is_file() else {}
+    self.prior_units = (prior.get("units") or {}) if prior.get("handoff_id") == self.handoff_id else {}
+    self.rendered_under = {uid: (self.prior_units[uid].get("rendered_under") or 1) if uid in self.prior_units
+                           else len(self.entries) for uid in self.plan.units}
+    self._line_maps = {}
     spec_text = core.read_text(self.design_path)
     named = units_section(spec_text)
     for uid, unit in self.plan.units.items():
@@ -284,10 +293,33 @@ class Handoff(core.Handoff):
         raise core.HandoffError(f"graph: {uid} is filed (#{record['number']}) and its section differs "
                                 "from the stored handoff_plan.md")
 
+  def line_map(self, i: int) -> list:
+    """The line map from the handoff's entry `i-1` to entry `i`: a respec's `respec/R<n>.json` `line_map`, else the
+    approved texts' opcodes; none (the identity) when a text is in no commit."""
+    if i not in self._line_maps:
+      entry = self.entries[i]
+      record = (respec.load_json(respec.respec_path(self.store, f"{entry['respec']}.json"))
+                if entry.get("kind") == "respec" and entry.get("respec") else None) or {}
+      ops = record.get("line_map")
+      if ops is None:
+        old, new = (review.approved_text(self.design_path, e) for e in self.entries[i - 1:i + 1])
+        ops = respec.opcodes(old.splitlines(), new.splitlines()) if old is not None and new is not None else []
+      self._line_maps[i] = ops
+    return self._line_maps[i]
+
+  def design_span(self, uid: str) -> tuple[int, int]:
+    """The unit's Design range at the latest approval: the plan text's, read under `rendered_under` and carried
+    through each later entry's line map (the plan file is never rewritten)."""
+    _, a, b, _ = self.plan.units[uid].design_range
+    for i in range(max(self.rendered_under.get(uid) or 1, 1), len(self.entries)):
+      a, b = respec.carry(self.line_map(i), a, b)
+    return a, b
+
   def render_unit(self, uid: str) -> str:
     if self.filed(uid) is not None:
       return core.unit_file_body(self.unit_file(uid)) + "\n"
     unit = self.plan.units[uid]
+    start, end = self.design_span(uid)
     merges = "merges " if self.graph.parallel else ""  # U61: with `rounds` the order is a merge order
     shared = "; ".join(f"`{path}`: " + ", ".join(f"{merges}after {self.ref(o)}" if k == "after"
                                                  else f"{merges}before {self.forward_ref(o)}"
@@ -295,7 +327,7 @@ class Handoff(core.Handoff):
     values = {
         "handoff_id": self.handoff_id, "unit_id": uid, "title": unit.title, "spec_sha256": self.spec_sha,
         "sha7": self.spec_sha[:7], "spec": self.design_path.relative_to(self.repo_root).as_posix(),
-        "design": f"{unit.design_range[0]}:{unit.design_range[1]}-{unit.design_range[2]} ({unit.design_range[3]})",
+        "design": f"{unit.design_range[0]}:{start}-{end} ({unit.design_range[3]})",
         "objective": unit.objective, "interfaces": "\n".join(unit.interfaces) or "- none",
         "dod": "\n".join(f"{n}. {item}" for n, item in enumerate(unit.dod, 1)),
         "global_constraints": "\n".join(self.plan.global_constraints),
@@ -319,7 +351,8 @@ class Handoff(core.Handoff):
     g = self.graph
     hashes = {uid: core.sha256_text(self.render_unit(uid)) for uid in g.order}
     core.atomic_write(self.store.path("plan"), self.plan.text)
-    units = {u: {**self.plan.units[u].to_json(g.wave[u], g.preds[u], g.merge_after[u]), "body_sha256": hashes[u]}
+    units = {u: {**self.plan.units[u].to_json(g.wave[u], g.preds[u], g.merge_after[u]), "body_sha256": hashes[u],
+                 "rendered_under": self.rendered_under[u]}
              for u in g.order}
     data = {"handoff_id": self.handoff_id, "repo": self.config["repo"],
             "design": {"path": str(self.design_path), "sha256": self.design_sha,
