@@ -425,7 +425,15 @@ ROOT = Path(__file__).resolve().parents[2]
      ("only `finding overruled` settles through `review settle --judges <panel>`",
       "`finding upheld` and `redesign` go through `decision rule --by judges:<panel>`"),
      ("a converged ruling settles through\n`review settle --judges <panel>`",)),
-    ("skills/wave/references/builder_orders.md", ("`(judges <panel>, contest)` is the same ruling in normal mode",), ()),
+    ("skills/wave/references/builder_orders.md",
+     ("`(judges <panel>, contest)` is the same ruling in normal mode, on every judges ruling of a normal-mode card",), (", on a head contest",)),
+    # round 4 (codebase-details-3-1): leavemealone mode's panel opens with the same five evidence files as every other route
+    ("skills/wave/references/leavemealone_mode.md",
+     ("a head contest's evidence is the round's `comments.md`, the diff, the unit's body,\n`r<n>/spec_range.md` and `r<n>/amendments.md`",),
+     ("the round's `comments.md` and diff, or the builder's comment, are the\nevidence",)),
+    # round 4 (codebase-details-3-4): a spec review's evidence is the spec, inside the repository folder
+    ("skills/judges/references/astra_judge.md", ("except a spec review's, which is the spec, inside the repository folder",),
+     ("and sits outside the repository folder: that content goes to OpenAI too",)),
     ("skills/plan/scripts/superegm/decision.py", ("judges' post (the `(judges <panel>, leavemealone | contest)` marker on any line",), ("judges' post (the `(judges <panel>, leavemealone)` marker",))])
 def test_review_round_one_texts(path, present, absent):
   """The reference texts name what the code now does: the five evidence files, the `contest` word, the data sent to OpenAI, the marker."""
