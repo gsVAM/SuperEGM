@@ -420,7 +420,7 @@ def test_wave_names_the_respec_lines_of_its_wait():
   wave = " ".join(text("skills/wave/SKILL.md").split())
   assert ("then respec lines (`open: respec`, `held: respec`, `respec: read failed`: none to do; `respec post`, "
           "`respec relaunch`: 5b)") in wave
-  assert "a ruled `revise` spends no relaunch; a `held: respec` unit's: step 6." in wave
+  assert "A `held: respec` unit never gets a direct `launch-builder`: step 6's `launch` marks it." in wave
   from superegm import status
   doc = status.wait_events.__doc__
   assert all(k in " ".join(doc.split()) for k in ("open: respec R<n>", "<U> held: respec R<n>", "respec post", "respec relaunch"))
@@ -511,6 +511,10 @@ def u62_relaunched(world, monkeypatch):
   u62.save_pr(s, "U07", 71, head, "CONFLICTING")
   code, out = world.run("launch-builder", "--unit", "U07", "--round", 2, "--runcard", card)
   assert code == 0, out
+  from superegm.launch import load_launches
+  launches = load_launches(s, "U07")  # the head (the base's commit, made now) predates round 2: the mark stands
+  launches[-1]["started_at"] = "2099-01-01T00:00:00Z"
+  s.path("launches", "U07.json").write_text(json.dumps({"launches": launches}), encoding="utf-8")
   return s, card
 
 
