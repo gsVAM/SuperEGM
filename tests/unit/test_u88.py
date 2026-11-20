@@ -3,9 +3,17 @@
 
 """U88: a builder's contest of a head finding goes to the judges' panel first in normal mode as in leavemealone."""
 
+import json
 from pathlib import Path
 
+import pytest
+
+from conftest import set_config
 from test_leavemealone_finish import head_review, seed
+from test_review import A, F, head_round, hstore, opened, rjson, settle
+from test_review import record as record_findings
+from test_wave import REPO, fake_gh, foreman_of, wave_store
+from test_wave import question as write_question
 
 COMMENTS_TEXT = "change-review-1-1 | high | src/x.py:3 | the retry loop never backs off\n"
 DIFF_TEXT = "--- a/src/x.py\n+++ b/src/x.py\n@@ -3 +3 @@\n-retry()\n+retry(backoff=1)\n"
@@ -47,3 +55,52 @@ def test_head_contest_goes_to_the_panel(world, tmp_path):
   astra_brief = (world.artifacts / "judges" / pid / "round-1" / "brief-astra.md").read_text(encoding="utf-8")
   assert all(name in astra_brief for name in ("comments.md", "diff", "body", "r1/spec_range.md", "r1/amendments.md"))
   assert AMENDMENTS_TEXT in astra_brief and SPEC_RANGE_TEXT in astra_brief and COMMENTS_TEXT in astra_brief
+
+
+def journal_of(st):
+  return st.path("journal").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("kind, rc, out", [
+    ("head", 0, "Ruling (judges p1, contest): U07 change-review-1-1 declined"),
+    ("spec", 1, "review settle: design-1-1 is high: --owner required in normal mode"),
+    ("plan", 1, "review settle: set-1-1 is high: --owner required in normal mode")])
+def test_settle_judges_by_card_kind(world, kind, rc, out):
+  """`--judges` settles a contested head finding on a normal-mode card; every other review keeps `--owner`."""
+  reviewer = {"head": "change-review", "spec": "design", "plan": "set"}[kind]
+  spec, cid, rid = opened(world, kind)
+  if kind == "head":
+    head_round(world, 1, "posted", cid, "revise")
+  loc = "src/x.py" if kind == "head" else "§1"
+  assert record_findings(world, rid, 1, reviewer, [F(reviewer, 1, 1, "high", loc=loc)], cid, sha=A if kind == "head" else None)[0] == 0
+  code, text = settle(world, rid, f"{reviewer}-1-1", "declined", cid, "--judges", "p1")
+  finding = rjson(world, rid, "round-1.json")["reviewers"][reviewer]["findings"][0]
+  journal = journal_of(hstore(world)) if rc == 0 else ""
+  assert code == rc and out in (journal if rc == 0 else text), text
+  assert (finding["disposition"], finding["ruling"]) == (("declined", "judges:p1") if rc == 0 else (None, None))
+  if rc == 0:  # the contest line stands in place of the `review settle … by …` line
+    assert f"review settle {rid} change-review-1-1" not in journal
+
+
+def test_the_judges_ruling_word_is_the_cards_mode(world):
+  """`decision rule --by judges:<panel>` journals and posts `contest` on a normal-mode card, `leavemealone` on a leavemealone one;
+  `<fid> allowed` stays the owner's alone in normal mode."""
+  from test_u84 import SPEC_COMMENT, open_decision, rule_on, spec_world
+  for mode, word in (("normal", "contest"), ("leavemealone", "leavemealone")):
+    card, s = spec_world(world, mode)
+    qid = open_decision(world, card, SPEC_COMMENT)
+    code, text = rule_on(world, card, qid, "(a)", "judges:p1")
+    assert code == 0, text
+    assert f"Ruling (judges p1, {word}): U02 {qid} " in journal_of(s)
+    assert f"\n(judges p1, {word})\n" in world.gh.comments[2][-1]["body"]
+    world.gh.comments.clear()
+    s.path("foreman", "U02").unlink()
+    s.path("journal").unlink()
+  card, s = spec_world(world, "normal")
+  wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "rounds": [{"round": 1, "phase": "posted", "outcome": "owner: foreman-1-1"}]})
+  td = "foreman-1-1 | high | tests/unit/test_q.py:3 | regression: no | test-delta: tests/unit/test_q.py:3 removed\n"
+  qid = world.run("decision", "open", "--unit", "U01", "--point", 1, "--question", write_question(world, td),
+                  "--source", "review head-U01-c1 round 1", "--runcard", card)[1].splitlines()[0]
+  code, text = world.run("decision", "rule", "--unit", "U01", "--decision", qid, "--ruling", "foreman-1-1 allowed",
+                         "--by", "judges:p1", "--runcard", card)
+  assert code != 0 and "decision: foreman-1-1 allowed is the owner's alone" in text, text
