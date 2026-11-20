@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema and issue body; the handoff id comes from the approval record; the plan is copied into the store; the optional `Issue` field checked against the spec's `## Units` section (U13); every escalated pair needs a `## Units` row or a blocking decision (U16); `filed_elsewhere[]`, an older handoff frozen, one store of many handoffs (U20); the body's `· Tier:` (U33); the `width:` line (U29); `merge_after`, `merges after` and `merges before` for a handoff whose approval carries `rounds` (U61); `rendered_under` and the Design range carried through each later line map (U90).
+# Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema and issue body; the handoff id comes from the approval record; the plan is copied into the store; the optional `Issue` field checked against the spec's `## Units` section (U13); every escalated pair needs a `## Units` row or a blocking decision (U16); `filed_elsewhere[]`, an older handoff frozen, one store of many handoffs (U20); the body's `· Tier:` (U33); the `width:` line (U29); `merge_after`, `merges after` and `merges before` for a handoff whose approval carries `rounds` (U61); `rendered_under` and the Design range carried through each later line map, the `Corrected:` row recorded as `corrected` by `graph` alone (U90).
 
 """superegm graph: parse the plan under its approval; write the store's plan copy,
 units, unit files and bodies."""
@@ -79,6 +79,7 @@ class Unit(core.Unit):
     self.review_focus = []   # the raw `- U<nn>: …` lines
     self.steps = ""          # the Steps text, verbatim
     self.decide = []         # the raw `Decide before build` lines
+    self.corrected = []      # the `Corrected:` row's respec ids (U90)
 
   def to_json(self, wave, preds, merge_after=()):
     return {**super().to_json(wave, preds, merge_after), "interfaces": self.interfaces, "review_focus": self.review_focus}
@@ -126,6 +127,11 @@ class Plan(core.Plan):
     if unknown:
       self._fail(unit.line - 1, f"{uid}: unknown fields {sorted(unknown)}")
     self._parse_fields(unit, fields)
+    if "Corrected" in fields:  # the one optional row naming the respecs the section was rewritten from (U90)
+      value, at = fields["Corrected"]
+      if not re.fullmatch(r"R\d+(?:, R\d+)*", value):
+        self._fail(at, f"{uid}: Corrected names respec ids `R<n>[, R<m>…]`, not '{value}'")
+      unit.corrected = value.split(", ")
     i = self._heading(lines, i, uid, "Interfaces")
     while i < len(lines) and lines[i].startswith("- "):
       if not INTERFACE_RE.match(lines[i].rstrip()):
@@ -347,12 +353,21 @@ class Handoff(core.Handoff):
     return (f"{core.unit_section_text(self.plan, uid)}\n\n## Issue body as posted\n\n"
             f"````markdown\n{self.render_unit(uid)}````\n")
 
-  def write_graph_files(self) -> None:
+  def write_graph_files(self, record: bool = False) -> None:
+    """`record` is `graph`'s own run: it alone records each section's `Corrected:` respecs as `corrected` (clearing
+    their `replan:` marks, `respec.marks`) and moves a unit naming a new one to `rendered_under` the latest entry; any
+    other render (`decide`) keeps what the last `graph` recorded (U90)."""
     g = self.graph
+    corrected = {u: list((self.prior_units.get(u) or {}).get("corrected") or []) for u in g.order}
+    if record:
+      for u in g.order:
+        if set(self.plan.units[u].corrected) - set(corrected[u]):  # the section rewritten in the new coordinates
+          self.rendered_under[u] = len(self.entries)
+        corrected[u] = list(self.plan.units[u].corrected)
     hashes = {uid: core.sha256_text(self.render_unit(uid)) for uid in g.order}
     core.atomic_write(self.store.path("plan"), self.plan.text)
     units = {u: {**self.plan.units[u].to_json(g.wave[u], g.preds[u], g.merge_after[u]), "body_sha256": hashes[u],
-                 "rendered_under": self.rendered_under[u]}
+                 "rendered_under": self.rendered_under[u], "corrected": corrected[u]}
              for u in g.order}
     data = {"handoff_id": self.handoff_id, "repo": self.config["repo"],
             "design": {"path": str(self.design_path), "sha256": self.design_sha,
@@ -434,7 +449,7 @@ def run(args):
   # The card is on the spec the plan names: `require_runcard` reads it from `design`.
   args.design = str(handoff.design_path)
   core.require_runcard(args, SKILLS)
-  handoff.write_graph_files()
+  handoff.write_graph_files(record=True)
   g = handoff.graph
   print(f"handoff {handoff.handoff_id} on {handoff.config['repo']}: {len(g.order)} units, {len(g.waves)} waves")
   for wave in sorted(g.waves):
