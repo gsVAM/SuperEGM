@@ -170,3 +170,63 @@ def test_respec_relaunch_waits_for_a_slot(world, monkeypatch, u1_running, marked
   launch_rc, launch_out = world.run("launch", "--runcard", card)
   journal = journal_of(s)
   assert launch_rc == 0 and marked.replace("U2", "U08") in launch_out and ("U08 marked for launch" in journal) is (not u1_running), launch_out
+
+
+def test_held_unit_offers_no_merge(world, monkeypatch):
+  # a standing mark holds a clean head everywhere; status names open respecs; tick_trigger follows respec.actionable
+  import superegm
+  import test_builders as tb
+  from conftest import REPO, make_pr
+  from superegm import inbox, respec, status
+  from test_u85 import open_respec
+  s, card, handoff, _ = tb.seed(world, units=("U07", "U08"))  # U08 plays U2
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert "marked: U07, U08" in world.run("launch", "--runcard", card)[1]
+  head = "c" * 40
+  make_pr(world.gh, 71, head, closes=[(REPO, 8)])
+  world.gh.graphql[8] = [{**world.gh.prs[71], "repository": {"nameWithOwner": REPO}}]
+  tb.launched(s, "U08", "exited 0")
+  clean = {"round": 1, "runcard": card, "launch": 1, "head": head, "phase": "posted", "dispatch_id": "d1", "outcome": "clean",
+           "posted_at": "2026-11-03T01:00:00Z"}
+  tb.foreman(s, "U08", [clean])
+  # R1 raised on U08's deviation and not yet approved: open
+  open_respec(s, "R1", "U08")
+  code, open_out = world.run("status", "--runcard", card)
+  assert code == 0, open_out
+
+  def merge_items():
+    state, foreman = tb.state_of(s), superegm.load_foreman(s, "U08")
+    return [i for i in inbox.unit_items(s, REPO, state, "U08", foreman) if i["kind"] == "merge"]
+  assert merge_items()  # the clean head is offered for merge before R1 touches it
+  apply_r1(s, "U08")  # approved: applied, touching U08
+  code, held_out = world.run("status", "--runcard", card)
+  assert code == 0, held_out
+  status_out = open_out + held_out
+  assert "open: respec R1" in open_out and "open: respec R1" not in held_out and "held: respec R1" not in open_out
+  assert "held: respec R1" in status_out and "open: respec R1" in status_out and not merge_items()  # the one merge offer today: inbox.py:138-141
+  # another command saves state.json (a stale copy, whole-file) during status's wait: the derived mark is not lost
+  stale = json.dumps(tb.state_of(s))
+  monkeypatch.setitem(world.ns, "SLEEP", lambda seconds: tb.put(s.path("state"), stale))
+  assert world.run("status", "--wait", 1, "--runcard", card)[0] == 0
+  mark_after_concurrent_state_save = respec.marks(s, handoff).get("U08")
+  assert mark_after_concurrent_state_save == "respec: R1"
+
+  def trigger():
+    state = tb.state_of(s)
+    return status.tick_trigger(superegm.Handoff(Path(state["plan"]), s, state))
+  assert trigger() == "respec R1 U08"
+  # a pending owner decision: held, nothing actionable, no session bought
+  pending = {"dispatch_id": "d1", "rounds": [clean], "rulings": [],
+             "decisions": [{"id": "U08-d1", "point": 2, "question": "cap", "options": ["one more round", "stop"]}]}
+  tb.put(s.path("foreman", "U08"), json.dumps(pending))
+  tick_trigger_with_pending_decision = trigger()
+  assert tick_trigger_with_pending_decision is None and respec.marks(s, handoff).get("U08") == "respec: R1" and not merge_items()
+  tb.foreman(s, "U08", [clean])
+  # settled: the comment posted, and a respec launch naming R1 exited 0 on the saved head with `DONE`
+  tb.put(respec.respec_path(s, "R1.U08.posted"), "1\n")
+  relaunch = {**tb.launches_of(s, "U08")[0], "round": 2, "reason": "respec", "respecs": ["R1"], "started_at": "2026-11-15T00:00:00Z",
+              "status": "exited 0", "head": head, "builder_status": "DONE"}
+  tb.put(s.path("launches", "U08.json"), json.dumps({"launches": tb.launches_of(s, "U08") + [relaunch]}))
+  assert world.run("status", "--wait", 1, "--runcard", card)[0] == 0
+  tick_trigger_once_settled = trigger()
+  assert respec.marks(s, handoff).get("U08") is None and tick_trigger_once_settled is None
