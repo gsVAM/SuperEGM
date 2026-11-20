@@ -1,7 +1,7 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the Astra
 review lane. Not part of google/elephant-goldfish-model.
-Modified by SuperEGM (gsVAM), 2026: the judge lane; the lane's model and effort read from the panel's `astra` member (U28). -->
+Modified by SuperEGM (gsVAM), 2026: the judge lane; the lane's model and effort read from the panel's `astra` member (U28); inline evidence (U88). -->
 
 # Astra judge lane
 
@@ -93,14 +93,16 @@ plugin's hook silent in the runner's session.
 - Do not edit the question file until the run ends or the user skips it: the
   runner fails a run whose plan changed.
 - Then dispatch the two Claude judges, concurrently, as the skill says.
-- The Astra lane reads no paths, so the evidence arrives inline: `brief-astra.md` embeds each evidence file's contents
+- The evidence arrives inline, whatever the lane may read: `brief-astra.md` embeds each evidence file's contents
   (on a head contest `comments.md`, the diff, the unit's body, `r<n>/spec_range.md` and `r<n>/amendments.md`), read from the
   panel's `evidence[]` paths and each re-checked against its recorded sha256. Pass `round-<n>/brief-astra.md`, not
   `brief.md`, as `--feedback`.
 
 **Data notice.** A run sends the question file, the brief and the repository
 folder, which Astra may read in full like any folder it is given, to OpenAI
-under the account `codex login status` reports. Show it in the run card
+under the account `codex login status` reports. On a head contest the brief
+also carries `comments.md`, the diff, the unit's body, `r<n>/spec_range.md` and `r<n>/amendments.md` from the store, outside the
+repository folder: that content goes to OpenAI too. Show it in the run card
 before the first launch of a panel.
 
 ## 3. Collect

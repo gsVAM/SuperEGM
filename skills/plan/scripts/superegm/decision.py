@@ -202,7 +202,7 @@ def parse_form(body: str):
 
 def ruling_of(comment: dict, owners: list) -> "Ruling | None":
   """The owner's ruling a comment carries, or None: an author outside `owners`, a body matching no form exactly, or the
-  judges' post (the `(judges <panel>, leavemealone)` marker on any line, recorded from `rulings[]`, never re-read)."""
+  judges' post (the `(judges <panel>, leavemealone | contest)` marker on any line, recorded from `rulings[]`, never re-read)."""
   login = (comment.get("user") or {}).get("login") or comment.get("login")
   body = comment.get("body") or ""
   if login not in owners or JUDGES_MARK_RE.search(body.replace("\r", "")):
