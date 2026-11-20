@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # From the elephant-goldfish-model (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_prepare` as the prepare module, keyed by the dispatch id; the fetched tip is the round's head; `pr_body.md` and `comments.md` beside the diff and the CI file; the App path's builder login (U15); the Astra brief and the lane's word on the `prepared:` line (U17); `r<n>/spec_range.md` at the marker's sha, the brief's range read from it (U20); the review worktree removed by force and its git calls hook-free (U25); `runcards` in its writes, allowed ahead of the Astra brief's instructions render on the card, which U38 adds (U37); `head_launch` of a round, the `recorded_at` comparison of `amendments.md` and the Astra brief's `Amendments` section (U97); the Astra brief ends with the instructions section rendered for role reviewers, lane astra, on the child card (U38).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_prepare` as the prepare module, keyed by the dispatch id; the fetched tip is the round's head; `pr_body.md` and `comments.md` beside the diff and the CI file; the App path's builder login (U15); the Astra brief and the lane's word on the `prepared:` line (U17); `r<n>/spec_range.md` at the marker's sha, the brief's range read from it (U20); the review worktree removed by force and its git calls hook-free (U25); `runcards` in its writes, allowed ahead of the Astra brief's instructions render on the card, which U38 adds (U37); `head_launch` of a round, the `recorded_at` comparison of `amendments.md` and the Astra brief's `Amendments` section (U97); the Astra brief ends with the instructions section rendered for role reviewers, lane astra, on the child card (U38); `amendments.md`'s `# Spec corrections` from the head launch's `respecs` (U86).
 
 """superegm prepare: fetch the PR into refs/superegm, add the review worktree, write the diff, CI, PR body and comments."""
 
@@ -106,7 +106,7 @@ def prepare(args, card):
   head_launch = own[-1] if own else None  # the latest launch that started before the head commit; `launch` stays the latest launch
   entry["head_launch"] = head_launch["round"] if head_launch else None
   write_amendments(r / "amendments.md", launch_builder.amendments_for(st, unit, core.unit_file_body(st.path("unit", unit))),
-                   head_launch.get("started_at") if head_launch else None)
+                   head_launch.get("started_at") if head_launch else None, corrections_of(st, unit, head_launch))
   for key in ("dod_runs", "test_delta"):  # an earlier head's gates never stand for this one: `post` refuses until `collect`
     entry.pop(key, None)
   entry.update({"head": head, "phase": "prepared", "merge_base": merge_base, "worktree": str(tree)})
@@ -157,13 +157,29 @@ def astra_brief(st, root: Path, unit: str, r: Path, diff: bytes, ci: dict, pr_bo
   return f"astra: ok {runner}" if runner else "astra: not installed"
 
 
-def write_amendments(path: Path, amendments: list, started) -> None:
+def corrections_of(st, unit: str, launch) -> list[dict]:
+  """Spec section 7.6: exactly the respecs the head's launch record names (`respecs`, read at its prompt preparation),
+  each with its comment file's text, so the reviewer holds the contract the builder held; none without that launch."""
+  out = []
+  for rid in (launch or {}).get("respecs") or []:
+    comment = st.path("file", f"respec_comment_{unit}_{rid}.md")
+    out.append({"id": rid, "text": core.read_text(comment) if comment.is_file() else "(comment file missing)"})
+  return out
+
+
+def write_amendments(path: Path, amendments: list, started, corrections=()) -> None:
   """`r<n>/amendments.md`: each amendment that applies to the unit, marked by whether the head's launch (`started`,
-  its `started_at`) began after the amendment's `recorded_at` (`at` for a legacy entry); an earlier head is reviewed against the brief its launch had."""
+  its `started_at`) began after the amendment's `recorded_at` (`at` for a legacy entry); an earlier head is reviewed against the brief its launch had.
+  Then `# Spec corrections`: the respecs that launch's record names, ruling over the original contract (U86)."""
   lines = ["# Amendments", ""] if amendments else ["# Amendments", "", "none"]
   for a in amendments:
     applies = "yes" if started and started > (a.get("recorded_at") or a["at"]) else "no"
     lines += [f"## {a['unit']} {a['name']} · comment {a['comment_id']} at {a['at']}", f"applies to this head: {applies}", "", a["text"], ""]
+  if corrections:
+    lines += ["", "# Spec corrections", "", "Corrections to the frozen spec this head's launch carried; where one differs from "
+              "the unit body or the spec range, the correction rules over the original contract.", ""]
+    for c in corrections:
+      lines += [f"## {c['id']}", "", c["text"].rstrip("\n"), ""]
   core.atomic_write(path, "\n".join(lines) + "\n")
 
 

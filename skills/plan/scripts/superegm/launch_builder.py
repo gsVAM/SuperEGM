@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING`, its freshly pinned base and its `git merge-tree` brief (U62); a fix round resuming the previous launch's session, `resumed_from` or `fresh` and `profile_dir` on the entry, and the stale-paths line (U63); the `superegm-precheck` script on every launch, its allow rules and `{{precheck}}`, the whitespace refusal on every launch, `builder.precheck_attempts` and the launch's issue-comment snapshot (U67); a unit with `builder.escalate_after` failing head rounds launching on the `difficult` tier's pair, `escalated` on the entry (U68).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING`, its freshly pinned base and its `git merge-tree` brief (U62); a fix round resuming the previous launch's session, `resumed_from` or `fresh` and `profile_dir` on the entry, and the stale-paths line (U63); the `superegm-precheck` script on every launch, its allow rules and `{{precheck}}`, the whitespace refusal on every launch, `builder.precheck_attempts` and the launch's issue-comment snapshot (U67); a unit with `builder.escalate_after` failing head rounds launching on the `difficult` tier's pair, `escalated` on the entry (U68); `# Spec corrections`, reason `respec` and the record's `respecs` (U86).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch, started
 detached and recorded `running`."""
@@ -153,10 +153,11 @@ def prepare(args, card):
   reviews = core.gh_pages(f"repos/{repo}/pulls/{pr}/reviews") if pr else []
   audit = AUDIT_LINE.format(owner=record["launched"].get("by", "unknown"),  # a pre-upgrade mark records no login
                             runcard=args.runcard, unit=unit, handoff=st.handoff_id)
+  corrections = corrections_for(st, unit)  # read once, at prompt preparation: the record's `respecs` are these (U86)
   text = prompt_text(number, unit, issue_body, orders_text(tools, launched_gh, builder_config["max_subagent_calls"], str(bin_dir / "superegm-precheck"),
                                                            merge=merge is not None, attempts=attempts), orient_text, comments, reviews, pr, builder, audit, pr_block,
                      spec_range=range_text, owners=config.get("owners") or [], foreman=foreman_data,
-                     amendments=amendments_for(st, unit, issue_body))
+                     amendments=amendments_for(st, unit, issue_body), corrections=corrections)
   if merge:
     text = text.rstrip("\n") + "\n\n---\n\n" + merge_brief(merge, base_commit, conflicts)
   # the builder's `# Repository instructions`, the handoff's frozen files, rendered once per card and placed last (U37)
@@ -200,8 +201,10 @@ def prepare(args, card):
   # the one behaviour (amendment 10): the wrapper started detached, then the launch recorded `running`
   pid = start_detached(["/bin/sh", "-c", line], st.path("launches", f"{unit}_r{rnd}.log"), dict(os.environ))
   launches = load_launches(st, unit)
-  entry = {"round": rnd, "reason": "merge" if merge == "alone" else launch_reason(launches, foreman_data), "worktree": str(worktree), "branch": branch,
+  reason = "merge" if merge == "alone" else "respec" if respec_marked(st, unit) else launch_reason(launches, foreman_data)
+  entry = {"round": rnd, "reason": reason, "worktree": str(worktree), "branch": branch,
            "started_at": core.now_iso(), "status": "running",
+           "respecs": [c["id"] for c in corrections],  # the corrections the prompt carries, never one approved after it (U86)
            "model": pair[0], "effort": pair[1], "tier": tier,  # the requested pair (U28), picked by the tier (U33)
            "result_file": str(result), "prompt_sha256": core.sha256_file(prompt), "boot_id": core.boot_id(), "pid": pid, "command": line, "session_id": session_id,
            "instructions": manifest,  # the files that reached the prompt, [] when none was addressed (U37)
@@ -732,6 +735,35 @@ def amendments_for(st, unit: str, body: str) -> list[dict]:
   return sorted((a for a in entries if a["unit"] == unit or (a["name"], a["unit"]) in consumed), key=lambda a: a["at"])
 
 
+def corrections_for(st, unit: str) -> list[dict]:
+  """Spec section 7.6: every applied respec touching the filed unit, in approval order, as `{"id": "R<n>", "text": <its
+  comment file, the diff hunks in the unit's range>}`. A unit touched while unfiled has no comment file: its re-planned
+  body already carries the correction."""
+  from superegm import respec  # at call time, as `respec` reads the review loop
+  try:
+    spec = respec.spec_of(st, st.handoff_id)
+  except core.HandoffError:
+    return []
+  out = []
+  for entry in respec.entries_of(st, st.handoff_id, spec):
+    rid = entry.get("respec") if entry.get("kind") == "respec" else None
+    applied = respec.load_json(respec.respec_path(st, f"{rid}.json")) if rid else None
+    comment = st.path("file", f"respec_comment_{unit}_{rid}.md")
+    if unit in ((applied or {}).get("touched") or []) and comment.is_file() and rid not in {c["id"] for c in out}:
+      out.append({"id": rid, "text": core.read_text(comment)})
+  return out
+
+
+def respec_marked(st, unit: str) -> bool:
+  """Whether the unit carries a `respec: R<n>` mark (`respec.marks`) as its launch is recorded: the launch's reason is then
+  `respec` (spec section 7.6)."""
+  from superegm import respec
+  try:
+    return str(respec.marks(st, st.handoff_id).get(unit) or "").startswith("respec:")
+  except core.HandoffError:
+    return False
+
+
 def launch_reason(launches: list, foreman: dict) -> str:
   """Spec section 6.5 "Measuring it": why this launch starts. `first` with no launch before it; else the latest
   event after the previous launch started: a posted round (`review`) or a ruling on a point-3 comment, a BLOCKED or
@@ -750,7 +782,7 @@ def launch_reason(launches: list, foreman: dict) -> str:
 
 
 def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr, builder, audit, pr_block=None, spec_range=None,
-                owners=(), foreman=None, amendments=()):
+                owners=(), foreman=None, amendments=(), corrections=()):
   """Exactly what spec section 3's anti-goal 3 allows: the issue body, the audit-trail line, the orders, the repository's
   PR block when `pr_block_file` is set, the unit's orient file, the frozen spec range the body cites, every Deviation
   comment, every Decision comment by a `config.owners` login, every Ruling comment by one in a form the one grammar
@@ -785,6 +817,10 @@ def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr,
   if amendments:  # spec section 6.5: the recorded interface amendments the unit's brief now includes
     parts.append("# Amendments\n\n" + "\n".join(f"## {a['unit']} {a['name']} · comment {a['comment_id']} at {a['at']}\n{a['text']}\n"
                                                 for a in amendments))
+  if corrections:  # spec section 7.6: the applied respecs touching the unit, ruling over the issue body and spec range
+    parts.append("# Spec corrections\n\nCorrections to the frozen spec approved after this issue was filed; where one differs "
+                 "from the issue body or the spec range above, the correction rules.\n\n"
+                 + "\n".join(f"## {c['id']}\n{c['text']}\n" for c in corrections))
   parts.append(f"# Comments on issue #{issue_number}\n\n" + "\n".join(f"## {c['user']['login']} · comment {c['id']}\n{c['body']}\n" for c in kept))
   if pr:
     kept = [r for r in reviews if r.get("body") and r["user"]["login"] != builder]
