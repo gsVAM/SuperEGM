@@ -326,6 +326,49 @@ def test_scan_measures_the_carried_range(world):
   code, out = world.run("graph", "--plan", world.plan)
   assert code == 0, out
   assert "docs/specs/s.md:206-246" in unit_file_text(world, "U08")
-  world.run("scan", "--plan", world.plan)
-  found = json.loads(next(handoff_store(world).root.rglob("scan/U08.json")).read_text(encoding="utf-8"))
+  code, out = world.run("scan", "--plan", world.plan)
+  assert code == 0, out
+  found =json.loads(next(handoff_store(world).root.rglob("scan/U08.json")).read_text(encoding="utf-8"))
   assert found["spec_range_bytes"] == len("".join(f"{line}\n" for line in lines[205:246]).encode("utf-8"))
+
+
+def test_next_gate_and_graph_rebase_the_spec_after_the_approving_worktree_is_gone(world, tmp_path):
+  # R1 applied and touching U07; the handoff's spec recorded in a worktree since removed: `next`, `gate` and `graph`
+  # read it under the repository root, never running git in the missing directory
+  s_world(world)
+  converge_all(world)
+  respec(world, inserted(spec_lines(), 120, 6), ["U07"])
+  path = world.artifacts / "handoffs" / f"{HID}.json"
+  gone = tmp_path / "removed-worktree" / SPEC_REL
+  core.atomic_write(path, json.loads(path.read_text(encoding="utf-8")) | {"spec": str(gone)})
+  ticked(world)
+  code, out = world.run("next", "--handoff", HID)
+  assert (code, out.strip()) == (0, "plan")
+  code, out = world.run("gate", "--pass", "--spec", world.spec)
+  assert code == 1
+  assert "gate: U07 needs a re-plan after respec R1" in out
+  code, out = world.run("graph", "--plan", world.plan)
+  assert code == 0, out
+  assert "docs/specs/s.md:206-246" in unit_file_text(world, "U08")
+
+
+def test_rendered_under_reads_an_after_void_record(world):
+  # a handoff graphed before U90 under its after-void approval (no `rendered_under`): its sections read in the
+  # after-void text's lines, never carried again through the voided-to-after-void map
+  s_world(world)
+  path = world.artifacts / "approvals" / f"{core.spec_slug(world.spec)}.json"
+  record = json.loads(path.read_text(encoding="utf-8"))
+  record["entries"][-1]["voided_by"] = "spec-s-c2"
+  core.atomic_write(path, record)
+  entry = approve(world, inserted(spec_lines(), 120, 6), "after-void")
+  units_path = handoff_store(world).path("units")
+  data = json.loads(units_path.read_text(encoding="utf-8"))
+  data["design"]["sha256"] = entry["sha256"]  # what a pre-U90 graph over the after-void spec stored
+  for unit in data["units"].values():
+    unit.pop("rendered_under", None)
+    unit.pop("corrected", None)
+  core.atomic_write(units_path, data)
+  code, out = world.run("graph", "--plan", world.plan)
+  assert code == 0, out
+  assert units(world)["U08"]["rendered_under"] == 2
+  assert "docs/specs/s.md:200-240" in unit_file_text(world, "U08")
