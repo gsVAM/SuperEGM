@@ -92,3 +92,9 @@ def frontmatter(path):
 def test_retro_skill_text(phrase):
   # the retro skill names its four targets, asks per edit, and never touches an approved spec
   assert phrase in text("skills/retro/SKILL.md") and frontmatter("skills/retro/SKILL.md")["effect_kinds"] == ["state-store"]
+
+
+@pytest.mark.parametrize("path, phrase", [("skills/integrate/SKILL.md", "/superegm:retro"), ("skills/using-superegm/SKILL.md", "/superegm:retro")])
+def test_integrate_offers_retro_and_phase_list(path, phrase):
+  # integrate offers the retrospective once after the post-mortem; the phase list ends with it
+  assert phrase in text(path)
