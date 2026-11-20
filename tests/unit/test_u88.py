@@ -109,19 +109,26 @@ PANEL_QUESTION = ("## Q1 change-review-1-1 (high, src/x.py): claim 1\n- (a) find
                   "- (c) redesign — claim 1\n")
 
 
-def settled_panel(world, converged="b", pid="p1", question=PANEL_QUESTION):
-  """A panel `pid` in the head's store whose verdict converged on option `converged` of Q1 (None: not converged)."""
+def settled_panel(world, converged="b", pid="p1", question=PANEL_QUESTION, split=None):
+  """A panel `pid` in the head's store whose verdict converged on option `converged` of Q1 (None: not converged); `split`: a
+  second question Q2, still split at the cap, appended to the question file."""
   folder = hstore(world).path("judges", pid, "question.md").parent
   folder.mkdir(parents=True, exist_ok=True)
-  (folder / "question.md").write_text(question, encoding="utf-8")
+  (folder / "question.md").write_text(question + (split or ""), encoding="utf-8")
   q1 = {"converged": converged is not None, "option": converged, "round": 1, "positions": {}, "vendors": [], "reason": None}
-  core.atomic_write(folder / "verdict.json", {"panel": pid, "questions": {"Q1": q1}, "open": [] if converged else ["Q1"],
-                                              "converged": converged is not None})
+  questions = {"Q1": q1} | ({"Q2": q1 | {"converged": False, "option": None}} if split else {})
+  core.atomic_write(folder / "verdict.json", {"panel": pid, "questions": questions, "open": [k for k, q in questions.items() if not q["converged"]],
+                                              "converged": all(q["converged"] for q in questions.values())})
+
+
+def panel_of(rid, rnd=1, tail="a1b2c3"):
+  """The id of a panel opened for review `rid` round `rnd`: `<question stem>-<6 hex>`, the stem as `question_name` gives it."""
+  return f"{rid}-r{rnd}-{tail}"
 
 
 @pytest.mark.parametrize("kind, disposition, rc, out", [
-    ("head", "declined", 0, "Ruling (judges p1, contest): U07 change-review-1-1 declined"),
-    ("head", "contested", 0, "Ruling (judges p1, contest): U07 change-review-1-1 contested"),
+    ("head", "declined", 0, "Ruling (judges {pid}, contest): U07 change-review-1-1 declined"),
+    ("head", "contested", 0, "Ruling (judges {pid}, contest): U07 change-review-1-1 contested"),
     ("spec", "declined", 1, "review settle: design-1-1 is high: --owner required in normal mode"),
     ("plan", "declined", 1, "review settle: set-1-1 is high: --owner required in normal mode"),
     ("integrate", "declined", 1, "review settle: design-1-1 is high: --owner required in normal mode")])
@@ -129,43 +136,67 @@ def test_settle_judges_by_card_kind(world, kind, disposition, rc, out):
   """`--judges` settles a contested head finding on a normal-mode card, opening no owner question; every other review keeps `--owner`."""
   reviewer = {"head": "change-review", "spec": "design", "plan": "set", "integrate": "design"}[kind]
   spec, cid, rid = opened(world, kind)
+  pid = panel_of(rid)
+  out = out.format(pid=pid)
   if kind == "head":
     head_round(world, 1, "posted", cid, "revise")
-    settled_panel(world)
+    settled_panel(world, pid=pid)
   loc = "src/x.py" if kind == "head" else "§1"
   assert record_findings(world, rid, 1, reviewer, [F(reviewer, 1, 1, "high", loc=loc)], cid, sha=A if kind == "head" else None)[0] == 0
-  code, text = settle(world, rid, f"{reviewer}-1-1", disposition, cid, "--judges", "p1")
+  code, text = settle(world, rid, f"{reviewer}-1-1", disposition, cid, "--judges", pid)
   finding = rjson(world, rid, "round-1.json")["reviewers"][reviewer]["findings"][0]
   journal = journal_of(hstore(world)) if rc == 0 else ""
   assert code == rc and out in (journal if rc == 0 else text), text
-  assert (finding["disposition"], finding["ruling"]) == ((disposition, "judges:p1") if rc == 0 else (None, None))
-  if rc == 0:  # the contest line stands in place of the `review settle … by …` line, and no owner question is opened
+  assert (finding["disposition"], finding["ruling"]) == ((disposition, f"judges:{pid}") if rc == 0 else (None, None))
+  # what still waits for the owner: a decision or owner outcome in the unit's record, or the finding left unsettled
+  foreman = foreman_of(hstore(world), "U07") if kind == "head" else {"decisions": [], "rounds": []}
+  owner_questions = foreman["decisions"] + [e for e in foreman["rounds"] if str(e.get("outcome") or "").startswith("owner:")] \
+      + (["unsettled finding"] if finding["disposition"] is None else [])
+  assert (owner_questions == []) is (rc == 0)
+  if rc == 0:  # the contest line stands in place of the `review settle … by …` line
     assert f"review settle {rid} change-review-1-1" not in journal
-    foreman = foreman_of(hstore(world), "U07")
-    owner_questions = foreman["decisions"] + [e for e in foreman["rounds"] if str(e.get("outcome") or "").startswith("owner:")]
-    assert owner_questions == []
 
 
 OTHER_FINDING = PANEL_QUESTION.replace("change-review-1-1", "change-review-1-2")
 
 
+@pytest.mark.parametrize("mode", ["normal", "leavemealone"])
 @pytest.mark.parametrize("panel, why", [
-    (None, "judges p1 has no verdict"),
-    ({"converged": None}, "judges p1 has not converged"),
-    ({"converged": "a"}, "judges p1 did not overrule change-review-1-1"),
-    ({"converged": "c"}, "judges p1 did not overrule change-review-1-1"),
-    ({"converged": "b", "question": OTHER_FINDING}, "judges p1 did not overrule change-review-1-1")])
-def test_settle_judges_needs_a_converged_panel_overruling_the_finding(world, panel, why):
-  """The wider gate stays narrow: a panel with no verdict, an unconverged one, one that upheld or asked for a redesign, or one that
-  ruled another finding settles nothing."""
+    (None, "judges {pid} has no verdict"),
+    ({"converged": None}, "judges {pid} has not converged"),
+    ({"converged": "a"}, "judges {pid} did not overrule change-review-1-1"),
+    ({"converged": "c"}, "judges {pid} did not overrule change-review-1-1"),
+    ({"converged": "b", "question": OTHER_FINDING}, "judges {pid} did not overrule change-review-1-1"),
+    ({"converged": "b", "pid": "p1"}, "judges p1 was not opened for {rid} round 1"),
+    ({"converged": "b", "pid": "head-U08-c1-r1-a1b2c3"}, "judges head-U08-c1-r1-a1b2c3 was not opened for {rid} round 1"),
+    ({"converged": "b", "pid": "{rid}-r2-a1b2c3"}, "judges {rid}-r2-a1b2c3 was not opened for {rid} round 1")])
+def test_settle_judges_needs_a_converged_panel_overruling_the_finding(world, panel, why, mode):
+  """The wider gate stays narrow, in either mode: a panel with no verdict, an unconverged one, one that upheld or asked for a redesign,
+  one that ruled another finding, or one opened for another review or round (the same finding id recurs in every unit) settles nothing."""
+  spec, cid, rid = opened(world, "head", mode=None if mode == "normal" else mode)
+  head_round(world, 1, "posted", cid, "revise")
+  pid = panel_of(rid)
+  if panel is not None:
+    settled_panel(world, **({"pid": pid} | {k: v.format(rid=rid) if k == "pid" else v for k, v in panel.items()}))
+  assert record_findings(world, rid, 1, "change-review", [F("change-review", 1, 1, "high", loc="src/x.py")], cid, sha=A)[0] == 0
+  used = panel["pid"].format(rid=rid) if panel and "pid" in panel else pid
+  code, text = settle(world, rid, "change-review-1-1", "declined", cid, "--judges", used)
+  assert code == 1 and f"review settle: change-review-1-1: {why.format(pid=pid, rid=rid)}" in text, text
+  assert rjson(world, rid, "round-1.json")["reviewers"]["change-review"]["findings"][0]["disposition"] is None
+
+
+def test_settle_judges_settles_one_converged_question_of_a_split_panel(world):
+  """Q1 converged `finding overruled`, Q2 split at the cap: the panel's own `converged` is false, yet Q1's finding settles
+  and Q2's does not."""
   spec, cid, rid = opened(world, "head")
   head_round(world, 1, "posted", cid, "revise")
-  if panel is not None:
-    settled_panel(world, **panel)
-  assert record_findings(world, rid, 1, "change-review", [F("change-review", 1, 1, "high", loc="src/x.py")], cid, sha=A)[0] == 0
-  code, text = settle(world, rid, "change-review-1-1", "declined", cid, "--judges", "p1")
-  assert code == 1 and f"review settle: change-review-1-1: {why}" in text, text
-  assert rjson(world, rid, "round-1.json")["reviewers"]["change-review"]["findings"][0]["disposition"] is None
+  pid = panel_of(rid)
+  settled_panel(world, pid=pid, split=OTHER_FINDING.replace("## Q1", "## Q2"))
+  found = [F("change-review", 1, 1, "high", loc="src/x.py"), F("change-review", 1, 2, "high", loc="src/y.py")]
+  assert record_findings(world, rid, 1, "change-review", found, cid, sha=A)[0] == 0
+  assert settle(world, rid, "change-review-1-1", "declined", cid, "--judges", pid)[0] == 0
+  code, text = settle(world, rid, "change-review-1-2", "declined", cid, "--judges", pid)
+  assert code == 1 and f"change-review-1-2: judges {pid} has not converged" in text, text
 
 
 @pytest.mark.parametrize("mode, word", [("normal", "contest"), ("leavemealone", "leavemealone")])
@@ -257,6 +288,35 @@ def test_an_unconverged_panel_gives_its_verdict_line_to_the_open_decision(world,
   question = foreman_of(core.store(world.repo), "U07")["decisions"][0]["question"]
   assert question.startswith(FINDING_LINE) and question.count(f"judges/{pid}/verdict.json") == 1
   assert "fable: finding upheld" in question and "opus: finding overruled" in question
+
+
+def test_the_verdict_line_goes_only_to_this_reviews_unruled_decision(world, tmp_path):
+  """The same finding id recurs in every unit and cycle: the line goes to the point 1 decision whose `source` is this panel's review
+  and round and that still has an unruled finding of the panel, never to another unit's, another round's, or a ruled one."""
+  pid, _ = contest(world, tmp_path)
+  rid = pid.rsplit("-r1-", 1)[0]
+  foreman = json.loads(core.store(world.repo).path("foreman", "U07").read_text(encoding="utf-8"))
+  base = {"id": "q1", "point": 1, "source": f"review {rid} round 1", "head": "a" * 64, "question": FINDING_LINE, "asked_at": "t",
+          "options": ["finding upheld", "finding overruled"]}
+  other_unit = {"decisions": [base | {"source": "review head-U08-c1 round 1"}], "rulings": []}
+  other_round = base | {"id": "q2", "source": f"review {rid} round 2"}
+  ruled = base | {"id": "q3"}
+  closed = base | {"id": "q4"}
+  put(world, foreman | {"decisions": [base, other_round, ruled, closed],
+                        "rulings": [{"decision": "q3", "ruling": "change-review-1-1 finding upheld — a"},
+                                    {"decision": "q4", "ruling": "redesign — b"}]}, "foreman", "U07")
+  put(world, foreman | other_unit, "foreman", "U08")
+  folder = world.artifacts / "judges" / pid
+  card = json.loads((folder / "panel.json").read_text(encoding="utf-8"))["runcard"]
+  for rnd in range(1, 6):
+    record_round(world, pid, card, rnd, {"fable": "a", "opus": "b", "astra": "a"})
+    assert world.run("judges", "diff", "--panel", pid, "--round", rnd, "--runcard", card)[0] == 0
+  assert world.run("judges", "verdict", "--panel", pid, "--runcard", card)[0] == 2
+  mark = f"judges/{pid}/verdict.json"
+  by_id = {d["id"]: d for d in foreman_of(core.store(world.repo), "U07")["decisions"]}
+  assert mark in by_id["q1"]["question"]
+  assert all(mark not in by_id[i]["question"] for i in ("q2", "q3", "q4")), "another round's, a ruled and a closed decision stay as they were"
+  assert foreman_of(core.store(world.repo), "U08")["decisions"][0]["question"] == FINDING_LINE
 
 
 VERDICT_LINE = "The judges did not converge (judges/p1/verdict.json), their last choices: Q1 fable: finding upheld; opus: finding overruled\n"
