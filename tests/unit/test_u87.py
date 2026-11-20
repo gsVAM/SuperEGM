@@ -58,3 +58,20 @@ def test_lessons_respec_evidence_unread(world):
   assert code == 0, out
   rows = lessons(c.hs.path("file", "postmortem.md").read_text(encoding="utf-8"))
   assert len(rows) == 2 and "evidence unread (comment 901)" in rows[0]
+
+
+def test_retro_copy(world, tmp_path):
+  # --retro copies the file in, needs no run card, writes only the store's file kind
+  from superegm import postmortem
+  from test_u78 import snapshot
+  c, _, _ = two_units(world)
+  source = tmp_path / "agreed-retro.md"
+  source.write_bytes("# Retro\n\n- the reviewer file gains one line\né\n".encode())
+  before = snapshot(c.root)
+  code, out = world.run("postmortem", "--handoff", c.hid, "--retro", str(source))
+  after = snapshot(c.root)
+  retro_md = c.hs.path("file", "retro.md")
+  assert code == 0, out
+  assert retro_md.read_bytes() == source.read_bytes() and set(after) - {retro_md} == set(before)
+  assert {p for p in before if after[p] != before[p]} == set()
+  assert postmortem.WRITES == frozenset(["file"])
