@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the report subcommand (spec section 11): the per-batch wave report, the idle rules
-# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31); its own `ci_wait_minutes` config key, moved from `__init__` (U32); the board's tier column (U33); `waiting proceed` and a proceed closing a point-1 decision (U92); the `conflict` view and its board action (U62); a unit waiting on an open respec is not active, its board row and merge round included (U86).
+# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31); its own `ci_wait_minutes` config key, moved from `__init__` (U32); the board's tier column (U33); `waiting proceed` and a proceed closing a point-1 decision (U92); the `conflict` view and its board action (U62); a unit waiting on an open respec is not active, its board row and merge round included (U86); a point-1 decision carrying an unconverged panel's verdict line stays pending on each finding no ruling names (U88).
 
 """superegm report: rewrite `wave_<n>_report.md` from the store, the plan and the spec and print its path, the
 board and the idle, pending and loop lines. It opens the card's handoff as `status` does (`core.locate`,
@@ -8,11 +8,13 @@ board and the idle, pending and loop lines. It opens the card's handoff as `stat
 `spec changed since the approval: run approve-spec again`. It reads GitHub never."""
 
 import json
+import re
 from pathlib import Path
 
 import superegm as core
 from superegm.launch import authorizing, conflict_again, latest_clean, load_launches, waiting_proceed
 
+FID_PAT = r"[a-z][\w:\[\]-]*-\d+-\d+"  # a finding id as decision.py reads it (decision imports report, so it is not imported back)
 WRITES = frozenset({"report", "runcards"})  # the store kinds this subcommand writes
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {"ci_wait_minutes": 30}, "", None  # its own config key (U32)
 SKILLS = frozenset({"wave"})  # the skills whose card this subcommand accepts
@@ -346,6 +348,12 @@ def pending_decisions(foreman: dict) -> list:
       if fids & {"redesign", "proceed"}:  # spec section 4.2: a proceed closes the whole decision, as `redesign` does
         return False
       return any(o.split(" ")[0] not in fids for o in options)
+    if d.get("point") == 1 and "/verdict.json)" in (d.get("question") or ""):  # an unconverged panel's decision (U88): pending on each finding no ruling names
+      fids = {str(r.get("ruling") or "").split(" ")[0] for r in rulings if r.get("decision") == d["id"]}
+      if fids & {"redesign", "proceed"}:
+        return False
+      asked = [a or b for a, b in re.findall(rf"^(?:#+\s+Q\d+\s+({FID_PAT})\s+\(|({FID_PAT})\s*\|)", d["question"], re.M)]
+      return any(fid not in fids for fid in asked) if asked else d["id"] not in ruled
     return d["id"] not in ruled
 
   return [d for d in foreman.get("decisions") or [] if pending(d)]

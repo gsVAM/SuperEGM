@@ -12,7 +12,7 @@ from pathlib import Path
 import superegm as core
 from superegm import instructions
 
-WRITES = frozenset(["judges", "runcards", "questions", "instructions"])  # the store kinds this subcommand writes (`instructions`: a spec review's reference copies, U74)
+WRITES = frozenset(["judges", "runcards", "questions", "instructions", "foreman"])  # the store kinds this subcommand writes (`instructions`: a spec review's reference copies, U74; `foreman`: an unconverged panel's verdict line on the open decision, U88)
 CONFIG_DEFAULTS = {"judges": {"min_vendors": 1,  # its own config key (U32)
                               "members": [{"name": "fable", "via": "adapter", "effort": "xhigh"},
                                           {"name": "opus", "via": "adapter", "effort": "max"},
@@ -494,6 +494,25 @@ def verdict_line(pid: str, verdict: dict, questions: list[dict]) -> str:
   return f"The judges did not converge (judges/{pid}/verdict.json), their last choices: " + " | ".join(parts) + "\n"
 
 
+def add_to_open_decisions(store, pid: str, question_text: str, line: str) -> None:
+  """Append the verdict line, once, to the `question` of each open point 1 decision that asks one of the panel's findings:
+  that record is what `inbox` lists and the ruling comment quotes (section 7.8), `owner-question.md` being only a copy."""
+  from superegm.decision import FINDING_LINE_RE
+  if not store.handoff_id:  # a panel outside a wave (a spec review's) has no foreman files
+    return
+  fids = lambda text: {a or b for a, b in FINDING_LINE_RE.findall(text or "")}
+  asked = fids(question_text)
+  for path in sorted(store.path("foreman", "x").parent.glob("*.json")):
+    data = json.loads(core.read_text(path))
+    changed = False
+    for decision in data.get("decisions", []):
+      if decision.get("point") == 1 and fids(decision.get("question")) & asked and f"judges/{pid}/verdict.json" not in decision["question"]:
+        decision["question"] = decision["question"].rstrip("\n") + "\n" + line
+        changed = True
+    if changed:
+      core.save_foreman(store, path.stem, data)
+
+
 def cmd_verdict(args, store) -> int:
   panel = load_panel(store, args.panel)
   panel_card(args, store, panel)
@@ -520,7 +539,9 @@ def cmd_verdict(args, store) -> int:
   line += " (degraded)" if verdict["degraded"] else ""
   core.journal(store, f"judges {pid}: {line}")
   if verdict["cap_reached"] and not verdict["converged"]:  # section 7.8: the owner keeps the question, with the verdict line
-    core.atomic_write(folder / "owner-question.md", core.read_text(folder / "question.md") + verdict_line(pid, verdict, questions))
+    line = verdict_line(pid, verdict, questions)
+    core.atomic_write(folder / "owner-question.md", core.read_text(folder / "question.md") + line)
+    add_to_open_decisions(store, pid, core.read_text(folder / "question.md"), line)
   print(json.dumps(verdict, indent=2))
   return 0 if verdict["converged"] else 2
 

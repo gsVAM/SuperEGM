@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45); the `proceed again` item and the merge on the authorizing outcome (U92); the `conflict` item (U62); a ruling's action the inbox with its `forms` and `on`, a review's its skill session, and `inbox withdrawn` (U72); no merge item for a head a `respec:` mark holds (U86).
+# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45); the `proceed again` item and the merge on the authorizing outcome (U92); the `conflict` item (U62); a ruling's action the inbox with its `forms` and `on`, a review's its skill session, and `inbox withdrawn` (U72); no merge item for a head a `respec:` mark holds (U86); a contested item carries the unconverged panel's verdict line (U88).
 
 """superegm inbox [--all] [--json] [--handoff <id>]: one line per item that needs the owner across the
 store's open handoffs, read-only and with no run card; superegm inbox withdrawn --pr <n> --reason <text>: the merge
@@ -154,7 +154,9 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
       fids = review.contested_fids(rnd) or [c["fid"] for c in rnd.get("builder_contested") or []]
       ruled = ruled_of(did)
       menu = lambda fid: [ruling_form(1, fid, o) for o in ("finding upheld", "finding overruled")]
-      out += [ruling_item(repo, uid, "contested", menu(fid), number, f"{did}/{fid}") for fid in fids if fid not in ruled]
+      verdict = next((l.strip() for l in (d.get("question") or "").splitlines() if "/verdict.json)" in l), None)  # an unconverged panel's line (U88)
+      out += [ruling_item(repo, uid, "contested", menu(fid), number, f"{did}/{fid}") | ({"verdict": verdict} if verdict else {})
+              for fid in fids if fid not in ruled]
   entry = latest_posted(foreman)
   if entry:
     n, rid = entry["round"], review.head_review_id(hs, uid)
@@ -571,7 +573,7 @@ def register(subparsers):
 
 
 def line_of(i: dict) -> str:
-  return f"{i['repo']} {i['subject']} | {i['kind']} | {i['action']}"
+  return f"{i['repo']} {i['subject']} | {i['kind']} | {i['action']}" + (f" | {i['verdict']}" if i.get("verdict") else "")
 
 
 def open_store(args) -> tuple:
