@@ -14,7 +14,7 @@ import subprocess
 from pathlib import Path
 
 import superegm as core
-from superegm import gate, graph, launch, report, review, runcard
+from superegm import gate, graph, launch, report, respec, review, runcard
 from superegm.approve_spec import units_section
 
 WRITES = frozenset({"chain", "runcards", "file"})  # the store kinds this subcommand writes
@@ -154,6 +154,9 @@ def planning_line(hs: core.Store, state: dict, spec: Path, text: str) -> str:
     return "plan"
   numbers = {u: (r or {}).get("number") for u, r in (state.get("units") or {}).items()}
   unfiled = [u for u in units["order"] if not numbers.get(u)]
+  marks = respec.marks(hs, hs.handoff_id) if hs.handoff_id else {}
+  if any((marks.get(u) or "").startswith("replan: ") for u in unfiled):
+    return "plan"  # a respec touched an unfiled unit: its section is rewritten from the corrected spec (U90)
   for uid in unfiled:
     rid = plan_review_stopped(hs, uid)
     if rid:
