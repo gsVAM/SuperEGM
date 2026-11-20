@@ -17,14 +17,19 @@ In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.
 
 The retrospective of a handoff that has closed: the post-mortem says what happened, this skill turns what the owner
 agrees into edits. `--handoff <id>` names the handoff; by default it is the latest closed handoff: the one whose `handoffs/<id>.json`
-(`{"id", "spec", "opened_at", "closed_at"}`) holds the latest non-null `closed_at`. Integrate offers the
+(`{"id", "spec", "opened_at", "closed_at"}`) holds the latest non-null `closed_at`, skipping a voided close (a handoff whose
+`journal.md` records `closed <id> at <closed_at>` followed by `(closed: voided)` filed no unit and has no Lessons). Integrate offers the
 retrospective once, after the post-mortem; typed later, it runs the same way. `superegm` below stands for
 `python3 '${CLAUDE_PLUGIN_ROOT}/skills/plan/scripts/superegm.py'`, one Bash call per command, run from the target
 repository, absolute paths in single quotes, nothing chained.
 
+The store is `artifacts_dir` in `.superegm/config.json`; the handoff's directory, `<handoff dir>` below, is
+`<artifacts_dir>/<handoff id>/`, and `handoffs/<id>.json` and `approvals/<spec-slug>.json` sit directly in `<artifacts_dir>`.
+
 ## Step 1: read the Lessons
 
-1. Read `<handoff dir>/postmortem.md`; when it is missing, `superegm postmortem --handoff <id>` writes it first.
+1. Read `<handoff dir>/postmortem.md`; when it is missing, `superegm postmortem --handoff <id>` writes it first
+   (`postmortem.md` is the helper's write, not this skill's).
 2. Its Lessons table is the agenda: one fact row per respec, `fix-design` finding, interface amendment, silent or most
    overruled reviewer, escalated or capped unit and decision answered by default, each naming its source record. The
    rows are facts and propose nothing; the proposals are this skill's, and the owner's to accept.
@@ -54,7 +59,9 @@ any handoff, and a finished spec is not edited by the retrospective.
 **Live and frozen keys.** A config key is either live or frozen, and the skill says which before it asks for the yes:
 
 - a live key (`driver.chain`, `units.*` read by `graph`, `reviewers.<kind>` for a review not yet opened): name
-  every open handoff (each `handoffs/<id>.json` whose `closed_at` null) and say the edit applies to it at once;
+  every open handoff (each `handoffs/<id>.json` whose `closed_at` is null; a legacy flat-store handoff, the one `state.json`
+  at the root of `<artifacts_dir>` holds, has no such file until it closes and counts while that `state.json` has no
+  `closed_at`) and say the edit applies to it at once;
 - a frozen key (`mode`, `review.rounds`, which an approval freezes): read each open handoff's approval, the entries of
   `approvals/<spec-slug>.json` that carry its `handoff_id`, fields `mode` and `rounds`. One whose
   approval froze the key keeps it; one whose approval has no frozen value (an approval before 1.2.1, which falls back to
@@ -77,5 +84,5 @@ next brainstorm: say so.
 
 ## What it never does
 
-It applies nothing without the owner's yes, writes to the store only `postmortem.md` when it is missing and `retro.md`, never pushes, and never edits
+It applies nothing without the owner's yes, writes nothing to the store but `retro.md`, never pushes, and never edits
 the approved spec of any handoff.

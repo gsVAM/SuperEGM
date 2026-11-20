@@ -22,7 +22,7 @@ import re
 from pathlib import Path
 
 import superegm as core
-from superegm import approve_spec, body, inbox, launch, launch_builder, report, respec, review
+from superegm import approve_spec, body, decision, inbox, launch, launch_builder, report, respec, review
 
 WRITES = frozenset(['file'])  # the store kinds this subcommand writes: the derived `postmortem.md` and, from `--retro <file>`, `retro.md`
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
@@ -44,8 +44,8 @@ def register(subparsers):
 
 
 def cell(value) -> str:
-  """One table cell: `|` and newlines cannot split it."""
-  return "" if value is None else str(value).replace("|", "/").replace("\n", " ").strip()
+  """One table cell: a `|` is escaped as `\\|` (the text stays verbatim in the rendered table) and a newline is a space."""
+  return "" if value is None else str(value).replace("|", "\\|").replace("\n", " ").strip()
 
 
 def render(headers: list, rows: list) -> str:
@@ -380,6 +380,15 @@ def deviation_evidence(st: core.Store, comment_id) -> str:
   return " ".join(lines) if lines else f"evidence unread (comment {comment_id})"
 
 
+def finding_evidence(hs: core.Store, uid, fid) -> str:
+  """A respec opened on the foreman's spec finding `fid` (it stores `finding`, not `comment_id`): the finding's claim as the
+  foreman decision's question holds it (`decision.spec_claims`); `spec finding <fid>` when no decision of the unit holds it."""
+  for held in (core.load_foreman(hs, uid).get("decisions") or []) if uid else []:
+    if claim := decision.spec_claims(str(held.get("question") or "")).get(fid):
+      return f"spec finding {fid}: {claim}"
+  return f"spec finding {fid}"
+
+
 def respec_rows(st: core.Store, hs: core.Store, spec) -> list:
   """One row per respec: its first approved range as `path:a-b`, its unit and the deviation's quoted evidence."""
   folder = respec.respec_path(hs)
@@ -400,7 +409,7 @@ def respec_rows(st: core.Store, hs: core.Store, spec) -> list:
     ranges = (entries.get(rid) or {}).get("ranges") or []
     where = f"{rel}:{ranges[0][0]}-{ranges[0][1]}" if ranges else "not approved"
     evidence = (deviation_evidence(st, record["comment_id"]) if record.get("comment_id")
-                else f"spec finding {record.get('finding')}")
+                else finding_evidence(hs, record.get("unit"), record.get("finding")))
     rows.append(["respec", record.get("unit"), f"respec/{path.name}", f"{rid} {where}: {evidence}"])
   return rows
 
@@ -409,8 +418,15 @@ def amendment_rows(hs: core.Store, uids: list) -> list:
   """One row per interface amendment that took effect, read as the builder's launch reads them (`launch_builder.amendments_for`):
   a file `amendments/<comment id>.json` counts only when a ruling names its comment, and the legacy `state.json` list counts."""
   found = [a for uid in uids for a in launch_builder.amendments_for(hs, uid, "") if a.get("unit") == uid]
-  return [["interface amendment", a.get("unit"), f"amendments/{a['comment_id']}.json" if a.get("comment_id") else "state.json amendments",
-           f"{a.get('name')}: {a.get('text')}"] for a in sorted(found, key=lambda a: str(a.get("at")))]
+  files = sorted((hs.path("state").parent / "amendments").glob("*.json"))
+
+  def source(amendment: dict) -> str:
+    """The file is named for the deviation comment; its entries' `comment_id` is the ruling's, so find the file that holds the entry."""
+    named = next((f.name for f in files if amendment in (read_json(f) or [])), None)
+    return f"amendments/{named}" if named else "state.json amendments"
+
+  return [["interface amendment", a.get("unit"), source(a), f"{a.get('name')}: {a.get('text')}"]
+          for a in sorted(found, key=lambda a: str(a.get("at")))]
 
 
 def fix_design_rows(st: core.Store, hs: core.Store, spec) -> list:
@@ -426,13 +442,14 @@ def fix_design_rows(st: core.Store, hs: core.Store, spec) -> list:
 
 
 def reviewer_rows(st: core.Store, hs: core.Store, spec) -> list:
-  """The reviewers with no finding kept (none raised, or every one overruled), whatever the others raised, and those
-  overruled most; with no finding overruled anywhere (`most` 0) no reviewer is most overruled."""
+  """The reviewers with no finding kept (none raised, or every one overruled or allowed), whatever the others raised, and
+  those overruled most; an allowance is recorded as an overrule (spec 13.2, `decision.py`), so it counts as one here though the
+  Reviewers table keeps its own column; with no finding overruled anywhere (`most` 0) no reviewer is most overruled."""
   total = {}
   for (name, _), s in reviewer_stats(st, hs, spec).items():
     t = total.setdefault(name, {"raised": 0, "overruled": 0})
     t["raised"] += sum(s[k] for k in SEVERITIES)
-    t["overruled"] += s["overruled"]
+    t["overruled"] += s["overruled"] + s["allowed"]
   most = max((t["overruled"] for t in total.values()), default=0)
   rows = []
   for name, t in sorted(total.items()):
