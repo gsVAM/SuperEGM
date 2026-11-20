@@ -93,16 +93,14 @@ plugin's hook silent in the runner's session.
 - Do not edit the question file until the run ends or the user skips it: the
   runner fails a run whose plan changed.
 - Then dispatch the two Claude judges, concurrently, as the skill says.
-- The evidence arrives inline, whatever the lane may read: `brief-astra.md` embeds each evidence file's contents
-  (on a head contest `comments.md`, the diff, the unit's body, `r<n>/spec_range.md` and `r<n>/amendments.md`), read from the
-  panel's `evidence[]` paths and each re-checked against its recorded sha256. Pass `round-<n>/brief-astra.md`, not
-  `brief.md`, as `--feedback`.
+- The evidence arrives inline, whatever the lane may read: `brief-astra.md` embeds the contents of every evidence file in the panel's `evidence[]`, for every question form
+  (a head contest's are `comments.md`, the diff, the unit's body, `r<n>/spec_range.md` and `r<n>/amendments.md`), each
+  re-checked against its recorded sha256. Pass `round-<n>/brief-astra.md`, not `brief.md`, as `--feedback`.
 
 **Data notice.** A run sends the question file, the brief and the repository
 folder, which Astra may read in full like any folder it is given, to OpenAI
-under the account `codex login status` reports. On a head contest the brief
-also carries `comments.md`, the diff, the unit's body, `r<n>/spec_range.md` and `r<n>/amendments.md` from the store, outside the
-repository folder: that content goes to OpenAI too. Show it in the run card
+under the account `codex login status` reports. The evidence, every file in the
+panel's `evidence[]`, goes into the brief whatever the question's form, and sits outside the repository folder: that content goes to OpenAI too. Show it in the run card
 before the first launch of a panel.
 
 ## 3. Collect

@@ -37,8 +37,8 @@ reasons from the round's `comments.md`) to a question file, each finding on a li
 (options `finding upheld; finding overruled`). A contested or declined high or medium finding goes to the
 judges first in both modes (`superegm judges question --review <head-review-id> --round <n>`, then the panel sequence of
 `skills/judges/references/leavemealone.md`; its evidence the round's `comments.md`, the diff, the unit's body,
-`r<n>/spec_range.md` and `r<n>/amendments.md`); a converged ruling settles through
-`review settle --judges <panel>` and is journalled `Ruling (judges <panel>, contest)` in normal mode. Only a panel that does not
+`r<n>/spec_range.md` and `r<n>/amendments.md`); a converged ruling follows `leavemealone.md`:
+only `finding overruled` settles through `review settle --judges <panel>` (journalled `Ruling (judges <panel>, contest)` in normal mode); `finding upheld` and `redesign` go through `decision rule --by judges:<panel>` alone. Only a panel that does not
 converge goes to the owner: ask point 1's question, one question per finding, the builder's reason verbatim as the overrule
 option's text, with the line naming `judges/<panel>/verdict.json` and each judge's last choice (the panel's
 `owner-question.md`). The owner alone rules `<fid> allowed`, `amend`, `respec` and the CI finding, in both modes: the
