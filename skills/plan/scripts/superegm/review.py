@@ -99,6 +99,8 @@ def register(subparsers):
   o.add_argument("--reviewers", required=True, help="comma-separated reviewer ids, the kind's first reviewer first")
   o.add_argument("--astra", choices=("on", "off"), help="the Astra lane (default: config.astra.enabled)")
   o.add_argument("--scope", help="kind spec: auto (default) | whole | headings separated by `;`")
+  o.add_argument("--respec", help="kind spec: R<n>, review only the correcting diff of open respec R<n> (design, "
+                                  "codebase-details and the Astra lane; cap 2)")
   r = core.add_parser(action, "record", "record one reviewer's round")
   r.add_argument("--review", required=True)
   r.add_argument("--round", type=int, required=True)
@@ -390,7 +392,8 @@ def spec_scope(st: core.Store, review: dict, spec: Path) -> list:
   old = approved_text(spec, approval)
   if old is None:
     return whole(f"no commit holds {approval['sha256'][:7]}")
-  rows = {row[2]: row for row in scope_sections(old, text)}  # by start line: two sections may share a heading
+  rows = {row[2]: row for row in scope_sections(old, text)  # by start line: two sections may share a heading
+          if form != "respec" or row[0] == "changed"}  # a respec cycle's remit: the diff's sections, no neighbours
   if isinstance(form, list):
     for heading, start, end in sections(text):
       if heading in form:
@@ -513,6 +516,47 @@ def bind(args, review: dict) -> dict:
 # ---------------------------------------------------------------- open
 
 
+RESPEC_CAP = 2  # a respec cycle's cap, below `review.rounds` (spec section 7.6)
+RESPEC_PANEL = ("design", "codebase-details")  # a respec cycle's panel, besides the Astra lane, narrowed by section 4.1
+
+
+def respec_base(st: core.Store, kind: str, artifact: str, respec: str, reviewers: list, given) -> str:
+  """`review open --respec R<n>`'s checks; returns the commit of the latest approval, the diff's base. Refused: a
+  kind other than spec, a `--scope`, a reviewer outside `RESPEC_PANEL`, no approval, or R<n> not open in the latest
+  approval's handoff."""
+  if kind != "spec":
+    raise core.HandoffError(f"review open: --respec is refused for kind {kind}")
+  if given is not None:
+    raise core.HandoffError("review open: --scope is refused with --respec")
+  outside = [r for r in reviewers if r not in RESPEC_PANEL]
+  if outside:
+    raise core.HandoffError(f"review open: respec {respec}: {outside[0]} is not on a respec panel ({', '.join(RESPEC_PANEL)})")
+  approval = core.load_approval(st, Path(artifact))
+  if not approval:
+    raise core.HandoffError(f"review open: respec {respec}: no approval")
+  hs = core.handoff_store(st, approval.get("handoff_id"))
+  applied = any(e.get("respec") == respec for e in core.load_approvals(st, Path(artifact)))
+  if applied or not hs.path("file", "respec", f"{respec}.open.json").is_file():
+    raise core.HandoffError(f"review open: respec {respec} is not open")
+  return approval["commit"]
+
+
+def respec_evidence(st: core.Store, review: dict) -> str:
+  """A respec cycle's evidence: the diff from the latest approval's commit (`base`) to `HEAD`, then the text at `HEAD`
+  of each section the diff changes; nothing else of the spec."""
+  spec = Path(review["artifact"])
+  root = core.git_toplevel(spec.parent)
+  rel = spec.resolve().relative_to(root.resolve()).as_posix()
+  old = core.run_git(["show", f"{review['base']}:{rel}"], root)
+  new = core.run_git(["show", f"HEAD:{rel}"], root)
+  out = [core.run_git(["diff", review["base"], "HEAD", "--", rel], root).rstrip("\n"), ""]
+  lines = new.splitlines()
+  for kind, heading, start, end in scope_sections(old, new):
+    if kind == "changed":
+      out += [f"--- {heading} ({start}-{end})", *lines[start - 1:end], ""]
+  return "\n".join(out)
+
+
 def open_review(args) -> int:
   st = core.store(core.git_toplevel(Path.cwd()))
   kind, reviewers = args.kind, [r for r in args.reviewers.split(",") if r != "astra"]  # an `astra` entry is informational
@@ -561,8 +605,10 @@ def open_review(args) -> int:
         core.journal(st, f"review open {rid} panel {','.join(panel_at(latest, nxt))} from round {nxt} under {args.runcard}")
       print(f"panel {','.join(panel_at(latest, nxt))} from round {nxt}" + (f" (unchanged: {refused})" if refused else ""))
     return 0
-  cap = cap_at_open(args, st, kind, artifact)
-  scope = scope_form(st, artifact, given) if kind == "spec" else None
+  respec = getattr(args, "respec", None)
+  base = respec_base(st, kind, artifact, respec, reviewers, given) if respec else None
+  cap = RESPEC_CAP if respec else cap_at_open(args, st, kind, artifact)
+  scope = ("respec" if respec else scope_form(st, artifact, given)) if kind == "spec" else None
   cycle = latest["cycle"] + 1 if latest else 1
   rid = review_id(st, kind, artifact, cycle)
   lane = seat_lane(kind, getattr(args, "astra", None), st.config.get("astra") or {})
@@ -570,7 +616,7 @@ def open_review(args) -> int:
             "reviewers": reviewers + (["astra"] if lane else []), "cap": cap,
             "runcard": args.runcard, "artifact_sha256": current_sha(st, kind, artifact) if kind == "plan" else args.sha256,
             "astra_incomplete": 0,
-            "converged": "no", "converged_round": None, "rulings": []}
+            "converged": "no", "converged_round": None, "rulings": [], **({"respec": respec, "base": base} if respec else {})}
   save_review(st, rid, review)
   core.card_add(st, args.runcard, "produced", rid)
   core.journal(st, f"review open {rid} panel {','.join(review['reviewers'])} under {args.runcard}")
@@ -636,6 +682,8 @@ def scope_review(args) -> int:
   bind(args, review)
   for kind, heading, start, end in scope_of(st, review, Path(review["artifact"])):
     print(f"{kind} {heading}" if start == end == 0 else f"{kind} {start}-{end} {heading}")  # a reference document is a whole file
+  if review.get("respec"):  # a respec cycle reviews its diff and the sections it touches alone (spec section 7.6)
+    print(respec_evidence(st, review))
   return 0
 
 
