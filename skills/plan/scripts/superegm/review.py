@@ -292,7 +292,7 @@ def cited_line(location: str) -> int | None:
   return int(match.group(1)) if match else None
 
 
-def out_of_scope(rows: list, spans: list, location: str, spec_name: str = "", root: str = ""):
+def out_of_scope(rows: list, spans: list, location: str, spec_name: str = "", root: str = "", respec: bool = False):
   """The heading of the section a finding cites when no scope row holds its line, else None; in a scoped
   round a location naming no line, or a line the spec does not hold, answers `none` (U32); a `whole` round
   exempts every finding. A round that lists reference documents (`("changed", <path>, 0, 0)` rows, U75) reads a
@@ -303,18 +303,21 @@ def out_of_scope(rows: list, spans: list, location: str, spec_name: str = "", ro
   or `#L<line>`, may hold spaces (`other/a b.md, line 8` names `other/a b.md`). The spec is named by its full path or
   its bare file name only, never with a directory in front of its path. A listed document is named by its full repository-relative path after one leading
   `./` or the repository root (`root`, an absolute path) is taken off, or by its bare file name (the spec's own name
-  wins a tie); a directory in front of the path names another file."""
+  wins a tie); a directory in front of the path names another file. A respec cycle (`respec`) lists no reference
+  document and its remit is the spec's correction alone: a location naming any other file answers `none`."""
   listed = {row[1] for row in rows if row[0] == "changed" and row[2] == row[3] == 0}
+  loc, ends = location.removeprefix("./"), ": \t,#"
+  for prefix in {root.rstrip("/"), str(Path(root).resolve()).rstrip("/")} - {"", "."}:
+    loc = loc.removeprefix(prefix + "/")
+  named = (re.match(r"([^:#,]+\.[A-Za-z][A-Za-z0-9]*)(?=:\d|#L\d)", loc) or re.match(r"([^:#,]*?/[^:#,]*?\.[A-Za-z][A-Za-z0-9]*)(?=[:\s#,]|$)", loc)
+           or re.match(r"([^\s:#,]+\.[A-Za-z][A-Za-z0-9]*)(?=[:\s#,]|$)", loc))
+  spec_named = bool(named) and bool(spec_name) and (named.group(1) == spec_name or ("/" not in named.group(1) and spec_name.rsplit("/", 1)[-1] == named.group(1)))
+  if respec and named and not spec_named:
+    return "none"
   if listed:
-    loc, ends = location.removeprefix("./"), ": \t,#"
-    for prefix in {root.rstrip("/"), str(Path(root).resolve()).rstrip("/")} - {"", "."}:
-      loc = loc.removeprefix(prefix + "/")
     named_as = lambda name: loc.startswith(name) and (len(loc) == len(name) or loc[len(name)] in ends)
     if any(named_as(path) for path in listed):
       return None
-    named = (re.match(r"([^:#,]+\.[A-Za-z][A-Za-z0-9]*)(?=:\d|#L\d)", loc) or re.match(r"([^:#,]*?/[^:#,]*?\.[A-Za-z][A-Za-z0-9]*)(?=[:\s#,]|$)", loc)
-             or re.match(r"([^\s:#,]+\.[A-Za-z][A-Za-z0-9]*)(?=[:\s#,]|$)", loc))
-    spec_named = bool(named) and bool(spec_name) and (named.group(1) == spec_name or ("/" not in named.group(1) and spec_name.rsplit("/", 1)[-1] == named.group(1)))
     if not spec_named:
       if "/" not in loc.split(":")[0].split("#")[0] and any(named_as(path.rsplit("/", 1)[-1]) for path in listed):
         return None  # a listed document by its bare file name (a slash before the first colon is another directory's)
@@ -474,7 +477,7 @@ def cycle_ids(st: core.Store, kind: str, artifact: str) -> list[str]:
 def latest_cycle(st: core.Store, kind: str, artifact: str) -> tuple[dict | None, bool]:
   """The latest cycle's `review.json` of this artifact and whether that cycle is closed: by an
   `accept` or `stop` ruling; a spec's by the approval that names it, once the bytes moved off its
-  sha; an integrate's by the handoff closing or changing (D1 (a)), or by a `## Units` amendment
+  sha, and a respec cycle's once its R<n> is not open (applied, or withdrawn by a stopped unit); an integrate's by the handoff closing or changing (D1 (a)), or by a `## Units` amendment
   past the bytes its latest completed round reviewed (a cycle with no completed round stays)."""
   cycles = cycle_ids(st, kind, artifact)
   if not cycles:
@@ -485,6 +488,10 @@ def latest_cycle(st: core.Store, kind: str, artifact: str) -> tuple[dict | None,
   if not closed and kind == "spec":
     approval = core.load_approval(st, Path(artifact))
     closed = bool(approval) and approval["review"] == rid and approval["sha256"] != current_sha(st, kind, artifact)
+    if not closed and review.get("respec"):  # a respec cycle closes once its R<n> is no longer open: applied or withdrawn
+      from superegm import respec as respecs
+      handoff = (approval or {}).get("handoff_id")
+      closed = not handoff or review["respec"] not in [r["id"] for r in respecs.open(st, handoff)]
   if not closed and kind == "integrate":
     state = core.load_state(st.root)
     amended = [e for e in core.load_approvals(st, Path(artifact))
@@ -526,8 +533,8 @@ RESPEC_PANEL = ("design", "codebase-details")  # a respec cycle's panel, besides
 
 def respec_base(st: core.Store, kind: str, artifact: str, respec: str, reviewers: list, given) -> str:
   """`review open --respec R<n>`'s checks; returns the commit of the latest approval, the diff's base. Refused: a
-  kind other than spec, a `--scope`, a reviewer outside `RESPEC_PANEL`, no approval, or R<n> not open in the latest
-  approval's handoff."""
+  kind other than spec, a `--scope`, a reviewer outside `RESPEC_PANEL`, no approval, a voided latest approval, or
+  R<n> not open in the latest approval's handoff."""
   if kind != "spec":
     raise core.HandoffError(f"review open: --respec is refused for kind {kind}")
   if given is not None:
@@ -826,7 +833,8 @@ def record_round(args) -> int:
       spans = sections(core.read_text(Path(review["artifact"])))
       artifact = Path(review["artifact"])
       spec_rel = artifact.resolve().relative_to(core.git_toplevel(artifact.parent).resolve()).as_posix()
-      verdicts = [(finding, line, out_of_scope(rnd["scope"], spans, finding["location"], spec_rel, str(core.git_toplevel(artifact.parent)))) for finding, line in pairs]
+      verdicts = [(finding, line, out_of_scope(rnd["scope"], spans, finding["location"], spec_rel, str(core.git_toplevel(artifact.parent)),
+                                              respec=bool(review.get("respec")))) for finding, line in pairs]
       findings = [finding for finding, _, section in verdicts if section is None]
       refused = [(finding["id"], line, section) for finding, line, section in verdicts if section is not None]
       mine = lambda line: line.split(" | ", 1)[0].rsplit("-", 2)[0] == reviewer

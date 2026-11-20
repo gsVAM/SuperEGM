@@ -6,7 +6,7 @@
 # ingest once before the refusals, the refusal of an unsettled external finding, an external finding's carried copies
 # as one escalated pair discharged by its latest copy alone, and a re-approval of the same cycle reading that cycle
 # again and keeping the replaced entry's unnamed pairs (U26); `--amend-units` typed by hand opens and closes its own
-# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units`, and a hand-written prior approval read as `since` 0 (U36); the triage section parsed, refused with its line and frozen as `triage` (U39); the run mode frozen as the entry's `mode` (U43); the `instructions` list frozen with each file's blob sha and its verified store copy, and the changed files printed (U37); an opening approval refused over a partly filed handoff, and the last filing restored over an unapplied dry run, and `--void` without `--review` on a handoff with no `state.json` (U53); a `dir` entry's documents validated, frozen by blob sha with their raw copies (U74); a proceeded cycle's unsettled external findings no refusal, its bytes checked against the proceed's pinned sha (U57); the reviewer files frozen as the entry's `reviewers` with their store copies and the changed ones printed (U76); the reference-document manifest at `HEAD` (merge base to `HEAD`, never the working tree) refused when it differs from the converged round's, or the proceed ruling's (U75); `--respec R<n>` and its `--dry-run`: the four refusals, `respec/R<n>.json` and the comment files, then the `respec` entry copying the frozen fields (U85).
+# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units`, and a hand-written prior approval read as `since` 0 (U36); the triage section parsed, refused with its line and frozen as `triage` (U39); the run mode frozen as the entry's `mode` (U43); the `instructions` list frozen with each file's blob sha and its verified store copy, and the changed files printed (U37); an opening approval refused over a partly filed handoff, and the last filing restored over an unapplied dry run, and `--void` without `--review` on a handoff with no `state.json` (U53); a `dir` entry's documents validated, frozen by blob sha with their raw copies (U74); a proceeded cycle's unsettled external findings no refusal, its bytes checked against the proceed's pinned sha (U57); the reviewer files frozen as the entry's `reviewers` with their store copies and the changed ones printed (U76); the reference-document manifest at `HEAD` (merge base to `HEAD`, never the working tree) refused when it differs from the converged round's, or the proceed ruling's (U75); `--respec R<n>` and its `--dry-run`: the refusals (no approval to correct, not the latest approval, not in this branch, not open, not converged, a merged overlap without a follow-up row, a changed frozen field), `respec/R<n>.json` and the comment files, then the `respec` entry copying the frozen fields (U85).
 
 """superegm approve-spec: record the owner's approval of a converged spec (spec section 8)."""
 
@@ -590,9 +590,11 @@ def frozen_change(old: str, new: str) -> str | None:
 
 
 def respec_checks(args, st: core.Store, spec: Path, root: Path, card: dict):
-  """`--respec R<n>`'s refusals, before any write: the latest approval not of this handoff, the respec not open, its
-  cycle not converged, a merged unit the range or Interfaces test touches with no follow-up row, a changed frozen
-  field. Returns `(handoff id, the latest approval, the review id, the spec text, respec.touched's result)`."""
+  """`--respec R<n>`'s refusals, before any write, each `approve-spec: respec R<n>: ...` unless named whole:
+  `no approval to correct`; `<handoff>: not the latest approval: plan the rows in the latest handoff` (a voided latest
+  approval included); `approve-spec: fold <base> first: approval <sha7> is not in this branch` (`require_branch_holds`);
+  `not open`; `review <id> not converged`; `<U> is merged and overlaps <path:a-b>: add a follow-up row`; and
+  `changes the frozen <field>: void and re-approve`. Returns `(handoff id, the latest approval, the review id, the spec text, respec.touched's result)`."""
   from superegm import respec
   rid_n = args.respec
   fail = lambda reason: core.HandoffError(f"approve-spec: respec {rid_n}: {reason}")
@@ -628,7 +630,7 @@ def respec_checks(args, st: core.Store, spec: Path, root: Path, card: dict):
 
 
 def approve_respec(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
-  """`--respec R<n>` (spec section 7.6): the four refusals, then `respec/R<n>.json` and the comment files, then the
+  """`--respec R<n>` (spec section 7.6): `respec_checks`' refusals, then `respec/R<n>.json` and the comment files, then the
   entry, copying every frozen field as `--amend-units` does; a crash between them leaves the file without an entry,
   which a re-run rewrites and completes. `--dry-run` prints the touched units of the working tree and writes nothing."""
   from superegm import respec

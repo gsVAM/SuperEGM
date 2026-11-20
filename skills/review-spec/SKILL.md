@@ -274,10 +274,12 @@ The owner's correction of the sections at fault after a `respec` ruling, in plac
    Approve or Stop. On Approve, run it again with `--yes`; it appends the `respec` entry and
    writes `respec/R<n>.json` and the comment files in the same command. On Stop, close the card
    and record nothing. In leavemealone (`--leavemealone` or the config's mode) it approves
-   without the question. It refuses, writing nothing, with `approve-spec: respec R<n>: review <id> not converged`,
-   `approve-spec: respec R<n>: <U> is merged and overlaps <path:a-b>: add a follow-up row`,
-   `approve-spec: respec R<n>: changes the frozen <field>: void and re-approve`, or the latest
-   approval not of this handoff. After a crash, run it again: it rewrites the file and appends
+   without the question. It refuses, writing nothing, with `approve-spec: respec R<n>: no approval to correct`,
+   `approve-spec: respec R<n>: <handoff>: not the latest approval: plan the rows in the latest handoff`
+   (a voided latest approval too), `approve-spec: fold <base> first: approval <sha7> is not in this branch`,
+   `approve-spec: respec R<n>: not open`, `approve-spec: respec R<n>: review <id> not converged`,
+   `approve-spec: respec R<n>: <U> is merged and overlaps <path:a-b>: add a follow-up row`, or
+   `approve-spec: respec R<n>: changes the frozen <field>: void and re-approve`. After a crash, run it again: it rewrites the file and appends
    the entry. The wave posts each comment and relaunches the touched units.
 
 ## Data notice

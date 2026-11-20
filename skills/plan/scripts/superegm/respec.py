@@ -45,8 +45,9 @@ def spec_of(store: core.Store, handoff: str) -> Path:
 
 
 def entries_of(store: core.Store, handoff: str, spec: Path) -> list:
-  """The handoff's approval entries, voided ones left out, in history order."""
-  return [e for e in core.load_approvals(store, spec) if e.get("handoff_id") == handoff and not e.get("voided_by")]
+  """The handoff's approval entries in history order, voided ones included: an after-void approval's text is mapped
+  from the voided one's, and `rendered_under` counts every entry (the latest is chosen apart, `core.load_approval`)."""
+  return [e for e in core.load_approvals(store, spec) if e.get("handoff_id") == handoff]
 
 
 def opcodes(old: list[str], new: list[str]) -> list[list]:
@@ -68,7 +69,13 @@ def carry(ops: list, start: int, end: int) -> tuple[int, int]:
 def changed_ranges(ops: list) -> list[tuple[int, int]]:
   """The diff's changed ranges in the old text's coordinates (1-based, inclusive): a replaced or deleted block's old
   lines; an insertion as the line it follows (the first line when it opens the text)."""
-  return [(i1 + 1, i2) if i2 > i1 else (max(i1, 1), max(i1, 1)) for tag, i1, i2, _, _ in ops if tag != "equal"]
+  return [span_of(op) for op in ops if op[0] != "equal"]
+
+
+def span_of(op: list) -> tuple[int, int]:
+  """One opcode's place in the old text (1-based, inclusive): its old lines, or for an insertion the line it follows."""
+  _, i1, i2, _, _ = op
+  return (i1 + 1, i2) if i2 > i1 else (max(i1, 1), max(i1, 1))
 
 
 def added_lines(ops: list, new: list[str]) -> list[str]:
@@ -170,22 +177,14 @@ def carried_spans(units: dict, entries: list, maps: list) -> dict:
 
 
 def comment_text(store: core.Store, handoff: str, text: str, unit: str, respec: str) -> str:
-  """`respec_comment_<unit>_R<n>.md`: the diff hunks from the latest approved text to `text` in the unit's Design
-  range and every hunk changing a line its filed body quotes (Global constraints included), in diff order (every hunk
-  when neither holds one: the unit was touched by an uncovered range or an Interfaces line)."""
-  hs = core.handoff_store(store, handoff)
-  _, entries, texts, maps = history(store, handoff)
-  prev, new = texts[-1], text.splitlines()
-  units = ((load_json(hs.path("units")) or {}).get("units")) or {}
-  span = carried_spans(units, entries, maps).get(unit)
-  body = core.read_text(hs.path("unit", unit)) if hs.path("unit", unit).is_file() else ""
-  quoted, shared = {line.strip() for line in body.splitlines()}, section_lines(body, GLOBAL)
-  counts = lambda line: line and line in quoted and (line in shared or not skipped(line))
-  hunks = [op for op in opcodes(prev, new) if op[0] != "equal"]
-  own = [op for op in hunks if (span and overlaps(span, (op[1] + 1, max(op[2], op[1] + 1))))
-         or any(counts(line.strip()) for line in prev[op[1]:op[2]])]
+  """`respec_comment_<unit>_R<n>.md`: every diff hunk from the latest approved text to `text` that `hunk_units`, the
+  rule `touched` runs, selects the unit for (its Design range, a shared line its body or a prior respec's added lines
+  quote, an Interfaces line it produces or consumes, an uncovered line), in diff order."""
+  ctx = context(store, handoff, text)
+  prev, new = ctx["prev"], ctx["new"]
   lines = [f"**Spec correction {respec}** for {unit}: the frozen spec changed; build to the lines below.", ""]
-  for _, i1, i2, j1, j2 in own or hunks:
+  picked = [op for op in ctx["ops"] if op[0] != "equal" and unit in set().union(*hunk_units(ctx, op)[:2])]
+  for _, i1, i2, j1, j2 in picked:
     lines += ["```diff", f"@@ -{i1 + 1},{i2 - i1} +{j1 + 1},{j2 - j1} @@",
               *(f"-{line}" for line in prev[i1:i2]), *(f"+{line}" for line in new[j1:j2]), "```", ""]
   return "\n".join(lines)
@@ -197,13 +196,38 @@ def touched(store: core.Store, handoff: str, text: str) -> dict:
   test touches, the range it overlaps and the follow-up row naming it, or None), `line_map` (the opcodes from the
   latest approved text to `text`) and `merged_review` (a merged unit only the shared-text or uncovered-range test
   touches). The draft (`--dry-run`) and the approval run this one function."""
+  ctx = context(store, handoff, text)
+  units, merged, ops = ctx["units"], ctx["merged"], ctx["ops"]
+  hit, overlap, review = set(), {}, set()  # range or Interfaces (any unit); shared text or uncovered (merged: review)
+  selected = [(op, hunk_units(ctx, op)) for op in ops if op[0] != "equal"]
+  for op, (op_hit, op_review, _, _) in selected:
+    hit |= op_hit
+    review |= op_review
+  for which in (2, 3):  # a merged unit's overlap: its first range hunk, else its first Interfaces hunk
+    for op, picked in selected:
+      for u in picked[which]:
+        overlap.setdefault(u, span_of(op))
+  rows, held = {}, units_rows("\n".join(ctx["prev"]))  # a new row of the Units table, its Follows naming the merged unit
+  for rid, line in units_rows(text).items():
+    follows = FOLLOWS.search(line)
+    if rid not in held and follows:
+      rows.setdefault(follows.group(1), rid)
+  follow_ups = [{"unit": u, "overlaps": f"{ctx['rel']}:{overlap[u][0]}-{overlap[u][1]}", "row": rows.get(u)}
+                for u in sorted(hit & merged)]
+  return {"touched": sorted(hit), "untouched": sorted(set(units) - hit), "follow_ups": follow_ups,
+          "line_map": ops, "merged_review": sorted(review - hit)}
+
+
+def context(store: core.Store, handoff: str, text: str) -> dict:
+  """What `hunk_units` reads for the diff from the handoff's latest approved text to `text`: the units, their carried
+  Design ranges, quoted lines (prior applied respecs' added lines included), Global constraints and Interfaces lines,
+  the merged units and the spec's own Global constraints line numbers."""
   hs = core.handoff_store(store, handoff)
   spec, entries, texts, maps = history(store, handoff)
   root = core.git_toplevel(spec.parent)
   rel = spec.resolve().relative_to(root.resolve()).as_posix()
   prev, new = texts[-1], text.splitlines()
   ops = opcodes(prev, new)
-  ranges = changed_ranges(ops)
   units = ((load_json(hs.path("units")) or {}).get("units")) or {}
   state = ((load_json(hs.path("state")) or {}).get("units")) or {}
   merged = {u for u in units if is_merged(state.get(u) or {})}
@@ -218,55 +242,50 @@ def touched(store: core.Store, handoff: str, text: str) -> dict:
       for u in prior.get("touched") or []:
         if u in lines_of:
           lines_of[u] |= added
-  carried = carried_spans(units, entries, maps)
   spec_global = set()
-  old_text = "\n".join(prev)
-  for title, start, end in sections(old_text):
+  for title, start, end in sections("\n".join(prev)):
     if title.lstrip("#").strip() == GLOBAL:
       spec_global |= set(range(start, end + 1))
-  hit, overlap, review = set(), {}, set()  # range or Interfaces (any unit); shared text or uncovered (merged: review)
-  for u, span in carried.items():
-    for r in ranges:
-      if overlaps(span, r):
-        hit.add(u)
-        overlap.setdefault(u, r)
-  for tag, i1, i2, j1, j2 in ops:
-    if tag == "equal":
+  return {"rel": rel, "prev": prev, "new": new, "ops": ops, "units": units, "merged": merged, "lines_of": lines_of,
+          "global_of": global_of, "interfaces_of": interfaces_of, "spec_global": spec_global,
+          "carried": carried_spans(units, entries, maps)}
+
+
+def hunk_units(ctx: dict, op: list) -> tuple[set, set, set, set]:
+  """`(hit, review, ranged, interfaced)` for one changed hunk, the rule `touched` and `comment_text` share: a unit whose
+  carried Design range the hunk overlaps (`ranged`); a unit whose body quotes a line the hunk removes or changes, a
+  `## Global constraints` line always counting and any other line unless `skipped` (merged: `review`); the producer and
+  every consumer of a `- Produces:` line the hunk removes or inserts (`interfaced`); and, for each changed line no
+  Design range covers, no body quotes and `skipped` passes, every unmerged unit (merged: `review`)."""
+  _, i1, i2, j1, j2 = op
+  prev, new, units, merged = ctx["prev"], ctx["new"], ctx["units"], ctx["merged"]
+  carried = ctx["carried"].values()
+  hit, review, interfaced = set(), set(), set()
+  ranged = {u for u, span in ctx["carried"].items() if overlaps(span, span_of(op))}
+  covered = lambda n: any(span[0] <= n <= span[1] for span in carried)  # n is 1-based in the old text
+  quoted_old = set()
+  for n in range(i1, i2):
+    line = prev[n].strip()
+    if not line:
       continue
-    r = (i1 + 1, i2) if i2 > i1 else (max(i1, 1), max(i1, 1))
-    quoted = False
-    for n in range(i1, i2):
-      line = prev[n].strip()
-      if not line:
-        continue
-      for u in units:
-        counts = n + 1 in spec_global or line in global_of[u] or not skipped(line)
-        if not counts:
-          continue
-        if line in lines_of[u]:
-          quoted = True
-          (review if u in merged else hit).add(u)
-    for line in [prev[n].strip() for n in range(i1, i2)] + [new[n].strip() for n in range(j1, j2)]:
-      if line.startswith("- Produces:"):  # removed or inserted: its producer, and every unit whose Consumes names it
-        names = interface_names(line)
-        for v, held in interfaces_of.items():
-          if any(name and name in l for l in held for name in names):
-            hit.add(v)
-            overlap.setdefault(v, r)
-    covered = any(overlaps(span, r) for span in carried.values())
-    trivial = all(skipped(line) for line in prev[i1:i2] + new[j1:j2])
-    if not covered and not quoted and not trivial:
-      hit |= set(units) - merged
-      review |= merged
-  rows, held = {}, units_rows(old_text)  # a new row of the Units table, its Follows naming the merged unit
-  for rid, line in units_rows(text).items():
-    follows = FOLLOWS.search(line)
-    if rid not in held and follows:
-      rows.setdefault(follows.group(1), rid)
-  follow_ups = [{"unit": u, "overlaps": f"{rel}:{overlap[u][0]}-{overlap[u][1]}", "row": rows.get(u)}
-                for u in sorted(hit & merged)]
-  return {"touched": sorted(hit), "untouched": sorted(set(units) - hit), "follow_ups": follow_ups,
-          "line_map": ops, "merged_review": sorted(review - hit)}
+    for u in units:
+      if (n + 1 in ctx["spec_global"] or line in ctx["global_of"][u] or not skipped(line)) and line in ctx["lines_of"][u]:
+        quoted_old.add(n)
+        (review if u in merged else hit).add(u)
+  for line in [prev[n].strip() for n in range(i1, i2)] + [new[n].strip() for n in range(j1, j2)]:
+    if line.startswith("- Produces:"):  # removed or inserted: its producer, and every unit whose Consumes names it
+      names = interface_names(line)
+      interfaced |= {v for v, held in ctx["interfaces_of"].items() if any(name and name in l for l in held for name in names)}
+  uncovered = any(not skipped(prev[n]) and n not in quoted_old and not covered(n + 1) for n in range(i1, i2))
+  for k in range(j2 - j1):  # a new line stands at the old line it replaces (the last one past their count), an inserted one where it goes
+    n = i1 + min(k, i2 - i1 - 1) if i2 > i1 else None
+    at = n + 1 if n is not None else max(i1, 1)
+    if not skipped(new[j1 + k]) and (n is None or n not in quoted_old) and not covered(at):
+      uncovered = True
+  if uncovered:
+    hit |= set(units) - merged
+    review |= merged
+  return hit | ranged | interfaced, review, ranged, interfaced
 
 
 CLEARING = ("DONE", "DONE_WITH_CONCERNS")  # a builder status that clears a mark on an unchanged head
@@ -305,11 +324,9 @@ def cleared(store: core.Store, root: Path, unit: str, respec: str, record: dict)
       started = core.epoch(entry.get("started_at"))
     except (TypeError, ValueError):
       continue
-    # read inside the launch's worktree, as `own_commit` reads it (U31); the spec repository when it has none
+    # read inside the launch's worktree, as `own_commit` reads it (U31); the spec repository only when no worktree exists
     worktree = Path(entry["worktree"]) if entry.get("worktree") else None
-    when = commit_time(worktree, head) if worktree and worktree.is_dir() else None
-    if when is None:
-      when = commit_time(root, head)
+    when = commit_time(worktree, head) if worktree and worktree.is_dir() else commit_time(root, head)
     if when is not None and when > started:
       return True
   return any(e.get("status") == "exited 0" and e.get("head") == head and e.get("builder_status") in CLEARING
