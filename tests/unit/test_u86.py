@@ -96,8 +96,10 @@ def apply_r1(s, unit):
   put(s.path("file", f"respec_comment_{unit}_R1.md"), CORRECTION.format(unit=unit))
 
 
-@pytest.mark.parametrize("approved, in_prompt", [("before the prompt", True), ("after the prompt", False)])
-def test_prompt_record_and_amendments_agree(world, tmp_path, capsys, monkeypatch, spawn_fake, which, no_graphify, approved, in_prompt):
+@pytest.mark.parametrize("approved, in_prompt, pushed_after_start", [
+  ("before the prompt", True, True), ("before the prompt", True, False), ("after the prompt", False, True)])
+def test_prompt_record_and_amendments_agree(world, tmp_path, capsys, monkeypatch, spawn_fake, which, no_graphify, approved, in_prompt,
+                                            pushed_after_start):
   # the prompt, the launch record's respecs and r<n>/amendments.md name the same respecs; astra_brief pastes that file
   import superegm
   import test_builders as tb
@@ -117,9 +119,9 @@ def test_prompt_record_and_amendments_agree(world, tmp_path, capsys, monkeypatch
   assert code == 0, out
   record = tb.launches_of(s)[-1]
   prompt = s.path("launches", f"{tb.UNIT}_r1_prompt.md").read_text(encoding="utf-8")
-  # the builder pushes after its start: the saved PR head is a commit made after the launch's started_at
-  pushed_after_start = True
-  head = commit_at(world, monkeypatch, "pushed.txt", "2099-01-01T00:00:00Z")
+  # codebase-details-2-6: the saved PR head is a commit made after the launch's started_at (the builder pushed), or one
+  # made before it (nothing pushed, and the running launch has no exit evidence): only a push clears the mark
+  head = commit_at(world, monkeypatch, "pushed.txt", "2099-01-01T00:00:00Z" if pushed_after_start else "2000-01-01T00:00:00Z")
   state = json.loads(s.path("state").read_text(encoding="utf-8"))
   state["units"][tb.UNIT]["pr"] = {"number": tb.PR, "head": head}
   superegm.atomic_write(s.path("state"), state)
@@ -303,8 +305,10 @@ def test_held_unit_gets_no_merge_round(held):
   assert launch.conflict_again(view, foreman, [{"round": 1, "status": "exited 0"}], True) is (not held)
 
 
-def test_held_conflicting_unit_relaunches_with_its_fix_not_merge_alone(world, monkeypatch, spawn_fake):
-  # astra-1-5: a respec relaunch of a clean CONFLICTING head carries the merge with the fix, never merge-only orders
+@pytest.mark.parametrize("via_launch", [True, False])
+def test_held_conflicting_unit_relaunches_with_its_fix_not_merge_alone(world, monkeypatch, spawn_fake, via_launch):
+  # astra-1-5: a respec relaunch of a clean CONFLICTING head carries the merge with the fix, never merge-only orders;
+  # astra-2-4: it starts only from `launch`'s fresh mark (its slot), never straight from a word's `launch-builder`
   import test_u62 as u62
   s, card, hid, _ = u62.seed(world)
   u62.with_rounds(s, world, 3)
@@ -313,23 +317,39 @@ def test_held_conflicting_unit_relaunches_with_its_fix_not_merge_alone(world, mo
   u62.write_foreman(s, "U07", [{**u62.CLEAN, "head": head, "posted_at": "2099-01-01T00:00:00Z"}])
   u62.save_pr(s, "U07", 71, head, "CONFLICTING")
   apply_r1(s, "U07")
+  if via_launch:
+    code, out = world.run("launch", "--runcard", card)
+    assert code == 0 and "marked: U07" in out, out
+    u62.save_pr(s, "U07", 71, head, "CONFLICTING")  # the pass that marked it read the head still conflicting
+  else:  # the mark round 1 started from, older than that launch (stamps are to the second)
+    state = json.loads(s.path("state").read_text(encoding="utf-8"))
+    state["units"]["U07"]["launched"]["at"] = "2000-01-01T00:00:00Z"
+    u62.put(s.path("state"), json.dumps(state))
   code, out = world.run("launch-builder", "--unit", "U07", "--round", 2, "--runcard", card)
+  if not via_launch:
+    assert code == 1 and "launch-builder: U07 holds respec R1: its relaunch waits for `launch`'s slot" in out, out
+    assert len(u62.launches_of(s, "U07")) == 1
+    return
   assert code == 0, out
   entry = u62.launches_of(s, "U07")[-1]
   assert (entry.get("merge"), entry["reason"], entry["respecs"]) == ("with-fix", "respec", ["R1"])
 
 
-def test_a_mark_read_failure_starts_no_builder(world, monkeypatch, spawn_fake, which, no_graphify):
-  # change-review-1-6: the mark is read before the builder starts, so a failed read never leaves one unrecorded
+@pytest.mark.parametrize("error", ["ValueError", "HandoffError"])
+def test_a_mark_read_failure_starts_no_builder(world, monkeypatch, spawn_fake, which, no_graphify, error):
+  # change-review-1-6: the mark is read before the builder starts, so a failed read never leaves one unrecorded;
+  # codebase-details-2-2: any failed read refuses the launch (fail closed), with a named refusal line
   import test_builders as tb
   s, card, handoff, _ = tb.seed(world)
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
   world.run("launch", "--runcard", card)
   apply_r1(s, tb.UNIT)
+  import superegm
   from superegm import respec
-  monkeypatch.setattr(respec, "marks", lambda store, handoff: (_ for _ in ()).throw(ValueError("R1.json: bad JSON")))
-  with pytest.raises(ValueError):
-    world.run("launch-builder", "--unit", tb.UNIT, "--round", 1, "--runcard", card)
+  exc = ValueError("R1.json: bad JSON") if error == "ValueError" else superegm.HandoffError("approval names no spec")
+  monkeypatch.setattr(respec, "marks", lambda store, handoff: (_ for _ in ()).throw(exc))
+  code, out = world.run("launch-builder", "--unit", tb.UNIT, "--round", 1, "--runcard", card)
+  assert code == 1 and f"launch-builder: respec marks unreadable: {exc}" in out, out
   assert not spawn_fake and not s.path("launches", f"{tb.UNIT}.json").exists()
 
 
@@ -370,18 +390,103 @@ def test_wave_and_integrate_skill_text(path, phrases):
   assert all(p in text(path) for p in phrases)
 
 
-def test_integrate_refuses_on_its_wait_output_close_included():
-  # astra-1-4, change-review-1-2, change-review-1-3: item 4 reads Step 1's `status --wait`, `--close` included, and
-  # item 3's inbox line stays with item 3
+@pytest.mark.parametrize("close", [False, True])
+def test_integrate_refuses_on_its_wait_output_close_included(close):
+  # astra-1-4, change-review-1-2, change-review-1-3; change-review-2-2: the refusal reads Step 1's `status --wait` and
+  # comes before the unlanded list ends a plain run, so it fires with and without `--close`; the inbox line stays with
+  # the unlanded list; codebase-details-2-3: a failed respec read refuses too
   step1 = text("skills/integrate/SKILL.md").split("## Step 1", 1)[1].split("## Step 2", 1)[0]
   item3, item4 = step1.split("\n3. ", 1)[1].split("\n4. ", 1)
-  assert "`--close` included" in item4 and "item 2's `status --wait` output" in item4 and "go to item 4" in item3
-  assert "merges in the inbox" in item3 and "inbox" not in item4
+  assert "item 2's `status --wait` output" in item3 and "with or without `--close`" in item3 and "go to item 4" in item3
+  assert "integrate: respec R<n> is open" in item3 and "integrate: <U> holds respec R<n>" in item3
+  assert "`respec: read failed: <error>`" in item3 and "inbox" not in item3
+  ending = "Without `--close`, one listed unit ends the" if not close else "With `--close` (`--patch` or not), go to Step 3"
+  assert ending in " ".join(item4.split()) and "merges in the inbox" in item4
 
 
 def test_wave_reaches_step_5b():
   # astra-1-1, codebase-details-1-2, codebase-details-1-12: the loop does not end on a respec line, and step 5b names
-  # the lines it reads, the post command and where the comment id comes from
+  # the lines it reads, the post command and where the comment id comes from; change-review-2-1, codebase-details-2-1:
+  # the post is scanned and pinned to the host and repo, as plan Step 4 posts `decision_comment`
   wave = text("skills/wave/SKILL.md")
   assert "no 5b line in step 2 → The end" in wave and "no 5b line of a non-idle unit → The end" in wave
-  assert "`respec post R<n> <U> #<i> '<f>'` → `gh issue comment <i> --body-file '<f>'`" in wave and "--comment <the URL's id>" in wave
+  assert ("`respec post R<n> <U> #<i> '<f>'` → `superegm scan --comment '<f>'` (a finding: say so, post nothing), then "
+          "`GH_HOST=github.com gh issue comment <i> -R OWNER/NAME --body-file '<f>'`") in wave and "--comment <the URL's id>" in wave
+
+
+def test_wave_names_the_respec_lines_of_its_wait():
+  # change-review-2-3, codebase-details-2-4: the batch's `status --wait` line list names the respec lines, and which
+  # need no action; astra-2-4: a held unit's `revise` waits for step 6's `launch`
+  wave = " ".join(text("skills/wave/SKILL.md").split())
+  assert ("then respec lines (`open: respec`, `held: respec`, `respec: read failed`: none to do; `respec post`, "
+          "`respec relaunch`: 5b)") in wave
+  assert "a ruled `revise` spends no relaunch; a `held: respec` unit's: step 6." in wave
+  from superegm import status
+  doc = status.wait_events.__doc__
+  assert all(k in " ".join(doc.split()) for k in ("open: respec R<n>", "<U> held: respec R<n>", "respec post", "respec relaunch"))
+
+
+# ---------------------------------------------------------------- round 3: the review of head 86f0f15
+
+
+def test_corrections_and_mark_come_from_one_read(world, monkeypatch, spawn_fake, which, no_graphify):
+  # astra-2-1, codebase-details-2-5: a respec applied between the corrections read and the mark read never splits the
+  # launch (a standing mark whose correction the prompt lacks): the launch refuses and starts nothing
+  import test_builders as tb
+  from superegm import launch_builder
+  s, card, handoff, _ = tb.seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0
+  read = launch_builder.corrections_for
+  monkeypatch.setattr(launch_builder, "corrections_for", lambda st, unit: (read(st, unit), apply_r1(s, unit))[0])
+  code, out = world.run("launch-builder", "--unit", tb.UNIT, "--round", 1, "--runcard", card)
+  assert code == 1 and f"launch-builder: {tb.UNIT}: respec R1 was applied while the launch was prepared" in out, out
+  assert not spawn_fake and not s.path("launches", f"{tb.UNIT}.json").exists()
+
+
+@pytest.mark.parametrize("decision, marked", [(True, "marked: none"), (False, "marked: U08")])
+def test_ready_again_waits_for_a_pending_decision(world, monkeypatch, decision, marked):
+  # astra-2-2: a clean round an ingest rewrote `revise` is ready again only with no owner decision pending
+  import test_builders as tb
+  s, card, handoff, _ = tb.seed(world, units=("U07", "U08"))
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert "marked: U07, U08" in world.run("launch", "--runcard", card)[1]
+  tb.launched(s, "U07", "running")
+  tb.launched(s, "U08", "exited 0")
+  rewritten = {"round": 1, "runcard": card, "launch": 1, "head": None, "phase": "posted", "dispatch_id": "d1",
+               "outcome": "revise", "rewritten_from": "clean", "posted_at": "2026-11-03T01:00:00Z"}
+  decisions = [{"id": "U08-d1", "point": 2, "question": "cap", "options": ["one more round", "stop"]}] if decision else []
+  tb.put(s.path("foreman", "U08"), json.dumps({"dispatch_id": "d1", "rounds": [rewritten], "rulings": [], "decisions": decisions}))
+  code, out = world.run("launch", "--runcard", card)
+  assert code == 0 and marked in out, out
+
+
+@pytest.mark.parametrize("respec_open, marked", [(True, "marked: U08"), (False, "marked: none")])
+def test_a_unit_waiting_on_a_respec_holds_no_slot(world, monkeypatch, respec_open, marked):
+  # astra-2-3: the raising unit of an open respec, no launch of it running, holds no slot while the owner corrects
+  import test_builders as tb
+  from test_u85 import open_respec
+  s, card, handoff, _ = tb.seed(world, units=("U07", "U08"), max_in_flight=1)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert "marked: U07" in world.run("launch", "--runcard", card)[1]
+  tb.launched(s, "U07", "exited 0")  # BLOCKED on a spec deviation, the owner ruled `respec`: no decision pending
+  if respec_open:
+    open_respec(s, "R1", "U07")
+  code, out = world.run("launch", "--runcard", card)
+  assert code == 0 and marked in out, out
+  assert ("in flight: none" in out) is respec_open, out
+
+
+def test_a_failed_respec_read_holds_and_is_reported(world, monkeypatch):
+  # codebase-details-2-3: status prints a failed read (integrate refuses on it); inbox treats the unit as held
+  import superegm
+  import test_builders as tb
+  from superegm import inbox, respec
+  s, card, handoff, _ = tb.seed(world, units=("U07", "U08"))
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  world.run("launch", "--runcard", card)
+  monkeypatch.setattr(respec, "marks", lambda store, handoff: (_ for _ in ()).throw(superegm.HandoffError("approval names no spec")))
+  for args in (("--wait", 1), ()):
+    code, out = world.run("status", *args, "--runcard", card)
+    assert code == 0 and "respec: read failed: approval names no spec" in out.splitlines(), out
+  assert inbox.respec_held(s, "U08") is True
