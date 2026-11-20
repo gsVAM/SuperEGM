@@ -847,3 +847,124 @@ def test_respec_approval_refuses_a_stale_branch(world):
   code, out = world.run("approve-spec", "--spec", spec, "--respec", "R1", "--yes")
   assert code == 1 and "approve-spec: fold" in out and "is not in this branch" in out
   assert snapshot(world.artifacts) == store_before
+
+
+# Round 4: the owner's rulings on the round-3 review (issue #169).
+
+
+R1_RETRY = replace(BASE, "- Max retries: 3", "- Max retries: 4")
+
+
+@pytest.mark.parametrize("unit, draft, wanted", [
+  ("U2", replace(replace(R1_RETRY, "- Max retries: 4", "- Max retries: 5"), "Delay is 5s.", "Delay is 6s."),
+   ["+- Max retries: 5", "+Delay is 6s."]),
+  ("U3", replace(replace(R1_RETRY, "Admin lists jobs.", "Admin lists every job."), "- Produces: `retry(job)` returning the delay",
+                 "- Produces: `retry(job)` returning the delay in ms"),
+   ["+Admin lists every job.", "+- Produces: `retry(job)` returning the delay in ms"])])
+def test_comment_selects_hunks_as_touched_does(world, unit, draft, wanted):
+  # astra-3-1, codebase-details-3-2: a prior respec's added line and an Interfaces line count in the comment as in touched
+  from superegm import respec
+  state_units = {"U0": MERGED_U1["U0"], "U1": {"number": 11}, "U2": {"number": 12}, "U3": {"number": 13}}
+  spec, st = respec_world(world, [(BASE, None), (R1_RETRY, "R1")], {"R1": ["U2"]}, state_units=state_units)
+  assert unit in respec.touched(st, HID, "".join(draft))["touched"]
+  text = respec.comment_text(st, HID, "".join(draft), unit, "R2")
+  assert all(w in text for w in wanted), text
+
+
+def test_comment_holds_an_insertion_after_the_range(world):
+  # codebase-details-3-1: a line inserted right after U2's range's last line is U2's own hunk, as touched places it
+  from superegm import respec
+  spec, st = respec_world(world, [(BASE, None)], state_units={"U0": MERGED_U1["U0"], "U1": {"number": 11}, "U2": {"number": 12}, "U3": {}})
+  draft = replace(BASE, "Deliver sends jobs.", "Deliver sends signed jobs.")
+  at = draft.index("## 3. Admin\n")
+  draft[at:at] = ["Retries back off.\n"]
+  assert respec.touched(st, HID, "".join(draft))["touched"] == ["U2"]
+  text = respec.comment_text(st, HID, "".join(draft), "U2", "R1")
+  assert "+Deliver sends signed jobs." in text and "+Retries back off." in text, text
+
+
+def test_history_carries_ranges_through_a_voided_approval(world):
+  # astra-3-2: an after-void approval inserting ten lines moves a filed unit's range; the voided entry's map carries it
+  from superegm import respec
+  after = replace(BASE, "Preamble goal line.", [f"Goal {n}." for n in range(10)])
+  spec, st = respec_world(world, [(BASE, None), (after, None)])
+  path = st.path("approvals", core.spec_slug(spec))
+  record = json.loads(path.read_text(encoding="utf-8"))
+  record["entries"][0]["voided_by"] = "spec-x-c1"
+  record["entries"][1]["kind"] = "after-void"
+  core.atomic_write(path, record)
+  assert respec.touched(st, HID, "".join(replace(after, "Delay is 5s.", "Delay is 6s.")))["touched"] == ["U2"]
+
+
+@pytest.mark.parametrize("change, touched, merged_review", [
+  ("an unquoted goal and the adjacent U0 heading", ["U0", "U1", "U2", "U3"], []),
+  ("a quoted line beside an unquoted uncovered line", ["U1", "U2", "U3"], ["U0"])])
+def test_uncovered_rule_reads_each_changed_line(world, change, touched, merged_review):
+  # astra-3-3: one block's covered or quoted line masks no uncovered, unquoted line beside it
+  from superegm import respec
+  spec, st = respec_world(world, [(BASE, None)])
+  at = BASE.index("- Shared rule here\n")
+  if change.startswith("an unquoted goal"):
+    draft = BASE[:at] + ["- Shared rule, revised\n", "Joined.\n", "## 0. Older\n"] + BASE[at + 3:]
+  else:
+    draft = BASE[:at - 1] + ["- No new deps at all\n", "- Shared rule, revised\n"] + BASE[at + 1:]
+  result = respec.touched(st, HID, "".join(draft))
+  assert (result["touched"], result["merged_review"]) == (touched, merged_review)
+
+
+def test_marks_never_fall_back_from_an_existing_worktree(world, monkeypatch):
+  # codebase-details-3-3: a launch worktree that lacks the head reads as not cleared; no spec repository fallback
+  from superegm import respec
+  head = commit_at(world, monkeypatch, "fix.txt", "2026-11-14T00:00:00Z")  # after the launch started, in the spec repo
+  worktree = world.repo.parent / "launch-wt"
+  worktree.mkdir()
+  git(["init", "-q"], worktree)
+  state_units = {"U0": MERGED_U1["U0"], "U1": {"number": 11}, "U3": {}, "U2": {"number": 12, "pr": {"number": 22, "head": head}}}
+  spec, st = respec_world(world, [(BASE, None), (R1_TEXT, "R1")], {"R1": ["U2"]}, state_units=state_units)
+  core.atomic_write(st.path("file", "respec_comment_U2_R1.md"), "**Spec correction R1** for U2\n")
+  entry = launch("exited 1")
+  core.atomic_write(st.path("launches", "U2"), {"unit": "U2", "launches": [entry]})
+  assert "U2" not in respec.marks(st, HID)  # no worktree: the spec repository holds the head
+  core.atomic_write(st.path("launches", "U2"), {"unit": "U2", "launches": [entry | {"worktree": str(worktree)}]})
+  assert respec.marks(st, HID).get("U2") == "respec: R1"
+
+
+@pytest.mark.parametrize("asked", [None, "R2"])
+def test_a_withdrawn_respec_closes_its_cycle(world, asked):
+  # change-review-3-1: R1's unit stopped mid-cycle withdraws R1; its cycle is closed and the next one opens
+  spec, st = respec_world(world, [(BASE, None)])
+  open_respec(st, "R1", "U2")
+  open_respec(st, "R2", "U3")
+  approved(world, spec, R1_TEXT, "draft")
+  world.spec = spec
+  cid = world.card("review-spec")
+  hand_cycle(st, spec, cid, "spec-x-c2", "R1")
+  core.atomic_write(st.path("foreman", "U2"), {"dispatch_id": None, "rounds": [], "decisions": [], "rulings": [],
+                                               "stopped": {"by": "owner", "reason": "x", "at": STARTED}})
+  code, out = world.run("review", "open", "--kind", "spec", "--artifact", spec, "--reviewers", "design,codebase-details",
+                        *(["--respec", asked] if asked else []), "--runcard", cid)
+  assert code == 0 and out.splitlines()[0] == "spec-x-c3", out
+
+
+def test_respec_scope_refuses_another_file():
+  # astra-3-4: a respec cycle's remit is the spec's correction: another file is out of scope whatever its line
+  from superegm.review import out_of_scope, sections
+  text = "".join(BASE)
+  rows = [("changed", SPEC_REL, 20, 30)]
+  assert out_of_scope(rows, sections(text), "docs/reference.md:23", SPEC_REL, "/abs/repo", respec=True) == "none"
+  assert out_of_scope(rows, sections(text), f"{SPEC_REL}:23", SPEC_REL, "/abs/repo", respec=True) is None
+  assert out_of_scope(rows, sections(text), "x.md:23", SPEC_REL, "/abs/repo", respec=True) is None
+
+
+def test_refusals_named_without_a_count():
+  # codebase-details-3-4, 3-5: every refusal named where it is documented, no count to go stale
+  from superegm import approve_spec, review
+  step = (REPO / "skills/review-spec/SKILL.md").read_text(encoding="utf-8")
+  step = step[step.index("4. **Approve.**"):step.index("## Data notice")]
+  header = (REPO / "skills/plan/scripts/superegm/approve_spec.py").read_text(encoding="utf-8")
+  for text in (step, approve_spec.respec_checks.__doc__, approve_spec.approve_respec.__doc__, header):
+    assert "four refusals" not in text
+  for needle in ("no approval to correct", "not the latest approval", "is not in this branch", "not open", "not converged",
+                 "add a follow-up row", "void and re-approve"):
+    assert needle in step and needle in approve_spec.respec_checks.__doc__, needle
+  assert "voided latest approval" in review.respec_base.__doc__
