@@ -376,8 +376,13 @@ ROOT = Path(__file__).resolve().parents[2]
       "`Ruling (judges <panel>, contest): <unit> <fid> <disposition>`"), ("`Ruling (judges <panel>, leavemealone): …`",)),
     ("skills/judges/references/astra_judge.md",
      ("the judge lane; the lane's model and effort read from the panel's `astra` member (U28); inline evidence (U88)",
-      "`comments.md`, the diff, the unit's body, `r<n>/spec_range.md` and `r<n>/amendments.md` from the store"),
-     ("reads no paths",)),
+      "embeds the contents of every evidence file in the panel's `evidence[]`, for every question form",
+      "whatever the question's form, and sits outside the repository folder: that content goes to OpenAI too"),
+     ("reads no paths", "On a head contest the brief")),
+    ("skills/wave/references/decision_points.md",
+     ("only `finding overruled` settles through `review settle --judges <panel>`",
+      "`finding upheld` and `redesign` go through `decision rule --by judges:<panel>`"),
+     ("a converged ruling settles through\n`review settle --judges <panel>`",)),
     ("skills/wave/references/builder_orders.md", ("`(judges <panel>, contest)` is the same ruling in normal mode",), ()),
     ("skills/plan/scripts/superegm/decision.py", ("judges' post (the `(judges <panel>, leavemealone | contest)` marker on any line",), ("judges' post (the `(judges <panel>, leavemealone)` marker",))])
 def test_review_round_one_texts(path, present, absent):
