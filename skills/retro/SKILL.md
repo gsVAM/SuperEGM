@@ -25,13 +25,15 @@ repository, absolute paths in single quotes, nothing chained.
 
 The store is `artifacts_dir` in `.superegm/config.json`; the handoff's directory, `<handoff dir>` below, is
 `<artifacts_dir>/<handoff id>/`, and `handoffs/<id>.json` and `approvals/<spec-slug>.json` sit directly in `<artifacts_dir>`.
+A legacy flat-store handoff keeps its own files (`postmortem.md`, `journal.md`, `retro.md`) at the root of `<artifacts_dir>`, not
+under `<id>/`: for it `<handoff dir>` is `<artifacts_dir>` itself, as the helper resolves it.
 
 ## Step 1: read the Lessons
 
 1. Read `<handoff dir>/postmortem.md`; when it is missing, `superegm postmortem --handoff <id>` writes it first
    (`postmortem.md` is the helper's write, not this skill's).
-2. Its Lessons table is the agenda: one fact row per respec, `fix-design` finding, interface amendment, silent or most
-   overruled reviewer, escalated or capped unit and decision answered by default, each naming its source record. The
+2. Its Lessons table is the agenda: one fact row per respec, `fix-design` finding, interface amendment, a reviewer kept
+   nothing or most overruled, escalated or capped unit and decision answered by default, each naming its source record. The
    rows are facts and propose nothing; the proposals are this skill's, and the owner's to accept.
 
 ## Step 2: the Q&A

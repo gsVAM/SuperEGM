@@ -221,7 +221,9 @@ def reviews_of(st: core.Store, hs: core.Store, spec) -> list:
 
 
 def reviewer_stats(st: core.Store, hs: core.Store, spec) -> dict:
-  """Per `(reviewer, kind)`, the counts the Reviewers table shows; the Lessons table reads the same numbers."""
+  """Per `(reviewer, kind)`, the counts the Reviewers table shows; the Lessons table reads the same numbers. `overrules` is
+  `overruled` plus `allowed`: an allowance is recorded as an overrule (spec 13.2, `decision.py`), and that one sum is what the table,
+  the Lessons rows and the integrate summary name a reviewer's overruled findings by."""
   stats, found, latest = {}, [], {}
   for rid, cycle in sorted(reviews_of(st, hs, spec), key=lambda r: cycle_order(r[0])):
     if not cycle:
@@ -234,7 +236,7 @@ def reviewer_stats(st: core.Store, hs: core.Store, spec) -> dict:
         if entry.get("not_run"):  # a reviewer that did not run raised nothing and kept no quiet round
           continue
         row = stats.setdefault((name, kind), {**dict.fromkeys(SEVERITIES, 0), "fixed": 0, "overruled": 0,
-                                              "allowed": 0, "deferred": 0, "regressions": 0, "quiet": 0})
+                                              "allowed": 0, "overrules": 0, "deferred": 0, "regressions": 0, "quiet": 0})
         findings = entry.get("findings") or []
         row["quiet"] += 0 if findings else 1
         for finding in findings:
@@ -247,13 +249,15 @@ def reviewer_stats(st: core.Store, hs: core.Store, spec) -> dict:
     row["allowed"] += fid in allowed
     row["overruled"] += fid not in allowed and (fid in overruled or disposition in ("contested", "declined"))
     row["regressions"] += finding.get("regression") == "yes"
+  for row in stats.values():
+    row["overrules"] = row["overruled"] + row["allowed"]
   return stats
 
 
 def reviewers_table(st: core.Store, hs: core.Store, uids: list, spec) -> str:
-  rows = [[name, kind, *(s[k] for k in (*SEVERITIES, "fixed", "overruled", "allowed", "deferred", "regressions", "quiet"))]
+  rows = [[name, kind, *(s[k] for k in (*SEVERITIES, "fixed", "overruled", "allowed", "overrules", "deferred", "regressions", "quiet"))]
           for (name, kind), s in sorted(reviewer_stats(st, hs, spec).items())]
-  return render(["reviewer", "kind", "high", "medium", "low", "fixed", "overruled", "allowed", "deferred", "regressions",
+  return render(["reviewer", "kind", "high", "medium", "low", "fixed", "overruled", "allowed", "overrules", "deferred", "regressions",
                  "quiet rounds"], rows)
 
 
@@ -360,11 +364,13 @@ def plan_table(hs: core.Store, uids: list, units: dict, state: dict) -> str:
 
 
 DEVIATION_RE = re.compile(r"\*\*Deviation \(spec\):\*\*(.*)")
+COMMENT_LABEL_RE = re.compile(r"\*\*(?:Builder status|Ruling|Deviation|Blocked|Status|Reply)\b")  # a comment's own labels; other bold text is evidence
 
 
 def deviation_evidence(st: core.Store, comment_id) -> str:
   """The lines under `**Deviation (spec):**` in the comment `gh api repos/<repo>/issues/comments/<id>` returns, up to the
-  next bold line; `evidence unread (comment <id>)` when the read fails or the comment holds none."""
+  next comment label (`COMMENT_LABEL_RE`; bold text inside the evidence does not end it, as in `decision.check_respec`) and
+  less its option lines (`- (a) ...`); `evidence unread (comment <id>)` when the read fails or the comment holds none."""
   try:
     text = str((core.gh_json(["api", f"repos/{st.config['repo']}/issues/comments/{comment_id}"]) or {}).get("body") or "")
   except (core.GhError, ValueError, OSError):  # OSError: no `gh` binary
@@ -373,9 +379,9 @@ def deviation_evidence(st: core.Store, comment_id) -> str:
   for line in text.splitlines():
     if m := DEVIATION_RE.search(line):
       taking, line = True, m.group(1)
-    elif taking and line.startswith("**"):
+    elif taking and COMMENT_LABEL_RE.match(line):
       break
-    if taking and line.strip():
+    if taking and line.strip() and not line.startswith("- ("):
       lines.append(line.strip())
   return " ".join(lines) if lines else f"evidence unread (comment {comment_id})"
 
@@ -443,13 +449,13 @@ def fix_design_rows(st: core.Store, hs: core.Store, spec) -> list:
 
 def reviewer_rows(st: core.Store, hs: core.Store, spec) -> list:
   """The reviewers with no finding kept (none raised, or every one overruled or allowed), whatever the others raised, and
-  those overruled most; an allowance is recorded as an overrule (spec 13.2, `decision.py`), so it counts as one here though the
-  Reviewers table keeps its own column; with no finding overruled anywhere (`most` 0) no reviewer is most overruled."""
+  those overruled most, by the Reviewers table's `overrules` column (an allowance counts, spec 13.2); with no finding overruled
+  anywhere (`most` 0) no reviewer is most overruled."""
   total = {}
   for (name, _), s in reviewer_stats(st, hs, spec).items():
     t = total.setdefault(name, {"raised": 0, "overruled": 0})
     t["raised"] += sum(s[k] for k in SEVERITIES)
-    t["overruled"] += s["overruled"] + s["allowed"]
+    t["overruled"] += s["overrules"]
   most = max((t["overruled"] for t in total.values()), default=0)
   rows = []
   for name, t in sorted(total.items()):
