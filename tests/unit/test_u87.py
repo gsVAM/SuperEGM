@@ -98,3 +98,10 @@ def test_retro_skill_text(phrase):
 def test_integrate_offers_retro_and_phase_list(path, phrase):
   # integrate offers the retrospective once after the post-mortem; the phase list ends with it
   assert phrase in text(path)
+
+
+def test_retro_folder_complete():
+  # every section-14 skill folder carries SKILL.md, assets/icon.svg and test_scenarios.yaml
+  import yaml
+  assert all((ROOT / "skills/retro" / n).is_file() for n in ("SKILL.md", "assets/icon.svg", "test_scenarios.yaml"))
+  assert yaml.safe_load((ROOT / "skills/retro/test_scenarios.yaml").read_text())["skill"] == "retro"
