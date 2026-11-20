@@ -182,7 +182,8 @@ def test_graph_maps_unfiled_ranges_through_line_map(world):
   ("decide", [], True),
 ])
 def test_corrected_line_clears_the_mark(world, render, corrected, marked):
-  # U07 carries replan: R1; once cleared, gate still reads "gate: U07 plan review not converged" until a review-plan cycle converges on its new sha
+  # U07 carries replan: R1; once cleared, gate reads "gate: U07 body differs from its converged round" (its review
+  # converged on the body before the rewrite) until a review-plan cycle converges on its new sha
   from superegm import respec as rs
   s_world(world)
   converge_all(world)
@@ -205,7 +206,8 @@ def test_corrected_line_clears_the_mark(world, render, corrected, marked):
   if marked:
     assert "gate: U07 needs a re-plan after respec R1" in out
     return
-  assert "gate: U07 " in out and "needs a re-plan" not in out  # cleared, yet its new body is unreviewed
+  assert "gate: U07 body differs from its converged round" in out  # cleared, yet its new body is unreviewed
+  assert "needs a re-plan" not in out
   converge_all(world)  # a review-plan cycle converged on every current body
   code, out = world.run("gate", "--pass", "--spec", world.spec)
   assert code == 0, out
@@ -333,14 +335,18 @@ def test_scan_measures_the_carried_range(world):
 
 
 def test_next_gate_and_graph_rebase_the_spec_after_the_approving_worktree_is_gone(world, tmp_path):
-  # R1 applied and touching U07; the handoff's spec recorded in a worktree since removed: `next`, `gate` and `graph`
-  # read it under the repository root, never running git in the missing directory
+  # R1 applied and touching U07; the handoff's spec and the plan's Design line recorded in a worktree since removed:
+  # `next`, `gate` and `graph` read it under the repository root, never running git in the missing directory
   s_world(world)
   converge_all(world)
   respec(world, inserted(spec_lines(), 120, 6), ["U07"])
   path = world.artifacts / "handoffs" / f"{HID}.json"
   gone = tmp_path / "removed-worktree" / SPEC_REL
   core.atomic_write(path, json.loads(path.read_text(encoding="utf-8")) | {"spec": str(gone)})
+  for plan in (Path(world.plan), handoff_store(world).path("plan")):
+    text = plan.read_text(encoding="utf-8")
+    assert f"Design: `{world.repo / SPEC_REL}`" in text
+    plan.write_text(text.replace(f"Design: `{world.repo / SPEC_REL}`", f"Design: `{gone}`"), encoding="utf-8")
   ticked(world)
   code, out = world.run("next", "--handoff", HID)
   assert (code, out.strip()) == (0, "plan")
