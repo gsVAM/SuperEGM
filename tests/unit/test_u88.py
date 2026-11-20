@@ -365,6 +365,48 @@ def test_the_wave_report_names_each_judges_ruling_with_its_panel(world):
   assert section.strip() == "- U01 q1 (judges p-7): change-review-1-1 finding overruled — the panel"
 
 
+def contested_items(world, question, n=1, findings=("high",), contested=(1,)):
+  """The inbox's `contested` items of one head review at round `n`, its point-1 decision asking `question`."""
+  from test_inbox import D, HEAD, POSTED, U, F as found, open_wave_card, seed as inbox_seed
+  from superegm.inbox import inbox_items
+  open_wave_card(world)
+  s = inbox_seed(world, **U(decisions=D(1, f"review head-U01-c1 round {n}", question=question), rounds=POSTED(n),
+                            reviews=HEAD(n, found(*findings), builder_contested=[{"fid": f"foreman-1-{i}", "reason": "r"} for i in contested])))
+  return [i["fingerprint"] for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "contested"]
+
+
+def test_a_blocking_contest_reaches_the_inbox_only_with_the_panels_verdict_line(world):
+  """Round 4 (astra-3-1): the decision opens before the panel runs, so a high or medium head contest lists no owner form until the
+  panel's unconverged verdict line is in the decision; a low contest, which no panel takes, lists at once."""
+  assert contested_items(world, "foreman-1-1 | high | src/x.py:3 | regression: no | c") == []
+  assert contested_items(world, "foreman-1-1 | medium | src/x.py:3 | regression: no | c", findings=("medium",)) == []
+  assert contested_items(world, "foreman-1-1 | low | src/x.py:3 | regression: no | c", findings=("low",)) == ["U01/contested/q1/foreman-1-1"]
+  assert contested_items(world, "foreman-1-1 | high | src/x.py:3 | regression: no | c\n" + VERDICT_LINE) == ["U01/contested/q1/foreman-1-1"]
+
+
+def test_a_contest_on_the_capped_round_reaches_the_inbox_when_its_panel_stays_split(world):
+  """Round 4 (astra-3-2): a head review at its round cap routes a contest to point 1; once the split panel's verdict line is in the
+  decision the contest is listed, not skipped by the cap."""
+  assert contested_items(world, "foreman-1-1 | high | src/x.py:3 | regression: no | c\n" + VERDICT_LINE, n=5) == ["U01/contested/q1/foreman-1-1"]
+  assert contested_items(world, "foreman-1-1 | high | src/x.py:3 | regression: no | c", n=5) == []
+
+
+def test_the_wave_report_lists_a_judges_settlement_the_review_recorded(world):
+  """Round 4 (astra-3-3): `review settle --judges` marks the finding `ruling: judges:<panel>` and adds no foreman ruling, so the
+  report reads it from the head review's rounds; a finding the decision rule also ruled is listed once, an owner's settlement not."""
+  from test_inbox import HEAD, ROUND, POSTED, U, F as found, open_wave_card, seed as inbox_seed
+  card = open_wave_card(world)
+  findings = found("high", "high", "high")
+  for finding, (disposition, by) in zip(findings, (("declined", "judges:p-3"), ("declined", "owner"), ("contested", "judges:p-4"))):
+    finding.update(disposition=disposition, ruling=by)
+  rulings = [{"decision": "q1", "ruling": "foreman-1-3 finding overruled — the panel", "fid": "foreman-1-3", "by": "judges:p-4"}]
+  s = inbox_seed(world, **U(launches=[{"round": 1, "status": "exited 0"}], rulings=rulings, rounds=POSTED(),
+                            reviews=HEAD(1, findings)))
+  assert world.run("report", "--runcard", card)[0] == 0
+  section = s.path("wave_report", 1).read_text(encoding="utf-8").split("## Judges' rulings\n")[1].split("\n##")[0]
+  assert section.strip().splitlines() == ["- U01 foreman-1-1 (judges p-3): declined", "- U01 q1 (judges p-4): foreman-1-3 finding overruled — the panel"]
+
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
