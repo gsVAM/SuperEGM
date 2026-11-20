@@ -99,13 +99,17 @@ drafting.
     Keep every section already there; a filed unit's section (one with an
     issue number in `state.json`) is frozen and stays byte-identical.
     Set `Tier:` on every section not yet filed (a filed one stays as it is, doable without the row) by section 2's criteria (`difficult`, `doable` or `easy`): it picks the builder's model and effort, and a wrong tier costs rounds.
-    A unit `superegm respec` marks `replan: R<n>` (an unfiled unit a respec touched; `gate` refuses it
+    A unit marked `replan: R<n>` (an unfiled unit a respec touched; `gate` refuses it
     `gate: <U> needs a re-plan after respec R<n>` and `next` prints `plan`) gets its section rewritten from
     the corrected spec, its Design range in the new approval's lines, with a `Corrected: R<n>` field row
     (`| Corrected | R<n> |`, comma-separated when several respecs touched it); `graph` alone records the row
     and clears the mark (a `decide` render does not), and the rewritten body goes back through
-    `/superegm:review-plan`. An untouched unfiled unit is not rewritten: `graph` carries its Design range to
-    the new approval's lines.
+    `/superegm:review-plan`. The mark is written nowhere: the helper derives it on every read. The marked
+    units are those listed in `touched` of an applied respec's `respec/R<n>.json` (in the handoff's
+    directory, under the store's `file` kind) that have no `respec_comment_<U>_R<n>.md` beside it (they
+    were unfiled at R<n>'s approval) and whose `handoff_units.json` `corrected` does not name R<n>.
+    Read those files to find the sections to rewrite. An untouched unfiled unit is not rewritten: `graph`
+    carries its Design range to the new approval's lines.
 2.  Nothing is committed under the repository's docs: the plan file stays
     outside the tree, and the store keeps its copy.
 

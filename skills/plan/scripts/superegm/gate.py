@@ -37,18 +37,16 @@ def require_latest(handoff, name: str) -> None:
 
 
 def handoff_marks(store: core.Store, root: Path | None = None) -> dict:
-  """U85's `respec.marks` of the store's handoff, read once per call by `run`, `apply` and `next` (U90); none, and
-  no git run, while the handoff has no applied respec: its entries are read by the spec's file name alone, the
-  recorded path rebased onto `root` (a spec approved in a worktree since removed)."""
+  """U85's `respec.marks` of the store's handoff, read once per call by `run`, `require_gate` (so `dry-run` and a
+  resumed `apply`) and `next` (U90); none, and no git run, while the handoff has no applied respec (its entries are
+  read by the spec's file name alone). The recorded spec is rebased onto `root` inside `respec.marks`, so a spec
+  approved in a worktree since removed is read under the repository root before git runs."""
   hid = store.handoff_id
   if not hid:
     return {}
-  spec = respec.spec_of(store, hid)
-  if root is not None:
-    spec = core.rebased(spec, root)
-  if not any(e.get("kind") == "respec" for e in respec.entries_of(store, hid, spec)):
+  if not any(e.get("kind") == "respec" for e in respec.entries_of(store, hid, respec.spec_of(store, hid))):
     return {}
-  return respec.marks(store, hid)
+  return respec.marks(store, hid, root)
 
 
 def require_replanned(uid: str, marks: dict) -> None:

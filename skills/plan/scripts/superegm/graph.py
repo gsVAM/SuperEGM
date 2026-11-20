@@ -242,8 +242,9 @@ class Handoff(core.Handoff):
     self.handoff_id, self.spec_sha = approval["handoff_id"], approval["sha256"]
     self.design_commit = approval.get("commit") or ""
     # U90: each unit's `rendered_under`, how many of the handoff's entries existed when its section's text was
-    # written (a unit new to `handoff_units.json` now; a record without the key the opening, 1), kept until a
-    # `Corrected:` row records a new respec; its Design range is carried from there through each later line map.
+    # written (a unit new to `handoff_units.json` now; a record without the key, from a graph before U90, the last
+    # entry whose sha256 is the record's `design.sha256`, else 1), kept until a `Corrected:` row records a new
+    # respec; its Design range is carried from there through each later line map.
     self.entries = respec.entries_of(store, self.handoff_id, self.design_path) or [approval]
     applied = {e["respec"] for e in self.entries if e.get("kind") == "respec" and e.get("respec")}
     for uid, unit in self.plan.units.items():
@@ -253,7 +254,9 @@ class Handoff(core.Handoff):
                                 f"no applied respec of handoff {self.handoff_id}")
     prior = json.loads(core.read_text(store.path("units"))) if store.path("units").is_file() else {}
     self.prior_units = (prior.get("units") or {}) if prior.get("handoff_id") == self.handoff_id else {}
-    self.rendered_under = {uid: (self.prior_units[uid].get("rendered_under") or 1) if uid in self.prior_units
+    graphed = ((prior.get("design") or {}).get("sha256")) if self.prior_units else None
+    legacy = max((i + 1 for i, e in enumerate(self.entries) if graphed and e.get("sha256") == graphed), default=1)
+    self.rendered_under = {uid: (self.prior_units[uid].get("rendered_under") or legacy) if uid in self.prior_units
                            else len(self.entries) for uid in self.plan.units}
     self._spans = None
     spec_text = core.read_text(self.design_path)
@@ -314,7 +317,7 @@ class Handoff(core.Handoff):
                      "rendered_under": self.rendered_under[u]}
                  for u, unit in self.plan.units.items() if self.filed(u) is None}
       if any(r["rendered_under"] < len(self.entries) for r in records.values()):
-        _, entries, _, maps = respec.history(self.store, self.handoff_id)
+        _, entries, _, maps = respec.history(self.store, self.handoff_id, self.repo_root)
         self._spans = respec.carried_spans(records, entries, maps)
       else:  # every section written under the latest approval: nothing to carry
         self._spans = {u: (r["design_range"]["start"], r["design_range"]["end"]) for u, r in records.items()}

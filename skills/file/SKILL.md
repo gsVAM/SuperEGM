@@ -155,23 +155,24 @@ filing has no `filings[]` entry and is not started: go to Step 3.
 ## Step 3: The gate
 
 Run `python3 '<HELPER>' gate --pass --spec '<SpecPath>' --runcard '<CARD>'`.
-It passes when every unfiled unit's plan review converged on the body the
-store holds now (`handoff_units.json`'s `body_sha256`), records the pair of
+It passes when every unfiled unit's plan review converged on its body as
+`graph` renders it now from the plan and the latest approval, records the pair of
 hashes the rest of the filing is checked against, and prints
 `gate passed: <k> unfiled units converged`. Its refusals:
 
 *   `gate: <U> needs a re-plan after respec R<n>`: a respec touched the
     unfiled unit (its `replan: R<n>` mark), whatever its review converged on;
-    a resumed `apply` refuses the same. Relay the line: the owner returns to
+    the dry run (Step 4) and a resumed `apply` refuse the same. Relay the line: the owner returns to
     `/superegm:plan` to rewrite the section with a `Corrected: R<n>` row, then
     `/superegm:review-plan`; this skill ends.
 *   `gate: <unit> plan review not converged`: the unit has no converged plan
     review, or a round was recorded after the converged one (the review is
     due again). The owner returns to `/superegm:review-plan`; this skill ends.
 *   `gate: <unit> body differs from its converged round`: the plan changed
-    after the review (an edit, a `decide`, a re-run `graph`). The unit needs
-    one more `/superegm:review-plan` round on the current body; this skill
-    ends.
+    after the review (an edit, a `decide`, a re-run `graph`), or a respec
+    moved the spec's hash or the unit's Design range. The owner runs
+    `/superegm:plan` first (its `graph` stores the current body), then one
+    more `/superegm:review-plan` round on that body; this skill ends.
 *   `gate: nothing to file (every unit is filed)`: there is nothing to do;
     report that and close the card (Step 7), never after a resumed verify with problems:
     that run ends at Step 2 or Step 6.
@@ -186,7 +187,7 @@ and writes nothing there. It writes
 with its title, labels and body, every link, the `Writes:` line with the
 counts, and the `Confirmed write list sha256`. On a later filing it names
 the tracking issue it will rewrite. The refusals (`changed after the gate`,
-`split the handoff`, `scan failed`, a missing `extra` label, no push access)
+`gate: <U> needs a re-plan after respec R<n>`, relayed as in Step 3, `split the handoff`, `scan failed`, a missing `extra` label, no push access)
 end the skill with the line shown.
 
 A unit whose section carries `Issue: #<n>` is adopted, not created: the dry
