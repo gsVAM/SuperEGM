@@ -200,7 +200,9 @@ def render_brief(panel: dict, questions: list[dict], round_no: int, open_ids: li
       path = Path(item["path"])
       if not path.is_file() or core.sha256_file(path) != item["sha256"]:
         raise core.HandoffError(f"judges: evidence {item['path']} changed since open")
-      lines += ["", f"### Evidence: {item['path']}", "```", core.read_text(path).rstrip("\n"), "```"]
+      body = core.read_text(path).rstrip("\n")
+      fence = "`" * max(3, 1 + max((len(run) for run in re.findall(r"`+", body)), default=0))  # one longer than the file's longest run
+      lines += ["", f"### Evidence: {item['path']}", fence, body, fence]
   if round_no > 1:
     lines += ["", f"Questions still open: {', '.join(open_ids)}",
               "Answer only those. Every prior verdict and every diff follow verbatim; no one adds arguments between rounds:",
@@ -216,8 +218,13 @@ def render_brief(panel: dict, questions: list[dict], round_no: int, open_ids: li
 def write_briefs(folder: Path, round_no: int, panel: dict, *args) -> None:
   """`round-<n>/brief.md` for the local members (the index) and `brief-astra.md` for the Astra member, which cannot read
   the store (the pastes): the same brief, each with its own lane's stored section."""
-  for name, lane in (("brief.md", "local"), ("brief-astra.md", "astra")):
-    core.atomic_write(folder / f"round-{round_no}" / name, render_brief(panel, *args, lane=lane))
+  for name, text in render_briefs(panel, *args).items():
+    core.atomic_write(folder / f"round-{round_no}" / name, text)
+
+
+def render_briefs(panel: dict, *args) -> dict:
+  """Both lanes' briefs by file name, rendered before either is written: a refusal (a changed evidence file) leaves no brief."""
+  return {name: render_brief(panel, *args, lane=lane) for name, lane in (("brief.md", "local"), ("brief-astra.md", "astra"))}
 
 
 def render_panel(store, parent: dict | None) -> dict:
@@ -454,14 +461,17 @@ def cmd_diff(args, store) -> int:
   folder = store.path("judges", pid)
   questions = parse_questions(core.read_text(folder / "question.md"))
   diff = neutral_diff(pid, n, questions, entries, open_questions(panel, questions, n))
-  core.atomic_write(folder / f"round-{n}" / "diff.md", diff)
   still_open = open_questions(panel, questions, n + 1)
-  if still_open and n < CAP:
+  briefs = {}
+  if still_open and n < CAP:  # everything that can refuse comes before the first write: a refusal leaves the round untouched
     prior = [(k, judge, core.read_text(folder / f"round-{k}" / f"{judge}.md"))
              for k in range(1, n + 1) for judge in panel["judges"]
              if "options" in panel["rounds"][str(k)].get(judge, {})]
-    diffs = [core.read_text(folder / f"round-{k}" / "diff.md") for k in range(1, n + 1)]
-    write_briefs(folder, n + 1, panel, questions, n + 1, still_open, prior, diffs)
+    diffs = [core.read_text(folder / f"round-{k}" / "diff.md") for k in range(1, n)] + [diff]
+    briefs = render_briefs(panel, questions, n + 1, still_open, prior, diffs)
+  core.atomic_write(folder / f"round-{n}" / "diff.md", diff)
+  for name, text in briefs.items():
+    core.atomic_write(folder / f"round-{n + 1}" / name, text)
   core.journal(store, f"judges {pid}: round {n} diff written, open {', '.join(still_open) or 'none'}")
   print(folder / f"round-{n}" / "diff.md")
   return 0
