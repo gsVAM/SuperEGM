@@ -1,0 +1,18 @@
+# Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
+# Added by SuperEGM (gsVAM), 2026: the retro skill's scenario (spec section 7.7) (U87).
+
+skill: "retro"
+description: "Behavioral evaluation scenario suite for the retro skill."
+
+scenarios:
+  - scenario_id: "retro_reads_its_skill"
+    description: "The agent follows the retro skill when asked to walk a closed handoff's Lessons."
+    eval_type: "deterministic"
+    system_prompt:
+      skill_file: "skills/retro/SKILL.md"
+    turns:
+      - user_input: "Run the retrospective of the latest closed handoff."
+        assertions:
+          - type: "required_pattern"
+            pattern: "(?i)retro"
+            message: "The response must name the retro skill."
