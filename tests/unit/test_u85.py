@@ -322,3 +322,71 @@ def test_respec_review_evidence_panel_and_cap(world):
   assert [m["name"] for m in panel] == ["design", "codebase-details", "astra"] and cycle["cap"] == 2
   assert "+Max retries: 4" in evidence and "## 9. Untouched section" not in evidence
   assert cycle["respec"] == "R1" and "changed" in evidence and "neighbour" not in evidence
+
+
+R1_TEXT = replace(BASE, "Delay is 5s.", "Delay is 6s.")
+STARTED = "2026-11-13T00:00:00Z"
+
+
+def commit_at(world, monkeypatch, name, when):
+  """A commit of `name` whose committer time is `when`; its sha."""
+  monkeypatch.setenv("GIT_COMMITTER_DATE", when)
+  (world.repo / name).write_text(name, encoding="utf-8")
+  git(["add", name], world.repo)
+  git(["commit", "-qm", name], world.repo)
+  monkeypatch.delenv("GIT_COMMITTER_DATE")
+  return git(["rev-parse", "HEAD"], world.repo).strip()
+
+
+def launch(status="exited 0", head=None, builder_status=None, respecs=("R1",), started_at=STARTED):
+  return {"round": 1, "status": status, "started_at": started_at, "respecs": list(respecs), "reason": "respec",
+          **({"head": head} if head else {}), "builder_status": builder_status}
+
+
+def marks_world(world, monkeypatch, case):
+  """Handoff `HID` with respec R1 applied (`R1_TEXT`), touching U2, as `case` sets U2 up."""
+  old = commit_at(world, monkeypatch, "old.txt", "2026-11-10T00:00:00Z")
+  new = commit_at(world, monkeypatch, "new.txt", "2026-11-14T00:00:00Z")
+  units = {u: {"id": u, "design_range": design_range(BASE, h)} for u, h in SECTIONS.items()}
+  filed = "unfiled" not in case
+  if case == "unfiled, corrected names R1":
+    units["U2"] |= {"corrected": ["R1"], "rendered_under": 2}
+  elif case == "unfiled, later render without corrected":
+    units["U2"] |= {"corrected": [], "rendered_under": 1}
+  head = new if case == "saved head committed after a launch naming R1 started" else old
+  state_units = {"U0": MERGED_U1["U0"], "U1": {"number": 11}, "U3": {},
+                 "U2": {"number": 12, "pr": {"number": 22, "head": head}} if filed else {}}
+  spec, st = respec_world(world, [(BASE, None), (R1_TEXT, "R1")], {"R1": ["U2"]}, units=units, state_units=state_units)
+  launches = {
+    "saved head committed after a launch naming R1 started": [launch("exited 1")],
+    "launch naming R1 failed before pushing": [launch("exited 1")],
+    "saved head older than every launch naming R1": [launch("exited 1"), launch("running", started_at="2026-11-13T06:00:00Z")],
+    "exit-0 DONE launch recorded head == saved head": [launch(head=old, builder_status="DONE")],
+    "exit-0 DONE_WITH_CONCERNS launch recorded head == saved head": [launch(head=old, builder_status="DONE_WITH_CONCERNS")],
+    "exit-0 BLOCKED launch, same head": [launch(head=old, builder_status="BLOCKED")],
+    "exit-0 NEEDS_CONTEXT launch, same head": [launch(head=old, builder_status="NEEDS_CONTEXT")],
+  }.get(case)
+  if launches:
+    core.atomic_write(st.path("launches", "U2"), {"unit": "U2", "launches": launches})
+  if case == "filed touched, unit stopped":
+    core.atomic_write(st.path("foreman", "U2"), {"dispatch_id": None, "rounds": [], "decisions": [], "rulings": [],
+                                                 "stopped": {"by": "owner", "reason": "x", "at": STARTED}})
+  return spec, st
+
+
+@pytest.mark.parametrize("case, mark", [
+  ("unfiled touched", "replan: R1"), ("unfiled, corrected names R1", None), ("unfiled, later render without corrected", "replan: R1"),
+  ("filed touched", "respec: R1"), ("saved head committed after a launch naming R1 started", None),
+  ("launch naming R1 failed before pushing", "respec: R1"), ("saved head older than every launch naming R1", "respec: R1"),
+  ("exit-0 DONE launch recorded head == saved head", None), ("exit-0 DONE_WITH_CONCERNS launch recorded head == saved head", None), ("exit-0 BLOCKED launch, same head", "respec: R1"),
+  ("exit-0 NEEDS_CONTEXT launch, same head", "respec: R1"), ("filed touched, unit stopped", None)])
+def test_marks_derived_and_cleared(world, monkeypatch, case, mark):
+  # marks are derived on every read; state.json is never written
+  from superegm import respec
+  spec, st = marks_world(world, monkeypatch, case)
+  handoff = HID
+  state_bytes_before = st.path("state").read_bytes()
+  assert respec.marks(st, handoff).get("U2") == mark and st.path("state").read_bytes() == state_bytes_before
+  state_bytes_after = st.path("state").read_bytes()
+  assert respec.marks(st, handoff).get("U2") == mark and state_bytes_after == state_bytes_before
+  assert "U0" not in respec.marks(st, handoff)
