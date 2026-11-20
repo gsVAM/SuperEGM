@@ -308,6 +308,25 @@ def test_the_wave_report_names_each_judges_ruling_with_its_panel(world):
 ROOT = Path(__file__).resolve().parents[2]
 
 
+@pytest.mark.parametrize("path, present, absent", [
+    ("skills/wave/SKILL.md", ("the inbox is the store-wide read", "detached in its own session, and returns at once"), ()),
+    ("skills/judges/references/leavemealone.md",
+     ("the round's `comments.md` and diff, `r<n>/spec_range.md` and `r<n>/amendments.md`",
+      "`decision rule --by\n   judges:<panel>` journals `Ruling (judges <panel>, leavemealone | contest): …`",
+      "`Ruling (judges <panel>, contest): <unit> <fid> <disposition>`"), ("`Ruling (judges <panel>, leavemealone): …`",)),
+    ("skills/judges/references/astra_judge.md",
+     ("the judge lane; the lane's model and effort read from the panel's `astra` member (U28); inline evidence (U88)",
+      "`comments.md`, the diff, the unit's body, `r<n>/spec_range.md` and `r<n>/amendments.md` from the store"),
+     ("reads no paths",)),
+    ("skills/wave/references/builder_orders.md", ("`(judges <panel>, contest)` is the same ruling in normal mode",), ()),
+    ("skills/plan/scripts/superegm/decision.py", ("`(judges <panel>, leavemealone | contest)` marker",), ())])
+def test_review_round_one_texts(path, present, absent):
+  """The reference texts name what the code now does: the five evidence files, the `contest` word, the data sent to OpenAI, the marker."""
+  body = (ROOT / path).read_text(encoding="utf-8")
+  assert all(p in body for p in present), [p for p in present if p not in body]
+  assert not any(p in body for p in absent), [p for p in absent if p in body]
+
+
 @pytest.mark.parametrize("path, phrases", [
     ("skills/wave/SKILL.md", ("in normal mode as in leavemealone", "judges/<panel>/verdict.json")),
     ("skills/wave/references/decision_points.md", ("judges first in both modes", "`<fid> allowed`", "`amend`", "`respec`", "CI finding")),
