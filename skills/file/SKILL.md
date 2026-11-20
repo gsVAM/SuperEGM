@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Files a confirmed handoff plan as GitHub issues, with the tracking issue, one sub-issue per unit and the blocked-by links.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the file skill body, phase 4 of the SuperEGM loop (design section 10); `[--handoff <id>]` and a frozen handoff's refusal (U20); the resume of a started filing, the frozen mode, `next wait` and `next clear` under the chain (U56); the answered chain record taken as the owner's (U70). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the file skill body, phase 4 of the SuperEGM loop (design section 10); `[--handoff <id>]` and a frozen handoff's refusal (U20); the resume of a started filing, the frozen mode, `next wait` and `next clear` under the chain (U56); the answered chain record taken as the owner's (U70); the gate's re-plan refusal relayed (U90). -->
 
 # file
 
@@ -155,18 +155,30 @@ filing has no `filings[]` entry and is not started: go to Step 3.
 ## Step 3: The gate
 
 Run `python3 '<HELPER>' gate --pass --spec '<SpecPath>' --runcard '<CARD>'`.
-It passes when every unfiled unit's plan review converged on the body the
-store holds now (`handoff_units.json`'s `body_sha256`), records the pair of
+It passes when every unfiled unit's plan review converged on its body as
+`graph` renders it now from the plan and the latest approval, records the pair of
 hashes the rest of the filing is checked against, and prints
 `gate passed: <k> unfiled units converged`. Its refusals:
 
+*   `gate: <U> needs a re-plan after respec R<n>`: a respec touched the
+    unfiled unit (its `replan: R<n>` mark), whatever its review converged on;
+    the dry run (Step 4) and a resumed `apply` refuse the same. Relay the line: the owner returns to
+    `/superegm:plan` to rewrite the section with a `Corrected: R<n>` row, then
+    `/superegm:review-plan`; this skill ends.
 *   `gate: <unit> plan review not converged`: the unit has no converged plan
     review, or a round was recorded after the converged one (the review is
     due again). The owner returns to `/superegm:review-plan`; this skill ends.
 *   `gate: <unit> body differs from its converged round`: the plan changed
-    after the review (an edit, a `decide`, a re-run `graph`). The unit needs
-    one more `/superegm:review-plan` round on the current body; this skill
-    ends.
+    after the review (an edit, a `decide`, a re-run `graph`), or a respec
+    moved the spec's hash or the unit's Design range. The owner runs
+    `/superegm:plan` first (its `graph` stores the current body), then one
+    more `/superegm:review-plan` round on that body; this skill ends.
+*   `respec: no commit holds approval <sha7> of <spec>`: rendering an
+    unfiled body carries its Design range through each approved text of the
+    handoff, and one of them is in no commit of the repository (a rewritten
+    or unfetched history); the dry run (Step 4) and `apply` refuse the same.
+    Relay the line: the owner restores that commit in the checkout (fetch
+    it, or check out the branch that holds it); this skill ends.
 *   `gate: nothing to file (every unit is filed)`: there is nothing to do;
     report that and close the card (Step 7), never after a resumed verify with problems:
     that run ends at Step 2 or Step 6.
@@ -181,7 +193,7 @@ and writes nothing there. It writes
 with its title, labels and body, every link, the `Writes:` line with the
 counts, and the `Confirmed write list sha256`. On a later filing it names
 the tracking issue it will rewrite. The refusals (`changed after the gate`,
-`split the handoff`, `scan failed`, a missing `extra` label, no push access)
+`gate: <U> needs a re-plan after respec R<n>` and `respec: no commit holds approval <sha7> of <spec>`, relayed as in Step 3, `split the handoff`, `scan failed`, a missing `extra` label, no push access)
 end the skill with the line shown.
 
 A unit whose section carries `Issue: #<n>` is adopted, not created: the dry

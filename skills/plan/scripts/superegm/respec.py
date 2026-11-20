@@ -31,16 +31,19 @@ def load_json(path: Path):
   return json.loads(core.read_text(path)) if path.is_file() else None
 
 
-def spec_of(store: core.Store, handoff: str) -> Path:
-  """The handoff's spec: `handoffs/<id>.json`'s `spec`, else the plan's `design.path`, else `state.json`'s."""
+def spec_of(store: core.Store, handoff: str, root: Path | None = None) -> Path:
+  """The handoff's spec: `handoffs/<id>.json`'s `spec`, else the plan's `design.path`, else `state.json`'s; with `root`,
+  rebased onto that checkout (`core.rebased`), so a spec approved in a worktree since removed is read where it lives."""
   record = load_json(store.path("handoffs", handoff)) or {}
-  if record.get("spec"):
-    return Path(record["spec"])
-  hs = core.handoff_store(store, handoff)
-  for kind in ("units", "state"):
-    path = ((load_json(hs.path(kind)) or {}).get("design") or {}).get("path")
-    if path:
-      return Path(path)
+  found = record.get("spec")
+  if not found:
+    hs = core.handoff_store(store, handoff)
+    for kind in ("units", "state"):
+      found = ((load_json(hs.path(kind)) or {}).get("design") or {}).get("path")
+      if found:
+        break
+  if found:
+    return core.rebased(Path(found), root) if root is not None else Path(found)
   raise core.HandoffError(f"respec: handoff {handoff} names no spec")
 
 
@@ -150,10 +153,10 @@ def is_merged(record: dict) -> bool:
   return bool(record.get("landed") or (record.get("pr") or {}).get("merged_at"))
 
 
-def history(store: core.Store, handoff: str):
+def history(store: core.Store, handoff: str, root: Path | None = None):
   """`(spec, entries, texts, maps)`: the handoff's entries, each one's approved text as lines, and the line map of
-  each consecutive pair (`maps[i]` from entry `i-1` to entry `i`; `maps[0]` empty)."""
-  spec = spec_of(store, handoff)
+  each consecutive pair (`maps[i]` from entry `i-1` to entry `i`; `maps[0]` empty); `root` as in `spec_of`."""
+  spec = spec_of(store, handoff, root)
   entries = entries_of(store, handoff, spec)
   if not entries:
     raise core.HandoffError(f"respec: handoff {handoff} has no approval")
@@ -361,12 +364,12 @@ def filed_at(store: core.Store, unit: str, respec: str) -> bool:
   return store.path("file", f"respec_comment_{unit}_{respec}.md").is_file()
 
 
-def marks(store: core.Store, handoff: str) -> dict:
+def marks(store: core.Store, handoff: str, root: Path | None = None) -> dict:
   """Unit to `replan: R<n>` (unfiled at R<n>'s approval, until `handoff_units.json`'s `corrected` names R<n>) or
   `respec: R<n>` (filed and unmerged then), derived on every read from the applied respecs' `respec/R<n>.json` `touched`,
   their comment files, `corrected`, `state.json`'s saved PR heads and the launch records; never written. Stopped and
-  merged units are left out, and a handoff a later approval supersedes carries none."""
-  spec = spec_of(store, handoff)
+  merged units are left out, and a handoff a later approval supersedes carries none; `root` as in `spec_of`."""
+  spec = spec_of(store, handoff, root)
   if latest_handoff(store, spec) != handoff:
     return {}
   hs = core.handoff_store(store, handoff)

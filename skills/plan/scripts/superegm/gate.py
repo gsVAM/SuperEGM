@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: `gate --pass` on converged plan reviews at the body hash over the store's plan copy; the unfiled write list; the reviewed pair, accept and readiness forms removed; an adopted unit's two trailing fields (U13); a review with a round after the converged one is not converged (U56); a review the owner's proceed converged, at the ruling's sha256 (U57).
+# Modified by SuperEGM (gsVAM), 2026: `gate --pass` on converged plan reviews at the body hash over the store's plan copy; the unfiled write list; the reviewed pair, accept and readiness forms removed; an adopted unit's two trailing fields (U13); a review with a round after the converged one is not converged (U56); a review the owner's proceed converged, at the ruling's sha256 (U57); a `replan: R<n>` unit refused, an unfiled body hashed as it renders now (U90).
 
 """superegm gate: pass the gate when every unfiled unit's plan review converged at its body hash."""
 
@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 import superegm as core
-from superegm import graph, review
+from superegm import graph, respec, review
 
 WRITES = frozenset(["state"])  # the store kinds this subcommand writes
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
@@ -36,10 +36,35 @@ def require_latest(handoff, name: str) -> None:
     raise core.HandoffError(f"{name}: {error}") from None
 
 
-def converged_review(store: core.Store, uid: str):
+def handoff_marks(store: core.Store, root: Path | None = None) -> dict:
+  """U85's `respec.marks` of the store's handoff, read once per call by `run`, `require_gate` (so `dry-run` and a
+  resumed `apply`) and `next` (U90); none, and no git run, while the handoff has no applied respec (its entries are
+  read by the spec's file name alone). The recorded spec is rebased onto `root` inside `respec.marks`, so a spec
+  approved in a worktree since removed is read under the repository root before git runs."""
+  hid = store.handoff_id
+  if not hid:
+    return {}
+  if not any(e.get("kind") == "respec" for e in respec.entries_of(store, hid, respec.spec_of(store, hid))):
+    return {}
+  return respec.marks(store, hid, root)
+
+
+def require_replanned(uid: str, marks: dict) -> None:
+  """A unit carrying `replan: R<n>` (U90) has no reviewed body: refused `gate: <U> needs a re-plan after respec R<n>`."""
+  mark = marks.get(uid) or ""
+  if mark.startswith("replan: "):
+    raise core.HandoffError(f"gate: {uid} needs a re-plan after respec {mark.removeprefix('replan: ')}")
+
+
+def converged_review(store: core.Store, uid: str, marks: dict | None = None):
   """(converged, the converged round's artifact_sha256) of the unit's latest plan review in the handoff's
   `reviews/`, found by kind and artifact, never by id; U04 writes `converged` as `yes | no | by ruling R<n>`, U57 `by proceed R<n>` (the ruling's
-  `sha256`, ahead of the converged-round test)."""
+  `sha256`, ahead of the converged-round test). A `replan: R<n>` unit (U90) is refused by `require_replanned`
+  over `marks`, the caller's one read of `respec.marks`: `run` passes its own; `apply` passes none, its
+  `require_gate` having refused the unit already; `phase.plan_review_due` passes none, `planning_line` having
+  returned `plan` for any unfiled unit carrying a `replan:` mark before it asks (no `require_gate` guards it)."""
+  if marks is not None:
+    require_replanned(uid, marks)
   latest = None
   for path in store.path("reviews").glob("*/review.json"):
     record = json.loads(core.read_text(path))
@@ -58,6 +83,12 @@ def converged_review(store: core.Store, uid: str):
 
 
 def require_gate(handoff) -> None:
+  """The gate passed on the current plan and bodies. An unfiled `replan: R<n>` unit is refused first (U90): a
+  respec changes every body's spec hash, so the hash test alone would hide the re-plan from a resumed `apply`."""
+  marks = handoff_marks(handoff.store, handoff.repo_root)
+  for uid in handoff.graph.order:
+    if handoff.filed(uid) is None:
+      require_replanned(uid, marks)
   state = handoff.state
   if not state.get("gate_plan_sha256") or not state.get("gate_bodies_sha256"):
     raise core.HandoffError("the gate has not passed: run gate --pass first")
@@ -66,9 +97,12 @@ def require_gate(handoff) -> None:
 
 
 def body_hashes(handoff) -> dict:
-  """`handoff_units.json` units[<id>].body_sha256, what the plan review converged on."""
-  return {uid: unit["body_sha256"]
-          for uid, unit in json.loads(core.read_text(handoff.store.path("units")))["units"].items()}
+  """Each unit's body as it renders now, the bytes the filing posts, which its plan review must have converged on:
+  a respec that moves an unfiled unit's Design range or the spec's hash invalidates the review (U90), where the
+  stored `handoff_units.json` hash would keep the body rendered before it. A filed unit keeps its stored hash."""
+  stored = json.loads(core.read_text(handoff.store.path("units")))["units"]
+  return {uid: core.sha256_text(handoff.render_unit(uid)) if handoff.filed(uid) is None else unit["body_sha256"]
+          for uid, unit in stored.items()}
 
 
 def pending_writes(handoff, units=None, adopted=None) -> list:
@@ -102,8 +136,9 @@ def run(args):
   if not unfiled:
     raise core.HandoffError("gate: nothing to file (every unit is filed)")
   hashes = body_hashes(handoff)
+  marks = handoff_marks(handoff.store, handoff.repo_root)
   for uid in unfiled:
-    converged, sha = converged_review(handoff.store, uid)
+    converged, sha = converged_review(handoff.store, uid, marks)
     if not converged:
       raise core.HandoffError(f"gate: {uid} plan review not converged")
     if sha != hashes[uid]:

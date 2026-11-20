@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema and issue body; the handoff id comes from the approval record; the plan is copied into the store; the optional `Issue` field checked against the spec's `## Units` section (U13); every escalated pair needs a `## Units` row or a blocking decision (U16); `filed_elsewhere[]`, an older handoff frozen, one store of many handoffs (U20); the body's `· Tier:` (U33); the `width:` line (U29); `merge_after`, `merges after` and `merges before` for a handoff whose approval carries `rounds` (U61).
+# Modified by SuperEGM (gsVAM), 2026: the section 9.1 unit schema and issue body; the handoff id comes from the approval record; the plan is copied into the store; the optional `Issue` field checked against the spec's `## Units` section (U13); every escalated pair needs a `## Units` row or a blocking decision (U16); `filed_elsewhere[]`, an older handoff frozen, one store of many handoffs (U20); the body's `· Tier:` (U33); the `width:` line (U29); `merge_after`, `merges after` and `merges before` for a handoff whose approval carries `rounds` (U61); `rendered_under` and the Design range carried through each later line map, the `Corrected:` row recorded as `corrected` by `graph` alone (U90).
 
 """superegm graph: parse the plan under its approval; write the store's plan copy,
 units, unit files and bodies."""
@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 
 import superegm as core
-from superegm import review
+from superegm import respec, review
 from superegm.approve_spec import units_section
 
 WRITES = frozenset(['bodies', 'plan', 'state', 'unit', 'units'])  # the store kinds this subcommand writes
@@ -79,6 +79,7 @@ class Unit(core.Unit):
     self.review_focus = []   # the raw `- U<nn>: …` lines
     self.steps = ""          # the Steps text, verbatim
     self.decide = []         # the raw `Decide before build` lines
+    self.corrected = []      # the `Corrected:` row's respec ids (U90)
 
   def to_json(self, wave, preds, merge_after=()):
     return {**super().to_json(wave, preds, merge_after), "interfaces": self.interfaces, "review_focus": self.review_focus}
@@ -126,6 +127,11 @@ class Plan(core.Plan):
     if unknown:
       self._fail(unit.line - 1, f"{uid}: unknown fields {sorted(unknown)}")
     self._parse_fields(unit, fields)
+    if "Corrected" in fields:  # the one optional row naming the respecs the section was rewritten from (U90)
+      value, at = fields["Corrected"]
+      if not re.fullmatch(r"R\d+(?:, R\d+)*", value):
+        self._fail(at, f"{uid}: Corrected names respec ids `R<n>[, R<m>…]`, not '{value}'")
+      unit.corrected = value.split(", ")
     i = self._heading(lines, i, uid, "Interfaces")
     while i < len(lines) and lines[i].startswith("- "):
       if not INTERFACE_RE.match(lines[i].rstrip()):
@@ -215,6 +221,8 @@ class Handoff(core.Handoff):
     design = Path(self.plan.design).expanduser()
     if not design.is_absolute():
       design = self.plan_path.parent / design
+    if not design.is_file():  # a Design line written in a worktree since removed: read under this checkout
+      design = core.here(design)
     if not design.is_file():
       raise core.HandoffError(f"graph: design file {design} does not exist")
     self.design_path = design.resolve()
@@ -235,6 +243,24 @@ class Handoff(core.Handoff):
                               f"{self.design_sha[:12]}: run /superegm:review-spec (approve-spec) first")
     self.handoff_id, self.spec_sha = approval["handoff_id"], approval["sha256"]
     self.design_commit = approval.get("commit") or ""
+    # U90: each unit's `rendered_under`, how many of the handoff's entries existed when its section's text was
+    # written (a unit new to `handoff_units.json` now; a record without the key, from a graph before U90, the last
+    # entry whose sha256 is the record's `design.sha256`, else 1), kept until a `Corrected:` row records a new
+    # respec; its Design range is carried from there through each later line map.
+    self.entries = respec.entries_of(store, self.handoff_id, self.design_path) or [approval]
+    applied = {e["respec"] for e in self.entries if e.get("kind") == "respec" and e.get("respec")}
+    for uid, unit in self.plan.units.items():
+      unknown = [r for r in unit.corrected if r not in applied]
+      if unknown:
+        raise core.HandoffError(f"graph: {uid}: Corrected names {', '.join(unknown)}, "
+                                f"no applied respec of handoff {self.handoff_id}")
+    prior = json.loads(core.read_text(store.path("units"))) if store.path("units").is_file() else {}
+    self.prior_units = (prior.get("units") or {}) if prior.get("handoff_id") == self.handoff_id else {}
+    graphed = ((prior.get("design") or {}).get("sha256")) if self.prior_units else None
+    legacy = max((i + 1 for i, e in enumerate(self.entries) if graphed and e.get("sha256") == graphed), default=1)
+    self.rendered_under = {uid: (self.prior_units[uid].get("rendered_under") or legacy) if uid in self.prior_units
+                           else len(self.entries) for uid in self.plan.units}
+    self._spans = None
     spec_text = core.read_text(self.design_path)
     named = units_section(spec_text)
     for uid, unit in self.plan.units.items():
@@ -284,10 +310,26 @@ class Handoff(core.Handoff):
         raise core.HandoffError(f"graph: {uid} is filed (#{record['number']}) and its section differs "
                                 "from the stored handoff_plan.md")
 
+  def design_span(self, uid: str) -> tuple[int, int]:
+    """The unit's Design range at the latest approval: the plan text's, read under `rendered_under` and carried
+    through the line map of each later pair of approved texts by U85's `respec.history` and `respec.carried_spans`
+    (the plan file is never rewritten); `history` refuses an approval no commit holds."""
+    if self._spans is None:
+      records = {u: {"design_range": {"start": unit.design_range[1], "end": unit.design_range[2]},
+                     "rendered_under": self.rendered_under[u]}
+                 for u, unit in self.plan.units.items() if self.filed(u) is None}
+      if any(r["rendered_under"] < len(self.entries) for r in records.values()):
+        _, entries, _, maps = respec.history(self.store, self.handoff_id, self.repo_root)
+        self._spans = respec.carried_spans(records, entries, maps)
+      else:  # every section written under the latest approval: nothing to carry
+        self._spans = {u: (r["design_range"]["start"], r["design_range"]["end"]) for u, r in records.items()}
+    return self._spans[uid]
+
   def render_unit(self, uid: str) -> str:
     if self.filed(uid) is not None:
       return core.unit_file_body(self.unit_file(uid)) + "\n"
     unit = self.plan.units[uid]
+    start, end = self.design_span(uid)
     merges = "merges " if self.graph.parallel else ""  # U61: with `rounds` the order is a merge order
     shared = "; ".join(f"`{path}`: " + ", ".join(f"{merges}after {self.ref(o)}" if k == "after"
                                                  else f"{merges}before {self.forward_ref(o)}"
@@ -295,7 +337,7 @@ class Handoff(core.Handoff):
     values = {
         "handoff_id": self.handoff_id, "unit_id": uid, "title": unit.title, "spec_sha256": self.spec_sha,
         "sha7": self.spec_sha[:7], "spec": self.design_path.relative_to(self.repo_root).as_posix(),
-        "design": f"{unit.design_range[0]}:{unit.design_range[1]}-{unit.design_range[2]} ({unit.design_range[3]})",
+        "design": f"{unit.design_range[0]}:{start}-{end} ({unit.design_range[3]})",
         "objective": unit.objective, "interfaces": "\n".join(unit.interfaces) or "- none",
         "dod": "\n".join(f"{n}. {item}" for n, item in enumerate(unit.dod, 1)),
         "global_constraints": "\n".join(self.plan.global_constraints),
@@ -315,11 +357,22 @@ class Handoff(core.Handoff):
     return (f"{core.unit_section_text(self.plan, uid)}\n\n## Issue body as posted\n\n"
             f"````markdown\n{self.render_unit(uid)}````\n")
 
-  def write_graph_files(self) -> None:
+  def write_graph_files(self, record: bool = False) -> None:
+    """`record` is `graph`'s own run: it alone records each section's `Corrected:` respecs as `corrected` (clearing
+    their `replan:` marks, `respec.marks`) and moves a unit naming a new one to `rendered_under` the latest entry; any
+    other render (`decide`) keeps what the last `graph` recorded (U90)."""
     g = self.graph
+    corrected = {u: list((self.prior_units.get(u) or {}).get("corrected") or []) for u in g.order}
+    if record:
+      for u in g.order:
+        if set(self.plan.units[u].corrected) - set(corrected[u]):  # the section rewritten in the new coordinates
+          self.rendered_under[u] = len(self.entries)
+          self._spans = None
+        corrected[u] = list(self.plan.units[u].corrected)
     hashes = {uid: core.sha256_text(self.render_unit(uid)) for uid in g.order}
     core.atomic_write(self.store.path("plan"), self.plan.text)
-    units = {u: {**self.plan.units[u].to_json(g.wave[u], g.preds[u], g.merge_after[u]), "body_sha256": hashes[u]}
+    units = {u: {**self.plan.units[u].to_json(g.wave[u], g.preds[u], g.merge_after[u]), "body_sha256": hashes[u],
+                 "rendered_under": self.rendered_under[u], "corrected": corrected[u]}
              for u in g.order}
     data = {"handoff_id": self.handoff_id, "repo": self.config["repo"],
             "design": {"path": str(self.design_path), "sha256": self.design_sha,
@@ -401,7 +454,7 @@ def run(args):
   # The card is on the spec the plan names: `require_runcard` reads it from `design`.
   args.design = str(handoff.design_path)
   core.require_runcard(args, SKILLS)
-  handoff.write_graph_files()
+  handoff.write_graph_files(record=True)
   g = handoff.graph
   print(f"handoff {handoff.handoff_id} on {handoff.config['repo']}: {len(g.order)} units, {len(g.waves)} waves")
   for wave in sorted(g.waves):
