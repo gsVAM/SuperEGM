@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the judges subcommand (spec section 13.1) and `judges question`, the
-# leavemealone-mode question renderer of section 13.2 (U11); the cap question names a spec review's scope (U19); the default members read from `DEFAULT_CONFIG` (U28); a `launch <n>` or `closed <n>` question renders its pending decision's options, a stall's heading its facts (U31); its own `judges` config key, moved from `__init__` (U32); the panel's instructions section rendered once at open by its parent card's skill, placed last in each brief and copied to each member's record (U38); `respec`, the owner's alone, left out of the judges' question with every other option keeping its letter, its leavemealone wait read off the options (U84).
+# leavemealone-mode question renderer of section 13.2 (U11); the cap question names a spec review's scope (U19); the default members read from `DEFAULT_CONFIG` (U28); a `launch <n>` or `closed <n>` question renders its pending decision's options, a stall's heading its facts (U31); its own `judges` config key, moved from `__init__` (U32); the panel's instructions section rendered once at open by its parent card's skill, placed last in each brief and copied to each member's record (U38); `respec`, the owner's alone, left out of the judges' question with every other option keeping its letter, its leavemealone wait read off the options (U84); the Astra member's brief embeds each evidence file's contents, re-checked against its recorded sha256, and an unconverged panel's point 1 question gains the verdict line (U88).
 
 """superegm judges open|record|diff|verdict|question: the judge panel over a question file, and the
 question file rendered from the record at a decision point."""
@@ -195,6 +195,12 @@ def render_brief(panel: dict, questions: list[dict], round_no: int, open_ids: li
            "Report no findings. Read only the question file and the evidence listed.",
            f"Question file: {panel['question']} (sha256 {panel['question_sha256']})",
            "Evidence: " + (", ".join(e["path"] for e in panel["evidence"]) or "none")]
+  if lane == "astra":  # the Astra lane reads no paths: each evidence file's contents follow, re-checked against the sha256 recorded at open
+    for item in panel["evidence"]:
+      path = Path(item["path"])
+      if not path.is_file() or core.sha256_file(path) != item["sha256"]:
+        raise core.HandoffError(f"judges: evidence {item['path']} changed since open")
+      lines += ["", f"### Evidence: {item['path']}", "```", core.read_text(path).rstrip("\n"), "```"]
   if round_no > 1:
     lines += ["", f"Questions still open: {', '.join(open_ids)}",
               "Answer only those. Every prior verdict and every diff follow verbatim; no one adds arguments between rounds:",
