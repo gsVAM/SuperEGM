@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 import superegm as core
-from test_leavemealone_finish import head_review, seed
+from test_leavemealone_finish import head_review, put, seed
 from test_review import A, F, head_round, hstore, opened, rjson, settle
 from test_review import record as record_findings
 from test_wave import REPO, fake_gh, foreman_of, wave_store
@@ -185,6 +185,67 @@ def test_verdict_line_keeps_each_judges_last_recorded_choice(world, tmp_path):
   assert world.run("judges", "verdict", "--panel", pid, "--runcard", card)[0] == 2
   line = (folder / "owner-question.md").read_text(encoding="utf-8").splitlines()[-1]
   assert "astra: finding upheld" in line and "fable: finding upheld" in line and "opus: finding overruled" in line, line
+
+
+FINDING_LINE = "change-review-1-1 | high | src/x.py:3 | regression: no | the retry loop never backs off\n"
+
+
+def open_point_one(world, pid, question=FINDING_LINE):
+  """The unit's open point 1 decision `decision open` recorded before the panel (U07's foreman file)."""
+  foreman = json.loads(core.store(world.repo).path("foreman", "U07").read_text(encoding="utf-8"))
+  decision = {"id": "q1", "point": 1, "source": f"review {pid.rsplit('-r1-', 1)[0]} round 1", "head": "a" * 64,
+              "question": question, "asked_at": "t", "options": ["finding upheld", "finding overruled"]}
+  put(world, foreman | {"decisions": [decision]}, "foreman", "U07")
+
+
+def test_an_unconverged_panel_gives_its_verdict_line_to_the_open_decision(world, tmp_path):
+  """The cap leaves the verdict line in the open point 1 decision's `question`, the record the inbox and the ruling comment read."""
+  pid, _ = contest(world, tmp_path)
+  open_point_one(world, pid)
+  folder = world.artifacts / "judges" / pid
+  card = json.loads((folder / "panel.json").read_text(encoding="utf-8"))["runcard"]
+  for rnd in range(1, 6):
+    record_round(world, pid, card, rnd, {"fable": "a", "opus": "b", "astra": "a"})
+    assert world.run("judges", "diff", "--panel", pid, "--round", rnd, "--runcard", card)[0] == 0
+    if rnd < 5:
+      assert world.run("judges", "verdict", "--panel", pid, "--runcard", card)[0] == 2
+      assert foreman_of(core.store(world.repo), "U07")["decisions"][0]["question"] == FINDING_LINE
+  assert world.run("judges", "verdict", "--panel", pid, "--runcard", card)[0] == 2
+  assert world.run("judges", "verdict", "--panel", pid, "--runcard", card)[0] == 2  # the line is added once
+  question = foreman_of(core.store(world.repo), "U07")["decisions"][0]["question"]
+  assert question.startswith(FINDING_LINE) and question.count(f"judges/{pid}/verdict.json") == 1
+  assert "fable: finding upheld" in question and "opus: finding overruled" in question
+
+
+VERDICT_LINE = "The judges did not converge (judges/p1/verdict.json), their last choices: Q1 fable: finding upheld; opus: finding overruled\n"
+
+
+def test_a_point_one_decision_stays_pending_on_each_unconverged_finding():
+  """F1 converged and ruled, F2 split at the cap: the decision stays pending on F2 alone, until F2 is ruled or a `redesign` rules the whole."""
+  from superegm.report import pending_decisions
+  lines = "change-review-1-1 | high | src/x.py:3 | regression: no | a\nchange-review-1-2 | high | src/x.py:9 | regression: no | b\n"
+  decision = {"id": "q1", "point": 1, "source": "review head-U07-c1 round 1", "question": lines + VERDICT_LINE,
+              "options": ["finding upheld", "finding overruled"]}
+  ruling = lambda text: {"decision": "q1", "ruling": text}
+  assert pending_decisions({"decisions": [decision], "rulings": []}) == [decision]
+  assert pending_decisions({"decisions": [decision], "rulings": [ruling("change-review-1-1 finding overruled — judges")]}) == [decision]
+  both = [ruling("change-review-1-1 finding overruled — judges"), ruling("change-review-1-2 finding upheld")]
+  assert pending_decisions({"decisions": [decision], "rulings": both}) == []
+  assert pending_decisions({"decisions": [decision], "rulings": [ruling("redesign — x")]}) == []
+  plain = decision | {"question": lines}  # a decision with no verdict line is ruled whole by its first ruling, as before
+  assert pending_decisions({"decisions": [plain], "rulings": [ruling("change-review-1-1 finding upheld")]}) == []
+
+
+def test_the_inbox_listing_shows_the_verdict_line(world):
+  """A contested finding whose decision carries the panel's verdict line lists it, in the item and in its printed line."""
+  from test_inbox import D, HEAD, POSTED, U, F as findings, open_wave_card, seed as inbox_seed
+  from superegm.inbox import inbox_items, line_of
+  open_wave_card(world)
+  s = inbox_seed(world, **U(decisions=D(1, "review head-U01-c1 round 1", question="foreman-1-1 | high | src/x.py:3 | regression: no | c\n" + VERDICT_LINE),
+                            rounds=POSTED(), reviews=HEAD(1, findings("high"), builder_contested=[{"fid": "foreman-1-1", "reason": "r"}])))
+  item = next(i for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "contested")
+  assert VERDICT_LINE.strip() in item["verdict"] and "judges/p1/verdict.json" in line_of(item)
+  assert all("verdict" not in i for i in inbox_items(s, [s.handoff_id]) if i["kind"] != "contested")
 
 
 ROOT = Path(__file__).resolve().parents[2]
