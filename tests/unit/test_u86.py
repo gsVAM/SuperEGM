@@ -230,3 +230,16 @@ def test_held_unit_offers_no_merge(world, monkeypatch):
   assert world.run("status", "--wait", 1, "--runcard", card)[0] == 0
   tick_trigger_once_settled = trigger()
   assert respec.marks(s, handoff).get("U08") is None and tick_trigger_once_settled is None
+
+
+def text(path):
+  from conftest import ROOT
+  return (ROOT / path).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("path, phrases", [
+  ("skills/wave/SKILL.md", ("the raising unit waits", "respec.actionable", "superegm respec posted", "reason `respec`")),
+  ("skills/integrate/SKILL.md", ("integrate: respec R<n> is open", "integrate: <U> holds respec R<n>"))])
+def test_wave_and_integrate_skill_text(path, phrases):
+  # the wave posts and relaunches idempotently; integrate refuses on an open respec or a standing mark
+  assert all(p in text(path) for p in phrases)
