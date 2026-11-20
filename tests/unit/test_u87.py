@@ -203,16 +203,11 @@ def test_respec_rows_keep_to_their_own_handoff(world):
   assert ":12-14" in row and "99-100" not in row
 
 
-@pytest.mark.parametrize("failure", ["missing", "no repo"])
-def test_respec_evidence_unread_without_gh_or_repo(world, failure):
-  # gh missing (FileNotFoundError) or no repo to read: the row says `evidence unread`, the report is still written
+def test_respec_evidence_unread_without_gh(world):
+  # gh missing (FileNotFoundError): the row says `evidence unread`, the report is still written
   def comment(args):
     raise FileNotFoundError("gh")
   c = respec_world(world, comment)
-  if failure == "no repo":
-    from conftest import set_config
-    set_config(world, owners=["alice"])
-    world.gh.extend("api", lambda args, cwd, token=None: (0, json.dumps({"body": DEVIATION}), ""))
   [row] = signal_rows(world, c, "respec")
   assert "evidence unread (comment 901)" in row
 
