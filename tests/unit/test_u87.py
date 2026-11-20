@@ -25,6 +25,11 @@ def respec_world(world, comment):
   """`two_units`' handoff with respec R1 applied (opened for U02 on comment 901, its approval entry ranges `12-14`);
   `comment(args)` answers the one `gh api` read of that comment. U01's second launch is escalated."""
   c, _, _ = two_units(world)
+  for round_file in (c.root / "reviews").glob("spec-*-c1/round-1.json"):  # each spec reviewer kept one finding: none is a silent one
+    record = jread(round_file)
+    for name, entry in record["reviewers"].items():
+      entry["findings"] = [{"id": f"{name}-1-1", "severity": "low", "regression": "no", "disposition": "fixed"}]
+    jwrite(round_file, record)
   answer = world.gh.handlers["api"]
 
   def api(args, cwd, token=None):
@@ -58,6 +63,164 @@ def test_lessons_respec_evidence_unread(world):
   assert code == 0, out
   rows = lessons(c.hs.path("file", "postmortem.md").read_text(encoding="utf-8"))
   assert len(rows) == 2 and "evidence unread (comment 901)" in rows[0]
+
+
+def report_of(world, c):
+  code, out = world.run("postmortem", "--handoff", c.hid)
+  assert code == 0, out
+  return c.hs.path("file", "postmortem.md").read_text(encoding="utf-8")
+
+
+def signal_rows(world, c, signal):
+  return [r for r in lessons(report_of(world, c)) if f"| {signal} |" in r]
+
+
+def head_review(c, found, rulings=()):
+  """One head review of U02 (the reviewers in `found`) and U02's foreman record, overruling the findings `rulings` names."""
+  from test_u78 import reviewed
+  reviewed(c, "head-U02-c1", "head", "U02", list(found), found)
+  jwrite(c.hs.path("foreman", "U02"), {"dispatch_id": None, "decisions": [], "rounds": [{"round": 1, "phase": "posted", "outcome": "posted"}],
+                                       "rulings": [{"ruling": f"{fid} finding overruled — not a defect", "by": "owner"} for fid in rulings]})
+
+
+def finding(reviewer, n, **more):
+  return {"id": f"{reviewer}-1-{n}", "severity": "high", "regression": "no", **more}
+
+
+def named(rows, *names):
+  """The rows whose fact opens with one of the reviewers `names` (the fixture's spec reviewers `design` and `zoom-out` ran quiet)."""
+  return [r for r in rows if r.split("|")[4].strip().split(":")[0] in names]
+
+
+def test_reviewer_rows_most_overruled(world):
+  # a reviewer with no finding kept and the one overruled most each get a row; the others none
+  c, _, _ = two_units(world)
+  head_review(c, {"kept": {"findings": [finding("kept", 1), finding("kept", 2)]}, "quiet": {"findings": []},
+                  "lost": {"findings": [finding("lost", 1)]}, "most": {"findings": [finding("most", 1), finding("most", 2)]}},
+              rulings=["lost-1-1", "most-1-1"])
+  nothing = named(signal_rows(world, c, "reviewer kept nothing"), "kept", "quiet", "lost", "most")
+  assert len(nothing) == 2 and "lost: 1 raised, 1 overruled" in nothing[0] and "quiet: 0 raised, 0 overruled" in nothing[1]
+  [most] = signal_rows(world, c, "reviewer most overruled")
+  assert "most: 1 of 2 overruled" in most
+
+
+def test_reviewer_rows_no_overrule_anywhere(world):
+  # nothing overruled: no reviewer is the most overruled, and a quiet one is still a reviewer with no finding kept
+  c, _, _ = two_units(world)
+  head_review(c, {"kept": {"findings": [finding("kept", 1)]}, "quiet": {"findings": []}})
+  assert signal_rows(world, c, "reviewer most overruled") == []
+  [row] = named(signal_rows(world, c, "reviewer kept nothing"), "kept", "quiet")
+  assert "quiet: 0 raised" in row
+
+
+def test_reviewer_rows_every_reviewer_quiet(world):
+  # every reviewer raised nothing: each is a reviewer with no finding kept
+  c, _, _ = two_units(world)
+  head_review(c, {"a": {"findings": []}, "b": {"findings": []}})
+  assert len(named(signal_rows(world, c, "reviewer kept nothing"), "a", "b", "design", "zoom-out")) == 4
+  assert signal_rows(world, c, "reviewer most overruled") == []
+
+
+def test_fix_design_rows(world):
+  # a fix-design finding is a row naming its review
+  c, _, _ = two_units(world)
+  head_review(c, {"a": {"findings": [finding("a", 1, disposition="fix-design", claim="the spec contradicts itself"), finding("a", 2)]}})
+  [row] = signal_rows(world, c, "fix-design finding")
+  assert "U02" in row and "reviews/head-U02-c1" in row and "a-1-1" in row and "the spec contradicts itself" in row
+
+
+def test_amendment_rows_need_a_ruling(world):
+  # an amendment file counts once a ruling names its comment; the legacy state entry counts; an unruled file does not
+  c, _, _ = two_units(world)
+  entry = {"unit": "U01", "name": "dequeue", "text": "dequeue returns null", "at": "2026-11-16T01:00:00Z"}
+  jwrite(c.hs.path("file", "amendments", "77.json"), [{**entry, "comment_id": 77}])
+  jwrite(c.hs.path("file", "amendments", "78.json"), [{**entry, "name": "peek", "text": "abandoned", "comment_id": 78}])
+  jwrite(c.hs.path("foreman", "U02"), {"dispatch_id": None, "rounds": [], "decisions": [
+      {"id": "D1", "point": 3, "source": "comment 77", "asked_at": "2026-11-16T00:00:00Z"}],
+      "rulings": [{"decision": "D1", "ruling": "amend — dequeue returns null", "by": "owner", "posted": "comment 5"}]})
+  c.state["amendments"] = [{"unit": "U01", "name": "legacy", "text": "an old one", "at": "2026-11-14T00:00:00Z"}]
+  c.save()
+  rows = signal_rows(world, c, "interface amendment")
+  assert len(rows) == 2 and "state.json amendments" in rows[0] and "legacy: an old one" in rows[0]
+  assert "amendments/77.json" in rows[1] and "dequeue: dequeue returns null" in rows[1] and "U01" in rows[1]
+  assert not any("abandoned" in r for r in rows)
+
+
+def cap_world(world, rulings, stopped):
+  c, _, _ = two_units(world)
+  decisions = [{"id": f"D{n}", "point": 2, "source": f"review head-U02-c{n} cap", "asked_at": "2026-11-16T00:00:00Z"} for n in (1, 2)]
+  jwrite(c.hs.path("foreman", "U02"), {"dispatch_id": None, "rounds": [], "decisions": decisions, "stopped": stopped,
+                                       "rulings": [{"decision": d, "ruling": r, "by": "owner"} for d, r in rulings]})
+  return c
+
+
+def test_cap_stop_rows_follow_the_cap_decision_that_stopped(world):
+  # only the cap decision answered stop is a stop at the cap, once; a later stop of another cause is not its cap's
+  c = cap_world(world, [("D1", "one more round"), ("D2", "stop")], {"reason": "later", "by": "owner"})
+  [row] = signal_rows(world, c, "unit stopped at the cap")
+  assert "U02" in row and "foreman/U02.json D2" in row
+
+
+def test_a_stop_after_a_proceeded_cap_is_no_cap_stop(world):
+  c = cap_world(world, [("D1", "one more round"), ("D2", "one more round")], {"reason": "launch failed", "by": "owner"})
+  assert signal_rows(world, c, "unit stopped at the cap") == []
+
+
+def test_default_answered_decisions_are_rows(world):
+  # a `decide --default` answer (marked in the record) and a foreman decision answered by `superegm` are rows; an owner's own is not
+  c, _, _ = two_units(world)
+  stamp = {"decided_at": "2026-11-16T00:00:00Z", "mode": "typed"}
+  c.state["decisions"] = {"U01/D1": {"answer": "(a)", "by": "owner", "default": True, **stamp},
+                          "U01/D2": {"answer": "(b)", "by": "owner", **stamp}}
+  c.save()
+  jwrite(c.hs.path("foreman", "U02"), {"dispatch_id": None, "rounds": [], "stopped": None, "decisions": [
+      {"id": "D1", "point": 2, "source": "review head-U02-c1 round 2", "asked_at": "2026-11-16T00:00:00Z"}],
+      "rulings": [{"decision": "D1", "ruling": "one more round", "by": "superegm"}]})
+  rows = signal_rows(world, c, "decision answered by default")
+  assert len(rows) == 2 and "U01" in rows[0] and "state.json decisions U01/D1" in rows[0] and "U01/D2" not in "".join(rows)
+  assert "U02" in rows[1] and "foreman/U02.json D1" in rows[1]
+
+
+def test_decide_default_marks_the_record(world):
+  # `decide --default` stores `default: true` beside the answer; an answer given with `--answer` does not
+  from test_plan import BLOCKED, graph, planned, state
+  spec, sha, plan, card = planned(world, BLOCKED)
+  assert graph(world, plan, card)[0] == 0
+  assert world.run("decide", "--unit", "U02", "--decision", "D1", "--default", "--runcard", card)[0] == 0
+  assert state(world)["decisions"]["U02/D1"]["default"] is True
+  assert world.run("decide", "--unit", "U02", "--decision", "D1", "--answer", "(b)", "--runcard", card)[0] == 0
+  assert "default" not in state(world)["decisions"]["U02/D1"]
+
+
+def test_respec_rows_keep_to_their_own_handoff(world):
+  # another handoff's R1, approved later, does not lend its ranges to this handoff's R1
+  c = respec_world(world, lambda args: (0, json.dumps({"id": 901, "body": DEVIATION}), ""))
+  path = c.root / "approvals" / f"{SLUG}.json"
+  record = jread(path)
+  record["entries"].append({**record["entries"][-1], "handoff_id": "2026-11-20-other", "ranges": [[99, 100]]})
+  jwrite(path, record)
+  [row] = signal_rows(world, c, "respec")
+  assert ":12-14" in row and "99-100" not in row
+
+
+@pytest.mark.parametrize("failure", ["missing", "no repo"])
+def test_respec_evidence_unread_without_gh_or_repo(world, failure):
+  # gh missing (FileNotFoundError) or no repo to read: the row says `evidence unread`, the report is still written
+  def comment(args):
+    raise FileNotFoundError("gh")
+  c = respec_world(world, comment)
+  if failure == "no repo":
+    from conftest import set_config
+    set_config(world, owners=["alice"])
+    world.gh.extend("api", lambda args, cwd, token=None: (0, json.dumps({"body": DEVIATION}), ""))
+  [row] = signal_rows(world, c, "respec")
+  assert "evidence unread (comment 901)" in row
+
+
+def test_retro_needs_a_file(world, tmp_path):
+  c, _, _ = two_units(world)
+  code, out = world.run("postmortem", "--handoff", c.hid, "--retro", str(tmp_path / "none.md"))
+  assert code == 1 and "postmortem: --retro" in out and "is not a file" in out
 
 
 def test_retro_copy(world, tmp_path):
@@ -96,7 +259,7 @@ def test_retro_skill_text(phrase):
 
 @pytest.mark.parametrize("path, phrase", [("skills/integrate/SKILL.md", "/superegm:retro"), ("skills/using-superegm/SKILL.md", "/superegm:retro")])
 def test_integrate_offers_retro_and_phase_list(path, phrase):
-  # integrate offers the retrospective once after the post-mortem; the phase list ends with it
+  # integrate offers the retrospective once after the post-mortem; the typed-skills list names it
   assert phrase in text(path)
 
 
