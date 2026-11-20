@@ -8,7 +8,7 @@ import json
 import pytest
 
 from superegm import atomic_write
-from test_file import planned, open_card, hp
+from test_file import planned, open_card, hp, converge, dry_run, SLUG
 
 
 def F(reviewer, n, i, sev="high"):
@@ -97,3 +97,55 @@ def test_respec_open_writes_or_refuses(world, monkeypatch, role, mode, finding, 
     assert "comment_id" not in record_
   else:
     assert respec_files(world) == []
+
+
+# ---------------------------------------------------------------- S2: file waits
+
+
+def put_review_respec(world, rid="R1", review="abc123-plan-U02-c1", finding="readiness-1-1"):
+  """`respec/R<n>.open.json` as `respec open` writes it from a plan review's fix-design finding (`unit: null`)."""
+  atomic_write(hp(world, "file", "respec", f"{rid}.open.json"),
+               {"id": rid, "unit": None, "review": review, "finding": finding, "at": "2026-11-04T00:00:00Z"})
+
+
+def approvals_path(world):
+  return world.artifacts / "approvals" / f"{SLUG}.json"
+
+
+def add_entry(world, **fields):
+  """One more approval entry, the latest one's fields with `fields` over them."""
+  data = json.loads(approvals_path(world).read_text(encoding="utf-8"))
+  data["entries"].append(data["entries"][-1] | {"approved_at": "2026-11-05T00:00:00Z"} | fields)
+  approvals_path(world).write_text(json.dumps(data), encoding="utf-8")
+
+
+def respec_state(world, state, handoff_id):
+  put_review_respec(world)
+  if state == "applied":
+    add_entry(world, respec="R1", review="spec-r1-c2", kind="respec-review")
+  elif state == "withdrawn":  # a later approval opened another handoff
+    add_entry(world, handoff_id=f"{SLUG}-ffffff", kind="opening", review=f"spec-{SLUG}-c2")
+
+
+@pytest.mark.parametrize("state, command, refused", [
+  ("open", "gate --pass", True), ("open", "apply --yes", True),
+  ("applied", "gate --pass", False), ("withdrawn", "gate --pass", False),
+])
+def test_file_waits_on_an_open_respec(world, state, command, refused):
+  if command == "apply --yes":  # the gate passed and the dry run confirmed before the respec opened: a resumed apply
+    spec, _, handoff_id, card = dry_run(world)
+  else:
+    spec, _, handoff_id = planned(world)
+    for uid in ("U01", "U02"):
+      converge(world, uid)
+    card = open_card(world, "file", str(spec))
+  respec_state(world, state, handoff_id)
+  argv = ["apply", "--spec", spec, "--yes"] if command == "apply --yes" else ["gate", "--pass", "--spec", spec]
+  argv += ["--handoff", handoff_id] if state == "withdrawn" else []
+  code, out = world.run(*argv, "--runcard", card)
+  assert ("file: respec R1 open" in out) is refused, out
+  if refused:
+    assert code == 1 and not world.gh.issues, out  # nothing filed
+  if state == "applied":
+    assert code == 0, out
+
