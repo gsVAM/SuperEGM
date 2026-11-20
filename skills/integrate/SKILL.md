@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Merges the landed units of a wave into the base branch and closes the handoff.
 ---
 
-<!-- Added by SuperEGM (gsVAM), 2026: the integrate skill (spec section 12); close's issue closes, `--note` and `--close --patch` (U32); the follow-ups given as known and quoted (U51); the post-mortem run after `close` (U78); the respec refusals (U86); the one-time offer of `/superegm:retro` after the post-mortem (U87). -->
+<!-- Added by SuperEGM (gsVAM), 2026: the integrate skill (spec section 12); close's issue closes, `--note` and `--close --patch` (U32); the follow-ups given as known and quoted (U51); the post-mortem run after `close` (U78); the respec refusals (U86); the one-time offer of `/superegm:retro` after the post-mortem (U87); the respec offered beside the void on a design finding (U91). -->
 
 # Integrate (phase 7)
 
@@ -92,6 +92,16 @@ Otherwise, per high or medium finding, in id order:
 1. Append one row to the spec's `## Units` table for the unit that fixes it, with the note
    `(from integrate, review <id>)` in its scope cell; the spec changes nowhere else.
 2. `superegm review settle --review <id> --finding <fid> --disposition escalated --runcard <card>`.
+
+A finding in the latest handoff whose fix is in the frozen spec's design, not a new unit: on a normal card only,
+ask the owner whether it is a design defect; on Yes, `superegm review settle --review <id> --finding <fid> --disposition fix-design --owner --runcard <card>`
+(no row for it), then ask one question with two options: `Respec` (design section 7.6),
+`superegm respec open --review <id> --finding <fid> --runcard <card>`, which writes `respec/R<n>.open.json`; this
+skill and `next` then wait on it (`open: respec R<n>`, `waiting respec R<n>`) until `/superegm:review-spec` approves it
+with `approve-spec --respec R<n>`, which closes this review's cycle so the next integrate opens a new one; or `Void`,
+`superegm approve-spec --void --review <id> --spec <spec-path> --runcard <card>`, for a change too large to respec. Tell
+the owner the outcome in one line, then Step 4. The respec is the owner's alone: a leavemealone run never offers it
+(the helper refuses it under a leavemealone card or `SUPEREGM_ROLE`) and escalates the finding as above.
 
 Then `superegm approve-spec --spec <spec-path> --amend-units --runcard <card>`: the approval is
 re-recorded at the new bytes without a review round, the handoff id kept; it refuses when any
