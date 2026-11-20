@@ -65,3 +65,14 @@ def test_finish_records_head_and_builder_status(world, tmp_path, pr, comment, gh
     assert any(c[:3] == ["pr", "view", "7"] for c in world.gh.calls)
   assert (exit_record.get("head"), exit_record["builder_status"]) == (head, word) and respec.marks(st, handoff).get("U2") == mark
   assert (f"U2 launch 1 exit read failed: {gh_fails}" in journal) == bool(gh_fails)
+
+
+@pytest.mark.parametrize("login, body, accepted", [
+  ("superegm-builder[bot]", "**Builder status:** DONE", True), ("superegm-builder[bot]", "**Deviation (spec):** x.md:3", True),
+  ("stranger", "**Builder status:** DONE", False), ("superegm-builder[bot]", "Quoting:\n**Builder status:** DONE", False)])
+def test_builder_comment_filter(login, body, accepted):
+  # one filter, moved out of builder_facts, used by builder_facts and finish
+  from superegm import record_launch, status
+  assert status.builder_comment({"user": {"login": login}, "body": body}, {"superegm-builder[bot]"}) is accepted
+  facts = Path(status.__file__).read_text(encoding="utf-8").split("def builder_facts", 1)[1].split("\ndef ", 1)[0]
+  assert "builder_comment(" in facts and "builder_comment(" in Path(record_launch.__file__).read_text(encoding="utf-8")
