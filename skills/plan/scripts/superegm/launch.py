@@ -78,12 +78,19 @@ def launch(args, card):
   actionable = respec.actionable(st, st.handoff_id) if st.handoff_id else []
   again = {unit for kind, _, unit in actionable if kind == "relaunch" and unit in views and unit not in stopped
            and unit not in idle and not views[unit].get("landed") and not merged(views[unit])}
-  flying = [uid for uid in handoff.graph.order if uid not in again and in_flight(st, uid, views[uid], idle)]
+  # a unit waiting on a respec (the raising unit of an open one, or a held one) holds no slot while no launch of it
+  # runs: the other units of the wave go on while the owner corrects the spec
+  waiting = held | ({r.get("unit") for r in respec.open(st, st.handoff_id)} if st.handoff_id else set())
+  flying = [uid for uid in handoff.graph.order if uid not in again and not (uid in waiting and not respec.live_launch(st, uid))
+            and in_flight(st, uid, views[uid], idle)]
+  from superegm.report import pending_decisions  # imported here: `report` imports this module
   for uid in handoff.graph.order:
     if uid in stopped or uid in idle or views[uid].get("landed") or merged(views[uid]):
       continue
     foreman, launches = core.load_foreman(st, uid), load_launches(st, uid)  # read once per unit
-    if ready_again(foreman, launches) or conflict_again(views[uid], foreman, launches, handoff.graph.parallel):
+    # a unit with a pending owner decision is not ready again: the owner rules first (spec section 7.2)
+    if ((ready_again(foreman, launches) and not pending_decisions(foreman))
+        or conflict_again(views[uid], foreman, launches, handoff.graph.parallel)):
       again.add(uid)
   ready = set(summary["ready"]) | again  # a unit an ingest returned to `revise` waits for a slot as a ready unit does
   marked = [uid for uid in handoff.graph.order if uid in ready and uid not in stopped][:max(0, config["max_in_flight"] - len(flying))]

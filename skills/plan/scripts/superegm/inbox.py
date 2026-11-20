@@ -228,14 +228,15 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
 
 def respec_held(hs: core.Store, uid: str) -> bool:
   """Whether `respec.marks` marks the unit `respec: R<n>` (spec section 7.6): its head is held, no merge offered.
-  Read here on every call, never from `state.json`, which other commands replace whole."""
+  Read here on every call, never from `state.json`, which other commands replace whole. A failed read holds the unit
+  (fail closed): no merge is offered on a head a mark may hold."""
   from superegm import respec  # at call time: `respec` reads `launch`'s records
   if not hs.handoff_id:
     return False
   try:
     return str(respec.marks(hs, hs.handoff_id).get(uid) or "").startswith("respec:")
-  except core.HandoffError:
-    return False
+  except (core.HandoffError, ValueError, OSError):
+    return True
 
 
 def conflict_items(repo: str, state: dict, uid: str, foreman: dict, launches: list, parallel: bool,

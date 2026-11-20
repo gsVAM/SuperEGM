@@ -111,9 +111,15 @@ def prepare(args, card):
   foreman_data = core.load_foreman(st, unit)
   pr = (record.get("pr") or {}).get("number") if rnd >= 2 else None
   merge = merge_mode(handoff.graph.parallel, record.get("pr") if pr else None, foreman_data)  # spec section 6.1
-  # spec section 7.6: the standing mark, read once and before anything starts; a held unit's merge is never `alone`, whose
-  # orders forbid any change beyond the merge: its relaunch carries the correction with the merge (`with-fix`)
-  standing = respec_standing(st, unit)
+  # spec section 7.6: the corrections and the standing mark, one read before anything starts (`respec_read`); a held
+  # unit's merge is never `alone`, whose orders forbid any change beyond the merge: its relaunch carries the
+  # correction with the merge (`with-fix`)
+  corrections, standing = respec_read(st, unit)  # the record's `respecs` are these corrections (U86)
+  launches_before = load_launches(st, unit)
+  if standing and launches_before and (record["launched"].get("at") or "") < (launches_before[-1].get("started_at") or ""):
+    # a relaunch of a held unit starts from `launch`'s fresh mark, which took its `max_in_flight` slot, never straight
+    # from a word's `launch-builder`
+    raise core.HandoffError(f"{unit} holds respec {standing}: its relaunch waits for `launch`'s slot")
   if standing and merge == "alone":
     merge = "with-fix"
   bin_dir = st.path("launches", f"{unit}_r{rnd}_bin")
@@ -158,8 +164,7 @@ def prepare(args, card):
   reviews = core.gh_pages(f"repos/{repo}/pulls/{pr}/reviews") if pr else []
   audit = AUDIT_LINE.format(owner=record["launched"].get("by", "unknown"),  # a pre-upgrade mark records no login
                             runcard=args.runcard, unit=unit, handoff=st.handoff_id)
-  corrections = corrections_for(st, unit)  # read once, at prompt preparation: the record's `respecs` are these (U86)
-  text = prompt_text(number, unit, issue_body, orders_text(tools, launched_gh, builder_config["max_subagent_calls"], str(bin_dir / "superegm-precheck"),
+  text =prompt_text(number, unit, issue_body, orders_text(tools, launched_gh, builder_config["max_subagent_calls"], str(bin_dir / "superegm-precheck"),
                                                            merge=merge is not None, attempts=attempts), orient_text, comments, reviews, pr, builder, audit, pr_block,
                      spec_range=range_text, owners=config.get("owners") or [], foreman=foreman_data,
                      amendments=amendments_for(st, unit, issue_body), corrections=corrections)
@@ -206,7 +211,7 @@ def prepare(args, card):
   # the one behaviour (amendment 10): the wrapper started detached, then the launch recorded `running`
   pid = start_detached(["/bin/sh", "-c", line], st.path("launches", f"{unit}_r{rnd}.log"), dict(os.environ))
   launches = load_launches(st, unit)
-  # `respec` when the prompt carries the standing mark's correction: reason and `respecs` from the same reads, before the start
+  # `respec` when the prompt carries the standing mark's correction: reason and `respecs` from `respec_read`'s one read
   reason = ("merge" if merge == "alone" else "respec" if standing in {c["id"] for c in corrections}
             else launch_reason(launches, foreman_data))
   entry = {"round": rnd, "reason": reason, "worktree": str(worktree), "branch": branch,
@@ -761,17 +766,24 @@ def corrections_for(st, unit: str) -> list[dict]:
   return out
 
 
-def respec_standing(st, unit: str) -> str | None:
-  """The R<n> of the unit's standing `respec: R<n>` mark (`respec.marks`, spec section 7.6), None without one. Read before
-  the builder starts, so a failing read refuses the launch and never leaves a builder running unrecorded."""
+def respec_read(st, unit: str) -> tuple[list[dict], str | None]:
+  """Spec section 7.6, read once before the builder starts: the unit's corrections (`corrections_for`) and the R<n> of
+  its standing `respec: R<n>` mark (`respec.marks`), None without one. The corrections are read first: a respec applied
+  after that read leaves a standing mark the prompt would not carry, so the launch refuses rather than split its
+  reason, merge mode and `respecs`. Any failed read refuses the launch (fail closed), never a builder running
+  unrecorded or unheld."""
   from superegm import respec
   if not st.handoff_id:
-    return None
+    return [], None
   try:
+    corrections = corrections_for(st, unit)
     mark = str(respec.marks(st, st.handoff_id).get(unit) or "")
-  except core.HandoffError:
-    return None
-  return mark.split(": ", 1)[1] if mark.startswith("respec: ") else None
+  except (core.HandoffError, ValueError, OSError) as error:
+    raise core.HandoffError(f"respec marks unreadable: {error}") from None
+  standing = mark.split(": ", 1)[1] if mark.startswith("respec: ") else None
+  if standing and standing not in {c["id"] for c in corrections}:
+    raise core.HandoffError(f"{unit}: respec {standing} was applied while the launch was prepared: launch it again")
+  return corrections, standing
 
 
 def launch_reason(launches: list, foreman: dict) -> str:

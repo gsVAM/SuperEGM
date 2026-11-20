@@ -90,7 +90,8 @@ def respec_lines(handoff) -> list:
   """Spec section 7.6: `open: respec R<n>` for each open respec (the line integrate refuses on), then `<U> held: respec
   R<n>` for each unit `respec.marks` marks `respec:` (no merge is offered for its head, however its review ended), then
   the wave's step 5b work, one line per `respec.actionable` entry: `respec post R<n> <U> #<issue> '<comment file>'`
-  and `respec relaunch R<n> <U>`."""
+  and `respec relaunch R<n> <U>`. A failed read is never "no respec": it prints the one line `respec: read failed:
+  <error>`, which integrate refuses on as it does an open respec."""
   from superegm import respec  # at call time: `respec` reads `launch`, which this module's callers import
   hid = handoff.store.handoff_id
   if not hid:
@@ -98,8 +99,8 @@ def respec_lines(handoff) -> list:
   try:
     opened, marks = respec.open(handoff.store, hid), respec.marks(handoff.store, hid)
     work = respec.actionable(handoff.store, hid)
-  except core.HandoffError:
-    return []
+  except (core.HandoffError, ValueError, OSError) as error:
+    return [f"respec: read failed: {error}"]
   units = handoff.state.get("units") or {}
   lines = ([f"open: respec {r['id']}" for r in opened]
            + [f"{uid} held: respec {mark.removeprefix('respec:').strip()}" for uid, mark in marks.items() if mark.startswith("respec:")])
@@ -146,7 +147,10 @@ def wait_events(handoff, seconds: int, card: dict) -> list:
   """Poll `status_pass` (reading only) until a unit has an unreported event or the deadline
   passes; the event lines, or `deadline`; one state write on return. Before that write, under a
   `wave` `card`, `post_board` reads the tracking issue once and, when the rows changed, rewrites
-  its board (`gh issue edit`, `board_changed_at`), a failed read or write journaled `board write failed`."""
+  its board (`gh issue edit`, `board_changed_at`), a failed read or write journaled `board write failed`. `run` prints
+  `respec_lines` after these lines, `deadline` included: `open: respec R<n>`, `<U> held: respec R<n>` and
+  `respec: read failed: <error>` (nothing for the wave to do; integrate refuses on them), then `respec post …` and
+  `respec relaunch …` (the wave's step 5b)."""
   state = handoff.state
   previous = (state.get("status") or {}).get("units") or {}
   deadline = core.NOW() + seconds
