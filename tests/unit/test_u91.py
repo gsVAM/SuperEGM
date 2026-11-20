@@ -10,6 +10,7 @@ import pytest
 from superegm import atomic_write
 from test_file import planned, open_card, hp, converge, dry_run, SLUG
 from test_u43 import registry  # noqa: F401 -- autouse: HOME under tmp_path, so `next` never reads the owner's registry
+from test_builders import spawn_fake, no_graphify, which  # noqa: F401  the fixtures test_builders' launches run under
 
 
 def F(reviewer, n, i, sev="high"):
@@ -299,4 +300,37 @@ def test_skills_offer_respec_beside_void(path):
   assert "--void" in text
   offer = next(p for p in text.split("\n\n") if "superegm respec open --review" in p)
   assert "--void" in offer and "leavemealone" in offer  # beside the void, and never under a leavemealone card
+
+
+# ---------------------------------------------------------------- S7: a plan-origin respec skips unfiled units
+
+
+def test_plan_respec_skips_unfiled_units(world, monkeypatch):
+  """A plan-origin respec R1 waits; U05 filed, U07 unfiled: status, readiness and launch skip U07 only."""
+  import test_builders as tb
+  from superegm import inbox, store as store_of
+  s, card, hid, _ = tb.seed(world, units=("U05", "U07"))
+  state = json.loads(s.path("state").read_text(encoding="utf-8"))
+  del state["units"]["U07"]  # unfiled: its plan review raised the design finding
+  atomic_write(s.path("state"), state)
+  rid = f"{hid[-6:]}plan-U07-c1"
+  atomic_write(s.path("reviews", rid, "review.json"),
+               {"id": rid, "kind": "plan", "artifact": "U07", "cycle": 1, "handoff_id": hid, "rulings": []})
+  atomic_write(s.path("file", "respec", "R1.open.json"),
+               {"id": "R1", "unit": None, "review": rid, "finding": "readiness-1-1", "at": "2026-11-04T00:00:00Z"})
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+
+  code, out = world.run("status", "--runcard", card)
+  assert code == 0, out
+  rows = out.splitlines()
+  units = [line.split()[0] for line in rows if line[:1] == "U"]
+  ready = next(line for line in rows if line.startswith("ready: "))
+  assert "U07" not in units and "U05" in units and "U07" not in ready
+  code, out = world.run("launch", "--runcard", card)
+  assert code == 0, out
+  marked = next((line for line in out.splitlines() if line.startswith("marked:")), "")
+  assert "U05" in marked and "U07" not in marked  # readiness and launch skip it
+  assert "launched" not in json.loads(s.path("state").read_text(encoding="utf-8"))["units"].get("U07", {})
+  lines = [inbox.line_of(i) for i in inbox.inbox_items(store_of(world.repo), [hid])]
+  assert any("waiting respec R1" in line for line in lines), lines
 
