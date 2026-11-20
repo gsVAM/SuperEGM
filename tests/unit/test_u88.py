@@ -77,6 +77,21 @@ def test_astra_evidence_fence_outgrows_the_evidence(world, tmp_path):
     assert f"```\n{text.rstrip(chr(10))}\n```\n" in astra
 
 
+def test_an_undecodable_diff_opens_the_panel_and_reaches_astra_with_a_replacement(world, tmp_path, monkeypatch):
+  """Round 5 (astra-4-3): a diff of a Latin-1 file is not UTF-8; the panel still opens, nothing is left half-written, and the Astra brief
+  carries the diff decoded with replacement characters, as `prepare.cut_diff` decodes it."""
+  real = evidence
+  def latin_diff(world, body=BODY_TEXT):
+    files = real(world, body)
+    Path(files[1]).write_bytes(DIFF_TEXT.encode("utf-8") + "+caf\xe9 = 1\n".encode("latin-1"))
+    return files
+  monkeypatch.setitem(globals(), "evidence", latin_diff)
+  pid, _ = contest(world, tmp_path)
+  folder = world.artifacts / "judges" / pid
+  astra = (folder / "round-1" / "brief-astra.md").read_text(encoding="utf-8")
+  assert "+caf� = 1" in astra and (folder / "panel.json").is_file() and (folder / "round-1" / "brief.md").is_file()
+
+
 def panel_with_round_one(world, tmp_path):
   pid, _ = contest(world, tmp_path)
   folder = world.artifacts / "judges" / pid
@@ -340,14 +355,9 @@ def test_a_point_one_decision_stays_pending_on_each_unconverged_finding():
 
 def test_the_inbox_listing_shows_the_verdict_line(world):
   """A contested finding whose decision carries the panel's verdict line lists it, in the item and in its printed line."""
-  from test_inbox import D, HEAD, POSTED, U, F as findings, open_wave_card, seed as inbox_seed
-  from superegm.inbox import inbox_items, line_of
-  open_wave_card(world)
-  s = inbox_seed(world, **U(decisions=D(1, "review head-U01-c1 round 1", question="foreman-1-1 | high | src/x.py:3 | regression: no | c\n" + VERDICT_LINE),
-                            rounds=POSTED(), reviews=HEAD(1, findings("high"), builder_contested=[{"fid": "foreman-1-1", "reason": "r"}])))
-  item = next(i for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "contested")
-  assert VERDICT_LINE.strip() in item["verdict"] and "judges/p1/verdict.json" in line_of(item)
-  assert all("verdict" not in i for i in inbox_items(s, [s.handoff_id]) if i["kind"] != "contested")
+  from superegm.inbox import line_of
+  (item,) = contested_items(world, CONTEST.format("high") + SPLIT_LINE, panel="capped", full=True)
+  assert SPLIT_LINE.strip() in item["verdict"] and "judges/head-U01-c1-r1-a1b2c3/verdict.json" in line_of(item)
 
 
 def test_the_wave_report_names_each_judges_ruling_with_its_panel(world):
@@ -365,30 +375,65 @@ def test_the_wave_report_names_each_judges_ruling_with_its_panel(world):
   assert section.strip() == "- U01 q1 (judges p-7): change-review-1-1 finding overruled — the panel"
 
 
-def contested_items(world, question, n=1, findings=("high",), contested=(1,)):
-  """The inbox's `contested` items of one head review at round `n`, its point-1 decision asking `question`."""
+PANELS = {"open": None, "between": {"converged": False, "cap_reached": False, "open": ["Q1"]},
+          "capped": {"converged": False, "cap_reached": True, "open": ["Q1"]}, "converged": {"converged": True, "cap_reached": False, "open": []}}
+
+
+def contested_items(world, question, n=1, findings=("high",), contested=(1,), panel=None, full=False):
+  """The inbox's `contested` items (their fingerprints, else the items) of one head review at round `n`, its point-1 decision asking
+  `question`; `panel`: the record of a panel opened for this review and round in the store, a key of PANELS (`open`: a panel.json and no
+  verdict.json; the others add that verdict.json), none: no panel was opened."""
   from test_inbox import D, HEAD, POSTED, U, F as found, open_wave_card, seed as inbox_seed
   from superegm.inbox import inbox_items
   open_wave_card(world)
   s = inbox_seed(world, **U(decisions=D(1, f"review head-U01-c1 round {n}", question=question), rounds=POSTED(n),
                             reviews=HEAD(n, found(*findings), builder_contested=[{"fid": f"foreman-1-{i}", "reason": "r"} for i in contested])))
-  return [i["fingerprint"] for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "contested"]
+  if panel:
+    pid = f"head-U01-c1-r{n}-a1b2c3"
+    core.atomic_write(s.path("judges", pid, "panel.json"), {"id": pid, "rounds": {}})
+    if PANELS[panel]:
+      core.atomic_write(s.path("judges", pid, "verdict.json"), {"panel": pid} | PANELS[panel])
+  items = [i for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "contested"]
+  return items if full else [i["fingerprint"] for i in items]
 
 
-@pytest.mark.parametrize("severity, n, verdict, listed", [
-    ("high", 1, "", False), ("medium", 1, "", False), ("high", 1, VERDICT_LINE, True),
-    ("high", 5, "", False), ("high", 5, VERDICT_LINE, True)])
-def test_a_blocking_contest_reaches_the_inbox_only_with_the_panels_verdict_line(world, severity, n, verdict, listed):
-  """Round 4 (astra-3-1, astra-3-2): the decision opens before the panel runs, so a high or medium head contest lists no owner form
-  until the panel's unconverged verdict line is in the decision, on the capped round (n = 5) too."""
-  question = f"foreman-1-1 | {severity} | src/x.py:3 | regression: no | c\n" + verdict
-  assert contested_items(world, question, n=n, findings=(severity,)) == (["U01/contested/q1/foreman-1-1"] if listed else [])
+SPLIT_LINE = VERDICT_LINE.replace("judges/p1/", "judges/head-U01-c1-r1-a1b2c3/")
+CONTEST = "foreman-1-1 | {} | src/x.py:3 | regression: no | c\n"
+
+
+@pytest.mark.parametrize("severity, n, panel, line, listed", [
+    ("high", 1, "open", "", False), ("medium", 1, "open", "", False), ("high", 1, "between", "", False),
+    ("high", 1, "capped", SPLIT_LINE, True), ("medium", 1, "capped", SPLIT_LINE, True),
+    ("high", 5, "open", "", False), ("high", 5, "capped", SPLIT_LINE.replace("-r1-", "-r5-"), True)])
+def test_a_blocking_contest_is_held_only_while_its_panel_is_open(world, severity, n, panel, line, listed):
+  """Round 5 (codebase-details-4-1): a high or medium head contest lists no owner form while a panel opened for its review and round has
+  no unconverged verdict at the cap yet (no verdict.json, or one with rounds to go), on the capped round (n = 5) too, and lists it with
+  the panel's verdict line once the panel is done and split."""
+  items = contested_items(world, CONTEST.format(severity) + line, n=n, findings=(severity,), panel=panel, full=True)
+  assert [i["fingerprint"] for i in items] == (["U01/contested/q1/foreman-1-1"] if listed else [])
+  assert all(line.strip() in i["verdict"] for i in items)
+
+
+@pytest.mark.parametrize("severity, panel", [("high", None), ("medium", None), ("high", "converged"), ("medium", "converged")])
+def test_a_blocking_contest_no_panel_will_rule_reaches_the_owner(world, severity, panel):
+  """Round 5 (astra-4-1, codebase-details-4-1): no panel was opened (`judges question` refused the round: a low or CI finding beside
+  it), or the panel converged on a `redesign` that `decision rule` refuses over mediums: no verdict line will come, the owner's forms list."""
+  items = contested_items(world, CONTEST.format(severity), findings=(severity,), panel=panel, full=True)
+  assert [i["fingerprint"] for i in items] == ["U01/contested/q1/foreman-1-1"] and all("verdict" not in i for i in items)
+
+
+@pytest.mark.parametrize("panel, listed", [("open", False), (None, True)])
+def test_the_hold_reads_the_panel_record_not_the_questions_text(world, panel, listed):
+  """Round 5 (astra-4-2): a builder's reason carrying `(judges/old/verdict.json)` neither holds nor lifts the hold, and shows no verdict line."""
+  question = "foreman-1-1 | high | src/x.py:3 | regression: no | see the old run (judges/old/verdict.json), their last choices: x\n"
+  items = contested_items(world, question, panel=panel, full=True)
+  assert [i["fingerprint"] for i in items] == (["U01/contested/q1/foreman-1-1"] if listed else []) and all("verdict" not in i for i in items)
 
 
 def test_a_low_contest_beside_a_blocking_one_lists_at_once(world):
-  """A low finding goes to no panel, so its owner form lists without a verdict line while the high one waits for it."""
+  """A low finding goes to no panel, so its owner form lists with no panel's verdict while the high one waits for an open panel."""
   question = "foreman-1-1 | high | src/x.py:3 | regression: no | c\nforeman-1-2 | low | src/x.py:3 | regression: no | c\n"
-  assert contested_items(world, question, findings=("high", "low"), contested=(1, 2)) == ["U01/contested/q1/foreman-1-2"]
+  assert contested_items(world, question, findings=("high", "low"), contested=(1, 2), panel="open") == ["U01/contested/q1/foreman-1-2"]
 
 
 def test_the_wave_report_lists_a_judges_settlement_the_review_recorded(world):
@@ -419,7 +464,7 @@ ROOT = Path(__file__).resolve().parents[2]
     ("skills/judges/references/astra_judge.md",
      ("the judge lane; the lane's model and effort read from the panel's `astra` member (U28); inline evidence (U88)",
       "embeds the contents of every evidence file in the panel's `evidence[]`, for every question form",
-      "whatever the question's form, and sits outside the repository folder, except"),
+      "whatever the question's form, and sits outside the repository folder, except the spec"),
      ("reads no paths", "On a head contest the brief")),
     ("skills/wave/references/decision_points.md",
      ("only `finding overruled` settles through `review settle --judges <panel>`",
@@ -432,8 +477,10 @@ ROOT = Path(__file__).resolve().parents[2]
      ("a head contest's evidence is the round's `comments.md`, the diff, the unit's body,\n`r<n>/spec_range.md` and `r<n>/amendments.md`",),
      ("the round's `comments.md` and diff, or the builder's comment, are the\nevidence",)),
     # round 4 (codebase-details-3-4): a spec review's evidence is the spec, inside the repository folder
-    ("skills/judges/references/astra_judge.md", ("except a spec review's, which is the spec, inside the repository folder",),
-     ("and sits outside the repository folder: that content goes to OpenAI too",)),
+    # round 5 (codebase-details-4-2): a plan review's and a `plan --unit <U> --decision D<n>` panel's evidence carries the spec too
+    ("skills/judges/references/astra_judge.md",
+     ("except the spec, which a spec review, a plan review and a `plan --unit <U> --decision D<n>` panel carry,\ninside the repository folder",),
+     ("except a spec review's, which is the spec, inside the repository folder", "and sits outside the repository folder: that content goes to OpenAI too")),
     ("skills/plan/scripts/superegm/decision.py", ("judges' post (the `(judges <panel>, leavemealone | contest)` marker on any line",), ("judges' post (the `(judges <panel>, leavemealone)` marker",))])
 def test_review_round_one_texts(path, present, absent):
   """The reference texts name what the code now does: the five evidence files, the `contest` word, the data sent to OpenAI, the marker."""
