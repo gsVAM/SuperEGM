@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from test_u85 import HID, STARTED, MERGED_U1, R1_TEXT, BASE, respec_world
+from test_builders import spawn_fake, no_graphify, which  # noqa: F401  the fixtures test_builders' launches run under
 
 BOT = "superegm-builder[bot]"
 
@@ -76,3 +77,70 @@ def test_builder_comment_filter(login, body, accepted):
   assert status.builder_comment({"user": {"login": login}, "body": body}, {"superegm-builder[bot]"}) is accepted
   facts = Path(status.__file__).read_text(encoding="utf-8").split("def builder_facts", 1)[1].split("\ndef ", 1)[0]
   assert "builder_comment(" in facts and "builder_comment(" in Path(record_launch.__file__).read_text(encoding="utf-8")
+
+
+CORRECTION = "**Spec correction R1** for {unit}\n\n```diff\n-- Max retries: 3\n+Max retries: 4\n```\n"
+
+
+def apply_r1(s, unit):
+  """Respec R1 applied to `s`'s handoff as `approve-spec --respec` leaves it: a `respec` approval entry copying the
+  opening's frozen fields, `respec/R1.json` touching `unit`, and the unit's comment file (it was filed then)."""
+  from test_builders import put  # written as another process writes them: no subcommand's WRITES applies
+  path = next((s.root / "approvals").glob("*.json"))
+  record = json.loads(path.read_text(encoding="utf-8"))
+  entries = record.get("entries") or [{"kind": "opening", "escalated": [], **{k: v for k, v in record.items() if k != "path"}}]
+  entries.append({**entries[0], "kind": "respec", "respec": "R1", "review": "spec-r1", "approved_at": "2026-11-14T00:00:00Z",
+                  "at": "2026-11-14T00:00:00Z"})
+  put(path, json.dumps({"path": record.get("path"), "entries": entries}))
+  put(s.path("file", "respec", "R1.json"), json.dumps({"touched": [unit], "untouched": [], "follow_ups": [], "line_map": []}))
+  put(s.path("file", f"respec_comment_{unit}_R1.md"), CORRECTION.format(unit=unit))
+
+
+@pytest.mark.parametrize("approved, in_prompt", [("before the prompt", True), ("after the prompt", False)])
+def test_prompt_record_and_amendments_agree(world, tmp_path, capsys, monkeypatch, spawn_fake, which, no_graphify, approved, in_prompt):
+  # the prompt, the launch record's respecs and r<n>/amendments.md name the same respecs; astra_brief pastes that file
+  import superegm
+  import test_builders as tb
+  import test_foreman as tf
+  from conftest import make_world
+  from test_u85 import commit_at
+  from superegm import launch_builder, respec
+  s, card, handoff, _ = tb.seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0
+  if in_prompt:
+    apply_r1(s, tb.UNIT)
+  else:  # approved once the prompt file is written, before the launch is recorded
+    spawn = launch_builder.start_detached
+    monkeypatch.setattr(launch_builder, "start_detached", lambda command, log, env: (apply_r1(s, tb.UNIT), spawn(command, log, env))[1])
+  code, out = world.run("launch-builder", "--unit", tb.UNIT, "--round", 1, "--runcard", card)
+  assert code == 0, out
+  record = tb.launches_of(s)[-1]
+  prompt = s.path("launches", f"{tb.UNIT}_r1_prompt.md").read_text(encoding="utf-8")
+  # the builder pushes after its start: the saved PR head is a commit made after the launch's started_at
+  pushed_after_start = True
+  head = commit_at(world, monkeypatch, "pushed.txt", "2099-01-01T00:00:00Z")
+  state = json.loads(s.path("state").read_text(encoding="utf-8"))
+  state["units"][tb.UNIT]["pr"] = {"number": tb.PR, "head": head}
+  superegm.atomic_write(s.path("state"), state)
+  mark = respec.marks(s, handoff).get(tb.UNIT)
+  # the foreman's round on a head that launch built: prepare's amendments.md and the Astra brief from its record
+  w = make_world(tmp_path / "foreman", capsys, monkeypatch)
+  from superegm import foreman
+  monkeypatch.setattr(foreman, "runner_path", lambda: "/x/runner.py")
+  built = {"round": 2, "status": "exited 0", "started_at": "2000-01-01T00:00:00Z", "reason": record["reason"],
+           "respecs": record.get("respecs", [])}  # relaunched after the posted round 1
+  _, _, head2, _ = tf.pr_repo(w, tmp_path / "foreman", monkeypatch)
+  st2, _, child, did, _ = tf.dispatched(w, head=head2, rounds=[tf.POSTED_R1], launches=[tf.TWO_LAUNCHES[0], built],
+                                        astra={"enabled": True})
+  core = __import__("superegm")  # the package as make_world reloaded it
+  core.atomic_write(st2.path("file", "respec", "R1.json"), {"touched": [tf.UNIT], "untouched": [], "follow_ups": [], "line_map": []})
+  core.atomic_write(st2.path("file", f"respec_comment_{tf.UNIT}_R1.md"), CORRECTION.format(unit=tf.UNIT))
+  code, out = w.run("prepare", "--unit", tf.UNIT, "--dispatch", did, "--runcard", child)
+  assert code == 0, out
+  r = st2.path("review", tf.UNIT, f"pr{tf.PR}") / "r2"
+  amendments_md = (r / "amendments.md").read_text(encoding="utf-8")
+  astra_brief = (r / "astra_brief.md").read_text(encoding="utf-8")
+  assert ("# Spec corrections" in prompt and "+Max retries: 4" in prompt) is in_prompt and record["reason"] == "respec"
+  assert (record.get("respecs") == ["R1"]) is in_prompt and ("R1" in amendments_md) is in_prompt and amendments_md in astra_brief
+  assert mark == (None if in_prompt and pushed_after_start else "respec: R1")
