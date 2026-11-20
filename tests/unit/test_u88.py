@@ -171,6 +171,22 @@ def test_unconverged_verdict_reaches_the_owner(world, tmp_path):
   assert f"judges/{pid}/verdict.json" in added[0] and "fable: finding upheld" in added[0] and "opus: finding overruled" in added[0]
 
 
+def test_verdict_line_keeps_each_judges_last_recorded_choice(world, tmp_path):
+  """A judge recorded `not run` in the last round keeps the choice it made earlier; one that never answered is named."""
+  pid, _ = contest(world, tmp_path)
+  folder = world.artifacts / "judges" / pid
+  card = json.loads((folder / "panel.json").read_text(encoding="utf-8"))["runcard"]
+  for rnd in range(1, 6):
+    record_round(world, pid, card, rnd, {"fable": "a", "opus": "b"} | ({"astra": "a"} if rnd < 5 else {}))
+    if rnd == 5:
+      assert world.run("judges", "record", "--panel", pid, "--round", 5, "--judge", "astra", "--not-run", "killed",
+                       "--runcard", card)[0] == 0
+    assert world.run("judges", "diff", "--panel", pid, "--round", rnd, "--runcard", card)[0] == 0
+  assert world.run("judges", "verdict", "--panel", pid, "--runcard", card)[0] == 2
+  line = (folder / "owner-question.md").read_text(encoding="utf-8").splitlines()[-1]
+  assert "astra: finding upheld" in line and "fable: finding upheld" in line and "opus: finding overruled" in line, line
+
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
