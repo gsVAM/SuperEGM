@@ -128,7 +128,7 @@ tables: the total wall time (Header, total wall seconds: the earliest first laun
 (Units, head rounds) and the reviewer with the most overruled findings (Reviewers, overruled,
 summed across its rows: a reviewer has one row per kind); the figures are the report's, the one sum aside. A refused `close` ends the skill without it.
 Then offer the retrospective, once: `/superegm:retro --handoff '<id>'` walks the report's Lessons with the owner and lands
-what they agree in one commit (design section 7.7). The skill runs nothing of it; the owner types the command when they want it.
+what they agree in one commit (design section 7.7). The skill runs nothing of it; the owner starts it in a session of their own when they want it.
 
 ## Step 4: the end
 
