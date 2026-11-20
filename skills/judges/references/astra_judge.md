@@ -100,7 +100,8 @@ plugin's hook silent in the runner's session.
 **Data notice.** A run sends the question file, the brief and the repository
 folder, which Astra may read in full like any folder it is given, to OpenAI
 under the account `codex login status` reports. The evidence, every file in the
-panel's `evidence[]`, goes into the brief whatever the question's form, and sits outside the repository folder, except a spec review's, which is the spec, inside the repository folder: that content goes to OpenAI too. Show it in the run card
+panel's `evidence[]`, goes into the brief whatever the question's form, and sits outside the repository folder, except the spec, which a spec review, a plan review and a `plan --unit <U> --decision D<n>` panel carry,
+inside the repository folder: that content goes to OpenAI too. Show it in the run card
 before the first launch of a panel.
 
 ## 3. Collect

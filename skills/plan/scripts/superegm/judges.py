@@ -200,7 +200,7 @@ def render_brief(panel: dict, questions: list[dict], round_no: int, open_ids: li
       path = Path(item["path"])
       if not path.is_file() or core.sha256_file(path) != item["sha256"]:
         raise core.HandoffError(f"judges: evidence {item['path']} changed since open")
-      body = core.read_text(path).rstrip("\n")
+      body = path.read_bytes().decode("utf-8", errors="replace").rstrip("\n")  # a diff of a Latin-1 file is not UTF-8 (prepare.cut_diff decodes it so)
       fence = "`" * max(3, 1 + max((len(run) for run in re.findall(r"`+", body)), default=0))  # one longer than the file's longest run
       lines += ["", f"### Evidence: {item['path']}", fence, body, fence]
   if round_no > 1:
@@ -281,14 +281,16 @@ def cmd_open(args, store) -> int:
   members = judge_members(config)
   min_vendors = (config.get("judges") or {}).get("min_vendors", 1)
   rendered = render_panel(store, parent)  # before the card opens: a refused render leaves no open judges card
-  rid = args.runcard or core.open_runcard(store, "judges", str(question), parent=args.parent)
   panel = {"id": pid, "question": str(question), "question_sha256": core.sha256_file(question),
-           "evidence": evidence, "judges": members, "min_vendors": min_vendors, "runcard": rid,
+           "evidence": evidence, "judges": members, "min_vendors": min_vendors, "runcard": args.runcard,
            "parent": args.parent, "opened_at": core.now_iso(), "rounds": {},
            "instructions": rendered}
+  briefs = render_briefs(panel, questions, 1, [q["id"] for q in questions], [], [])  # before the card opens: a refusal leaves nothing written
+  panel["runcard"] = args.runcard or core.open_runcard(store, "judges", str(question), parent=args.parent)
   core.atomic_write(folder / "question.md", question.read_bytes())
   write_json(folder / "panel.json", panel)
-  write_briefs(folder, 1, panel, questions, 1, [q["id"] for q in questions], [], [])
+  for name, text in briefs.items():
+    core.atomic_write(folder / "round-1" / name, text)
   core.journal(store, f"judges {pid}: opened ({', '.join(members)}; min_vendors {min_vendors})")
   print(pid)
   return 0
