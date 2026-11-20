@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the report subcommand (spec section 11): the per-batch wave report, the idle rules
-# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31); its own `ci_wait_minutes` config key, moved from `__init__` (U32); the board's tier column (U33); `waiting proceed` and a proceed closing a point-1 decision (U92); the `conflict` view and its board action (U62); a unit waiting on an open respec is not active, its board row and merge round included (U86); a point-1 decision carrying an unconverged panel's verdict line stays pending on each finding no ruling names (U88).
+# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31); its own `ci_wait_minutes` config key, moved from `__init__` (U32); the board's tier column (U33); `waiting proceed` and a proceed closing a point-1 decision (U92); the `conflict` view and its board action (U62); a unit waiting on an open respec is not active, its board row and merge round included (U86); a point-1 decision carrying an unconverged panel's verdict line stays pending on each finding no ruling names, and the report lists each judges ruling with its panel (U88).
 
 """superegm report: rewrite `wave_<n>_report.md` from the store, the plan and the spec and print its path, the
 board and the idle, pending and loop lines. It opens the card's handoff as `status` does (`core.locate`,
@@ -69,6 +69,8 @@ def run(args):
   lines += section("Ready, unlaunched", [f"{uid} ({'slot free' if free > 0 else 'no free slot'})" for uid in ready])
   lines += section("Pending decisions", [f"{uid} {d['id']} (point {d['point']}, {d['source']}): {question_line(d['question'])}"
                                          for uid, d in pending])
+  lines += section("Judges' rulings", [f"{uid} {r.get('decision') or r.get('fid')} (judges {r['by'][7:]}): {r['ruling']}" for uid in launched
+                                       for r in foremen[uid].get("rulings") or [] if str(r.get("by") or "").startswith("judges:")])
   lines += section("Stopped", [stopped_line(st, uid, foremen[uid]["stopped"], views) for uid in launched
                                if states[uid] == "stopped"])
   core.atomic_write(path, "\n".join(lines) + "\n")
