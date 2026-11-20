@@ -7,6 +7,7 @@ the mark."""
 
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
 
@@ -208,6 +209,17 @@ def test_corrected_line_clears_the_mark(world, render, corrected, marked):
   converge_all(world)  # a review-plan cycle converged on every current body
   code, out = world.run("gate", "--pass", "--spec", world.spec)
   assert code == 0, out
+
+
+def read(rel):
+  return (Path(__file__).resolve().parents[2] / rel).read_text(encoding="utf-8")
+
+
+def test_skills_name_the_replan():
+  # the plan skill rewrites a replan section, the schema names the field, the file skill relays the refusal
+  assert "Corrected: R<n>" in read("skills/plan/SKILL.md")
+  assert "Corrected" in read("skills/plan/references/handoff_plan.md")
+  assert "gate: <U> needs a re-plan after respec R<n>" in read("skills/file/SKILL.md")
 
 
 def test_corrected_row_names_respec_ids(world):
