@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Merges the landed units of a wave into the base branch and closes the handoff.
 ---
 
-<!-- Added by SuperEGM (gsVAM), 2026: the integrate skill (spec section 12); close's issue closes, `--note` and `--close --patch` (U32); the follow-ups given as known and quoted (U51). -->
+<!-- Added by SuperEGM (gsVAM), 2026: the integrate skill (spec section 12); close's issue closes, `--note` and `--close --patch` (U32); the follow-ups given as known and quoted (U51); the post-mortem run after `close` (U78). -->
 
 # Integrate (phase 7)
 
@@ -112,6 +112,15 @@ redesign (its `foreman/<U>.json` carries `stopped.brief`) comes first; while tha
 such unit, each read journaled and `state.json` untouched: the owner closes it by hand, since the plugin edits no issue it did not file, and `close`
 runs again. The skill never closes it; it prints the refusal and ends at Step 4. Other handoffs of the store
 are untouched: each has its own directory.
+
+After `close` succeeds, run the post-mortem (no card of its own, it writes only the derived file):
+
+    superegm postmortem --handoff '<id>'
+
+It prints the path of `<handoff dir>/postmortem.md`. Tell the owner that path and three lines read from its
+tables: the total wall time (Header, total wall seconds: the earliest first launch to the latest merge), the unit with the most rounds
+(Units, head rounds) and the reviewer with the most overruled findings (Reviewers, overruled,
+summed across its rows: a reviewer has one row per kind); the figures are the report's, the one sum aside. A refused `close` ends the skill without it.
 
 ## Step 4: the end
 
