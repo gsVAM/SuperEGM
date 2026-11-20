@@ -1,7 +1,7 @@
 # Copyright 2026 Google LLC.
 # SPDX-License-Identifier: Apache-2.0
 # Modified by SuperEGM (gsVAM), 2026: one host, the allow-list of section 15 and the three-file hook rule;
-# three-file hook rule, hook hash, effects checks; the inbox skill (U23); the driver skill (U24); the inbox typed (U72).
+# three-file hook rule, hook hash, effects checks; the inbox skill (U23); the driver skill (U24); the inbox typed (U72); the brainstorming companion scripts packed (U83).
 
 """Build the runtime folder and a reproducible ZIP without development files."""
 
@@ -22,7 +22,7 @@ SHARED = (
     "skills/*/SKILL.md", "skills/*/*.md", "skills/*/examples/*.md",
     "skills/*/*.sh", "skills/*/*.ts", "skills/*/*.js", "skills/*/*.dot",
     "skills/*/assets/*.svg", "skills/*/assets/*.png", "skills/*/references/*.md",
-    "skills/*/scripts/*.py", "skills/*/scripts/superegm/*.py",
+    "skills/*/scripts/*.py", "skills/*/scripts/superegm/*.py", "skills/brainstorming/scripts/*",
     "skills/*/references/*.json", "agents/*.md", "resources/*.md",
     "resources/document_standards/*.md", "docs/index.md", "docs/getting_started.md",
     "docs/claude.md", "docs/faq.md", "docs/privacy.md", "docs/releases.md",

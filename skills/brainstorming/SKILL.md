@@ -5,7 +5,7 @@ effects: working-tree
 description: "You MUST use this before any creative work - creating features, building components, adding functionality, modifying behavior, or planning anything new, in software or out of it (a talk, a business, a renovation)."
 ---
 
-<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: spec path docs/specs, the Units section, the review-spec gate, the brainstorm-brief lookup; builder check and the mockups section removed; the brief in the handoff's own directory (U32); the team brainstorm (U34); the triage section offered (U39); the SDLC workflow step (U64); the chain offered after doctor passes, nothing written outside the repository (U71); the reference documents offered once in the SDLC workflow step (U75). -->
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: spec path docs/specs, the builder check, the Units section, the review-spec gate, the brainstorm-brief lookup; the brief in the handoff's own directory (U32); the team brainstorm (U34); the triage section offered (U39); the SDLC workflow step (U64); the chain offered after doctor passes, nothing written outside the repository (U71); the reference documents offered once in the SDLC workflow step (U75); the visual companion restored, its session directory .superegm/brainstorm/ (U83); the triage fields, the red flags, and Ground to cover, Offer recon, Questions that work and Spike to feel things out moved word for word into references/ (U83). -->
 
 # Brainstorming
 
@@ -34,7 +34,9 @@ why?
 In a repository with `.superegm/config.json`, look before you ask anything. Read `artifacts_dir` from that file. Every handoff in that store whose `state.json` has no `closed_at` may hold `foreman/*.brainstorm.md` files, in the handoff's own directory. Each is the brainstorm brief of a unit the owner stopped for redesign.
 For each brief, take the unit id from its file name (`<unit>-<decision id>.brainstorm.md`); the brief counts only when `foreman/<unit>.json` carries `stopped.brief` naming it. Take the unit's issue number from that handoff's `state.json` and read the issue's `state` with `gh api repos/<repo>/issues/<n>`, `<repo>` being `repo` in `.superegm/config.json`.
 For a brief of a unit stopped for redesign whose issue is still open, start from the brief: say so in one line, naming the handoff and the unit, and read what the owner asked, the findings and the deviations before your first question; the brief carries no range, so read the unit body's `Spec:` range at the sha that line cites (the `Spec:` range, never the checkout's bytes).
-A brief whose issue is closed is left in place and never offered. With no such brief, go on to "Your First Message".
+A brief whose issue is closed is left in place and never offered.
+If `.superegm/brainstorm.md` exists, read it at the start too, before you go on, with or without a brief: the owner's questions for every brainstorm, not the per-decision brief. Work them in one at a time as your questions after the first message.
+With no such brief, go on to "Your First Message".
 
 ## Your First Message
 
@@ -77,45 +79,27 @@ said in plain words. When there's existing work, build on what it already
 uses. Any choice you make goes in the design as your call, never as
 something they agreed to.
 
-**Ground to cover.** This is territory, not a script. Never read these
-out as questions:
-
-- what kind of thing this is, and what makes it special
-- why now, and what success looks like to them
-- goals, non-goals, and anti-goals (what would make this a failure even
-  if it technically works)
-- prior art: what they've seen elsewhere, loved or hated
-- current state: what exists now, what they've tried
-- the details they care about
-
-**Questions that work** anchor in specifics: "Walk me through the last
-time...", "If it could only do one of these well, which?", "What would
-make you wince if I got it wrong?" A guess they can correct ("I'm
-guessing this is because X keeps biting you?") often beats a question.
-
-**Offer recon.** Once you have a bit of grounding and looking would help,
-offer to go look: their codebase or project, their own files and data,
-or the web. Say what you'd look for. They decide whether you go.
+**Ground to cover, Offer recon, Questions that work and Spike to feel things out:** read `references/conversation-craft.md` before the first question. It holds those four sections word for word, and they apply to every brainstorm.
 
 **Think wide privately.** Before you propose anything, come up with
 several ideas and drop the weak ones, including any that fight what
 they've told you about why. Show the comparison only when it helps them
 decide.
 
-**Spike to feel things out.** Agentic work is waterfall, but very, very
-fast. A quick throwaway build is often the cheapest way to learn what
-they want or whether something works. Offer one when it would help.
-When they just want to spike, get out of the way. Spikes get no tests
-or minimal ones, aren't bulletproof, and skip the plan, implementation,
-and review process. Bring what the spike taught you back into the
-conversation.
+**Show, don't tell.** Offer the visual companion (below) whenever seeing
+would help more than reading: something they'll look at (a screen, a
+page, a printout, a sign), a layout or arrangement, a flow or sequence of
+steps, options that would look different from each other, a structure
+easier to see than read (a diagram, a timeline, a map). Once they've
+accepted, use it for mockups to react to, side-by-side options, and
+throwaway prototypes they can click.
 
 ## Think Wide With a Team
 
 This section runs only when the owner asks for it: they typed `/superegm:brainstorming --team`, or `brainstorm.team` is true in `.superegm/config.json`.
 Reading the config yourself, a missing key reads false; `false` or a missing key is no ask, and you say nothing.
 Only a value neither `true` nor `false` (a string such as `"yes"`, which the helper's `load_config` refuses) is worth a word: tell the owner it is malformed and go on without the team unless they typed `--team`.
-A brainstorm not asked for runs neither teammates nor subagents: the skill as above, nothing more.
+A brainstorm not asked for runs neither teammates nor subagents: the skill as above, nothing more; the builder check below is its own single dispatch and runs in every project brainstorm, team or not.
 Run it once you know the topic well enough to state it in one line, before you propose anything.
 
 **Teams or the fallback.** Read the variable with one Bash `echo "$CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"`.
@@ -172,6 +156,12 @@ the whole conversation; the last chunk covers whatever is left.
 Mark anything you're guessing as your guess; only what they said goes in
 as theirs. End each chunk by asking what's wrong or missing.
 
+Before you send a chunk, check it: does it describe something they'll
+look at, like a page, a screen, a schedule, or a printout? If so, and
+they haven't seen the visual companion offer yet, send the offer instead
+(its own message, below) and hold the chunk for the next message. Once
+they've accepted, put a mockup next to the description.
+
 ## Size the Work
 
 Once you understand what they want, pick a size and say it in plain
@@ -181,7 +171,7 @@ words. They can override it.
 |------|----------------------|------|
 | A quick, clear task | the request itself | do it |
 | A small change | in chat | build it through the normal workflow |
-| A project with a written design | a written design document | design the SDLC workflow, then `/superegm:review-spec`, typed by your human partner, then `/superegm:plan` |
+| A project with a written design | a written design document | run the builder check, design the SDLC workflow, then `/superegm:review-spec`, typed by your human partner, then `/superegm:plan` |
 
 If it grows mid-task, stop, say so, and step up a size.
 
@@ -213,25 +203,9 @@ could plan from without going back to your human partner. Cover:
   a high or medium blocks until fixed or ruled. It holds one `Unblock:`
   line and the run of `- ` lines directly after it; each line is one
   pattern, `field: value` pairs separated by `, ` that must all hold, and a
-  pattern applies to mediums only. Every field is one of:
-  - `reach` (`external`, `agent`, `config` or `forged`): can an HTTP caller,
-    an agent action or a plausible configuration mistake trigger it, or only
-    a hand-forged in-process object?
-  - `later` (`easy`, `migration` or `version`): easy to fix later, or does
-    the fix need a migration or a new declaration version?
-  - `critical` (`yes` or `no`): on the critical path with serious
-    ramifications?
-  - `verified` (`confirmed` or `refuted`): the triager found the defect, or
-    found none.
-
-  ```markdown
-  ## Triage
-
-  Unblock:
-  - reach: forged, later: easy
-  - critical: no, later: easy, verified: confirmed
-  ```
-
+  pattern applies to mediums only. The fields are `reach`, `later`,
+  `critical` and `verified`: their values and meanings, and a fenced
+  example, are in `references/triage.md`; read it before you write one.
   Ask what they would be content to see deferred, and write only the
   patterns they say. Approval parses the section, refuses a malformed one
   with its line and freezes the patterns; editing it later needs a new
@@ -240,6 +214,26 @@ could plan from without going back to your human partner. Cover:
 **Where it goes:** in a software repo,
 `docs/specs/YYYY-MM-DD-<topic>-design.md`, committed.
 Otherwise, ask. Your human partner's preferences override both.
+
+**Builder check:** once the design is written (after the team's synthesis,
+in a team brainstorm), dispatch one fresh subagent with
+`references/builder-check-prompt.md`, its `[DOMAIN]` and `[DOCUMENT_PATH]`
+filled. Say a reviewer will read it first and you may come back once with
+a few questions. Don't hand over the document until the check is back.
+Sort what the builder asks into three piles:
+
+- **Answered already** by the conversation or the project: put the answer
+  in the document.
+- **Minor:** a sensible builder could settle it without changing what gets
+  built. Settle it yourself and mark it in the document as your call.
+- **Theirs:** only your human partner can answer it, and the answer changes
+  what gets built.
+Bring the "theirs" pile in one message, most important first. Update the
+document with their answers, then hand it over with a short list of calls
+you made. One dispatch, never a loop. Commit the document's edits by path before the
+SDLC workflow step and `/superegm:review-spec`, so the reviewers read the
+checked text at `HEAD`. Without a subagent tool, read the document as that
+builder yourself.
 
 ## Design the SDLC Workflow
 
@@ -332,10 +326,26 @@ typed by your human partner; invoke no skill.
 
 ## Red Flags
 
-| Thought | Reality |
-|---------|---------|
-| "I'll offer options to save them effort" | Options steer. Ask them to describe it first. |
-| "I'll fill in sensible defaults" | Good. Say them out loud. A default they never heard is one they couldn't reject. |
-| "I should explain the process first" | Ask your question. The process shows itself. |
-| "They said 'sounds good' to the idea" | Approval covers what you showed them. A description you haven't written isn't approved. |
-| "The spike works, I'll keep building on it" | Keeping it is a new request. Back through the gate. |
+The thoughts that mean you are about to skip a step, each with the reality
+that answers it, are in `references/red-flags.md`; read it when you catch
+yourself rationalising.
+
+## Visual Companion
+
+A browser tab for showing mockups, diagrams, and prototypes: a tool, not
+a mode. **Offer it just-in-time**, the first time one of the moments above
+comes up, never upfront, as its own message with nothing else in it:
+
+> "This might be easier if I show you. Want me to open a browser tab with some mockups?"
+
+If they decline, stay in text and don't offer again unless they raise it.
+Start the server only on their yes; when the brainstorm ends run
+`bash scripts/stop-server.sh <session_dir>`, the session directory being
+the parent of the `screen_dir` and `state_dir` that start-server.sh
+printed. Where the helper cannot run (Cowork), loopback cannot be
+reached (a remote or containerised session) or no browser opens, say so
+once and stay in text.
+
+**Per question, ask: would they understand this better by seeing it?**
+If they accept, read `references/visual-companion.md` before starting the
+server.

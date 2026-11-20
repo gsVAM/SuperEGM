@@ -82,8 +82,7 @@ SP_KEPT = (
     "skills/plan/references/writing_plans.md", "skills/wave/references/builder_orders.md",
 )
 SP_NOT_KEPT = (
-    "skills/brainstorming/scripts", "skills/brainstorming/visual-companion.md",
-    "skills/brainstorming/builder-check-prompt.md", "skills/using-superpowers", "skills/writing-plans",
+    "skills/using-superpowers", "skills/writing-plans",
     "skills/executing-plans", "skills/subagent-driven-development", "skills/requesting-code-review",
     "skills/receiving-code-review", "skills/dispatching-parallel-agents", "skills/using-git-worktrees",
     "skills/diagnosing-superpowers",
