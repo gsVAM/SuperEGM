@@ -113,6 +113,18 @@ def test_reviewer_rows_no_overrule_anywhere(world):
   assert "quiet: 0 raised" in row
 
 
+def test_reviewer_rows_an_allowance_is_an_overrule(world):
+  # spec 13.2: an allowance is recorded as an overrule, so a reviewer whose every finding was allowed kept none
+  c, _, _ = two_units(world)
+  head_review(c, {"kept": {"findings": [finding("kept", 1)]}, "allowed": {"findings": [finding("allowed", 1)]}})
+  record = jread(c.hs.path("foreman", "U02"))
+  record["rulings"] = [{"ruling": "allowed-1-1 allowed — a known gap", "by": "owner"}]
+  jwrite(c.hs.path("foreman", "U02"), record)
+  [row] = named(signal_rows(world, c, "reviewer kept nothing"), "kept", "allowed")
+  assert "allowed: 1 raised, 1 overruled" in row
+  assert signal_rows(world, c, "reviewer most overruled") == []
+
+
 def test_reviewer_rows_every_reviewer_quiet(world):
   # every reviewer raised nothing: each is a reviewer with no finding kept
   c, _, _ = two_units(world)
@@ -144,6 +156,24 @@ def test_amendment_rows_need_a_ruling(world):
   assert len(rows) == 2 and "state.json amendments" in rows[0] and "legacy: an old one" in rows[0]
   assert "amendments/77.json" in rows[1] and "dequeue: dequeue returns null" in rows[1] and "U01" in rows[1]
   assert not any("abandoned" in r for r in rows)
+
+
+def test_amendment_row_cites_its_file_by_the_deviation_comment(world):
+  # the file is named for the deviation comment; the `comment_id` inside is the ruling's, and a pipe in the text stays verbatim
+  c, _, _ = two_units(world)
+  entry = {"unit": "U01", "name": "dequeue", "text": "dequeue() -> int | None", "at": "2026-11-16T01:00:00Z", "comment_id": 21}
+  jwrite(c.hs.path("file", "amendments", "11.json"), [entry])
+  jwrite(c.hs.path("foreman", "U02"), {"dispatch_id": None, "rounds": [], "decisions": [
+      {"id": "D1", "point": 3, "source": "comment 11", "asked_at": "2026-11-16T00:00:00Z"}],
+      "rulings": [{"decision": "D1", "ruling": "amend — dequeue returns null", "by": "owner", "posted": "comment 21"}]})
+  [row] = signal_rows(world, c, "interface amendment")
+  assert "amendments/11.json" in row and "amendments/21.json" not in row
+  assert "dequeue() -> int \\| None" in row
+
+
+def test_pipes_in_a_cell_are_escaped_not_replaced():
+  from superegm import postmortem
+  assert postmortem.cell("a | b\nc") == "a \\| b c" and postmortem.cell(None) == ""
 
 
 def cap_world(world, rulings, stopped):
@@ -203,6 +233,18 @@ def test_respec_rows_keep_to_their_own_handoff(world):
   assert ":12-14" in row and "99-100" not in row
 
 
+def test_respec_from_a_foreman_finding_quotes_the_decision(world):
+  # a respec opened on the foreman's spec finding carries `finding`, not `comment_id`: its evidence is the finding's claim in the decision's question
+  c = respec_world(world, lambda args: (1, "", "HTTP 404"))
+  jwrite(c.hs.path("file", "respec", "R1.open.json"), {"id": "R1", "unit": "U02", "finding": "foreman-1-1", "at": "2026-11-16T00:00:00Z"})
+  question = ("foreman-1-2 | low | a.py:1 | regression: no | an ordinary finding\n"
+              "foreman-1-1 | high | docs/specs/x.md:12 | regression: no | deviation (spec) unruled: the retry count is wrong; `pytest -k retry` fails\n")
+  jwrite(c.hs.path("foreman", "U02"), {"dispatch_id": None, "rounds": [], "rulings": [], "decisions": [
+      {"id": "D1", "point": 1, "source": "review head-U02-c1 round 1", "question": question, "asked_at": "2026-11-16T00:00:00Z"}]})
+  [row] = signal_rows(world, c, "respec")
+  assert "the retry count is wrong; `pytest -k retry` fails" in row and "foreman-1-1" in row and "an ordinary finding" not in row
+
+
 def test_respec_evidence_unread_without_gh(world):
   # gh missing (FileNotFoundError): the row says `evidence unread`, the report is still written
   def comment(args):
@@ -248,7 +290,8 @@ def frontmatter(path):
                                     "owner's yes", "suggested answer", "one question at a time", "`retro: <handoff>`",
                                     "superegm postmortem --handoff <id> --retro <file>", "never edits the approved spec", "every open handoff",
                                     "`handoffs/<id>.json`", "latest non-null `closed_at`", "`closed_at` null", "`approvals/<spec-slug>.json`",
-                                    "to the store only `postmortem.md` when it is missing and `retro.md`"])
+                                    "writes nothing to the store but `retro.md`", "`artifacts_dir`", "`<artifacts_dir>/<handoff id>/`",
+                                    "`(closed: voided)`", "legacy flat-store handoff", "the helper's write, not this skill's"])
 def test_retro_skill_text(phrase):
   # the retro skill names its four targets, asks per edit, and never touches an approved spec
   assert phrase in text("skills/retro/SKILL.md") and frontmatter("skills/retro/SKILL.md")["effect_kinds"] == ["state-store"]
