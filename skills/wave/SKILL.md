@@ -28,12 +28,12 @@ This skill runs in Claude Code only. In any other host reply `wave runs in Claud
 You, the elephant, drive one loop from this conversation over a filed
 handoff's units (§11). `superegm launch` marks the ready units
 up to `max_in_flight`; you launch one
-builder per marked unit as the builder account; the builder pushes its unit branch and opens a draft PR it can never merge. Every head
+builder per marked unit as the builder account; it pushes its unit branch and opens a draft PR it can never merge. Every head
 with concluded CI gets one review round from a **foreman**: a per-unit
 elephant dispatched through its own adapter (`superegm:foreman`,
 `omitClaudeMd: true`), which dispatches the head's goldfish panel
 (zero-context, read-only, each via its own adapter), records the
-findings, posts one review comment bound to the reviewed commit, and returns
+findings, posts one review comment bound to the reviewed commit, returns
 one word (the word table).
 
 Your only GitHub writes are the `**Ruling:**` comment `decision rule` posts, a respec's comment,
@@ -49,7 +49,7 @@ Every writing call carries `--runcard '<CARD>'`; a refusal is one `superegm: <re
 Under SUPEREGM_ROLE=driver (a tick of `/superegm:driver` started this session), never ask. In
 normal mode open points 1, 2, 3 and 5 as `decision open` records, as leavemealone-mode does (an
 unconverged judges' question stays open alike). That unit is `pending a decision`
-(no slot) and the batch goes on with every event; the session ends on the
+(no slot) and the batch goes on handling every event of the batch; the session ends on the
 loop's condition alone: `status.wait_events` acked every event, so an early exit loses another unit's exit.
 
 Open a reference only when sent to it:
@@ -85,7 +85,7 @@ conversation with `run_in_background: true` (Bash timeout 1,800,000
 ms). It returns every unreported event since its last save, one line each
 (`head`, `exit`, `status`, `landed`, `closed`, `ruling`, `stalled`, `conflict`), or `deadline`, then respec lines (`open: respec`, `held: respec`, `respec: read failed`: none to do; `respec post`, `respec relaunch`: 5b). Handle every
 line before calling it again, in this order; a stopped unit's lines are
-ignored except `landed` and `stalled`; `conflict` needs nothing before step 6:
+ignored except `landed` and `stalled`; `conflict` lines need nothing before step 6:
 
 1. `landed` lines: the unit is done; its dependants become ready (`launch` sees them at step 6).
 2. `closed` lines: a non-builder actor closed the PR unmerged or the issue → the owner has ruled; run `superegm decision rule --unit <U> --ruling 'stop the unit' --by <login> --posted closed:<n> --runcard '<CARD>'`. The builder account closed it → Decision point 3 (source `closed <n>`).
@@ -94,7 +94,7 @@ ignored except `landed` and `stalled`; `conflict` needs nothing before step 6:
 4. `ruling` lines: an owner's `**Ruling:**` comment; apply it as `references/rulings.md`'s `ruling` bullet says.
 5. `superegm foreman dispatch` for every active unit with a head, `deadline` included: `--unit <U> --runcard '<CARD>'`. It alone evaluates §11's predicate (CI concluded, latest launch terminal, no round posted since it, no decision pending, review not stalled): it prints `<dispatch-id> <child-card>` when it holds and refuses otherwise: skip a refused unit, except exit 1 `recovered <word>`, which is the foreman's word for a round the PR already carries. Dispatch every accepted unit's foreman **in one message**, each through the `superegm:foreman` adapter, named `foreman-<U>-<dispatch-id>`, in the foreground, with `references/foreman_brief.md`'s brief filled in. Then `word_action` per returned word (the table below).
 5b. `respec.actionable` (§7.6; the raising unit waits): `respec post R<n> <U> #<i> '<f>'` → `superegm scan --comment '<f>'` (a finding: say so, post nothing), then `GH_HOST=github.com gh issue comment <i> -R OWNER/NAME --body-file '<f>'`, then `superegm respec posted --respec R<n> --unit <U> --comment <the URL's id>`; `respec relaunch` → step 6, reason `respec`.
-6. `superegm launch`: `--idle <the report's idle list> --runcard '<CARD>'` (omit `--idle` on `none`) marks the ready units up to the free slots and prints `in flight:` and `marked:`; a clean `conflict` unit is marked once for its **merge round**. Per marked unit: `superegm launch-builder --unit <U> --round <n> --runcard '<CARD>'` (`<n>` is the launch count) alone: `launch-builder` starts the builder detached, records the launch and returns. A `launch-builder` refusal makes the unit idle for this invocation, no retry: `superegm report --idle '<U>=launch-builder: <reason>' --runcard '<CARD>'`.
+6. `superegm launch`: `--idle <the report's idle list> --runcard '<CARD>'` (omit `--idle` on `none`) marks the ready units up to the free slots and prints `in flight:` and `marked:`; a clean `conflict` unit is marked once for its **merge round**. Per marked unit: `superegm launch-builder --unit <U> --round <n> --runcard '<CARD>'` (`<n>` is the launch count) alone: `launch-builder` starts the builder and records the launch, detached, and returns. A `launch-builder` refusal makes the unit idle for this invocation, no retry: `superegm report --idle '<U>=launch-builder: <reason>' --runcard '<CARD>'`.
 7. `superegm report`: `python3 '<HELPER>' report --runcard '<CARD>'`, then `python3 '<HELPER>' notify --runcard '<CARD>'` (the owner's `~/.superegm/notify` hook gets the new inbox lines; a failing or slow hook never stops the wave). If a decision was opened this batch, pause (outside SUPEREGM_ROLE=driver, above): ask the owner at its decision point and run `report` again once ruled. Else `loop: ended` and no 5b line of a non-idle unit → The end; else the next batch.
 
 A launched unit's `unit_state`, in order: `landed`, `stopped`, `pending`,
@@ -117,8 +117,8 @@ dispatch):
 - `revise` → in normal mode, when `review status` printed `acceptable: yes` → Decision point 5 first (no launch
   while it is pending). Otherwise, and on a ruled `revise`, `launch-builder` for the next
   round (the prompt carries the review); a ruled `revise` spends no relaunch.
-- `contested: <ids>` → Decision point 1: the judges first, in normal mode as in leavemealone; an unconverged panel
-  reaches the owner with `judges/<panel>/verdict.json` named.
+- `contested: <ids>` → Decision point 1: the judges first, in normal mode as in leavemealone; unconverged, the
+  owner, `judges/<panel>/verdict.json` named.
 - `cap-reached` → Decision point 2.
 - `owner: <ids>` → `decision open` for the owner's findings, ruled by the owner alone (no judge panel):
   no relaunch, no slot.
