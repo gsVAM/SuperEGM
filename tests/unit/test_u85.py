@@ -968,3 +968,78 @@ def test_refusals_named_without_a_count():
                  "add a follow-up row", "void and re-approve"):
     assert needle in step and needle in approve_spec.respec_checks.__doc__, needle
   assert "voided latest approval" in review.respec_base.__doc__
+
+
+# Round 5: the owner's rulings on the round-4 review (issue #169).
+
+
+def test_a_growing_replace_judges_each_new_line(world):
+  # change-review-4-1, astra-4-1: a new line past the old block's length has no old counterpart, so it is never quoted
+  from superegm import respec
+  spec, st = respec_world(world, [(BASE, None)])
+  draft = replace(replace(BASE, "- Max retries: 3", "- Max retries: 4"), "- Max retries: 4", ["- Retry delay doubles"])
+  result = respec.touched(st, HID, "".join(draft))
+  assert (result["touched"], result["merged_review"]) == (["U1", "U2", "U3"], ["U0"])
+
+
+@pytest.mark.parametrize("change, touched", [
+  ("only the follow-up row", []), ("U1's row", ["U1"])])
+def test_a_units_table_change_touches_its_row_only(world, change, touched):
+  # codebase-details-4-1: a Units row touches the unit it names, a new follow-up row none; never the uncovered rule
+  from superegm import respec
+  spec, st = respec_world(world, [(BASE, None)])
+  if change.startswith("only"):
+    draft = BASE + [FOLLOW_ROW + "\n"]
+  else:
+    draft = replace(BASE, "| U1 | queue | — | S |", "| U1 | queue, fifo | — | S |")
+  result = respec.touched(st, HID, "".join(draft))
+  assert (result["touched"], result["merged_review"]) == (touched, [])
+
+
+def test_interfaces_match_declared_names_only(world):
+  # codebase-details-4-2, astra-4-3: an incidental backticked word (`None`) touches no unit whose Interfaces mention it
+  from superegm import respec
+  line = "- Produces: `retry(job)` returning `None`"
+  base = replace(BASE, "- Produces: `retry(job)` returning the delay", line)
+  spec, st = respec_world(world, [(base, None)])
+  core.atomic_write(st.path("unit", "U1"), BODIES["U1"].replace("- Produces: `retry(job)` returning the delay", line))
+  core.atomic_write(st.path("unit", "U2"), BODIES["U2"] + "\n## Interfaces\n- Produces: `flush(job)` returning `None`\n")
+  draft = replace(base, line, line + " at once")
+  assert respec.touched(st, HID, "".join(draft))["touched"] == ["U1", "U3"]
+
+
+def test_a_changed_consumes_line_touches_producer_and_consumers(world):
+  # astra-4-2: a Consumes line inside U2's range touches U2, U1 that produces its name and U3 that consumes it too
+  from superegm import respec
+  base = replace(BASE, "Delay is 5s.", ["- Consumes: `retry(job)` for delivery (U1)"])
+  spec, st = respec_world(world, [(base, None)])
+  draft = replace(base, "- Consumes: `retry(job)` for delivery (U1)", "- Consumes: `retry(job)` for signed delivery (U1)")
+  assert respec.touched(st, HID, "".join(draft))["touched"] == ["U1", "U2", "U3"]
+
+
+def test_comment_hunk_header_of_a_pure_insertion(world):
+  # codebase-details-4-3: the zero-length side names the line before the gap, as unified diff does
+  from superegm import respec
+  spec, st = respec_world(world, [(BASE, None)])
+  draft = replace(BASE, "Deliver sends jobs.", ["Retries back off."])
+  text = respec.comment_text(st, HID, "".join(draft), "U2", "R1")
+  assert "@@ -22,0 +23,1 @@" in text, text
+
+
+def test_spec_scope_docstring_names_the_respec_form():
+  # codebase-details-4-4
+  from superegm import review
+  assert "respec" in review.spec_scope.__doc__
+
+
+def test_respec_posted_refuses_an_orphan_file(world, monkeypatch):
+  # astra-4-4: R1.json without its approval entry (the crash window) is not applied
+  spec, st, _ = actionable_world(world, monkeypatch, "open, unposted, idle unit")
+  path = st.path("approvals", core.spec_slug(spec))
+  full = json.loads(path.read_text(encoding="utf-8"))
+  core.atomic_write(path, dict(full, entries=[e for e in full["entries"] if e.get("kind") != "respec"]))
+  world.spec = spec
+  code, out = world.run("respec", "posted", "--respec", "R1", "--unit", "U2", "--comment", "555",
+                        "--runcard", world.card("wave"))
+  assert code == 1 and "respec posted: respec R1 is not applied" in out
+  assert not st.path("file", "respec", "R1.U2.posted").exists()
