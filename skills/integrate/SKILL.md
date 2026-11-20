@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Merges the landed units of a wave into the base branch and closes the handoff.
 ---
 
-<!-- Added by SuperEGM (gsVAM), 2026: the integrate skill (spec section 12); close's issue closes, `--note` and `--close --patch` (U32); the follow-ups given as known and quoted (U51); the post-mortem run after `close` (U78). -->
+<!-- Added by SuperEGM (gsVAM), 2026: the integrate skill (spec section 12); close's issue closes, `--note` and `--close --patch` (U32); the follow-ups given as known and quoted (U51); the post-mortem run after `close` (U78); the respec refusals (U86). -->
 
 # Integrate (phase 7)
 
@@ -36,12 +36,18 @@ every writing call carries `--runcard`.
 2. The landed set `close` starts from is the snapshot `status --wait` saves:
    `superegm status --wait 1 --runcard <card>` reads GitHub once and saves every unit's `landed`
    and `closed` facts; `close` adds each unlanded unit whose recorded PR it reads merged (Step 3).
-3. From `state.json`'s `status.units`, list every unit that is neither `landed` nor closed by a
+3. Respecs (design section 7.6), with or without `--close`, before the landed list: item 2's `status --wait` output,
+   after its event lines, refuses the integrate round and the close while it prints `open: respec R<n>` (print
+   `integrate: respec R<n> is open`), `<U> held: respec R<n>` (print `integrate: <U> holds respec R<n>`) or
+   `respec: read failed: <error>` (print `integrate: respec read failed: <error>`; an unread respec is never taken as
+   none): say that the wave applies and relaunches it, and go to Step 4. A withdrawn respec or a stopped unit's mark
+   is not printed and does not refuse. Otherwise go to item 4.
+4. From `state.json`'s `status.units`, list every unit that is neither `landed` nor closed by a
    non-builder login (`closed`'s issue entry); a unit whose PR is merged, its issue still open, is
    not listed: `close` lands it and closes its issue. The saved snapshot has no merged field: a
    merged PR is a unit with `pr` set and `ci` null (`status` reads no CI of a merged PR). Without `--close`, one listed unit ends the
    invocation here: print the list, say that the owner merges, closes or re-types
-   `/superegm:wave`, and go to Step 4. With `--close` (`--patch` or not), go to Step 3.
+   `/superegm:wave`, and go to Step 4; with none listed, go to Step 2. With `--close` (`--patch` or not), go to Step 3.
    Say that the owner merges in the inbox (`/superegm:inbox`); where the base ruleset restricts updates to config.owners, the inbox runs the admin bypass, `gh pr merge --admin`, once the owner says yes to it.
 
 ## Step 2: one integrate round

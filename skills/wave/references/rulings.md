@@ -44,7 +44,8 @@ point's section" below is the point's section of `references/decision_points.md`
   `launch-builder`; `stop` or `redesign` → `review rule … --ruling stop --owner`
   (a `redesign` at point 1 runs no `review rule`). Point 3: `relaunch`, or an
   option on a `BLOCKED` comment → `launch-builder` now, as for any option on a
-  `BLOCKED` or `NEEDS_CONTEXT` comment; `stop the unit` stops it. An `allowed`
+  `BLOCKED` or `NEEDS_CONTEXT` comment; `respec` → nothing until `approve-spec --respec R<n>` applies it;
+  `stop the unit` stops it. Every `launch-builder` here, a `held: respec` unit: step 6's `launch`. An `allowed`
   ruling refused with `no open decision names it` needs nothing more: `collect` reads a prior round's
   `tdd-order` one, the owner's `dod-<n> allowed`, a `<fid> allowed` on a posted
   `test-delta:` fid and a `test-delta <file> allowed` itself.

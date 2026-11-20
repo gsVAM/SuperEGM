@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_launch` as the launch module; it marks the ready units up to `max_in_flight` after the protection checks of spec section 11, the owners set and the team bypass included; the builder as a GitHub App (U15); a unit whose `clean` outcome an ingest rewrote is ready again (U21); `interrupted (reboot)` terminal and a unit pending a decision out of the in-flight count (U24); `origin_problems` takes the ref and runs the spec check alone (U43); a merged view holds no slot and is never relaunched (U55); the authorizing outcome, a proceed's pinned head and `waiting proceed` (U92); a `conflict` unit on a clean or proceeded head ready again once for a merge round (U62).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_launch` as the launch module; it marks the ready units up to `max_in_flight` after the protection checks of spec section 11, the owners set and the team bypass included; the builder as a GitHub App (U15); a unit whose `clean` outcome an ingest rewrote is ready again (U21); `interrupted (reboot)` terminal and a unit pending a decision out of the in-flight count (U24); `origin_problems` takes the ref and runs the spec check alone (U43); a merged view holds no slot and is never relaunched (U55); the authorizing outcome, a proceed's pinned head and `waiting proceed` (U92); a `conflict` unit on a clean or proceeded head ready again once for a merge round (U62); a unit `respec.actionable` lists for relaunch ready again within `max_in_flight`, a held view gets no merge round, a unit waiting on an open or standing respec holds no slot while no launch of it runs, an open respec's raising unit is marked for nothing, `ready_again` waits for a pending owner decision, and the mark records `after`; a filed unit's `replan:` mark holds and a failed respec read refuses (U86).
 
 """superegm launch: check what the launch needs, then mark the ready units up to `max_in_flight`."""
 
@@ -68,20 +68,43 @@ def launch(args, card):
   stopped_numbers = {issue["number"] for issue in core.gh_pages(f"repos/{config['repo']}/issues?labels={label}&state=all&per_page=100")}
   stopped = {uid for uid, record in state["units"].items() if record.get("number") in stopped_numbers}
   idle = set(filter(None, args.idle.split(",")))
-  views = {uid: {**summary["units"][uid], "launched": state["units"][uid].get("launched"), "stopped": uid in stopped}
-           for uid in handoff.graph.order}
-  flying = [uid for uid in handoff.graph.order if in_flight(st, uid, views[uid], idle)]
-  again = set()
+  # spec section 7.6: a unit whose `respec: R<n>` mark stands is held (no merge round, `conflict_again`); one whose mark
+  # is actionable (`respec.actionable`: not stopped, merged, pending a decision or running) is ready again for its
+  # relaunch, holds no slot until that launch is recorded (as `ready_again`) and waits for a free one as any ready unit
+  from superegm import respec  # at call time: `respec` reads `launch`'s records
+  # a filed unit's `replan: R<n>` (its comment file missing) holds as `respec: R<n>` does: its correction is still to
+  # come; a failed read refuses the launch in one line, as `launch-builder`'s does (fail closed)
+  try:
+    held = set(respec.marks(st, st.handoff_id)) if st.handoff_id else set()
+    actionable = respec.actionable(st, st.handoff_id) if st.handoff_id else []
+    opened = {r.get("unit") for r in respec.open(st, st.handoff_id)} if st.handoff_id else set()
+  except (core.HandoffError, ValueError, OSError) as error:
+    raise core.HandoffError(f"respec marks unreadable: {error}") from None
+  views = {uid: {**summary["units"][uid], "launched": state["units"][uid].get("launched"), "stopped": uid in stopped,
+                 "held": uid in held} for uid in handoff.graph.order}
+  again = {unit for kind, _, unit in actionable if kind == "relaunch" and unit in views and unit not in stopped
+           and unit not in idle and not views[unit].get("landed") and not merged(views[unit])}
+  # a unit waiting on a respec (the raising unit of an open one, or a held one) holds no slot while no launch of it
+  # runs: the other units of the wave go on while the owner corrects the spec
+  # the raising unit of an open respec is marked for nothing (no relaunch, no merge round) until the correction applies
+  waiting = held | opened
+  flying = [uid for uid in handoff.graph.order if uid not in again and not (uid in waiting and not respec.live_launch(st, uid))
+            and in_flight(st, uid, views[uid], idle)]
+  from superegm.report import pending_decisions  # imported here: `report` imports this module
   for uid in handoff.graph.order:
-    if uid in stopped or uid in idle or views[uid].get("landed") or merged(views[uid]):
+    if uid in stopped or uid in idle or uid in opened or views[uid].get("landed") or merged(views[uid]):
       continue
     foreman, launches = core.load_foreman(st, uid), load_launches(st, uid)  # read once per unit
-    if ready_again(foreman, launches) or conflict_again(views[uid], foreman, launches, handoff.graph.parallel):
+    # a unit with a pending owner decision is not ready again: the owner rules first (spec section 7.2)
+    if ((ready_again(foreman, launches) and not pending_decisions(foreman))
+        or conflict_again(views[uid], foreman, launches, handoff.graph.parallel)):
       again.add(uid)
   ready = set(summary["ready"]) | again  # a unit an ingest returned to `revise` waits for a slot as a ready unit does
-  marked = [uid for uid in handoff.graph.order if uid in ready and uid not in stopped][:max(0, config["max_in_flight"] - len(flying))]
-  for uid in marked:
-    state["units"].setdefault(uid, {})["launched"] = {"at": core.now_iso(), "runcard": args.runcard, "by": me}
+  marked = [uid for uid in handoff.graph.order if uid in ready and uid not in stopped and uid not in opened
+            ][:max(0, config["max_in_flight"] - len(flying))]
+  for uid in marked:  # `after`: the launches recorded when marked, so `launch-builder` tells a fresh mark from a spent one
+    state["units"].setdefault(uid, {})["launched"] = {"at": core.now_iso(), "runcard": args.runcard, "by": me,
+                                                      "after": len(load_launches(st, uid))}
     core.journal(st, f"{uid} marked for launch")
   core.save_state(handoff.artifact_dir, state)
   print("in flight: " + (", ".join(flying) or "none"))
@@ -137,9 +160,10 @@ def conflict_again(view: dict, foreman: dict, launches: list, parallel: bool) ->
   shows the conflict), it has an authorizing outcome (spec section 4.2) with no launch recorded since that outcome's
   launch and the pull request's head still its head (`latest_clean`), no launch of it is running, it is not `waiting
   proceed` and it waits on no open decision and no stop. Once the merge launch is recorded the rule no longer holds,
-  so the unit is relaunched once per authorizing outcome."""
+  so the unit is relaunched once per authorizing outcome. A view `held` by a standing `respec: R<n>` mark (spec section
+  7.6) gets no merge round: its relaunch, reason `respec`, carries the correction instead."""
   from superegm.report import pending_decisions  # imported here: `report` imports this module
-  if (not (parallel and view.get("conflict")) or view.get("stopped") or foreman.get("stopped")
+  if (not (parallel and view.get("conflict")) or view.get("held") or view.get("stopped") or foreman.get("stopped")
       or pending_decisions(foreman)):
     return False
   head = view.get("head")

@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45); the `proceed again` item and the merge on the authorizing outcome (U92); the `conflict` item (U62); a ruling's action the inbox with its `forms` and `on`, a review's its skill session, and `inbox withdrawn` (U72).
+# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45); the `proceed again` item and the merge on the authorizing outcome (U92); the `conflict` item (U62); a ruling's action the inbox with its `forms` and `on`, a review's its skill session, and `inbox withdrawn` (U72); no merge item for a head a `respec:` mark holds (U86).
 
 """superegm inbox [--all] [--json] [--handoff <id>]: one line per item that needs the owner across the
 store's open handoffs, read-only and with no run card; superegm inbox withdrawn --pr <n> --reason <text>: the merge
@@ -200,8 +200,9 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
   rounds = foreman.get("rounds") or []
   latest = max((e["round"] for e in rounds if e.get("phase") == "posted"), default=None)
   undo = [ruling_form(1, r["fid"], "finding upheld") for r in foreman.get("followups") or [] if r.get("round") == latest]
+  # spec section 7.6: no merge for a head a standing `respec: R<n>` mark holds, however its review ended
   if (latest_clean(foreman, launches, head) and not unpinned and not conflict and not live
-      and not report.pending_decisions(foreman)):
+      and not report.pending_decisions(foreman) and not respec_held(hs, uid)):
     pr = report.unit_view(state, uid)["pr"] or ((state["units"].get(uid) or {}).get("pr") or {}).get("number")
     url = f"{GITHUB}/{repo}/pull/{pr}"
     # U61: the shared-file merge order from `handoff_units.json`, none when the file or the key is absent
@@ -225,11 +226,41 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
   return out
 
 
-def conflict_items(repo: str, state: dict, uid: str, foreman: dict, launches: list, parallel: bool) -> list:
+def respec_held(hs: core.Store, uid: str) -> bool:
+  """Whether `respec.marks` marks the unit (spec section 7.6): its head is held, no merge offered. A filed unit whose
+  comment file is missing reads `replan: R<n>` and is held as `respec: R<n>` is: its correction is still to come.
+  Read here on every call, never from `state.json`, which other commands replace whole. A failed read holds the unit
+  (fail closed): no merge is offered on a head a mark may hold, and the inbox's `respec` item (`respec_read_items`)
+  names the failure, so the owner sees why the merge is withheld."""
+  from superegm import respec  # at call time: `respec` reads `launch`'s records
+  if not hs.handoff_id:
+    return False
+  try:
+    return bool(respec.marks(hs, hs.handoff_id).get(uid))
+  except (core.HandoffError, ValueError, OSError):
+    return True
+
+
+def respec_read_items(hs: core.Store, repo: str, hid: str) -> list:
+  """Spec section 7.6: one `respec` item when the handoff's marks cannot be read (`respec_held` then holds every
+  unit), naming the error; none when they read."""
+  from superegm import respec  # at call time: `respec` reads `launch`'s records
+  if not hs.handoff_id:
+    return []
+  try:
+    respec.marks(hs, hs.handoff_id)
+  except (core.HandoffError, ValueError, OSError) as error:
+    return [item(repo, hid, "respec", f"read failed: {error}: no merge is offered on a held head until it reads", "read-failed")]
+  return []
+
+
+def conflict_items(repo: str, state: dict, uid: str, foreman: dict, launches: list, parallel: bool,
+                   held: bool = False) -> list:
   """U62 (spec section 6.1): one `conflict` item beside an unlanded unit while its saved view is `conflict`, a
   stopped unit's included, naming what resolves it: the merge round `launch` marks (`launch.conflict_again`), the
   owner's hand (a stopped unit, or an approval without `rounds`, 1.2's rule), or the rule applied again once the
-  running launch ends or the owner rules; a revising unit's next fix round carries the merge orders."""
+  running launch ends or the owner rules; a revising unit's next fix round carries the merge orders. A unit `held` by a
+  standing `respec: R<n>` mark (spec section 7.6) gets no merge round: its respec relaunch carries the correction."""
   view = report.unit_view(state, uid)
   if not report.conflicting(state, uid) or view["landed"]:
     return []
@@ -237,6 +268,8 @@ def conflict_items(repo: str, state: dict, uid: str, foreman: dict, launches: li
     then = "the unit is stopped: the owner resolves it"
   elif not parallel:
     then = "approved under 1.2.0: the owner resolves it"
+  elif held:
+    then = "held by a respec: its relaunch comes first"
   elif conflict_again({**view, "conflict": True}, foreman, launches, parallel):
     then = "a merge round is marked at the next `launch`"
   elif ((latest_posted(foreman) or {}).get("outcome") == "revise" and not report.pending_decisions(foreman)
@@ -449,7 +482,8 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
         continue
       live.add(uid)
       found += unit_items(hs, repo, state, uid, foreman, mode)
-      found += conflict_items(repo, state, uid, foreman, load_launches(hs, uid), parallel)  # U62 (spec section 6.1)
+      held = report.conflicting(state, uid) and respec_held(hs, uid)  # spec section 7.6: read only where it matters
+      found += conflict_items(repo, state, uid, foreman, load_launches(hs, uid), parallel, held)  # U62 (spec section 6.1)
     if units:
       for path in review_dirs(hs, spec, spec in read_specs):
         rev = json.loads(core.read_text(path / "review.json"))
@@ -461,7 +495,7 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
       read_specs.add(spec)
     found.sort(key=lambda i: (i["subject"], KINDS.index(i["kind"].split(" ")[0])))
     found = in_merge_order(hs, found)
-    found += wave_items(hs, repo, hid) + driver_items(hs, repo, hid) + chain_items(store, hs, repo, hid, state, foremen)
+    found += respec_read_items(hs, repo, hid) + wave_items(hs, repo, hid) + driver_items(hs, repo, hid) + chain_items(store, hs, repo, hid, state, foremen)
     out += [i | {"handoff": hid} for i in found]  # U72: the inbox answers each item under its own handoff
   return out
 

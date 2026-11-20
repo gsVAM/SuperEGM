@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the `ruling` event and a status line after a comment's deviation headings (U22); the board's one write per `wave` pass, `post_board` (U30); the tick's read, `tick_trigger` (U24); the watchdog's `stalled` line, its predicate and `head_time` (U31); `tick_trigger`'s chain-on `merged` line and its proofs over every chain phase's card (U44); `ruling_facts` reads `proceeds[]`, so a recorded proceed comment is no event (U94); the `conflict` view status, its fingerprint key and its event line (U62).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the `ruling` event and a status line after a comment's deviation headings (U22); the board's one write per `wave` pass, `post_board` (U30); the tick's read, `tick_trigger` (U24); the watchdog's `stalled` line, its predicate and `head_time` (U31); `tick_trigger`'s chain-on `merged` line and its proofs over every chain phase's card (U44); `ruling_facts` reads `proceeds[]`, so a recorded proceed comment is no event (U94); the `conflict` view status, its fingerprint key and its event line (U62); `builder_comment`, the filter `builder_facts` and `finish` share, the `open:`/`held: respec` lines and `tick_trigger`'s `respec R<n> <unit>` (U86).
 
 """superegm status: landed and ready sets, PRs, CI; refuses without a complete receipt.
 `--wait <s>` polls, reading only, and prints every unreported event line, or `deadline`. Under a `wave` card
@@ -65,7 +65,8 @@ def run(args):
     record["pr"] = pr
     record["status"] = None
   if args.wait:
-    print("\n".join(wait_events(handoff, args.wait, card)))
+    # the respec lines follow the events: integrate's Step 1 and the wave's batches run only `status --wait`
+    print("\n".join(wait_events(handoff, args.wait, card) + respec_lines(handoff)))
     return 0
   for uid in args.confirm_landed or []:
     view = unit_view(handoff, uid)
@@ -80,7 +81,37 @@ def run(args):
   if post_board(handoff, card, {**summary, "units": {uid: fingerprint(unit) for uid, unit in summary["units"].items()}}):
     core.save_state(handoff.artifact_dir, handoff.state)
   core.print_status(handoff, summary, open_blocking)
+  if lines := respec_lines(handoff):
+    print("\n".join(lines))
   return 0
+
+
+def respec_lines(handoff) -> list:
+  """Spec section 7.6: `open: respec R<n>` for each open respec (the line integrate refuses on), then `<U> held: respec
+  R<n>` for each unit `respec.marks` marks `respec:`, or a filed unit it marks `replan:` (its comment file missing) (no merge is offered for its head, however its review ended), then
+  the wave's step 5b work, one line per `respec.actionable` entry: `respec post R<n> <U> #<issue> '<comment file>'`
+  and `respec relaunch R<n> <U>`. A failed read is never "no respec": it prints the one line `respec: read failed:
+  <error>`, which integrate refuses on as it does an open respec."""
+  from superegm import respec  # at call time: `respec` reads `launch`, which this module's callers import
+  hid = handoff.store.handoff_id
+  if not hid:
+    return []
+  try:
+    opened, marks = respec.open(handoff.store, hid), respec.marks(handoff.store, hid)
+    work = respec.actionable(handoff.store, hid)
+  except (core.HandoffError, ValueError, OSError) as error:
+    return [f"respec: read failed: {error}"]
+  units = handoff.state.get("units") or {}
+  lines = ([f"open: respec {r['id']}" for r in opened]
+           + [f"{uid} held: respec {mark.split(':', 1)[1].strip()}" for uid, mark in marks.items()
+              if mark.startswith("respec:") or (units.get(uid) or {}).get("number")])
+  for kind, rid, uid in work:
+    if kind == "post":
+      comment = handoff.store.path("file", f"respec_comment_{uid}_{rid}.md")
+      lines.append(f"respec post {rid} {uid} #{(units.get(uid) or {}).get('number')} '{comment}'")
+    else:
+      lines.append(f"respec relaunch {rid} {uid}")
+  return lines
 
 
 def post_board(handoff, card: dict, status: dict) -> bool:
@@ -117,7 +148,10 @@ def wait_events(handoff, seconds: int, card: dict) -> list:
   """Poll `status_pass` (reading only) until a unit has an unreported event or the deadline
   passes; the event lines, or `deadline`; one state write on return. Before that write, under a
   `wave` `card`, `post_board` reads the tracking issue once and, when the rows changed, rewrites
-  its board (`gh issue edit`, `board_changed_at`), a failed read or write journaled `board write failed`."""
+  its board (`gh issue edit`, `board_changed_at`), a failed read or write journaled `board write failed`. `run` prints
+  `respec_lines` after these lines, `deadline` included: `open: respec R<n>`, `<U> held: respec R<n>` and
+  `respec: read failed: <error>` (nothing for the wave to do; integrate refuses on them), then `respec post …` and
+  `respec relaunch …` (the wave's step 5b)."""
   state = handoff.state
   previous = (state.get("status") or {}).get("units") or {}
   deadline = core.NOW() + seconds
@@ -177,6 +211,16 @@ def stalled(entry: dict, worktree_head_time: float | None, now: float, minutes: 
   return waited if waited >= minutes else None
 
 
+def builder_comment(comment: dict, builders) -> bool:
+  """The builder-comment filter `builder_facts` and `record-launch`'s `finish` share (U86): a builder login (a store
+  whose `launch` recorded no login reads all) and a body opening with `**Builder status:**` or `**Deviation`."""
+  if builders and (comment.get("user") or {}).get("login") not in builders:
+    return False  # a stranger's status line is no builder's (spec section 11.2)
+  # a status comment opens with its status line or its `**Deviation**` headings (the orders' shapes); a status
+  # line quoted below another comment's first line, such as an owner's ruling, is not one
+  return (comment.get("body") or "").startswith(("**Builder status:**", "**Deviation"))
+
+
 def builder_facts(st, uid: str, comments: list, config: dict | None = None) -> tuple:
   """From the latest launch by `round`: `[round, <text of its exit file>]` when that file exists,
   and `[id, word, login]` of the last `**Builder status:**` comment (one opening with that line or with its
@@ -194,12 +238,7 @@ def builder_facts(st, uid: str, comments: list, config: dict | None = None) -> t
   since = latest["started_at"] if latest else ""
   status, builders = None, builder_logins(st)
   for comment in comments:
-    if builders and (comment.get("user") or {}).get("login") not in builders:
-      continue  # a stranger's status line is no builder's (spec section 11.2); a store whose `launch` recorded no login reads all
-    body = comment.get("body") or ""
-    # a status comment opens with its status line or its `**Deviation**` headings (the orders' shapes); a status
-    # line quoted below another comment's first line, such as an owner's ruling, is not one
-    match = STATUS_RE.search(body) if body.startswith(("**Builder status:**", "**Deviation")) else None
+    match = STATUS_RE.search(comment.get("body") or "") if builder_comment(comment, builders) else None
     if match and (comment.get("created_at") or "") >= since:
       status = [comment["id"], match.group(1), (comment.get("user") or {}).get("login")]
   stall = None
@@ -319,7 +358,10 @@ def tick_trigger(handoff) -> str | None:
   `stalled` line at every tick while its predicate holds, no fingerprint saving it away, U31; a `status word=` event
   by a login no card records as a builder skipped), then, with `driver.chain` on, `<uid> merged pr=<n>` when the pass
   reads its pull request merged (`pr` set, `ci` null) and the saved snapshot does not show it so (U44), before the
-  next unit's lines; `<uid> ready` for a unit the read finds ready and the saved `ready` lacks; an
+  next unit's lines; `<uid> ready` for a unit the read finds ready and the saved `ready` lacks; `respec R<n> <unit>`
+  for the first `respec.actionable` entry (spec section 7.6: a missing post or a standing mark on an eligible unit), a
+  failed respec read (HandoffError, ValueError or OSError, a bad `respec/R<n>.json` among them) journaled
+  `respec: read failed: <error>` and buying no session (`status` prints the same line, which integrate refuses on); an
   un-ingested thread above `low` on the latest posted round's head, by U21's reader, a stopped unit's threads skipped;
   `first launch` while `state.status` is absent; else None, the nothing-to-do predicate."""
   st, state = handoff.store, handoff.state
@@ -350,6 +392,15 @@ def tick_trigger(handoff) -> str | None:
     for uid in summary.get("ready") or []:
       if uid not in (saved.get("ready") or []):
         return f"{uid} ready"
+  from superegm import respec  # spec section 7.6: a missing post or a standing mark on an eligible unit buys a wave
+  try:
+    work = respec.actionable(st, st.handoff_id) if st.handoff_id else []
+  except (core.HandoffError, ValueError, OSError) as error:  # a bad `respec/R<n>.json` never escapes to the driver
+    core.journal(st, f"respec: read failed: {error}")
+    work = []
+  if work:
+    _, rid, uid = work[0]
+    return f"respec {rid} {uid}"
   repo, config = handoff.config["repo"], handoff.config
   for uid in handoff.graph.order:
     foreman = core.load_foreman(st, uid)

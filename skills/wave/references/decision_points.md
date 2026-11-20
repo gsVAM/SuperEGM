@@ -1,5 +1,5 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
-Added by SuperEGM (gsVAM), 2026: the `owner:` row of the word table and the three decision points, moved out of the wave skill's SKILL.md (the owner's ruling: a 24K skill body is context bloat); the `owner: <ids>` decision's allowed options, one per id, and its leavemealone sentence (U25); Decision point 5, a head's accept below the cap (U35); a stalled launch at point 3 and the carve-out (U31); a failed resume excluded from point 3 (U63). -->
+Added by SuperEGM (gsVAM), 2026: the `owner:` row of the word table and the three decision points, moved out of the wave skill's SKILL.md (the owner's ruling: a 24K skill body is context bloat); the `owner: <ids>` decision's allowed options, one per id, and its leavemealone sentence (U25); Decision point 5, a head's accept below the cap (U35); a stalled launch at point 3 and the carve-out (U31); a failed resume excluded from point 3 (U63); the `held: respec` routes to `launch` and point 3's `respec` route (U86). -->
 
 # The decision points
 
@@ -42,7 +42,7 @@ then `review status`; record it with
 `python3 '<HELPER>' decision rule --unit <U> --decision <qid> --ruling '<fid> finding upheld' --by <login> --runcard '<CARD>'`
 or `--ruling '<fid> finding overruled — <reason>'`, which posts the
 `**Ruling:**` comment on the issue. Then by `review status`: 0 → the unit
-awaits merge; 2 → Decision point 2; in normal mode `acceptable: yes` → Decision point 5; else `launch-builder`.
+awaits merge; 2 → Decision point 2; in normal mode `acceptable: yes` → Decision point 5; else `launch-builder`. For a `held: respec` unit, step 6's `launch`.
 A third ruling, on a head, is `redesign — <one sentence why>` (the sentence the owner's, typed after the dash; a bare `redesign` is refused):
 `python3 '<HELPER>' decision rule --unit <U> --decision <qid> --ruling 'redesign — <one sentence why>' --by <login> --runcard '<CARD>'`.
 It stops the unit by `stop`'s own path (the issue labelled `superegm:stopped`, never relaunched) and writes the
@@ -61,7 +61,7 @@ Write the `review status` trend line to a question file and run
 (options `one more round; stop`, and on a head `redesign — <one sentence why>`; once `one more round` is spent,
 `judges question --review <head-review-id> --cap` asks `stop` and `redesign` alone). `one more round` (once per unit):
 `python3 '<HELPER>' review rule --review <head-review-id> --ruling continue --owner --runcard '<CARD>'`,
-then `decision rule … --ruling 'one more round'`, then `launch-builder`.
+then `decision rule … --ruling 'one more round'`, then `launch-builder` (a `held: respec` unit: step 6's `launch`).
 `stop`: `review rule … --ruling stop --owner`, then
 `decision rule … --ruling stop`, which labels and stops the unit.
 `redesign — <one sentence why>`: `review rule … --ruling stop --owner`, then
@@ -86,7 +86,7 @@ Ask the owner, then
 `python3 '<HELPER>' decision rule --unit <U> --decision <qid> --ruling '(<letter>) — <reason>' --by <login> --runcard '<CARD>'`
 (it posts `**Ruling:** (<comment-id>) <option> — <reason>` quoting the
 question; the next launch's prompt carries it). `relaunch` →
-`launch-builder` now; `stop the unit` → the unit is labelled and never
+`launch-builder` now (a `held: respec` unit: step 6's `launch`; `respec` → nothing until its approval); `stop the unit` → the unit is labelled and never
 relaunched.
 Leavemealone-mode: U11 wires §13.2 here.
 
@@ -105,5 +105,5 @@ unit awaits merge. A refused accept (`review rule: accept refused: <blockers>`) 
 An accept on a pull request whose head moved since the round is refused `review rule: the reviewed head moved: revise`;
 on a rerun after a failed post it first withdraws the accept it gave (journaled `review <id> R<n> accept lapsed`, the
 round's word `revise`), the decision staying pending: rule it `revise`.
-`revise` is the round's own word: `launch-builder` as the `revise` row does; it spends no point-3 relaunch.
+`revise` is the round's own word: `launch-builder` as the `revise` row does (a `held: respec` unit: step 6's `launch`); it spends no point-3 relaunch.
 The owner's alone (`--by judges:<id>` is refused): in leavemealone-mode no point 5 opens and no head is accepted early.
