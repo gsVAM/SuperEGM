@@ -6,7 +6,7 @@
 # ingest once before the refusals, the refusal of an unsettled external finding, an external finding's carried copies
 # as one escalated pair discharged by its latest copy alone, and a re-approval of the same cycle reading that cycle
 # again and keeping the replaced entry's unnamed pairs (U26); `--amend-units` typed by hand opens and closes its own
-# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units`, and a hand-written prior approval read as `since` 0 (U36); the triage section parsed, refused with its line and frozen as `triage` (U39); the run mode frozen as the entry's `mode` (U43); the `instructions` list frozen with each file's blob sha and its verified store copy, and the changed files printed (U37); an opening approval refused over a partly filed handoff, and the last filing restored over an unapplied dry run, and `--void` without `--review` on a handoff with no `state.json` (U53); a `dir` entry's documents validated, frozen by blob sha with their raw copies (U74); a proceeded cycle's unsettled external findings no refusal, its bytes checked against the proceed's pinned sha (U57); the reviewer files frozen as the entry's `reviewers` with their store copies and the changed ones printed (U76); the reference-document manifest at `HEAD` (merge base to `HEAD`, never the working tree) refused when it differs from the converged round's, or the proceed ruling's (U75).
+# card, the branch check reading `spec_blob` (U32); the `Rounds:` line or the live `review.rounds` frozen as the entry's `rounds`, and `FROZEN_FIELDS` copied by `--amend-units`, and a hand-written prior approval read as `since` 0 (U36); the triage section parsed, refused with its line and frozen as `triage` (U39); the run mode frozen as the entry's `mode` (U43); the `instructions` list frozen with each file's blob sha and its verified store copy, and the changed files printed (U37); an opening approval refused over a partly filed handoff, and the last filing restored over an unapplied dry run, and `--void` without `--review` on a handoff with no `state.json` (U53); a `dir` entry's documents validated, frozen by blob sha with their raw copies (U74); a proceeded cycle's unsettled external findings no refusal, its bytes checked against the proceed's pinned sha (U57); the reviewer files frozen as the entry's `reviewers` with their store copies and the changed ones printed (U76); the reference-document manifest at `HEAD` (merge base to `HEAD`, never the working tree) refused when it differs from the converged round's, or the proceed ruling's (U75); `--respec R<n>` and its `--dry-run`: the refusals (no approval to correct, not the latest approval, not in this branch, not open, not converged, a merged overlap without a follow-up row, a changed frozen field), `respec/R<n>.json` and the comment files, then the `respec` entry copying the frozen fields (U85).
 
 """superegm approve-spec: record the owner's approval of a converged spec (spec section 8)."""
 
@@ -19,7 +19,7 @@ import superegm as core
 from superegm import close, instructions, reviewers, runcard
 from superegm.review import Refusal, evaluate, findings_of, ingest_pr, last_proceed, latest_cycle, live_rounds, load_review, load_round, reference_manifest, review_id, round_numbers, rounds_of, valid_rounds
 
-WRITES = frozenset(["approvals", "handoffs", "state", "reviews", "runcards", "instructions", "reviewers"])  # the store kinds this subcommand writes
+WRITES = frozenset(["approvals", "handoffs", "state", "reviews", "runcards", "instructions", "reviewers", "file"])  # the store kinds this subcommand writes
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset(["review-spec", "review-plan", "integrate", "approve-spec"])  # the skills whose card this subcommand accepts
 CONFIG = ".superegm/config.json"
@@ -43,6 +43,9 @@ def register(subparsers):
   p.add_argument("--amend-units", dest="amend_units", action="store_true",
                  help="re-approve rows appended to ## Units without a review round; typed without "
                       "--runcard it opens and closes its own approve-spec-<6 hex>-<n> card")
+  p.add_argument("--respec", help="R<n>: approve the converged correction of respec R<n> (spec section 7.6)")
+  p.add_argument("--dry-run", dest="dry_run", action="store_true",
+                 help="with --respec: print the touched units and merged_review of the working tree, write nothing")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -388,6 +391,12 @@ def run(args):
   spec = Path(args.design).expanduser().resolve()
   if not spec.is_file():
     raise core.HandoffError(f"approve-spec: spec {spec} does not exist")
+  # a dry run writes nothing only on the respec route, and a respec is no void or amendment: each refused by name
+  if args.dry_run and not args.respec:
+    raise core.HandoffError("approve-spec: --dry-run needs --respec R<n>")
+  for flag, given in (("--void", args.void), ("--amend-units", args.amend_units)):
+    if args.respec and given:
+      raise core.HandoffError(f"approve-spec: --respec is refused with {flag}")
   root = core.git_toplevel(spec)
   st = core.store(root)
   owner_void = args.void and not args.review
@@ -432,10 +441,14 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
     return void_approval(args, st, spec)
   if args.amend_units:
     return amend_units(args, st, spec, root)
+  if getattr(args, "respec", None):
+    return approve_respec(args, st, spec, root, card)
   review, _ = latest_cycle(st, "spec", str(spec))
   if review is None:
     raise core.HandoffError(f"approve-spec: no spec review for {slug}")
   rid = review_id(st, "spec", str(spec), review["cycle"])
+  if review.get("respec"):  # a respec cycle is approved by `--respec R<n>` alone, which writes its touched units
+    raise core.HandoffError(f"approve-spec: review {rid} is a respec {review['respec']} cycle: use --respec {review['respec']}")
   if not (root / CONFIG).is_file():  # before any GitHub call: the config names the repository
     raise core.HandoffError(f"approve-spec: {CONFIG} missing: run superegm init")
   # U39: a malformed triage section refuses before the PR ingest (which writes) and before the prompt and the commit
@@ -544,6 +557,117 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   path = append_entry(st, spec, entry)
   write_handoff_file(st, handoff_id, spec, entry["approved_at"] if kind == "opening" else None)
   core.journal(st, f"approve-spec {kind} {handoff_id} sha256 {sha[:12]} at review {rid} commit {commit[:12]} under {args.runcard}")
+  print(f"approval recorded in {path}")
+  return 0
+
+
+def frozen_change(old: str, new: str) -> str | None:
+  """The frozen field a respec's diff from `old` to `new` changes a line of: `Rounds` (the `Rounds:` lines before the
+  first H2) or `triage` (the triage section); None when neither moved."""
+  def rounds_lines(text):  # fenced lines are no Rounds lines and a fenced H2 ends nothing, as `rounds_line` reads
+    found, fence = [], None
+    for line in text.splitlines():
+      if fence:
+        if re.match(rf"^ {{0,3}}{fence[0]}{{{fence[1]},}}\s*$", line):
+          fence = None
+        continue
+      if (opener := core.FENCE_RE.match(line)) and not (opener.group(1)[0] == "`" and "`" in opener.group(2)):
+        fence = (opener.group(1)[0], len(opener.group(1)))
+        continue
+      if ANY_H2.match(line):
+        break
+      if line.startswith("Rounds:"):
+        found.append(line)
+    return found
+  def triage_body(text):  # the section's lines alone: a heading moved by a line above it changes nothing
+    section = triage_section(text.splitlines())
+    return None if section is None else section[1]
+  if rounds_lines(old) != rounds_lines(new):
+    return "Rounds"
+  if triage_body(old) != triage_body(new):
+    return "triage"
+  return None
+
+
+def respec_checks(args, st: core.Store, spec: Path, root: Path, card: dict):
+  """`--respec R<n>`'s refusals, before any write, each `approve-spec: respec R<n>: ...` unless named whole:
+  `no approval to correct`; `<handoff>: not the latest approval: plan the rows in the latest handoff` (a voided latest
+  approval included); `approve-spec: fold <base> first: approval <sha7> is not in this branch` (`require_branch_holds`);
+  `not open`; `review <id> not converged`; `<U> is merged and overlaps <path:a-b>: add a follow-up row`; and
+  `changes the frozen <field>: void and re-approve`. Returns `(handoff id, the latest approval, the review id, the spec text, respec.touched's result)`."""
+  from superegm import respec
+  rid_n = args.respec
+  fail = lambda reason: core.HandoffError(f"approve-spec: respec {rid_n}: {reason}")
+  latest = core.load_approval(st, spec)
+  if latest is None:
+    raise fail("no approval to correct")
+  # the handoff `core.resolve_handoff` resolved (`--handoff`, else the card's), the latest only when neither names one
+  hid = getattr(args, "handoff", None) or st.handoff_id or latest.get("handoff_id")
+  if latest.get("handoff_id") != hid or latest.get("voided_by"):
+    raise fail(f"{hid}: not the latest approval: plan the rows in the latest handoff")
+  require_branch_holds(st, root, spec.relative_to(root).as_posix(), latest)  # as ordinary approvals and --amend-units
+  if rid_n not in [r["id"] for r in respec.open(st, hid)]:  # applied, withdrawn or never opened
+    raise fail("not open")
+  if args.dry_run:  # the draft, before its commit and its review: the touched units alone
+    return hid, latest, None, core.read_text(spec), respec.touched(st, hid, core.read_text(spec))
+  review, _ = latest_cycle(st, "spec", str(spec))
+  rid = review_id(st, "spec", str(spec), review["cycle"]) if review else "none"
+  if review is None or review.get("respec") != rid_n:
+    raise fail(f"review {rid} not converged")
+  status = evaluate(st, review, card.get("parent") or args.runcard)
+  text = core.read_text(spec)
+  if status.code != 0 or core.sha256_file(spec) != status.sha:  # the raw bytes, as `current_sha` hashes them
+    raise fail(f"review {rid} not converged")
+  result = respec.touched(st, hid, text)
+  for follow in result["follow_ups"]:
+    if not follow["row"]:
+      raise fail(f"{follow['unit']} is merged and overlaps {follow['overlaps']}: add a follow-up row")
+  rel = spec.relative_to(root).as_posix()
+  changed = frozen_change(core.run_git(["show", f"{latest['commit']}:{rel}"], root), text)
+  if changed:
+    raise fail(f"changes the frozen {changed}: void and re-approve")
+  return hid, latest, rid, text, result
+
+
+def approve_respec(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
+  """`--respec R<n>` (spec section 7.6): `respec_checks`' refusals, then `respec/R<n>.json` and the comment files, then the
+  entry, copying every frozen field as `--amend-units` does; a crash between them leaves the file without an entry,
+  which a re-run rewrites and completes. `--dry-run` prints the touched units of the working tree and writes nothing."""
+  from superegm import respec
+  hid, latest, rid, text, result = respec_checks(args, st, spec, root, card)
+  for key in ("touched", "untouched", "merged_review"):
+    print(f"{key}: {', '.join(result[key])}")
+  for follow in result["follow_ups"]:
+    print(f"follow_up: {follow['unit']} overlaps {follow['overlaps']}: row {follow['row']}")
+  if args.dry_run:
+    return 0
+  if not (args.yes or args.leavemealone or st.config.get("mode") == "leavemealone"):
+    print(f"Approve respec {args.respec} of `{spec}` at review {rid}?")
+    print("Options: Approve | Stop. Run again with --yes after the owner chose Approve.")
+    return 0
+  hs = core.handoff_store(st, hid)
+  rel = spec.relative_to(root).as_posix()
+  core.atomic_write(respec.respec_path(hs, f"{args.respec}.json"), result)
+  state = (handoff_state(st, hid) or {}).get("units") or {}
+  for unit in result["touched"]:  # a filed, unmerged unit: the comment the wave posts beside its filed body
+    record = state.get(unit) or {}
+    if record.get("number") and not respec.is_merged(record):
+      core.atomic_write(hs.path("file", f"respec_comment_{unit}_{args.respec}.md"),
+                        respec.comment_text(st, hid, text, unit, args.respec))
+  commit = commit_by_path(root, [rel, CONFIG], f"superegm: approve {core.spec_slug(spec)} respec {args.respec} at review {rid}",
+                          st.config["commit_trailer"])
+  # the previous entry's escalated pairs the Units section does not name, then this respec cycle's own, as an ordinary
+  # approval carries them (`graph` reads the latest entry's list alone)
+  named = units_section(text)
+  escalated = [pair for pair in latest.get("escalated") or [] if pair not in named]
+  escalated += [pair for pair in escalated_pairs(st, spec, cycle_of(latest.get("review"))) if pair not in escalated]
+  if escalated:
+    print(f"approve-spec: {len(escalated)} escalated finding(s) await the owner: {', '.join(escalated)}")
+  entry = entry_of(core.sha256_file(spec), commit, args.runcard, rid, hid, "respec", escalated,
+                   {f: latest[f] for f in FROZEN_FIELDS if f in latest})
+  entry |= {"respec": args.respec, "ranges": [list(r) for r in respec.changed_ranges(result["line_map"])]}
+  path = append_entry(st, spec, entry)
+  core.journal(st, f"approve-spec respec {args.respec} {hid} sha256 {entry['sha256'][:12]} at review {rid} commit {commit[:12]} under {args.runcard}")
   print(f"approval recorded in {path}")
   return 0
 

@@ -11,7 +11,7 @@ description: >-
   Zoom Out Review, and Implementation Readiness.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: renamed to review-spec; the body is spec section 8's one review loop over the helper (the stages, presets, semantic split, checkpoint gates and report files are gone); persona path agents/zoom-out.md; the amendment scope, the branch sentence and the batch settle (U19); the spec PR, the pushes and the PR's ingest (U26); step 3's accept below the cap (U35); the resumed panel line and the cap read from `review.rounds` (U36); proceed offered at the cap and on a stall (U58); the driver's setup after the approval when the chain is on (U71). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: renamed to review-spec; the body is spec section 8's one review loop over the helper (the stages, presets, semantic split, checkpoint gates and report files are gone); persona path agents/zoom-out.md; the amendment scope, the branch sentence and the batch settle (U19); the spec PR, the pushes and the PR's ingest (U26); step 3's accept below the cap (U35); the resumed panel line and the cap read from `review.rounds` (U36); proceed offered at the cap and on a stall (U58); the driver's setup after the approval when the chain is on (U71); the `--respec R<n>` path: the Q&A, the dry run before the commit, the respec review and approval (U85). -->
 
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: run card, panel presets, Astra lane. -->
 
@@ -241,6 +241,46 @@ When plan review or integrate finds the defect to be in the frozen spec, that sk
 `superegm approve-spec --void --review <id> --spec <spec-path>`: the approval is void, `graph`
 refuses it, and the owner types `/superegm:review-spec <spec-path>` again. The review opens as
 the next cycle; a re-approval while any unit is filed keeps the handoff id.
+
+## A respec (`--respec R<n>`)
+
+    /superegm:review-spec <spec-path> --respec R<n>
+
+The owner's correction of the sections at fault after a `respec` ruling, in place of a void
+(spec section 7.6). R<n> must be open (`respec/R<n>.open.json` in the handoff's directory).
+
+1. **Draft.** Draft the smallest diff to the spec that settles the deviation, with the owner in
+   a Q&A: one question at a time, as the brainstorm, each question led by its suggested answer
+   (`Suggested: <the suggested answer>`), then the question; wait for the reply before the next. Never change
+   the `Rounds:` line or the triage section (a respec carries the frozen fields unchanged), a
+   filed unit's Scope, Blocked by or DoD command (that is a `stop the unit` and a follow-up row),
+   or the `## Units` table beyond follow-up rows (that is `--amend-units`). A merged unit the
+   diff's range or Interfaces line touches gets a new follow-up row in the same diff, its title
+   carrying `Follows: U<n>`.
+2. **Dry run.** Before the commit, run `approve-spec --respec R<n> --dry-run`
+   (`superegm approve-spec --respec R<n> --dry-run --spec <spec-path> --runcard <id>`): it runs the
+   approval's touched-unit rule on the working tree, writes nothing and prints `touched:`,
+   `untouched:`, `merged_review:` and each `follow_up:`. Show the owner the list; a
+   `merged_review` unit the owner wants rebuilt gets its follow-up row now, then dry-run again.
+   Commit the diff on the spec's branch.
+3. **Review.** `superegm review open --kind spec --artifact <spec-path> --reviewers design,codebase-details --respec R<n> [--astra on|off] --runcard <id>`:
+   the panel is `design`, `codebase-details` and the Astra lane, the cap is 2, and the evidence is
+   what `superegm review scope --review <id> --runcard <id>` prints: the diff from the latest
+   approval's commit to `HEAD` and the sections it touches. Brief each reviewer with that alone;
+   a finding outside those sections is out of remit. Then the loop of step 3.
+4. **Approve.** `superegm approve-spec --spec <spec-path> --respec R<n> --runcard <id>` checks
+   the refusals below and prints the touched units. Without `--yes` (normal mode) it then prints
+   `Approve respec R<n> of <spec> at review <id>?`, writes nothing and exits 0: ask the owner,
+   Approve or Stop. On Approve, run it again with `--yes`; it appends the `respec` entry and
+   writes `respec/R<n>.json` and the comment files in the same command. On Stop, close the card
+   and record nothing. In leavemealone (`--leavemealone` or the config's mode) it approves
+   without the question. It refuses, writing nothing, with `approve-spec: respec R<n>: no approval to correct`,
+   `approve-spec: respec R<n>: <handoff>: not the latest approval: plan the rows in the latest handoff`
+   (a voided latest approval too), `approve-spec: fold <base> first: approval <sha7> is not in this branch`,
+   `approve-spec: respec R<n>: not open`, `approve-spec: respec R<n>: review <id> not converged`,
+   `approve-spec: respec R<n>: <U> is merged and overlaps <path:a-b>: add a follow-up row`, or
+   `approve-spec: respec R<n>: changes the frozen <field>: void and re-approve`. After a crash, run it again: it rewrites the file and appends
+   the entry. The wave posts each comment and relaunches the touched units.
 
 ## Data notice
 

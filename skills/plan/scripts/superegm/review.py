@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76); a spec cycle's changed reference documents as whole-file `changed <path>` scope lines, their `refs` manifest on each round, in the scope filter, the settle check and the proceed ruling (U75).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76); a spec cycle's changed reference documents as whole-file `changed <path>` scope lines, their `refs` manifest on each round, in the scope filter, the settle check and the proceed ruling (U75); `review open --respec R<n>`: the diff and its sections as evidence, the `design`, `codebase-details` and Astra panel, cap 2 (U85).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest|triage: the one review loop (spec section 8)."""
 
@@ -7,6 +7,7 @@ import argparse
 import contextlib
 from dataclasses import dataclass
 import difflib
+import hashlib
 import io
 import json
 import os
@@ -99,6 +100,8 @@ def register(subparsers):
   o.add_argument("--reviewers", required=True, help="comma-separated reviewer ids, the kind's first reviewer first")
   o.add_argument("--astra", choices=("on", "off"), help="the Astra lane (default: config.astra.enabled)")
   o.add_argument("--scope", help="kind spec: auto (default) | whole | headings separated by `;`")
+  o.add_argument("--respec", help="kind spec: R<n>, review only the correcting diff of open respec R<n> (design, "
+                                  "codebase-details and the Astra lane; cap 2)")
   r = core.add_parser(action, "record", "record one reviewer's round")
   r.add_argument("--review", required=True)
   r.add_argument("--round", type=int, required=True)
@@ -289,7 +292,7 @@ def cited_line(location: str) -> int | None:
   return int(match.group(1)) if match else None
 
 
-def out_of_scope(rows: list, spans: list, location: str, spec_name: str = "", root: str = ""):
+def out_of_scope(rows: list, spans: list, location: str, spec_name: str = "", root: str = "", respec: bool = False):
   """The heading of the section a finding cites when no scope row holds its line, else None; in a scoped
   round a location naming no line, or a line the spec does not hold, answers `none` (U32); a `whole` round
   exempts every finding. A round that lists reference documents (`("changed", <path>, 0, 0)` rows, U75) reads a
@@ -300,18 +303,21 @@ def out_of_scope(rows: list, spans: list, location: str, spec_name: str = "", ro
   or `#L<line>`, may hold spaces (`other/a b.md, line 8` names `other/a b.md`). The spec is named by its full path or
   its bare file name only, never with a directory in front of its path. A listed document is named by its full repository-relative path after one leading
   `./` or the repository root (`root`, an absolute path) is taken off, or by its bare file name (the spec's own name
-  wins a tie); a directory in front of the path names another file."""
+  wins a tie); a directory in front of the path names another file. A respec cycle (`respec`) lists no reference
+  document and its remit is the spec's correction alone: a location naming any other file answers `none`."""
   listed = {row[1] for row in rows if row[0] == "changed" and row[2] == row[3] == 0}
+  loc, ends = location.removeprefix("./"), ": \t,#"
+  for prefix in {root.rstrip("/"), str(Path(root).resolve()).rstrip("/")} - {"", "."}:
+    loc = loc.removeprefix(prefix + "/")
+  named = (re.match(r"([^:#,]+\.[A-Za-z][A-Za-z0-9]*)(?=:\d|#L\d)", loc) or re.match(r"([^:#,]*?/[^:#,]*?\.[A-Za-z][A-Za-z0-9]*)(?=[:\s#,]|$)", loc)
+           or re.match(r"([^\s:#,]+\.[A-Za-z][A-Za-z0-9]*)(?=[:\s#,]|$)", loc))
+  spec_named = bool(named) and bool(spec_name) and (named.group(1) == spec_name or ("/" not in named.group(1) and spec_name.rsplit("/", 1)[-1] == named.group(1)))
+  if respec and named and not spec_named:
+    return "none"
   if listed:
-    loc, ends = location.removeprefix("./"), ": \t,#"
-    for prefix in {root.rstrip("/"), str(Path(root).resolve()).rstrip("/")} - {"", "."}:
-      loc = loc.removeprefix(prefix + "/")
     named_as = lambda name: loc.startswith(name) and (len(loc) == len(name) or loc[len(name)] in ends)
     if any(named_as(path) for path in listed):
       return None
-    named = (re.match(r"([^:#,]+\.[A-Za-z][A-Za-z0-9]*)(?=:\d|#L\d)", loc) or re.match(r"([^:#,]*?/[^:#,]*?\.[A-Za-z][A-Za-z0-9]*)(?=[:\s#,]|$)", loc)
-             or re.match(r"([^\s:#,]+\.[A-Za-z][A-Za-z0-9]*)(?=[:\s#,]|$)", loc))
-    spec_named = bool(named) and bool(spec_name) and (named.group(1) == spec_name or ("/" not in named.group(1) and spec_name.rsplit("/", 1)[-1] == named.group(1)))
     if not spec_named:
       if "/" not in loc.split(":")[0].split("#")[0] and any(named_as(path.rsplit("/", 1)[-1]) for path in listed):
         return None  # a listed document by its bare file name (a slash before the first colon is another directory's)
@@ -368,16 +374,21 @@ def refs_moved(st: core.Store, review: dict, rnd: dict) -> bool:
 
 def scope_of(st: core.Store, review: dict, spec: Path) -> list:
   """The spec's scope rows (`spec_scope`), then one `("changed", <path>, 0, 0)` row per changed reference document
-  (`reference_manifest`): a whole file, which has no lines (U75)."""
+  (`reference_manifest`): a whole file, which has no lines (U75); a respec cycle's scope is its correction diff
+  alone, with no reference document row (spec section 7.6)."""
   root = core.git_toplevel(spec.parent)
+  if review.get("respec"):
+    return spec_scope(st, review, spec)
   return spec_scope(st, review, spec) + [("changed", row["file"], 0, 0) for row in reference_manifest(st, root)]
 
 
 def spec_scope(st: core.Store, review: dict, spec: Path) -> list:
   """The round's scope rows, `(changed|neighbour|whole, heading, start, end)`, from the current bytes: under
   `auto` (a review opened before U19 reads as `auto`) the sections `scope_sections` finds against the
-  approved bytes; a section list adds its headings as `changed`, without neighbours (a heading the bytes no
-  longer hold is dropped). One `whole` row otherwise, its heading field the reason: `(whole)`, `(no
+  approved bytes; under `respec` (a `review open --respec R<n>` cycle) only the `changed` sections
+  `scope_sections` finds against the latest approved bytes, without neighbours; a section list adds its
+  headings as `changed`, without neighbours (a heading the bytes no longer hold is dropped). One `whole` row
+  otherwise, its heading field the reason: `(whole)`, `(no
   approval)`, `(no commit holds <sha7>)`, or `(no change)` when nothing changed and no listed heading stands."""
   text = core.read_text(spec)
   whole = lambda reason: [("whole", f"({reason})", 1, len(text.splitlines()))]
@@ -390,7 +401,8 @@ def spec_scope(st: core.Store, review: dict, spec: Path) -> list:
   old = approved_text(spec, approval)
   if old is None:
     return whole(f"no commit holds {approval['sha256'][:7]}")
-  rows = {row[2]: row for row in scope_sections(old, text)}  # by start line: two sections may share a heading
+  rows = {row[2]: row for row in scope_sections(old, text)  # by start line: two sections may share a heading
+          if form != "respec" or row[0] == "changed"}  # a respec cycle's remit: the diff's sections, no neighbours
   if isinstance(form, list):
     for heading, start, end in sections(text):
       if heading in form:
@@ -467,7 +479,7 @@ def cycle_ids(st: core.Store, kind: str, artifact: str) -> list[str]:
 def latest_cycle(st: core.Store, kind: str, artifact: str) -> tuple[dict | None, bool]:
   """The latest cycle's `review.json` of this artifact and whether that cycle is closed: by an
   `accept` or `stop` ruling; a spec's by the approval that names it, once the bytes moved off its
-  sha; an integrate's by the handoff closing or changing (D1 (a)), or by a `## Units` amendment
+  sha, and a respec cycle's once its R<n> is not open (applied, or withdrawn by a stopped unit); an integrate's by the handoff closing or changing (D1 (a)), or by a `## Units` amendment
   past the bytes its latest completed round reviewed (a cycle with no completed round stays)."""
   cycles = cycle_ids(st, kind, artifact)
   if not cycles:
@@ -478,6 +490,10 @@ def latest_cycle(st: core.Store, kind: str, artifact: str) -> tuple[dict | None,
   if not closed and kind == "spec":
     approval = core.load_approval(st, Path(artifact))
     closed = bool(approval) and approval["review"] == rid and approval["sha256"] != current_sha(st, kind, artifact)
+    if not closed and review.get("respec"):  # a respec cycle closes once its R<n> is no longer open: applied or withdrawn
+      from superegm import respec as respecs
+      handoff = (approval or {}).get("handoff_id")
+      closed = not handoff or review["respec"] not in [r["id"] for r in respecs.open(st, handoff)]
   if not closed and kind == "integrate":
     state = core.load_state(st.root)
     amended = [e for e in core.load_approvals(st, Path(artifact))
@@ -511,6 +527,49 @@ def bind(args, review: dict) -> dict:
 
 
 # ---------------------------------------------------------------- open
+
+
+RESPEC_CAP = 2  # a respec cycle's cap, below `review.rounds` (spec section 7.6)
+RESPEC_PANEL = ("design", "codebase-details")  # a respec cycle's panel, besides the Astra lane, narrowed by section 4.1
+
+
+def respec_base(st: core.Store, kind: str, artifact: str, respec: str, reviewers: list, given) -> str:
+  """`review open --respec R<n>`'s checks; returns the commit of the latest approval, the diff's base. Refused: a
+  kind other than spec, a `--scope`, a reviewer outside `RESPEC_PANEL`, no approval, a voided latest approval, or
+  R<n> not open in the latest approval's handoff."""
+  if kind != "spec":
+    raise core.HandoffError(f"review open: --respec is refused for kind {kind}")
+  if given is not None:
+    raise core.HandoffError("review open: --scope is refused with --respec")
+  outside = [r for r in reviewers if r not in RESPEC_PANEL]
+  if outside:
+    raise core.HandoffError(f"review open: respec {respec}: {outside[0]} is not on a respec panel ({', '.join(RESPEC_PANEL)})")
+  approval = core.load_approval(st, Path(artifact))
+  if not approval:
+    raise core.HandoffError(f"review open: respec {respec}: no approval")
+  if approval.get("voided_by"):  # the line approve-spec --respec refuses with: no cycle runs against a voided handoff
+    raise core.HandoffError(f"review open: respec {respec}: {approval.get('handoff_id')}: not the latest approval: "
+                            "plan the rows in the latest handoff")
+  from superegm import respec as respecs  # R ids are per handoff: open in the latest approval's handoff alone
+  if respec not in [r["id"] for r in respecs.open(st, approval.get("handoff_id"))]:
+    raise core.HandoffError(f"review open: respec {respec} is not open")
+  return approval["commit"]
+
+
+def respec_evidence(st: core.Store, review: dict) -> str:
+  """A respec cycle's evidence: the diff from the latest approval's commit (`base`) to `HEAD`, then the text at `HEAD`
+  of each section the diff changes; nothing else of the spec."""
+  spec = Path(review["artifact"])
+  root = core.git_toplevel(spec.parent)
+  rel = spec.resolve().relative_to(root.resolve()).as_posix()
+  old = core.run_git(["show", f"{review['base']}:{rel}"], root)
+  new = core.run_git(["show", f"HEAD:{rel}"], root)
+  out = [core.run_git(["diff", review["base"], "HEAD", "--", rel], root).rstrip("\n"), ""]
+  lines = new.splitlines()
+  for kind, heading, start, end in scope_sections(old, new):
+    if kind == "changed":
+      out += [f"--- {heading} ({start}-{end})", *lines[start - 1:end], ""]
+  return "\n".join(out)
 
 
 def open_review(args) -> int:
@@ -547,7 +606,14 @@ def open_review(args) -> int:
   given = getattr(args, "scope", None)  # a caller's own Namespace (the foreman's) may omit it
   if given is not None and kind != "spec":
     raise core.HandoffError(f"review open: --scope is refused for kind {kind}")
+  respec = getattr(args, "respec", None)  # read and checked before the resume, which resumes only its own cycle
+  base = respec_base(st, kind, artifact, respec, reviewers, given) if respec else None
   latest, closed = latest_cycle(st, kind, artifact)
+  if respec and latest and not closed and latest.get("respec") != respec:
+    raise core.HandoffError(f"review open: respec {respec}: {review_id(st, kind, artifact, latest['cycle'])} is open")
+  if not respec and latest and not closed and latest.get("respec"):  # resumed by `--respec R<n>` alone
+    raise core.HandoffError(f"review open: {review_id(st, kind, artifact, latest['cycle'])} is a respec {latest['respec']} "
+                            f"cycle: use --respec {latest['respec']}")
   if latest and not closed:  # a re-typed skill resumes the open cycle; a spec's panel may narrow, from the next round
     rid = review_id(st, kind, artifact, latest["cycle"])
     core.card_add(st, args.runcard, "produced", rid)
@@ -561,8 +627,8 @@ def open_review(args) -> int:
         core.journal(st, f"review open {rid} panel {','.join(panel_at(latest, nxt))} from round {nxt} under {args.runcard}")
       print(f"panel {','.join(panel_at(latest, nxt))} from round {nxt}" + (f" (unchanged: {refused})" if refused else ""))
     return 0
-  cap = cap_at_open(args, st, kind, artifact)
-  scope = scope_form(st, artifact, given) if kind == "spec" else None
+  cap = RESPEC_CAP if respec else cap_at_open(args, st, kind, artifact)
+  scope = ("respec" if respec else scope_form(st, artifact, given)) if kind == "spec" else None
   cycle = latest["cycle"] + 1 if latest else 1
   rid = review_id(st, kind, artifact, cycle)
   lane = seat_lane(kind, getattr(args, "astra", None), st.config.get("astra") or {})
@@ -570,7 +636,7 @@ def open_review(args) -> int:
             "reviewers": reviewers + (["astra"] if lane else []), "cap": cap,
             "runcard": args.runcard, "artifact_sha256": current_sha(st, kind, artifact) if kind == "plan" else args.sha256,
             "astra_incomplete": 0,
-            "converged": "no", "converged_round": None, "rulings": []}
+            "converged": "no", "converged_round": None, "rulings": [], **({"respec": respec, "base": base} if respec else {})}
   save_review(st, rid, review)
   core.card_add(st, args.runcard, "produced", rid)
   core.journal(st, f"review open {rid} panel {','.join(review['reviewers'])} under {args.runcard}")
@@ -636,6 +702,8 @@ def scope_review(args) -> int:
   bind(args, review)
   for kind, heading, start, end in scope_of(st, review, Path(review["artifact"])):
     print(f"{kind} {heading}" if start == end == 0 else f"{kind} {start}-{end} {heading}")  # a reference document is a whole file
+  if review.get("respec"):  # a respec cycle reviews its diff and the sections it touches alone (spec section 7.6)
+    print(respec_evidence(st, review))
   return 0
 
 
@@ -686,6 +754,13 @@ def record_round(args) -> int:
   if kind == "plan" and args.sha256:
     raise core.HandoffError("review record: --sha256 is refused for kind plan")
   sha = current_sha(st, kind, review["artifact"])
+  if review.get("respec"):  # its evidence is HEAD's diff: the recorded sha must be of the same bytes
+    spec = Path(review["artifact"])
+    root = core.git_toplevel(spec.parent)
+    from superegm import instructions  # at call time, as `reviewers` is: the raw blob, hashed as `current_sha` hashes
+    head = instructions.blob(root, "HEAD", spec.resolve().relative_to(root.resolve()).as_posix())
+    if head is None or hashlib.sha256(head).hexdigest() != sha:
+      raise core.HandoffError(f"review record: respec {review['respec']}: {spec} differs from HEAD: commit the correction")
   if kind == "head":
     sha = args.sha256 or (existing["artifact_sha256"] if existing else review["artifact_sha256"] if n == 1 else None)
     if not sha:
@@ -760,7 +835,8 @@ def record_round(args) -> int:
       spans = sections(core.read_text(Path(review["artifact"])))
       artifact = Path(review["artifact"])
       spec_rel = artifact.resolve().relative_to(core.git_toplevel(artifact.parent).resolve()).as_posix()
-      verdicts = [(finding, line, out_of_scope(rnd["scope"], spans, finding["location"], spec_rel, str(core.git_toplevel(artifact.parent)))) for finding, line in pairs]
+      verdicts = [(finding, line, out_of_scope(rnd["scope"], spans, finding["location"], spec_rel, str(core.git_toplevel(artifact.parent)),
+                                              respec=bool(review.get("respec")))) for finding, line in pairs]
       findings = [finding for finding, _, section in verdicts if section is None]
       refused = [(finding["id"], line, section) for finding, line, section in verdicts if section is not None]
       mine = lambda line: line.split(" | ", 1)[0].rsplit("-", 2)[0] == reviewer
