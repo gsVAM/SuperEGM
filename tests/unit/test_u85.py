@@ -291,3 +291,34 @@ def test_approve_respec_writes_entry_and_touched(world, monkeypatch):
   assert set(json.loads(r1_json)) == {"touched", "untouched", "follow_ups", "line_map", "merged_review"}
   assert comment_file.name == "respec_comment_U2_R1.md" and rerun_after_crash_entries == 1 and "file" in approve_spec.WRITES
   assert "-Delay is 5s." in comment_file.read_text(encoding="utf-8") and "+Delay is 6s." in comment_file.read_text(encoding="utf-8")
+
+
+RETRY = BASE[:BASE.index("## 5. Units\n")] + ["## 8. Retry\n", "\n", "Max retries: 3\n", "\n"] \
+  + [f"Filler {n}.\n" for n in range(8)] + ["\n", "## 9. Untouched section\n", "\n", "Nothing here.\n", "\n"] \
+  + BASE[BASE.index("## 5. Units\n"):]
+
+
+def test_respec_review_evidence_panel_and_cap(world):
+  # a respec cycle reviews the diff from the latest approval's commit to HEAD and the sections it touches
+  spec, st = respec_world(world, [(RETRY, None)])
+  open_respec(st)
+  approved(world, spec, replace(RETRY, "Max retries: 3", "Max retries: 4"), "draft")
+  world.spec = spec
+  cid = world.card("review-spec")
+  code, out = world.run("review", "open", "--kind", "spec", "--artifact", spec, "--reviewers", "design,zoom-out",
+                        "--astra", "on", "--respec", "R1", "--runcard", cid)
+  assert code == 1 and "zoom-out is not on a respec panel" in out
+  code, out = world.run("review", "open", "--kind", "spec", "--artifact", spec, "--reviewers", "design,codebase-details",
+                        "--astra", "on", "--respec", "R2", "--runcard", cid)
+  assert code == 1 and "respec R2 is not open" in out
+  code, out = world.run("review", "open", "--kind", "spec", "--artifact", spec, "--reviewers", "design,codebase-details",
+                        "--astra", "on", "--respec", "R1", "--runcard", cid)
+  assert code == 0, out
+  rid = out.splitlines()[0]
+  cycle = json.loads(st.path("reviews", rid, "review.json").read_text(encoding="utf-8"))
+  panel = [{"name": name} for name in cycle["reviewers"]]
+  code, evidence = world.run("review", "scope", "--review", rid, "--runcard", cid)
+  assert code == 0, evidence
+  assert [m["name"] for m in panel] == ["design", "codebase-details", "astra"] and cycle["cap"] == 2
+  assert "+Max retries: 4" in evidence and "## 9. Untouched section" not in evidence
+  assert cycle["respec"] == "R1" and "changed" in evidence and "neighbour" not in evidence
