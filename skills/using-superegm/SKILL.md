@@ -5,7 +5,7 @@ effects: none
 description: Use when starting any conversation - establishes how to find and use skills, requiring skill invocation before ANY response including clarifying questions
 ---
 
-<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: renamed to using-superegm; superegm names, the typed and auto-invoked lists, the phase rule; the Claude Code reference only; the four rules of design section 5 (U19); the inbox line (U23); the driver in the typed list (U24); the line on the brainstorm's review and build design step (U64); the typed list takes the inbox and the owner's answers move there (U70); the retro in the typed list, the last phase (U87). -->
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: renamed to using-superegm; superegm names, the typed and auto-invoked lists, the phase rule; the Claude Code reference only; the four rules of design section 5 (U19); the inbox line (U23); the driver in the typed list (U24); the line on the brainstorm's review and build design step (U64); the typed list takes the inbox and the owner's answers move there (U70); the retro in the typed list (U87). -->
 
 In Claude Code or Cowork, read `${CLAUDE_PLUGIN_ROOT}/docs/claude.md` first.
 
