@@ -286,3 +286,17 @@ def test_due_rows_opens_a_fresh_cycle(world, case):
   new_review = review.load_review(st, out.splitlines()[0])
   assert new_review["cycle"] == old_review["cycle"] + 1
 
+
+# ---------------------------------------------------------------- S6: the skills offer the respec
+
+
+@pytest.mark.parametrize("path", ["skills/review-plan/SKILL.md", "skills/integrate/SKILL.md"])
+def test_skills_offer_respec_beside_void(path):
+  """Interactive only: the leavemealone panel never offers it."""
+  from conftest import ROOT
+  text = (ROOT / path).read_text(encoding="utf-8")
+  assert "superegm respec open --review" in text
+  assert "--void" in text
+  offer = next(p for p in text.split("\n\n") if "superegm respec open --review" in p)
+  assert "--void" in offer and "leavemealone" in offer  # beside the void, and never under a leavemealone card
+
