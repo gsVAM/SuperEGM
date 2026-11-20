@@ -43,6 +43,9 @@ def register(subparsers):
   p.add_argument("--amend-units", dest="amend_units", action="store_true",
                  help="re-approve rows appended to ## Units without a review round; typed without "
                       "--runcard it opens and closes its own approve-spec-<6 hex>-<n> card")
+  p.add_argument("--respec", help="R<n>: approve the converged correction of respec R<n> (spec section 7.6)")
+  p.add_argument("--dry-run", dest="dry_run", action="store_true",
+                 help="with --respec: print the touched units and merged_review of the working tree, write nothing")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -432,6 +435,8 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
     return void_approval(args, st, spec)
   if args.amend_units:
     return amend_units(args, st, spec, root)
+  if getattr(args, "respec", None):
+    return approve_respec(args, st, spec, root, card)
   review, _ = latest_cycle(st, "spec", str(spec))
   if review is None:
     raise core.HandoffError(f"approve-spec: no spec review for {slug}")
@@ -546,6 +551,62 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   core.journal(st, f"approve-spec {kind} {handoff_id} sha256 {sha[:12]} at review {rid} commit {commit[:12]} under {args.runcard}")
   print(f"approval recorded in {path}")
   return 0
+
+
+def frozen_change(old: str, new: str) -> str | None:
+  """The frozen field a respec's diff from `old` to `new` changes a line of: `Rounds` (the `Rounds:` lines before the
+  first H2) or `triage` (the triage section); None when neither moved."""
+  def rounds_lines(text):
+    lines = text.splitlines()
+    first = next((i for i, line in enumerate(lines) if ANY_H2.match(line)), len(lines))
+    return [line for line in lines[:first] if line.startswith("Rounds:")]
+  if rounds_lines(old) != rounds_lines(new):
+    return "Rounds"
+  if triage_section(old.splitlines()) != triage_section(new.splitlines()):
+    return "triage"
+  return None
+
+
+def respec_checks(args, st: core.Store, spec: Path, root: Path, card: dict):
+  """`--respec R<n>`'s refusals, before any write: the latest approval not of this handoff, the respec not open, its
+  cycle not converged, a merged unit the range or Interfaces test touches with no follow-up row, a changed frozen
+  field. Returns `(handoff id, the latest approval, the review id, the spec text, respec.touched's result)`."""
+  from superegm import respec
+  rid_n = args.respec
+  fail = lambda reason: core.HandoffError(f"approve-spec: respec {rid_n}: {reason}")
+  latest = core.load_approval(st, spec)
+  if latest is None:
+    raise fail("no approval to correct")
+  hid = getattr(args, "handoff", None) or latest.get("handoff_id")
+  if latest.get("handoff_id") != hid or latest.get("voided_by"):
+    raise fail(f"{hid}: not the latest approval: plan the rows in the latest handoff")
+  hs = core.handoff_store(st, hid)
+  if not respec.respec_path(hs, f"{rid_n}.open.json").is_file() or any(
+      e.get("respec") == rid_n for e in core.load_approvals(st, spec) if e.get("handoff_id") == hid):
+    raise fail("not open")
+  review, _ = latest_cycle(st, "spec", str(spec))
+  rid = review_id(st, "spec", str(spec), review["cycle"]) if review else "none"
+  if review is None or review.get("respec") != rid_n:
+    raise fail(f"review {rid} not converged")
+  status = evaluate(st, review, card.get("parent") or args.runcard)
+  text = core.read_text(spec)
+  if status.code != 0 or core.sha256_text(text) != status.sha:
+    raise fail(f"review {rid} not converged")
+  result = respec.touched(st, hid, text)
+  for follow in result["follow_ups"]:
+    if not follow["row"]:
+      raise fail(f"{follow['unit']} is merged and overlaps {follow['overlaps']}: add a follow-up row")
+  rel = spec.relative_to(root).as_posix()
+  changed = frozen_change(core.run_git(["show", f"{latest['commit']}:{rel}"], root), text)
+  if changed:
+    raise fail(f"changes the frozen {changed}: void and re-approve")
+  return hid, latest, rid, text, result
+
+
+def approve_respec(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
+  """`--respec R<n>` (spec section 7.6): the four refusals, then the touched units and the entry."""
+  respec_checks(args, st, spec, root, card)
+  raise core.HandoffError(f"approve-spec: respec {args.respec}: not implemented")
 
 
 def void_approval(args, st: core.Store, spec: Path) -> int:
