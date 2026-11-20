@@ -144,3 +144,29 @@ def test_prompt_record_and_amendments_agree(world, tmp_path, capsys, monkeypatch
   assert ("# Spec corrections" in prompt and "+Max retries: 4" in prompt) is in_prompt and record["reason"] == "respec"
   assert (record.get("respecs") == ["R1"]) is in_prompt and ("R1" in amendments_md) is in_prompt and amendments_md in astra_brief
   assert mark == (None if in_prompt and pushed_after_start else "respec: R1")
+
+
+@pytest.mark.parametrize("u1_running, marked", [(True, "marked: none"), (False, "marked: U2")])
+def test_respec_relaunch_waits_for_a_slot(world, monkeypatch, u1_running, marked):
+  # max_in_flight 1: a respec relaunch joins the ready-again set and takes a slot only when one is free
+  import test_builders as tb
+  from superegm import respec
+  s, card, handoff, _ = tb.seed(world, units=("U07", "U08"), max_in_flight=1)  # U07 plays U1, U08 plays U2
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert "marked: U07" in world.run("launch", "--runcard", card)[1]
+  state = tb.state_of(s)
+  state["units"]["U08"]["launched"] = {"at": "2026-11-02T00:00:00Z", "runcard": card}
+  tb.put(s.path("state"), json.dumps(state))
+  # U2 built and reviewed clean, then R1 touched it: its mark stands, its head waits for a respec relaunch
+  tb.launched(s, "U08", "exited 0")
+  tb.foreman(s, "U08", [{"round": 1, "runcard": card, "launch": 1, "head": None, "phase": "posted", "dispatch_id": "d1",
+                         "outcome": "clean", "posted_at": "2026-11-03T01:00:00Z"}])
+  apply_r1(s, "U08")
+  if u1_running:
+    tb.launched(s, "U07", "running")  # another unit's builder holds the one slot
+  else:
+    world.gh.issues[7]["labels"].append("superegm:stopped")  # U1 stopped: the slot is free
+  assert respec.marks(s, handoff).get("U08") == "respec: R1" and ("relaunch", "R1", "U08") in respec.actionable(s, handoff)
+  launch_rc, launch_out = world.run("launch", "--runcard", card)
+  journal = journal_of(s)
+  assert launch_rc == 0 and marked.replace("U2", "U08") in launch_out and ("U08 marked for launch" in journal) is (not u1_running), launch_out
