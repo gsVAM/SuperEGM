@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: `superegm next`, a handoff's next phase by the first-match table of spec section 7.1 (U43).
+# Added by SuperEGM (gsVAM), 2026: `superegm next`, a handoff's next phase by the first-match table of spec section 7.1 (U43); the `waiting respec R<n>` row (U91).
 
 """superegm next: print a handoff's next phase, the first row of spec section 7.1's table that matches.
 
@@ -14,7 +14,7 @@ import subprocess
 from pathlib import Path
 
 import superegm as core
-from superegm import gate, graph, launch, report, review, runcard
+from superegm import gate, graph, launch, report, respec, review, runcard
 from superegm.approve_spec import units_section
 
 WRITES = frozenset({"chain", "runcards", "file"})  # the store kinds this subcommand writes
@@ -162,6 +162,12 @@ def planning_line(hs: core.Store, state: dict, spec: Path, text: str, root: Path
     own = [e for e in core.load_approvals(hs, spec) if e.get("handoff_id") == hs.handoff_id]
     if own and (units.get("design") or {}).get("sha256") not in (None, own[-1]["sha256"]):
       return "plan"  # the bodies were rendered under an earlier approval: `graph` carries them to the latest's
+  waiting = respec.review_open(hs, hs.handoff_id)  # U91: a respec from a review's design finding (`unit: null`)
+  if waiting and not any(plan_review_stopped(hs, u) for u in unfiled):
+    # Every row below but `wave` would be `review-plan`, `file` or `integrate`: while a filed unit is still open its
+    # `wave` runs on (the tick must not skip the handoff), else the handoff waits on the respec.
+    filed = [u for u in units["order"] if numbers.get(u)]
+    return "wave" if any(unit_open(hs, state, u) for u in filed) else f"waiting respec {waiting[0]['id']}"
   for uid in unfiled:
     rid = plan_review_stopped(hs, uid)
     if rid:
