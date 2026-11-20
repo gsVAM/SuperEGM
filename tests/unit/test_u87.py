@@ -326,6 +326,14 @@ def test_retro_skill_text(phrase):
   assert phrase in text("skills/retro/SKILL.md") and frontmatter("skills/retro/SKILL.md")["effect_kinds"] == ["state-store"]
 
 
+@pytest.mark.parametrize("path, phrase", [("skills/retro/SKILL.md", "a reviewer kept\n   nothing or most overruled"),
+                                          ("skills/retro/SKILL.md", "A legacy flat-store handoff keeps its own files"),
+                                          ("skills/integrate/SKILL.md", "Reviewers, overrules, the overruled\nand allowed columns together")])
+def test_round_4_skill_wording(path, phrase):
+  # the retro agenda names the spec's row ("kept nothing"), a legacy handoff's files sit at the store root, and integrate's line sums the allowances
+  assert phrase in text(path)
+
+
 @pytest.mark.parametrize("path, phrase", [("skills/integrate/SKILL.md", "/superegm:retro"), ("skills/using-superegm/SKILL.md", "/superegm:retro")])
 def test_integrate_offers_retro_and_phase_list(path, phrase):
   # integrate offers the retrospective once after the post-mortem; the typed-skills list names it
