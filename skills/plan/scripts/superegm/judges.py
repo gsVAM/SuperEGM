@@ -495,18 +495,25 @@ def verdict_line(pid: str, verdict: dict, questions: list[dict]) -> str:
 
 
 def add_to_open_decisions(store, pid: str, question_text: str, line: str) -> None:
-  """Append the verdict line, once, to the `question` of each open point 1 decision that asks one of the panel's findings:
-  that record is what `inbox` lists and the ruling comment quotes (section 7.8), `owner-question.md` being only a copy."""
+  """Append the verdict line, once, to the `question` of each point 1 decision of this panel's review and round (its `source` is
+  `review <rid> round <n>`, the panel id being `<rid>-r<n>-<6 hex>`) that still has an unruled finding the panel asks: that record
+  is what `inbox` lists and the ruling comment quotes (section 7.8), `owner-question.md` being only a copy. A finding id recurs
+  in every unit and cycle, so the id alone never picks a decision; one a `redesign` or a `proceed` closed, or whose asked
+  findings all have a ruling, is left as it was."""
   from superegm.decision import FINDING_LINE_RE
-  if not store.handoff_id:  # a panel outside a wave (a spec review's) has no foreman files
+  m = re.fullmatch(r"(.+)-r(\d+)-[0-9a-f]{6}", pid)
+  if not store.handoff_id or not m:  # a panel outside a wave (a spec review's) has no foreman files
     return
+  source = f"review {m.group(1)} round {m.group(2)}"
   fids = lambda text: {a or b for a, b in FINDING_LINE_RE.findall(text or "")}
   asked = fids(question_text)
   for path in sorted(store.path("foreman", "x").parent.glob("*.json")):
     data = json.loads(core.read_text(path))
     changed = False
     for decision in data.get("decisions", []):
-      if decision.get("point") == 1 and fids(decision.get("question")) & asked and f"judges/{pid}/verdict.json" not in decision["question"]:
+      named = {str(r.get("ruling") or "").split(" ")[0] for r in data.get("rulings", []) if r.get("decision") == decision.get("id")}
+      unruled = not named & {"redesign", "proceed"} and any(f not in named for f in fids(decision.get("question")) & asked)
+      if decision.get("point") == 1 and decision.get("source") == source and unruled and f"judges/{pid}/verdict.json" not in decision["question"]:
         decision["question"] = decision["question"].rstrip("\n") + "\n" + line
         changed = True
     if changed:
