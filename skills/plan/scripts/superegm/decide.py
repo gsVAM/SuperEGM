@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the answer is one of the item's options, written into the plan line of an unfiled unit; a filed unit gets the comment file only; the card's mode stored on the decision (U43).
+# Modified by SuperEGM (gsVAM), 2026: the answer is one of the item's options, written into the plan line of an unfiled unit; a filed unit gets the comment file only; the card's mode stored on the decision (U43); a `--default` answer marked in that record (U87).
 
 """superegm decide: answer a decide-before-build item in place."""
 
@@ -48,6 +48,8 @@ def run(args):
   answer = answer_for({**decision, "unit": uid}, args.answer, args.default)
   by = f"judges:{args.judges}" if args.judges else "owner"
   record = {"answer": answer, "by": by, "decided_at": core.now_iso(), "mode": card["mode"]}  # scan's ruler reads it (U43)
+  if args.default:
+    record["default"] = True  # the post-mortem's Lessons table lists a decision answered by default (U87)
   number = handoff.filed(uid)
   if number is None:
     lines = core.read_text(handoff.plan_path).split("\n")
