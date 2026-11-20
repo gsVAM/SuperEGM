@@ -15,6 +15,8 @@ import pytest
 import superegm as core
 from conftest import git
 
+REPO = Path(__file__).resolve().parents[2]
+
 SPEC_REL, HID = "docs/specs/x.md", "x-abc123"
 
 BASE = """# X
@@ -390,3 +392,61 @@ def test_marks_derived_and_cleared(world, monkeypatch, case, mark):
   state_bytes_after = st.path("state").read_bytes()
   assert respec.marks(st, handoff).get("U2") == mark and state_bytes_after == state_bytes_before
   assert "U0" not in respec.marks(st, handoff)
+
+
+def actionable_world(world, monkeypatch, case):
+  """Respec R1, raised by U2 and touching filed U2, as `case` sets it up; `(spec, st, opened)`, `opened` the ids
+  `respec.open` returned before R1's approval (an applied respec is no longer open), the store then holding it."""
+  old = commit_at(world, monkeypatch, "old.txt", "2026-11-10T00:00:00Z")
+  state_units = {"U0": MERGED_U1["U0"], "U1": {"number": 11}, "U3": {}, "U2": {"number": 12, "pr": {"number": 22, "head": old}}}
+  spec, st = respec_world(world, [(BASE, None), (R1_TEXT, "R1")], {"R1": ["U2"]}, state_units=state_units)
+  open_respec(st)
+  if case == "handoff superseded":
+    another_handoff(st, spec)
+  if case == "unit stopped":
+    core.atomic_write(st.path("foreman", "U2"), {"dispatch_id": None, "rounds": [], "decisions": [], "rulings": [],
+                                                 "stopped": {"by": "owner", "reason": "x", "at": STARTED}})
+  if case == "pending owner decision":
+    core.atomic_write(st.path("foreman", "U2"), {"dispatch_id": None, "rounds": [], "rulings": [], "decisions": [
+      {"id": "U2-d1", "point": 2, "question": "respec R1?", "options": ["respec", "stop the unit"]}]})
+  if case == "posted, unit's own launch live":
+    core.atomic_write(st.path("file", "respec", "R1.U2.posted"), {"comment": 555})
+    core.atomic_write(st.path("launches", "U2"), {"unit": "U2", "launches": [launch("running", builder_status=None)]})
+  if case.startswith("max_in_flight 1"):
+    config = world.repo / ".superegm/config.json"
+    config.write_text(json.dumps(dict(json.loads(config.read_text(encoding="utf-8")), max_in_flight=1)), encoding="utf-8")
+    core.atomic_write(st.path("launches", "U1"), {"unit": "U1", "launches": [launch("running", respecs=())]})
+  from superegm import respec
+  path = st.path("approvals", core.spec_slug(spec))
+  full = json.loads(path.read_text(encoding="utf-8"))
+  core.atomic_write(path, dict(full, entries=[e for e in full["entries"] if e.get("kind") != "respec"]))
+  opened = [r["id"] for r in respec.open(st, HID)]
+  core.atomic_write(path, full)
+  return spec, st, opened
+
+
+@pytest.mark.parametrize("case, opened, items", [
+  ("open, unposted, idle unit", ["R1"], [("post", "R1", "U2"), ("relaunch", "R1", "U2")]),
+  ("posted, unit's own launch live", ["R1"], []), ("unit stopped", [], []), ("handoff superseded", [], []),
+  ("pending owner decision", ["R1"], []),
+  ("max_in_flight 1, U1's builder running, clean U2 touched", ["R1"], [("post", "R1", "U2"), ("relaunch", "R1", "U2")])])
+def test_withdrawn_respec_and_actionable(world, monkeypatch, case, opened, items):
+  # a withdrawn respec is not open; a relaunch is only queued for launch's ready-again set, never launched here
+  from superegm import respec
+  spec, st, opened_before_approval = actionable_world(world, monkeypatch, case)
+  handoff = HID
+  launches_of_U2_before = snapshot(st.path("launches", "U2").parent)
+  assert opened_before_approval == opened and respec.actionable(st, handoff) == items
+  assert [r["id"] for r in respec.open(st, handoff)] == []  # applied once an approval names it
+  launches_of_U2_after = snapshot(st.path("launches", "U2").parent)
+  assert launches_of_U2_after == launches_of_U2_before
+  if case != "handoff superseded":  # a card on the spec resolves the latest handoff, which holds no R1
+    world.spec = spec
+    cid = world.card("wave")
+    posted_rc, out = world.run("respec", "posted", "--respec", "R1", "--unit", "U2", "--comment", "555", "--runcard", cid)
+    respec_dir = st.path("file", "respec")
+    assert posted_rc == 0 and (respec_dir / "R1.U2.posted").exists(), out
+  if case == "open, unposted, idle unit":
+    assert respec.actionable(st, handoff) == [("relaunch", "R1", "U2")]
+  skill_text = (REPO / "skills/review-spec/SKILL.md").read_text(encoding="utf-8")
+  assert all(p in skill_text for p in ("--respec R<n>", "one question at a time", "suggested answer", "approve-spec --respec R<n> --dry-run"))
