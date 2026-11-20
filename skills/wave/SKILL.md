@@ -60,6 +60,7 @@ Open a reference only when sent to it:
   `decision rule`, `review settle` or `review rule`), whenever a word, step or `pending:` item names one.
 - `references/rulings.md`: a `ruling` line (batch step 4), a posted owner `**Ruling:**` (entry step 4), the stops.
 - `references/leavemealone_mode.md`: on a `leavemealone` card, before asking the owner at a decision point.
+- `references/resume_notes.md`: at the entry, before step 5.
 
 ## Entry: resume from the store
 
@@ -74,7 +75,6 @@ Open a reference only when sent to it:
 5. Run `report` again. `loop: ended` and no 5b line in step 2 → The end. Otherwise run batches, the
    first from its step 5: step 2 was its wait, and its lines are handled.
 
-Builders left running and refusals: `references/resume_notes.md`.
 A `held: respec` unit never gets a direct `launch-builder`: step 6's `launch` marks it.
 
 ## A batch
