@@ -663,3 +663,187 @@ def test_skill_respec_dry_run_and_confirmation_text():
   assert "each `follow_up:`" in text and "each `follow-up:`" not in text
   step = text[text.index("4. **Approve.**"):text.index("## Data notice")]
   assert "--yes" in step and "writes nothing" in step and "Stop" in step
+
+
+# Round 3: the owner's rulings on the round-2 review (issue #169).
+
+
+def test_plain_open_and_approve_refuse_a_respec_cycle(world):
+  # change-review-2-1: only the `--respec R<n>` route resumes or approves a respec cycle
+  spec, st = respec_world(world, [(BASE, None)])
+  open_respec(st)
+  spec.write_text("".join(R1_TEXT), encoding="utf-8")
+  cid = respec_cycle(world, spec, st)
+  code, out = world.run("review", "open", "--kind", "spec", "--artifact", spec, "--reviewers", "design,codebase-details",
+                        "--runcard", cid)
+  assert code == 1 and "spec-x-c2 is a respec R1 cycle: use --respec R1" in out
+  store_before = snapshot(world.artifacts)
+  code, out = world.run("approve-spec", "--spec", spec, "--yes")
+  assert code == 1 and "approve-spec: review spec-x-c2 is a respec R1 cycle: use --respec R1" in out
+  assert snapshot(world.artifacts) == store_before
+
+
+def test_respec_round_scope_holds_no_reference_document(world, monkeypatch):
+  # codebase-details-2-1: a respec cycle's scope is the correction diff alone, no reference_manifest row
+  from superegm import review
+  monkeypatch.setattr(review, "reference_manifest", lambda st, root: [{"file": "docs/instructions/a.md", "sha": "a" * 12}])
+  spec, st = respec_world(world, [(BASE, None)])
+  open_respec(st)
+  spec.write_text("".join(R1_TEXT), encoding="utf-8")
+  respec_cycle(world, spec, st)
+  rnd = json.loads(st.path("reviews", "spec-x-c2", "round-1.json").read_text(encoding="utf-8"))
+  assert rnd["scope"] and not any(row[1] == "docs/instructions/a.md" for row in rnd["scope"])
+  path = st.path("reviews", "spec-x-c2", "review.json")  # `review open --respec` records the diff's base
+  core.atomic_write(path, json.loads(path.read_text(encoding="utf-8")) | {"base": core.load_approval(st, spec)["commit"]})
+  code, out = world.run("review", "scope", "--review", "spec-x-c2", "--runcard", world.card("review-spec"))
+  assert code == 0 and "docs/instructions/a.md" not in out, out
+
+
+@pytest.mark.parametrize("argv, err", [
+  (["--dry-run", "--yes"], "approve-spec: --dry-run needs --respec R<n>"),
+  (["--dry-run", "--leavemealone"], "approve-spec: --dry-run needs --respec R<n>"),
+  (["--respec", "R1", "--amend-units"], "approve-spec: --respec is refused with --amend-units"),
+  (["--respec", "R1", "--void", "--review", "spec-x-c1"], "approve-spec: --respec is refused with --void")])
+def test_dry_run_and_respec_flag_refusals(world, argv, err):
+  # codebase-details-2-2: a dry run without --respec, or --respec beside another branch, is refused by name
+  spec, st = respec_world(world, [(BASE, None)])
+  open_respec(st)
+  spec.write_text("".join(R1_TEXT), encoding="utf-8")
+  respec_cycle(world, spec, st)
+  head = git(["rev-parse", "HEAD"], world.repo)
+  store_before = snapshot(world.artifacts)
+  code, out = world.run("approve-spec", "--spec", spec, *argv)
+  assert code == 1 and err in out
+  assert snapshot(world.artifacts) == store_before and git(["rev-parse", "HEAD"], world.repo) == head
+
+
+def test_respec_approval_hashes_raw_bytes(world):
+  # codebase-details-2-3: a CRLF spec converges and its entry's sha256 is of the raw bytes, as current_sha reads them
+  crlf = lambda lines: [line.replace("\n", "\r\n") for line in lines]
+  units = {u: {"id": u, "design_range": design_range(BASE, h)} for u, h in SECTIONS.items()}
+  spec, st = respec_world(world, [(crlf(BASE), None)], units=units)
+  open_respec(st)
+  spec.write_bytes("".join(crlf(R1_TEXT)).encode("utf-8"))
+  respec_cycle(world, spec, st)
+  code, out = world.run("approve-spec", "--spec", spec, "--respec", "R1", "--yes")
+  assert code == 0, out
+  entry = json.loads(st.path("approvals", core.spec_slug(spec)).read_text(encoding="utf-8"))["entries"][-1]
+  assert entry["respec"] == "R1" and entry["sha256"] == hashlib.sha256(spec.read_bytes()).hexdigest()
+
+
+def test_marks_read_the_head_time_in_the_launch_worktree(world, monkeypatch):
+  # codebase-details-2-4: the saved head's time is read inside the launch's worktree, as own_commit reads it
+  from superegm import respec
+  worktree = world.repo.parent / "launch-wt"
+  worktree.mkdir()
+  git(["init", "-q"], worktree)
+  git(["config", "user.email", "b@example.invalid"], worktree)
+  git(["config", "user.name", "B"], worktree)
+  (worktree / "fix.txt").write_text("fix", encoding="utf-8")
+  git(["add", "fix.txt"], worktree)
+  monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-11-14T00:00:00Z")
+  git(["commit", "-qm", "fix"], worktree)
+  monkeypatch.delenv("GIT_COMMITTER_DATE")
+  head = git(["rev-parse", "HEAD"], worktree).strip()
+  state_units = {"U0": MERGED_U1["U0"], "U1": {"number": 11}, "U3": {}, "U2": {"number": 12, "pr": {"number": 22, "head": head}}}
+  spec, st = respec_world(world, [(BASE, None), (R1_TEXT, "R1")], {"R1": ["U2"]}, state_units=state_units)
+  core.atomic_write(st.path("file", "respec_comment_U2_R1.md"), "**Spec correction R1** for U2\n")
+  entry = launch("exited 1")
+  core.atomic_write(st.path("launches", "U2"), {"unit": "U2", "launches": [entry]})
+  assert respec.marks(st, HID).get("U2") == "respec: R1"  # no worktree recorded: the spec repository lacks the head
+  core.atomic_write(st.path("launches", "U2"), {"unit": "U2", "launches": [entry | {"worktree": str(worktree)}]})
+  assert "U2" not in respec.marks(st, HID)
+
+
+def test_respec_review_refuses_a_voided_latest_approval(world):
+  # codebase-details-2-5: no respec cycle runs against a voided handoff
+  spec, st = respec_world(world, [(BASE, None)])
+  open_respec(st)
+  path = st.path("approvals", core.spec_slug(spec))
+  record = json.loads(path.read_text(encoding="utf-8"))
+  record["entries"][-1]["voided_by"] = "spec-x-c1"
+  core.atomic_write(path, record)
+  approved(world, spec, R1_TEXT, "draft")
+  world.spec = spec
+  cid = world.card("review-spec")
+  code, out = world.run("review", "open", "--kind", "spec", "--artifact", spec, "--reviewers", "design,codebase-details",
+                        "--respec", "R1", "--runcard", cid)
+  assert code == 1 and f"review open: respec R1: {HID}: not the latest approval: plan the rows in the latest handoff" in out
+  assert not st.path("reviews", "spec-x-c2", "review.json").exists()
+
+
+def test_respec_approval_refuses_a_card_on_a_superseded_handoff(world):
+  # astra-2-1: the handoff is the card's, as core.resolve_handoff resolved it, never silently the latest
+  spec, st = respec_world(world, [(BASE, None)])
+  open_respec(st)
+  world.spec = spec
+  stale = world.card("integrate")  # opened while HID was the latest approval's handoff
+  assert json.loads(st.path("runcards", stale).read_text(encoding="utf-8")).get("handoff") == HID
+  spec.write_text("".join(R1_TEXT), encoding="utf-8")
+  respec_cycle(world, spec, st)
+  another_handoff(st, spec)
+  core.atomic_write(core.handoff_store(st, "x-def456").path("file", "respec", "R1.open.json"),
+                    {"id": "R1", "unit": "U2", "comment_id": 903, "at": STARTED})
+  store_before = snapshot(world.artifacts)
+  code, out = world.run("approve-spec", "--spec", spec, "--respec", "R1", "--yes", "--runcard", stale)
+  assert code == 1 and f"approve-spec: respec R1: {HID}: not the latest approval" in out
+  assert snapshot(world.artifacts) == store_before
+
+
+def test_inserted_produces_line_reaches_its_consumers(world):
+  # astra-2-2: an inserted Produces line inside U1's range touches every unit consuming it
+  from superegm import respec
+  spec, st = respec_world(world, [(BASE, None)])
+  draft = replace(BASE, "Queue keeps jobs.", ["- Produces: `retry(job)`"])
+  assert respec.touched(st, HID, "".join(draft))["touched"] == ["U1", "U3"]
+
+
+def test_respec_approval_carries_escalated_findings(world):
+  # astra-2-3: the previous entry's escalated list plus the respec cycle's own escalated pairs
+  from superegm import review
+  spec, st = respec_world(world, [(BASE, None)])
+  path = st.path("approvals", core.spec_slug(spec))
+  record = json.loads(path.read_text(encoding="utf-8"))
+  record["entries"][-1]["escalated"] = ["spec-x-c1:design-1-1"]
+  core.atomic_write(path, record)
+  open_respec(st)
+  spec.write_text("".join(R1_TEXT), encoding="utf-8")
+  respec_cycle(world, spec, st)
+  rnd_path = st.path("reviews", "spec-x-c2", "round-1.json")
+  rnd = json.loads(rnd_path.read_text(encoding="utf-8"))
+  [finding] = review.parse_findings("design-1-1 | high | docs/specs/x.md:44 | regression: no | the delay", "design", 1)
+  rnd["reviewers"]["design"]["findings"] = [finding | {"disposition": "escalated"}]
+  core.atomic_write(rnd_path, rnd)
+  code, out = world.run("approve-spec", "--spec", spec, "--respec", "R1", "--yes")
+  assert code == 0, out
+  entry = json.loads(path.read_text(encoding="utf-8"))["entries"][-1]
+  assert entry["escalated"] == ["spec-x-c1:design-1-1", "spec-x-c2:design-1-1"]
+
+
+def test_comment_lists_own_and_quoted_shared_hunks(world):
+  # astra-2-4: a correction of U2's range and of a Global constraints line U2's filed body quotes: both hunks
+  state_units = {"U0": MERGED_U1["U0"], "U1": {"number": 11}, "U2": {"number": 12}, "U3": {}}
+  spec, st = respec_world(world, [(BASE, None)], state_units=state_units)
+  open_respec(st)
+  spec.write_text("".join(replace(R1_TEXT, "- Max retries: 3", "- Max retries: 4")), encoding="utf-8")
+  respec_cycle(world, spec, st)
+  code, out = world.run("approve-spec", "--spec", spec, "--respec", "R1", "--yes")
+  assert code == 0, out
+  text = st.path("file", "respec_comment_U2_R1.md").read_text(encoding="utf-8")
+  assert "+Delay is 6s." in text and "+- Max retries: 4" in text and "-- Max retries: 3" in text
+
+
+def test_respec_approval_refuses_a_stale_branch(world):
+  # astra-2-5: a branch holding no commit of the latest approval's bytes is refused, as ordinary approvals are
+  spec, st = respec_world(world, [(BASE, None)])
+  open_respec(st)
+  path = st.path("approvals", core.spec_slug(spec))
+  record = json.loads(path.read_text(encoding="utf-8"))
+  record["entries"][-1]["sha256"] = hashlib.sha256(b"bytes approved on another branch").hexdigest()
+  core.atomic_write(path, record)
+  spec.write_text("".join(R1_TEXT), encoding="utf-8")
+  respec_cycle(world, spec, st)
+  store_before = snapshot(world.artifacts)
+  code, out = world.run("approve-spec", "--spec", spec, "--respec", "R1", "--yes")
+  assert code == 1 and "approve-spec: fold" in out and "is not in this branch" in out
+  assert snapshot(world.artifacts) == store_before
