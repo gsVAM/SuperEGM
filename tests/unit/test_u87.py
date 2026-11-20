@@ -173,6 +173,23 @@ def test_reviewers_table_and_lessons_count_overrules_alike(world):
   assert "b: 2 of 3 overruled" in most
 
 
+def test_reviewer_rows_a_tie_lists_every_tied_reviewer_by_name(world):
+  # a tie on the most overruled gives each tied reviewer its own row, in reviewer-id order (sorted by name), whatever order they ran in
+  c, _, _ = two_units(world)
+  head_review(c, {"zeta": {"findings": [finding("zeta", 1), finding("zeta", 2)]}, "alpha": {"findings": [finding("alpha", 1), finding("alpha", 2)]}},
+              rulings=["zeta-1-1", "alpha-1-1"])
+  rows = signal_rows(world, c, "reviewer most overruled")
+  assert [r.split("|")[4].strip().split(":")[0] for r in rows] == ["alpha", "zeta"]
+
+
+def test_integrate_summary_line_names_the_lessons_row(world):
+  # the integrate close summary names the reviewer as the Lessons row does: overruled plus allowed, a tie in reviewer-id order, and a
+  # reviewer whose every finding was overruled or allowed is "reviewer kept nothing", not "reviewer most overruled"
+  said = " ".join(text("skills/integrate/SKILL.md").split())
+  assert ("a tie lists every tied reviewer, each on its own Lessons row in reviewer-id order (sorted by name); a reviewer whose every "
+          "finding was overruled or allowed gets the row \"reviewer kept nothing\", not \"reviewer most overruled\"") in said
+
+
 def test_fix_design_rows(world):
   # a fix-design finding is a row naming its review
   c, _, _ = two_units(world)
