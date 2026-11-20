@@ -56,6 +56,17 @@ def test_lessons_rows(world):
   assert "U01" in rows[1] and "escalated" in rows[1]
 
 
+def test_lessons_respec_evidence_runs_to_the_next_comment_label(world):
+  # bold text inside the evidence does not end it: only a comment label (`**Builder status:**`, `**Ruling:**`, ...) does; option lines are no evidence
+  body = ("**Deviation (spec):** docs/specs/x.md:12 says 3\n\n**Evidence:** `pytest -k retry` fails\n\n"
+          "**Builder status:** BLOCKED\n- (a) respec\n**Ruling:** not this\n")
+  c = respec_world(world, lambda args: (0, json.dumps({"id": 901, "body": body}), ""))
+  code, out = world.run("postmortem", "--handoff", c.hid)
+  assert code == 0, out
+  row = lessons(c.hs.path("file", "postmortem.md").read_text(encoding="utf-8"))[0]
+  assert "says 3 **Evidence:** `pytest -k retry` fails" in row and "BLOCKED" not in row and "not this" not in row and "(a)" not in row
+
+
 def test_lessons_respec_evidence_unread(world):
   # a comment read that fails leaves the row and says so
   c = respec_world(world, lambda args: (1, "", "HTTP 404"))
