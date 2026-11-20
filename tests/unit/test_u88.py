@@ -125,3 +125,17 @@ def test_unconverged_verdict_reaches_the_owner(world, tmp_path):
   added = owner[len(question):].splitlines()
   assert len(added) == 1, "one added line"
   assert f"judges/{pid}/verdict.json" in added[0] and "fable: finding upheld" in added[0] and "opus: finding overruled" in added[0]
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.parametrize("path, phrases", [
+    ("skills/wave/SKILL.md", ("in normal mode as in leavemealone", "judges/<panel>/verdict.json")),
+    ("skills/wave/references/decision_points.md", ("judges first in both modes", "`<fid> allowed`", "`amend`", "`respec`", "CI finding")),
+    ("skills/judges/references/leavemealone.md", ("apply in normal mode", "contest")),
+    ("skills/judges/references/astra_judge.md", ("evidence arrives inline",))])
+def test_contest_reference_texts(path, phrases):
+  """The skills route a head contest to the panel first and list the owner-only rulings."""
+  body = (ROOT / path).read_text(encoding="utf-8")
+  assert all(phrase in body for phrase in phrases), [p for p in phrases if p not in body]
