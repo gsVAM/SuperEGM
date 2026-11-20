@@ -7,6 +7,7 @@ import argparse
 import contextlib
 from dataclasses import dataclass
 import difflib
+import hashlib
 import io
 import json
 import os
@@ -370,8 +371,11 @@ def refs_moved(st: core.Store, review: dict, rnd: dict) -> bool:
 
 def scope_of(st: core.Store, review: dict, spec: Path) -> list:
   """The spec's scope rows (`spec_scope`), then one `("changed", <path>, 0, 0)` row per changed reference document
-  (`reference_manifest`): a whole file, which has no lines (U75)."""
+  (`reference_manifest`): a whole file, which has no lines (U75); a respec cycle's scope is its correction diff
+  alone, with no reference document row (spec section 7.6)."""
   root = core.git_toplevel(spec.parent)
+  if review.get("respec"):
+    return spec_scope(st, review, spec)
   return spec_scope(st, review, spec) + [("changed", row["file"], 0, 0) for row in reference_manifest(st, root)]
 
 
@@ -534,6 +538,9 @@ def respec_base(st: core.Store, kind: str, artifact: str, respec: str, reviewers
   approval = core.load_approval(st, Path(artifact))
   if not approval:
     raise core.HandoffError(f"review open: respec {respec}: no approval")
+  if approval.get("voided_by"):  # the line approve-spec --respec refuses with: no cycle runs against a voided handoff
+    raise core.HandoffError(f"review open: respec {respec}: {approval.get('handoff_id')}: not the latest approval: "
+                            "plan the rows in the latest handoff")
   from superegm import respec as respecs  # R ids are per handoff: open in the latest approval's handoff alone
   if respec not in [r["id"] for r in respecs.open(st, approval.get("handoff_id"))]:
     raise core.HandoffError(f"review open: respec {respec} is not open")
@@ -595,6 +602,9 @@ def open_review(args) -> int:
   latest, closed = latest_cycle(st, kind, artifact)
   if respec and latest and not closed and latest.get("respec") != respec:
     raise core.HandoffError(f"review open: respec {respec}: {review_id(st, kind, artifact, latest['cycle'])} is open")
+  if not respec and latest and not closed and latest.get("respec"):  # resumed by `--respec R<n>` alone
+    raise core.HandoffError(f"review open: {review_id(st, kind, artifact, latest['cycle'])} is a respec {latest['respec']} "
+                            f"cycle: use --respec {latest['respec']}")
   if latest and not closed:  # a re-typed skill resumes the open cycle; a spec's panel may narrow, from the next round
     rid = review_id(st, kind, artifact, latest["cycle"])
     core.card_add(st, args.runcard, "produced", rid)
@@ -738,8 +748,9 @@ def record_round(args) -> int:
   if review.get("respec"):  # its evidence is HEAD's diff: the recorded sha must be of the same bytes
     spec = Path(review["artifact"])
     root = core.git_toplevel(spec.parent)
-    head = core.run_git(["show", f"HEAD:{spec.resolve().relative_to(root.resolve()).as_posix()}"], root)
-    if core.sha256_text(head) != sha:
+    from superegm import instructions  # at call time, as `reviewers` is: the raw blob, hashed as `current_sha` hashes
+    head = instructions.blob(root, "HEAD", spec.resolve().relative_to(root.resolve()).as_posix())
+    if head is None or hashlib.sha256(head).hexdigest() != sha:
       raise core.HandoffError(f"review record: respec {review['respec']}: {spec} differs from HEAD: commit the correction")
   if kind == "head":
     sha = args.sha256 or (existing["artifact_sha256"] if existing else review["artifact_sha256"] if n == 1 else None)

@@ -171,14 +171,19 @@ def carried_spans(units: dict, entries: list, maps: list) -> dict:
 
 def comment_text(store: core.Store, handoff: str, text: str, unit: str, respec: str) -> str:
   """`respec_comment_<unit>_R<n>.md`: the diff hunks from the latest approved text to `text` in the unit's Design
-  range (every hunk when the unit was touched by shared text alone)."""
+  range and every hunk changing a line its filed body quotes (Global constraints included), in diff order (every hunk
+  when neither holds one: the unit was touched by an uncovered range or an Interfaces line)."""
   hs = core.handoff_store(store, handoff)
   _, entries, texts, maps = history(store, handoff)
   prev, new = texts[-1], text.splitlines()
   units = ((load_json(hs.path("units")) or {}).get("units")) or {}
   span = carried_spans(units, entries, maps).get(unit)
+  body = core.read_text(hs.path("unit", unit)) if hs.path("unit", unit).is_file() else ""
+  quoted, shared = {line.strip() for line in body.splitlines()}, section_lines(body, GLOBAL)
+  counts = lambda line: line and line in quoted and (line in shared or not skipped(line))
   hunks = [op for op in opcodes(prev, new) if op[0] != "equal"]
-  own = [op for op in hunks if span and overlaps(span, (op[1] + 1, max(op[2], op[1] + 1)))]
+  own = [op for op in hunks if (span and overlaps(span, (op[1] + 1, max(op[2], op[1] + 1))))
+         or any(counts(line.strip()) for line in prev[op[1]:op[2]])]
   lines = [f"**Spec correction {respec}** for {unit}: the frozen spec changed; build to the lines below.", ""]
   for _, i1, i2, j1, j2 in own or hunks:
     lines += ["```diff", f"@@ -{i1 + 1},{i2 - i1} +{j1 + 1},{j2 - j1} @@",
@@ -241,7 +246,8 @@ def touched(store: core.Store, handoff: str, text: str) -> dict:
         if line in lines_of[u]:
           quoted = True
           (review if u in merged else hit).add(u)
-      if line.startswith("- Produces:"):  # its producer, and every unit whose Consumes names it
+    for line in [prev[n].strip() for n in range(i1, i2)] + [new[n].strip() for n in range(j1, j2)]:
+      if line.startswith("- Produces:"):  # removed or inserted: its producer, and every unit whose Consumes names it
         names = interface_names(line)
         for v, held in interfaces_of.items():
           if any(name and name in l for l in held for name in names):
@@ -276,7 +282,7 @@ def latest_handoff(store: core.Store, spec: Path) -> str | None:
 
 
 def commit_time(root: Path, sha: str) -> float | None:
-  """The committer time of `sha` in `root`, as `status` reads a worktree head's (U31); None when git cannot."""
+  """The committer time of `sha` in `root`; None when git cannot."""
   try:
     return float(core.run_git(["log", "-1", "--format=%ct", sha], root).strip())
   except (core.HandoffError, ValueError, OSError):
@@ -294,12 +300,16 @@ def cleared(store: core.Store, root: Path, unit: str, respec: str, record: dict)
   naming = [e for e in data.get("launches") or [] if isinstance(e, dict) and respec in (e.get("respecs") or [])]
   if not naming:
     return False
-  when = commit_time(root, head)
   for entry in naming:
     try:
       started = core.epoch(entry.get("started_at"))
     except (TypeError, ValueError):
       continue
+    # read inside the launch's worktree, as `own_commit` reads it (U31); the spec repository when it has none
+    worktree = Path(entry["worktree"]) if entry.get("worktree") else None
+    when = commit_time(worktree, head) if worktree and worktree.is_dir() else None
+    if when is None:
+      when = commit_time(root, head)
     if when is not None and when > started:
       return True
   return any(e.get("status") == "exited 0" and e.get("head") == head and e.get("builder_status") in CLEARING

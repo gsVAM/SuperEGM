@@ -391,6 +391,12 @@ def run(args):
   spec = Path(args.design).expanduser().resolve()
   if not spec.is_file():
     raise core.HandoffError(f"approve-spec: spec {spec} does not exist")
+  # a dry run writes nothing only on the respec route, and a respec is no void or amendment: each refused by name
+  if args.dry_run and not args.respec:
+    raise core.HandoffError("approve-spec: --dry-run needs --respec R<n>")
+  for flag, given in (("--void", args.void), ("--amend-units", args.amend_units)):
+    if args.respec and given:
+      raise core.HandoffError(f"approve-spec: --respec is refused with {flag}")
   root = core.git_toplevel(spec)
   st = core.store(root)
   owner_void = args.void and not args.review
@@ -441,6 +447,8 @@ def approve(args, st: core.Store, spec: Path, root: Path, card: dict) -> int:
   if review is None:
     raise core.HandoffError(f"approve-spec: no spec review for {slug}")
   rid = review_id(st, "spec", str(spec), review["cycle"])
+  if review.get("respec"):  # a respec cycle is approved by `--respec R<n>` alone, which writes its touched units
+    raise core.HandoffError(f"approve-spec: review {rid} is a respec {review['respec']} cycle: use --respec {review['respec']}")
   if not (root / CONFIG).is_file():  # before any GitHub call: the config names the repository
     raise core.HandoffError(f"approve-spec: {CONFIG} missing: run superegm init")
   # U39: a malformed triage section refuses before the PR ingest (which writes) and before the prompt and the commit
@@ -591,9 +599,11 @@ def respec_checks(args, st: core.Store, spec: Path, root: Path, card: dict):
   latest = core.load_approval(st, spec)
   if latest is None:
     raise fail("no approval to correct")
-  hid = getattr(args, "handoff", None) or latest.get("handoff_id")
+  # the handoff `core.resolve_handoff` resolved (`--handoff`, else the card's), the latest only when neither names one
+  hid = getattr(args, "handoff", None) or st.handoff_id or latest.get("handoff_id")
   if latest.get("handoff_id") != hid or latest.get("voided_by"):
     raise fail(f"{hid}: not the latest approval: plan the rows in the latest handoff")
+  require_branch_holds(st, root, spec.relative_to(root).as_posix(), latest)  # as ordinary approvals and --amend-units
   if rid_n not in [r["id"] for r in respec.open(st, hid)]:  # applied, withdrawn or never opened
     raise fail("not open")
   if args.dry_run:  # the draft, before its commit and its review: the touched units alone
@@ -604,7 +614,7 @@ def respec_checks(args, st: core.Store, spec: Path, root: Path, card: dict):
     raise fail(f"review {rid} not converged")
   status = evaluate(st, review, card.get("parent") or args.runcard)
   text = core.read_text(spec)
-  if status.code != 0 or core.sha256_text(text) != status.sha:
+  if status.code != 0 or core.sha256_file(spec) != status.sha:  # the raw bytes, as `current_sha` hashes them
     raise fail(f"review {rid} not converged")
   result = respec.touched(st, hid, text)
   for follow in result["follow_ups"]:
@@ -644,7 +654,14 @@ def approve_respec(args, st: core.Store, spec: Path, root: Path, card: dict) -> 
                         respec.comment_text(st, hid, text, unit, args.respec))
   commit = commit_by_path(root, [rel, CONFIG], f"superegm: approve {core.spec_slug(spec)} respec {args.respec} at review {rid}",
                           st.config["commit_trailer"])
-  entry = entry_of(core.sha256_text(text), commit, args.runcard, rid, hid, "respec", list(latest.get("escalated") or []),
+  # the previous entry's escalated pairs the Units section does not name, then this respec cycle's own, as an ordinary
+  # approval carries them (`graph` reads the latest entry's list alone)
+  named = units_section(text)
+  escalated = [pair for pair in latest.get("escalated") or [] if pair not in named]
+  escalated += [pair for pair in escalated_pairs(st, spec, cycle_of(latest.get("review"))) if pair not in escalated]
+  if escalated:
+    print(f"approve-spec: {len(escalated)} escalated finding(s) await the owner: {', '.join(escalated)}")
+  entry = entry_of(core.sha256_file(spec), commit, args.runcard, rid, hid, "respec", escalated,
                    {f: latest[f] for f in FROZEN_FIELDS if f in latest})
   entry |= {"respec": args.respec, "ranges": [list(r) for r in respec.changed_ranges(result["line_map"])]}
   path = append_entry(st, spec, entry)
