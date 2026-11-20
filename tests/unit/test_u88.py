@@ -248,6 +248,21 @@ def test_the_inbox_listing_shows_the_verdict_line(world):
   assert all("verdict" not in i for i in inbox_items(s, [s.handoff_id]) if i["kind"] != "contested")
 
 
+def test_the_wave_report_names_each_judges_ruling_with_its_panel(world):
+  """Section 7.8: a ruling made by a panel, converged or by `decision rule`, is listed with the panel and the finding; an owner's is not."""
+  from test_wave import open_wave_card
+  card = open_wave_card(world)
+  rulings = [{"decision": "q1", "ruling": "change-review-1-1 finding overruled — the panel", "by": "judges:p-7"},
+             {"decision": "q2", "ruling": "change-review-1-2 finding upheld", "by": "gsVAM"}]
+  decisions = [{"id": "q1", "point": 1, "source": "review r round 1", "question": "x"}, {"id": "q2", "point": 1, "source": "review r round 1", "question": "y"}]
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "launches": [{"round": 1, "status": "exited 0"}],
+                             "decisions": decisions, "rulings": rulings})
+  assert world.run("report", "--runcard", card)[0] == 0
+  text = s.path("wave_report", 1).read_text(encoding="utf-8")
+  section = text.split("## Judges' rulings\n")[1].split("\n##")[0]
+  assert section.strip() == "- U01 q1 (judges p-7): change-review-1-1 finding overruled — the panel"
+
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
