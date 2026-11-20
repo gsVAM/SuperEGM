@@ -479,12 +479,17 @@ def cmd_diff(args, store) -> int:
 
 def verdict_line(pid: str, verdict: dict, questions: list[dict]) -> str:
   """The one line an unconverged panel adds to the owner's point 1 question: `judges/<panel>/verdict.json` and, for each
-  open question, each judge's last choice as its option's text."""
+  open question, each judge's last recorded choice, from whichever round it made it, as its option's text (a judge
+  that never answered the question reads `no answer`)."""
   options = {q["id"]: q["options"] for q in questions}
   parts = []
   for qid in verdict["open"]:
-    positions = verdict["questions"][qid]["positions"]
-    choices = sorted((judge, options[qid][oid]) for oid, judges in positions.items() for judge in judges)
+    last = {}
+    for key in sorted(verdict["rounds"], key=int):
+      for judge, entry in verdict["rounds"][key].items():
+        if entry.get("options", {}).get(qid):
+          last[judge] = entry["options"][qid]
+    choices = [(judge, options[qid][last[judge]] if judge in last else "no answer") for judge in sorted(verdict["judges"])]
     parts.append(f"{qid} " + "; ".join(f"{judge}: {text}" for judge, text in choices))
   return f"The judges did not converge (judges/{pid}/verdict.json), their last choices: " + " | ".join(parts) + "\n"
 
