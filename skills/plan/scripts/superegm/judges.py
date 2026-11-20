@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the judges subcommand (spec section 13.1) and `judges question`, the
-# leavemealone-mode question renderer of section 13.2 (U11); the cap question names a spec review's scope (U19); the default members read from `DEFAULT_CONFIG` (U28); a `launch <n>` or `closed <n>` question renders its pending decision's options, a stall's heading its facts (U31); its own `judges` config key, moved from `__init__` (U32); the panel's instructions section rendered once at open by its parent card's skill, placed last in each brief and copied to each member's record (U38).
+# leavemealone-mode question renderer of section 13.2 (U11); the cap question names a spec review's scope (U19); the default members read from `DEFAULT_CONFIG` (U28); a `launch <n>` or `closed <n>` question renders its pending decision's options, a stall's heading its facts (U31); its own `judges` config key, moved from `__init__` (U32); the panel's instructions section rendered once at open by its parent card's skill, placed last in each brief and copied to each member's record (U38); `respec`, the owner's alone, left out of the judges' question with every other option keeping its letter, its leavemealone wait read off the options (U84).
 
 """superegm judges open|record|diff|verdict|question: the judge panel over a question file, and the
 question file rendered from the record at a decision point."""
@@ -503,8 +503,8 @@ def question(args, st) -> int:
       args.design = found["artifact"]
     else:
       args.unit = found["artifact"]
-  core.require_runcard(args, QUESTION_SKILLS)
-  text, consumers = render(st, args)
+  card = core.require_runcard(args, QUESTION_SKILLS)
+  text, consumers = render(st, args, card.get("mode"))
   path = st.path("questions", question_name(args))
   core.atomic_write(path, text)
   core.journal(st, f"question rendered: {path}")
@@ -522,7 +522,7 @@ def question_name(args) -> str:
   return f"{args.unit}-blocked-{'-'.join(args.blocked)}.md"
 
 
-def render(st, args) -> tuple[str, list[int]]:
+def render(st, args, mode=None) -> tuple[str, list[int]]:
   """The question text of one section 13.2 point and, for an `interface` deviation, the consumers to post on."""
   if args.review and args.cap:
     return cap_question(st, args.review), []
@@ -531,7 +531,7 @@ def render(st, args) -> tuple[str, list[int]]:
   if args.unit and args.decision:
     return decision_question(st, args.unit, args.decision), []
   if args.unit and args.blocked:
-    return blocked_question(st, args.unit, args.blocked)
+    return blocked_question(st, args.unit, args.blocked, mode)
   raise core.HandoffError("question: --review <id> (--round <n> | --cap) or --unit <U> (--decision D<n> | --blocked ...)")
 
 
@@ -611,40 +611,49 @@ def redesign_option(st, rid: str) -> str:
   return f"redesign — the head is at its cap after {len(numbers)} rounds" + (": " + "; ".join(claims) if claims else "")
 
 
+STORED_LETTER_RE = re.compile(r"^\([a-z]\) ")  # a stored option's own letter prefix
+
+
 def decision_question(st, unit: str, did: str) -> str:
-  """A plan-time `D<n>` with its options as stored; a runtime `q<n>` is refused (`--blocked` renders it, `amend` left out)."""
+  """A plan-time `D<n>` with its options as stored, `respec` (the owner's alone, §7.6) left out and `amend` kept (a
+  plan-time decision's options come from the plan, `tests/unit/test_u96.py` pins `amend` there); a runtime `q<n>` is
+  refused (`--blocked` renders it through `stored_options_text`, `amend` and `respec` left out)."""
   if re.fullmatch(r"q\d+", did):
     raise core.HandoffError(f"question: {did} is a runtime decision: use --blocked <comment-id> | launch <n> | closed <n>")
   units = json.loads(core.read_text(st.path("units"))).get("units") or {}
   decision = next((d for d in units.get(unit, {}).get("decisions") or [] if d["id"] == did), None)
   if decision is None:
     raise core.HandoffError(f"question: {unit} has no decision {did}")
-  return f"## Q1 {unit} {did}: {decision['question']}\n" + "".join(f"- {o}\n" for o in decision["options"])
-
-
-STORED_LETTER_RE = re.compile(r"^\([a-z]\) ")  # a stored option's own letter prefix
+  return f"## Q1 {unit} {did}: {decision['question']}\n" + "".join(f"- {o}\n" for o in decision["options"] if STORED_LETTER_RE.sub("", o) != "respec")
 
 
 def stored_options_text(options: list) -> str:
-  """A pending decision's stored options with `amend` (the owner's alone, §6.5) left out and the others keeping the
-  letter of their stored position; a stored `(x) ` prefix is dropped so a letter prints once."""
+  """A pending decision's stored options with `amend` (the owner's alone, §6.5) and `respec` (the owner's alone,
+  §7.6) left out and the others keeping the letter of their stored position; a stored `(x) ` prefix is dropped so a
+  letter prints once."""
   return "".join(f"- ({chr(ord('a') + i)}) {STORED_LETTER_RE.sub('', option)}\n"
-                 for i, option in enumerate(options) if option != "amend")
+                 for i, option in enumerate(options) if STORED_LETTER_RE.sub("", option) not in ("amend", "respec"))
 
 
-def blocked_question(st, unit: str, what: list) -> tuple[str, list[int]]:
+def blocked_question(st, unit: str, what: list, mode=None) -> tuple[str, list[int]]:
+  """The question for a blocked comment, launch or close. In leavemealone-mode (`mode`) a `spec` deviation's question
+  waits for the owner (§7.6): the judges are given none, since `respec` is the owner's alone."""
   from superegm.launch import load_launches
   if len(what) == 1 and what[0].isdigit():
     body = (core.gh_json(["api", f"repos/{st.config['repo']}/issues/comments/{what[0]}"]) or {}).get("body") or ""
-    heading, *rest = body.splitlines() or [""]
+    heading = (body.splitlines() or [""])[0]
+    from superegm.decision import comment_options
     from superegm.report import pending_decisions
     pending = next((d for d in pending_decisions(core.load_foreman(st, unit))
                     if d.get("point") == 3 and d.get("source") == f"comment {what[0]}"), None)
-    if pending is not None:  # the stored options, `amend` left out and the letters kept
-      shown = stored_options_text(pending.get("options") or RELAUNCH)
-    else:  # no decision opened on the comment: its `- (` lines, then `stop the unit`
-      options = [line[2:].strip() for line in rest if line.startswith("- (")]
-      shown = options_text([o.partition(" ")[2] for o in options] + ["stop the unit"])
+    held = pending.get("options") or RELAUNCH if pending is not None else comment_options(body)  # the decision's frozen options, else the comment's
+    if mode == "leavemealone" and "respec" in (STORED_LETTER_RE.sub("", o) for o in held):
+      raise core.HandoffError(f"question: comment {what[0]} is a spec deviation: in leavemealone-mode it waits for the owner (respec is the owner's alone)")
+    plain = [STORED_LETTER_RE.sub("", o) for o in held]
+    if pending is None and "respec" not in plain:  # a comment with nothing decided and no `respec`: `amend` left out, the rest lettered afresh as before
+      shown = options_text([o for o in plain if o != "amend"])
+    else:  # `amend` and `respec` left out, every other option keeping its letter (a later `respec` decision stores these letters)
+      shown = stored_options_text(held)
     consumers = []
     if heading.startswith("**Deviation (interface):**"):
       from superegm.decision import INTERFACE

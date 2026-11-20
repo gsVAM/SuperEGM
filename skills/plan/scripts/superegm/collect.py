@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # From the elephant-goldfish-model (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17); an unreplied external high or medium carried forward (U21); rulings read through `ruling_of` and the record, every folded deviation heading (U22); the DoD re-run and the test delta, two gates before the word (U25); its own `foreman` config key and `init` line, moved from `__init__` and `init` (U32); both `binding_rulings` calls drop the consumed comments, so an edited recorded proceed waives no check (U94); the worktree checks in `worktree_checks`, the one function `collect` and `precheck` call, the posted rounds' settled findings in `posted_findings`, the reading both share, and the changed paths read NUL-separated, one with a control character shown JSON-quoted (U67).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17); an unreplied external high or medium carried forward (U21); rulings read through `ruling_of` and the record, every folded deviation heading (U22); the DoD re-run and the test delta, two gates before the word (U25); its own `foreman` config key and `init` line, moved from `__init__` and `init` (U32); both `binding_rulings` calls drop the consumed comments, so an edited recorded proceed waives no check (U94); the worktree checks in `worktree_checks`, the one function `collect` and `precheck` call, the posted rounds' settled findings in `posted_findings`, the reading both share, and the changed paths read NUL-separated, one with a control character shown JSON-quoted (U67); the `spec` deviation kind in `DEVIATION_RE`, and `--spec`, the foreman's own finding of kind `spec` held in its round (U84).
 
 """superegm collect: the foreman's findings of a round through one `review record --reviewer foreman`, or a
 round that could not complete with `--not-run`."""
@@ -19,7 +19,7 @@ from pathlib import Path
 
 import superegm as core
 from superegm import body as body_mod, review, tdd_order
-from superegm.decision import binding_rulings, consumed_comments, recorded_rulings
+from superegm.decision import PATH_LINE, binding_rulings, check_respec, cites, consumed_comments, recorded_rulings
 from superegm.foreman import head_review_id
 from superegm.launch_builder import DOD_RESULT_RE, SENTINEL, launched_pairs
 from superegm.orient import TEST_RE
@@ -34,7 +34,7 @@ INIT_STEP = ("`collect` re-runs every DoD `Run` item the PR body pastes under it
              "foreman.run_timeout_minutes (default 8, at most 9, under the Bash tool's 10-minute cap).")
 DOCTOR_CHECKS = None
 SKILLS = frozenset(['wave'])  # the skills whose card this subcommand accepts
-DEVIATION_RE = re.compile(r"^\*\*Deviation \((interface|dod|test|other)\):\*\*")
+DEVIATION_RE = re.compile(r"^\*\*Deviation \((interface|dod|test|spec|other)\):\*\*")
 REPLY_RE = re.compile(r"^\*\*Reply (\S+):\*\* (fixed|contested)(?:\s*[—-]\s*(.*))?", re.S)
 COUNTS_RE = re.compile(r"(\d+) passed|(\d+) failed")  # a pytest summary line's pass and fail counts
 KILL_WAIT = 5  # seconds waited after `kill_group` at the bound before `exit: none` is recorded
@@ -318,6 +318,8 @@ def register(subparsers):
   p.add_argument("--unit", required=True)
   p.add_argument("--dispatch", required=True, help="the dispatch id `foreman dispatch` printed")
   p.add_argument("--not-run", dest="not_run", help="the round could not complete, with this reason")
+  p.add_argument("--spec", action="append", default=[], metavar="TEXT",
+                 help="a finding of kind `spec` (§7.6): the frozen spec's `path:line` and the evidence; held as `deviation (spec) unruled`")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -346,6 +348,7 @@ def collect(args, card):
     return 0
   if entry.get("phase") != "prepared":
     raise core.HandoffError(f"{unit} round {n} is `{entry.get('phase')}`, not `prepared`")
+  specs = spec_findings(args.spec, core.handoff_spec(args, st))
   number = handoff.state["units"][unit]["pr"]["number"]
   r = st.path("review", unit, f"pr{number}") / f"r{n}"
   worktree = Path(entry["worktree"])
@@ -391,6 +394,7 @@ def collect(args, card):
     if run["summary"] is not None:
       core.atomic_write(r / "dod" / f"{i}.txt", f"exit: {'none' if run['exit'] is None else run['exit']}\n"
                         f"summary: {run['summary']}\ntimed_out: {'yes' if run['timed_out'] else 'no'}\n")
+  specs += [s for s in unruled_specs(last, rulings) if s not in specs]  # a spec finding stays open until the owner rules it (§7.6)
   lines, contested = foreman_findings(n, verdict, text, scope, worktree, facts["changed"], pr_body, comments, login, prior, prior_ci_fid,
                                       commits, prior_tdd, prior_scope, contest_of,
                                       external, earlier, disposed, posted, handoff.config.get("owners") or [],
@@ -398,7 +402,7 @@ def collect(args, card):
                                       handoff.state["units"][unit].get("number"), runs=runs, prior_dod=prior_dod, present=present,
                                       delta=delta, prior_delta=prior_delta, texts=texts, config=handoff.config, held=holds,
                                       open_prior=open_of(last), deferred=followup_fids, consumed=consumed_comments(data),
-                                      checked=checked)
+                                      checked=checked, specs=specs)
   lines, slots, contested = carry(lines, contested, last, prior, contest_of, rulings)
   entry.update(dod_runs=runs, test_delta=delta)
   findings = r / "foreman.findings"
@@ -423,6 +427,32 @@ def collect(args, card):
   core.journal(st, f"{unit} round {n} collected: {len(lines)} foreman findings under {args.runcard}")
   print(f"collected: {len(lines)} foreman findings")
   return 0
+
+
+def spec_findings(texts: list, spec: str) -> list:
+  """The foreman's findings of kind `spec` (§7.6), `(location, claim)` each: the text must quote the frozen spec's
+  `path:line` and the evidence, as the builder's `**Deviation (spec):**` comment does (`check_respec`, refused
+  otherwise); the location is the quoted spec line. The claim stays on one line, with no ` | ` field separator."""
+  found = []
+  for text in texts:
+    text = " ".join(text.split()).replace(" | ", " / ")
+    check_respec("**Deviation (spec):** " + text, spec)
+    found.append((next(m.group(0) for m in PATH_LINE.finditer(text) if not spec or cites(m.group(0), spec)), SPEC_CLAIM + text))
+  return found
+
+
+SPEC_CLAIM = "deviation (spec) unruled: "
+
+
+def unruled_specs(last: dict, rulings: list) -> list:
+  """The foreman's spec findings the previous posted round (`last`) holds open, `(location, claim)` each as
+  `spec_findings` makes them: a finding of kind `spec` blocks until the owner rules it (§7.6), so a round that is
+  not given `--spec` again still raises it, and `carry` keeps its id. A finding an `upheld`, `overruled` or
+  `allowed` ruling names, or a recorded `<fid> respec` (read as an overrule), is settled and not raised again."""
+  settled = {r.subject for r in rulings if r.kind in ("upheld", "overruled", "allowed")}
+  prev = ((last.get("reviewers") or {}).get("foreman") or {}).get("findings") or []
+  return [(f["location"], f["claim"]) for f in prev
+          if f["disposition"] is None and f["claim"].startswith(SPEC_CLAIM) and f["id"] not in settled]
 
 
 def require_non_terminal(unit: str, entry: dict) -> None:
@@ -483,10 +513,13 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
                      issue_number: int = None, runs: dict = None, prior_dod: dict = None, present: set = None,
                      delta: list = None, prior_delta: dict = None, texts: dict = None, config: dict = None,
                      held: dict = None, open_prior: set = frozenset(), deferred: list = (),
-                     consumed: frozenset = frozenset(), checked: list = None) -> tuple:
+                     consumed: frozenset = frozenset(), checked: list = None, specs: list = ()) -> tuple:
   """The foreman's high findings of spec section 11 in this order, which numbers the `foreman-<r>-<k>` ids: CI,
   the DoD items' fenced-output and `Exists` checks, the `dod-<n>` re-runs, the `test-delta:` entries, scope,
-  tdd-order, deviations, contested, upheld, unreplied external; and `builder_contested[]` for the contested ones. Rulings
+  tdd-order, deviations, the foreman's spec findings, contested, upheld, unreplied external; and `builder_contested[]` for the contested ones.
+  `specs`, `(location, claim)` each, is the foreman's findings of kind `spec` (§7.6): the ones `--spec` raises in this round
+  (`spec_findings`) and the ones the previous posted round holds open (`unruled_specs`), which `carry` then keeps under
+  their ids; each is a blocker as a comment's deviation is, and numbered right after the comment deviations. Rulings
   and replies count only from the right author: a ruling is a `config.owners` login's comment `ruling_of` reads
   (spec section 13.2's one grammar) on the unit's issue, never the PR, or an entry of the record (`recorded`,
   `recorded_rulings`), replies come from the builder. Every `**Deviation**` line of a comment is one deviation; an `allowed` ruling on a posted
@@ -552,6 +585,7 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
       kind = DEVIATION_RE.match(line)
       if kind and kind.group(1) != "other" and c["id"] not in ruled:
         found.append((where(c), f"deviation ({kind.group(1)}) unruled"))
+  found += specs  # the foreman's own findings of kind `spec` (§7.6), raised in this round: blockers as a builder's comment is
   if prior_round:
     settled = {r.subject for r in rulings if r.kind in ("upheld", "overruled", "allowed")}
     for c in comments:

@@ -2,13 +2,14 @@
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3/5
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
-# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63).
+# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63); `respec`, a `spec` deviation's option, the owner's alone, a spent `relaunch` dropped beside it, and a letter that resolves to it binding nothing unrecorded (spec §7.6, U84).
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
 import argparse
 import contextlib
 import io
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -21,7 +22,7 @@ from superegm.report import pending_decisions, unit_view
 from superegm import review, scan
 from superegm.review import Refusal
 
-WRITES = frozenset({"foreman", "reviews", "state", "file"})  # the store kinds this subcommand writes (`reviews`: a fifth point's accept, U35; `state`: the other writers' fields; `file`: `amendments/<comment id>.json`, §6.5)
+WRITES = frozenset({"foreman", "reviews", "state", "file"})  # the store kinds this subcommand writes (`reviews`: a fifth point's accept, U35; `state`: the other writers' fields; `file`: `amendments/<comment id>.json`, §6.5, and `respec/R<n>.open.json`, §7.6)
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
 SKILLS = frozenset({"wave"})  # the skills whose card this subcommand accepts
 RELAUNCH = ["relaunch", "stop the unit"]
@@ -31,9 +32,11 @@ INTERFACE = re.compile(r"(?P<unit>U\d+) (?P<name>[^:]+):")  # an interface headi
 
 def comment_options(text: str) -> list:
   """A builder comment's point-3 options: its `- (` lines, `amend` when its one deviation heading is an interface
-  one (the owner's alone, spec §6.5; `check_amend` refuses any other), then `stop the unit`."""
-  amend = ["amend"] if [m["kind"] for m in DEVIATION.finditer(text)] == ["interface"] else []
-  return [line[2:].strip() for line in text.splitlines() if line.startswith("- (")] + amend + ["stop the unit"]
+  one (the owner's alone, spec §6.5; `check_amend` refuses any other), `respec` when it is a `spec` one (the owner's
+  alone, spec §7.6), then `stop the unit`."""
+  kinds = [m["kind"] for m in DEVIATION.finditer(text)]
+  extra = ["amend"] if kinds == ["interface"] else ["respec"] if kinds == ["spec"] else []
+  return [line[2:].strip() for line in text.splitlines() if line.startswith("- (")] + extra + ["stop the unit"]
 
 
 def produced_names(st, unit: str) -> list:
@@ -64,6 +67,81 @@ def amendments_of(text: str, chosen: str, reason: str, comment_id: int, now: str
   return [{"unit": h["unit"], "name": heading_name(h["name"], produced_names(st, h["unit"])),
            "text": reason.strip() if chosen == "amend" else chosen, "comment_id": comment_id, "at": now}
           for h in heads if h]
+
+
+RESPEC_FILE = re.compile(r"R(\d+)\.")
+
+
+def respec_files(st) -> list:
+  """The `respec/` folder's files, sorted."""
+  folder = st.path("file", "respec")
+  return sorted(folder.iterdir()) if folder.is_dir() else []
+
+
+def respec_held(st, unit: str, comment_id: int = None, finding: str = None):
+  """The `(file, content)` of the open respec file of this unit and this deviation, a comment (`comment_id`) or the
+  foreman's finding (`finding`), else None."""
+  for file in respec_files(st):
+    if file.name.endswith(".open.json"):
+      try:
+        held = json.loads(file.read_text(encoding="utf-8"))
+      except ValueError:
+        continue
+      if isinstance(held, dict) and held.get("unit") == unit and held.get("comment_id") == comment_id and held.get("finding") == finding:
+        return file, held
+  return None
+
+
+def open_respec(st, unit: str, comment_id: int, now: str, finding: str = None) -> str:
+  """Spec §7.6: the owner's `respec` on a `spec` deviation writes `respec/R<n>.open.json` (`{id, unit, comment_id,
+  at}`, the store's `file` kind, never `state.json`) in the handoff's directory; `R<n>` is the next number no
+  `respec/` file uses. On the foreman's spec finding `finding` (its fid) takes `comment_id`'s place: `{id, unit,
+  finding, at}`. A rerun after a crash finds the file for the same unit and deviation and keeps it."""
+  if held := respec_held(st, unit, comment_id, finding):
+    return held[1]["id"]
+  used = [int(m.group(1)) for f in respec_files(st) if (m := RESPEC_FILE.match(f.name))]
+  rid = f"R{max(used, default=0) + 1}"
+  entry = {"id": rid, "unit": unit, "finding": finding} if finding else {"id": rid, "unit": unit, "comment_id": comment_id}
+  core.atomic_write(st.path("file", "respec", f"{rid}.open.json"), entry | {"at": now})
+  return rid
+
+
+def drop_respec(st, unit: str, comment_id: int = None, finding: str = None) -> None:
+  """Remove the open respec file of this unit and deviation, if any: what a crashed run left when a rerun rules
+  another option, so the file is never read as an open respec."""
+  if held := respec_held(st, unit, comment_id, finding):
+    held[0].unlink()
+
+
+PATH_LINE = re.compile(r"[\w./-]+\.[A-Za-z]\w*:\d+(?:-\d+)?")  # a `path:line` (or `path:a-b`) reference
+BACKTICKED = re.compile(r"`([^`\n]+)`")
+
+
+def cites(ref: str, spec: str) -> bool:
+  """Whether a `path:line` reference names the frozen spec: its path is the spec's, or ends it on a path boundary."""
+  path, spec = ref.rpartition(":")[0].removeprefix("./"), spec.removeprefix("./")
+  return spec == path or spec.endswith("/" + path)
+
+
+def check_respec(text: str, spec: str = "") -> None:
+  """Refuse a `respec` that is not on one `spec` deviation alone, whose comment does not quote a `path:line` of the
+  frozen spec (`spec`, the handoff's spec path; empty when none is known, then any `path:line` counts), or that shows
+  no evidence: a command (a backticked span that is not itself a `path:line`) or a `path:line` outside the spec, in
+  the base (spec §7.6). The comment is the heading and the lines after it, less its options and cut at the
+  `**Builder status:**` line: a `path:line` or a command after it does not count."""
+  heads = list(DEVIATION.finditer(text))
+  if len(heads) != 1 or heads[0]["kind"] != "spec":
+    raise Refusal("decision: respec needs a comment with one spec deviation and no other")
+  said = text[heads[0].start("rest"):].split("**Builder status:**")[0]
+  said = "\n".join(line for line in said.splitlines() if not line.startswith("- ("))
+  refs = list(dict.fromkeys(m.group(0) for m in PATH_LINE.finditer(said)))
+  in_spec = [r for r in refs if not spec or cites(r, spec)]
+  if not in_spec:
+    raise Refusal("decision: respec needs the frozen spec's path:line in the deviation")
+  commands = [s for s in BACKTICKED.findall(said) if not PATH_LINE.fullmatch(s.strip())]
+  base = [r for r in refs if r not in in_spec] if spec else refs[1:]
+  if not commands and not base:
+    raise Refusal("decision: respec needs the evidence: a command and its output, or a path:line in the base")
 
 
 def check_amend(st, text: str, reason: str) -> None:
@@ -199,7 +277,10 @@ def binding_rulings(comments: list, owners: list, recorded: list, decisions=None
   `stop the unit`), as `decision rule` would accept it, with two exceptions `offered` names: an option naming a
   comment id this issue lacks binds unchecked (an interface ruling copied from its producer's issue, which
   `decision rule` drops here as naming no open decision, and which a mistyped id cannot be told apart from), and an
-  option on a named comment with no `- (` lines binds whatever its text. Given `pending` (the open decisions, `pending_decisions`),
+  option on a named comment with no `- (` lines binds whatever its text unless `respec` is among that comment's
+  `comment_options` (a comment whose one deviation is `spec`; a `spec` deviation beside another deviation is no
+  `spec` comment, so it keeps the exception); an unrecorded
+  `respec`, or a letter resolving to it, binds nothing (`offered`: only `rule` writes the open file). Given `pending` (the open decisions, `pending_decisions`),
   an unrecorded `one more round` or `stop` binds only while a point-2 decision is open and a `redesign` only while
   a head's (point 1 or 2) is: otherwise `decision rule` drops it, and at point 3 a redesign is text. Once a point-1
   question exists, an unrecorded `finding upheld` binds only on a fid one asks about (`fid_decisions`, whose
@@ -239,23 +320,27 @@ def binding_rulings(comments: list, owners: list, recorded: list, decisions=None
 def offered(r: "Ruling", comments: list, decisions: list) -> bool:
   """Whether an option ruling names one of its decision's options (`check_ruling` at point 3), except where there
   is nothing to check it against: a numeric id this issue's comments lack (a ruling copied from a producer's
-  issue, or a mistyped id: both bind, unchecked) and a named comment with no `- (` lines (any option binds); a
-  decision id the record lacks binds nothing."""
+  issue, or a mistyped id: both bind, unchecked) and a named comment with no `- (` lines whose `comment_options`
+  do not include `respec` (any option binds; a comment whose one deviation is `spec` is excluded, a `spec`
+  deviation beside another deviation is not); a decision id the record lacks binds nothing. A `respec` never binds unrecorded: `rule` writes
+  its open file and records it, whether the ruling names it or a letter resolves to it (a `spec` comment with no
+  option lines offers `respec` and `stop the unit`, so `(a)` is `respec`)."""
   decision = next((d for d in decisions if d.get("point") in (3, 5) and r.subject == option_name(d)), None)
+  if (r.option or "").strip() == "respec":  # a ruling comment alone binds no `respec`: `rule` writes the open file and
+    return False  # records it (`recorded_rulings`), so a recorded one needs no check here, an unrecorded one clears no blocker
   if decision is not None:
     options = decision.get("options") or []
   else:
     named = next((c for c in comments if str(c.get("id")) == r.subject), None)
     if named is None:  # a comment id this issue lacks: an interface ruling copied from its producer's issue (spec
       return r.subject.isdigit()  # section 13.2), nothing here to check it against; a decision id it lacks binds nothing
-    if not any(line.startswith("- (") for line in (named.get("body") or "").splitlines()):
-      return True  # a comment with no option lines (a kind-`other` deviation): nothing to check the option against
     options = comment_options(named.get("body") or "")
+    if "respec" not in options and not any(line.startswith("- (") for line in (named.get("body") or "").splitlines()):
+      return True  # a comment with no option lines (a kind-`other` deviation): nothing to check the option against
   try:
-    check_ruling(3, options, r.option or "")
+    return check_ruling(3, options, r.option or "") != "respec"  # a lettered `(a) respec` resolves to it too
   except Refusal:
     return False
-  return True
 
 
 def overridden_comments(comments: list, owners: list, foreman: dict) -> dict:
@@ -401,7 +486,11 @@ def open_decision(args) -> int:
   qid, now = f"q{len(data['decisions']) + 1}", core.now_iso()
   data["decisions"].append({"id": qid, "point": args.point, "source": args.source, "head": head,
                             "question": question, "asked_at": now, "options": options})
-  reason = stop_reason(data, load_launches(st, unit), args.source) if options == RELAUNCH else None
+  reason = stop_reason(data, load_launches(st, unit), args.source) if "relaunch" in options else None
+  if reason and "respec" in options:  # a spec deviation keeps `respec` (§7.6): the spent relaunch is dropped, the decision is asked
+    options.remove("relaunch")
+    data["decisions"][-1]["options"] = options
+    reason = None
   if reason:
     data["rulings"].append({"decision": qid, "ruling": "stop the unit", "by": "superegm",
                             "reason": reason, "posted": None, "posted_at": now})
@@ -452,10 +541,24 @@ def stop_reason(foreman: dict, launches: list, source: str):
   return None
 
 
+SPEC_CLAIM = "deviation (spec) unruled: "  # the claim of the foreman's finding of kind `spec` (`collect --spec`, §7.6)
+
+
+def spec_claims(question: str) -> dict:
+  """The foreman's spec findings a point-1 question holds, fid to the finding's text (what follows `SPEC_CLAIM`)."""
+  found = {}
+  for line in question.splitlines():
+    fields = line.split(" | ", 4)
+    if len(fields) == 5 and fields[4].startswith(SPEC_CLAIM) and " " not in fields[0]:
+      found[fields[0]] = fields[4][len(SPEC_CLAIM):]
+  return found
+
+
 def options_for(point: int, source: str, question: str, foreman: dict, head: str) -> list:
-  """Spec section 13.2's options: point 1 upheld|overruled; point 2 one more round|stop; point 3 the
+  """Spec section 13.2's options: point 1 upheld|overruled, and `<fid> respec` (§7.6, the owner's alone) for each of the
+  foreman's spec findings the question holds; point 2 one more round|stop; point 3 the
   comment's own `- (a)` lines plus `stop the unit`, or `relaunch; stop the unit` for a launch, a close,
-  or a third `blocked` comment on the same head; point 5 (a head's accept below the cap) accept|revise. Point 1 on
+  or a third `blocked` comment on the same head (a `spec` deviation's keeps `respec` between them, §7.6, `open_decision` dropping a `relaunch` already used); point 5 (a head's accept below the cap) accept|revise. Point 1 on
   an `owner: <ids>` word (the latest posted round's outcome) offers `<fid> allowed`, one per id the question names (U25)."""
   if point == 5:
     return ["accept", "revise"]
@@ -466,7 +569,7 @@ def options_for(point: int, source: str, question: str, foreman: dict, head: str
       named = [f"{fid} allowed" for fid in word[len("owner: "):].split(", ") if re.search(rf"(?<!\S){re.escape(fid)}(?!\S)", question)]
       if named:
         return named
-    return ["finding upheld", "finding overruled"]
+    return ["finding upheld", "finding overruled"] + [f"{fid} respec" for fid in spec_claims(question)]
   if point == 2:
     return ["one more round", "stop"]
   if source.startswith("comment"):
@@ -474,6 +577,8 @@ def options_for(point: int, source: str, question: str, foreman: dict, head: str
             if d.get("point") == 3 and str(d.get("source", "")).startswith("comment") and d.get("head") == head]
     if len(same) < 2:
       return comment_options(question)
+    if "respec" in comment_options(question):  # a spec deviation's decision always offers `respec` (§7.6)
+      return RELAUNCH[:1] + ["respec"] + RELAUNCH[1:]
   return list(RELAUNCH)
 
 
@@ -560,7 +665,7 @@ def rule(args) -> int:
     if ruled_by_comment != chosen:
       raise Refusal(f"decision: comment {args.posted} rules {said}, not {head.strip()}")
     reason = found.reason or ""
-  elif not reason.strip() and chosen != "amend" and (decision["point"] == 3 or chosen.endswith((" finding overruled", " allowed"))):
+  elif not reason.strip() and chosen != "amend" and (decision["point"] == 3 or chosen.endswith((" finding overruled", " allowed", " respec"))):
     # a ruling typed without the reason its form carries: the session's, or the panel's, named as such
     reason = f"ruled by judges {args.by[7:]}" if args.by.startswith("judges:") else "ruled in the session"
   if chosen == "redesign" and basis["point"] in (1, 2):  # a head's third ruling; a point-3 option named `redesign` is an option
@@ -571,8 +676,13 @@ def rule(args) -> int:
     chosen = f"redesign — {reason.strip()}"
     brief = brief_path(st, unit, decision["id"])  # written after the comment is posted: a refusal leaves no brief
   amends = decision["point"] == 3 and str(decision["source"]).startswith("comment")
+  respec_fid = chosen.removesuffix(" respec") if decision["point"] == 1 and chosen.endswith(" respec") else None
   if amends and chosen == "amend":  # refused before anything is posted
     check_amend(st, decision["question"], reason)
+  if amends and chosen == "respec":  # the spec line and the evidence, refused before anything is posted
+    check_respec(decision["question"], core.handoff_spec(args, st))
+  if respec_fid:  # the same two parts on the foreman's spec finding, refused before anything is posted
+    check_respec("**Deviation (spec):** " + spec_claims(decision["question"])[respec_fid], core.handoff_spec(args, st))
   if decision["point"] == 5:  # a head's fifth point (U35): the owner's alone, applied before anything is posted
     if args.by.startswith("judges:"):
       raise Refusal("decision: point 5 is the owner's alone")
@@ -635,6 +745,18 @@ def rule(args) -> int:
       core.atomic_write(file, [entry | {"recorded_at": recorded_at} for entry in added])
     elif file.exists():
       file.unlink()
+  # spec §7.6: the open file is written before the ruling is saved, so a crash leaves a file a rerun keeps when it rules
+  # `respec` again, and removes when it rules another option, so a stale file is never read as an open respec
+  deviation = None
+  if amends:
+    deviation = {"comment_id": int(str(decision["source"]).split()[1])}
+  elif decision["point"] == 1 and chosen.split(" ")[0] in spec_claims(decision["question"]):  # a spec finding's ruling
+    deviation = {"finding": chosen.split(" ")[0]}
+  if deviation:
+    if (chosen == "respec" if amends else bool(respec_fid)) and not closed:
+      open_respec(st, unit, deviation.get("comment_id"), now, deviation.get("finding"))
+    else:
+      drop_respec(st, unit, deviation.get("comment_id"), deviation.get("finding"))
   # recorded before the read-back, the session's post marked `unread` (its GitHub time not yet read), so a
   # `status --wait` pass in between compares its edits with its own `created_at` and skips the unedited post
   core.save_foreman(st, unit, data)
@@ -827,8 +949,6 @@ def check_ruling(point: int, options: list, ruling: str, by: str = "") -> str:
     place = ord(text[1]) - ord("a")
     if place < len(options):
       text = options[place]
-  if point == 3 and text == "amend" and "amend" in options and by.startswith("judges:"):  # on the option the ruling resolves to
-    raise Refusal("decision: amend is the owner's alone")
   if point == 1 and options and all(o.endswith(" allowed") for o in options):
     said = text.partition(" — ")[0].strip()
     option = next((o for o in options if o.split(" ")[0] == fid and said in ("allowed", "finding overruled", "finding upheld")), None)
@@ -836,9 +956,15 @@ def check_ruling(point: int, options: list, ruling: str, by: str = "") -> str:
       raise Refusal(f"decision: {fid} {said} is the owner's alone")  # the ruling the panel gave, not the option it matched
     if option:
       return f"{fid} finding upheld" if said == "finding upheld" else option
+  if point == 1 and text.partition(" — ")[0].strip() == "respec" and f"{fid} respec" in options:  # §7.6: the foreman's spec finding
+    if by.startswith("judges:"):
+      raise Refusal("decision: respec is the owner's alone")
+    return f"{fid} respec"
   for option in options:
     letter, _, rest = option.partition(" ") if option.startswith("(") else ("", "", option)
     if text and text in (option, letter, rest) and (point != 1 or fid):
+      if point == 3 and rest in ("amend", "respec") and by.startswith("judges:"):  # on the option the ruling resolves to, its own `(x) ` prefix dropped
+        raise Refusal(f"decision: {rest} is the owner's alone")
       return f"{fid} {rest}" if point == 1 else rest
   extra = ["redesign — <one sentence why>"] if point in (1, 2) else []  # a head's third ruling, in no option list
   raise Refusal("decision: ruling is none of the options: " + "; ".join(options + extra))
