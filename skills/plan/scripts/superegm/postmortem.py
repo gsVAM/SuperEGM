@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: `superegm postmortem`, the handoff's report of spec section 7.5 (U78).
+# Added by SuperEGM (gsVAM), 2026: `superegm postmortem`, the handoff's report of spec section 7.5 (U78); the Lessons table and `--retro <file>` (U87).
 
 """superegm postmortem: one report of a handoff from the store alone (spec section 7.5).
 
@@ -36,6 +36,7 @@ SEVERITIES = ("high", "medium", "low")
 def register(subparsers):
   p = core.add_parser(subparsers, "postmortem", "write the handoff's post-mortem report (spec section 7.5)", runcard=False)
   p.add_argument("--handoff", required=True, help="the handoff reported on")
+  p.add_argument("--retro", help="copy this file to the handoff's retro.md (spec section 7.7) instead of writing the report")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -483,6 +484,14 @@ def build(st: core.Store, hs: core.Store) -> str:
 def run(args) -> int:
   st = core.store(core.git_toplevel(Path.cwd()))
   hs = core.handoff_store(st, args.handoff)
+  if args.retro:  # the retrospective's record: the agreed file's bytes, no report rebuilt, no run card
+    source = Path(args.retro)
+    if not source.is_file():
+      raise core.HandoffError(f"postmortem: --retro {args.retro} is not a file")
+    out = hs.path("file", "retro.md")
+    core.atomic_write(out, source.read_bytes())
+    print(out)
+    return 0
   out = hs.path("file", "postmortem.md")
   core.atomic_write(out, build(st, hs))
   print(out)
