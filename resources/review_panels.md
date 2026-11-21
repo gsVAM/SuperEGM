@@ -270,9 +270,10 @@ Report the counts per round on one line so the trend is legible, for example
 regressions that do not fall, mean the approach needs changing, not another
 round.
 
-**Cap: 5 rounds, then pause.** At round 5, stop and put the choice to the user
+**The cap is `review.rounds`** (an integer 1–10, default 3; a spec's `Rounds:`
+line freezes its own). At the last round, stop and put the choice to the user
 in one line with the trend and the open findings: continue, accept the
-remainder, or stop. Never start round 6 without their answer. The cap is a
+remainder, or stop. Never start another round without their answer. The cap is a
 cost guard, not a quality bar: converging at round 2 is the normal case. The
 rule itself, the cap and the stall predicate are implemented once, in the
 helper's `superegm review status`, and written out in

@@ -87,7 +87,7 @@ The philosophy:
 - **One inbox.** `/superegm:inbox` lists only what needs you: in this repository, or with `--all` across every repository you registered. If you write an executable `~/.superegm/notify`, it receives each new item, so a phone notification is one script away.
 - **Rule from your phone.** A `**Ruling:**` comment on a unit's issue, from an owner, is a ruling. You never have to open a terminal to unblock a unit.
 - **Outside reviews count.** A review from a colleague or a review bot on a builder's pull request, or on the spec's own pull request, is ingested as findings and enters the same loop.
-- **Accept early.** When only mediums and lows remain, the review says so, and you can accept without waiting out five rounds.
+- **Accept early.** When only mediums and lows remain, the review says so, and you can accept without waiting out the round cap.
 
 ### Leave it running
 
@@ -203,7 +203,7 @@ Add `--leavemealone` to a skill (or set `"mode": "leavemealone"` in `.superegm/c
 
 ## How a review works
 
-One review loop serves the spec, every plan and every pull request head. Each round, every reviewer on the panel is a goldfish: a fresh, isolated session that sees only the artifact, the standards for its kind and, from round 2, the previous round's findings with the fixes marked. The panel is fixed when the review opens and every reviewer runs concurrently. At the cap of five rounds the owner rules: one more round, accept, or stop.
+One review loop serves the spec, every plan and every pull request head. Each round, every reviewer on the panel is a goldfish: a fresh, isolated session that sees only the artifact, the standards for its kind and, from round 2, the previous round's findings with the fixes marked. The panel is fixed when the review opens and every reviewer runs concurrently. At the cap (`review.rounds`, default 3; a spec's `Rounds:` line freezes its own) the owner rules: one more round, accept, or stop.
 
 ```mermaid
 flowchart LR
@@ -211,7 +211,7 @@ flowchart LR
   F -->|none high or medium| X["Converged<br/>sha256 recorded"]
   F -->|fix| N["Fix, mark<br/>each finding"]
   N -->|next round| R
-  N -.->|5 rounds| RU["Your ruling"]
+  N -.->|round cap| RU["Your ruling"]
   classDef human fill:#fde68a,stroke:#b45309,color:#1f2937
   class RU human
 ```

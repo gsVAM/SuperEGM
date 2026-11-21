@@ -47,7 +47,7 @@ The empty builder profile (no plugins, no `CLAUDE.md`) keeps it that way.
 
 #### Q: What if a review never converges?
 
-**A**: Change the thing, not the round. A review at its cap of five rounds pauses for a ruling:
+**A**: Change the thing, not the round. A review at its cap (`review.rounds`, default 3; a spec's `Rounds:` line freezes its own) pauses for a ruling:
 one bounded round more (once), accept the remainder, or stop. Two rounds that regress on the same
 area mean the capability should be deleted, the contract narrowed or the surface shrunk.
 
@@ -75,7 +75,7 @@ a comment.
 findings (`review ingest`, `review ingest --pr`) and enters the same loop: a high or medium turns a
 clean head back into a revise until the builder answers it.
 
-#### Q: Must I wait five rounds to accept a few mediums?
+#### Q: Must I wait out the round cap to accept a few mediums?
 
 **A**: No. When only mediums and lows stand, `review status` prints an `acceptable:` line and you
 can accept then and there.
