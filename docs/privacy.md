@@ -56,8 +56,8 @@ An instruction file or reference document addressed to `reviewers` or `judges` (
 brief carries each file's text, and each reference document's bytes up to 262,144 bytes together.
 A file addressed to `builder` or `foreman` alone does not go to the Codex vendor, but the builder's
 instructions are part of the prompt of its `claude -p` session, so the host (Claude Code) processes
-them under its own terms. The `astra` judge sends the brief to Codex whether or not `astra.enabled`
-is set; to keep a file from it, do not address it to `judges`.
+them under its own terms. With `astra.enabled` false neither the lane nor the `astra` judge runs, and nothing goes to Codex;
+to keep a file from it while the lane is on, do not address it to `reviewers` or `judges`.
 
 Opt out of the lane with `"astra": {"enabled": false}` in `.superegm/config.json`, `codex logout`, or by not
 installing claudex-loop; the lane then records `not run` and the review runs Claude-only. Local

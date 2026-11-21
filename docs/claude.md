@@ -125,20 +125,21 @@ call (`--timeout 540` under a 600000 ms limit) and waits for it, so nothing outl
   `--permission-mode bypassPermissions` with no allow-list and no prompt, under the credential the
   env file names (the accepted residual: the driver goes only on a machine and repositories the
   owner would let a session act on alone). A tick starts at most one session per registered store
-  and loops over every store, so several stores' sessions may run at once. A tick chains nothing
-  and merges nothing, unless `driver.chain` is `true` (default `false`), when a tick may carry a
-  handoff on to its next phase; `driver kick --root <path>` runs a tick now, only when the driver
+  and loops over every store, so several stores' sessions may run at once. A tick merges nothing in any
+  mode and chains nothing, unless `driver.chain` is `true` (default `false`), when a tick may carry a
+  handoff on to its next phase, never `integrate`; `driver kick --root <path>` runs a tick now, only when the driver
   is installed, the root registered and that store's `driver.chain` true, and opens no card.
 - The inbox asks in words. A merge offer the unit has outgrown is `inbox withdrawn` and journals
   `merge withdrawn`. A bare `inbox` is read-only and opens no card; `inbox withdrawn` typed without
-  `--runcard` opens and closes its own inbox card, the exception that sits next to
-  `approve-spec --void`, which opens and closes its own card too.
+  `--runcard` opens and closes its own inbox card, an exception that sits next to
+  `approve-spec --void`, which opens and closes its own card too, and `driver kick`, which runs
+  with no card.
 
 ## Repository instructions
 
 - `instructions` in `.superegm/config.json` names files, or folders of reference documents, each
   addressed `to` any of `builder`, `foreman`, `reviewers` and `judges`. `approve-spec` freezes them
-  by blob sha into the store, and `superegm instructions --role <role>` prints a role's section,
+  by blob sha into the store, and `superegm instructions --role <role> (--handoff <id> --runcard <card> | --spec <path> --review <id> --round <n>)` prints a role's section,
   which every brief carries last. A file cannot grant a tool: `builder.allowed_tools` stays the
   owner's. A builder's own branch never changes what an agent was told.
 - The brainstorm's builder check and visual companion run in the owner's session: the companion

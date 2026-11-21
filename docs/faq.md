@@ -21,7 +21,7 @@ foreman, only by the elephant.
 
 #### Q: Who merges?
 
-**A**: The owner. Nothing is merged by a machine, in any mode. Builders open draft pull requests
+**A**: The owner. Nothing is merged by a machine on its own: no builder, foreman or driver merges, in any mode; the inbox merges only a pull request you name, with `--match-head-commit`. Builders open draft pull requests
 they cannot merge; the branch protection lets only the owner update the base branch; the wave
 ends with merge-ready drafts and a report, and `integrate` runs after the owner has merged.
 
@@ -39,15 +39,15 @@ nothing, and a close by the builder account is a decision point, not a stop.
 The builder then acts as `<slug>[bot]` under one-hour installation tokens minted per `gh` call from the App's private key, which only the path in `SUPEREGM_APP_KEY` names; `superegm doctor` prints the App's lines.
 It is the recommended path, for a personal repository or an organization's; the machine account is the fallback when you cannot register an App.
 
-#### Q: Why a fresh session for every builder launch?
+#### Q: Is a builder launch a fresh session?
 
-**A**: A builder's brief is the issue body, the builder orders, the rulings on its issue and,
+**A**: The first is. A later launch of a unit resumes, as a fork, the immediately previous successful session when its transcript, model, effort, profile and instruction files all match; otherwise it starts fresh. A builder's brief is the issue body, the builder orders, the rulings on its issue and,
 from round 2, the foreman's reviews of its own branch: never the planning elephant's context.
 The empty builder profile (no plugins, no `CLAUDE.md`) keeps it that way.
 
 #### Q: What if a review never converges?
 
-**A**: Change the thing, not the round. A review at its cap (`review.rounds`, default 3; a spec's `Rounds:` line freezes its own) pauses for a ruling:
+**A**: Change the thing, not the round. A review at its cap (`review.rounds`, default 3, stored when the review opens) pauses for a ruling:
 one bounded round more (once), accept the remainder, or stop. Two rounds that regress on the same
 area mean the capability should be deleted, the contract narrowed or the surface shrunk.
 
@@ -78,14 +78,14 @@ clean head back into a revise until the builder answers it.
 #### Q: Must I wait out the round cap to accept a few mediums?
 
 **A**: No. When only mediums and lows stand, `review status` prints an `acceptable:` line and you
-can accept then and there. The cap is `review.rounds` (default 3); a spec's `Rounds:` line sets its own.
+can accept then and there. The cap is `review.rounds` (default 3); a spec's `Rounds:` line sets it for the handoff's plan, head and integrate reviews, not for the spec's own review.
 
 #### Q: Can I give every agent my repository's rules?
 
 **A**: Yes. List files, or folders of reference documents, under `instructions` in
 `.superegm/config.json`, each addressed to `builder`, `foreman`, `reviewers` and `judges` as you
 choose. `approve-spec` freezes them. What goes to `reviewers` or `judges` also goes to the Codex
-vendor: through the Astra lane for reviewers and through the `astra` judge for judges.
+vendor when `astra.enabled` is true: through the Astra lane for reviewers and through the `astra` judge for judges.
 
 #### Q: Can I add a reviewer of my own?
 

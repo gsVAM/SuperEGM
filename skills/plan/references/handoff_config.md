@@ -6,7 +6,7 @@ Modified by SuperEGM (gsVAM), 2026: EGM's repository-rules reference brought to 
 
 Repository rules live in `.superegm/config.json` at the repository root (the git
 top level of the design file), not in the plugin: the plugin is generic.
-`superegm init` writes the file with every key's default and prints the owner's
+`superegm init` writes the file with every key's default except `driver.chain`, which it leaves out (absent reads `false`), and prints the owner's
 by-hand steps; a missing file means the defaults, and the dry run says so.
 Unknown keys stop.
 
@@ -59,7 +59,6 @@ Unknown keys stop.
   "instructions": [],
   "review": {"rounds": 3},
   "units": {"max_body_kb": 25, "max_files": 10, "max_steps": 16},
-  "driver": {"chain": false},
   "ci_wait_minutes": 30,
   "astra": {"enabled": false, "model": "gpt-6-astra", "effort": "xhigh", "heads": true, "heads_effort": "high"},
   "ingest": {"severity_words": {"bug": "high", "issue": "medium", "nit": "low", "suggestion": "low"}, "human_role": "write"}
@@ -71,7 +70,7 @@ Unknown keys stop.
 | `repo` | parsed from `git remote get-url origin` | `^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`. The helper then finds, in `git remote -v`, the remote whose URL names it in any form (`https://github.com/O/N[.git]`, `git@github.com:O/N[.git]`, `ssh://git@github.com/O/N[.git]`), records it as `remote` in the state for `prepare`, and stops with "no remote for OWNER/NAME in <repo root>: add one or fix `repo`" when none matches. In a fork checkout `origin` is the fork and the target is usually `upstream`. |
 | `base` | `main` | The default branch; `init` refuses another. The owner pushes the approval commit to `origin/<base>`, `launch` fetches it, and every builder branch starts from it. |
 | `artifacts_dir` | `~/.superegm/<owner>/<name>` (`init`) | An absolute path outside the working tree: the store (unit files, issue bodies, reviews, launches, judge panels), never committed. |
-| `mode` | `normal` | `normal` or `leavemealone`: in leavemealone-mode the judge panel rules at every decision point; merge stays the owner's in both. |
+| `mode` | `normal` | `normal` or `leavemealone`: in leavemealone-mode the judge panel rules at every decision point; merge stays the owner's in both. Approval freezes the mode, so an edit governs handoffs approved after it. |
 | `max_in_flight` | `5` | A positive integer: how many units `launch` keeps in flight at once. |
 | `labels.unit` | `superegm:unit` | On every unit issue. Each label name must match `^[^,\s]{1,50}$` (GitHub rejects longer names). |
 | `labels.wave_prefix` | `superegm:wave-` | `superegm:wave-<n>` on every unit issue. |
@@ -108,8 +107,8 @@ Unknown keys stop.
 | `notify_timeout_seconds` | `30` | A positive number: how long `notify` waits on the owner's `~/.superegm/notify` hook, which `wave` runs with the inbox lines new since the last notify on its stdin. The hook lives outside every repository; absent means no hook. |
 | `ingest.severity_words` | `bug` high, `issue` medium, `nit` low, `suggestion` low (Devin's words) | Words mapped to `high`, `medium` or `low` for `review ingest`, which reads PR review threads into the unit's latest posted round. Words match whole and case-folded, and `high`, `medium` and `low` themselves always count. An inline thread takes the word its first line starts with or carries in a bold or bracketed marker, else `low`; a human's review body is `medium` when its first line carries such a word, else `low`; a bot's review body is always `low`. |
 | `ingest.human_role` | `write` | `read`, `triage`, `write`, `maintain` or `admin`: the repository role from which a human's thread counts. A thread from a human below it is `low` whatever its words, recorded and never posted. |
-| `instructions` | `[]` | A list of `{file, to}` or `{dir, to}` entries (exactly one of `file` and `dir`); `to` is a non-empty list from `builder`, `foreman`, `reviewers`, `judges`. A `file` is at most 8,192 bytes; a `dir`'s `*.md` files (at most 50, 65,536 bytes each) are listed as reference documents. `approve-spec` freezes each by blob sha. A file addressed to `reviewers` or `judges` goes to the Codex vendor through the Astra lane and the `astra` judge. |
-| `review.rounds` | `3` | An integer 1 to 10: the round cap of a review. A spec's own review always runs under the live value; `approve-spec` freezes the spec's `Rounds:` line, else the live value, as the cap of the handoff's plan, head and integrate reviews, and a later change does not reach an approved handoff. The judge panel keeps its own cap of 5. |
+| `instructions` | `[]` | A list of `{file, to}` or `{dir, to}` entries (exactly one of `file` and `dir`); `to` is a non-empty list from `builder`, `foreman`, `reviewers`, `judges`. A `file` is at most 8,192 bytes; a `dir`'s `*.md` files (at most 50, 65,536 bytes each) are listed as reference documents. `approve-spec` freezes each by blob sha. A file addressed to `reviewers` or `judges` goes to the Codex vendor through the Astra lane and the `astra` judge when `astra.enabled` is true. |
+| `review.rounds` | `3` | An integer 1 to 10: the round cap of a review, stored when the review opens. A spec's own review opens under the live value; `approve-spec` freezes the spec's `Rounds:` line, else the live value, as the cap of the handoff's plan, head and integrate reviews, and a later change does not reach an approved handoff (one approved under 1.2.0 keeps 5). The judge panel keeps its own cap of 5. |
 | `units.max_body_kb` | `25` | A positive integer at most 48: the largest unit issue body, in KB. |
 | `units.max_files` | `10` | An integer of at least 8 (a lower value is refused): the most files a unit's Scope may name. |
 | `units.max_steps` | `16` | A positive integer: the most Steps a unit may have. |
@@ -122,7 +121,7 @@ Fixed behaviour, not configuration: a bare `@name` in the text outside code is r
 (it notifies that user); CI is required; a merged PR is required for landed;
 both PR-matching rules of the wave skill apply; the label colour is `1b6ef3`;
 derived labels are created without `--force` and existing labels are never
-edited; nothing is merged by a machine.
+edited; no builder, foreman or driver merges.
 
 The dry run makes three read-only `gh` calls: `gh auth status --hostname
 github.com`, `gh api repos/OWNER/NAME -q .permissions` (push access is
