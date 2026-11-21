@@ -440,3 +440,15 @@ def test_the_helper_declares_itself_single_writer() -> None:
                "skills/plan/references/handoff_config.md"):
     flat = " ".join(read(path).split())
     assert "single-writer" in flat or "One command at a time" in flat, path
+
+
+@pytest.mark.parametrize("path, text", [
+    *[(p, k) for p in ("README.md", "skills/plan/references/handoff_config.md") for k in (
+        "instructions", "review.rounds", "units.max_body_kb", "units.max_files", "units.max_steps",
+        "driver.chain", "reviewers.", "builder.precheck_attempts", "builder.escalate_after")],
+    ("README.md", "post-mortem"), ("README.md", "superegm inbox"), ("README.md", ".superegm/reviewers/"),
+    ("docs/privacy.md", "Codex"), ("docs/privacy.md", "visual companion"),
+])
+def test_docs_cover_1_2_1(path, text):
+    # every 1.2.1 key a user configures and every feature a user sees is documented
+    assert text in " ".join(read(path).split())
