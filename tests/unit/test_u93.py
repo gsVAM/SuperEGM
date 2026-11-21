@@ -409,14 +409,15 @@ def test_clean_keeps_a_unit_folder_that_is_a_symlink_to_another_units(world, mon
   s, _card, _hid, _bodies = seed(world, units=(UNIT,))
   other = s.path("review", "U02", "pr7", "worktree") if where == "review" else s.path("worktrees", "U02", "r1")
   add_tree(world, other)
-  s.path(where, UNIT).symlink_to(s.path(where, "U02"))
+  folder = (lambda unit: s.path("review", unit, "pr0").parent) if where == "review" else (lambda unit: s.path("worktrees", unit))
+  folder(UNIT).symlink_to(folder("U02"))
   procs = Procs(other.resolve(), False)
   monkeypatch.setattr(clean_module, "process_table", procs.listing)
   monkeypatch.setattr(clean_module, "signal_process", procs.send)
   monkeypatch.setattr(clean_module, "is_alive", procs.alive)
   code, out = world.run("clean", "--unit", UNIT, "--runcard", clean_card(world))
   assert code == 0, out
-  assert f"kept {s.path(where, UNIT)}/" in out and ": symlink" in out
+  assert f"kept {folder(UNIT)}/" in out and ": symlink" in out
   assert procs.signals == [] and other.is_dir()  # the other unit's tree and processes are untouched
   assert f"{UNIT} cleaned" not in out and f"{UNIT} cleaned" not in journal_text(s)
 
@@ -456,7 +457,10 @@ def test_clean_prints_git_s_error_when_a_forced_removal_fails_and_keeps_the_refs
 def test_clean_goes_on_when_one_builder_tree_fails_removal(world):
   s, _card, _hid, _bodies = seed(world, units=(UNIT,))
   launched(s, UNIT, "exited 0", rnd=1)
+  one = json.loads(s.path("launches", UNIT).read_text(encoding="utf-8"))["launches"]
   launched(s, UNIT, "exited 0", rnd=2)
+  both = one + json.loads(s.path("launches", UNIT).read_text(encoding="utf-8"))["launches"]  # one file holds both launches
+  put(s.path("launches", UNIT), json.dumps({"launches": both}))
   first, second = s.path("worktrees", UNIT, "r1"), s.path("worktrees", UNIT, "r2")
   add_tree(world, first)
   add_tree(world, second)
