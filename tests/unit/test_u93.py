@@ -196,10 +196,12 @@ def test_wave_skill_keeps_the_wording_u93_trimmed():
 
 def test_clean_skill_describes_what_clean_does():
   text = read("skills/clean/SKILL.md")
-  for said in ("pr<n>/worktree", "kept <path>: not a worktree", "kept <path>: uncommitted changes", "resolves outside the store",
+  for said in ("pr<n>/worktree", "kept <path>: not a worktree", "kept <path>: uncommitted changes", "kept <path>: symlink",
                "cannot list its processes", "cannot be signalled", "SIGTERM", "SIGKILL", "<unit> killed <pid> <command>",
-               "--auto", "`wave` or `integrate` card"):
+               "--auto", "`wave` or `integrate` card", "lsof +c 0 -a -d cwd -Fpcn", "on this unit", "without regard to case",
+               "never signalled", "`worktrees/<unit>/` folder", "git's error"):
     assert said in text, said
+  assert "resolves outside the store" not in text and "-d cwd -Fn`" not in text
   assert "refuses the whole run" not in text and "removes nothing" not in text
 
 
@@ -227,7 +229,7 @@ def test_clean_keeps_a_review_link_that_resolves_outside_the_store(world, monkey
   monkeypatch.setattr(clean_module, "is_alive", procs.alive)
   code, out = world.run("clean", "--unit", UNIT, "--runcard", clean_card(world))
   assert code == 0, out
-  assert f"kept {link}: resolves outside the store" in out
+  assert f"kept {link}: symlink" in out
   assert procs.signals == [] and world.repo.is_dir() and link.is_symlink()
   assert f"{UNIT} cleaned" not in out
 
@@ -370,7 +372,7 @@ def test_clean_auto_prints_a_warning_it_cannot_resolve(world, monkeypatch):
   link.parent.mkdir(parents=True, exist_ok=True)
   link.symlink_to(world.repo)
   code, out = world.run("clean", "--auto", "--runcard", world.open_card("integrate", artifact))
-  assert code == 0 and f"kept {link}: resolves outside the store" in out and f"{UNIT} cleaned" not in out
+  assert code == 0 and f"kept {link}: symlink" in out and f"{UNIT} cleaned" not in out
 
 
 def test_clean_auto_never_exits_non_zero(world, monkeypatch):
@@ -392,3 +394,82 @@ def test_clean_auto_and_unit_are_exclusive(world):
   with pytest.raises(SystemExit) as stop:
     world.run("clean", "--auto", "--unit", UNIT, "--runcard", card)
   assert stop.value.code != 0
+
+
+def test_clean_auto_refuses_nothing_under_a_refused_card(world):
+  seed(world, units=(UNIT,))
+  code, out = world.run("clean", "--auto", "--runcard", clean_card(world))  # a clean card on the unit, not the handoff's spec
+  assert code == 0 and out.startswith("clean: runcard:") and out.count("\n") == 1
+  code, out = world.run("clean", "--auto", "--runcard", "no-such-card")
+  assert code == 0 and out.startswith("clean: runcard:")
+
+
+@pytest.mark.parametrize("where", ["review", "worktrees"])
+def test_clean_keeps_a_unit_folder_that_is_a_symlink_to_another_units(world, monkeypatch, where):
+  s, _card, _hid, _bodies = seed(world, units=(UNIT,))
+  other = s.path("review", "U02", "pr7", "worktree") if where == "review" else s.path("worktrees", "U02", "r1")
+  add_tree(world, other)
+  s.path(where, UNIT).symlink_to(s.path(where, "U02"))
+  procs = Procs(other.resolve(), False)
+  monkeypatch.setattr(clean_module, "process_table", procs.listing)
+  monkeypatch.setattr(clean_module, "signal_process", procs.send)
+  monkeypatch.setattr(clean_module, "is_alive", procs.alive)
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", clean_card(world))
+  assert code == 0, out
+  assert f"kept {s.path(where, UNIT)}/" in out and ": symlink" in out
+  assert procs.signals == [] and other.is_dir()  # the other unit's tree and processes are untouched
+  assert f"{UNIT} cleaned" not in out and f"{UNIT} cleaned" not in journal_text(s)
+
+
+@pytest.mark.parametrize("builder", [True, False])
+def test_clean_auto_deletes_a_terminal_units_refs_whether_or_not_a_review_tree_existed(world, builder):
+  s, card, _hid, _bodies = seed(world, units=(UNIT,))
+  launched(s, UNIT, "exited 0")
+  saved(s, record={"launched": {"at": "2026-11-03T00:00:00Z", "runcard": card, "by": "owner"},
+                   "pr": {"number": 70, "head": "a" * 40, "merged_at": "2026-11-03T01:00:00Z"}},
+        view={"pr": 70, "head": "a" * 40, "ci": "pass", "landed": False})
+  if builder:
+    add_tree(world, s.path("worktrees", UNIT, "r1"))
+  for ref in ("refs/superegm/pr/70", "refs/superegm/pr-base/70"):
+    git("update-ref", ref, "HEAD", cwd=world.repo)
+  artifact = json.loads(s.path("runcards", card).read_text(encoding="utf-8"))["artifact"]
+  auto = world.open_card("integrate", artifact)
+  assert world.run("clean", "--auto", "--runcard", auto) == (0, "U01 cleaned\n")
+  assert git("for-each-ref", "refs/superegm/pr/70", "refs/superegm/pr-base/70", cwd=world.repo) == ""
+  assert world.run("clean", "--auto", "--runcard", auto) == (0, "")
+  assert journal_text(s).count(f"{UNIT} cleaned") == 1
+
+
+def test_clean_prints_git_s_error_when_a_forced_removal_fails_and_keeps_the_refs(world):
+  s, _card, _hid, _bodies = seed(world, units=(UNIT,))
+  child = s.path("review", UNIT, "pr7", "worktree")
+  add_tree(world, child)
+  git("worktree", "lock", str(child), cwd=world.repo)
+  git("update-ref", "refs/superegm/pr/7", "HEAD", cwd=world.repo)
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", clean_card(world))
+  assert code == 0, out
+  line = next(l for l in out.splitlines() if l.startswith(f"kept {child}: "))
+  assert "locked" in line and "uncommitted changes" not in out and child.is_dir()  # git's reason, first line
+  assert git("for-each-ref", "refs/superegm/pr/7", cwd=world.repo) != "" and f"{UNIT} cleaned" not in out
+
+
+def test_clean_goes_on_when_one_builder_tree_fails_removal(world):
+  s, _card, _hid, _bodies = seed(world, units=(UNIT,))
+  launched(s, UNIT, "exited 0", rnd=1)
+  launched(s, UNIT, "exited 0", rnd=2)
+  first, second = s.path("worktrees", UNIT, "r1"), s.path("worktrees", UNIT, "r2")
+  add_tree(world, first)
+  add_tree(world, second)
+  git("worktree", "lock", str(first), cwd=world.repo)
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", clean_card(world))
+  assert code == 0, out
+  assert f"kept {first}: " in out and "locked" in out and first.is_dir()
+  assert not second.exists()  # the next tree was removed, not skipped by a raise
+  assert f"{UNIT} cleaned" not in out and f"{UNIT} cleaned" not in journal_text(s)
+
+
+def test_resume_notes_hold_one_copy_of_the_loop_ended_sentence():
+  notes = read("skills/wave/references/resume_notes.md")
+  assert "`loop_ended`" not in notes
+  assert "`loop_ended`" in read("skills/wave/SKILL.md")
+  assert "stays in SKILL.md" in notes.split("-->", 1)[0]  # the header says what stayed
