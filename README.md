@@ -105,24 +105,70 @@ SuperEGM 1.2 was built by SuperEGM. Its [design](https://github.com/gsVAM/supere
 
 ## The workflow at a glance
 
-Eight phases, one typed skill each, nothing chains. The yellow steps are the human's.
+One skill per phase, in this order. The yellow steps are the human's.
 
 ```mermaid
 flowchart LR
-  P0["0 Brainstorm<br/>a spec ending in Units"] --> P1["1 Spec review<br/>converged or ruled"]
+  B0["Brainstorm<br/>builder check, visual companion"] --> W0["SDLC workflow<br/>reviewers, rules, round cap"]
+  W0 --> P1["Review spec<br/>converged or ruled"]
   P1 --> H1["Owner pushes<br/>the approval commit"]
-  H1 --> P2["2 Plan<br/>graph and scan pass"]
-  P2 --> P3["3 Plan review<br/>converged or ruled, per unit"]
-  P3 --> P4["4 File<br/>dry run confirmed"]
-  P4 --> P5["5 Wave<br/>every head clean"]
-  P5 --> H2["6 Merge<br/>by hand"]
-  H2 --> P7["7 Integrate<br/>nothing left to escalate"]
+  H1 --> P2["Plan<br/>graph and scan pass"]
+  P2 --> P3["Review plan<br/>converged or ruled, per unit"]
+  P3 --> P4["File<br/>dry run confirmed"]
+  P4 --> P5["Wave<br/>every head clean"]
+  P5 --> H2["Merge<br/>by hand"]
+  H2 --> P7["Integrate<br/>nothing left to escalate"]
+  P7 --> PM["Post-mortem<br/>one report from the store"]
   P7 -.->|new units| P2
   classDef human fill:#fde68a,stroke:#b45309,color:#1f2937
   class H1,H2 human
 ```
 
-The approval commit is the one human step between phases 1 and 5: `launch` refuses the first wave until the spec on the base branch hashes to the approval. Integrate may append new units to the spec; they go through plan, plan review, file and wave again.
+The approval commit is the one human step between review-spec and the wave: `launch` refuses the first wave until the spec on the base branch hashes to the approval. Integrate may append new units to the spec; they go through plan, review-plan, file and wave again.
+
+**Brainstorm.** Before the brainstorm hands the spec over, one fresh subagent reads it as the person who must build it (the builder check) and reports only the questions where a wrong guess matters; the skill answers what the spec already answers, settles the minor ones and marks them as its own calls, and asks you the rest. The visual companion, offered just in time, opens a local browser tab with mockups and diagrams; it binds `127.0.0.1` only and starts only on your yes, and nothing it shows leaves the machine.
+
+**SDLC workflow.** Once the spec is written, the brainstorm walks you through the workflow that will review and build it, in order: the reviewers, the instructions and reference documents, the round cap, the mode, the builder's tooling, `superegm doctor`, and the chain. You may skip any area or the whole step.
+
+**Review spec, plan, review plan, file, wave, integrate.** As described in [How a review works](#how-a-review-works), [How a wave works](#how-a-wave-works) and [The eight phases](#the-eight-phases).
+
+**Post-mortem.** Once a handoff is done, the post-mortem is one report written from the store alone: units, reviewers, owner time, launches and lessons, numbers only.
+
+### Instructions and reference documents
+
+`instructions` in `.superegm/config.json` lists files (`{"file": ".superegm/rules.md", "to": ["builder", "foreman", "reviewers", "judges"]}`, at most 8,192 bytes) that go into the brief of every role they are addressed to. An entry may name a `dir` instead: its `*.md` files are listed in the brief as reference documents (at most 50, 65,536 bytes each) that an agent reads when its task touches them. `approve-spec` freezes each file by its blob sha, so a builder's branch never changes what an agent was told. A file cannot grant a tool: a command it asks the builder to run still needs a `builder.allowed_tools` entry. A file addressed to `reviewers` or `judges` goes to the Codex vendor with the Astra lane (see [docs/privacy.md](docs/privacy.md)).
+
+### Custom reviewers
+
+A file `.superegm/reviewers/<id>.md` adds a review goldfish: frontmatter `name`, `kinds` (any of `spec`, `plan`, `head`, `integrate`) and optional `model` and `effort`, then the persona (at most 8,192 bytes). A file named for a built-in reviewer replaces that reviewer's persona. Name the ids in `reviewers.spec`, `reviewers.plan`, `reviewers.head` and `reviewers.integrate`; `approve-spec` freezes the files, and `superegm doctor` prints a `reviewers:` line.
+
+### The round cap
+
+A review pauses for your ruling at its cap: `review.rounds`, an integer 1 to 10, default 3. A spec's own `Rounds:` line freezes a different cap for that spec. The judge panel keeps its own cap of 5.
+
+### The chain and the inbox
+
+With `driver.chain` set to `true` (default `false`; the SDLC workflow offers it once doctor passes), the driver carries a handoff through its phases unattended and stops where it needs you. `driver kick` runs one store's tick now, and the driver's interval is 5 minutes. `/superegm:inbox` (the helper is `superegm inbox`) lists only what needs you.
+
+### Answers in words
+
+The inbox asks in plain words, opens each question with one recommended option and its reason, and your "yes" takes it. It checks that your `gh` login is in `config.owners`, reads your mapped answer back once, and posts the `**Ruling:**` comment itself; no skill asks you to paste a command. It merges only a pull request you name, with `--match-head-commit`, and withdraws the offer if the unit changed: `inbox withdrawn` journals `merge withdrawn`. Typed without `--runcard`, the inbox opens no card, except `approve-spec --void` and `driver kick`, which open and close their own.
+
+### Config keys added in 1.2.1
+
+| Key | Default |
+| --- | --- |
+| `instructions` | `[]` |
+| `review.rounds` | `3` |
+| `units.max_body_kb` | `25` |
+| `units.max_files` | `10` |
+| `units.max_steps` | `16` |
+| `driver.chain` | `false` |
+| `reviewers.<kind>` | the built-in panels, plus ids from `.superegm/reviewers/` |
+| `builder.precheck_attempts` | `3` |
+| `builder.escalate_after` | `2` (`0` turns escalation off) |
+
+[`skills/plan/references/handoff_config.md`](skills/plan/references/handoff_config.md) has each key's rule.
 
 ## Install
 

@@ -78,4 +78,30 @@ clean head back into a revise until the builder answers it.
 #### Q: Must I wait out the round cap to accept a few mediums?
 
 **A**: No. When only mediums and lows stand, `review status` prints an `acceptable:` line and you
-can accept then and there.
+can accept then and there. The cap is `review.rounds` (default 3); a spec's `Rounds:` line sets its own.
+
+#### Q: Can I give every agent my repository's rules?
+
+**A**: Yes. List files, or folders of reference documents, under `instructions` in
+`.superegm/config.json`, each addressed to `builder`, `foreman`, `reviewers` and `judges` as you
+choose. `approve-spec` freezes them. What goes to `reviewers` or `judges` also goes to the Codex
+vendor when the Astra lane is on.
+
+#### Q: Can I add a reviewer of my own?
+
+**A**: Yes. Write `.superegm/reviewers/<id>.md` with a `name`, its `kinds` and a persona, then name
+the id in `reviewers.<kind>`.
+
+#### Q: Does the chain run on its own?
+
+**A**: Only when `driver.chain` is `true` (default `false`). The brainstorm offers it once doctor
+passes; `superegm driver kick` runs one tick now.
+
+#### Q: What does a withdrawn inbox offer mean?
+
+**A**: The unit changed after the inbox asked, so it took the offer back and journalled
+`merge withdrawn`. The inbox asks in words, and typed without `--runcard` it opens and closes its own card.
+
+#### Q: Is there a report when a handoff is done?
+
+**A**: Yes, the post-mortem: one report from the store, written after integrate.

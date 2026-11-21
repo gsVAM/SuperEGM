@@ -1,6 +1,6 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-Modified by SuperEGM (gsVAM), 2026: EGM's repository-rules reference brought to `.superegm/config.json`'s key set, the launch-policy keys `owners`, `owner_team` and `pr_block_file` included (spec section 11); SuperEGM 1.2's keys added, the example brought to `DEFAULT_CONFIG`: `reviewers.model`, `reviewers.effort`, `brainstorm.team`, `foreman.run_timeout_minutes`, `notify_timeout_seconds`, `builder.effort`, `builder.plugins`, `builder.mcp`, `builder.max_subagent_calls`, `builder.stall_minutes`, `builder.tiers`, `astra.heads_effort` and `ingest` (spec sections 6, 7, 8, 11, 11.1 and 11.2). -->
+Modified by SuperEGM (gsVAM), 2026: EGM's repository-rules reference brought to `.superegm/config.json`'s key set, the launch-policy keys `owners`, `owner_team` and `pr_block_file` included (spec section 11); SuperEGM 1.2's keys added, the example brought to `DEFAULT_CONFIG`: `reviewers.model`, `reviewers.effort`, `brainstorm.team`, `foreman.run_timeout_minutes`, `notify_timeout_seconds`, `builder.effort`, `builder.plugins`, `builder.mcp`, `builder.max_subagent_calls`, `builder.stall_minutes`, `builder.tiers`, `astra.heads_effort` and `ingest` (spec sections 6, 7, 8, 11, 11.1 and 11.2); SuperEGM 1.2.1's keys added: `instructions`, `review.rounds`, `units.*`, `driver.chain`, custom reviewer ids, `builder.precheck_attempts` and `builder.escalate_after`. -->
 
 # Repository configuration: `.superegm/config.json`
 
@@ -51,9 +51,15 @@ Unknown keys stop.
     "mcp": {},
     "max_subagent_calls": 12,
     "stall_minutes": 30,
+    "precheck_attempts": 3,
+    "escalate_after": 2,
     "tiers": {"difficult": {"model": "claude-opus-5-5", "effort": "high"}, "easy": {"model": "claude-sonnet-5-5", "effort": "medium"}},
     "app": null
   },
+  "instructions": [],
+  "review": {"rounds": 3},
+  "units": {"max_body_kb": 25, "max_files": 10, "max_steps": 16},
+  "driver": {"chain": false},
   "ci_wait_minutes": 30,
   "astra": {"enabled": false, "model": "gpt-6-astra", "effort": "xhigh", "heads": true, "heads_effort": "high"},
   "ingest": {"severity_words": {"bug": "high", "issue": "medium", "nit": "low", "suggestion": "low"}, "human_role": "write"}
@@ -102,6 +108,15 @@ Unknown keys stop.
 | `notify_timeout_seconds` | `30` | A positive number: how long `notify` waits on the owner's `~/.superegm/notify` hook, which `wave` runs with the inbox lines new since the last notify on its stdin. The hook lives outside every repository; absent means no hook. |
 | `ingest.severity_words` | `bug` high, `issue` medium, `nit` low, `suggestion` low (Devin's words) | Words mapped to `high`, `medium` or `low` for `review ingest`, which reads PR review threads into the unit's latest posted round. Words match whole and case-folded, and `high`, `medium` and `low` themselves always count. An inline thread takes the word its first line starts with or carries in a bold or bracketed marker, else `low`; a human's review body is `medium` when its first line carries such a word, else `low`; a bot's review body is always `low`. |
 | `ingest.human_role` | `write` | `read`, `triage`, `write`, `maintain` or `admin`: the repository role from which a human's thread counts. A thread from a human below it is `low` whatever its words, recorded and never posted. |
+| `instructions` | `[]` | A list of `{file, to}` or `{dir, to}` entries (exactly one of `file` and `dir`); `to` is a non-empty list from `builder`, `foreman`, `reviewers`, `judges`. A `file` is at most 8,192 bytes; a `dir`'s `*.md` files (at most 50, 65,536 bytes each) are listed as reference documents. `approve-spec` freezes each by blob sha. A file addressed to `reviewers` or `judges` goes to the Codex vendor with the Astra lane. |
+| `review.rounds` | `3` | An integer 1 to 10: the round cap of a review. A spec's `Rounds:` line freezes its own cap. The judge panel keeps its own cap of 5. |
+| `units.max_body_kb` | `25` | A positive integer at most 48: the largest unit issue body, in KB. |
+| `units.max_files` | `10` | A positive integer: the most files a unit's Scope may name. |
+| `units.max_steps` | `16` | A positive integer: the most Steps a unit may have. |
+| `driver.chain` | `false` | True or false: `true` lets the driver carry a handoff through its phases unattended. Read live; no approval freezes it. |
+| `reviewers.<kind>` | the spec's panels | Besides the built-in adapters, an id of a file `.superegm/reviewers/<id>.md` whose `kinds` holds the kind. |
+| `builder.precheck_attempts` | `3` | A positive integer: how many times a builder may try the launch precheck before the launch is reported failed. |
+| `builder.escalate_after` | `2` | A non-negative integer: failed rounds after which a unit escalates to the `difficult` tier; `0` turns escalation off. |
 
 Fixed behaviour, not configuration: a bare `@name` in the text outside code is refused
 (it notifies that user); CI is required; a merged PR is required for landed;
