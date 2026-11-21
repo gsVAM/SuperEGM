@@ -202,11 +202,8 @@ voids before the choice below: a void cannot be undone, and a respec cannot foll
    never offers it (the helper refuses it under a leavemealone card or `SUPEREGM_ROLE`), so go to
    item 3.
 2. `Respec`: `superegm respec open --review '<id>' --finding '<fid>' --runcard '<card>'`, through
-   `<HELPER>` like every call here, `<fid>` the round's first `fix-design` finding in id order. One
-   question and one respec per round, however many `fix-design` findings it holds: the respec's
-   approval closes the whole cycle, resolving every one of them, while a second `R<n>` on the same
-   review would stay open after it and keep `file` and `next` waiting; name the others in the
-   respec's text. It writes `respec/R<n>.open.json`, the filed units go on, and
+   `<HELPER>` like every call here, `<fid>` the round's first `fix-design` finding: one respec per round,
+   its approval closing the cycle and every such finding (a second `R<n>` would stay open). It writes `respec/R<n>.open.json`, the filed units go on, and
    `file` and `next` wait on it (`waiting respec R<n>`) until `/superegm:review-spec` approves it
    with `approve-spec --respec R<n>`, which closes this cycle so the next `review-plan` opens a new
    one on the corrected plan. Tell the owner that in one line, then
