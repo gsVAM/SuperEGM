@@ -115,7 +115,7 @@ Unknown keys stop.
 | `driver.chain` | `false` | True or false: `true` lets the driver carry a handoff through its phases unattended. Read live; no approval freezes it. `init` does not write this key: when it is absent it reads `false`. |
 | `reviewers.<kind>` | the spec's panels | Besides the built-in adapters, an id of a file `.superegm/reviewers/<id>.md` whose `kinds` holds the kind. |
 | `builder.precheck_attempts` | `3` | A positive integer: the most precheck runs a builder makes in one launch; once they are spent it pushes its best checkpoint with the open findings listed (a precheck never holds a push back for good). |
-| `builder.escalate_after` | `2` | A non-negative integer: failed rounds after which a unit escalates to the `difficult` tier; `0` turns escalation off. |
+| `builder.escalate_after` | `2` | A non-negative integer: failed rounds after which a unit escalates to the `difficult` tier; `0` turns escalation off for later rounds but does not undo an escalation already recorded. Only the current head cycle's posted foreman rounds that ended `revise`, `cap-reached` or contested with an open blocking finding count. |
 
 Fixed behaviour, not configuration: a bare `@name` in the text outside code is refused
 (it notifies that user); CI is required; a merged PR is required for landed;

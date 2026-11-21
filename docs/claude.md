@@ -119,7 +119,7 @@ call (`--timeout 540` under a 600000 ms limit) and waits for it, so nothing outl
 - The driver is a launchd agent (on Linux a systemd user timer) that runs `superegm driver tick`
   in the environment of `~/.superegm/env` (`KEY=value` lines, mode 0600: `PATH`, `CLAUDE_CONFIG_DIR`
   and the builder identity's variable). A tick records each launch in `driver/<handoff>.json` before
-  starting it, and launches `claude -p` with `/superegm:wave <spec> --handoff <id>` (plus `--leavemealone` when the handoff's frozen mode is not normal; with `driver.chain` true the phase is the one `superegm next` names)
+  starting it, and launches `claude -p` with `/superegm:wave <spec> --handoff <id>` (with `driver.chain` false, the default, always `wave` with `--leavemealone`; with `driver.chain` true the phase is the one `superegm next` names, and `--leavemealone` is added only when the handoff's frozen mode is not normal)
   in its own session and process group; the plist sets `AbandonProcessGroup` (the systemd unit
   `KillMode=process`), so the reaping of the exited tick leaves the session alive. That session runs
   `--permission-mode bypassPermissions` with no allow-list and no prompt, under the credential the

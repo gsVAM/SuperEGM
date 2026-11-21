@@ -59,8 +59,8 @@ pull request.
 #### Q: Can I leave it running while I am away?
 
 **A**: Yes. Register the repository with `superegm register`, write `~/.superegm/env`, and type
-`/superegm:driver install`: a launchd or systemd timer runs `wave --leavemealone` for every
-registered handoff. It launches builders, runs reviews and judges, and stops at every merge.
+`/superegm:driver install`: a launchd or systemd timer launches a session for every
+registered handoff: with `driver.chain` false (the default) `wave --leavemealone`; with it true the phase `superegm next` names, with `--leavemealone` only when the handoff's frozen mode is not normal. It launches builders, runs reviews and judges, and stops at every merge.
 `/superegm:inbox` lists what waits on you, and an executable `~/.superegm/notify` hears each new line.
 
 #### Q: Can I rule without opening a terminal?

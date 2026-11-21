@@ -271,7 +271,7 @@ regressions that do not fall, mean the approach needs changing, not another
 round.
 
 **The cap is `review.rounds`** (an integer 1–10, default 3; a spec's `Rounds:`
-line, frozen at approval, caps the handoff's plan, head and integrate reviews; a spec's own review runs under the live value). At the last round, stop and put the choice to the user
+line, frozen at approval, caps the handoff's plan, head and integrate reviews; with no such line the live value at approval is frozen instead, so a later change of the key does not reach the handoff; a spec's own review runs under the live value, and a respec cycle opens with 2). At the last round, stop and put the choice to the user
 in one line with the trend and the open findings: continue, accept the
 remainder, or stop. Never start another round without their answer. The cap is a
 cost guard, not a quality bar: converging at round 2 is the normal case. The
