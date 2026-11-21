@@ -4,6 +4,7 @@
 """superegm clean: remove a unit's review and builder worktrees and its private refs once every
 launch and round is terminal; keeps what it cannot prove."""
 
+import json
 import os
 import signal
 import subprocess
@@ -30,10 +31,15 @@ def register(subparsers):
 
 
 def run(args):
-  core.require_runcard(args, SKILLS)
   try:
+    core.require_runcard(args, SKILLS)
     return clean(args)
   except core.HandoffError as error:
+    if args.auto:  # `--auto` refuses nothing: a refused card or a missing checkout is one line and exit 0
+      print(f"clean: {error}")
+      return 0
+    if str(error).startswith("runcard:"):
+      raise
     raise core.HandoffError(f"clean: {error}") from None
 
 
@@ -52,8 +58,8 @@ def clean_auto(root, args):
   request is merged (its issue still open, which `status` does not mark landed) or that is `stopped`, and that `terminal_problems`
   passes, one `<unit> cleaned` line per unit cleaned. Any other unit is skipped silently, and so is a folder that holds only round
   records; a line a person should read (a process that cannot be listed, signalled or killed, uncommitted changes in a legacy tree, a
-  path outside the store) still prints, and so does `clean --auto: <unit or handoff>: <error>` for any error. It always exits 0, so the
-  caller never stops."""
+  symlinked folder, a removal git refused) still prints, and so does `clean --auto: <unit or handoff>: <error>` for any error. A refused card
+  prints `clean: <reason>`. It always exits 0, so the caller never stops."""
   try:
     plan, st = core.locate(args)
     handoff = core.Handoff(plan, st)
@@ -73,14 +79,38 @@ def clean_auto(root, args):
   return 0
 
 
-def inside_store(st, unit, tree):
-  """`tree`, symlinks resolved, lies strictly inside the unit's `review/<unit>/` or `worktrees/<unit>/` folder."""
-  real = tree.resolve()
-  for base in (st.path("review", unit, "pr0").parent, st.path("worktrees", unit)):
-    base = base.resolve()
-    if real != base and real.is_relative_to(base):
+def linked(st, unit, tree):
+  """True when `tree`, or any folder above it inside the store (`review/`, `review/<unit>/`, `pr<n>/`, `worktrees/<unit>/`), is a
+  symlink: a link can reach another unit's tree, so nothing is signalled or removed through one."""
+  store = st.path("review", unit, "pr0").parent.parent.parent
+  while tree != store and tree != tree.parent:
+    if tree.is_symlink():
       return True
+    tree = tree.parent
   return False
+
+
+def pr_numbers(st, unit):
+  """The pull request numbers whose private refs the unit owns: the recorded `units.<unit>.pr.number` and each `review/<unit>/pr<n>`."""
+  numbers = {p.name[2:] for p in st.path("review", unit, "pr0").parent.glob("pr*") if p.name[2:].isdigit()}
+  try:
+    state = json.loads(st.path("state").read_text(encoding="utf-8"))
+    number = ((state.get("units") or {}).get(unit, {}).get("pr") or {}).get("number")
+    if isinstance(number, int) and not isinstance(number, bool):
+      numbers.add(str(number))
+  except (OSError, ValueError, AttributeError):
+    pass
+  return sorted(numbers)
+
+
+def private_refs(root, st, unit):
+  """The `refs/superegm/pr/<n>` and `refs/superegm/pr-base/<n>` that exist for the unit's pull requests."""
+  wanted = [f"refs/superegm/{kind}/{n}" for n in pr_numbers(st, unit) for kind in ("pr", "pr-base")]
+  return [ref for ref in wanted if core.run_git(["rev-parse", "--verify", "--quiet", ref], root, check=False).strip()]
+
+
+def first_line(error):
+  return str(error).splitlines()[0] if str(error) else "git failed"
 
 
 def review_trees(root, st, unit):
@@ -103,8 +133,9 @@ def builder_trees(root, st, unit):
 
 def has_remnants(root, st, unit):
   """Something `clean_unit` would remove: a registered review worktree (the `pr<n>/worktree` child or a legacy `pr<n>`), or a builder
-  `r<n>` folder that a launch records and git has registered. A folder kept by rule (unrecorded, unregistered) is not one."""
-  if review_trees(root, st, unit):
+  `r<n>` folder that a launch records and git has registered, or a private ref of the unit's pull requests. A folder kept by rule
+  (unrecorded, unregistered) is not one."""
+  if review_trees(root, st, unit) or private_refs(root, st, unit):
     return True
   trees, recorded, registered = builder_trees(root, st, unit)
   return any(tree.resolve() in recorded and tree.resolve() in registered for tree in trees)
@@ -116,7 +147,9 @@ def is_dirty(tree):
 
 def clean_unit(root, st, unit, quiet=False):
   """Remove the unit's registered worktrees and refs. `quiet` (`--auto`) leaves out the routine `kept ...: not a worktree` and
-  `no launch records it` lines; a line that warns always prints. `<unit> cleaned` is journalled only when nothing was kept for a reason."""
+  `no launch records it` lines; a line that warns always prints. `<unit> cleaned` is journalled, and the unit's private refs deleted, only
+  when no tree was kept for a reason (a symlink, a process that cannot be listed or signalled or survives SIGKILL, uncommitted changes in a
+  legacy tree, a removal git refused); `not a worktree` and `no launch records it` do not withhold it."""
   problems = terminal_problems(st, unit)
   if problems:
     raise core.HandoffError(problems[0])
@@ -126,14 +159,15 @@ def clean_unit(root, st, unit, quiet=False):
       print(line)
 
   complete = True
+  refs = private_refs(root, st, unit)  # read before any `pr<n>` folder goes: a legacy tree's folder names its number
   registered_review = review_trees(root, st, unit)
   for folder in sorted(p for p in st.path("review", unit, "pr0").parent.glob("pr*") if p.is_dir()):
     if folder not in registered_review:
       note(f"kept {folder}: not a worktree")
       continue
     tree, legacy = registered_review[folder]
-    if not inside_store(st, unit, tree):
-      print(f"kept {tree}: resolves outside the store")
+    if linked(st, unit, tree):
+      print(f"kept {tree}: symlink")
       complete = False
       continue
     if legacy and is_dirty(tree):  # a legacy `pr<n>` may be a person's tree: never forced, never signalled
@@ -145,24 +179,25 @@ def clean_unit(root, st, unit, quiet=False):
       continue
     try:
       core.remove_worktree(root, tree, force=not legacy)  # the review child is the store's: its `pr<n>/r<n>` records stay
-    except core.HandoffError:
-      print(f"kept {tree}: uncommitted changes")
+    except core.HandoffError as error:  # git's own reason: `uncommitted changes` only where the dirty-legacy refusal says so
+      print(f"kept {tree}: {first_line(error)}")
       complete = False
-      continue
-    for ref in (f"refs/superegm/pr/{folder.name[2:]}", f"refs/superegm/pr-base/{folder.name[2:]}"):
-      core.run_git(["update-ref", "-d", ref], root, check=False)
   trees, recorded, registered = builder_trees(root, st, unit)
   for tree in trees:
     real = tree.resolve()
-    if not inside_store(st, unit, tree):
-      print(f"kept {tree}: resolves outside the store")
+    if linked(st, unit, tree):
+      print(f"kept {tree}: symlink")
       complete = False
     elif real not in recorded:
       note(f"kept {tree}: no launch records it")
     elif real not in registered:
       note(f"kept {tree}: not a worktree")
     elif stop_leftovers(st, unit, tree):
-      core.run_git(["worktree", "remove", "--force", str(tree)], root)
+      try:
+        core.run_git(["worktree", "remove", "--force", str(tree)], root)
+      except core.HandoffError as error:
+        print(f"kept {tree}: {first_line(error)}")
+        complete = False
     else:
       complete = False
   core.run_git(["worktree", "prune"], root, check=False)
@@ -171,6 +206,8 @@ def clean_unit(root, st, unit, quiet=False):
   except OSError:
     pass
   if complete:
+    for ref in refs:  # the refs go once nothing of the unit was kept, whether or not a review tree existed
+      core.run_git(["update-ref", "-d", ref], root, check=False)
     core.journal(st, f"{unit} cleaned")
     print(f"{unit} cleaned")
 
