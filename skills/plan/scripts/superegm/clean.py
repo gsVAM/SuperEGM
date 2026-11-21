@@ -193,7 +193,7 @@ def parse_process_table(text):
 
 
 def process_table():
-  """`(pid, command, cwd)` of every process `lsof -a -d cwd` lists; `ListError` when `lsof` is missing, times out or exits non-zero."""
+  """`(pid, command, cwd)` of every process `lsof -a -d cwd` lists; `ListError` when `lsof` is missing, times out or exits non-zero with no records."""
   try:
     result = subprocess.run(["lsof", "+c", "0", "-a", "-d", "cwd", "-Fpcn"], capture_output=True, text=True, timeout=60)
   except FileNotFoundError:
@@ -202,9 +202,10 @@ def process_table():
     raise ListError("lsof timed out") from None
   except (OSError, subprocess.SubprocessError) as error:
     raise ListError(str(error)) from None
-  if result.returncode != 0:
+  table = parse_process_table(result.stdout)
+  if result.returncode != 0 and not table:  # an exit 1 that still lists processes (some not readable) is a usable listing
     raise ListError(f"lsof exited {result.returncode}")
-  return parse_process_table(result.stdout)
+  return table
 
 
 def signal_process(pid, sig):
