@@ -109,7 +109,7 @@ One skill per phase, in this order. The yellow steps are the human's.
 
 ```mermaid
 flowchart LR
-  B0["Brainstorm<br/>builder check, visual companion"] --> W0["SDLC workflow<br/>reviewers, rules, round cap"]
+  B0["Brainstorm<br/>builder check, browser mockups"] --> W0["SDLC workflow<br/>reviewers, rules, round cap"]
   W0 --> P1["Review spec<br/>converged or ruled"]
   P1 --> H1["Owner pushes<br/>the approval commit"]
   H1 --> P2["Plan<br/>graph and scan pass"]
@@ -126,7 +126,7 @@ flowchart LR
 
 The approval commit is the one human step between review-spec and the wave: `launch` refuses the first wave until the spec on the base branch hashes to the approval. Integrate may append new units to the spec; they go through plan, review-plan, file and wave again.
 
-**Brainstorm.** Before the brainstorm hands the spec over, one fresh subagent reads it as the person who must build it (the builder check) and reports only the questions where a wrong guess matters; the skill answers what the spec already answers, settles the minor ones and marks them as its own calls, and asks you the rest. The visual companion, offered just in time, opens a local browser tab with mockups and diagrams; it binds `127.0.0.1` only and starts only on your yes, and nothing it shows leaves the machine.
+**Brainstorm.** Before the brainstorm hands the spec over, one fresh subagent reads it as the person who must build it (the builder check) and reports only the questions where a wrong guess matters; the skill answers what the spec already answers, settles the minor ones and marks them as its own calls, and asks you the rest. A local browser tab with mockups and diagrams is offered just in time; it binds `127.0.0.1` only, starts only on your yes, and nothing it shows leaves the machine.
 
 **SDLC workflow.** Once the spec is written, the brainstorm walks you through the workflow that will review and build it, in order: the reviewers, the instructions and reference documents, the round cap, the mode, the builder's tooling, `superegm doctor`, and the chain. You may skip any area or the whole step.
 

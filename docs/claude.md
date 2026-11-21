@@ -140,7 +140,7 @@ call (`--timeout 540` under a 600000 ms limit) and waits for it, so nothing outl
   by blob sha into the store, and `superegm instructions --role <role>` prints a role's section,
   which every brief carries last. A file cannot grant a tool: `builder.allowed_tools` stays the
   owner's. A builder's own branch never changes what an agent was told.
-- The brainstorm's builder check and visual companion run in the owner's session: the companion
+- The brainstorm's builder check and browser mockups run in the owner's session: the mockup
   server binds `127.0.0.1` and needs the `?key=` token, and where the helper cannot run (Cowork)
   the skill stays in text.
 
