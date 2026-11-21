@@ -108,3 +108,45 @@ def test_clean_kills_leftover_processes(world, monkeypatch, where, survives, kep
   assert {pid for pid, _sig in procs.signals} == {4242, 4243}  # a sibling path, a `vim` and the parent's `node` are left alone
   assert tree.exists() is kept
   assert ("4242" in out and "node" in out and f"kept {tree}" in out) is survives
+
+
+def saved(s, **changes):
+  """Merge `changes` into the handoff's state: `units.U01`, `status.units.U01` (the saved view) or both."""
+  state = json.loads(s.path("state").read_text(encoding="utf-8"))
+  state["units"][UNIT].update(changes.get("record", {}))
+  state["status"] = {"ready": [], "units": {UNIT: changes.get("view", {})}}
+  put(s.path("state"), json.dumps(state))
+
+
+@pytest.mark.parametrize("skill", ["wave", "integrate"])
+@pytest.mark.parametrize("unit, cleaned", [
+  ("landed", True), ("merged_at set, issue open", True), ("stopped", True),
+  ("live launch", False), ("active", False),
+])
+def test_clean_auto_cleans_terminal_units(world, skill, unit, cleaned):
+  s, card, _hid, _bodies = seed(world, units=(UNIT,))
+  launch = {"launched": {"at": "2026-11-03T00:00:00Z", "runcard": card, "by": "owner"}}
+  view = {"pr": 70, "head": "a" * 40, "ci": "pass", "landed": False}
+  launched(s, UNIT, "running" if unit == "live launch" else "exited 0")
+  tree = s.path("worktrees", UNIT, "r1")
+  tree.parent.mkdir(parents=True, exist_ok=True)
+  git("worktree", "add", "-q", "--detach", str(tree), "HEAD", cwd=world.repo)
+  if unit in ("landed", "live launch"):
+    view = {**view, "ci": None}  # a merged view: `pr` set, `ci` null; the live launch keeps it from being cleaned
+  elif unit == "merged_at set, issue open":
+    launch["pr"] = {"number": 70, "head": "a" * 40, "merged_at": "2026-11-03T01:00:00Z"}  # the view still reads its CI
+  elif unit == "stopped":
+    view = {"pr": None, "head": None, "ci": None, "landed": False}
+    put(s.path("foreman", UNIT), json.dumps({"dispatch_id": "d1", "rounds": [], "decisions": [], "rulings": [],
+                                             "stopped": {"by": "owner", "reason": "given up", "brief": None}}))
+  elif unit == "active":
+    view = {**view, "ci": "pending"}
+  saved(s, record=launch, view=view)
+  artifact = json.loads(s.path("runcards", card).read_text(encoding="utf-8"))["artifact"]
+  auto_card = card if skill == "wave" else world.open_card("integrate", artifact)
+  code, out = world.run("clean", "--auto", "--runcard", auto_card)
+  assert code == 0, out
+  assert tree.exists() is not cleaned
+  assert (s.path("worktrees", UNIT)).exists() is not cleaned
+  assert (f"{UNIT} cleaned" in out) is cleaned
+  assert (f"{UNIT} cleaned" in journal_text(s)) is cleaned
