@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Merges the landed units of a wave into the base branch and closes the handoff.
 ---
 
-<!-- Added by SuperEGM (gsVAM), 2026: the integrate skill (spec section 12); close's issue closes, `--note` and `--close --patch` (U32); the follow-ups given as known and quoted (U51); the post-mortem run after `close` (U78); the respec refusals (U86); the one-time offer of `/superegm:retro` after the post-mortem (U87); the respec offered beside the void on a design finding (U91). -->
+<!-- Added by SuperEGM (gsVAM), 2026: the integrate skill (spec section 12); close's issue closes, `--note` and `--close --patch` (U32); the follow-ups given as known and quoted (U51); the post-mortem run after `close` (U78); the respec refusals (U86); the one-time offer of `/superegm:retro` after the post-mortem (U87); the respec offered beside the void on a design finding (U91); `clean --auto` after the filing (U93). -->
 
 # Integrate (phase 7)
 
@@ -151,6 +151,8 @@ Then offer the retrospective, once: `/superegm:retro --handoff '<id>'` walks the
 what they agree in one commit (design section 7.7). The skill runs nothing of it; the owner starts it in a session of their own when they want it.
 
 ## Step 4: the end
+
+After the filing (Step 2a's units, Step 3's close), run `superegm clean --auto --runcard <card>`: it removes the worktrees of every landed, merged or stopped unit, prints one line per unit cleaned and never refuses, so it never stops the skill.
 
 `superegm runcard close <card>` (`--note '<text>'` journals a note with it) is the last action of every path, including an error you cannot
 recover from. In chat: the review id and its `review status` line, the escalated findings with
