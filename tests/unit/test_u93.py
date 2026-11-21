@@ -417,7 +417,7 @@ def test_clean_keeps_a_unit_folder_that_is_a_symlink_to_another_units(world, mon
   monkeypatch.setattr(clean_module, "is_alive", procs.alive)
   code, out = world.run("clean", "--unit", UNIT, "--runcard", clean_card(world))
   assert code == 0, out
-  assert f"kept {folder(UNIT)}/" in out and ": symlink" in out
+  assert f"kept {folder(UNIT)}: symlink" in out  # the linked unit folder itself, named once
   assert procs.signals == [] and other.is_dir()  # the other unit's tree and processes are untouched
   assert f"{UNIT} cleaned" not in out and f"{UNIT} cleaned" not in journal_text(s)
 
@@ -477,3 +477,81 @@ def test_resume_notes_hold_one_copy_of_the_loop_ended_sentence():
   assert "`loop_ended`" not in notes.split("-->", 1)[1]  # the body; the header names the sentence that stayed
   assert "`loop_ended`" in read("skills/wave/SKILL.md")
   assert "stays in SKILL.md" in notes.split("-->", 1)[0]  # the header says what stayed
+
+
+def test_clean_auto_exits_0_on_an_unparseable_card_or_config(world):
+  s, card, _hid, _bodies = seed(world, units=(UNIT,))
+  artifact = landed(world, s, card)
+  auto = world.open_card("integrate", artifact)
+  config = world.repo / ".superegm" / "config.json"
+  good_config = config.read_text(encoding="utf-8")
+  card_file = s.path("runcards", auto)
+  good_card = card_file.read_text(encoding="utf-8")
+  card_file.write_text("{ not json", encoding="utf-8")
+  code, out = world.run("clean", "--auto", "--runcard", auto)
+  assert code == 0 and out.startswith("clean: ") and out.count("\n") == 1, out
+  with pytest.raises(ValueError):  # `--unit` keeps today's behaviour: the unparseable card is an error
+    world.run("clean", "--unit", UNIT, "--runcard", auto)
+  card_file.write_text(good_card, encoding="utf-8")
+  config.write_text("{ not json", encoding="utf-8")
+  code, out = world.run("clean", "--auto", "--runcard", auto)
+  assert code == 0 and out.startswith("clean: ") and out.count("\n") == 1, out
+  config.write_text(good_config, encoding="utf-8")
+
+
+def test_wave_and_integrate_say_clean_auto_runs_at_the_end_and_what_it_cleans():
+  wave, integrate = read("skills/wave/SKILL.md"), read("skills/integrate/SKILL.md")
+  said = "every landed, merged or stopped unit that has something left to remove"
+  assert "(a paused one included)" not in wave  # no step leads to a paused launch; a batch that stops at step 7 does not run it
+  assert said in section(wave, "## The end") and said in section(integrate, "## Step 4: the end")
+  assert "every landed, merged or stopped unit, prints" not in wave + integrate
+
+
+def test_clean_skill_names_the_survivor_line_and_which_builder_trees_count():
+  text = read("skills/clean/SKILL.md")
+  assert "kept <path>: <command> <pid> survives SIGKILL" in text
+  assert "only when a launch records it and git registers it" in text
+
+
+def test_clean_leaves_a_folder_that_is_not_pr_digits_alone(world, monkeypatch):
+  s, _card, _hid, _bodies = seed(world, units=(UNIT,))
+  other = s.path("review", UNIT, "private", "worktree")
+  add_tree(world, other)
+  procs = Procs(other.resolve(), False)
+  monkeypatch.setattr(clean_module, "process_table", procs.listing)
+  monkeypatch.setattr(clean_module, "signal_process", procs.send)
+  monkeypatch.setattr(clean_module, "is_alive", procs.alive)
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", clean_card(world))
+  assert code == 0, out
+  assert other.is_dir() and procs.signals == []  # neither signalled nor removed
+  assert "private" not in out
+
+
+def test_clean_keeps_a_symlinked_unit_folder_and_deletes_no_ref_through_it(world):
+  s, _card, _hid, _bodies = seed(world, units=(UNIT,))
+  (s.path("review", "U02", "pr7") / "r1").mkdir(parents=True)  # round records only: no registered tree
+  folder = s.path("review", UNIT, "pr0").parent
+  folder.symlink_to(s.path("review", "U02", "pr0").parent)
+  git("update-ref", "refs/superegm/pr/7", "HEAD", cwd=world.repo)
+  git("update-ref", "refs/superegm/pr-base/7", "HEAD", cwd=world.repo)
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", clean_card(world))
+  assert code == 0, out
+  assert f"kept {folder}: symlink" in out
+  assert git("for-each-ref", "refs/superegm/pr/7", "refs/superegm/pr-base/7", cwd=world.repo) != ""  # U02's refs stay
+  assert f"{UNIT} cleaned" not in out and f"{UNIT} cleaned" not in journal_text(s)
+  assert clean_module.pr_numbers(s, UNIT) == [] and clean_module.private_refs(world.repo, s, UNIT) == []
+
+
+def test_clean_keeps_a_ref_git_cannot_delete_and_does_not_journal_cleaned(world):
+  s, _card, _hid, _bodies = seed(world, units=(UNIT,))
+  add_tree(world, s.path("review", UNIT, "pr7", "worktree"))
+  git("update-ref", "refs/superegm/pr/7", "HEAD", cwd=world.repo)
+  common = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=world.repo))
+  (common / "refs/superegm/pr/7.lock").write_text("", encoding="utf-8")
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", clean_card(world))
+  assert code == 0, out
+  line = next(l for l in out.splitlines() if l.startswith("kept refs/superegm/pr/7: "))
+  assert "lock" in line
+  assert git("for-each-ref", "refs/superegm/pr/7", cwd=world.repo) != ""
+  assert f"{UNIT} cleaned" not in out and f"{UNIT} cleaned" not in journal_text(s)
+  assert clean_module.has_remnants(world.repo, s, UNIT)  # the ref still counts as left
