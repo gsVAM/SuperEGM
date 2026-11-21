@@ -2,7 +2,7 @@
 name: integrate
 license: Apache-2.0
 effects: external
-effect_kinds: [state-store, start-session, github-write]
+effect_kinds: [state-store, start-session, github-write, destructive-local]
 disable-model-invocation: true
 description: Merges the landed units of a wave into the base branch and closes the handoff.
 ---
