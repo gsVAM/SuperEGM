@@ -201,8 +201,8 @@ voids before the choice below: a void cannot be undone, and a respec cannot foll
    leavemealone card there is no question: the respec is the owner's alone, a leavemealone panel
    never offers it (the helper refuses it under a leavemealone card or `SUPEREGM_ROLE`), so go to
    item 3.
-2. `Respec`: `superegm respec open --review '<id>' --finding '<fid>' --runcard '<card>'`, run as
-   `python3 '<HELPER>' respec open …` like every call here, `<fid>` the `fix-design` finding. It writes `respec/R<n>.open.json`, the filed units go on, and
+2. `Respec`: `superegm respec open --review '<id>' --finding '<fid>' --runcard '<card>'`, through
+   `<HELPER>` like every call here, `<fid>` the `fix-design` finding. It writes `respec/R<n>.open.json`, the filed units go on, and
    `file` and `next` wait on it (`waiting respec R<n>`) until `/superegm:review-spec` approves it
    with `approve-spec --respec R<n>`, which closes this cycle so the next `review-plan` opens a new
    one on the corrected plan. Tell the owner that in one line, then

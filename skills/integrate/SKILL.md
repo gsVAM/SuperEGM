@@ -113,8 +113,8 @@ bytes without a review round, the handoff id kept; it refuses when any line outs
 respec does not refuse it: the rows are the escalated findings' units, and the respec's approval is a later entry.
 After a `Void` it is not run: the voided approval carries no amendment, and the rows go back to
 `/superegm:review-spec` with the spec. Tell the owner in one line what happened: the respecs opened or the void,
-and, when the rows were approved, push the approval commit to `origin/<base>`, then type `plan` → `review-plan` →
-`file` → `wave` for the new units only (`file` waits while a respec is open). The handoff stays open; Step 4.
+and, when the rows were approved, push the approval commit to `origin/<base>`, then type
+`plan` → `review-plan` → `file` → `wave` for the new units only (`file` waits while a respec is open). The handoff stays open; Step 4.
 
 ## Step 3: close
 

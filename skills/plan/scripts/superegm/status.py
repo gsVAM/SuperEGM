@@ -96,7 +96,8 @@ def skip_unfiled(handoff) -> set:
   filed units, which go on; `tick_trigger` applies it too, so the driver's tick never reads an unfiled unit's issue.
   Returns the units skipped; a failed respec read raises, the caller keeping the whole order."""
   from superegm import respec
-  if not respec.plan_waiting(handoff.store, handoff.handoff_id):
+  hid = handoff.store.handoff_id
+  if not hid or not respec.plan_waiting(handoff.store, hid):
     return set()
   units = handoff.state.get("units") or {}
   skipped = {uid for uid in handoff.graph.order if not (units.get(uid) or {}).get("number")}
