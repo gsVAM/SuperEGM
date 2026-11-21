@@ -46,7 +46,10 @@ def run(args):
   core.require_receipt(state)
   core.require_repo(handoff)
   state.setdefault("units", {})
-  skip_unfiled(handoff)
+  try:
+    skip_unfiled(handoff)
+  except (core.HandoffError, ValueError, OSError):
+    pass  # the unit list stays whole; `respec_lines` prints the one `respec: read failed: <error>` line
   if args.wait and (args.watch or args.confirm_landed):
     raise core.HandoffError(
         "--wait only watches; it does not record a choice. Run `status --watch "
@@ -90,7 +93,8 @@ def run(args):
 def skip_unfiled(handoff) -> set:
   """U91 (spec section 7.6): while a respec raised from a plan review waits, the handoff's unfiled units (no issue
   number in `state.json`) leave its graph order for this command, so `status`, readiness and `launch` read only the
-  filed units, which go on. Returns the units skipped."""
+  filed units, which go on; `tick_trigger` applies it too, so the driver's tick never reads an unfiled unit's issue.
+  Returns the units skipped; a failed respec read raises, the caller keeping the whole order."""
   from superegm import respec
   if not respec.plan_waiting(handoff.store, handoff.handoff_id):
     return set()
@@ -390,6 +394,10 @@ def tick_trigger(handoff) -> str | None:
         return f"exit-file {mine[-1][0]}"
   saved = state.get("status")
   previous = (saved or {}).get("units") or {}
+  try:  # U91: under a plan-origin respec the unfiled units have no issue to read (the driver builds a fresh handoff)
+    skip_unfiled(handoff)
+  except (core.HandoffError, ValueError, OSError) as error:
+    core.journal(st, f"respec: read failed: {error}")
   summary, _ = core.status_pass(handoff, save=False)
   builders = builder_logins(st)
   from superegm import phase

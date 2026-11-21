@@ -164,8 +164,9 @@ def planning_line(hs: core.Store, state: dict, spec: Path, text: str, root: Path
       return "plan"  # the bodies were rendered under an earlier approval: `graph` carries them to the latest's
   waiting = respec.review_open(hs, hs.handoff_id)  # U91: a respec from a review's design finding (`unit: null`)
   if waiting and not any(plan_review_stopped(hs, u) for u in unfiled):
-    # Every row below but `wave` would be `review-plan`, `file` or `integrate`: while a filed unit is still open its
-    # `wave` runs on (the tick must not skip the handoff), else the handoff waits on the respec.
+    # Every row below but `waiting review-plan: <rid> stopped` (the guard above leaves it to its own row) and `wave`
+    # would be `review-plan`, `file` or `integrate`: while a filed unit is still open its `wave` runs on (the tick
+    # must not skip the handoff), else the handoff waits on the respec.
     filed = [u for u in units["order"] if numbers.get(u)]
     return "wave" if any(unit_open(hs, state, u) for u in filed) else f"waiting respec {waiting[0]['id']}"
   for uid in unfiled:

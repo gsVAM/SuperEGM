@@ -269,17 +269,20 @@ def respec_held(hs: core.Store, uid: str) -> bool:
 
 
 def respec_read_items(hs: core.Store, repo: str, hid: str) -> list:
-  """Spec section 7.6: one `respec` item when the handoff's marks cannot be read (`respec_held` then holds every
-  unit), naming the error; none when they read."""
+  """Spec section 7.6: one `respec` item when the handoff's marks or open respecs cannot be read (`respec_held` then
+  holds every unit), naming the error; when they read, one `waiting respec R<n>` item per open respec raised from a
+  review's design finding (`unit: null`, U91), chained or not (`chain_items` leaves that line to this one), none
+  else."""
   from superegm import respec  # at call time: `respec` reads `launch`'s records
   if not hs.handoff_id:
     return []
   try:
     respec.marks(hs, hs.handoff_id)
+    waiting = respec.review_open(hs, hs.handoff_id)
   except (core.HandoffError, ValueError, OSError) as error:
     return [item(repo, hid, "respec", f"read failed: {error}: no merge is offered on a held head until it reads", "read-failed")]
   # U91: a respec raised from a review's design finding waits for the owner's `/superegm:review-spec`
-  return [item(repo, hid, "respec", f"waiting respec {r['id']}", f"waiting:{r['id']}") for r in respec.review_open(hs, hs.handoff_id)]
+  return [item(repo, hid, "respec", f"waiting respec {r['id']}", f"waiting:{r['id']}") for r in waiting]
 
 
 def conflict_items(repo: str, state: dict, uid: str, foreman: dict, launches: list, parallel: bool,

@@ -480,7 +480,9 @@ def latest_cycle(st: core.Store, kind: str, artifact: str) -> tuple[dict | None,
   """The latest cycle's `review.json` of this artifact and whether that cycle is closed: by an
   `accept` or `stop` ruling; a spec's by the approval that names it, once the bytes moved off its
   sha, and a respec cycle's once its R<n> is not open (applied, or withdrawn by a stopped unit); an integrate's by the handoff closing or changing (D1 (a)), or by a `## Units` amendment
-  past the bytes its latest completed round reviewed (a cycle with no completed round stays)."""
+  past the bytes its latest completed round reviewed (a cycle with no completed round stays); a plan or integrate
+  cycle by a respec approval (U91, `respec_closed`): an approval entry whose `source_review` is the cycle's id and
+  whose `handoff_id` is the cycle's, its `fix-design` finding resolved by the respec."""
   cycles = cycle_ids(st, kind, artifact)
   if not cycles:
     return None, False
@@ -1370,7 +1372,7 @@ def evaluate(st: core.Store, review: dict, runcard: str) -> Status:
   rulings = [r["ruling"] for r in review["rulings"]]
   fix_design = any(f["disposition"] == "fix-design" for r in rounds for f in findings_of(r)) \
       and not respec_closed(st, review, rid)  # a respec approval resolved the finding: its exit 4 ends (U91)
-  clean =latest is not None and not any(blocking(f) and f["disposition"] is None for f in findings_of(latest))
+  clean = latest is not None and not any(blocking(f) and f["disposition"] is None for f in findings_of(latest))
   regressions = regressions_of(latest) if latest else 0
   accept = next((r for r in reversed(review["rulings"]) if r["ruling"] == "accept"), None)
   if accept and early_accept_lapsed(review, accept, rounds, rulings):

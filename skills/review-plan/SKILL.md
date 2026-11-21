@@ -193,21 +193,25 @@ turn you made them: record, settle, ask `review status`, then Step 1.
 
 ## Step 4: fix-design
 
-`review status` exit 4: the defect is in the frozen spec, not in the units.
-`python3 '<HELPER>' approve-spec --void --review '<id>' --spec '<spec>' --runcard '<card>'`
-writes `voided_by` on the approval, and `graph` refuses the spec from then on. Tell the owner
-in one line that the spec returns to `/superegm:review-spec` for that unit's Design range, then
-`python3 '<HELPER>' runcard close '<card>'` and stop.
+`review status` exit 4: the defect is in the frozen spec, not in the units. Nothing in this Step
+voids before the choice below: a void cannot be undone, and a respec cannot follow it.
 
-Beside the void, on a normal card only, ask the owner one question with two options: `Void` (the
-`--void` above, for a change too large to respec) or `Respec` (design section 7.6), which runs
-`superegm respec open --review '<id>' --finding '<fid>' --runcard '<card>'` (through `<HELPER>`
-like every call here, `<fid>` the `fix-design` finding): it writes `respec/R<n>.open.json`, the filed units go on, and `file` and
-`next` wait on it (`waiting respec R<n>`) until `/superegm:review-spec` approves it with
-`approve-spec --respec R<n>`, which closes this cycle so the next `review-plan` opens a new one on
-the corrected plan. Tell the owner that in one line, then `runcard close` and stop. The respec is
-the owner's alone: a leavemealone panel never offers it (the helper refuses it under a
-leavemealone card or `SUPEREGM_ROLE`), and voids as above.
+1. The choice. On a normal card, ask the owner one question with two options before anything
+   else: `Respec` (design section 7.6) or `Void` (for a change too large to respec). On a
+   leavemealone card there is no question: the respec is the owner's alone, a leavemealone panel
+   never offers it (the helper refuses it under a leavemealone card or `SUPEREGM_ROLE`), so go to
+   item 3.
+2. `Respec`: `superegm respec open --review '<id>' --finding '<fid>' --runcard '<card>'`, run as
+   `python3 '<HELPER>' respec open …` like every call here, `<fid>` the `fix-design` finding. It writes `respec/R<n>.open.json`, the filed units go on, and
+   `file` and `next` wait on it (`waiting respec R<n>`) until `/superegm:review-spec` approves it
+   with `approve-spec --respec R<n>`, which closes this cycle so the next `review-plan` opens a new
+   one on the corrected plan. Tell the owner that in one line, then
+   `python3 '<HELPER>' runcard close '<card>'` and stop. Nothing is voided.
+3. `Void`, or a leavemealone card:
+   `python3 '<HELPER>' approve-spec --void --review '<id>' --spec '<spec>' --runcard '<card>'`
+   writes `voided_by` on the approval, and `graph` refuses the spec from then on. Tell the owner
+   in one line that the spec returns to `/superegm:review-spec` for that unit's Design range, then
+   `python3 '<HELPER>' runcard close '<card>'` and stop.
 
 ## Step 5: the end
 

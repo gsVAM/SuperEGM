@@ -87,27 +87,34 @@ A frozen handoff (an older one: a later approval opened another handoff of the s
 and runs no `--amend-units`, both refused; its spec's rows are planned in the latest handoff. Settle every
 high or medium of the round in one file, a line `<fid> | escalated | (to the latest handoff)` each:
 `superegm review settle --review <id> --file <path> --runcard <card>` (`fix-design` is refused there), then Step 3.
-Otherwise, per high or medium finding, in id order:
+Otherwise settle every high or medium finding of the round first, in id order, each one way:
 
-1. Append one row to the spec's `## Units` table for the unit that fixes it, with the note
-   `(from integrate, review <id>)` in its scope cell; the spec changes nowhere else.
-2. `superegm review settle --review <id> --finding <fid> --disposition escalated --runcard <card>`.
+1. A finding a new unit fixes: append one row to the spec's `## Units` table for that unit, with the note
+   `(from integrate, review <id>)` in its scope cell (the spec changes nowhere else), then
+   `superegm review settle --review <id> --finding <fid> --disposition escalated --runcard <card>`.
+2. A finding whose fix is in the frozen spec's design, not a new unit: on a normal card only, ask the owner
+   whether it is a design defect; on Yes,
+   `superegm review settle --review <id> --finding <fid> --disposition fix-design --owner --runcard <card>` (no row
+   for it); on No, or on a leavemealone card, settle it as item 1. Go on to the next finding: nothing is voided or
+   opened inside this loop.
 
-A finding in the latest handoff whose fix is in the frozen spec's design, not a new unit: on a normal card only,
-ask the owner whether it is a design defect; on Yes, `superegm review settle --review <id> --finding <fid> --disposition fix-design --owner --runcard <card>`
-(no row for it), then ask one question with two options: `Respec` (design section 7.6),
-`superegm respec open --review <id> --finding <fid> --runcard <card>`, which writes `respec/R<n>.open.json`; this
-skill and `next` then wait on it (`open: respec R<n>`, `waiting respec R<n>`) until `/superegm:review-spec` approves it
-with `approve-spec --respec R<n>`, which closes this review's cycle so the next integrate opens a new one; or `Void`,
-`superegm approve-spec --void --review <id> --spec <spec-path> --runcard <card>`, for a change too large to respec. Tell
-the owner the outcome in one line, then Step 4. The respec is the owner's alone: a leavemealone run never offers it
-(the helper refuses it under a leavemealone card or `SUPEREGM_ROLE`) and escalates the finding as above.
+When every finding is settled and one or more is `fix-design`, ask the owner one question with two options (a
+normal card only: a leavemealone run settled none `fix-design`). `Respec` (design section 7.6): per `fix-design`
+finding, `superegm respec open --review <id> --finding <fid> --runcard <card>`, which writes
+`respec/R<n>.open.json`; this skill and `next` then wait on each (`open: respec R<n>`, `waiting respec R<n>`) until
+`/superegm:review-spec` approves it with `approve-spec --respec R<n>`, which closes this review's cycle so the next
+integrate opens a new one. `Void`, for a change too large to respec:
+`superegm approve-spec --void --review <id> --spec <spec-path> --runcard <card>`. The respec is the owner's alone:
+the helper refuses it under a leavemealone card or `SUPEREGM_ROLE`.
 
-Then `superegm approve-spec --spec <spec-path> --amend-units --runcard <card>`: the approval is
-re-recorded at the new bytes without a review round, the handoff id kept; it refuses when any
-line outside `## Units` changed. Tell the owner in one line: push the approval commit to
-`origin/<base>`, then type `plan` → `review-plan` → `file` → `wave` for the new units only. The
-handoff stays open; Step 4.
+Then, when the loop appended any `## Units` row and the owner did not choose `Void`,
+`superegm approve-spec --spec <spec-path> --amend-units --runcard <card>`: the approval is re-recorded at the new
+bytes without a review round, the handoff id kept; it refuses when any line outside `## Units` changed. An open
+respec does not refuse it: the rows are the escalated findings' units, and the respec's approval is a later entry.
+After a `Void` it is not run: the voided approval carries no amendment, and the rows go back to
+`/superegm:review-spec` with the spec. Tell the owner in one line what happened: the respecs opened or the void,
+and, when the rows were approved, push the approval commit to `origin/<base>`, then type `plan` → `review-plan` →
+`file` → `wave` for the new units only (`file` waits while a respec is open). The handoff stays open; Step 4.
 
 ## Step 3: close
 
