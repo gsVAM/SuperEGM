@@ -5,13 +5,22 @@
 `node` and `python*` processes first, keeps round records, and `clean --auto` cleans every landed, merged or
 stopped unit at the end of each wave and integrate invocation."""
 
-import json, signal, subprocess
+import json, os, signal, subprocess
 from pathlib import Path
 import pytest
+import superegm as core
+import superegm.clean as clean_module
 from test_builders import seed, put, launched, spawn_fake, no_graphify, which  # noqa: F401  the fixtures a seeded store runs under
 
 ROOT = Path(__file__).resolve().parents[2]
 UNIT = "U01"
+REAL_PROCESS_TABLE = clean_module.process_table
+
+
+@pytest.fixture(autouse=True)
+def no_processes(monkeypatch):
+  """No test here reads the machine's processes: the table is empty unless a test sets its own."""
+  monkeypatch.setattr(clean_module, "process_table", lambda: [])
 
 
 def git(*args, cwd):
@@ -59,6 +68,7 @@ def test_clean_removes_the_registered_review_worktree(world, layout, removed, pr
   assert layout.endswith("(legacy)") or (pr / "r1").is_dir() and (pr / "r2").is_dir()
   if printed:
     assert printed.format(store=base) in out
+    assert f"{UNIT} cleaned" in out and f"{UNIT} cleaned" in journal_text(s)  # the run went on after the kept line
   assert git("for-each-ref", "refs/superegm/pr/7", "refs/superegm/pr-base/7", cwd=repo) == "" or printed
   assert "/review/" not in git("worktree", "list", "--porcelain", cwd=repo) or printed  # no review worktree stays registered
 
@@ -152,9 +162,224 @@ def test_clean_auto_cleans_terminal_units(world, skill, unit, cleaned):
   assert (f"{UNIT} cleaned" in journal_text(s)) is cleaned
 
 
-@pytest.mark.parametrize("path", ["skills/wave/SKILL.md", "skills/integrate/SKILL.md"])
-def test_skills_run_clean_auto(path):
-  # wave: at the end of each invocation after its last launch; integrate: after its filing
+def section(text, heading):
+  start = text.index(heading)
+  stops = [i for i in (text.find("\n## ", start + 1), text.find("\n ## ", start + 1)) if i != -1]
+  return text[start:min(stops)] if stops else text[start:]
+
+
+@pytest.mark.parametrize("path, headings, words", [
+  ("skills/wave/SKILL.md", ["## The end", "## Retries"], ["after its last launch", "never refuses"]),
+  ("skills/integrate/SKILL.md", ["## Step 4: the end"], ["respec", "stalled", "listed", "never refuses"]),
+])
+def test_skills_run_clean_auto(path, headings, words):
+  # wave: at the end of each invocation after its last launch (the retries path included); integrate: on every path to Step 4
   text = read(path)
   assert "clean --auto" in text
+  for heading in headings:
+    assert "clean --auto" in section(text, heading), heading
+  end = section(text, headings[0])
+  for word in words:
+    assert word in end, word
   assert len(text.split("---", 2)[2].encode("utf-8")) <= 24000  # the skill body limit
+
+
+def test_wave_skill_keeps_the_wording_u93_trimmed():
+  text = read("skills/wave/SKILL.md")
+  for kept in ("(zero-context, read-only, each via its own adapter), records the",
+               "`status.wait_events` acked every event, so an early exit loses another unit's exit.",
+               "Every `status` pass under this card rewrites the board",
+               "one GitHub write per pass and none when the rows are unchanged"):
+    assert kept in text, kept
+  assert len(text.encode("utf-8")) < 15000
+
+
+def test_clean_skill_describes_what_clean_does():
+  text = read("skills/clean/SKILL.md")
+  for said in ("pr<n>/worktree", "kept <path>: not a worktree", "kept <path>: uncommitted changes", "resolves outside the store",
+               "cannot list its processes", "cannot be signalled", "SIGTERM", "SIGKILL", "<unit> killed <pid> <command>",
+               "--auto", "`wave` or `integrate` card"):
+    assert said in text, said
+  assert "refuses the whole run" not in text and "removes nothing" not in text
+
+
+def landed(world, s, card):
+  """U01 as `status` saves a landed unit: a merged view (`pr` set, `ci` null) and one terminal launch."""
+  launched(s, UNIT, "exited 0")
+  saved(s, record={"launched": {"at": "2026-11-03T00:00:00Z", "runcard": card, "by": "owner"}},
+        view={"pr": 70, "head": "a" * 40, "ci": None, "landed": False})
+  return json.loads(s.path("runcards", card).read_text(encoding="utf-8"))["artifact"]
+
+
+def add_tree(world, path):
+  path.parent.mkdir(parents=True, exist_ok=True)
+  git("worktree", "add", "-q", "--detach", str(path), "HEAD", cwd=world.repo)
+
+
+def test_clean_keeps_a_review_link_that_resolves_outside_the_store(world, monkeypatch):
+  s, _card, _hid, _bodies = seed(world, units=(UNIT,))
+  link = s.path("review", UNIT, "pr7", "worktree")
+  link.parent.mkdir(parents=True, exist_ok=True)
+  link.symlink_to(world.repo)  # the owner's own checkout, which git has registered
+  procs = Procs(world.repo.resolve(), False)
+  monkeypatch.setattr(clean_module, "process_table", procs.listing)
+  monkeypatch.setattr(clean_module, "signal_process", procs.send)
+  monkeypatch.setattr(clean_module, "is_alive", procs.alive)
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", clean_card(world))
+  assert code == 0, out
+  assert f"kept {link}: resolves outside the store" in out
+  assert procs.signals == [] and world.repo.is_dir() and link.is_symlink()
+  assert f"{UNIT} cleaned" not in out
+
+
+@pytest.mark.parametrize("failure, reason", [("missing", "lsof is missing"), ("exit", "lsof exited 1"), ("timeout", "lsof timed out")])
+def test_clean_keeps_a_worktree_when_lsof_fails(world, monkeypatch, failure, reason):
+  s, _card, _hid, _bodies = seed(world, units=(UNIT,))
+  launched(s, UNIT, "exited 0", rnd=2)
+  child, builder = s.path("review", UNIT, "pr7", "worktree"), s.path("worktrees", UNIT, "r2")
+  add_tree(world, child)
+  add_tree(world, builder)
+  git("update-ref", "refs/superegm/pr/7", "HEAD", cwd=world.repo)
+  monkeypatch.setattr(clean_module, "process_table", REAL_PROCESS_TABLE)
+  real_run = subprocess.run
+
+  def fake_run(argv, *args, **kwargs):
+    if argv[0] != "lsof":
+      return real_run(argv, *args, **kwargs)
+    if failure == "missing":
+      raise FileNotFoundError("lsof")
+    if failure == "timeout":
+      raise subprocess.TimeoutExpired(argv, 60)
+    return subprocess.CompletedProcess(argv, 1, "", "lsof: boom")
+
+  monkeypatch.setattr(subprocess, "run", fake_run)
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", clean_card(world))
+  assert code == 0, out
+  for tree in (child, builder):
+    assert tree.is_dir() and f"kept {tree}: cannot list its processes ({reason})" in out
+  assert git("for-each-ref", "refs/superegm/pr/7", cwd=world.repo) != ""  # nothing was removed, so its ref stays
+  assert f"{UNIT} cleaned" not in out and f"{UNIT} cleaned" not in journal_text(s)
+
+
+def test_clean_keeps_a_tree_whose_process_cannot_be_signalled_and_goes_on(world, monkeypatch):
+  s, _card, _hid, _bodies = seed(world, units=(UNIT,))
+  launched(s, UNIT, "exited 0", rnd=2)
+  child, builder = s.path("review", UNIT, "pr7", "worktree"), s.path("worktrees", UNIT, "r2")
+  add_tree(world, child)
+  add_tree(world, builder)
+  procs = Procs(builder.resolve(), False)
+
+  def send(pid, sig):
+    if pid == 4242:
+      raise PermissionError(1, "Operation not permitted")
+    procs.send(pid, sig)
+
+  monkeypatch.setattr(clean_module, "process_table", procs.listing)
+  monkeypatch.setattr(clean_module, "signal_process", send)
+  monkeypatch.setattr(clean_module, "is_alive", procs.alive)
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", clean_card(world))
+  assert code == 0, out
+  assert f"kept {builder}: process 4242 cannot be signalled" in out
+  assert builder.is_dir() and not child.exists()  # the sweep went on: the review tree is gone
+  assert "U01 killed 4242" not in journal_text(s) and f"{UNIT} cleaned" not in out
+
+
+def test_clean_keeps_a_dirty_legacy_review_tree_signals_nothing_and_goes_on(world, monkeypatch):
+  s, _card, _hid, _bodies = seed(world, units=(UNIT,))
+  launched(s, UNIT, "exited 0", rnd=1)
+  pr, builder = s.path("review", UNIT, "pr7"), s.path("worktrees", UNIT, "r1")
+  add_tree(world, pr)
+  add_tree(world, builder)
+  (pr / "scratch.txt").write_text("unsaved\n", encoding="utf-8")
+  git("update-ref", "refs/superegm/pr/7", "HEAD", cwd=world.repo)
+  procs = Procs(pr.resolve(), False)
+  monkeypatch.setattr(clean_module, "process_table", procs.listing)
+  monkeypatch.setattr(clean_module, "signal_process", procs.send)
+  monkeypatch.setattr(clean_module, "is_alive", procs.alive)
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", clean_card(world))
+  assert code == 0, out
+  assert f"kept {pr}: uncommitted changes" in out
+  assert (pr / "scratch.txt").is_file() and not builder.exists()  # the person's tree stays, the builder's goes
+  assert not [pid for pid, _sig in procs.signals if pid in (4242, 4243)]  # nothing was signalled in the kept tree
+  assert git("for-each-ref", "refs/superegm/pr/7", cwd=world.repo) != ""
+  assert f"{UNIT} cleaned" not in out and f"{UNIT} cleaned" not in journal_text(s)
+
+
+def test_clean_names_a_recorded_builder_tree_git_does_not_register(world):
+  s, _card, _hid, _bodies = seed(world, units=(UNIT,))
+  launched(s, UNIT, "exited 0", rnd=1)
+  tree = s.path("worktrees", UNIT, "r1")
+  tree.mkdir(parents=True)
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", clean_card(world))
+  assert code == 0, out  # not the 1.2 abort `is not a working tree`
+  assert f"kept {tree}: not a worktree" in out and tree.is_dir()
+
+
+def test_parse_process_table_reads_pid_command_and_cwd():
+  text = "p101\ncnode\nn/a/b\np102\ncPython\nn/c d\np103\ncvim\nn/\n"
+  assert clean_module.parse_process_table(text) == [(101, "node", "/a/b"), (102, "Python", "/c d"), (103, "vim", "/")]
+  assert clean_module.parse_process_table("") == []
+
+
+def test_leftovers_asks_lsof_for_cwds_matches_case_blind_and_skips_this_process(monkeypatch, tmp_path):
+  tree = tmp_path / "tree"
+  tree.mkdir()
+  text = "".join(f"p{pid}\nc{command}\nn{cwd}\n" for pid, command, cwd in [
+    (os.getpid(), "python3", tree), (os.getppid(), "node", tree), (900, "Python", tree / "x"), (901, "node", f"{tree}-sibling"),
+    (902, "nodemon", tree), (903, "python3.11", tree), (904, "NODE", tree), (905, "vim", tree)])
+  calls = []
+  monkeypatch.setattr(clean_module, "process_table", REAL_PROCESS_TABLE)
+  monkeypatch.setattr(subprocess, "run", lambda argv, *a, **k: (calls.append(argv), subprocess.CompletedProcess(argv, 0, text, ""))[1])
+  assert clean_module.leftovers(tree) == [(900, "Python"), (903, "python3.11"), (904, "NODE")]
+  assert calls[0][0] == "lsof" and "-Fpcn" in calls[0] and calls[0][calls[0].index("-d") + 1] == "cwd"
+
+
+def test_clean_auto_prints_one_line_per_unit_once(world):
+  s, card, _hid, _bodies = seed(world, units=(UNIT,))
+  artifact = landed(world, s, card)
+  child, builder = s.path("review", UNIT, "pr7", "worktree"), s.path("worktrees", UNIT, "r1")
+  add_tree(world, child)
+  add_tree(world, builder)
+  (s.path("review", UNIT, "pr7") / "r1").mkdir()
+  (s.path("review", UNIT, "pr8") / "r1").mkdir(parents=True)  # a folder that holds only round records
+  stray = s.path("worktrees", UNIT, "r5")  # no launch records it
+  stray.mkdir()
+  auto = world.open_card("integrate", artifact)
+  code, out = world.run("clean", "--auto", "--runcard", auto)
+  assert (code, out) == (0, "U01 cleaned\n")  # no `kept ...: not a worktree` for pr8, no line for the stray r5
+  assert not child.exists() and not builder.exists() and stray.is_dir() and (s.path("review", UNIT, "pr8") / "r1").is_dir()
+  assert journal_text(s).count(f"{UNIT} cleaned") == 1
+  code, out = world.run("clean", "--auto", "--runcard", auto)
+  assert (code, out) == (0, "")
+  assert journal_text(s).count(f"{UNIT} cleaned") == 1
+
+
+def test_clean_auto_prints_a_warning_it_cannot_resolve(world, monkeypatch):
+  s, card, _hid, _bodies = seed(world, units=(UNIT,))
+  artifact = landed(world, s, card)
+  link = s.path("review", UNIT, "pr7", "worktree")
+  link.parent.mkdir(parents=True, exist_ok=True)
+  link.symlink_to(world.repo)
+  code, out = world.run("clean", "--auto", "--runcard", world.open_card("integrate", artifact))
+  assert code == 0 and f"kept {link}: resolves outside the store" in out and f"{UNIT} cleaned" not in out
+
+
+def test_clean_auto_never_exits_non_zero(world, monkeypatch):
+  s, card, _hid, _bodies = seed(world, units=(UNIT,))
+  artifact = landed(world, s, card)
+  auto = world.open_card("integrate", artifact)
+
+  def boom(*args, **kwargs):
+    raise RuntimeError("boom")
+
+  monkeypatch.setattr(clean_module, "has_remnants", boom)
+  assert world.run("clean", "--auto", "--runcard", auto) == (0, "clean --auto: U01: boom\n")
+  monkeypatch.setattr(core, "locate", boom)
+  assert world.run("clean", "--auto", "--runcard", auto) == (0, "clean --auto: handoff: boom\n")
+
+
+def test_clean_auto_and_unit_are_exclusive(world):
+  s, card, _hid, _bodies = seed(world, units=(UNIT,))
+  with pytest.raises(SystemExit) as stop:
+    world.run("clean", "--auto", "--unit", UNIT, "--runcard", card)
+  assert stop.value.code != 0
