@@ -64,8 +64,9 @@ def clean_auto(root, args):
   request is merged (its issue still open, which `status` does not mark landed) or that is `stopped`, and that `terminal_problems`
   passes, one `<unit> cleaned` line per unit cleaned. Any other unit is skipped silently, and so is a folder that holds only round
   records; a line a person should read (a process that cannot be listed, signalled or killed, uncommitted changes in a legacy tree, a
-  symlinked folder, a removal git refused) still prints, and so does `clean --auto: <unit or handoff>: <error>` for any error. A refused card
-  prints `clean: <reason>`. It always exits 0, so the caller never stops."""
+  symlinked folder, a removal git refused) still prints. It always exits 0, so the caller never stops: a run card or config that cannot be
+  read, or a card refused, prints `clean: <error>`; an error loading the handoff prints `clean --auto: handoff: <error>` and ends the sweep;
+  an error on one unit prints `clean --auto: <unit>: <error>` and the sweep goes on to the next unit."""
   try:
     plan, st = core.locate(args)
     handoff = core.Handoff(plan, st)
@@ -102,11 +103,19 @@ def review_dir(st, unit):
 
 def pr_folders(st, unit):
   """The `review/<unit>/pr<digits>` folders, none when `review/<unit>` is itself a link (it could be another unit's); a folder
-  named `private` or `pr-old` is not one."""
+  named `private` or `pr-old` is not one, and neither is a link (see `pr_links`)."""
   folder = review_dir(st, unit)
   if linked(st, unit, folder):
     return []
-  return sorted(p for p in folder.glob("pr*") if p.is_dir() and re.fullmatch(r"pr\d+", p.name))
+  return sorted(p for p in folder.glob("pr*") if p.is_dir() and not p.is_symlink() and re.fullmatch(r"pr\d+", p.name))
+
+
+def pr_links(st, unit):
+  """The `review/<unit>/pr<digits>` entries that are symlinks (they could be another unit's folder): kept, and their number is not counted."""
+  folder = review_dir(st, unit)
+  if linked(st, unit, folder):
+    return []
+  return sorted(p for p in folder.glob("pr*") if p.is_symlink() and re.fullmatch(r"pr\d+", p.name))
 
 
 def pr_numbers(st, unit):
@@ -148,8 +157,16 @@ def builder_trees(root, st, unit):
   """`(trees, recorded, registered)`: the `worktrees/<unit>/r<n>` folders, the worktrees a launch records, those git has registered."""
   recorded = {Path(entry["worktree"]).resolve() for entry in load_launches(st, unit)}
   folder = st.path("worktrees", unit)
-  trees = [] if linked(st, unit, folder) else sorted(p for p in folder.glob("r*") if p.is_dir())
+  trees = [] if linked(st, unit, folder) else sorted(p for p in folder.glob("r*") if p.is_dir() and re.fullmatch(r"r\d+", p.name))
   return trees, recorded, set(core.registered_worktrees(root))
+
+
+def strays(st, unit):
+  """The entries of `worktrees/<unit>/` that are not an `r<digits>` folder (a `scratch/` folder, a file, an `r2x/`): none through a link."""
+  folder = st.path("worktrees", unit)
+  if linked(st, unit, folder) or not folder.is_dir():
+    return []
+  return sorted(p for p in folder.iterdir() if not (p.is_dir() and re.fullmatch(r"r\d+", p.name)))
 
 
 def has_remnants(root, st, unit):
@@ -168,9 +185,10 @@ def is_dirty(tree):
 
 def clean_unit(root, st, unit, quiet=False):
   """Remove the unit's registered worktrees and refs. `quiet` (`--auto`) leaves out the routine `kept ...: not a worktree` and
-  `no launch records it` lines; a line that warns always prints. `<unit> cleaned` is journalled, and the unit's private refs deleted, only
-  when no tree was kept for a reason (a symlink, a process that cannot be listed or signalled or survives SIGKILL, uncommitted changes in a
-  legacy tree, a removal git refused, a ref git cannot delete); `not a worktree` and `no launch records it` do not withhold it."""
+  `no launch records it` and `not a builder tree` lines; a line that warns always prints. `<unit> cleaned` is journalled, and the unit's
+  private refs deleted, only when nothing was kept for a reason (a symlink, a process that cannot be listed or signalled or survives
+  SIGKILL, uncommitted changes in a legacy tree, a removal git refused, the unit folder's `rmdir` refused, a ref git cannot delete);
+  `not a worktree`, `no launch records it` and `not a builder tree` do not withhold it."""
   problems = terminal_problems(st, unit)
   if problems:
     raise core.HandoffError(problems[0])
@@ -184,6 +202,9 @@ def clean_unit(root, st, unit, quiet=False):
     if linked(st, unit, folder):  # a link can reach another unit's folder: nothing is signalled, removed or deleted through it
       print(f"kept {folder}: symlink")
       complete = False
+  for link in pr_links(st, unit):  # a linked `pr<n>` could be another unit's: its number is no ref of this unit, and it is kept
+    print(f"kept {link}: symlink")
+    complete = False
   refs = private_refs(root, st, unit)  # read before any `pr<n>` folder goes: a legacy tree's folder names its number
   registered_review = review_trees(root, st, unit)
   for folder in pr_folders(st, unit):
@@ -226,10 +247,16 @@ def clean_unit(root, st, unit, quiet=False):
     else:
       complete = False
   core.run_git(["worktree", "prune"], root, check=False)
-  try:
-    st.path("worktrees", unit).rmdir()  # the unit's folder goes with its last worktree; a kept one stays
-  except OSError:
-    pass
+  left = strays(st, unit)
+  for entry in left:
+    note(f"kept {entry}: not a builder tree")
+  folder = st.path("worktrees", unit)
+  if folder.is_dir() and not folder.is_symlink() and not left and not any(tree.exists() for tree in trees):
+    try:
+      folder.rmdir()  # the unit's folder goes with its last worktree; a folder with a kept entry (said above) stays
+    except OSError as error:
+      print(f"kept {folder}: {error}")
+      complete = False
   if complete:
     for ref in refs:  # the refs go once nothing of the unit was kept, whether or not a review tree existed
       try:
