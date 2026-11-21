@@ -101,6 +101,35 @@ def test_respec_open_writes_or_refuses(world, monkeypatch, role, mode, finding, 
     assert respec_files(world) == []
 
 
+@pytest.mark.parametrize("held", ["open", "applied"])
+def test_respec_open_rerun_keeps_its_file(world, monkeypatch, held):
+  """A rerun on the same review and finding prints the R<n> it wrote and writes no R2; once an approval names R1, the
+  rerun is refused, never printed as open."""
+  monkeypatch.delenv("SUPEREGM_ROLE", raising=False)
+  spec, _, _ = planned(world)
+  card, rid, fid = opened_review(world, spec, "integrate")
+  settle(world, rid, fid, "fix-design", card)
+  code, out = world.run("respec", "open", "--review", rid, "--finding", fid, "--runcard", card)
+  assert code == 0, out
+  if held == "applied":
+    add_entry(world, respec="R1", review=f"spec-{SLUG}-c2", kind="respec", source_review=rid)
+  code, out = world.run("respec", "open", "--review", rid, "--finding", fid, "--runcard", card)
+  if held == "open":
+    assert code == 0 and "respec R1 open" in out, out
+  else:
+    assert code == 1 and "respec open: R1" in out and "applied" in out and "respec R1 open" not in out, out
+  assert respec_files(world) == ["R1.open.json"]
+
+
+def test_respec_open_names_itself_on_an_unknown_finding(world, monkeypatch):
+  monkeypatch.delenv("SUPEREGM_ROLE", raising=False)
+  spec, _, _ = planned(world)
+  card, rid, _ = opened_review(world, spec, "integrate")
+  code, out = world.run("respec", "open", "--review", rid, "--finding", "design-9-9", "--runcard", card)
+  assert code == 1 and "respec open: no finding design-9-9" in out and "review settle" not in out, out
+  assert respec_files(world) == []
+
+
 # ---------------------------------------------------------------- S2: file waits
 
 
@@ -153,6 +182,24 @@ def test_file_waits_on_an_open_respec(world, state, command, refused):
 
 
 
+@pytest.mark.parametrize("filing", ["gate passed, dry run confirmed", "every unit filed"])
+def test_dry_run_and_apply_wait_on_an_open_respec(world, filing):
+  """`require_gate` refuses while the respec is open: a dry run never overwrites the confirmed receipt, and an apply
+  with no unit left to file never skips the check."""
+  from test_file import applied
+  spec, _, _, card = (dry_run if filing.startswith("gate") else applied)(world)
+  put_review_respec(world)
+  before = json.loads(hp(world, "state").read_text(encoding="utf-8"))
+  code, out = world.run("dry-run", "--spec", spec, "--runcard", card)
+  assert code == 1 and "file: respec R1 open" in out, out
+  after = json.loads(hp(world, "state").read_text(encoding="utf-8"))
+  assert (after.get("confirmed"), after.get("confirmed_sha256")) == (before.get("confirmed"), before.get("confirmed_sha256"))
+  issues = json.dumps(world.gh.issues, sort_keys=True)
+  code, out = world.run("apply", "--spec", spec, "--yes", "--runcard", card)
+  assert code == 1 and "file: respec R1 open" in out, out
+  assert json.dumps(world.gh.issues, sort_keys=True) == issues
+
+
 # ---------------------------------------------------------------- S3: next waits
 
 
@@ -184,6 +231,29 @@ def test_next_waits_on_a_review_respec(world, registry, origin, units, printed):
   code, out, before, after = c.next()
   assert (code, out) == (0, printed)
   assert before == after  # next writes nothing
+
+
+def test_chained_inbox_shows_one_review_respec_wait(world, registry, monkeypatch):
+  """A chained handoff (the chain on, a frozen mode) whose `next` prints `waiting respec R1`: `chain_items` drops
+  that line, so the inbox lists the respec's one item."""
+  import superegm as core
+  from superegm import inbox, phase, store
+  from test_u43 import Chain, jwrite
+  monkeypatch.setattr(core, "frozen_mode", lambda hs: "normal")
+  monkeypatch.setattr(core, "chain_on", lambda config: True)
+  c = Chain(world)
+  c.plan("U01", "U02", "U03")
+  for n, uid in enumerate(("U01", "U02"), 1):
+    c.review(uid)
+    c.filed(uid, n, pr={"number": 10 + n}, ci="success", landed=True)
+  c.save()
+  jwrite(c.hs.path("file", "respec", "R1.open.json"),
+         {"id": "R1", "unit": None, "review": f"{c.hid[-6:]}-plan-U03-c1", "finding": "readiness-1-1",
+          "at": "2026-11-15T00:00:00Z"})
+  st = store(world.repo)
+  assert phase.next_line(st, c.hid) == "waiting respec R1"
+  lines = [inbox.line_of(i) for i in inbox.inbox_items(st, [c.hid])]
+  assert sum("waiting respec R1" in line for line in lines) == 1, lines
 
 
 # ---------------------------------------------------------------- S4: the approval closes the source cycle
@@ -248,14 +318,20 @@ def test_respec_approval_closes_the_source_cycle(world, kind):
 
 @pytest.mark.parametrize("case", ["respec closed the cycle at the old cap", "proceeded cycle, body changed by a replan"])
 def test_due_rows_opens_a_fresh_cycle(world, case):
-  """test_file's planned U01 and U02: U01 converged beside U02, the unit under the case."""
+  """test_file's planned U01 and U02: U01 converged by an accept ruling beside U02, the unit under the case."""
   from superegm import review, review_plan, store
   spec, _, hid = planned(world, ("U01", "U02"))
   card = open_card(world, "review-plan", str(spec))
   code, out = world.run("review", "open", "--kind", "plan", "--artifact", "U01", "--reviewers", "readiness", "--runcard", card)
   assert code == 0, out
-  record(world, out.splitlines()[0], 1, "readiness", [], card)  # U01 converged on a clean round
+  accepted = out.splitlines()[0]
   st = store(world.repo)
+  path = st.path("reviews", accepted, "review.json")
+  atomic_write(path, json.loads(path.read_text(encoding="utf-8")) | {"cap": 1})
+  record(world, accepted, 1, "readiness", [F("readiness", 1, 1)], card)  # U01 at its cap of one unclean round
+  code, out = world.run("review", "rule", "--review", accepted, "--ruling", "accept", "--owner", "--runcard", card)
+  assert code == 0, out  # U01 converged by the owner's accept
+  assert review.load_review(st, accepted)["converged"].startswith("by ruling ")
   sha = json.loads(hp(world, "units").read_text(encoding="utf-8"))["units"]["U02"]["body_sha256"]
   if case.startswith("respec"):
     rid = source_cycle(st, "plan", "U02", hid)  # cycle 1: a fix-design finding at the cap
@@ -281,7 +357,7 @@ def test_due_rows_opens_a_fresh_cycle(world, case):
   old_review = review.load_review(st, rid)
   rows = review_plan.due_rows(st, card)
   assert [r for r in rows if r[0] == "U02"] == [("U02", "due", "-", "1", sha)]  # `due - 1`: the skill runs `review open`
-  assert [r[1] for r in rows if r[0] == "U01"] == ["converged"]  # the converged cycle beside it stays
+  assert [r[1] for r in rows if r[0] == "U01"] == ["converged"]  # the accepted cycle beside it stays converged
   code, out = world.run("review", "open", "--kind", "plan", "--artifact", "U02", "--reviewers", "readiness", "--runcard", card)
   assert code == 0, out
   new_review = review.load_review(st, out.splitlines()[0])
@@ -305,10 +381,10 @@ def test_skills_offer_respec_beside_void(path):
 # ---------------------------------------------------------------- S7: a plan-origin respec skips unfiled units
 
 
-def test_plan_respec_skips_unfiled_units(world, monkeypatch):
-  """A plan-origin respec R1 waits; U05 filed, U07 unfiled: status, readiness and launch skip U07 only."""
+def plan_respec_world(world):
+  """test_builders' seed of U05 and U07 with U07 unfiled and a plan-origin respec R1 open on U07's plan review:
+  (store, card, handoff id)."""
   import test_builders as tb
-  from superegm import inbox, store as store_of
   s, card, hid, _ = tb.seed(world, units=("U05", "U07"))
   state = json.loads(s.path("state").read_text(encoding="utf-8"))
   del state["units"]["U07"]  # unfiled: its plan review raised the design finding
@@ -318,6 +394,13 @@ def test_plan_respec_skips_unfiled_units(world, monkeypatch):
                {"id": rid, "kind": "plan", "artifact": "U07", "cycle": 1, "handoff_id": hid, "rulings": []})
   atomic_write(s.path("file", "respec", "R1.open.json"),
                {"id": "R1", "unit": None, "review": rid, "finding": "readiness-1-1", "at": "2026-11-04T00:00:00Z"})
+  return s, card, hid
+
+
+def test_plan_respec_skips_unfiled_units(world, monkeypatch):
+  """A plan-origin respec R1 waits; U05 filed, U07 unfiled: status, readiness and launch skip U07 only."""
+  from superegm import inbox, store as store_of
+  s, card, hid = plan_respec_world(world)
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
 
   code, out = world.run("status", "--runcard", card)
@@ -333,4 +416,15 @@ def test_plan_respec_skips_unfiled_units(world, monkeypatch):
   assert "launched" not in json.loads(s.path("state").read_text(encoding="utf-8"))["units"].get("U07", {})
   lines = [inbox.line_of(i) for i in inbox.inbox_items(store_of(world.repo), [hid])]
   assert any("waiting respec R1" in line for line in lines), lines
+
+
+def test_wave_trigger_skips_unfiled_units(world):
+  """The driver's `wave_trigger` reaches `tick_trigger` on a fresh handoff: U07, unfiled under the plan-origin
+  respec, is never read from GitHub (no `issues/None`), and the tick still reads the filed unit."""
+  from superegm import driver
+  s, _, _ = plan_respec_world(world)
+  state = json.loads(s.path("state").read_text(encoding="utf-8"))
+  trigger = driver.wave_trigger(s, {"root": str(world.repo)}, state)
+  assert not any("issues/None" in " ".join(map(str, call)) for call in world.gh.calls), world.gh.calls
+  assert trigger is None or "U07" not in trigger, trigger
 
