@@ -321,6 +321,15 @@ def test_parse_process_table_reads_pid_command_and_cwd():
   assert clean_module.parse_process_table("") == []
 
 
+def test_process_table_uses_an_exit_1_listing_that_has_records(monkeypatch):
+  text = "p900\ncnode\nn/a\n"
+  monkeypatch.setattr(subprocess, "run", lambda argv, *a, **k: subprocess.CompletedProcess(argv, 1, text, "lsof: WARNING: can't stat() fuse"))
+  assert REAL_PROCESS_TABLE() == [(900, "node", "/a")]
+  monkeypatch.setattr(subprocess, "run", lambda argv, *a, **k: subprocess.CompletedProcess(argv, 1, "", "lsof: boom"))
+  with pytest.raises(clean_module.ListError, match="lsof exited 1"):
+    REAL_PROCESS_TABLE()
+
+
 def test_leftovers_asks_lsof_for_cwds_matches_case_blind_and_skips_this_process(monkeypatch, tmp_path):
   tree = tmp_path / "tree"
   tree.mkdir()
