@@ -13,7 +13,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30); the batch's `notify` (U23); the decision points, rulings and leavemealone-mode moved to `references/`; a head's Decision point 5 and `clean` by accept (U35); `launch-builder` alone and the driver role (U24); `stalled` (U31); the frozen mode, driven normal-mode decisions (U45); `waiting proceed` (U92); the merge round (U62); failed resume (U63); the merge line's inbox (U70); respecs (U86); contests (U88); `clean --auto` at the end of each invocation (U93). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30); the batch's `notify` (U23); the decision points, rulings and leavemealone-mode moved to `references/`; a head's Decision point 5 and `clean` by accept (U35); `launch-builder` alone and the driver role (U24); `stalled` (U31); the frozen mode, driven normal-mode decisions (U45); `waiting proceed` (U92); the merge round (U62); failed resume (U63); the merge line's inbox (U70); respecs (U86); contests (U88); `clean --auto` (U93). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the wave skill. Not part of google/elephant-goldfish-model. -->
 
@@ -33,7 +33,7 @@ builder per marked unit as the builder account; the builder pushes its unit bran
 with concluded CI gets one review round from a **foreman**: a per-unit
 elephant dispatched through its own adapter (`superegm:foreman`,
 `omitClaudeMd: true`), which dispatches the head's goldfish panel
-(zero-context, read-only, each via its own adapter), records the
+(zero-context, read-only), records the
 findings, posts one review comment bound to the reviewed commit, and returns
 one word (the word table).
 
@@ -51,7 +51,7 @@ Under SUPEREGM_ROLE=driver (a tick of `/superegm:driver` started this session), 
 normal mode open points 1, 2, 3 and 5 as `decision open` records, as leavemealone-mode does (an
 unconverged judges' question stays open alike). That unit is `pending a decision`
 (no slot) and the batch goes on handling every event of the batch; the session ends on the
-loop's condition alone: `status.wait_events` acked every event, so an early exit loses another unit's exit.
+loop's condition alone: `status.wait_events` acked every event.
 
 Open a reference only when sent to it:
 
@@ -68,8 +68,8 @@ Open a reference only when sent to it:
    `status` and `report` read the card's handoff alone; the inbox is the store-wide read.
 1. Run `superegm runcard open --skill wave --artifact '<spec>'`, adding `--mode leavemealone` only when the invocation said `--leavemealone`, else `runcard open`'s default, the approval's frozen mode (`config.mode` for an entry with no `mode`). The printed id is `<CARD>`; a card still open on this spec is marked interrupted.
 2. Run `superegm status --wait 1 --runcard '<CARD>'` as a batch runs its wait (`run_in_background: true`, Bash timeout 1,800,000 ms: the first pass reads every issue, PR and check). It reads GitHub once, saves the snapshot `report` derives from (`report` never reads GitHub: skipping this ends the loop on a stale snapshot) and returns every event since its last save, or `deadline`. Handle every line as a batch's steps 1–3 before going on, and `ruling` lines as its step 4; then run batch step 3b.
-   Every `status` pass under this card rewrites the board (the `## Units` table `report` prints) between `<!-- superegm:board -->` and `<!-- /superegm:board -->` in the tracking issue's body:
-   one GitHub write per pass and none when the rows are unchanged; the inbox stays the action list.
+   Each `status` pass rewrites the board (the `## Units` table `report` prints) between `<!-- superegm:board -->` and `<!-- /superegm:board -->` in the tracking issue's body:
+   one write per pass, none when the rows are unchanged; the inbox stays the action list.
 3. Run `superegm report --runcard '<CARD>'`. It derives all from the store, the plan and the spec (refusing as `status` does on a spec changed since its approval); idle units come from this card alone. Its lines: the report path, the board, `idle:`, `pending:`, `loop:`.
 4. Rule every `pending:` item first, at its decision point in `references/decision_points.md`: the record's `point`, printed as `(point <p>, <source>)`, names the point, never the source's words (a point-5 decision's source is `review <id> round <n>`, as point 1's is). Before asking, read the issue's comments (`GH_HOST=github.com gh api repos/<repo>/issues/<n>/comments --paginate`): an owner's `**Ruling:**` already posted binds once `decision rule --posted <comment id>` records it, as `references/rulings.md`'s `ruling` bullet says; then an `interrupted` launch with no decision on it → Decision point 3.
 5. Run `report` again. `loop: ended` and no 5b line in step 2 → The end. Otherwise run batches, the
@@ -133,7 +133,7 @@ dispatch):
 - A `decision rule` whose post or label request fails (a `gh` error, not a refusal) records nothing: run it again, a `--posted` one included. A journaled `<U> <qid>: label superegm:stopped left on issue #<n>` means the label stayed on: run `gh issue edit <n> --remove-label superegm:stopped` first.
 ## The end
 
-At the end of every invocation, after its last launch (a paused one included), run `superegm clean --auto --runcard '<CARD>'`: it removes the worktrees of every landed, merged or stopped unit, prints one line per unit cleaned and never refuses, so it never stops the wave.
+After its last launch: `superegm clean --auto --runcard '<CARD>'` (never refuses).
 
 Before the close, run batch step 3b once and `report` again (a thread posted before the last round's review is read now): an `outcome:` line or no longer `loop: ended` → back to the batches.
 
