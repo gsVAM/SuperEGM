@@ -13,7 +13,7 @@ description: >-
   Claude Code only.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30); the batch's `notify` (U23); the decision points, rulings and leavemealone-mode moved to `references/`; a head's Decision point 5 and `clean` by accept (U35); `launch-builder` alone and the driver role (U24); `stalled` (U31); the frozen mode, driven normal-mode decisions (U45); `waiting proceed` (U92); the merge round (U62); failed resume (U63); the merge line's inbox (U70); respecs (U86); contests (U88). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the driver loop of §11; the admin-bypass merge line (U19); `[--handoff <id>]` passed on every call (U20); the batch's `review ingest` step 3b (U21); the `ruling` event and its step 4 (U22); the board in the tracking issue (U30); the batch's `notify` (U23); the decision points, rulings and leavemealone-mode moved to `references/`; a head's Decision point 5 and `clean` by accept (U35); `launch-builder` alone and the driver role (U24); `stalled` (U31); the frozen mode, driven normal-mode decisions (U45); `waiting proceed` (U92); the merge round (U62); failed resume (U63); the merge line's inbox (U70); respecs (U86); contests (U88); `clean --auto` (U93). -->
 
 <!-- Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: the wave skill. Not part of google/elephant-goldfish-model. -->
 
@@ -96,12 +96,7 @@ ignored except `landed` and `stalled`; `conflict` lines need nothing before step
 6. `superegm launch`: `--idle <the report's idle list> --runcard '<CARD>'` (omit `--idle` on `none`) marks the ready units up to the free slots and prints `in flight:` and `marked:`; a clean `conflict` unit is marked once for its **merge round**. Per marked unit: `superegm launch-builder --unit <U> --round <n> --runcard '<CARD>'` (`<n>` is the launch count) alone: `launch-builder` starts the builder and records the launch, detached in its own session, and returns at once. A `launch-builder` refusal makes the unit idle for this invocation, no retry: `superegm report --idle '<U>=launch-builder: <reason>' --runcard '<CARD>'`.
 7. `superegm report`: `python3 '<HELPER>' report --runcard '<CARD>'`, then `python3 '<HELPER>' notify --runcard '<CARD>'` (the owner's `~/.superegm/notify` hook gets the new inbox lines; a failing or slow hook never stops the wave). If a decision was opened this batch, pause (outside SUPEREGM_ROLE=driver, above): ask the owner at its decision point and run `report` again once ruled. Else `loop: ended` and no 5b line of a non-idle unit → The end; else the next batch.
 
-A launched unit's `unit_state`, in order: `landed`, `stopped`, `pending`,
-`idle`, `waiting proceed` (no slot; ask the owner to proceed again), CI-wait
-`idle`, `clean`, else `active`; `active`/`clean` with an open respec: `waiting respec`; only `active` is dispatched. `loop_ended`: no
-active unit, no ready unlaunched unit with a free slot, nor a merge round `launch` would mark. CI pending or absent
-`ci_wait_minutes` (default 30) after the card saw the head: CI-wait `idle`;
-a new head restarts it.
+`loop_ended`: no active unit, no ready unlaunched unit with a free slot, nor a merge round `launch` would mark. `unit_state` (`waiting respec`), `ci_wait_minutes`: `references/resume_notes.md`.
 
 ## The word table
 
@@ -129,9 +124,11 @@ dispatch):
 
 ## Retries
 
-- `status --wait` exiting non-zero: retry once; failing again, run `report` and end.
+- `status --wait` exiting non-zero: retry once; failing again, run `report`, then The end's `superegm clean --auto --runcard '<CARD>'`, and end.
 - A `decision rule` whose post or label request fails (a `gh` error, not a refusal) records nothing: run it again, a `--posted` one included. A journaled `<U> <qid>: label superegm:stopped left on issue #<n>` means the label stayed on: run `gh issue edit <n> --remove-label superegm:stopped` first.
 ## The end
+
+At the end of every invocation, after its last launch, run `superegm clean --auto --runcard '<CARD>'`: it cleans every landed, merged or stopped unit that has something left to remove, prints a line per unit and never refuses.
 
 Before the close, run batch step 3b once and `report` again (a thread posted before the last round's review is read now): an `outcome:` line or no longer `loop: ended` → back to the batches.
 

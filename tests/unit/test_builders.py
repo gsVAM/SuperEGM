@@ -989,7 +989,7 @@ def test_clean_refuses_until_terminal_then_removes_what_it_can_prove(world, monk
   stray = s.path("worktrees", UNIT, "r9")
   git(["worktree", "add", "-q", "--detach", str(stray), "HEAD"], world.repo)
   code, out = world.run("clean", "--unit", UNIT, "--runcard", ccard)
-  assert code == 1 and "uncommitted changes" in out and review.is_dir() and r1.is_dir()   # EGM's dirty refusal on a review worktree; nothing removed
+  assert code == 0 and f"kept {review}: uncommitted changes" in out and review.is_dir() and not r1.exists()   # a dirty legacy review tree is kept; the builder trees go
   (review / "scratch.txt").unlink()
   code, out = world.run("clean", "--unit", UNIT, "--runcard", ccard)
   assert code == 0, out
