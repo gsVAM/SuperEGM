@@ -99,9 +99,11 @@ Otherwise settle every high or medium finding of the round first, in id order, e
    opened inside this loop.
 
 When every finding is settled and one or more is `fix-design`, ask the owner one question with two options (a
-normal card only: a leavemealone run settled none `fix-design`). `Respec` (design section 7.6): per `fix-design`
-finding, `superegm respec open --review <id> --finding <fid> --runcard <card>`, which writes
-`respec/R<n>.open.json`; this skill and `next` then wait on each (`open: respec R<n>`, `waiting respec R<n>`) until
+normal card only: a leavemealone run settled none `fix-design`). `Respec` (design section 7.6): one respec for
+the round, `superegm respec open --review <id> --finding <fid> --runcard <card>` with `<fid>` its first `fix-design`
+finding in id order (its approval closes the cycle, resolving every one of them; a second `R<n>` on the same review
+would stay open after it, so name the others in the respec's text), which writes
+`respec/R<n>.open.json`; this skill and `next` then wait on it (`open: respec R<n>`, `waiting respec R<n>`) until
 `/superegm:review-spec` approves it with `approve-spec --respec R<n>`, which closes this review's cycle so the next
 integrate opens a new one. `Void`, for a change too large to respec:
 `superegm approve-spec --void --review <id> --spec <spec-path> --runcard <card>`. The respec is the owner's alone:

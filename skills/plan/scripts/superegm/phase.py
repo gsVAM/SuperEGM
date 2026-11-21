@@ -162,13 +162,17 @@ def planning_line(hs: core.Store, state: dict, spec: Path, text: str, root: Path
     own = [e for e in core.load_approvals(hs, spec) if e.get("handoff_id") == hs.handoff_id]
     if own and (units.get("design") or {}).get("sha256") not in (None, own[-1]["sha256"]):
       return "plan"  # the bodies were rendered under an earlier approval: `graph` carries them to the latest's
-  waiting = respec.review_open(hs, hs.handoff_id)  # U91: a respec from a review's design finding (`unit: null`)
-  if waiting and not any(plan_review_stopped(hs, u) for u in unfiled):
+  try:  # U91: a respec from a review's design finding (`unit: null`)
+    waiting = respec.review_open(hs, hs.handoff_id)
+    held = f"waiting respec {waiting[0]['id']}" if waiting else None
+  except (core.HandoffError, ValueError, OSError) as error:  # fail closed: a bad open file never escapes `next`
+    held = f"waiting respec: read failed: {first_line(str(error))}"
+  if held and not any(plan_review_stopped(hs, u) for u in unfiled):
     # Every row below but `waiting review-plan: <rid> stopped` (the guard above leaves it to its own row) and `wave`
     # would be `review-plan`, `file` or `integrate`: while a filed unit is still open its `wave` runs on (the tick
-    # must not skip the handoff), else the handoff waits on the respec.
+    # must not skip the handoff), else the handoff waits on the respec, or on its failed read.
     filed = [u for u in units["order"] if numbers.get(u)]
-    return "wave" if any(unit_open(hs, state, u) for u in filed) else f"waiting respec {waiting[0]['id']}"
+    return "wave" if any(unit_open(hs, state, u) for u in filed) else held
   for uid in unfiled:
     rid = plan_review_stopped(hs, uid)
     if rid:

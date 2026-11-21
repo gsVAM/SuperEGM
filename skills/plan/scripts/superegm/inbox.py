@@ -269,18 +269,23 @@ def respec_held(hs: core.Store, uid: str) -> bool:
 
 
 def respec_read_items(hs: core.Store, repo: str, hid: str) -> list:
-  """Spec section 7.6: one `respec` item when the handoff's marks or open respecs cannot be read (`respec_held` then
-  holds every unit), naming the error; when they read, one `waiting respec R<n>` item per open respec raised from a
-  review's design finding (`unit: null`, U91), chained or not (`chain_items` leaves that line to this one), none
-  else."""
+  """Spec section 7.6: one `respec` item naming the error when the handoff's marks cannot be read (`respec_held` then
+  holds every unit: no merge is offered on a held head until it reads); else one when its open respecs cannot be read
+  (`respec.marks` reads only the applied `R<n>.json`, so no unit is held, while `file`, `integrate` and `next` wait);
+  when both read, one `waiting respec R<n>` item per open respec raised from a review's design finding (`unit: null`,
+  U91), chained or not (`chain_items` leaves those lines, and `next`'s read-failed one, to this one), none else."""
   from superegm import respec  # at call time: `respec` reads `launch`'s records
   if not hs.handoff_id:
     return []
   try:
     respec.marks(hs, hs.handoff_id)
-    waiting = respec.review_open(hs, hs.handoff_id)
   except (core.HandoffError, ValueError, OSError) as error:
     return [item(repo, hid, "respec", f"read failed: {error}: no merge is offered on a held head until it reads", "read-failed")]
+  try:
+    waiting = respec.review_open(hs, hs.handoff_id)
+  except (core.HandoffError, ValueError, OSError) as error:
+    return [item(repo, hid, "respec", f"read failed: {error}: the open respecs are unread; no unit is held, and file "
+                 "and integrate wait until it reads", "read-failed")]
   # U91: a respec raised from a review's design finding waits for the owner's `/superegm:review-spec`
   return [item(repo, hid, "respec", f"waiting respec {r['id']}", f"waiting:{r['id']}") for r in waiting]
 
@@ -472,7 +477,7 @@ def chain_items(store: core.Store, hs: core.Store, repo: str, hid: str, state: d
     printed = phase.next_line(store, hid)
   except core.HandoffError:
     return []
-  if printed.startswith("waiting respec "):  # U91: `respec_read_items` carries it, chained or not
+  if printed.startswith("waiting respec"):  # U91: `respec_read_items` carries it (or its read failure), chained or not
     return []
   if printed.startswith("waiting "):
     action = printed

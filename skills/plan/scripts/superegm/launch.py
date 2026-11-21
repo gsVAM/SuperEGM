@@ -50,10 +50,9 @@ def launch(args, card):
   core.require_receipt(state)
   core.require_repo(handoff)
   from superegm import status  # at call time: status imports this module
-  try:  # U91: a respec from a plan review waits: readiness and launch skip the unfiled units
-    status.skip_unfiled(handoff)
-  except (core.HandoffError, ValueError, OSError) as error:  # fail closed, as the marks' read below
-    raise core.HandoffError(f"respec marks unreadable: {error}") from None
+  # U91: a respec from a review's design finding waits: readiness and launch skip the unfiled units
+  if failed := status.skip_unfiled(handoff):  # fail closed, as the marks' read below
+    raise core.HandoffError(f"respec marks unreadable: {failed.removeprefix('respec: read failed: ')}")
   builder, app = builder_login(config, os.environ.get(token_env)), config["builder"]["app"]
   if app:  # the App's reads that can change under a wave (spec section 11), repeated at every launch
     openssl = tool("openssl")
