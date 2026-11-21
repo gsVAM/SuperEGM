@@ -430,7 +430,7 @@ def test_readme_install_and_licence():
 REMOVED = ["egm-bootstrap", "synthesizer", "bootstrap_orchestrator", "distributions/claude", "EGM_PANEL", "EGM_ASTRA",
            "EGM_GOLDFISH", ".egm/handoff.json", "egm-review-loop", "egm-resolve", "egm-handoff", "egm-wave",
            "egm_handoff.py", "handoff_state.json", "--published", "gate --accept", "merge locally", "Merge back locally",
-           "visual companion", "/egm:", "codex plugin", "docs/codex.md", "docs/harnesses.md", "ChatGPT", "Antigravity",
+           "/egm:", "codex plugin", "docs/codex.md", "docs/harnesses.md", "ChatGPT", "Antigravity",
            ".codex-plugin", "egm-openai", "egm-claude", "attestation", "foreman_<unit-id>_state.json", "--defer", "defer ",
            "head-moved", "rebase-only", "concepts_brief.md", "design_draft.md", "Stage 7", "Stage 9"]
 MINE = ["README.md", "docs/index.md", "docs/getting_started.md", "docs/claude.md", "docs/faq.md", "docs/privacy.md",

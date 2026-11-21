@@ -1,6 +1,6 @@
 # SuperEGM
 
-<!-- Modified by SuperEGM (gsVAM), 2026: U01's skeleton filled in by U11; U11's README restructured for the public with diagrams; the 1.2 docs sweep (U29); the 1.2.0 release README: what's new, install from GitHub and why, the setup map, the documentation table.; the inaugural public README (1.2): the pitch, the story, the feature tour, the compact review figure; the Licence paragraph names the restored brainstorming files (U83). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: U01's skeleton filled in by U11; U11's README restructured for the public with diagrams; the 1.2 docs sweep (U29); the 1.2.0 release README: what's new, install from GitHub and why, the setup map, the documentation table.; the inaugural public README (1.2): the pitch, the story, the feature tour, the compact review figure; the Licence paragraph names the restored brainstorming files (U83); the 1.2.1 workflow order, key tables and subsections (U50). -->
 
 <p align="center"><img src="docs/assets/logo.png" width="420" alt="SuperEGM: a caped elephant and a masked goldfish"></p>
 
@@ -87,7 +87,7 @@ The philosophy:
 - **One inbox.** `/superegm:inbox` lists only what needs you: in this repository, or with `--all` across every repository you registered. If you write an executable `~/.superegm/notify`, it receives each new item, so a phone notification is one script away.
 - **Rule from your phone.** A `**Ruling:**` comment on a unit's issue, from an owner, is a ruling. You never have to open a terminal to unblock a unit.
 - **Outside reviews count.** A review from a colleague or a review bot on a builder's pull request, or on the spec's own pull request, is ingested as findings and enters the same loop.
-- **Accept early.** When only mediums and lows remain, the review says so, and you can accept without waiting out five rounds.
+- **Accept early.** When only mediums and lows remain, the review says so, and you can accept without waiting out the round cap.
 
 ### Leave it running
 
@@ -105,24 +105,78 @@ SuperEGM 1.2 was built by SuperEGM. Its [design](https://github.com/gsVAM/supere
 
 ## The workflow at a glance
 
-Eight phases, one typed skill each, nothing chains. The yellow steps are the human's.
+The phases, in this order (the brainstorm and the SDLC workflow step belong to one skill, and the post-mortem is a helper command). The yellow steps are the human's.
 
 ```mermaid
 flowchart LR
-  P0["0 Brainstorm<br/>a spec ending in Units"] --> P1["1 Spec review<br/>converged or ruled"]
+  B0["Brainstorm<br/>builder check, visual companion"] --> W0["SDLC workflow<br/>reviewers, rules, round cap"]
+  W0 --> P1["Review spec<br/>converged or ruled"]
   P1 --> H1["Owner pushes<br/>the approval commit"]
-  H1 --> P2["2 Plan<br/>graph and scan pass"]
-  P2 --> P3["3 Plan review<br/>converged or ruled, per unit"]
-  P3 --> P4["4 File<br/>dry run confirmed"]
-  P4 --> P5["5 Wave<br/>every head clean"]
-  P5 --> H2["6 Merge<br/>by hand"]
-  H2 --> P7["7 Integrate<br/>nothing left to escalate"]
+  H1 --> P2["Plan<br/>graph and scan pass"]
+  P2 --> P3["Review plan<br/>converged or ruled, per unit"]
+  P3 --> P4["File<br/>dry run confirmed"]
+  P4 --> P5["Wave<br/>every head clean"]
+  P5 --> H2["Merge<br/>by hand"]
+  H2 --> P7["Integrate<br/>nothing left to escalate"]
+  P7 --> PM["Post-mortem<br/>one report from the store"]
   P7 -.->|new units| P2
   classDef human fill:#fde68a,stroke:#b45309,color:#1f2937
   class H1,H2 human
 ```
 
-The approval commit is the one human step between phases 1 and 5: `launch` refuses the first wave until the spec on the base branch hashes to the approval. Integrate may append new units to the spec; they go through plan, plan review, file and wave again.
+The approval commit is the one human step between review-spec and the wave: `launch` refuses the first wave until the spec on the base branch hashes to the approval. Integrate may append new units to the spec; they go through plan, review-plan, file and wave again.
+
+**Brainstorm.** Before the brainstorm hands the spec over, one fresh subagent reads it as the person who must build it (the builder check) and reports only the questions where a wrong guess matters; the skill answers what the spec already answers, settles the minor ones and marks them as its own calls, and asks you the rest. The visual companion, offered just in time, opens a local browser tab with mockups and diagrams; it binds `127.0.0.1` only and starts only on your yes, and nothing it shows leaves the machine.
+
+**SDLC workflow.** Once the spec is written, the brainstorm walks you through the workflow that will review and build it, in order: the reviewers, the instructions and reference documents, the round cap, the mode, the builder's tooling, `superegm doctor`, and the chain. You may skip any area or the whole step.
+
+**Review spec, plan, review plan, file, wave, integrate.** As described in [How a review works](#how-a-review-works), [How a wave works](#how-a-wave-works) and [The eight phases](#the-eight-phases).
+
+**Post-mortem.** One report per handoff, described in [Post-mortem](#post-mortem) below.
+
+### Instructions and reference documents
+
+`instructions` in `.superegm/config.json` lists files (`{"file": ".superegm/rules.md", "to": ["builder", "foreman", "reviewers", "judges"]}`, at most 8,192 bytes) that go into the brief of every role they are addressed to. An entry may name a `dir` instead: its `*.md` files are listed in the brief as reference documents (at most 50, 65,536 bytes each) that an agent reads when its task touches them. `approve-spec` freezes each file by its blob sha, so a builder's branch never changes what an agent was told. A file cannot grant a tool: a command it asks the builder to run still needs a `builder.allowed_tools` entry. A file addressed to `reviewers` or `judges` goes to the Codex vendor through the Astra lane and the `astra` judge (see [docs/privacy.md](docs/privacy.md)).
+
+### Custom reviewers
+
+A file `.superegm/reviewers/<id>.md` adds a review goldfish: frontmatter `name`, `kinds` (any of `spec`, `plan`, `head`, `integrate`) and optional `model` and `effort`, then the persona (at most 8,192 bytes). A file named for a built-in reviewer replaces that reviewer's persona. Name the ids in `reviewers.spec`, `reviewers.plan`, `reviewers.head` and `reviewers.integrate`; `approve-spec` freezes the files, and `superegm doctor` prints a `reviewers:` line.
+
+### The round cap
+
+A review pauses for your ruling at its cap: `review.rounds`, an integer 1 to 10, default 3. A spec's own review always runs under the live `review.rounds`. `approve-spec` freezes the spec's `Rounds:` line, else the live value, as the cap of that handoff's plan, head and integrate reviews, so a later change to `review.rounds` does not reach an approved handoff. The judge panel keeps its own cap of 5.
+
+### The chain and the inbox
+
+With `driver.chain` set to `true` (default `false`; the SDLC workflow offers it once doctor passes), the driver carries a handoff through its phases unattended and stops where it needs you. `driver kick --root <path>` runs a tick now, but only when the driver is installed, the root is registered and that store's `driver.chain` is true; the install default interval is 5 minutes (`driver install --interval` sets another). `/superegm:inbox` (the helper is `superegm inbox`) lists only what needs you.
+
+### Answers in words
+
+The inbox asks in plain words, opens each question with one recommended option and its reason, and your "yes" takes it. It checks that your `gh` login is in `config.owners`, reads your mapped answer back once, and posts the `**Ruling:**` comment itself; no skill asks you to paste a command. It merges only a pull request you name, with `--match-head-commit`, and withdraws the offer if the unit changed: `inbox withdrawn` journals `merge withdrawn`. A bare `superegm inbox` is read-only and opens no card. Typed without `--runcard`, `inbox withdrawn` opens and closes its own inbox card; that exception stands next to `approve-spec --void`, which opens and closes its own card too, and `driver kick`, which runs with no card.
+
+### Medium triage
+
+A spec may carry a `## Triage` section with `Unblock:` patterns (over reach, later, critical, verified). When it does, a triage goldfish answers fixed fields against the code for a medium finding, and a matching one is deferred (`deferred: triage <n>`) instead of blocking the head. A clean head can therefore keep confirmed medium defects; they are listed under **Deferred by triage**, recorded as a follow-up row, and listed when the unit closes. To restore a blocker, undo it in the inbox: it posts `**Ruling:** <fid> finding upheld`, and triage is off for that unit afterwards.
+
+### Post-mortem
+
+`superegm postmortem --handoff <id>` writes one report from the store, with six sections: Header, Units, Reviewers, Owner time, Plan against actual and Lessons (fact rows that name their source records). It needs no run card, reads one `gh api` comment per respec row, and works on an open handoff too. Integrate runs it after it closes the handoff.
+
+### Config keys added in 1.2.1
+
+| Key | Default |
+| --- | --- |
+| `instructions` | `[]` |
+| `review.rounds` | `3` |
+| `units.max_body_kb` | `25` |
+| `units.max_files` | `10` |
+| `units.max_steps` | `16` |
+| `driver.chain` | `false` |
+| `reviewers.<kind>` | the built-in panels, plus ids from `.superegm/reviewers/` |
+| `builder.precheck_attempts` | `3` |
+| `builder.escalate_after` | `2` (`0` turns escalation off) |
+
+[`skills/plan/references/handoff_config.md`](skills/plan/references/handoff_config.md) has each key's rule.
 
 ## Install
 
@@ -185,7 +239,7 @@ Six things need a human once, before the first wave, and three more as you need 
 5. Commit `.superegm/config.json`; `approve-spec` commits it with the spec.
 6. Run reviews from a profile without SubagentStart hooks: such hooks in the owner's own profile reach adapter subagents, and every dispatch record carries what the goldfish reported seeing.
 7. Configure the builder's tooling, if it needs any: list the plugins in `config.builder.plugins` (each installed once into your own profile and disabled there) and the MCP servers in `config.builder.mcp`; every launch loads exactly those and records them, with each plugin's hook events, in `launches/<unit>_r<n>_plugins.json`. To let builders delegate, add `Agent` to `config.builder.allowed_tools` (absent by default): a builder may then spawn the platform's default subagents under its own allow-list, budgeted in its orders at `builder.max_subagent_calls` (12), a budget the helper does not enforce.
-8. For the driver, write `~/.superegm/env` (`KEY=value` lines, mode 0600: `PATH`, `CLAUDE_CONFIG_DIR` naming a profile without SubagentStart hooks, and `SUPEREGM_APP_KEY` or `SUPEREGM_BUILDER_TOKEN`; the driver's sessions run unattended with `bypassPermissions`, no allow-list and no prompt, under that credential), then type `/superegm:driver install` (installs the timer with `superegm driver install`; re-typed after every plugin update) and `/superegm:driver register` (runs `superegm register`) from each handoff's worktree; the skill runs both under a `driver` card, without which the helper refuses them. On Linux, also run `loginctl enable-linger` so the timer runs while you are logged out.
+8. For the driver, write `~/.superegm/env` (`KEY=value` lines, mode 0600: `PATH`, `CLAUDE_CONFIG_DIR` naming a profile without SubagentStart hooks, and `SUPEREGM_APP_KEY` or `SUPEREGM_BUILDER_TOKEN`; the driver's sessions run unattended with `bypassPermissions`, no allow-list and no prompt, under that credential), then type `/superegm:driver install` (installs the timer with `superegm driver install`; re-typed after every plugin update) and `/superegm:driver register` (runs `superegm register`) from the checkout that has the base branch checked out (without `--root` it registers the current checkout, and a spec-branch worktree makes the chain stop at `waiting checkout`); the skill runs both under a `driver` card, without which the helper refuses them. On Linux, also run `loginctl enable-linger` so the timer runs while you are logged out.
 9. Keep the machine awake while the driver runs (`pmset`, or `caffeinate`): `doctor` prints the `sleep:` setting. Optionally write `~/.superegm/notify`, an executable outside every repository that gets the new inbox lines on its stdin.
 
 Then run `superegm doctor` before the first wave: one line per prerequisite, `ok` or the refusal `launch` would give, and no run card.
@@ -203,7 +257,7 @@ Add `--leavemealone` to a skill (or set `"mode": "leavemealone"` in `.superegm/c
 
 ## How a review works
 
-One review loop serves the spec, every plan and every pull request head. Each round, every reviewer on the panel is a goldfish: a fresh, isolated session that sees only the artifact, the standards for its kind and, from round 2, the previous round's findings with the fixes marked. The panel is fixed when the review opens and every reviewer runs concurrently. At the cap of five rounds the owner rules: one more round, accept, or stop.
+One review loop serves the spec, every plan and every pull request head. Each round, every reviewer on the panel is a goldfish: a fresh, isolated session that sees only the artifact, the standards for its kind and, from round 2, the previous round's findings with the fixes marked. The panel is fixed when the review opens and every reviewer runs concurrently. At the cap (`review.rounds`, default 3; a spec's `Rounds:` line freezes its own) the owner rules: one more round, accept, or stop.
 
 ```mermaid
 flowchart LR
@@ -211,12 +265,12 @@ flowchart LR
   F -->|none high or medium| X["Converged<br/>sha256 recorded"]
   F -->|fix| N["Fix, mark<br/>each finding"]
   N -->|next round| R
-  N -.->|5 rounds| RU["Your ruling"]
+  N -.->|round cap| RU["Your ruling"]
   classDef human fill:#fde68a,stroke:#b45309,color:#1f2937
   class RU human
 ```
 
-Lows never block. A high or medium finding that is contested or declined needs the owner's word in normal mode, and on a pull request head the cap ruling is one more round or stop, never accept. In leavemealone-mode the judge panel (isolated judges on more than one model, converging per question) gives those rulings instead, and a panel that does not converge waits for the owner.
+Lows never block. A high or medium finding that is contested or declined by the builder goes to the judge panel (isolated judges on more than one model, converging per question) first, in both modes; a panel that does not converge waits for the owner. On a pull request head the cap ruling is one more round or stop, never accept. Only an `<fid> allowed` ruling, an amendment or a respec is the owner's alone.
 
 Every external review is ingested as findings: a review on a builder's pull request, and from 1.2 the spec's own pull request (`review ingest --pr`, with the pull request's number), enters the same loop. The owner rules with one `**Ruling:**` comment, from a phone if need be. Below the cap, when only mediums and lows stand, `review status` prints an `acceptable:` line and the owner may accept; the journal then records it as accepted before the cap, and on a pull request head the wave asks it as `decision open --point 5` (accept or revise).
 
@@ -254,7 +308,7 @@ Clean means CI green, every definition-of-done item met, no unsettled high or me
 
 The foreman re-runs every DoD `Run` item on the head itself rather than trusting the pasted output, and checks the test delta: a test removed or weakened is a high finding only the owner can allow. A builder runs on its unit's tier (`builder.tiers` for a difficult or an easy unit, `builder.model` and `builder.effort` for a doable one), loads the plugins of `config.builder.plugins` and the servers of `config.builder.mcp` alone, and records them in `launches/<unit>_r<n>_plugins.json`. The review goldfish run on `reviewers.model` at `reviewers.effort` (`opus` / `xhigh` by default; `SUPEREGM_GOLDFISH_MODEL` and `SUPEREGM_GOLDFISH_EFFORT` override them for a session), each judge on its `judges.members` model and effort, and the foreman's Astra lane at `astra.heads_effort` (`high`); `doctor` prints one `model:` line per role. A running builder with no newer commit of its own for `builder.stall_minutes` is reported stalled, comments or not. The tracking issue carries a live board between `<!-- superegm:board -->` and `<!-- /superegm:board -->`, and `close` closes the tracking issue when the handoff ends with every unit landed.
 
-The fleet layer runs waves while you are away. `/superegm:inbox` lists only what needs you in the current repository's store, and with `--all` across every registered store; `~/.superegm/notify`, if you write it, is told of each new line. `/superegm:driver` installs a timer (`superegm driver install`) that types `wave --leavemealone` for one open handoff at a time per store in the environment of `~/.superegm/env`, over the stores `superegm register` listed; keep the machine awake (`caffeinate`). That session runs with `--permission-mode bypassPermissions`, no allow-list and no prompt, under the credential the env file names, so install the driver only on a machine and for repositories you would let a session act on alone. The driver never merges.
+The fleet layer runs waves while you are away. `/superegm:inbox` lists only what needs you in the current repository's store, and with `--all` across every registered store; `~/.superegm/notify`, if you write it, is told of each new line. `/superegm:driver` installs a timer (`superegm driver install`) that types `wave --leavemealone` for one open handoff (with `driver.chain` true, whatever phase `superegm next` names) at a time per store in the environment of `~/.superegm/env`, over the stores `superegm register` listed; keep the machine awake (`caffeinate`). That session runs with `--permission-mode bypassPermissions`, no allow-list and no prompt, under the credential the env file names, so install the driver only on a machine and for repositories you would let a session act on alone. The driver never merges.
 
 ## The eight phases
 
@@ -271,7 +325,7 @@ The fleet layer runs waves while you are away. `/superegm:inbox` lists only what
 
 In the plan phase each unit may carry a `Tier:` row (`difficult`, `doable` or `easy`) that picks its builder's model and effort from `builder.tiers`; a unit without one builds as doable.
 
-One skill per phase, nothing chains; the owner pushes the approval commit between phases 1 and 5. With `--leavemealone` (or `"mode": "leavemealone"` in the config) the judge panel rules at every decision point and the owner wakes to merge-ready draft pull requests.
+One skill per phase; nothing chains unless `driver.chain` is true, in which case the driver launches whatever phase `superegm next` names; the owner pushes the approval commit between phases 1 and 5. With `--leavemealone` (or `"mode": "leavemealone"` in the config) the judge panel rules at every decision point and the owner wakes to merge-ready draft pull requests.
 
 ## Skills
 
