@@ -152,7 +152,7 @@ what they agree in one commit (design section 7.7). The skill runs nothing of it
 
 ## Step 4: the end
 
-On every path to this step, a filing or none (Step 2a's units, Step 3's close, a respec refusal, units listed without `--close`, a stalled round), run `superegm clean --auto --runcard <card>`: it removes the worktrees of every landed, merged or stopped unit, prints one line per unit cleaned and never refuses, so it never stops the skill.
+On every path to this step, a filing or none (Step 2a's units, Step 3's close, a respec refusal, units listed without `--close`, a stalled round), run `superegm clean --auto --runcard <card>`: it removes what is left of every landed, merged or stopped unit that has something left to remove, prints one line per unit cleaned and never refuses, so it never stops the skill.
 
 `superegm runcard close <card>` (`--note '<text>'` journals a note with it) is the last action of every path, including an error you cannot
 recover from. In chat: the review id and its `review status` line, the escalated findings with

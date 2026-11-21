@@ -128,7 +128,7 @@ dispatch):
 - A `decision rule` whose post or label request fails (a `gh` error, not a refusal) records nothing: run it again, a `--posted` one included. A journaled `<U> <qid>: label superegm:stopped left on issue #<n>` means the label stayed on: run `gh issue edit <n> --remove-label superegm:stopped` first.
 ## The end
 
-At the end of every invocation, after its last launch (a paused one included), run `superegm clean --auto --runcard '<CARD>'`: it cleans every landed, merged or stopped unit, prints one line per unit cleaned and never refuses.
+At the end of every invocation, after its last launch, run `superegm clean --auto --runcard '<CARD>'`: it cleans every landed, merged or stopped unit that has something left to remove, prints a line per unit and never refuses.
 
 Before the close, run batch step 3b once and `report` again (a thread posted before the last round's review is read now): an `outcome:` line or no longer `loop: ended` → back to the batches.
 

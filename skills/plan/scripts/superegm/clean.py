@@ -6,6 +6,7 @@ launch and round is terminal; keeps what it cannot prove."""
 
 import json
 import os
+import re
 import signal
 import subprocess
 from pathlib import Path
@@ -41,6 +42,11 @@ def run(args):
     if str(error).startswith("runcard:"):
       raise
     raise core.HandoffError(f"clean: {error}") from None
+  except Exception as error:  # an unparseable card or config under `--auto` is one line and exit 0; `--unit` keeps its traceback
+    if not args.auto:
+      raise
+    print(f"clean: {error}")
+    return 0
 
 
 def clean(args):
@@ -90,9 +96,23 @@ def linked(st, unit, tree):
   return False
 
 
+def review_dir(st, unit):
+  return st.path("review", unit, "pr0").parent
+
+
+def pr_folders(st, unit):
+  """The `review/<unit>/pr<digits>` folders, none when `review/<unit>` is itself a link (it could be another unit's); a folder
+  named `private` or `pr-old` is not one."""
+  folder = review_dir(st, unit)
+  if linked(st, unit, folder):
+    return []
+  return sorted(p for p in folder.glob("pr*") if p.is_dir() and re.fullmatch(r"pr\d+", p.name))
+
+
 def pr_numbers(st, unit):
-  """The pull request numbers whose private refs the unit owns: the recorded `units.<unit>.pr.number` and each `review/<unit>/pr<n>`."""
-  numbers = {p.name[2:] for p in st.path("review", unit, "pr0").parent.glob("pr*") if p.name[2:].isdigit()}
+  """The pull request numbers whose private refs the unit owns: the recorded `units.<unit>.pr.number` and each `review/<unit>/pr<n>`
+  (none through a linked unit folder)."""
+  numbers = {p.name[2:] for p in pr_folders(st, unit)}
   try:
     state = json.loads(st.path("state").read_text(encoding="utf-8"))
     number = ((state.get("units") or {}).get(unit, {}).get("pr") or {}).get("number")
@@ -116,7 +136,7 @@ def first_line(error):
 def review_trees(root, st, unit):
   """`{folder: (tree, legacy)}` for each `review/<unit>/pr<n>` folder whose `worktree` child (or, legacy, itself) git has registered."""
   registered, found = set(core.registered_worktrees(root)), {}
-  for folder in sorted(p for p in st.path("review", unit, "pr0").parent.glob("pr*") if p.is_dir()):
+  for folder in pr_folders(st, unit):
     if (folder / "worktree").resolve() in registered:
       found[folder] = (folder / "worktree", False)
     elif folder.resolve() in registered:
@@ -127,7 +147,8 @@ def review_trees(root, st, unit):
 def builder_trees(root, st, unit):
   """`(trees, recorded, registered)`: the `worktrees/<unit>/r<n>` folders, the worktrees a launch records, those git has registered."""
   recorded = {Path(entry["worktree"]).resolve() for entry in load_launches(st, unit)}
-  trees = sorted(p for p in st.path("worktrees", unit).glob("r*") if p.is_dir())
+  folder = st.path("worktrees", unit)
+  trees = [] if linked(st, unit, folder) else sorted(p for p in folder.glob("r*") if p.is_dir())
   return trees, recorded, set(core.registered_worktrees(root))
 
 
@@ -149,7 +170,7 @@ def clean_unit(root, st, unit, quiet=False):
   """Remove the unit's registered worktrees and refs. `quiet` (`--auto`) leaves out the routine `kept ...: not a worktree` and
   `no launch records it` lines; a line that warns always prints. `<unit> cleaned` is journalled, and the unit's private refs deleted, only
   when no tree was kept for a reason (a symlink, a process that cannot be listed or signalled or survives SIGKILL, uncommitted changes in a
-  legacy tree, a removal git refused); `not a worktree` and `no launch records it` do not withhold it."""
+  legacy tree, a removal git refused, a ref git cannot delete); `not a worktree` and `no launch records it` do not withhold it."""
   problems = terminal_problems(st, unit)
   if problems:
     raise core.HandoffError(problems[0])
@@ -159,9 +180,13 @@ def clean_unit(root, st, unit, quiet=False):
       print(line)
 
   complete = True
+  for folder in (review_dir(st, unit), st.path("worktrees", unit)):
+    if linked(st, unit, folder):  # a link can reach another unit's folder: nothing is signalled, removed or deleted through it
+      print(f"kept {folder}: symlink")
+      complete = False
   refs = private_refs(root, st, unit)  # read before any `pr<n>` folder goes: a legacy tree's folder names its number
   registered_review = review_trees(root, st, unit)
-  for folder in sorted(p for p in st.path("review", unit, "pr0").parent.glob("pr*") if p.is_dir()):
+  for folder in pr_folders(st, unit):
     if folder not in registered_review:
       note(f"kept {folder}: not a worktree")
       continue
@@ -207,7 +232,12 @@ def clean_unit(root, st, unit, quiet=False):
     pass
   if complete:
     for ref in refs:  # the refs go once nothing of the unit was kept, whether or not a review tree existed
-      core.run_git(["update-ref", "-d", ref], root, check=False)
+      try:
+        core.run_git(["update-ref", "-d", ref], root)
+      except core.HandoffError as error:  # a ref git cannot delete still counts as left, so the unit is not cleaned
+        print(f"kept {ref}: {first_line(error)}")
+        complete = False
+  if complete:
     core.journal(st, f"{unit} cleaned")
     print(f"{unit} cleaned")
 
