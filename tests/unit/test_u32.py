@@ -84,7 +84,7 @@ def test_spec_blob_and_store_take_their_inputs_explicitly(world):
 # ---------------------------------------------------------------- S8: the prose
 
 PROSE = [("skills/wave/references/builder_orders.md", "HEAD detached", True), ("skills/integrate/SKILL.md", "[--close [--patch]]", True),
-         ("skills/integrate/SKILL.md", "effect_kinds: [state-store, start-session, github-write]", True),
+         ("skills/integrate/SKILL.md", "effect_kinds: [state-store, start-session, github-write, destructive-local]", True),
          ("skills/integrate/SKILL.md", "of every unit whose PR merged, its issue open or not", True),
          ("skills/review-spec/references/review_loop.md", "citing no line, or a line the spec does not hold, takes the same path", True),
          ("skills/review-spec/references/review_loop.md", "<6 hex>-plan-<unit>", False), ("skills/plan/references/handoff_plan.md", "may hold only", False),
