@@ -555,3 +555,79 @@ def test_clean_keeps_a_ref_git_cannot_delete_and_does_not_journal_cleaned(world)
   assert git("for-each-ref", "refs/superegm/pr/7", cwd=world.repo) != ""
   assert f"{UNIT} cleaned" not in out and f"{UNIT} cleaned" not in journal_text(s)
   assert clean_module.has_remnants(world.repo, s, UNIT)  # the ref still counts as left
+
+
+def test_clean_skill_and_docstring_name_the_three_auto_error_lines():
+  text, doc = read("skills/clean/SKILL.md"), clean_module.clean_auto.__doc__
+  for said in ("`clean: <error>`", "`clean --auto: handoff: <error>`", "ends the sweep", "`clean --auto: <unit>: <error>`",
+               "cannot be read", "kept <path>: not a builder tree"):
+    assert said in text, said
+  for said in ("clean: <error>", "clean --auto: handoff: <error>", "ends the sweep", "clean --auto: <unit>: <error>"):
+    assert said in doc, said
+  assert "`clean --auto: <unit or handoff>: <error>`" not in text and "<unit or handoff>" not in doc
+
+
+def test_clean_names_an_entry_of_the_builder_folder_that_is_not_a_builder_tree(world):
+  s, _card, _hid, _bodies = seed(world, units=(UNIT,))
+  launched(s, UNIT, "exited 0", rnd=2)
+  builder = s.path("worktrees", UNIT, "r2")
+  add_tree(world, builder)
+  scratch, loose, odd = (s.path("worktrees", UNIT, name) for name in ("scratch", "notes.txt", "r2x"))
+  scratch.mkdir()
+  loose.write_text("keep\n", encoding="utf-8")
+  odd.mkdir()
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", clean_card(world))
+  assert code == 0, out
+  for entry in (scratch, loose, odd):
+    assert entry.exists() and f"kept {entry}: not a builder tree" in out  # said, and left alone
+  assert not builder.exists() and f"kept {builder}" not in out
+
+
+def test_clean_auto_leaves_out_the_routine_not_a_builder_tree_line(world):
+  s, card, _hid, _bodies = seed(world, units=(UNIT,))
+  artifact = landed(world, s, card)
+  builder = s.path("worktrees", UNIT, "r1")
+  add_tree(world, builder)
+  scratch = s.path("worktrees", UNIT, "scratch")
+  scratch.mkdir()
+  code, out = world.run("clean", "--auto", "--runcard", world.open_card("integrate", artifact))
+  assert (code, out) == (0, "U01 cleaned\n") and scratch.is_dir() and not builder.exists()
+
+
+def test_clean_prints_the_os_error_and_does_not_journal_cleaned_when_the_unit_folder_cannot_be_removed(world, monkeypatch):
+  s, _card, _hid, _bodies = seed(world, units=(UNIT,))
+  launched(s, UNIT, "exited 0", rnd=2)
+  folder = s.path("worktrees", UNIT)
+  add_tree(world, folder / "r2")
+  git("update-ref", "refs/superegm/pr/7", "HEAD", cwd=world.repo)
+  (s.path("review", UNIT, "pr7") / "r1").mkdir(parents=True)
+  real_rmdir = Path.rmdir
+
+  def rmdir(self, *args, **kwargs):
+    if self == folder:
+      raise OSError(13, "Permission denied")
+    return real_rmdir(self, *args, **kwargs)
+
+  monkeypatch.setattr(Path, "rmdir", rmdir)
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", clean_card(world))
+  assert code == 0, out
+  assert f"kept {folder}: [Errno 13] Permission denied" in out
+  assert f"{UNIT} cleaned" not in out and f"{UNIT} cleaned" not in journal_text(s)
+  assert git("for-each-ref", "refs/superegm/pr/7", cwd=world.repo) != ""  # nothing is reported cleaned, so its ref stays
+
+
+def test_clean_keeps_a_symlinked_pr_folder_and_deletes_no_ref_through_it(world):
+  s, _card, _hid, _bodies = seed(world, units=(UNIT,))
+  (s.path("review", "U02", "pr7") / "r1").mkdir(parents=True)  # round records only: no registered tree
+  link = s.path("review", UNIT, "pr7")
+  link.parent.mkdir(parents=True, exist_ok=True)
+  link.symlink_to(s.path("review", "U02", "pr7"))
+  git("update-ref", "refs/superegm/pr/7", "HEAD", cwd=world.repo)
+  git("update-ref", "refs/superegm/pr-base/7", "HEAD", cwd=world.repo)
+  assert clean_module.pr_numbers(s, UNIT) == [] and not clean_module.has_remnants(world.repo, s, UNIT)  # not selectable under --auto
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", clean_card(world))
+  assert code == 0, out
+  assert f"kept {link}: symlink" in out
+  assert git("for-each-ref", "refs/superegm/pr/7", "refs/superegm/pr-base/7", cwd=world.repo) != ""  # U02's refs stay
+  assert (s.path("review", "U02", "pr7") / "r1").is_dir() and link.is_symlink()
+  assert f"{UNIT} cleaned" not in out and f"{UNIT} cleaned" not in journal_text(s)
