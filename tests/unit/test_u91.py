@@ -443,3 +443,75 @@ def test_wave_trigger_skips_unfiled_units(world):
   assert not any("issues/None" in " ".join(map(str, call)) for call in world.gh.calls), world.gh.calls
   assert trigger is None or "U07" not in trigger, trigger
 
+
+# ---------------------------------------------------------------- round 3: either origin, and a failed read
+
+
+@pytest.mark.parametrize("origin", ["plan", "integrate", "plan, its review.json unreadable"])
+def test_status_and_launch_skip_unfiled_units_under_either_origin(world, monkeypatch, origin):
+  """An open `unit: null` respec of either origin (an integrate-origin respec beside an escalated unit row planned but
+  unfiled): `status` and `launch` skip the unfiled U07 and never request `issues/None`; the source review is not read."""
+  s, card, hid = plan_respec_world(world)
+  if origin == "integrate":
+    atomic_write(s.path("file", "respec", "R1.open.json"),
+                 {"id": "R1", "unit": None, "review": f"spec-{SLUG}-integrate-c1", "finding": "design-1-1",
+                  "at": "2026-11-04T00:00:00Z"})
+  elif origin.endswith("unreadable"):
+    rid = json.loads(s.path("file", "respec", "R1.open.json").read_text(encoding="utf-8"))["review"]
+    s.path("reviews", rid, "review.json").write_text("{not json", encoding="utf-8")
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  code, out = world.run("status", "--runcard", card)
+  assert code == 0, out
+  units = [line.split()[0] for line in out.splitlines() if line[:1] == "U"]
+  assert "U07" not in units and "U05" in units, out
+  code, out = world.run("launch", "--runcard", card)
+  assert code == 0, out
+  assert "U07" not in next((line for line in out.splitlines() if line.startswith("marked:")), "")
+  assert not any("issues/None" in " ".join(map(str, call)) for call in world.gh.calls), world.gh.calls
+
+
+def test_a_failed_respec_read_still_skips_unfiled_units(world):
+  """U05 filed, U07 unfiled, a malformed `R1.open.json`: `status` drops U07 before any GitHub request and prints
+  `respec: read failed: <error>`; the driver's tick drops it too, journaling the same line."""
+  from superegm import driver
+  s, card, _ = plan_respec_world(world)
+  s.path("file", "respec", "R1.open.json").write_text("{not json", encoding="utf-8")
+  code, out = world.run("status", "--runcard", card)
+  assert code == 0 and "respec: read failed: " in out, out
+  units = [line.split()[0] for line in out.splitlines() if line[:1] == "U"]
+  assert "U07" not in units and "U05" in units, out
+  state = json.loads(s.path("state").read_text(encoding="utf-8"))
+  driver.wave_trigger(s, {"root": str(world.repo)}, state)
+  assert not any("issues/None" in " ".join(map(str, call)) for call in world.gh.calls), world.gh.calls
+  assert "respec: read failed: " in s.path("journal").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("running", [False, True])
+def test_a_chained_handoff_with_a_bad_open_respec_never_raises(world, registry, monkeypatch, running):
+  """A chained handoff (U03 unfiled) and a malformed `R1.open.json`: `next_line` returns the read-failed line (or
+  `wave` while a filed unit still runs), never raising; the inbox lists one `read failed` item, which holds no merge."""
+  import superegm as core
+  from superegm import inbox, phase, store
+  from test_u43 import Chain, jwrite
+  monkeypatch.setattr(core, "frozen_mode", lambda hs: "normal")
+  monkeypatch.setattr(core, "chain_on", lambda config: True)
+  c = Chain(world)
+  c.plan("U01", "U02", "U03")
+  for n, uid in enumerate(("U01", "U02"), 1):
+    c.review(uid)
+    c.filed(uid, n, pr={"number": 10 + n}, ci="success", landed=not (running and uid == "U01"))
+  if running:
+    result = world.repo.parent / "U01-r1.result"
+    jwrite(c.hs.path("launches", "U01"), {"launches": [{"round": 1, "status": "running", "result_file": str(result)}]})
+    result.with_name(result.name + ".exit").write_text("0\n", encoding="utf-8")
+  c.save()
+  c.hs.path("file", "respec").mkdir(parents=True, exist_ok=True)
+  c.hs.path("file", "respec", "R1.open.json").write_text("{not json", encoding="utf-8")
+  st = store(world.repo)
+  printed = phase.next_line(st, c.hid)
+  assert printed == "wave" if running else printed.startswith("waiting respec: read failed: "), printed
+  lines = [inbox.line_of(i) for i in inbox.inbox_items(st, [c.hid])]
+  failed = [line for line in lines if "read failed" in line]
+  assert len(failed) == 1 and "no merge is offered" not in failed[0], lines
+  assert not inbox.respec_held(c.hs, "U02")
+
