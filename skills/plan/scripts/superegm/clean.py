@@ -34,9 +34,17 @@ def clean(args):
   problems = terminal_problems(st, unit)
   if problems:
     raise core.HandoffError(problems[0])
-  for tree in sorted(p for p in st.path("review", unit, "pr0").parent.glob("pr*") if p.is_dir()):
-    core.remove_worktree(root, tree)  # EGM's dirty refusal: a person's edits in a review worktree are never discarded
-    for ref in (f"refs/superegm/pr/{tree.name[2:]}", f"refs/superegm/pr-base/{tree.name[2:]}"):
+  registered = set(core.registered_worktrees(root))
+  for folder in sorted(p for p in st.path("review", unit, "pr0").parent.glob("pr*") if p.is_dir()):
+    child = folder / "worktree"
+    if child.resolve() in registered:
+      core.remove_worktree(root, child, force=True)  # the review child is the store's: its `pr<n>/r<n>` records stay
+    elif folder.resolve() in registered:
+      core.remove_worktree(root, folder)  # a legacy `pr<n>` worktree keeps EGM's dirty refusal
+    else:
+      print(f"kept {folder}: not a worktree")
+      continue
+    for ref in (f"refs/superegm/pr/{folder.name[2:]}", f"refs/superegm/pr-base/{folder.name[2:]}"):
       core.run_git(["update-ref", "-d", ref], root, check=False)
   recorded = {Path(entry["worktree"]).resolve() for entry in load_launches(st, unit)}
   for tree in sorted(p for p in st.path("worktrees", unit).glob("r*") if p.is_dir()):
