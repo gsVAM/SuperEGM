@@ -7,7 +7,7 @@ disable-model-invocation: true
 description: Reviews a handoff plan against its design through the judge panel before any issue is filed.
 ---
 
-<!-- Modified by SuperEGM (gsVAM), 2026: the body: plan review over the helper's review-plan and review subcommands (U06); `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the accept below the cap's one question per round (U35); the `width:` line, the plan header, the chain check and the split check (U29); the readiness plan remit (1.2.1 §6.5); the driven wait and the typed run on a wait record, the frozen mode (U45); proceed offered at the cap and on a stall (U58); the answered chain record taken as the owner's (U70); the repository-reviewer dispatch (U77). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the body: plan review over the helper's review-plan and review subcommands (U06); `[--handoff <id>]`, `filed_elsewhere` and the handoff's directory (U20); the accept below the cap's one question per round (U35); the `width:` line, the plan header, the chain check and the split check (U29); the readiness plan remit (1.2.1 §6.5); the driven wait and the typed run on a wait record, the frozen mode (U45); proceed offered at the cap and on a stall (U58); the answered chain record taken as the owner's (U70); the repository-reviewer dispatch (U77); Step 4 offers the respec beside the void (U91). -->
 
 # Plan review (phase 3)
 
@@ -193,11 +193,26 @@ turn you made them: record, settle, ask `review status`, then Step 1.
 
 ## Step 4: fix-design
 
-`review status` exit 4: the defect is in the frozen spec, not in the units.
-`python3 '<HELPER>' approve-spec --void --review '<id>' --spec '<spec>' --runcard '<card>'`
-writes `voided_by` on the approval, and `graph` refuses the spec from then on. Tell the owner
-in one line that the spec returns to `/superegm:review-spec` for that unit's Design range, then
-`python3 '<HELPER>' runcard close '<card>'` and stop.
+`review status` exit 4: the defect is in the frozen spec, not in the units. Nothing in this Step
+voids before the choice below: a void cannot be undone, and a respec cannot follow it.
+
+1. The choice. On a normal card, ask the owner one question with two options before anything
+   else: `Respec` (design section 7.6) or `Void` (for a change too large to respec). On a
+   leavemealone card there is no question: the respec is the owner's alone, a leavemealone panel
+   never offers it (the helper refuses it under a leavemealone card or `SUPEREGM_ROLE`), so go to
+   item 3.
+2. `Respec`: `superegm respec open --review '<id>' --finding '<fid>' --runcard '<card>'`, through
+   `<HELPER>` like every call here, `<fid>` the round's first `fix-design` finding: one respec per round,
+   its approval closing the cycle and every such finding (a second `R<n>` would stay open). It writes `respec/R<n>.open.json`, the filed units go on, and
+   `file` and `next` wait on it (`waiting respec R<n>`) until `/superegm:review-spec` approves it
+   with `approve-spec --respec R<n>`, which closes this cycle so the next `review-plan` opens a new
+   one on the corrected plan. Tell the owner that in one line, then
+   `python3 '<HELPER>' runcard close '<card>'` and stop. Nothing is voided.
+3. `Void`, or a leavemealone card:
+   `python3 '<HELPER>' approve-spec --void --review '<id>' --spec '<spec>' --runcard '<card>'`
+   writes `voided_by` on the approval, and `graph` refuses the spec from then on. Tell the owner
+   in one line that the spec returns to `/superegm:review-spec` for that unit's Design range, then
+   `python3 '<HELPER>' runcard close '<card>'` and stop.
 
 ## Step 5: the end
 

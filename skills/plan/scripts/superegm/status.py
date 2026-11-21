@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the `ruling` event and a status line after a comment's deviation headings (U22); the board's one write per `wave` pass, `post_board` (U30); the tick's read, `tick_trigger` (U24); the watchdog's `stalled` line, its predicate and `head_time` (U31); `tick_trigger`'s chain-on `merged` line and its proofs over every chain phase's card (U44); `ruling_facts` reads `proceeds[]`, so a recorded proceed comment is no event (U94); the `conflict` view status, its fingerprint key and its event line (U62); `builder_comment`, the filter `builder_facts` and `finish` share, the `open:`/`held: respec` lines and `tick_trigger`'s `respec R<n> <unit>` (U86).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the `ruling` event and a status line after a comment's deviation headings (U22); the board's one write per `wave` pass, `post_board` (U30); the tick's read, `tick_trigger` (U24); the watchdog's `stalled` line, its predicate and `head_time` (U31); `tick_trigger`'s chain-on `merged` line and its proofs over every chain phase's card (U44); `ruling_facts` reads `proceeds[]`, so a recorded proceed comment is no event (U94); the `conflict` view status, its fingerprint key and its event line (U62); `builder_comment`, the filter `builder_facts` and `finish` share, the `open:`/`held: respec` lines and `tick_trigger`'s `respec R<n> <unit>` (U86); the unfiled units skipped while a plan review's respec waits (U91).
 
 """superegm status: landed and ready sets, PRs, CI; refuses without a complete receipt.
 `--wait <s>` polls, reading only, and prints every unreported event line, or `deadline`. Under a `wave` card
@@ -46,6 +46,7 @@ def run(args):
   core.require_receipt(state)
   core.require_repo(handoff)
   state.setdefault("units", {})
+  skip_unfiled(handoff)  # a failed read drops the unfiled units too; `respec_lines` prints its `respec: read failed` line
   if args.wait and (args.watch or args.confirm_landed):
     raise core.HandoffError(
         "--wait only watches; it does not record a choice. Run `status --watch "
@@ -84,6 +85,28 @@ def run(args):
   if lines := respec_lines(handoff):
     print("\n".join(lines))
   return 0
+
+
+def skip_unfiled(handoff) -> str | None:
+  """U91 (spec section 7.6): while a respec raised from a review's design finding waits (`respec.review_open`, a plan
+  or an integrate review's, its source review never read), the handoff's unfiled units (no issue number in
+  `state.json`, an escalated row planned under an integrate-origin respec among them) leave its graph order for this
+  command, so `status`, readiness and `launch` read only the filed units, which go on; `tick_trigger` applies it too,
+  so the driver's tick never reads an unfiled unit's issue. A failed respec read drops them as well (fail closed: an
+  unfiled unit has no issue to read) and is returned as the line `respec: read failed: <error>`; None else."""
+  from superegm import respec
+  hid = handoff.store.handoff_id
+  if not hid:
+    return None
+  error = None
+  try:
+    waiting = bool(respec.review_open(handoff.store, hid))
+  except (core.HandoffError, ValueError, OSError) as failed:
+    waiting, error = True, f"respec: read failed: {failed}"
+  if waiting:
+    units = handoff.state.get("units") or {}
+    handoff.graph.order = [uid for uid in handoff.graph.order if (units.get(uid) or {}).get("number")]
+  return error
 
 
 def respec_lines(handoff) -> list:
@@ -376,6 +399,10 @@ def tick_trigger(handoff) -> str | None:
         return f"exit-file {mine[-1][0]}"
   saved = state.get("status")
   previous = (saved or {}).get("units") or {}
+  # U91: under a review-origin respec, or a failed read of it, the unfiled units have no issue to read (the driver
+  # builds a fresh handoff)
+  if failed := skip_unfiled(handoff):
+    core.journal(st, failed)
   summary, _ = core.status_pass(handoff, save=False)
   builders = builder_logins(st)
   from superegm import phase

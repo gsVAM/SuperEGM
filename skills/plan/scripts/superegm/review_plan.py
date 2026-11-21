@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: plan review's dispatch set and the set and proportion inputs (spec section 9.2); a proceeded unit converged at the ruling's pinned bytes (U57).
+# Added by SuperEGM (gsVAM), 2026: plan review's dispatch set and the set and proportion inputs (spec section 9.2); a proceeded unit converged at the ruling's pinned bytes (U57); a fresh cycle after a respec closed the cycle or a replan moved a proceeded body (U91).
 
 """superegm review-plan due|set-input|proportion-input: what a plan-review round dispatches, and
 the texts the `set` and `proportion` reviewers read (spec section 9.2). Writes nothing."""
@@ -66,7 +66,8 @@ def due_rows(st: core.Store, runcard: str) -> list[tuple[str, str, str, str, str
   """One row per unfiled unit: `(unit, due|converged|stalled|cap|fix-design, review id or -, next round or -,
   body_sha256)`. `converged` needs the converged round's bytes to be the unit's current bytes and no round
   file above it, or, on a cycle the owner proceeded, the unit's current bytes to be the ruling's `sha256`; any other
-  exit 0 or 3 is `due` at the highest round file plus one."""
+  exit 0 or 3 is `due` at the highest round file plus one. A cycle a respec approval closed, and a proceeded cycle whose
+  pinned sha is not the body's, are `due - 1`: `review open` opens a new cycle (U91)."""
   rows = []
   for uid, sha in unfiled(st):
     latest, _ = review.latest_cycle(st, "plan", uid)
@@ -74,12 +75,18 @@ def due_rows(st: core.Store, runcard: str) -> list[tuple[str, str, str, str, str
       rows.append((uid, "due", "-", "1", sha))
       continue
     rid = review.review_id(st, "plan", uid, latest["cycle"])
+    if review.respec_closed(st, latest, rid):  # U91: a respec approval closed the cycle, at its cap or not
+      rows.append((uid, "due", "-", "1", sha))
+      continue
     code = status_of(rid, runcard)
     last = max(review.round_numbers(st, rid), default=0)
     word = {4: "fix-design", 5: "stalled", 2: "cap"}.get(code)
     proceed = review.last_proceed(latest)
     if code == 0 and proceed:  # U57: the owner's proceed pins the body bytes it ruled on
-      word = "converged" if proceed.get("sha256") == sha else None
+      if proceed.get("sha256") != sha:  # U91: a replan changed the body: the proceeded cycle is closed, a fresh one opens
+        rows.append((uid, "due", "-", "1", sha))
+        continue
+      word = "converged"
     elif code == 0:
       converged = latest["converged_round"] or last
       rnd = review.load_round(st, rid, converged)

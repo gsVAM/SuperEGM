@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45); the `proceed again` item and the merge on the authorizing outcome (U92); the `conflict` item (U62); a ruling's action the inbox with its `forms` and `on`, a review's its skill session, and `inbox withdrawn` (U72); no merge item for a head a `respec:` mark holds (U86); a contested item carries the unconverged panel's verdict line (U88), a head contest held only while the store's panel record for its review and round is open (U88).
+# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45); the `proceed again` item and the merge on the authorizing outcome (U92); the `conflict` item (U62); a ruling's action the inbox with its `forms` and `on`, a review's its skill session, and `inbox withdrawn` (U72); no merge item for a head a `respec:` mark holds (U86); a contested item carries the unconverged panel's verdict line (U88), a head contest held only while the store's panel record for its review and round is open (U88); the `waiting respec R<n>` line of a respec from a review's design finding (U91).
 
 """superegm inbox [--all] [--json] [--handoff <id>]: one line per item that needs the owner across the
 store's open handoffs, read-only and with no run card; superegm inbox withdrawn --pr <n> --reason <text>: the merge
@@ -269,8 +269,11 @@ def respec_held(hs: core.Store, uid: str) -> bool:
 
 
 def respec_read_items(hs: core.Store, repo: str, hid: str) -> list:
-  """Spec section 7.6: one `respec` item when the handoff's marks cannot be read (`respec_held` then holds every
-  unit), naming the error; none when they read."""
+  """Spec section 7.6: one `respec` item naming the error when the handoff's marks cannot be read (`respec_held` then
+  holds every unit: no merge is offered on a held head until it reads); else one when its open respecs cannot be read
+  (`respec.marks` reads only the applied `R<n>.json`, so no unit is held, while `file`, `integrate` and `next` wait);
+  when both read, one `waiting respec R<n>` item per open respec raised from a review's design finding (`unit: null`,
+  U91), chained or not (`chain_items` leaves those lines, and `next`'s read-failed one, to this one), none else."""
   from superegm import respec  # at call time: `respec` reads `launch`'s records
   if not hs.handoff_id:
     return []
@@ -278,7 +281,13 @@ def respec_read_items(hs: core.Store, repo: str, hid: str) -> list:
     respec.marks(hs, hs.handoff_id)
   except (core.HandoffError, ValueError, OSError) as error:
     return [item(repo, hid, "respec", f"read failed: {error}: no merge is offered on a held head until it reads", "read-failed")]
-  return []
+  try:
+    waiting = respec.review_open(hs, hs.handoff_id)
+  except (core.HandoffError, ValueError, OSError) as error:
+    return [item(repo, hid, "respec", f"read failed: {error}: the open respecs are unread; no unit is held, and file "
+                 "and integrate wait until it reads", "read-failed")]
+  # U91: a respec raised from a review's design finding waits for the owner's `/superegm:review-spec`
+  return [item(repo, hid, "respec", f"waiting respec {r['id']}", f"waiting:{r['id']}") for r in waiting]
 
 
 def conflict_items(repo: str, state: dict, uid: str, foreman: dict, launches: list, parallel: bool,
@@ -467,6 +476,8 @@ def chain_items(store: core.Store, hs: core.Store, repo: str, hid: str, state: d
   try:
     printed = phase.next_line(store, hid)
   except core.HandoffError:
+    return []
+  if printed.startswith("waiting respec"):  # U91: `respec_read_items` carries it (or its read failure), chained or not
     return []
   if printed.startswith("waiting "):
     action = printed

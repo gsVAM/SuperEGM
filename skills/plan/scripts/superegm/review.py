@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review settle --judges` for a head's contested or declined high or medium on a normal-mode card, journalled `Ruling (judges <panel>, contest)` (U88); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76); a spec cycle's changed reference documents as whole-file `changed <path>` scope lines, their `refs` manifest on each round, in the scope filter, the settle check and the proceed ruling (U75); `review open --respec R<n>`: the diff and its sections as evidence, the `design`, `codebase-details` and Astra panel, cap 2 (U85).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review settle --judges` for a head's contested or declined high or medium on a normal-mode card, journalled `Ruling (judges <panel>, contest)` (U88); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76); a spec cycle's changed reference documents as whole-file `changed <path>` scope lines, their `refs` manifest on each round, in the scope filter, the settle check and the proceed ruling (U75); `review open --respec R<n>`: the diff and its sections as evidence, the `design`, `codebase-details` and Astra panel, cap 2 (U85); a plan or integrate cycle a respec approval closed by its `source_review` (U91).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest|triage: the one review loop (spec section 8)."""
 
@@ -480,13 +480,15 @@ def latest_cycle(st: core.Store, kind: str, artifact: str) -> tuple[dict | None,
   """The latest cycle's `review.json` of this artifact and whether that cycle is closed: by an
   `accept` or `stop` ruling; a spec's by the approval that names it, once the bytes moved off its
   sha, and a respec cycle's once its R<n> is not open (applied, or withdrawn by a stopped unit); an integrate's by the handoff closing or changing (D1 (a)), or by a `## Units` amendment
-  past the bytes its latest completed round reviewed (a cycle with no completed round stays)."""
+  past the bytes its latest completed round reviewed (a cycle with no completed round stays); a plan or integrate
+  cycle by a respec approval (U91, `respec_closed`): an approval entry whose `source_review` is the cycle's id and
+  whose `handoff_id` is the cycle's, its `fix-design` finding resolved by the respec."""
   cycles = cycle_ids(st, kind, artifact)
   if not cycles:
     return None, False
   rid = cycles[-1]
   review = load_review(st, rid)
-  closed = any(r["ruling"] in ("accept", "stop", "proceed") for r in review["rulings"])
+  closed = any(r["ruling"] in ("accept", "stop", "proceed") for r in review["rulings"]) or respec_closed(st, review, rid)
   if not closed and kind == "spec":
     approval = core.load_approval(st, Path(artifact))
     closed = bool(approval) and approval["review"] == rid and approval["sha256"] != current_sha(st, kind, artifact)
@@ -502,6 +504,21 @@ def latest_cycle(st: core.Store, kind: str, artifact: str) -> tuple[dict | None,
     closed = bool(state.get("closed_at")) or ("handoff_id" in review and state.get("handoff_id") != review["handoff_id"]) \
         or bool(amended and latest_sha and amended[-1]["sha256"] != latest_sha)
   return review, closed
+
+
+def respec_closed(st: core.Store, review: dict, rid: str) -> bool:
+  """Whether a respec approval closed this plan or integrate cycle (U91): an approval entry of the cycle's own handoff
+  (`handoff_id` equal: review ids are handoff-local) whose `source_review` is `rid`. Its `fix-design` finding is then
+  resolved by the respec and the next review of the artifact opens a new cycle."""
+  if review.get("kind") not in ("plan", "integrate"):
+    return False
+  from superegm import respec as respecs
+  handoff = review.get("handoff_id") or st.handoff_id
+  try:
+    spec = Path(review["artifact"]) if review["kind"] == "integrate" else respecs.spec_of(st, handoff)
+  except core.HandoffError:  # a handoff naming no spec has no approval to close it
+    return False
+  return any(e.get("source_review") == rid and e.get("handoff_id") == handoff for e in core.load_approvals(st, spec))
 
 
 def current_sha(st: core.Store, kind: str, artifact: str):
@@ -1353,7 +1370,8 @@ def evaluate(st: core.Store, review: dict, runcard: str) -> Status:
   completed = [r for r in rounds if r["what_ran"] == "completed"]
   latest = completed[-1] if completed else None
   rulings = [r["ruling"] for r in review["rulings"]]
-  fix_design = any(f["disposition"] == "fix-design" for r in rounds for f in findings_of(r))
+  fix_design = any(f["disposition"] == "fix-design" for r in rounds for f in findings_of(r)) \
+      and not respec_closed(st, review, rid)  # a respec approval resolved the finding: its exit 4 ends (U91)
   clean = latest is not None and not any(blocking(f) and f["disposition"] is None for f in findings_of(latest))
   regressions = regressions_of(latest) if latest else 0
   accept = next((r for r in reversed(review["rulings"]) if r["ruling"] == "accept"), None)
