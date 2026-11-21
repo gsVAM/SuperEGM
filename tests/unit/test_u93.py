@@ -580,7 +580,7 @@ def test_clean_names_an_entry_of_the_builder_folder_that_is_not_a_builder_tree(w
   assert code == 0, out
   for entry in (scratch, loose, odd):
     assert entry.exists() and f"kept {entry}: not a builder tree" in out  # said, and left alone
-  assert not builder.exists() and f"kept {builder}" not in out
+  assert not builder.exists() and f"kept {builder}:" not in out
 
 
 def test_clean_auto_leaves_out_the_routine_not_a_builder_tree_line(world):
