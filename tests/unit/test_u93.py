@@ -150,3 +150,11 @@ def test_clean_auto_cleans_terminal_units(world, skill, unit, cleaned):
   assert (s.path("worktrees", UNIT)).exists() is not cleaned
   assert (f"{UNIT} cleaned" in out) is cleaned
   assert (f"{UNIT} cleaned" in journal_text(s)) is cleaned
+
+
+@pytest.mark.parametrize("path", ["skills/wave/SKILL.md", "skills/integrate/SKILL.md"])
+def test_skills_run_clean_auto(path):
+  # wave: at the end of each invocation after its last launch; integrate: after its filing
+  text = read(path)
+  assert "clean --auto" in text
+  assert len(text.split("---", 2)[2].encode("utf-8")) <= 24000  # the skill body limit
