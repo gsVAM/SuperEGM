@@ -96,7 +96,7 @@ ignored except `landed` and `stalled`; `conflict` lines need nothing before step
 6. `superegm launch`: `--idle <the report's idle list> --runcard '<CARD>'` (omit `--idle` on `none`) marks the ready units up to the free slots and prints `in flight:` and `marked:`; a clean `conflict` unit is marked once for its **merge round**. Per marked unit: `superegm launch-builder --unit <U> --round <n> --runcard '<CARD>'` (`<n>` is the launch count) alone: `launch-builder` starts the builder and records the launch, detached in its own session, and returns at once. A `launch-builder` refusal makes the unit idle for this invocation, no retry: `superegm report --idle '<U>=launch-builder: <reason>' --runcard '<CARD>'`.
 7. `superegm report`: `python3 '<HELPER>' report --runcard '<CARD>'`, then `python3 '<HELPER>' notify --runcard '<CARD>'` (the owner's `~/.superegm/notify` hook gets the new inbox lines; a failing or slow hook never stops the wave). If a decision was opened this batch, pause (outside SUPEREGM_ROLE=driver, above): ask the owner at its decision point and run `report` again once ruled. Else `loop: ended` and no 5b line of a non-idle unit → The end; else the next batch.
 
-A launched unit's `unit_state` (`waiting respec` among them), `loop_ended` and `ci_wait_minutes`: `references/resume_notes.md`.
+`loop_ended`: no active unit, no ready unlaunched unit with a free slot, nor a merge round `launch` would mark. `unit_state` (`waiting respec`), `ci_wait_minutes`: `references/resume_notes.md`.
 
 ## The word table
 
@@ -128,7 +128,7 @@ dispatch):
 - A `decision rule` whose post or label request fails (a `gh` error, not a refusal) records nothing: run it again, a `--posted` one included. A journaled `<U> <qid>: label superegm:stopped left on issue #<n>` means the label stayed on: run `gh issue edit <n> --remove-label superegm:stopped` first.
 ## The end
 
-At the end of every invocation, after its last launch (a paused one included), run `superegm clean --auto --runcard '<CARD>'`: it removes the worktrees of every landed, merged or stopped unit, prints one line per unit cleaned and never refuses, so it never stops the wave.
+At the end of every invocation, after its last launch (a paused one included), run `superegm clean --auto --runcard '<CARD>'`: it cleans every landed, merged or stopped unit, prints one line per unit cleaned and never refuses.
 
 Before the close, run batch step 3b once and `report` again (a thread posted before the last round's review is read now): an `outcome:` line or no longer `loop: ended` → back to the batches.
 
