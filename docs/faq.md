@@ -85,7 +85,7 @@ can accept then and there. The cap is `review.rounds` (default 3); a spec's `Rou
 **A**: Yes. List files, or folders of reference documents, under `instructions` in
 `.superegm/config.json`, each addressed to `builder`, `foreman`, `reviewers` and `judges` as you
 choose. `approve-spec` freezes them. What goes to `reviewers` or `judges` also goes to the Codex
-vendor when `astra.enabled` is true: through the Astra lane for reviewers and through the `astra` judge for judges.
+vendor: through the Astra lane for reviewers (seated when `astra.enabled` is true, or when a review is opened with `--astra on`) and through the `astra` judge for judges (when `astra.enabled` is true).
 
 #### Q: Can I add a reviewer of my own?
 
@@ -95,7 +95,7 @@ the id in `reviewers.<kind>`.
 #### Q: Does the chain run on its own?
 
 **A**: Only when `driver.chain` is `true` (default `false`). The brainstorm offers it once doctor
-passes; `superegm driver kick --root <path>` runs a tick now, if the driver is installed and the
+passes; `superegm driver kick --root <path>` runs a tick now, if the driver is installed, the root is registered and the
 store's `driver.chain` is true.
 
 #### Q: What does a withdrawn inbox offer mean?

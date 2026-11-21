@@ -67,7 +67,7 @@ call (`--timeout 540` under a 600000 ms limit) and waits for it, so nothing outl
   whole command line; `record-launch` records it and, later, its exit.
 - Headless sessions SuperEGM starts set `SUPEREGM_ROLE` to `builder` or `goldfish` and
   `SUPEREGM_RUNCARD` to the run card they run under; the session hook prints nothing for those
-  roles. The third role is the driver's: a `driver tick` launches its `wave --leavemealone`
+  roles. The third role is the driver's: a `driver tick` launches its `wave` (or, with `driver.chain` true, its next phase's)
   session with `SUPEREGM_ROLE=driver`, and the hook prints its text for it as for any role but
   `builder` and `goldfish`.
 - A builder launch loads the plugins of `config.builder.plugins` with one `--plugin-dir` each
@@ -119,7 +119,7 @@ call (`--timeout 540` under a 600000 ms limit) and waits for it, so nothing outl
 - The driver is a launchd agent (on Linux a systemd user timer) that runs `superegm driver tick`
   in the environment of `~/.superegm/env` (`KEY=value` lines, mode 0600: `PATH`, `CLAUDE_CONFIG_DIR`
   and the builder identity's variable). A tick records each launch in `driver/<handoff>.json` before
-  starting it, and launches `claude -p` with `/superegm:wave <spec> --handoff <id> --leavemealone`
+  starting it, and launches `claude -p` with `/superegm:wave <spec> --handoff <id>` (plus `--leavemealone` when the handoff's frozen mode is not normal; with `driver.chain` true the phase is the one `superegm next` names)
   in its own session and process group; the plist sets `AbandonProcessGroup` (the systemd unit
   `KillMode=process`), so the reaping of the exited tick leaves the session alive. That session runs
   `--permission-mode bypassPermissions` with no allow-list and no prompt, under the credential the
@@ -128,7 +128,7 @@ call (`--timeout 540` under a 600000 ms limit) and waits for it, so nothing outl
   and loops over every store, so several stores' sessions may run at once. A tick merges nothing in any
   mode and chains nothing, unless `driver.chain` is `true` (default `false`), when a tick may carry a
   handoff on to its next phase, never `integrate`; `driver kick --root <path>` runs a tick now, only when the driver
-  is installed, the root registered and that store's `driver.chain` true, and opens no card.
+  is installed, the root registered and that store's `driver.chain` true; `kick` takes no `--runcard`, though the tick it runs opens a `driver` card for any launch or notify.
 - The inbox asks in words. A merge offer the unit has outgrown is `inbox withdrawn` and journals
   `merge withdrawn`. A bare `inbox` is read-only and opens no card; `inbox withdrawn` typed without
   `--runcard` opens and closes its own inbox card, an exception that sits next to
@@ -139,7 +139,7 @@ call (`--timeout 540` under a 600000 ms limit) and waits for it, so nothing outl
 
 - `instructions` in `.superegm/config.json` names files, or folders of reference documents, each
   addressed `to` any of `builder`, `foreman`, `reviewers` and `judges`. `approve-spec` freezes them
-  by blob sha into the store, and `superegm instructions --role <role> (--handoff <id> --runcard <card> | --spec <path> --review <id> --round <n>)` prints a role's section,
+  by blob sha into the store, and `superegm instructions --role <role> --runcard <card> (--handoff <id> | --spec <path> --review <id> --round <n>)` prints a role's section,
   which every brief carries last. A file cannot grant a tool: `builder.allowed_tools` stays the
   owner's. A builder's own branch never changes what an agent was told.
 - The brainstorm's builder check and visual companion run in the owner's session: the companion
