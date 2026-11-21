@@ -65,9 +65,7 @@ def converged_review(store: core.Store, uid: str, marks: dict | None = None):
   returned `plan` for any unfiled unit carrying a `replan:` mark before it asks (no `require_gate` guards it).
   While a respec raised from a review's design finding (`unit: null`) is open, refused `file: respec R<n> open`
   (U91): `gate --pass` and a resumed `apply` wait on it; `next` prints its wait row before it asks."""
-  waiting = respec.review_open(store, store.handoff_id) if store.handoff_id else []
-  if waiting:
-    raise core.HandoffError(f"file: respec {waiting[0]['id']} open")
+  require_no_review_respec(store)
   if marks is not None:
     require_replanned(uid, marks)
   latest = None
@@ -87,9 +85,20 @@ def converged_review(store: core.Store, uid: str, marks: dict | None = None):
   return True, rnd["artifact_sha256"]
 
 
+def require_no_review_respec(store: core.Store) -> None:
+  """Refused `file: respec R<n> open` while a respec raised from a review's design finding (`unit: null`) is open on
+  the store's handoff (U91)."""
+  waiting = respec.review_open(store, store.handoff_id) if store.handoff_id else []
+  if waiting:
+    raise core.HandoffError(f"file: respec {waiting[0]['id']} open")
+
+
 def require_gate(handoff) -> None:
-  """The gate passed on the current plan and bodies. An unfiled `replan: R<n>` unit is refused first (U90): a
-  respec changes every body's spec hash, so the hash test alone would hide the re-plan from a resumed `apply`."""
+  """The gate passed on the current plan and bodies. An open `unit: null` respec is refused first (U91), so a dry run
+  never rewrites the confirmed receipt and an apply with no unit left to file never skips the wait; then an unfiled
+  `replan: R<n>` unit (U90): a respec changes every body's spec hash, so the hash test alone would hide the re-plan
+  from a resumed `apply`."""
+  require_no_review_respec(handoff.store)
   marks = handoff_marks(handoff.store, handoff.repo_root)
   for uid in handoff.graph.order:
     if handoff.filed(uid) is None:

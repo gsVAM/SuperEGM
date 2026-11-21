@@ -418,6 +418,21 @@ def test_plan_respec_skips_unfiled_units(world, monkeypatch):
   assert any("waiting respec R1" in line for line in lines), lines
 
 
+def test_a_failed_respec_read_keeps_the_unit_list(world):
+  """A bad `respec/R1.open.json`: `status` prints `respec: read failed: <error>` beside its unit list and exits 0, and
+  the inbox lists a `read failed` item, never raising."""
+  import test_builders as tb
+  from superegm import inbox, store as store_of
+  s, card, hid, _ = tb.seed(world, units=("U05", "U07"))
+  s.path("file", "respec").mkdir(parents=True, exist_ok=True)
+  s.path("file", "respec", "R1.open.json").write_text("{not json", encoding="utf-8")
+  code, out = world.run("status", "--runcard", card)
+  assert code == 0 and "respec: read failed: " in out, out
+  assert {"U05", "U07"} <= {line.split()[0] for line in out.splitlines() if line[:1] == "U"}, out
+  lines = [inbox.line_of(i) for i in inbox.inbox_items(store_of(world.repo), [hid])]
+  assert any("read failed" in line for line in lines), lines
+
+
 def test_wave_trigger_skips_unfiled_units(world):
   """The driver's `wave_trigger` reaches `tick_trigger` on a fresh handoff: U07, unfiled under the plan-origin
   respec, is never read from GitHub (no `issues/None`), and the tick still reads the filed unit."""

@@ -495,9 +495,11 @@ def plan_waiting(store: core.Store, handoff: str) -> list:
 
 def record_open(args) -> int:
   """`respec open` (U91): write `respec/R<n>.open.json` (`{id, unit: null, review, finding, at}`) in the handoff's
-  directory, `R<n>` the next number no `respec/` file uses. The owner's alone: refused under `SUPEREGM_ROLE` or a
-  leavemealone card; refused on a head review's finding and on a finding not settled `fix-design`. A rerun on the same
-  review and finding keeps the file it wrote."""
+  directory, `R<n>` the next number no `respec/` file uses. Refused, nothing written: under `SUPEREGM_ROLE` or a
+  leavemealone card (`respec open: owner only`); a review never opened; a head review's finding; a review neither plan
+  nor integrate; a finding the review does not hold (`respec open: no finding <fid>`); a finding not settled
+  `fix-design`. A rerun on the same review and finding prints the R<n> it wrote while that respec is open, and is
+  refused once an approval applied it or it was withdrawn."""
   from superegm import review as review_mod  # at call time, as `eligible` imports it
   card = core.require_runcard(args, OPEN_SKILLS)
   if os.environ.get("SUPEREGM_ROLE") or card.get("mode") == "leavemealone":
@@ -510,7 +512,10 @@ def record_open(args) -> int:
     raise core.HandoffError(f"respec open: {args.review} is a head review: its findings open no respec")
   if found["kind"] not in ("plan", "integrate"):
     raise core.HandoffError(f"respec open: {args.review} is a {found['kind']} review, not plan or integrate")
-  disposition = review_mod.locate_finding(st, args.review, args.finding)[3].get("disposition")
+  try:
+    disposition = review_mod.locate_finding(st, args.review, args.finding)[3].get("disposition")
+  except core.HandoffError:  # `review settle: no finding <fid>`, review's own wording
+    raise core.HandoffError(f"respec open: no finding {args.finding}") from None
   if disposition != "fix-design":
     raise core.HandoffError(f"respec open: {args.finding} is {disposition or 'unsettled'}, not fix-design")
   folder = respec_path(st)
@@ -518,6 +523,8 @@ def record_open(args) -> int:
   for path in files:
     held = load_json(path) if OPEN_FILE.match(path.name) else None
     if isinstance(held, dict) and held.get("unit") is None and (held.get("review"), held.get("finding")) == (args.review, args.finding):
+      if held.get("id") not in {r["id"] for r in (review_open(st, st.handoff_id) if st.handoff_id else [])}:
+        raise core.HandoffError(f"respec open: {held.get('id')} from {args.review} {args.finding} is applied or withdrawn")
       print(f"respec {held['id']} open: {path.name}")
       return 0
   used = [int(m.group(1)) for p in files if (m := re.match(r"R(\d+)\.", p.name))]
