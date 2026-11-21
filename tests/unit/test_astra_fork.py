@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: paths under the section 14 names; README tests removed; MODIFIED set.
+# Modified by SuperEGM (gsVAM), 2026: paths under the section 14 names; README tests removed; MODIFIED set; the review.rounds cap and 1.2.1 docs pins (U50).
 
 """Wiring checks for the fork: Astra lane, panels, run card, change notices."""
 
@@ -367,17 +367,21 @@ def test_convergence_rule_is_stated_once_and_referenced() -> None:
   assert "## 7. Convergence and the round cap" in PANELS
   for text in ("no finding in the round is attributable to the previous round's fixes",
                "regression: yes|no",
-               "Cap: 5 rounds, then pause",
-               "Never start round 6 without their answer"):
+               "review.rounds"):
     assert text in flat, text
+  assert "Cap: 5 rounds" not in flat and "Never start round 6" not in flat
   # SuperEGM section 11: the wave skill pauses at the cap (decision point 2); the convergence doctrine
   # lives in review_loop.md, which the wave skill no longer references (U10b).
   wave = " ".join(read("skills/wave/references/decision_points.md").split())
-  assert "Cap: 5 rounds, then PAUSE" in wave
+  assert "review.rounds" in wave and "Cap: 5 rounds" not in wave
   assert "Cap 3 rounds" not in wave and "Cap 3 rounds" not in read("skills/wave/SKILL.md"), "the fixed cap must be gone"
   # SuperEGM section 9.2: the plan review's rounds run through the judge panel, which stops at the cap.
   judges = " ".join(read("skills/judges/SKILL.md").split())
   assert "the cap of 5 rounds is reached" in judges and "cap_reached" in judges
+  # 1.2.1: README and faq keep no fixed five-round cap; the judge panel's own cap of 5 stays
+  for doc in ("README.md", "docs/faq.md"):
+    assert "five rounds" not in " ".join(read(doc).split()), doc
+  assert "|5 rounds|" not in read("README.md")
 
 
 
@@ -436,3 +440,15 @@ def test_the_helper_declares_itself_single_writer() -> None:
                "skills/plan/references/handoff_config.md"):
     flat = " ".join(read(path).split())
     assert "single-writer" in flat or "One command at a time" in flat, path
+
+
+@pytest.mark.parametrize("path, text", [
+    *[(p, k) for p in ("README.md", "skills/plan/references/handoff_config.md") for k in (
+        "instructions", "review.rounds", "units.max_body_kb", "units.max_files", "units.max_steps",
+        "driver.chain", "reviewers.", "builder.precheck_attempts", "builder.escalate_after")],
+    ("README.md", "post-mortem"), ("README.md", "superegm inbox"), ("README.md", ".superegm/reviewers/"),
+    ("docs/privacy.md", "Codex"), ("docs/privacy.md", "visual companion"),
+])
+def test_docs_cover_1_2_1(path, text):
+    # every 1.2.1 key a user configures and every feature a user sees is documented
+    assert text in " ".join(read(path).split())

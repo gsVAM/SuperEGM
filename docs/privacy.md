@@ -1,6 +1,6 @@
 <!-- Copyright 2026 Google LLC. SPDX-License-Identifier: Apache-2.0 -->
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: Astra lane section, fork issue tracker. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: what SuperEGM sends to GitHub and to OpenAI, the builder account's token, the store and the config keys that bound it. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: what SuperEGM sends to GitHub and to OpenAI, the builder account's token, the store and the config keys that bound it; the 1.2.1 statements on instruction files and the visual companion (U50). -->
 
 # SuperEGM data handling
 
@@ -51,9 +51,26 @@ the finding lines of every reviewer of the last posted round, the Claude reviewe
 with their dispositions). From round 2 of a head, the Claude reviewers' findings therefore leave the machine.
 Set `"heads": false` under `astra` to keep heads Claude-only.
 
-Opt out with `"astra": {"enabled": false}` in `.superegm/config.json`, `codex logout`, or by not
+An instruction file or reference document addressed to `reviewers` or `judges` (config key
+`instructions`) goes to the Codex vendor too, through the Astra lane and the `astra` judge: the
+brief carries each file's text, and each reference document's bytes up to 262,144 bytes together.
+Addressing a file to `builder` or `foreman` alone keeps it out of the brief's instructions section
+only: a builder's instructions are part of the prompt of its `claude -p` session, so the host
+(Claude Code) processes them under its own terms, and when such a file is changed in a reviewed pull
+request, its diff is part of the Astra brief like any other changed file. The `astra` judge is
+skipped when `astra.enabled` is false, but a review opened with `--astra on` seats the lane whatever
+that key says, so its brief, and the reviewers' instruction files, go to Codex then. Do not address
+a file to `reviewers` or `judges` if it must stay off the vendor's side.
+
+Opt out of the lane with `"astra": {"enabled": false}` in `.superegm/config.json`, `codex logout`, or by not
 installing claudex-loop; the lane then records `not run` and the review runs Claude-only. Local
 copies of each prompt and reply stay under `${TMPDIR:-/tmp}`; delete them when done.
+
+## The visual companion
+
+The brainstorm's visual companion is a local server that binds `127.0.0.1` and serves only with
+its `?key=` token, and only after the owner says yes. Nothing the visual companion shows leaves
+the machine.
 
 ## Builders and goldfish
 

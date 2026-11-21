@@ -1,12 +1,12 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-Modified by SuperEGM (gsVAM), 2026: EGM's repository-rules reference brought to `.superegm/config.json`'s key set, the launch-policy keys `owners`, `owner_team` and `pr_block_file` included (spec section 11); SuperEGM 1.2's keys added, the example brought to `DEFAULT_CONFIG`: `reviewers.model`, `reviewers.effort`, `brainstorm.team`, `foreman.run_timeout_minutes`, `notify_timeout_seconds`, `builder.effort`, `builder.plugins`, `builder.mcp`, `builder.max_subagent_calls`, `builder.stall_minutes`, `builder.tiers`, `astra.heads_effort` and `ingest` (spec sections 6, 7, 8, 11, 11.1 and 11.2). -->
+Modified by SuperEGM (gsVAM), 2026: EGM's repository-rules reference brought to `.superegm/config.json`'s key set, the launch-policy keys `owners`, `owner_team` and `pr_block_file` included (spec section 11); SuperEGM 1.2's keys added, the example brought to `DEFAULT_CONFIG`: `reviewers.model`, `reviewers.effort`, `brainstorm.team`, `foreman.run_timeout_minutes`, `notify_timeout_seconds`, `builder.effort`, `builder.plugins`, `builder.mcp`, `builder.max_subagent_calls`, `builder.stall_minutes`, `builder.tiers`, `astra.heads_effort` and `ingest` (spec sections 6, 7, 8, 11, 11.1 and 11.2); SuperEGM 1.2.1's keys added: `instructions`, `review.rounds`, `units.*`, `driver.chain`, custom reviewer ids, `builder.precheck_attempts` and `builder.escalate_after`. -->
 
 # Repository configuration: `.superegm/config.json`
 
 Repository rules live in `.superegm/config.json` at the repository root (the git
 top level of the design file), not in the plugin: the plugin is generic.
-`superegm init` writes the file with every key's default and prints the owner's
+`superegm init` writes the file with every key's default except `driver.chain`, which it leaves out (absent reads `false`), and prints the owner's
 by-hand steps; a missing file means the defaults, and the dry run says so.
 Unknown keys stop.
 
@@ -51,9 +51,14 @@ Unknown keys stop.
     "mcp": {},
     "max_subagent_calls": 12,
     "stall_minutes": 30,
+    "precheck_attempts": 3,
+    "escalate_after": 2,
     "tiers": {"difficult": {"model": "claude-opus-5-5", "effort": "high"}, "easy": {"model": "claude-sonnet-5-5", "effort": "medium"}},
     "app": null
   },
+  "instructions": [],
+  "review": {"rounds": 3},
+  "units": {"max_body_kb": 25, "max_files": 10, "max_steps": 16},
   "ci_wait_minutes": 30,
   "astra": {"enabled": false, "model": "gpt-6-astra", "effort": "xhigh", "heads": true, "heads_effort": "high"},
   "ingest": {"severity_words": {"bug": "high", "issue": "medium", "nit": "low", "suggestion": "low"}, "human_role": "write"}
@@ -65,7 +70,7 @@ Unknown keys stop.
 | `repo` | parsed from `git remote get-url origin` | `^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`. The helper then finds, in `git remote -v`, the remote whose URL names it in any form (`https://github.com/O/N[.git]`, `git@github.com:O/N[.git]`, `ssh://git@github.com/O/N[.git]`), records it as `remote` in the state for `prepare`, and stops with "no remote for OWNER/NAME in <repo root>: add one or fix `repo`" when none matches. In a fork checkout `origin` is the fork and the target is usually `upstream`. |
 | `base` | `main` | The default branch; `init` refuses another. The owner pushes the approval commit to `origin/<base>`, `launch` fetches it, and every builder branch starts from it. |
 | `artifacts_dir` | `~/.superegm/<owner>/<name>` (`init`) | An absolute path outside the working tree: the store (unit files, issue bodies, reviews, launches, judge panels), never committed. |
-| `mode` | `normal` | `normal` or `leavemealone`: in leavemealone-mode the judge panel rules at every decision point; merge stays the owner's in both. |
+| `mode` | `normal` | `normal` or `leavemealone`: in leavemealone-mode the judge panel rules at every decision point; merge stays the owner's in both. Approval freezes the mode, so an edit governs handoffs approved after it. |
 | `max_in_flight` | `5` | A positive integer: how many units `launch` keeps in flight at once. |
 | `labels.unit` | `superegm:unit` | On every unit issue. Each label name must match `^[^,\s]{1,50}$` (GitHub rejects longer names). |
 | `labels.wave_prefix` | `superegm:wave-` | `superegm:wave-<n>` on every unit issue. |
@@ -78,7 +83,7 @@ Unknown keys stop.
 | `banned_terms` | `[]` | Regular expressions matched line by line against the RAW text of every body and comment - code spans and fenced blocks included; the banned-term rule is not code-aware, so a banned term in backticks is still refused and the author rewords. A repository that must not name AI tools in GitHub text lists them here. |
 | `fix_request_mention` | none | `^@[A-Za-z0-9-]+(\[bot\])?$`. The one mention the scan allows, on the first line of a round comment, because coding-agent services act on PR feedback only when a comment mentions them. Never allowed in a body. |
 | `allowed_mentions` | `[]` | `@name` strings that may appear in any body or comment. A name inside a fenced code block or an inline code span is never a mention (GitHub notifies for neither); any other legitimate mention must be listed here as the EXACT token GitHub would resolve, e.g. `@types/node` - `@types` does not cover `@types/node`, and `@acme` never covers the team `@acme/release`, which would subscribe its members. The allowlist exempts mentions only, never banned terms. Otherwise a refusal names the line and the author rewords. |
-| `reviewers` | the spec's panels | One reviewer list per review kind (`spec`, `plan`, `head`, `integrate`); each name is an adapter in `.claude-plugin/agents/`, except `head`'s `astra`, which is informational: `astra.enabled` and `astra.heads` seat the Astra lane. |
+| `reviewers` | the spec's panels | One reviewer list per review kind (`spec`, `plan`, `head`, `integrate`); each name is an adapter in `.claude-plugin/agents/` or the id of a `.superegm/reviewers/<id>.md` file, except `head`'s `astra`, which is informational: `astra.enabled` and `astra.heads` seat the Astra lane. |
 | `reviewers.model` | `opus` | The model of every review goldfish dispatch of the four kinds, in the Agent tool's alias form (`sonnet`, `opus`, `haiku`, `fable`), passed as the adapter's per-dispatch override; the judges use their members' values instead. `SUPEREGM_GOLDFISH_MODEL`, when set, overrides it for the session, and `inherit` passes nothing. |
 | `reviewers.effort` | `xhigh` | The effort of those dispatches, `low` to `max`. `SUPEREGM_GOLDFISH_EFFORT` overrides it the same way, and an exported `CLAUDE_CODE_EFFORT_LEVEL` becomes every goldfish's effective effort. |
 | `astra` | disabled | `enabled`, `model`, `effort`, `heads`: the Astra lane, GPT-model reviewers run headlessly through claudex-loop. Once `enabled` is true, `heads` (true; a config without it reads true) seats the lane on every head review. `effort` is the elephant's lanes'. |
@@ -102,12 +107,21 @@ Unknown keys stop.
 | `notify_timeout_seconds` | `30` | A positive number: how long `notify` waits on the owner's `~/.superegm/notify` hook, which `wave` runs with the inbox lines new since the last notify on its stdin. The hook lives outside every repository; absent means no hook. |
 | `ingest.severity_words` | `bug` high, `issue` medium, `nit` low, `suggestion` low (Devin's words) | Words mapped to `high`, `medium` or `low` for `review ingest`, which reads PR review threads into the unit's latest posted round. Words match whole and case-folded, and `high`, `medium` and `low` themselves always count. An inline thread takes the word its first line starts with or carries in a bold or bracketed marker, else `low`; a human's review body is `medium` when its first line carries such a word, else `low`; a bot's review body is always `low`. |
 | `ingest.human_role` | `write` | `read`, `triage`, `write`, `maintain` or `admin`: the repository role from which a human's thread counts. A thread from a human below it is `low` whatever its words, recorded and never posted. |
+| `instructions` | `[]` | A list of `{file, to}` or `{dir, to}` entries (exactly one of `file` and `dir`); `to` is a non-empty list from `builder`, `foreman`, `reviewers`, `judges`. A `file` is at most 8,192 bytes; a `dir`'s `*.md` files (at most 50, 65,536 bytes each) are listed as reference documents. `approve-spec` freezes each by blob sha. A file addressed to `reviewers` or `judges` goes to the Codex vendor through the Astra lane (seated when `astra.enabled` is true, or when a review is opened with `--astra on`) and the `astra` judge (when `astra.enabled` is true). |
+| `review.rounds` | `3` | An integer 1 to 10: the round cap of a review, stored when the review opens. A spec's own review opens under the live value (a respec cycle opens with 2); a `Rounds: <n>` line counts only at column 0 in the spec's header, before its first `##` heading and outside fences. `approve-spec` freezes that line, else the live value, as the cap of the handoff's plan, head and integrate reviews, and a later change does not reach an approved handoff (one approved under 1.2.0 keeps 5). The judge panel keeps its own cap of 5. |
+| `units.max_body_kb` | `25` | A positive integer at most 48: the largest unit issue body, in KB. |
+| `units.max_files` | `10` | An integer of at least 8 (a lower value is refused): the most files a unit's Scope may name. |
+| `units.max_steps` | `16` | A positive integer: the most Steps a unit may have. |
+| `driver.chain` | `false` | True or false: `true` lets the driver carry a handoff through its phases unattended. Read live; no approval freezes it. `init` does not write this key: when it is absent it reads `false`. |
+| `reviewers.<kind>` | the spec's panels | Besides the built-in adapters, an id of a file `.superegm/reviewers/<id>.md` whose `kinds` holds the kind. |
+| `builder.precheck_attempts` | `3` | A positive integer: the most precheck runs a builder makes in one launch; once they are spent it pushes its best checkpoint with the open findings listed (a precheck never holds a push back for good). |
+| `builder.escalate_after` | `2` | A non-negative integer: failed rounds after which a unit escalates to the `difficult` tier; `0` turns escalation off for later rounds but does not undo an escalation already recorded. Only the current head cycle's posted foreman rounds that ended `revise`, `cap-reached` or contested with an open blocking finding count. |
 
 Fixed behaviour, not configuration: a bare `@name` in the text outside code is refused
 (it notifies that user); CI is required; a merged PR is required for landed;
 both PR-matching rules of the wave skill apply; the label colour is `1b6ef3`;
 derived labels are created without `--force` and existing labels are never
-edited; nothing is merged by a machine.
+edited; no builder, foreman or driver merges.
 
 The dry run makes three read-only `gh` calls: `gh auth status --hostname
 github.com`, `gh api repos/OWNER/NAME -q .permissions` (push access is

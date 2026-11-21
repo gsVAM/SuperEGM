@@ -3,7 +3,7 @@ Copyright 2026 Google LLC.
 SPDX-License-Identifier: Apache-2.0
 -->
 <!-- Modified by the elephant-goldfish-model Astra fork (gsVAM), 2026: fork install commands, Astra lane section, panel stage order. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: the platform facts of design section 4 in SuperEGM's names; EGM's install, stage, review-orchestrator and environment-variable text removed; the Astra head lane's foreground exception (U17); the store layout of one directory per handoff (U20); the 1.2 docs sweep: the driver role, the fleet, the builder's plugins, servers and effort, the accept below the cap and agent teams (U29). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the platform facts of design section 4 in SuperEGM's names; EGM's install, stage, review-orchestrator and environment-variable text removed; the Astra head lane's foreground exception (U17); the store layout of one directory per handoff (U20); the 1.2 docs sweep: the driver role, the fleet, the builder's plugins, servers and effort, the accept below the cap and agent teams (U29); the 1.2.1 docs sweep: repository instructions, the chain and the inbox's answers in words (U50). -->
 
 # Claude Code: the platform facts
 
@@ -67,7 +67,7 @@ call (`--timeout 540` under a 600000 ms limit) and waits for it, so nothing outl
   whole command line; `record-launch` records it and, later, its exit.
 - Headless sessions SuperEGM starts set `SUPEREGM_ROLE` to `builder` or `goldfish` and
   `SUPEREGM_RUNCARD` to the run card they run under; the session hook prints nothing for those
-  roles. The third role is the driver's: a `driver tick` launches its `wave --leavemealone`
+  roles. The third role is the driver's: a `driver tick` launches its `wave` (or, with `driver.chain` true, its next phase's)
   session with `SUPEREGM_ROLE=driver`, and the hook prints its text for it as for any role but
   `builder` and `goldfish`.
 - A builder launch loads the plugins of `config.builder.plugins` with one `--plugin-dir` each
@@ -119,14 +119,32 @@ call (`--timeout 540` under a 600000 ms limit) and waits for it, so nothing outl
 - The driver is a launchd agent (on Linux a systemd user timer) that runs `superegm driver tick`
   in the environment of `~/.superegm/env` (`KEY=value` lines, mode 0600: `PATH`, `CLAUDE_CONFIG_DIR`
   and the builder identity's variable). A tick records each launch in `driver/<handoff>.json` before
-  starting it, and launches `claude -p` with `/superegm:wave <spec> --handoff <id> --leavemealone`
+  starting it, and launches `claude -p` with `/superegm:wave <spec> --handoff <id>` (with `driver.chain` false, the default, always `wave` with `--leavemealone`; with `driver.chain` true the phase is the one `superegm next` names, and `--leavemealone` is added only when the handoff's frozen mode is not normal)
   in its own session and process group; the plist sets `AbandonProcessGroup` (the systemd unit
   `KillMode=process`), so the reaping of the exited tick leaves the session alive. That session runs
   `--permission-mode bypassPermissions` with no allow-list and no prompt, under the credential the
   env file names (the accepted residual: the driver goes only on a machine and repositories the
   owner would let a session act on alone). A tick starts at most one session per registered store
-  and loops over every store, so several stores' sessions may run at once. A tick chains nothing
-  and merges nothing.
+  and loops over every store, so several stores' sessions may run at once. A tick merges nothing in any
+  mode and chains nothing, unless `driver.chain` is `true` (default `false`), when a tick may carry a
+  handoff on to its next phase, never `integrate`; `driver kick --root <path>` runs a tick now, only when the driver
+  is installed, the root registered and that store's `driver.chain` true; `kick` takes no `--runcard`, though the tick it runs opens a `driver` card for any launch or notify.
+- The inbox asks in words. A merge offer the unit has outgrown is `inbox withdrawn` and journals
+  `merge withdrawn`. A bare `inbox` is read-only and opens no card; `inbox withdrawn` typed without
+  `--runcard` opens and closes its own inbox card, an exception that sits next to
+  `approve-spec --void`, which opens and closes its own card too, and `driver kick`, which runs
+  with no card.
+
+## Repository instructions
+
+- `instructions` in `.superegm/config.json` names files, or folders of reference documents, each
+  addressed `to` any of `builder`, `foreman`, `reviewers` and `judges`. `approve-spec` freezes them
+  by blob sha into the store, and `superegm instructions --role <role> --runcard <card> (--handoff <id> | --spec <path> --review <id> --round <n>)` prints a role's section,
+  which every brief carries last. A file cannot grant a tool: `builder.allowed_tools` stays the
+  owner's. A builder's own branch never changes what an agent was told.
+- The brainstorm's builder check and visual companion run in the owner's session: the companion
+  server binds `127.0.0.1` and needs the `?key=` token, and where the helper cannot run (Cowork)
+  the skill stays in text.
 
 ## Accepting below the cap
 
