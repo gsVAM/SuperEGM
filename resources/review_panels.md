@@ -2,7 +2,7 @@
 Added by the elephant-goldfish-model Astra fork (gsVAM), 2026: panel presets,
 routing table, run card and configuration. Not part of google/elephant-goldfish-model.
 Modified by SuperEGM (gsVAM), 2026: section 7's convergence rule and cap live in
-skills/review-spec/references/review_loop.md; the second clean round for document reviews is gone; the head review's panel row (U17); the external reviewer id of `review ingest` (U21); the foreman's own gate findings (U25); section 6 points at review_loop.md's one model and effort rule (U28). -->
+skills/review-spec/references/review_loop.md; the second clean round for document reviews is gone; the head review's panel row (U17); the external reviewer id of `review ingest` (U21); the foreman's own gate findings (U25); section 6 points at review_loop.md's one model and effort rule (U28); section 7's cap is `review.rounds` (U50). -->
 
 # Review panels, run card and configuration
 
@@ -271,7 +271,7 @@ regressions that do not fall, mean the approach needs changing, not another
 round.
 
 **The cap is `review.rounds`** (an integer 1–10, default 3; a spec's `Rounds:`
-line freezes its own). At the last round, stop and put the choice to the user
+line, frozen at approval, caps the handoff's plan, head and integrate reviews; a spec's own review runs under the live value). At the last round, stop and put the choice to the user
 in one line with the trend and the open findings: continue, accept the
 remainder, or stop. Never start another round without their answer. The cap is a
 cost guard, not a quality bar: converging at round 2 is the normal case. The

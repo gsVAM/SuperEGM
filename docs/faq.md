@@ -1,6 +1,6 @@
 # FAQ
 
-<!-- Modified by SuperEGM (gsVAM), 2026: EGM's philosophy questions replaced by SuperEGM's: modes, the builder account, the judges, what stays human; 1.2's driver, rulings by comment, outside reviews and acceptance below the cap. -->
+<!-- Modified by SuperEGM (gsVAM), 2026: EGM's philosophy questions replaced by SuperEGM's: modes, the builder account, the judges, what stays human; 1.2's driver, rulings by comment, outside reviews and acceptance below the cap; the 1.2.1 instructions, chain, inbox and review.rounds answers (U50). -->
 
 #### Q: What does the owner actually do?
 
@@ -85,7 +85,7 @@ can accept then and there. The cap is `review.rounds` (default 3); a spec's `Rou
 **A**: Yes. List files, or folders of reference documents, under `instructions` in
 `.superegm/config.json`, each addressed to `builder`, `foreman`, `reviewers` and `judges` as you
 choose. `approve-spec` freezes them. What goes to `reviewers` or `judges` also goes to the Codex
-vendor when the Astra lane is on.
+vendor: through the Astra lane for reviewers and through the `astra` judge for judges.
 
 #### Q: Can I add a reviewer of my own?
 
@@ -95,12 +95,13 @@ the id in `reviewers.<kind>`.
 #### Q: Does the chain run on its own?
 
 **A**: Only when `driver.chain` is `true` (default `false`). The brainstorm offers it once doctor
-passes; `superegm driver kick` runs one tick now.
+passes; `superegm driver kick --root <path>` runs a tick now, if the driver is installed and the
+store's `driver.chain` is true.
 
 #### Q: What does a withdrawn inbox offer mean?
 
 **A**: The unit changed after the inbox asked, so it took the offer back and journalled
-`merge withdrawn`. The inbox asks in words, and typed without `--runcard` it opens and closes its own card.
+`merge withdrawn`. The inbox asks in words, and `inbox withdrawn` typed without `--runcard` opens and closes its own card (a bare `inbox` only lists).
 
 #### Q: Is there a report when a handoff is done?
 

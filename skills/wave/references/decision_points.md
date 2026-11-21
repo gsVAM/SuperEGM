@@ -61,7 +61,7 @@ Leavemealone-mode: U11 wires §13.2 here.
 
 ### Decision point 2
 
-The head review is at its cap. The cap is `review.rounds` (default 3; a spec's `Rounds:` line freezes its own), then PAUSE for the owner.
+The head review is at its cap. The cap is `review.rounds` (default 3; the approval froze the spec's `Rounds:` line, else the live value, for this handoff), then PAUSE for the owner.
 Write the `review status` trend line to a question file and run
 `python3 '<HELPER>' decision open --unit <U> --point 2 --question '<file>' --source 'review <head-review-id> cap' --runcard '<CARD>'`
 (options `one more round; stop`, and on a head `redesign — <one sentence why>`; once `one more round` is spent,

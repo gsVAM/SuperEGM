@@ -54,9 +54,12 @@ Set `"heads": false` under `astra` to keep heads Claude-only.
 An instruction file or reference document addressed to `reviewers` or `judges` (config key
 `instructions`) goes to the Codex vendor too, through the Astra lane and the `astra` judge: the
 brief carries each file's text, and each reference document's bytes up to 262,144 bytes together.
-Address a file to `builder` or `foreman` alone to keep it on the machine.
+A file addressed to `builder` or `foreman` alone does not go to the Codex vendor, but the builder's
+instructions are part of the prompt of its `claude -p` session, so the host (Claude Code) processes
+them under its own terms. The `astra` judge sends the brief to Codex whether or not `astra.enabled`
+is set; to keep a file from it, do not address it to `judges`.
 
-Opt out with `"astra": {"enabled": false}` in `.superegm/config.json`, `codex logout`, or by not
+Opt out of the lane with `"astra": {"enabled": false}` in `.superegm/config.json`, `codex logout`, or by not
 installing claudex-loop; the lane then records `not run` and the review runs Claude-only. Local
 copies of each prompt and reply stay under `${TMPDIR:-/tmp}`; delete them when done.
 

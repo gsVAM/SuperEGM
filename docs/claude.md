@@ -127,11 +127,12 @@ call (`--timeout 540` under a 600000 ms limit) and waits for it, so nothing outl
   owner would let a session act on alone). A tick starts at most one session per registered store
   and loops over every store, so several stores' sessions may run at once. A tick chains nothing
   and merges nothing, unless `driver.chain` is `true` (default `false`), when a tick may carry a
-  handoff on to its next phase; `driver kick` runs one store's tick now.
+  handoff on to its next phase; `driver kick --root <path>` runs a tick now, only when the driver
+  is installed, the root registered and that store's `driver.chain` true, and opens no card.
 - The inbox asks in words. A merge offer the unit has outgrown is `inbox withdrawn` and journals
-  `merge withdrawn`. `inbox` typed without `--runcard` opens and closes its own inbox card; the
-  exception sits next to `approve-spec --void` and `driver kick`, which open and close their own
-  cards likewise.
+  `merge withdrawn`. A bare `inbox` is read-only and opens no card; `inbox withdrawn` typed without
+  `--runcard` opens and closes its own inbox card, the exception that sits next to
+  `approve-spec --void`, which opens and closes its own card too.
 
 ## Repository instructions
 
