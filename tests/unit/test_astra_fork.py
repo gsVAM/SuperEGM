@@ -367,17 +367,21 @@ def test_convergence_rule_is_stated_once_and_referenced() -> None:
   assert "## 7. Convergence and the round cap" in PANELS
   for text in ("no finding in the round is attributable to the previous round's fixes",
                "regression: yes|no",
-               "Cap: 5 rounds, then pause",
-               "Never start round 6 without their answer"):
+               "review.rounds"):
     assert text in flat, text
+  assert "Cap: 5 rounds" not in flat and "Never start round 6" not in flat
   # SuperEGM section 11: the wave skill pauses at the cap (decision point 2); the convergence doctrine
   # lives in review_loop.md, which the wave skill no longer references (U10b).
   wave = " ".join(read("skills/wave/references/decision_points.md").split())
-  assert "Cap: 5 rounds, then PAUSE" in wave
+  assert "review.rounds" in wave and "Cap: 5 rounds" not in wave
   assert "Cap 3 rounds" not in wave and "Cap 3 rounds" not in read("skills/wave/SKILL.md"), "the fixed cap must be gone"
   # SuperEGM section 9.2: the plan review's rounds run through the judge panel, which stops at the cap.
   judges = " ".join(read("skills/judges/SKILL.md").split())
   assert "the cap of 5 rounds is reached" in judges and "cap_reached" in judges
+  # 1.2.1: README and faq keep no fixed five-round cap; the judge panel's own cap of 5 stays
+  for doc in ("README.md", "docs/faq.md"):
+    assert "five rounds" not in " ".join(read(doc).split()), doc
+  assert "|5 rounds|" not in read("README.md")
 
 
 
