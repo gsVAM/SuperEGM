@@ -11,16 +11,19 @@ from pathlib import Path
 
 import superegm as core
 from superegm.launch import load_launches, terminal
+from superegm.report import unit_state, unit_view
 
 WRITES = frozenset()  # the store kinds this subcommand writes
 CONFIG_DEFAULTS, INIT_STEP, DOCTOR_CHECKS = {}, "", None  # no config key, init line or doctor line of its own (U32)
-SKILLS = frozenset(["clean"])  # the skills whose card this subcommand accepts
+SKILLS = frozenset(["clean", "wave", "integrate"])  # the skills whose card this subcommand accepts
 KILL_WAIT = 5  # seconds between SIGTERM and SIGKILL
 
 
 def register(subparsers):
-  p = core.add_parser(subparsers, "clean", "remove a unit's worktrees and private refs once every launch and round is terminal")
-  p.add_argument("--unit", required=True)
+  p = core.add_parser(subparsers, "clean", "remove a unit's worktrees and private refs once every launch and round is terminal; "
+                         "--auto cleans every landed, merged or stopped unit and refuses nothing")
+  p.add_argument("--unit")
+  p.add_argument("--auto", action="store_true", help="clean every landed, merged or stopped unit that is terminal, silently skipping the rest")
   p.set_defaults(run=run, writes=WRITES)
 
 
@@ -34,7 +37,42 @@ def run(args):
 
 def clean(args):
   root = core.git_toplevel(Path.cwd())
-  st, unit = core.store(root), args.unit
+  if args.auto:
+    return clean_auto(root, args)
+  if not args.unit:
+    raise core.HandoffError("pass --unit <unit> or --auto")
+  clean_unit(root, core.store(root), args.unit)
+  return 0
+
+
+def clean_auto(root, args):
+  """The wave's and integrate's end-of-invocation sweep: every unit that has `landed` (`report.unit_state`), whose recorded pull
+  request is merged (its issue still open, which `status` does not mark landed) or that is `stopped`, and that `terminal_problems`
+  passes, one line per unit cleaned; any other unit, and any unit `clean_unit` refuses, is skipped silently, so the caller never stops."""
+  plan, st = core.locate(args)
+  handoff = core.Handoff(plan, st)
+  state, card, now = handoff.state, core.load_card(st, args.runcard), core.NOW()
+  for uid in handoff.graph.order:
+    foreman, entries = core.load_foreman(st, uid), load_launches(st, uid)
+    word = unit_state(uid, unit_view(state, uid), foreman, entries, card, st.config, now)
+    merged = ((state.get("units") or {}).get(uid, {}).get("pr") or {}).get("merged_at")
+    if (word in ("landed", "stopped") or merged) and has_remnants(root, st, uid):
+      try:
+        clean_unit(root, st, uid)
+      except core.HandoffError:
+        pass
+  return 0
+
+
+def has_remnants(root, st, unit):
+  """A registered review worktree (the `pr<n>/worktree` child or a legacy `pr<n>`) or a builder `r<n>` folder of `unit` is still there."""
+  registered = set(core.registered_worktrees(root))
+  folders = [p for p in st.path("review", unit, "pr0").parent.glob("pr*") if p.is_dir()]
+  return any(p.resolve() in registered or (p / "worktree").resolve() in registered for p in folders) \
+      or any(p.is_dir() for p in st.path("worktrees", unit).glob("r*"))
+
+
+def clean_unit(root, st, unit):
   problems = terminal_problems(st, unit)
   if problems:
     raise core.HandoffError(problems[0])
@@ -66,9 +104,12 @@ def clean(args):
       complete = False
   core.run_git(["worktree", "prune"], root, check=False)
   if complete:
+    try:
+      st.path("worktrees", unit).rmdir()  # the unit's folder goes with its last worktree; a kept one stays
+    except OSError:
+      pass
     core.journal(st, f"{unit} cleaned")
     print(f"{unit} cleaned")
-  return 0
 
 
 def process_table():
