@@ -474,6 +474,6 @@ def test_clean_goes_on_when_one_builder_tree_fails_removal(world):
 
 def test_resume_notes_hold_one_copy_of_the_loop_ended_sentence():
   notes = read("skills/wave/references/resume_notes.md")
-  assert "`loop_ended`" not in notes
+  assert "`loop_ended`" not in notes.split("-->", 1)[1]  # the body; the header names the sentence that stayed
   assert "`loop_ended`" in read("skills/wave/SKILL.md")
   assert "stays in SKILL.md" in notes.split("-->", 1)[0]  # the header says what stayed
