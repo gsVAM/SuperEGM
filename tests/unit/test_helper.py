@@ -458,7 +458,7 @@ def test_init_writes_the_config_with_every_key_and_refuses_another_base(tmp_path
   harness = Harness(capsys)
   harness.gh.extend("api", lambda args, cwd, token=None: (0, "octocat\n", "") if args[1:] == ["user", "-q", ".login"] else (1, "", "unexpected"))
   code, out = harness.run("init", "--artifacts-dir", str(tmp_path / "store"))
-  assert code == 0 and '1. Create the builder account and its token as README.md, "Before the first run" step 1 says' in out
+  assert code == 0 and '1. Register the builder\'s GitHub App as README.md, "Before the first run" step 1 says' in out
   assert "SUPEREGM_BUILDER_TOKEN" in out and "fine-grained" not in out and "Contents read" not in out
   assert "branch protection" in out and "config.owners" in out and out.rstrip().splitlines()[-1] == "then run `superegm doctor`"
   config = json.loads((repo / ".superegm/config.json").read_text(encoding="utf-8"))
