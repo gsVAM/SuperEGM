@@ -390,12 +390,7 @@ SKIP = (".git", ".pytest_cache", "__pycache__", "tests")
 
 def test_readme_install_and_licence():
   readme = (ROOT / "README.md").read_text(encoding="utf-8")
-  for snippet in ["1. Create the **builder account**", "a second GitHub login, a machine account the owner controls", "one is allowed per person",
-                  "collaborator with Write", "fine-grained personal access token when the repository belongs to an organization the builder account is a member of",
-                  "resource owner that organization", "limited to this repository", "Contents read and write", "Pull requests read and write",
-                  "Issues read and write", "Metadata read", "no Workflows permission", "90 days", "otherwise a classic token", "`repo` scope",
-                  "without `workflow`", "`.github/workflows`", "token policies", "`SUPEREGM_BUILDER_TOKEN`", "never in the repository or the config",
-                  "Builders push and open draft pull requests as that account and can never update the base branch.",
+  for snippet in ["1. Register the builder's **GitHub App**", "no webhook", "`builder.app`", "one identity per repository",
                   "config.owners", "config.owner_team", "run `superegm doctor` before the first wave", "the refusal `launch` would give"]:
     assert snippet in readme, snippet
   for doc in ("docs/claude.md", "docs/getting_started.md"):
