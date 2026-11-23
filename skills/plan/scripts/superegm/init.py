@@ -13,7 +13,7 @@ SESSION_DIR_IGNORE = ".superegm/brainstorm/"  # the visual companion's session d
 
 OWN = """wrote {path}
 By hand, before the first typed skill runs:
-1. Create the builder account and its token as README.md, "Before the first run" step 1 says; put the token in SUPEREGM_BUILDER_TOKEN (config key builder.gh_token_env), never in the repository or the config, or register a GitHub App as that step says and set builder.app (SUPEREGM_BUILDER_TOKEN then stays unset: one identity per repository).
+1. Register the builder's GitHub App as README.md, "Before the first run" step 1 says, and set builder.app.
 2. Create the builder's empty profile at {profile_dir} (config key builder.profile_dir):
    no hooks, no plugins, no skills/ or commands/ directory, only the login (`CLAUDE_CONFIG_DIR={profile_dir} claude`,
    `/login`, exit) and a settings.json with "syncClaudeAiPlugins": false and "disableClaudeAiConnectors": true,

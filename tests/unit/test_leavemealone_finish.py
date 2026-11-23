@@ -390,12 +390,7 @@ SKIP = (".git", ".pytest_cache", "__pycache__", "tests")
 
 def test_readme_install_and_licence():
   readme = (ROOT / "README.md").read_text(encoding="utf-8")
-  for snippet in ["1. Create the **builder account**", "a second GitHub login, a machine account the owner controls", "one is allowed per person",
-                  "collaborator with Write", "fine-grained personal access token when the repository belongs to an organization the builder account is a member of",
-                  "resource owner that organization", "limited to this repository", "Contents read and write", "Pull requests read and write",
-                  "Issues read and write", "Metadata read", "no Workflows permission", "90 days", "otherwise a classic token", "`repo` scope",
-                  "without `workflow`", "`.github/workflows`", "token policies", "`SUPEREGM_BUILDER_TOKEN`", "never in the repository or the config",
-                  "Builders push and open draft pull requests as that account and can never update the base branch.",
+  for snippet in ["1. Register the builder's **GitHub App**", "no webhook", "`builder.app`", "one identity per repository",
                   "config.owners", "config.owner_team", "run `superegm doctor` before the first wave", "the refusal `launch` would give"]:
     assert snippet in readme, snippet
   for doc in ("docs/claude.md", "docs/getting_started.md"):
@@ -452,9 +447,9 @@ def test_no_removed_mechanism_named(path):
 # ---------------------------------------------------------------- U15: the App path's prose
 
 PROSE_ROWS = [
-  ("README.md", "**GitHub App** instead", True), ("README.md", "visibility `Only on this account`", True),
+  ("README.md", "Register the builder's **GitHub App**", True), ("README.md", "visibility `Only on this account`", True),
   ("README.md", "`contents: write`, `pull_requests: write`, `issues: write`, `metadata: read`", True), ("README.md", "`SUPEREGM_APP_KEY`", True),
-  ("skills/plan/scripts/superegm/init.py", "or register a GitHub App as that step says and set builder.app", True),
+  ("skills/plan/scripts/superegm/init.py", "Register the builder's GitHub App as README.md", True),
   ("docs/claude.md", "`superegm-no-token`", True), ("docs/claude.md", "`{{gh}}`", True), ("docs/faq.md", "GitHub App", True), ("docs/privacy.md", "the builder session can read the key file", True),
   ("skills/plan/references/handoff_config.md", '"app": null', True),
   ("skills/wave/references/builder_orders.md", "`{{gh}} pr create --draft`", True), ("skills/wave/references/builder_orders.md", "`gh pr", False),
