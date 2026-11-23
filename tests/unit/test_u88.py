@@ -379,14 +379,14 @@ PANELS = {"open": None, "between": {"converged": False, "cap_reached": False, "o
           "capped": {"converged": False, "cap_reached": True, "open": ["Q1"]}, "converged": {"converged": True, "cap_reached": False, "open": []}}
 
 
-def contested_items(world, question, n=1, findings=("high",), contested=(1,), panel=None, full=False):
+def contested_items(world, question, n=1, findings=("high",), contested=(1,), panel=None, full=False, source=None):
   """The inbox's `contested` items (their fingerprints, else the items) of one head review at round `n`, its point-1 decision asking
   `question`; `panel`: the record of a panel opened for this review and round in the store, a key of PANELS (`open`: a panel.json and no
   verdict.json; the others add that verdict.json), none: no panel was opened."""
   from test_inbox import D, HEAD, POSTED, U, F as found, open_wave_card, seed as inbox_seed
   from superegm.inbox import inbox_items
   open_wave_card(world)
-  s = inbox_seed(world, **U(decisions=D(1, f"review head-U01-c1 round {n}", question=question), rounds=POSTED(n),
+  s = inbox_seed(world, **U(decisions=D(1, source or f"review head-U01-c1 round {n}", question=question), rounds=POSTED(n),
                             reviews=HEAD(n, found(*findings), builder_contested=[{"fid": f"foreman-1-{i}", "reason": "r"} for i in contested])))
   if panel:
     pid = f"head-U01-c1-r{n}-a1b2c3"
@@ -428,6 +428,11 @@ def test_the_hold_reads_the_panel_record_not_the_questions_text(world, panel, li
   question = "foreman-1-1 | high | src/x.py:3 | regression: no | see the old run (judges/old/verdict.json), their last choices: x\n"
   items = contested_items(world, question, panel=panel, full=True)
   assert [i["fingerprint"] for i in items] == (["U01/contested/q1/foreman-1-1"] if listed else []) and all("verdict" not in i for i in items)
+
+
+def test_a_point_one_decision_not_from_a_review_round_lists_nothing(world):
+  """#250: a point-1 decision whose source names no review round (`launch 1`) skips the item instead of crashing `superegm inbox`."""
+  assert contested_items(world, CONTEST.format("high"), source="launch 1") == []
 
 
 def test_a_low_contest_beside_a_blocking_one_lists_at_once(world):
