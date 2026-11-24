@@ -22,10 +22,8 @@ differ, the spec wins and this file is out of date: say so in a finding.
 - The helper (`skills/plan/scripts/superegm/`) is the only writer of the store. A skill or an
   agent never writes a file under `artifacts_dir` itself.
 - A subcommand writes only the store kinds it declares in its `WRITES`.
-- `state.json`, `foreman/<U>.json` and the track file are written only through their save
-  functions (`save_state`, `save_foreman`, the track file's own), which merge with concurrent
-  writes from 1.3 on (U98). Nothing writes them another way, and nothing holds a store lock across
-  a wait or a GitHub call.
+- A command that reads a store file, changes it and writes it back does so within one short
+  step: it never holds a loaded copy across a wait and writes it back afterwards.
 - A store written by 1.2.1 opens unchanged. A new key or file reads as absent when missing; no
   migration step is needed.
 
