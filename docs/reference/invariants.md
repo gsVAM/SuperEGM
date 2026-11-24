@@ -22,9 +22,10 @@ differ, the spec wins and this file is out of date: say so in a finding.
 - The helper (`skills/plan/scripts/superegm/`) is the only writer of the store. A skill or an
   agent never writes a file under `artifacts_dir` itself.
 - A subcommand writes only the store kinds it declares in its `WRITES`.
-- Once the 1.3 locked update exists (U98), every read-change-write of `state.json`,
-  `foreman/<U>.json` or `tracks.json` goes through it. Nothing holds that lock across a wait or a
-  GitHub call.
+- `state.json`, `foreman/<U>.json` and the track file are written only through their save
+  functions (`save_state`, `save_foreman`, the track file's own), which merge with concurrent
+  writes from 1.3 on (U98). Nothing writes them another way, and nothing holds a store lock across
+  a wait or a GitHub call.
 - A store written by 1.2.1 opens unchanged. A new key or file reads as absent when missing; no
   migration step is needed.
 
@@ -42,9 +43,10 @@ differ, the spec wins and this file is out of date: say so in a finding.
 
 - No change widens what an unattended builder may run: no new allow-list entry with a broader
   prefix, no unrestricted `Bash`, no bare `Skill`.
-- Text from a GitHub comment reaches a builder's prompt only when its author's login is in
-  `config.owners`, or when it is one of the forms the helper already parses (Deviation, Decision,
-  Ruling, Seam).
+- Text from a GitHub comment or review reaches a builder's prompt only from the authors its form
+  allows: the builder's identity for Seam, the builder or `config.owners` for Deviation, and
+  `config.owners` for Decision, Ruling, Note and pull-request reviews. An edited comment or review
+  never reaches it.
 - Nothing the helper sends off the machine (the Astra lane, the Codex judge) goes unlisted in
   `docs/privacy.md` and `resources/astra_lane.md`.
 - No secret, token or key value is ever printed, journaled or written to the store. Name the
