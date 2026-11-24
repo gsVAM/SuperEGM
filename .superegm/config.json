@@ -128,5 +128,8 @@
         "judges"
       ]
     }
-  ]
+  ],
+  "units": {
+    "max_files": 13
+  }
 }
