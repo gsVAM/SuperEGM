@@ -10,8 +10,8 @@ differ, the spec wins and this file is out of date: say so in a finding.
 
 - Every file a unit creates or changes carries a provenance header at its top, tests included.
 - A new file gets `Added by SuperEGM (gsVAM), 2026: <what>`.
-- A changed file gets its `<what>` appended to its existing `Modified by SuperEGM (gsVAM), 2026: …`
-  line, or gets that line if it has none.
+- A changed file gets its `<what>` appended to its existing "Modified by SuperEGM" notice line,
+  or gets that notice line, in the form the other changed files use, if it has none.
 - `<what>` names the unit and the spec section: for example `U104's owner-only spec findings
   (1.3 design section 3.8)`.
 - Python and YAML use a `#` comment, Markdown an HTML comment, as the files around it do.
