@@ -117,5 +117,16 @@
   ],
   "foreman": {
     "run_timeout_minutes": 9
-  }
+  },
+  "instructions": [
+    {
+      "dir": "docs/reference",
+      "to": [
+        "builder",
+        "foreman",
+        "reviewers",
+        "judges"
+      ]
+    }
+  ]
 }
