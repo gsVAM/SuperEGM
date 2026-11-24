@@ -116,6 +116,6 @@
     "gsVAM"
   ],
   "foreman": {
-    "run_timeout_minutes": 15
+    "run_timeout_minutes": 9
   }
 }
