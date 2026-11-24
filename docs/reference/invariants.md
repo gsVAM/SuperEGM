@@ -22,8 +22,9 @@ differ, the spec wins and this file is out of date: say so in a finding.
 - The helper (`skills/plan/scripts/superegm/`) is the only writer of the store. A skill or an
   agent never writes a file under `artifacts_dir` itself.
 - A subcommand writes only the store kinds it declares in its `WRITES`.
-- A command that reads a store file, changes it and writes it back does so within one short
-  step: it never holds a loaded copy across a wait and writes it back afterwards.
+- No new command holds a loaded copy of a store file across a wait, a model call or a long run and
+  then writes it back; it loads the file again first. `collect`'s hold of the foreman file across
+  its DoD runs is the one known exception (1.3 design section 9).
 - A store written by 1.2.1 opens unchanged. A new key or file reads as absent when missing; no
   migration step is needed.
 
@@ -43,8 +44,8 @@ differ, the spec wins and this file is out of date: say so in a finding.
   prefix, no unrestricted `Bash`, no bare `Skill`.
 - Text from a GitHub comment or review reaches a builder's prompt only from the authors its form
   allows: the builder's identity for Seam, the builder or `config.owners` for Deviation, and
-  `config.owners` for Decision, Ruling, Note and pull-request reviews. An edited comment or review
-  never reaches it.
+  `config.owners` for Decision, Ruling, Note and pull-request reviews. An edited issue comment never
+  reaches it, and an edited ruling comment is never recorded.
 - Nothing the helper sends off the machine (the Astra lane, the Codex judge) goes unlisted in
   `docs/privacy.md` and `resources/astra_lane.md`.
 - No secret, token or key value is ever printed, journaled or written to the store. Name the
