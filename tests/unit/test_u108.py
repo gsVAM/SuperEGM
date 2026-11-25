@@ -84,3 +84,54 @@ def test_orders_carry_the_allow_list_and_the_command_rules(world, monkeypatch, s
   assert f"`{gh} pr view <branch>`" in orders
   for phrase in ("one command per Bash call", "heredoc", "--body-file", "one segment per Bash call", "empty `feat`"):
     assert phrase in orders
+
+
+def posted(s, rnd: int) -> str:
+  """The launch's prompt file without its `# Builder orders` part, whose own text quotes the forms (`**Seam:** ok`)."""
+  text = s.path("launches", f"{UNIT}_r{rnd}_prompt.md").read_text(encoding="utf-8")
+  return "\n\n---\n\n".join(part for part in text.split("\n\n---\n\n") if not part.startswith("# Builder orders"))
+
+
+LOGINS = {"builder": "builder-bot", "owner": "owner", "stranger": "stranger"}  # seed's builder login and config.owners
+stranger_login = LOGINS["stranger"]
+
+
+def round_2(world, monkeypatch, s, card, hid, comments=(), reviews=()):
+  """Round 1 ended (exit 0) with pull request #70 at the base, its reviews `reviews`; then round 2's launch."""
+  from conftest import make_pr
+  from test_builders import BASE, PR, REPO, state_of
+  Path(launches_of(s)[-1]["result_file"] + ".exit").write_text("0\n", encoding="utf-8")
+  head = git(["rev-parse", "refs/superegm/base"], world.repo).strip()
+  git(["update-ref", f"refs/pull/{PR}/head", head], world.repo.parent / "origin.git")
+  state = state_of(s); state["units"][UNIT]["pr"] = {"number": PR, "head": head, "base_ref": BASE}
+  s.path("state").write_text(json.dumps(state), encoding="utf-8")
+  make_pr(world.gh, PR, head, branch=f"superegm/{hid}/U07", closes=[(REPO, ISSUE)])
+  world.gh.reviews[PR] = [{**r, "commit_id": head} for r in reviews]
+  return launch(world, monkeypatch, comments, rnd=2, seeded=(s, card, hid))
+
+
+@pytest.mark.parametrize("form, author, kept", [
+    ("**Deviation (other):** x", "builder", True), ("**Deviation (other):** x", "owner", True),
+    ("**Deviation (other):** x", "stranger", False),
+    ("**Seam:** ok", "builder", True), ("**Seam:** ok", "stranger", False),
+    ("**Decision D1:** x", "owner", True), ("**Decision D1:** x", "stranger", False),
+    ("**Ruling:** foreman-1-1 finding upheld", "owner", True), ("**Ruling:** foreman-1-1 finding upheld", "stranger", False),
+    ("**Note:** x", "owner", True), ("**Note:** x", "stranger", False),
+    ("PR review body", "owner", True), ("PR review body", "stranger", False),
+])
+def test_prompt_keeps_each_form_from_its_authors(world, monkeypatch, spawn_fake, form, author, kept):
+  # `form` on U07's issue (a PR review body: on its PR, author read from user.login) by `author`: builder = the launch's builder login,
+  # owner = a config.owners login, stranger = neither (its login `stranger_login`); prompt and journal after launch-builder
+  login = LOGINS[author]
+  if form == "PR review body":
+    s, card, hid = launch(world, monkeypatch)
+    s, card, hid = round_2(world, monkeypatch, s, card, hid, reviews=[{"id": 9, "user": {"login": login}, "body": form}])
+    rnd = 2
+  else:
+    s, card, hid = launch(world, monkeypatch, [{"id": 5, "user": {"login": login}, "body": form,
+                                                "created_at": "2026-11-25T10:00:00Z", "updated_at": "2026-11-25T10:00:00Z"}])
+    rnd = 1
+  prompt = posted(s, rnd)
+  journal = s.path("journal").read_text(encoding="utf-8")
+  assert (form in prompt) is kept
+  assert kept or f"ignored: {stranger_login} is not the builder or an owner" in journal
