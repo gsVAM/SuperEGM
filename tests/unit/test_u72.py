@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U72
+# Modified by SuperEGM (gsVAM), 2026: a head proceed names its head, the inbox's proceed form with it, and no #250 panel line in the seeds (U107, 1.3 design section 3.9).
 
 """U72 (spec 1.2.1 section 7.3): the inbox is a typed external skill that asks the owner in words and does the
 rest; every ruling item's action points to the inbox, with its `**Ruling:**` forms and the URL it is posted on; a
@@ -42,7 +43,7 @@ def item_of(world, kind):
   """The one item of `kind` the inbox lists for the seeded unit."""
   if kind == "proceed again":  # test_u92: a proceed, then a later launch on it: waiting proceed
     s, card, rid = head_world(world)
-    assert proceed(world, rid, card, "--owner", "--reason", "accepted risk")[0] == 0
+    assert proceed(world, rid, card, "--owner", "--head", "a" * 7, "--reason", "accepted risk")[0] == 0
     launches(s, "U01", 1, 2)
     want = "proceed"
   elif kind == "kill_failed":

@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3/5
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
-# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63); `respec`, a `spec` deviation's option, the owner's alone, a spent `relaunch` dropped beside it, and a letter that resolves to it binding nothing unrecorded (spec §7.6, U84); the judges' ruling journalled and posted with `contest` on a normal-mode card (spec §7.8, U88).
+# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63); `respec`, a `spec` deviation's option, the owner's alone, a spent `relaunch` dropped beside it, and a letter that resolves to it binding nothing unrecorded (spec §7.6, U84); the judges' ruling journalled and posted with `contest` on a normal-mode card (spec §7.8, U88); the head proceed's `<sha7>` subject, and an undo refused while a proceed's merge is offered (U107, 1.3 design section 3.9).
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
@@ -170,7 +170,9 @@ FORM_RES = (
   ("allowed-file", re.compile(rf"test-delta (?P<subject>\S+) allowed{REASON}")),
   ("redesign", re.compile(rf"redesign{REASON}")),
   ("allowed", re.compile(rf"(?P<subject>{FID}) allowed{REASON}")),
-  ("proceed", re.compile(rf"proceed{REASON}")),  # the owner's go-ahead on a head (spec section 4.2): owners alone
+  # the owner's go-ahead (spec section 4.2): owners alone; on a head its subject is the `<sha7>` the owner was shown,
+  # which `review rule` pins and refuses once the head moved, or refuses when absent (1.3 design section 3.9, U107)
+  ("proceed", re.compile(rf"proceed(?: (?P<subject>[0-9a-f]{{7,40}}))?{REASON}")),
 )
 LETTER_RE = re.compile(r"\([a-z]\)")  # a rendered option's letter, the bare answer of the judges
 FILE_RULING_RE = re.compile(r"test-delta (\S+) allowed")  # a recorded whole-file allowance's text

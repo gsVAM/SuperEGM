@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U57
+# Modified by SuperEGM (gsVAM), 2026: a head proceed names its head, `--head <sha7>` or `proceed <sha7> — <reason>` (U107, 1.3 design section 3.9).
 
 """U57: proceed, the owner's go-ahead (`review rule --ruling proceed --owner`, spec section 4.2): its refusals, its
 records, the convergence it gives ahead of every other test, and its readers downstream."""
@@ -64,7 +65,7 @@ def snapshot(s, rid, *units):
 ])
 def test_proceed_refusals(world, case, message):
   s, card, rid = head_world(world)
-  body = "**Ruling:** proceed — ship it"
+  body = "**Ruling:** proceed aaaaaaa — ship it"
   served = {"posted by a non-owner": comment(s, 901, body, author="passer-by"),
             "posted comment not of the proceed form": comment(s, 901, "**Ruling:** stop"),
             "posted on another unit's issue": comment(s, 901, body, uid="U02")}.get(case, comment(s, 901, body))
@@ -102,8 +103,8 @@ def launches(s, uid, *rounds):
 def test_proceed_records_the_head(world):
   s, card, rid = head_world(world)
   launches(s, "U01", 1, 2)
-  serve(world, comment(s, 901, "**Ruling:** proceed — the medium is accepted risk"),
-        comment(s, 902, "**Ruling:** proceed — again, after the merge round", updated="2026-11-11T09:00:00Z"))
+  serve(world, comment(s, 901, "**Ruling:** proceed aaaaaaa — the medium is accepted risk"),
+        comment(s, 902, "**Ruling:** proceed aaaaaaa — again, after the merge round", updated="2026-11-11T09:00:00Z"))
   rulings_before = foreman_of(s, "U01")["rulings"]
   code, out = proceed(world, rid, card, "--owner", "--posted", "901")
   assert code == 0, out
@@ -131,7 +132,7 @@ def test_proceed_records_the_head(world):
   assert code == 0, out
   rid2 = out.strip()
   u02_rulings = foreman_of(s, "U02")["rulings"]
-  code, out = proceed(world, rid2, card, "--owner", "--reason", "typed in session")
+  code, out = proceed(world, rid2, card, "--owner", "--head", "bbbbbbb", "--reason", "typed in session")
   assert code == 0, out
   assert foreman_of(s, "U02")["proceeds"] == [
     {"ruling": "R1", "review": rid2, "posted": None, "posted_at": None, "issue": issue_of(s, "U02"),
@@ -234,7 +235,7 @@ def test_proceed_converges_first(world, monkeypatch, case, kind, k, h):
   assert before != 0 or case == "round 0", before
   open_before = {f["id"] for f in findings(st, rid) if f["disposition"] is None}
   assert len(open_before) == k
-  code, out = proceed(world, rid, cid, "--owner", "--reason", "accepted risk")
+  code, out = proceed(world, rid, cid, "--owner", *(["--head", head[:7]] if kind == "head" else []), "--reason", "accepted risk")
   assert code == 0, out
   assert verdict(st, rid) == "by proceed R1"
   assert run_status()[0] == 0

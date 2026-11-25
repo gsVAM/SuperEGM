@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U92
+# Modified by SuperEGM (gsVAM), 2026: a head proceed names its head, `--head <sha7>` or `proceed <sha7> — <reason>` (U107, 1.3 design section 3.9).
 
 """U92: proceed's readers (spec section 4.2): `launch`, `report`, `inbox` and `review` read a proceeded head through
 its authorizing outcome, the newer by launch of the latest round posted clean and the newest `proceeds[]` entry."""
@@ -20,6 +21,7 @@ from test_u43 import registry  # noqa: F401 -- autouse: HOME under tmp_path
 from test_builders import spawn_fake, which, no_graphify  # noqa: F401 -- launch-builder starts no builder, finds `gh`
 
 NOW = time.time()
+H7 = "a" * 7  # U107: a head proceed names the head the owner was shown, `head_world`'s
 
 
 def set_head(s, uid, head):
@@ -57,16 +59,16 @@ def test_waiting_proceed_after_a_later_launch(world, case, merge_offered):
   s, card, rid = head_world(world)
   if case == "proceed on H1 while a launch pushed H2":
     write_launches(s, "U01", (1, "exited 0"), (2, "running"))
-    code, out = proceed(world, rid, card, "--owner", "--reason", "accepted risk")
+    code, out = proceed(world, rid, card, "--owner", "--head", H7, "--reason", "accepted risk")
     assert code == 0, out
     set_head(s, "U01", "c" * 40)
   else:
-    code, out = proceed(world, rid, card, "--owner", "--reason", "accepted risk")
+    code, out = proceed(world, rid, card, "--owner", "--head", H7, "--reason", "accepted risk")
     assert code == 0, out
     launches(s, "U01", 1, 2)  # the merge launch after the proceed, terminal
     if case == "second proceed naming the later launch":
       set_head(s, "U01", "c" * 40)
-      code, out = proceed(world, rid, card, "--owner", "--reason", "the merge round is fine")
+      code, out = proceed(world, rid, card, "--owner", "--head", "c" * 7, "--reason", "the merge round is fine")
       assert code == 0, out
       assert foreman_of(s, "U01")["proceeds"][-1]["launch"] == 2
   view, foreman, entries, card_json = reading(s, card)
@@ -110,7 +112,7 @@ def unposted_world(world, case):
                                   "head cycle with no foreman round"])
 def test_inbox_offers_merge_on_the_authorizing_head(world, case):
   s, card, rid = unposted_world(world, case)
-  code, out = proceed(world, rid, card, "--owner", "--reason", "ship it")
+  code, out = proceed(world, rid, card, "--owner", "--head", "abc123", "--reason", "ship it")
   assert code == 0, out
   assert foreman_of(s, "U01")["proceeds"][-1]["head"] == "abc123"
   # proceeded on head "abc123"; inbox stays read-only and names the owner's merge command
@@ -142,7 +144,7 @@ def test_proceed_closes_point_one_decisions(world, decision):
   f["decisions"].append(opened)
   atomic_write(s.path("foreman", "U01"), f)
   # a proceed ruling on the review the decision names
-  code, out = proceed(world, rid, card, "--owner", "--reason", "accepted risk")
+  code, out = proceed(world, rid, card, "--owner", "--head", H7, "--reason", "accepted risk")
   assert code == 0, out
   view, foreman, entries, card_json = reading(s, card)
   assert [r["ruling"] for r in foreman["rulings"] if r.get("decision") == "q1"] == ["proceed"]
@@ -196,7 +198,7 @@ def run_after_a_posted_proceed(world, monkeypatch, command):
     return world.run("launch-builder", "--unit", UNIT, "--round", 2, "--runcard", card)
   from test_u57 import comment, serve
   s, card, rid = head_world(world)
-  serve(world, comment(s, 901, "**Ruling:** proceed — the medium is accepted risk"))
+  serve(world, comment(s, 901, f"**Ruling:** proceed {H7} — the medium is accepted risk"))
   code, out = proceed(world, rid, card, "--owner", "--posted", "901")
   assert code == 0, out
   atomic_write(s.path("foreman", "U01"), posted_proceed(foreman_of(s, "U01"), rid))
@@ -287,7 +289,7 @@ def test_waiting_proceed_reads_the_later_launch_finished(tmp_path, status, exit_
 def test_merge_needs_the_proceeds_pinned_head(world):
   # change-review-1-5: a proceed with no pinned head offers no merge: `--match-head-commit` has nothing to pin
   s, card, rid = head_world(world)
-  code, out = proceed(world, rid, card, "--owner", "--reason", "accepted risk")
+  code, out = proceed(world, rid, card, "--owner", "--head", H7, "--reason", "accepted risk")
   assert code == 0, out
   f = foreman_of(s, "U01")
   f["proceeds"][-1]["head"] = None
@@ -321,7 +323,7 @@ def proceed_items(s):
 def test_proceed_again_item_is_keyed_on_the_later_launch_and_head(world):
   # change-review-2-1: the `proceed again` item's fingerprint is the later launch and the head it left
   s, card, rid = head_world(world)
-  code, out = proceed(world, rid, card, "--owner", "--reason", "accepted risk")
+  code, out = proceed(world, rid, card, "--owner", "--head", H7, "--reason", "accepted risk")
   assert code == 0, out
   launches(s, "U01", 1, 2)  # the merge launch after the proceed, terminal
   head = reading(s, card)[0]["head"]
@@ -347,7 +349,7 @@ def test_head_less_proceed_asks_for_a_proceed_again(world):
   assert report.next_action("clean", latest, runs, [], None, proceeded=True, pinned=False) == "proceed again"
   assert report.next_action("clean", latest, runs, [], None, proceeded=True) == "await-merge"
   s, card, rid = head_world(world)
-  code, out = proceed(world, rid, card, "--owner", "--reason", "accepted risk")
+  code, out = proceed(world, rid, card, "--owner", "--head", H7, "--reason", "accepted risk")
   assert code == 0, out
   f = foreman_of(s, "U01")
   f["proceeds"][-1]["head"] = None
@@ -371,7 +373,7 @@ def board_row(world, s, card, uid="U01"):
 def test_board_shows_the_proceeds_action(world, pinned, action):
   # change-review-3-1: the board itself, not `next_action` alone, reads the proceed and its pinned head
   s, card, rid = head_world(world)
-  code, out = proceed(world, rid, card, "--owner", "--reason", "accepted risk")
+  code, out = proceed(world, rid, card, "--owner", "--head", H7, "--reason", "accepted risk")
   assert code == 0, out
   if not pinned:
     f = foreman_of(s, "U01")
@@ -385,7 +387,7 @@ def test_proceed_again_names_no_missing_head(world):
   # codebase-details-3-3: a later launch finished on a proceed that pinned no head, and the pull request has
   # none: no `proceed again: U01 head None`, keyed `2/None`, until a head exists to proceed on
   s, card, rid = head_world(world)
-  code, out = proceed(world, rid, card, "--owner", "--reason", "accepted risk")
+  code, out = proceed(world, rid, card, "--owner", "--head", H7, "--reason", "accepted risk")
   assert code == 0, out
   f = foreman_of(s, "U01")
   f["proceeds"][-1]["head"] = None
