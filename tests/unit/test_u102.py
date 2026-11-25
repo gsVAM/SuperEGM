@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U102, settled findings stay settled (spec section 3.5).
+# Added by SuperEGM (gsVAM), 2026: U102, settled findings stay settled (U102, 1.3 design section 3.5).
 
 """U102: `collect` drops a builder's contest of a settled fid (or of one derived from a settled fid), an owner's
 `test-delta <file> allowed` widens Scope for that file, and a test-delta settlement follows the test and the line

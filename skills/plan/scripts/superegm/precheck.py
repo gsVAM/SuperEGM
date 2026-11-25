@@ -1,6 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the builder's precheck of spec section 6.3 (U67).
-# Modified by SuperEGM (gsVAM), 2026: the rulings' times passed to `worktree_checks` as `collect` passes them, so a test-delta settlement binds the same entry (U102).
+# Added by SuperEGM (gsVAM), 2026: the builder's precheck of spec section 6.3 (U67); the rulings' times passed to `worktree_checks` as `collect` passes them, so a test-delta settlement binds the same entry (U102, 1.3 design section 3.5).
 
 """superegm precheck: the foreman's checks that need only the worktree, run by the builder in its own worktree
 before every push: each DoD item's fenced output and `Run` command, the test delta, the scope check and the

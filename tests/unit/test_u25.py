@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U25, the foreman verifies: the DoD re-run and the test delta (spec §11.1).
-# Modified by SuperEGM (gsVAM), 2026: the exact `test_delta` entries carry the settlement key, `test`, `text`, `base_text` and `occurrence` (U102).
+# Modified by SuperEGM (gsVAM), 2026: the exact `test_delta` entries carry the settlement key, `test`, `text`, `base_text` and `occurrence` (U102, 1.3 design section 3.5).
 
 """U25: the `foreman` config key, `kill_group`, `dod_runs`, `test_delta`, the forced removal and the hook-free checkouts."""
 
