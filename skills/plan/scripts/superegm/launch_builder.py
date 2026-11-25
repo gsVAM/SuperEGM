@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING`, its freshly pinned base and its `git merge-tree` brief (U62); a fix round resuming the previous launch's session, `resumed_from` or `fresh` and `profile_dir` on the entry, and the stale-paths line (U63); the `superegm-precheck` script on every launch, its allow rules and `{{precheck}}`, the whitespace refusal on every launch, `builder.precheck_attempts` and the launch's issue-comment snapshot (U67); a unit with `builder.escalate_after` failing head rounds launching on the `difficult` tier's pair, `escalated` on the entry (U68); `# Spec corrections`, reason `respec` and the record's `respecs` (U86); `builder.stall_minutes` defaults to 60 (U100, 1.3 design section 3.3); the `superegm-push` script on every launch, the allow-list's one push entry and the orders' `{{allowed}}` and `{{push}}`, the per-form author rules and their journal lines, the `**Note:**` form and `# Owner notes` (U108, 1.3 design section 3.7).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING`, its freshly pinned base and its `git merge-tree` brief (U62); a fix round resuming the previous launch's session, `resumed_from` or `fresh` and `profile_dir` on the entry, and the stale-paths line (U63); the `superegm-precheck` script on every launch, its allow rules and `{{precheck}}`, the whitespace refusal on every launch, `builder.precheck_attempts` and the launch's issue-comment snapshot (U67); a unit with `builder.escalate_after` failing head rounds launching on the `difficult` tier's pair, `escalated` on the entry (U68); `# Spec corrections`, reason `respec` and the record's `respecs` (U86); `builder.stall_minutes` defaults to 60 (U100, 1.3 design section 3.3); the `superegm-push` script on every launch, the allow-list's one push entry and the orders' `{{allowed}}` and `{{push}}`, the per-form author rules and their journal lines, the `**Note:**` form and `# Owner notes`, an edited issue comment left out (U108, 1.3 design section 3.7).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch, started
 detached and recorded `running`."""
@@ -18,7 +18,7 @@ import superegm as core
 from superegm import body, instructions, orient, scan
 from superegm.body import consumes
 from superegm.builder_token import key_path, tool
-from superegm.decision import deleted_rulings, overridden_comments, parse_form, recorded_rulings
+from superegm.decision import consumed_comments, deleted_rulings, overridden_comments, parse_form, recorded_rulings
 from superegm.launch import authorizing, base_problems, builder_email, builder_login, load_launches, terminal
 from superegm.review_plan import SPEC_LINE_RE
 from superegm.status import STATUS_RE
@@ -850,9 +850,12 @@ def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr,
   `deleted_rulings`), the builder's own `**Seam:**` comments, the recorded amendments that apply (spec section 6.5),
   and from round 2 the PR's review bodies by a `config.owners` login (1.3 design section 3.7, U108). Each form comment
   or review body an author rule leaves out appends `<unit> <what> ignored: <login> is not the builder or an owner`
-  (or `… an owner`, `… the builder` for a login that is the other) to `ignored`, for the caller's journal."""
+  (or `… an owner`, `… the builder` for a login that is the other) to `ignored`, for the caller's journal; a form
+  comment whose `updated_at` differs from its `created_at` is left out as `<unit> <what> ignored: edited`, unless the
+  record consumed it (`consumed_comments`) or it carries no `updated_at`."""
   overridden = overridden_comments(comments, list(owners), foreman or {})
   ignored = [] if ignored is None else ignored
+  consumed = consumed_comments(foreman or {})
 
   def leave_out(what, login, allowed):  # an author rule leaves `what` out: one journal line (U108)
     who = ("the builder or an owner" if login != builder and login not in owners
@@ -871,6 +874,11 @@ def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr,
     allowed = {builder, *owners} if form.startswith("Deviation") else {builder} if form == "Seam" else set(owners)
     if login not in allowed:
       leave_out(f"comment {c['id']} {match.group(0)}", login, allowed)
+      return False
+    # an edited comment never reaches the prompt (1.3 design section 3.7), save one the record consumed, which its record
+    # answers; a comment with no `updated_at` reads as unedited
+    if int(c["id"]) not in consumed and c.get("updated_at") is not None and c.get("updated_at") != c.get("created_at"):
+      ignored.append(f"{unit} comment {c['id']} {match.group(0)} ignored: edited")
       return False
     return form != "Ruling" or parse_form(c["body"]) is not None
   # an edited recorded ruling is shown as its record (spec section 13.2: a later comment never changes it)
