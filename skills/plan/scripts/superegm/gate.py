@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: `gate --pass` on converged plan reviews at the body hash over the store's plan copy; the unfiled write list; the reviewed pair, accept and readiness forms removed; an adopted unit's two trailing fields (U13); a review with a round after the converged one is not converged (U56); a review the owner's proceed converged, at the ruling's sha256 (U57); a `replan: R<n>` unit refused, an unfiled body hashed as it renders now (U90); refused while a respec from a review's design finding is open (U91).
+# Modified by SuperEGM (gsVAM), 2026: `gate --pass` on converged plan reviews at the body hash over the store's plan copy; the unfiled write list; the reviewed pair, accept and readiness forms removed; an adopted unit's two trailing fields (U13); a review with a round after the converged one is not converged (U56); a review the owner's proceed converged, at the ruling's sha256 (U57); a `replan: R<n>` unit refused, an unfiled body hashed as it renders now (U90); refused while a respec from a review's design finding is open (U91); every unfiled unit's replan mark read before any body-hash refusal (U106, 1.3 design section 3.8).
 
 """superegm gate: pass the gate when every unfiled unit's plan review converged at its body hash."""
 
@@ -151,6 +151,8 @@ def run(args):
     raise core.HandoffError("gate: nothing to file (every unit is filed)")
   hashes = body_hashes(handoff)
   marks = handoff_marks(handoff.store, handoff.repo_root)
+  for uid in unfiled:  # U106: every unit's replan mark first, so no earlier unit's body hash hides a later unit's re-plan
+    require_replanned(uid, marks)
   for uid in unfiled:
     converged, sha = converged_review(handoff.store, uid, marks)
     if not converged:
