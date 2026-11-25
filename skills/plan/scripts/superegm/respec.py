@@ -14,7 +14,6 @@ import superegm as core
 from superegm.review import approved_text, sections
 
 WRITES = frozenset(["file"])  # `respec/` and the comment files are the store's `file` kind
-BACKTICKED =re.compile(r"`([^`]+)`")
 TABLE_SEPARATOR = re.compile(r"^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$")
 HEADING_MARKER = re.compile(r"^\s*#+\s*$")
 FOLLOWS = re.compile(r"Follows:\s*(U\d+)")
@@ -124,11 +123,15 @@ def interface_lines(body: str) -> set[str]:
   return {line.strip() for _, line in unfenced(body.splitlines()) if line.strip().startswith(INTERFACE)}
 
 
-def interface_name(line: str) -> str:
-  """The one name an Interfaces line declares, compared whole: its first backticked span, else its text after the
-  colon less a trailing `(U<n>)`; any later backticked word (`None`, `file`) is prose, never a name."""
-  found = BACKTICKED.search(line)
-  return found.group(1).strip() if found else re.sub(r"\s*\(U\d+\)\s*$", "", line.split(":", 1)[1]).strip()
+def interface_names(line: str) -> set[str]:
+  """The names an Interfaces line declares, as `scan.names_of` reads its text after the colon, each then cut at its first
+  `(` or `->` (U105): `load(path) -> dict` and `load` are one name, a command keeps its words (`superegm review open`), a
+  store-key line (`` `state.json` key `x` ``) is keyed by its key, and `- Produces: none` names nothing."""
+  from superegm.scan import names_of  # at call time: scan imports graph, which imports this module
+  item = line.split(":", 1)[1].strip()
+  if item.rstrip(".").lower() == "none":
+    return set()
+  return {cut for name in names_of(item) if (cut := re.split(r"\(|->", name, maxsplit=1)[0].strip())}
 
 
 def units_span(text: str) -> tuple[int, int] | None:
@@ -270,7 +273,7 @@ def context(store: core.Store, handoff: str, text: str) -> dict:
       spec_global |= set(range(start, end + 1))
   (table_old, prose_old), (table_new, prose_new) = units_lines(prev), units_lines(new)
   return {"rel": rel, "prev": prev, "new": new, "ops": ops, "units": units, "merged": merged, "lines_of": lines_of,
-          "global_of": global_of, "names_of": {u: {interface_name(l) for l in held} for u, held in interfaces_of.items()},
+          "global_of": global_of, "names_of": {u: set().union(*map(interface_names, held)) for u, held in interfaces_of.items()},
           "spec_global": spec_global, "carried": carried_spans(units, entries, maps),
           "table_old": table_old, "table_new": table_new, "prose_old": prose_old, "prose_new": prose_new,
           "rows_old": set(units_rows("\n".join(prev)))}
@@ -281,7 +284,7 @@ def hunk_units(ctx: dict, op: list) -> tuple[set, set, set, set]:
   carried Design range the hunk overlaps (`ranged`); a unit whose body quotes a line the hunk removes or changes, a
   `## Global constraints` line always counting and any other line unless `skipped` (merged: `review`); every unit whose
   Interfaces declare the name of a `- Produces:` or `- Consumes:` line the hunk removes or inserts, its producer and
-  every consumer, names compared whole (`interfaced`); a `## Units` table line (header, separator or row), the unit its
+  every consumer, names read by `interface_names` (`interfaced`); a `## Units` table line (header, separator or row), the unit its
   row names and none for a new follow-up row (`Follows: U<n>`), never the uncovered, quoted-line or range rule (merged:
   `review`); a line of prose under `## Units` outside the table that `skipped` passes, every unmerged unit (merged:
   `review`) whatever covers or quotes it, the range rule still applying (U105); and, for each other changed line no
@@ -315,8 +318,8 @@ def hunk_units(ctx: dict, op: list) -> tuple[set, set, set, set]:
         (review if u in merged else hit).add(u)
   for line in [prev[n].strip() for n in range(i1, i2)] + [new[n].strip() for n in range(j1, j2)]:
     if line.startswith(INTERFACE):  # removed or inserted: the producer and every consumer of the name it declares
-      name = interface_name(line)
-      interfaced |= {v for v, names in ctx["names_of"].items() if name and name in names}
+      declared = interface_names(line)
+      interfaced |= {v for v, names in ctx["names_of"].items() if declared & names}
   units_old, units_new = ctx["table_old"] | ctx["prose_old"], ctx["table_new"] | ctx["prose_new"]  # their own rules
   uncovered = any(not skipped(prev[n]) and n not in quoted_old and not covered(n + 1)
                   for n in range(i1, i2) if n not in units_old)
