@@ -82,3 +82,20 @@ def test_not_run_round_is_no_head_round(world):
   report = report_of(world, c)
   assert table(report, "Units")["U01"]["head rounds"] == "1"
   assert table(report, "Plan against actual")["U01"]["head rounds"] == "1"
+
+
+def lesson_rows(world, c):
+  """The Lessons table's rows, each as its cells, in order."""
+  body = report_of(world, c).split("## Lessons\n", 1)[1].split("\n## ", 1)[0]
+  return [[cell.strip() for cell in line.strip().strip("|").split(" | ")] for line in body.splitlines() if line.startswith("|")][2:]
+
+
+@pytest.mark.parametrize("ruling", ["stop — over budget", "redesign — the seam is wrong"])
+def test_cap_ruling_stop_or_redesign_is_a_lesson(world, ruling):
+  # U01's foreman decision q1 with source `review head-U01-c1 cap`, ruled `ruling`
+  c, _, _ = two_units(world)
+  jwrite(c.hs.path("foreman", "U01"), {
+      "dispatch_id": None, "rounds": [], "stopped": None, "rulings": [{"decision": "q1", "ruling": ruling, "by": "owner"}],
+      "decisions": [{"id": "q1", "point": 2, "source": "review head-U01-c1 cap", "asked_at": "2026-11-16T00:00:00Z"}]})
+  lessons = lesson_rows(world, c)
+  assert [r[:3] for r in lessons if r[0] == "unit stopped at the cap"] == [["unit stopped at the cap", "U01", "foreman/U01.json q1"]]
