@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review settle --judges` for a head's contested or declined high or medium on a normal-mode card, journalled `Ruling (judges <panel>, contest)` (U88); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76); a spec cycle's changed reference documents as whole-file `changed <path>` scope lines, their `refs` manifest on each round, in the scope filter, the settle check and the proceed ruling (U75); `review open --respec R<n>`: the diff and its sections as evidence, the `design`, `codebase-details` and Astra panel, cap 2 (U85); a plan or integrate cycle a respec approval closed by its `source_review` (U91); `review record --sha256` on a head takes the full 40-hex commit sha alone (U101, 1.3 design section 3.4).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review settle --judges` for a head's contested or declined high or medium on a normal-mode card, journalled `Ruling (judges <panel>, contest)` (U88); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76); a spec cycle's changed reference documents as whole-file `changed <path>` scope lines, their `refs` manifest on each round, in the scope filter, the settle check and the proceed ruling (U75); `review open --respec R<n>`: the diff and its sections as evidence, the `design`, `codebase-details` and Astra panel, cap 2 (U85); a plan or integrate cycle a respec approval closed by its `source_review` (U91); `review record --sha256` on a head takes the full 40-hex commit sha alone (U101, 1.3 design section 3.4); a location's file name is its first whitespace-free token ending in a file extension that starts before the first line cite (U109, 1.3 design section 3.10).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest|triage: the one review loop (spec section 8)."""
 
@@ -286,9 +286,13 @@ def scope_sections(old: str, new: str) -> list[tuple[str, str, int, int]]:
           for i, (heading, start, end) in enumerate(spans) if i in changed or i in neighbours]
 
 
+CITE_RE = re.compile(r"(?:\blines? |\bL|:)(\d+)")
+FILE_TOKEN_RE = re.compile(r"[^\s:#,]+\.[A-Za-z][A-Za-z0-9]*(?=[:\s#,]|$)")  # a whitespace-free token ending in a file extension
+
+
 def cited_line(location: str) -> int | None:
   """The line a finding's location cites: the first integer after `line `, `lines `, `L` or `:`, else None."""
-  match = re.search(r"(?:\blines? |\bL|:)(\d+)", location)
+  match = CITE_RE.search(location)
   return int(match.group(1)) if match else None
 
 
@@ -298,20 +302,25 @@ def out_of_scope(rows: list, spans: list, location: str, spec_name: str = "", ro
   exempts every finding. A round that lists reference documents (`("changed", <path>, 0, 0)` rows, U75) reads a
   location's path first: a listed document is in scope whatever its line, any other file but the spec (`spec_name`,
   its repository-relative path) answers `none`, and only a spec location goes on through `cited_line` and the
-  sections. A file name has an extension that starts with a letter and ends at `:`, `#`, `,` or a space, so a
-  section cite such as `§3.5 line 4` or `3.5:4` names no file; a path with a slash, or a name followed by `:<line>`
-  or `#L<line>`, may hold spaces (`other/a b.md, line 8` names `other/a b.md`). The spec is named by its full path or
-  its bare file name only, never with a directory in front of its path. A listed document is named by its full repository-relative path after one leading
-  `./` or the repository root (`root`, an absolute path) is taken off, or by its bare file name (the spec's own name
-  wins a tie); a directory in front of the path names another file. A respec cycle (`respec`) lists no reference
-  document and its remit is the spec's correction alone: a location naming any other file answers `none`."""
+  sections. A file name is the location's first whitespace-free token that ends in a file extension (an extension
+  that starts with a letter, the token ending at whitespace, `:`, `#`, `,` or the end) and starts before the
+  location's first line cite (the span `cited_line` reads; any such token when the location cites no line), so a
+  token after that cite names no file (`line 8 of design.md` and `§2 line 8 contradicts README.md` cite the spec's
+  line 8), and a section cite such as `§3.5 line 4` or `3.5:4` names no file. The spec is named by its full path or
+  its bare file name only, never with a directory in front of its path. A listed document is named by its full
+  repository-relative path after one leading `./` or the repository root (`root`, an absolute path) is taken off,
+  or by its bare file name (the spec's own name wins a tie), opening the location and ending at whitespace, `:`,
+  `#`, `,` or the end, whatever follows it (it may hold spaces: `domain model.md line 12 vs docs/specs/design.md`
+  names the listed document); a directory in front of the path names another file. A respec cycle (`respec`)
+  lists no reference document and its remit is the spec's correction alone: a location naming any other file
+  answers `none`."""
   listed = {row[1] for row in rows if row[0] == "changed" and row[2] == row[3] == 0}
   loc, ends = location.removeprefix("./"), ": \t,#"
   for prefix in {root.rstrip("/"), str(Path(root).resolve()).rstrip("/")} - {"", "."}:
     loc = loc.removeprefix(prefix + "/")
-  named = (re.match(r"([^:#,]+\.[A-Za-z][A-Za-z0-9]*)(?=:\d|#L\d)", loc) or re.match(r"([^:#,]*?/[^:#,]*?\.[A-Za-z][A-Za-z0-9]*)(?=[:\s#,]|$)", loc)
-           or re.match(r"([^\s:#,]+\.[A-Za-z][A-Za-z0-9]*)(?=[:\s#,]|$)", loc))
-  spec_named = bool(named) and bool(spec_name) and (named.group(1) == spec_name or ("/" not in named.group(1) and spec_name.rsplit("/", 1)[-1] == named.group(1)))
+  cite = CITE_RE.search(loc)
+  named = next((m for m in FILE_TOKEN_RE.finditer(loc) if cite is None or m.start() < cite.start()), None)
+  spec_named = bool(named) and bool(spec_name) and (named.group(0) == spec_name or ("/" not in named.group(0) and spec_name.rsplit("/", 1)[-1] == named.group(0)))
   if respec and named and not spec_named:
     return "none"
   if listed:
@@ -319,8 +328,8 @@ def out_of_scope(rows: list, spans: list, location: str, spec_name: str = "", ro
     if any(named_as(path) for path in listed):
       return None
     if not spec_named:
-      if "/" not in loc.split(":")[0].split("#")[0] and any(named_as(path.rsplit("/", 1)[-1]) for path in listed):
-        return None  # a listed document by its bare file name (a slash before the first colon is another directory's)
+      if any(named_as(path.rsplit("/", 1)[-1]) for path in listed):
+        return None  # a listed document by its bare file name opening the location
       if named:
         return "none"
     rows = [row for row in rows if not (row[0] == "changed" and row[2] == row[3] == 0)]
