@@ -151,3 +151,17 @@ def test_clean_lists_again_after_the_wait(world, monkeypatch, found):
   assert "identity changed" not in out and "U07 cleaned" in journal
   assert signals[found] == [signal.SIGTERM] * (2 if found == 4242 else 1)  # the listed 4242, then the one found after the wait
   assert table.listings == 2  # one listing after the wait, no further one
+
+
+def test_clean_never_rmdirs_through_a_symlink(world):
+  s, _card, _hid, _bodies = seed(world, units=(UNIT,))
+  store_worktrees = s.path("worktrees", UNIT).parent
+  if store_worktrees.is_dir():
+    store_worktrees.rmdir()
+  linked_target = world.repo.parent / "elsewhere"
+  (linked_target / "U07").mkdir(parents=True)
+  store_worktrees.symlink_to(linked_target, target_is_directory=True)
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", world.open_card("clean", UNIT))
+  assert code == 0, out
+  assert (linked_target / "U07").is_dir()
+  assert f"kept {store_worktrees / 'U07'}: symlink" in out and "U07 cleaned" not in out
