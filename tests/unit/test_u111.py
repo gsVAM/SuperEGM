@@ -212,3 +212,24 @@ def test_close_saves_the_merge_and_clean_auto_loads_the_closed_handoff(world, pr
   assert auto_code == 0 and "clean --auto: handoff:" not in auto_out
   assert ("U07 cleaned" in auto_out) is bool(saved and "merged_at" in saved)
   assert tree.exists() is not bool(saved and "merged_at" in saved)
+
+
+def test_one_undeletable_ref_keeps_only_itself(world):
+  s, _card, _hid, _bodies = seed(world, units=(UNIT,))
+  with_pr(s, 52)
+  for ref in ("refs/superegm/pr/52", "refs/superegm/pr-base/52"):
+    git("update-ref", ref, "HEAD", cwd=world.repo)
+  common = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=world.repo))
+  (common / "refs/superegm/pr/52.lock").write_text("", encoding="utf-8")  # git cannot delete a ref whose lock is held
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", world.open_card("clean", UNIT))
+  assert code == 0, out
+  journal, refs_after = journal_text(s), refs(world)
+  skill = " ".join((ROOT / "skills/clean/SKILL.md").read_text(encoding="utf-8").split())
+  assert "kept refs/superegm/pr/52: " in out and "refs/superegm/pr-base/52" not in refs_after
+  assert "refs/superegm/pr/52" in refs_after
+  assert "U07 cleaned" not in journal
+  for phrase in ("keeps only itself", "ps -o lstart= -p <pid>", "kept <pid>: identity changed", "lists them again"):
+    assert phrase in skill, phrase
+  assert "keeps only itself" in " ".join(clean.clean_unit.__doc__.split())
+  auto_doc = " ".join(clean.clean_auto.__doc__.split())
+  assert all(line in auto_doc for line in ("kept <path>: <OSError>", "kept <ref>: ", "kept <pid>: identity changed"))
