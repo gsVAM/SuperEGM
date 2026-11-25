@@ -135,3 +135,22 @@ def test_prompt_keeps_each_form_from_its_authors(world, monkeypatch, spawn_fake,
   journal = s.path("journal").read_text(encoding="utf-8")
   assert (form in prompt) is kept
   assert kept or f"ignored: {stranger_login} is not the builder or an owner" in journal
+
+
+def comment(cid, login, body, at, updated="same"):
+  """An issue comment as the REST list gives it; `updated` `same` copies `at`, None leaves `updated_at` out."""
+  c = {"id": cid, "user": {"login": login}, "body": body, "created_at": at}
+  if updated is not None:
+    c["updated_at"] = at if updated == "same" else updated
+  return c
+
+
+def test_owner_notes_reach_every_later_launch(world, monkeypatch, spawn_fake):
+  # owners post `**Note:** first note` at 10:00 and `**Note:** second note` at 11:00 on U07's issue, then round 2 launches
+  s, card, hid = launch(world, monkeypatch)
+  notes_posted = [comment(5, "owner", "**Note:** first note", "2026-11-25T10:00:00Z"),
+                  comment(6, "owner", "**Note:** second note", "2026-11-25T11:00:00Z")]
+  round_2(world, monkeypatch, s, card, hid, comments=notes_posted)
+  prompt_round_2 = s.path("launches", f"{UNIT}_r2_prompt.md").read_text(encoding="utf-8")
+  notes = prompt_round_2.split("# Owner notes", 1)[1].split("\n---\n", 1)[0]
+  assert notes.index("first note") < notes.index("second note")
