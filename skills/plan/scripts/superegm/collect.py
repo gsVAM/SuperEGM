@@ -6,6 +6,7 @@
 round that could not complete with `--not-run`."""
 
 import argparse
+import ast
 import contextlib
 import difflib
 import io
@@ -233,20 +234,40 @@ ANY_DEF_RE = re.compile(r"\s*(?:async\s+)?def (\w+)\s*\(")
 
 
 def enclosing_tests(lines: list) -> list:
-  """The qualified name of the test enclosing each of `lines` (spec section 3.5): the outermost enclosing `def test_*`,
-  after the classes around it (`TestA.test_x`), or `<module>` outside a test. A block ends at the next code line
-  at its own indentation or less; a decorator line, and every line down to the `def` it decorates (stacked
-  decorators and a `parametrize`'s rows included), belongs to the test that `def` opens."""
+  """The qualified name of the test enclosing each of `lines` (spec section 3.5): the nearest enclosing `def test_*`,
+  after the classes around it (`TestA.test_x`), or `<module>` outside a test. A test spans its `def` statement as
+  Python's syntax reads it (`ast`), its decorators included: a signature over several lines, or a string's lines at
+  any indentation, neither ends it nor opens another. A text Python cannot parse falls back to `indented_tests`."""
+  try:
+    tree = ast.parse("\n".join(lines))
+  except (SyntaxError, ValueError):
+    return indented_tests(lines)
+  names = ["<module>"] * len(lines)
+
+  def visit(node, classes):
+    for child in ast.iter_child_nodes(node):
+      if isinstance(child, ast.ClassDef):
+        visit(child, classes + [child.name])
+        continue
+      if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) and child.name.startswith("test_"):
+        start = min([d.lineno for d in child.decorator_list] + [child.lineno]) - 1
+        names[start:child.end_lineno] = [".".join(classes + [child.name])] * (child.end_lineno - start)
+      visit(child, classes)  # a test nested in this one overwrites its own lines: the nearest encloses them
+  visit(tree, [])
+  return names
+
+
+def indented_tests(lines: list) -> list:
+  """`enclosing_tests` by indentation, for a text Python cannot parse: a block ends at the next code line at its
+  own indentation or less; a line takes the nearest enclosing `def test_*`, after the classes around it; a
+  decorator line, and every line down to the `def` it decorates, belongs to the test that `def` opens."""
   names, scopes = [], []  # scopes: (indent, name, is_class), outermost first
 
   def qualified():
-    classes = []
-    for _, name, is_class in scopes:
-      if is_class:
-        classes.append(name)
-      else:
-        return ".".join(classes + [name]) if name.startswith("test_") else "<module>"
-    return "<module>"
+    tests = [k for k, (_, name, is_class) in enumerate(scopes) if not is_class and name.startswith("test_")]
+    if not tests:
+      return "<module>"
+    return ".".join([name for _, name, is_class in scopes[:tests[-1]] if is_class] + [scopes[tests[-1]][1]])
   for line in lines:
     s = line.strip()
     if s and not s.startswith("#"):
