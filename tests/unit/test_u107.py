@@ -11,8 +11,9 @@ import pytest
 
 from superegm import atomic_write
 from superegm.inbox import inbox_items
-from test_wave import foreman_of
-from test_u57 import OWNER, UPDATED, comment, head_world, issue_of, proceed, round_zero, serve
+from test_inbox import HEAD, U, seed
+from test_wave import foreman_of, open_wave_card
+from test_u57 import OWNER, UPDATED, comment, head_world, issue_of, launches, proceed, round_zero, serve
 from test_u43 import registry  # noqa: F401 -- autouse: HOME under tmp_path
 
 NEEDS = 'proceed needs the head: write "proceed <sha7> — <reason>"'
@@ -72,3 +73,28 @@ def test_head_proceed_pins_the_shown_head(world, how, head_now, outcome):
   _, cid, plan_rid, _, _ = round_zero(world)
   bare_typed_proceed_on_a_plan_review_code, out = proceed(world, plan_rid, cid, "--owner", "--reason", "planned enough")
   assert bare_typed_proceed_on_a_plan_review_code == 0, out
+
+
+# ---------------------------------------------------------------- S2: every proceed offer shows its head
+
+
+def proceed_offer_store(world, kind):
+  """`proceed`: U01 proceeded on its head, then a later launch finished (waiting proceed); `stalled`: U01's head
+  review stalled (`review status` exit 5)."""
+  if kind == "proceed":
+    s, card, rid = head_world(world)
+    assert proceed(world, rid, card, "--owner", "--head", "a" * 7, "--reason", "accepted risk")[0] == 0
+    launches(s, "U01", 1, 2)
+    return s
+  open_wave_card(world)
+  return seed(world, **U(rounds=[{"round": n, "phase": "collected", "outcome": "not run (error: x)", "runcard": "wave-1"}
+                                 for n in (1, 2)], reviews=HEAD(0, [])))
+
+
+@pytest.mark.parametrize("kind", ["proceed", "stalled"])
+def test_inbox_proceed_offers_show_the_head(world, kind):
+  # every proceed the inbox offers carries the head it covers in the form the owner posts
+  st = proceed_offer_store(world, kind)
+  handoff_id = st.handoff_id
+  [offer] = [i for i in inbox_items(st, [handoff_id]) if i["kind"] == kind]
+  assert offer["forms"] == [f"**Ruling:** proceed {offer['head'][:7]} — <reason>"]
