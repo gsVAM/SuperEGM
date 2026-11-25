@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U44's tests: the phase-aware tick behind `driver.chain`.
+# Added by SuperEGM (gsVAM), 2026: U44's tests: the phase-aware tick behind `driver.chain`; `set_mode` reads the handoff's own approval file by name, never the first `approvals/*.json` a glob returns (the 1.3 wave's flaky CI).
 
 """U44 (spec section 7.1): the tick fetches the base into `refs/superegm/tick-base`, asks `superegm next` and launches,
 proves, counts and reports the session of the chain phase that comes next; with `driver.chain` absent or false it is
@@ -18,7 +18,7 @@ from conftest import ROOT, make_repo, Harness
 from test_builders import put, spawn_fake, SPAWNED  # noqa: F401  (spawn_fake: a fixture)
 from test_driver import registered
 from test_u24 import tick_launches, tick_launch, card_of, driver_file
-from test_u43 import Chain, UNITS
+from test_u43 import Chain, SLUG, UNITS
 
 
 def edit_config(repo, **keys):
@@ -153,7 +153,7 @@ def test_tick_removes_a_superseded_wait_record(world, monkeypatch, tmp_path, spa
 
 def set_mode(c, mode):
   """The handoff's approval entry with `mode` frozen as given; None removes it (a 1.2.0 entry)."""
-  path = next((c.root / "approvals").glob("*.json"))
+  path = c.root / "approvals" / f"{SLUG}.json"  # the world's flat `sample.json` sits beside it
   record = json.loads(path.read_text(encoding="utf-8"))
   entry = record["entries"][-1]
   entry.pop("mode", None)
