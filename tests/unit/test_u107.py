@@ -9,6 +9,7 @@ import json
 
 import pytest
 
+import superegm  # the harness reloads the package per test: read its names at call time
 from superegm import atomic_write
 from superegm.inbox import inbox_items
 from test_inbox import HEAD, U, seed
@@ -98,3 +99,35 @@ def test_inbox_proceed_offers_show_the_head(world, kind):
   handoff_id = st.handoff_id
   [offer] = [i for i in inbox_items(st, [handoff_id]) if i["kind"] == kind]
   assert offer["forms"] == [f"**Ruling:** proceed {offer['head'][:7]} — <reason>"]
+
+
+# ---------------------------------------------------------------- S3: the repository check
+
+
+def mismatch_store(tmp_path, frozen):
+  """A store whose config names `o/new`, holding handoff x-abc123 frozen on `frozen` (its `state.json`'s `repo`, as
+  `core.require_repo` binds it): unit U01 filed as issue #2 with one pending point-3 decision, no wave card."""
+  root = tmp_path / "store"
+  st = superegm.Store(root, config={**superegm.DEFAULT_CONFIG, "repo": "o/new", "artifacts_dir": str(root)})
+  hs = superegm.handoff_store(st, "x-abc123")
+  spec = tmp_path / "x.md"
+  spec.write_text("# x\n", encoding="utf-8")
+  atomic_write(st.path("handoffs", "x-abc123"), {"id": "x-abc123", "spec": str(spec), "opened_at": "t", "closed_at": None})
+  atomic_write(hs.path("state"), {"handoff_id": "x-abc123", "repo": frozen, "units": {"U01": {"number": 2}},
+                                  "status": {"units": {"U01": {"pr": None, "head": None, "ci": None, "landed": False}}}})
+  atomic_write(hs.path("foreman", "U01"), {"dispatch_id": None, "rounds": [], "rulings": [],
+                                           "decisions": [{"id": "q1", "point": 3, "source": "comment 77", "question": "q",
+                                                          "asked_at": "t"}]})
+  return st
+
+
+@pytest.mark.parametrize("frozen, actions", [
+  ("o/old", ["repo mismatch: x-abc123 was approved for o/old"]),
+  ("o/new", ["answer in the inbox"]),
+])
+def test_repo_mismatch_replaces_the_handoffs_lines(tmp_path, frozen, actions):
+  # config.repo is o/new; handoff x-abc123 is frozen on `frozen` with one pending point-3 decision and no wave card
+  st = mismatch_store(tmp_path, frozen)
+  items = inbox_items(st, ["x-abc123"])
+  assert [i["action"] for i in items] == actions
+  assert frozen == "o/new" or not any("forms" in i or "on" in i for i in items)
