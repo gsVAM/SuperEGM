@@ -283,3 +283,88 @@ def test_judges_and_1_2_1_test_delta_settlements_carry(world, tmp_path, monkeypa
   rnd = collect_round(world, st, card, 2)
   round_2_claims = [f["claim"] for f in rnd["reviewers"]["foreman"]["findings"]]
   assert sum(claim.startswith("test-delta: tests/unit/test_q.py:") for claim in round_2_claims) == highs, round_2_claims
+
+
+# Round 2's review (PR #293): the fixes, each pinned.
+
+SYNTAX = ("import pytest\n"                         # 1
+          "\n"                                       # 2
+          "def test_a(\n"                            # 3  a signature over several lines, closed at the def's indent
+          "    tmp_path,\n"                          # 4
+          "):\n"                                     # 5
+          "    text = '''\n"                         # 6  a string whose lines sit at column 0
+          "def x(\n"                                 # 7
+          "'''\n"                                    # 8
+          "    assert y == 1\n"                      # 9
+          "\n"                                       # 10
+          "class TestB:\n"                           # 11
+          "    @pytest.mark.parametrize('x', [\n"    # 12
+          "        1,\n"                             # 13
+          "    ])\n"                                 # 14
+          "    def test_b(self, x):\n"               # 15
+          "        def test_inner():\n"              # 16 a test nested in a test: the nearest encloses its lines
+          "            assert x\n"                   # 17
+          "        assert y == 1\n")                 # 18
+
+
+def test_the_enclosing_test_is_read_from_the_syntax_not_the_indentation():
+  # astra-1-2, codebase-details-1-2, change-review-1-2: a multi-line signature or a string's column-0 lines end no
+  # test, a string's `def x(` opens none, and a line takes the nearest enclosing `def test_*` with its class
+  from superegm.collect import enclosing_tests
+  names = enclosing_tests(SYNTAX.splitlines())
+  assert names == (["<module>"] * 2 + ["test_a"] * 7 + ["<module>"] * 2 + ["TestB.test_b"] * 4
+                   + ["TestB.test_inner"] * 2 + ["TestB.test_b"])
+
+
+K = lambda text: {"file": Q, "line": 3, "base_line": 3, "kind": "weakened", "base_commit": "0" * 40, "test": "test_a",
+                  "text": text, "base_text": "assert y == 1", "occurrence": 1}
+WEAKENED = f"test-delta: {Q}:3 weakened"
+FOLLOWS = {  # each case: round 1's and round 2's foreman records, their test_delta entries, the ruling, the contested fid
+  # astra-1-3, codebase-details-1-5: a ruling on a contest's copy settles the original it contests
+  # (round 2 holds foreman-1-1 carried, as foreman-2-1 below, and its contest's copy foreman-2-2)
+  "copy-ruled": ({"foreman": "foreman-1-1 | high | dod/4.txt | regression: no | dod-4: ran red (timeout)\n"},
+                 {"foreman": "foreman-2-1 | high | dod/4.txt | regression: no | dod-4: ran red (timeout)\n"
+                             "foreman-2-2 | high | pr #70 comment 9 | regression: no | contested foreman-1-1: red\n"},
+                 None, None, "foreman-2-2 finding overruled — CI runs the suite", "foreman-1-1", False),
+  # codebase-details-1-3: the owner's file allowance widens Scope, so a contest of that path's scope finding is moot
+  "scope-file": ({"foreman": f"foreman-1-1 | high | {Q} | regression: no | changed path outside Scope paths\n"}, None,
+                 None, None, "test-delta tests/unit/test_q.py allowed — by design", "foreman-1-1", False),
+  # codebase-details-1-4, change-review-1-3: the ruling binds round 1's entry; the carried copy's new change is open
+  "carried-new-change": ({"foreman": f"foreman-1-1 | high | {Q}:3 | regression: no | {WEAKENED}\n"},
+                         {"foreman": f"foreman-2-1 | high | {Q}:3 | regression: no | {WEAKENED}\n"},
+                         K("assert y"), K("assert True"), "foreman-1-1 allowed — kept by design", "foreman-1-1", True),
+  "carried-same-change": ({"foreman": f"foreman-1-1 | high | {Q}:3 | regression: no | {WEAKENED}\n"},
+                          {"foreman": f"foreman-2-1 | high | {Q}:3 | regression: no | {WEAKENED}\n"},
+                          K("assert y"), K("assert y"), "foreman-1-1 allowed — kept by design", "foreman-1-1", False),
+}
+
+
+@pytest.mark.parametrize("case", list(FOLLOWS))
+def test_a_contest_is_dropped_only_where_a_ruling_settles_what_it_contests(world, tmp_path, monkeypatch, case):
+  round_1, round_2, entry_1, entry_2, ruling, contested, raised = FOLLOWS[case]
+  if case == "scope-file":  # round 1's scope finding: test_q.py outside Scope
+    monkeypatch.setattr(test_foreman, "SECTION", test_foreman.SECTION.replace("`tests/unit/test_q.py` (modify), ", ""))
+  rounds = [{**POSTED_R1, **({"test_delta": [entry_1]} if entry_1 else {})}]
+  if round_2:  # round 2, posted after the ruling when it carries a test-delta entry, else with round 1
+    rounds.append({**R2, **({"test_delta": [entry_2], "posted_at": "2026-11-02T15:00:00Z"} if entry_2 else {})})
+  n = len(rounds) + 1
+  reply_at = "2026-11-02T16:00:00Z"
+  comments = {2: [c(13, "owner", f"**Ruling:** {ruling}", at=RULING_AT)],
+              PR: [c(14, "builder-bot", f"**Reply {contested}:** contested — CI runs the suite", at=reply_at)]}
+  kw = dict(rounds=rounds, launches=[{"round": i, "status": "exited 0"} for i in range(1, n + 1)], comments=comments)
+  st0, card0, _ = seed(world, **kw)
+  rid = open_head_review(world, st0, card0, "0" * 40, {"change-review": "", **round_1})
+  if round_2:  # recorded under round 2's ids, then its foreman-2-1 made round 1's carried copy, as `collect`'s carry writes it
+    record(world, st0, rid, 2, "0" * 40, card0, {"change-review": "", **round_2})
+    path = st0.path("reviews", rid, "round-2.json")
+    held = json.loads(path.read_text(encoding="utf-8"))
+    first = held["reviewers"]["foreman"]["findings"][0]
+    first.update(id="foreman-1-1", carried_from=1)
+    atomic_write(path, held)
+  w = prepared(world, tmp_path, monkeypatch, **kw)
+  code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
+  assert code == 0, out
+  lines = (w.dir / f"r{n}/foreman.findings").read_text(encoding="utf-8").splitlines()
+  builder_contested = json.loads(w.st.path("reviews", w.rid, f"round-{n}.json").read_text(encoding="utf-8"))["builder_contested"]
+  assert any(line.endswith(f"contested {contested}: CI runs the suite") for line in lines) is raised, lines
+  assert len(builder_contested) == (1 if raised else 0)
