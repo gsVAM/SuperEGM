@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the `ruling` event and a status line after a comment's deviation headings (U22); the board's one write per `wave` pass, `post_board` (U30); the tick's read, `tick_trigger` (U24); the watchdog's `stalled` line, its predicate and `head_time` (U31); `tick_trigger`'s chain-on `merged` line and its proofs over every chain phase's card (U44); `ruling_facts` reads `proceeds[]`, so a recorded proceed comment is no event (U94); the `conflict` view status, its fingerprint key and its event line (U62); `builder_comment`, the filter `builder_facts` and `finish` share, the `open:`/`held: respec` lines and `tick_trigger`'s `respec R<n> <unit>` (U86); the unfiled units skipped while a plan review's respec waits (U91).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_status` as the status module; `--wait` returns event lines (U09b); the `ruling` event and a status line after a comment's deviation headings (U22); the board's one write per `wave` pass, `post_board` (U30); the tick's read, `tick_trigger` (U24); the watchdog's `stalled` line, its predicate and `head_time` (U31); `tick_trigger`'s chain-on `merged` line and its proofs over every chain phase's card (U44); `ruling_facts` reads `proceeds[]`, so a recorded proceed comment is no event (U94); the `conflict` view status, its fingerprint key and its event line (U62); `builder_comment`, the filter `builder_facts` and `finish` share, the `open:`/`held: respec` lines and `tick_trigger`'s `respec R<n> <unit>` (U86); the unfiled units skipped while a plan review's respec waits (U91); `status --wait` loads `state.json` again before its one save and copies onto it only what its passes set, so a write made during the wait survives (U98, 1.3 design section 3.1).
 
 """superegm status: landed and ready sets, PRs, CI; refuses without a complete receipt.
 `--wait <s>` polls, reading only, and prints every unreported event line, or `deadline`. Under a `wave` card
@@ -169,7 +169,8 @@ def post_board(handoff, card: dict, status: dict) -> bool:
 
 def wait_events(handoff, seconds: int, card: dict) -> list:
   """Poll `status_pass` (reading only) until a unit has an unreported event or the deadline
-  passes; the event lines, or `deadline`; one state write on return. Before that write, under a
+  passes; the event lines, or `deadline`; one state write on return, of a fresh load of `state.json` carrying only what the
+  passes set. Before that write, under a
   `wave` `card`, `post_board` reads the tracking issue once and, when the rows changed, rewrites
   its board (`gh issue edit`, `board_changed_at`), a failed read or write journaled `board write failed`. `run` prints
   `respec_lines` after these lines, `deadline` included: `open: respec R<n>`, `<U> held: respec R<n>` and
@@ -178,18 +179,41 @@ def wait_events(handoff, seconds: int, card: dict) -> list:
   state = handoff.state
   previous = (state.get("status") or {}).get("units") or {}
   deadline = core.NOW() + seconds
+  records = lambda uid: state["units"].get(uid) or {}
+  watched = {uid: records(uid).get("watch") for uid in handoff.graph.order}  # the `watch` every pass of the wait reads
+  read_pr = set()  # the units a pass of the wait set a `pr` for
+  voided = {}  # unit -> (the void a pass set, the `landed_confirmed` it voided); `unit_view` emits no event for it
   while True:
+    held = {uid: records(uid).get("landed_confirmation_void") for uid in handoff.graph.order}
     summary, _ = core.status_pass(handoff, save=False)
+    read_pr |= {uid for uid, unit in summary["units"].items() if unit["pr"]}
+    for uid in handoff.graph.order:
+      if (void := records(uid).get("landed_confirmation_void")) and void != held[uid]:
+        voided[uid] = (void, records(uid).get("landed_confirmed"))
     lines = [line for uid in handoff.graph.order
              for line in unit_events(uid, previous.get(uid), summary["units"][uid])]
     if lines or core.NOW() >= deadline:
       break
     core.SLEEP(min(core.WAIT_INTERVAL, max(1, deadline - core.NOW())))
-  # One write, when the wait is over, the only writer of `status.units`: while it waits it only
-  # reads, so no other command can be overwritten by a sleeping watcher.
+  # The GitHub reads and the board write are done: the file is touched last. `state` is the copy loaded before the wait,
+  # and `save_state` replaces the whole file, so saving it would lose what another command wrote while the wait slept
+  # (a launch mark, a ruling, a settlement). The wait loads `state.json` again and copies onto that only what its passes set:
+  # `status`, `board_changed_at` (when `post_board` wrote), and per unit `pr`, `status` and `landed_confirmation_void`.
   state["status"] = {**summary, "units": {uid: fingerprint(unit) for uid, unit in summary["units"].items()}}
-  post_board(handoff, card, state["status"])
-  core.save_state(handoff.artifact_dir, state)
+  board = post_board(handoff, card, state["status"])
+  fresh = core.load_state(handoff.artifact_dir)
+  fresh["status"] = state["status"]
+  if board:
+    fresh["board_changed_at"] = state["board_changed_at"]
+  for uid in handoff.graph.order:
+    record = fresh.setdefault("units", {}).setdefault(uid, {})
+    if record.get("watch") == watched[uid]:  # else a `status --watch` recorded another PR during the wait: its `pr` and `status` stand
+      record["status"] = state["units"][uid]["status"]
+      if uid in read_pr:
+        record["pr"] = state["units"][uid]["pr"]
+    if uid in voided and record.get("landed_confirmed") == voided[uid][1]:  # else the confirmation was given again: no void
+      record["landed_confirmation_void"] = voided[uid][0]
+  core.save_state(handoff.artifact_dir, fresh)
   return lines or ["deadline"]
 
 
