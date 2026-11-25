@@ -165,3 +165,50 @@ def test_clean_never_rmdirs_through_a_symlink(world):
   assert code == 0, out
   assert (linked_target / "U07").is_dir()
   assert f"kept {store_worktrees / 'U07'}: symlink" in out and "U07 cleaned" not in out
+
+
+def served(world, read):
+  """`gh api repos/<repo>/pulls/52` reads `read`; `gh issue close` closes the issue; every other route is the fake's own."""
+
+  def api(args, cwd, token=None):
+    endpoint = world.gh.endpoint_of(args)
+    return world.gh.ok(read) if endpoint.endswith("/pulls/52") else world.gh.do_api(args)
+
+  def issue(args, cwd, token=None):
+    if args[1] != "close":
+      return world.gh.do_issue(args)
+    world.gh.issues[int(args[2])]["state"] = "closed"
+    return world.gh.ok(text="")
+
+  world.gh.extend("api", api)
+  world.gh.extend("issue", issue)
+
+
+@pytest.mark.parametrize("pr_record, read, saved", [
+  ({"number": 52}, {"merged": True, "merged_at": "2026-11-20T10:00:00Z"}, {"number": 52, "merged_at": "2026-11-20T10:00:00Z"}),
+  ({"number": 52}, {"merged": True}, {"number": 52}),  # a read without merged_at writes nothing
+  (None, {"merged": True}, None),  # no units.U07.pr object and a read without merged_at, as test_leavemealone_finish fakes it
+])
+def test_close_saves_the_merge_and_clean_auto_loads_the_closed_handoff(world, pr_record, read, saved):
+  s, card, _hid, _bodies = seed(world, units=(UNIT,))
+  launched(s, UNIT, "exited 0")
+  tree = s.path("worktrees", UNIT, "r1")
+  tree.parent.mkdir(parents=True, exist_ok=True)
+  git("worktree", "add", "-q", "--detach", str(tree), "HEAD", cwd=world.repo)
+  state = json.loads(s.path("state").read_text(encoding="utf-8"))
+  state["units"][UNIT]["launched"] = {"at": "2026-11-03T00:00:00Z", "runcard": card, "by": "owner"}
+  if pr_record is not None:
+    state["units"][UNIT]["pr"] = pr_record
+  state["status"] = {"ready": [], "units": {UNIT: {"pr": 52, "head": "a" * 40, "ci": "pass", "landed": False}}}  # unlanded, PR 52
+  put(s.path("state"), json.dumps(state))
+  served(world, read)
+  artifact = json.loads(s.path("runcards", card).read_text(encoding="utf-8"))["artifact"]
+  integrate = world.open_card("integrate", artifact)
+  code, out = world.run("close", "--runcard", integrate)
+  assert code == 0, out
+  state = json.loads(s.path("state").read_text(encoding="utf-8"))
+  auto_code, auto_out = world.run("clean", "--auto", "--runcard", integrate)
+  assert state["closed_at"] and state["units"]["U07"].get("pr") == saved
+  assert auto_code == 0 and "clean --auto: handoff:" not in auto_out
+  assert ("U07 cleaned" in auto_out) is bool(saved and "merged_at" in saved)
+  assert tree.exists() is not bool(saved and "merged_at" in saved)
