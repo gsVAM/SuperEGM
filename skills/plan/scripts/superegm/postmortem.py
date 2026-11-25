@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: `superegm postmortem`, the handoff's report of spec section 7.5 (U78); the Lessons table and `--retro <file>` (U87); a copy's settlement counted on the finding it copies, and a round of only copies quiet (U110, 1.3 design section 3.10).
+# Added by SuperEGM (gsVAM), 2026: `superegm postmortem`, the handoff's report of spec section 7.5 (U78); the Lessons table and `--retro <file>` (U87); a copy's settlement counted on the finding it copies, and a round of only copies quiet, a not-run round no head round, a `redesign` cap ruling and an unapproved respec cycle's findings kept, `**Reply <fid>:**` a comment label (U110, 1.3 design section 3.10).
 
 """superegm postmortem: one report of a handoff from the store (spec section 7.5), and its retrospective's record (7.7).
 
@@ -391,7 +391,7 @@ def plan_table(hs: core.Store, uids: list, units: dict, state: dict) -> str:
 
 
 DEVIATION_RE = re.compile(r"\*\*Deviation \(spec\):\*\*(.*)")
-COMMENT_LABEL_RE = re.compile(r"\*\*(?:Builder status|Ruling|Deviation|Blocked|Status|Reply)(?: \([^)]*\))?:\*\*")  # a whole label of a comment (`**Deviation (spec):**`); other bold text, `**Status mismatch:**` too, is evidence
+COMMENT_LABEL_RE = re.compile(r"\*\*(?:(?:Builder status|Ruling|Deviation|Blocked|Status|Reply)(?: \([^)]*\))?|Reply [^\s*]+-\d+-\d+):\*\*")  # a whole label of a comment (`**Deviation (spec):**`, `**Reply foreman-2-1:**`: a builder's reply names a finding id, U110); other bold text, `**Status mismatch:**` and `**Reply later:**` too, is evidence
 
 
 def deviation_evidence(st: core.Store, comment_id) -> str:
