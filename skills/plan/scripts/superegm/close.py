@@ -62,11 +62,8 @@ def run(args):
     if not landed and unit.get("pr"):
       pull = core.gh_json(["api", f"repos/{repo}/pulls/{unit['pr']}"]) or {}
       landed = bool(pull.get("merged"))
-      if landed and pull.get("merged_at") and isinstance(record.get("pr"), dict) and record["pr"].get("number") == unit["pr"]:
-        # The merge saved for `clean --auto`, before `closed_at`, only into an existing `pr` object of the PR read
-        # (a `status --watch` after the snapshot may have recorded another PR)
-        record["pr"]["merged_at"] = pull["merged_at"]
-        core.atomic_write(st.path("state"), state)
+      if landed and pull.get("merged_at"):
+        save_merge(st, uid, unit["pr"], pull["merged_at"])
     if not landed:
       unlanded.append(uid)
       core.journal(st, f"close: {uid} unlanded")
@@ -82,11 +79,23 @@ def run(args):
           for uid in sorted(state.get("units") or {}) for r in core.load_foreman(st, uid).get("followups") or []]
   for row in rows:
     core.journal(st, f"close: follow-up {row}")
+  state = core.load_state(st.root)  # read again after the GitHub reads: another writer's record (a `status --watch`) is kept
   write_closed(st, state, None)
   print(f"closed {state['handoff_id']}; unlanded: {', '.join(unlanded) or 'none'}")
   if rows:
     print("\n".join(["Follow-ups:", *(f"- {row}" for row in rows)]))
   return 0
+
+
+def save_merge(store: core.Store, uid: str, number: int, merged_at: str) -> None:
+  """The merge of PR `number` saved for `clean --auto` as `units.<uid>.pr.merged_at`, before `closed_at`: `state.json` read
+  again first (a `status --watch` may have recorded another PR while `close` waited on GitHub), and written only into an
+  existing `pr` object whose `number` is the PR read."""
+  state = core.load_state(store.root)
+  record = ((state.get("units") or {}).get(uid) or {}).get("pr")
+  if isinstance(record, dict) and record.get("number") == number:
+    record["merged_at"] = merged_at
+    core.atomic_write(store.path("state"), state)
 
 
 def close_issue(store: core.Store, repo: str, label: str, number: int) -> None:
