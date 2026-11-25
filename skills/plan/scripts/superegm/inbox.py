@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45); the `proceed again` item and the merge on the authorizing outcome (U92); the `conflict` item (U62); a ruling's action the inbox with its `forms` and `on`, a review's its skill session, and `inbox withdrawn` (U72); no merge item for a head a `respec:` mark holds (U86); a contested item carries the unconverged panel's verdict line (U88), a head contest held only while the store's panel record for its review and round is open (U88); the `waiting respec R<n>` line of a respec from a review's design finding (U91).
+# Added by SuperEGM (gsVAM), 2026: the inbox and notify subcommands (spec section 11.2, U23); the driver lines, `--all` over the registry and notify under a driver card (U24); the `kill_failed` item's text and the stamps read through `core.epoch` (U31); its own `notify_timeout_seconds` config key and `init` line, moved from `__init__` and `init` (U32); `kill_group` renamed `sigkill_hook` (U48); the mode read card, then frozen, then `config.mode`, and a chained handoff's `waiting …` and `ready to integrate` lines (U45); the `proceed again` item and the merge on the authorizing outcome (U92); the `conflict` item (U62); a ruling's action the inbox with its `forms` and `on`, a review's its skill session, and `inbox withdrawn` (U72); no merge item for a head a `respec:` mark holds (U86); a contested item carries the unconverged panel's verdict line (U88), a head contest held only while the store's panel record for its review and round is open (U88); the `waiting respec R<n>` line of a respec from a review's design finding (U91); every proceed offer's form names its head, a handoff approved for another repository is one `repo mismatch` line, no undo beside a proceed's merge, and a capped round's contest no panel will rule is listed (U107, 1.3 design section 3.9).
 
 """superegm inbox [--all] [--json] [--handoff <id>]: one line per item that needs the owner across the
 store's open handoffs, read-only and with no run card; superegm inbox withdrawn --pr <n> --reason <text>: the merge
@@ -41,13 +41,18 @@ def item(repo: str, subject: str, kind: str, action: str, key) -> dict:
 
 
 INBOX = "answer in the inbox"  # spec 1.2.1 section 7.3: the owner answers a ruling in words in the inbox (U72)
-PROCEED = "**Ruling:** proceed — <reason>"  # spec section 4.2: the owner's go-ahead on a head
 SESSION = {"spec": "review-spec", "plan": "review-plan", "integrate": "integrate"}  # a review's kind -> its skill
 
 
 def session(skill: str) -> str:
   """The action of a question the owner answers in that skill's interactive session (spec 1.2.1 section 7.3)."""
   return f"answer in your {skill} session"
+
+
+def proceed_form(head) -> str:
+  """The owner's go-ahead on a head (spec section 4.2) as the inbox offers it: naming the head it covers, the one the
+  owner is shown, which `review rule` pins and refuses once it moved (1.3 design section 3.9)."""
+  return f"**Ruling:** proceed {head[:7] if head else '<sha7>'} — <reason>"
 
 
 def ruling_item(repo: str, subject: str, kind: str, forms: list, number, key) -> dict:
@@ -210,14 +215,14 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
   # proceed on, so nothing is listed until the pull request has one
   if shown and waiting_proceed(foreman, launches, head):
     last = launches[-1]["round"] if launches else 0
-    out.append(ruling_item(repo, uid, "proceed", [PROCEED], number, f"{last}/{shown}") | {"head": shown})
+    out.append(ruling_item(repo, uid, "proceed", [proceed_form(shown)], number, f"{last}/{shown}") | {"head": shown})
   auth = authorizing(foreman) or {}
   # a proceed with no pinned head has nothing for `--match-head-commit` to pin: no merge is offered on it, and
   # once the pull request has a head the owner is asked to proceed again on it, as the board's action says
   unpinned = bool(auth.get("ruling")) and not auth.get("head")
   if unpinned and head and latest_clean(foreman, launches, head):
     last = launches[-1]["round"] if launches else 0
-    out.append(ruling_item(repo, uid, "proceed", [PROCEED], number, f"{last}/{head}") | {"head": head})
+    out.append(ruling_item(repo, uid, "proceed", [proceed_form(head)], number, f"{last}/{head}") | {"head": head})
   # U62: no merge is offered while GitHub reads the pull request `CONFLICTING`: it would refuse it
   # U72: no merge is offered while a decision is pending or a launch is live (a proceed may rule on a running one)
   live = bool(launches) and not finished(launches[-1])
@@ -385,8 +390,9 @@ def review_items(hs: core.Store, repo: str, spec: str, rid: str, rev: dict, fore
     foreman, number = foremen.get(unit) or {}, (((state or {}).get("units") or {}).get(unit) or {}).get("number")
     if status.code == 5:  # spec section 4.2: a stall ends the invocation and `proceed` is the way past it; no point-2
       # decision is open on a stall, so a cap form would rule nothing (decision.verify_posted)
-      out.append(ruling_item(repo, unit, "stalled", [PROCEED], number, f"{rid}/{rounds[-1]['round']}")
-                 | {"head": review.pinned_head(hs, rid, rev, state or {})})  # the head its proceed would pin
+      pinned = review.pinned_head(hs, rid, rev, state or {})  # the head its proceed would pin
+      out.append(ruling_item(repo, unit, "stalled", [proceed_form(pinned)], number, f"{rid}/{rounds[-1]['round']}")
+                 | {"head": pinned})
     elif status.code == 2 and not any(d.get("point") == 2 for d in report.pending_decisions(foreman)):
       # the capped round is posted but its point-2 decision is not open yet: a posted cap form would name no open
       # decision (decision.verify_posted drops it), so the item offers none until the next wave opens it

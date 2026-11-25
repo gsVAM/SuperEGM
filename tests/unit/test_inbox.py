@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U23's tests of the inbox and the notify hook (spec section 11.2).
+# Modified by SuperEGM (gsVAM), 2026: the stall's proceed form names its head, and no #250 panel line in the seeds (U107, 1.3 design section 3.9).
 
 """U23: `inbox_items` and `superegm inbox`, `notify_lines` and `superegm notify`.
 Fixtures: conftest's `world`; `wave_store` and `open_wave_card` from test_wave.py."""
@@ -81,7 +82,7 @@ KINDS = {"decision", "cap", "contested", "merge", "stalled", "escalated", "redes
   (U(rounds=POSTED(1, "clean")), []),
   # a stall opens no decision, so `proceed` is its way past (spec section 4.2), not a cap form
   (U(rounds=[{"round": n, "phase": "collected", "outcome": "not run (error: x)", "runcard": "wave-1"} for n in (1, 2)], reviews=HEAD(0, [])),
-   [("U01", "stalled", ["**Ruling:** proceed — <reason>"], "U01/stalled/head-U01-c1/2")]),
+   [("U01", "stalled", ["**Ruling:** proceed aaaaaaa — <reason>"], "U01/stalled/head-U01-c1/2")]),
   ({"escalated": ["spec-sample-c1:design-1-1"], **U()}, [("spec-sample-c1", "escalated", "answer in your plan session", "spec-sample-c1/escalated/design-1-1")]),
   (U(reviews=REVIEW("integrate", "spec-sample-integrate-c1", {1: ROUND(1, [{**F("high")[0], "disposition": "escalated"}])})),
    [("spec-sample-integrate-c1", "escalated", "answer in your integrate session", "spec-sample-integrate-c1/escalated/foreman-1-1")]),
