@@ -250,7 +250,8 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
     # lands, the last one included
     key = "".join([base] + [f"/after-{m}" for m in after])
     merge = item(repo, uid, "merge", action, key) | {"head": auth.get("head") or head}
-    if undo:
+    # 1.3 design section 3.9: an undo is refused while a proceed's merge is offered (decision.refuse_undo), so none rides on it
+    if undo and not auth.get("ruling"):
       merge |= {"undo": undo, "on": f"{GITHUB}/{repo}/issues/{number}"}
     out.append(merge)
   elif undo:

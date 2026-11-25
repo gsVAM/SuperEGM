@@ -832,7 +832,8 @@ def deferral_of(foreman: dict, fid: str):
 def refuse_undo(st, unit: str, data: dict, row: dict, args) -> None:
   """The undo's refusals (spec section 5.2), checked before anything is written, so the follow-up row stays: a
   deferral of an earlier round than the unit's latest posted one, a stopped unit (`foreman.stopped`, or the stopped
-  label on its issue), and a pull request merged or closed (its state read now)."""
+  label on its issue), the unit's authorizing outcome a proceed whose merge the inbox still offers (1.3 design section
+  3.9), and a pull request merged or closed (its state read now)."""
   posted = [e["round"] for e in data.get("rounds") or [] if e.get("phase") == "posted"]
   why = None
   if row["round"] != max(posted, default=None):
@@ -845,11 +846,23 @@ def refuse_undo(st, unit: str, data: dict, row: dict, args) -> None:
     pr = (record.get("pr") or {}).get("number")
     if labelled_stopped(st, record["number"]):
       why = f"{unit} is stopped (issue #{record['number']} labelled {st.config['labels']['stopped']})"
+    elif proceed_merge_offered(st, unit, data, state):
+      why = f"{unit}'s merge on the owner's proceed is still offered"
     elif pr and (pr_state := core.gh_json(["pr", "view", str(pr), "-R", st.config["repo"], "--json", "state"]).get("state")) != "OPEN":
       why = f"pull request #{pr} is {pr_state.lower()}"
   if why:
     core.journal(st, f"undo refused ({args.by}, comment {args.posted}): {why}; follow-up {row['fid']} kept")
     raise Refusal(f"decision: undo refused: {why}; the follow-up row stays")
+
+
+def proceed_merge_offered(st, unit: str, data: dict, state: dict) -> bool:
+  """Whether the unit's authorizing outcome is a proceed (spec section 4.2) whose merge the inbox offers now
+  (`inbox.unit_items`' merge item, its guards included): an undo then is refused (1.3 design section 3.9)."""
+  from superegm import inbox  # at call time: `inbox` imports this module
+  from superegm.launch import authorizing
+  if not (authorizing(data) or {}).get("ruling"):
+    return False
+  return any(i["kind"] == "merge" for i in inbox.unit_items(st, st.config["repo"], state, unit, data))
 
 
 def undo(st, unit: str, data: dict, args, comment: dict, found: "Ruling", now: str) -> int:
