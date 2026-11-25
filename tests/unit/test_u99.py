@@ -14,6 +14,8 @@ import pytest
     ("gh_json", "HTTP 504", 4, [1, 4, 16], True),
     ("gh_json", "HTTP 404", 1, [], True),
     ("gh_json", "HTTP 422", 1, [], True),
+    ("gh_json", "HTTP 422: read: connection reset by peer", 1, [], True),  # a 4xx is never retried, whatever its text says
+    ("gh_retry", "HTTP 404: connection reset", 1, [], True),
     ("gh_json", "HTTP 403: You have exceeded a secondary rate limit", 1, [60], False),
     ("gh_retry", "HTTP 502", 1, [1], False),
     ("gh_retry", "read: connection reset by peer", 2, [1, 4], False),
