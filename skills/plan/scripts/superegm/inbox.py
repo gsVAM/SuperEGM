@@ -176,7 +176,9 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
       status = status_of(hs, rid, rev) if rev else None
       panel, pid = panel_state(hs, rid, n) if rid else (None, None)  # the store's panel record for this review and round, never the question's text (U88)
       verdict = next((l.strip() for l in (d.get("question") or "").splitlines() if f"(judges/{pid}/verdict.json)" in l), None) if pid else None
-      if status is None or not (status.code == 3 or status.code == 2 and panel == "split"):  # a split panel's contest on the capped round still reaches the owner
+      # on the capped round a contest reaches the owner unless a panel on it is still open: a split one's, and one no
+      # panel will rule (none opened, or only converged ones) (1.3 design section 3.9)
+      if status is None or not (status.code == 3 or status.code == 2 and panel != "open"):
         continue
       rnd = review.load_round(hs, rid, n) or {}
       fids = review.contested_fids(rnd) or [c["fid"] for c in rnd.get("builder_contested") or []]

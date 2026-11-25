@@ -70,8 +70,9 @@ KINDS = {"decision", "cap", "contested", "merge", "stalled", "escalated", "redes
    [("U01", "decision", [ruling_form(3, "q1", o) for o in ("accept", "revise")], "U01/decision/q1")]),
   (U(decisions=D(1, "review head-U01-c1 round 1", question=PANEL), rounds=POSTED(), reviews=HEAD(1, F("high", "medium"), builder_contested=[{"fid": f"foreman-1-{i}", "reason": "r"} for i in (1, 2)])),
    [("U01", "contested", CONTESTED(f'foreman-1-{i}').split(" | "), f"U01/contested/q1/foreman-1-{i}") for i in (1, 2)]),
+  # U107 (1.3 design section 3.9): the capped round's contest no panel will rule (none opened) is listed beside the cap
   (U(decisions=D(1, "review head-U01-c1 round 5") + D(2, "review head-U01-c1 cap", id="q2"), rounds=POSTED(5), reviews=HEAD(5, F("high"), builder_contested=[{"fid": "foreman-1-1", "reason": "r"}])),
-   [("U01", "cap", CAP.split(" | "), "U01/cap/q2")]),
+   [("U01", "cap", CAP.split(" | "), "U01/cap/q2"), ("U01", "contested", CONTESTED("foreman-1-1").split(" | "), "U01/contested/q1/foreman-1-1")]),
   # round 3 (astra-2-1): a head cap with no decision open yet offers no form, as a posted one would rule nothing
   (U(rounds=POSTED(5), reviews=HEAD(5, F("high"))), [("U01", "cap", "its decision point 2 opens at the next wave", "U01/cap/head-U01-c1")]),
   (U(reviews=REVIEW("plan", "plan-U01-c1", {n: ROUND(n, F("high")) for n in range(1, 6)})),
