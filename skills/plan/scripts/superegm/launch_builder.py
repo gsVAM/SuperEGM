@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING`, its freshly pinned base and its `git merge-tree` brief (U62); a fix round resuming the previous launch's session, `resumed_from` or `fresh` and `profile_dir` on the entry, and the stale-paths line (U63); the `superegm-precheck` script on every launch, its allow rules and `{{precheck}}`, the whitespace refusal on every launch, `builder.precheck_attempts` and the launch's issue-comment snapshot (U67); a unit with `builder.escalate_after` failing head rounds launching on the `difficult` tier's pair, `escalated` on the entry (U68); `# Spec corrections`, reason `respec` and the record's `respecs` (U86); `builder.stall_minutes` defaults to 60 (U100, 1.3 design section 3.3); the `superegm-push` script on every launch (U108, 1.3 design section 3.7).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING`, its freshly pinned base and its `git merge-tree` brief (U62); a fix round resuming the previous launch's session, `resumed_from` or `fresh` and `profile_dir` on the entry, and the stale-paths line (U63); the `superegm-precheck` script on every launch, its allow rules and `{{precheck}}`, the whitespace refusal on every launch, `builder.precheck_attempts` and the launch's issue-comment snapshot (U67); a unit with `builder.escalate_after` failing head rounds launching on the `difficult` tier's pair, `escalated` on the entry (U68); `# Spec corrections`, reason `respec` and the record's `respecs` (U86); `builder.stall_minutes` defaults to 60 (U100, 1.3 design section 3.3); the `superegm-push` script on every launch, the allow-list's one push entry and the orders' `{{allowed}}` and `{{push}}` (U108, 1.3 design section 3.7).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch, started
 detached and recorded `running`."""
@@ -165,7 +165,7 @@ def prepare(args, card):
   audit = AUDIT_LINE.format(owner=record["launched"].get("by", "unknown"),  # a pre-upgrade mark records no login
                             runcard=args.runcard, unit=unit, handoff=st.handoff_id)
   text = prompt_text(number, unit, issue_body, orders_text(tools, launched_gh, builder_config["max_subagent_calls"], str(bin_dir / "superegm-precheck"),
-                                                           merge=merge is not None, attempts=attempts), orient_text, comments, reviews, pr, builder, audit, pr_block,
+                                                           merge=merge is not None, attempts=attempts, push=str(bin_dir / "superegm-push")), orient_text, comments, reviews, pr, builder, audit, pr_block,
                      spec_range=range_text, owners=config.get("owners") or [], foreman=foreman_data,
                      amendments=amendments_for(st, unit, issue_body), corrections=corrections)
   if merge:
@@ -253,9 +253,10 @@ SUBAGENTS_RE = re.compile(r"(?:\n<!-- subagents(?: Agent)?: [^\n]* -->)+\n")  # 
 MERGE_RE = re.compile(r"\n<!-- merge: ([^\n]*) -->\n")  # the merge orders' line (spec section 6.1)
 
 
-def orders_text(tools: list, gh: str, cap: int, precheck: str = "", merge: bool = False, attempts: int = 3) -> str:
+def orders_text(tools: list, gh: str, cap: int, precheck: str = "", merge: bool = False, attempts: int = 3, push: str = "") -> str:
   """`references/builder_orders.md` as one launch reads it: `{{gh}}` the launched `gh`, `{{precheck}}` the launch's
-  `superegm-precheck` script and `{{attempts}}` its `builder.precheck_attempts` (U67), `{{skills}}` the skills
+  `superegm-precheck` script and `{{attempts}}` its `builder.precheck_attempts` (U67), `{{allowed}}` the launch's
+  allow-list `tools`, one `- \\`<entry>\\`` line each, and `{{push}}` its `superegm-push` script (U108), `{{skills}}` the skills
   the allow-list names, `none` when it names none, and `{{subagents}}` the sentence of the `<!-- subagents Agent: -->`
   line, `{{cap}}` filled, when the list carries `Agent`, else that of the `<!-- subagents: -->` line; both lines removed.
   The `<!-- merge: -->` line becomes a `## The merge orders` section on a launch carrying merge orders (`merge`,
@@ -266,8 +267,9 @@ def orders_text(tools: list, gh: str, cap: int, precheck: str = "", merge: bool 
   line = next(l for l in text.splitlines() if l.startswith(marker))
   sentence = line[len(marker):].removesuffix(" -->").replace("{{cap}}", str(cap))
   text = SUBAGENTS_RE.sub("", text, count=1).replace("{{subagents}}", sentence)
-  text = text.replace("{{attempts}}", str(attempts))
-  return text.replace("{{gh}}", gh).replace("{{precheck}}", precheck).replace("{{skills}}", ", ".join(skill_names(tools)) or "none")
+  text = text.replace("{{attempts}}", str(attempts)).replace("{{push}}", push)
+  text = text.replace("{{gh}}", gh).replace("{{precheck}}", precheck).replace("{{skills}}", ", ".join(skill_names(tools)) or "none")
+  return text.replace("{{allowed}}", "\n".join(f"- `{entry}`" for entry in tools))  # last: no entry is read as a placeholder
 
 
 def start_detached(command: list, log: Path, env: dict) -> int:

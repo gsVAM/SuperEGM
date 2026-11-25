@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the builders' tests (U09): launch, launch-builder, record-launch, interrupt, clean, the orders and the two skill bodies; the App path (U15); the watchdog's trap and `--exit stalled` (U31); the idempotent re-run (U32); the precheck script's two allow rules and the fourth `orders_text` argument (U67); the allow-list's push script in place of the `git push` entry (U108, 1.3 design section 3.7).
+# Modified by SuperEGM (gsVAM), 2026: the builders' tests (U09): launch, launch-builder, record-launch, interrupt, clean, the orders and the two skill bodies; the App path (U15); the watchdog's trap and `--exit stalled` (U31); the idempotent re-run (U32); the precheck script's two allow rules and the fourth `orders_text` argument (U67); the allow-list's push script in place of the `git push` entry, and the orders' `{{push}}` and `{{allowed}}` (U108, 1.3 design section 3.7).
 
 """The builders (spec section 11): `launch` and its preconditions, `launch-builder`'s worktree,
 prompt file and command line, `record-launch`, `interrupt`, `clean`, the builder orders and the
@@ -447,7 +447,8 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   prompt_file = s.path("launches", f"{UNIT}_r1_prompt.md")
   prompt = prompt_file.read_text(encoding="utf-8")
   precheck = s.path("launches", f"{UNIT}_r1_bin", "superegm-precheck")
-  orders = orders_text(DEFAULT_CONFIG["builder"]["allowed_tools"], "/usr/local/bin/gh", 12, str(precheck))
+  orders = orders_text(line.split("--allowedTools '")[1].split("'")[0].split(","), "/usr/local/bin/gh", 12, str(precheck),
+                       push=str(precheck.parent / "superegm-push"))  # the launch's own allow-list and push script (U108)
   assert prompt.startswith(f"# Issue #{ISSUE} — U07\n\n{world.gh.issues[ISSUE]['body']}")
   assert f"\n\n---\n\n# Builder orders\n\n{orders}" in prompt
   assert f"\n\n---\n\n# Comments on issue #{ISSUE}\n\n## owner · comment 1\n**Decision D1:** (a) five\n\n## builder-bot · comment 3\n**Deviation (other):** renamed a fixture\n\n## owner · comment 4\n**Ruling:** (3) (a) — proceed\n" in prompt
@@ -665,8 +666,9 @@ def test_launch_builder_appends_the_pr_block(world, monkeypatch, key, spawn_fake
     assert not s.path("worktrees", UNIT).exists() and not s.path("launches", f"{UNIT}_r1_prompt.md").exists()
     return
   assert code == 0, out
-  orders = orders_text(DEFAULT_CONFIG["builder"]["allowed_tools"], "/usr/local/bin/gh", 12,
-                       str(s.path("launches", f"{UNIT}_r1_bin", "superegm-precheck")))
+  orders = orders_text(launches_of(s)[-1]["command"].split("--allowedTools '")[1].split("'")[0].split(","), "/usr/local/bin/gh", 12,
+                       str(s.path("launches", f"{UNIT}_r1_bin", "superegm-precheck")),
+                       push=str(s.path("launches", f"{UNIT}_r1_bin", "superegm-push")))  # the launch's own allow-list and push script (U108)
   prompt = s.path("launches", f"{UNIT}_r1_prompt.md").read_text(encoding="utf-8")
   if key:
     assert f"\n\n---\n\n# Builder orders\n\n{orders}\n\n---\n\n# PR block\n\n<!-- coord/v1 task=7 -->\n\n\n---\n\n# " in prompt
@@ -1007,7 +1009,7 @@ def test_builder_orders_carry_the_discipline_and_the_dod_results_form():
   text = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8")
   assert text.startswith("<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the implementer prompt, receiving-code-review and test-driven-development absorbed into the builder orders. -->\n")
   for form in ("follow the Steps in order", "test first", "one `test(S<n>)` commit then one `feat(S<n>)` commit per Step",
-               "paste each item's output in the PR body under its item number", "`git push origin <branch>`", "never to any other branch",
+               "paste each item's output in the PR body under its item number", "Push with `{{push}}`", "never to any other branch",
                "**draft** pull request", "`Closes #<issue>`", "never retarget or close it", "**Deviation (<kind>):**", "interface | dod | test | other",
                "verify each review finding against the code before changing anything", "**Reply <fid>:** fixed | contested — <reason>",
                "finding upheld", "finding overruled", "**Builder status:** DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT",
