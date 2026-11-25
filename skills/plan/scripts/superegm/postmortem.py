@@ -74,9 +74,10 @@ def uids_of(hs: core.Store, units: dict, state: dict) -> list:
 
 def recorded_rounds(hs: core.Store, uid: str) -> set:
   """The round numbers of the unit's head reviews in which a reviewer's result is recorded: `review.record_round` writes
-  them without advancing the foreman's phase, so a `prepared` round holding one is a round in progress."""
+  them without advancing the foreman's phase, so a `prepared` round holding one is a round in progress. A reviewer's
+  `--not-run` record is no result (U110): a round holding only those never ran."""
   return {n for rid in review.cycle_ids(hs, "head", uid) for n in review.round_numbers(hs, rid)
-          if review.load_round(hs, rid, n).get("reviewers")}
+          if any(not (r or {}).get("not_run") for r in (review.load_round(hs, rid, n).get("reviewers") or {}).values())}
 
 
 def superseded(entry: dict, recorded: set = frozenset()) -> bool:
