@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U14's tests of `superegm doctor` (spec section 11); the App lines and the launched environment (U15); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five driver lines (U24); the informational `stall:` line (U31); the modules' `astra:` and `graphify:` lines last (U32); the three `model: builder` lines (U33); the informational `chain:` line (U54).
+# Added by SuperEGM (gsVAM), 2026: U14's tests of `superegm doctor` (spec section 11); the App lines and the launched environment (U15); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five driver lines (U24); the informational `stall:` line (U31); the modules' `astra:` and `graphify:` lines last (U32); the three `model: builder` lines (U33); the informational `chain:` line (U54); the `stall: 60 min` default (U100, 1.3 design section 3.3).
 
 """`superegm doctor`: one line per wave prerequisite, `ok` or the refusal `launch` or `launch-builder`
 would give, in a pinned order; no run card, no store write."""

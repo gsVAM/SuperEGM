@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U31
+# Modified by SuperEGM (gsVAM), 2026: the 60-minute default pin (U100, 1.3 design section 3.3)
 
 """U31 (spec section 11.1): the watchdog's key `builder.stall_minutes` and the `kill_failed` lines."""
 

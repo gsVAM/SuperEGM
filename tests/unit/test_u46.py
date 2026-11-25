@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U46's tests: the registry-driven config merge.
+# Modified by SuperEGM (gsVAM), 2026: the 60-minute `stall_minutes` default pin (U100, 1.3 design section 3.3)
 
 """U46: `load_config` merges every registered object default one level and takes the builder defaults from the registry."""
 

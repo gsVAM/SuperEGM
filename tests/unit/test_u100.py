@@ -1,11 +1,12 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U100's tests: the watchdog's 60-minute default and the foreman's background and `collect`'s foreground wording.
+# Added by SuperEGM (gsVAM), 2026: U100's tests: the watchdog's 60-minute default and the foreman's background and `collect`'s foreground wording (1.3 design section 3.3).
 
 """U100 (spec section 3.3): `builder.stall_minutes` defaults to 60; the foreman runs in the background beside
 `status --wait`, `collect` in the foreground."""
 
 import json
 import shutil
+import subprocess
 import time
 from pathlib import Path
 
@@ -23,6 +24,10 @@ def test_stall_minutes_defaults_to_60(world, monkeypatch, tmp_path):
   # the watchdog's default is 60 minutes (L3), for a .superegm/config.json whose builder lacks the key
   from superegm import status as status_mod
   gh, st, card = events_seed(world, monkeypatch)
+  bare = tmp_path / "origin.git"  # origin is a local bare clone, as test_builders.seed makes it: doctor's origin check fetches, never from github.com
+  subprocess.run(["git", "clone", "-q", "--bare", str(world.repo), str(bare)], check=True, capture_output=True)
+  subprocess.run(["git", "-C", str(world.repo), "remote", "set-url", "origin", str(bare)], check=True, capture_output=True)
+  world.ns["find_remote"] = lambda root, repo: "origin"
   builder = {k: v for k, v in DEFAULT_CONFIG["builder"].items() if k != "stall_minutes"}
   set_config(world, repo=REPO, builder=builder)
   assert superegm.load_config(world.repo)["builder"]["stall_minutes"] == 60
@@ -56,6 +61,7 @@ def test_foreman_background_collect_foreground():
     assert "never with `run_in_background`" in text
   assert "except a unit whose foreman has not returned (no call, no dispatch)" in wave_skill
   assert "A returned word is applied at the next batch's step 5, after steps 1-4 and before its dispatch" in wave_skill
+  assert "Rule a unit after its foreman's `collect` ends." in wave_skill  # section 9: a ruling typed during `collect` can be lost
   assert "The end is reached only with no foreman out." in wave_skill
   assert "no 5b line in step 2 → The end" in wave_skill and "no 5b line of a non-idle unit → The end" in wave_skill
   assert "`foreman-<unit-id>-<dispatch-id>`, in the foreground" not in brief_opening
