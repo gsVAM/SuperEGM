@@ -224,6 +224,20 @@ def test_a_ruling_settles_only_its_own_units_review_in_the_round_its_source_name
   assert (disposition(1), disposition(2)) == ("contested", None)
 
 
+def test_a_session_ruling_settles_only_a_finding_its_decision_names(world):
+  """Round 3 (astra-2-1): q1 asks about foreman-2-1 alone, while round 2 also holds foreman-2-2; the session's overrule of foreman-2-2
+  on q1 is refused, as the posted path refuses it, before anything is posted, recorded or settled."""
+  w = world_of(world, "normal", "contest+delta", {"foreman-2-1": "contested"}, "foreman-2-1 finding overruled — the spec allows it")
+  s, rid = w.s, w.rids["U01"]
+  before = foreman_of(s, "U01")["rulings"]
+  code, err = rule_by(world, w, "U01", "foreman-2-2 finding overruled — not asked", "owner", False)
+  findings = {f["id"]: f for f in json.loads(s.path("reviews", rid, "round-2.json").read_text(encoding="utf-8"))
+              ["reviewers"]["foreman"]["findings"]}
+  assert code == 1 and "foreman-2-2 is not a finding of q1" in err
+  assert foreman_of(s, "U01")["rulings"] == before and not world.gh.comments.get(2)
+  assert findings["foreman-2-2"]["disposition"] is None
+
+
 # ---------------------------------------------------------------- S3: a ruling comment edited before its record is refused
 
 
@@ -287,3 +301,5 @@ def test_the_wave_references_state_the_forms_and_the_refused_paths():
   assert 'missing <fid>: write "<fid> finding overruled"' in rulings and "ruling comment edited: post a new one" in rulings
   assert "the CI finding is settled by no one" in rulings and "on the CI finding, `<fid> finding upheld`" in rulings
   assert all(word in owner_paragraph for word in ("does not converge", "refused round", "refused `redesign`"))
+  # round 3 (codebase-details-2-1): a `decision rule` stopped after its record and before its settle is finished by `review settle`
+  assert "A point-1 `decision rule` stopped after its `Ruling (…)` line and before its settle" in rulings
