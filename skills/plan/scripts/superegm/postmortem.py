@@ -144,7 +144,7 @@ def note_finding(entries: list, latest: dict, scope: tuple, name: str, finding: 
     latest[key] = len(entries)
     entries.append(item)
   latest[("id", scope, fid)] = finding
-  if not finding.get("disposition") and ("settled", scope, fid) in latest:  # a copy settled it before a newer copy of it came
+  if copy and not finding.get("disposition") and ("settled", scope, fid) in latest:  # a copy settled it before a newer copy of it came
     finding["disposition"] = latest[("settled", scope, fid)]
   return str(fid) if copy else ""
 
