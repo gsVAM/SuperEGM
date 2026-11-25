@@ -350,15 +350,21 @@ def start_time(pid):
 def stop_leftovers(st, unit, tree):
   """SIGTERM, after `KILL_WAIT` seconds SIGKILL, each leftover process in `tree`, journalled `<unit> killed <pid> <command>`.
   Each process's start time is read when it is listed and again before each signal: a start time that differs, or that `ps` cannot
-  read, skips that process (it may be another one under a reused PID), with `kept <pid>: identity changed`.
-  False, with a `kept` line, when the processes cannot be listed, one cannot be signalled, one's identity changed or one outlives
-  SIGKILL (the caller keeps the tree)."""
+  read, skips that process (it may be another one under a reused PID), with `kept <pid>: identity changed`. After the wait the
+  processes are listed again: one found then (a new PID, or a listed PID with a new start time) is a new process, and gets SIGTERM,
+  one more wait and SIGKILL, each checked against the start time that listing read, with no further listing; a PID already kept
+  as `identity changed` is never signalled again. False, with a `kept` line, when the processes cannot be listed, one cannot be
+  signalled, one's identity changed or one outlives SIGKILL (the caller keeps the tree)."""
+
+  def listed():
+    return [(pid, command, start_time(pid)) for pid, command in leftovers(tree)]
+
   try:
-    found = [(pid, command, start_time(pid)) for pid, command in leftovers(tree)]
+    found = listed()
   except ListError as error:
     print(f"kept {tree}: cannot list its processes ({error})")
     return False
-  blocked, changed = [], []
+  blocked, changed, survivors, unlisted = [], [], [], None
 
   def send(pid, start, sig):
     """Signal `pid` only when its start time still reads `start`; False when it was not signalled."""
@@ -374,29 +380,56 @@ def stop_leftovers(st, unit, tree):
       return False
     return True
 
-  for pid, _command, start in found:
-    send(pid, start, signal.SIGTERM)
-  found = [(pid, command, start) for pid, command, start in found if pid not in blocked and pid not in changed]
-  deadline = core.NOW() + KILL_WAIT
-  while core.NOW() < deadline and any(is_alive(pid) for pid, _command, _start in found):
-    core.SLEEP(1)
-  survivors = []
-  for pid, command, start in found:
-    if is_alive(pid):
-      if not send(pid, start, signal.SIGKILL):
-        continue
+  def terminate(procs):
+    """SIGTERM each, then wait up to `KILL_WAIT` seconds for them to go; the ones signalled."""
+    for pid, _command, start in procs:
+      send(pid, start, signal.SIGTERM)
+    procs = [(pid, command, start) for pid, command, start in procs if pid not in blocked and pid not in changed]
+    deadline = core.NOW() + KILL_WAIT
+    while core.NOW() < deadline and any(is_alive(pid) for pid, _command, _start in procs):
       core.SLEEP(1)
-    if is_alive(pid):
-      survivors.append((pid, command))
-    else:
+    return procs
+
+  def kill(procs):
+    """SIGKILL each still alive; journal each gone, note each that outlives it."""
+    for pid, command, start in procs:
+      if is_alive(pid):
+        if not send(pid, start, signal.SIGKILL):
+          continue
+        core.SLEEP(1)
+      if is_alive(pid):
+        survivors.append((pid, command))
+      else:
+        core.journal(st, f"{unit} killed {pid} {command}")
+
+  first = terminate(found)
+  try:
+    again = listed()  # after the wait: a process found now that was not listed before is a new one
+  except ListError as error:
+    again, unlisted = [], error
+  latest, before = {pid: start for pid, _command, start in again}, {pid: start for pid, _command, start in found}
+  remaining = []
+  for pid, command, start in first:
+    now = latest.get(pid, start)
+    if now is None:  # unreadable at this listing: never signalled after this read
+      changed.append(pid)
+    elif now != start:  # the listed process is gone: its PID names a new process, handled below
       core.journal(st, f"{unit} killed {pid} {command}")
+    else:
+      remaining.append((pid, command, start))
+  kill(remaining)
+  new = [(pid, command, start) for pid, command, start in again
+         if pid not in changed and pid not in blocked and (pid not in before or before[pid] != start)]
+  kill(terminate(new))
+  if unlisted is not None:
+    print(f"kept {tree}: cannot list its processes ({unlisted})")
   for pid in blocked:
     print(f"kept {tree}: process {pid} cannot be signalled")
   for pid in changed:
     print(f"kept {pid}: identity changed")
   for pid, command in survivors:
     print(f"kept {tree}: {command} {pid} survives SIGKILL")
-  return not survivors and not blocked and not changed
+  return not survivors and not blocked and not changed and unlisted is None
 
 
 def terminal_problems(store, unit):
