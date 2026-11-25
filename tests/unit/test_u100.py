@@ -7,6 +7,7 @@
 import json
 import shutil
 import time
+from pathlib import Path
 
 from conftest import REPO, set_config
 import superegm
@@ -40,3 +41,25 @@ def test_stall_minutes_defaults_to_60(world, monkeypatch, tmp_path):
   monkeypatch.setattr(status_mod, "head_time", lambda worktree: None)
   _, wait_31 = world.run(*WAIT, card)
   assert not any(line.startswith("U01 stalled (") for line in wait_31.splitlines()), wait_31
+
+
+def test_foreman_background_collect_foreground():
+  # the foreman runs in the background beside `status --wait`, `collect` in the foreground (L6, L14); no second foreman for a
+  # unit whose foreman is out; brief_opening: foreman_brief.md above `## Brief`; brief_block: the fenced text under it
+  root = Path(__file__).resolve().parents[2] / "skills/wave"
+  wave_skill = (root / "SKILL.md").read_text(encoding="utf-8")
+  brief = (root / "references/foreman_brief.md").read_text(encoding="utf-8")
+  brief_opening, brief_block = brief.split("\n## Brief\n", 1)
+  for text in (brief_opening, wave_skill):
+    assert "beside `status --wait`" in text
+  for text in (brief_block, wave_skill):
+    assert "never with `run_in_background`" in text
+  assert "except a unit whose foreman has not returned (no call, no dispatch)" in wave_skill
+  assert "A returned word is applied at the next batch's step 5, after steps 1-4 and before its dispatch" in wave_skill
+  assert "The end is reached only with no foreman out." in wave_skill
+  assert "no 5b line in step 2 → The end" in wave_skill and "no 5b line of a non-idle unit → The end" in wave_skill
+  assert "`foreman-<unit-id>-<dispatch-id>`, in the foreground" not in brief_opening
+  assert "named `foreman-<U>-<dispatch-id>`, in the foreground" not in wave_skill
+  assert "It alone evaluates §11's predicate" not in wave_skill
+  assert "It alone evaluates §11's predicate (CI concluded, latest launch terminal, no round posted since it" in brief_opening
+  assert len(wave_skill.encode("utf-8")) < 15_000
