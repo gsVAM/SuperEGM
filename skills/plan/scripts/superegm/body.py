@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the issue-body parsers of spec section 9.1; EGM's `fill_numbers` and `normalise` moved here; a Step's command defaults from its `Write` line.
+# Modified by SuperEGM (gsVAM), 2026: the issue-body parsers of spec section 9.1; EGM's `fill_numbers` and `normalise` moved here; a Step's command defaults from its `Write` line; U109's `step_paths` reads only path-shaped spans (1.3 design section 3.10).
 
 """The unit issue body (spec section 9.1) read back: its marker, its DoD items,
 its Steps' commands and paths, and the interfaces it consumes."""
@@ -15,6 +15,7 @@ RUN_RE = re.compile(r"^\s*Run `([^`]+)`")
 SPAN_RE = re.compile(r"`([^`]+)`")
 CONSUMES_RE = re.compile(r"^- Consumes: (.+) \((U\d{2,})\)\s*$")
 PARAMETRIZE_RE = re.compile(r"@pytest\.mark\.parametrize")
+PATH_EXT_RE = re.compile(r"\.[A-Za-z][A-Za-z0-9]*$")
 
 
 def sections(body: str) -> dict:
@@ -57,15 +58,21 @@ def run_commands(body: str) -> list:
   return commands
 
 
+def path_shaped(span: str) -> bool:
+  """A span that holds a `/` or ends in a file extension."""
+  return "/" in span or bool(PATH_EXT_RE.search(span))
+
+
 def step_paths(body: str) -> list:
-  """(step, test path, implementation path): the second span of the Step's first
-  line and the last span of its `Implement` line."""
+  """(step, test path, implementation path): the first path-shaped span of the Step's
+  `Write` line and the last path-shaped span of its `Implement` line, None when there is none."""
   found = []
   for number, lines in steps(body):
-    spans = SPAN_RE.findall(lines[0])
+    tests = [s for s in SPAN_RE.findall(lines[0]) if path_shaped(s)]
     implement = next((l for l in lines[1:] if l.strip().startswith("Implement ")), "")
-    targets = SPAN_RE.findall(implement)
-    found.append((number, spans[1] if len(spans) > 1 else None, targets[-1] if targets else None))
+    targets = [s for s in SPAN_RE.findall(implement) if path_shaped(s)]
+    # shortcut: a dotted symbol such as body.steps ends in an extension-shaped tail and reads as a path
+    found.append((number, tests[0] if tests else None, targets[-1] if targets else None))
   return found
 
 
