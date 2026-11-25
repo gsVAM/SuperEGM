@@ -254,7 +254,7 @@ def test_an_undo_is_offered_while_no_merge_is(world):
 @pytest.mark.parametrize("phrase", [
   "gh api user --jq .login", "`config.owners`", "recommended", "one-line reason",
   "leavemealone", "did not converge", "back once", "gh issue comment <n> -R <repo> --body-file",
-  "proceed again", "**Ruling:** proceed — <reason>", "superegm next answer --handoff",
+  "proceed again", "**Ruling:** proceed <sha7> — <reason>", "superegm next answer --handoff",
   "handoff_dryrun.md", "superegm approve-spec --void --spec", "answer in your",
   "superegm driver kick --root", "No skill asks the owner to post a comment or to paste a command"])
 def test_the_inbox_skill_names_each_step(phrase):

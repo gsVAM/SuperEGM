@@ -194,3 +194,29 @@ def test_pending_decision_reads_its_own_verdict_file(last_line, pending):
         "options": ["finding upheld", "finding overruled"]}
   foreman = {"decisions": [q1], "rulings": [{"decision": "q1", "ruling": "foreman-1-1 finding upheld"}]}
   assert (report.pending_decisions(foreman) == [q1]) == pending
+
+
+# ---------------------------------------------------------------- S7: the inbox skill and rulings.md
+
+
+def line_starting(text, prefix):
+  """The one line of `text` that starts with `prefix` (a kind's bullet, a numbered step)."""
+  [found] = [line for line in text.splitlines() if line.startswith(prefix)]
+  return found
+
+
+def test_inbox_and_rulings_show_the_new_forms():
+  # the head proceed forms; #236: the cap command's --runcard, the unpinned proceed among undo's reasons, `undo` in
+  # step 4, no undo beside a proceed's merge, the respec hold in the merge and undo bullets; L21: a draft readied before the merge
+  from conftest import ROOT
+  inbox_skill = (ROOT / "skills/inbox/SKILL.md").read_text(encoding="utf-8")
+  rulings = (ROOT / "skills/wave/references/rulings.md").read_text(encoding="utf-8")
+  cap_bullet, undo_bullet = line_starting(inbox_skill, "- `cap`:"), line_starting(inbox_skill, "- `undo`:")
+  merge_bullet = line_starting(inbox_skill, "- `merge`:")
+  step_4, step_9 = line_starting(inbox_skill, "4. "), line_starting(inbox_skill, "9. ")
+  for text in (inbox_skill, rulings):
+    assert "**Ruling:** proceed <sha7> — <reason>" in text and "**Ruling:** proceed — <reason>" not in text
+  assert "review rule --ruling proceed --head <sha7> --owner --reason <text>" in rulings
+  assert "--runcard" in cap_bullet and "without a pinned head" in undo_bullet and "respec" in undo_bullet and "undo" in step_4
+  assert "respec" in merge_bullet and "refused while the proceed's merge is still offered" in merge_bullet
+  assert step_9.index("gh pr ready <n> -R <repo>") < step_9.index("gh pr merge <n> -R <repo>")
