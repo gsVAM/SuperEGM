@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: `superegm next`, a handoff's next phase by the first-match table of spec section 7.1 (U43); the `waiting respec R<n>` row (U91).
+# Added by SuperEGM (gsVAM), 2026: `superegm next`, a handoff's next phase by the first-match table of spec section 7.1 (U43); the `waiting respec R<n>` row (U91); `next answer` refuses an empty `--answer` (U110, 1.3 design section 3.10).
 
 """superegm next: print a handoff's next phase, the first row of spec section 7.1's table that matches.
 
@@ -313,6 +313,8 @@ def answer(args, st: core.Store, hid: str) -> int:
   """Record `--answer` on the handoff's wait record as the login `gh api user` reports: `answer`, `by` and `at` on
   `chain/<handoff>.json`, the words as `waits/<phase>-<since>.answer.md` and `{by, at, sha}` (the answer's sha256) as
   `waits/<phase>-<since>.answer.json` in the handoff's directory, both keyed by the wait's `since`, never rewritten. No run card: the phase session that runs next holds the card."""
+  if not args.answer:  # an empty answer answers nothing and, once written, closes the wait: refused before any read or write (U110)
+    raise core.HandoffError("next answer: --answer is empty")
   path = st.path("chain", hid)
   record = read_json(path)
   if not record:

@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: `superegm postmortem`, the handoff's report of spec section 7.5 (U78); the Lessons table and `--retro <file>` (U87).
+# Added by SuperEGM (gsVAM), 2026: `superegm postmortem`, the handoff's report of spec section 7.5 (U78); the Lessons table and `--retro <file>` (U87); a copy's settlement counted on the finding it copies, and a round of only copies quiet, a not-run round no head round, a `redesign` cap ruling and an unapproved respec cycle's findings kept, `**Reply <fid>:**` a comment label (U110, 1.3 design section 3.10).
 
 """superegm postmortem: one report of a handoff from the store (spec section 7.5), and its retrospective's record (7.7).
 
@@ -33,6 +33,7 @@ CLEAR_RE = re.compile(r"^(\S+) next clear (\S+) (\S+) answered by (\S+) at (\S+)
 SUPERSEDED_RE = re.compile(r"^(\S+) driver: (\S+) superseded: wait record removed$")
 OVERRULED_RE = re.compile(r"^(\S+) finding overruled\b")
 ALLOWED_RE = re.compile(r"^(\S+) allowed\b")
+COPY_RE = re.compile(r"(?:unreplied|contested) (\S+):")  # a foreman finding's claim that repeats finding `<fid>` (`collect.foreman_findings`)
 SEVERITIES = ("high", "medium", "low")
 
 
@@ -73,9 +74,10 @@ def uids_of(hs: core.Store, units: dict, state: dict) -> list:
 
 def recorded_rounds(hs: core.Store, uid: str) -> set:
   """The round numbers of the unit's head reviews in which a reviewer's result is recorded: `review.record_round` writes
-  them without advancing the foreman's phase, so a `prepared` round holding one is a round in progress."""
+  them without advancing the foreman's phase, so a `prepared` round holding one is a round in progress. A reviewer's
+  `--not-run` record is no result (U110): a round holding only those never ran."""
   return {n for rid in review.cycle_ids(hs, "head", uid) for n in review.round_numbers(hs, rid)
-          if review.load_round(hs, rid, n).get("reviewers")}
+          if any(not (r or {}).get("not_run") for r in (review.load_round(hs, rid, n).get("reviewers") or {}).values())}
 
 
 def superseded(entry: dict, recorded: set = frozenset()) -> bool:
@@ -114,22 +116,43 @@ def unit_facts(hs: core.Store, uid: str, state: dict) -> dict:
       "subagent_calls": sum((x.get("subagent_calls") or {}).get("count", 0) for x in launches)}
 
 
-def note_finding(entries: list, latest: dict, scope: tuple, name: str, finding: dict, item) -> None:
+def note_finding(entries: list, latest: dict, scope: tuple, name: str, finding: dict, item) -> str:
   """Count `finding` once: `item` (what the caller tallies it by) joins `entries`, or, for a finding carried into a later
   round, replaces the copy before it. `collect.carry` copies a still-open foreman finding under its own id with
   `carried_from`; `review.carry_externals` copies an external one with the same id and claim; `review settle` and
   triage write a carried finding's outcome on its newest copy (`review.locate_finding`), so the newest copy stands.
-  A foreman `unreplied <fid>: ...` high repeats an external finding its reviewer's record holds: it is no finding.
-  Findings of one `scope` (the review kind and artifact) are told apart by reviewer and id."""
-  if str(finding.get("claim") or "").startswith("unreplied "):
-    return
+  A foreman `unreplied <fid>: ...` or `contested <fid>: ...` high naming a finding already noted in the scope repeats it
+  (`COPY_RE`; any other reviewer's claim, or one naming no known finding, is its own finding): it is no finding, and a
+  settlement it holds counts on the finding it copies, down the chain to the original (U110). Findings of one `scope` (the
+  review kind and artifact, so a head's per unit, not per cycle) are told apart by reviewer and id; ids repeat in each of a
+  unit's head cycles, so a finding counted as new drops the link and settlement an earlier finding of its id left.
+  Returns `""` for a finding counted as new, else the id of the finding it is a copy of (its own for a carried one)."""
+  fid = finding.get("id")
+  m = COPY_RE.match(str(finding.get("claim") or "")) if name == "foreman" else None
+  if m and (("id", scope, m.group(1)) in latest or ("link", scope, m.group(1)) in latest):
+    root = latest.get(("link", scope, m.group(1)), m.group(1))
+    latest[("link", scope, fid)] = root
+    if disposition := finding.get("disposition"):
+      latest[("settled", scope, root)] = disposition
+      original = latest.get(("id", scope, root))
+      if original is not None and not original.get("disposition"):
+        original["disposition"] = disposition
+    return str(root)
   external = name.startswith("external:")
-  key = (*scope, name, finding.get("id")) + ((finding.get("claim"),) if external else ())
-  if (external or finding.get("carried_from")) and key in latest:
+  key = (*scope, name, fid) + ((finding.get("claim"),) if external else ())
+  copy = (external or finding.get("carried_from")) and key in latest
+  if copy:
     entries[latest[key]] = item
   else:
     latest[key] = len(entries)
     entries.append(item)
+    latest.pop(("link", scope, fid), None)  # a new finding is no copy of what an earlier cycle's finding of its id copied
+    latest.pop(("settled", scope, fid), None)
+  latest[("id", scope, fid)] = finding
+  latest[("at", scope, fid)] = latest[key]  # its place in `entries`, where a ruling on a copy of it lands
+  if copy and not finding.get("disposition") and ("settled", scope, fid) in latest:  # a copy settled it before a newer copy of it came
+    finding["disposition"] = latest[("settled", scope, fid)]
+  return str(fid) if copy else ""
 
 
 def cycle_order(rid: str) -> tuple:
@@ -210,12 +233,23 @@ def spec_cycles(hs: core.Store, spec) -> range:
 
 def reviews_of(st: core.Store, hs: core.Store, spec) -> list:
   """This handoff's reviews: its own (`inbox.review_dirs`, which a legacy flat store's shared folder needs) and the
-  spec cycles it owns."""
+  spec cycles it owns, and (U110) a respec cycle opened for this handoff that no approval entry ever named: it ends
+  after the last entry's cycle, so `spec_cycles` leaves it out, yet its `review.json` holds `respec` and this handoff's id.
+  A respec cycle naming another handoff is that handoff's, even inside this one's range (an earlier handoff's respec,
+  withdrawn before this handoff's approval)."""
   owned = spec_cycles(hs, spec)
   found = []
   for path in inbox.review_dirs(hs, spec):
     m = re.fullmatch(r"spec-(?:(?!-integrate-).)+-c(\d+)", path.name)  # an integrate review is no spec cycle
-    if m is None or int(m.group(1)) in owned:
+    if m is None:
+      found.append(path.name)
+      continue
+    cycle = review.load_review(hs, path.name) or {}
+    if cycle.get("respec") and cycle.get("handoff_id"):
+      ours = cycle["handoff_id"] == hs.handoff_id
+    else:
+      ours = int(m.group(1)) in owned
+    if ours:
       found.append(path.name)
   return [(rid, review.load_review(hs, rid)) for rid in found]
 
@@ -224,13 +258,14 @@ def reviewer_stats(st: core.Store, hs: core.Store, spec) -> dict:
   """Per `(reviewer, kind)`, the counts the Reviewers table shows; the Lessons table reads the same numbers. `overrules` is
   `overruled` plus `allowed`: an allowance is recorded as an overrule (spec 13.2, `decision.py`), and that one sum is what the table,
   the Lessons rows and the integrate summary name a reviewer's overruled findings by."""
-  stats, found, latest = {}, [], {}
+  stats, found, latest, ruled = {}, [], {}, {}
+  via_copy = {"overruled": set(), "allowed": set()}  # the places in `found` a ruling on a copy reached: that finding alone, not its id
   for rid, cycle in sorted(reviews_of(st, hs, spec), key=lambda r: cycle_order(r[0])):
     if not cycle:
       continue
     kind = cycle["kind"]
     head = kind == "head"  # a head's outcomes are the foreman's rulings; any other kind's, `review settle`'s
-    overruled, allowed = verdicts(hs, cycle["artifact"]) if head else (set(), set())
+    overruled, allowed = ruled.setdefault(cycle["artifact"], verdicts(hs, cycle["artifact"])) if head else (set(), set())
     for rnd in review.rounds_of(hs, rid, cycle):
       for name, entry in (rnd.get("reviewers") or {}).items():
         if entry.get("not_run"):  # a reviewer that did not run raised nothing and kept no quiet round
@@ -238,16 +273,23 @@ def reviewer_stats(st: core.Store, hs: core.Store, spec) -> dict:
         row = stats.setdefault((name, kind), {**dict.fromkeys(SEVERITIES, 0), "fixed": 0, "overruled": 0,
                                               "allowed": 0, "overrules": 0, "deferred": 0, "regressions": 0, "quiet": 0})
         findings = entry.get("findings") or []
-        row["quiet"] += 0 if findings else 1
+        new = 0
         for finding in findings:
-          note_finding(found, latest, (kind, cycle["artifact"]), name, finding, (name, kind, overruled, allowed, finding))
-  for name, kind, overruled, allowed, finding in found:
+          scope = (kind, cycle["artifact"])
+          copied = note_finding(found, latest, scope, name, finding, (name, kind, overruled, allowed, finding))
+          new += not copied
+          for verdict, ruling in (("overruled", overruled), ("allowed", allowed)):  # a ruling on a copy rules the finding it copies
+            if copied and finding.get("id") in ruling and ("at", scope, copied) in latest:
+              via_copy[verdict].add(latest[("at", scope, copied)])
+        row["quiet"] += 0 if new else 1  # a round of only copies raised nothing new
+  for at, (name, kind, overruled, allowed, finding) in enumerate(found):
     row, disposition, fid = stats[(name, kind)], str(finding.get("disposition") or ""), finding.get("id")
+    is_allowed = fid in allowed or at in via_copy["allowed"]
     row[finding.get("severity")] = row.get(finding.get("severity"), 0) + 1
     row["fixed"] += disposition == "fixed"
     row["deferred"] += disposition.startswith("deferred")
-    row["allowed"] += fid in allowed
-    row["overruled"] += fid not in allowed and (fid in overruled or disposition in ("contested", "declined"))
+    row["allowed"] += is_allowed
+    row["overruled"] += not is_allowed and (fid in overruled or at in via_copy["overruled"] or disposition in ("contested", "declined"))
     row["regressions"] += finding.get("regression") == "yes"
   for row in stats.values():
     row["overrules"] = row["overruled"] + row["allowed"]
@@ -364,7 +406,7 @@ def plan_table(hs: core.Store, uids: list, units: dict, state: dict) -> str:
 
 
 DEVIATION_RE = re.compile(r"\*\*Deviation \(spec\):\*\*(.*)")
-COMMENT_LABEL_RE = re.compile(r"\*\*(?:Builder status|Ruling|Deviation|Blocked|Status|Reply)(?: \([^)]*\))?:\*\*")  # a whole label of a comment (`**Deviation (spec):**`); other bold text, `**Status mismatch:**` too, is evidence
+COMMENT_LABEL_RE = re.compile(r"\*\*(?:(?:Builder status|Ruling|Deviation|Blocked|Status|Reply)(?: \([^)]*\))?|Reply [^\s*]+-\d+-\d+):\*\*")  # a whole label of a comment (`**Deviation (spec):**`, `**Reply foreman-2-1:**`: a builder's reply names a finding id, U110); other bold text, `**Status mismatch:**` and `**Reply later:**` too, is evidence
 
 
 def deviation_evidence(st: core.Store, comment_id) -> str:
@@ -467,7 +509,8 @@ def reviewer_rows(st: core.Store, hs: core.Store, spec) -> list:
 
 
 def unit_rows(hs: core.Store, uids: list) -> list:
-  """A unit with an escalated launch, and one row per cap decision whose own ruling was a stop."""
+  """A unit with an escalated launch, and one row per cap decision whose own ruling was a stop or a `redesign` (U110): the
+  cap ruling that ends the unit's builds, as `stop` does."""
   rows = []
   for uid in uids:
     escalated = [e for e in launch.load_launches(hs, uid) if e.get("escalated")]
@@ -477,7 +520,7 @@ def unit_rows(hs: core.Store, uids: list) -> list:
     for decision in foreman.get("decisions") or []:
       if str(decision.get("source") or "").endswith(" cap"):
         given = [r for r in foreman.get("rulings") or [] if r.get("decision") == decision.get("id")]
-        if any(str(r.get("ruling") or "").startswith("stop") for r in given):
+        if any(str(r.get("ruling") or "").startswith(("stop", "redesign")) for r in given):
           rows.append(["unit stopped at the cap", uid, f"foreman/{uid}.json {decision.get('id')}", str(decision.get("source"))])
   return rows
 
