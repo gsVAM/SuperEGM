@@ -5,6 +5,8 @@
 and range rules, Interfaces names are read as `scan.names_of` reads them, a respec cycle's ingest reads its scope alone,
 and `approve-spec --respec` runs after the approving worktree is removed."""
 
+import json
+
 import pytest
 
 import superegm as core
@@ -147,3 +149,26 @@ def test_respec_ingest_reads_its_scope_alone(world, monkeypatch, cycle, thread_a
                                            for f in record["findings"]]
   assert code == 0 and f"{ingested} ingested" in out
   assert len(external_findings_of_the_latest_round) == ingested
+
+
+@pytest.mark.parametrize("flags", [["--dry-run"], ["--yes"]])
+def test_respec_approval_after_its_worktree_is_removed(world, flags):
+  # handoffs/<id>.json names the spec in a worktree since removed; approve-spec --respec R1 runs from the main checkout
+  from test_u85 import MERGED_U1, open_respec, respec_cycle
+  state_units = {"U0": MERGED_U1["U0"], "U1": {"number": 11}, "U2": {"number": 12}, "U3": {}}
+  spec, st = respec_world(world, [(BASE, None)], state_units=state_units)
+  gone = world.repo.parent / "wt-removed" / "docs" / "specs" / "x.md"
+  assert not gone.parent.parent.parent.exists()
+  core.atomic_write(st.path("handoffs", HID), {"id": HID, "spec": str(gone), "opened_at": "2026-11-12T00:00:00Z", "closed_at": None})
+  open_respec(st)
+  spec.write_text("".join(DRAFT), encoding="utf-8")
+  world.spec = spec
+  world.card("review-spec")
+  if flags == ["--yes"]:
+    respec_cycle(world, spec, st)
+  code, out = world.run("approve-spec", "--spec", spec, "--respec", "R1", *flags)
+  assert code == 0 and "touched: U2" in out, out
+  r1 = st.path("file", "respec", "R1.json")
+  respec_r1_json_text = r1.read_text(encoding="utf-8") if r1.exists() else None
+  assert flags == ["--dry-run"] or json.loads(respec_r1_json_text)["touched"] == ["U2"]
+  assert flags == ["--dry-run"] or "+Delay is 6s." in st.path("file", "respec_comment_U2_R1.md").read_text(encoding="utf-8")
