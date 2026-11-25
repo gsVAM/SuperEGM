@@ -6,6 +6,8 @@ respec the loop waits on; `respec.load_json` refuses an unreadable or non-object
 a unit a `replan:` mark holds; `gate` reads every unfiled unit's replan mark before any body-hash refusal."""
 
 import json
+import re
+from pathlib import Path
 
 import pytest
 
@@ -36,3 +38,29 @@ def test_waiting_respec_takes_no_merge_round(world, raised, loop_starts, names):
   assert code == 0 and loop.startswith(loop_starts), out
   assert all(name in loop for name in names), loop
   assert ("merge round" in loop) is (not raised), loop
+
+
+@pytest.mark.parametrize("name, content", [
+  ("R1.open.json", "{not json"),
+  ("R1.open.json", "[]"),
+  ("R1.json", "{not json"),
+  ("R1.json", '"applied"'),
+])
+def test_unreadable_respec_file_refused_with_its_path(world, name, content):
+  # path = the handoff's respec/<name>; R1.json is an applied respec's (an approval entry names R1, touching filed U07)
+  import test_builders as tb
+  from test_u86 import apply_r1
+  from superegm import launch_builder, respec, status
+  st, card, handoff_id, _ = tb.seed(world)
+  if name == "R1.json":
+    apply_r1(st, tb.UNIT)
+  path = respec.respec_path(st, name)
+  put(path, content)
+  readers = ([respec.marks, lambda st, hid: launch_builder.corrections_for(st, tb.UNIT)] if name == "R1.json"
+             else [respec.open])
+  for reader in readers:
+    with pytest.raises(core.HandoffError, match=re.escape(f"{path}: ")):
+      reader(st, handoff_id)
+  state = tb.state_of(st)
+  [line] = status.respec_lines(core.Handoff(Path(state["plan"]), st, state))
+  assert line.startswith(f"respec: read failed: {path}: "), line
