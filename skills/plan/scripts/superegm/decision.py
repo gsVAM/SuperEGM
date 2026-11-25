@@ -846,10 +846,11 @@ def refuse_undo(st, unit: str, data: dict, row: dict, args) -> None:
     pr = (record.get("pr") or {}).get("number")
     if labelled_stopped(st, record["number"]):
       why = f"{unit} is stopped (issue #{record['number']} labelled {st.config['labels']['stopped']})"
-    elif proceed_merge_offered(st, unit, data, state):
-      why = f"{unit}'s merge on the owner's proceed is still offered"
+    # the pull request's own state first: a merged or closed one is the reason, whatever the inbox would still build
     elif pr and (pr_state := core.gh_json(["pr", "view", str(pr), "-R", st.config["repo"], "--json", "state"]).get("state")) != "OPEN":
       why = f"pull request #{pr} is {pr_state.lower()}"
+    elif proceed_merge_offered(st, unit, data, state):
+      why = f"{unit}'s merge on the owner's proceed is still offered"
   if why:
     core.journal(st, f"undo refused ({args.by}, comment {args.posted}): {why}; follow-up {row['fid']} kept")
     raise Refusal(f"decision: undo refused: {why}; the follow-up row stays")
