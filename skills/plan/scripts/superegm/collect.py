@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # From the elephant-goldfish-model (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17); an unreplied external high or medium carried forward (U21); rulings read through `ruling_of` and the record, every folded deviation heading (U22); the DoD re-run and the test delta, two gates before the word (U25); its own `foreman` config key and `init` line, moved from `__init__` and `init` (U32); both `binding_rulings` calls drop the consumed comments, so an edited recorded proceed waives no check (U94); the worktree checks in `worktree_checks`, the one function `collect` and `precheck` call, the posted rounds' settled findings in `posted_findings`, the reading both share, and the changed paths read NUL-separated, one with a control character shown JSON-quoted (U67); the `spec` deviation kind in `DEVIATION_RE`, and `--spec`, the foreman's own finding of kind `spec` held in its round (U84).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17); an unreplied external high or medium carried forward (U21); rulings read through `ruling_of` and the record, every folded deviation heading (U22); the DoD re-run and the test delta, two gates before the word (U25); its own `foreman` config key and `init` line, moved from `__init__` and `init` (U32); both `binding_rulings` calls drop the consumed comments, so an edited recorded proceed waives no check (U94); the worktree checks in `worktree_checks`, the one function `collect` and `precheck` call, the posted rounds' settled findings in `posted_findings`, the reading both share, and the changed paths read NUL-separated, one with a control character shown JSON-quoted (U67); the `spec` deviation kind in `DEVIATION_RE`, and `--spec`, the foreman's own finding of kind `spec` held in its round (U84); it prints each foreman finding's line, and saves the round's `collected` phase last, so a failed `collect` leaves the round `prepared` (U101, 1.3 design section 3.4).
 
 """superegm collect: the foreman's findings of a round through one `review record --reviewer foreman`, or a
 round that could not complete with `--not-run`."""
@@ -426,6 +426,8 @@ def collect(args, card):
   core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
   core.journal(st, f"{unit} round {n} collected: {len(lines)} foreman findings under {args.runcard}")
   print(f"collected: {len(lines)} foreman findings")
+  for line in lines:  # each finding's line, as recorded in `r<n>/foreman.findings`, not only the count
+    print(line)
   return 0
 
 
