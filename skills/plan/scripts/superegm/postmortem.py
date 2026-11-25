@@ -121,12 +121,15 @@ def note_finding(entries: list, latest: dict, scope: tuple, name: str, finding: 
   round, replaces the copy before it. `collect.carry` copies a still-open foreman finding under its own id with
   `carried_from`; `review.carry_externals` copies an external one with the same id and claim; `review settle` and
   triage write a carried finding's outcome on its newest copy (`review.locate_finding`), so the newest copy stands.
-  A foreman `unreplied <fid>: ...` or `contested <fid>: ...` high repeats a finding some record holds (`COPY_RE`): it is
-  no finding, and a settlement it holds counts on the finding it copies, down the chain to the original (U110). Findings
-  of one `scope` (the review kind and artifact) are told apart by reviewer and id.
+  A foreman `unreplied <fid>: ...` or `contested <fid>: ...` high naming a finding already noted in the scope repeats it
+  (`COPY_RE`; any other reviewer's claim, or one naming no known finding, is its own finding): it is no finding, and a
+  settlement it holds counts on the finding it copies, down the chain to the original (U110). Findings of one `scope` (the
+  review kind and artifact, so a head's per unit, not per cycle) are told apart by reviewer and id; ids repeat in each of a
+  unit's head cycles, so a finding counted as new drops the link and settlement an earlier finding of its id left.
   Returns `""` for a finding counted as new, else the id of the finding it is a copy of (its own for a carried one)."""
   fid = finding.get("id")
-  if m := COPY_RE.match(str(finding.get("claim") or "")):
+  m = COPY_RE.match(str(finding.get("claim") or "")) if name == "foreman" else None
+  if m and (("id", scope, m.group(1)) in latest or ("link", scope, m.group(1)) in latest):
     root = latest.get(("link", scope, m.group(1)), m.group(1))
     latest[("link", scope, fid)] = root
     if disposition := finding.get("disposition"):
@@ -143,6 +146,8 @@ def note_finding(entries: list, latest: dict, scope: tuple, name: str, finding: 
   else:
     latest[key] = len(entries)
     entries.append(item)
+    latest.pop(("link", scope, fid), None)  # a new finding is no copy of what an earlier cycle's finding of its id copied
+    latest.pop(("settled", scope, fid), None)
   latest[("id", scope, fid)] = finding
   if copy and not finding.get("disposition") and ("settled", scope, fid) in latest:  # a copy settled it before a newer copy of it came
     finding["disposition"] = latest[("settled", scope, fid)]
