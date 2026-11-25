@@ -167,12 +167,17 @@ def test_clean_never_rmdirs_through_a_symlink(world):
   assert f"kept {store_worktrees / 'U07'}: symlink" in out and "U07 cleaned" not in out
 
 
-def served(world, read):
-  """`gh api repos/<repo>/pulls/52` reads `read`; `gh issue close` closes the issue; every other route is the fake's own."""
+def served(world, read, during=None):
+  """`gh api repos/<repo>/pulls/52` reads `read`, running `during()` first (another writer acting while `close` waits on GitHub);
+  `gh issue close` closes the issue; every other route is the fake's own."""
 
   def api(args, cwd, token=None):
     endpoint = world.gh.endpoint_of(args)
-    return world.gh.ok(read) if endpoint.endswith("/pulls/52") else world.gh.do_api(args)
+    if not endpoint.endswith("/pulls/52"):
+      return world.gh.do_api(args)
+    if during:
+      during()
+    return world.gh.ok(read)
 
   def issue(args, cwd, token=None):
     if args[1] != "close":
@@ -214,6 +219,28 @@ def test_close_saves_the_merge_and_clean_auto_loads_the_closed_handoff(world, pr
   assert auto_code == 0 and "clean --auto: handoff:" not in auto_out
   assert ("U07 cleaned" in auto_out) is bool(saved and "merged_at" in saved)
   assert tree.exists() is not bool(saved and "merged_at" in saved)
+
+
+def test_close_reads_the_state_again_before_saving_the_merge(world):
+  # `status --watch` records PR 53 while `close` waits on PR 52's read (astra-2-1): 52's merge never lands in 53's record,
+  # and `close`'s later writes keep 53
+  s, card, _hid, _bodies = seed(world, units=(UNIT,))
+  state = json.loads(s.path("state").read_text(encoding="utf-8"))
+  state["units"][UNIT]["pr"] = {"number": 52}
+  state["status"] = {"ready": [], "units": {UNIT: {"pr": 52, "head": "a" * 40, "ci": "pass", "landed": False}}}
+  put(s.path("state"), json.dumps(state))
+
+  def watch():  # what `status --watch U07=53` writes: the record of the newly selected PR
+    current = json.loads(s.path("state").read_text(encoding="utf-8"))
+    current["units"][UNIT]["pr"] = {"number": 53}
+    put(s.path("state"), json.dumps(current))
+
+  served(world, {"merged": True, "merged_at": "2026-11-20T10:00:00Z"}, during=watch)
+  artifact = json.loads(s.path("runcards", card).read_text(encoding="utf-8"))["artifact"]
+  code, out = world.run("close", "--runcard", world.open_card("integrate", artifact))
+  assert code == 0, out
+  state = json.loads(s.path("state").read_text(encoding="utf-8"))
+  assert state["closed_at"] and state["units"][UNIT]["pr"] == {"number": 53}
 
 
 def test_one_undeletable_ref_keeps_only_itself(world):
