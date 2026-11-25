@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review settle --judges` for a head's contested or declined high or medium on a normal-mode card, journalled `Ruling (judges <panel>, contest)` (U88); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76); a spec cycle's changed reference documents as whole-file `changed <path>` scope lines, their `refs` manifest on each round, in the scope filter, the settle check and the proceed ruling (U75); `review open --respec R<n>`: the diff and its sections as evidence, the `design`, `codebase-details` and Astra panel, cap 2 (U85); a plan or integrate cycle a respec approval closed by its `source_review` (U91).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review settle --judges` for a head's contested or declined high or medium on a normal-mode card, journalled `Ruling (judges <panel>, contest)` (U88); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76); a spec cycle's changed reference documents as whole-file `changed <path>` scope lines, their `refs` manifest on each round, in the scope filter, the settle check and the proceed ruling (U75); `review open --respec R<n>`: the diff and its sections as evidence, the `design`, `codebase-details` and Astra panel, cap 2 (U85); a plan or integrate cycle a respec approval closed by its `source_review` (U91); a respec cycle's ingest neither records nor carries an external finding outside its scope (U105).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest|triage: the one review loop (spec section 8)."""
 
@@ -1959,6 +1959,27 @@ def external_record(rnd: dict, reviewer: str) -> dict:
                                                 "model": "none:none", "effort": "none:none"})
 
 
+def respec_keeps(rows: list, spec_rel: str, path: str | None, line: int | None) -> bool:
+  """Whether a respec cycle's round takes an external finding at `path` and `line` (U105), its file read before its line:
+  one naming no file (a review body) is kept, one on another file never, one on the spec naming no line (a file-level
+  comment) kept, and one on a line of the spec only inside a row of the round's scope (`rows`, a `whole` row all)."""
+  if not path:
+    return True
+  if path.removeprefix("./") != spec_rel:
+    return False
+  return line is None or any(kind == "whole" or start <= line <= end for kind, _, start, end in rows)
+
+
+def finding_at(location: str) -> tuple[str | None, int | None]:
+  """`(path, line)` of an ingested finding's location as `thread_line` writes it (`<file:line or file or PR> at <commit7>`):
+  `PR`, a review body's, names no file."""
+  where = re.sub(r" at [0-9a-f]*$", "", location.strip())
+  if where == "PR":
+    return None, None
+  match = re.fullmatch(r"(.*?):(\d+)", where)
+  return (match.group(1), int(match.group(2))) if match else (where, None)
+
+
 def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[int, list[str]]:
   """The spec PR's threads (spec section 8, External review on the elephant's own PR) recorded as `external:<login>`
   findings into the latest round of `review`'s cycle, closed by an `accept` or not; a thread whose root id is in
@@ -1967,6 +1988,8 @@ def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[
   and settling nothing: unlike the `--unit` path, which reads a ruling on the unit's issue, nothing reads one on the
   spec PR; a spec's rulings are made in the session or by the judges). Every unsettled external high or medium of an earlier round is
   carried into the round first, and a new thread's id is numbered after every id of its reviewer and round number
+  (a respec cycle's round neither records nor carries a finding `respec_keeps` refuses: another file's, with a line or
+  without, or a line of the spec outside the round's scope; U105)
   in any cycle, so no fid is reused. Recorded outside the panel and the round's byte and scope checks, so `what_ran`
   is untouched; each finding keeps its PR's `number` as `pr`. Then the reply pass posts `**Reply <fid>:** fixed` on
   GitHub (`reply_fixed`, whose failures are named and retried, never refused). A gh failure of the read is a
@@ -1984,11 +2007,18 @@ def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[
               for name, record in load_round(st, other_rid, m)["reviewers"].items() if name.startswith("external:")
               for f in record["findings"] if f.get("thread") is not None]
   backfill = sorted({tid for tid in recorded if tid not in listed})
-  carried = carry_externals(st, review["artifact"], rid, rnd)
+  keep = lambda path, line: True
+  if review.get("respec"):  # a respec cycle's remit is its correction: an external finding outside it is no finding of the round
+    spec = Path(review["artifact"])
+    rows = rnd.get("scope") or [list(row) for row in scope_of(st, review, spec)]
+    spec_rel = spec.resolve().relative_to(core.git_toplevel(spec.parent).resolve()).as_posix()
+    keep = lambda path, line: respec_keeps(rows, spec_rel, path, line)
+  carried = carry_externals(st, review["artifact"], rid, rnd, keep)
   owners = set(config.get("owners") or [])
   try:  # an owner's `**Ruling:**` is dropped, never a finding; nothing reads it here (the `--unit` path reads its issue's)
     threads = [t for t in read_threads(config["repo"], number, listed | set(recorded))
-               if not (t["login"] in owners and ((t["body"] or "").strip().splitlines() or [""])[0].startswith("**Ruling:**"))]
+               if not (t["login"] in owners and ((t["body"] or "").strip().splitlines() or [""])[0].startswith("**Ruling:**"))
+               and keep(t.get("path"), t.get("line"))]  # skipped, never in `ingested[]`: a later ordinary cycle reads it
     roles = {}
     for thread in threads:
       if not thread["bot"] and thread["login"] not in roles:
@@ -2083,10 +2113,11 @@ def reply_fixed(st: core.Store, artifact: str, number: int, runcard: str) -> lis
   return replied
 
 
-def carry_externals(st: core.Store, artifact: str, rid: str, rnd: dict) -> list[str]:
+def carry_externals(st: core.Store, artifact: str, rid: str, rnd: dict, keep=None) -> list[str]:
   """Every unsettled external high or medium of an earlier round of the spec's cycles (this cycle's earlier rounds
   included) copied into `rnd` (the latest round, in memory) when no finding there holds its `(id, claim)`, as `collect`
-  carries one on a head: the copy and the original are one finding. The fids carried."""
+  carries one on a head: the copy and the original are one finding; with `keep` (a respec cycle's scope, U105), only a
+  finding whose location (`finding_at`) it keeps. The fids carried."""
   held = {(f["id"], f["claim"]) for f in findings_of(rnd)}
   carried = []
   for other_rid, _ in spec_cycles(st, artifact):
@@ -2095,7 +2126,8 @@ def carry_externals(st: core.Store, artifact: str, rid: str, rnd: dict) -> list[
         continue
       for reviewer, record in load_round(st, other_rid, m)["reviewers"].items():
         for finding in record["findings"] if reviewer.startswith("external:") else []:
-          if blocking(finding) and finding["disposition"] is None and (finding["id"], finding["claim"]) not in held:
+          if (blocking(finding) and finding["disposition"] is None and (finding["id"], finding["claim"]) not in held
+              and (keep is None or keep(*finding_at(finding["location"])))):
             external_record(rnd, reviewer)["findings"].append(dict(finding))
             held.add((finding["id"], finding["claim"]))
             carried.append(finding["id"])
