@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the tests of U93, cleanup is automatic.
+# Added by SuperEGM (gsVAM), 2026: the tests of U93, cleanup is automatic; U111 re-pins the two kill tests on an unchanged `ps` start time.
 
 """U93 (spec section 7.1): `clean` removes only registered review worktrees, kills a worktree's leftover
 `node` and `python*` processes first, keeps round records, and `clean --auto` cleans every landed, merged or
@@ -93,6 +93,10 @@ class Procs:
   def alive(self, pid):
     return pid in self.table
 
+  def start(self, pid):
+    """`ps -o lstart= -p <pid>`: one start time per process, unchanged while it lives (U111)."""
+    return "Tue Nov 25 10:00:00 2026" if pid in self.table else None
+
 
 @pytest.mark.parametrize("where", ["worktrees/U01/r2", "review/U01/pr7/worktree"])
 @pytest.mark.parametrize("survives, kept", [(False, False), (True, True)])
@@ -109,6 +113,7 @@ def test_clean_kills_leftover_processes(world, monkeypatch, where, survives, kep
   monkeypatch.setattr(clean_module, "process_table", procs.listing)
   monkeypatch.setattr(clean_module, "signal_process", procs.send)
   monkeypatch.setattr(clean_module, "is_alive", procs.alive)
+  monkeypatch.setattr(clean_module, "start_time", procs.start)  # an unchanged `ps` start time (U111)
   code, out = world.run("clean", "--unit", UNIT, "--runcard", clean_card(world))
   assert code == 0, out
   assert "U01 killed 4243 python3.11" in journal_text(s)
@@ -279,6 +284,7 @@ def test_clean_keeps_a_tree_whose_process_cannot_be_signalled_and_goes_on(world,
   monkeypatch.setattr(clean_module, "process_table", procs.listing)
   monkeypatch.setattr(clean_module, "signal_process", send)
   monkeypatch.setattr(clean_module, "is_alive", procs.alive)
+  monkeypatch.setattr(clean_module, "start_time", procs.start)  # an unchanged `ps` start time (U111)
   code, out = world.run("clean", "--unit", UNIT, "--runcard", clean_card(world))
   assert code == 0, out
   assert f"kept {builder}: process 4242 cannot be signalled" in out

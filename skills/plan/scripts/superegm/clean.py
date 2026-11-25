@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the clean subcommand (spec section 11).
+# Added by SuperEGM (gsVAM), 2026: the clean subcommand (spec section 11); the start-time check before each signal,
+# the listing after the wait and no rmdir through a symlink (U111).
 
 """superegm clean: remove a unit's review and builder worktrees and its private refs once every
 launch and round is terminal; keeps what it cannot prove."""
@@ -336,45 +337,66 @@ def leftovers(tree):
   return found
 
 
-def stop_leftovers(st, unit, tree):
-  """SIGTERM, after `KILL_WAIT` seconds SIGKILL, each leftover process in `tree`, journalled `<unit> killed <pid> <command>`;
-  False, with a `kept` line, when the processes cannot be listed, one cannot be signalled or one outlives SIGKILL (the caller keeps the tree)."""
+def start_time(pid):
+  """The process's start time as `ps -o lstart= -p <pid>` prints it (macOS and Linux); None when `ps` fails or prints nothing."""
   try:
-    found = leftovers(tree)
+    result = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=10)
+  except (OSError, subprocess.SubprocessError):
+    return None
+  text = result.stdout.strip()
+  return text if result.returncode == 0 and text else None
+
+
+def stop_leftovers(st, unit, tree):
+  """SIGTERM, after `KILL_WAIT` seconds SIGKILL, each leftover process in `tree`, journalled `<unit> killed <pid> <command>`.
+  Each process's start time is read when it is listed and again before each signal: a start time that differs, or that `ps` cannot
+  read, skips that process (it may be another one under a reused PID), with `kept <pid>: identity changed`.
+  False, with a `kept` line, when the processes cannot be listed, one cannot be signalled, one's identity changed or one outlives
+  SIGKILL (the caller keeps the tree)."""
+  try:
+    found = [(pid, command, start_time(pid)) for pid, command in leftovers(tree)]
   except ListError as error:
     print(f"kept {tree}: cannot list its processes ({error})")
     return False
-  blocked = []
+  blocked, changed = [], []
 
-  def send(pid, sig):
+  def send(pid, start, sig):
+    """Signal `pid` only when its start time still reads `start`; False when it was not signalled."""
+    if start is None or start_time(pid) != start:
+      if pid not in changed:
+        changed.append(pid)
+      return False
     try:
       signal_process(pid, sig)
     except PermissionError:
       if pid not in blocked:
         blocked.append(pid)
+      return False
+    return True
 
-  for pid, _command in found:
-    send(pid, signal.SIGTERM)
-  found = [(pid, command) for pid, command in found if pid not in blocked]
+  for pid, _command, start in found:
+    send(pid, start, signal.SIGTERM)
+  found = [(pid, command, start) for pid, command, start in found if pid not in blocked and pid not in changed]
   deadline = core.NOW() + KILL_WAIT
-  while core.NOW() < deadline and any(is_alive(pid) for pid, _command in found):
+  while core.NOW() < deadline and any(is_alive(pid) for pid, _command, _start in found):
     core.SLEEP(1)
   survivors = []
-  for pid, command in found:
+  for pid, command, start in found:
     if is_alive(pid):
-      send(pid, signal.SIGKILL)
+      if not send(pid, start, signal.SIGKILL):
+        continue
       core.SLEEP(1)
-    if pid in blocked:
-      continue
     if is_alive(pid):
       survivors.append((pid, command))
     else:
       core.journal(st, f"{unit} killed {pid} {command}")
   for pid in blocked:
     print(f"kept {tree}: process {pid} cannot be signalled")
+  for pid in changed:
+    print(f"kept {pid}: identity changed")
   for pid, command in survivors:
     print(f"kept {tree}: {command} {pid} survives SIGKILL")
-  return not survivors and not blocked
+  return not survivors and not blocked and not changed
 
 
 def terminal_problems(store, unit):
