@@ -129,3 +129,25 @@ def test_clean_skips_a_process_whose_start_time_changed(world, monkeypatch, at, 
   assert "kept 4242: identity changed" in out and signals == sent
   assert "U07 killed 4242" not in journal and "U07 cleaned" not in journal and tree.is_dir()
   assert "refs/superegm/pr/52" in refs_after
+
+
+@pytest.mark.parametrize("found", [4343, 4242])  # 4242: its PID found again with a new start time
+def test_clean_lists_again_after_the_wait(world, monkeypatch, found):
+  s, _card, _hid, _bodies = seed(world, units=(UNIT,))
+  tree = builder_tree(world, s)
+  table = Table({4242: ["python3", str(tree.resolve()), FIRST]})
+
+  def on_list(n):  # the listing after the wait finds `found` in the same tree, started at 10:00:30
+    if n == 2:
+      table.rows[found] = ["python3", str(tree.resolve()), LATER]
+
+  table.on_list = on_list
+  table.install(monkeypatch)
+  code, out = world.run("clean", "--unit", UNIT, "--runcard", world.open_card("clean", UNIT))
+  assert code == 0, out
+  journal = journal_text(s)
+  signals = {pid: table.sent(pid) for pid in (4242, found)}
+  assert signals[found][-1] == signal.SIGTERM and f"U07 killed {found} python3" in journal
+  assert "identity changed" not in out and "U07 cleaned" in journal
+  assert signals[found] == [signal.SIGTERM] * (2 if found == 4242 else 1)  # the listed 4242, then the one found after the wait
+  assert table.listings == 2  # one listing after the wait, no further one
