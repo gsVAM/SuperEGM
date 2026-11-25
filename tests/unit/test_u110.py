@@ -80,6 +80,46 @@ def test_a_settled_copy_settles_no_unrelated_finding_of_the_same_id(world):
   assert (row["high"], row["fixed"]) == ("2", "1")
 
 
+def test_a_claim_that_reads_like_a_copy_is_a_finding_unless_a_foreman_copy_of_a_known_finding(world):
+  # a reviewer's own finding whose claim begins `contested state:` copies nothing: no finding `state` exists, and it is no foreman's
+  c, _, _ = two_units(world)
+  head_rounds(c, [{"change-review": [found("change-review-1-1", "contested state: retries never terminate")]}])
+  report = report_of(world, c)
+  row = keyed(report, "Reviewers", 2)[("change-review", "head")]
+  assert (row["high"], row["quiet rounds"]) == ("1", "0")
+  assert keyed(report, "Units", 1)[("U01",)]["high"] == "1"
+
+
+def test_a_foreman_claim_naming_no_known_finding_is_a_finding(world):
+  # the foreman's own `contested ghost-9-9: …` finding names a finding no round holds: counted as its own
+  c, _, _ = two_units(world)
+  head_rounds(c, [{"foreman": [found("foreman-1-1", "contested ghost-9-9: out of Scope")]}])
+  assert keyed(report_of(world, c), "Reviewers", 2)[("foreman", "head")]["high"] == "1"
+
+
+def test_a_carried_finding_of_a_later_cycle_takes_no_settlement_from_an_earlier_one(world):
+  # head cycle 1: foreman-1-1 and its `contested` copy settled fixed; cycle 2 raises its own foreman-1-1 and carries it: still open
+  c, _, _ = two_units(world)
+  copy = found("foreman-2-1", "contested foreman-1-1: out of Scope", disposition="fixed")
+  head_rounds(c, [{"foreman": [found("foreman-1-1")]}, {"foreman": [copy]}])
+  reviewed(c, "head-U01-c2", "head", "U01", ["foreman"], {"foreman": {"findings": [found("foreman-1-1", "another defect")]}})
+  jwrite(c.hs.path("reviews", "head-U01-c2", "round-2.json"), {"round": 2, "runcard": "rc", "reviewers": {
+      "foreman": {"findings": [found("foreman-1-1", "another defect", carried_from=1)]}}})
+  row = keyed(report_of(world, c), "Reviewers", 2)[("foreman", "head")]
+  assert (row["high"], row["fixed"]) == ("2", "1")
+
+
+def test_a_copy_of_a_later_cycle_follows_no_link_of_an_earlier_one(world):
+  # cycle 1's `foreman-2-1` was an `unreplied` copy of external ext-1; cycle 2's own `foreman-2-1` is a finding, and its `contested` copy settled fixed
+  c, _, _ = two_units(world)
+  head_rounds(c, [{"external:octo": [EXTERNAL]}, {"foreman": [found("foreman-2-1", UNREPLIED)]}])
+  reviewed(c, "head-U01-c2", "head", "U01", ["foreman"], {"foreman": {"findings": [found("foreman-2-1", "a real defect")]}})
+  jwrite(c.hs.path("reviews", "head-U01-c2", "round-2.json"), {"round": 2, "runcard": "rc", "reviewers": {
+      "foreman": {"findings": [found("foreman-3-1", "contested foreman-2-1: out of Scope", disposition="fixed")]}}})
+  rows = keyed(report_of(world, c), "Reviewers", 2)
+  assert (rows[("foreman", "head")]["fixed"], rows[("external:octo", "head")]["fixed"]) == ("1", "0")
+
+
 def test_not_run_round_is_no_head_round(world):
   # U01's head round 1 ran; round 2's foreman entry is `prepared` and its reviewers hold only `review record --not-run` records
   c, _, _ = two_units(world)
