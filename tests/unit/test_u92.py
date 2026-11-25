@@ -68,6 +68,7 @@ def test_waiting_proceed_after_a_later_launch(world, case, merge_offered):
     launches(s, "U01", 1, 2)  # the merge launch after the proceed, terminal
     if case == "second proceed naming the later launch":
       set_head(s, "U01", "c" * 40)
+      world.gh.prs[70]["headRefOid"] = "c" * 40  # the merge launch's push, on GitHub too
       code, out = proceed(world, rid, card, "--owner", "--head", "c" * 7, "--reason", "the merge round is fine")
       assert code == 0, out
       assert foreman_of(s, "U01")["proceeds"][-1]["launch"] == 2

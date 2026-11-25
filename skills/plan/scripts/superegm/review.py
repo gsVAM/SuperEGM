@@ -2271,6 +2271,7 @@ def rule_proceed(st: core.Store, rid: str, review: dict, card: dict, args) -> in
       raise core.HandoffError(f"review rule: comment {posted}: {NEEDS_HEAD}")
     ruling["reason"], by, shown = found.reason, found.login, found.subject
   refuse_moved_since(unit, shown, pinned)
+  refuse_moved_since(unit, shown, live_head(st, state, unit, pinned))
   ruling["sha256"] = pinned
   launches = st.path("launches", unit)
   launched = json.loads(core.read_text(launches))["launches"] if launches.is_file() else []
@@ -2296,6 +2297,15 @@ def refuse_moved_since(unit: str, shown: str, pinned) -> None:
   if not (pinned and (shown == pinned or re.fullmatch(r"[0-9a-f]{7,40}", shown) and pinned.startswith(shown))):
     now = pinned[:7] if pinned else "none"
     raise core.HandoffError(f"review rule: {unit}'s head moved since {shown} (now {now}): proceed again on the head shown now")
+
+
+def live_head(st: core.Store, state: dict, unit: str, pinned):
+  """The unit's pull request's head read from GitHub now, so a push the wave has not saved yet refuses a head
+  proceed before anything is written (1.3 design section 3.9); `pinned` itself while the unit has no pull request."""
+  from superegm.report import unit_view
+  pr = unit_view(state, unit)["pr"]
+  number = pr["number"] if isinstance(pr, dict) else pr
+  return core.read_pr(st.config["repo"], int(number))["head"] if number else pinned
 
 
 def last_proceed(review: dict):
