@@ -14,6 +14,7 @@ import pytest
 from test_wave import wave_store, CLEAN as WAVE_CLEAN, open_wave_card
 from test_u62 import HEAD, with_rounds, put
 from test_u85 import open_respec
+from test_builders import spawn_fake, no_graphify, which  # noqa: F401  the fixtures a `launch-builder` run needs
 
 
 @pytest.mark.parametrize("raised, loop_starts, names", [
@@ -64,3 +65,21 @@ def test_unreadable_respec_file_refused_with_its_path(world, name, content):
   state = tb.state_of(st)
   [line] = status.respec_lines(core.Handoff(Path(state["plan"]), st, state))
   assert line.startswith(f"respec: read failed: {path}: "), line
+
+
+def test_launch_builder_refuses_a_replan_mark(world, monkeypatch, spawn_fake, which, no_graphify):
+  # filed, unmerged U07 touched by applied R1 with no respec_comment_U07_R1.md: respec.marks reads `replan: R1`
+  import test_builders as tb
+  from test_u86 import apply_r1
+  from superegm import respec
+  st, card, handoff_id, _ = tb.seed(world)
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  assert world.run("launch", "--runcard", card)[0] == 0
+  tb.launched(st, tb.UNIT, "exited 0")
+  apply_r1(st, tb.UNIT)
+  st.path("file", f"respec_comment_{tb.UNIT}_R1.md").unlink()
+  assert respec.marks(st, handoff_id).get(tb.UNIT) == "replan: R1"
+  before = tb.launches_of(st)
+  code, out = world.run("launch-builder", "--unit", tb.UNIT, "--round", 2, "--runcard", card)
+  assert code == 1 and f"launch-builder: {tb.UNIT}" in out and "replan" in out and "R1" in out, out
+  assert tb.launches_of(st) == before and not spawn_fake
