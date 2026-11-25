@@ -413,8 +413,6 @@ def collect(args, card):
         isolation="clean", model="-:-", effort="-:-", runcard=args.runcard, unit=None, design=None, plan=None))
   if code != 0:
     raise core.HandoffError(f"review record exited {code}")
-  entry["phase"] = "collected"
-  core.save_foreman(st, unit, data)
   rnd = review.load_round(st, rid, n)
   posted_now = iter(rnd["reviewers"]["foreman"]["findings"])  # in the order raised: `test_delta` pairs with it
   rnd["reviewers"]["foreman"]["findings"] = [slot or next(posted_now) for slot in slots]
@@ -422,8 +420,10 @@ def collect(args, card):
   brief = r / "astra_brief.md"
   if "astra" in rnd["reviewers"] and brief.is_file():  # the lane's record names the brief the runner read
     rnd["reviewers"]["astra"]["brief_sha256"] = core.sha256_file(brief)
-  rnd["what_ran"] = review.derive_what_ran(review.load_review(st, rid), rnd, entry)
+  rnd["what_ran"] = review.derive_what_ran(review.load_review(st, rid), rnd, {**entry, "phase": "collected"})  # as the phase will stand
   core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
+  entry["phase"] = "collected"  # saved last: a failure above leaves the round `prepared`, and `collect` run again completes it
+  core.save_foreman(st, unit, data)
   core.journal(st, f"{unit} round {n} collected: {len(lines)} foreman findings under {args.runcard}")
   print(f"collected: {len(lines)} foreman findings")
   for line in lines:  # each finding's line, as recorded in `r<n>/foreman.findings`, not only the count
