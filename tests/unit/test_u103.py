@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U103's tests: rulings (1.3 design sections 3.6, 3.7 and 3.10): the missing-fid refusal of a point-1 ruling, the settle a point-1 ruling makes.
+# Added by SuperEGM (gsVAM), 2026: U103's tests: rulings (1.3 design sections 3.6, 3.7 and 3.10): the missing-fid refusal of a point-1 ruling, the settle a point-1 ruling makes, the refusal of an edited ruling comment.
 
 """U103: `decision rule` refuses a point-1 ruling with no fid, settles the finding a point-1 ruling rules, and refuses an
 edited ruling comment."""
@@ -12,7 +12,7 @@ import pytest
 
 import superegm as core
 from conftest import REPO, set_config
-from superegm import review
+from superegm import decision, review
 from test_wave import foreman_of, open_wave_card, question, wave_store
 
 FINDING = "foreman-1-1 | high | src/x.py:3 | regression: no | the retry loop never backs off\n"
@@ -195,3 +195,45 @@ def test_a_point_1_ruling_settles_its_finding(world, mode, by, decision, ruling,
   ci_code, ci_err = world.run("decision", "rule", "--unit", "U03", "--decision", "q1", "--ruling", "foreman-2-4 finding overruled — flaky",
                               "--by", "owner", "--runcard", w.card)
   assert ci_code == 1 and "the CI finding is settled by no one" in ci_err and foreman_of(s, "U03")["rulings"] == ci_before
+
+
+# ---------------------------------------------------------------- S3: a ruling comment edited before its record is refused
+
+
+@pytest.mark.parametrize("updated_at, refused", [("2026-11-24T10:00:00Z", False), (None, False), ("2026-11-24T10:05:00Z", True)])
+def test_an_edited_ruling_comment_is_refused(world, updated_at, refused):
+  """A posted ruling comment whose `updated_at` differs from its `created_at` when first recorded is refused, nothing recorded,
+  a `review rule --ruling proceed --owner --posted` comment too; one recorded unedited and edited after is still a ruling event."""
+  card = open_wave_card(world)
+  rounds = [{"round": n, "phase": "posted", "outcome": "revise" if n == 1 else "contested: foreman-1-1", "launch": 1, "runcard": card,
+             "head": "a" * 40, "dispatch_id": f"d{n}", "posted_at": None} for n in (1, 2)]
+  s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "rounds": rounds})
+  set_config(world, repo=REPO, owners=["owner"])
+  rid = review.review_id(s, "head", "U01", 1)
+  seed_review(s, "U01", rid, card, [finding("foreman-2-1")], ["foreman-2-1"])
+  comment = lambda cid, text: {"id": cid, "user": {"login": "owner"}, "body": f"**Ruling:** {text}",
+                               "issue_url": f"https://api.github.com/repos/{REPO}/issues/2",
+                               "created_at": "2026-11-24T10:00:00Z"} | ({"updated_at": updated_at} if updated_at else {})
+  comments = {13: comment(13, "foreman-1-1 finding overruled — moved"), 14: comment(14, "proceed — go ahead")}
+  Gh(world, comments)
+  assert world.run("decision", "open", "--unit", "U01", "--point", 1, "--question", question(world, FINDING),
+                   "--source", f"review {rid} round 2", "--runcard", card)[0] == 0
+  rulings_before = foreman_of(s, "U01")["rulings"]
+  proceeds_before = foreman_of(s, "U01").get("proceeds")
+  code, err = world.run("decision", "rule", "--unit", "U01", "--posted", 13, "--ruling", "foreman-1-1 finding overruled — moved",
+                        "--by", "owner", "--runcard", card)
+  rulings_after = foreman_of(s, "U01")["rulings"]
+  assert (code, "ruling comment edited: post a new one" in err) == ((1, True) if refused else (0, False)), err
+  assert (rulings_after == rulings_before) is refused
+  if not refused:  # comment 13 recorded unedited, then edited: still read as the owner's ruling, its rerun refused as before
+    edited_13 = comments[13] | {"updated_at": "2026-11-24T10:05:00Z"}
+    comments[13] = edited_13
+    assert decision.ruling_of(edited_13, ["owner"]) is not None
+    rerun_code, rerun_err = world.run("decision", "rule", "--unit", "U01", "--posted", 13, "--ruling",
+                                      "foreman-1-1 finding overruled — moved", "--by", "owner", "--runcard", card)
+    assert rerun_code == 1 and "already recorded (ruling edited after record, ignored)" in rerun_err
+  if refused:  # comment 14: the same refusal before any form or head check, no `proceeds[]` entry
+    proceed_code, proceed_err = world.run("review", "rule", "--review", rid, "--ruling", "proceed", "--owner", "--posted", 14,
+                                          "--runcard", card)
+    assert proceed_code == 1 and "ruling comment edited: post a new one" in proceed_err
+    assert foreman_of(s, "U01").get("proceeds") == proceeds_before
