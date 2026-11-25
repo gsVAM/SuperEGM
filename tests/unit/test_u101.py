@@ -39,3 +39,20 @@ def test_prepared_line_prints_the_full_head(world, tmp_path, monkeypatch):
   code, out = world.run("prepare", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)  # the round again: `prepared` ran it once
   assert code == 0, out
   assert out.startswith(f"prepared: head {w.head} merge-base "), out
+
+
+OTHER = [("test(S1): hook", "tests/unit/test_hooks.py"), ("feat(S1): hook", "src/hooks.py"), ("feat(S1): more", "src/other.py")]
+
+
+def collect(world, w):
+  return world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
+
+
+def test_collect_prints_each_finding_line(world, tmp_path, monkeypatch):
+  # collect prints the count and every foreman finding's line it recorded (L8): CI not green, and a path outside Scope
+  w = prepared(world, tmp_path, monkeypatch, ci="failure", commits=OTHER)
+  code, out = collect(world, w)
+  findings = (w.dir / "r1/foreman.findings").read_text(encoding="utf-8").splitlines()
+  assert code == 0 and len(findings) >= 2, out
+  assert f"collected: {len(findings)} foreman findings" in out.splitlines()
+  assert all(line in out.splitlines() for line in findings)
