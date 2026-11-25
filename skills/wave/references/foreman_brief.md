@@ -10,6 +10,7 @@ The elephant passes the text under "Brief" verbatim as the prompt of a foreman d
 `foreman-<unit-id>-<dispatch-id>`, in the background beside `status --wait`, with the angle-bracket values filled in, after
 `superegm foreman dispatch --unit <unit-id> --runcard <wave-card>` printed `<dispatch-id> <child-card>`.
 It alone evaluates §11's predicate (CI concluded, latest launch terminal, no round posted since it, no decision pending, review not stalled): it prints `<dispatch-id> <child-card>` when it holds and refuses otherwise: skip a refused unit, except exit 1 `recovered <word>`, which is the foreman's word for a round the PR already carries.
+The wave skill's `<head-review-id>` is the unit's `head-<U>-c<n>` review under `reviews/`, opened by its first dispatch.
 A foreman runs one round and returns one word plus one line; the elephant records nothing itself, and
 the next `foreman dispatch` supersedes a round left non-terminal. The goldfish are dispatched
 through their own reviewer adapters (a repository or overridden reviewer through `superegm:repo-reviewer`), which set `omitClaudeMd: true` and the read-only tool list: that,
