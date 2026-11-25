@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the builders' tests (U09): launch, launch-builder, record-launch, interrupt, clean, the orders and the two skill bodies; the App path (U15); the watchdog's trap and `--exit stalled` (U31); the idempotent re-run (U32); the precheck script's two allow rules and the fourth `orders_text` argument (U67).
+# Modified by SuperEGM (gsVAM), 2026: the builders' tests (U09): launch, launch-builder, record-launch, interrupt, clean, the orders and the two skill bodies; the App path (U15); the watchdog's trap and `--exit stalled` (U31); the idempotent re-run (U32); the precheck script's two allow rules and the fourth `orders_text` argument (U67); the allow-list's push script in place of the `git push` entry (U108, 1.3 design section 3.7).
 
 """The builders (spec section 11): `launch` and its preconditions, `launch-builder`'s worktree,
 prompt file and command line, `record-launch`, `interrupt`, `clean`, the builder orders and the
@@ -461,7 +461,7 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   mcp_file = s.path("launches", f"{UNIT}_r1_mcp.json")
   assert f" claude -p \"$(cat '{prompt_file}')\" --session-id '{launches_of(s)[-1]['session_id']}' --model '{cfg['model']}' --effort '{cfg['effort']}' --permission-mode '{cfg['permission_mode']}' --setting-sources user --mcp-config '{mcp_file}' --strict-mcp-config --allowedTools '" in line, line
   tools = line.split("--allowedTools '")[1].split("'")[0].split(",")
-  assert tools == [t.replace("Bash(gh ", "Bash(/usr/local/bin/gh ") for t in cfg["allowed_tools"]] + [f"Bash(git push origin {branch}:*)",
+  assert tools == [t.replace("Bash(gh ", "Bash(/usr/local/bin/gh ") for t in cfg["allowed_tools"]] + [f"Bash({precheck.parent}/superegm-push:*)",
       f"Bash({precheck.parent}/superegm-precheck:*)", "Bash(git reset --hard:*)"]
   wrapper, kick = line.splitlines()  # the store is registered: the wrapper ends with the kick (U71)
   assert wrapper.endswith(f"' --output-format json > '{result}'; echo $? > '{result}.exit'")
@@ -922,12 +922,13 @@ import superegm  # the harness reloads the package per test: read HandoffError a
 from superegm.launch_builder import allowed_tools
 
 PRECHECK = ["Bash(/bin/U07_r1_bin/superegm-precheck:*)", "Bash(git reset --hard:*)"]  # the two rules a given bin adds (U67)
+PUSH = "Bash(/bin/U07_r1_bin/superegm-push:*)"  # the one push entry, a given bin's (U108)
 
 
 @pytest.mark.parametrize("configured, expect", [
-  (["Read", "Edit", "Bash(git add:*)"], ["Read", "Edit", "Bash(git add:*)", "Bash(git push origin superegm/h/U07:*)", "Bash(pytest:*)", *PRECHECK]),
-  (["Bash(pytest:*)", "Read"], ["Bash(pytest:*)", "Read", "Bash(git push origin superegm/h/U07:*)", *PRECHECK]),
-  (["Read", "Agent", "Workflow"], ["Read", "Agent", "Workflow", "Bash(git push origin superegm/h/U07:*)", "Bash(pytest:*)", *PRECHECK]),
+  (["Read", "Edit", "Bash(git add:*)"], ["Read", "Edit", "Bash(git add:*)", PUSH, "Bash(pytest:*)", *PRECHECK]),
+  (["Bash(pytest:*)", "Read"], ["Bash(pytest:*)", "Read", PUSH, *PRECHECK]),
+  (["Read", "Agent", "Workflow"], ["Read", "Agent", "Workflow", PUSH, "Bash(pytest:*)", *PRECHECK]),
   (["Read", "Skill"], "Skill"),
   (["Read", "Bash"], "Bash"),
   (["Read", "Bash(*)"], "Bash(*)"),
@@ -939,7 +940,7 @@ def test_allowed_tools_composition(configured, expect):
       allowed_tools(configured, "superegm/h/U07", body, "/usr/local/bin/gh")
   else:
     assert allowed_tools(configured, "superegm/h/U07", body, "/usr/local/bin/gh", bin=Path("/bin/U07_r1_bin")) == expect
-    assert allowed_tools(configured, "superegm/h/U07", body, "/usr/local/bin/gh") == expect[:-2]  # no bin, no rules
+    assert allowed_tools(configured, "superegm/h/U07", body, "/usr/local/bin/gh") == [t for t in expect[:-2] if t != PUSH]  # no bin, no rules
 
 
 def test_interrupt_records_a_launch_or_marks_a_prepared_round(world):

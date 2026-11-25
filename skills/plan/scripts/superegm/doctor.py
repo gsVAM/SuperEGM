@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24); the informational `plugins` and `mcp` lines and the profile line's plugin refusals (U27); the informational `model:` role table (U28); the informational `stall:` line (U31); the modules' DOCTOR_CHECKS lines after its own (U32); the three `model: builder <tier>` lines (U33); `chain` in INFORMATIONAL (U54); `--probe`, one headless builder session on the launch's own flags (U60); the informational `reviewers:` line after `mcp:` (U76); the `driver:` findings of a credential the env file lacks and an enabled plugin's `SubagentStart` hook (U71).
+# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24); the informational `plugins` and `mcp` lines and the profile line's plugin refusals (U27); the informational `model:` role table (U28); the informational `stall:` line (U31); the modules' DOCTOR_CHECKS lines after its own (U32); the three `model: builder <tier>` lines (U33); `chain` in INFORMATIONAL (U54); `--probe`, one headless builder session on the launch's own flags (U60); the informational `reviewers:` line after `mcp:` (U76); the `driver:` findings of a credential the env file lacks and an enabled plugin's `SubagentStart` hook (U71); the probe's `git push` filter dropped, no bin giving no push entry (U108, 1.3 design section 3.7).
 
 """superegm doctor: one line per wave prerequisite, `ok` or the refusal `launch` or `launch-builder`
 would give; read-only, no run card."""
@@ -69,8 +69,8 @@ def probe(config, repo_root: Path) -> bool:
       # HEAD's builder-addressed instruction text (U37's renderer); a throwaway store in the temp dir takes any copy it writes
       text = instructions.render(core.Store(temp / "store"), "builder", None, repo_root)[1].strip()
       # bare gh: the probe prompt carries no gh path (a launch's orders do), so the rules a launch rewrites to its gh
-      # admit the probe's bare calls, and a `gh <group> <command>` hint is the entry that admits them
-      tools = [t for t in allowed_tools(b["allowed_tools"], "superegm/probe", "", "gh") if not t.startswith("Bash(git push ")]
+      # admit the probe's bare calls, and a `gh <group> <command>` hint is the entry that admits them; no bin, no push entry (U108)
+      tools = allowed_tools(b["allowed_tools"], "superegm/probe", "", "gh")
     except core.HandoffError as error:
       print(f"probe: session {error}")
       return False

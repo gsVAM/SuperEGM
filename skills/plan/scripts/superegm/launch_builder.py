@@ -545,19 +545,24 @@ def pr_block_text(repo_root, ref, path):
 
 def allowed_tools(configured, branch, body_text, gh, merge=False, bin=None):
   """The configured allow-list with its `gh` prefixes rewritten to `gh`'s absolute path (a bare `gh …`
-  is refused, so no PATH order is assumed), plus a push prefix for the unit's own branch and
-  `Bash(<first word>:*)` for the first word of every `&&`/`;` segment of every command the body runs (U25's D1 (a));
-  a bare `Skill` and unrestricted Bash are refused; `Agent` passes, the owner's opt-in (amendment 15, U27).
+  is refused, so no PATH order is assumed), every `git push` entry and `Bash(git:*)` left out, and
+  `Bash(<first word>:*)` for the first word but `git` of every `&&`/`;` segment of every command the body runs (U25's
+  D1 (a)); a bare `Skill` and unrestricted Bash are refused; `Agent` passes, the owner's opt-in (amendment 15, U27).
   `merge`: the launch carries merge orders (spec section 6.1), and on it alone `Bash(git merge:*)` is admitted.
-  `bin`: the launch's bin directory; given, `Bash(<bin>/superegm-precheck:*)` and `Bash(git reset --hard:*)`, the
-  reset to the best checkpoint, are admitted (spec 1.2.1 section 6.3)."""
+  `bin`: the launch's bin directory; given, `Bash(<bin>/superegm-push:*)`, the one push entry (1.3 design section 3.7,
+  U108), then `Bash(<bin>/superegm-precheck:*)` and `Bash(git reset --hard:*)`, the reset to the best checkpoint, are
+  admitted (spec 1.2.1 section 6.3); with no `bin` the list carries no push at all. `branch` names no entry since U108:
+  the push script carries it."""
   for entry in ("Skill", "Bash", "Bash(*)"):
     if entry in configured:
       raise core.HandoffError(f"allowed_tools carries {entry}: a builder invokes no skill bare, never runs unrestricted Bash")
-  tools = [f"Bash({gh} {t[8:]}" if t.startswith("Bash(gh ") else t for t in configured] + [f"Bash(git push origin {branch}:*)"]
+  tools = [f"Bash({gh} {t[8:]}" if t.startswith("Bash(gh ") else t for t in configured
+           if t != "Bash(git:*)" and not t.startswith("Bash(git push")]
+  if bin is not None:
+    tools.append(f"Bash({bin}/superegm-push:*)")
   for command in body.run_commands(body_text):
     for first in segment_heads(command):
-      if f"Bash({first}:*)" not in tools:
+      if first != "git" and f"Bash({first}:*)" not in tools:
         tools.append(f"Bash({first}:*)")
   if merge and "Bash(git merge:*)" not in tools:
     tools.append("Bash(git merge:*)")
