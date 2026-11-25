@@ -1543,7 +1543,8 @@ POST_HEADER_RE = re.compile(r"^\*\*SuperEGM review round \d+ \(head [0-9a-f]{7}\
 
 def read_threads(repo: str, number: int, skip: set) -> list[dict]:
   """A PR's review threads (spec section 8, External review): a review comment with no `in_reply_to`, its
-  replies its text, and a non-empty review body of a review with no inline comments that is not `APPROVED`;
+  replies its text (with its `original_line`, `original_commit_id` and `subject_type`, which place an outdated line
+  comment, U105), and a non-empty review body of a review with no inline comments that is not `APPROVED`;
   a review carrying `review post`'s header is the foreman's, never a thread. `skip` holds root ids left out."""
   comments = core.gh_pages(f"repos/{repo}/pulls/{number}/comments")
   reviews = core.gh_pages(f"repos/{repo}/pulls/{number}/reviews")
@@ -1560,7 +1561,8 @@ def read_threads(repo: str, number: int, skip: set) -> list[dict]:
     threads.append({"id": c["id"], "login": login(c), "bot": login(c).endswith("[bot]"),
                     "root": c.get("body") or "", "body": "\n\n".join([c.get("body") or "", *replies.get(c["id"], [])]), "path": c.get("path"),
                     "line": c.get("line"), "commit_id": c.get("commit_id"), "review_body": False,
-                    "created_at": c.get("created_at")})
+                    "created_at": c.get("created_at"), "original_line": c.get("original_line"),
+                    "original_commit_id": c.get("original_commit_id"), "subject_type": c.get("subject_type")})
   for r in reviews:
     body = r.get("body") or ""
     if POST_HEADER_RE.search(body):
@@ -1962,7 +1964,8 @@ def external_record(rnd: dict, reviewer: str) -> dict:
 def respec_keeps(rows: list, spec_rel: str, path: str | None, line: int | None) -> bool:
   """Whether a respec cycle's round takes an external finding at `path` and `line` (U105), its file read before its line:
   one naming no file (a review body) is kept, one on another file never, one on the spec naming no line (a file-level
-  comment) kept, and one on a line of the spec only inside a row of the round's scope (`rows`, a `whole` row all)."""
+  comment, or a line whose place is unknown) kept, and one on a line of the spec only inside a row of the scope (`rows`,
+  a `whole` row all), `line` counted in the same text as `rows`."""
   if not path:
     return True
   if path.removeprefix("./") != spec_rel:
@@ -1970,14 +1973,38 @@ def respec_keeps(rows: list, spec_rel: str, path: str | None, line: int | None) 
   return line is None or any(kind == "whole" or start <= line <= end for kind, _, start, end in rows)
 
 
-def finding_at(location: str) -> tuple[str | None, int | None]:
-  """`(path, line)` of an ingested finding's location as `thread_line` writes it (`<file:line or file or PR> at <commit7>`):
-  `PR`, a review body's, names no file."""
-  where = re.sub(r" at [0-9a-f]*$", "", location.strip())
+def finding_at(location: str) -> tuple[str | None, int | None, str | None]:
+  """`(path, line, commit)` of an ingested finding's location as `thread_line` writes it (`<file:line or file or PR> at
+  <commit7>`), its line counted in that commit: `PR`, a review body's, names no file."""
+  at = re.search(r" at ([0-9a-f]*)$", location.strip())
+  commit = (at.group(1) or None) if at else None
+  where = location.strip()[:at.start()] if at else location.strip()
   if where == "PR":
-    return None, None
+    return None, None, commit
   match = re.fullmatch(r"(.*?):(\d+)", where)
-  return (match.group(1), int(match.group(2))) if match else (where, None)
+  return (match.group(1), int(match.group(2)), commit) if match else (where, None, commit)
+
+
+def thread_place(thread: dict) -> tuple[int | None, str | None]:
+  """`(line, commit)` a PR thread names: its `line` in its `commit_id`; an outdated line comment, whose `line` GitHub
+  nulls, its `original_line` in its `original_commit_id`; a file-level comment (`subject_type` `file`) none."""
+  if thread.get("line") is None and thread.get("subject_type") != "file" and thread.get("original_line") is not None:
+    return thread["original_line"], thread.get("original_commit_id")
+  return thread.get("line"), thread.get("commit_id")
+
+
+def line_now(root: Path, spec_rel: str, current: list[str], commit: str | None, line: int) -> int | None:
+  """`line` of the spec as it stood at `commit`, carried to the spec's `current` lines through `respec.carry`'s line map
+  (a line the later text changed or removed stands at the block that replaced it); unchanged with no commit named; None
+  when no commit `commit` holds the spec, its place unknown (U105)."""
+  if not commit:
+    return line
+  try:
+    then = core.run_git(["show", f"{commit}:{spec_rel}"], root).splitlines()
+  except core.HandoffError:
+    return None
+  from superegm import respec  # at call time: respec imports this module
+  return respec.carry(respec.opcodes(then, current), line, line)[0]
 
 
 def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[int, list[str]]:
@@ -1989,7 +2016,9 @@ def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[
   spec PR; a spec's rulings are made in the session or by the judges). Every unsettled external high or medium of an earlier round is
   carried into the round first, and a new thread's id is numbered after every id of its reviewer and round number
   in any cycle, so no fid is reused. A respec cycle's round neither records nor carries a finding `respec_keeps`
-  refuses: another file's, with a line or without, or one on a line of the spec outside the round's scope (U105). Recorded outside the panel and the round's byte and scope checks, so `what_ran`
+  refuses: another file's, with a line or without, or one on a line of the spec outside the scope of the spec's bytes now
+  (`scope_of`, never the round's stored rows: a fix pushed since the record moved its lines), the line carried from the
+  commit it was made on (`thread_place`, `finding_at`, `line_now`) (U105). Recorded outside the panel and the round's byte and scope checks, so `what_ran`
   is untouched; each finding keeps its PR's `number` as `pr`. Then the reply pass posts `**Reply <fid>:** fixed` on
   GitHub (`reply_fixed`, whose failures are named and retried, never refused). A gh failure of the read is a
   one-line Refusal. Returns
@@ -2006,18 +2035,23 @@ def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[
               for name, record in load_round(st, other_rid, m)["reviewers"].items() if name.startswith("external:")
               for f in record["findings"] if f.get("thread") is not None]
   backfill = sorted({tid for tid in recorded if tid not in listed})
-  keep = lambda path, line: True
+  keep = lambda path, line, commit: True
   if review.get("respec"):  # a respec cycle's remit is its correction: an external finding outside it is no finding of the round
     spec = Path(review["artifact"])
-    rows = rnd.get("scope") or [list(row) for row in scope_of(st, review, spec)]
-    spec_rel = spec.resolve().relative_to(core.git_toplevel(spec.parent).resolve()).as_posix()
-    keep = lambda path, line: respec_keeps(rows, spec_rel, path, line)
+    root = core.git_toplevel(spec.parent)
+    # the scope of the spec's bytes now, never the round's stored rows: a fix pushed since its record moved the lines
+    rows, current = [list(row) for row in scope_of(st, review, spec)], core.read_text(spec).splitlines()
+    spec_rel = spec.resolve().relative_to(root.resolve()).as_posix()
+    def keep(path, line, commit):  # a line of the spec is carried from the commit it was made on to the text now
+      if path and path.removeprefix("./") == spec_rel and line is not None:
+        line = line_now(root, spec_rel, current, commit, line)
+      return respec_keeps(rows, spec_rel, path, line)
   carried = carry_externals(st, review["artifact"], rid, rnd, keep)
   owners = set(config.get("owners") or [])
   try:  # an owner's `**Ruling:**` is dropped, never a finding; nothing reads it here (the `--unit` path reads its issue's)
     threads = [t for t in read_threads(config["repo"], number, listed | set(recorded))
                if not (t["login"] in owners and ((t["body"] or "").strip().splitlines() or [""])[0].startswith("**Ruling:**"))
-               and keep(t.get("path"), t.get("line"))]  # skipped, never in `ingested[]`: a later ordinary cycle reads it
+               and keep(t.get("path"), *thread_place(t))]  # skipped, never in `ingested[]`: a later ordinary cycle reads it
     roles = {}
     for thread in threads:
       if not thread["bot"] and thread["login"] not in roles:
