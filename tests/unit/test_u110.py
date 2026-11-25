@@ -187,6 +187,26 @@ def test_unapproved_respec_cycle_findings_are_kept(world, review_json, rows):
   assert len([r for r in lessons if r[0] == "fix-design finding"]) == rows
 
 
+@pytest.mark.parametrize("review_json, rows", [
+    ({"respec": "R1", "handoff_id": "<another handoff>"}, 0),  # the earlier handoff's respec cycle, withdrawn before this one's approval
+    ({"respec": "R1", "handoff_id": "<this handoff>"}, 1),
+    ({}, 1),                                                    # a plain spec cycle this handoff's approval range holds
+])
+def test_another_handoffs_respec_cycle_in_the_approval_range_is_not_this_handoffs(world, review_json, rows):
+  # another handoff approved at c1 and opened respec c2; this handoff's one approval entry is c3, so its range is c2-c3
+  from test_review import SLUG
+  from test_u43 import jread
+  c, _, _ = two_units(world)
+  path = c.root / "approvals" / f"{SLUG}.json"
+  record = jread(path)
+  last = record["entries"][-1]
+  jwrite(path, {**record, "entries": [{**last, "handoff_id": "another-handoff", "review": f"spec-{SLUG}-c1"},
+                                      {**last, "review": f"spec-{SLUG}-c3"}]})
+  open_spec_cycle(c, 2, {k: c.hid if v == "<this handoff>" else v for k, v in review_json.items()})
+  lessons = lesson_rows(world, c)
+  assert len([r for r in lessons if r[0] == "fix-design finding"]) == rows
+
+
 @pytest.mark.parametrize("reply", ["**Reply foreman-2-1:** fixed", "**Reply change-review-1-3:** contested — out of Scope"])
 def test_reply_fid_ends_the_respec_evidence(world, reply):
   # the deviation comment's body, read for the respec's Lessons row
