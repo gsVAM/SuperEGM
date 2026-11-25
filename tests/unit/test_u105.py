@@ -120,9 +120,16 @@ DELETED_LATER = "carried: an earlier cycle's unsettled external high on a line a
 WITH_TAIL = replace(BASE, "Delay is 5s.", ["", "Delay doubles."])
 WITH_TAIL = WITH_TAIL[:25] + WITH_TAIL[26:]  # `Delay doubles.` (line 25) ends `## 2. Deliver`, `## 3. Admin` right after it
 assert WITH_TAIL[24:26] == ["Delay doubles.\n", "## 3. Admin\n"]
-EARLIER = {CARRIED_IN_SCOPE: (LONGER, LONGER_DELAY), DELETED_LATER: (WITH_TAIL, WITH_TAIL.index("Delay doubles.\n") + 1)}
-THREADS_AT["a LEFT-side comment: its line counted in the PR's base text, never the head's"] = \
-  {"path": "docs/specs/x.md", "line": BASE.index("Admin lists jobs.\n") + 1, "side": "LEFT"}
+REPLACED_WIDE = "carried: an earlier cycle's unsettled external high on the changed section's line, in a replaced block starting in an unchanged one"
+WIDE = DRAFT[:15] + ["Queue keeps jobs, temp.\n", "assert result, temp\n", "- Log every retry, temp\n", "Temp gap.\n",
+                     "## 2. Deliver, temp\n", "Temp gap two.\n", "Deliver sends jobs, temp.\n", "Delay is 7s.\n"] + DRAFT[23:]
+assert len(WIDE) == len(DRAFT) and WIDE[22] == "Delay is 7s.\n"  # lines 16-23 replaced together, `## 1. Queue` to `## 2. Deliver`
+EARLIER = {CARRIED_IN_SCOPE: (LONGER, LONGER_DELAY), DELETED_LATER: (WITH_TAIL, WITH_TAIL.index("Delay doubles.\n") + 1),
+           REPLACED_WIDE: (WIDE, 23)}
+LEFT_REMOVED = "a LEFT-side comment on the line the correction removed, its number in the merge base's text"
+LEFT_CONTEXT = "a LEFT-side comment on a context line of a section the correction leaves unchanged"
+THREADS_AT[LEFT_REMOVED] = {"path": "docs/specs/x.md", "line": BASE.index("Delay is 5s.\n") + 1, "side": "LEFT"}
+THREADS_AT[LEFT_CONTEXT] = {"path": "docs/specs/x.md", "line": BASE.index("Admin lists jobs.\n") + 1, "side": "LEFT"}
 
 
 def earlier_cycle(st, spec, cid, location="docs/other.md:3 at ccccccc"):
@@ -154,8 +161,11 @@ def earlier_cycle(st, spec, cid, location="docs/other.md:3 at ccccccc"):
   ("respec R1", "an outdated line comment on a section the correction leaves unchanged", 0),
   ("respec R1", CARRIED_IN_SCOPE, 1),
   ("respec R1", DELETED_LATER, 1),
-  ("respec R1", "a LEFT-side comment: its line counted in the PR's base text, never the head's", 1),
   ("ordinary", "an outdated line comment on a section the correction leaves unchanged", 1),
+  ("respec R1", REPLACED_WIDE, 1),
+  ("respec R1", LEFT_REMOVED, 1),
+  ("respec R1", LEFT_CONTEXT, 0),
+  ("ordinary", LEFT_REMOVED, 1),
 ])
 def test_respec_ingest_reads_its_scope_alone(world, monkeypatch, cycle, thread_at, ingested):
   # `review ingest --pr <n>` on the spec PR: on a respec cycle an external finding, high or medium, outside the correction's scope, new or carried, is
@@ -163,13 +173,18 @@ def test_respec_ingest_reads_its_scope_alone(world, monkeypatch, cycle, thread_a
   # a thread on the spec naming no line is kept; a line is read in the commit it was made on and carried to the
   # spec's current text, whose scope is read now (astra-1-1, change-review-1-1, codebase-details-1-1, codebase-details-1-2);
   # a deleted line stands where the scope counts a deletion (astra-2-1, codebase-details-2-1), a LEFT-side line is in the
-  # PR's base text (change-review-2-1), and an outdated thread is recorded at its original line (astra-2-2)
+  # PR's base text (change-review-2-1), and an outdated thread is recorded at its original line (astra-2-2); a replaced
+  # line stands at its own place in the block (astra-3-1), and a LEFT-side line is read in the merge base of
+  # `config.base` and its commit (astra-3-2, codebase-details-3-1)
   from superegm import review as review_mod
   from conftest import git
   from test_u85 import approved, open_respec
   spec, st = respec_world(world, [(BASE, None)])
   if cycle != "ordinary":
     open_respec(st)
+  merge_base = git(["rev-parse", "HEAD"], world.repo).strip()  # the approved text, on `main` (`config.base`)
+  if thread_at.startswith("a LEFT-side"):  # the spec PR's branch, off `main`: GitHub's LEFT side shows the merge base
+    git(["checkout", "-qb", "respec-r1"], world.repo)
   earlier_text, earlier_line = EARLIER.get(thread_at, (None, None))
   earlier = approved(world, spec, earlier_text, "draft")["commit"] if earlier_text else None
   head = approved(world, spec, DRAFT, "draft")["commit"]  # the draft, committed: a respec round records HEAD's spec
@@ -202,6 +217,8 @@ def test_respec_ingest_reads_its_scope_alone(world, monkeypatch, cycle, thread_a
                                            for f in record["findings"]]
   assert code == 0 and f"{0 if carried else ingested} ingested" in out  # a carried finding is in the round, never newly ingested
   assert len(external_findings_of_the_latest_round) == ingested
+  if thread_at == LEFT_REMOVED:  # recorded in the text its line counts in, so a later respec reads it there
+    assert external_findings_of_the_latest_round[0]["location"] == f"docs/specs/x.md:23 at {merge_base[:7]}"
   if thread_at.startswith("an outdated") and ingested:  # recorded where the thread was made, so a later respec reads its line
     admin = BASE.index("Admin lists jobs.\n") + 1
     assert external_findings_of_the_latest_round[0]["location"] == f"docs/specs/x.md:{admin} at {head[:7]}"
