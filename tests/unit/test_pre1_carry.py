@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: P6 (1.2.1-pre.1), the foreman's carry and contests (spec section 6.5, "The foreman").
+# Modified by SuperEGM (gsVAM), 2026: `collected:` is pinned by its first line (U101's recovering a round, 1.3 design section 3.4).
 
 """P6: a finding waiting on a ruling is posted once. `collect` carries a builder contest with no ruling on a finding
 it does not derive, and every derived finding whose check still fails with the same claim and location, from the
@@ -48,7 +49,7 @@ def build(world, tmp_path, monkeypatch, records, patches=(), comments=None, comm
 
 def collected(world, w, n, count):
   code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
-  assert (code, out.strip()) == (0, f"collected: {count} foreman findings"), out
+  assert (code, out.splitlines()[0]) == (0, f"collected: {count} foreman findings"), out  # then each finding's line (U101)
   lines = (w.dir / f"r{n}/foreman.findings").read_text(encoding="utf-8").splitlines()
   return lines, json.loads(w.st.path("reviews", w.rid, f"round-{n}.json").read_text(encoding="utf-8"))
 
