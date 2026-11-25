@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING`, its freshly pinned base and its `git merge-tree` brief (U62); a fix round resuming the previous launch's session, `resumed_from` or `fresh` and `profile_dir` on the entry, and the stale-paths line (U63); the `superegm-precheck` script on every launch, its allow rules and `{{precheck}}`, the whitespace refusal on every launch, `builder.precheck_attempts` and the launch's issue-comment snapshot (U67); a unit with `builder.escalate_after` failing head rounds launching on the `difficult` tier's pair, `escalated` on the entry (U68); `# Spec corrections`, reason `respec` and the record's `respecs` (U86); `builder.stall_minutes` defaults to 60 (U100, 1.3 design section 3.3); the `superegm-push` script on every launch, the allow-list's one push entry and the orders' `{{allowed}}` and `{{push}}` (U108, 1.3 design section 3.7).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING`, its freshly pinned base and its `git merge-tree` brief (U62); a fix round resuming the previous launch's session, `resumed_from` or `fresh` and `profile_dir` on the entry, and the stale-paths line (U63); the `superegm-precheck` script on every launch, its allow rules and `{{precheck}}`, the whitespace refusal on every launch, `builder.precheck_attempts` and the launch's issue-comment snapshot (U67); a unit with `builder.escalate_after` failing head rounds launching on the `difficult` tier's pair, `escalated` on the entry (U68); `# Spec corrections`, reason `respec` and the record's `respecs` (U86); `builder.stall_minutes` defaults to 60 (U100, 1.3 design section 3.3); the `superegm-push` script on every launch, the allow-list's one push entry and the orders' `{{allowed}}` and `{{push}}`, the per-form author rules and their journal lines (U108, 1.3 design section 3.7).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch, started
 detached and recorded `running`."""
@@ -45,7 +45,7 @@ CONFIG_DEFAULTS = {  # its own config key (U32)
 }
 INIT_STEP, DOCTOR_CHECKS = "", None  # its init lines stay numbered in init's own text (U32)
 SKILLS = frozenset(["wave"])  # the skills whose card this subcommand accepts
-PROMPT_COMMENT_RE = re.compile(r"^\*\*(Deviation \([a-z]+\)|Decision D\d+|Ruling|Seam):\*\*")
+PROMPT_COMMENT_RE = re.compile(r"^\*\*(Deviation \([a-z]+\)|Decision D\d+|Ruling|Seam|Note):\*\*")  # `Note` (U108)
 # The PR body's DoD-results form (the orders): `### DoD <n>` then one fenced block per item.
 DOD_RESULT_RE = re.compile(r"^### DoD (\d+)\n```[^\n]*\n(.*?)\n```", re.M | re.S)
 ORDERS = Path(__file__).resolve().parents[4] / "skills/wave/references/builder_orders.md"
@@ -162,12 +162,13 @@ def prepare(args, card):
   range_text = spec_range_text(handoff.repo_root, st, issue_body, base_commit or "refs/superegm/base")
   comments = core.gh_pages(f"repos/{repo}/issues/{number}/comments")
   reviews = core.gh_pages(f"repos/{repo}/pulls/{pr}/reviews") if pr else []
+  ignored = []  # the comments and review bodies an author rule leaves out, journaled once the prompt is written (U108)
   audit = AUDIT_LINE.format(owner=record["launched"].get("by", "unknown"),  # a pre-upgrade mark records no login
                             runcard=args.runcard, unit=unit, handoff=st.handoff_id)
   text = prompt_text(number, unit, issue_body, orders_text(tools, launched_gh, builder_config["max_subagent_calls"], str(bin_dir / "superegm-precheck"),
                                                            merge=merge is not None, attempts=attempts, push=str(bin_dir / "superegm-push")), orient_text, comments, reviews, pr, builder, audit, pr_block,
                      spec_range=range_text, owners=config.get("owners") or [], foreman=foreman_data,
-                     amendments=amendments_for(st, unit, issue_body), corrections=corrections)
+                     amendments=amendments_for(st, unit, issue_body), corrections=corrections, ignored=ignored)
   if merge:
     text = text.rstrip("\n") + "\n\n---\n\n" + merge_brief(merge, base_commit, conflicts)
   # the builder's `# Repository instructions`, the handoff's frozen files, rendered once per card and placed last (U37)
@@ -182,6 +183,8 @@ def prepare(args, card):
             "shim) are stale.\n") + text
   prompt = st.path("launches", f"{unit}_r{rnd}_prompt.md")
   core.atomic_write(prompt, text)
+  for line in ignored:
+    core.journal(st, line)
   write_precheck(st, unit, rnd, handoff.repo_root)  # every launch, the machine-account path included (U67)
   write_push(st, unit, rnd, branch)  # every launch: the one push the allow-list admits (U108)
   # the issue comments this launch fetched, kept for its precheck: a ruling posted after the last round is posted
@@ -836,28 +839,39 @@ def launch_reason(launches: list, foreman: dict) -> str:
 
 
 def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr, builder, audit, pr_block=None, spec_range=None,
-                owners=(), foreman=None, amendments=(), corrections=()):
+                owners=(), foreman=None, amendments=(), corrections=(), ignored=None):
   """Exactly what spec section 3's anti-goal 3 allows: the issue body, the audit-trail line, the orders, the repository's
   PR block when `pr_block_file` is set, the unit's orient file, the frozen spec range the body cites, every Deviation
-  comment, every Decision comment by a `config.owners` login, every Ruling comment by one in a form the one grammar
+  comment by the builder or a `config.owners` login, every Decision and Note comment by a `config.owners` login, every Ruling comment by one in a form the one grammar
   reads (`parse_form`; the judges' post under the elephant's token kept, a typo or a stranger's dropped, one the
   unit's record overrides dropped, and a recorded one edited after its record, whatever the edit, shown as its
   record: `overridden_comments` of `foreman`; a recorded one deleted shown as its record in its place:
   `deleted_rulings`), the builder's own `**Seam:**` comments, the recorded amendments that apply (spec section 6.5),
-  and from round 2 the foreman's reviews on the PR."""
+  and from round 2 the PR's review bodies by a `config.owners` login (1.3 design section 3.7, U108). Each form comment
+  or review body an author rule leaves out appends `<unit> <what> ignored: <login> is not the builder or an owner`
+  (or `… an owner`, `… the builder` for a login that is the other) to `ignored`, for the caller's journal."""
   overridden = overridden_comments(comments, list(owners), foreman or {})
+  ignored = [] if ignored is None else ignored
+
+  def leave_out(what, login, allowed):  # an author rule leaves `what` out: one journal line (U108)
+    who = ("the builder or an owner" if login != builder and login not in owners
+           else "the builder" if allowed == {builder} else "an owner")
+    ignored.append(f"{unit} {what} ignored: {login} is not {who}")
 
   def keep(c):
     if overridden.get(c["id"]) is not None:  # the record stands in for its comment's edit
       return True
-    if not PROMPT_COMMENT_RE.match(c["body"]) or c["id"] in overridden:
+    match = PROMPT_COMMENT_RE.match(c["body"])
+    if not match or c["id"] in overridden:
       return False
-    if c["body"].startswith("**Deviation"):
-      return True
-    if c["body"].startswith("**Seam:**"):  # the builder's own record of its seam, never another's
-      return c["user"]["login"] == builder
-    return c["user"]["login"] in owners and (not c["body"].startswith("**Ruling:**") or parse_form(c["body"]) is not None
-                                             or overridden.get(c["id"]) is not None)
+    # the per-form author rules (1.3 design section 3.7): Seam the builder's own, Deviation the builder's or an owner's,
+    # Decision, Ruling and Note an owner's
+    form, login = match.group(1), c["user"]["login"]
+    allowed = {builder, *owners} if form.startswith("Deviation") else {builder} if form == "Seam" else set(owners)
+    if login not in allowed:
+      leave_out(f"comment {c['id']} {match.group(0)}", login, allowed)
+      return False
+    return form != "Ruling" or parse_form(c["body"]) is not None
   # an edited recorded ruling is shown as its record (spec section 13.2: a later comment never changes it)
   kept = [c | {"body": overridden[c["id"]]} if overridden.get(c["id"]) else c for c in comments if keep(c)]
   for gone in deleted_rulings(comments, foreman or {}):  # in its place among the comments, by id
@@ -876,8 +890,11 @@ def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr,
                  "from the issue body or the spec range above, the correction rules.\n\n"
                  + "\n".join(f"## {c['id']}\n{c['text']}\n" for c in corrections))
   parts.append(f"# Comments on issue #{issue_number}\n\n" + "\n".join(f"## {c['user']['login']} · comment {c['id']}\n{c['body']}\n" for c in kept))
-  if pr:
-    kept = [r for r in reviews if r.get("body") and r["user"]["login"] != builder]
+  if pr:  # a review body an owner's alone, read from its `user.login` (U108)
+    kept = [r for r in reviews if r.get("body") and r["user"]["login"] in owners]
+    for r in reviews:
+      if r.get("body") and r["user"]["login"] not in owners:
+        leave_out(f"review {r['id']} PR review", r["user"]["login"], set(owners))
     parts.append(f"# Review comments on PR #{pr}\n\n" + "\n".join(
         f"## {r['user']['login']} · review {r['id']} on {r['commit_id'][:7]}\n{r['body']}\n" for r in kept))
   return "\n\n---\n\n".join(parts)
