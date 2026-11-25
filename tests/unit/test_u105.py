@@ -72,3 +72,78 @@ def test_interface_names_match_as_scan_reads_them(world, u1_line, u2_line, touch
   core.atomic_write(st.path("unit", "U2"), f"### U2: Deliver\n\n## Interfaces\n{u2_line}\n")
   draft = replace(base, u1_line, None)
   assert respec.touched(st, HID, "".join(draft))["touched"] == touched
+
+
+DRAFT = replace(BASE, "Delay is 5s.", "Delay is 6s.")  # the correction changes `## 2. Deliver` alone
+THREAD = {"id": 41, "login": "alice", "bot": False, "body": "high: the delay is unstated", "path": None, "line": None,
+          "commit_id": "c" * 40, "review_body": False, "created_at": "2026-11-14T00:00:00Z"}
+THREADS_AT = {
+  "docs/other.md:3": {"path": "docs/other.md", "line": 3},
+  "the spec, a line of a section the correction leaves unchanged": {"path": "docs/specs/x.md", "line": BASE.index("Admin lists jobs.\n") + 1},
+  "the spec, a line of the section the correction changes": {"path": "docs/specs/x.md", "line": DRAFT.index("Delay is 6s.\n") + 1},
+  "no line: a review body": {"review_body": True},
+  "no line: a file-level comment on the spec": {"path": "docs/specs/x.md"},
+  "no line: a file-level comment on docs/other.md": {"path": "docs/other.md"},
+}
+
+
+def earlier_cycle(st, spec, cid):
+  """`spec-x-c1`, the cycle the opening approval names (closed once the bytes moved), its round 1 holding an unsettled
+  external high at docs/other.md:3 from thread 31."""
+  from superegm import review as review_mod
+  ext = "external:alice"
+  [finding] = review_mod.parse_findings(f"{ext}-1-1 | high | docs/other.md:3 at ccccccc | regression: no | the delay is unstated", ext, 1)
+  core.atomic_write(st.path("reviews", "spec-x-c1", "review.json"), {
+    "kind": "spec", "artifact": str(spec), "cycle": 1, "handoff_id": None, "scope": "auto", "reviewers": ["design"],
+    "cap": 3, "runcard": cid, "artifact_sha256": None, "astra_incomplete": 0, "converged": "no", "converged_round": None,
+    "rulings": [], "ingested": [31]})
+  core.atomic_write(st.path("reviews", "spec-x-c1", "round-1.json"), {
+    "round": 1, "runcard": cid, "artifact_sha256": None, "builder_contested": [], "reviewers": {ext: {
+      "findings": [finding | {"thread": 31, "review_body": False, "pr": 7}], "not_run": None, "isolation": "exposed:ingest",
+      "model": "none:none", "effort": "none:none"}}})
+
+
+@pytest.mark.parametrize("cycle, thread_at, ingested", [
+  ("respec R1", "docs/other.md:3", 0),
+  ("respec R1", "the spec, a line of a section the correction leaves unchanged", 0),
+  ("respec R1", "the spec, a line of the section the correction changes", 1),
+  ("respec R1", "no line: a review body", 1),
+  ("respec R1", "no line: a file-level comment on the spec", 1),
+  ("respec R1", "no line: a file-level comment on docs/other.md", 0),
+  ("respec R1", "carried: an earlier cycle's unsettled external high at docs/other.md:3", 0),
+  ("ordinary", "docs/other.md:3", 1),
+])
+def test_respec_ingest_reads_its_scope_alone(world, monkeypatch, cycle, thread_at, ingested):
+  # `review ingest --pr <n>` on the spec PR: on a respec cycle an external finding, high or medium, outside the correction's scope, new or carried, is
+  # never a finding of the round; a thread on another file is skipped with or without a line, and a review body or
+  # a thread on the spec naming no line is kept
+  from superegm import review as review_mod
+  from test_u85 import approved, open_respec
+  spec, st = respec_world(world, [(BASE, None)])
+  if cycle != "ordinary":
+    open_respec(st)
+  approved(world, spec, DRAFT, "draft")  # the draft, committed: a respec round records HEAD's spec
+  world.spec = spec
+  cid = world.card("review-spec")
+  carried = thread_at.startswith("carried")
+  if carried:
+    earlier_cycle(st, spec, cid)
+  threads = [] if carried else [THREAD | THREADS_AT[thread_at]]
+  monkeypatch.setattr(review_mod, "read_threads", lambda repo, number, skip: [t for t in threads if t["id"] not in skip])
+  monkeypatch.setattr(review_mod, "collaborator_role", lambda repo, login: "write")
+  code, out = world.run("review", "open", "--kind", "spec", "--artifact", spec, "--reviewers", "design,codebase-details",
+                        "--astra", "off", *(["--respec", "R1"] if cycle != "ordinary" else []), "--runcard", cid)
+  assert code == 0, out
+  rid = out.splitlines()[0]
+  for reviewer in ("design", "codebase-details"):
+    path = world.repo.parent / f"{rid}-1-{reviewer}.txt"
+    path.write_text("", encoding="utf-8")
+    code, out = world.run("review", "record", "--review", rid, "--round", "1", "--reviewer", reviewer, "--runcard", cid,
+                          "--findings", str(path), "--isolation", "clean", "--model", "inherit:opus", "--effort", "inherit:high")
+    assert code == 0, out
+  code, out = world.run("review", "ingest", "--pr", "7", "--runcard", cid)
+  latest = review_mod.load_round(st, rid, 1)
+  external_findings_of_the_latest_round = [f for name, record in latest["reviewers"].items() if name.startswith("external:")
+                                           for f in record["findings"]]
+  assert code == 0 and f"{ingested} ingested" in out
+  assert len(external_findings_of_the_latest_round) == ingested
