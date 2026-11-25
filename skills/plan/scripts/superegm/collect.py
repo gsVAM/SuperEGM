@@ -179,8 +179,10 @@ def test_delta(base_files: dict, head_files: dict, named: set) -> list:
   head line is `removed`. Each entry carries the key a settlement matches on (spec section 3.5): `test`, the
   qualified name of the test enclosing the keyed line (`enclosing_tests`), `text`, that line stripped at its ends,
   `base_text`, the paired base line's (a `removed` entry's own `text`, `""` for an added marker), and `occurrence`,
-  the text's 1-based number among identical lines of that test. A `removed` entry keys its base line in the base
-  test; a weakened assertion its head line in the head test; an added marker its head line, in the test it decorates."""
+  the text's 1-based number among identical lines of that test; a weakened assertion's is its base line's number
+  among identical lines of the base test enclosing it (amended on comment 7174114054). A `removed` entry keys its base
+  line in the base test; a weakened assertion its head line in the head test; an added marker its head line, in the
+  test it decorates."""
   delta = []
   for path, (base_commit, base_text) in sorted(base_files.items()):
     if path in named or not path.endswith(".py"):
@@ -190,10 +192,15 @@ def test_delta(base_files: dict, head_files: dict, named: set) -> list:
     head = (head_text or "").splitlines()
     names = {"base": enclosing_tests(base), "head": enclosing_tests(head)}
 
-    def entry(line, base_line, kind, side, k, base_text=None):  # keyed on line `k` of `side` (0-based)
+    def number(lines, name, k):  # line `k`'s 1-based number among identical lines of the test enclosing it
+      return sum(1 for m in range(k + 1) if name[m] == name[k] and lines[m].strip() == lines[k].strip())
+
+    def entry(line, base_line, kind, side, k, base_text=None, paired=None):  # keyed on line `k` of `side` (0-based)
       lines, name = (base, names["base"]) if side == "base" else (head, names["head"])
       text = lines[k].strip()
-      occurrence = sum(1 for m in range(k + 1) if name[m] == name[k] and lines[m].strip() == text)
+      # a weakened assertion (`paired`, its base line) counts its base line in the base test: two weakenings of
+      # identical base assertions stay apart (amended on comment 7174114054)
+      occurrence = number(base, names["base"], paired) if paired is not None else number(lines, name, k)
       return {"file": path, "line": line, "base_line": base_line, "kind": kind, "base_commit": base_commit,
               "test": name[k], "text": text, "base_text": text if base_text is None else base_text, "occurrence": occurrence}
     if head_text is None:
@@ -216,7 +223,7 @@ def test_delta(base_files: dict, head_files: dict, named: set) -> list:
       for k in range(paired):
         i, j = i1 + k, j1 + k
         if i in guarded and any(op in base[i] and op not in head[j] for op in OPERATORS):
-          delta.append(entry(j + 1, i + 1, "weakened", "head", j, base[i].strip()))
+          delta.append(entry(j + 1, i + 1, "weakened", "head", j, base[i].strip(), paired=i))
       for j in range(j1, j2):  # a marker added, or written over a paired base line that was no marker
         d = decorated(head, j)
         if j - j1 < paired and marker(base[i1 + j - j1]):
