@@ -135,9 +135,16 @@ def interface_names(line: str) -> set[str]:
 
 
 def units_span(text: str) -> tuple[int, int] | None:
-  """The 1-based inclusive line range of the spec's last `## Units` section, or None."""
-  spans = [(start, end) for title, start, end in sections(text) if UNITS_H2.match(title)]
-  return spans[-1] if spans else None
+  """The 1-based inclusive line range of the spec's last `## Units` section, or None: its heading to the line before the
+  next H2, its H3 subsections included, as `approve_spec.units_section` reads the section (U105)."""
+  found = sections(text)
+  at = [i for i, (title, _, _) in enumerate(found) if UNITS_H2.match(title)]
+  if not at:
+    return None
+  last = at[-1]
+  while last + 1 < len(found) and found[last + 1][0].startswith("### "):
+    last += 1
+  return found[at[-1]][1], found[last][2]
 
 
 def units_lines(lines: list[str]) -> tuple[set, set, set]:
