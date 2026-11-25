@@ -7,14 +7,15 @@ text across a merge of main, a 1.2.1 entry's base-commit-and-line key and a judg
 Fixtures: conftest's `world` and test_foreman's `seed`, `pr_repo`, `prepared` and `open_head_review`."""
 
 import json
+from pathlib import Path
 
 import pytest
 
-from superegm import foreman as foreman_mod
+from superegm import atomic_write, foreman as foreman_mod
 import test_foreman
-
-from test_foreman import (POSTED_R1, PR, UNIT, builder_token, c, open_head_review, prepared, record,  # noqa: F401
-                          seed)
+from test_foreman import (POSTED_R1, PR, PR_BODY, UNIT, builder_token, c, open_head_review, pr_repo, prepared,  # noqa: F401
+                          record, seed)
+from test_u67 import tmpdir_in_tmp_path  # noqa: F401  every temporary directory `precheck` makes, under tmp_path
 
 R2 = {**POSTED_R1, "round": 2, "launch": 2, "dispatch_id": "d2"}
 REPLY_AT, RULING_AT = "2026-11-02T14:00:00Z", "2026-11-02T13:00:00Z"
@@ -111,3 +112,143 @@ def test_a_test_delta_file_allowance_widens_scope(world, tmp_path, monkeypatch, 
   located = [line.split(" | ", 2)[2] for line in foreman_findings_lines]
   assert "tests/unit/test_q.py | regression: no | changed path outside Scope paths" not in located
   assert "src/other.py | regression: no | changed path outside Scope paths" in located
+
+
+# Rounds driven as the foreman drives them: each head through `foreman dispatch`, `prepare` and `collect`, each
+# collected round marked posted as `review post` marks it; `precheck` then run from the builder's worktree.
+BRANCH = "superegm/sample-42aff4/U01"
+ALLOWED = "**Ruling:** foreman-1-1 allowed — kept by design"
+POSTED_AT = {1: "2026-11-02T12:00:00Z", 2: "2026-11-02T15:00:00Z"}  # the ruling (RULING_AT) falls between them
+
+
+def move_head(world, st, g, text, merge=False):
+  """A new PR head on the branch: `text` as test_q.py (when it differs), after a merge of main (`merge`) whose own
+  commit added two lines above test_q.py's first class; the PR, its CI and the state follow it."""
+  if merge:
+    target = g("rev-parse", "--show-toplevel")
+    Path(target, Q).write_text("import pytest\n\n" + BASE, encoding="utf-8")
+    g("commit", "-qam", "main: import pytest")
+  g("checkout", "-q", BRANCH)
+  if merge:
+    g("merge", "-q", "--no-edit", "main")
+  target = g("rev-parse", "--show-toplevel")
+  if not merge and Path(target, Q).read_text(encoding="utf-8") != text:
+    Path(target, Q).write_text(text, encoding="utf-8")
+    g("commit", "-qam", "chore: later")
+  head = g("rev-parse", "HEAD")
+  g("update-ref", f"refs/pull/{PR}/head", head)
+  g("checkout", "-q", "main")
+  world.gh.prs[PR]["headRefOid"] = head
+  world.gh.check_runs[head] = [{"name": "tests", "status": "completed", "conclusion": "success"}]
+  world.gh.combined[head] = {"state": "success", "statuses": []}
+  state = json.loads(st.path("state").read_text(encoding="utf-8"))
+  state["units"][UNIT]["pr"]["head"] = head
+  atomic_write(st.path("state"), state)
+  return head
+
+
+def collect_round(world, st, card, n) -> dict:
+  """Round `n` on the PR's head, after launch `n`: dispatched, prepared and collected; its record."""
+  launches = json.loads(st.path("launches", UNIT).read_text(encoding="utf-8"))
+  if len(launches["launches"]) < n:
+    launches["launches"].append({"round": n, "status": "exited 0"})
+    atomic_write(st.path("launches", UNIT), launches)
+  code, out = world.run("foreman", "dispatch", "--unit", UNIT, "--runcard", card)
+  assert code == 0, out
+  did, child = out.split()
+  code, out = world.run("prepare", "--unit", UNIT, "--dispatch", did, "--runcard", child)
+  assert code == 0, out
+  head = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][-1]["head"]
+  record(world, st, test_foreman.head_rid(st), n, head, child, {"change-review": ""})  # the round's panel completed
+  code, out = world.run("collect", "--unit", UNIT, "--dispatch", did, "--runcard", child)
+  assert code == 0, out
+  return json.loads(st.path("reviews", test_foreman.head_rid(st), f"round-{n}.json").read_text(encoding="utf-8"))
+
+
+def post(st, n):
+  """Round `n`, collected, marked posted at `POSTED_AT[n]`."""
+  data = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))
+  entry = data["rounds"][-1]
+  assert entry["round"] == n and entry["phase"] == "collected"
+  entry.update(phase="posted", posted_at=POSTED_AT[n], outcome="revise")
+  atomic_write(st.path("foreman", UNIT), data)
+
+
+def precheck_on_head(world, st, g, tmp_path, monkeypatch, snapshot: str) -> list:
+  """`superegm precheck` from the builder's worktree on the PR's head, the latest launch's comment snapshot `snapshot`."""
+  g("fetch", "-q", "--no-write-fetch-head", "origin", "+refs/heads/main:refs/superegm/base",
+    f"+refs/pull/{PR}/head:refs/heads/{BRANCH}", cwd=world.repo)
+  worktree = tmp_path / "wt"
+  g("worktree", "add", "-q", str(worktree), BRANCH, cwd=world.repo)
+  latest = max(l["round"] for l in json.loads(st.path("launches", UNIT).read_text(encoding="utf-8"))["launches"])
+  st.path("launches", f"{UNIT}_r{latest}_comments.md").write_text(snapshot, encoding="utf-8")
+  body = tmp_path / "pr_body.md"
+  body.write_text(PR_BODY, encoding="utf-8")
+  monkeypatch.chdir(worktree)
+  code, out = world.run("precheck", "--handoff", st.handoff_id, "--unit", UNIT, "--pr-body", body)
+  monkeypatch.chdir(world.repo)
+  return out.splitlines()
+
+
+def nth(text, old, new, n):
+  """`text` with the `n`-th (1-based) occurrence of `old` replaced by `new`."""
+  parts = text.split(old)
+  return old.join(parts[:n]) + new + old.join(parts[n:])
+
+
+BASE = ("class TestA:\n    def test_x(self):\n        assert y == 1\n        assert y == 1\n        assert y in s\n\n"
+        "class TestB:\n    def test_x(self):\n        assert y == 1\n")
+WEAK = "TestA.test_x's first `assert y == 1` weakened to `assert y`"
+SKIP = "`@pytest.mark.skip` added above TestA.test_x"
+ROUND_1 = {WEAK: nth(BASE, "assert y == 1", "assert y", 1),
+           SKIP: BASE.replace("class TestA:\n", "class TestA:\n    @pytest.mark.skip\n")}
+LATER = {
+  "as in round 1": lambda r1: r1,
+  "as in round 1, after a merge of main added two lines above TestA and moved the base commit": lambda r1: r1,
+  "both `assert y == 1` lines of TestA.test_x weakened to `assert y`": lambda r1: BASE.replace("assert y == 1", "assert y", 2),
+  "as in round 1, and TestB.test_x's `assert y == 1` weakened to `assert y` too": lambda r1: nth(r1, "assert y == 1", "assert y", 2),
+  "TestA.test_x's first `assert y == 1` weakened further, to `assert True`": lambda r1: nth(BASE, "assert y == 1", "assert True", 1),
+  "TestA.test_x's first `assert y == 1` weakened further, to `assert True`; round 3 on the same head":
+      lambda r1: nth(BASE, "assert y == 1", "assert True", 1),
+  "the first `assert y == 1` restored, and TestA.test_x's `assert y in s` weakened to `assert y`":
+      lambda r1: BASE.replace("assert y in s", "assert y"),
+  "the `@pytest.mark.skip` moved from TestA.test_x to TestB.test_x":
+      lambda r1: BASE.replace("class TestB:\n", "class TestB:\n    @pytest.mark.skip\n"),
+}
+
+
+@pytest.mark.parametrize("round_1, later_head, counted, highs", [
+    (WEAK, "as in round 1", 2, 0),
+    (WEAK, "as in round 1, after a merge of main added two lines above TestA and moved the base commit", 2, 0),
+    (WEAK, "both `assert y == 1` lines of TestA.test_x weakened to `assert y`", 2, 1),
+    (WEAK, "as in round 1, and TestB.test_x's `assert y == 1` weakened to `assert y` too", 2, 1),
+    (WEAK, "TestA.test_x's first `assert y == 1` weakened further, to `assert True`", 2, 1),
+    (WEAK, "TestA.test_x's first `assert y == 1` weakened further, to `assert True`; round 3 on the same head", 3, 1),
+    (WEAK, "the first `assert y == 1` restored, and TestA.test_x's `assert y in s` weakened to `assert y`", 2, 1),
+    (SKIP, "as in round 1", 2, 0),
+    (SKIP, "the `@pytest.mark.skip` moved from TestA.test_x to TestB.test_x", 2, 1),
+])
+def test_a_test_delta_settlement_follows_the_test_and_the_line_text(world, tmp_path, monkeypatch, round_1, later_head, counted, highs):
+  # round 1's change (foreman-1-1) is ruled `**Ruling:** foreman-1-1 allowed — kept by design` by the owner on the issue before
+  # round 2, with no `decision rule`, so a later finding at its line keeps the id foreman-1-1 by the carry; the key per entry kind:
+  # `removed` the base line in the base test enclosing it; a weakened assertion the head line in the head test enclosing it,
+  # beside its base line's text; an added marker its head line in the test it decorates (past stacked decorators);
+  # `round_findings` the open foreman findings of round `counted`'s record, carried copies included
+  comments = {2: []}
+  target, base, head, g = pr_repo(world, tmp_path, monkeypatch, commits=S1 + [("chore: round 1", Q, ROUND_1[round_1])],
+                                  base_files={Q: BASE})
+  st, card, _ = seed(world, head=head, comments=comments)
+  first = collect_round(world, st, card, 1)
+  assert [f["claim"] for f in first["reviewers"]["foreman"]["findings"]] == [f"test-delta: {Q}:{2 if round_1 == SKIP else 3} weakened"]
+  post(st, 1)
+  comments[2].append(c(13, "owner", ALLOWED, at=RULING_AT))  # after round 1's post, before round 2's
+  move_head(world, st, g, LATER[later_head](ROUND_1[round_1]), merge="merge of main" in later_head)
+  for n in range(2, counted + 1):
+    rnd = collect_round(world, st, card, n)
+    if n < counted:
+      post(st, n)
+  round_findings = [f for f in rnd["reviewers"]["foreman"]["findings"] if f["disposition"] is None]
+  snapshot = f"builder: builder-bot\n### issue #2 comment 13 by owner at {RULING_AT}\n{ALLOWED}\n"
+  precheck_lines = precheck_on_head(world, st, g, tmp_path, monkeypatch, snapshot)
+  assert sum(f["claim"].startswith("test-delta: tests/unit/test_q.py:") for f in round_findings) == highs, round_findings
+  assert sum("test-delta: tests/unit/test_q.py:" in line for line in precheck_lines) == highs, precheck_lines  # `superegm precheck` on the later head
