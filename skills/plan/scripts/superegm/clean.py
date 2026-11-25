@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the clean subcommand (spec section 11).
+# Added by SuperEGM (gsVAM), 2026: the clean subcommand (spec section 11); U111's start-time check before each signal,
+# listing after the wait, no rmdir through a symlink and one undeletable ref keeping only itself (1.3 design section 3.10).
 
 """superegm clean: remove a unit's review and builder worktrees and its private refs once every
 launch and round is terminal; keeps what it cannot prove."""
@@ -64,7 +65,9 @@ def clean_auto(root, args):
   request is merged (its issue still open, which `status` does not mark landed) or that is `stopped`, and that `terminal_problems`
   passes, one `<unit> cleaned` line per unit cleaned. Any other unit is skipped silently, and so is a folder that holds only round
   records; a line a person should read (a process that cannot be listed, signalled or killed, uncommitted changes in a legacy tree, a
-  symlinked folder, a removal git refused) still prints. It always exits 0, so the caller never stops: a run card or config that cannot be
+  symlinked folder, a removal git refused, `kept <path>: <OSError>` when the unit folder's `rmdir` is refused, `kept <ref>: …` for a
+  ref git cannot delete, `kept <pid>: identity changed` for a process whose start time changed or cannot be read) still prints.
+  It always exits 0, so the caller never stops: a run card or config that cannot be
   read, or a card refused, prints `clean: <error>`; an error loading the handoff prints `clean --auto: handoff: <error>` and ends the sweep;
   an error on one unit prints `clean --auto: <unit>: <error>` and the sweep goes on to the next unit."""
   try:
@@ -187,8 +190,9 @@ def clean_unit(root, st, unit, quiet=False):
   """Remove the unit's registered worktrees and refs. `quiet` (`--auto`) leaves out the routine `kept ...: not a worktree` and
   `no launch records it` and `not a builder tree` lines; a line that warns always prints. `<unit> cleaned` is journalled, and the unit's
   private refs deleted, only when nothing was kept for a reason (a symlink, a process that cannot be listed or signalled or survives
-  SIGKILL, uncommitted changes in a legacy tree, a removal git refused, the unit folder's `rmdir` refused, a ref git cannot delete);
-  `not a worktree`, `no launch records it` and `not a builder tree` do not withhold it."""
+  SIGKILL or whose identity changed, uncommitted changes in a legacy tree, a removal git refused, the unit folder's `rmdir` refused);
+  `not a worktree`, `no launch records it` and `not a builder tree` do not withhold it. A ref git cannot delete keeps only itself:
+  `kept <ref>: ` and git's first line, the unit's other refs still deleted, and `<unit> cleaned` not journalled."""
   problems = terminal_problems(st, unit)
   if problems:
     raise core.HandoffError(problems[0])
@@ -251,9 +255,9 @@ def clean_unit(root, st, unit, quiet=False):
   for entry in left:
     note(f"kept {entry}: not a builder tree")
   folder = st.path("worktrees", unit)
-  if folder.is_dir() and not folder.is_symlink() and not left and not any(tree.exists() for tree in trees):
+  if folder.is_dir() and not linked(st, unit, folder) and not left and not any(tree.exists() for tree in trees):
     try:
-      folder.rmdir()  # the unit's folder goes with its last worktree; a folder with a kept entry (said above) stays
+      folder.rmdir()  # the unit's folder goes with its last worktree, never through a link up to the store; a kept entry keeps it
     except OSError as error:
       print(f"kept {folder}: {error}")
       complete = False
@@ -336,45 +340,99 @@ def leftovers(tree):
   return found
 
 
-def stop_leftovers(st, unit, tree):
-  """SIGTERM, after `KILL_WAIT` seconds SIGKILL, each leftover process in `tree`, journalled `<unit> killed <pid> <command>`;
-  False, with a `kept` line, when the processes cannot be listed, one cannot be signalled or one outlives SIGKILL (the caller keeps the tree)."""
+def start_time(pid):
+  """The process's start time as `ps -o lstart= -p <pid>` prints it (macOS and Linux); None when `ps` fails or prints nothing."""
   try:
-    found = leftovers(tree)
+    result = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=10)
+  except (OSError, subprocess.SubprocessError):
+    return None
+  text = result.stdout.strip()
+  return text if result.returncode == 0 and text else None
+
+
+def stop_leftovers(st, unit, tree):
+  """SIGTERM, after `KILL_WAIT` seconds SIGKILL, each leftover process in `tree`, journalled `<unit> killed <pid> <command>`.
+  Each process's start time is read when it is listed and again before each signal: a start time that differs, or that `ps` cannot
+  read, skips that process (it may be another one under a reused PID), with `kept <pid>: identity changed`. After the wait the
+  processes are listed again: one found then (a new PID, or a listed PID with a new start time) is a new process, and gets SIGTERM,
+  one more wait and SIGKILL, each checked against the start time that listing read, with no further listing; a PID already kept
+  as `identity changed` is never signalled again. False, with a `kept` line, when the processes cannot be listed, one cannot be
+  signalled, one's identity changed or one outlives SIGKILL (the caller keeps the tree)."""
+
+  def listed():
+    return [(pid, command, start_time(pid)) for pid, command in leftovers(tree)]
+
+  try:
+    found = listed()
   except ListError as error:
     print(f"kept {tree}: cannot list its processes ({error})")
     return False
-  blocked = []
+  blocked, changed, survivors, unlisted = [], [], [], None
 
-  def send(pid, sig):
+  def send(pid, start, sig):
+    """Signal `pid` only when its start time still reads `start`; False when it was not signalled."""
+    if start is None or start_time(pid) != start:
+      if pid not in changed:
+        changed.append(pid)
+      return False
     try:
       signal_process(pid, sig)
     except PermissionError:
       if pid not in blocked:
         blocked.append(pid)
+      return False
+    return True
 
-  for pid, _command in found:
-    send(pid, signal.SIGTERM)
-  found = [(pid, command) for pid, command in found if pid not in blocked]
-  deadline = core.NOW() + KILL_WAIT
-  while core.NOW() < deadline and any(is_alive(pid) for pid, _command in found):
-    core.SLEEP(1)
-  survivors = []
-  for pid, command in found:
-    if is_alive(pid):
-      send(pid, signal.SIGKILL)
+  def terminate(procs):
+    """SIGTERM each, then wait up to `KILL_WAIT` seconds for them to go; the ones signalled."""
+    for pid, _command, start in procs:
+      send(pid, start, signal.SIGTERM)
+    procs = [(pid, command, start) for pid, command, start in procs if pid not in blocked and pid not in changed]
+    deadline = core.NOW() + KILL_WAIT
+    while core.NOW() < deadline and any(is_alive(pid) for pid, _command, _start in procs):
       core.SLEEP(1)
-    if pid in blocked:
-      continue
-    if is_alive(pid):
-      survivors.append((pid, command))
-    else:
+    return procs
+
+  def kill(procs):
+    """SIGKILL each still alive; journal each gone, note each that outlives it."""
+    for pid, command, start in procs:
+      if is_alive(pid):
+        if not send(pid, start, signal.SIGKILL):
+          continue
+        core.SLEEP(1)
+      if is_alive(pid):
+        survivors.append((pid, command))
+      else:
+        core.journal(st, f"{unit} killed {pid} {command}")
+
+  first = terminate(found)
+  try:
+    again = listed()  # after the wait: a process found now that was not listed before is a new one
+  except ListError as error:
+    again, unlisted = [], error
+  latest, before = {pid: start for pid, _command, start in again}, {pid: start for pid, _command, start in found}
+  remaining = []
+  for pid, command, start in first:
+    now = latest.get(pid, start)
+    if now is None:  # unreadable at this listing: never signalled after this read
+      changed.append(pid)
+    elif now != start:  # the listed process is gone: its PID names a new process, handled below
       core.journal(st, f"{unit} killed {pid} {command}")
+    else:
+      remaining.append((pid, command, start))
+  kill(remaining)
+  new = [(pid, command, start) for pid, command, start in again
+         if pid not in changed and pid not in blocked and (pid not in before or before[pid] != start)]
+  kill(terminate(new))
+  if unlisted is not None:
+    print(f"kept {tree}: cannot list its processes ({unlisted})")
   for pid in blocked:
     print(f"kept {tree}: process {pid} cannot be signalled")
+  for pid in changed:
+    print(f"kept {pid}: identity changed")
   for pid, command in survivors:
     print(f"kept {tree}: {command} {pid} survives SIGKILL")
-  return not survivors and not blocked
+  return not survivors and not blocked and not changed and unlisted is None
 
 
 def terminal_problems(store, unit):

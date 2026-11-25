@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U10b's tests of the driver: report, decision open|rule, the wave skill body; the by-hand ruling read through `ruling_of` (U22); the foreman-verifies prose and the owner-only decision's allowed form (U25); the head's fifth decision point and the accept below the cap's skill texts (U35); the watchdog's stalled line, carve-out and skill lines (U31).
+# Added by SuperEGM (gsVAM), 2026: U10b's tests of the driver: report, decision open|rule, the wave skill body; the by-hand ruling read through `ruling_of` (U22); the foreman-verifies prose and the owner-only decision's allowed form (U25); the head's fifth decision point and the accept below the cap's skill texts (U35); the watchdog's stalled line, carve-out and skill lines (U31); the stalled-line rows set their 30 minutes explicitly (U100, 1.3 design section 3.3).
+# Modified by SuperEGM (gsVAM), 2026: U99's `GhError` re-pins, now exit 1 and the `gh:` line (1.3 design section 3.2).
 
 """U10b: the pure functions the wave skill cites, `report`, `decision open|rule` and the skill body.
 Fixtures: conftest's `world`, `applied` and `make_pr` (U03/U07)."""
@@ -1271,8 +1272,8 @@ def test_a_stop_whose_label_fails_records_nothing_so_its_comment_replays(world, 
     return real(args, *a, **kw)
   monkeypatch.setattr(superegm, "gh", failing)
   rule = lambda: world.run("decision", "rule", "--unit", "U01", "--ruling", "stop", "--by", "owner", "--posted", "95", "--runcard", card)
-  with pytest.raises(superegm.GhError):  # the helper's `gh` failure
-    rule()
+  code, out = rule()  # the helper's `gh` failure ends as one `gh:` line (U99)
+  assert code == 1 and out.startswith("gh: ") and len(out.strip().splitlines()) == 1
   f = foreman_of(s, "U01")
   assert f["rulings"] == [] and "stopped" not in f and "superegm:stopped" not in world.gh.issues[2]["labels"]
   monkeypatch.setattr(superegm, "gh", real)
@@ -1297,8 +1298,8 @@ def test_a_session_stop_whose_post_fails_leaves_no_label(world, monkeypatch):
     return real(args, *a, **kw)
   monkeypatch.setattr(superegm, "gh", failing)
   rule = lambda: world.run("decision", "rule", "--unit", "U01", "--decision", q, "--ruling", "stop", "--by", "owner", "--runcard", card)
-  with pytest.raises(superegm.GhError):
-    rule()
+  code, out = rule()
+  assert code == 1 and out.startswith("gh: ") and len(out.strip().splitlines()) == 1
   f = foreman_of(s, "U01")
   assert f["rulings"] == [] and "stopped" not in f and "superegm:stopped" not in world.gh.issues[2]["labels"]
   monkeypatch.setattr(superegm, "gh", real)
@@ -1322,8 +1323,8 @@ def test_a_session_stop_whose_post_fails_keeps_a_label_it_found(world, monkeypat
     return real(args, *a, **kw)
   monkeypatch.setattr(superegm, "gh", failing)
   rule = lambda: world.run("decision", "rule", "--unit", "U01", "--decision", q, "--ruling", "stop", "--by", "owner", "--runcard", card)
-  with pytest.raises(superegm.GhError, match="HTTP 502"):
-    rule()
+  code, out = rule()
+  assert code == 1 and out.startswith("gh: ") and "HTTP 502" in out and len(out.strip().splitlines()) == 1
   assert world.gh.issues[2]["labels"].count("superegm:stopped") == 1 and foreman_of(s, "U01")["rulings"] == []
   world.gh.issues[2]["labels"].remove("superegm:stopped")
   def failing_twice(args, *a, **kw):
@@ -1333,8 +1334,8 @@ def test_a_session_stop_whose_post_fails_keeps_a_label_it_found(world, monkeypat
       raise superegm.GhError(args, 1, "", "HTTP 504")
     return real(args, *a, **kw)
   monkeypatch.setattr(superegm, "gh", failing_twice)
-  with pytest.raises(superegm.GhError, match="HTTP 502"):
-    rule()
+  code, out = rule()
+  assert code == 1 and out.startswith("gh: ") and "HTTP 502" in out and len(out.strip().splitlines()) == 1
   assert f"U01 {q}: label superegm:stopped left on issue #2" in s.path("journal").read_text(encoding="utf-8")
 
 
@@ -1587,8 +1588,8 @@ iso = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
 
 
 @pytest.mark.parametrize("extra, head, exit_text, minutes, word, lines", [
-  ({}, NOW - 1800, None, None, "DONE_WITH_CONCERNS", ["U01 stalled (30 min; last commit 2023-11-14T21:43:20Z) pr=none status=DONE_WITH_CONCERNS"]),
-  ({}, NOW - 3600, None, None, None, ["U01 stalled (31 min; last commit none) pr=none status=none"]),
+  ({}, NOW - 1800, None, 30, "DONE_WITH_CONCERNS", ["U01 stalled (30 min; last commit 2023-11-14T21:43:20Z) pr=none status=DONE_WITH_CONCERNS"]),
+  ({}, NOW - 3600, None, 30, None, ["U01 stalled (31 min; last commit none) pr=none status=none"]),
   ({}, NOW - 3600, "0", None, None, ["U01 exit code=0 pr=none status=none"]),
   ({}, None, None, 45, None, ["deadline"]),
   ({"kill_failed": "no exit file"}, None, None, None, None, ["deadline"]),
