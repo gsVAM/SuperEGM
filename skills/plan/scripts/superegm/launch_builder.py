@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING`, its freshly pinned base and its `git merge-tree` brief (U62); a fix round resuming the previous launch's session, `resumed_from` or `fresh` and `profile_dir` on the entry, and the stale-paths line (U63); the `superegm-precheck` script on every launch, its allow rules and `{{precheck}}`, the whitespace refusal on every launch, `builder.precheck_attempts` and the launch's issue-comment snapshot (U67); a unit with `builder.escalate_after` failing head rounds launching on the `difficult` tier's pair, `escalated` on the entry (U68); `# Spec corrections`, reason `respec` and the record's `respecs` (U86); `builder.stall_minutes` defaults to 60 (U100, 1.3 design section 3.3).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING`, its freshly pinned base and its `git merge-tree` brief (U62); a fix round resuming the previous launch's session, `resumed_from` or `fresh` and `profile_dir` on the entry, and the stale-paths line (U63); the `superegm-precheck` script on every launch, its allow rules and `{{precheck}}`, the whitespace refusal on every launch, `builder.precheck_attempts` and the launch's issue-comment snapshot (U67); a unit with `builder.escalate_after` failing head rounds launching on the `difficult` tier's pair, `escalated` on the entry (U68); `# Spec corrections`, reason `respec` and the record's `respecs` (U86); `builder.stall_minutes` defaults to 60 (U100, 1.3 design section 3.3); the `superegm-push` script on every launch (U108, 1.3 design section 3.7).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch, started
 detached and recorded `running`."""
@@ -123,7 +123,7 @@ def prepare(args, card):
   if standing and merge == "alone":
     merge = "with-fix"
   bin_dir = st.path("launches", f"{unit}_r{rnd}_bin")
-  for value in (sys.executable, HELPER, st.handoff_id, unit, handoff.repo_root):  # write_precheck's values, before any write
+  for value in (sys.executable, HELPER, st.handoff_id, unit, handoff.repo_root, branch):  # write_precheck's and write_push's values, before any write
     if "'" in str(value):
       raise core.HandoffError(f"{value} holds a quote and cannot go in a launched script")
   tools = allowed_tools(builder_config["allowed_tools"], branch, issue_body, launched_gh, merge=merge is not None, bin=bin_dir)
@@ -183,6 +183,7 @@ def prepare(args, card):
   prompt = st.path("launches", f"{unit}_r{rnd}_prompt.md")
   core.atomic_write(prompt, text)
   write_precheck(st, unit, rnd, handoff.repo_root)  # every launch, the machine-account path included (U67)
+  write_push(st, unit, rnd, branch)  # every launch: the one push the allow-list admits (U108)
   # the issue comments this launch fetched, kept for its precheck: a ruling posted after the last round is posted
   # reaches no round's `comments.md` until the next prepare, yet the prompt carries it (U67)
   from superegm.prepare import write_comments  # prepare imports this module
@@ -314,6 +315,17 @@ def write_precheck(store, unit: str, rnd: int, repo_root: Path) -> Path:
   core.atomic_write(script, "#!/bin/sh\n# written by superegm launch-builder: the foreman's worktree checks, before every push\n"
                     f"SUPEREGM_REPO={q(repo_root)}; export SUPEREGM_REPO\n"
                     f'exec {q(sys.executable)} {q(HELPER)} precheck --handoff {q(store.handoff_id)} --unit {q(unit)} "$@"\n')
+  script.chmod(0o700)
+  return script
+
+
+def write_push(store, unit: str, rnd: int, branch: str) -> Path:
+  """`launches/<unit>_r<n>_bin/superegm-push` (1.3 design section 3.7, U108), written on every launch beside the `gh`
+  shim: it ignores its arguments and runs `git push --no-follow-tags origin HEAD:refs/heads/<branch>`, the branch
+  fixed here, with no `-u`, so it writes nothing into the repository's shared `.git/config`. 0o700."""
+  script = store.path("launches", f"{unit}_r{rnd}_bin", "superegm-push")  # `prepare` refused a quote in the branch
+  core.atomic_write(script, "#!/bin/sh\n# written by superegm launch-builder: HEAD to this launch's own branch, whatever the arguments\n"
+                    f"exec git push --no-follow-tags origin 'HEAD:refs/heads/{branch}'\n")
   script.chmod(0o700)
   return script
 
