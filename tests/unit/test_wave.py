@@ -1587,8 +1587,8 @@ iso = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
 
 
 @pytest.mark.parametrize("extra, head, exit_text, minutes, word, lines", [
-  ({}, NOW - 1800, None, None, "DONE_WITH_CONCERNS", ["U01 stalled (30 min; last commit 2023-11-14T21:43:20Z) pr=none status=DONE_WITH_CONCERNS"]),
-  ({}, NOW - 3600, None, None, None, ["U01 stalled (31 min; last commit none) pr=none status=none"]),
+  ({}, NOW - 1800, None, 30, "DONE_WITH_CONCERNS", ["U01 stalled (30 min; last commit 2023-11-14T21:43:20Z) pr=none status=DONE_WITH_CONCERNS"]),
+  ({}, NOW - 3600, None, 30, None, ["U01 stalled (31 min; last commit none) pr=none status=none"]),
   ({}, NOW - 3600, "0", None, None, ["U01 exit code=0 pr=none status=none"]),
   ({}, None, None, 45, None, ["deadline"]),
   ({"kill_failed": "no exit file"}, None, None, None, None, ["deadline"]),

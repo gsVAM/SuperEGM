@@ -16,9 +16,9 @@ from superegm import atomic_write
 from test_wave import open_wave_card, wave_store
 
 
-@pytest.mark.parametrize("value, loaded", [(30, 30), (45, 45), ("absent", 30), (0, None), ("30", None), (True, None)])
-def test_stall_minutes_is_30_and_a_positive_integer(world, value, loaded):
-  assert superegm.DEFAULT_CONFIG["builder"]["stall_minutes"] == 30
+@pytest.mark.parametrize("value, loaded", [(60, 60), (45, 45), ("absent", 60), (0, None), ("30", None), (True, None)])
+def test_stall_minutes_is_60_and_a_positive_integer(world, value, loaded):
+  assert superegm.DEFAULT_CONFIG["builder"]["stall_minutes"] == 60
   builder = {**superegm.DEFAULT_CONFIG["builder"], "stall_minutes": value}
   value == "absent" and builder.pop("stall_minutes")
   set_config(world, repo=REPO, builder=builder)

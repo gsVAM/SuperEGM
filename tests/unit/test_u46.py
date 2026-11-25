@@ -36,7 +36,7 @@ def test_builder_defaults_from_the_registry(world, app, ok):
     config = superegm.load_config(world.repo)
     assert config["builder"]["app"]["private_key_env"] == "SUPEREGM_APP_KEY"
     assert {k: config["builder"][k] for k in ("plugins", "mcp", "max_subagent_calls", "stall_minutes")} == \
-        {"plugins": [], "mcp": {}, "max_subagent_calls": 12, "stall_minutes": 30}
+        {"plugins": [], "mcp": {}, "max_subagent_calls": 12, "stall_minutes": 60}
   else:
     with pytest.raises(superegm.HandoffError, match="builder.app"):
       superegm.load_config(world.repo)
