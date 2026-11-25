@@ -37,3 +37,24 @@ def test_gh_retry_retries_5xx_and_reset(world, call, stderr, failures, sleeps, r
   assert raised == raises
   assert world.sleeps == sleeps
   assert len(gh_calls) == len(sleeps) + 1
+
+
+@pytest.mark.parametrize("stderr", ["HTTP 500", 'HTTP 500: Internal Server Error\n{"message": "Server Error"}\n'])
+def test_gh_error_prints_one_line(world, monkeypatch, stderr):
+  import argparse
+  import superegm
+  world.ns["GH"] = lambda args, cwd, token=None: (1, "", stderr)  # a 500 is not retried
+
+  def probe(args):  # a subcommand whose one gh read fails
+    return 0 if superegm.gh_json(["api", "repos/example-org/webhooks"]) else 0
+
+  class Probe:
+    def parse_args(self, argv=None):
+      return argparse.Namespace(command="probe", writes=(), run=probe)
+
+  monkeypatch.setattr(superegm, "build_parser", Probe)
+  code = world.main(["probe"])
+  out, err = world.capsys.readouterr()
+  assert code == 1
+  assert len(err.strip().splitlines()) == 1 and err.startswith("gh: ")
+  assert "Traceback" not in out + err
