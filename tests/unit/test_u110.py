@@ -127,3 +127,15 @@ def test_unapproved_respec_cycle_findings_are_kept(world, review_json, rows):
   open_spec_cycle(c, 3, {k: c.hid if v == "<this handoff>" else v for k, v in review_json.items()})
   lessons = lesson_rows(world, c)
   assert len([r for r in lessons if r[0] == "fix-design finding"]) == rows
+
+
+@pytest.mark.parametrize("reply", ["**Reply foreman-2-1:** fixed", "**Reply change-review-1-3:** contested — out of Scope"])
+def test_reply_fid_ends_the_respec_evidence(world, reply):
+  # the deviation comment's body, read for the respec's Lessons row
+  import json
+  from test_u87 import respec_world
+  body = f"**Deviation (spec):** docs/specs/x.md:12 says 3\n\n`pytest -k retry` fails\n\n{reply}\n"
+  c = respec_world(world, lambda args: (0, json.dumps({"id": 901, "body": body}), ""))
+  lessons = lesson_rows(world, c)
+  fact = " | ".join(next(r for r in lessons if r[0] == "respec"))
+  assert "says 3 `pytest -k retry` fails" in fact and reply not in fact
