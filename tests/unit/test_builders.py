@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the builders' tests (U09): launch, launch-builder, record-launch, interrupt, clean, the orders and the two skill bodies; the App path (U15); the watchdog's trap and `--exit stalled` (U31); the idempotent re-run (U32); the precheck script's two allow rules and the fourth `orders_text` argument (U67); the allow-list's push script in place of the `git push` entry, and the orders' `{{push}}` and `{{allowed}}` (U108, 1.3 design section 3.7).
+# Modified by SuperEGM (gsVAM), 2026: the builders' tests (U09): launch, launch-builder, record-launch, interrupt, clean, the orders and the two skill bodies; the App path (U15); the watchdog's trap and `--exit stalled` (U31); the idempotent re-run (U32); the precheck script's two allow rules and the fourth `orders_text` argument (U67); the allow-list's push script in place of the `git push` entry, and the orders' `{{push}}` and `{{allowed}}`, the `_plugins.json` record's `managed_hooks` (U108, 1.3 design section 3.7).
 
 """The builders (spec section 11): `launch` and its preconditions, `launch-builder`'s worktree,
 prompt file and command line, `record-launch`, `interrupt`, `clean`, the builder orders and the
@@ -896,7 +896,7 @@ def test_launch_builder_writes_the_mcp_file_and_the_plugins_record(world, monkey
     return
   listed = case == "listed"
   assert code == 0 and not managed.exists() and json.loads(mcp.read_text(encoding="utf-8")) == {"mcpServers": MCP if listed else {}}, out
-  assert json.loads(record.read_text(encoding="utf-8")) == {"plugins": [{"id": PONY, "version": "5.3.3", "dir": str(d), "hooks": THREE}] if listed else [], "managed": [], "mcp": ["context7"] if listed else []}
+  assert json.loads(record.read_text(encoding="utf-8")) == {"plugins": [{"id": PONY, "version": "5.3.3", "dir": str(d), "hooks": THREE}] if listed else [], "managed": [], "mcp": ["context7"] if listed else [], "managed_hooks": []}
   assert f"Your skills, named by your allow-list: {'ponytail:ponytail' if listed else 'none'}. You have no subagents" in s.path("launches", f"{UNIT}_r1_prompt.md").read_text(encoding="utf-8")
   assert skill_names(["Read", *rules, "Skill(superegm:orient)"]) == ["ponytail:ponytail", "superegm:orient"]
 

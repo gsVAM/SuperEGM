@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING`, its freshly pinned base and its `git merge-tree` brief (U62); a fix round resuming the previous launch's session, `resumed_from` or `fresh` and `profile_dir` on the entry, and the stale-paths line (U63); the `superegm-precheck` script on every launch, its allow rules and `{{precheck}}`, the whitespace refusal on every launch, `builder.precheck_attempts` and the launch's issue-comment snapshot (U67); a unit with `builder.escalate_after` failing head rounds launching on the `difficult` tier's pair, `escalated` on the entry (U68); `# Spec corrections`, reason `respec` and the record's `respecs` (U86); `builder.stall_minutes` defaults to 60 (U100, 1.3 design section 3.3); the `superegm-push` script on every launch, the allow-list's one push entry and the orders' `{{allowed}}` and `{{push}}`, the per-form author rules and their journal lines, the `**Note:**` form and `# Owner notes`, an edited issue comment left out (U108, 1.3 design section 3.7).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING`, its freshly pinned base and its `git merge-tree` brief (U62); a fix round resuming the previous launch's session, `resumed_from` or `fresh` and `profile_dir` on the entry, and the stale-paths line (U63); the `superegm-precheck` script on every launch, its allow rules and `{{precheck}}`, the whitespace refusal on every launch, `builder.precheck_attempts` and the launch's issue-comment snapshot (U67); a unit with `builder.escalate_after` failing head rounds launching on the `difficult` tier's pair, `escalated` on the entry (U68); `# Spec corrections`, reason `respec` and the record's `respecs` (U86); `builder.stall_minutes` defaults to 60 (U100, 1.3 design section 3.3); the `superegm-push` script on every launch, the allow-list's one push entry and the orders' `{{allowed}}` and `{{push}}`, the per-form author rules and their journal lines, the `**Note:**` form and `# Owner notes`, an edited issue comment left out, `managed_hooks` and each launch's record of them (U108, 1.3 design section 3.7).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch, started
 detached and recorded `running`."""
@@ -198,10 +198,13 @@ def prepare(args, card):
   if app:
     write_bin(st, unit, rnd, config, openssl, gh)
   managed = managed_plugins(Path(config["builder"]["profile_dir"]).expanduser() / "plugins")
+  hooks = managed_hooks(Path(config["builder"]["profile_dir"]).expanduser())  # the managed settings' hook events (U108)
   core.atomic_write(mcp_file, json.dumps({"mcpServers": builder_config["mcp"]}, indent=2) + "\n")
   core.atomic_write(st.path("launches", f"{unit}_r{rnd}_plugins.json"),
-                    json.dumps({"plugins": dirs, "managed": managed, "mcp": sorted(builder_config["mcp"])}, indent=2) + "\n")
-  core.journal(st, f"{unit} launch {rnd} prepared" + (f" (managed plugins: {', '.join(managed)})" if managed else ""))
+                    json.dumps({"plugins": dirs, "managed": managed, "mcp": sorted(builder_config["mcp"]),
+                                "managed_hooks": hooks}, indent=2) + "\n")
+  named = "; ".join(f"managed {kind}: {', '.join(names)}" for kind, names in (("plugins", managed), ("hooks", hooks)) if names)
+  core.journal(st, f"{unit} launch {rnd} prepared" + (f" ({named})" if named else ""))
   result = st.path("launches", f"{unit}_r{rnd}_result.json")
   session_id = str(uuid.uuid4())  # the session's transcript `projects/<slug>/<id>.jsonl`, read at the exit (U27)
   from superegm import driver
@@ -423,6 +426,18 @@ def managed_plugins(plugins):
   not the owner's plugins; each launch records them (owner ruling 2026-11-06)."""
   entries = installed_entries(plugins) or {}
   return sorted(name for name, scopes in entries.items() if scopes and all(s == "managed" for s in scopes))
+
+
+def managed_hooks(profile_dir: Path) -> list[str]:
+  """The hook events (the keys of the `hooks` object) of `<profile_dir>/remote-settings.json`, the organization's managed
+  settings Claude Code writes into the profile, sorted; `[]` when the file is absent, unreadable or holds no `hooks`
+  (1.3 design section 3.7, U108)."""
+  try:
+    data = json.loads((Path(profile_dir) / "remote-settings.json").read_text(encoding="utf-8"))
+  except (OSError, ValueError):
+    return []
+  hooks = data.get("hooks") if isinstance(data, dict) else None
+  return sorted(hooks) if isinstance(hooks, dict) else []
 
 
 def plugins_held(plugins):
