@@ -5,11 +5,14 @@
 finding's line and saves its `collected` phase last, and the foreman brief says how a failed `collect` is recovered.
 Fixtures: test_foreman's `seed`, `prepared`, `record`."""
 import json
+from pathlib import Path
 
 import pytest
 
 import superegm as core
-from test_foreman import UNIT, builder_token, c, prepared, record, seed  # noqa: F401  builder_token: autouse
+from test_foreman import UNIT, builder_token, prepared  # noqa: F401  builder_token: autouse
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.mark.parametrize("sha, code", [
@@ -84,3 +87,15 @@ def test_failed_collect_leaves_the_round_prepared(world, tmp_path, monkeypatch):
   assert {"builder_contested", "what_ran"} <= set(round_record)
   foreman_ids = [f["id"] for f in round_record["reviewers"]["foreman"]["findings"]]
   assert len(foreman_ids) == len(set(foreman_ids)) >= 2
+
+
+def test_brief_recovers_and_dispatches_with_the_pair():
+  # the brief: rerun a failed collect once, `--not-run` only for a panel that did not run, the pair on every Agent call,
+  # and the deviation evidence `decision.py`'s check counts (L7, L19, #240 codebase-details-5-1)
+  brief = " ".join((ROOT / "skills/wave/references/foreman_brief.md").read_text(encoding="utf-8").split())
+  assert "run again once on the same prepared round; failing again, return `error`" in brief
+  assert "a `collect` refused for its `--spec` text writes nothing and is not that rerun" in brief
+  assert "whose panel did not run" in brief
+  assert "pass `model` and `effort` on every Agent call" in brief
+  assert "The evidence is exactly what `collect` counts: a command on one line in inline backticks, then its output" not in brief
+  assert "a backticked span that is not itself a `path:line`, or a `path:line` outside the spec" in brief
