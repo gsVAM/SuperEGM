@@ -131,3 +131,30 @@ def test_repo_mismatch_replaces_the_handoffs_lines(tmp_path, frozen, actions):
   items = inbox_items(st, ["x-abc123"])
   assert [i["action"] for i in items] == actions
   assert frozen == "o/new" or not any("forms" in i or "on" in i for i in items)
+
+
+# ---------------------------------------------------------------- S4: no undo beside a proceed's merge
+
+
+@pytest.mark.parametrize("authorized_by, refused", [("proceed", True), ("clean round", False)])
+def test_undo_refused_while_a_proceeds_merge_is_offered(world, tmp_path, monkeypatch, authorized_by, refused):
+  # U01's merge is offered; its latest posted round deferred change-review-1-1; the owner posts
+  # `**Ruling:** change-review-1-1 finding upheld`
+  from test_u40 import F1, UPHELD, deferred_round, owner_comment, rule_posted
+  w = deferred_round(world, tmp_path, monkeypatch)
+  st, handoff_id = w.st, w.st.handoff_id
+  if authorized_by == "proceed":  # the owner's proceed on the clean round's head: the proceed authorizes the merge
+    code, out = world.run("review", "rule", "--review", w.rid, "--ruling", "proceed", "--owner", "--head", w.head[:7],
+                          "--reason", "ship it", "--runcard", w.child)
+    assert code == 0, out
+  [merge] = [i for i in inbox_items(st, [handoff_id]) if i["kind"] == "merge"]
+  assert ("undo" in merge) is not refused  # the inbox offers no undo the helper would refuse
+  before = foreman_of(st, "U01")["followups"]
+  owner_comment(world, 77, UPHELD)
+  code, out = rule_posted(world, w, f"{F1} finding upheld", 77)
+  foreman = foreman_of(st, "U01")
+  assert code == (1 if refused else 0), out
+  if refused:
+    assert "decision: undo refused: " in out and "the follow-up row stays" in out and foreman["followups"] == before
+  else:
+    assert foreman["followups"] == []
