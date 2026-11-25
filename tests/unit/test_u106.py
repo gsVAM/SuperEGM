@@ -15,6 +15,7 @@ from test_wave import wave_store, CLEAN as WAVE_CLEAN, open_wave_card
 from test_u62 import HEAD, with_rounds, put
 from test_u85 import open_respec
 from test_builders import spawn_fake, no_graphify, which  # noqa: F401  the fixtures a `launch-builder` run needs
+from test_u90 import home, s_world, converge_all, respec as apply_respec, inserted, spec_lines, marks  # noqa: F401  `home`: autouse
 
 
 @pytest.mark.parametrize("raised, loop_starts, names", [
@@ -83,3 +84,15 @@ def test_launch_builder_refuses_a_replan_mark(world, monkeypatch, spawn_fake, wh
   code, out = world.run("launch-builder", "--unit", tb.UNIT, "--round", 2, "--runcard", card)
   assert code == 1 and f"launch-builder: {tb.UNIT}" in out and "replan" in out and "R1" in out, out
   assert tb.launches_of(st) == before and not spawn_fake
+
+
+def test_gate_reads_every_replan_mark_before_a_body_hash(world):
+  # unfiled U07's body differs from its converged round (the respec moves the spec's hash, so every body changes); unfiled
+  # U08, later in the order, carries `replan: R1`
+  s_world(world)
+  converge_all(world)
+  apply_respec(world, inserted(spec_lines(), 120, 6), ["U08"])
+  assert marks(world) == {"U08": "replan: R1"}
+  code, out = world.run("gate", "--pass", "--spec", world.spec)
+  assert code == 1 and "gate: U08 needs a re-plan after respec R1" in out, out
+  assert "body differs" not in out, out
