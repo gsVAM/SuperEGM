@@ -46,6 +46,8 @@ def test_waiting_respec_takes_no_merge_round(world, raised, loop_starts, names):
   ("R1.open.json", "[]"),
   ("R1.json", "{not json"),
   ("R1.json", '"applied"'),
+  ("R1.open.json", None),  # None: a directory stands where the file belongs
+  ("R1.json", None),
 ])
 def test_unreadable_respec_file_refused_with_its_path(world, name, content):
   # path = the handoff's respec/<name>; R1.json is an applied respec's (an approval entry names R1, touching filed U07)
@@ -57,7 +59,11 @@ def test_unreadable_respec_file_refused_with_its_path(world, name, content):
   if name == "R1.json":
     apply_r1(st, tb.UNIT)
   path = respec.respec_path(st, name)
-  put(path, content)
+  if content is None:
+    path.unlink(missing_ok=True)
+    path.mkdir(parents=True)
+  else:
+    put(path, content)
   readers = ([respec.marks, lambda st, hid: launch_builder.corrections_for(st, tb.UNIT)] if name == "R1.json"
              else [respec.open])
   for reader in readers:
