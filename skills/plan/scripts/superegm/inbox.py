@@ -505,6 +505,13 @@ def inbox_items(store: core.Store, handoff_ids: list) -> list:
   for hid in sorted(handoff_ids):
     hs, spec = core.handoff_store(store, hid), (rows.get(hid) or {}).get("spec")
     state = approve_spec.handoff_state(store, hid)
+    # 1.3 design section 3.9: a handoff approved for another repository than `config.repo` (its frozen `repo`, as
+    # `core.require_repo` binds it) is that one line, before any of its items is built: nothing is offered for it
+    frozen = (state.get("confirmed") or {}).get("repo") or state.get("repo")
+    if frozen and frozen.lower() != repo.lower():
+      out.append(item(repo, hid, "repo", f"repo mismatch: {hid} was approved for {frozen}", f"mismatch:{frozen}")
+                 | {"handoff": hid})
+      continue
     units = state.get("units") or {}
     foremen = {uid: core.load_foreman(hs, uid) for uid in units}
     # an escalation is the spec's: two handoffs of one spec list it once; unit ids repeat across handoffs
