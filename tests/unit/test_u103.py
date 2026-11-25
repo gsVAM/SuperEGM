@@ -1,11 +1,12 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U103's tests: rulings (1.3 design sections 3.6, 3.7 and 3.10): the missing-fid refusal of a point-1 ruling, the settle a point-1 ruling makes, the refusal of an edited ruling comment.
+# Added by SuperEGM (gsVAM), 2026: U103's tests: rulings (1.3 design sections 3.6, 3.7 and 3.10): the missing-fid refusal of a point-1 ruling, the settle a point-1 ruling makes, the refusal of an edited ruling comment, the wave references' forms and refused paths.
 
 """U103: `decision rule` refuses a point-1 ruling with no fid, settles the finding a point-1 ruling rules, and refuses an
 edited ruling comment."""
 
 import json
 import re
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -237,3 +238,26 @@ def test_an_edited_ruling_comment_is_refused(world, updated_at, refused):
                                           "--runcard", card)
     assert proceed_code == 1 and "ruling comment edited: post a new one" in proceed_err
     assert foreman_of(s, "U01").get("proceeds") == proceeds_before
+
+
+# ---------------------------------------------------------------- S4: the wave references
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_the_wave_references_state_the_forms_and_the_refused_paths():
+  """`decision rule` settles the point-1 finding it rules, so neither reference tells the wave to run `review settle --owner` after
+  it, and its second line routes as `review settle`'s word does; Decision point 1's owner paragraph names, besides a panel that
+  does not converge, the round `judges question` refuses and the refused `redesign`."""
+  collapsed = lambda name: " ".join((ROOT / "skills/wave/references" / name).read_text(encoding="utf-8").split())
+  rulings, points = collapsed("rulings.md"), collapsed("decision_points.md")
+  section = points.split("### Decision point 1")[1].split("### Decision point 2")[0]
+  _, opens, rest = section.partition("Only a panel that does not converge")
+  owner_paragraph = (opens + rest).partition("Record each ruling")[0]
+  for text in (rulings, points):
+    assert "`decision rule` settles the finding it rules" in text and "`decision rule`'s second line" in text
+    assert not re.search(r"review settle [^`]*--disposition (contested|declined) --owner", text)
+  assert 'missing <fid>: write "<fid> finding overruled"' in rulings and "ruling comment edited: post a new one" in rulings
+  assert "the CI finding is settled by no one" in rulings and "on the CI finding, `<fid> finding upheld`" in rulings
+  assert all(word in owner_paragraph for word in ("does not converge", "refused round", "refused `redesign`"))
