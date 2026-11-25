@@ -180,3 +180,20 @@ def test_edited_comment_is_left_out(world, monkeypatch, spawn_fake, form, update
   prompt, journal = posted(s, 1), s.path("journal").read_text(encoding="utf-8")
   assert (form in prompt) is shown
   assert ("ignored: edited" in journal) is (not shown)
+
+
+@pytest.mark.parametrize("remote_settings, events", [
+    ({"enabledPlugins": {}, "extraKnownMarketplaces": {}, "hooks": {"SessionStart": [], "PreToolUse": []}}, ["PreToolUse", "SessionStart"]),
+    ({"enabledPlugins": {}}, []),
+    (None, []),  # no remote-settings.json in the builder profile
+])
+def test_managed_hooks_are_recorded_per_launch(world, monkeypatch, spawn_fake, remote_settings, events):
+  # the builder profile's remote-settings.json; plugins_record: the launch's _plugins.json, whose `managed` field is unchanged
+  profile_dir = world.repo.parent / "profile"  # seed's builder profile
+  if remote_settings is not None:
+    profile_dir.mkdir(exist_ok=True)
+    (profile_dir / "remote-settings.json").write_text(json.dumps(remote_settings), encoding="utf-8")
+  s, card, hid = launch(world, monkeypatch)
+  plugins_record = json.loads(s.path("launches", f"{UNIT}_r1_plugins.json").read_text(encoding="utf-8"))
+  assert sorted(launch_builder.managed_hooks(profile_dir)) == events
+  assert sorted(plugins_record["managed_hooks"]) == events and plugins_record["managed"] == []
