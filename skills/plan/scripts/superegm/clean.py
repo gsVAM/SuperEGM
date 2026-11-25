@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the clean subcommand (spec section 11); the start-time check before each signal,
-# the listing after the wait and no rmdir through a symlink (U111).
+# Added by SuperEGM (gsVAM), 2026: the clean subcommand (spec section 11); U111's start-time check before each signal,
+# listing after the wait, no rmdir through a symlink and one undeletable ref keeping only itself (1.3 design section 3.10).
 
 """superegm clean: remove a unit's review and builder worktrees and its private refs once every
 launch and round is terminal; keeps what it cannot prove."""
@@ -65,7 +65,9 @@ def clean_auto(root, args):
   request is merged (its issue still open, which `status` does not mark landed) or that is `stopped`, and that `terminal_problems`
   passes, one `<unit> cleaned` line per unit cleaned. Any other unit is skipped silently, and so is a folder that holds only round
   records; a line a person should read (a process that cannot be listed, signalled or killed, uncommitted changes in a legacy tree, a
-  symlinked folder, a removal git refused) still prints. It always exits 0, so the caller never stops: a run card or config that cannot be
+  symlinked folder, a removal git refused, `kept <path>: <OSError>` when the unit folder's `rmdir` is refused, `kept <ref>: …` for a
+  ref git cannot delete, `kept <pid>: identity changed` for a process whose start time changed or cannot be read) still prints.
+  It always exits 0, so the caller never stops: a run card or config that cannot be
   read, or a card refused, prints `clean: <error>`; an error loading the handoff prints `clean --auto: handoff: <error>` and ends the sweep;
   an error on one unit prints `clean --auto: <unit>: <error>` and the sweep goes on to the next unit."""
   try:
@@ -188,8 +190,9 @@ def clean_unit(root, st, unit, quiet=False):
   """Remove the unit's registered worktrees and refs. `quiet` (`--auto`) leaves out the routine `kept ...: not a worktree` and
   `no launch records it` and `not a builder tree` lines; a line that warns always prints. `<unit> cleaned` is journalled, and the unit's
   private refs deleted, only when nothing was kept for a reason (a symlink, a process that cannot be listed or signalled or survives
-  SIGKILL, uncommitted changes in a legacy tree, a removal git refused, the unit folder's `rmdir` refused, a ref git cannot delete);
-  `not a worktree`, `no launch records it` and `not a builder tree` do not withhold it."""
+  SIGKILL or whose identity changed, uncommitted changes in a legacy tree, a removal git refused, the unit folder's `rmdir` refused);
+  `not a worktree`, `no launch records it` and `not a builder tree` do not withhold it. A ref git cannot delete keeps only itself:
+  `kept <ref>: ` and git's first line, the unit's other refs still deleted, and `<unit> cleaned` not journalled."""
   problems = terminal_problems(st, unit)
   if problems:
     raise core.HandoffError(problems[0])

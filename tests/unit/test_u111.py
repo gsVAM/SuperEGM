@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the tests of U111, clean (#253): the start-time identity check, the listing after
-# the wait, no rmdir through a symlink, close saving a merge, and the one-undeletable-ref wording.
+# Added by SuperEGM (gsVAM), 2026: U111's tests (1.3 design section 3.10, clean, #253): the start-time identity check, the
+# listing after the wait, no rmdir through a symlink, close saving a merge, and the one-undeletable-ref wording.
 
 """U111 (spec section 3.10, Clean): `clean` checks each listed process's start time before every signal and lists
 again after the wait, never runs `rmdir` through a symlink, and `close` saves a merge it reads from GitHub."""

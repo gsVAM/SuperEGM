@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: the close subcommand (spec section 12): `closed_at`, every unlanded unit journaled;
 # it refuses while a redesign-stopped unit's issue is open (one GitHub read per such unit); `write_closed`, `closed_at` in the state and handoffs/<id>.json (U20).
 # a merged unit's open issue and, all landed, the tracking issue closed as completed; `--note` (U32); the follow-ups block (U51);
-# a merge it reads saved into `units.<U>.pr.merged_at` (U111).
+# U111's merge read from GitHub saved into `units.<U>.pr.merged_at` (1.3 design section 3.10).
 
 """superegm close [--note <text>]: close the handoff under an integrate card. GitHub reads: each redesign-stopped
 unit's issue (each read journaled; one open, it refuses with `state.json` untouched and nothing closed), each unlanded unit's recorded PR through `gh api repos/<repo>/pulls/<n>` (merged lands it for this close, and a `merged_at` the read carries is saved into an existing `units.<U>.pr` object for `clean --auto`, before `closed_at`) and each landed unit's issue;

@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the tests of U93, cleanup is automatic; U111 re-pins the two kill tests on an unchanged `ps` start time.
+# Added by SuperEGM (gsVAM), 2026: the tests of U93, cleanup is automatic; U111's re-pin of the two kill tests on an
+# unchanged `ps` start time (1.3 design section 3.10).
 
 """U93 (spec section 7.1): `clean` removes only registered review worktrees, kills a worktree's leftover
 `node` and `python*` processes first, keeps round records, and `clean --auto` cleans every landed, merged or
