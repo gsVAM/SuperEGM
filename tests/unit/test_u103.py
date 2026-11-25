@@ -244,7 +244,7 @@ def test_an_edited_ruling_comment_is_refused(world, updated_at, refused):
   comments = {13: comment(13, "foreman-1-1 finding overruled — moved"), 14: comment(14, "proceed — go ahead")}
   Gh(world, comments)
   assert world.run("decision", "open", "--unit", "U01", "--point", 1, "--question", question(world, FINDING),
-                   "--source", f"review {rid} round 2", "--runcard", card)[0] == 0
+                   "--source", f"review {rid} round 1", "--runcard", card)[0] == 0
   rulings_before = foreman_of(s, "U01")["rulings"]
   proceeds_before = foreman_of(s, "U01").get("proceeds")
   code, err = world.run("decision", "rule", "--unit", "U01", "--posted", 13, "--ruling", "foreman-1-1 finding overruled — moved",

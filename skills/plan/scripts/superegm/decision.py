@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3/5
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
-# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63); `respec`, a `spec` deviation's option, the owner's alone, a spent `relaunch` dropped beside it, and a letter that resolves to it binding nothing unrecorded (spec §7.6, U84); the judges' ruling journalled and posted with `contest` on a normal-mode card (spec §7.8, U88); U103's rulings (1.3 design section 3.6): a point-1 ruling with no fid refused as `missing <fid>`, a point-1 overrule or allowance settling the finding it rules through `review.apply_settle` after `review settle`'s ruler checks, a failed GitHub read one `gh:` line, a posted ruling comment edited before its first record refused as `ruling comment edited: post a new one`.
+# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63); `respec`, a `spec` deviation's option, the owner's alone, a spent `relaunch` dropped beside it, and a letter that resolves to it binding nothing unrecorded (spec §7.6, U84); the judges' ruling journalled and posted with `contest` on a normal-mode card (spec §7.8, U88); U103's rulings (1.3 design sections 3.6 and 3.7): a point-1 ruling with no fid refused as `missing <fid>`, a point-1 overrule or allowance settling the finding it rules through `review.apply_settle` after `review settle`'s ruler checks, a failed GitHub read one `gh:` line, a posted ruling comment edited before its first record refused as `ruling comment edited: post a new one`.
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
@@ -173,7 +173,7 @@ FORM_RES = (
   ("allowed", re.compile(rf"(?P<subject>{FID}) allowed{REASON}")),
   ("proceed", re.compile(rf"proceed{REASON}")),  # the owner's go-ahead on a head (spec section 4.2): owners alone
 )
-NO_FID_FORMS = ("finding upheld", "finding overruled", "allowed")  # a point-1 verdict typed with no fid in front of it (U103)
+NO_FID_RE = re.compile(r"(?:finding (?:upheld|overruled)|allowed)\b")  # a point-1 ruling opening with the verdict, no fid in front of it (U103)
 LETTER_RE = re.compile(r"\([a-z]\)")  # a rendered option's letter, the bare answer of the judges
 FILE_RULING_RE = re.compile(r"test-delta (\S+) allowed")  # a recorded whole-file allowance's text
 JUDGES_MARK_RE = re.compile(r"^\(judges \S+, (?:leavemealone|contest)\)$", re.M)
@@ -624,9 +624,10 @@ def settle_checks(st, items: list, args, card: dict) -> list:
   """U103: the point-1 ruling's settle, checked before anything is posted or recorded. `items` is each `(decision, fid)` the
   ruling overrules or allows; its fid is settled in the head review's round the decision's source names, with the disposition
   the decision gives (`declined` on an `owner: <ids>` decision, `contested` on a contest's), as the owner or as `judges:<panel>`
-  (`args.by`), after `review settle`'s own ruler checks. A review never opened (or no head's), a finding it does not hold, and in
+  (`args.by`), after `review settle`'s own ruler checks. A review never opened, no head's or another unit's, and in
   leavemealone-mode a ruling typed in the session (no `--posted`: no comment of the owner's for the settle to read) settle
-  nothing; the CI finding refuses any overrule. A refusal is `review settle`'s own. The plan: `(review id, checked)` each."""
+  nothing; a finding the source's round does not hold is refused, and the CI finding refuses any overrule. A refusal is
+  `review settle`'s own. The plan: `(review id, checked)` each."""
   judges = args.by[7:] if args.by.startswith("judges:") else None
   posted = args.posted if args.posted and not args.posted.startswith("closed:") else None
   ruler = argparse.Namespace(owner=not judges, judges=judges, posted=posted, runcard=args.runcard)
@@ -635,22 +636,18 @@ def settle_checks(st, items: list, args, card: dict) -> list:
     words = str(decision.get("source") or "").split()
     if len(words) != 4 or words[0] != "review" or words[2] != "round" or not words[3].isdigit():
       continue
-    rid = words[1]
+    rid, source_round = words[1], int(words[3])
     opened = review.load_review(st, rid)
-    if opened is None or opened["kind"] != "head":
+    if opened is None or opened["kind"] != "head" or opened["artifact"] != args.unit:  # never another unit's review
       continue
     try:
-      _, _, reviewer, found = review.locate_finding(st, rid, fid)
+      _, _, reviewer, found = review.locate_in_round(st, rid, source_round, fid)
       review.check_ci_finding(reviewer, found)  # whether or not it settles
       if card.get("mode") == "leavemealone" and not posted:
         continue
       disposition = "declined" if f"{fid} allowed" in (decision.get("options") or []) else "contested"
-      n = review.check_settle(st, rid, opened, card, ruler, fid, disposition)
-    except Refusal:
-      raise
-    except core.HandoffError as error:
-      if str(error).startswith("review settle: no finding "):  # a finding the review does not hold: nothing to settle
-        continue
+      n = review.check_settle(st, rid, opened, card, ruler, fid, disposition, source_round)
+    except core.HandoffError as error:  # a finding the source's round does not hold is refused too, as `review settle` refuses it
       raise Refusal(str(error)) from None
     plan.setdefault(rid, []).append((fid, disposition, None, n))
   return list(plan.items())
@@ -696,7 +693,7 @@ def rule(args) -> int:
   # Point 1 takes one ruling per contested finding (`<fid> finding upheld | overruled`, the leavemealone row's
   # "one call per finding"), keyed on the comment's fid on a by-hand ruling; the other points take one ruling.
   fid_of = lambda text: text.partition(" — ")[0].strip().split(" ")[0]
-  if decisions[0]["point"] == 1 and head.strip() in NO_FID_FORMS:  # U103: a ruling that opens with the verdict names no finding
+  if decisions[0]["point"] == 1 and NO_FID_RE.match(head.strip()):  # U103: a ruling that opens with the verdict names no finding
     raise Refusal('decision: missing <fid>: write "<fid> finding overruled"')
   fid = found.subject if found and found.kind in ("upheld", "overruled", "allowed") else fid_of(head)
   for d in decisions:

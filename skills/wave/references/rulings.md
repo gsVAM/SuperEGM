@@ -1,5 +1,5 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
-Added by SuperEGM (gsVAM), 2026: the wave skill's stops and by-hand rulings, moved out of the wave skill's SKILL.md (the owner's ruling: a 24K skill body is context bloat); `decision rule` settling the point-1 finding it rules, its second line, the missing-fid, CI-finding and edited-comment refusals (U103, 1.3 design section 3.6). -->
+Added by SuperEGM (gsVAM), 2026: the wave skill's stops and by-hand rulings, moved out of the wave skill's SKILL.md (the owner's ruling: a 24K skill body is context bloat); `decision rule` settling the point-1 finding it rules, its second line, the missing-fid, CI-finding and edited-comment refusals (U103, 1.3 design sections 3.6 and 3.7). -->
 
 # Rulings by comment, and stops
 
