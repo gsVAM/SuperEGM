@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U10b's tests of the driver: report, decision open|rule, the wave skill body; the by-hand ruling read through `ruling_of` (U22); the foreman-verifies prose and the owner-only decision's allowed form (U25); the head's fifth decision point and the accept below the cap's skill texts (U35); the watchdog's stalled line, carve-out and skill lines (U31).
-# Modified by SuperEGM (gsVAM), 2026: U99's `GhError` re-pins, now exit 1 and the `gh:` line (1.3 design section 3.2); U103's re-pin of the by-hand ruling test, a comment edited before its record refused (1.3 design section 3.6).
+# Added by SuperEGM (gsVAM), 2026: U10b's tests of the driver: report, decision open|rule, the wave skill body; the by-hand ruling read through `ruling_of` (U22); the foreman-verifies prose and the owner-only decision's allowed form (U25); the head's fifth decision point and the accept below the cap's skill texts (U35); the watchdog's stalled line, carve-out and skill lines (U31); the stalled-line rows set their 30 minutes explicitly (U100, 1.3 design section 3.3).
+# Modified by SuperEGM (gsVAM), 2026: U99's `GhError` re-pins, now exit 1 and the `gh:` line (1.3 design section 3.2); U103's re-pin of the by-hand ruling test, a comment edited before its record refused (1.3 design section 3.7).
 
 """U10b: the pure functions the wave skill cites, `report`, `decision open|rule` and the skill body.
 Fixtures: conftest's `world`, `applied` and `make_pr` (U03/U07)."""
@@ -1590,8 +1590,8 @@ iso = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
 
 
 @pytest.mark.parametrize("extra, head, exit_text, minutes, word, lines", [
-  ({}, NOW - 1800, None, None, "DONE_WITH_CONCERNS", ["U01 stalled (30 min; last commit 2023-11-14T21:43:20Z) pr=none status=DONE_WITH_CONCERNS"]),
-  ({}, NOW - 3600, None, None, None, ["U01 stalled (31 min; last commit none) pr=none status=none"]),
+  ({}, NOW - 1800, None, 30, "DONE_WITH_CONCERNS", ["U01 stalled (30 min; last commit 2023-11-14T21:43:20Z) pr=none status=DONE_WITH_CONCERNS"]),
+  ({}, NOW - 3600, None, 30, None, ["U01 stalled (31 min; last commit none) pr=none status=none"]),
   ({}, NOW - 3600, "0", None, None, ["U01 exit code=0 pr=none status=none"]),
   ({}, None, None, 45, None, ["deadline"]),
   ({"kill_failed": "no exit file"}, None, None, None, None, ["deadline"]),
