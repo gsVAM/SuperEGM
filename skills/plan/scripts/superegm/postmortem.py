@@ -234,17 +234,23 @@ def spec_cycles(hs: core.Store, spec) -> range:
 def reviews_of(st: core.Store, hs: core.Store, spec) -> list:
   """This handoff's reviews: its own (`inbox.review_dirs`, which a legacy flat store's shared folder needs) and the
   spec cycles it owns, and (U110) a respec cycle opened for this handoff that no approval entry ever named: it ends
-  after the last entry's cycle, so `spec_cycles` leaves it out, yet its `review.json` holds `respec` and this handoff's id."""
+  after the last entry's cycle, so `spec_cycles` leaves it out, yet its `review.json` holds `respec` and this handoff's id.
+  A respec cycle naming another handoff is that handoff's, even inside this one's range (an earlier handoff's respec,
+  withdrawn before this handoff's approval)."""
   owned = spec_cycles(hs, spec)
   found = []
   for path in inbox.review_dirs(hs, spec):
     m = re.fullmatch(r"spec-(?:(?!-integrate-).)+-c(\d+)", path.name)  # an integrate review is no spec cycle
-    if m is None or int(m.group(1)) in owned:
+    if m is None:
       found.append(path.name)
+      continue
+    cycle = review.load_review(hs, path.name) or {}
+    if cycle.get("respec") and cycle.get("handoff_id"):
+      ours = cycle["handoff_id"] == hs.handoff_id
     else:
-      cycle = review.load_review(hs, path.name) or {}
-      if cycle.get("respec") and cycle.get("handoff_id") == hs.handoff_id:
-        found.append(path.name)
+      ours = int(m.group(1)) in owned
+    if ours:
+      found.append(path.name)
   return [(rid, review.load_review(hs, rid)) for rid in found]
 
 
