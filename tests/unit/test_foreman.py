@@ -620,9 +620,10 @@ DELTA = {"removed-from-base": ({Q: THREE}, [("chore: trim", Q, TWO)], {}, [K(Q, 
                                                     "posted_at": "t"} for text in ("test-delta tests/unit/test_q.py allowed", "foreman-1-1 allowed")]}, [], [])
      for how, comments in (("kept", RULED("**Ruling:** test-delta tests/unit/test_q.py allowed — by design")),
                            ("edited", RULED("**Ruling:** test-delta tests/unit/test_z.py allowed — by design")), ("deleted", {}))},
+  # U102 (spec section 3.5): the judges' recorded overrule settles the entry as the owner's does, no longer re-raised
   "judges-overruled":({Q: THREE}, [("chore: trim", Q, TWO)], {"comments": {}, "decisions": [{"id": "q1", "point": 1, "source": "review r round 1"}],
                        "rulings": [{"decision": "q1", "ruling": "foreman-1-1 finding overruled", "by": "judges:p-1", "reason": "r",
-                                    "posted": "comment 13", "posted_at": "t"}]}, [K(Q, 3, 3)], [CLAIM(Q, 3)]),
+                                    "posted": "comment 13", "posted_at": "t"}]}, [], []),
   "renamed-then-deleted": ({Q: THREE}, [("chore: move", {Q: None, R: THREE}), ("chore: drop", {R: None})], {},
                            [K(R, n, n) for n in (1, 2, 3)], [CLAIM(R, n) for n in (1, 2, 3)]),
   "renamed-out-then-deleted": ({Q: THREE}, [("chore: archive", {Q: None, "archive/q.txt": THREE}), ("chore: drop", {"archive/q.txt": None})], {},

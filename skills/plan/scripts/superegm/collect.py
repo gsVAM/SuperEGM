@@ -592,7 +592,7 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
   paths found before the runs; `texts`, item number to `(output, paste)`, the whole texts the counts are read from.
   `delta`, `test_delta`'s entries, is trimmed in place of every entry an owner's ruling allows (a posted fid's,
   through `prior_delta`, fid to its posted entries, the one a ruling binds matched by `delta_key`, or `test-delta <file> allowed`; a judges'
-  recorded ruling never settles one) and each entry left is a `test-delta:` high, after the `dod-<n>` ones and before scope.
+  recorded overrule settles a fid's entry as the owner's does) and each entry left is a `test-delta:` high, after the `dod-<n>` ones and before scope.
   The worktree's findings (fenced output through tdd-order) are `worktree_findings`' over these facts, or `checked`
   when given: `collect` passes `worktree_checks`' own, the one function `precheck` calls too (U67)."""
   found, contested = [], []
@@ -830,14 +830,14 @@ def worktree_findings(body: str, scope: list, worktree: Path, changed: list, pr_
   found += dod_findings(body, runs or {}, ruled | {item for fid, item in prior_dod.items() if fid in overruled | allowed},
                         texts, config)
   if delta is not None:  # the test delta: an allowed entry or file is dropped from the round's record, then each left is a high
-    owners_own = [r for r in rulings if not r.login.startswith("judges:")]  # the owner's alone: never the judges' rulings
-    # a settlement binds the key of the entry it ruled on (`bound_entry`, by the ruling's time), matched on the test and
-    # the line text (spec section 3.5), so a merge of main or a line shift does not re-raise it; a 1.2.1 entry's on its base commit and line
+    # a settlement, the owner's or the judges' recorded overrule, binds the key of the entry it ruled on (`bound_entry`,
+    # by the ruling's time), matched on the test and the line text (spec section 3.5), so a merge of main or a line
+    # shift does not re-raise it; a 1.2.1 entry's on its base commit and line
     keys = {delta_key(bound_entry(prior_delta[fid], (times or {}).get(r.comment_id)))
-            for r in owners_own if r.kind in ("overruled", "allowed") for fid in chain(r.subject) if prior_delta.get(fid)}
-    # a file allowance binds whole: unrecorded, its comment; recorded (`decision rule` keeps `test-delta <file> allowed`
-    # beside the per-fid ones), the record, whatever a later edit or deletion of the comment does
-    files = {r.subject for r in owners_own if r.kind == "allowed-file"}
+            for r in rulings if r.kind in ("overruled", "allowed") for fid in chain(r.subject) if prior_delta.get(fid)}
+    # a file allowance, the owner's alone, binds whole: unrecorded, its comment; recorded (`decision rule` keeps
+    # `test-delta <file> allowed` beside the per-fid ones), the record, whatever a later edit or deletion of the comment does
+    files = {r.subject for r in rulings if r.kind == "allowed-file" and not r.login.startswith("judges:")}
     delta[:] = [e for e in delta if e["file"] not in files and delta_key(e) not in keys and delta_key(e, legacy=True) not in keys]
     found += [(f"{e['file']}:{e['line']}", f"test-delta: {e['file']}:{e['line']} {e['kind']}") for e in delta]
   widened = {path for fid, path in prior_scope.items() if fid in overruled}  # an owner's overrule widens the Scope
