@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U25, the foreman verifies: the DoD re-run and the test delta (spec §11.1).
+# Modified by SuperEGM (gsVAM), 2026: the exact `test_delta` entries carry the settlement key, `test`, `text`, `base_text` and `occurrence` (U102).
 
 """U25: the `foreman` config key, `kill_group`, `dod_runs`, `test_delta`, the forced removal and the hook-free checkouts."""
 
@@ -61,16 +62,22 @@ def test_dod_runs_kills_each_items_group_on_return_and_at_the_bound(tmp_path, mo
 test_delta.__test__ = False  # the helper's name starts `test_`: pytest must not collect it here
 F, T = "tests/unit/test_a.py", lambda *lines: "\n".join(lines) + "\n"
 BASE = T("import pytest", "@pytest.mark.parametrize('x', [", "  (1,),", "  (2,),", "])", "def test_a(x):", "  assert x == x", "  assert 1 in [1]", "  with pytest.raises(ValueError):", "    int('a')")
-E = lambda line, base_line, kind="removed": {"file": F, "line": line, "base_line": base_line, "kind": kind, "base_commit": "b"}
+# U102: each entry carries its settlement key: the enclosing test, the line's stripped text, its base line's and its occurrence
+E = lambda line, base_line, kind="removed", text="", test="test_a", base_text=None: {
+    "file": F, "line": line, "base_line": base_line, "kind": kind, "base_commit": "b", "test": test, "text": text,
+    "base_text": text if base_text is None else base_text, "occurrence": 1}
+M = lambda line, base_line, test="test_a", text="@pytest.mark.skip": E(line, base_line, "weakened", text, test, "")  # an added marker
+GONE = {3: "(1,),", 4: "(2,),", 6: "def test_a(x):", 7: "assert x == x", 8: "assert 1 in [1]", 9: "with pytest.raises(ValueError):"}
 
 
 @pytest.mark.parametrize("head, named, expect", [
-  (BASE.replace("assert x == x", "assert x == 1"), set(), []), (BASE.replace("  assert 1 in [1]\n", ""), set(), [E(8, 8)]), (BASE.replace("  assert 1 in [1]\n", ""), {F}, []),
-  (BASE.replace("assert x == x", "assert x"), set(), [E(7, 7, "weakened")]), (BASE.replace("pytest.raises", "contextlib.suppress"), set(), [E(9, 9, "weakened")]),
-  (BASE.replace("  (2,),\n", ""), set(), [E(4, 4)]), (BASE.replace("  (1,),\n  (2,),\n", "  (2,),\n  (1,),\n"), set(), []),
-  (BASE.replace("def test_a", "@pytest.mark.skip\ndef test_a"), set(), [E(6, 6, "weakened")]), (None, set(), [E(n, n) for n in (3, 4, 6, 7, 8, 9)]),
-  (BASE.replace("def test_a", "@pytest.mark.skipif(True, reason='x')\ndef test_a"), set(), [E(6, 6, "weakened")]),
-  (BASE.replace("@pytest.mark.parametrize", "@pytest.mark.skip\n@pytest.mark.parametrize"), set(), [E(2, 6, "weakened")])])
+  (BASE.replace("assert x == x", "assert x == 1"), set(), []), (BASE.replace("  assert 1 in [1]\n", ""), set(), [E(8, 8, text=GONE[8])]), (BASE.replace("  assert 1 in [1]\n", ""), {F}, []),
+  (BASE.replace("assert x == x", "assert x"), set(), [E(7, 7, "weakened", "assert x", base_text=GONE[7])]),
+  (BASE.replace("pytest.raises", "contextlib.suppress"), set(), [E(9, 9, "weakened", "with contextlib.suppress(ValueError):", base_text=GONE[9])]),
+  (BASE.replace("  (2,),\n", ""), set(), [E(4, 4, text=GONE[4])]), (BASE.replace("  (1,),\n  (2,),\n", "  (2,),\n  (1,),\n"), set(), []),
+  (BASE.replace("def test_a", "@pytest.mark.skip\ndef test_a"), set(), [M(6, 6)]), (None, set(), [E(n, n, text=GONE[n]) for n in (3, 4, 6, 7, 8, 9)]),
+  (BASE.replace("def test_a", "@pytest.mark.skipif(True, reason='x')\ndef test_a"), set(), [M(6, 6, text="@pytest.mark.skipif(True, reason='x')")]),
+  (BASE.replace("@pytest.mark.parametrize", "@pytest.mark.skip\n@pytest.mark.parametrize"), set(), [M(2, 6)])])
 def test_test_delta_pairs_assertions_as_git_does(head, named, expect):
   assert test_delta({F: ("b", BASE)}, {F: head} if head is not None else {}, named) == expect
 
@@ -79,8 +86,8 @@ ONE = T("import pytest", "@pytest.mark.parametrize('x', [1, 2])", "# a note", "d
 
 
 @pytest.mark.parametrize("head, expect", [(ONE.replace("# a note\n", ""), []),
-  (ONE.replace("# a note", "@pytest.mark.skip"), [E(3, 4, "weakened")]), (ONE.replace("# a note", "@pytest.mark.slow"), []),
-  (ONE.replace("# a note\ndef test_b(x):", "@pytest.mark.skip\ndef test_b(x, tmp_path):"), [E(3, 4, "weakened")])])
+  (ONE.replace("# a note", "@pytest.mark.skip"), [M(3, 4, "test_b")]), (ONE.replace("# a note", "@pytest.mark.slow"), []),
+  (ONE.replace("# a note\ndef test_b(x):", "@pytest.mark.skip\ndef test_b(x, tmp_path):"), [M(3, 4, "test_b")])])
 def test_a_one_line_parametrize_opens_no_rows_and_a_marker_written_over_a_line_is_weakened(head, expect):
   assert test_delta({F: ("b", ONE)}, {F: head}, set()) == expect
 
@@ -90,7 +97,7 @@ SKIPPED = T("import pytest", "", "@pytest.mark.skip", "@pytest.mark.slow", "def 
 
 
 @pytest.mark.parametrize("base, head, expect", [
-  (PLAIN, PLAIN.replace("def test_c", "@pytest.mark.skip\n# temporarily disabled\ndef test_c"), [E(2, 2, "weakened")]),
+  (PLAIN, PLAIN.replace("def test_c", "@pytest.mark.skip\n# temporarily disabled\ndef test_c"), [M(2, 2, "test_c")]),
   (SKIPPED, SKIPPED.replace("@pytest.mark.skip\n@pytest.mark.slow", "@pytest.mark.slow\n@pytest.mark.skip"), []),
   (SKIPPED, T("import pytest", "", "def test_d():", "  assert 2 == 2", "", "@pytest.mark.skip", "@pytest.mark.slow", "def test_c():", "  assert 1 == 1"), [])])
 def test_a_marker_past_a_comment_is_weakened_and_one_the_base_test_carried_is_not(base, head, expect):
@@ -165,7 +172,7 @@ def test_run_env_empties_a_generic_credential_helper_the_checkout_names(tmp_path
 PAREN = T("import pytest", "def test_c():", "  assert(1 == 1)", "  assert 2")
 
 
-@pytest.mark.parametrize("base, head, expect", [(PAREN, PAREN.replace("  assert(1 == 1)\n", ""), [E(3, 3)]),
+@pytest.mark.parametrize("base, head, expect", [(PAREN, PAREN.replace("  assert(1 == 1)\n", ""), [E(3, 3, text="assert(1 == 1)", test="test_c")]),
   (PLAIN, PLAIN.replace("def test_c", "# @pytest.mark.skip\ndef test_c"), [])])
 def test_a_parenthesised_assert_is_guarded_and_a_commented_marker_is_no_marker(base, head, expect):
   """Round 5 (PR #103 review, astra-5-4, astra-5-5): `assert(…)` is an assertion; a commented-out marker adds none."""

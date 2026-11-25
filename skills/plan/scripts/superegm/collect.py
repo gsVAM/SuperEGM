@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # From the elephant-goldfish-model (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17); an unreplied external high or medium carried forward (U21); rulings read through `ruling_of` and the record, every folded deviation heading (U22); the DoD re-run and the test delta, two gates before the word (U25); its own `foreman` config key and `init` line, moved from `__init__` and `init` (U32); both `binding_rulings` calls drop the consumed comments, so an edited recorded proceed waives no check (U94); the worktree checks in `worktree_checks`, the one function `collect` and `precheck` call, the posted rounds' settled findings in `posted_findings`, the reading both share, and the changed paths read NUL-separated, one with a control character shown JSON-quoted (U67); the `spec` deviation kind in `DEVIATION_RE`, and `--spec`, the foreman's own finding of kind `spec` held in its round (U84).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17); an unreplied external high or medium carried forward (U21); rulings read through `ruling_of` and the record, every folded deviation heading (U22); the DoD re-run and the test delta, two gates before the word (U25); its own `foreman` config key and `init` line, moved from `__init__` and `init` (U32); both `binding_rulings` calls drop the consumed comments, so an edited recorded proceed waives no check (U94); the worktree checks in `worktree_checks`, the one function `collect` and `precheck` call, the posted rounds' settled findings in `posted_findings`, the reading both share, and the changed paths read NUL-separated, one with a control character shown JSON-quoted (U67); the `spec` deviation kind in `DEVIATION_RE`, and `--spec`, the foreman's own finding of kind `spec` held in its round (U84); a contest of a settled fid, or of one derived from it, dropped, an owner's `test-delta <file> allowed` widening Scope, and a test-delta settlement keyed by the test and the line text, bound by its ruling's time to the entry it ruled on (U102).
 
 """superegm collect: the foreman's findings of a round through one `review record --reviewer foreman`, or a
 round that could not complete with `--not-run`."""
@@ -175,18 +175,29 @@ def test_delta(base_files: dict, head_files: dict, named: set) -> list:
   them: positionally within each `difflib.SequenceMatcher` `replace` block, the rest unpaired; a pair whose head
   line lacks one of the base line's `OPERATORS` is `weakened` at the head line, a head `skip`, `skipif` or `xfail`
   marker, unpaired or paired with a base line that was no marker, above a `def test_`, past any stacked decorator, is `weakened`, and an unpaired base assertion whose stripped text is in no
-  head line is `removed`."""
+  head line is `removed`. Each entry carries the key a settlement matches on (spec section 3.5): `test`, the
+  qualified name of the test enclosing the keyed line (`enclosing_tests`), `text`, that line stripped at its ends,
+  `base_text`, the paired base line's (a `removed` entry's own `text`, `""` for an added marker), and `occurrence`,
+  the text's 1-based number among identical lines of that test. A `removed` entry keys its base line in the base
+  test; a weakened assertion its head line in the head test; an added marker its head line, in the test it decorates."""
   delta = []
   for path, (base_commit, base_text) in sorted(base_files.items()):
     if path in named or not path.endswith(".py"):
       continue
-    entry = lambda line, base_line, kind: {"file": path, "line": line, "base_line": base_line, "kind": kind, "base_commit": base_commit}
     base, guarded = base_text.splitlines(), assertion_lines(base_text.splitlines())
     head_text = head_files.get(path)
+    head = (head_text or "").splitlines()
+    names = {"base": enclosing_tests(base), "head": enclosing_tests(head)}
+
+    def entry(line, base_line, kind, side, k, base_text=None):  # keyed on line `k` of `side` (0-based)
+      lines, name = (base, names["base"]) if side == "base" else (head, names["head"])
+      text = lines[k].strip()
+      occurrence = sum(1 for m in range(k + 1) if name[m] == name[k] and lines[m].strip() == text)
+      return {"file": path, "line": line, "base_line": base_line, "kind": kind, "base_commit": base_commit,
+              "test": name[k], "text": text, "base_text": text if base_text is None else base_text, "occurrence": occurrence}
     if head_text is None:
-      delta += [entry(i + 1, i + 1, "removed") for i in sorted(guarded)]
+      delta += [entry(i + 1, i + 1, "removed", "base", i) for i in sorted(guarded)]
       continue
-    head = head_text.splitlines()
     stripped = {line.strip() for line in head}
     ops = difflib.SequenceMatcher(None, base, head, autojunk=False).get_opcodes()
     to_base = {j1 + k: i1 + k for tag, i1, i2, j1, j2 in ops if tag == "equal" for k in range(i2 - i1)}
@@ -204,17 +215,53 @@ def test_delta(base_files: dict, head_files: dict, named: set) -> list:
       for k in range(paired):
         i, j = i1 + k, j1 + k
         if i in guarded and any(op in base[i] and op not in head[j] for op in OPERATORS):
-          delta.append(entry(j + 1, i + 1, "weakened"))
+          delta.append(entry(j + 1, i + 1, "weakened", "head", j, base[i].strip()))
       for j in range(j1, j2):  # a marker added, or written over a paired base line that was no marker
         d = decorated(head, j)
         if j - j1 < paired and marker(base[i1 + j - j1]):
           continue
         if (m := marker(head[j])) and d < len(head) and (b := base_def(d)) is not None and (b, m.group(0)) not in had:
-          delta.append(entry(j + 1, b + 1, "weakened"))
+          delta.append(entry(j + 1, b + 1, "weakened", "head", j, ""))
       for i in range(i1 + paired, i2):
         if i in guarded and base[i].strip() not in stripped:
-          delta.append(entry(j1 + 1, i + 1, "removed"))
+          delta.append(entry(j1 + 1, i + 1, "removed", "base", i))
   return delta
+
+
+CLASS_RE = re.compile(r"\s*class (\w+)\b")
+ANY_DEF_RE = re.compile(r"\s*(?:async\s+)?def (\w+)\s*\(")
+
+
+def enclosing_tests(lines: list) -> list:
+  """The qualified name of the test enclosing each of `lines` (spec section 3.5): the outermost enclosing `def test_*`,
+  after the classes around it (`TestA.test_x`), or `<module>` outside a test. A block ends at the next code line
+  at its own indentation or less; a decorator line, and every line down to the `def` it decorates (stacked
+  decorators and a `parametrize`'s rows included), belongs to the test that `def` opens."""
+  names, scopes = [], []  # scopes: (indent, name, is_class), outermost first
+
+  def qualified():
+    classes = []
+    for _, name, is_class in scopes:
+      if is_class:
+        classes.append(name)
+      else:
+        return ".".join(classes + [name]) if name.startswith("test_") else "<module>"
+    return "<module>"
+  for line in lines:
+    s = line.strip()
+    if s and not s.startswith("#"):
+      indent = len(line) - len(line.lstrip())
+      while scopes and scopes[-1][0] >= indent:
+        scopes.pop()
+      if m := CLASS_RE.match(line):
+        scopes.append((indent, m.group(1), True))
+      elif m := ANY_DEF_RE.match(line):
+        scopes.append((indent, m.group(1), False))
+    names.append(qualified())
+  for j, line in enumerate(lines):  # a decorator and the lines down to its `def`: that def's test
+    if line.strip().startswith("@") and (d := decorated(lines, j)) < len(lines):
+      names[j:d] = [names[d]] * (d - j)
+  return names
 
 
 def delta_files(worktree: Path, base: str, head: str, commits: list, named: set) -> tuple:
@@ -387,7 +434,7 @@ def collect(args, card):
   # the worktree's git config) are held whole while the DoD `Run` items run
   checked, facts = worktree_checks(worktree, entry["merge_base"], entry["head"], text, scope, pr_body, rulings, contest_of,
                                    {"dod": prior_dod, "delta": prior_delta, "scope": prior_scope, "tdd": prior_tdd},
-                                   deadline=deadline, out_dir=r / "dod", config=handoff.config,
+                                   deadline=deadline, out_dir=r / "dod", config=handoff.config, times=ruling_times(comments, recorded_times(data)),
                                    hold=[st.path("foreman", unit)] + ([st.path("reviews", rid, f"round-{n}.json")] if rid else []))
   commits, present, delta, runs, texts = (facts[k] for k in ("commits", "present", "delta", "runs", "texts"))
   for i, run in runs.items():
@@ -544,7 +591,7 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
   (`prior_dod`, fid to item number), a contest's copy followed back to it. `present`, when given, is the `Exists`
   paths found before the runs; `texts`, item number to `(output, paste)`, the whole texts the counts are read from.
   `delta`, `test_delta`'s entries, is trimmed in place of every entry an owner's ruling allows (a posted fid's,
-  through `prior_delta`, fid to `(file, base_commit, base_line, kind)`, or `test-delta <file> allowed`; a judges'
+  through `prior_delta`, fid to its posted entries, the one a ruling binds matched by `delta_key`, or `test-delta <file> allowed`; a judges'
   recorded ruling never settles one) and each entry left is a `test-delta:` high, after the `dod-<n>` ones and before scope.
   The worktree's findings (fenced output through tdd-order) are `worktree_findings`' over these facts, or `checked`
   when given: `collect` passes `worktree_checks`' own, the one function `precheck` calls too (U67)."""
@@ -576,7 +623,7 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
   by_id = {c["id"]: c for c in comments}
   if checked is None:  # `worktree_checks`' findings, else the same checks over the facts given here
     checked = worktree_findings(body, scope, worktree, changed, pr_body, commits, rulings, links, runs=runs, texts=texts,
-                                config=config, present=present, delta=delta,
+                                config=config, present=present, delta=delta, times=ruling_times(comments, recorded_at or {}),
                                 prior={"dod": prior_dod, "delta": prior_delta, "scope": prior_scope, "tdd": prior_tdd})
   found += checked
   ruled = {int(r.subject) for r in rulings if r.kind == "option" and r.subject.isdigit()}
@@ -652,25 +699,54 @@ def settled_fids(rulings: list, links: dict, prior_dod: dict, prior_delta: dict)
   return settled
 
 
-def delta_file(key):
-  """The file of a posted test-delta fid's key (`posted_findings`' `delta`), or None."""
-  return key[0] if key else None
+def delta_file(held):
+  """The file of a posted test-delta fid's entries (`posted_findings`' `delta`), or None."""
+  return held[0][1]["file"] if held else None
+
+
+def bound_entry(held: list, at) -> dict:
+  """The entry a settlement made at `at` binds of a fid posted in `held` (`(posted_at, entry)` in round order): the
+  fid's entry in the last round posted before the ruling's comment or record, never a later one a carried copy of
+  the fid picks up; the first when no round was posted before it, or the ruling's time is unknown (`at` None)."""
+  before = [entry for posted_at, entry in held if at is not None and posted_at < at]
+  return before[-1] if before else held[0][1]
+
+
+def delta_key(entry: dict, legacy: bool = False) -> tuple:
+  """A test-delta entry's settlement key (spec section 3.5): file, kind, enclosing test, stripped line text, the
+  base line's text and the occurrence; a 1.2.1 entry (no `test`), or any entry when `legacy`, is keyed on its base
+  commit and line, the key a 1.2.1 settlement is still honoured on."""
+  if legacy or "test" not in entry:
+    return entry["file"], entry["base_commit"], entry["base_line"], entry["kind"]
+  return entry["file"], entry["kind"], entry["test"], entry["text"], entry["base_text"], entry["occurrence"]
+
+
+def ruling_times(comments: list, recorded: dict) -> dict:
+  """Each ruling's time by its comment id, the bound `bound_entry` reads: a comment's own creation time, and a
+  recorded ruling's record time (`recorded`, `recorded_times`' map) in its place, but for an `unread` record (the
+  host's clock) while its comment is still there."""
+  times = {c["id"]: c["at"] for c in comments if c.get("at")}
+  for cid, (at, unread) in recorded.items():
+    if at and not (unread and cid in times):
+      times[cid] = at
+  return times
 
 
 def posted_findings(st, rid, rounds: list) -> dict:
   """What the posted rounds' foreman findings settle, the one reading `collect` and `precheck` share (spec section
   6.3), each fid to: `scope` its out-of-Scope path (an overrule widens the Scope for good), `tdd` its tdd-order
-  failure and `dod` its item number (a ruled one stays ruled in every later round), `delta` its test-delta key
-  `(file, base_commit, base_line, kind)`, `links` the fid a contest or carried copy names (a reply may answer
-  under it); `disposed` the copies with a disposition (a settled copy settles what it carries)."""
+  failure and `dod` its item number (a ruled one stays ruled in every later round), `delta` its `test_delta` entry
+  in each posted round holding it, `(posted_at, entry)` in round order (a carried copy picks up a later entry; a
+  settlement binds the one it ruled on, `bound_entry`), `links` the fid a contest or carried copy names (a reply
+  may answer under it); `disposed` the copies with a disposition (a settled copy settles what it carries)."""
   out = {"scope": {}, "tdd": {}, "dod": {}, "delta": {}, "links": {}, "disposed": set()}
   for e in rounds or []:
     if e.get("phase") != "posted":
       continue
     findings = prior_foreman_findings(st, rid, e["round"])
     deltas = [f["id"] for f in findings if f["claim"].startswith("test-delta: ")]
-    out["delta"].update({fid: (d["file"], d["base_commit"], d["base_line"], d["kind"])
-                         for fid, d in zip(deltas, e.get("test_delta") or [])})
+    for fid, d in zip(deltas, e.get("test_delta") or []):
+      out["delta"].setdefault(fid, []).append((e.get("posted_at") or "", d))
     for f in findings:
       if f["claim"] == "changed path outside Scope paths":
         out["scope"][f["id"]] = f["location"]
@@ -687,11 +763,12 @@ def posted_findings(st, rid, rounds: list) -> dict:
 
 def worktree_checks(worktree: Path, merge_base: str, head: str, body: str, scope: list, pr_body: str, rulings: list,
                     links: dict, prior: dict, deadline: float = None, out_dir: Path = None, gh: str = None,
-                    hold=(), config: dict = None) -> tuple:
+                    hold=(), config: dict = None, times: dict = None) -> tuple:
   """The foreman's checks that need only the worktree, the one function `collect` and `precheck` both call
   (spec section 6.3): the changed paths, commits, `Exists` paths and test delta are read, the DoD `Run` items whose
   output `pr_body` pastes run (`dod_runs`, outputs under `out_dir`; none when it is None) with the worktree's git
-  config and every `hold` path held whole and written back, then `worktree_findings` reads them. Returns
+  config and every `hold` path held whole and written back, then `worktree_findings` reads them, with the rulings'
+  times (`times`, `ruling_times`: both callers pass the same, so a settlement binds the same entry). Returns
   `(found, facts)`: `(location, claim)` per finding and `{changed, commits, present, delta, runs, texts, pasted}`."""
   # NUL-separated: a Scope path may hold a space, and a quoted or split name would be reported outside Scope
   changed = [p for p in core.run_git(["diff", "--name-only", "-z", merge_base, "HEAD"], worktree).split("\0") if p]
@@ -718,18 +795,19 @@ def worktree_checks(worktree: Path, merge_base: str, head: str, body: str, scope
     texts = {int(i): (out(i).read_text(encoding="utf-8", errors="replace") if out(i).is_file() else "", pasted[int(i)])
              for i in runs}  # each side's whole text: its last count line is compared, not its last line
   found = worktree_findings(body, scope, worktree, changed, pr_body, commits, rulings, links, runs=runs, texts=texts,
-                            config=config, present=present, delta=delta, prior=prior)
+                            config=config, present=present, delta=delta, prior=prior, times=times)
   return found, {"changed": changed, "commits": commits, "present": present, "delta": delta, "runs": runs,
                  "texts": texts, "pasted": pasted}
 
 
 def worktree_findings(body: str, scope: list, worktree: Path, changed: list, pr_body: str, commits: list, rulings: list,
                       links: dict, runs: dict = None, texts: dict = None, config: dict = None, present: set = None,
-                      delta: list = None, prior: dict = None) -> list:
+                      delta: list = None, prior: dict = None, times: dict = None) -> list:
   """`(location, claim)` per worktree finding in the foreman's order: the fenced-output and `Exists` checks, the
   `dod-<n>` re-runs, the `test-delta:` entries (`delta` trimmed in place of what an owner's ruling allows), scope,
-  tdd-order. `prior` holds the posted rounds' fids: `dod` (to item number), `delta` (to its key), `scope` (to its
-  path), `tdd` (to its failure); `links` the contest links a ruling on a copy follows back to the original."""
+  tdd-order. `prior` holds the posted rounds' fids: `dod` (to item number), `delta` (to its posted entries), `scope`
+  (to its path), `tdd` (to its failure); `links` the contest links a ruling on a copy follows back to the original;
+  `times` each ruling's time by comment id (`ruling_times`), which binds a test-delta settlement to its entry."""
   prior, links, found = prior or {}, links or {}, []
   prior_dod, prior_delta, prior_scope, prior_tdd = (prior.get(k) or {} for k in ("dod", "delta", "scope", "tdd"))
   results = {int(m.group(1)) for m in DOD_RESULT_RE.finditer(pr_body)}
@@ -753,12 +831,14 @@ def worktree_findings(body: str, scope: list, worktree: Path, changed: list, pr_
                         texts, config)
   if delta is not None:  # the test delta: an allowed entry or file is dropped from the round's record, then each left is a high
     owners_own = [r for r in rulings if not r.login.startswith("judges:")]  # the owner's alone: never the judges' rulings
-    settled = set().union(*(chain(r.subject) for r in owners_own if r.kind in ("overruled", "allowed")))
-    keys = {key for fid, key in prior_delta.items() if fid in settled}
+    # a settlement binds the key of the entry it ruled on (`bound_entry`, by the ruling's time), matched on the test and
+    # the line text (spec section 3.5), so a merge of main or a line shift does not re-raise it; a 1.2.1 entry's on its base commit and line
+    keys = {delta_key(bound_entry(prior_delta[fid], (times or {}).get(r.comment_id)))
+            for r in owners_own if r.kind in ("overruled", "allowed") for fid in chain(r.subject) if prior_delta.get(fid)}
     # a file allowance binds whole: unrecorded, its comment; recorded (`decision rule` keeps `test-delta <file> allowed`
     # beside the per-fid ones), the record, whatever a later edit or deletion of the comment does
     files = {r.subject for r in owners_own if r.kind == "allowed-file"}
-    delta[:] = [e for e in delta if e["file"] not in files and (e["file"], e["base_commit"], e["base_line"], e["kind"]) not in keys]
+    delta[:] = [e for e in delta if e["file"] not in files and delta_key(e) not in keys and delta_key(e, legacy=True) not in keys]
     found += [(f"{e['file']}:{e['line']}", f"test-delta: {e['file']}:{e['line']} {e['kind']}") for e in delta]
   widened = {path for fid, path in prior_scope.items() if fid in overruled}  # an owner's overrule widens the Scope
   # and so does an owner's `test-delta <file> allowed`, for that file, as an overruled scope finding's path (spec section 3.5)
