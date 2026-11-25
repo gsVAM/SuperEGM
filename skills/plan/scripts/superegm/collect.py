@@ -761,6 +761,8 @@ def worktree_findings(body: str, scope: list, worktree: Path, changed: list, pr_
     delta[:] = [e for e in delta if e["file"] not in files and (e["file"], e["base_commit"], e["base_line"], e["kind"]) not in keys]
     found += [(f"{e['file']}:{e['line']}", f"test-delta: {e['file']}:{e['line']} {e['kind']}") for e in delta]
   widened = {path for fid, path in prior_scope.items() if fid in overruled}  # an owner's overrule widens the Scope
+  # and so does an owner's `test-delta <file> allowed`, for that file, as an overruled scope finding's path (spec section 3.5)
+  widened |= {r.subject for r in rulings if r.kind == "allowed-file" and not r.login.startswith("judges:")}
   in_scope = lambda path: any(path == s or path.startswith(s.rstrip("/") + "/") for s in scope)  # a directory covers its files
   # a path holding a control character (a newline would split the finding's line) is shown JSON-quoted, as posted
   shown = lambda path: json.dumps(path, ensure_ascii=False) if any(ord(c) < 32 or ord(c) == 127 for c in path) else path
