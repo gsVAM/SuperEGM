@@ -89,6 +89,48 @@ def test_failed_collect_leaves_the_round_prepared(world, tmp_path, monkeypatch):
   assert len(foreman_ids) == len(set(foreman_ids)) >= 2
 
 
+def test_an_empty_sha256_is_refused_not_replaced_by_the_rounds_own(world, tmp_path, monkeypatch):
+  # `--sha256 ''` is a value that is not the full head sha: refused, never swapped for the round's recorded sha
+  w = prepared(world, tmp_path, monkeypatch)
+  findings = w.dir / "r1/change-review.findings"
+  findings.write_text("", encoding="utf-8")
+  argv = ["review", "record", "--review", w.rid, "--round", 1, "--reviewer", "change-review", "--findings", str(findings),
+          "--isolation", "clean", "--model", "m:m", "--effort", "e:e", "--runcard", w.child]
+  assert world.run(*argv, "--sha256", w.head)[0] == 0  # the round exists, at its head
+  round_file = w.st.path("reviews", w.rid, "round-1.json")
+  before = round_file.read_bytes()
+  rc, out = world.run(*argv, "--sha256", "")
+  assert rc == 1 and "--sha256" in out and "40" in out, out
+  assert round_file.read_bytes() == before
+
+
+def test_a_collect_whose_journal_line_fails_leaves_the_round_prepared(world, tmp_path, monkeypatch):
+  # the phase is the last thing `collect` saves: the journal line before it fails, the round stays `prepared`, the rerun completes it
+  w = prepared(world, tmp_path, monkeypatch, ci="failure", commits=OTHER)
+  phase = lambda: json.loads(w.st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][0]["phase"]
+  real = core.journal
+
+  def failing(st, line):
+    if "foreman findings" in line:
+      raise core.HandoffError("journal: disk full")
+    return real(st, line)
+  monkeypatch.setattr(core, "journal", failing)
+  first_code, _ = collect(world, w)
+  phase_after_first = phase()
+  monkeypatch.setattr(core, "journal", real)
+  second_code, out = collect(world, w)
+  assert first_code != 0 and phase_after_first == "prepared"
+  assert second_code == 0 and phase() == "collected", out
+
+
+def test_brief_does_not_promise_a_fenced_block_is_refused():
+  # `collect` collapses a `--spec` text to one line, where a fence's backticks hold a span the check counts: the brief names
+  # only the form that is refused (an unquoted command)
+  brief = " ".join((ROOT / "skills/wave/references/foreman_brief.md").read_text(encoding="utf-8").split())
+  assert "a fenced block" not in brief
+  assert "any other form is refused (an unquoted command" in brief
+
+
 def test_brief_recovers_and_dispatches_with_the_pair():
   # the brief: rerun a failed collect once, `--not-run` only for a panel that did not run, the pair on every Agent call,
   # and the deviation evidence `decision.py`'s check counts (L7, L19, #240 codebase-details-5-1)

@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U10's tests of the foreman's helper subcommands.
-# Modified by SuperEGM (gsVAM), 2026: collect reads rulings through `ruling_of` and the record (U22).; the forge check drops an outer run's `GIT_CONFIG_` pairs (1.2.1 wave fix); the cap tests set the review's stored `cap` in place of the `review.CAP` monkeypatch (U36); the Astra brief's sections pin includes `Amendments` (U97); the `prepared:` line's full head and `collected:` pinned by its first line (U101).
+# Modified by SuperEGM (gsVAM), 2026: collect reads rulings through `ruling_of` and the record (U22).; the forge check drops an outer run's `GIT_CONFIG_` pairs (1.2.1 wave fix); the cap tests set the review's stored `cap` in place of the `review.CAP` monkeypatch (U36); the Astra brief's sections pin includes `Amendments` (U97); the `prepared:` line's full head and `collected:` pinned by its first line (U101's recovering a round, 1.3 design section 3.4).
 
 """U10: foreman dispatch, prepare, collect, tdd-order, review post. This file replaces U03's nine moved
 prepare/collect tests (they pin `--round`, `--run-folder`, `--verdict`, `head-moved`, `launched` and `--remove`:
