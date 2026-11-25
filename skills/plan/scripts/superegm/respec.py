@@ -140,14 +140,15 @@ def units_span(text: str) -> tuple[int, int] | None:
   return spans[-1] if spans else None
 
 
-def units_lines(lines: list[str]) -> tuple[set, set]:
-  """`(table, prose)`: the 0-based indexes of the last `## Units` section's table lines (header, separator and rows, every
-  unfenced line that opens with `|`) and of its other lines below the heading, its prose (U105)."""
+def units_lines(lines: list[str]) -> tuple[set, set, set]:
+  """`(section, table, prose)`: the 0-based indexes of the last `## Units` section's lines, its heading included (never
+  the uncovered rule's), of its table lines (header, separator and rows, every unfenced line that opens with `|`) and of
+  its other lines below the heading, its prose (U105)."""
   span = units_span("\n".join(lines))
   if not span:
-    return set(), set()
+    return set(), set(), set()
   table = {n for n, line in unfenced(lines) if span[0] <= n + 1 <= span[1] and line.lstrip().startswith("|")}
-  return table, set(range(span[0], span[1])) - table
+  return set(range(span[0] - 1, span[1])), table, set(range(span[0], span[1])) - table
 
 
 def units_rows(text: str) -> dict:
@@ -272,11 +273,12 @@ def context(store: core.Store, handoff: str, text: str, root: Path | None = None
   for title, start, end in sections("\n".join(prev)):
     if title.lstrip("#").strip() == GLOBAL:
       spec_global |= set(range(start, end + 1))
-  (table_old, prose_old), (table_new, prose_new) = units_lines(prev), units_lines(new)
+  (section_old, table_old, prose_old), (section_new, table_new, prose_new) = units_lines(prev), units_lines(new)
   return {"rel": rel, "prev": prev, "new": new, "ops": ops, "units": units, "merged": merged, "lines_of": lines_of,
           "global_of": global_of, "names_of": {u: set().union(*map(interface_names, held)) for u, held in interfaces_of.items()},
           "spec_global": spec_global, "carried": carried_spans(units, entries, maps),
           "table_old": table_old, "table_new": table_new, "prose_old": prose_old, "prose_new": prose_new,
+          "section_old": section_old, "section_new": section_new,
           "rows_old": set(units_rows("\n".join(prev)))}
 
 
@@ -321,7 +323,7 @@ def hunk_units(ctx: dict, op: list) -> tuple[set, set, set, set]:
     if line.startswith(INTERFACE):  # removed or inserted: the producer and every consumer of the name it declares
       declared = interface_names(line)
       interfaced |= {v for v, names in ctx["names_of"].items() if declared & names}
-  units_old, units_new = ctx["table_old"] | ctx["prose_old"], ctx["table_new"] | ctx["prose_new"]  # their own rules
+  units_old, units_new = ctx["section_old"], ctx["section_new"]  # the table and prose have their own rules; the heading none
   uncovered = any(not skipped(prev[n]) and n not in quoted_old and not covered(n + 1)
                   for n in range(i1, i2) if n not in units_old)
   for k in range(j2 - j1):  # a new line stands at the old line it replaces; one past their count, or inserted, after the block

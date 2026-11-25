@@ -1988,9 +1988,8 @@ def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[
   and settling nothing: unlike the `--unit` path, which reads a ruling on the unit's issue, nothing reads one on the
   spec PR; a spec's rulings are made in the session or by the judges). Every unsettled external high or medium of an earlier round is
   carried into the round first, and a new thread's id is numbered after every id of its reviewer and round number
-  (a respec cycle's round neither records nor carries a finding `respec_keeps` refuses: another file's, with a line or
-  without, or a line of the spec outside the round's scope; U105)
-  in any cycle, so no fid is reused. Recorded outside the panel and the round's byte and scope checks, so `what_ran`
+  in any cycle, so no fid is reused. A respec cycle's round neither records nor carries a finding `respec_keeps`
+  refuses: another file's, with a line or without, or one on a line of the spec outside the round's scope (U105). Recorded outside the panel and the round's byte and scope checks, so `what_ran`
   is untouched; each finding keeps its PR's `number` as `pr`. Then the reply pass posts `**Reply <fid>:** fixed` on
   GitHub (`reply_fixed`, whose failures are named and retried, never refused). A gh failure of the read is a
   one-line Refusal. Returns
