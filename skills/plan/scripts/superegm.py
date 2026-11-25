@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: renamed from EGM's handoff helper; reduced to main(), the subcommands live in the superegm package.
+# Modified by SuperEGM (gsVAM), 2026: renamed from EGM's handoff helper; reduced to main(), the subcommands live in the superegm package; U99's one-line `gh:` exit for a GhError that escapes a subcommand (1.3 design section 3.2).
 
 """SuperEGM helper entry point: `python3 '<absolute path>' <subcommand> ...`.
 
@@ -28,6 +28,9 @@ def main(argv=None):
     return args.run(args)
   except superegm.HandoffError as error:
     print(f"superegm: {error}", file=sys.stderr)
+    return 1
+  except superegm.GhError as error:  # one line, never a traceback (1.3 design section 3.2)
+    print(f"gh: {' '.join(str(error).split())}", file=sys.stderr)
     return 1
   finally:
     superegm.CURRENT_WRITES = superegm.CURRENT_SUBCOMMAND = None
