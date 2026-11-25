@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the respec's touched units, derived marks, open and actionable respecs and `respec posted` (U85); `respec open` from a review's design finding (U91).
+# Added by SuperEGM (gsVAM), 2026: the respec's touched units, derived marks, open and actionable respecs and `respec posted` (U85); `respec open` from a review's design finding (U91); `load_json` refuses an unreadable or non-object file with its path (U106, 1.3 design section 3.8).
 
 """superegm respec: the units a spec correction touches (spec section 7.6), its derived marks and the posts and
 relaunches it asks for; every mark is derived on read from `respec/` and the launch records, never `state.json`."""
@@ -29,7 +29,17 @@ def respec_path(store: core.Store, *name: str) -> Path:
 
 
 def load_json(path: Path):
-  return json.loads(core.read_text(path)) if path.is_file() else None
+  """The JSON object in `path`, None when the file is absent. An unreadable file, broken JSON or JSON that is not an
+  object (a list, a string) is refused `<path>: <reason>` (U106): a missing read never stands for a held respec read."""
+  if not path.is_file():
+    return None
+  try:
+    data = json.loads(core.read_text(path))
+  except (OSError, ValueError) as error:
+    raise core.HandoffError(f"{path}: {error}") from None
+  if not isinstance(data, dict):
+    raise core.HandoffError(f"{path}: not a JSON object")
+  return data
 
 
 def spec_of(store: core.Store, handoff: str, root: Path | None = None) -> Path:
