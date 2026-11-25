@@ -1543,8 +1543,8 @@ POST_HEADER_RE = re.compile(r"^\*\*SuperEGM review round \d+ \(head [0-9a-f]{7}\
 
 def read_threads(repo: str, number: int, skip: set) -> list[dict]:
   """A PR's review threads (spec section 8, External review): a review comment with no `in_reply_to`, its
-  replies its text (with its `original_line`, `original_commit_id` and `subject_type`, which place an outdated line
-  comment, U105), and a non-empty review body of a review with no inline comments that is not `APPROVED`;
+  replies its text (with its `original_line`, `original_commit_id`, `subject_type`, `side` and `original_side`, which
+  place an outdated or LEFT-side line comment, U105), and a non-empty review body of a review with no inline comments that is not `APPROVED`;
   a review carrying `review post`'s header is the foreman's, never a thread. `skip` holds root ids left out."""
   comments = core.gh_pages(f"repos/{repo}/pulls/{number}/comments")
   reviews = core.gh_pages(f"repos/{repo}/pulls/{number}/reviews")
@@ -1562,7 +1562,8 @@ def read_threads(repo: str, number: int, skip: set) -> list[dict]:
                     "root": c.get("body") or "", "body": "\n\n".join([c.get("body") or "", *replies.get(c["id"], [])]), "path": c.get("path"),
                     "line": c.get("line"), "commit_id": c.get("commit_id"), "review_body": False,
                     "created_at": c.get("created_at"), "original_line": c.get("original_line"),
-                    "original_commit_id": c.get("original_commit_id"), "subject_type": c.get("subject_type")})
+                    "original_commit_id": c.get("original_commit_id"), "subject_type": c.get("subject_type"),
+                    "side": c.get("side"), "original_side": c.get("original_side")})
   for r in reviews:
     body = r.get("body") or ""
     if POST_HEADER_RE.search(body):
@@ -1987,16 +1988,25 @@ def finding_at(location: str) -> tuple[str | None, int | None, str | None]:
 
 def thread_place(thread: dict) -> tuple[int | None, str | None]:
   """`(line, commit)` a PR thread names: its `line` in its `commit_id`; an outdated line comment, whose `line` GitHub
-  nulls, its `original_line` in its `original_commit_id`; a file-level comment (`subject_type` `file`) none."""
-  if thread.get("line") is None and thread.get("subject_type") != "file" and thread.get("original_line") is not None:
-    return thread["original_line"], thread.get("original_commit_id")
-  return thread.get("line"), thread.get("commit_id")
+  nulls, its `original_line` in its `original_commit_id`; none for a file-level comment (`subject_type` `file`) and for
+  a comment on the diff's LEFT side (`side`, or `original_side` when outdated), whose line counts in the PR's base text,
+  not in a head commit: a line the PR removed or left as context there, kept as the correction's (U105)."""
+  if thread.get("subject_type") == "file":
+    return None, None
+  if thread.get("line") is not None:
+    line, commit, side = thread["line"], thread.get("commit_id"), thread.get("side")
+  elif thread.get("original_line") is not None:
+    line, commit, side = thread["original_line"], thread.get("original_commit_id"), thread.get("original_side") or thread.get("side")
+  else:
+    return None, None
+  return (None, None) if side == "LEFT" else (line, commit)
 
 
 def line_now(root: Path, spec_rel: str, current: list[str], commit: str | None, line: int) -> int | None:
-  """`line` of the spec as it stood at `commit`, carried to the spec's `current` lines through `respec.carry`'s line map
-  (a line the later text changed or removed stands at the block that replaced it); unchanged with no commit named; None
-  when no commit `commit` holds the spec, its place unknown (U105)."""
+  """`line` of the spec as it stood at `commit`, carried to the spec's `current` lines (U105): a line of an equal block
+  moves with it, a changed one stands at the first line that replaced it, and a removed one at the line before the gap
+  (`max(j1, 1)`), where `scope_sections` counts a deletion; unchanged with no commit named; None when no commit `commit`
+  holds the spec, its place unknown."""
   if not commit:
     return line
   try:
@@ -2004,7 +2014,10 @@ def line_now(root: Path, spec_rel: str, current: list[str], commit: str | None, 
   except core.HandoffError:
     return None
   from superegm import respec  # at call time: respec imports this module
-  return respec.carry(respec.opcodes(then, current), line, line)[0]
+  for tag, i1, i2, j1, j2 in respec.opcodes(then, current):
+    if i1 <= line - 1 < i2:
+      return j1 + (line - 1 - i1) + 1 if tag == "equal" else (j1 + 1 if j2 > j1 else max(j1, 1))
+  return max(len(current), 1)  # past the text it was read in: its last line
 
 
 def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[int, list[str]]:
@@ -2070,7 +2083,9 @@ def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[
     top = max((int(m.group(1)) for fid in held + [f["id"] for f in record["findings"]]
                if (m := re.fullmatch(rf"{re.escape(ext)}-{n}-(\d+)", fid))), default=0)
     severity = thread_severity(thread, config, None if thread["bot"] else roles[thread["login"]])
-    [finding] = parse_findings(thread_line(ext, n, top + 1, thread, severity, config), ext, n)
+    line, commit = thread_place(thread)  # recorded where it was made, so a later respec reads its line (U105)
+    placed = thread | {"line": line, "commit_id": commit or thread.get("commit_id")}
+    [finding] = parse_findings(thread_line(ext, n, top + 1, placed, severity, config), ext, n)
     record["findings"].append({**finding, "thread": thread["id"], "review_body": thread["review_body"], "pr": number})
     added.append(thread["id"])
   if added or carried:
