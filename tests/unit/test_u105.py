@@ -57,6 +57,27 @@ def test_units_section_changes_touch_by_their_rules(world, change, touched, merg
   assert (result["touched"], result["merged_review"]) == (touched, merged_review)
 
 
+RULE = "Each unit commits its tests first."
+UNITS_H3 = BASE[:UNITS_AT] + ["## 5. Units\n", "\n", "Every unit logs its retries.\n", "\n", "### Rows\n", "\n"] \
+  + UNITS[UNITS_AT + 4:] + ["\n", "### Build rules\n", "\n", RULE + "\n"]
+
+
+@pytest.mark.parametrize("change, touched, merged_review", [
+  ("a prose line under `### Build rules` of `## Units`, U2's Design range over the section", ["U1", "U2", "U3"], ["U0"]),
+  ("U1's row of a table under `### Rows` of `## Units`, U3's Design range over the section", ["U1"], []),
+])
+def test_units_subsections_keep_the_units_rules(world, change, touched, merged_review):
+  # astra-1-2: the Units section runs to the next H2 (as `approve_spec.units_section` reads it), its H3s included
+  from superegm import respec
+  owner = "U2" if "prose" in change else "U3"
+  units = {u: {"id": u, "design_range": design_range(UNITS_H3, "## 5. Units" if u == owner else h)} for u, h in SECTIONS.items()}
+  spec, st = respec_world(world, [(UNITS_H3, None)], units=units)
+  draft = replace(UNITS_H3, RULE, "Each unit commits its tests before its code.") if "prose" in change \
+    else replace(UNITS_H3, U1_ROW, "| U1 | queue, fifo | — | S |")
+  result = respec.touched(st, HID, "".join(draft))
+  assert (result["touched"], result["merged_review"]) == (touched, merged_review)
+
+
 @pytest.mark.parametrize("u1_line, u2_line, touched", [
   ("- Produces: `load(path) -> dict`", "- Consumes: `load` (U1)", ["U1", "U2"]),
   ("- Produces: `superegm review open --review <id>`", "- Consumes: `superegm review open` (U1)", ["U1", "U2"]),
