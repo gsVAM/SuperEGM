@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U35
+# Modified by SuperEGM (gsVAM), 2026: U99's two `GhError` re-pins, now exit 1 and the `gh:` line (1.3 design section 3.2).
 
 """U35: accept below the cap (`review rule --ruling accept --owner` on an acceptable round, its refusals)."""
 
@@ -180,8 +181,8 @@ def test_a_head_accept_whose_post_failed_reruns(world, monkeypatch):
       raise superegm.GhError(args, 1, "", "HTTP 502")
     return real(args, *a, **kw)
   monkeypatch.setattr(superegm, "gh", failing)
-  with pytest.raises(superegm.GhError):
-    rule_fifth(world, card)
+  code, out = rule_fifth(world, card)  # the `GhError` ends as one `gh:` line (U99)
+  assert code == 1 and out.startswith("gh: ") and len(out.strip().splitlines()) == 1
   assert foreman_of(s, "U01")["rulings"] == []
   monkeypatch.setattr(superegm, "gh", real)
   assert rule_fifth(world, card)[0] == 0
@@ -251,8 +252,8 @@ def failed_accept(world, monkeypatch, card):
       raise superegm.GhError(args, 1, "", "HTTP 502")
     return real(args, *a, **kw)
   monkeypatch.setattr(superegm, "gh", failing)
-  with pytest.raises(superegm.GhError):
-    rule_fifth(world, card)
+  code, out = rule_fifth(world, card)  # the `GhError` ends as one `gh:` line (U99)
+  assert code == 1 and out.startswith("gh: ") and len(out.strip().splitlines()) == 1
   monkeypatch.setattr(superegm, "gh", real)
 
 
