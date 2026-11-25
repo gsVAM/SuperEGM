@@ -149,6 +149,7 @@ def note_finding(entries: list, latest: dict, scope: tuple, name: str, finding: 
     latest.pop(("link", scope, fid), None)  # a new finding is no copy of what an earlier cycle's finding of its id copied
     latest.pop(("settled", scope, fid), None)
   latest[("id", scope, fid)] = finding
+  latest[("at", scope, fid)] = latest[key]  # its place in `entries`, where a ruling on a copy of it lands
   if copy and not finding.get("disposition") and ("settled", scope, fid) in latest:  # a copy settled it before a newer copy of it came
     finding["disposition"] = latest[("settled", scope, fid)]
   return str(fid) if copy else ""
@@ -252,6 +253,7 @@ def reviewer_stats(st: core.Store, hs: core.Store, spec) -> dict:
   `overruled` plus `allowed`: an allowance is recorded as an overrule (spec 13.2, `decision.py`), and that one sum is what the table,
   the Lessons rows and the integrate summary name a reviewer's overruled findings by."""
   stats, found, latest, ruled = {}, [], {}, {}
+  via_copy = {"overruled": set(), "allowed": set()}  # the places in `found` a ruling on a copy reached: that finding alone, not its id
   for rid, cycle in sorted(reviews_of(st, hs, spec), key=lambda r: cycle_order(r[0])):
     if not cycle:
       continue
@@ -267,19 +269,21 @@ def reviewer_stats(st: core.Store, hs: core.Store, spec) -> dict:
         findings = entry.get("findings") or []
         new = 0
         for finding in findings:
-          copied = note_finding(found, latest, (kind, cycle["artifact"]), name, finding, (name, kind, overruled, allowed, finding))
+          scope = (kind, cycle["artifact"])
+          copied = note_finding(found, latest, scope, name, finding, (name, kind, overruled, allowed, finding))
           new += not copied
-          for ruling in (overruled, allowed):  # a ruling on a copy rules the finding it copies
-            if copied and finding.get("id") in ruling:
-              ruling.add(copied)
+          for verdict, ruling in (("overruled", overruled), ("allowed", allowed)):  # a ruling on a copy rules the finding it copies
+            if copied and finding.get("id") in ruling and ("at", scope, copied) in latest:
+              via_copy[verdict].add(latest[("at", scope, copied)])
         row["quiet"] += 0 if new else 1  # a round of only copies raised nothing new
-  for name, kind, overruled, allowed, finding in found:
+  for at, (name, kind, overruled, allowed, finding) in enumerate(found):
     row, disposition, fid = stats[(name, kind)], str(finding.get("disposition") or ""), finding.get("id")
+    is_allowed = fid in allowed or at in via_copy["allowed"]
     row[finding.get("severity")] = row.get(finding.get("severity"), 0) + 1
     row["fixed"] += disposition == "fixed"
     row["deferred"] += disposition.startswith("deferred")
-    row["allowed"] += fid in allowed
-    row["overruled"] += fid not in allowed and (fid in overruled or disposition in ("contested", "declined"))
+    row["allowed"] += is_allowed
+    row["overruled"] += not is_allowed and (fid in overruled or at in via_copy["overruled"] or disposition in ("contested", "declined"))
     row["regressions"] += finding.get("regression") == "yes"
   for row in stats.values():
     row["overrules"] = row["overruled"] + row["allowed"]
