@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the respec's touched units, derived marks, open and actionable respecs and `respec posted` (U85); `respec open` from a review's design finding (U91); `## Units` prose and table rules, Interfaces names as `scan` reads them and the repository root through to `history` (U105).
+# Added by SuperEGM (gsVAM), 2026: the respec's touched units, derived marks, open and actionable respecs and `respec posted` (U85); `respec open` from a review's design finding (U91); U105's `## Units` prose and table rules (the section to the next H2), Interfaces names as `scan` reads them and the repository root through to `history` (1.3 design section 3.8).
 
 """superegm respec: the units a spec correction touches (spec section 7.6), its derived marks and the posts and
 relaunches it asks for; every mark is derived on read from `respec/` and the launch records, never `state.json`."""
