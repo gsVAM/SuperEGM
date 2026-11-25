@@ -43,3 +43,25 @@ def test_load_config_checks_each_panel(world, reviewers, refused):
       superegm.load_config(world.repo)
   else:
     assert superegm.load_config(world.repo)["reviewers"]["plan"][:3] == ["readiness", "proportion", "set"]
+
+
+SPEC_TEXT = "# Spec\n\n## A\nline\nline\n\n## B\nline\nline\n"
+SCOPE = [("changed", "B", 7, 9), ("changed", "docs/reference/domain model.md", 0, 0)]
+
+
+@pytest.mark.parametrize("location, answer", [
+  ("design.md line 8 contradicts docs/reference/domain model.md", None),
+  ("design.md line 4 contradicts docs/reference/domain model.md", "## A"),
+  ("design.md line 8 contradicts a/b.md:12", None),
+  ("docs/specs/design.md line 8 contradicts a/b.md:12", None),
+  ("other/domain model.md, line 8", "none"),
+  ("docs/reference/domain model.md:500", None),
+  ("line 8 of design.md", None),                                     # a token after the first line cite names no file: the spec's line
+  ("§2 line 8 contradicts README.md", None),
+  ("domain model.md line 12 vs docs/specs/design.md", None),         # a listed document's bare name opens it; the later `/` decides nothing
+])
+def test_location_stops_at_whitespace_before_a_slash_path(location, answer):
+  # spec docs/specs/design.md SPEC_TEXT; rows, spans: the round's scope (## B changed, docs/reference/domain model.md listed)
+  # and the spec's sections; a file name stops at whitespace (spec 3.10)
+  from superegm import review
+  assert review.out_of_scope(SCOPE, review.sections(SPEC_TEXT), location, "docs/specs/design.md") == answer
