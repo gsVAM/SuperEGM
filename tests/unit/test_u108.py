@@ -197,3 +197,25 @@ def test_managed_hooks_are_recorded_per_launch(world, monkeypatch, spawn_fake, r
   plugins_record = json.loads(s.path("launches", f"{UNIT}_r1_plugins.json").read_text(encoding="utf-8"))
   assert sorted(launch_builder.managed_hooks(profile_dir)) == events
   assert sorted(plugins_record["managed_hooks"]) == events and plugins_record["managed"] == []
+
+
+def test_doctor_prints_the_managed_line(world, monkeypatch, tmp_path):
+  # `superegm doctor` with a builder profile holding managed plugin data@kw and remote-settings.json hooks PreToolUse and SessionStart; every other line ok
+  import shutil
+  from conftest import REPO
+  monkeypatch.setenv("HOME", str(tmp_path)); seed(world)
+  monkeypatch.setenv("CLAUDE_CODE_PLUGIN_CACHE_DIR", str(tmp_path / "plugins"))
+  monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
+  monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: {"gh": "/usr/local/bin/gh"}.get(cmd))
+  git(["remote", "set-url", "--push", "origin", f"git@github.com:{REPO}.git"], world.repo)
+  profile = Path(json.loads((world.repo / ".superegm/config.json").read_text(encoding="utf-8"))["builder"]["profile_dir"])
+  (profile / "plugins").mkdir()
+  (profile / "plugins/installed_plugins.json").write_text(json.dumps({"version": 2, "plugins": {"data@kw": [
+      {"scope": "managed", "installPath": str(profile / "plugins/cache/kw/data/1.0.0"), "version": "1.0.0"}]}}), encoding="utf-8")
+  (profile / "remote-settings.json").write_text(json.dumps({"hooks": {"SessionStart": [], "PreToolUse": []}}), encoding="utf-8")
+  code, out = world.run("doctor")
+  lines = out.splitlines()
+  line = next(l for l in lines if l.startswith("managed: "))
+  assert lines[lines.index(line) - 1].startswith("plugins: ")
+  assert "data@kw" in line and "PreToolUse" in line and "SessionStart" in line
+  assert code == 0, out  # informational: it never fails the exit
