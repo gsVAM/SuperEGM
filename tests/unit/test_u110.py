@@ -69,3 +69,16 @@ def test_copies_count_once_in_the_reviewers_and_units_tables(world, rounds, ruli
   head_rounds(c, rounds, rulings)
   tables = keyed(report_of(world, c), table_name, len(row))
   assert tables[row][column] == value
+
+
+def test_not_run_round_is_no_head_round(world):
+  # U01's head round 1 ran; round 2's foreman entry is `prepared` and its reviewers hold only `review record --not-run` records
+  c, _, _ = two_units(world)
+  jwrite(c.hs.path("foreman", "U01"), {"dispatch_id": None, "decisions": [], "rulings": [], "rounds": [
+      {"round": 1, "phase": "posted", "outcome": "posted"}, {"round": 2, "phase": "prepared"}]})
+  reviewed(c, "head-U01-c1", "head", "U01", ["design", "zoom-out"], {"design": {"findings": []}, "zoom-out": {"findings": []}})
+  jwrite(c.hs.path("reviews", "head-U01-c1", "round-2.json"), {"round": 2, "runcard": "rc", "reviewers": {
+      "design": {"findings": [], "not_run": True}, "zoom-out": {"findings": [], "not_run": True}}})
+  report = report_of(world, c)
+  assert table(report, "Units")["U01"]["head rounds"] == "1"
+  assert table(report, "Plan against actual")["U01"]["head rounds"] == "1"
