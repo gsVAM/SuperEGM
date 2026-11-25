@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import set_config  # noqa: F401
+from conftest import make_pr, set_config  # noqa: F401
 from superegm import atomic_write, launch, report
 from superegm.inbox import inbox_items, line_of
 from test_wave import foreman_of
@@ -104,6 +104,7 @@ def unposted_world(world, case):
   code, out = world.run("review", "open", "--kind", "head", "--artifact", "U01", "--reviewers", "change-review",
                         "--runcard", card)
   assert code == 0, out
+  make_pr(world.gh, 70, "abc123")  # U107: a head proceed reads the pull request's head afresh
   set_config(world, repo=REPO, owners=["owner"])
   return s, card, out.strip()
 

@@ -8,7 +8,7 @@ records, the convergence it gives ahead of every other test, and its readers dow
 import json
 import pytest
 
-from conftest import ROOT, set_config
+from conftest import ROOT, make_pr, set_config
 from superegm import atomic_write
 from test_wave import open_wave_card, wave_store, fake_gh, foreman_of, head_review
 from test_u43 import registry  # noqa: F401 -- autouse: HOME under tmp_path, so `next` never reads the owner's registry
@@ -34,6 +34,8 @@ def head_world(world):
   s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "launches": [{"round": 1, "status": "exited 0"}]},
                  U02={"pr": 71, "head": "b" * 40, "ci": "green", "launches": [{"round": 1, "status": "exited 0"}]})
   rid = head_review(world, s, card)
+  for number, head in ((70, "a" * 40), (71, "b" * 40)):  # U107: a head proceed reads the pull request's head afresh
+    make_pr(world.gh, number, head)
   set_config(world, repo=REPO, owners=[OWNER])
   return s, card, rid
 
