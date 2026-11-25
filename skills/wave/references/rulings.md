@@ -63,6 +63,11 @@ point's section" below is the point's section of `references/decision_points.md`
   for one naming no open decision or an already ruled one, or a refused allowance (not one refused with `no open decision names it`); take either as the fact it states, and
   run nothing else for it. For a run stopped between a record and its continuation, the
   journal's `Ruling (…)` line with no continuation after it is the step to finish.
+  A point-1 `decision rule` stopped after its `Ruling (…)` line and before its settle leaves the finding it
+  overruled or allowed unsettled, and its rerun is refused as already ruled: finish it with `review settle`
+  on that finding, its disposition the one `decision rule` gives (`contested`, or `declined` on an `owner: <ids>`
+  decision) and its ruler the ruling's (the owner, with the ruling comment's `--posted <comment-id>` in
+  leavemealone-mode, or `--judges <panel>`), then route by the word it prints, as `decision rule`'s second line.
 - The undo of triage (design section 5.2): `**Ruling:** <fid> finding upheld`
   naming a fid of the unit's `followups[]` (a medium triage took off the blocking list, the
   inbox's undo) is the same `decision rule --unit <U> --ruling '<fid> finding upheld' --by <login>

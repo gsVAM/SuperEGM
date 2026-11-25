@@ -740,7 +740,10 @@ def rule(args) -> int:
     data = core.load_foreman(st, unit)  # the round's outcome is written: the record is reloaded before the append
   settles = []  # U103: a point-1 overrule or allowance settles the finding it rules; every check runs before the post
   if decision["point"] == 1 and not closed and chosen.endswith((" finding overruled", " allowed")):
-    settles = settle_checks(st, [(decision, chosen.split(" ")[0])], args, card)
+    ruled_fid = chosen.split(" ")[0]
+    if not found and decision not in fid_decisions(data, ruled_fid):  # as the posted path refuses it: never another finding
+      raise Refusal(f"decision: {ruled_fid} is not a finding of {decision['id']}")
+    settles = settle_checks(st, [(decision, ruled_fid)], args, card)
   # the effect is the point's, never the option's wording: point 2's `stop`, point 3's `stop the unit`, a redesign.
   # The label goes first, so a failed request records nothing and the same call reruns (round 9); a session post
   # that then fails takes off again only a label this call put on (rounds 10 and 11).
