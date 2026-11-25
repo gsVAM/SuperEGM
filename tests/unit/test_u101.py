@@ -31,3 +31,11 @@ def test_sha256_is_the_full_head_sha(world, tmp_path, monkeypatch, sha, code):
   assert rc == code, out
   assert code == 0 or ("--sha256" in out and "40" in out), out
   assert round_file.exists() == (code == 0)
+
+
+def test_prepared_line_prints_the_full_head(world, tmp_path, monkeypatch):
+  # the `prepared:` line names the head as the 40-hex sha `review record --sha256` takes
+  w = prepared(world, tmp_path, monkeypatch)
+  code, out = world.run("prepare", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)  # the round again: `prepared` ran it once
+  assert code == 0, out
+  assert out.startswith(f"prepared: head {w.head} merge-base "), out
