@@ -368,3 +368,35 @@ def test_a_contest_is_dropped_only_where_a_ruling_settles_what_it_contests(world
   builder_contested = json.loads(w.st.path("reviews", w.rid, f"round-{n}.json").read_text(encoding="utf-8"))["builder_contested"]
   assert any(line.endswith(f"contested {contested}: CI runs the suite") for line in lines) is raised, lines
   assert len(builder_contested) == (1 if raised else 0)
+
+
+# Round 3: the owner's ruling (a) on comment 7174114054 amends `occurrence`: a weakened entry's is its base line's
+# 1-based number among identical lines of the base test enclosing it (astra-1-1).
+
+TWICE = "def test_x():\n    assert y == 1\n    z = 2\n    assert y == 1\n"
+
+
+@pytest.mark.parametrize("later, highs", [
+    ("as in round 1", 0),
+    ("the first restored and the second weakened to the same text", 1),  # astra-1-1: the weakening moved, never ruled
+])
+def test_a_weakening_moved_to_an_identical_base_assertion_is_raised(world, tmp_path, monkeypatch, later, highs):
+  # round 1 weakens test_x's first `assert y == 1` to `assert y`; the owner allows foreman-1-1 before round 2
+  comments = {2: []}
+  first_weak = TWICE.replace("assert y == 1", "assert y", 1)
+  target, base, head, g = pr_repo(world, tmp_path, monkeypatch, commits=S1 + [("chore: round 1", Q, first_weak)],
+                                  base_files={Q: TWICE})
+  st, card, _ = seed(world, head=head, comments=comments)
+  first = collect_round(world, st, card, 1)
+  assert [(e["text"], e["base_text"], e["occurrence"]) for e in
+          json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][0]["test_delta"]] == [("assert y", "assert y == 1", 1)]
+  assert len(first["reviewers"]["foreman"]["findings"]) == 1
+  post(st, 1)
+  comments[2].append(c(13, "owner", ALLOWED, at=RULING_AT))
+  move_head(world, st, g, first_weak if later == "as in round 1" else nth(TWICE, "assert y == 1", "assert y", 2))
+  rnd = collect_round(world, st, card, 2)
+  round_findings = [f for f in rnd["reviewers"]["foreman"]["findings"] if f["disposition"] is None]
+  snapshot = f"builder: builder-bot\n### issue #2 comment 13 by owner at {RULING_AT}\n{ALLOWED}\n"
+  precheck_lines = precheck_on_head(world, st, g, tmp_path, monkeypatch, snapshot)
+  assert sum(f["claim"].startswith("test-delta: tests/unit/test_q.py:") for f in round_findings) == highs, round_findings
+  assert sum("test-delta: tests/unit/test_q.py:" in line for line in precheck_lines) == highs, precheck_lines
