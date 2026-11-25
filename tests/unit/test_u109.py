@@ -4,8 +4,13 @@
 """U109: `step_paths` reads only path-shaped spans; `load_config` checks each `reviewers.<kind>` panel;
 `out_of_scope` reads a review location's file name as a whitespace-free token."""
 
+import re
+
 import pytest
+import superegm
 from superegm import body
+
+from conftest import set_config
 
 
 @pytest.mark.parametrize("write, implement, test_path, impl_path", [
@@ -20,3 +25,21 @@ from superegm import body
 def test_step_paths_reads_only_path_shaped_spans(write, implement, test_path, impl_path):
   # a path-shaped span holds a `/` or ends in a file extension; any other span is no path
   assert body.step_paths(f"## Steps\n{write}\n{implement}\n") == [(1, test_path, impl_path)]
+
+
+@pytest.mark.parametrize("reviewers, refused", [
+  ({"spec": ["zoom-out"]}, "reviewers.spec"),
+  ({"plan": ["readiness", "proportion"]}, "reviewers.plan"),
+  ({"head": []}, "reviewers.head"),
+  ({"integrate": ["style"]}, "reviewers.integrate"),
+  ({"spec": ["design", "zoom-out", "style"], "head": ["change-review"]}, None),
+  ({}, None),
+])
+def test_load_config_checks_each_panel(world, reviewers, refused):
+  # .superegm/config.json's reviewers; each reviewers.<kind> opens with review.PANEL_OF[<kind>], as CI checks the repository's own
+  set_config(world, repo="example-org/webhooks", reviewers=reviewers)
+  if refused:
+    with pytest.raises(superegm.HandoffError, match=re.escape(refused)):
+      superegm.load_config(world.repo)
+  else:
+    assert superegm.load_config(world.repo)["reviewers"]["plan"][:3] == ["readiness", "proportion", "set"]
