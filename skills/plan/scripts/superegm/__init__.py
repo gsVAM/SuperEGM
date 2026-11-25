@@ -2069,23 +2069,11 @@ def discover_pr(handoff: Handoff, uid, number):
              if ((n.get("repository") or {}).get("nameWithOwner") or "").lower() == repo.lower()]
   if matches:
     return matches, []
-  prs = gh_json(["pr", "list", "-R", repo, "--state", "all", "--limit", "1000", "--json",
-                 "number,state,headRefName,headRefOid,baseRefName,baseRefOid,closingIssuesReferences,isDraft,mergedAt,mergeable"]) or []
-  branch = handoff.branch(uid)
-  candidates = []
-  for pr in prs:
-    refs = pr.get("closingIssuesReferences") or []
-    for ref in refs:
-      repository = ref.get("repository") or {}
-      full = f"{(repository.get('owner') or {}).get('login')}/{repository.get('name')}"
-      if full.lower() == repo.lower() and ref.get("number") == number:
-        matches.append(pr_record(pr))
-        break
-    else:
-      head = pr.get("headRefName") or ""
-      if not refs and (head == branch or head.startswith(branch + "/")):
-        candidates.append(pr_record(pr))
-  return matches, candidates
+  # A unit's pull request is always on its own branch (1.3 design section 3.2): its result is a `--watch`
+  # candidate, never a match, so the list is the branch's alone and no 1,000-pull-request list is read.
+  prs = gh_json(["pr", "list", "-R", repo, "--head", handoff.branch(uid), "--state", "all", "--json",
+                 "number,state,headRefName,headRefOid,baseRefName,baseRefOid,isDraft,mergedAt,mergeable"]) or []
+  return matches, [pr_record(pr) for pr in prs]
 
 
 def read_ci(repo, sha):

@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's test world (the fake gh, the harness, the sample repository and plan) moved out of test_helper.py so every unit's tests share it; the sample plan in the section 9.1 grammar under an approval record (U05); the PR review threads and collaborator roles of the fake gh (U21); the one-comment route `issues/comments/<id>`, `gh issue edit` taking a label off alone and adding a label the issue has once (U22); `gh issue edit --body-file` in the fake gh (U30); `review.rounds` 5 in the world's config (U36).
+# Modified by SuperEGM (gsVAM), 2026: EGM's test world (the fake gh, the harness, the sample repository and plan) moved out of test_helper.py so every unit's tests share it; the sample plan in the section 9.1 grammar under an approval record (U05); the PR review threads and collaborator roles of the fake gh (U21); the one-comment route `issues/comments/<id>`, `gh issue edit` taking a label off alone and adding a label the issue has once (U22); `gh issue edit --body-file` in the fake gh (U30); `review.rounds` 5 in the world's config (U36); U99's `gh pr list --head` and the GraphQL closing-reference answer drawn from the pull requests when a test set none (1.3 design section 3.2).
 
 """The test world: a temporary repository, a store, the fake `gh` and the harness.
 
@@ -322,8 +322,9 @@ class FakeGitHub:
     if args[1] == "view":
       return self.ok(self.prs[int(args[2])])
     if args[1] == "list":
-      assert "--limit" in args and args[args.index("--limit") + 1] == "1000", args
-      return self.ok(list(self.prs.values()))
+      assert "--head" in args, args  # a branch's pull requests, never the whole list (U99)
+      head = args[args.index("--head") + 1]
+      return self.ok([p for p in self.prs.values() if p["headRefName"] == head])
     raise AssertionError(args)
 
   @staticmethod
@@ -353,7 +354,11 @@ class FakeGitHub:
       assert args[i - 1] == "-F", args
       assert paginate and "--slurp" in args
       number = int([a for a in args if a.startswith("number=")][0][7:])
-      nodes = self.graphql.get(number, [])
+      nodes = self.graphql.get(number)
+      if nodes is None:  # no answer set: the pull requests whose closing references name this issue (U99)
+        nodes = [{**p, "repository": {"nameWithOwner": self.repo}} for p in self.prs.values()
+                 if any(r["number"] == number and f"{r['repository']['owner']['login']}/{r['repository']['name']}" == self.repo
+                        for r in p.get("closingIssuesReferences") or [])]
       return self.ok([{"data": {"repository": {"issue": {"closedByPullRequestsReferences": {
           "nodes": nodes, "pageInfo": {"hasNextPage": False, "endCursor": None}}}}}}])
     if "-X" in args and args[args.index("-X") + 1] == "POST":
