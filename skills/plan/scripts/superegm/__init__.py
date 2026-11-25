@@ -891,8 +891,11 @@ class GhError(Exception):
 
   @property
   def transient(self) -> bool:
-    """An HTTP 502, 503 or 504, or a connection reset: worth trying again."""
-    return self.http_status in (502, 503, 504) or "connection reset" in (self.stdout + self.stderr).lower()
+    """An HTTP 502, 503 or 504, or a connection reset that came with no HTTP status
+    (a response of any other status, a 4xx above all, is never retried): worth trying again."""
+    if self.http_status is None:
+      return "connection reset" in (self.stdout + self.stderr).lower()
+    return self.http_status in (502, 503, 504)
 
   @property
   def retry_after(self):
