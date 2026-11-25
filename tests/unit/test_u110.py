@@ -139,3 +139,18 @@ def test_reply_fid_ends_the_respec_evidence(world, reply):
   lessons = lesson_rows(world, c)
   fact = " | ".join(next(r for r in lessons if r[0] == "respec"))
   assert "says 3 `pytest -k retry` fails" in fact and reply not in fact
+
+
+def test_next_answer_refuses_an_empty_answer(world):
+  # chain/<handoff>.json holds an unanswered wait; the owner runs `superegm next answer --handoff <id> --answer ''`
+  from test_u43 import jread
+  from test_u78 import chain_world, wait
+  c = chain_world(world)
+  c.plan("U01")
+  wait(world, c, "plan", "split U01?")
+  waits_dir = c.hs.path("file", "waits")
+  code, out = world.run("next", "answer", "--handoff", c.hid, "--answer", "")
+  chain_after = jread(c.root / "chain" / f"{c.hid}.json")
+  assert code == 1, out
+  assert out.strip().startswith("superegm: next answer: ") and len(out.strip().splitlines()) == 1, out  # the helper's error prefix, then one line
+  assert "answer" not in chain_after and not list(waits_dir.glob("*.answer.*"))
