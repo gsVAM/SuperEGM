@@ -19,7 +19,8 @@ from test_wave import foreman_of, open_wave_card, question, wave_store
 FINDING = "foreman-1-1 | high | src/x.py:3 | regression: no | the retry loop never backs off\n"
 
 
-@pytest.mark.parametrize("ruling", ["finding overruled — the test moved", "finding overruled", "finding upheld"])
+@pytest.mark.parametrize("ruling", ["finding overruled — the test moved", "finding overruled", "finding upheld",
+                                    "finding upheld (fix it)", "finding overruled (moved)", "allowed — kept"])
 def test_a_ruling_without_a_fid_says_so(world, ruling):
   """A point-1 ruling that opens with the verdict is refused, `<fid>` written as the spec writes it, nothing recorded."""
   card = open_wave_card(world)
@@ -196,6 +197,31 @@ def test_a_point_1_ruling_settles_its_finding(world, mode, by, decision, ruling,
   ci_code, ci_err = world.run("decision", "rule", "--unit", "U03", "--decision", "q1", "--ruling", "foreman-2-4 finding overruled — flaky",
                               "--by", "owner", "--runcard", w.card)
   assert ci_code == 1 and "the CI finding is settled by no one" in ci_err and foreman_of(s, "U03")["rulings"] == ci_before
+
+
+def test_a_ruling_settles_only_its_own_units_review_in_the_round_its_source_names(world):
+  """Round 2 (astra-1-1, astra-1-2): finding ids recur across units and carry across rounds, so a decision naming another unit's
+  review settles nothing there, and one naming round 1 settles round 1's finding, or is refused when that round lacks it."""
+  ruling = "foreman-2-1 finding overruled — the spec allows it"
+  w = world_of(world, "normal", "contest", {"foreman-2-1": "contested"}, ruling)
+  s, rid = w.s, w.rids["U01"]
+  disposition = lambda n: next(f["disposition"] for f in json.loads(s.path("reviews", rid, f"round-{n}.json").read_text(encoding="utf-8"))
+                               ["reviewers"]["foreman"]["findings"] if f["id"] == "foreman-2-1")
+  source = lambda unit, text: core.atomic_write(s.path("foreman", unit), foreman_of(s, unit) | {
+      "decisions": [foreman_of(s, unit)["decisions"][0] | {"source": text}]})
+  source("U02", f"review {rid} round 2")  # U02's decision names U01's review: nothing of U01's is settled
+  assert rule_by(world, w, "U02", ruling, "owner", False)[0] == 0
+  assert disposition(2) is None and next(e for e in foreman_of(s, "U01")["rounds"] if e["round"] == 2)["outcome"] == "contested: foreman-2-1"
+  source("U01", f"review {rid} round 1")  # round 1 holds no foreman-2-1: refused, nothing recorded
+  before = foreman_of(s, "U01")["rulings"]
+  code, err = rule_by(world, w, "U01", ruling, "owner", False)
+  assert code == 1 and "no finding foreman-2-1" in err and foreman_of(s, "U01")["rulings"] == before and not world.gh.comments.get(2)
+  path = s.path("reviews", rid, "round-1.json")  # round 1 carries a copy of the finding: only that copy is settled
+  carried = json.loads(path.read_text(encoding="utf-8"))
+  carried["reviewers"]["foreman"]["findings"].append(finding("foreman-2-1"))
+  core.atomic_write(path, carried)
+  assert rule_by(world, w, "U01", ruling, "owner", False)[0] == 0
+  assert (disposition(1), disposition(2)) == ("contested", None)
 
 
 # ---------------------------------------------------------------- S3: a ruling comment edited before its record is refused
