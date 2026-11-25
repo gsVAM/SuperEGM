@@ -336,6 +336,12 @@ FOLLOWS = {  # each case: round 1's and round 2's foreman records, their test_de
   "carried-same-change": ({"foreman": f"foreman-1-1 | high | {Q}:3 | regression: no | {WEAKENED}\n"},
                           {"foreman": f"foreman-2-1 | high | {Q}:3 | regression: no | {WEAKENED}\n"},
                           K("assert y"), K("assert y"), "foreman-1-1 allowed — kept by design", "foreman-1-1", False),
+  # astra-2-2 (round 2): the same change after a line shift, raised as foreman-2-1 (the carry kept no id); its entry
+  # has the key the ruling on foreman-1-1 bound, so collect drops the high and the contest of it too
+  "shifted-copy": ({"foreman": f"foreman-1-1 | high | {Q}:3 | regression: no | {WEAKENED}\n"},
+                   {"foreman": f"foreman-2-1 | high | {Q}:5 | regression: no | test-delta: {Q}:5 weakened\n"},
+                   K("assert y"), {**K("assert y"), "line": 5, "base_line": 5}, "foreman-1-1 allowed — kept by design",
+                   "foreman-2-1", False),
 }
 
 
@@ -359,7 +365,8 @@ def test_a_contest_is_dropped_only_where_a_ruling_settles_what_it_contests(world
     path = st0.path("reviews", rid, "round-2.json")
     held = json.loads(path.read_text(encoding="utf-8"))
     first = held["reviewers"]["foreman"]["findings"][0]
-    first.update(id="foreman-1-1", carried_from=1)
+    if case != "shifted-copy":  # a shifted line keeps no id: round 2 raised it under its own
+      first.update(id="foreman-1-1", carried_from=1)
     atomic_write(path, held)
   w = prepared(world, tmp_path, monkeypatch, **kw)
   code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
@@ -400,3 +407,29 @@ def test_a_weakening_moved_to_an_identical_base_assertion_is_raised(world, tmp_p
   precheck_lines = precheck_on_head(world, st, g, tmp_path, monkeypatch, snapshot)
   assert sum(f["claim"].startswith("test-delta: tests/unit/test_q.py:") for f in round_findings) == highs, round_findings
   assert sum("test-delta: tests/unit/test_q.py:" in line for line in precheck_lines) == highs, precheck_lines
+
+
+# Round 3's review (PR #293, round 2): the fixes, each pinned.
+
+def test_the_indentation_fallback_reads_brackets_and_strings_as_the_syntax_does():
+  # codebase-details-2-1, change-review-2-2: a text Python cannot parse names its lines as `ast` names a parsable one:
+  # a line inside an open bracket (a signature's closing `):`) or a triple-quoted string ends no test and opens none
+  from superegm.collect import enclosing_tests, indented_tests
+  lines = SYNTAX.splitlines()
+  assert indented_tests(lines) == enclosing_tests(lines)
+
+
+def test_a_tree_too_deep_for_the_parser_falls_back_and_never_stops_the_round():
+  # change-review-2-1: a RecursionError from parsing or walking the tree takes the indentation fallback
+  from superegm.collect import enclosing_tests
+  lines = ["def test_a():", "    x = " + "+".join(["1"] * 20000), "    assert x"]
+  assert enclosing_tests(lines) == ["test_a"] * 3
+
+
+def test_a_ruling_before_any_round_holding_the_fid_binds_no_entry():
+  # astra-2-3: a ruling binds the fid's entry in the last round posted before it; with none, it binds nothing
+  from superegm.collect import bound_entry
+  entry = K("assert y")
+  held = [("2026-11-02T15:00:00Z", entry)]
+  assert bound_entry(held, "2026-11-02T13:00:00Z") is None
+  assert bound_entry(held, "2026-11-02T16:00:00Z") == entry
