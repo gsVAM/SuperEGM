@@ -64,10 +64,20 @@ def test_foreman_background_collect_foreground():
   # section 9: `collect` writes back the foreman file it loaded, so a stop, a ruling or an ingest of a unit whose foreman is
   # out waits for the batch after it returns (status prints a `closed` line once: it is held, never dropped)
   assert "the lines of a unit whose foreman is out, and its 3b, wait for the batch after it returns" in wave_skill
-  assert "`word_action` per returned word of an unstopped unit" in wave_skill
+  # a held word goes by `review status` once a ruling (a proceed) has landed since it returned
+  assert "`word_action` per returned word of an unstopped unit, which awaits merge if a ruling since left `review status` 0" in wave_skill
   assert "Rule a unit after its foreman's `collect` ends." not in wave_skill  # the elephant sees the return, not `collect`
-  assert "The end is reached only with no foreman out." in wave_skill
-  assert "`status --wait` exiting non-zero: retry once; failing again, once no foreman is out, run `report`" in wave_skill
+  # no path ends the invocation over a held line or word: `status` prints `closed` and `ruling` once
+  assert "The end is reached only with no foreman out. Held lines and words go first (steps 1-4, then `word_action`)." in wave_skill
+  assert ("`status --wait` exiting non-zero: retry once; failing again, once no foreman is out and what is held is handled, "
+          "run `report`") in wave_skill
+  # the word table defines `<head-review-id>` (decision_points.md calls it the wave skill's)
+  assert "`superegm review status --review <head-review-id> --runcard '<CARD>'` (the unit's `head-<U>-c<n>` review):" in wave_skill
+  # room under the byte pin: two unpinned word-table rows moved verbatim into the brief's opening, read at step 5
+  for row in ("- `error`, `target-moved`, or a return that is none of these words (no word\n  included) → redispatch",
+              "- `recovered <word>` from `foreman dispatch` → the row of `<word>`."):
+    assert row not in wave_skill and row in brief_opening, row
+  assert "the rows of `references/foreman_brief.md`" in wave_skill
   assert "no 5b line in step 2 → The end" in wave_skill and "no 5b line of a non-idle unit → The end" in wave_skill
   assert "`foreman-<unit-id>-<dispatch-id>`, in the foreground" not in brief_opening
   assert "named `foreman-<U>-<dispatch-id>`, in the foreground" not in wave_skill
