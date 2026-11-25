@@ -11,6 +11,7 @@ import json
 import pytest
 
 from superegm import foreman as foreman_mod
+import test_foreman
 
 from test_foreman import (POSTED_R1, PR, UNIT, builder_token, c, open_head_review, prepared, record,  # noqa: F401
                           seed)
@@ -85,3 +86,28 @@ def test_a_contest_of_a_settled_fid_is_dropped(world, tmp_path, monkeypatch, con
   builder_contested = json.loads(w.st.path("reviews", w.rid, f"round-{n}.json").read_text(encoding="utf-8"))["builder_contested"]
   assert any(line.endswith(f"contested {contested}: CI runs the suite") for line in foreman_findings_lines) is raised, foreman_findings_lines
   assert len(builder_contested) == (1 if raised else 0)
+
+
+S1 = [("test(S1): hook", "tests/unit/test_hooks.py"), ("feat(S1): hook", "src/hooks.py")]
+FILE_RULING = "test-delta tests/unit/test_q.py allowed"
+
+
+@pytest.mark.parametrize("how", ["comment", "recorded"])
+def test_a_test_delta_file_allowance_widens_scope(world, tmp_path, monkeypatch, how):
+  # Scope lacks tests/unit/test_q.py and src/other.py; the head changes both; the owner's
+  # `**Ruling:** test-delta tests/unit/test_q.py allowed — by design` is on the issue, or recorded by `decision rule`
+  monkeypatch.setattr(test_foreman, "SECTION", test_foreman.SECTION.replace("`tests/unit/test_q.py` (modify), ", ""))
+  if how == "comment":
+    kw = {"comments": {2: [c(13, "owner", f"**Ruling:** {FILE_RULING} — by design", at=RULING_AT)]}}
+  else:  # the record alone: its comment deleted
+    kw = {"decisions": [{"id": "q1", "point": 1, "source": "review r round 1"}],
+          "rulings": [{"decision": "q1", "ruling": FILE_RULING, "by": "owner", "reason": "by design", "posted": "comment 13",
+                       "posted_at": RULING_AT}]}
+  commits = S1 + [("chore: note", Q, "def test_a():\n  assert 1 == 1\n# a note\n"), ("chore: other", "src/other.py")]
+  w = prepared(world, tmp_path, monkeypatch, commits=commits, base_files={Q: "def test_a():\n  assert 1 == 1\n"}, **kw)
+  code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
+  assert code == 0, out
+  foreman_findings_lines = (w.dir / "r1/foreman.findings").read_text(encoding="utf-8").splitlines()
+  located = [line.split(" | ", 2)[2] for line in foreman_findings_lines]
+  assert "tests/unit/test_q.py | regression: no | changed path outside Scope paths" not in located
+  assert "src/other.py | regression: no | changed path outside Scope paths" in located
