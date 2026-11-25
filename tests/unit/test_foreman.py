@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U10's tests of the foreman's helper subcommands.
-# Modified by SuperEGM (gsVAM), 2026: collect reads rulings through `ruling_of` and the record (U22).; the forge check drops an outer run's `GIT_CONFIG_` pairs (1.2.1 wave fix); the cap tests set the review's stored `cap` in place of the `review.CAP` monkeypatch (U36); the Astra brief's sections pin includes `Amendments` (U97); the `prepared:` line's full head and `collected:` pinned by its first line (U101's recovering a round, 1.3 design section 3.4).
+# Modified by SuperEGM (gsVAM), 2026: collect reads rulings through `ruling_of` and the record (U22).; the forge check drops an outer run's `GIT_CONFIG_` pairs (1.2.1 wave fix); the cap tests set the review's stored `cap` in place of the `review.CAP` monkeypatch (U36); the Astra brief's sections pin includes `Amendments` (U97); the `prepared:` line's full head and `collected:` pinned by its first line (U101's recovering a round, 1.3 design section 3.4); the seed config carries each kind's fixed panel (U109, 1.3 design section 3.10).
 
 """U10: foreman dispatch, prepare, collect, tdd-order, review post. This file replaces U03's nine moved
 prepare/collect tests (they pin `--round`, `--run-folder`, `--verdict`, `head-moved`, `launched` and `--remove`:
@@ -13,6 +13,7 @@ from conftest import make_pr, set_config
 import superegm as core
 from superegm import store, atomic_write, sha256_file, DEFAULT_CONFIG
 from superegm import review as review_mod, tdd_order
+from superegm.review import PANEL_OF
 from superegm import foreman as foreman_mod
 from superegm.prepare import cut_diff, prior_round_text
 from test_builder_token import APP
@@ -132,7 +133,7 @@ def seed(world, *, head="a" * 40, ci="success", launches=({"round": 1, "status":
   `card = world.open_card("wave", str(world.spec))`."""
   spec = world.spec.resolve()
   set_config(world, repo=REPO, banned_terms=["(?i)secret-codename"],
-             reviewers={"spec": [], "plan": [], "head": ["change-review"], "integrate": []},
+             reviewers={kind: panel.split(",") for kind, panel in PANEL_OF.items()},
              **({"builder": builder} if builder else {}), **({"astra": astra} if astra else {}),
              **({"foreman": foreman} if foreman else {}), owners=owners or ["owner"])
   plan = (f"# Handoff plan: Webhook delivery\n\nDesign: `{spec}`\n\n## Global constraints\n- none\n\n"
