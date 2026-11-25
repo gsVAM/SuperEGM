@@ -71,6 +71,15 @@ def test_copies_count_once_in_the_reviewers_and_units_tables(world, rounds, ruli
   assert tables[row][column] == value
 
 
+def test_a_settled_copy_settles_no_unrelated_finding_of_the_same_id(world):
+  # ids repeat across a unit's head cycles: cycle 2's own `ext-1` (another claim) is not the finding cycle 1's copy settled
+  c, _, _ = two_units(world)
+  head_rounds(c, [{"external:octo": [EXTERNAL]}, {"foreman": [found("foreman-2-1", UNREPLIED, disposition="fixed")]}])
+  reviewed(c, "head-U01-c2", "head", "U01", ["external:octo"], {"external:octo": {"findings": [found("ext-1", "another defect")]}})
+  row = keyed(report_of(world, c), "Reviewers", 2)[("external:octo", "head")]
+  assert (row["high"], row["fixed"]) == ("2", "1")
+
+
 def test_not_run_round_is_no_head_round(world):
   # U01's head round 1 ran; round 2's foreman entry is `prepared` and its reviewers hold only `review record --not-run` records
   c, _, _ = two_units(world)
