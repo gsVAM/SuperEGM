@@ -489,7 +489,8 @@ def reviewer_rows(st: core.Store, hs: core.Store, spec) -> list:
 
 
 def unit_rows(hs: core.Store, uids: list) -> list:
-  """A unit with an escalated launch, and one row per cap decision whose own ruling was a stop."""
+  """A unit with an escalated launch, and one row per cap decision whose own ruling was a stop or a `redesign` (U110): the
+  cap ruling that ends the unit's builds, as `stop` does."""
   rows = []
   for uid in uids:
     escalated = [e for e in launch.load_launches(hs, uid) if e.get("escalated")]
@@ -499,7 +500,7 @@ def unit_rows(hs: core.Store, uids: list) -> list:
     for decision in foreman.get("decisions") or []:
       if str(decision.get("source") or "").endswith(" cap"):
         given = [r for r in foreman.get("rulings") or [] if r.get("decision") == decision.get("id")]
-        if any(str(r.get("ruling") or "").startswith("stop") for r in given):
+        if any(str(r.get("ruling") or "").startswith(("stop", "redesign")) for r in given):
           rows.append(["unit stopped at the cap", uid, f"foreman/{uid}.json {decision.get('id')}", str(decision.get("source"))])
   return rows
 
