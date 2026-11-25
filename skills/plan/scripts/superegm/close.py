@@ -5,7 +5,7 @@
 # U111's merge read from GitHub saved into `units.<U>.pr.merged_at` (1.3 design section 3.10).
 
 """superegm close [--note <text>]: close the handoff under an integrate card. GitHub reads: each redesign-stopped
-unit's issue (each read journaled; one open, it refuses with `state.json` untouched and nothing closed), each unlanded unit's recorded PR through `gh api repos/<repo>/pulls/<n>` (merged lands it for this close, and a `merged_at` the read carries is saved into an existing `units.<U>.pr` object for `clean --auto`, before `closed_at`) and each landed unit's issue;
+unit's issue (each read journaled; one open, it refuses with `state.json` untouched and nothing closed), each unlanded unit's recorded PR through `gh api repos/<repo>/pulls/<n>` (merged lands it for this close, and a `merged_at` the read carries is saved into an existing `units.<U>.pr` object of that PR number for `clean --auto`, before `closed_at`) and each landed unit's issue;
 GitHub writes: `gh issue close --reason completed` of each landed unit's open issue and, every unit landed, of
 the tracking issue, each journaled (an already-closed issue reads as done); `--note` journaled as
 `close: note <text>`; then `closed_at` written last, once, in its `state.json` and its `handoffs/<id>.json`
@@ -62,8 +62,9 @@ def run(args):
     if not landed and unit.get("pr"):
       pull = core.gh_json(["api", f"repos/{repo}/pulls/{unit['pr']}"]) or {}
       landed = bool(pull.get("merged"))
-      if landed and pull.get("merged_at") and isinstance(record.get("pr"), dict):
-        # The merge saved for `clean --auto`, before `closed_at`, only into an existing `pr` object
+      if landed and pull.get("merged_at") and isinstance(record.get("pr"), dict) and record["pr"].get("number") == unit["pr"]:
+        # The merge saved for `clean --auto`, before `closed_at`, only into an existing `pr` object of the PR read
+        # (a `status --watch` after the snapshot may have recorded another PR)
         record["pr"]["merged_at"] = pull["merged_at"]
         core.atomic_write(st.path("state"), state)
     if not landed:
