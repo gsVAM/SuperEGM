@@ -422,9 +422,9 @@ def collect(args, card):
     rnd["reviewers"]["astra"]["brief_sha256"] = core.sha256_file(brief)
   rnd["what_ran"] = review.derive_what_ran(review.load_review(st, rid), rnd, {**entry, "phase": "collected"})  # as the phase will stand
   core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
-  entry["phase"] = "collected"  # saved last: a failure above leaves the round `prepared`, and `collect` run again completes it
-  core.save_foreman(st, unit, data)
   core.journal(st, f"{unit} round {n} collected: {len(lines)} foreman findings under {args.runcard}")
+  entry["phase"] = "collected"  # the last write: a failure above (the journal line included) leaves the round `prepared`, and `collect` run again completes it
+  core.save_foreman(st, unit, data)
   print(f"collected: {len(lines)} foreman findings")
   for line in lines:  # each finding's line, as recorded in `r<n>/foreman.findings`, not only the count
     print(line)

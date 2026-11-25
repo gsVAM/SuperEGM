@@ -778,7 +778,7 @@ def record_round(args) -> int:
     head = instructions.blob(root, "HEAD", spec.resolve().relative_to(root.resolve()).as_posix())
     if head is None or hashlib.sha256(head).hexdigest() != sha:
       raise core.HandoffError(f"review record: respec {review['respec']}: {spec} differs from HEAD: commit the correction")
-  if kind == "head" and args.sha256 and not re.fullmatch(r"[0-9a-f]{40}", args.sha256):  # a head's bytes are its commit: the full sha, never a prefix or a digest
+  if kind == "head" and args.sha256 is not None and not re.fullmatch(r"[0-9a-f]{40}", args.sha256):  # a head's bytes are its commit: the full sha, never a prefix or a digest
     raise core.HandoffError(f"review record: --sha256 on a head takes the full 40-hex commit sha, not {args.sha256!r}")
   if kind == "head":
     sha = args.sha256 or (existing["artifact_sha256"] if existing else review["artifact_sha256"] if n == 1 else None)
