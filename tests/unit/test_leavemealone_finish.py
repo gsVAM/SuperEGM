@@ -2,6 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: U11's tests: `judges question`, the leavemealone routing, `close`, the
 # integrate skill, the docs, the README and the removed-mechanism sweep; the `blocked-launch` and `blocked-closed`
 # forms read the pending point-3 decision (U31); `close` closes a merged unit's open issue and the tracking issue, `--note` (U32).
+# Modified by SuperEGM (gsVAM), 2026: a head's recorded sha is a full 40-hex commit sha (U101's recovering a round, 1.3 design section 3.4).
 
 """U11: leavemealone routing and finish (design sections 12, 13.2 and 15)."""
 
@@ -15,7 +16,7 @@ from conftest import REPO
 from superegm import atomic_write, store
 
 ROOT = Path(__file__).resolve().parents[2]
-HEAD = "a" * 64
+HEAD = "a" * 40  # a head's sha: the full 40-hex commit sha (U101)
 FINDING = "change-review-1-1 | high | src/x.py:3 | regression: no | the retry loop never backs off"
 LOW = "change-review-1-2 | low | src/x.py:9 | regression: no | a stray print"
 CI = "foreman-1-1 | high | ci | regression: no | CI not green on this head"
