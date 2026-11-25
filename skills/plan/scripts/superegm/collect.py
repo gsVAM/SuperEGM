@@ -244,40 +244,50 @@ def enclosing_tests(lines: list) -> list:
   """The qualified name of the test enclosing each of `lines` (spec section 3.5): the nearest enclosing `def test_*`,
   after the classes around it (`TestA.test_x`), or `<module>` outside a test. A test spans its `def` statement as
   Python's syntax reads it (`ast`), its decorators included: a signature over several lines, or a string's lines at
-  any indentation, neither ends it nor opens another. A text Python cannot parse falls back to `indented_tests`."""
+  any indentation, neither ends it nor opens another. A text Python cannot parse, or whose tree is too deep for its
+  parser (`RecursionError`), falls back to `indented_tests`: the round never stops on a test file's shape."""
   try:
     tree = ast.parse("\n".join(lines))
-  except (SyntaxError, ValueError):
+  except (SyntaxError, ValueError, RecursionError, MemoryError):
     return indented_tests(lines)
   names = ["<module>"] * len(lines)
-
-  def visit(node, classes):
+  stack = [(tree, [])]  # an explicit stack, outer nodes first: a deep tree never recurses here
+  while stack:
+    node, classes = stack.pop()
     for child in ast.iter_child_nodes(node):
       if isinstance(child, ast.ClassDef):
-        visit(child, classes + [child.name])
+        stack.append((child, classes + [child.name]))
         continue
       if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) and child.name.startswith("test_"):
         start = min([d.lineno for d in child.decorator_list] + [child.lineno]) - 1
         names[start:child.end_lineno] = [".".join(classes + [child.name])] * (child.end_lineno - start)
-      visit(child, classes)  # a test nested in this one overwrites its own lines: the nearest encloses them
-  visit(tree, [])
+      stack.append((child, classes))  # a test nested in this one is named after it: the nearest encloses its lines
   return names
 
 
 def indented_tests(lines: list) -> list:
-  """`enclosing_tests` by indentation, for a text Python cannot parse: a block ends at the next code line at its
-  own indentation or less; a line takes the nearest enclosing `def test_*`, after the classes around it; a
-  decorator line, and every line down to the `def` it decorates, belongs to the test that `def` opens."""
+  """`enclosing_tests` by indentation, for a text Python cannot parse: a block ends at the next statement line at its
+  own indentation or less; a line that opens inside a bracket or a string (`statement_starts`: a signature's closing
+  `):`, a triple-quoted string's lines) ends no block and opens none; a line takes the nearest enclosing
+  `def test_*`, after the classes around it; a blank or comment line takes a test's name only between two lines of
+  that test, as `ast`'s spans have it; a decorator line, and every line down to the `def` it decorates, belongs to
+  the test that `def` opens."""
   names, scopes = [], []  # scopes: (indent, name, is_class), outermost first
+  starts = statement_starts(lines)
 
   def qualified():
     tests = [k for k, (_, name, is_class) in enumerate(scopes) if not is_class and name.startswith("test_")]
     if not tests:
       return "<module>"
     return ".".join([name for _, name, is_class in scopes[:tests[-1]] if is_class] + [scopes[tests[-1]][1]])
-  for line in lines:
+  filler = []  # each blank or comment line at a statement's place: named once the next statement is
+  for j, line in enumerate(lines):
     s = line.strip()
-    if s and not s.startswith("#"):
+    if starts[j] and (not s or s.startswith("#")):
+      filler.append(j)
+      names.append(None)
+      continue
+    if starts[j]:
       indent = len(line) - len(line.lstrip())
       while scopes and scopes[-1][0] >= indent:
         scopes.pop()
@@ -286,10 +296,48 @@ def indented_tests(lines: list) -> list:
       elif m := ANY_DEF_RE.match(line):
         scopes.append((indent, m.group(1), False))
     names.append(qualified())
+    before = next((names[k] for k in range(filler[0] - 1, -1, -1) if names[k] is not None), None) if filler else None
+    for k in filler:
+      names[k] = names[j] if before == names[j] else "<module>"
+    filler = []
+  for k in filler:
+    names[k] = "<module>"
   for j, line in enumerate(lines):  # a decorator and the lines down to its `def`: that def's test
-    if line.strip().startswith("@") and (d := decorated(lines, j)) < len(lines):
+    if starts[j] and line.strip().startswith("@") and (d := decorated(lines, j)) < len(lines):
       names[j:d] = [names[d]] * (d - j)
   return names
+
+
+def statement_starts(lines: list) -> list:
+  """Whether each of `lines` opens outside any bracket, string or backslash continuation: a light scan of quotes
+  (single, double, triple), brackets and comments, for a text `ast` cannot read."""
+  starts, depth, quote, joined = [], 0, None, False
+  for line in lines:
+    starts.append(depth == 0 and quote is None and not joined)
+    i, joined = 0, False
+    while i < len(line):
+      ch = line[i]
+      if quote:
+        if line.startswith(quote, i):
+          i, quote = i + len(quote), None
+          continue
+        i += 2 if ch == "\\" else 1
+        continue
+      if ch == "#":
+        break
+      if ch in "'\"":
+        quote = ch * 3 if line.startswith(ch * 3, i) else ch
+        i += len(quote)
+        continue
+      if ch in "([{":
+        depth += 1
+      elif ch in ")]}":
+        depth = max(0, depth - 1)
+      i += 1
+    if quote and len(quote) == 1:  # a one-quote string ends at its line, unless the line continues it
+      quote = quote if line.endswith("\\") else None
+    joined = quote is None and depth == 0 and line.rstrip().endswith("\\") and not line.lstrip().startswith("#")
+  return starts
 
 
 def delta_files(worktree: Path, base: str, head: str, commits: list, named: set) -> tuple:
