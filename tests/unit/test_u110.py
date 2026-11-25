@@ -99,3 +99,31 @@ def test_cap_ruling_stop_or_redesign_is_a_lesson(world, ruling):
       "decisions": [{"id": "q1", "point": 2, "source": "review head-U01-c1 cap", "asked_at": "2026-11-16T00:00:00Z"}]})
   lessons = lesson_rows(world, c)
   assert [r[:3] for r in lessons if r[0] == "unit stopped at the cap"] == [["unit stopped at the cap", "U01", "foreman/U01.json q1"]]
+
+
+def open_spec_cycle(c, n, extra, disposition="fix-design"):
+  """Spec cycle `n` of the handoff's spec, its `review.json` holding `extra`, its round 1 holding one finding settled `disposition`."""
+  from test_review import SLUG
+  rid = f"spec-{SLUG}-c{n}"
+  jwrite(c.hs.path("reviews", rid, "review.json"), {"kind": "spec", "artifact": str(c.spec), "cycle": n, "reviewers": ["design"],
+                                                    "runcard": "rc", "converged": "no", "rulings": [], **extra})
+  jwrite(c.hs.path("reviews", rid, "round-1.json"), {"round": 1, "runcard": "rc", "reviewers": {
+      "design": {"findings": [found("design-1-1", "the range is wrong", disposition=disposition)]}}})
+
+
+@pytest.mark.parametrize("review_json, rows", [
+    ({"respec": "R1", "handoff_id": "<this handoff>"}, 1),     # this handoff's respec cycle, never approved
+    ({"respec": "R1", "handoff_id": "<another handoff>"}, 0),
+    ({}, 0),                                                    # a plain spec cycle opened after the last entry
+])
+def test_unapproved_respec_cycle_findings_are_kept(world, review_json, rows):
+  # spec cycle c3 opened after the handoff's last approval entry (c2) and in no entry
+  from test_review import SLUG
+  from test_u43 import jread
+  c, _, _ = two_units(world)
+  path = c.root / "approvals" / f"{SLUG}.json"
+  record = jread(path)
+  jwrite(path, {**record, "entries": [{**record["entries"][-1], "review": f"spec-{SLUG}-c2"}]})
+  open_spec_cycle(c, 3, {k: c.hid if v == "<this handoff>" else v for k, v in review_json.items()})
+  lessons = lesson_rows(world, c)
+  assert len([r for r in lessons if r[0] == "fix-design finding"]) == rows
