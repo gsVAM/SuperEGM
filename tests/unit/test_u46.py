@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U46's tests: the registry-driven config merge.
+# Modified by SuperEGM (gsVAM), 2026: the 60-minute `stall_minutes` default pin (U100, 1.3 design section 3.3)
 
 """U46: `load_config` merges every registered object default one level and takes the builder defaults from the registry."""
 
@@ -36,7 +37,7 @@ def test_builder_defaults_from_the_registry(world, app, ok):
     config = superegm.load_config(world.repo)
     assert config["builder"]["app"]["private_key_env"] == "SUPEREGM_APP_KEY"
     assert {k: config["builder"][k] for k in ("plugins", "mcp", "max_subagent_calls", "stall_minutes")} == \
-        {"plugins": [], "mcp": {}, "max_subagent_calls": 12, "stall_minutes": 30}
+        {"plugins": [], "mcp": {}, "max_subagent_calls": 12, "stall_minutes": 60}
   else:
     with pytest.raises(superegm.HandoffError, match="builder.app"):
       superegm.load_config(world.repo)
