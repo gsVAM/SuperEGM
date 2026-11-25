@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # From the elephant-goldfish-model (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17); an unreplied external high or medium carried forward (U21); rulings read through `ruling_of` and the record, every folded deviation heading (U22); the DoD re-run and the test delta, two gates before the word (U25); its own `foreman` config key and `init` line, moved from `__init__` and `init` (U32); both `binding_rulings` calls drop the consumed comments, so an edited recorded proceed waives no check (U94); the worktree checks in `worktree_checks`, the one function `collect` and `precheck` call, the posted rounds' settled findings in `posted_findings`, the reading both share, and the changed paths read NUL-separated, one with a control character shown JSON-quoted (U67); the `spec` deviation kind in `DEVIATION_RE`, and `--spec`, the foreman's own finding of kind `spec` held in its round (U84); a contest of a settled fid, or of one derived from it, dropped, an owner's `test-delta <file> allowed` widening Scope, and a test-delta settlement keyed by the test and the line text, bound by its ruling's time to the entry it ruled on (U102, 1.3 design section 3.5).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17); an unreplied external high or medium carried forward (U21); rulings read through `ruling_of` and the record, every folded deviation heading (U22); the DoD re-run and the test delta, two gates before the word (U25); its own `foreman` config key and `init` line, moved from `__init__` and `init` (U32); both `binding_rulings` calls drop the consumed comments, so an edited recorded proceed waives no check (U94); the worktree checks in `worktree_checks`, the one function `collect` and `precheck` call, the posted rounds' settled findings in `posted_findings`, the reading both share, and the changed paths read NUL-separated, one with a control character shown JSON-quoted (U67); the `spec` deviation kind in `DEVIATION_RE`, and `--spec`, the foreman's own finding of kind `spec` held in its round (U84); it prints each foreman finding's line, and saves the round's `collected` phase last, so a failed `collect` leaves the round `prepared` (U101, 1.3 design section 3.4); a contest of a settled fid, or of one derived from it, dropped, an owner's `test-delta <file> allowed` widening Scope, and a test-delta settlement keyed by the test and the line text, bound by its ruling's time to the entry it ruled on (U102, 1.3 design section 3.5).
 
 """superegm collect: the foreman's findings of a round through one `review record --reviewer foreman`, or a
 round that could not complete with `--not-run`."""
@@ -536,8 +536,6 @@ def collect(args, card):
         isolation="clean", model="-:-", effort="-:-", runcard=args.runcard, unit=None, design=None, plan=None))
   if code != 0:
     raise core.HandoffError(f"review record exited {code}")
-  entry["phase"] = "collected"
-  core.save_foreman(st, unit, data)
   rnd = review.load_round(st, rid, n)
   posted_now = iter(rnd["reviewers"]["foreman"]["findings"])  # in the order raised: `test_delta` pairs with it
   rnd["reviewers"]["foreman"]["findings"] = [slot or next(posted_now) for slot in slots]
@@ -545,10 +543,14 @@ def collect(args, card):
   brief = r / "astra_brief.md"
   if "astra" in rnd["reviewers"] and brief.is_file():  # the lane's record names the brief the runner read
     rnd["reviewers"]["astra"]["brief_sha256"] = core.sha256_file(brief)
-  rnd["what_ran"] = review.derive_what_ran(review.load_review(st, rid), rnd, entry)
+  rnd["what_ran"] = review.derive_what_ran(review.load_review(st, rid), rnd, {**entry, "phase": "collected"})  # as the phase will stand
   core.atomic_write(st.path("reviews", rid, f"round-{n}.json"), rnd)
   core.journal(st, f"{unit} round {n} collected: {len(lines)} foreman findings under {args.runcard}")
+  entry["phase"] = "collected"  # the last write: a failure above (the journal line included) leaves the round `prepared`, and `collect` run again completes it
+  core.save_foreman(st, unit, data)
   print(f"collected: {len(lines)} foreman findings")
+  for line in lines:  # each finding's line, as recorded in `r<n>/foreman.findings`, not only the count
+    print(line)
   return 0
 
 

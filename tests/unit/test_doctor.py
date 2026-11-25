@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U14's tests of `superegm doctor` (spec section 11); the App lines and the launched environment (U15); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five driver lines (U24); the informational `stall:` line (U31); the modules' `astra:` and `graphify:` lines last (U32); the three `model: builder` lines (U33); the informational `chain:` line (U54).
+# Added by SuperEGM (gsVAM), 2026: U14's tests of `superegm doctor` (spec section 11); the App lines and the launched environment (U15); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five driver lines (U24); the informational `stall:` line (U31); the modules' `astra:` and `graphify:` lines last (U32); the three `model: builder` lines (U33); the informational `chain:` line (U54); the `stall: 60 min` default (U100, 1.3 design section 3.3).
 
 """`superegm doctor`: one line per wave prerequisite, `ok` or the refusal `launch` or `launch-builder`
 would give, in a pinned order; no run card, no store write."""
@@ -25,7 +25,7 @@ MODULES = ["chain: off","astra: not installed (heads will record not run)", "gra
 OK = ["config: ok", "owner: ok (owner)", "origin: ok", "token: ok", "builder: ok (builder-bot)", "role: ok (write)",
       "scopes: ok (classic: repo, read:org)", "protection: ok",
       "merge: gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset restricts updates to config.owners)", "profile: ok", "plugins: none", "mcp: none", "reviewers: none", "gh: ok (/usr/local/bin/gh)", "environment: ok",
-      "stall: 30 min", "python3.12: not on PATH (informational)", "hooks: none", "core.hooksPath: unset", *DRIVER_NONE, *ROLES,
+      "stall: 60 min", "python3.12: not on PATH (informational)", "hooks: none", "core.hooksPath: unset", *DRIVER_NONE, *ROLES,
       *MODULES]
 NAMES = [line.split(":")[0] for line in OK]
 
@@ -117,7 +117,7 @@ def test_doctor_prints_the_plugins_and_mcp_lines(world, monkeypatch, tmp_path, s
 OK_APP = ["config: ok", "owner: ok (owner)", "origin: ok", "credential: ok (app superegm-builder)", "key: ok ({key})", "openssl: ok ({openssl})", "artifacts_dir: ok",
           "app: ok (superegm-builder #12345)", f"permissions: ok ({FOUR[1:-1]})", "token: ok", "installation: ok (example-org/webhooks)",
           "scanning: push protection enabled, non-provider patterns enabled", "protection: ok",
-          "merge: gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset restricts updates to config.owners)", "profile: ok", "plugins: none", "mcp: none", "reviewers: none", "gh: ok ({gh})", "environment: ok", "stall: 30 min",
+          "merge: gh pr merge --admin (informational: the owner merges with the admin bypass where the base ruleset restricts updates to config.owners)", "profile: ok", "plugins: none", "mcp: none", "reviewers: none", "gh: ok ({gh})", "environment: ok", "stall: 60 min",
           "python3.12: not on PATH (informational)", "hooks: none", "core.hooksPath: unset", *DRIVER_NONE, *ROLES, *MODULES]
 
 

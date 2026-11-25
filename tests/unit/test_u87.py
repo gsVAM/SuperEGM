@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U87's tests, spec sections 7.5 and 7.7: the post-mortem's Lessons table, `postmortem --retro` and the retro skill.
+# Added by SuperEGM (gsVAM), 2026: U87's tests, spec sections 7.5 and 7.7: the post-mortem's Lessons table, `postmortem --retro` and the retro skill; U110's fixes (1.3 design section 3.10, #249): the Reply label fixture, an honest comment and a phrase matched across a line break.
 
 """U87: the Lessons table, `superegm postmortem --retro <file>` and the `/superegm:retro` skill."""
 
@@ -70,12 +70,12 @@ def test_lessons_respec_evidence_runs_to_the_next_comment_label(world):
 def test_lessons_respec_evidence_label_is_a_whole_label(world):
   # bold text that only begins with a label word (`**Status mismatch:**`) is evidence; the whole label ends it
   body = ("**Deviation (spec):** docs/specs/x.md:12 requires success\n\n**Status mismatch:** `pytest -k retry` fails\n\n"
-          "**Reply later:** kept\n**Builder status:** BLOCKED\n")
+          "**Replying later:** kept\n**Builder status:** BLOCKED\n")
   c = respec_world(world, lambda args: (0, json.dumps({"id": 901, "body": body}), ""))
   code, out = world.run("postmortem", "--handoff", c.hid)
   assert code == 0, out
   row = lessons(c.hs.path("file", "postmortem.md").read_text(encoding="utf-8"))[0]
-  assert "requires success **Status mismatch:** `pytest -k retry` fails" in row and "**Reply later:** kept" in row and "BLOCKED" not in row
+  assert "requires success **Status mismatch:** `pytest -k retry` fails" in row and "**Replying later:** kept" in row and "BLOCKED" not in row
 
 
 def test_lessons_respec_evidence_unread(world):
@@ -183,8 +183,9 @@ def test_reviewer_rows_a_tie_lists_every_tied_reviewer_by_name(world):
 
 
 def test_integrate_summary_line_names_the_lessons_row(world):
-  # the integrate close summary names the reviewer as the Lessons row does: overruled plus allowed, a tie in reviewer-id order, and a
-  # reviewer whose every finding was overruled or allowed is "reviewer kept nothing", not "reviewer most overruled"
+  # the integrate skill's summary wording for a tie (every tied reviewer, each on its own Lessons row in reviewer-id order) and for a
+  # reviewer whose every finding was overruled or allowed ("reviewer kept nothing", not "reviewer most overruled") is the Lessons rows'
+  # (the overruled-plus-allowed sum itself is pinned by `test_round_4_skill_wording`)
   said = " ".join(text("skills/integrate/SKILL.md").split())
   assert ("a tie lists every tied reviewer, each on its own Lessons row in reviewer-id order (sorted by name); a reviewer whose every "
           "finding was overruled or allowed gets the row \"reviewer kept nothing\", not \"reviewer most overruled\"") in said
@@ -356,10 +357,10 @@ def test_retro_skill_text(phrase):
 
 @pytest.mark.parametrize("path, phrase", [("skills/retro/SKILL.md", "a reviewer kept\n   nothing or most overruled"),
                                           ("skills/retro/SKILL.md", "A legacy flat-store handoff keeps its own files"),
-                                          ("skills/integrate/SKILL.md", "Reviewers, overrules, the overruled\nand allowed columns together")])
+                                          ("skills/integrate/SKILL.md", "Reviewers, overrules, the overruled and allowed columns together")])
 def test_round_4_skill_wording(path, phrase):
   # the retro agenda names the spec's row ("kept nothing"), a legacy handoff's files sit at the store root, and integrate's line sums the allowances
-  assert phrase in text(path)
+  assert " ".join(phrase.split()) in " ".join(text(path).split())  # whitespace as one space: a phrase is no raw line break
 
 
 @pytest.mark.parametrize("path, phrase", [("skills/integrate/SKILL.md", "/superegm:retro"), ("skills/using-superegm/SKILL.md", "/superegm:retro")])

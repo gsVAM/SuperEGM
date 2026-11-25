@@ -1,10 +1,11 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the close subcommand (spec section 12): `closed_at`, every unlanded unit journaled;
 # it refuses while a redesign-stopped unit's issue is open (one GitHub read per such unit); `write_closed`, `closed_at` in the state and handoffs/<id>.json (U20).
-# a merged unit's open issue and, all landed, the tracking issue closed as completed; `--note` (U32); the follow-ups block (U51).
+# a merged unit's open issue and, all landed, the tracking issue closed as completed; `--note` (U32); the follow-ups block (U51);
+# U111's merge read from GitHub saved into `units.<U>.pr.merged_at` (1.3 design section 3.10).
 
 """superegm close [--note <text>]: close the handoff under an integrate card. GitHub reads: each redesign-stopped
-unit's issue (each read journaled; one open, it refuses with `state.json` untouched and nothing closed), each unlanded unit's recorded PR through `gh api repos/<repo>/pulls/<n>` (merged lands it for this close) and each landed unit's issue;
+unit's issue (each read journaled; one open, it refuses with `state.json` untouched and nothing closed), each unlanded unit's recorded PR through `gh api repos/<repo>/pulls/<n>` (merged lands it for this close, and a `merged_at` the read carries is saved into an existing `units.<U>.pr` object of that PR number for `clean --auto`, before `closed_at`) and each landed unit's issue;
 GitHub writes: `gh issue close --reason completed` of each landed unit's open issue and, every unit landed, of
 the tracking issue, each journaled (an already-closed issue reads as done); `--note` journaled as
 `close: note <text>`; then `closed_at` written last, once, in its `state.json` and its `handoffs/<id>.json`
@@ -59,7 +60,10 @@ def run(args):
     unit = saved.get(uid) or {}
     landed = bool(unit.get("landed"))
     if not landed and unit.get("pr"):
-      landed = bool((core.gh_json(["api", f"repos/{repo}/pulls/{unit['pr']}"]) or {}).get("merged"))
+      pull = core.gh_json(["api", f"repos/{repo}/pulls/{unit['pr']}"]) or {}
+      landed = bool(pull.get("merged"))
+      if landed and pull.get("merged_at"):
+        save_merge(st, uid, unit["pr"], pull["merged_at"])
     if not landed:
       unlanded.append(uid)
       core.journal(st, f"close: {uid} unlanded")
@@ -75,11 +79,23 @@ def run(args):
           for uid in sorted(state.get("units") or {}) for r in core.load_foreman(st, uid).get("followups") or []]
   for row in rows:
     core.journal(st, f"close: follow-up {row}")
+  state = core.load_state(st.root)  # read again after the GitHub reads: another writer's record (a `status --watch`) is kept
   write_closed(st, state, None)
   print(f"closed {state['handoff_id']}; unlanded: {', '.join(unlanded) or 'none'}")
   if rows:
     print("\n".join(["Follow-ups:", *(f"- {row}" for row in rows)]))
   return 0
+
+
+def save_merge(store: core.Store, uid: str, number: int, merged_at: str) -> None:
+  """The merge of PR `number` saved for `clean --auto` as `units.<uid>.pr.merged_at`, before `closed_at`: `state.json` read
+  again first (a `status --watch` may have recorded another PR while `close` waited on GitHub), and written only into an
+  existing `pr` object whose `number` is the PR read."""
+  state = core.load_state(store.root)
+  record = ((state.get("units") or {}).get(uid) or {}).get("pr")
+  if isinstance(record, dict) and record.get("number") == number:
+    record["merged_at"] = merged_at
+    core.atomic_write(store.path("state"), state)
 
 
 def close_issue(store: core.Store, repo: str, label: str, number: int) -> None:

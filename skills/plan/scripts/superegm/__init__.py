@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes and the one stamp formatter and parser (U31); `discover()`, CORE_CONFIG and SUBCOMMANDS and DEFAULT_CONFIG derived from the modules (U32); the `Tier:` field, `builder.tiers`, `tier_pair` and `unit_tier` (U33); the brainstorm.team key (U34); the one-level merge of every registered object default and the builder defaults read from the registry (U46); the chain and tick store kinds, and `runcard open`'s default mode the frozen one (U43); the store-level instructions kind (U37); the driven card of every chain phase, the top-level cards the tick reads by the chain and the unwritten `driver` key (U44); `reboot_launches` records `subagent_calls` (U49); `Graph(plan, approval)` splits the blockers from the shared-file merge orders under an approval entry with `rounds` (U61); `read_pr` and `pr_record` read `mergeable` (U62); the `reviewers` store kind, `reviewers/<blob sha>.json` (U76); the optional `Corrected` field (U90).
+# Modified by SuperEGM (gsVAM), 2026: EGM's helper split into this package; the shared names live here, one module per subcommand; the orient and orient_unit store kinds (spec section 9.3); builder.app and the launches `_bin` form (U15); astra.heads and the head panel's informational `astra` entry (U17); the ingest key and the comment scan's size limit (U21); the notify_timeout_seconds key and the inbox module (U23); the foreman key, kill_group, hook-free git calls and the forced worktree removal (U25); the registry, the boot id, the driver store kind and runcard open's refusal while a tick's launch may be live (U24); builder.plugins, builder.mcp and builder.max_subagent_calls (U27); the default models and efforts per role and the builder and reviewers merge (U28); builder.stall_minutes and the one stamp formatter and parser (U31); `discover()`, CORE_CONFIG and SUBCOMMANDS and DEFAULT_CONFIG derived from the modules (U32); the `Tier:` field, `builder.tiers`, `tier_pair` and `unit_tier` (U33); the brainstorm.team key (U34); the one-level merge of every registered object default and the builder defaults read from the registry (U46); the chain and tick store kinds, and `runcard open`'s default mode the frozen one (U43); the store-level instructions kind (U37); the driven card of every chain phase, the top-level cards the tick reads by the chain and the unwritten `driver` key (U44); `reboot_launches` records `subagent_calls` (U49); `Graph(plan, approval)` splits the blockers from the shared-file merge orders under an approval entry with `rounds` (U61); `read_pr` and `pr_record` read `mergeable` (U62); the `reviewers` store kind, `reviewers/<blob sha>.json` (U76); the optional `Corrected` field (U90); U99's `gh_retry` one loop for every caller with `gh_json` through it, and `discover_pr`'s branch lookup (1.3 design section 3.2).
 
 """SuperEGM helper: the store, run cards, units -> graph, waves, issue bodies, dry run, GitHub.
 
@@ -890,6 +890,14 @@ class GhError(Exception):
         "rate limit" in text or "secondary" in text or "abuse" in text)
 
   @property
+  def transient(self) -> bool:
+    """An HTTP 502, 503 or 504, or a connection reset that came with no HTTP status
+    (a response of any other status, a 4xx above all, is never retried): worth trying again."""
+    if self.http_status is None:
+      return "connection reset" in (self.stdout + self.stderr).lower()
+    return self.http_status in (502, 503, 504)
+
+  @property
   def retry_after(self):
     match = re.search(r"(?im)^retry-after:\s*(\d+)", self.stdout)
     return int(match.group(1)) if match else None
@@ -934,21 +942,31 @@ def gh(args, *, token=None) -> str:
   return out
 
 
+TRANSIENT_BACKOFF = (1, 4, 16)
+
+
 def gh_retry(args) -> str:
-  """`gh` with the same bounded rate-limit retries the issue and link writes
-  get: a secondary limit on a label must not end the run at the first refusal."""
-  for attempt in range(4):
+  """`gh` with one bounded retry loop for every caller, reads and writes alike
+  (1.3 design section 3.2): a rate limit is slept off as it always was, and an
+  HTTP 502, 503 or 504 or a connection reset is retried up to three times after
+  1, 4 then 16 seconds. Any other error, a 4xx included, is raised at once."""
+  limited = transient = 0
+  while True:
     try:
       return gh(args)
     except GhError as error:
-      if error.rate_limited and attempt < 3:
+      if error.rate_limited and limited < 3:
+        limited += 1
         SLEEP(error.retry_after or 60)
-        continue
-      raise
+      elif error.transient and transient < len(TRANSIENT_BACKOFF):
+        SLEEP(TRANSIENT_BACKOFF[transient])
+        transient += 1
+      else:
+        raise
 
 
 def gh_json(args):
-  out = gh(args)
+  out = gh_retry(args)
   return json.loads(out) if out.strip() else None
 
 
@@ -2054,23 +2072,11 @@ def discover_pr(handoff: Handoff, uid, number):
              if ((n.get("repository") or {}).get("nameWithOwner") or "").lower() == repo.lower()]
   if matches:
     return matches, []
-  prs = gh_json(["pr", "list", "-R", repo, "--state", "all", "--limit", "1000", "--json",
-                 "number,state,headRefName,headRefOid,baseRefName,baseRefOid,closingIssuesReferences,isDraft,mergedAt,mergeable"]) or []
-  branch = handoff.branch(uid)
-  candidates = []
-  for pr in prs:
-    refs = pr.get("closingIssuesReferences") or []
-    for ref in refs:
-      repository = ref.get("repository") or {}
-      full = f"{(repository.get('owner') or {}).get('login')}/{repository.get('name')}"
-      if full.lower() == repo.lower() and ref.get("number") == number:
-        matches.append(pr_record(pr))
-        break
-    else:
-      head = pr.get("headRefName") or ""
-      if not refs and (head == branch or head.startswith(branch + "/")):
-        candidates.append(pr_record(pr))
-  return matches, candidates
+  # A unit's pull request is always on its own branch (1.3 design section 3.2): its result is a `--watch`
+  # candidate, never a match, so the list is the branch's alone and no 1,000-pull-request list is read.
+  prs = gh_json(["pr", "list", "-R", repo, "--head", handoff.branch(uid), "--state", "all", "--json",
+                 "number,state,headRefName,headRefOid,baseRefName,baseRefOid,isDraft,mergedAt,mergeable"]) or []
+  return matches, [pr_record(pr) for pr in prs]
 
 
 def read_ci(repo, sha):
