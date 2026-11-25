@@ -58,3 +58,28 @@ def test_gh_error_prints_one_line(world, monkeypatch, stderr):
   assert code == 1
   assert len(err.strip().splitlines()) == 1 and err.startswith("gh: ")
   assert "Traceback" not in out + err
+
+
+@pytest.mark.parametrize("graphql, on_branch, matches, candidates", [
+    ([41], [], [41], []),
+    ([], [52], [], [52]),  # PR 52's closingIssuesReferences name the unit's issue
+    ([], [53], [], [53]),  # PR 53 has none
+])
+def test_discover_pr_second_lookup_is_the_branch(world, graphql, on_branch, matches, candidates):
+  import superegm
+  from conftest import REPO, applied, handoff_store, make_pr, state_of
+  gh = applied(world)
+  state = state_of(world)
+  handoff_id, issue = state["handoff_id"], state["units"]["U01"]["number"]
+  branch = f"superegm/{handoff_id}/U01"
+  handoff = superegm.Handoff(superegm.here(state["plan"]), handoff_store(world))
+  gh.graphql[issue] = [{**make_pr(gh, n, "a" * 40, closes=[(REPO, issue)], branch=branch),
+                        "repository": {"nameWithOwner": REPO}} for n in graphql]
+  for n in on_branch:
+    make_pr(gh, n, "b" * 40, closes=[(REPO, issue)] if n == 52 else [], branch=branch)
+  found, cands = superegm.discover_pr(handoff, "U01", issue)
+  pr_list_calls = [c for c in gh.calls if c[:2] == ["pr", "list"]]
+  assert ([m["number"] for m in found], [c["number"] for c in cands]) == (matches, candidates)
+  assert bool(pr_list_calls) == (not graphql)
+  assert all(c[c.index("--head") + 1] == branch and c[c.index("--state") + 1] == "all"
+             and "1000" not in c for c in pr_list_calls)
