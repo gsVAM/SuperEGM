@@ -200,11 +200,11 @@ def carried_spans(units: dict, entries: list, maps: list) -> dict:
   return carried
 
 
-def comment_text(store: core.Store, handoff: str, text: str, unit: str, respec: str) -> str:
+def comment_text(store: core.Store, handoff: str, text: str, unit: str, respec: str, root: Path | None = None) -> str:
   """`respec_comment_<unit>_R<n>.md`: every diff hunk from the latest approved text to `text` that `hunk_units`, the
   rule `touched` runs, selects the unit for (its Design range, a shared line its body or a prior respec's added lines
-  quote, an Interfaces line it produces or consumes, an uncovered line), in diff order."""
-  ctx = context(store, handoff, text)
+  quote, an Interfaces line it produces or consumes, an uncovered line), in diff order; `root` as in `spec_of`."""
+  ctx = context(store, handoff, text, root)
   prev, new = ctx["prev"], ctx["new"]
   lines = [f"**Spec correction {respec}** for {unit}: the frozen spec changed; build to the lines below.", ""]
   picked = [op for op in ctx["ops"] if op[0] != "equal" and unit in set().union(*hunk_units(ctx, op)[:2])]
@@ -215,13 +215,14 @@ def comment_text(store: core.Store, handoff: str, text: str, unit: str, respec: 
   return "\n".join(lines)
 
 
-def touched(store: core.Store, handoff: str, text: str) -> dict:
+def touched(store: core.Store, handoff: str, text: str, root: Path | None = None) -> dict:
   """The units the diff from the handoff's latest approved text to `text` touches (spec section 7.6), as
   `respec/R<n>.json` holds them: `touched`, `untouched`, `follow_ups` (each merged unit the range or Interfaces
   test touches, the range it overlaps and the follow-up row naming it, or None), `line_map` (the opcodes from the
   latest approved text to `text`) and `merged_review` (a merged unit only the shared-text or uncovered-range test
-  touches). The draft (`--dry-run`) and the approval run this one function."""
-  ctx = context(store, handoff, text)
+  touches). The draft (`--dry-run`) and the approval run this one function; `root` as in `spec_of`, so the approval
+  runs from the main checkout after the worktree the spec was approved in is removed (U105)."""
+  ctx = context(store, handoff, text, root)
   units, merged, ops = ctx["units"], ctx["merged"], ctx["ops"]
   hit, overlap, review = set(), {}, set()  # range or Interfaces (any unit); shared text or uncovered (merged: review)
   selected = [(op, hunk_units(ctx, op)) for op in ops if op[0] != "equal"]
@@ -243,12 +244,12 @@ def touched(store: core.Store, handoff: str, text: str) -> dict:
           "line_map": ops, "merged_review": sorted(review - hit)}
 
 
-def context(store: core.Store, handoff: str, text: str) -> dict:
+def context(store: core.Store, handoff: str, text: str, root: Path | None = None) -> dict:
   """What `hunk_units` reads for the diff from the handoff's latest approved text to `text`: the units, their carried
   Design ranges, quoted lines (prior applied respecs' added lines included), Global constraints and Interfaces lines,
   the merged units and the spec's own Global constraints line numbers."""
   hs = core.handoff_store(store, handoff)
-  spec, entries, texts, maps = history(store, handoff)
+  spec, entries, texts, maps = history(store, handoff, root)
   root = core.git_toplevel(spec.parent)
   rel = spec.resolve().relative_to(root.resolve()).as_posix()
   prev, new = texts[-1], text.splitlines()
