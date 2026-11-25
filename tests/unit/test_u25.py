@@ -72,8 +72,7 @@ GONE = {3: "(1,),", 4: "(2,),", 6: "def test_a(x):", 7: "assert x == x", 8: "ass
 
 @pytest.mark.parametrize("head, named, expect", [
   (BASE.replace("assert x == x", "assert x == 1"), set(), []), (BASE.replace("  assert 1 in [1]\n", ""), set(), [E(8, 8, text=GONE[8])]), (BASE.replace("  assert 1 in [1]\n", ""), {F}, []),
-  (BASE.replace("assert x == x", "assert x"), set(), [E(7, 7, "weakened", "assert x", base_text=GONE[7])]),
-  (BASE.replace("pytest.raises", "contextlib.suppress"), set(), [E(9, 9, "weakened", "with contextlib.suppress(ValueError):", base_text=GONE[9])]),
+  (BASE.replace("assert x == x", "assert x"), set(), [E(7, 7, "weakened", "assert x", base_text=GONE[7])]), (BASE.replace("pytest.raises", "contextlib.suppress"), set(), [E(9, 9, "weakened", "with contextlib.suppress(ValueError):", base_text=GONE[9])]),
   (BASE.replace("  (2,),\n", ""), set(), [E(4, 4, text=GONE[4])]), (BASE.replace("  (1,),\n  (2,),\n", "  (2,),\n  (1,),\n"), set(), []),
   (BASE.replace("def test_a", "@pytest.mark.skip\ndef test_a"), set(), [M(6, 6)]), (None, set(), [E(n, n, text=GONE[n]) for n in (3, 4, 6, 7, 8, 9)]),
   (BASE.replace("def test_a", "@pytest.mark.skipif(True, reason='x')\ndef test_a"), set(), [M(6, 6, text="@pytest.mark.skipif(True, reason='x')")]),
