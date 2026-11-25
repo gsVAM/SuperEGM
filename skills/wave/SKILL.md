@@ -91,7 +91,7 @@ ignored except `landed` and `stalled`; the lines of a unit whose foreman is out,
 3. `exit` and `status` lines, one folded decision per unit. Record the exit: `superegm record-launch --unit <U> --exit <code> --runcard '<CARD>'`. It prints `failed resume` → step 6's `launch-builder` now (fresh), no decision. Then: `DONE` and `DONE_WITH_CONCERNS` need nothing (the head is reviewed at step 5); `BLOCKED` or `NEEDS_CONTEXT`, an exit with no PR (`pr=none`), or an interrupted launch → Decision point 3. `stalled`: `superegm record-launch --unit <U> --exit stalled --runcard '<CARD>'`, then Decision point 3 with the stall facts unless stopped; `kill_failed` idle.
 3b. `superegm review ingest` for every unit with an open PR (never a landed unit), awaiting-merge units included, stopped units excluded: `--unit <U> --runcard '<CARD>'` records the PR's new review threads as `external:<login>` findings into the latest posted round and prints `<n> ingested` (`0 ingested` before its first posted round). `outcome: revise`: the unit is ready again; `launch` marks it at step 6 when a slot is free (never `launch-builder` here). `outcome: cap-reached` → Decision point 2 (source `review <head-review-id> cap`). Exit 1: report the unit and the refusal line in chat; the batch goes on. A GitHub read or record refusal may clear on the next batch's retry, as does `unfinished ingest is not on the latest posted round`; `comment over 65,536 bytes`, `is not set: the builder's login is unknown`, `header present on` and a `review ingest: comment:<n>:` scan refusal repeat until the owner resolves them by hand, so say so each batch.
 4. `ruling` lines: an owner's `**Ruling:**` comment; apply it as `references/rulings.md`'s `ruling` bullet says.
-5. `superegm foreman dispatch` for every active unit with a head, `deadline` included, except a unit whose foreman has not returned (no call, no dispatch): `--unit <U> --runcard '<CARD>'`. Dispatch every accepted unit's foreman **in one message**, each through the `superegm:foreman` adapter with `references/foreman_brief.md`'s brief filled in, in the background beside `status --wait`; `collect` runs in the foreground, never with `run_in_background`. A returned word is applied at the next batch's step 5, after steps 1-4 and before its dispatch: `word_action` per returned word of an unstopped unit.
+5. `superegm foreman dispatch` for every active unit with a head, `deadline` included, except a unit whose foreman has not returned (no call, no dispatch): `--unit <U> --runcard '<CARD>'`. Dispatch every accepted unit's foreman **in one message**, each through the `superegm:foreman` adapter with `references/foreman_brief.md`'s brief filled in, in the background beside `status --wait`; `collect` runs in the foreground, never with `run_in_background`. A returned word is applied at the next batch's step 5, after steps 1-4 and before its dispatch: `word_action` per returned word of an unstopped unit, which awaits merge if a ruling since left `review status` 0.
 5b. `respec.actionable` (§7.6; the raising unit waits): `respec post R<n> <U> #<i> '<f>'` → `superegm scan --comment '<f>'` (a finding: say so, post nothing), then `GH_HOST=github.com gh issue comment <i> -R OWNER/NAME --body-file '<f>'`, then `superegm respec posted --respec R<n> --unit <U> --comment <the URL's id>`; `respec relaunch` → step 6, reason `respec`.
 6. `superegm launch`: `--idle <the report's idle list> --runcard '<CARD>'` (omit `--idle` on `none`) marks the ready units up to the free slots and prints `in flight:` and `marked:`; a clean `conflict` unit is marked once for its **merge round**. Per marked unit: `superegm launch-builder --unit <U> --round <n> --runcard '<CARD>'` (`<n>` is the launch count) alone: `launch-builder` starts the builder and records the launch, detached in its own session, and returns at once. A `launch-builder` refusal makes the unit idle for this invocation, no retry: `superegm report --idle '<U>=launch-builder: <reason>' --runcard '<CARD>'`.
 7. `superegm report`: `python3 '<HELPER>' report --runcard '<CARD>'`, then `python3 '<HELPER>' notify --runcard '<CARD>'` (the owner's `~/.superegm/notify` hook gets the new inbox lines; a failing or slow hook never stops the wave). If a decision was opened this batch, pause (outside SUPEREGM_ROLE=driver, above): ask the owner at its decision point and run `report` again once ruled. Else `loop: ended` and no 5b line of a non-idle unit → The end; else the next batch.
@@ -101,7 +101,7 @@ ignored except `landed` and `stalled`; the lines of a unit whose foreman is out,
 ## The word table
 
 `word_action(word, review_exit)`, where `review_exit` is the exit code of
-`superegm review status --review <head-review-id> --runcard '<CARD>'`:
+`superegm review status --review <head-review-id> --runcard '<CARD>'` (the unit's `head-<U>-c<n>` review):
 
 - `clean` → await-merge: nothing runs; the unit awaits the owner's merge and
   its slot is free; so after accept (point 5) or a proceed, but one pinning no head: `proceed again`.
@@ -113,20 +113,16 @@ ignored except `landed` and `stalled`; the lines of a unit whose foreman is out,
 - `cap-reached` → Decision point 2.
 - `owner: <ids>` → `decision open` for the owner's findings, ruled by the owner alone (no judge panel):
   no relaunch, no slot.
-- `error`, `target-moved`, or a return that is none of these words (no word
-  included) → redispatch: the head is reviewed again at
-  the next step 5, unless `review status` exits 5 (stalled) →
-  `superegm report --idle '<U>=review stalled' --runcard '<CARD>'`.
 - `blocked` (step 2's builder close, step 3's cases) → Decision point 3.
-- `recovered <word>` from `foreman dispatch` → the row of `<word>`.
+- any other word, `recovered <word>` included: the rows of `references/foreman_brief.md`.
 
 ## Retries
 
-- `status --wait` exiting non-zero: retry once; failing again, once no foreman is out, run `report`, then The end's `superegm clean --auto --runcard '<CARD>'`, and end.
+- `status --wait` exiting non-zero: retry once; failing again, once no foreman is out and what is held is handled, run `report`, then The end's `superegm clean --auto --runcard '<CARD>'`, and end.
 - A `decision rule` whose post or label request fails (a `gh` error, not a refusal) records nothing: run it again, a `--posted` one included. A journaled `<U> <qid>: label superegm:stopped left on issue #<n>` means the label stayed on: run `gh issue edit <n> --remove-label superegm:stopped` first.
 ## The end
 
-The end is reached only with no foreman out. At the end of every invocation, after its last launch, run `superegm clean --auto --runcard '<CARD>'`: it cleans every landed, merged or stopped unit that has something left to remove, prints a line per unit and never refuses.
+The end is reached only with no foreman out. Held lines and words go first (steps 1-4, then `word_action`). At the end of every invocation, after its last launch, run `superegm clean --auto --runcard '<CARD>'`: it cleans every landed, merged or stopped unit that has something left to remove, prints a line per unit and never refuses.
 
 Before the close, run batch step 3b once and `report` again (a thread posted before the last round's review is read now): an `outcome:` line or no longer `loop: ended` → back to the batches.
 
