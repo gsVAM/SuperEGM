@@ -219,3 +219,19 @@ def test_doctor_prints_the_managed_line(world, monkeypatch, tmp_path):
   assert lines[lines.index(line) - 1].startswith("plugins: ")
   assert "data@kw" in line and "PreToolUse" in line and "SessionStart" in line
   assert code == 0, out  # informational: it never fails the exit
+
+
+MOVED = "It derives all from the store, the plan and the spec (refusing as `status` does on a spec changed since its approval); idle units come from this card alone."
+PROBE = "Then run `superegm doctor --probe` once (Bash timeout 600,000 ms); stop unless it prints `probe: session ok` and no `probe:` line fails."
+
+
+def test_wave_skill_probes_before_the_first_launch():
+  # wave, notes: skills/wave/SKILL.md and skills/wave/references/resume_notes.md, each with its whitespace runs joined to one space
+  import re
+  root = Path(__file__).resolve().parents[2]
+  wave, notes = (re.sub(r"\s+", " ", (root / rel).read_text(encoding="utf-8"))
+                 for rel in ("skills/wave/SKILL.md", "skills/wave/references/resume_notes.md"))
+  entry, batch = wave.split("## Entry", 1)[1].split("## A batch", 1)
+  assert PROBE in entry and entry.index(PROBE) < entry.index("superegm status --wait 1 ")
+  assert "superegm doctor --probe" not in batch
+  assert MOVED not in wave and MOVED in notes
