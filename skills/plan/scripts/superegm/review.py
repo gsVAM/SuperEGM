@@ -1179,7 +1179,8 @@ def check_settle(st: core.Store, rid: str, review: dict, card: dict, args, fid: 
     if card["mode"] == "leavemealone" and not args.judges:
       if not (args.owner and getattr(args, "posted", None)):
         raise core.HandoffError(f"review settle: {fid} is {finding['severity']}: --judges required in leavemealone-mode")
-      verify_owner_ruling(st.config, finding, args.posted, delta_claim(st, rid, finding["claim"]))
+      verify_owner_ruling(st.config, finding, args.posted, delta_claim(st, rid, finding["claim"]),
+                          unrecorded=getattr(args, "unrecorded", False))
     if card["mode"] != "leavemealone" and not args.owner and not (args.judges and review["kind"] == "head"):  # U88: a head's contest goes to the panel first
       raise core.HandoffError(f"review settle: {fid} is {finding['severity']}: --owner required in normal mode")
     if args.judges and review["kind"] == "head":  # either mode: a contest settles by a panel that overruled it
@@ -1222,15 +1223,18 @@ def delta_claim(st: core.Store, rid: str, claim: str) -> str:
   return claim
 
 
-def verify_owner_ruling(config: dict, finding: dict, comment_id: str, original: str = None) -> None:
+def verify_owner_ruling(config: dict, finding: dict, comment_id: str, original: str = None, unrecorded: bool = False) -> None:
   """In leavemealone the owner's word still counts, by hand (1.1.3; U22 reads such comments itself): one GitHub
   read of the comment, by a `config.owners` login, carrying a ruling `ruling_of` reads: `<fid> finding overruled`,
   or `<fid> allowed` on a `test-delta:` finding, or `test-delta <file> allowed` on a `test-delta:` finding of that
-  file or on a contest's copy whose `original` claim (`delta_claim`'s) is one (U25)."""
+  file or on a contest's copy whose `original` claim (`delta_claim`'s) is one (U25). `unrecorded` (`decision rule`'s
+  read before the comment's first record, U103): an edited comment is refused, as on `decision rule`'s own read."""
   from superegm.decision import ruling_of  # inside: `decision` imports `review`
   fid, claim = finding["id"], finding["claim"]
   original = claim if original is None else original
   comment = core.gh_json(["api", f"repos/{config['repo']}/issues/comments/{comment_id}"]) or {}
+  if unrecorded and edited_comment(comment):
+    raise core.HandoffError("review settle: ruling comment edited: post a new one")
   author = (comment.get("user") or {}).get("login")
   if author not in (config.get("owners") or []):
     raise core.HandoffError(f"review settle: comment {comment_id} is by {author}, not a login in config.owners")

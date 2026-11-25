@@ -630,7 +630,8 @@ def settle_checks(st, items: list, args, card: dict) -> list:
   `review settle`'s own. The plan: `(review id, checked)` each."""
   judges = args.by[7:] if args.by.startswith("judges:") else None
   posted = args.posted if args.posted and not args.posted.startswith("closed:") else None
-  ruler = argparse.Namespace(owner=not judges, judges=judges, posted=posted, runcard=args.runcard)
+  # `unrecorded`: the settle's read of the comment comes before its first record, so an edit it sees is refused (U103)
+  ruler = argparse.Namespace(owner=not judges, judges=judges, posted=posted, runcard=args.runcard, unrecorded=True)
   plan = {}
   for decision, fid in items:
     words = str(decision.get("source") or "").split()
