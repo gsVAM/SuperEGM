@@ -14,14 +14,18 @@ from superegm import launch_builder
 from test_builders import ISSUE, UNIT, git, launches_of, seed, spawn_fake, no_graphify, which  # noqa: F401  the fixtures a launch runs under
 
 
-def launch(world, monkeypatch, comments=(), rnd=1, card=None, seeded=None):
-  """U07 seeded and marked (once), its issue comments `comments`, then `launch-builder` round `rnd`: (store, card, hid)."""
+def launch(world, monkeypatch, comments=(), rnd=1, card=None, seeded=None, foreman=None):
+  """U07 seeded and marked (once), its foreman record `foreman` when given, its issue comments `comments`, then
+  `launch-builder` round `rnd`: (store, card, hid)."""
   if seeded is None:
     s, card, hid, _ = seed(world)
     monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "ghp_builder")
     assert world.run("launch", "--runcard", card)[0] == 0
   else:
     s, card, hid = seeded
+  if foreman is not None:
+    from test_builders import put
+    put(s.path("foreman", UNIT), json.dumps({"dispatch_id": "d1", "rounds": [], "decisions": [], "rulings": [], **foreman}))
   world.gh.comments[ISSUE] = list(comments)
   code, out = world.run("launch-builder", "--unit", UNIT, "--round", rnd, "--runcard", card)
   assert code == 0, out
@@ -154,3 +158,25 @@ def test_owner_notes_reach_every_later_launch(world, monkeypatch, spawn_fake):
   prompt_round_2 = s.path("launches", f"{UNIT}_r2_prompt.md").read_text(encoding="utf-8")
   notes = prompt_round_2.split("# Owner notes", 1)[1].split("\n---\n", 1)[0]
   assert notes.index("first note") < notes.index("second note")
+
+
+AUTHOR = {"**Deviation (other):** x": "builder-bot", "**Seam:** ok": "builder-bot"}  # every other form: an owner's
+
+
+@pytest.mark.parametrize("form, updated_at, recorded, shown", [
+    ("**Deviation (other):** x", "2026-11-25T11:00:00Z", False, False),
+    ("**Seam:** ok", "2026-11-25T11:00:00Z", False, False),
+    ("**Decision D1:** x", "2026-11-25T11:00:00Z", False, False),
+    ("**Note:** x", "2026-11-25T11:00:00Z", False, False),
+    ("**Ruling:** foreman-1-1 finding upheld", "2026-11-25T11:00:00Z", True, True),  # edited before or after its record
+    ("**Note:** x", None, False, True),  # no updated_at field: unedited
+])
+def test_edited_comment_is_left_out(world, monkeypatch, spawn_fake, form, updated_at, recorded, shown):
+  # `form` by its allowed author, created_at 2026-11-25T10:00:00Z; recorded: the unit's record consumed it (a rulings[] entry posted `comment <id>`)
+  record = {"decisions": [{"id": "q1", "point": 1, "source": "review r round 1"}],
+            "rulings": [{"decision": "q1", "ruling": "foreman-1-1 finding upheld", "by": "owner", "reason": None,
+                         "posted": "comment 5", "posted_at": "2026-11-25T10:30:00Z"}]} if recorded else None
+  s, card, hid = launch(world, monkeypatch, [comment(5, AUTHOR.get(form, "owner"), form, "2026-11-25T10:00:00Z", updated_at)], foreman=record)
+  prompt, journal = posted(s, 1), s.path("journal").read_text(encoding="utf-8")
+  assert (form in prompt) is shown
+  assert ("ignored: edited" in journal) is (not shown)
