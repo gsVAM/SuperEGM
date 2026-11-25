@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: `superegm postmortem`, the handoff's report of spec section 7.5 (U78); the Lessons table and `--retro <file>` (U87).
+# Added by SuperEGM (gsVAM), 2026: `superegm postmortem`, the handoff's report of spec section 7.5 (U78); the Lessons table and `--retro <file>` (U87); a copy's settlement counted on the finding it copies, and a round of only copies quiet (U110, 1.3 design section 3.10).
 
 """superegm postmortem: one report of a handoff from the store (spec section 7.5), and its retrospective's record (7.7).
 
@@ -33,6 +33,7 @@ CLEAR_RE = re.compile(r"^(\S+) next clear (\S+) (\S+) answered by (\S+) at (\S+)
 SUPERSEDED_RE = re.compile(r"^(\S+) driver: (\S+) superseded: wait record removed$")
 OVERRULED_RE = re.compile(r"^(\S+) finding overruled\b")
 ALLOWED_RE = re.compile(r"^(\S+) allowed\b")
+COPY_RE = re.compile(r"(?:unreplied|contested) (\S+):")  # a foreman finding's claim that repeats finding `<fid>` (`collect.foreman_findings`)
 SEVERITIES = ("high", "medium", "low")
 
 
@@ -114,22 +115,37 @@ def unit_facts(hs: core.Store, uid: str, state: dict) -> dict:
       "subagent_calls": sum((x.get("subagent_calls") or {}).get("count", 0) for x in launches)}
 
 
-def note_finding(entries: list, latest: dict, scope: tuple, name: str, finding: dict, item) -> None:
+def note_finding(entries: list, latest: dict, scope: tuple, name: str, finding: dict, item) -> str:
   """Count `finding` once: `item` (what the caller tallies it by) joins `entries`, or, for a finding carried into a later
   round, replaces the copy before it. `collect.carry` copies a still-open foreman finding under its own id with
   `carried_from`; `review.carry_externals` copies an external one with the same id and claim; `review settle` and
   triage write a carried finding's outcome on its newest copy (`review.locate_finding`), so the newest copy stands.
-  A foreman `unreplied <fid>: ...` high repeats an external finding its reviewer's record holds: it is no finding.
-  Findings of one `scope` (the review kind and artifact) are told apart by reviewer and id."""
-  if str(finding.get("claim") or "").startswith("unreplied "):
-    return
+  A foreman `unreplied <fid>: ...` or `contested <fid>: ...` high repeats a finding some record holds (`COPY_RE`): it is
+  no finding, and a settlement it holds counts on the finding it copies, down the chain to the original (U110). Findings
+  of one `scope` (the review kind and artifact) are told apart by reviewer and id.
+  Returns `""` for a finding counted as new, else the id of the finding it is a copy of (its own for a carried one)."""
+  fid = finding.get("id")
+  if m := COPY_RE.match(str(finding.get("claim") or "")):
+    root = latest.get(("link", scope, m.group(1)), m.group(1))
+    latest[("link", scope, fid)] = root
+    if disposition := finding.get("disposition"):
+      latest[("settled", scope, root)] = disposition
+      original = latest.get(("id", scope, root))
+      if original is not None and not original.get("disposition"):
+        original["disposition"] = disposition
+    return str(root)
   external = name.startswith("external:")
-  key = (*scope, name, finding.get("id")) + ((finding.get("claim"),) if external else ())
-  if (external or finding.get("carried_from")) and key in latest:
+  key = (*scope, name, fid) + ((finding.get("claim"),) if external else ())
+  copy = (external or finding.get("carried_from")) and key in latest
+  if copy:
     entries[latest[key]] = item
   else:
     latest[key] = len(entries)
     entries.append(item)
+  latest[("id", scope, fid)] = finding
+  if not finding.get("disposition") and ("settled", scope, fid) in latest:  # a copy settled it before a newer copy of it came
+    finding["disposition"] = latest[("settled", scope, fid)]
+  return str(fid) if copy else ""
 
 
 def cycle_order(rid: str) -> tuple:
@@ -224,13 +240,13 @@ def reviewer_stats(st: core.Store, hs: core.Store, spec) -> dict:
   """Per `(reviewer, kind)`, the counts the Reviewers table shows; the Lessons table reads the same numbers. `overrules` is
   `overruled` plus `allowed`: an allowance is recorded as an overrule (spec 13.2, `decision.py`), and that one sum is what the table,
   the Lessons rows and the integrate summary name a reviewer's overruled findings by."""
-  stats, found, latest = {}, [], {}
+  stats, found, latest, ruled = {}, [], {}, {}
   for rid, cycle in sorted(reviews_of(st, hs, spec), key=lambda r: cycle_order(r[0])):
     if not cycle:
       continue
     kind = cycle["kind"]
     head = kind == "head"  # a head's outcomes are the foreman's rulings; any other kind's, `review settle`'s
-    overruled, allowed = verdicts(hs, cycle["artifact"]) if head else (set(), set())
+    overruled, allowed = ruled.setdefault(cycle["artifact"], verdicts(hs, cycle["artifact"])) if head else (set(), set())
     for rnd in review.rounds_of(hs, rid, cycle):
       for name, entry in (rnd.get("reviewers") or {}).items():
         if entry.get("not_run"):  # a reviewer that did not run raised nothing and kept no quiet round
@@ -238,9 +254,14 @@ def reviewer_stats(st: core.Store, hs: core.Store, spec) -> dict:
         row = stats.setdefault((name, kind), {**dict.fromkeys(SEVERITIES, 0), "fixed": 0, "overruled": 0,
                                               "allowed": 0, "overrules": 0, "deferred": 0, "regressions": 0, "quiet": 0})
         findings = entry.get("findings") or []
-        row["quiet"] += 0 if findings else 1
+        new = 0
         for finding in findings:
-          note_finding(found, latest, (kind, cycle["artifact"]), name, finding, (name, kind, overruled, allowed, finding))
+          copied = note_finding(found, latest, (kind, cycle["artifact"]), name, finding, (name, kind, overruled, allowed, finding))
+          new += not copied
+          for ruling in (overruled, allowed):  # a ruling on a copy rules the finding it copies
+            if copied and finding.get("id") in ruling:
+              ruling.add(copied)
+        row["quiet"] += 0 if new else 1  # a round of only copies raised nothing new
   for name, kind, overruled, allowed, finding in found:
     row, disposition, fid = stats[(name, kind)], str(finding.get("disposition") or ""), finding.get("id")
     row[finding.get("severity")] = row.get(finding.get("severity"), 0) + 1
