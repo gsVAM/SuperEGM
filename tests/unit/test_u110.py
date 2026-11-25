@@ -80,6 +80,15 @@ def test_a_settled_copy_settles_no_unrelated_finding_of_the_same_id(world):
   assert (row["high"], row["fixed"]) == ("2", "1")
 
 
+def test_a_ruled_copy_rules_no_unrelated_finding_of_the_same_id(world):
+  # cycle 1's copy of ext-1 is ruled overruled; cycle 2's own `ext-1` (another claim) is not the finding that ruling reached
+  c, _, _ = two_units(world)
+  head_rounds(c, [{"external:octo": [EXTERNAL]}, {"foreman": [found("foreman-2-1", UNREPLIED)]}], ("foreman-2-1 finding overruled — not a defect",))
+  reviewed(c, "head-U01-c2", "head", "U01", ["external:octo"], {"external:octo": {"findings": [found("ext-1", "another defect")]}})
+  row = keyed(report_of(world, c), "Reviewers", 2)[("external:octo", "head")]
+  assert (row["high"], row["overruled"]) == ("2", "1")
+
+
 def test_a_claim_that_reads_like_a_copy_is_a_finding_unless_a_foreman_copy_of_a_known_finding(world):
   # a reviewer's own finding whose claim begins `contested state:` copies nothing: no finding `state` exists, and it is no foreman's
   c, _, _ = two_units(world)
