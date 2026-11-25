@@ -179,10 +179,17 @@ def wait_events(handoff, seconds: int, card: dict) -> list:
   state = handoff.state
   previous = (state.get("status") or {}).get("units") or {}
   deadline = core.NOW() + seconds
+  records = lambda uid: state["units"].get(uid) or {}
+  watched = {uid: records(uid).get("watch") for uid in handoff.graph.order}  # the `watch` every pass of the wait reads
   read_pr = set()  # the units a pass of the wait set a `pr` for
+  voided = {}  # unit -> (the void a pass set, the `landed_confirmed` it voided); `unit_view` emits no event for it
   while True:
+    held = {uid: records(uid).get("landed_confirmation_void") for uid in handoff.graph.order}
     summary, _ = core.status_pass(handoff, save=False)
     read_pr |= {uid for uid, unit in summary["units"].items() if unit["pr"]}
+    for uid in handoff.graph.order:
+      if (void := records(uid).get("landed_confirmation_void")) and void != held[uid]:
+        voided[uid] = (void, records(uid).get("landed_confirmed"))
     lines = [line for uid in handoff.graph.order
              for line in unit_events(uid, previous.get(uid), summary["units"][uid])]
     if lines or core.NOW() >= deadline:
@@ -190,7 +197,8 @@ def wait_events(handoff, seconds: int, card: dict) -> list:
     core.SLEEP(min(core.WAIT_INTERVAL, max(1, deadline - core.NOW())))
   # The GitHub reads and the board write are done: the file is touched last. `state` is the copy loaded before the wait,
   # and `save_state` replaces the whole file, so saving it would lose what another command wrote while the wait slept
-  # (a launch mark, a ruling, a settlement). The wait loads `state.json` again and copies onto that only what its passes set.
+  # (a launch mark, a ruling, a settlement). The wait loads `state.json` again and copies onto that only what its passes set:
+  # `status`, `board_changed_at` (when `post_board` wrote), and per unit `pr`, `status` and `landed_confirmation_void`.
   state["status"] = {**summary, "units": {uid: fingerprint(unit) for uid, unit in summary["units"].items()}}
   board = post_board(handoff, card, state["status"])
   fresh = core.load_state(handoff.artifact_dir)
@@ -199,9 +207,12 @@ def wait_events(handoff, seconds: int, card: dict) -> list:
     fresh["board_changed_at"] = state["board_changed_at"]
   for uid in handoff.graph.order:
     record = fresh.setdefault("units", {}).setdefault(uid, {})
-    record["status"] = state["units"][uid]["status"]
-    if uid in read_pr:
-      record["pr"] = state["units"][uid]["pr"]
+    if record.get("watch") == watched[uid]:  # else a `status --watch` recorded another PR during the wait: its `pr` and `status` stand
+      record["status"] = state["units"][uid]["status"]
+      if uid in read_pr:
+        record["pr"] = state["units"][uid]["pr"]
+    if uid in voided and record.get("landed_confirmed") == voided[uid][1]:  # else the confirmation was given again: no void
+      record["landed_confirmation_void"] = voided[uid][0]
   core.save_state(handoff.artifact_dir, fresh)
   return lines or ["deadline"]
 
