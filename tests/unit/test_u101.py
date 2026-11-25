@@ -56,3 +56,31 @@ def test_collect_prints_each_finding_line(world, tmp_path, monkeypatch):
   assert code == 0 and len(findings) >= 2, out
   assert f"collected: {len(findings)} foreman findings" in out.splitlines()
   assert all(line in out.splitlines() for line in findings)
+
+
+def test_failed_collect_leaves_the_round_prepared(world, tmp_path, monkeypatch):
+  # a collect that fails after recording the foreman's findings (the round file's last write raises) leaves the round
+  # `prepared` in foreman/<unit>.json; the same command run again on that round completes it, each finding once (L19)
+  w = prepared(world, tmp_path, monkeypatch, ci="failure", commits=OTHER)
+  round_file = w.st.path("reviews", w.rid, "round-1.json")
+  phase = lambda: json.loads(w.st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][0]["phase"]
+  real, writes = core.atomic_write, []
+
+  def failing(path, obj):
+    if str(path) == str(round_file):
+      writes.append(path)
+      if len(writes) == 2:  # `review record`'s write is the first, `collect`'s own last one the second
+        raise core.HandoffError("disk full")
+    return real(path, obj)
+  monkeypatch.setattr(core, "atomic_write", failing)
+  first_code, _ = collect(world, w)
+  phase_after_first = phase()
+  monkeypatch.setattr(core, "atomic_write", real)
+  second_code, out = collect(world, w)
+  phase_after_second = phase()
+  assert first_code != 0 and phase_after_first == "prepared"
+  assert second_code == 0 and phase_after_second == "collected", out
+  round_record = json.loads(round_file.read_text(encoding="utf-8"))
+  assert {"builder_contested", "what_ran"} <= set(round_record)
+  foreman_ids = [f["id"] for f in round_record["reviewers"]["foreman"]["findings"]]
+  assert len(foreman_ids) == len(set(foreman_ids)) >= 2
