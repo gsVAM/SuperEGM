@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: U87's tests, spec sections 7.5 and 7.7: the post-mortem's Lessons table, `postmortem --retro` and the retro skill.
+# Added by SuperEGM (gsVAM), 2026: U87's tests, spec sections 7.5 and 7.7: the post-mortem's Lessons table, `postmortem --retro` and the retro skill; U110's fixes (1.3 design section 3.10, #249): the Reply label fixture, an honest comment and a phrase matched across a line break.
 
 """U87: the Lessons table, `superegm postmortem --retro <file>` and the `/superegm:retro` skill."""
 
