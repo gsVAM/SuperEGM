@@ -61,8 +61,13 @@ def test_foreman_background_collect_foreground():
     assert "never with `run_in_background`" in text
   assert "except a unit whose foreman has not returned (no call, no dispatch)" in wave_skill
   assert "A returned word is applied at the next batch's step 5, after steps 1-4 and before its dispatch" in wave_skill
-  assert "Rule a unit after its foreman's `collect` ends." in wave_skill  # section 9: a ruling typed during `collect` can be lost
+  # section 9: `collect` writes back the foreman file it loaded, so a stop, a ruling or an ingest of a unit whose foreman is
+  # out waits for the batch after it returns (status prints a `closed` line once: it is held, never dropped)
+  assert "the lines of a unit whose foreman is out, and its 3b, wait for the batch after it returns" in wave_skill
+  assert "`word_action` per returned word of an unstopped unit" in wave_skill
+  assert "Rule a unit after its foreman's `collect` ends." not in wave_skill  # the elephant sees the return, not `collect`
   assert "The end is reached only with no foreman out." in wave_skill
+  assert "`status --wait` exiting non-zero: retry once; failing again, once no foreman is out, run `report`" in wave_skill
   assert "no 5b line in step 2 → The end" in wave_skill and "no 5b line of a non-idle unit → The end" in wave_skill
   assert "`foreman-<unit-id>-<dispatch-id>`, in the foreground" not in brief_opening
   assert "named `foreman-<U>-<dispatch-id>`, in the foreground" not in wave_skill
