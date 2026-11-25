@@ -175,3 +175,22 @@ def test_capped_round_contest_without_a_ruling_panel_is_listed(world, panel, fin
   record = {"none opened": None, "split at its cap": "capped", "open, rounds to go": "between"}[panel]
   line = SPLIT_LINE.replace("-r1-", "-r5-") if record == "capped" else ""
   assert contested_items(world, CONTEST.format("high") + line, n=5, panel=record) == fingerprints
+
+
+# ---------------------------------------------------------------- S6: a decision's own verdict file
+
+
+@pytest.mark.parametrize("last_line, pending", [
+  ("The judges did not converge (judges/head-U01-c1-r1-a1b2c3/verdict.json), their last choices: Q1 …", True),
+  ("The judges did not converge (judges/head-U01-c2-r1-a1b2c3/verdict.json), their last choices: Q1 …", False),
+  ("foreman-1-2 | high | src/x.py:9 | regression: no | see (judges/p1/verdict.json), their last choices: x", False),
+  ("foreman-1-2 | high | src/x.py:9 | regression: no | The judges did not converge (judges/head-U01-c1-r1-a1b2c3/verdict.json)", False),
+])
+def test_pending_decision_reads_its_own_verdict_file(last_line, pending):
+  # q1: point 1, source `review head-U01-c1 round 1`, asks foreman-1-1 and foreman-1-2, its question ending last_line; foreman-1-1 is ruled
+  from superegm import report
+  asks = "foreman-1-1 | high | src/x.py:3 | regression: no | a\nforeman-1-2 | high | src/x.py:9 | regression: no | b\n"
+  q1 = {"id": "q1", "point": 1, "source": "review head-U01-c1 round 1", "question": asks + last_line + "\n",
+        "options": ["finding upheld", "finding overruled"]}
+  foreman = {"decisions": [q1], "rulings": [{"decision": "q1", "ruling": "foreman-1-1 finding upheld"}]}
+  assert (report.pending_decisions(foreman) == [q1]) == pending
