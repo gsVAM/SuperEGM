@@ -69,3 +69,18 @@ def test_allow_list_names_the_push_script_and_no_git_push(configured, body_text)
   assert tools.count("Bash(/bin/U07_r1_bin/superegm-push:*)") == 1
   assert {"Bash(/bin/U07_r1_bin/superegm-precheck:*)", "Bash(git reset --hard:*)"} <= set(tools)
   assert not any("push" in t for t in launch_builder.allowed_tools(configured, "superegm/h/U07", body_text, "/usr/local/bin/gh"))
+
+
+def test_orders_carry_the_allow_list_and_the_command_rules(world, monkeypatch, spawn_fake):
+  # the launch prompt's orders; launch_tools: the launch's --allowedTools entries; gh: the launch's gh shim path; bin_dir: its bin directory
+  s, card, hid = launch(world, monkeypatch)
+  prompt = s.path("launches", f"{UNIT}_r1_prompt.md").read_text(encoding="utf-8")
+  launch_tools = launches_of(s)[-1]["command"].split("--allowedTools '")[1].split("'")[0].split(",")
+  gh, bin_dir = "/usr/local/bin/gh", s.path("launches", f"{UNIT}_r1_bin")
+  orders = prompt.split("# Builder orders", 1)[1]
+  assert "{{allowed}}" not in orders and "{{push}}" not in orders
+  assert all(any(line.strip(" -`") == entry for line in orders.splitlines()) for entry in launch_tools)
+  assert f"`{bin_dir}/superegm-push`" in orders and "`git push origin <branch>`" not in orders
+  assert f"`{gh} pr view <branch>`" in orders
+  for phrase in ("one command per Bash call", "heredoc", "--body-file", "one segment per Bash call", "empty `feat`"):
+    assert phrase in orders
