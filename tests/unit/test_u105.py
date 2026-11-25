@@ -116,6 +116,13 @@ THREADS_AT = {
 LONGER = replace(BASE, "Preamble goal line.", [f"Pad {n}." for n in range(5)])  # five lines above every section
 LONGER_DELAY = LONGER.index("Delay is 5s.\n") + 1  # line 28 there: the blank line in `## 3. Admin` of the draft
 CARRIED_IN_SCOPE = "carried: an earlier cycle's unsettled external high on the changed line, recorded at a commit five lines longer"
+DELETED_LATER = "carried: an earlier cycle's unsettled external high on a line a later fix deleted from the changed section's end"
+WITH_TAIL = replace(BASE, "Delay is 5s.", ["", "Delay doubles."])
+WITH_TAIL = WITH_TAIL[:25] + WITH_TAIL[26:]  # `Delay doubles.` (line 25) ends `## 2. Deliver`, `## 3. Admin` right after it
+assert WITH_TAIL[24:26] == ["Delay doubles.\n", "## 3. Admin\n"]
+EARLIER = {CARRIED_IN_SCOPE: (LONGER, LONGER_DELAY), DELETED_LATER: (WITH_TAIL, WITH_TAIL.index("Delay doubles.\n") + 1)}
+THREADS_AT["a LEFT-side comment: its line counted in the PR's base text, never the head's"] = \
+  {"path": "docs/specs/x.md", "line": BASE.index("Admin lists jobs.\n") + 1, "side": "LEFT"}
 
 
 def earlier_cycle(st, spec, cid, location="docs/other.md:3 at ccccccc"):
@@ -146,25 +153,31 @@ def earlier_cycle(st, spec, cid, location="docs/other.md:3 at ccccccc"):
   ("respec R1", ADDED_BY_FIX, 1),
   ("respec R1", "an outdated line comment on a section the correction leaves unchanged", 0),
   ("respec R1", CARRIED_IN_SCOPE, 1),
+  ("respec R1", DELETED_LATER, 1),
+  ("respec R1", "a LEFT-side comment: its line counted in the PR's base text, never the head's", 1),
+  ("ordinary", "an outdated line comment on a section the correction leaves unchanged", 1),
 ])
 def test_respec_ingest_reads_its_scope_alone(world, monkeypatch, cycle, thread_at, ingested):
   # `review ingest --pr <n>` on the spec PR: on a respec cycle an external finding, high or medium, outside the correction's scope, new or carried, is
   # never a finding of the round; a thread on another file is skipped with or without a line, and a review body or
   # a thread on the spec naming no line is kept; a line is read in the commit it was made on and carried to the
-  # spec's current text, whose scope is read now (astra-1-1, change-review-1-1, codebase-details-1-1, codebase-details-1-2)
+  # spec's current text, whose scope is read now (astra-1-1, change-review-1-1, codebase-details-1-1, codebase-details-1-2);
+  # a deleted line stands where the scope counts a deletion (astra-2-1, codebase-details-2-1), a LEFT-side line is in the
+  # PR's base text (change-review-2-1), and an outdated thread is recorded at its original line (astra-2-2)
   from superegm import review as review_mod
   from conftest import git
   from test_u85 import approved, open_respec
   spec, st = respec_world(world, [(BASE, None)])
   if cycle != "ordinary":
     open_respec(st)
-  longer = approved(world, spec, LONGER, "draft")["commit"] if thread_at == CARRIED_IN_SCOPE else None
+  earlier_text, earlier_line = EARLIER.get(thread_at, (None, None))
+  earlier = approved(world, spec, earlier_text, "draft")["commit"] if earlier_text else None
   head = approved(world, spec, DRAFT, "draft")["commit"]  # the draft, committed: a respec round records HEAD's spec
   world.spec = spec
   cid = world.card("review-spec")
   carried = thread_at.startswith("carried")
   if carried:
-    at = f"docs/specs/x.md:{LONGER_DELAY} at {longer[:7]}" if longer else "docs/other.md:3 at ccccccc"
+    at = f"docs/specs/x.md:{earlier_line} at {earlier[:7]}" if earlier else "docs/other.md:3 at ccccccc"
     earlier_cycle(st, spec, cid, at)
   threads = [] if carried else [THREAD | {"commit_id": head, "original_commit_id": head} | THREADS_AT[thread_at]]
   monkeypatch.setattr(review_mod, "read_threads", lambda repo, number, skip: [t for t in threads if t["id"] not in skip])
@@ -189,6 +202,9 @@ def test_respec_ingest_reads_its_scope_alone(world, monkeypatch, cycle, thread_a
                                            for f in record["findings"]]
   assert code == 0 and f"{0 if carried else ingested} ingested" in out  # a carried finding is in the round, never newly ingested
   assert len(external_findings_of_the_latest_round) == ingested
+  if thread_at.startswith("an outdated") and ingested:  # recorded where the thread was made, so a later respec reads its line
+    admin = BASE.index("Admin lists jobs.\n") + 1
+    assert external_findings_of_the_latest_round[0]["location"] == f"docs/specs/x.md:{admin} at {head[:7]}"
 
 
 @pytest.mark.parametrize("flags", [["--dry-run"], ["--yes"]])
