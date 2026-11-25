@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review settle --judges` for a head's contested or declined high or medium on a normal-mode card, journalled `Ruling (judges <panel>, contest)` (U88); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76); a spec cycle's changed reference documents as whole-file `changed <path>` scope lines, their `refs` manifest on each round, in the scope filter, the settle check and the proceed ruling (U75); `review open --respec R<n>`: the diff and its sections as evidence, the `design`, `codebase-details` and Astra panel, cap 2 (U85); a plan or integrate cycle a respec approval closed by its `source_review` (U91).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review settle --judges` for a head's contested or declined high or medium on a normal-mode card, journalled `Ruling (judges <panel>, contest)` (U88); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76); a spec cycle's changed reference documents as whole-file `changed <path>` scope lines, their `refs` manifest on each round, in the scope filter, the settle check and the proceed ruling (U75); `review open --respec R<n>`: the diff and its sections as evidence, the `design`, `codebase-details` and Astra panel, cap 2 (U85); a plan or integrate cycle a respec approval closed by its `source_review` (U91); the settle's writes in `apply_settle`, which `decision rule` calls on a point-1 ruling, and the CI finding's refusal in `check_ci_finding` (U103, 1.3 design section 3.6).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest|triage: the one review loop (spec section 8)."""
 
@@ -1103,6 +1103,19 @@ def settle_finding(args) -> int:
         checked.append((fields[0], fields[1], fields[2], check_settle(st, rid, review, card, args, fields[0], fields[1])))
       except core.HandoffError as error:
         raise core.HandoffError(f"review settle: {line}: {str(error).removeprefix('review settle: ')}: nothing written")
+  word = apply_settle(st, rid, review, card, args, checked)
+  for fid, disposition, _, _ in checked:
+    print(f"{fid} {disposition}")
+  if word:
+    print(word)
+  return 0
+
+
+def apply_settle(st: core.Store, rid: str, review: dict, card: dict, args, checked: list) -> str | None:
+  """The settle `review settle` runs once its checks pass, and `decision rule` runs on a point-1 ruling (U103): each
+  `(fid, disposition, note, round)` of `checked` takes its disposition and its `ruling` (`owner`, `judges:<panel>`, or none),
+  the verdict is stored, a head's clean outcome is written, or the `owner:`/`revise`/`cap-reached` word of a remainder
+  that is not clean; the word rewritten, if any. `args` carries `owner`, `judges` and `runcard`."""
   runcard = card.get("parent") or args.runcard
   for fid, disposition, note, n in checked:
     rnd = load_round(st, rid, n)
@@ -1125,11 +1138,14 @@ def settle_finding(args) -> int:
     write_head_outcome(st, review, runcard)
   elif review["kind"] == "head":
     word = write_owner_outcome(st, rid, review, runcard, status.code)
-  for fid, disposition, _, _ in checked:
-    print(f"{fid} {disposition}")
-  if word:
-    print(word)
-  return 0
+  return word
+
+
+def check_ci_finding(reviewer: str, finding: dict) -> None:
+  """D2 (a): `collect` records the CI finding afresh each round, so no one settles it (`check_settle`, and `decision rule` on
+  an overrule of it, U103)."""
+  if reviewer == "foreman" and finding["location"] == "ci":
+    raise core.HandoffError("review settle: the CI finding is settled by no one")
 
 
 def check_settle(st: core.Store, rid: str, review: dict, card: dict, args, fid: str, disposition: str) -> int:
@@ -1139,8 +1155,7 @@ def check_settle(st: core.Store, rid: str, review: dict, card: dict, args, fid: 
     raise core.HandoffError("review settle: fix-design is refused on a head")
   if review["kind"] == "integrate" and disposition == "fix-design" and frozen(st):  # its spec is the latest handoff's now
     raise core.HandoffError("review settle: fix-design is refused on a frozen handoff's integrate: settle it escalated")
-  if reviewer == "foreman" and finding["location"] == "ci":  # D2 (a): `collect` records it afresh each round
-    raise core.HandoffError("review settle: the CI finding is settled by no one")
+  check_ci_finding(reviewer, finding)
   if disposition == "fixed" and rnd["artifact_sha256"] == current_sha(st, review["kind"], review["artifact"]) \
       and not refs_moved(st, review, rnd):  # a spec round's changed reference document counts as changed bytes (U75)
     raise core.HandoffError("review settle: fixed needs changed bytes")  # a head's current bytes are unknown: never
