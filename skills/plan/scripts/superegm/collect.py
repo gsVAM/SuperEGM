@@ -587,13 +587,13 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
         found.append((where(c), f"deviation ({kind.group(1)}) unruled"))
   found += specs  # the foreman's own findings of kind `spec` (§7.6), raised in this round: blockers as a builder's comment is
   if prior_round:
-    settled = {r.subject for r in rulings if r.kind in ("upheld", "overruled", "allowed")}
+    settled = settled_fids(rulings, links, prior_dod or {}, prior_delta or {})
     for c in comments:
       reply = REPLY_RE.match(c["body"])
       if not reply or c["login"] != login or reply.group(2) != "contested":
         continue
       fid = reply.group(1)
-      if fid == prior_ci_fid or fid in settled or (fid not in open_prior and fid not in late):
+      if fid == prior_ci_fid or settled(fid) or (fid not in open_prior and fid not in late):
         continue
       if posted is not None and not timely(fid, c["at"], posted, {fid: prior_round} if fid in open_prior else held):
         continue  # a contest of a copy not yet posted contests nothing; one the previous round already took is not new
@@ -624,6 +624,37 @@ def foreman_findings(round_n: int, ci_verdict: str, body: str, scope: list, work
       found.append((f["location"], f"unreplied {f['id']}: {f['claim']}"))
   lines = [f"foreman-{round_n}-{i} | high | {location} | regression: no | {claim}" for i, (location, claim) in enumerate(found, 1)]
   return lines, contested
+
+
+def settled_fids(rulings: list, links: dict, prior_dod: dict, prior_delta: dict):
+  """Whether a fid is settled by an owner's or the judges' ruling (spec section 3.5), the predicate a builder's contest
+  is dropped by: the fid, or a fid it derives from, is ruled `upheld`, `overruled` or `allowed`. The derivation is the
+  foreman's own posted record alone, never another reviewer's claim or a contest's wording: a contest's or a carried
+  copy's link (`links`) down to what it names, a `dod-<n>` fid (`prior_dod`) whose item is allowed (`dod-<n> allowed`)
+  or whose item an overruled or allowed fid of the record raised, and a test-delta fid (`prior_delta`) whose file is
+  allowed (`test-delta <file> allowed`)."""
+  ruled = {r.subject for r in rulings if r.kind in ("upheld", "overruled", "allowed")}
+  waived = {r.subject for r in rulings if r.kind in ("overruled", "allowed")}
+  items = {int(s[4:]) for s in ruled if re.fullmatch(r"dod-\d+", s)}
+  items |= {prior_dod[f] for f in waived if f in prior_dod}
+  files = {r.subject for r in rulings if r.kind == "allowed-file"}
+
+  def settled(fid):
+    seen = set()
+    while fid not in seen:
+      seen.add(fid)
+      if fid in ruled or prior_dod.get(fid, -1) in items or delta_file(prior_delta.get(fid)) in files:
+        return True
+      if fid not in links:
+        return False
+      fid = links[fid]
+    return False
+  return settled
+
+
+def delta_file(key):
+  """The file of a posted test-delta fid's key (`posted_findings`' `delta`), or None."""
+  return key[0] if key else None
 
 
 def posted_findings(st, rid, rounds: list) -> dict:
