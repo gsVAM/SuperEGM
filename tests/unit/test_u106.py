@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pytest
 
-import superegm as core
 from test_wave import wave_store, CLEAN as WAVE_CLEAN, open_wave_card
 from test_u62 import HEAD, with_rounds, put
 from test_u85 import open_respec
@@ -48,6 +47,7 @@ def test_waiting_respec_takes_no_merge_round(world, raised, loop_starts, names):
 ])
 def test_unreadable_respec_file_refused_with_its_path(world, name, content):
   # path = the handoff's respec/<name>; R1.json is an applied respec's (an approval entry names R1, touching filed U07)
+  import superegm as core  # inside the test: the `world` fixture reloads the package
   import test_builders as tb
   from test_u86 import apply_r1
   from superegm import launch_builder, respec, status
