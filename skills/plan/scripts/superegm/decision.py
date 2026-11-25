@@ -3,6 +3,7 @@
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
 # `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63); `respec`, a `spec` deviation's option, the owner's alone, a spent `relaunch` dropped beside it, and a letter that resolves to it binding nothing unrecorded (spec §7.6, U84); the judges' ruling journalled and posted with `contest` on a normal-mode card (spec §7.8, U88).
+# Modified by SuperEGM (gsVAM), 2026: U103's rulings (1.3 design section 3.6): a point-1 ruling with no fid is refused as `missing <fid>`.
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
@@ -172,6 +173,7 @@ FORM_RES = (
   ("allowed", re.compile(rf"(?P<subject>{FID}) allowed{REASON}")),
   ("proceed", re.compile(rf"proceed{REASON}")),  # the owner's go-ahead on a head (spec section 4.2): owners alone
 )
+NO_FID_FORMS = ("finding upheld", "finding overruled", "allowed")  # a point-1 verdict typed with no fid in front of it (U103)
 LETTER_RE = re.compile(r"\([a-z]\)")  # a rendered option's letter, the bare answer of the judges
 FILE_RULING_RE = re.compile(r"test-delta (\S+) allowed")  # a recorded whole-file allowance's text
 JUDGES_MARK_RE = re.compile(r"^\(judges \S+, (?:leavemealone|contest)\)$", re.M)
@@ -645,6 +647,8 @@ def rule(args) -> int:
   # Point 1 takes one ruling per contested finding (`<fid> finding upheld | overruled`, the leavemealone row's
   # "one call per finding"), keyed on the comment's fid on a by-hand ruling; the other points take one ruling.
   fid_of = lambda text: text.partition(" — ")[0].strip().split(" ")[0]
+  if decisions[0]["point"] == 1 and head.strip() in NO_FID_FORMS:  # U103: a ruling that opens with the verdict names no finding
+    raise Refusal('decision: missing <fid>: write "<fid> finding overruled"')
   fid = found.subject if found and found.kind in ("upheld", "overruled", "allowed") else fid_of(head)
   for d in decisions:
     ruled = [r for r in data["rulings"] if r.get("decision") == d["id"]]
