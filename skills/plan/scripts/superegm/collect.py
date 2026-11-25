@@ -759,36 +759,51 @@ def settled_fids(rulings: list, links: dict, prior_dod: dict, prior_delta: dict,
   reviewer's claim or a contest's wording: a contest's or a carried copy's link (`links`) down to what it names, a
   `dod-<n>` fid (`prior_dod`) whose item is allowed (`dod-<n> allowed`) or whose item an overruled or allowed fid of
   the record raised, a test-delta fid (`prior_delta`) whose file is allowed (`test-delta <file> allowed`), and a scope
-  fid (`prior_scope`) whose path the owner's `test-delta <path> allowed` widened Scope for. An overrule or allowance of
-  a test-delta fid settles it only while its open entry, the last posted round's, has the key of the entry the ruling
-  bound (`bound_entry`, by the ruling's time in `times`): a carried copy's later change is no settled one."""
-  prior_scope, times = prior_scope or {}, times or {}
-
-  def down(fid):
-    out = [fid]
-    while out[-1] in links and links[out[-1]] not in out:
-      out.append(links[out[-1]])
-    return out
+  fid (`prior_scope`) whose path the owner's `test-delta <path> allowed` widened Scope for. A test-delta fid is
+  settled by an overrule or allowance only while its open entry, the last posted round's, has a key a settlement
+  bound (`settlement_keys`, the keys `worktree_findings` trims the delta by): a carried copy's later change is no
+  settled one, and the same change raised again under another fid after a line shift is."""
+  prior_scope = prior_scope or {}
+  down = lambda fid: links_down(fid, links)
   reaches = {}  # each fid to the rulings that rule it, on it or on a copy naming it
   for r in rulings:
     if r.kind in ("upheld", "overruled", "allowed"):
       for f in down(r.subject):
         reaches.setdefault(f, []).append(r)
-
-  def covers(fid, r):
-    if r.kind == "upheld" or fid not in prior_delta:
-      return True
-    bound, open_entry = bound_entry(prior_delta[fid], times.get(r.comment_id)), prior_delta[fid][-1][1]
-    return delta_key(bound) in (delta_key(open_entry), delta_key(open_entry, legacy=True))
+  keys = settlement_keys(rulings, links, prior_delta, times)
   items = {int(r.subject[4:]) for r in rulings if r.kind == "allowed" and re.fullmatch(r"dod-\d+", r.subject)}
   items |= {prior_dod[f] for f, rs in reaches.items() if f in prior_dod and any(r.kind != "upheld" for r in rs)}
   files = {r.subject for r in rulings if r.kind == "allowed-file"}
   widened = {r.subject for r in rulings if r.kind == "allowed-file" and not r.login.startswith("judges:")}
 
+  def ruled(f):  # an uphold settles whatever it names; an overrule or allowance a test-delta fid by its key alone
+    if f in prior_delta:
+      open_entry = prior_delta[f][-1][1]
+      return any(r.kind == "upheld" for r in reaches.get(f, ())) or \
+          delta_key(open_entry) in keys or delta_key(open_entry, legacy=True) in keys
+    return f in reaches
+
   def settled(fid):
-    return any(any(covers(f, r) for r in reaches.get(f, ())) or prior_dod.get(f, -1) in items
-               or delta_file(prior_delta.get(f)) in files or prior_scope.get(f) in widened for f in down(fid))
+    return any(ruled(f) or prior_dod.get(f, -1) in items or delta_file(prior_delta.get(f)) in files
+               or prior_scope.get(f) in widened for f in down(fid))
   return settled
+
+
+def links_down(fid: str, links: dict) -> list:
+  """`fid` and what it names down `links` (a contest's or a carried copy's link to its original), cycles cut."""
+  out = [fid]
+  while out[-1] in links and links[out[-1]] not in out:
+    out.append(links[out[-1]])
+  return out
+
+
+def settlement_keys(rulings: list, links: dict, prior_delta: dict, times: dict = None) -> set:
+  """The test-delta keys settled (spec section 3.5): each overrule or allowance, the owner's or the judges', binds
+  the key of the entry it ruled on, for its subject and what that names down `links` (`bound_entry`, by the
+  ruling's time in `times`); a ruling made before any round holding the fid binds none."""
+  times = times or {}
+  return {delta_key(bound) for r in rulings if r.kind in ("overruled", "allowed") for fid in links_down(r.subject, links)
+          if prior_delta.get(fid) and (bound := bound_entry(prior_delta[fid], times.get(r.comment_id))) is not None}
 
 
 def delta_file(held):
@@ -796,12 +811,15 @@ def delta_file(held):
   return held[0][1]["file"] if held else None
 
 
-def bound_entry(held: list, at) -> dict:
+def bound_entry(held: list, at):
   """The entry a settlement made at `at` binds of a fid posted in `held` (`(posted_at, entry)` in round order): the
   fid's entry in the last round posted before the ruling's comment or record, never a later one a carried copy of
-  the fid picks up; the first when no round was posted before it, or the ruling's time is unknown (`at` None)."""
-  before = [entry for posted_at, entry in held if at is not None and posted_at < at]
-  return before[-1] if before else held[0][1]
+  the fid picks up; None when no round holding it was posted before the ruling (it ruled a fid not yet raised),
+  and the first entry when the ruling's time is unknown (`at` None)."""
+  if at is None:
+    return held[0][1]
+  before = [entry for posted_at, entry in held if posted_at < at]
+  return before[-1] if before else None
 
 
 def delta_key(entry: dict, legacy: bool = False) -> tuple:
@@ -924,9 +942,8 @@ def worktree_findings(body: str, scope: list, worktree: Path, changed: list, pr_
   if delta is not None:  # the test delta: an allowed entry or file is dropped from the round's record, then each left is a high
     # a settlement, the owner's or the judges' recorded overrule, binds the key of the entry it ruled on (`bound_entry`,
     # by the ruling's time), matched on the test and the line text (spec section 3.5), so a merge of main or a line
-    # shift does not re-raise it; a 1.2.1 entry's on its base commit and line
-    keys = {delta_key(bound_entry(prior_delta[fid], (times or {}).get(r.comment_id)))
-            for r in rulings if r.kind in ("overruled", "allowed") for fid in chain(r.subject) if prior_delta.get(fid)}
+    # shift does not re-raise it; a 1.2.1 entry's on its base commit and line; `settled_fids` reads the same keys
+    keys = settlement_keys(rulings, links, prior_delta, times)
     # a file allowance, the owner's alone, binds whole: unrecorded, its comment; recorded (`decision rule` keeps
     # `test-delta <file> allowed` beside the per-fid ones), the record, whatever a later edit or deletion of the comment does
     files = {r.subject for r in rulings if r.kind == "allowed-file" and not r.login.startswith("judges:")}
