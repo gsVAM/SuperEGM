@@ -188,6 +188,8 @@ def served(world, read):
   ({"number": 52}, {"merged": True, "merged_at": "2026-11-20T10:00:00Z"}, {"number": 52, "merged_at": "2026-11-20T10:00:00Z"}),
   ({"number": 52}, {"merged": True}, {"number": 52}),  # a read without merged_at writes nothing
   (None, {"merged": True}, None),  # no units.U07.pr object and a read without merged_at, as test_leavemealone_finish fakes it
+  # `status --watch` selected PR 53 after the snapshot of PR 52: 52's merge is never written into 53's record (astra-1-1)
+  ({"number": 53}, {"merged": True, "merged_at": "2026-11-20T10:00:00Z"}, {"number": 53}),
 ])
 def test_close_saves_the_merge_and_clean_auto_loads_the_closed_handoff(world, pr_record, read, saved):
   s, card, _hid, _bodies = seed(world, units=(UNIT,))
