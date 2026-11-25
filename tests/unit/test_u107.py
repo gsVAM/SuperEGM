@@ -158,3 +158,20 @@ def test_undo_refused_while_a_proceeds_merge_is_offered(world, tmp_path, monkeyp
     assert "decision: undo refused: " in out and "the follow-up row stays" in out and foreman["followups"] == before
   else:
     assert foreman["followups"] == []
+
+
+# ---------------------------------------------------------------- S5: a capped round's contest no panel will rule
+
+
+@pytest.mark.parametrize("panel, fingerprints", [
+  ("none opened", ["U01/contested/q1/foreman-1-1"]),
+  ("split at its cap", ["U01/contested/q1/foreman-1-1"]),
+  ("open, rounds to go", []),
+])
+def test_capped_round_contest_without_a_ruling_panel_is_listed(world, panel, fingerprints):
+  # head-U01-c1 at its cap (review status exit 2): its round 5 of 5; point-1 decision q1 on its round; foreman-1-1
+  # high and contested; the store's panel record for the round: none, one split at its cap, or one with rounds to go
+  from test_u88 import CONTEST, SPLIT_LINE, contested_items
+  record = {"none opened": None, "split at its cap": "capped", "open, rounds to go": "between"}[panel]
+  line = SPLIT_LINE.replace("-r1-", "-r5-") if record == "capped" else ""
+  assert contested_items(world, CONTEST.format("high") + line, n=5, panel=record) == fingerprints
