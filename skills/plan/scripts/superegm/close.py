@@ -1,10 +1,11 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the close subcommand (spec section 12): `closed_at`, every unlanded unit journaled;
 # it refuses while a redesign-stopped unit's issue is open (one GitHub read per such unit); `write_closed`, `closed_at` in the state and handoffs/<id>.json (U20).
-# a merged unit's open issue and, all landed, the tracking issue closed as completed; `--note` (U32); the follow-ups block (U51).
+# a merged unit's open issue and, all landed, the tracking issue closed as completed; `--note` (U32); the follow-ups block (U51);
+# a merge it reads saved into `units.<U>.pr.merged_at` (U111).
 
 """superegm close [--note <text>]: close the handoff under an integrate card. GitHub reads: each redesign-stopped
-unit's issue (each read journaled; one open, it refuses with `state.json` untouched and nothing closed), each unlanded unit's recorded PR through `gh api repos/<repo>/pulls/<n>` (merged lands it for this close) and each landed unit's issue;
+unit's issue (each read journaled; one open, it refuses with `state.json` untouched and nothing closed), each unlanded unit's recorded PR through `gh api repos/<repo>/pulls/<n>` (merged lands it for this close, and a `merged_at` the read carries is saved into an existing `units.<U>.pr` object for `clean --auto`, before `closed_at`) and each landed unit's issue;
 GitHub writes: `gh issue close --reason completed` of each landed unit's open issue and, every unit landed, of
 the tracking issue, each journaled (an already-closed issue reads as done); `--note` journaled as
 `close: note <text>`; then `closed_at` written last, once, in its `state.json` and its `handoffs/<id>.json`
@@ -59,7 +60,12 @@ def run(args):
     unit = saved.get(uid) or {}
     landed = bool(unit.get("landed"))
     if not landed and unit.get("pr"):
-      landed = bool((core.gh_json(["api", f"repos/{repo}/pulls/{unit['pr']}"]) or {}).get("merged"))
+      pull = core.gh_json(["api", f"repos/{repo}/pulls/{unit['pr']}"]) or {}
+      landed = bool(pull.get("merged"))
+      if landed and pull.get("merged_at") and isinstance(record.get("pr"), dict):
+        # The merge saved for `clean --auto`, before `closed_at`, only into an existing `pr` object
+        record["pr"]["merged_at"] = pull["merged_at"]
+        core.atomic_write(st.path("state"), state)
     if not landed:
       unlanded.append(uid)
       core.journal(st, f"close: {uid} unlanded")
