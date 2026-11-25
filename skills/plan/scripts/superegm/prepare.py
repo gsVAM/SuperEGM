@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # From the elephant-goldfish-model (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_prepare` as the prepare module, keyed by the dispatch id; the fetched tip is the round's head; `pr_body.md` and `comments.md` beside the diff and the CI file; the App path's builder login (U15); the Astra brief and the lane's word on the `prepared:` line (U17); `r<n>/spec_range.md` at the marker's sha, the brief's range read from it (U20); the review worktree removed by force and its git calls hook-free (U25); `runcards` in its writes, allowed ahead of the Astra brief's instructions render on the card, which U38 adds (U37); `head_launch` of a round, the `recorded_at` comparison of `amendments.md` and the Astra brief's `Amendments` section (U97); the Astra brief ends with the instructions section rendered for role reviewers, lane astra, on the child card (U38); `amendments.md`'s `# Spec corrections` from the head launch's `respecs` (U86).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_prepare` as the prepare module, keyed by the dispatch id; the fetched tip is the round's head; `pr_body.md` and `comments.md` beside the diff and the CI file; the App path's builder login (U15); the Astra brief and the lane's word on the `prepared:` line (U17); `r<n>/spec_range.md` at the marker's sha, the brief's range read from it (U20); the review worktree removed by force and its git calls hook-free (U25); `runcards` in its writes, allowed ahead of the Astra brief's instructions render on the card, which U38 adds (U37); `head_launch` of a round, the `recorded_at` comparison of `amendments.md` and the Astra brief's `Amendments` section (U97); the Astra brief ends with the instructions section rendered for role reviewers, lane astra, on the child card (U38); `amendments.md`'s `# Spec corrections` from the head launch's `respecs` (U86); the `prepared:` line prints the full 40-hex head (U101, 1.3 design section 3.4).
 
 """superegm prepare: fetch the PR into refs/superegm, add the review worktree, write the diff, CI, PR body and comments."""
 
@@ -115,7 +115,7 @@ def prepare(args, card):
   previous = max((e["round"] for e in data["rounds"] if e.get("phase") == "posted"), default=None)
   lane = astra_brief(st, root, unit, r, diff, ci, pr.get("body") or "", previous, args.runcard)
   core.journal(st, f"{unit} round {n} prepared head {head[:7]} under {args.runcard}")
-  print(f"prepared: head {head[:7]} merge-base {merge_base[:7]} {ci['verdict']} previous {previous or '-'} {lane}")
+  print(f"prepared: head {head} merge-base {merge_base[:7]} {ci['verdict']} previous {previous or '-'} {lane}")
   return 0
 
 
