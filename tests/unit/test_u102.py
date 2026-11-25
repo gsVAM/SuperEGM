@@ -121,12 +121,12 @@ ALLOWED = "**Ruling:** foreman-1-1 allowed — kept by design"
 POSTED_AT = {1: "2026-11-02T12:00:00Z", 2: "2026-11-02T15:00:00Z"}  # the ruling (RULING_AT) falls between them
 
 
-def move_head(world, st, g, text, merge=False):
-  """A new PR head on the branch: `text` as test_q.py (when it differs), after a merge of main (`merge`) whose own
-  commit added two lines above test_q.py's first class; the PR, its CI and the state follow it."""
+def move_head(world, st, g, text, merge=None):
+  """A new PR head on the branch: `text` as test_q.py (when it differs), or a merge of main whose own commit wrote
+  `merge` as test_q.py (two lines added above the base's first line); the PR, its CI and the state follow it."""
   if merge:
     target = g("rev-parse", "--show-toplevel")
-    Path(target, Q).write_text("import pytest\n\n" + BASE, encoding="utf-8")
+    Path(target, Q).write_text(merge, encoding="utf-8")
     g("commit", "-qam", "main: import pytest")
   g("checkout", "-q", BRANCH)
   if merge:
@@ -242,7 +242,7 @@ def test_a_test_delta_settlement_follows_the_test_and_the_line_text(world, tmp_p
   assert [f["claim"] for f in first["reviewers"]["foreman"]["findings"]] == [f"test-delta: {Q}:{2 if round_1 == SKIP else 3} weakened"]
   post(st, 1)
   comments[2].append(c(13, "owner", ALLOWED, at=RULING_AT))  # after round 1's post, before round 2's
-  move_head(world, st, g, LATER[later_head](ROUND_1[round_1]), merge="merge of main" in later_head)
+  move_head(world, st, g, LATER[later_head](ROUND_1[round_1]), merge="merge of main" in later_head and "import pytest\n\n" + BASE)
   for n in range(2, counted + 1):
     rnd = collect_round(world, st, card, n)
     if n < counted:
@@ -252,3 +252,34 @@ def test_a_test_delta_settlement_follows_the_test_and_the_line_text(world, tmp_p
   precheck_lines = precheck_on_head(world, st, g, tmp_path, monkeypatch, snapshot)
   assert sum(f["claim"].startswith("test-delta: tests/unit/test_q.py:") for f in round_findings) == highs, round_findings
   assert sum("test-delta: tests/unit/test_q.py:" in line for line in precheck_lines) == highs, precheck_lines  # `superegm precheck` on the later head
+
+
+THREE, TWO = "def test_a():\n  assert 1 == 1\n  assert 2 == 2\n", "def test_a():\n  assert 1 == 1\n"
+REMOVED = {"file": Q, "line": 3, "base_line": 3, "kind": "removed"}  # round 1's entry: `assert 2 == 2` of test_a, removed
+ENTRIES = {"1.3": {"test": "test_a", "text": "assert 2 == 2", "base_text": "assert 2 == 2", "occurrence": 1},
+           "1.2.1: {file, line, base_line, kind, base_commit} only": {}}
+SETTLED_BY = {
+  "judges:p-1, recorded `foreman-1-1 finding overruled`": {
+      "decisions": [{"id": "q1", "point": 1, "source": "review r round 1"}],
+      "rulings": [{"decision": "q1", "ruling": "foreman-1-1 finding overruled", "by": "judges:p-1", "reason": "moved",
+                   "posted": "comment 13", "posted_at": RULING_AT}]},
+  "owner, `foreman-1-1 allowed — moved`": {"comments": {2: [c(13, "owner", "**Ruling:** foreman-1-1 allowed — moved", at=RULING_AT)]}}}
+
+
+@pytest.mark.parametrize("settled_by, entry, base_moved, highs", [
+    ("judges:p-1, recorded `foreman-1-1 finding overruled`", "1.3", True, 0),
+    ("owner, `foreman-1-1 allowed — moved`", "1.2.1: {file, line, base_line, kind, base_commit} only", False, 0),
+    ("owner, `foreman-1-1 allowed — moved`", "1.2.1: {file, line, base_line, kind, base_commit} only", True, 1),
+])
+def test_judges_and_1_2_1_test_delta_settlements_carry(world, tmp_path, monkeypatch, settled_by, entry, base_moved, highs):
+  # round 1's foreman-1-1 removed `assert 2 == 2` of tests/unit/test_q.py::test_a; round 2's head still lacks it
+  target, base, head, g = pr_repo(world, tmp_path, monkeypatch, commits=S1 + [("chore: trim", Q, TWO)], base_files={Q: THREE})
+  posted = {**POSTED_R1, "test_delta": [{**REMOVED, "base_commit": base, **ENTRIES[entry]}]}  # taken at round 1's base
+  st, card, _ = seed(world, head=head, rounds=[posted], launches=test_foreman.TWO_LAUNCHES, **SETTLED_BY[settled_by])
+  open_head_review(world, st, card, "0" * 40, {"change-review": "",
+                                               "foreman": f"foreman-1-1 | high | {Q}:3 | regression: no | test-delta: {Q}:3 removed\n"})
+  if base_moved:  # a merge of main whose commit added two lines above test_a: the base commit and the line move
+    move_head(world, st, g, None, merge="import os\n\n" + THREE)
+  rnd = collect_round(world, st, card, 2)
+  round_2_claims = [f["claim"] for f in rnd["reviewers"]["foreman"]["findings"]]
+  assert sum(claim.startswith("test-delta: tests/unit/test_q.py:") for claim in round_2_claims) == highs, round_2_claims
