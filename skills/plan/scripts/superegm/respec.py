@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the respec's touched units, derived marks, open and actionable respecs and `respec posted` (U85); `respec open` from a review's design finding (U91).
+# Added by SuperEGM (gsVAM), 2026: the respec's touched units, derived marks, open and actionable respecs and `respec posted` (U85); `respec open` from a review's design finding (U91); `## Units` prose and table rules, Interfaces names as `scan` reads them and the repository root through to `history` (U105).
 
 """superegm respec: the units a spec correction touches (spec section 7.6), its derived marks and the posts and
 relaunches it asks for; every mark is derived on read from `respec/` and the launch records, never `state.json`."""
@@ -137,6 +137,16 @@ def units_span(text: str) -> tuple[int, int] | None:
   return spans[-1] if spans else None
 
 
+def units_lines(lines: list[str]) -> tuple[set, set]:
+  """`(table, prose)`: the 0-based indexes of the last `## Units` section's table lines (header, separator and rows, every
+  unfenced line that opens with `|`) and of its other lines below the heading, its prose (U105)."""
+  span = units_span("\n".join(lines))
+  if not span:
+    return set(), set()
+  table = {n for n, line in unfenced(lines) if span[0] <= n + 1 <= span[1] and line.lstrip().startswith("|")}
+  return table, set(range(span[0], span[1])) - table
+
+
 def units_rows(text: str) -> dict:
   """Row id to row line of the spec's last `## Units` table, fenced lines left out."""
   span = units_span(text)
@@ -258,11 +268,12 @@ def context(store: core.Store, handoff: str, text: str) -> dict:
   for title, start, end in sections("\n".join(prev)):
     if title.lstrip("#").strip() == GLOBAL:
       spec_global |= set(range(start, end + 1))
-  table = lambda lines: (lambda s: set(range(s[0] - 1, s[1])) if s else set())(units_span("\n".join(lines)))
+  (table_old, prose_old), (table_new, prose_new) = units_lines(prev), units_lines(new)
   return {"rel": rel, "prev": prev, "new": new, "ops": ops, "units": units, "merged": merged, "lines_of": lines_of,
           "global_of": global_of, "names_of": {u: {interface_name(l) for l in held} for u, held in interfaces_of.items()},
           "spec_global": spec_global, "carried": carried_spans(units, entries, maps),
-          "table_old": table(prev), "table_new": table(new), "rows_old": set(units_rows("\n".join(prev)))}
+          "table_old": table_old, "table_new": table_new, "prose_old": prose_old, "prose_new": prose_new,
+          "rows_old": set(units_rows("\n".join(prev)))}
 
 
 def hunk_units(ctx: dict, op: list) -> tuple[set, set, set, set]:
@@ -270,8 +281,10 @@ def hunk_units(ctx: dict, op: list) -> tuple[set, set, set, set]:
   carried Design range the hunk overlaps (`ranged`); a unit whose body quotes a line the hunk removes or changes, a
   `## Global constraints` line always counting and any other line unless `skipped` (merged: `review`); every unit whose
   Interfaces declare the name of a `- Produces:` or `- Consumes:` line the hunk removes or inserts, its producer and
-  every consumer, names compared whole (`interfaced`); a `## Units` table line, the unit its row names and none for a
-  new follow-up row (`Follows: U<n>`), never the uncovered rule (merged: `review`); and, for each other changed line no
+  every consumer, names compared whole (`interfaced`); a `## Units` table line (header, separator or row), the unit its
+  row names and none for a new follow-up row (`Follows: U<n>`), never the uncovered, quoted-line or range rule (merged:
+  `review`); a line of prose under `## Units` outside the table that `skipped` passes, every unmerged unit (merged:
+  `review`) whatever covers or quotes it, the range rule still applying (U105); and, for each other changed line no
   Design range covers, no body quotes and `skipped` passes, every unmerged unit (merged: `review`). A replace's new
   line past the old block's length has no old counterpart: it is judged as an insertion, never as quoted."""
   _, i1, i2, j1, j2 = op
@@ -284,12 +297,17 @@ def hunk_units(ctx: dict, op: list) -> tuple[set, set, set, set]:
     if not row or row.group(1) not in units or (is_new and row.group(1) not in ctx["rows_old"] and FOLLOWS.search(line)):
       continue
     (review if row.group(1) in merged else hit).add(row.group(1))
-  ranged = {u for u, span in ctx["carried"].items() if overlaps(span, span_of(op))}
+  # where the hunk's lines stand in the old text (1-based), a Units-table line left out: the range rule's places
+  at_old = {n + 1 for n in range(i1, i2) if n not in ctx["table_old"]}
+  at_old |= {i1 + k + 1 if k < i2 - i1 else max(i2, 1) for k in range(j2 - j1) if j1 + k not in ctx["table_new"]}
+  ranged = {u for u, span in ctx["carried"].items() if any(span[0] <= n <= span[1] for n in at_old)}
   covered = lambda n: any(span[0] <= n <= span[1] for span in carried)  # n is 1-based in the old text
+  prose = any(not skipped(prev[n]) for n in range(i1, i2) if n in ctx["prose_old"]) or \
+    any(not skipped(new[n]) for n in range(j1, j2) if n in ctx["prose_new"])
   quoted_old = set()
   for n in range(i1, i2):
     line = prev[n].strip()
-    if not line:
+    if not line or n in ctx["table_old"]:
       continue
     for u in units:
       if (n + 1 in ctx["spec_global"] or line in ctx["global_of"][u] or not skipped(line)) and line in ctx["lines_of"][u]:
@@ -299,16 +317,17 @@ def hunk_units(ctx: dict, op: list) -> tuple[set, set, set, set]:
     if line.startswith(INTERFACE):  # removed or inserted: the producer and every consumer of the name it declares
       name = interface_name(line)
       interfaced |= {v for v, names in ctx["names_of"].items() if name and name in names}
+  units_old, units_new = ctx["table_old"] | ctx["prose_old"], ctx["table_new"] | ctx["prose_new"]  # their own rules
   uncovered = any(not skipped(prev[n]) and n not in quoted_old and not covered(n + 1)
-                  for n in range(i1, i2) if n not in ctx["table_old"])
+                  for n in range(i1, i2) if n not in units_old)
   for k in range(j2 - j1):  # a new line stands at the old line it replaces; one past their count, or inserted, after the block
     n = i1 + k if k < i2 - i1 else None
     at = n + 1 if n is not None else max(i2, 1)
-    if j1 + k in ctx["table_new"]:
+    if j1 + k in units_new:
       continue
     if not skipped(new[j1 + k]) and (n is None or n not in quoted_old) and not covered(at):
       uncovered = True
-  if uncovered:
+  if uncovered or prose:  # prose under `## Units` is a build rule: every unmerged unit, whatever covers or quotes it
     hit |= set(units) - merged
     review |= merged
   return hit | ranged | interfaced, review, ranged, interfaced
