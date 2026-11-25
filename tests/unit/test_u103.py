@@ -69,10 +69,11 @@ def question_of(found, contested):
 
 
 class Gh:
-  """The by-hand ruling comments the fake GitHub serves; their reads fail from the `fail_from`-th on."""
+  """The by-hand ruling comments the fake GitHub serves; their reads fail from the `fail_from`-th on, and read as edited from
+  the `edit_from`-th on."""
 
   def __init__(self, world, comments):
-    self.reads, self.fail_from = 0, None
+    self.reads, self.fail_from, self.edit_from = 0, None, None
 
     def api(args, cwd, token=None):
       match = re.fullmatch(rf"repos/{REPO}/issues/comments/(\d+)", world.gh.endpoint_of(args))
@@ -81,6 +82,8 @@ class Gh:
       self.reads += 1
       if self.fail_from is not None and self.reads >= self.fail_from:
         return 1, "", "gh: Server Error (HTTP 500)"
+      if self.edit_from is not None and self.reads >= self.edit_from:
+        return world.gh.ok(comments[int(match.group(1))] | {"updated_at": "2026-11-24T10:05:00Z"})
       return world.gh.ok(comments[int(match.group(1))])
     world.gh.extend("api", api)
 
@@ -236,6 +239,27 @@ def test_a_session_ruling_settles_only_a_finding_its_decision_names(world):
   assert code == 1 and "foreman-2-2 is not a finding of q1" in err
   assert foreman_of(s, "U01")["rulings"] == before and not world.gh.comments.get(2)
   assert findings["foreman-2-2"]["disposition"] is None
+
+
+def test_a_comment_edited_between_its_two_reads_is_refused(world):
+  """Round 4 (astra-3-1): in leavemealone-mode `decision rule --posted` reads the owner's comment, then the settle reads it again
+  before the record; an edit seen on that second read is refused as on the first, nothing recorded or settled. The replayed
+  `review settle --owner --posted` after a ruling recorded unedited still reads an edit made after the record as 1.2.1 did."""
+  ruling = "foreman-2-1 finding overruled — the spec allows it"
+  w = world_of(world, "leavemealone", "contest", {"foreman-2-1": "contested"}, ruling)
+  s, rid = w.s, w.rids["U01"]
+  disposition = lambda: next(f["disposition"] for f in json.loads(s.path("reviews", rid, "round-2.json").read_text(encoding="utf-8"))
+                             ["reviewers"]["foreman"]["findings"] if f["id"] == "foreman-2-1")
+  before = foreman_of(s, "U01")["rulings"]
+  w.gh.edit_from = 2  # the ruling's own read sees it unedited, the settle's read sees the edit
+  code, err = rule_by(world, w, "U01", ruling, "owner", True)
+  assert code == 1 and "ruling comment edited: post a new one" in err
+  assert foreman_of(s, "U01")["rulings"] == before and disposition() is None
+  w.gh.reads, w.gh.edit_from = 0, None
+  assert rule_by(world, w, "U01", ruling, "owner", True)[0] == 0 and disposition() == "contested"
+  w.gh.edit_from = 1  # edited after its record: the replayed settle is not refused
+  assert world.run("review", "settle", "--review", rid, "--finding", "foreman-2-1", "--disposition", "contested", "--owner",
+                   "--posted", OWNER_COMMENTS["U01"], "--runcard", w.card)[0] == 0
 
 
 # ---------------------------------------------------------------- S3: a ruling comment edited before its record is refused
