@@ -53,3 +53,22 @@ def test_units_section_changes_touch_by_their_rules(world, change, touched, merg
     core.atomic_write(st.path("unit", uid), BODIES[uid] + f"\n{line}\n")
   result = respec.touched(st, HID, "".join(draft()))
   assert (result["touched"], result["merged_review"]) == (touched, merged_review)
+
+
+@pytest.mark.parametrize("u1_line, u2_line, touched", [
+  ("- Produces: `load(path) -> dict`", "- Consumes: `load` (U1)", ["U1", "U2"]),
+  ("- Produces: `superegm review open --review <id>`", "- Consumes: `superegm review open` (U1)", ["U1", "U2"]),
+  ("- Produces: `superegm review open --review <id>`", "- Consumes: `superegm launch --runcard <card>` (U1)", ["U1"]),
+  ("- Produces: `state.json` key `x`", "- Consumes: `state.json` key `x` (U1)", ["U1", "U2"]),
+  ("- Produces: `state.json` key `x`", "- Consumes: `state.json` key `y` (U1)", ["U1"]),
+  ("- Produces: none", "- Consumes: none", ["U1"]),
+])
+def test_interface_names_match_as_scan_reads_them(world, u1_line, u2_line, touched):
+  # U1's Interfaces hold u1_line, U2's u2_line; the draft removes the spec's copy of u1_line, inside U1's Design range alone
+  from superegm import respec
+  base = replace(BASE, "Queue keeps jobs.", [u1_line])
+  spec, st = respec_world(world, [(base, None)])
+  core.atomic_write(st.path("unit", "U1"), f"### U1: Queue\n\n## Interfaces\n{u1_line}\n")
+  core.atomic_write(st.path("unit", "U2"), f"### U2: Deliver\n\n## Interfaces\n{u2_line}\n")
+  draft = replace(base, u1_line, None)
+  assert respec.touched(st, HID, "".join(draft))["touched"] == touched
