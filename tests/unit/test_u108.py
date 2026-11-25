@@ -50,3 +50,22 @@ def test_push_script_pushes_head_to_the_launch_branch(world, monkeypatch, spawn_
   assert origin_refs["refs/heads/main"] == main_before
   assert "refs/tags/v-annotated" not in origin_refs
   assert f'[branch "superegm/{hid}/U07"]' not in config_text
+
+
+RUNS = "## Definition of done\n2. Run `pytest tests/unit/test_u07.py -q` — passes\n"
+
+
+@pytest.mark.parametrize("configured, body_text", [
+    (["Read", "Edit", "Bash(git add:*)"], RUNS),
+    (["Bash(pytest:*)", "Read"], RUNS),
+    (["Read", "Agent", "Workflow"], RUNS),
+    (["Read", "Bash(git push:*)", "Bash(git push -q origin superegm/h/U07:*)"], RUNS),
+    (["Read"], "## Definition of done\n2. Run `git diff --check && pytest -q` — passes\n"),
+])
+def test_allow_list_names_the_push_script_and_no_git_push(configured, body_text):
+  # the push script's absolute path stands in for every git push entry; a DoD segment led by git adds no entry; precheck and reset stay
+  tools = launch_builder.allowed_tools(configured, "superegm/h/U07", body_text, "/usr/local/bin/gh", bin=Path("/bin/U07_r1_bin"))
+  assert not any(t.startswith("Bash(git push") for t in tools) and "Bash(git:*)" not in tools
+  assert tools.count("Bash(/bin/U07_r1_bin/superegm-push:*)") == 1
+  assert {"Bash(/bin/U07_r1_bin/superegm-precheck:*)", "Bash(git reset --hard:*)"} <= set(tools)
+  assert not any("push" in t for t in launch_builder.allowed_tools(configured, "superegm/h/U07", body_text, "/usr/local/bin/gh"))
