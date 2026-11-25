@@ -1986,11 +1986,12 @@ def finding_at(location: str) -> tuple[str | None, int | None, str | None]:
   return (match.group(1), int(match.group(2)), commit) if match else (where, None, commit)
 
 
-def thread_place(thread: dict) -> tuple[int | None, str | None]:
+def thread_place(thread: dict, base_of=None) -> tuple[int | None, str | None]:
   """`(line, commit)` a PR thread names: its `line` in its `commit_id`; an outdated line comment, whose `line` GitHub
-  nulls, its `original_line` in its `original_commit_id`; none for a file-level comment (`subject_type` `file`) and for
-  a comment on the diff's LEFT side (`side`, or `original_side` when outdated), whose line counts in the PR's base text,
-  not in a head commit: a line the PR removed or left as context there, kept as the correction's (U105)."""
+  nulls, its `original_line` in its `original_commit_id`; none for a file-level comment (`subject_type` `file`). A
+  comment on the diff's LEFT side (`side`, or `original_side` when outdated) counts its line in the PR's base text, the
+  text GitHub's LEFT side shows: its line in `base_of(<its commit>)`, the merge base of `config.base` and that commit,
+  and none when no `base_of` is given or the merge base cannot be read (U105)."""
   if thread.get("subject_type") == "file":
     return None, None
   if thread.get("line") is not None:
@@ -1999,14 +2000,28 @@ def thread_place(thread: dict) -> tuple[int | None, str | None]:
     line, commit, side = thread["original_line"], thread.get("original_commit_id"), thread.get("original_side") or thread.get("side")
   else:
     return None, None
-  return (None, None) if side == "LEFT" else (line, commit)
+  if side != "LEFT":
+    return line, commit
+  base = base_of(commit) if base_of and commit else None
+  return (line, base) if base else (None, None)
+
+
+def merge_base_of(root: Path, base: str):
+  """A function from a commit to the merge base of `base` and that commit in `root`, each read once; None when git
+  cannot read it (U105)."""
+  found = {}
+  def of(commit: str) -> str | None:
+    if commit not in found:
+      found[commit] = core.run_git(["merge-base", base, commit], root, check=False).strip() or None
+    return found[commit]
+  return of
 
 
 def line_now(root: Path, spec_rel: str, current: list[str], commit: str | None, line: int) -> int | None:
   """`line` of the spec as it stood at `commit`, carried to the spec's `current` lines (U105): a line of an equal block
-  moves with it, a changed one stands at the first line that replaced it, and a removed one at the line before the gap
-  (`max(j1, 1)`), where `scope_sections` counts a deletion; unchanged with no commit named; None when no commit `commit`
-  holds the spec, its place unknown."""
+  moves with it, a replaced one stands at the new line in its own place in the block (the block's last new line when
+  the block shrank past it), and a removed one at the line before the gap (`max(j1, 1)`), where `scope_sections` counts
+  a deletion; unchanged with no commit named; None when no commit `commit` holds the spec, its place unknown."""
   if not commit:
     return line
   try:
@@ -2016,7 +2031,7 @@ def line_now(root: Path, spec_rel: str, current: list[str], commit: str | None, 
   from superegm import respec  # at call time: respec imports this module
   for tag, i1, i2, j1, j2 in respec.opcodes(then, current):
     if i1 <= line - 1 < i2:
-      return j1 + (line - 1 - i1) + 1 if tag == "equal" else (j1 + 1 if j2 > j1 else max(j1, 1))
+      return j1 + min(line - 1 - i1, j2 - j1 - 1) + 1 if j2 > j1 else max(j1, 1)  # equal or replaced: its own place
   return max(len(current), 1)  # past the text it was read in: its last line
 
 
@@ -2049,6 +2064,10 @@ def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[
               for f in record["findings"] if f.get("thread") is not None]
   backfill = sorted({tid for tid in recorded if tid not in listed})
   keep = lambda path, line, commit: True
+  try:  # a LEFT-side thread's line counts in the merge base of `config.base` and its commit (`thread_place`)
+    base_of = merge_base_of(core.git_toplevel(Path(review["artifact"]).parent), config["base"])
+  except (core.HandoffError, OSError):
+    base_of = None
   if review.get("respec"):  # a respec cycle's remit is its correction: an external finding outside it is no finding of the round
     spec = Path(review["artifact"])
     root = core.git_toplevel(spec.parent)
@@ -2064,7 +2083,7 @@ def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[
   try:  # an owner's `**Ruling:**` is dropped, never a finding; nothing reads it here (the `--unit` path reads its issue's)
     threads = [t for t in read_threads(config["repo"], number, listed | set(recorded))
                if not (t["login"] in owners and ((t["body"] or "").strip().splitlines() or [""])[0].startswith("**Ruling:**"))
-               and keep(t.get("path"), *thread_place(t))]  # skipped, never in `ingested[]`: a later ordinary cycle reads it
+               and keep(t.get("path"), *thread_place(t, base_of))]  # skipped, never in `ingested[]`: a later ordinary cycle reads it
     roles = {}
     for thread in threads:
       if not thread["bot"] and thread["login"] not in roles:
@@ -2083,7 +2102,7 @@ def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[
     top = max((int(m.group(1)) for fid in held + [f["id"] for f in record["findings"]]
                if (m := re.fullmatch(rf"{re.escape(ext)}-{n}-(\d+)", fid))), default=0)
     severity = thread_severity(thread, config, None if thread["bot"] else roles[thread["login"]])
-    line, commit = thread_place(thread)  # recorded where it was made, so a later respec reads its line (U105)
+    line, commit = thread_place(thread, base_of)  # recorded in the text its line counts in, so a later respec reads it (U105)
     placed = thread | {"line": line, "commit_id": commit or thread.get("commit_id")}
     [finding] = parse_findings(thread_line(ext, n, top + 1, placed, severity, config), ext, n)
     record["findings"].append({**finding, "thread": thread["id"], "review_body": thread["review_body"], "pr": number})
