@@ -252,9 +252,9 @@ def clean_unit(root, st, unit, quiet=False):
   for entry in left:
     note(f"kept {entry}: not a builder tree")
   folder = st.path("worktrees", unit)
-  if folder.is_dir() and not folder.is_symlink() and not left and not any(tree.exists() for tree in trees):
+  if folder.is_dir() and not linked(st, unit, folder) and not left and not any(tree.exists() for tree in trees):
     try:
-      folder.rmdir()  # the unit's folder goes with its last worktree; a folder with a kept entry (said above) stays
+      folder.rmdir()  # the unit's folder goes with its last worktree, never through a link up to the store; a kept entry keeps it
     except OSError as error:
       print(f"kept {folder}: {error}")
       complete = False
