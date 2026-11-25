@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the report subcommand (spec section 11): the per-batch wave report, the idle rules
-# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31); its own `ci_wait_minutes` config key, moved from `__init__` (U32); the board's tier column (U33); `waiting proceed` and a proceed closing a point-1 decision (U92); the `conflict` view and its board action (U62); a unit waiting on an open respec is not active, its board row and merge round included (U86); a point-1 decision carrying an unconverged panel's verdict line stays pending on each finding no ruling names, and the report lists each judges ruling with its panel (U88).
+# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31); its own `ci_wait_minutes` config key, moved from `__init__` (U32); the board's tier column (U33); `waiting proceed` and a proceed closing a point-1 decision (U92); the `conflict` view and its board action (U62); a unit waiting on an open respec is not active, its board row and merge round included (U86); a point-1 decision carrying an unconverged panel's verdict line stays pending on each finding no ruling names, and the report lists each judges ruling with its panel (U88); that verdict line matched by the decision's own verdict file, the path its `source` fixes (U107, 1.3 design section 3.9).
 
 """superegm report: rewrite `wave_<n>_report.md` from the store, the plan and the spec and print its path, the
 board and the idle, pending and loop lines. It opens the card's handoff as `status` does (`core.locate`,
@@ -358,10 +358,21 @@ def unit_state(uid: str, view: dict, foreman: dict, launches: list, card: dict, 
 def pending_decisions(foreman: dict) -> list:
   """`decisions[]` minus `rulings[]` (spec section 7); a point-1 decision whose options end ` allowed` (an
   `owner: <ids>` decision, U25) stays pending until every option's fid has a ruling or a `redesign` or a `proceed` rules it whole;
-  so does a point-1 decision whose question holds an unconverged panel's `(judges/<panel>/verdict.json)` line (U88), for each
-  finding its question asks, until every one has a ruling or a `redesign` or a `proceed` rules it whole."""
+  so does a point-1 decision whose question holds an unconverged panel's verdict line (U88), for each finding its
+  question asks, until every one has a ruling or a `redesign` or a `proceed` rules it whole. That line is matched by
+  the decision's own verdict file, never by searching the question's text (1.3 design section 3.9): a line opening
+  `The judges did not converge (judges/<rid>-r<n>-<6 hex>/verdict.json)`, `<rid>` and `<n>` read from the
+  decision's `source` (`review <rid> round <n>`), with no store read; a builder's text quoting another path, or
+  this one inside a finding line, makes no decision pending."""
   rulings = foreman.get("rulings") or []
   ruled = {r.get("decision") for r in rulings}
+
+  def own_verdict(d) -> bool:
+    words = str(d.get("source") or "").split()
+    if not (len(words) == 4 and words[0] == "review" and words[2] == "round" and words[3].isdigit()):
+      return False
+    line = rf"^The judges did not converge \(judges/{re.escape(words[1])}-r{words[3]}-[0-9a-f]{{6}}/verdict\.json\)"
+    return re.search(line, d.get("question") or "", re.M) is not None
 
   def pending(d):
     options = d.get("options") or []
@@ -370,7 +381,7 @@ def pending_decisions(foreman: dict) -> list:
       if fids & {"redesign", "proceed"}:  # spec section 4.2: a proceed closes the whole decision, as `redesign` does
         return False
       return any(o.split(" ")[0] not in fids for o in options)
-    if d.get("point") == 1 and "/verdict.json)" in (d.get("question") or ""):  # an unconverged panel's decision (U88): pending on each finding no ruling names
+    if d.get("point") == 1 and own_verdict(d):  # an unconverged panel's decision (U88): pending on each finding no ruling names
       fids = {str(r.get("ruling") or "").split(" ")[0] for r in rulings if r.get("decision") == d["id"]}
       if fids & {"redesign", "proceed"}:
         return False
