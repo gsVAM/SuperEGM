@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review settle --judges` for a head's contested or declined high or medium on a normal-mode card, journalled `Ruling (judges <panel>, contest)` (U88); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76); a spec cycle's changed reference documents as whole-file `changed <path>` scope lines, their `refs` manifest on each round, in the scope filter, the settle check and the proceed ruling (U75); `review open --respec R<n>`: the diff and its sections as evidence, the `design`, `codebase-details` and Astra panel, cap 2 (U85); a plan or integrate cycle a respec approval closed by its `source_review` (U91); `review record --sha256` on a head takes the full 40-hex commit sha alone (U101, 1.3 design section 3.4); the settle's writes in `apply_settle`, which `decision rule` calls on a point-1 ruling, the CI finding's refusal in `check_ci_finding` and a posted proceed comment edited before its record refused in `posted_comment` (U103, 1.3 design sections 3.6 and 3.7).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review settle --judges` for a head's contested or declined high or medium on a normal-mode card, journalled `Ruling (judges <panel>, contest)` (U88); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76); a spec cycle's changed reference documents as whole-file `changed <path>` scope lines, their `refs` manifest on each round, in the scope filter, the settle check and the proceed ruling (U75); `review open --respec R<n>`: the diff and its sections as evidence, the `design`, `codebase-details` and Astra panel, cap 2 (U85); a plan or integrate cycle a respec approval closed by its `source_review` (U91); `review record --sha256` on a head takes the full 40-hex commit sha alone (U101, 1.3 design section 3.4); the settle's writes in `apply_settle`, which `decision rule` calls on a point-1 ruling, the CI finding's refusal in `check_ci_finding` and a posted proceed comment edited before its record refused in `posted_comment` (U103, 1.3 design sections 3.6 and 3.7); U104's owner-only spec findings (1.3 design section 3.8): `owner_only_fids` and the posted word naming a `deviation (spec)` fid whatever else blocks.
 
 """superegm review open|record|settle|status|rule|scope|post|ingest|triage: the one review loop (spec section 8)."""
 
@@ -1315,7 +1315,7 @@ def write_owner_outcome(st: core.Store, rid: str, review: dict, runcard: str, co
   data = core.load_foreman(st, unit)
   posted = sorted((e for e in data["rounds"] if e.get("phase") == "posted"), key=lambda e: e["round"])
   rnd = load_round(st, rid, posted[-1]["round"]) if posted else None
-  if not rnd or contested_fids(rnd) or not (owner := owner_only_fids(rnd)):
+  if not rnd or (contested_fids(rnd) and not spec_fids(rnd)) or not (owner := owner_only_fids(rnd)):
     return None
   upheld = {str(r.get("ruling") or "").split(" ")[0] for r in data.get("rulings") or []  # `--ruling` is stored raw, reason and all
             if str(r.get("ruling") or "").partition(" — ")[0].strip().endswith(" finding upheld")}
@@ -2153,12 +2153,22 @@ def contested_fids(round_json: dict) -> list:
 
 
 def owner_only_fids(round_json: dict) -> list:
-  """The unsettled `test-delta:` fids of the round when every unsettled high or medium of it is one of them, else
-  []: a remainder the owner alone can settle (U25)."""
+  """The owner's findings of the round: whenever it holds an unsettled `deviation (spec)` fid (U104, 1.3 design section
+  3.8), whatever else blocks, those fids, then its unsettled `test-delta:` fids; else the unsettled `test-delta:` fids
+  when every unsettled high or medium of it is one of them, else []: a remainder the owner alone can settle (U25)."""
   open_blocking = [f for record in (round_json.get("reviewers") or {}).values() for f in record.get("findings") or []
                    if f["disposition"] is None and blocking(f)]
   owner = [f["id"] for f in open_blocking if f["claim"].startswith("test-delta:")]
+  if spec := spec_fids(round_json):
+    return spec + owner
   return owner if owner and len(owner) == len(open_blocking) else []
+
+
+def spec_fids(round_json: dict) -> list:
+  """The round's unsettled high or medium `deviation (spec)` findings (`collect --spec`, U104): the owner's alone."""
+  from superegm.decision import SPEC_CLAIM  # inside: `decision` imports `review`
+  return [f["id"] for record in (round_json.get("reviewers") or {}).values() for f in record.get("findings") or []
+          if f["disposition"] is None and blocking(f) and f["claim"].startswith(SPEC_CLAIM)]
 
 
 def count_posted(st: core.Store, unit: str, entry: dict, posted_at: str, review_id: str, runcard: str) -> str:
@@ -2173,7 +2183,9 @@ def count_posted(st: core.Store, unit: str, entry: dict, posted_at: str, review_
     rnd["what_ran"] = derive_what_ran(review, rnd, saved)
     core.atomic_write(st.path("reviews", review_id, f"round-{entry['round']}.json"), rnd)
   store_verdict(st, review_id, review, runcard)  # the round now completed: an early accept it lapses is journaled
-  word = outcome_word(status_code(review_id, runcard), contested_fids(rnd or {}), owner_only_fids(rnd or {}))
+  # a spec finding's word is the owner's at once, beside a contest too (U104): its question carries the round's contests
+  contested = [] if spec_fids(rnd or {}) else contested_fids(rnd or {})
+  word = outcome_word(status_code(review_id, runcard), contested, owner_only_fids(rnd or {}))
   saved["outcome"] = word
   entry.update(saved)
   core.save_foreman(st, unit, data)
