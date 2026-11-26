@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3/5
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
-# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63); `respec`, a `spec` deviation's option, the owner's alone, a spent `relaunch` dropped beside it, and a letter that resolves to it binding nothing unrecorded (spec §7.6, U84); the judges' ruling journalled and posted with `contest` on a normal-mode card (spec §7.8, U88); U103's rulings (1.3 design sections 3.6 and 3.7): a point-1 ruling with no fid refused as `missing <fid>`, a point-1 overrule or allowance settling the finding it rules through `review.apply_settle` after `review settle`'s ruler checks, a failed GitHub read one `gh:` line, a posted ruling comment edited before its first record refused as `ruling comment edited: post a new one`.
+# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63); `respec`, a `spec` deviation's option, the owner's alone, a spent `relaunch` dropped beside it, and a letter that resolves to it binding nothing unrecorded (spec §7.6, U84); the judges' ruling journalled and posted with `contest` on a normal-mode card (spec §7.8, U88); U103's rulings (1.3 design sections 3.6 and 3.7): a point-1 ruling with no fid refused as `missing <fid>`, a point-1 overrule or allowance settling the finding it rules through `review.apply_settle` after `review settle`'s ruler checks, a failed GitHub read one `gh:` line, a posted ruling comment edited before its first record refused as `ruling comment edited: post a new one`; U104's owner-only spec findings (1.3 design section 3.8): an `owner: <ids>` decision offering a spec fid `<fid> respec` beside `finding upheld` and `finding overruled`, a `## Q<n>` question's spec finding read, a mixed decision's `<fid> allowed` ruled as an `owner: <ids>` decision's.
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
@@ -550,13 +550,27 @@ SPEC_CLAIM = "deviation (spec) unruled: "  # the claim of the foreman's finding 
 
 
 def spec_claims(question: str) -> dict:
-  """The foreman's spec findings a point-1 question holds, fid to the finding's text (what follows `SPEC_CLAIM`)."""
+  """The foreman's spec findings a point-1 question holds, fid to the finding's text (what follows `SPEC_CLAIM`): a
+  `<fid> | … | <claim>` line, or a `## Q<n> <fid> (<severity>, <location>): <claim>` one (U104)."""
   found = {}
   for line in question.splitlines():
     fields = line.split(" | ", 4)
     if len(fields) == 5 and fields[4].startswith(SPEC_CLAIM) and " " not in fields[0]:
       found[fields[0]] = fields[4][len(SPEC_CLAIM):]
+    elif (m := Q_LINE_RE.match(line)) and m["claim"].startswith(SPEC_CLAIM):
+      found[m["fid"]] = m["claim"][len(SPEC_CLAIM):]
   return found
+
+
+def owner_options(word: str, question: str) -> list:
+  """Point 1 on an `owner: <ids>` word (U25, U104): an id of the word standing in the question as its own word is offered
+  `<fid> respec` when the question holds it as a spec finding, else `<fid> allowed`; with a spec fid among them,
+  `finding upheld` and `finding overruled` come first; [] when no id of the word stands in the question."""
+  specs = spec_claims(question)
+  ids = [fid for fid in word[len("owner: "):].split(", ") if re.search(rf"(?<!\S){re.escape(fid)}(?!\S)", question)]
+  respecs = [f"{fid} respec" for fid in ids if fid in specs]
+  allowed = [f"{fid} allowed" for fid in ids if fid not in specs]
+  return (["finding upheld", "finding overruled"] + respecs if respecs else []) + allowed
 
 
 def options_for(point: int, source: str, question: str, foreman: dict, head: str) -> list:
@@ -564,16 +578,15 @@ def options_for(point: int, source: str, question: str, foreman: dict, head: str
   foreman's spec findings the question holds; point 2 one more round|stop; point 3 the
   comment's own `- (a)` lines plus `stop the unit`, or `relaunch; stop the unit` for a launch, a close,
   or a third `blocked` comment on the same head (a `spec` deviation's keeps `respec` between them, §7.6, `open_decision` dropping a `relaunch` already used); point 5 (a head's accept below the cap) accept|revise. Point 1 on
-  an `owner: <ids>` word (the latest posted round's outcome) offers `<fid> allowed`, one per id the question names (U25)."""
+  an `owner: <ids>` word (the latest posted round's outcome) offers `owner_options`: `<fid> allowed` one per id the question
+  names (U25), a spec finding's id `<fid> respec` beside `finding upheld` and `finding overruled` (U104)."""
   if point == 5:
     return ["accept", "revise"]
   if point == 1:
     posted = [e for e in foreman.get("rounds") or [] if e.get("phase") == "posted"]
     word = str(posted[-1].get("outcome") or "") if posted else ""
-    if word.startswith("owner: "):
-      named = [f"{fid} allowed" for fid in word[len("owner: "):].split(", ") if re.search(rf"(?<!\S){re.escape(fid)}(?!\S)", question)]
-      if named:
-        return named
+    if word.startswith("owner: ") and (named := owner_options(word, question)):
+      return named
     return ["finding upheld", "finding overruled"] + [f"{fid} respec" for fid in spec_claims(question)]
   if point == 2:
     return ["one more round", "stop"]
@@ -1013,17 +1026,19 @@ def check_ruling(point: int, options: list, ruling: str, by: str = "") -> str:
     place = ord(text[1]) - ord("a")
     if place < len(options):
       text = options[place]
-  if point == 1 and options and all(o.endswith(" allowed") for o in options):
-    said = text.partition(" — ")[0].strip()
-    option = next((o for o in options if o.split(" ")[0] == fid and said in ("allowed", "finding overruled", "finding upheld")), None)
+  said = text.partition(" — ")[0].strip()
+  if point == 1 and f"{fid} allowed" in options:  # an `owner: <ids>` decision's test-delta fid, a mixed decision's too (U104)
+    option = f"{fid} allowed" if said in ("allowed", "finding overruled", "finding upheld") else None
     if option and by.startswith("judges:"):
       raise Refusal(f"decision: {fid} {said} is the owner's alone")  # the ruling the panel gave, not the option it matched
     if option:
       return f"{fid} finding upheld" if said == "finding upheld" else option
-  if point == 1 and text.partition(" — ")[0].strip() == "respec" and f"{fid} respec" in options:  # §7.6: the foreman's spec finding
+  if point == 1 and said == "respec" and f"{fid} respec" in options:  # §7.6: the foreman's spec finding
     if by.startswith("judges:"):
       raise Refusal("decision: respec is the owner's alone")
     return f"{fid} respec"
+  if point == 1 and f"{fid} respec" in options and by.startswith("judges:"):  # a spec finding is the owner's alone (U104)
+    raise Refusal(f"decision: {fid} {said} is the owner's alone")
   for option in options:
     letter, _, rest = option.partition(" ") if option.startswith("(") else ("", "", option)
     if text and text in (option, letter, rest) and (point != 1 or fid):
@@ -1188,7 +1203,8 @@ def refuse_allowance(store, args, found: "Ruling", decisions: list, cid, mode) -
   """In leavemealone-mode an allowance naming an open point-1 decision is refused, journaled as dropped (the owner's
   notice, the event being spent): the decision's `review settle --owner --posted` reads only the overrule form. An
   `owner: <ids>` decision (every option `<fid> allowed`, U25) asks for the allowance itself and is never refused."""
-  owner_only = decisions and decisions[0].get("options") and all(o.endswith(" allowed") for o in decisions[0]["options"])
+  options = (decisions[0].get("options") or []) if decisions else []
+  owner_only = options and (all(o.endswith(" allowed") for o in options) or f"{found.subject} allowed" in options)  # a mixed decision's too (U104)
   if found.kind == "allowed" and decisions and mode == "leavemealone" and not owner_only:
     dropped(store, args, f"comment {cid} allows {found.subject}; in leavemealone-mode {decisions[0]['id']} takes "
                          f"`**Ruling:** {found.subject} finding overruled — <reason>`")
@@ -1199,6 +1215,7 @@ FID_PAT = r"[a-z][\w:\[\]-]*-\d+-\d+"
 # A finding line of a point-1 question: `<fid> | <severity> | …`, or the question file's `## Q<n> <fid> (<severity>, …`;
 # a line merely starting `<fid> (` (a quoted original) is not one
 FINDING_LINE_RE = re.compile(rf"^(?:#+\s+Q\d+\s+({FID_PAT})\s+\(|({FID_PAT})\s*\|)", re.M)
+Q_LINE_RE = re.compile(rf"^#+\s+Q\d+\s+(?P<fid>{FID_PAT})\s+\([^)]*\):\s*(?P<claim>.*)$")  # a `## Q<n> <fid> (…): <claim>` line
 
 
 def fid_decisions(foreman: dict, fid: str, strict: bool = False) -> list:
@@ -1226,7 +1243,7 @@ def file_targets(foreman: dict, path: str, st=None) -> list:
     options = d.get("options") or []
     if d["point"] != 1 or not options or d["id"] in redesigned:
       continue
-    if all(o.endswith(" allowed") for o in options):
+    if any(o.endswith(" allowed") for o in options):  # an `owner: <ids>` decision, a mixed one's `<fid> allowed` too (U104)
       out += [(d, fid) for fid in line.findall(d.get("question") or "")
               if f"{fid} allowed" in options and not fid_ruled(foreman, fid)]
     elif st is not None and str(d.get("source") or "").startswith("review "):
