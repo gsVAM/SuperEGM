@@ -515,3 +515,66 @@ def test_a_1_2_1_decision_with_a_respec_option_closes_at_its_first_ruling():
   found = [finding("foreman-1-1", SPEC), finding("foreman-1-2", "the hook never fires")]
   options = ["finding upheld", "finding overruled", "foreman-1-1 respec"]
   assert report.pending_decisions(ruled_file(None, options, False, ["foreman-1-2 finding upheld"], found)) == []
+
+
+# ---------------------------------------------------------------- review round 2 (PR #301)
+
+
+def set_round(w, n, findings, contested=()):
+  """Round `n`'s foreman findings and `builder_contested` rewritten in U01's head review."""
+  rnd = round_json(w, n)
+  rnd["reviewers"]["foreman"]["findings"] = [finding(fid, claim) for fid, claim in findings]
+  rnd["builder_contested"] = [{"fid": fid, "reason": "r"} for fid in contested]
+  core.atomic_write(w.s.path("reviews", w.rid, f"round-{n}.json"), rnd)
+
+
+def set_word(w, word):
+  data = foreman_of(w.s, "U01")
+  data["rounds"][-1]["outcome"] = word
+  core.atomic_write(w.s.path("foreman", "U01"), data)
+
+
+def test_a_contest_chain_through_an_earlier_round_reaches_its_spec_finding(world):
+  # astra-2-2: q1 names the spec finding foreman-1-1 and foreman-3-1 `contested foreman-2-1: …`, where foreman-2-1, held in
+  # round 2 alone, contests foreman-1-1: the chain the question cannot show is the one `decision open` records, so the respec
+  # of foreman-1-1 rules foreman-3-1 too and q1 closes
+  w = unit_world(world, [("foreman-3-1", "contested foreman-2-1: the code is right"), ("foreman-1-1", SPEC)], ["foreman-3-1"], posted=True)
+  set_round(w, 2, [("foreman-2-1", "contested foreman-1-1: the code is right")])
+  set_word(w, "owner: foreman-1-1")
+  found = {f["id"]: f for f in round_json(w)["reviewers"]["foreman"]["findings"]}
+  open_q(world, w, line_of(found["foreman-1-1"]) + line_of(found["foreman-3-1"]), n=3)
+  code, out = rule(world, w, "foreman-1-1 respec — the spec is wrong")
+  assert code == 0, out
+  assert report.pending_decisions(foreman_of(w.s, "U01")) == [] and review.open_decisions(w.s, "U01") == []
+
+
+def test_an_upheld_contest_copy_rules_its_spec_finding_once(world):
+  # astra-2-3: `foreman-2-2 finding upheld` on the copy rules the pair: the inbox offers foreman-2-1 no more, and a later ruling
+  # on foreman-2-1 is refused as already ruled, nothing recorded
+  w = pair_world(world)
+  code, out = rule(world, w, "foreman-2-2 finding upheld")
+  assert code == 0, out
+  items = [i for i in map(json.loads, world.run("inbox", "--json")[1].splitlines()) if i["subject"] == "U01"]
+  before = foreman_of(w.s, "U01")["rulings"]
+  again_code, again_out = rule(world, w, "foreman-2-1 respec — the spec is wrong")
+  assert not any(i["kind"] == "owner" for i in items)
+  assert again_code == 1 and "already ruled" in again_out and foreman_of(w.s, "U01")["rulings"] == before
+
+
+def test_a_file_allowance_on_a_spec_decision_rules_a_test_delta_contest_copy(world):
+  # codebase-details-2-1: q1 names the spec finding foreman-2-1, the test-delta foreman-2-2 and foreman-2-3, the builder's copy
+  # `contested foreman-1-1: …` of round 1's test-delta finding of the same file: the owner's `test-delta <file> allowed`
+  # rules foreman-2-2 allowed and the copy overruled, as on a 1.2.1 contest decision
+  w = unit_world(world, [("foreman-2-1", SPEC), ("foreman-2-2", "test-delta: tests/unit/test_q.py:5 removed"),
+                         ("foreman-2-3", "contested foreman-1-1: the test moved")], ["foreman-2-3"], posted=True)
+  set_round(w, 1, [("foreman-1-1", "test-delta: tests/unit/test_q.py:3 removed")])
+  set_word(w, "owner: foreman-2-1, foreman-2-2")
+  fake_gh(world, {f"repos/{REPO}/issues/comments/601": {"id": 601, "user": {"login": "owner"},
+                                                       "body": "**Ruling:** test-delta tests/unit/test_q.py allowed — moved"}})
+  open_q(world, w, "".join(line_of(f) for f in round_json(w)["reviewers"]["foreman"]["findings"]), n=2)
+  code, out = rule(world, w, "test-delta tests/unit/test_q.py allowed", posted=601)
+  assert code == 0, out
+  assert [r["ruling"] for r in foreman_of(w.s, "U01")["rulings"]] == [
+      "test-delta tests/unit/test_q.py allowed", "foreman-2-2 allowed", "foreman-2-3 finding overruled"]
+  assert rule(world, w, "foreman-2-1 respec — the spec is wrong")[0] == 0
+  assert report.pending_decisions(foreman_of(w.s, "U01")) == [] and review.open_decisions(w.s, "U01") == []
