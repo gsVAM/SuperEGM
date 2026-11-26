@@ -32,6 +32,9 @@ def test_step_paths_reads_only_path_shaped_spans(write, implement, test_path, im
   ("1. Write the failing test `test_x` for `U07` in `tests/unit/test_u01.py`:", "@pytest.mark.parametrize", "pytest tests/unit/test_u01.py -k test_x -q"),
   ("1. Write the failing test `test_x` in `tests/unit/test_u01.py`:", "", "pytest tests/unit/test_u01.py::test_x -q"),
   ("1. Write the failing test `test_x` for `U07`:", "", None),
+  ("1. Write the failing test in `tests/unit/test_u01.py`:", "", None),                   # one span, the path alone: no test name, so no command
+  ("1. Write the failing test in `tests/unit/test_u01.py`:", "@pytest.mark.parametrize", None),
+  ("1. Write the failing test `test_x` and `test_y` in `tests/unit/test_u01.py`:", "", "pytest tests/unit/test_u01.py::test_x -q"),
 ])
 def test_run_commands_takes_the_path_shaped_test_span(write, fence, command):
   # astra-4-1: a Step's default command reads its test path as step_paths does, the first path-shaped span of the `Write` line, never the second span
