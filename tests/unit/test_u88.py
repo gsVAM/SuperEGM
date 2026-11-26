@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U88's tests: the judges rule a builder's contest first (design section 7.8).
+# Modified by SuperEGM (gsVAM), 2026: a pending decision's verdict line names its own verdict file (U107, 1.3 design section 3.9).
 
 """U88: a builder's contest of a head finding goes to the judges' panel first in normal mode as in leavemealone."""
 
@@ -341,7 +342,9 @@ def test_a_point_one_decision_stays_pending_on_each_unconverged_finding():
   """F1 converged and ruled, F2 split at the cap: the decision stays pending on F2 alone, until F2 is ruled or a `redesign` rules the whole."""
   from superegm.report import pending_decisions
   lines = "change-review-1-1 | high | src/x.py:3 | regression: no | a\nchange-review-1-2 | high | src/x.py:9 | regression: no | b\n"
-  decision = {"id": "q1", "point": 1, "source": "review head-U07-c1 round 1", "question": lines + VERDICT_LINE,
+  # U107 (1.3 design section 3.9): the verdict line names the decision's own verdict file, the path its source fixes
+  own = VERDICT_LINE.replace("judges/p1/", "judges/head-U07-c1-r1-a1b2c3/")
+  decision = {"id": "q1", "point": 1, "source": "review head-U07-c1 round 1", "question": lines + own,
               "options": ["finding upheld", "finding overruled"]}
   ruling = lambda text: {"decision": "q1", "ruling": text}
   assert pending_decisions({"decisions": [decision], "rulings": []}) == [decision]

@@ -1,3 +1,4 @@
+# Modified by SuperEGM (gsVAM), 2026: the probe's allow-list without the `git push` filter, dead once no bin gives no push entry (U108, 1.3 design section 3.7).
 """U60: the builder probe, `superegm doctor --probe` (spec 1.2.1 section 3.3)."""
 
 import json
@@ -95,8 +96,8 @@ def test_probe_uses_the_launch_flags(world, monkeypatch, tmp_path):
   probe_env, probe_argv = argv[1:at], argv[at:]
   config = superegm.load_config(world.repo)
   from superegm.launch_builder import allowed_tools
-  tools = [t for t in allowed_tools(config["builder"]["allowed_tools"], "superegm/probe", "", "gh")
-           if not t.startswith("Bash(git push ")]
+  tools = allowed_tools(config["builder"]["allowed_tools"], "superegm/probe", "", "gh")  # no bin: no push entry (U108)
+  assert not any("push" in t for t in tools)
   mcp_file = Path(spawned[0]["cwd"]) / "probe-mcp.json"
   env_words, claude_args = builder_flags(config, tools, [], mcp_file, (config["builder"]["model"], config["builder"]["effort"]))
   assert probe_argv[:2] == ["claude", "-p"]
