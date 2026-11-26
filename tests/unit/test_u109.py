@@ -65,3 +65,15 @@ def test_location_stops_at_whitespace_before_a_slash_path(location, answer):
   # and the spec's sections; a file name stops at whitespace (spec 3.10)
   from superegm import review
   assert review.out_of_scope(SCOPE, review.sections(SPEC_TEXT), location, "docs/specs/design.md") == answer
+
+
+@pytest.mark.parametrize("spec_name, location, answer", [
+  ("docs/specs/model.md", "domain model.md:500", None),                 # the listed `domain model.md` opens the location; `model.md` is its tail, not the spec
+  ("docs/specs/model.md", "domain model.md line 12 vs model.md", None),
+  ("docs/specs/model.md", "model.md:8", None),                          # the spec's own name, read as the spec
+  ("docs/specs/model.md", "model.md:4", "## A"),
+])
+def test_a_listed_bare_name_opening_a_location_is_not_a_spec_names_tail(spec_name, location, answer):
+  # astra-1-1: a spec whose bare name is the last word of a listed document's bare name must not turn that document's location into a spec location
+  from superegm import review
+  assert review.out_of_scope(SCOPE, review.sections(SPEC_TEXT), location, spec_name) == answer
