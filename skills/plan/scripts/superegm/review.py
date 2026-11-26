@@ -1526,16 +1526,18 @@ def point_one_open(st: core.Store, foreman: dict, decision: dict) -> bool:
   named = {a or b for a, b in FINDING_LINE_RE.findall(decision.get("question") or "")}
   ruled = {r["ruling"].partition(" — ")[0].strip().split(" ")[0]
            for r in foreman.get("rulings") or [] if r.get("decision") == decision["id"]}
-  return any(not set(contest_chain(st, words[1], fid)) & ruled for fid in fids if not named or fid in named)
+  return any(not set(contest_chain(st, words[1], fid, rnd)) & ruled for fid in fids if not named or fid in named)
 
 
-def contest_chain(st: core.Store, rid: str, fid: str) -> list:
+def contest_chain(st: core.Store, rid: str, fid: str, rnd: dict = None) -> list:
   """`fid`, then each fid down its contest chain (`contested <fid>: …`, `unreplied <fid>: …`) in the review `rid`,
-  bounded; an id no round holds ends the walk (U104)."""
+  bounded; an id no round holds ends the walk (U104). A fid the round `rnd` holds is read there, the store only for
+  one it lacks."""
+  held = {f["id"]: f for f in findings_of(rnd)} if rnd and rnd.get("reviewers") else {}
   chain = [fid]
   for _ in range(32):
     try:
-      claim = locate_finding(st, rid, chain[-1])[3]["claim"]
+      claim = (held[chain[-1]].get("claim") or "") if chain[-1] in held else locate_finding(st, rid, chain[-1])[3]["claim"]
     except core.HandoffError:
       break
     m = re.match(r"(?:contested|unreplied) (\S+):", claim)
