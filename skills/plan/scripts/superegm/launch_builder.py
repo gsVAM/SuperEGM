@@ -1,9 +1,10 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING`, its freshly pinned base and its `git merge-tree` brief (U62); a fix round resuming the previous launch's session, `resumed_from` or `fresh` and `profile_dir` on the entry, and the stale-paths line (U63); the `superegm-precheck` script on every launch, its allow rules and `{{precheck}}`, the whitespace refusal on every launch, `builder.precheck_attempts` and the launch's issue-comment snapshot (U67); a unit with `builder.escalate_after` failing head rounds launching on the `difficult` tier's pair, `escalated` on the entry (U68); `# Spec corrections`, reason `respec` and the record's `respecs` (U86); `builder.stall_minutes` defaults to 60 (U100, 1.3 design section 3.3); the `superegm-push` script on every launch, the allow-list's one push entry and the orders' `{{allowed}}` and `{{push}}`, the per-form author rules and their journal lines, the `**Note:**` form and `# Owner notes`, an edited issue comment left out and a consumed one edited before its record shown as its record, `managed_hooks` and each launch's record of them (U108, 1.3 design section 3.7).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING`, its freshly pinned base and its `git merge-tree` brief (U62); a fix round resuming the previous launch's session, `resumed_from` or `fresh` and `profile_dir` on the entry, and the stale-paths line (U63); the `superegm-precheck` script on every launch, its allow rules and `{{precheck}}`, the whitespace refusal on every launch, `builder.precheck_attempts` and the launch's issue-comment snapshot (U67); a unit with `builder.escalate_after` failing head rounds launching on the `difficult` tier's pair, `escalated` on the entry (U68); `# Spec corrections`, reason `respec` and the record's `respecs` (U86); `builder.stall_minutes` defaults to 60 (U100, 1.3 design section 3.3); the `superegm-push` script on every launch, the allow-list's one push entry (no git rule that `reaches_push` kept) and the orders' `{{allowed}}` and `{{push}}`, the per-form author rules and their journal lines, the `**Note:**` form and `# Owner notes`, an edited issue comment left out and a consumed one edited before its record shown as its record, `managed_hooks` and each launch's record of them (U108, 1.3 design section 3.7).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch, started
 detached and recorded `running`."""
 
+import fnmatch
 import hashlib
 import json
 import os
@@ -564,10 +565,36 @@ def pr_block_text(repo_root, ref, path):
   return result.stdout.decode("utf-8")
 
 
+GIT_SUBCOMMAND_RE = re.compile(r"[a-z][a-z0-9-]*")  # a plain subcommand word: no option, no wildcard
+
+
+def is_git(word: str) -> bool:
+  """A command word that runs git: `git` by any path (`/usr/bin/git`), or a wildcard word matching it (`gi*`)."""
+  name = os.path.basename(word)
+  return name == "git" or ("*" in name and fnmatch.fnmatchcase("git", name))
+
+
+def reaches_push(entry: str) -> bool:
+  """Whether an allow-list entry admits a `git push` (1.3 design section 3.7, U108 review): a `Bash(...)` rule, its
+  `:*` dropped, whose first word `is_git` and whose next word is no plain subcommand (`Bash(git:*)`, `Bash(git *)`,
+  `Bash(git -C sub:*)`, an option before the subcommand) or is `push`, or that names `push` as any word."""
+  match = re.fullmatch(r"Bash\((.*)\)", entry, re.S)
+  if not match:
+    return False
+  rule = match.group(1).removesuffix(":*")
+  try:
+    words = shlex.split(rule)
+  except ValueError:
+    words = rule.split()
+  if not words or not is_git(words[0]):
+    return False
+  return len(words) < 2 or not GIT_SUBCOMMAND_RE.fullmatch(words[1]) or "push" in words
+
+
 def allowed_tools(configured, branch, body_text, gh, merge=False, bin=None):
   """The configured allow-list with its `gh` prefixes rewritten to `gh`'s absolute path (a bare `gh …`
-  is refused, so no PATH order is assumed), every `git push` entry and `Bash(git:*)` left out, and
-  `Bash(<first word>:*)` for the first word but `git` of every `&&`/`;` segment of every command the body runs (U25's
+  is refused, so no PATH order is assumed), every entry that `reaches_push` left out, and
+  `Bash(<first word>:*)` for the first word but git's (`is_git`) of every `&&`/`;` segment of every command the body runs (U25's
   D1 (a)); a bare `Skill` and unrestricted Bash are refused; `Agent` passes, the owner's opt-in (amendment 15, U27).
   `merge`: the launch carries merge orders (spec section 6.1), and on it alone `Bash(git merge:*)` is admitted.
   `bin`: the launch's bin directory; given, `Bash(<bin>/superegm-push:*)`, the one push entry (1.3 design section 3.7,
@@ -577,13 +604,12 @@ def allowed_tools(configured, branch, body_text, gh, merge=False, bin=None):
   for entry in ("Skill", "Bash", "Bash(*)"):
     if entry in configured:
       raise core.HandoffError(f"allowed_tools carries {entry}: a builder invokes no skill bare, never runs unrestricted Bash")
-  tools = [f"Bash({gh} {t[8:]}" if t.startswith("Bash(gh ") else t for t in configured
-           if t != "Bash(git:*)" and not t.startswith("Bash(git push")]
+  tools = [f"Bash({gh} {t[8:]}" if t.startswith("Bash(gh ") else t for t in configured if not reaches_push(t)]
   if bin is not None:
     tools.append(f"Bash({bin}/superegm-push:*)")
   for command in body.run_commands(body_text):
     for first in segment_heads(command):
-      if first != "git" and f"Bash({first}:*)" not in tools:
+      if not is_git(first) and f"Bash({first}:*)" not in tools:
         tools.append(f"Bash({first}:*)")
   if merge and "Bash(git merge:*)" not in tools:
     tools.append("Bash(git merge:*)")
