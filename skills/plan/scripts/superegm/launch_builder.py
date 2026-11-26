@@ -574,10 +574,18 @@ def is_git(word: str) -> bool:
   return name == "git" or ("*" in name and fnmatch.fnmatchcase("git", name))
 
 
+# a command word that runs the words after it as a command: a rule it leads admits `git push` behind it (U108 review)
+RUNNERS = frozenset(["env", "command", "exec", "builtin", "eval", "nice", "nohup", "time", "timeout", "sudo", "xargs",
+                     "sh", "bash", "zsh", "dash", "ksh"])
+ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*", re.S)  # `NAME=value` before a command
+
+
 def reaches_push(entry: str) -> bool:
   """Whether an allow-list entry admits a `git push` (1.3 design section 3.7, U108 review): a `Bash(...)` rule, its
-  `:*` dropped, whose first word `is_git` and whose next word is no plain subcommand (`Bash(git:*)`, `Bash(git *)`,
-  `Bash(git -C sub:*)`, an option before the subcommand) or is `push`, or that names `push` as any word."""
+  `:*` dropped, led by a runner or a shell (`RUNNERS`, by any path) or by an assignment, which admit any command after
+  them (`Bash(env:*)`, `Bash(env git push:*)`, `Bash(sh -c:*)`); or whose first word `is_git`, or any word is `git` by
+  any path, with the word after it no plain subcommand (`Bash(git:*)`, `Bash(git *)`, `Bash(git -C sub:*)`, an option
+  before the subcommand) or `push` among the words from there."""
   match = re.fullmatch(r"Bash\((.*)\)", entry, re.S)
   if not match:
     return False
@@ -586,15 +594,22 @@ def reaches_push(entry: str) -> bool:
     words = shlex.split(rule)
   except ValueError:
     words = rule.split()
-  if not words or not is_git(words[0]):
+  if not words:
     return False
-  return len(words) < 2 or not GIT_SUBCOMMAND_RE.fullmatch(words[1]) or "push" in words
+  if os.path.basename(words[0]) in RUNNERS or ASSIGNMENT_RE.fullmatch(words[0]):
+    return True
+  at = next((i for i, word in enumerate(words) if (is_git(word) if i == 0 else os.path.basename(word) == "git")), None)
+  if at is None:
+    return False
+  rest = words[at:]
+  return len(rest) < 2 or not GIT_SUBCOMMAND_RE.fullmatch(rest[1]) or "push" in rest
 
 
 def allowed_tools(configured, branch, body_text, gh, merge=False, bin=None):
   """The configured allow-list with its `gh` prefixes rewritten to `gh`'s absolute path (a bare `gh …`
   is refused, so no PATH order is assumed), every entry that `reaches_push` left out, and
-  `Bash(<first word>:*)` for the first word but git's (`is_git`) of every `&&`/`;` segment of every command the body runs (U25's
+  `Bash(<first word>:*)` for the first word of every `&&`/`;` segment, but one whose rule `reaches_push` (git, a runner,
+  a shell or an assignment), of every command the body runs (U25's
   D1 (a)); a bare `Skill` and unrestricted Bash are refused; `Agent` passes, the owner's opt-in (amendment 15, U27).
   `merge`: the launch carries merge orders (spec section 6.1), and on it alone `Bash(git merge:*)` is admitted.
   `bin`: the launch's bin directory; given, `Bash(<bin>/superegm-push:*)`, the one push entry (1.3 design section 3.7,
@@ -609,7 +624,7 @@ def allowed_tools(configured, branch, body_text, gh, merge=False, bin=None):
     tools.append(f"Bash({bin}/superegm-push:*)")
   for command in body.run_commands(body_text):
     for first in segment_heads(command):
-      if not is_git(first) and f"Bash({first}:*)" not in tools:
+      if not reaches_push(f"Bash({first}:*)") and f"Bash({first}:*)" not in tools:
         tools.append(f"Bash({first}:*)")
   if merge and "Bash(git merge:*)" not in tools:
     tools.append("Bash(git merge:*)")
