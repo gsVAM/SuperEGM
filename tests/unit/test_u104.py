@@ -12,7 +12,8 @@ import pytest
 
 import superegm as core
 from conftest import REPO, set_config
-from superegm import decision, review
+from superegm import collect, decision, review
+from test_foreman import POSTED_R1, UNIT, c, open_head_review, prepared, seed
 from test_wave import fake_gh, foreman_of, question, wave_store
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -249,3 +250,33 @@ def test_open_respec_files_are_keyed_by_unit_cycle_and_fid(world):
   legacy = {"id": "R1", "unit": "U01", "finding": "foreman-1-1", "at": "2026-11-03T09:00:00Z"}  # a 1.2.1 file, no `cycle`
   core.atomic_write(w.s.path("file", "respec", "R1.open.json"), legacy)
   assert decision.respec_held(w.s, "U01", finding="foreman-1-1", cycle=c1)[1] == legacy
+
+
+# ---------------------------------------------------------------- S7: a ruling on a contest copy settles the spec finding
+
+
+@pytest.mark.parametrize("ruling, raised", [
+    ("**Ruling:** foreman-2-1 finding overruled — the code is right", False),
+    ("**Ruling:** foreman-1-2 finding overruled — unrelated", True),
+])
+def test_a_ruling_on_a_contest_copy_settles_the_spec_finding(world, tmp_path, monkeypatch, ruling, raised):
+  # round 1 raised foreman-1-1 (SPEC); round 2 held foreman-2-1 `contested foreman-1-1: the code is right`; round 3 runs without --spec
+  posted_r2 = {**POSTED_R1, "round": 2, "dispatch_id": "d2", "posted_at": "2026-11-02T12:30:00Z"}
+  kw = dict(rounds=[POSTED_R1, posted_r2], launches=[{"round": k, "status": "exited 0"} for k in (1, 2, 3)],
+            comments={2: [c(20, "owner", ruling)]})
+  st0, card0, _ = seed(world, **kw)
+  rid = open_head_review(world, st0, card0, "0" * 40, {"change-review": "", "foreman": SPEC_1_1})
+  first = json.loads(st0.path("reviews", rid, "round-1.json").read_text(encoding="utf-8"))
+  held = first["reviewers"]["foreman"]["findings"][0] | {"carried_from": 1}
+  contest = finding("foreman-2-1", "contested foreman-1-1: the code is right")
+  core.atomic_write(st0.path("reviews", rid, "round-2.json"), first | {
+      "round": 2, "builder_contested": [{"fid": "foreman-2-1", "reason": "the code is right"}],
+      "reviewers": first["reviewers"] | {"foreman": {**first["reviewers"]["foreman"], "findings": [held, contest]}}})
+  w = prepared(world, tmp_path, monkeypatch, **kw)
+  code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
+  assert code == 0, out
+  round_3_foreman_claims = [f["claim"] for f in json.loads(w.st.path("reviews", w.rid, "round-3.json").read_text(encoding="utf-8"))
+                            ["reviewers"]["foreman"]["findings"]]
+  assert any(claim.startswith("deviation (spec) unruled: ") for claim in round_3_foreman_claims) is raised
+  assert collect.SPEC_CLAIM is decision.SPEC_CLAIM
+  assert "SPEC_CLAIM = " not in (ROOT / "skills/plan/scripts/superegm/collect.py").read_text(encoding="utf-8")
