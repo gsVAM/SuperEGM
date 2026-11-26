@@ -3,7 +3,7 @@ name: writing-plans
 description: Use when you have a spec or requirements for a multi-step task, before touching code
 ---
 
-<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the SuperEGM Step form and its derived defaults; what a Step holds (1.2.1 §6.5); Q9 as the bar for a Step (U79); the 600-line target and the `units.*` limits (U42). -->
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the SuperEGM Step form and its derived defaults; what a Step holds (1.2.1 §6.5); Q9 as the bar for a Step (U79); the 600-line target and the `units.*` limits (U42); the full suite is CI's (U119, 1.3 design section 3.3). -->
 
 # Writing Plans
 

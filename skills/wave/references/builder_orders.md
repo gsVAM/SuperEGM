@@ -1,5 +1,5 @@
 <!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the implementer prompt, receiving-code-review and test-driven-development absorbed into the builder orders. -->
-<!-- Modified by SuperEGM (gsVAM), 2026: the section of the launch's allow-list and the one-command rules, `{{push}}` for the push and the `pr view` check, and the `edited before its record` marker (U108, 1.3 design section 3.7). -->
+<!-- Modified by SuperEGM (gsVAM), 2026: the section of the launch's allow-list and the one-command rules, `{{push}}` for the push and the `pr view` check, and the `edited before its record` marker (U108, 1.3 design section 3.7); the unit's own test file before a push, the full suite CI's (U119, 1.3 design section 3.3). -->
 
 # Builder orders
 
