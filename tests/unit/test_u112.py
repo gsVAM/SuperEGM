@@ -27,10 +27,17 @@ def test_probe_offers_no_allow_for_a_command_runner(command, name):
   assert runner_line(command) == (f"denied Bash {command} ({name}: runs commands or pushes, no --allow)", False)
 
 
-def test_runner_reason_survives_an_unparseable_quote():
-  # astra-1-1: shlex rejects bash's ANSI-C quoting, yet the subcommand comes right after git: still the runner reason
-  command = "git rebase --exec $'echo \\'ok\\'' main"
-  assert runner_line(command) == (f"denied Bash {command} (git rebase: runs commands or pushes, no --allow)", False)
+@pytest.mark.parametrize("command, name", [
+    ("git rebase --exec $'echo \\'ok\\'' main", "git rebase"),
+    ("gh alias set --shell co $'echo \\'hi\\''", "gh alias set"),
+    ("gh extension install $'owner/gh-\\'ext'", "gh extension"),
+    ("gh ext install $'owner/gh-\\'ext'", "gh ext"),
+    ("gh extensions exec $'x\\'y'", "gh extensions"),
+])
+def test_runner_reason_survives_an_unparseable_quote(command, name):
+  # astra-1-1, astra-2-1: shlex rejects bash's ANSI-C quoting, yet the subcommand comes right after git or gh:
+  # still the runner reason
+  assert runner_line(command) == (f"denied Bash {command} ({name}: runs commands or pushes, no --allow)", False)
 
 
 def runner_line(command):
