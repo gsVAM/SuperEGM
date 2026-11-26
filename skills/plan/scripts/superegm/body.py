@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the issue-body parsers of spec section 9.1; EGM's `fill_numbers` and `normalise` moved here; a Step's command defaults from its `Write` line.
+# Modified by SuperEGM (gsVAM), 2026: the issue-body parsers of spec section 9.1; EGM's `fill_numbers` and `normalise` moved here; a Step's command defaults from its `Write` line; U109's `step_paths` reads only path-shaped spans, and `run_commands` takes the same test path (1.3 design section 3.10).
 
 """The unit issue body (spec section 9.1) read back: its marker, its DoD items,
 its Steps' commands and paths, and the interfaces it consumes."""
@@ -15,6 +15,7 @@ RUN_RE = re.compile(r"^\s*Run `([^`]+)`")
 SPAN_RE = re.compile(r"`([^`]+)`")
 CONSUMES_RE = re.compile(r"^- Consumes: (.+) \((U\d{2,})\)\s*$")
 PARAMETRIZE_RE = re.compile(r"@pytest\.mark\.parametrize")
+PATH_EXT_RE = re.compile(r"\.[A-Za-z][A-Za-z0-9]*$")
 
 
 def sections(body: str) -> dict:
@@ -44,28 +45,36 @@ def steps(body: str) -> list:
 def run_commands(body: str) -> list:
   """The DoD `Run` commands, then each Step's one command: its first `Run`
   line, else `pytest <test path>::<test name> -q` (`-k <test name>` when
-  the fence holds `@pytest.mark.parametrize`) from the `Write` line."""
+  the fence holds `@pytest.mark.parametrize`) from the `Write` line: the test name is its first span, the
+  test path the first path-shaped span after it (a path alone names no test, so no command)."""
   commands = [text for _, kind, text in dod_items(body) if kind == "run"]
   for _, lines in steps(body):
     first = next((RUN_RE.match(l) for l in lines if RUN_RE.match(l)), None)
     spans = SPAN_RE.findall(lines[0])
+    path = next((s for s in spans[1:] if path_shaped(s)), None)
     if first:
       commands.append(first.group(1))
-    elif len(spans) > 1:
+    elif path:
       select = f" -k {spans[0]}" if any(PARAMETRIZE_RE.search(l) for l in lines) else f"::{spans[0]}"
-      commands.append(f"pytest {spans[1]}{select} -q")
+      commands.append(f"pytest {path}{select} -q")
   return commands
 
 
+def path_shaped(span: str) -> bool:
+  """A span that holds a `/` or ends in a file extension."""
+  return "/" in span or bool(PATH_EXT_RE.search(span))
+
+
 def step_paths(body: str) -> list:
-  """(step, test path, implementation path): the second span of the Step's first
-  line and the last span of its `Implement` line."""
+  """(step, test path, implementation path): the first path-shaped span of the Step's
+  `Write` line and the last path-shaped span of its `Implement` line, None when there is none."""
   found = []
   for number, lines in steps(body):
-    spans = SPAN_RE.findall(lines[0])
+    tests = [s for s in SPAN_RE.findall(lines[0]) if path_shaped(s)]
     implement = next((l for l in lines[1:] if l.strip().startswith("Implement ")), "")
-    targets = SPAN_RE.findall(implement)
-    found.append((number, spans[1] if len(spans) > 1 else None, targets[-1] if targets else None))
+    targets = [s for s in SPAN_RE.findall(implement) if path_shaped(s)]
+    # shortcut: a dotted symbol such as body.steps ends in an extension-shaped tail and reads as a path
+    found.append((number, tests[0] if tests else None, targets[-1] if targets else None))
   return found
 
 

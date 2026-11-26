@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U104's tests: a foreman spec finding reaches the owner (1.3 design section 3.8).
+# Modified by SuperEGM (gsVAM), 2026: the seed config carries each kind's fixed panel, which `load_config` now requires (U109, 1.3 design section 3.10, ruled on issue #275).
 
 """U104: a `deviation (spec)` finding raised by `collect --spec` is the owner's alone, never the judges', and opens the round's
 one point-1 decision at once, offering `<fid> respec` beside `finding upheld` and `finding overruled`."""
@@ -40,7 +41,7 @@ def unit_world(world, open_findings, builder_contested, mode="normal", posted=Fa
   card = world.run("runcard", "open", "--skill", "wave", "--artifact", world.spec, *extra, card=None)[1].strip()
   n = round_of(open_findings[0][0])
   s = wave_store(world, U01={"pr": 70, "head": HEAD, "ci": "green"})
-  set_config(world, repo=REPO, owners=["owner"], reviewers={"spec": [], "plan": [], "head": ["change-review"], "integrate": []})
+  set_config(world, repo=REPO, owners=["owner"], reviewers={kind: panel.split(",") for kind, panel in review.PANEL_OF.items()})
   rid = review.review_id(s, "head", "U01", 1)
   core.atomic_write(s.path("reviews", rid, "review.json"),
                     {"kind": "head", "artifact": "U01", "cycle": 1, "handoff_id": s.handoff_id, "scope": None,
