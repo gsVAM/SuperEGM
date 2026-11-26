@@ -181,8 +181,9 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
       by_id = {f["id"]: f for f in review.findings_of(rnd)} if rnd else {}
       # a head review's high or medium contest goes to the judges first: no owner form while a panel on it is open; with no panel opened, or one converged, none will rule it
       held = lambda fid: rev["kind"] == "head" and panel == "open" and review.blocking(by_id.get(fid) or {"severity": "high"})
-      # a contest copy whose chain reaches a spec fid of the word is that fid's `owner` item, never one of its own (U104)
-      copy = lambda fid: bool(spec) and bool(set(review.contest_chain(hs, rid, fid)[1:]) & spec)
+      # a contest copy whose chain reaches a spec fid of the word is that fid's `owner` item, never one of its own, and one
+      # whose chain reaches a fid this decision ruled is closed with it, whatever the word now says (U104)
+      copy = lambda fid: bool(set(review.contest_chain(hs, rid, fid, rnd)[1:]) & (spec | ruled))
       out += [ruling_item(repo, uid, "contested", menu(fid), number, f"{did}/{fid}") | ({"verdict": verdict} if verdict else {})
               for fid in fids if fid not in ruled and not held(fid) and not copy(fid)]
   entry = latest_posted(foreman)
