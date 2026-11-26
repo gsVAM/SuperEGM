@@ -589,6 +589,20 @@ def spec_reached(st, decision: dict, fid: str) -> bool:
   return bool(claim) and review.delta_claim(st, rid, claim).startswith(SPEC_CLAIM)
 
 
+def spec_pair(st, decision: dict, fid: str) -> list:
+  """The unsettled findings of the decision's source round a ruling on `fid` settles with it (U104): the spec findings its
+  contest chain reaches (a ruling on a contest copy also settles the original), then every other contest copy whose chain
+  reaches one of those or `fid` itself (a ruling on the original closes its copy); [] when no spec finding is reached."""
+  rid, n = source_review(decision)
+  rnd = review.load_round(st, rid, n) if rid else None
+  if not rnd:
+    return []
+  open_ = {f["id"]: f for f in review.findings_of(rnd) if f["disposition"] is None}
+  specs = [x for x in review.contest_chain(st, rid, fid, rnd) if x in open_ and open_[x]["claim"].startswith(SPEC_CLAIM)]
+  copies = [c for c in open_ if c != fid and c not in specs and set(review.contest_chain(st, rid, c, rnd)[1:]) & set(specs)]
+  return [x for x in specs if x != fid] + copies
+
+
 def owner_options(word: str, question: str) -> list:
   """Point 1 on an `owner: <ids>` word (U25, U104): an id of the word standing in the question as its own word is offered
   `<fid> respec` when the question holds it as a spec finding, else `<fid> allowed`; with a spec fid among them,
@@ -660,18 +674,19 @@ def high_behind(st, unit: str, source: str) -> bool:
   return bool(rnd) and any(f["severity"] == "high" and f["disposition"] is None for f in review.findings_of(rnd))
 
 
-def settle_checks(st, items: list, args, card: dict) -> list:
+def settle_checks(st, items: list, args, card: dict, also: str = None) -> list:
   """U103: the point-1 ruling's settle, checked before anything is posted or recorded. `items` is each `(decision, fid)` the
   ruling overrules or allows; its fid is settled in the head review's round the decision's source names, with the disposition
   the decision gives (`declined` on an `owner: <ids>` decision, `contested` on a contest's), as the owner or as `judges:<panel>`
   (`args.by`), after `review settle`'s own ruler checks. A review never opened, no head's or another unit's, and in
   leavemealone-mode a ruling typed in the session (no `--posted`: no comment of the owner's for the settle to read) settle
   nothing; a finding the source's round does not hold is refused, and the CI finding refuses any overrule. A refusal is
-  `review settle`'s own. The plan: `(review id, checked)` each."""
+  `review settle`'s own. The plan: `(review id, checked)` each. `also`: the fid the ruling names, which the owner's comment
+  may name in place of an item's own (a spec pair settled whole, U104)."""
   judges = args.by[7:] if args.by.startswith("judges:") else None
   posted = args.posted if args.posted and not args.posted.startswith("closed:") else None
   # `unrecorded`: the settle's read of the comment comes before its first record, so an edit it sees is refused (U103)
-  ruler = argparse.Namespace(owner=not judges, judges=judges, posted=posted, runcard=args.runcard, unrecorded=True)
+  ruler = argparse.Namespace(owner=not judges, judges=judges, posted=posted, runcard=args.runcard, unrecorded=True, also=also)
   plan = {}
   for decision, fid in items:
     words = str(decision.get("source") or "").split()
@@ -789,7 +804,8 @@ def rule(args) -> int:
     ruled_fid = chosen.split(" ")[0]
     if not found and decision not in fid_decisions(data, ruled_fid):  # as the posted path refuses it: never another finding
       raise Refusal(f"decision: {ruled_fid} is not a finding of {decision['id']}")
-    settles = settle_checks(st, [(decision, ruled_fid)], args, card)
+    # a spec pair is settled whole (U104): the copy's overrule settles the spec finding, the spec finding's closes its copies
+    settles = settle_checks(st, [(decision, x) for x in [ruled_fid] + spec_pair(st, decision, ruled_fid)], args, card, also=ruled_fid)
   # the effect is the point's, never the option's wording: point 2's `stop`, point 3's `stop the unit`, a redesign.
   # The label goes first, so a failed request records nothing and the same call reruns (round 9); a session post
   # that then fails takes off again only a label this call put on (rounds 10 and 11).

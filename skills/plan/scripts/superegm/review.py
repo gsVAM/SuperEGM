@@ -1181,7 +1181,7 @@ def check_settle(st: core.Store, rid: str, review: dict, card: dict, args, fid: 
       if not (args.owner and getattr(args, "posted", None)):
         raise core.HandoffError(f"review settle: {fid} is {finding['severity']}: --judges required in leavemealone-mode")
       verify_owner_ruling(st.config, finding, args.posted, delta_claim(st, rid, finding["claim"]),
-                          unrecorded=getattr(args, "unrecorded", False))
+                          unrecorded=getattr(args, "unrecorded", False), also=getattr(args, "also", None))
     if card["mode"] != "leavemealone" and not args.owner and not (args.judges and review["kind"] == "head"):  # U88: a head's contest goes to the panel first
       raise core.HandoffError(f"review settle: {fid} is {finding['severity']}: --owner required in normal mode")
     if args.judges and review["kind"] == "head":  # either mode: a contest settles by a panel that overruled it
@@ -1224,12 +1224,14 @@ def delta_claim(st: core.Store, rid: str, claim: str) -> str:
   return claim
 
 
-def verify_owner_ruling(config: dict, finding: dict, comment_id: str, original: str = None, unrecorded: bool = False) -> None:
+def verify_owner_ruling(config: dict, finding: dict, comment_id: str, original: str = None, unrecorded: bool = False,
+                        also: str = None) -> None:
   """In leavemealone the owner's word still counts, by hand (1.1.3; U22 reads such comments itself): one GitHub
   read of the comment, by a `config.owners` login, carrying a ruling `ruling_of` reads: `<fid> finding overruled`,
   or `<fid> allowed` on a `test-delta:` finding, or `test-delta <file> allowed` on a `test-delta:` finding of that
   file or on a contest's copy whose `original` claim (`delta_claim`'s) is one (U25). `unrecorded` (`decision rule`'s
-  read before the comment's first record, U103): an edited comment is refused, as on `decision rule`'s own read."""
+  read before the comment's first record, U103): an edited comment is refused, as on `decision rule`'s own read. `also`
+  (`decision rule`'s settle of a spec pair, U104): the comment may rule that fid in place of this finding's own."""
   from superegm.decision import ruling_of  # inside: `decision` imports `review`
   fid, claim = finding["id"], finding["claim"]
   original = claim if original is None else original
@@ -1241,7 +1243,7 @@ def verify_owner_ruling(config: dict, finding: dict, comment_id: str, original: 
     raise core.HandoffError(f"review settle: comment {comment_id} is by {author}, not a login in config.owners")
   found = ruling_of({**comment, "id": comment.get("id") or comment_id}, config.get("owners") or [])
   delta = claim.startswith("test-delta:")
-  if not (found and ((found.subject == fid and (found.kind == "overruled" or (found.kind == "allowed" and delta)))
+  if not (found and ((found.subject in (fid, also) and (found.kind == "overruled" or (found.kind == "allowed" and delta)))
                      or (found.kind == "allowed-file" and original.startswith(f"test-delta: {found.subject}:")))):
     raise core.HandoffError(f"review settle: comment {comment_id} does not rule {fid} overruled")
 
