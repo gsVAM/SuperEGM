@@ -2123,6 +2123,10 @@ def ci_verdict(ci):
     # Conservative: an aggregate failure we cannot attribute to a context we
     # read is still a failure.
     red.append(f"status:{ci['combined_state']}")
+  if not red and not any(r["conclusion"] == "success" for r in runs) \
+      and not any(c.get("state") == "success" for c in contexts):
+    # "Green" means a check ran: neutral and skipped alone ran nothing.
+    return "ci red (no check ran)"
   return "ci green" if not red else "ci red (" + ", ".join(str(n) for n in red) + ")"
 
 
