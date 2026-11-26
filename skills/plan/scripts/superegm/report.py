@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the report subcommand (spec section 11): the per-batch wave report, the idle rules
-# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31); its own `ci_wait_minutes` config key, moved from `__init__` (U32); the board's tier column (U33); `waiting proceed` and a proceed closing a point-1 decision (U92); the `conflict` view and its board action (U62); a unit waiting on an open respec is not active, its board row and merge round included (U86); a point-1 decision carrying an unconverged panel's verdict line stays pending on each finding no ruling names, and the report lists each judges ruling with its panel (U88).
+# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31); its own `ci_wait_minutes` config key, moved from `__init__` (U32); the board's tier column (U33); `waiting proceed` and a proceed closing a point-1 decision (U92); the `conflict` view and its board action (U62); a unit waiting on an open respec is not active, its board row and merge round included (U86); a point-1 decision carrying an unconverged panel's verdict line stays pending on each finding no ruling names, and the report lists each judges ruling with its panel (U88); a point-1 decision offering `<fid> respec` pending until each fid of its `<fid> respec` and `<fid> allowed` options, and each its split panel asks, is ruled, a contest copy ruled through the fid its chain reaches (U104's owner-only spec findings, 1.3 design section 3.8).
 
 """superegm report: rewrite `wave_<n>_report.md` from the store, the plan and the spec and print its path, the
 board and the idle, pending and loop lines. It opens the card's handoff as `status` does (`core.locate`,
@@ -359,12 +359,33 @@ def pending_decisions(foreman: dict) -> list:
   """`decisions[]` minus `rulings[]` (spec section 7); a point-1 decision whose options end ` allowed` (an
   `owner: <ids>` decision, U25) stays pending until every option's fid has a ruling or a `redesign` or a `proceed` rules it whole;
   so does a point-1 decision whose question holds an unconverged panel's `(judges/<panel>/verdict.json)` line (U88), for each
-  finding its question asks, until every one has a ruling or a `redesign` or a `proceed` rules it whole."""
+  finding its question asks, until every one has a ruling or a `redesign` or a `proceed` rules it whole; a point-1 decision
+  offering `<fid> respec` (U104) stays pending until each fid of its `<fid> respec` and `<fid> allowed` options, and with a
+  verdict line each fid its question asks, has a ruling, a contest copy (`contested <fid>: …` in its question line) ruled
+  through the fid its chain reaches, or a `redesign` or a `proceed` rules it whole."""
   rulings = foreman.get("rulings") or []
   ruled = {r.get("decision") for r in rulings}
 
   def pending(d):
     options = d.get("options") or []
+    if d.get("point") == 1 and any(o.endswith(" respec") for o in options):  # a spec finding's decision (U104)
+      fids = {str(r.get("ruling") or "").split(" ")[0] for r in rulings if r.get("decision") == d["id"]}
+      if fids & {"redesign", "proceed"}:
+        return False
+      need = [o.split(" ")[0] for o in options if o.endswith((" respec", " allowed"))]
+      if "/verdict.json)" in (d.get("question") or ""):  # a split panel's question: each finding it asks too
+        need += [a or b for a, b in re.findall(rf"^(?:#+\s+Q\d+\s+({FID_PAT})\s+\(|({FID_PAT})\s*\|)", d["question"], re.M)]
+      links = dict(re.findall(rf"^(?:#+\s+Q\d+\s+)?({FID_PAT})\s*(?:\||\().*?(?:contested|unreplied) ({FID_PAT}):", d.get("question") or "", re.M))
+
+      def ruled_through(fid):  # a contest copy is ruled when a ruling names the fid its chain reaches
+        seen = set()
+        while fid not in seen:
+          if fid in fids:
+            return True
+          seen.add(fid)
+          fid = links.get(fid, fid)
+        return False
+      return not all(ruled_through(fid) for fid in need)
     if d.get("point") == 1 and options and all(o.endswith(" allowed") for o in options):
       fids = {str(r.get("ruling") or "").split(" ")[0] for r in rulings if r.get("decision") == d["id"]}
       if fids & {"redesign", "proceed"}:  # spec section 4.2: a proceed closes the whole decision, as `redesign` does
