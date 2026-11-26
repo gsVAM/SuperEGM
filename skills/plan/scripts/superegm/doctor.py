@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24); the informational `plugins` and `mcp` lines and the profile line's plugin refusals (U27); the informational `model:` role table (U28); the informational `stall:` line (U31); the modules' DOCTOR_CHECKS lines after its own (U32); the three `model: builder <tier>` lines (U33); `chain` in INFORMATIONAL (U54); `--probe`, one headless builder session on the launch's own flags (U60); the informational `reviewers:` line after `mcp:` (U76); the `driver:` findings of a credential the env file lacks and an enabled plugin's `SubagentStart` hook (U71); no `--allow` hint for a command runner, the runner reason instead (U112).
+# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24); the informational `plugins` and `mcp` lines and the profile line's plugin refusals (U27); the informational `model:` role table (U28); the informational `stall:` line (U31); the modules' DOCTOR_CHECKS lines after its own (U32); the three `model: builder <tier>` lines (U33); `chain` in INFORMATIONAL (U54); `--probe`, one headless builder session on the launch's own flags (U60); the informational `reviewers:` line after `mcp:` (U76); the `driver:` findings of a credential the env file lacks and an enabled plugin's `SubagentStart` hook (U71); no `--allow` hint for a command runner, the runner reason instead (U112, 1.3 design section 3.10).
 
 """superegm doctor: one line per wave prerequisite, `ok` or the refusal `launch` or `launch-builder`
 would give; read-only, no run card."""
@@ -161,15 +161,21 @@ def allow_prefixes(command: str) -> list:
   `gh <group> <command>` (gh by bare name or path; the launch rewrites a bare gh rule to its own gh) when both words
   are plain and the group is not `api`, whose next word is an endpoint, not a command. A `git push`, or a git call
   with an option before its subcommand and the word `push` anywhere, gives None: no prefix narrower than the push
-  itself keeps the launch's own-branch limit. Every other segment gives "", no --allow: so no interpreter, runner or
-  other first word is offered a rule that admits arbitrary calls."""
+  itself keeps the launch's own-branch limit. A command runner (spec 1.3 section 3.10, U112: `git subtree`, `git rebase`,
+  `git submodule`, `git bisect` in any form, `gh alias set`, `gh extension`, `gh ext`, `gh extensions`) gives
+  `("runner", <name>)`, never a prefix, since any prefix would admit `--exec`, `foreach`, `run` or a push to any ref.
+  Every other segment gives "", no --allow: so no interpreter, runner or other first word is offered a rule that
+  admits arbitrary calls."""
   prefixes = []
   for text in segments_of(command):
     try:
       words = shlex.split(text)
     except ValueError:
-      prefixes.append("")
-      continue
+      # a quote shlex rejects (bash's $'..'): the subcommand right after git or gh is still read, by whitespace
+      words = text.split()
+      if not (words[:1] == ["git"] and words[1:2] and words[1] in RUNNER_GIT):
+        prefixes.append("")
+        continue
     if not words:
       continue
     name = os.path.basename(words[0])
