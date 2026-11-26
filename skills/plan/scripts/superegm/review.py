@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review settle --judges` for a head's contested or declined high or medium on a normal-mode card, journalled `Ruling (judges <panel>, contest)` (U88); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76); a spec cycle's changed reference documents as whole-file `changed <path>` scope lines, their `refs` manifest on each round, in the scope filter, the settle check and the proceed ruling (U75); `review open --respec R<n>`: the diff and its sections as evidence, the `design`, `codebase-details` and Astra panel, cap 2 (U85); a plan or integrate cycle a respec approval closed by its `source_review` (U91); `review record --sha256` on a head takes the full 40-hex commit sha alone (U101, 1.3 design section 3.4); the settle's writes in `apply_settle`, which `decision rule` calls on a point-1 ruling, the CI finding's refusal in `check_ci_finding` and a posted proceed comment edited before its record refused in `posted_comment` (U103, 1.3 design sections 3.6 and 3.7); U104's owner-only spec findings (1.3 design section 3.8): `owner_only_fids` and the posted word naming a `deviation (spec)` fid whatever else blocks, its settle the owner's alone.
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review settle --judges` for a head's contested or declined high or medium on a normal-mode card, journalled `Ruling (judges <panel>, contest)` (U88); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76); a spec cycle's changed reference documents as whole-file `changed <path>` scope lines, their `refs` manifest on each round, in the scope filter, the settle check and the proceed ruling (U75); `review open --respec R<n>`: the diff and its sections as evidence, the `design`, `codebase-details` and Astra panel, cap 2 (U85); a plan or integrate cycle a respec approval closed by its `source_review` (U91); `review record --sha256` on a head takes the full 40-hex commit sha alone (U101, 1.3 design section 3.4); the settle's writes in `apply_settle`, which `decision rule` calls on a point-1 ruling, the CI finding's refusal in `check_ci_finding` and a posted proceed comment edited before its record refused in `posted_comment` (U103, 1.3 design sections 3.6 and 3.7); U104's owner-only spec findings (1.3 design section 3.8): `owner_only_fids` and the posted word naming a `deviation (spec)` fid whatever else blocks, its settle the owner's alone, `point_one_open` counting only the contests its question names and a contest copy ruled through the fid its chain reaches.
 
 """superegm review open|record|settle|status|rule|scope|post|ingest|triage: the one review loop (spec section 8)."""
 
@@ -1512,7 +1512,10 @@ def open_decisions(st: core.Store, unit: str) -> list[dict]:
 
 
 def point_one_open(st: core.Store, foreman: dict, decision: dict) -> bool:
-  """A point-1 decision some contested fid of its `review <id> round <n>` round names no ruling of."""
+  """A point-1 decision some contested fid of its `review <id> round <n>` round names no ruling of: only the contests its
+  question names count (a question naming no fid counts every contest, as in 1.2.1), and a contest copy counts as ruled
+  when a ruling of the decision names a fid its chain reaches (U104: a ruling on a spec finding closes its copy)."""
+  from superegm.decision import FINDING_LINE_RE  # inside: `decision` imports `review`
   words = (decision.get("source") or "").split()
   if len(words) != 4 or words[0] != "review" or words[2] != "round" or not words[3].isdigit():
     return False
@@ -1520,9 +1523,26 @@ def point_one_open(st: core.Store, foreman: dict, decision: dict) -> bool:
     return False  # a proceed closes the whole decision, as `redesign` does
   rnd = load_round(st, words[1], int(words[3])) or {}
   fids = contested_fids(rnd) or [c["fid"] for c in rnd.get("builder_contested") or []]
+  named = {a or b for a, b in FINDING_LINE_RE.findall(decision.get("question") or "")}
   ruled = {r["ruling"].partition(" — ")[0].strip().split(" ")[0]
            for r in foreman.get("rulings") or [] if r.get("decision") == decision["id"]}
-  return any(fid not in ruled for fid in fids)
+  return any(not set(contest_chain(st, words[1], fid)) & ruled for fid in fids if not named or fid in named)
+
+
+def contest_chain(st: core.Store, rid: str, fid: str) -> list:
+  """`fid`, then each fid down its contest chain (`contested <fid>: …`, `unreplied <fid>: …`) in the review `rid`,
+  bounded; an id no round holds ends the walk (U104)."""
+  chain = [fid]
+  for _ in range(32):
+    try:
+      claim = locate_finding(st, rid, chain[-1])[3]["claim"]
+    except core.HandoffError:
+      break
+    m = re.match(r"(?:contested|unreplied) (\S+):", claim)
+    if not m or m.group(1) in chain:
+      break
+    chain.append(m.group(1))
+  return chain
 
 
 def names_review(decision: dict, rid: str) -> bool:
