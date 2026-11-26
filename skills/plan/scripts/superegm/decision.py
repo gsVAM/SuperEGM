@@ -497,6 +497,10 @@ def open_decision(args) -> int:
   qid, now = f"q{len(data['decisions']) + 1}", core.now_iso()
   data["decisions"].append({"id": qid, "point": args.point, "source": args.source, "head": head,
                             "question": question, "asked_at": now, "options": options})
+  posted = [e for e in data.get("rounds") or [] if e.get("phase") == "posted"]
+  word = str(posted[-1].get("outcome") or "") if posted else ""
+  if args.point == 1 and word.startswith("owner: ") and any(o.endswith(" respec") for o in options):
+    data["decisions"][-1]["word"] = word  # a spec finding's decision (U104): `pending_decisions` reads it whole
   reason = stop_reason(data, load_launches(st, unit), args.source) if "relaunch" in options else None
   if reason and "respec" in options:  # a spec deviation keeps `respec` (§7.6): the spent relaunch is dropped, the decision is asked
     options.remove("relaunch")

@@ -359,33 +359,32 @@ def pending_decisions(foreman: dict) -> list:
   """`decisions[]` minus `rulings[]` (spec section 7); a point-1 decision whose options end ` allowed` (an
   `owner: <ids>` decision, U25) stays pending until every option's fid has a ruling or a `redesign` or a `proceed` rules it whole;
   so does a point-1 decision whose question holds an unconverged panel's `(judges/<panel>/verdict.json)` line (U88), for each
-  finding its question asks, until every one has a ruling or a `redesign` or a `proceed` rules it whole; a point-1 decision
-  offering `<fid> respec` (U104) stays pending until each fid of its `<fid> respec` and `<fid> allowed` options, and with a
-  verdict line each fid its question asks, has a ruling, a contest copy (`contested <fid>: …` in its question line) ruled
-  through the fid its chain reaches, or a `redesign` or a `proceed` rules it whole."""
+  finding its question asks, until every one has a ruling or a `redesign` or a `proceed` rules it whole; a spec finding's
+  decision (U104: opened on an `owner:` word, which it records as `word`, and offering `<fid> respec`) stays pending until each
+  fid of its `<fid> respec` and `<fid> allowed` options and each fid its question names has a ruling, a spec pair (a contest
+  copy, `contested <fid>: …` in its question line, and the fid its chain reaches) ruled by a ruling on either, or a `redesign`
+  or a `proceed` rules it whole. A 1.2.1 decision (no `word`) reads as it did."""
   rulings = foreman.get("rulings") or []
   ruled = {r.get("decision") for r in rulings}
 
   def pending(d):
     options = d.get("options") or []
-    if d.get("point") == 1 and any(o.endswith(" respec") for o in options):  # a spec finding's decision (U104)
+    if (d.get("point") == 1 and str(d.get("word") or "").startswith("owner: ")
+            and any(o.endswith(" respec") for o in options)):  # a spec finding's decision (U104)
       fids = {str(r.get("ruling") or "").split(" ")[0] for r in rulings if r.get("decision") == d["id"]}
       if fids & {"redesign", "proceed"}:
         return False
       need = [o.split(" ")[0] for o in options if o.endswith((" respec", " allowed"))]
-      if "/verdict.json)" in (d.get("question") or ""):  # a split panel's question: each finding it asks too
-        need += [a or b for a, b in re.findall(rf"^(?:#+\s+Q\d+\s+({FID_PAT})\s+\(|({FID_PAT})\s*\|)", d["question"], re.M)]
+      need += [a or b for a, b in re.findall(rf"^(?:#+\s+Q\d+\s+({FID_PAT})\s+\(|({FID_PAT})\s*\|)", d.get("question") or "", re.M)]
       links = dict(re.findall(rf"^(?:#+\s+Q\d+\s+)?({FID_PAT})\s*(?:\||\().*?(?:contested|unreplied) ({FID_PAT}):", d.get("question") or "", re.M))
 
-      def ruled_through(fid):  # a contest copy is ruled when a ruling names the fid its chain reaches
-        seen = set()
-        while fid not in seen:
-          if fid in fids:
-            return True
-          seen.add(fid)
-          fid = links.get(fid, fid)
-        return False
-      return not all(ruled_through(fid) for fid in need)
+      def chain(fid):  # the fid, then each fid its contest chain reaches
+        out = [fid]
+        while links.get(out[-1]) and links[out[-1]] not in out:
+          out.append(links[out[-1]])
+        return out
+      done = {x for fid in fids for x in chain(fid)}  # a ruling on a copy rules what it contests too
+      return not all(set(chain(fid)) & done for fid in need)
     if d.get("point") == 1 and options and all(o.endswith(" allowed") for o in options):
       fids = {str(r.get("ruling") or "").split(" ")[0] for r in rulings if r.get("decision") == d["id"]}
       if fids & {"redesign", "proceed"}:  # spec section 4.2: a proceed closes the whole decision, as `redesign` does
