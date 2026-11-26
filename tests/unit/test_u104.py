@@ -280,3 +280,18 @@ def test_a_ruling_on_a_contest_copy_settles_the_spec_finding(world, tmp_path, mo
   assert any(claim.startswith("deviation (spec) unruled: ") for claim in round_3_foreman_claims) is raised
   assert collect.SPEC_CLAIM is decision.SPEC_CLAIM
   assert "SPEC_CLAIM = " not in (ROOT / "skills/plan/scripts/superegm/collect.py").read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------- S8: the decision points name it
+
+
+def test_decision_points_name_the_spec_finding_owner_only():
+  # `spec_row` the line of `## The owner's findings` naming `deviation (spec)`: the owner's, never the judges', contested or not,
+  # with respec offered; one decision for the round, its question also carrying the round's other contests, still asked of the
+  # judges and ruled as Decision point 1 rules them
+  text = (ROOT / "skills/wave/references/decision_points.md").read_text(encoding="utf-8")
+  section = text.split("## The owner's findings")[1].split("\n## ")[0]
+  spec_row = next(line for line in section.splitlines() if "deviation (spec)" in line)
+  assert all(word in spec_row for word in ("finding upheld", "finding overruled", "<fid> respec", "contested or not",
+                                           "one decision for the round"))
+  assert "judges question --review <head-review-id> --round <n>" in spec_row and "Decision point 1" in spec_row
