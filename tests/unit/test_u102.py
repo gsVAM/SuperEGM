@@ -433,3 +433,32 @@ def test_a_ruling_before_any_round_holding_the_fid_binds_no_entry():
   held = [("2026-11-02T15:00:00Z", entry)]
   assert bound_entry(held, "2026-11-02T13:00:00Z") is None
   assert bound_entry(held, "2026-11-02T16:00:00Z") == entry
+
+
+# Round 4's review (PR #293, round 3): the fixes, each pinned.
+
+def test_the_fallback_reads_a_nested_quote_f_string_as_one_string():
+  # astra-3-3: Python 3.12 lets an f-string's replacement field reuse its own quote; the scan steps into the field
+  # as code, so the inner quote and the `(` inside a string never open a bracket that swallows the next test
+  from superegm.collect import indented_tests
+  lines = ["def test_a():", '    value = f"{mapping["("]}"', "    assert y == 1", "", "def test_b():", "    assert y == 1"]
+  assert indented_tests(lines) == ["test_a"] * 3 + ["<module>"] + ["test_b"] * 2
+
+
+def test_a_contest_copy_whose_contest_a_ruling_settled_is_not_carried():
+  # astra-3-2: foreman-2-1 contests astra-1-1, foreman-3-1 contests foreman-2-1, and the owner overrules foreman-3-1;
+  # the ruling reaches foreman-2-1 down the contest links, so round 4 carries neither it nor its builder_contested entry
+  from superegm.collect import carry
+  from superegm.decision import Ruling
+  last = {"reviewers": {"foreman": {"findings": [
+              {"id": "foreman-2-1", "severity": "high", "location": "pr #70 comment 9", "regression": "no",
+               "claim": "contested astra-1-1: it fires", "disposition": None},
+              {"id": "foreman-3-1", "severity": "high", "location": "pr #70 comment 10", "regression": "no",
+               "claim": "contested foreman-2-1: still fires", "disposition": None}]}},
+          "builder_contested": [{"fid": "foreman-2-1", "reason": "it fires"}]}
+  links = {"foreman-2-1": "astra-1-1", "foreman-3-1": "foreman-2-1"}
+  overruled = [Ruling("overruled", "foreman-3-1", None, "settled", "owner", 13)]
+  kept, slots, contested = carry([], [], last, 3, links, overruled)
+  assert (kept, slots, contested) == ([], [], [])
+  _, slots, contested = carry([], [], last, 3, links, [])  # with no ruling, the open contest copy is carried
+  assert [s["id"] for s in slots] == ["foreman-2-1"] and contested == [{"fid": "foreman-2-1", "reason": "it fires"}]
