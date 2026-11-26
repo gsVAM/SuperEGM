@@ -310,33 +310,59 @@ def indented_tests(lines: list) -> list:
 
 def statement_starts(lines: list) -> list:
   """Whether each of `lines` opens outside any bracket, string or backslash continuation: a light scan of quotes
-  (single, double, triple), brackets and comments, for a text `ast` cannot read."""
-  starts, depth, quote, joined = [], 0, None, False
+  (single, double, triple), brackets and comments, for a text `ast` cannot read. An f-string's replacement field
+  (`{...}`, never `{{`) is scanned as code down to its closing `}`, so a string inside it, its own quote included
+  (Python 3.12, PEP 701), opens a string of its own and never ends the f-string."""
+  starts, depth, joined = [], 0, False
+  stack = []  # open strings and replacement fields, innermost last: ["str", quote, is_f] or ["field", depth]
   for line in lines:
-    starts.append(depth == 0 and quote is None and not joined)
+    starts.append(depth == 0 and not stack and not joined)
     i, joined = 0, False
     while i < len(line):
-      ch = line[i]
-      if quote:
-        if line.startswith(quote, i):
-          i, quote = i + len(quote), None
-          continue
-        i += 2 if ch == "\\" else 1
+      ch, top = line[i], stack[-1] if stack else None
+      if top and top[0] == "str":
+        if line.startswith(top[1], i):
+          i += len(top[1])
+          stack.pop()
+        elif ch == "\\":
+          i += 2
+        elif top[2] and line.startswith("{{", i):  # an f-string's `{{` is text
+          i += 2
+        elif top[2] and ch == "{":  # `{` opens a replacement field, read as code
+          stack.append(["field", 0])
+          i += 1
+        else:
+          i += 1
         continue
       if ch == "#":
         break
       if ch in "'\"":
+        k = i
+        while k > 0 and line[k - 1] in "rRbBfFuU":
+          k -= 1
+        prefix = line[k:i] if k == 0 or not (line[k - 1].isalnum() or line[k - 1] == "_") else ""
         quote = ch * 3 if line.startswith(ch * 3, i) else ch
+        stack.append(["str", quote, "f" in prefix.lower()])
         i += len(quote)
         continue
       if ch in "([{":
-        depth += 1
+        if top:
+          top[1] += 1
+        else:
+          depth += 1
       elif ch in ")]}":
-        depth = max(0, depth - 1)
+        if top and ch == "}" and top[1] == 0:
+          stack.pop()  # the replacement field closes: back in its f-string
+        elif top:
+          top[1] = max(0, top[1] - 1)
+        else:
+          depth = max(0, depth - 1)
       i += 1
-    if quote and len(quote) == 1:  # a one-quote string ends at its line, unless the line continues it
-      quote = quote if line.endswith("\\") else None
-    joined = quote is None and depth == 0 and line.rstrip().endswith("\\") and not line.lstrip().startswith("#")
+    if not line.endswith("\\"):  # a one-quote string ends at its line, and with it whatever it holds open
+      one = next((k for k, s in enumerate(stack) if s[0] == "str" and len(s[1]) == 1), None)
+      if one is not None:
+        del stack[one:]
+    joined = not stack and depth == 0 and line.rstrip().endswith("\\") and not line.lstrip().startswith("#")
   return starts
 
 
