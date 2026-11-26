@@ -2258,10 +2258,11 @@ def rule_proceed(st: core.Store, rid: str, review: dict, card: dict, args) -> in
   state = core.load_state(st.root)
   number = state["units"][unit]["number"]
   pinned = pinned_head(st, rid, review, state)
+  live = live_head(st, state, unit, pinned)  # read before the replay too: a replay holds only while GitHub's head is the recorded one
   comment, by = None, "owner"
   if posted:
     recorded = next((e for e in foreman.get("proceeds") or [] if e.get("posted") == f"comment {posted}"), None)
-    if recorded and (recorded.get("review"), recorded.get("head")) == (rid, pinned):
+    if recorded and (recorded.get("review"), recorded.get("head"), live) == (rid, pinned, pinned):
       print(json.dumps(recorded, sort_keys=True))  # the same comment, review and head: the recorded entry, nothing written
       return 0
     if recorded or posted_anywhere(st, f"comment {posted}"):
@@ -2271,7 +2272,7 @@ def rule_proceed(st: core.Store, rid: str, review: dict, card: dict, args) -> in
       raise core.HandoffError(f"review rule: comment {posted}: {NEEDS_HEAD}")
     ruling["reason"], by, shown = found.reason, found.login, found.subject
   refuse_moved_since(unit, shown, pinned)
-  refuse_moved_since(unit, shown, live_head(st, state, unit, pinned))
+  refuse_moved_since(unit, shown, live)
   ruling["sha256"] = pinned
   launches = st.path("launches", unit)
   launched = json.loads(core.read_text(launches))["launches"] if launches.is_file() else []
@@ -2301,10 +2302,12 @@ def refuse_moved_since(unit: str, shown: str, pinned) -> None:
 
 def live_head(st: core.Store, state: dict, unit: str, pinned):
   """The unit's pull request's head read from GitHub now, so a push the wave has not saved yet refuses a head
-  proceed before anything is written (1.3 design section 3.9); `pinned` itself while the unit has no pull request."""
+  proceed before anything is written (1.3 design section 3.9); `pinned` itself while the unit has no pull request. The
+  number is the saved view's (`status --wait`), else the unit's own record (`units[<id>].pr`, as plain `status` keeps
+  it), so a store with no snapshot is checked too."""
   from superegm.report import unit_view
-  pr = unit_view(state, unit)["pr"]
-  number = pr["number"] if isinstance(pr, dict) else pr
+  pr = unit_view(state, unit)["pr"] or ((state.get("units") or {}).get(unit) or {}).get("pr")
+  number = pr.get("number") if isinstance(pr, dict) else pr
   return core.read_pr(st.config["repo"], int(number))["head"] if number else pinned
 
 
