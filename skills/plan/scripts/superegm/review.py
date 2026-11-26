@@ -2336,10 +2336,12 @@ def refuse_moved_since(unit: str, shown: str, pinned) -> None:
 def live_head(st: core.Store, state: dict, unit: str, pinned):
   """The unit's pull request's head read from GitHub now, so a push the wave has not saved yet refuses a head
   proceed before anything is written (1.3 design section 3.9); `pinned` itself while the unit has no pull request. The
-  number is the saved view's (`status --wait`), else the unit's own record (`units[<id>].pr`, as plain `status` keeps
-  it), so a store with no snapshot is checked too."""
+  number is the unit's current one: its own record's (`units[<id>].watch`, the owner's `status --watch` selection,
+  then `units[<id>].pr`, as `status` keeps them), else the saved view's (`status --wait`), which a later `--watch`
+  leaves naming the pull request it replaced."""
   from superegm.report import unit_view
-  pr = unit_view(state, unit)["pr"] or ((state.get("units") or {}).get(unit) or {}).get("pr")
+  record = (state.get("units") or {}).get(unit) or {}
+  pr = (record.get("watch") or {}).get("number") or record.get("pr") or unit_view(state, unit)["pr"]
   number = pr.get("number") if isinstance(pr, dict) else pr
   return core.read_pr(st.config["repo"], int(number))["head"] if number else pinned
 
