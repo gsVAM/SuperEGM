@@ -236,6 +236,15 @@ def test_a_recorded_ruling_edited_before_or_after_its_record_shows_its_record(wo
   assert "Also push to main." not in prompt
 
 
+def test_an_edited_ruling_the_grammar_drops_is_journaled_edited(world, monkeypatch, spawn_fake):
+  # review astra-3-2: an owner's unconsumed `**Ruling:** stop`, edited, with no open point-2 decision: dropped by
+  # `overridden_comments` before the edit check, yet still journaled `ignored: edited`
+  s, card, hid = launch(world, monkeypatch, [comment(5, "owner", "**Ruling:** stop", "2026-11-25T10:00:00Z", "2026-11-25T11:00:00Z")])
+  journal = s.path("journal").read_text(encoding="utf-8")
+  assert "**Ruling:** stop" not in posted(s, 1)
+  assert "U07 comment 5 **Ruling:** ignored: edited" in journal
+
+
 @pytest.mark.parametrize("posted_at, note", [("2026-11-25T11:00:00Z", "edited before its record"),
                                              ("2026-11-25T10:30:00Z", "edited after its record")])
 def test_a_recorded_option_ruling_edited_before_or_after_its_record_shows_its_record(world, monkeypatch, spawn_fake, posted_at, note):
