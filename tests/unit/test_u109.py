@@ -27,6 +27,18 @@ def test_step_paths_reads_only_path_shaped_spans(write, implement, test_path, im
   assert body.step_paths(f"## Steps\n{write}\n{implement}\n") == [(1, test_path, impl_path)]
 
 
+@pytest.mark.parametrize("write, fence, command", [
+  ("1. Write the failing test `test_x` for `U07` in `tests/unit/test_u01.py`:", "", "pytest tests/unit/test_u01.py::test_x -q"),
+  ("1. Write the failing test `test_x` for `U07` in `tests/unit/test_u01.py`:", "@pytest.mark.parametrize", "pytest tests/unit/test_u01.py -k test_x -q"),
+  ("1. Write the failing test `test_x` in `tests/unit/test_u01.py`:", "", "pytest tests/unit/test_u01.py::test_x -q"),
+  ("1. Write the failing test `test_x` for `U07`:", "", None),
+])
+def test_run_commands_takes_the_path_shaped_test_span(write, fence, command):
+  # astra-4-1: a Step's default command reads its test path as step_paths does, the first path-shaped span of the `Write` line, never the second span
+  text = f"## Steps\n{write}\n   {fence}\n   Implement it in `skills/x.py`.\n"
+  assert body.run_commands(text) == ([command] if command else [])
+
+
 @pytest.mark.parametrize("reviewers, refused", [
   ({"spec": ["zoom-out"]}, "reviewers.spec"),
   ({"plan": ["readiness", "proportion"]}, "reviewers.plan"),
