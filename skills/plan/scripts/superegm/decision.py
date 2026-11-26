@@ -568,6 +568,27 @@ def spec_claims(question: str) -> dict:
   return found
 
 
+def source_review(decision: dict) -> tuple:
+  """(review id, round) of a decision's `review <rid> round <n>` source, else (None, None)."""
+  words = str(decision.get("source") or "").split()
+  if len(words) == 4 and words[0] == "review" and words[2] == "round" and words[3].isdigit():
+    return words[1], int(words[3])
+  return None, None
+
+
+def spec_reached(st, decision: dict, fid: str) -> bool:
+  """Whether `fid` is a foreman spec finding of the decision's question, or a finding of its source round whose contest
+  chain, in the decision's head review, reaches one (U104): the owner's alone."""
+  if fid in spec_claims(decision.get("question") or ""):
+    return True
+  rid, n = source_review(decision)
+  try:
+    claim = review.locate_in_round(st, rid, n, fid)[3]["claim"] if rid else ""
+  except core.HandoffError:
+    return False
+  return bool(claim) and review.delta_claim(st, rid, claim).startswith(SPEC_CLAIM)
+
+
 def owner_options(word: str, question: str) -> list:
   """Point 1 on an `owner: <ids>` word (U25, U104): an id of the word standing in the question as its own word is offered
   `<fid> respec` when the question holds it as a spec finding, else `<fid> allowed`; with a spec fid among them,
@@ -761,6 +782,8 @@ def rule(args) -> int:
       raise Refusal("decision: point 5 is the owner's alone")
     fifth_point(st, unit, decision, chosen, args.runcard)
     data = core.load_foreman(st, unit)  # the round's outcome is written: the record is reloaded before the append
+  if decision["point"] == 1 and args.by.startswith("judges:") and spec_reached(st, decision, chosen.split(" ")[0]):
+    raise Refusal(f"decision: {chosen.split(' ')[0]} is the owner's alone")  # a spec finding or its contest copy (U104)
   settles = []  # U103: a point-1 overrule or allowance settles the finding it rules; every check runs before the post
   if decision["point"] == 1 and not closed and chosen.endswith((" finding overruled", " allowed")):
     ruled_fid = chosen.split(" ")[0]

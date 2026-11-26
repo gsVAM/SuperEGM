@@ -597,10 +597,11 @@ def unruled_specs(last: dict, rulings: list, links: dict = None) -> list:
   `spec_findings` makes them: a finding of kind `spec` blocks until the owner rules it (§7.6), so a round that is
   not given `--spec` again still raises it, and `carry` keeps its id. A finding an `upheld`, `overruled` or
   `allowed` ruling names, or a recorded `<fid> respec` (read as an overrule), is settled and not raised again; so is
-  one a ruling on a contest copy reaches down the copy's chain (`links`, each copy to the fid it names, U104)."""
+  one an owner's ruling on a contest copy reaches down the copy's chain (`links`, each copy to the fid it names, U104); a
+  judges' ruling settles no spec finding, which is the owner's alone."""
   links, settled = links or {}, set()
   for r in rulings:
-    if r.kind in ("upheld", "overruled", "allowed"):
+    if r.kind in ("upheld", "overruled", "allowed") and not r.login.startswith("judges:"):
       fid = r.subject
       while fid not in settled:
         settled.add(fid)

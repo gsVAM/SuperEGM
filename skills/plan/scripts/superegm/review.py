@@ -1173,7 +1173,8 @@ def check_settle(st: core.Store, rid: str, review: dict, card: dict, args, fid: 
   if disposition == "fixed" and rnd["artifact_sha256"] == current_sha(st, review["kind"], review["artifact"]) \
       and not refs_moved(st, review, rnd):  # a spec round's changed reference document counts as changed bytes (U75)
     raise core.HandoffError("review settle: fixed needs changed bytes")  # a head's current bytes are unknown: never
-  if finding["claim"].startswith(("test-delta:", spec_claim())) and not args.owner:  # U25, U104: the owner's alone, in either mode
+  # U25, U104: the owner's alone, in either mode; a spec finding's contest copy too (its chain reaches one)
+  if (finding["claim"].startswith("test-delta:") or delta_claim(st, rid, finding["claim"]).startswith(spec_claim())) and not args.owner:
     raise core.HandoffError(f"review settle: {fid} is the owner's alone: --owner required")
   if blocking(finding) and disposition in ("contested", "declined"):
     if card["mode"] == "leavemealone" and not args.judges:
