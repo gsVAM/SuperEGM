@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U84's tests, spec §7.6 "The deviation" and "The ruling": the `spec` deviation kind and the owner's `respec`.
-# Modified by SuperEGM (gsVAM), 2026: `collected:` is pinned by its first line, and the brief's evidence wording (U101's recovering a round, 1.3 design section 3.4).
+# Modified by SuperEGM (gsVAM), 2026: `collected:` is pinned by its first line, and the brief's evidence wording (U101's recovering a round, 1.3 design section 3.4); the open respec file's `cycle` and `open_respec`'s calls re-pinned (U104's owner-only spec findings, 1.3 design section 3.8).
 
 """U84: a `**Deviation (spec):**` comment blocks until ruled, its decision offers `respec` (the owner's alone,
 never in the judges' question), `decision rule ... respec` writes `respec/R<n>.open.json` and never `state.json`,
@@ -327,7 +327,8 @@ def test_the_decision_on_a_foreman_spec_finding_offers_respec_to_the_owner_alone
   code, out = rule_on(world, card, qid, "foreman-1-1 respec — the spec is wrong")
   assert code == 0, out
   open_file = s.path("file", "respec", "R1.open.json")
-  assert json.loads(open_file.read_text(encoding="utf-8")) == {"id": "R1", "unit": "U02", "finding": "foreman-1-1", "at": AT}
+  # keyed by unit, head cycle (the decision source's review id) and fid (U104)
+  assert json.loads(open_file.read_text(encoding="utf-8")) == {"id": "R1", "unit": "U02", "finding": "foreman-1-1", "cycle": "r1", "at": AT}
   assert state_file.read_bytes() == before
   assert [(r.kind, r.subject) for r in decision.recorded_rulings(foreman_of(s, "U02"))] == [("overruled", "foreman-1-1")]  # settles the finding
 
@@ -348,7 +349,7 @@ def test_a_rerun_that_rules_another_option_removes_the_stale_open_file(world, by
   card, s = spec_world(world)
   if by_finding:
     qid, other = finding_decision(world, card), "foreman-1-1 finding overruled — the spec stands"
-    decision.open_respec(s, "U02", None, core.now_iso(), finding="foreman-1-1")
+    decision.open_respec(s, "U02", None, core.now_iso(), finding="foreman-1-1", cycle="r1")  # the decision's head cycle (U104)
   else:
     qid, other = open_decision(world, card, SPEC_COMMENT), "(b)"
     decision.open_respec(s, "U02", 101, core.now_iso())

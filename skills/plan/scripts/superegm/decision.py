@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3/5
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
-# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63); `respec`, a `spec` deviation's option, the owner's alone, a spent `relaunch` dropped beside it, and a letter that resolves to it binding nothing unrecorded (spec §7.6, U84); the judges' ruling journalled and posted with `contest` on a normal-mode card (spec §7.8, U88); U103's rulings (1.3 design sections 3.6 and 3.7): a point-1 ruling with no fid refused as `missing <fid>`, a point-1 overrule or allowance settling the finding it rules through `review.apply_settle` after `review settle`'s ruler checks, a failed GitHub read one `gh:` line, a posted ruling comment edited before its first record refused as `ruling comment edited: post a new one`; the head proceed's `<sha7>` subject, and an undo refused while a proceed's merge is offered (U107, 1.3 design section 3.9).
+# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63); `respec`, a `spec` deviation's option, the owner's alone, a spent `relaunch` dropped beside it, and a letter that resolves to it binding nothing unrecorded (spec §7.6, U84); the judges' ruling journalled and posted with `contest` on a normal-mode card (spec §7.8, U88); U103's rulings (1.3 design sections 3.6 and 3.7): a point-1 ruling with no fid refused as `missing <fid>`, a point-1 overrule or allowance settling the finding it rules through `review.apply_settle` after `review settle`'s ruler checks, a failed GitHub read one `gh:` line, a posted ruling comment edited before its first record refused as `ruling comment edited: post a new one`; U104's owner-only spec findings (1.3 design section 3.8): an `owner: <ids>` decision offering a spec fid `<fid> respec` beside `finding upheld` and `finding overruled`, a `## Q<n>` question's spec finding read, a mixed decision's `<fid> allowed` ruled as an `owner: <ids>` decision's; the `<fid> respec — <reason>` form, read by `verify_posted` as a point-1 ruling on that fid, and a doubled `<fid> <fid> respec` refused as none of the options; the open respec file keyed by unit, head cycle (`cycle`) and fid; a spec fid's overrule settled `declined`, as on an `owner: <ids>` decision; a spec pair settled whole by an owner's overrule of either fid, a spec finding's contest copy refused to the judges, a spec decision recording its `word` and the contest `links` of its findings' chains that reach a spec finding, a ruling on either of a spec pair ruling both (`pair_ruled`), a fid's earlier ruling read within its own head review, and a file allowance ruling a spec decision's test-delta contest copy too; the head proceed's `<sha7>` subject, and an undo refused while a proceed's merge is offered (U107, 1.3 design section 3.9).
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
@@ -79,38 +79,43 @@ def respec_files(st) -> list:
   return sorted(folder.iterdir()) if folder.is_dir() else []
 
 
-def respec_held(st, unit: str, comment_id: int = None, finding: str = None):
+def respec_held(st, unit: str, comment_id: int = None, finding: str = None, cycle: str = None):
   """The `(file, content)` of the open respec file of this unit and this deviation, a comment (`comment_id`) or the
-  foreman's finding (`finding`), else None."""
+  foreman's finding (`finding`) of head cycle `cycle` (U104: a fid repeats across head cycles), else None; a file
+  with no `cycle` (1.2.1's) matches on unit and fid alone."""
   for file in respec_files(st):
     if file.name.endswith(".open.json"):
       try:
         held = json.loads(file.read_text(encoding="utf-8"))
       except ValueError:
         continue
-      if isinstance(held, dict) and held.get("unit") == unit and held.get("comment_id") == comment_id and held.get("finding") == finding:
+      if (isinstance(held, dict) and held.get("unit") == unit and held.get("comment_id") == comment_id
+              and held.get("finding") == finding and held.get("cycle", cycle) == cycle):
         return file, held
   return None
 
 
-def open_respec(st, unit: str, comment_id: int, now: str, finding: str = None) -> str:
+def open_respec(st, unit: str, comment_id: int, now: str, finding: str = None, cycle: str = None) -> str:
   """Spec §7.6: the owner's `respec` on a `spec` deviation writes `respec/R<n>.open.json` (`{id, unit, comment_id,
   at}`, the store's `file` kind, never `state.json`) in the handoff's directory; `R<n>` is the next number no
-  `respec/` file uses. On the foreman's spec finding `finding` (its fid) takes `comment_id`'s place: `{id, unit,
-  finding, at}`. A rerun after a crash finds the file for the same unit and deviation and keeps it."""
-  if held := respec_held(st, unit, comment_id, finding):
+  `respec/` file uses. On the foreman's spec finding `finding` (its fid) takes `comment_id`'s place and `cycle`
+  names its head cycle, the decision source's review id (U104; never `review`, which `approve-spec --respec` reads
+  as a closed review cycle): `{id, unit, finding, cycle, at}`. A rerun after a crash finds the file for the same
+  unit, head cycle and deviation and keeps it."""
+  if held := respec_held(st, unit, comment_id, finding, cycle):
     return held[1]["id"]
   used = [int(m.group(1)) for f in respec_files(st) if (m := RESPEC_FILE.match(f.name))]
   rid = f"R{max(used, default=0) + 1}"
-  entry = {"id": rid, "unit": unit, "finding": finding} if finding else {"id": rid, "unit": unit, "comment_id": comment_id}
+  entry = ({"id": rid, "unit": unit, "finding": finding} | ({"cycle": cycle} if cycle else {}) if finding
+           else {"id": rid, "unit": unit, "comment_id": comment_id})
   core.atomic_write(st.path("file", "respec", f"{rid}.open.json"), entry | {"at": now})
   return rid
 
 
-def drop_respec(st, unit: str, comment_id: int = None, finding: str = None) -> None:
-  """Remove the open respec file of this unit and deviation, if any: what a crashed run left when a rerun rules
-  another option, so the file is never read as an open respec."""
-  if held := respec_held(st, unit, comment_id, finding):
+def drop_respec(st, unit: str, comment_id: int = None, finding: str = None, cycle: str = None) -> None:
+  """Remove the open respec file of this unit, head cycle and deviation, if any: what a crashed run left when a
+  rerun rules another option, so the file is never read as an open respec."""
+  if held := respec_held(st, unit, comment_id, finding, cycle):
     held[0].unlink()
 
 
@@ -168,6 +173,7 @@ FORM_RES = (
   ("round", re.compile(r"one more round")),
   ("stop", re.compile(r"stop")),
   ("option", re.compile(rf"\((?P<subject>\d+|q\d+)\) (?P<option>\S.*?){REASON}")),
+  ("respec", re.compile(rf"(?P<subject>{FID}) respec{REASON}")),  # the owner's respec of a foreman spec finding (U104)
   ("allowed-file", re.compile(rf"test-delta (?P<subject>\S+) allowed{REASON}")),
   ("redesign", re.compile(rf"redesign{REASON}")),
   ("allowed", re.compile(rf"(?P<subject>{FID}) allowed{REASON}")),
@@ -183,7 +189,7 @@ JUDGES_MARK_RE = re.compile(r"^\(judges \S+, (?:leavemealone|contest)\)$", re.M)
 
 @dataclass(frozen=True)
 class Ruling:
-  kind: str  # upheld | overruled | round | stop | option | allowed | allowed-file | redesign | proceed
+  kind: str  # upheld | overruled | round | stop | option | allowed | allowed-file | redesign | proceed | respec
   subject: str  # the fid, the comment or decision id, the `dod-<n>` item, the file, or "" for round, stop and redesign
   option: str | None  # the option text at point 3
   reason: str | None  # the text after the first ` — `, as typed
@@ -493,6 +499,12 @@ def open_decision(args) -> int:
   qid, now = f"q{len(data['decisions']) + 1}", core.now_iso()
   data["decisions"].append({"id": qid, "point": args.point, "source": args.source, "head": head,
                             "question": question, "asked_at": now, "options": options})
+  posted = [e for e in data.get("rounds") or [] if e.get("phase") == "posted"]
+  word = str(posted[-1].get("outcome") or "") if posted else ""
+  if args.point == 1 and word.startswith("owner: ") and any(o.endswith(" respec") for o in options):
+    data["decisions"][-1]["word"] = word  # a spec finding's decision (U104): `pending_decisions` reads it whole
+    if links := contest_links(st, args.source, question):  # its findings' contest chains, read now through the store
+      data["decisions"][-1]["links"] = links
   reason = stop_reason(data, load_launches(st, unit), args.source) if "relaunch" in options else None
   if reason and "respec" in options:  # a spec deviation keeps `respec` (§7.6): the spent relaunch is dropped, the decision is asked
     options.remove("relaunch")
@@ -552,13 +564,99 @@ SPEC_CLAIM = "deviation (spec) unruled: "  # the claim of the foreman's finding 
 
 
 def spec_claims(question: str) -> dict:
-  """The foreman's spec findings a point-1 question holds, fid to the finding's text (what follows `SPEC_CLAIM`)."""
+  """The foreman's spec findings a point-1 question holds, fid to the finding's text (what follows `SPEC_CLAIM`): a
+  `<fid> | … | <claim>` line, or a `## Q<n> <fid> (<severity>, <location>): <claim>` one (U104)."""
   found = {}
   for line in question.splitlines():
     fields = line.split(" | ", 4)
     if len(fields) == 5 and fields[4].startswith(SPEC_CLAIM) and " " not in fields[0]:
       found[fields[0]] = fields[4][len(SPEC_CLAIM):]
+    elif (m := Q_LINE_RE.match(line)) and m["claim"].startswith(SPEC_CLAIM):
+      found[m["fid"]] = m["claim"][len(SPEC_CLAIM):]
   return found
+
+
+def source_review(decision: dict) -> tuple:
+  """(review id, round) of a decision's `review <rid> round <n>` source, else (None, None)."""
+  words = str(decision.get("source") or "").split()
+  if len(words) == 4 and words[0] == "review" and words[2] == "round" and words[3].isdigit():
+    return words[1], int(words[3])
+  return None, None
+
+
+def spec_reached(st, decision: dict, fid: str) -> bool:
+  """Whether `fid` is a foreman spec finding of the decision's question, or a finding of its source round whose contest
+  chain, in the decision's head review, reaches one (U104): the owner's alone."""
+  if fid in spec_claims(decision.get("question") or ""):
+    return True
+  rid, n = source_review(decision)
+  try:
+    claim = review.locate_in_round(st, rid, n, fid)[3]["claim"] if rid else ""
+  except core.HandoffError:
+    return False
+  return bool(claim) and review.delta_claim(st, rid, claim).startswith(SPEC_CLAIM)
+
+
+def spec_pair(st, decision: dict, fid: str) -> list:
+  """The unsettled findings of the decision's source round a ruling on `fid` settles with it (U104): the spec findings its
+  contest chain reaches (a ruling on a contest copy also settles the original), then every other contest copy whose chain
+  reaches one of those or `fid` itself (a ruling on the original closes its copy); [] when no spec finding is reached."""
+  rid, n = source_review(decision)
+  rnd = review.load_round(st, rid, n) if rid else None
+  if not rnd:
+    return []
+  open_ = {f["id"]: f for f in review.findings_of(rnd) if f["disposition"] is None}
+  specs = [x for x in review.contest_chain(st, rid, fid, rnd) if x in open_ and open_[x]["claim"].startswith(SPEC_CLAIM)]
+  copies = [c for c in open_ if c != fid and c not in specs and set(review.contest_chain(st, rid, c, rnd)[1:]) & set(specs)]
+  return [x for x in specs if x != fid] + copies
+
+
+def contest_links(st, source: str, question: str) -> dict:
+  """Each contest link (a copy's fid to the fid it contests) down the chain of every finding the question names, read in
+  the source's head review through every round (U104): a chain may pass through a finding of an earlier round the
+  question does not show. Only a spec pair is ruled as one, so only a chain that reaches a spec finding is kept, up to
+  it: a test-delta finding or an ordinary one and its contest copy stay apart, each ruled by its own ruling."""
+  rid, n = source_review({"source": source})
+  rnd = review.load_round(st, rid, n) if rid else None
+
+  def spec(fid):
+    try:
+      return review.locate_finding(st, rid, fid)[3]["claim"].startswith(SPEC_CLAIM)
+    except core.HandoffError:
+      return False
+  links = {}
+  for fid in dict.fromkeys(a or b for a, b in FINDING_LINE_RE.findall(question)) if rnd else ():
+    chain = review.contest_chain(st, rid, fid, rnd)
+    reached = [i for i, x in enumerate(chain) if spec(x)]
+    if reached:
+      links.update(zip(chain[:reached[-1]], chain[1:reached[-1] + 1]))
+  return links
+
+
+def pair_ruled(decision: dict, ruled: list, fid: str) -> bool:
+  """Whether `fid` is ruled on the decision whose rulings name `ruled` (their fids): named itself, or one of a spec pair
+  the decision's recorded `links` join, a ruling on a contest copy ruling the fid it contests and the reverse (U104). A
+  decision with no `links` (1.2.1's) reads the fid alone."""
+  links = decision.get("links") or {}
+
+  def chain(x):
+    out = [x]
+    while links.get(out[-1]) and links[out[-1]] not in out:
+      out.append(links[out[-1]])
+    return out
+  done = {y for r in ruled for y in chain(r)}
+  return bool(set(chain(fid)) & done)
+
+
+def owner_options(word: str, question: str) -> list:
+  """Point 1 on an `owner: <ids>` word (U25, U104): an id of the word standing in the question as its own word is offered
+  `<fid> respec` when the question holds it as a spec finding, else `<fid> allowed`; with a spec fid among them,
+  `finding upheld` and `finding overruled` come first; [] when no id of the word stands in the question."""
+  specs = spec_claims(question)
+  ids = [fid for fid in word[len("owner: "):].split(", ") if re.search(rf"(?<!\S){re.escape(fid)}(?!\S)", question)]
+  respecs = [f"{fid} respec" for fid in ids if fid in specs]
+  allowed = [f"{fid} allowed" for fid in ids if fid not in specs]
+  return (["finding upheld", "finding overruled"] + respecs if respecs else []) + allowed
 
 
 def options_for(point: int, source: str, question: str, foreman: dict, head: str) -> list:
@@ -566,16 +664,15 @@ def options_for(point: int, source: str, question: str, foreman: dict, head: str
   foreman's spec findings the question holds; point 2 one more round|stop; point 3 the
   comment's own `- (a)` lines plus `stop the unit`, or `relaunch; stop the unit` for a launch, a close,
   or a third `blocked` comment on the same head (a `spec` deviation's keeps `respec` between them, §7.6, `open_decision` dropping a `relaunch` already used); point 5 (a head's accept below the cap) accept|revise. Point 1 on
-  an `owner: <ids>` word (the latest posted round's outcome) offers `<fid> allowed`, one per id the question names (U25)."""
+  an `owner: <ids>` word (the latest posted round's outcome) offers `owner_options`: `<fid> allowed` one per id the question
+  names (U25), a spec finding's id `<fid> respec` beside `finding upheld` and `finding overruled` (U104)."""
   if point == 5:
     return ["accept", "revise"]
   if point == 1:
     posted = [e for e in foreman.get("rounds") or [] if e.get("phase") == "posted"]
     word = str(posted[-1].get("outcome") or "") if posted else ""
-    if word.startswith("owner: "):
-      named = [f"{fid} allowed" for fid in word[len("owner: "):].split(", ") if re.search(rf"(?<!\S){re.escape(fid)}(?!\S)", question)]
-      if named:
-        return named
+    if word.startswith("owner: ") and (named := owner_options(word, question)):
+      return named
     return ["finding upheld", "finding overruled"] + [f"{fid} respec" for fid in spec_claims(question)]
   if point == 2:
     return ["one more round", "stop"]
@@ -622,18 +719,19 @@ def high_behind(st, unit: str, source: str) -> bool:
   return bool(rnd) and any(f["severity"] == "high" and f["disposition"] is None for f in review.findings_of(rnd))
 
 
-def settle_checks(st, items: list, args, card: dict) -> list:
+def settle_checks(st, items: list, args, card: dict, also: str = None) -> list:
   """U103: the point-1 ruling's settle, checked before anything is posted or recorded. `items` is each `(decision, fid)` the
   ruling overrules or allows; its fid is settled in the head review's round the decision's source names, with the disposition
   the decision gives (`declined` on an `owner: <ids>` decision, `contested` on a contest's), as the owner or as `judges:<panel>`
   (`args.by`), after `review settle`'s own ruler checks. A review never opened, no head's or another unit's, and in
   leavemealone-mode a ruling typed in the session (no `--posted`: no comment of the owner's for the settle to read) settle
   nothing; a finding the source's round does not hold is refused, and the CI finding refuses any overrule. A refusal is
-  `review settle`'s own. The plan: `(review id, checked)` each."""
+  `review settle`'s own. The plan: `(review id, checked)` each. `also`: the fid the ruling names, which the owner's comment
+  may name in place of an item's own (a spec pair settled whole, U104)."""
   judges = args.by[7:] if args.by.startswith("judges:") else None
   posted = args.posted if args.posted and not args.posted.startswith("closed:") else None
   # `unrecorded`: the settle's read of the comment comes before its first record, so an edit it sees is refused (U103)
-  ruler = argparse.Namespace(owner=not judges, judges=judges, posted=posted, runcard=args.runcard, unrecorded=True)
+  ruler = argparse.Namespace(owner=not judges, judges=judges, posted=posted, runcard=args.runcard, unrecorded=True, also=also)
   plan = {}
   for decision, fid in items:
     words = str(decision.get("source") or "").split()
@@ -648,7 +746,9 @@ def settle_checks(st, items: list, args, card: dict) -> list:
       review.check_ci_finding(reviewer, found)  # whether or not it settles
       if card.get("mode") == "leavemealone" and not posted:
         continue
-      disposition = "declined" if f"{fid} allowed" in (decision.get("options") or []) else "contested"
+      # `declined` on an `owner: <ids>` decision, a spec fid's overrule too (U104)
+      options = decision.get("options") or []
+      disposition = "declined" if f"{fid} allowed" in options or f"{fid} respec" in options else "contested"
       n = review.check_settle(st, rid, opened, card, ruler, fid, disposition, source_round)
     except core.HandoffError as error:  # a finding the source's round does not hold is refused too, as `review settle` refuses it
       raise Refusal(str(error)) from None
@@ -698,10 +798,10 @@ def rule(args) -> int:
   fid_of = lambda text: text.partition(" — ")[0].strip().split(" ")[0]
   if decisions[0]["point"] == 1 and NO_FID_RE.match(head.strip()):  # U103: a ruling that opens with the verdict names no finding
     raise Refusal('decision: missing <fid>: write "<fid> finding overruled"')
-  fid = found.subject if found and found.kind in ("upheld", "overruled", "allowed") else fid_of(head)
+  fid = found.subject if found and found.kind in ("upheld", "overruled", "allowed", "respec") else fid_of(head)
   for d in decisions:
     ruled = [r for r in data["rulings"] if r.get("decision") == d["id"]]
-    if ruled and (d["point"] != 1 or any(fid_of(r["ruling"]) == fid for r in ruled)):
+    if ruled and (d["point"] != 1 or pair_ruled(d, [fid_of(r["ruling"]) for r in ruled], fid)):  # a spec pair's other too (U104)
       dropped(st, args, f"{d['id']} already ruled")
   decision = decisions[0]
   basis = next((d for d in decisions if d["point"] in (1, 2)), decision) if found and found.kind == "redesign" else decision
@@ -710,6 +810,7 @@ def rule(args) -> int:
   if found:  # the record is the comment's ruling: a `--ruling` that resolves to another option is refused
     said = {"upheld": f"{found.subject} finding upheld", "overruled": f"{found.subject} finding overruled",
             "round": "one more round", "stop": "stop", "option": found.option, "redesign": "redesign",
+            "respec": f"{found.subject} respec",
             "allowed": f"{found.subject} finding overruled"}.get(found.kind) or ""  # an allowance is recorded as an overrule (§13.2)
     try:
       ruled_by_comment = check_ruling(basis["point"], basis["options"], said, args.by)
@@ -741,12 +842,15 @@ def rule(args) -> int:
       raise Refusal("decision: point 5 is the owner's alone")
     fifth_point(st, unit, decision, chosen, args.runcard)
     data = core.load_foreman(st, unit)  # the round's outcome is written: the record is reloaded before the append
+  if decision["point"] == 1 and args.by.startswith("judges:") and spec_reached(st, decision, chosen.split(" ")[0]):
+    raise Refusal(f"decision: {chosen.split(' ')[0]} is the owner's alone")  # a spec finding or its contest copy (U104)
   settles = []  # U103: a point-1 overrule or allowance settles the finding it rules; every check runs before the post
   if decision["point"] == 1 and not closed and chosen.endswith((" finding overruled", " allowed")):
     ruled_fid = chosen.split(" ")[0]
     if not found and decision not in fid_decisions(data, ruled_fid):  # as the posted path refuses it: never another finding
       raise Refusal(f"decision: {ruled_fid} is not a finding of {decision['id']}")
-    settles = settle_checks(st, [(decision, ruled_fid)], args, card)
+    # a spec pair is settled whole (U104): the copy's overrule settles the spec finding, the spec finding's closes its copies
+    settles = settle_checks(st, [(decision, x) for x in [ruled_fid] + spec_pair(st, decision, ruled_fid)], args, card, also=ruled_fid)
   # the effect is the point's, never the option's wording: point 2's `stop`, point 3's `stop the unit`, a redesign.
   # The label goes first, so a failed request records nothing and the same call reruns (round 9); a session post
   # that then fails takes off again only a label this call put on (rounds 10 and 11).
@@ -810,12 +914,13 @@ def rule(args) -> int:
   if amends:
     deviation = {"comment_id": int(str(decision["source"]).split()[1])}
   elif decision["point"] == 1 and chosen.split(" ")[0] in spec_claims(decision["question"]):  # a spec finding's ruling
-    deviation = {"finding": chosen.split(" ")[0]}
+    words = str(decision.get("source") or "").split()  # its head cycle, the source's review id (U104)
+    deviation = {"finding": chosen.split(" ")[0], "cycle": words[1] if len(words) > 1 and words[0] == "review" else None}
   if deviation:
     if (chosen == "respec" if amends else bool(respec_fid)) and not closed:
-      open_respec(st, unit, deviation.get("comment_id"), now, deviation.get("finding"))
+      open_respec(st, unit, deviation.get("comment_id"), now, deviation.get("finding"), deviation.get("cycle"))
     else:
-      drop_respec(st, unit, deviation.get("comment_id"), deviation.get("finding"))
+      drop_respec(st, unit, deviation.get("comment_id"), deviation.get("finding"), deviation.get("cycle"))
   # recorded before the read-back, the session's post marked `unread` (its GitHub time not yet read), so a
   # `status --wait` pass in between compares its edits with its own `created_at` and skips the unedited post
   core.save_foreman(st, unit, data)
@@ -956,7 +1061,7 @@ def undo(st, unit: str, data: dict, args, comment: dict, found: "Ruling", now: s
   return 0
 
 
-KIND_POINTS = {"upheld": (1,), "overruled": (1,), "allowed": (1,), "allowed-file": (1,), "round": (2,), "stop": (2,), "option": (3, 5), "redesign": (1, 2)}
+KIND_POINTS = {"upheld": (1,), "overruled": (1,), "allowed": (1,), "respec": (1,), "allowed-file": (1,), "round": (2,), "stop": (2,), "option": (3, 5), "redesign": (1, 2)}
 
 
 def dropped(store, args, reason: str):
@@ -1029,18 +1134,22 @@ def check_ruling(point: int, options: list, ruling: str, by: str = "") -> str:
     place = ord(text[1]) - ord("a")
     if place < len(options):
       text = options[place]
-  if point == 1 and options and all(o.endswith(" allowed") for o in options):
-    said = text.partition(" — ")[0].strip()
-    option = next((o for o in options if o.split(" ")[0] == fid and said in ("allowed", "finding overruled", "finding upheld")), None)
+  said = text.partition(" — ")[0].strip()
+  if point == 1 and f"{fid} allowed" in options:  # an `owner: <ids>` decision's test-delta fid, a mixed decision's too (U104)
+    option = f"{fid} allowed" if said in ("allowed", "finding overruled", "finding upheld") else None
     if option and by.startswith("judges:"):
       raise Refusal(f"decision: {fid} {said} is the owner's alone")  # the ruling the panel gave, not the option it matched
     if option:
       return f"{fid} finding upheld" if said == "finding upheld" else option
-  if point == 1 and text.partition(" — ")[0].strip() == "respec" and f"{fid} respec" in options:  # §7.6: the foreman's spec finding
+  if point == 1 and said == "respec" and f"{fid} respec" in options:  # §7.6: the foreman's spec finding
     if by.startswith("judges:"):
       raise Refusal("decision: respec is the owner's alone")
     return f"{fid} respec"
+  if point == 1 and f"{fid} respec" in options and by.startswith("judges:"):  # a spec finding is the owner's alone (U104)
+    raise Refusal(f"decision: {fid} {said} is the owner's alone")
   for option in options:
+    if point == 1 and option.endswith((" allowed", " respec")):  # an option carrying its own fid is answered above alone, so a
+      continue  # doubled `<fid> <fid> respec`, or a respec of a fid no spec finding of the question names, is none of them (U104)
     letter, _, rest = option.partition(" ") if option.startswith("(") else ("", "", option)
     if text and text in (option, letter, rest) and (point != 1 or fid):
       if point == 3 and rest in ("amend", "respec") and by.startswith("judges:"):  # on the option the ruling resolves to, its own `(x) ` prefix dropped
@@ -1159,10 +1268,10 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int, mode=None)
     source = decision["source"]
     if found.kind == "option" and found.subject != option_name(decision):
       raise Refusal(f"decision: comment {cid} does not name {source if source.startswith('comment ') else decision['id']}")
-    if found.kind in ("upheld", "overruled", "allowed"):  # the fid must be one of this decision's, and ruled nowhere else
-      if decision not in fid_decisions(foreman, found.subject, strict=found.kind == "allowed"):
+    if found.kind in ("upheld", "overruled", "allowed", "respec"):  # the fid must be one of this decision's, and ruled nowhere else
+      if decision not in fid_decisions(foreman, found.subject, strict=found.kind in ("allowed", "respec")):
         raise Refusal(f"decision: comment {cid} rules {found.subject}, not a finding of {decision['id']}")
-      if fid_ruled(foreman, found.subject, but=decision["id"]):
+      if fid_ruled(foreman, found.subject, but=decision["id"], rid=source_review(decision)[0]):
         dropped(store, args, f"{found.subject} already ruled")
     if found.kind == "redesign" and decision["id"] not in {d["id"] for d in pending_decisions(foreman)}:
       dropped(store, args, f"{decision['id']} already ruled")  # a redesign rules open decisions alone, as without --decision
@@ -1177,8 +1286,9 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int, mode=None)
     decisions = list({d["id"]: d for d, _ in file_targets(foreman, found.subject, store)}.values())
   elif found.kind == "redesign":
     decisions = pending if any(d["point"] in points for d in pending) else []
-  elif found.kind in ("upheld", "overruled", "allowed"):
-    decisions = [d for d in fid_decisions(foreman, found.subject, strict=found.kind == "allowed") if not fid_ruled(foreman, found.subject)][-1:]
+  elif found.kind in ("upheld", "overruled", "allowed", "respec"):  # a respec: the latest decision naming its spec finding (U104)
+    decisions = [d for d in fid_decisions(foreman, found.subject, strict=found.kind in ("allowed", "respec"))
+                 if not fid_ruled(foreman, found.subject, rid=source_review(d)[0])][-1:]  # its own head cycle's (U104)
   elif found.kind in ("round", "stop"):
     decisions = [d for d in pending if d["point"] == 2][-1:]
   elif found.kind == "option":
@@ -1204,7 +1314,8 @@ def refuse_allowance(store, args, found: "Ruling", decisions: list, cid, mode) -
   """In leavemealone-mode an allowance naming an open point-1 decision is refused, journaled as dropped (the owner's
   notice, the event being spent): the decision's `review settle --owner --posted` reads only the overrule form. An
   `owner: <ids>` decision (every option `<fid> allowed`, U25) asks for the allowance itself and is never refused."""
-  owner_only = decisions and decisions[0].get("options") and all(o.endswith(" allowed") for o in decisions[0]["options"])
+  options = (decisions[0].get("options") or []) if decisions else []
+  owner_only = options and (all(o.endswith(" allowed") for o in options) or f"{found.subject} allowed" in options)  # a mixed decision's too (U104)
   if found.kind == "allowed" and decisions and mode == "leavemealone" and not owner_only:
     dropped(store, args, f"comment {cid} allows {found.subject}; in leavemealone-mode {decisions[0]['id']} takes "
                          f"`**Ruling:** {found.subject} finding overruled — <reason>`")
@@ -1215,6 +1326,7 @@ FID_PAT = r"[a-z][\w:\[\]-]*-\d+-\d+"
 # A finding line of a point-1 question: `<fid> | <severity> | …`, or the question file's `## Q<n> <fid> (<severity>, …`;
 # a line merely starting `<fid> (` (a quoted original) is not one
 FINDING_LINE_RE = re.compile(rf"^(?:#+\s+Q\d+\s+({FID_PAT})\s+\(|({FID_PAT})\s*\|)", re.M)
+Q_LINE_RE = re.compile(rf"^#+\s+Q\d+\s+(?P<fid>{FID_PAT})\s+\([^)]*\):\s*(?P<claim>.*)$")  # a `## Q<n> <fid> (…): <claim>` line
 
 
 def fid_decisions(foreman: dict, fid: str, strict: bool = False) -> list:
@@ -1242,10 +1354,12 @@ def file_targets(foreman: dict, path: str, st=None) -> list:
     options = d.get("options") or []
     if d["point"] != 1 or not options or d["id"] in redesigned:
       continue
-    if all(o.endswith(" allowed") for o in options):
+    if any(o.endswith(" allowed") for o in options):  # an `owner: <ids>` decision, a mixed one's `<fid> allowed` too (U104)
       out += [(d, fid) for fid in line.findall(d.get("question") or "")
-              if f"{fid} allowed" in options and not fid_ruled(foreman, fid)]
-    elif st is not None and str(d.get("source") or "").startswith("review "):
+              if f"{fid} allowed" in options and not fid_ruled(foreman, fid, rid=source_review(d)[0])]
+    # a contest copy of a finding of that file: any decision but an all-`allowed` one, a spec decision's too, which carries the
+    # round's other contests beside its `<fid> allowed` ones (U104)
+    if not all(o.endswith(" allowed") for o in options) and st is not None and str(d.get("source") or "").startswith("review "):
       rid = d["source"].split()[1]
       for fid in dict.fromkeys(a or b for a, b in FINDING_LINE_RE.findall(d.get("question") or "")):
         try:
@@ -1253,13 +1367,15 @@ def file_targets(foreman: dict, path: str, st=None) -> list:
         except core.HandoffError:
           continue
         if (claim != (original := review.delta_claim(st, rid, claim)) and original.startswith(f"test-delta: {path}:")
-            and not fid_ruled(foreman, fid)):
+            and not fid_ruled(foreman, fid, rid=rid) and (d, fid) not in out):
           out.append((d, fid))
   return out
 
 
-def fid_ruled(foreman: dict, fid: str, but: str = "") -> bool:
-  """Whether a point-1 ruling on `fid` is recorded on any decision but `but` (the one `rule` checks itself)."""
-  point1 = {d["id"] for d in foreman["decisions"] if d["point"] == 1} - {but}
-  return any(r.get("decision") in point1 and r["ruling"].partition(" — ")[0].strip().split(" ")[0] == fid
-             for r in foreman["rulings"])
+def fid_ruled(foreman: dict, fid: str, but: str = "", rid: str = None) -> bool:
+  """Whether a point-1 ruling on `fid` is recorded on any decision but `but` (the one `rule` checks itself); given `rid`, on a
+  decision of that head review alone (U104: a foreman fid repeats in a later head cycle, a new finding there); a ruling on
+  the other of a spec pair the decision's `links` join counts (`pair_ruled`)."""
+  point1 = [d for d in foreman["decisions"] if d["point"] == 1 and (rid is None or source_review(d)[0] == rid) and d["id"] != but]
+  return any(pair_ruled(d, [r["ruling"].partition(" — ")[0].strip().split(" ")[0] for r in foreman["rulings"]
+                            if r.get("decision") == d["id"]], fid) for d in point1)

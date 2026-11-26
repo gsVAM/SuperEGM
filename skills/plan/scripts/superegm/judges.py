@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the judges subcommand (spec section 13.1) and `judges question`, the
-# leavemealone-mode question renderer of section 13.2 (U11); the cap question names a spec review's scope (U19); the default members read from `DEFAULT_CONFIG` (U28); a `launch <n>` or `closed <n>` question renders its pending decision's options, a stall's heading its facts (U31); its own `judges` config key, moved from `__init__` (U32); the panel's instructions section rendered once at open by its parent card's skill, placed last in each brief and copied to each member's record (U38); `respec`, the owner's alone, left out of the judges' question with every other option keeping its letter, its leavemealone wait read off the options (U84); the Astra member's brief embeds each evidence file's contents, re-checked against its recorded sha256, and an unconverged panel's point 1 question gains the verdict line (U88).
+# leavemealone-mode question renderer of section 13.2 (U11); the cap question names a spec review's scope (U19); the default members read from `DEFAULT_CONFIG` (U28); a `launch <n>` or `closed <n>` question renders its pending decision's options, a stall's heading its facts (U31); its own `judges` config key, moved from `__init__` (U32); the panel's instructions section rendered once at open by its parent card's skill, placed last in each brief and copied to each member's record (U38); `respec`, the owner's alone, left out of the judges' question with every other option keeping its letter, its leavemealone wait read off the options (U84); the Astra member's brief embeds each evidence file's contents, re-checked against its recorded sha256, and an unconverged panel's point 1 question gains the verdict line (U88); a `deviation (spec)` finding, and a contest copy whose chain reaches one, left out of `judges question --round`: the owner's alone (U104, 1.3 design section 3.8).
 
 """superegm judges open|record|diff|verdict|question: the judge panel over a question file, and the
 question file rendered from the record at a decision point."""
@@ -605,7 +605,10 @@ def options_text(options: list) -> str:
 
 
 def round_questions(st, rid: str, n: int, reasons: list) -> str:
+  """The round's contests (and `--reason` fids) as `## Q<n>` questions; a `deviation (spec)` finding, or a contest copy
+  whose chain reaches one, is the owner's alone and never asked (U104)."""
   from superegm import review as reviews
+  from superegm.decision import SPEC_CLAIM
   rnd = reviews.load_round(st, rid, n)
   if rnd is None:
     raise core.HandoffError(f"question: {rid} has no round {n}")
@@ -619,15 +622,17 @@ def round_questions(st, rid: str, n: int, reasons: list) -> str:
   asked += [(entry["fid"], entry["reason"]) for entry in rnd.get("builder_contested") or []]
   head = (reviews.load_review(st, rid) or {}).get("kind") == "head"
   lines = []
-  for k, (fid, text) in enumerate(asked, start=1):
+  for fid, text in asked:
     if fid not in findings:
       raise core.HandoffError(f"question: {fid} is not in round {n}")
     finding = findings[fid]
+    if reviews.delta_claim(st, rid, finding["claim"]).startswith(SPEC_CLAIM):  # the owner's alone, in either mode (U104)
+      continue
     if finding["location"] == "ci" or finding["claim"].startswith("CI not green"):  # section 8: settled by no one
       raise core.HandoffError(f"question: {fid} is the CI finding")
     if finding["severity"] == "low":
       raise core.HandoffError(f"question: {fid} is low")
-    lines.append(f"## Q{k} {fid} ({finding['severity']}, {finding['location']}): {finding['claim']}\n"
+    lines.append(f"## Q{len(lines) + 1} {fid} ({finding['severity']}, {finding['location']}): {finding['claim']}\n"
                  + options_text(["finding upheld", f"finding overruled — {text}"]
                                 + ([f"redesign — {finding['claim']}"] if head else [])))
   if not lines:
