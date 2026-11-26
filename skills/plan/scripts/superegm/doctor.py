@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24); the informational `plugins` and `mcp` lines and the profile line's plugin refusals (U27); the informational `model:` role table (U28); the informational `stall:` line (U31); the modules' DOCTOR_CHECKS lines after its own (U32); the three `model: builder <tier>` lines (U33); `chain` in INFORMATIONAL (U54); `--probe`, one headless builder session on the launch's own flags (U60); the informational `reviewers:` line after `mcp:` (U76); the `driver:` findings of a credential the env file lacks and an enabled plugin's `SubagentStart` hook (U71); the probe's `git push` filter dropped, no bin giving no push entry, and the informational `managed:` line after `plugins:` (U108, 1.3 design section 3.7).
+# Added by SuperEGM (gsVAM), 2026: the doctor subcommand (spec section 11); the App lines and the launched environment (U15); the informational `astra:` line (U17); the informational `merge:` line (U19); the informational `python3.12`, `hooks` and `core.hooksPath` lines (U25); the five informational driver lines (U24); the informational `plugins` and `mcp` lines and the profile line's plugin refusals (U27); the informational `model:` role table (U28); the informational `stall:` line (U31); the modules' DOCTOR_CHECKS lines after its own (U32); the three `model: builder <tier>` lines (U33); `chain` in INFORMATIONAL (U54); `--probe`, one headless builder session on the launch's own flags (U60); the informational `reviewers:` line after `mcp:` (U76); the `driver:` findings of a credential the env file lacks and an enabled plugin's `SubagentStart` hook (U71); the probe's `git push` filter dropped, no bin giving no push entry, and the informational `managed:` line after `plugins:` (U108, 1.3 design section 3.7); no `--allow` hint for a command runner, the runner reason instead (U112, 1.3 design section 3.10).
 
 """superegm doctor: one line per wave prerequisite, `ok` or the refusal `launch` or `launch-builder`
 would give; read-only, no run card."""
@@ -137,7 +137,9 @@ def probe_lines(stdout: str, profile: str) -> list[tuple[str, bool]]:
         if tool_name == "Bash" and isinstance(tool_input.get("command"), str):
           command = "\\n".join(tool_input["command"].strip().splitlines())
           prefixes = list(dict.fromkeys(allow_prefixes(tool_input["command"])))
-          hint = "; ".join(filter(None, [" ".join(f"--allow {shlex.quote(p)}" for p in prefixes if p),
+          runners = [f"{p[1]}: runs commands or pushes, no --allow" for p in prefixes if isinstance(p, tuple)]
+          prefixes = [p for p in prefixes if not isinstance(p, tuple)]
+          hint = "; ".join(filter(None, [" ".join(f"--allow {shlex.quote(p)}" for p in prefixes if p), *runners,
                                          PUSH_HINT if None in prefixes else "", NARROW_HINT if "" in prefixes else ""]))
           lines.append((f"denied Bash {command} ({hint})", False))
         else:
@@ -147,6 +149,8 @@ def probe_lines(stdout: str, profile: str) -> list[tuple[str, bool]]:
 
 PUSH_HINT = "git push: a launch admits only its own branch, no --allow"
 NARROW_HINT = "no --allow: a hint names only a plain `git <subcommand>` or `gh <group> <command>`"
+RUNNER_GIT = ("subtree", "rebase", "submodule", "bisect")  # a hint would admit --exec, foreach, run or a push to any ref
+RUNNER_GH = ("extension", "ext", "extensions")
 PLAIN_NAME = re.compile(r"[A-Za-z0-9_./+-]+")
 PLAIN_WORD = re.compile(r"[a-z][a-z0-9-]*")
 
@@ -157,15 +161,21 @@ def allow_prefixes(command: str) -> list:
   `gh <group> <command>` (gh by bare name or path; the launch rewrites a bare gh rule to its own gh) when both words
   are plain and the group is not `api`, whose next word is an endpoint, not a command. A `git push`, or a git call
   with an option before its subcommand and the word `push` anywhere, gives None: no prefix narrower than the push
-  itself keeps the launch's own-branch limit. Every other segment gives "", no --allow: so no interpreter, runner or
-  other first word is offered a rule that admits arbitrary calls."""
+  itself keeps the launch's own-branch limit. A command runner (spec 1.3 section 3.10, U112: `git subtree`, `git rebase`,
+  `git submodule`, `git bisect`, `gh alias set`, `gh extension`, `gh ext`, `gh extensions`, with the subcommand right
+  after git or gh, even behind a quote shlex rejects) gives `("runner", <name>)`, never a prefix, since any prefix
+  would admit `--exec`, `foreach`, `run` or a push to any ref. Every other segment gives "", no --allow: so no
+  interpreter, runner or other first word is offered a rule that admits arbitrary calls."""
   prefixes = []
   for text in segments_of(command):
     try:
       words = shlex.split(text)
     except ValueError:
-      prefixes.append("")
-      continue
+      # a quote shlex rejects (bash's $'..'): the subcommand right after git or gh is still read, by whitespace
+      words = text.split()
+      if not runner_of(words):
+        prefixes.append("")
+        continue
     if not words:
       continue
     name = os.path.basename(words[0])
@@ -175,6 +185,8 @@ def allow_prefixes(command: str) -> list:
     plain = [bool(PLAIN_WORD.fullmatch(w)) for w in words[1:3]]
     if words[0] == "git" and (words[1:2] == ["push"] or words[1:2] and words[1].startswith("-") and "push" in words):
       prefixes.append(None)
+    elif runner_of(words):
+      prefixes.append(("runner", runner_of(words)))
     elif words[0] == "git" and plain[:1] == [True]:
       prefixes.append(f"git {words[1]}")
     elif name == "gh" and plain == [True, True] and words[1] != "api":
@@ -182,6 +194,18 @@ def allow_prefixes(command: str) -> list:
     else:
       prefixes.append("")
   return prefixes
+
+
+def runner_of(words: list) -> str:
+  """The command runner (U112) the words of a segment call with its subcommand right after git or gh, or ""."""
+  name = os.path.basename(words[0]) if words else ""
+  if words[:1] == ["git"] and words[1:2] and words[1] in RUNNER_GIT:
+    return f"git {words[1]}"
+  if name == "gh" and words[1:3] == ["alias", "set"]:
+    return "gh alias set"
+  if name == "gh" and words[1:2] and words[1] in RUNNER_GH:
+    return f"gh {words[1]}"
+  return ""
 
 
 def segments_of(command: str) -> list:
