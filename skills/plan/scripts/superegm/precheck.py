@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the builder's precheck of spec section 6.3 (U67).
+# Added by SuperEGM (gsVAM), 2026: the builder's precheck of spec section 6.3 (U67); the rulings' times passed to `worktree_checks` as `collect` passes them, so a test-delta settlement binds the same entry (U102, 1.3 design section 3.5).
 
 """superegm precheck: the foreman's checks that need only the worktree, run by the builder in its own worktree
 before every push: each DoD item's fenced output and `Run` command, the test delta, the scope check and the
@@ -81,7 +81,8 @@ def run(args):
                     "+refs/remotes/origin/*:refs/remotes/origin/*"], tree)
       core.run_git(["checkout", "--quiet", "--detach", head], tree)
       found, _ = collect.worktree_checks(tree, merge_base, head, body, scope, pr_body, rulings, prior["links"], prior,
-                                         deadline=deadline, out_dir=out_dir, config=handoff.config)  # `collect`'s own
+                                         deadline=deadline, out_dir=out_dir, config=handoff.config,  # `collect`'s own
+                                         times=collect.ruling_times(comments, collect.recorded_times(data)))  # its ruling times too
   except BaseException:
     shutil.rmtree(out_dir, ignore_errors=True)
     raise
