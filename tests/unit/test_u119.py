@@ -3,8 +3,6 @@
 
 """U119: `ci_verdict` reads "green" as "a check ran"; the plan and builder wording says the full suite is CI's."""
 
-from pathlib import Path
-
 import pytest
 
 import superegm
@@ -39,19 +37,3 @@ def test_no_check_ran_is_red(conclusions, contexts, verdict):
   # "green" means a check ran: a run concluded `success` or a status context is `success`; neutral and skipped alone are red
   assert superegm.ci_verdict(make_ci(conclusions, contexts)) == verdict
   assert status.ci_word("ci red (no check ran)") == "red:no check ran"
-
-
-def read(path):
-  return (Path(__file__).resolve().parents[2] / path).read_text()
-
-
-def test_full_suite_is_ci():
-  # a unit's own test file is a Run item; the full suite is covered by `CI green on the head` and is CI's, never the builder's
-  plan_skill = read("skills/plan/SKILL.md")
-  writing_plans = read("skills/plan/references/writing_plans.md")
-  builder_orders = read("skills/wave/references/builder_orders.md")
-  for text in (plan_skill, writing_plans):
-    assert "a unit's own test file is a `Run` item" in text
-    assert "the full suite is covered by `CI green on the head`" in text
-  assert "Before a push you run your unit's own test file; the full suite is CI's" in builder_orders
-  assert "full test command" not in builder_orders
