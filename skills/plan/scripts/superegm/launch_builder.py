@@ -19,8 +19,8 @@ import superegm as core
 from superegm import body, instructions, orient, scan
 from superegm.body import consumes
 from superegm.builder_token import key_path, tool
-from superegm.decision import (consumed_comments, deleted_rulings, overridden_comments, parse_form, proceed_text, record_text,
-                               recorded_rulings)
+from superegm.decision import (consumed_comments, deleted_rulings, edited_after_record, overridden_comments, parse_form,
+                               proceed_text, record_text, recorded_rulings)
 from superegm.launch import authorizing, base_problems, builder_email, builder_login, load_launches, terminal
 from superegm.review_plan import SPEC_LINE_RE
 from superegm.status import STATUS_RE
@@ -904,7 +904,17 @@ def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr,
            else "the builder" if allowed == {builder} else "an owner")
     ignored.append(f"{unit} {what} ignored: {login} is not {who}")
 
+  def edited(c):  # a comment with no `updated_at` reads as unedited
+    return c.get("updated_at") is not None and c.get("updated_at") != c.get("created_at")
+
   def keep(c):
+    # a consumed comment edited before its record is shown as its record, never its live body: checked before
+    # `overridden`, whose `(recorded on … as: …)` value keeps that body (U108 review round 2)
+    if int(c["id"]) in consumed and edited(c):
+      entry = record_entry(foreman or {}, f"comment {c['id']}")
+      if entry is not None and not edited_after_record(c, entry):
+        records[c["id"]] = recorded_text(foreman or {}, f"comment {c['id']}")
+        return True
     if overridden.get(c["id"]) is not None:  # the record stands in for its comment's edit
       return True
     match = PROMPT_COMMENT_RE.match(c["body"])
@@ -918,18 +928,15 @@ def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr,
       leave_out(f"comment {c['id']} {match.group(0)}", login, allowed)
       return False
     # an edited comment never reaches the prompt (1.3 design section 3.7), save one the record consumed, which its record
-    # answers: edited before its record too (`overridden_comments` reads only a later edit), it is shown as its record,
-    # never its edited body; a comment with no `updated_at` reads as unedited
-    if c.get("updated_at") is not None and c.get("updated_at") != c.get("created_at"):
+    # answers (above, or `overridden` after its record)
+    if edited(c):
       if int(c["id"]) not in consumed:
         ignored.append(f"{unit} comment {c['id']} {match.group(0)} ignored: edited")
-        return False
-      records[c["id"]] = recorded_text(foreman or {}, f"comment {c['id']}")
-      return records[c["id"]] is not None
+      return False
     return form != "Ruling" or parse_form(c["body"]) is not None
   records = {}  # a consumed comment edited before its record: its record's text, by id
   # an edited recorded ruling is shown as its record (spec section 13.2: a later comment never changes it)
-  kept = [c | {"body": overridden.get(c["id"]) or records.get(c["id"])} if overridden.get(c["id"]) or records.get(c["id"]) else c
+  kept = [c | {"body": records.get(c["id"]) or overridden.get(c["id"])} if records.get(c["id"]) or overridden.get(c["id"]) else c
           for c in comments if keep(c)]
   for gone in deleted_rulings(comments, foreman or {}):  # in its place among the comments, by id
     kept.insert(next((i for i, c in enumerate(kept) if int(c["id"]) > gone["id"]), len(kept)), gone)
@@ -965,13 +972,19 @@ def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr,
 EDITED_BEFORE = "the comment was edited before its record"
 
 
+def record_entry(foreman: dict, posted: str) -> dict | None:
+  """The record that consumed a comment (`posted` `comment <id>`): its `rulings[]` entry, else its `proceeds[]` entry, else
+  None (U108)."""
+  return next((r for key in ("rulings", "proceeds") for r in foreman.get(key) or [] if r.get("posted") == posted), None)
+
+
 def recorded_text(foreman: dict, posted: str) -> str | None:
   """The record of a consumed comment (`posted` `comment <id>`) edited before its record, marked `EDITED_BEFORE`: its
   `rulings[]` entry through `record_text`, else its `proceeds[]` entry through `proceed_text`; None with neither (U108)."""
   entry = next((r for r in foreman.get("rulings") or [] if r.get("posted") == posted), None)
   if entry is not None:
     return record_text(foreman, entry, EDITED_BEFORE)
-  proceed = next((r for r in foreman.get("proceeds") or [] if r.get("posted") == posted), None)
+  proceed = record_entry(foreman, posted)
   return proceed_text(proceed, EDITED_BEFORE) if proceed is not None else None
 
 
