@@ -79,6 +79,18 @@ def test_location_stops_at_whitespace_before_a_slash_path(location, answer):
   assert review.out_of_scope(SCOPE, review.sections(SPEC_TEXT), location, "docs/specs/design.md") == answer
 
 
+@pytest.mark.parametrize("location", [
+  "domain model.md line 12",                      # a nonbreaking space ends the name as a space does
+  "domain model.md line 12 vs docs/specs/design.md",
+  "docs/reference/domain model.md line 500",
+  "domain model.md\nline 12",
+])
+def test_a_listed_document_opening_a_location_ends_at_any_whitespace(location):
+  # astra-4-2: the listed-name boundary is whitespace as FILE_TOKEN_RE reads it, not an ASCII space or tab alone
+  from superegm import review
+  assert review.out_of_scope(SCOPE, review.sections(SPEC_TEXT), location, "docs/specs/design.md") is None
+
+
 @pytest.mark.parametrize("spec_name, location, answer", [
   ("docs/specs/model.md", "domain model.md:500", None),                 # the listed `domain model.md` opens the location; `model.md` is its tail, not the spec
   ("docs/specs/model.md", "domain model.md line 12 vs model.md", None),
