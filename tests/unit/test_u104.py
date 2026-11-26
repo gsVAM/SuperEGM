@@ -295,3 +295,45 @@ def test_decision_points_name_the_spec_finding_owner_only():
   assert all(word in spec_row for word in ("finding upheld", "finding overruled", "<fid> respec", "contested or not",
                                            "one decision for the round"))
   assert "judges question --review <head-review-id> --round <n>" in spec_row and "Decision point 1" in spec_row
+
+
+# ---------------------------------------------------------------- S9: a ruling on the spec finding closes its contest copy
+
+
+COPY = ("foreman-2-2", "contested foreman-2-1: the code is right")
+ORDINARY = ("foreman-2-3", "contested foreman-1-1: the test came first")
+
+
+def line_of(f) -> str:
+  return f"{f['id']} | {f['severity']} | {f['location']} | regression: no | {f['claim']}\n"
+
+
+def spec_round_world(world, word="owner: foreman-2-1"):
+  """U01's round 2 posted `word`, holding foreman-2-1 (SPEC), its contest copy foreman-2-2 and foreman-2-3, a contest of round
+  1's ordinary high, both in `builder_contested`."""
+  w = unit_world(world, [("foreman-2-1", SPEC), COPY, ORDINARY], ["foreman-2-2", "foreman-2-3"], posted=True)
+  data = foreman_of(w.s, "U01")
+  data["rounds"][-1]["outcome"] = word
+  core.atomic_write(w.s.path("foreman", "U01"), data)
+  return w
+
+
+@pytest.mark.parametrize("named, rulings, open_after", [
+    (["foreman-2-1", "foreman-2-2"], ["foreman-2-1 respec — the spec is wrong"], []),
+    (["foreman-2-1", "foreman-2-2"], ["foreman-2-1 finding upheld"], []),
+    (["foreman-2-1", "foreman-2-2", "foreman-2-3"], ["foreman-2-1 respec — the spec is wrong"], ["q1"]),
+    (["foreman-2-1", "foreman-2-2", "foreman-2-3"], ["foreman-2-1 respec — the spec is wrong", "foreman-2-3 finding upheld"], []),
+])
+def test_a_ruling_on_the_spec_finding_closes_its_contest_copy(world, named, rulings, open_after):
+  # round 2 holds foreman-2-1 (SPEC) and, in `builder_contested`, foreman-2-2 `contested foreman-2-1: the code is right` and
+  # foreman-2-3, a contest of an ordinary high; q1, the round's point-1 decision on the word `owner: foreman-2-1`, its question
+  # naming the fids `named` (a `<fid> |` line each), is ruled `rulings` with `superegm decision rule`;
+  # `open_ids` the ids of `review.open_decisions` for the unit, what a respec's eligibility reads
+  w = spec_round_world(world)
+  found = {f["id"]: f for f in round_json(w)["reviewers"]["foreman"]["findings"]}
+  open_q(world, w, "".join(line_of(found[fid]) for fid in named), n=2)
+  for ruling in rulings:
+    code, out = rule(world, w, ruling)
+    assert code == 0, out
+  open_ids = [d["id"] for d in review.open_decisions(w.s, "U01")]
+  assert open_ids == open_after
