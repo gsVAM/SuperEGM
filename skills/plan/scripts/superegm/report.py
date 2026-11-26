@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the report subcommand (spec section 11): the per-batch wave report, the idle rules
-# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31); its own `ci_wait_minutes` config key, moved from `__init__` (U32); the board's tier column (U33); `waiting proceed` and a proceed closing a point-1 decision (U92); the `conflict` view and its board action (U62); a unit waiting on an open respec is not active, its board row and merge round included (U86); a point-1 decision carrying an unconverged panel's verdict line stays pending on each finding no ruling names, and the report lists each judges ruling with its panel (U88); a point-1 decision offering `<fid> respec` pending until each fid of its `<fid> respec` and `<fid> allowed` options, and each its split panel asks, is ruled, a contest copy ruled through the fid its chain reaches; read only on a decision recording its `owner:` word, pending on each fid its question names, a ruling on either of a spec pair ruling both, its recorded `links` read beside the question's, a link counted only on a chain that reaches a spec fid, a 1.2.1 decision read as it was (U104's owner-only spec findings, 1.3 design section 3.8).
+# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31); its own `ci_wait_minutes` config key, moved from `__init__` (U32); the board's tier column (U33); `waiting proceed` and a proceed closing a point-1 decision (U92); the `conflict` view and its board action (U62); a unit waiting on an open respec is not active, its board row and merge round included (U86); a point-1 decision carrying an unconverged panel's verdict line stays pending on each finding no ruling names, and the report lists each judges ruling with its panel (U88); a point-1 decision offering `<fid> respec` pending until each fid of its `<fid> respec` and `<fid> allowed` options, and each its split panel asks, is ruled, a contest copy ruled through the fid its chain reaches; read only on a decision recording its `owner:` word, pending on each fid its question names, a ruling on either of a spec pair ruling both, its recorded `links` read beside the question's, a link counted only on a chain that reaches a spec fid, a 1.2.1 decision read as it was (U104's owner-only spec findings, 1.3 design section 3.8); a `waiting respec` unit takes no merge round and the loop's end names each open respec it waits on (U106's wave end, 1.3 design section 3.8); that verdict line matched by the decision's own verdict file, the path its `source` fixes (U107, 1.3 design section 3.9).
 
 """superegm report: rewrite `wave_<n>_report.md` from the store, the plan and the spec and print its path, the
 board and the idle, pending and loop lines. It opens the card's handoff as `status` does (`core.locate`,
@@ -50,9 +50,12 @@ def run(args):
   ready = [uid for uid in (state.get("status") or {}).get("ready") or [] if uid not in launched and uid not in named_idle]
   # U62 (spec section 6.1): a clean conflicting unit `launch`'s `again` set takes is pending work, not an end
   # an idle unit, named or on its CI wait, is passed to `launch --idle`, which marks none of them
-  merge_rounds = [uid for uid in launched if uid not in named_idle and states[uid] != "idle" and conflict_again(
+  # U106: a `waiting respec` unit takes no merge round either: its raised respec is open, the owner's correction comes first
+  merge_rounds = [uid for uid in launched if uid not in named_idle and states[uid] not in ("idle", "waiting respec") and conflict_again(
       {**views[uid], "conflict": conflicting(state, uid)}, foremen[uid], entries[uid], handoff.graph.parallel)]
   ended, why = loop_ended(states, ready, free, merge_rounds)
+  if ended:  # U106: the end names each open respec its `waiting respec` units raised (the 1.2.1 reason keeps its words)
+    why += "".join(f"; waiting: respec {rid}" for rid in waiting_respecs(st, states))
   n = wave_number(st, args.runcard, card)
   path = st.path("wave_report", n)
   lines = [f"# Wave {n} report (handoff {st.handoff_id})", f"Run card: {args.runcard}", f"Loop: {'ended' if ended else 'continuing'} ({why})", "",
@@ -358,14 +361,25 @@ def unit_state(uid: str, view: dict, foreman: dict, launches: list, card: dict, 
 def pending_decisions(foreman: dict) -> list:
   """`decisions[]` minus `rulings[]` (spec section 7); a point-1 decision whose options end ` allowed` (an
   `owner: <ids>` decision, U25) stays pending until every option's fid has a ruling or a `redesign` or a `proceed` rules it whole;
-  so does a point-1 decision whose question holds an unconverged panel's `(judges/<panel>/verdict.json)` line (U88), for each
-  finding its question asks, until every one has a ruling or a `redesign` or a `proceed` rules it whole; a spec finding's
+  so does a point-1 decision whose question holds an unconverged panel's verdict line (U88), for each finding its
+  question asks, until every one has a ruling or a `redesign` or a `proceed` rules it whole. That line is matched by
+  the decision's own verdict file, never by searching the question's text (1.3 design section 3.9): a line opening
+  `The judges did not converge (judges/<rid>-r<n>-<6 hex>/verdict.json)`, `<rid>` and `<n>` read from the
+  decision's `source` (`review <rid> round <n>`), with no store read; a builder's text quoting another path, or
+  this one inside a finding line, makes no decision pending. A spec finding's
   decision (U104: opened on an `owner:` word, which it records as `word`, and offering `<fid> respec`) stays pending until each
   fid of its `<fid> respec` and `<fid> allowed` options and each fid its question names has a ruling, a spec pair (a contest
   copy, `contested <fid>: …` in its question line, and the fid its chain reaches) ruled by a ruling on either, or a `redesign`
   or a `proceed` rules it whole. A 1.2.1 decision (no `word`) reads as it did."""
   rulings = foreman.get("rulings") or []
   ruled = {r.get("decision") for r in rulings}
+
+  def own_verdict(d) -> bool:
+    words = str(d.get("source") or "").split()
+    if not (len(words) == 4 and words[0] == "review" and words[2] == "round" and words[3].isdigit()):
+      return False
+    line = rf"^The judges did not converge \(judges/{re.escape(words[1])}-r{words[3]}-[0-9a-f]{{6}}/verdict\.json\)"
+    return re.search(line, d.get("question") or "", re.M) is not None
 
   def pending(d):
     options = d.get("options") or []
@@ -398,7 +412,7 @@ def pending_decisions(foreman: dict) -> list:
       if fids & {"redesign", "proceed"}:  # spec section 4.2: a proceed closes the whole decision, as `redesign` does
         return False
       return any(o.split(" ")[0] not in fids for o in options)
-    if d.get("point") == 1 and "/verdict.json)" in (d.get("question") or ""):  # an unconverged panel's decision (U88): pending on each finding no ruling names
+    if d.get("point") == 1 and own_verdict(d):  # an unconverged panel's decision (U88): pending on each finding no ruling names
       fids = {str(r.get("ruling") or "").split(" ")[0] for r in rulings if r.get("decision") == d["id"]}
       if fids & {"redesign", "proceed"}:
         return False
@@ -456,6 +470,19 @@ def respec_waiting(st, active: list) -> list:
   try:
     opened = {r.get("unit") for r in respec.open(st, st.handoff_id)}
     return [uid for uid in active if uid in opened and not respec.live_launch(st, uid)]
+  except (core.HandoffError, ValueError, OSError):
+    return []
+
+
+def waiting_respecs(st, states: dict) -> list:
+  """U106: the ids, in id order, of the open respecs (`respec.open`) the `waiting respec` units raised; none when the
+  read fails (`respec_waiting` made those units wait on a read that succeeded)."""
+  waiting = {uid for uid, word in states.items() if word == "waiting respec"}
+  if not waiting or not st.handoff_id:
+    return []
+  from superegm import respec  # at call time: `respec` reads `launch`'s records
+  try:
+    return [r["id"] for r in respec.open(st, st.handoff_id) if r.get("unit") in waiting]
   except (core.HandoffError, ValueError, OSError):
     return []
 

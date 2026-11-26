@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U72
+# Modified by SuperEGM (gsVAM), 2026: a head proceed names its head, the inbox's proceed form with it, and no #250 panel line in the seeds (U107, 1.3 design section 3.9).
 
 """U72 (spec 1.2.1 section 7.3): the inbox is a typed external skill that asks the owner in words and does the
 rest; every ruling item's action points to the inbox, with its `**Ruling:**` forms and the URL it is posted on; a
@@ -16,7 +17,7 @@ from conftest import REPO, ROOT
 from superegm import atomic_write, phase
 from superegm.decision import check_ruling, parse_form
 from superegm.inbox import inbox_items, registry_items
-from test_inbox import D, F, HEAD, PANEL, POSTED, REVIEW, ROUND, U, seed
+from test_inbox import D, F, HEAD, POSTED, REVIEW, ROUND, U, seed
 from test_wave import open_wave_card, wave_store
 from test_u57 import head_world, launches, proceed
 from test_u43 import registry  # noqa: F401 -- autouse: HOME under tmp_path
@@ -27,7 +28,7 @@ SKILL = ROOT / "skills/inbox/SKILL.md"
 
 SEEDS = {  # one unit's state per kind, as test_inbox's table seeds it
   "decision": U(decisions=D(3, "comment 77")),
-  "contested": U(decisions=D(1, "review head-U01-c1 round 1", question=PANEL), rounds=POSTED(),
+  "contested": U(decisions=D(1, "review head-U01-c1 round 1"), rounds=POSTED(),
                  reviews=HEAD(1, F("high"), builder_contested=[{"fid": "foreman-1-1", "reason": "r"}])),
   "test-delta": U(rounds=POSTED(), reviews=HEAD(1, [{**F("high")[0], "claim": "test-delta: tests/test_x.py:3 removed"}])),
   "owner": U(rounds=POSTED(1, "owner: foreman-1-1")),
@@ -42,7 +43,7 @@ def item_of(world, kind):
   """The one item of `kind` the inbox lists for the seeded unit."""
   if kind == "proceed again":  # test_u92: a proceed, then a later launch on it: waiting proceed
     s, card, rid = head_world(world)
-    assert proceed(world, rid, card, "--owner", "--reason", "accepted risk")[0] == 0
+    assert proceed(world, rid, card, "--owner", "--head", "a" * 7, "--reason", "accepted risk")[0] == 0
     launches(s, "U01", 1, 2)
     want = "proceed"
   elif kind == "kill_failed":
@@ -253,7 +254,7 @@ def test_an_undo_is_offered_while_no_merge_is(world):
 @pytest.mark.parametrize("phrase", [
   "gh api user --jq .login", "`config.owners`", "recommended", "one-line reason",
   "leavemealone", "did not converge", "back once", "gh issue comment <n> -R <repo> --body-file",
-  "proceed again", "**Ruling:** proceed — <reason>", "superegm next answer --handoff",
+  "proceed again", "**Ruling:** proceed <sha7> — <reason>", "superegm next answer --handoff",
   "handoff_dryrun.md", "superegm approve-spec --void --spec", "answer in your",
   "superegm driver kick --root", "No skill asks the owner to post a comment or to paste a command"])
 def test_the_inbox_skill_names_each_step(phrase):

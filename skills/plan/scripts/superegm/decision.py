@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3/5
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
-# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63); `respec`, a `spec` deviation's option, the owner's alone, a spent `relaunch` dropped beside it, and a letter that resolves to it binding nothing unrecorded (spec §7.6, U84); the judges' ruling journalled and posted with `contest` on a normal-mode card (spec §7.8, U88); U103's rulings (1.3 design sections 3.6 and 3.7): a point-1 ruling with no fid refused as `missing <fid>`, a point-1 overrule or allowance settling the finding it rules through `review.apply_settle` after `review settle`'s ruler checks, a failed GitHub read one `gh:` line, a posted ruling comment edited before its first record refused as `ruling comment edited: post a new one`; U104's owner-only spec findings (1.3 design section 3.8): an `owner: <ids>` decision offering a spec fid `<fid> respec` beside `finding upheld` and `finding overruled`, a `## Q<n>` question's spec finding read, a mixed decision's `<fid> allowed` ruled as an `owner: <ids>` decision's; the `<fid> respec — <reason>` form, read by `verify_posted` as a point-1 ruling on that fid, and a doubled `<fid> <fid> respec` refused as none of the options; the open respec file keyed by unit, head cycle (`cycle`) and fid; a spec fid's overrule settled `declined`, as on an `owner: <ids>` decision; a spec pair settled whole by an owner's overrule of either fid, a spec finding's contest copy refused to the judges, a spec decision recording its `word` and the contest `links` of its findings' chains that reach a spec finding, a ruling on either of a spec pair ruling both (`pair_ruled`), a fid's earlier ruling read within its own head review, and a file allowance ruling a spec decision's test-delta contest copy too.
+# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63); `respec`, a `spec` deviation's option, the owner's alone, a spent `relaunch` dropped beside it, and a letter that resolves to it binding nothing unrecorded (spec §7.6, U84); the judges' ruling journalled and posted with `contest` on a normal-mode card (spec §7.8, U88); U103's rulings (1.3 design sections 3.6 and 3.7): a point-1 ruling with no fid refused as `missing <fid>`, a point-1 overrule or allowance settling the finding it rules through `review.apply_settle` after `review settle`'s ruler checks, a failed GitHub read one `gh:` line, a posted ruling comment edited before its first record refused as `ruling comment edited: post a new one`; U104's owner-only spec findings (1.3 design section 3.8): an `owner: <ids>` decision offering a spec fid `<fid> respec` beside `finding upheld` and `finding overruled`, a `## Q<n>` question's spec finding read, a mixed decision's `<fid> allowed` ruled as an `owner: <ids>` decision's; the `<fid> respec — <reason>` form, read by `verify_posted` as a point-1 ruling on that fid, and a doubled `<fid> <fid> respec` refused as none of the options; the open respec file keyed by unit, head cycle (`cycle`) and fid; a spec fid's overrule settled `declined`, as on an `owner: <ids>` decision; a spec pair settled whole by an owner's overrule of either fid, a spec finding's contest copy refused to the judges, a spec decision recording its `word` and the contest `links` of its findings' chains that reach a spec finding, a ruling on either of a spec pair ruling both (`pair_ruled`), a fid's earlier ruling read within its own head review, and a file allowance ruling a spec decision's test-delta contest copy too; the head proceed's `<sha7>` subject, and an undo refused while a proceed's merge is offered (U107, 1.3 design section 3.9).
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
@@ -177,7 +177,9 @@ FORM_RES = (
   ("allowed-file", re.compile(rf"test-delta (?P<subject>\S+) allowed{REASON}")),
   ("redesign", re.compile(rf"redesign{REASON}")),
   ("allowed", re.compile(rf"(?P<subject>{FID}) allowed{REASON}")),
-  ("proceed", re.compile(rf"proceed{REASON}")),  # the owner's go-ahead on a head (spec section 4.2): owners alone
+  # the owner's go-ahead (spec section 4.2): owners alone; on a head its subject is the `<sha7>` the owner was shown,
+  # which `review rule` pins and refuses once the head moved, or refuses when absent (1.3 design section 3.9, U107)
+  ("proceed", re.compile(rf"proceed(?: (?P<subject>[0-9a-f]{{7,40}}))?{REASON}")),
 )
 NO_FID_RE = re.compile(r"(?:finding (?:upheld|overruled)|allowed)\b")  # a point-1 ruling opening with the verdict, no fid in front of it (U103)
 LETTER_RE = re.compile(r"\([a-z]\)")  # a rendered option's letter, the bare answer of the judges
@@ -995,7 +997,8 @@ def deferral_of(foreman: dict, fid: str):
 def refuse_undo(st, unit: str, data: dict, row: dict, args) -> None:
   """The undo's refusals (spec section 5.2), checked before anything is written, so the follow-up row stays: a
   deferral of an earlier round than the unit's latest posted one, a stopped unit (`foreman.stopped`, or the stopped
-  label on its issue), and a pull request merged or closed (its state read now)."""
+  label on its issue), the unit's authorizing outcome a proceed whose merge the inbox still offers (1.3 design section
+  3.9), and a pull request merged or closed (its state read now)."""
   posted = [e["round"] for e in data.get("rounds") or [] if e.get("phase") == "posted"]
   why = None
   if row["round"] != max(posted, default=None):
@@ -1008,11 +1011,24 @@ def refuse_undo(st, unit: str, data: dict, row: dict, args) -> None:
     pr = (record.get("pr") or {}).get("number")
     if labelled_stopped(st, record["number"]):
       why = f"{unit} is stopped (issue #{record['number']} labelled {st.config['labels']['stopped']})"
+    # the pull request's own state first: a merged or closed one is the reason, whatever the inbox would still build
     elif pr and (pr_state := core.gh_json(["pr", "view", str(pr), "-R", st.config["repo"], "--json", "state"]).get("state")) != "OPEN":
       why = f"pull request #{pr} is {pr_state.lower()}"
+    elif proceed_merge_offered(st, unit, data, state):
+      why = f"{unit}'s merge on the owner's proceed is still offered"
   if why:
     core.journal(st, f"undo refused ({args.by}, comment {args.posted}): {why}; follow-up {row['fid']} kept")
     raise Refusal(f"decision: undo refused: {why}; the follow-up row stays")
+
+
+def proceed_merge_offered(st, unit: str, data: dict, state: dict) -> bool:
+  """Whether the unit's authorizing outcome is a proceed (spec section 4.2) whose merge the inbox offers now
+  (`inbox.unit_items`' merge item, its guards included): an undo then is refused (1.3 design section 3.9)."""
+  from superegm import inbox  # at call time: `inbox` imports this module
+  from superegm.launch import authorizing
+  if not (authorizing(data) or {}).get("ruling"):
+    return False
+  return any(i["kind"] == "merge" for i in inbox.unit_items(st, st.config["repo"], state, unit, data))
 
 
 def undo(st, unit: str, data: dict, args, comment: dict, found: "Ruling", now: str) -> int:
