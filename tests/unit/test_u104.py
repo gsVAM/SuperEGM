@@ -12,7 +12,7 @@ import pytest
 
 import superegm as core
 from conftest import REPO, set_config
-from superegm import collect, decision, review
+from superegm import collect, decision, report, review
 from test_foreman import POSTED_R1, UNIT, c, open_head_review, prepared, seed
 from test_wave import fake_gh, foreman_of, question, wave_store
 
@@ -337,3 +337,37 @@ def test_a_ruling_on_the_spec_finding_closes_its_contest_copy(world, named, ruli
     assert code == 0, out
   open_ids = [d["id"] for d in review.open_decisions(w.s, "U01")]
   assert open_ids == open_after
+
+
+# ---------------------------------------------------------------- S10: pending until each fid is ruled
+
+
+def ruled_file(word, options, split, rulings) -> dict:
+  """The unit's foreman file: round 2 posted `word`, q1 its point-1 decision with `options`, ruled `rulings` in order."""
+  if split:
+    found = [finding("foreman-2-1", SPEC), finding(*COPY), finding(*ORDINARY)]
+    text = "".join(line_of(f) for f in found) + "The panel split: see (judges/p-1/verdict.json).\n"
+  else:
+    text = "".join(line_of(finding(o.split(" ")[0], SPEC if o.endswith(" respec") else "test-delta: tests/unit/test_q.py:3 removed"))
+                   for o in options if o.endswith((" respec", " allowed")))
+  return {"rounds": [{"round": 2, "phase": "posted", "outcome": word}],
+          "decisions": [{"id": "q1", "point": 1, "source": "review head-U01-c1 round 2", "question": text, "options": options}],
+          "rulings": [{"decision": "q1", "ruling": r, "by": "owner"} for r in rulings]}
+
+
+@pytest.mark.parametrize("word, options, split, first, second", [
+    ("owner: foreman-1-1, foreman-1-2", ["finding upheld", "finding overruled", "foreman-1-1 respec", "foreman-1-2 respec"],
+     False, "foreman-1-1 respec — the spec is wrong", "foreman-1-2 finding upheld"),
+    ("owner: foreman-1-2, foreman-1-1", ["finding upheld", "finding overruled", "foreman-1-2 respec", "foreman-1-1 allowed"],
+     False, "foreman-1-2 respec — the spec is wrong", "foreman-1-1 allowed — kept"),
+    ("owner: foreman-2-1", ["finding upheld", "finding overruled", "foreman-2-1 respec"],
+     True, "foreman-2-1 respec — the spec is wrong", "foreman-2-3 finding upheld"),
+])
+def test_a_spec_finding_decision_stays_pending_until_each_fid_is_ruled(word, options, split, first, second):
+  # q1, the point-1 decision on `word` with `options`; with `split`, its question names foreman-2-1 (SPEC), its contest copy
+  # foreman-2-2 `contested foreman-2-1: the code is right` and foreman-2-3, an ordinary high's contest, and holds the split
+  # panel's `(judges/p-1/verdict.json)` line; `after_first` the unit's foreman file once q1 is ruled `first`,
+  # `after_both` once it is ruled `second` too
+  after_first, after_both = ruled_file(word, options, split, [first]), ruled_file(word, options, split, [first, second])
+  assert [d["id"] for d in report.pending_decisions(after_first)] == ["q1"]
+  assert report.pending_decisions(after_both) == []
