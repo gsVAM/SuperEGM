@@ -371,3 +371,31 @@ def test_a_spec_finding_decision_stays_pending_until_each_fid_is_ruled(word, opt
   after_first, after_both = ruled_file(word, options, split, [first]), ruled_file(word, options, split, [first, second])
   assert [d["id"] for d in report.pending_decisions(after_first)] == ["q1"]
   assert report.pending_decisions(after_both) == []
+
+
+# ---------------------------------------------------------------- S11: the inbox offers its rulings
+
+
+def test_the_inbox_offers_a_spec_findings_rulings(world):
+  # U01's latest posted round (round 2) holds foreman-2-1 (SPEC) and, in `builder_contested`, its contest copy foreman-2-2
+  # `contested foreman-2-1: the code is right`; its word `owner: foreman-2-1`, q1 open; `items` and `after_items` U01's items of
+  # `superegm inbox --json` before and after q1 is ruled `foreman-2-1 finding overruled — the code is right`
+  w = unit_world(world, [("foreman-2-1", SPEC), COPY], ["foreman-2-2"], posted=True)
+  data = foreman_of(w.s, "U01")
+  data["rounds"][-1]["outcome"] = "owner: foreman-2-1"
+  core.atomic_write(w.s.path("foreman", "U01"), data)
+  core.atomic_write(w.s.path("handoffs", w.s.handoff_id), {"id": w.s.handoff_id, "spec": str(world.spec), "opened_at": "t", "closed_at": None})
+  found = {f["id"]: f for f in round_json(w)["reviewers"]["foreman"]["findings"]}
+  open_q(world, w, line_of(found["foreman-2-1"]) + line_of(found["foreman-2-2"]), n=2)
+  inbox = lambda: [i for i in map(json.loads, world.run("inbox", "--json")[1].splitlines()) if i["subject"] == "U01"]
+  items = inbox()
+  code, out = rule(world, w, "foreman-2-1 finding overruled — the code is right")
+  assert code == 0, out
+  after_items = inbox()
+  assert [i["forms"] for i in items if i["kind"] == "owner"] == [["**Ruling:** foreman-2-1 finding upheld",
+                                                                "**Ruling:** foreman-2-1 finding overruled — <reason>",
+                                                                "**Ruling:** foreman-2-1 respec — <reason>"]]
+  assert not any(i["fingerprint"].endswith("/foreman-2-2") for i in items + after_items)  # the pair is one item
+  assert not any(i["kind"] in ("owner", "contested") for i in after_items)
+  # the owner's overrule settles the spec finding `declined`, as on any `owner: <ids>` decision
+  assert {f["id"]: f["disposition"] for f in round_json(w)["reviewers"]["foreman"]["findings"]}["foreman-2-1"] == "declined"
