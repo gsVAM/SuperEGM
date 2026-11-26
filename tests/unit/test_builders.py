@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: the builders' tests (U09): launch, launch-builder, record-launch, interrupt, clean, the orders and the two skill bodies; the App path (U15); the watchdog's trap and `--exit stalled` (U31); the idempotent re-run (U32); the precheck script's two allow rules and the fourth `orders_text` argument (U67).
+# Modified by SuperEGM (gsVAM), 2026: the builders' tests (U09): launch, launch-builder, record-launch, interrupt, clean, the orders and the two skill bodies; the App path (U15); the watchdog's trap and `--exit stalled` (U31); the idempotent re-run (U32); the precheck script's two allow rules and the fourth `orders_text` argument (U67); the allow-list's push script in place of the `git push` entry, and the orders' `{{push}}` and `{{allowed}}`, the `_plugins.json` record's `managed_hooks` (U108, 1.3 design section 3.7).
 
 """The builders (spec section 11): `launch` and its preconditions, `launch-builder`'s worktree,
 prompt file and command line, `record-launch`, `interrupt`, `clean`, the builder orders and the
@@ -447,7 +447,8 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   prompt_file = s.path("launches", f"{UNIT}_r1_prompt.md")
   prompt = prompt_file.read_text(encoding="utf-8")
   precheck = s.path("launches", f"{UNIT}_r1_bin", "superegm-precheck")
-  orders = orders_text(DEFAULT_CONFIG["builder"]["allowed_tools"], "/usr/local/bin/gh", 12, str(precheck))
+  orders = orders_text(line.split("--allowedTools '")[1].split("'")[0].split(","), "/usr/local/bin/gh", 12, str(precheck),
+                       push=str(precheck.parent / "superegm-push"))  # the launch's own allow-list and push script (U108)
   assert prompt.startswith(f"# Issue #{ISSUE} — U07\n\n{world.gh.issues[ISSUE]['body']}")
   assert f"\n\n---\n\n# Builder orders\n\n{orders}" in prompt
   assert f"\n\n---\n\n# Comments on issue #{ISSUE}\n\n## owner · comment 1\n**Decision D1:** (a) five\n\n## builder-bot · comment 3\n**Deviation (other):** renamed a fixture\n\n## owner · comment 4\n**Ruling:** (3) (a) — proceed\n" in prompt
@@ -461,7 +462,7 @@ def test_launch_builder_round_1_prepares_worktree_prompt_and_command(world, monk
   mcp_file = s.path("launches", f"{UNIT}_r1_mcp.json")
   assert f" claude -p \"$(cat '{prompt_file}')\" --session-id '{launches_of(s)[-1]['session_id']}' --model '{cfg['model']}' --effort '{cfg['effort']}' --permission-mode '{cfg['permission_mode']}' --setting-sources user --mcp-config '{mcp_file}' --strict-mcp-config --allowedTools '" in line, line
   tools = line.split("--allowedTools '")[1].split("'")[0].split(",")
-  assert tools == [t.replace("Bash(gh ", "Bash(/usr/local/bin/gh ") for t in cfg["allowed_tools"]] + [f"Bash(git push origin {branch}:*)",
+  assert tools == [t.replace("Bash(gh ", "Bash(/usr/local/bin/gh ") for t in cfg["allowed_tools"]] + [f"Bash({precheck.parent}/superegm-push:*)",
       f"Bash({precheck.parent}/superegm-precheck:*)", "Bash(git reset --hard:*)"]
   wrapper, kick = line.splitlines()  # the store is registered: the wrapper ends with the kick (U71)
   assert wrapper.endswith(f"' --output-format json > '{result}'; echo $? > '{result}.exit'")
@@ -665,8 +666,9 @@ def test_launch_builder_appends_the_pr_block(world, monkeypatch, key, spawn_fake
     assert not s.path("worktrees", UNIT).exists() and not s.path("launches", f"{UNIT}_r1_prompt.md").exists()
     return
   assert code == 0, out
-  orders = orders_text(DEFAULT_CONFIG["builder"]["allowed_tools"], "/usr/local/bin/gh", 12,
-                       str(s.path("launches", f"{UNIT}_r1_bin", "superegm-precheck")))
+  orders = orders_text(launches_of(s)[-1]["command"].split("--allowedTools '")[1].split("'")[0].split(","), "/usr/local/bin/gh", 12,
+                       str(s.path("launches", f"{UNIT}_r1_bin", "superegm-precheck")),
+                       push=str(s.path("launches", f"{UNIT}_r1_bin", "superegm-push")))  # the launch's own allow-list and push script (U108)
   prompt = s.path("launches", f"{UNIT}_r1_prompt.md").read_text(encoding="utf-8")
   if key:
     assert f"\n\n---\n\n# Builder orders\n\n{orders}\n\n---\n\n# PR block\n\n<!-- coord/v1 task=7 -->\n\n\n---\n\n# " in prompt
@@ -894,7 +896,7 @@ def test_launch_builder_writes_the_mcp_file_and_the_plugins_record(world, monkey
     return
   listed = case == "listed"
   assert code == 0 and not managed.exists() and json.loads(mcp.read_text(encoding="utf-8")) == {"mcpServers": MCP if listed else {}}, out
-  assert json.loads(record.read_text(encoding="utf-8")) == {"plugins": [{"id": PONY, "version": "5.3.3", "dir": str(d), "hooks": THREE}] if listed else [], "managed": [], "mcp": ["context7"] if listed else []}
+  assert json.loads(record.read_text(encoding="utf-8")) == {"plugins": [{"id": PONY, "version": "5.3.3", "dir": str(d), "hooks": THREE}] if listed else [], "managed": [], "mcp": ["context7"] if listed else [], "managed_hooks": []}
   assert f"Your skills, named by your allow-list: {'ponytail:ponytail' if listed else 'none'}. You have no subagents" in s.path("launches", f"{UNIT}_r1_prompt.md").read_text(encoding="utf-8")
   assert skill_names(["Read", *rules, "Skill(superegm:orient)"]) == ["ponytail:ponytail", "superegm:orient"]
 
@@ -922,12 +924,13 @@ import superegm  # the harness reloads the package per test: read HandoffError a
 from superegm.launch_builder import allowed_tools
 
 PRECHECK = ["Bash(/bin/U07_r1_bin/superegm-precheck:*)", "Bash(git reset --hard:*)"]  # the two rules a given bin adds (U67)
+PUSH = "Bash(/bin/U07_r1_bin/superegm-push:*)"  # the one push entry, a given bin's (U108)
 
 
 @pytest.mark.parametrize("configured, expect", [
-  (["Read", "Edit", "Bash(git add:*)"], ["Read", "Edit", "Bash(git add:*)", "Bash(git push origin superegm/h/U07:*)", "Bash(pytest:*)", *PRECHECK]),
-  (["Bash(pytest:*)", "Read"], ["Bash(pytest:*)", "Read", "Bash(git push origin superegm/h/U07:*)", *PRECHECK]),
-  (["Read", "Agent", "Workflow"], ["Read", "Agent", "Workflow", "Bash(git push origin superegm/h/U07:*)", "Bash(pytest:*)", *PRECHECK]),
+  (["Read", "Edit", "Bash(git add:*)"], ["Read", "Edit", "Bash(git add:*)", PUSH, "Bash(pytest:*)", *PRECHECK]),
+  (["Bash(pytest:*)", "Read"], ["Bash(pytest:*)", "Read", PUSH, *PRECHECK]),
+  (["Read", "Agent", "Workflow"], ["Read", "Agent", "Workflow", PUSH, "Bash(pytest:*)", *PRECHECK]),
   (["Read", "Skill"], "Skill"),
   (["Read", "Bash"], "Bash"),
   (["Read", "Bash(*)"], "Bash(*)"),
@@ -939,7 +942,7 @@ def test_allowed_tools_composition(configured, expect):
       allowed_tools(configured, "superegm/h/U07", body, "/usr/local/bin/gh")
   else:
     assert allowed_tools(configured, "superegm/h/U07", body, "/usr/local/bin/gh", bin=Path("/bin/U07_r1_bin")) == expect
-    assert allowed_tools(configured, "superegm/h/U07", body, "/usr/local/bin/gh") == expect[:-2]  # no bin, no rules
+    assert allowed_tools(configured, "superegm/h/U07", body, "/usr/local/bin/gh") == [t for t in expect[:-2] if t != PUSH]  # no bin, no rules
 
 
 def test_interrupt_records_a_launch_or_marks_a_prepared_round(world):
@@ -1006,7 +1009,7 @@ def test_builder_orders_carry_the_discipline_and_the_dod_results_form():
   text = (ROOT / "skills/wave/references/builder_orders.md").read_text(encoding="utf-8")
   assert text.startswith("<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the implementer prompt, receiving-code-review and test-driven-development absorbed into the builder orders. -->\n")
   for form in ("follow the Steps in order", "test first", "one `test(S<n>)` commit then one `feat(S<n>)` commit per Step",
-               "paste each item's output in the PR body under its item number", "`git push origin <branch>`", "never to any other branch",
+               "paste each item's output in the PR body under its item number", "Push with `{{push}}`", "never to any other branch",
                "**draft** pull request", "`Closes #<issue>`", "never retarget or close it", "**Deviation (<kind>):**", "interface | dod | test | other",
                "verify each review finding against the code before changing anything", "**Reply <fid>:** fixed | contested — <reason>",
                "finding upheld", "finding overruled", "**Builder status:** DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT",

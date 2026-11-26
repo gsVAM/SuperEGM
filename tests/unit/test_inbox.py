@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U23's tests of the inbox and the notify hook (spec section 11.2).
+# Modified by SuperEGM (gsVAM), 2026: the stall's proceed form names its head, and no #250 panel line in the seeds (U107, 1.3 design section 3.9).
 
 """U23: `inbox_items` and `superegm inbox`, `notify_lines` and `superegm notify`.
 Fixtures: conftest's `world`; `wave_store` and `open_wave_card` from test_wave.py."""
@@ -58,7 +59,6 @@ HEAD = lambda n, findings, **more: REVIEW("head", "head-U01-c1", {i: ROUND(i, fi
 POSTED = lambda n=1, outcome="revise": [{"round": i, "phase": "posted", "outcome": outcome, "launch": i, "runcard": "wave-1"} for i in range(1, n + 1)]
 D = lambda point, source, **more: [{"id": "q1", "point": point, "source": source, "question": "q", "asked_at": "t", **more}]
 U = lambda **more: {"U01": {"pr": 70, "head": "a" * 40, "ci": "green", **more}}
-PANEL = "q\nThe judges did not converge (judges/p1/verdict.json), their last choices: Q1 fable: finding upheld; opus: finding overruled"  # U88: a high or medium head contest lists only with the unconverged panel's line
 KINDS = {"decision", "cap", "contested", "merge", "stalled", "escalated", "redesign", "test-delta", "owner", "kill_failed", "wave"}
 
 
@@ -67,10 +67,11 @@ KINDS = {"decision", "cap", "contested", "merge", "stalled", "escalated", "redes
   (U(decisions=D(3, "comment 77")), [("U01", "decision", [OPTION('77')], "U01/decision/q1")]),
   (U(decisions=D(5, "review head-U01-c1 round 1", options=["accept", "revise"])),
    [("U01", "decision", [ruling_form(3, "q1", o) for o in ("accept", "revise")], "U01/decision/q1")]),
-  (U(decisions=D(1, "review head-U01-c1 round 1", question=PANEL), rounds=POSTED(), reviews=HEAD(1, F("high", "medium"), builder_contested=[{"fid": f"foreman-1-{i}", "reason": "r"} for i in (1, 2)])),
+  (U(decisions=D(1, "review head-U01-c1 round 1"), rounds=POSTED(), reviews=HEAD(1, F("high", "medium"), builder_contested=[{"fid": f"foreman-1-{i}", "reason": "r"} for i in (1, 2)])),
    [("U01", "contested", CONTESTED(f'foreman-1-{i}').split(" | "), f"U01/contested/q1/foreman-1-{i}") for i in (1, 2)]),
+  # U107 (1.3 design section 3.9): the capped round's contest no panel will rule (none opened) is listed beside the cap
   (U(decisions=D(1, "review head-U01-c1 round 5") + D(2, "review head-U01-c1 cap", id="q2"), rounds=POSTED(5), reviews=HEAD(5, F("high"), builder_contested=[{"fid": "foreman-1-1", "reason": "r"}])),
-   [("U01", "cap", CAP.split(" | "), "U01/cap/q2")]),
+   [("U01", "cap", CAP.split(" | "), "U01/cap/q2"), ("U01", "contested", CONTESTED("foreman-1-1").split(" | "), "U01/contested/q1/foreman-1-1")]),
   # round 3 (astra-2-1): a head cap with no decision open yet offers no form, as a posted one would rule nothing
   (U(rounds=POSTED(5), reviews=HEAD(5, F("high"))), [("U01", "cap", "its decision point 2 opens at the next wave", "U01/cap/head-U01-c1")]),
   (U(reviews=REVIEW("plan", "plan-U01-c1", {n: ROUND(n, F("high")) for n in range(1, 6)})),
@@ -81,7 +82,7 @@ KINDS = {"decision", "cap", "contested", "merge", "stalled", "escalated", "redes
   (U(rounds=POSTED(1, "clean")), []),
   # a stall opens no decision, so `proceed` is its way past (spec section 4.2), not a cap form
   (U(rounds=[{"round": n, "phase": "collected", "outcome": "not run (error: x)", "runcard": "wave-1"} for n in (1, 2)], reviews=HEAD(0, [])),
-   [("U01", "stalled", ["**Ruling:** proceed — <reason>"], "U01/stalled/head-U01-c1/2")]),
+   [("U01", "stalled", ["**Ruling:** proceed aaaaaaa — <reason>"], "U01/stalled/head-U01-c1/2")]),
   ({"escalated": ["spec-sample-c1:design-1-1"], **U()}, [("spec-sample-c1", "escalated", "answer in your plan session", "spec-sample-c1/escalated/design-1-1")]),
   (U(reviews=REVIEW("integrate", "spec-sample-integrate-c1", {1: ROUND(1, [{**F("high")[0], "disposition": "escalated"}])})),
    [("spec-sample-integrate-c1", "escalated", "answer in your integrate session", "spec-sample-integrate-c1/escalated/foreman-1-1")]),
@@ -138,7 +139,7 @@ def test_notify_runs_the_hook_once_with_the_new_lines(world, tmp_path, monkeypat
 def test_a_point_1_decision_lists_each_finding_until_its_own_ruling(world):
   """Round 2 (astra-1-1): point 1 takes one ruling per contested finding, so a ruled fid leaves and the other stays."""
   card = open_wave_card(world)
-  s = seed(world, **U(decisions=D(1, "review head-U01-c1 round 1", question=PANEL), rulings=[{"decision": "q1", "ruling": "foreman-1-1 finding upheld — r"}],
+  s = seed(world, **U(decisions=D(1, "review head-U01-c1 round 1"), rulings=[{"decision": "q1", "ruling": "foreman-1-1 finding upheld — r"}],
                       rounds=POSTED(), reviews=HEAD(1, F("high", "medium"), builder_contested=[{"fid": f"foreman-1-{i}", "reason": "r"} for i in (1, 2)])))
   assert [i["fingerprint"] for i in inbox_items(s, [s.handoff_id])] == ["U01/contested/q1/foreman-1-2", card]
 

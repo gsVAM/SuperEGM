@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U66
+# Modified by SuperEGM (gsVAM), 2026: a head proceed names its head, `--head <sha7>` (U107, 1.3 design section 3.9).
 
 """U66 (spec sections 6.1 and 4.2): the foreman round of a launch with `merge: "alone"` carries `merge: true` and is
 left out of the review round cap's count, and after a proceed the merge launch's head is refused dispatch so the
@@ -83,7 +84,7 @@ def test_proceeded_merge_head_is_not_reviewed(world):
   state["status"] = {"units": {UNIT: {"pr": PR, "head": HEAD, "ci": "green", "landed": False}}, "ready": [], "landed": []}
   state["units"][UNIT]["launched"] = True
   atomic_write(st.path("state"), state)
-  code, out = world.run("review", "rule", "--review", rid, "--ruling", "proceed", "--owner", "--reason", "accepted risk",
+  code, out = world.run("review", "rule", "--review", rid, "--ruling", "proceed", "--owner", "--head", HEAD[:7], "--reason", "accepted risk",
                         "--runcard", card)
   assert code == 0, out
   # the conflict: the unit's merge launch 2 ran and moved the head
@@ -104,7 +105,7 @@ def test_proceeded_merge_head_is_not_reviewed(world):
   assert not any("gh pr merge" in line for line in items), items
   assert unit_state(st, card, foreman) == "waiting proceed"
   # the second proceed names launch 2: the merge is offered on the merge head
-  code, out = world.run("review", "rule", "--review", rid, "--ruling", "proceed", "--owner", "--reason", "merge round fine",
+  code, out = world.run("review", "rule", "--review", rid, "--ruling", "proceed", "--owner", "--head", MERGE_HEAD[:7], "--reason", "merge round fine",
                         "--runcard", card)
   assert code == 0, out
   items = [inbox.line_of(i) for i in inbox.inbox_items(st, [st.handoff_id]) if i["subject"] == UNIT]
