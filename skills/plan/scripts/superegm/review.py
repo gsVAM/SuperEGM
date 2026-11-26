@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review settle --judges` for a head's contested or declined high or medium on a normal-mode card, journalled `Ruling (judges <panel>, contest)` (U88); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76); a spec cycle's changed reference documents as whole-file `changed <path>` scope lines, their `refs` manifest on each round, in the scope filter, the settle check and the proceed ruling (U75); `review open --respec R<n>`: the diff and its sections as evidence, the `design`, `codebase-details` and Astra panel, cap 2 (U85); a plan or integrate cycle a respec approval closed by its `source_review` (U91); `review record --sha256` on a head takes the full 40-hex commit sha alone (U101, 1.3 design section 3.4); the settle's writes in `apply_settle`, which `decision rule` calls on a point-1 ruling, the CI finding's refusal in `check_ci_finding` and a posted proceed comment edited before its record refused in `posted_comment` (U103, 1.3 design sections 3.6 and 3.7); a location's file name is its first whitespace-free token ending in a file extension that starts before the first line cite, and a listed document opening a location ends at any whitespace (U109, 1.3 design section 3.10).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review settle --judges` for a head's contested or declined high or medium on a normal-mode card, journalled `Ruling (judges <panel>, contest)` (U88); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76); a spec cycle's changed reference documents as whole-file `changed <path>` scope lines, their `refs` manifest on each round, in the scope filter, the settle check and the proceed ruling (U75); `review open --respec R<n>`: the diff and its sections as evidence, the `design`, `codebase-details` and Astra panel, cap 2 (U85); a plan or integrate cycle a respec approval closed by its `source_review` (U91); `review record --sha256` on a head takes the full 40-hex commit sha alone (U101, 1.3 design section 3.4); the settle's writes in `apply_settle`, which `decision rule` calls on a point-1 ruling, the CI finding's refusal in `check_ci_finding` and a posted proceed comment edited before its record refused in `posted_comment` (U103, 1.3 design sections 3.6 and 3.7); U104's owner-only spec findings (1.3 design section 3.8): `owner_only_fids` and the posted word naming a `deviation (spec)` fid whatever else blocks, its settle the owner's alone, `point_one_open` counting only the contests its question names and a contest copy ruled through the fid its chain reaches; a spec finding's contest copy the owner's alone in `check_settle`, and the owner's comment on either of a spec pair read for both; U105's respec cycle ingest, which neither records nor carries an external finding outside its scope, read now with each line carried from its commit (1.3 design section 3.8); a location's file name is its first whitespace-free token ending in a file extension that starts before the first line cite, and a listed document opening a location ends at any whitespace (U109, 1.3 design section 3.10).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest|triage: the one review loop (spec section 8)."""
 
@@ -1191,14 +1191,15 @@ def check_settle(st: core.Store, rid: str, review: dict, card: dict, args, fid: 
   if disposition == "fixed" and rnd["artifact_sha256"] == current_sha(st, review["kind"], review["artifact"]) \
       and not refs_moved(st, review, rnd):  # a spec round's changed reference document counts as changed bytes (U75)
     raise core.HandoffError("review settle: fixed needs changed bytes")  # a head's current bytes are unknown: never
-  if finding["claim"].startswith("test-delta:") and not args.owner:  # U25: the owner's alone, in either mode
+  # U25, U104: the owner's alone, in either mode; a spec finding's contest copy too (its chain reaches one)
+  if (finding["claim"].startswith("test-delta:") or delta_claim(st, rid, finding["claim"]).startswith(spec_claim())) and not args.owner:
     raise core.HandoffError(f"review settle: {fid} is the owner's alone: --owner required")
   if blocking(finding) and disposition in ("contested", "declined"):
     if card["mode"] == "leavemealone" and not args.judges:
       if not (args.owner and getattr(args, "posted", None)):
         raise core.HandoffError(f"review settle: {fid} is {finding['severity']}: --judges required in leavemealone-mode")
       verify_owner_ruling(st.config, finding, args.posted, delta_claim(st, rid, finding["claim"]),
-                          unrecorded=getattr(args, "unrecorded", False))
+                          unrecorded=getattr(args, "unrecorded", False), also=getattr(args, "also", None))
     if card["mode"] != "leavemealone" and not args.owner and not (args.judges and review["kind"] == "head"):  # U88: a head's contest goes to the panel first
       raise core.HandoffError(f"review settle: {fid} is {finding['severity']}: --owner required in normal mode")
     if args.judges and review["kind"] == "head":  # either mode: a contest settles by a panel that overruled it
@@ -1241,12 +1242,14 @@ def delta_claim(st: core.Store, rid: str, claim: str) -> str:
   return claim
 
 
-def verify_owner_ruling(config: dict, finding: dict, comment_id: str, original: str = None, unrecorded: bool = False) -> None:
+def verify_owner_ruling(config: dict, finding: dict, comment_id: str, original: str = None, unrecorded: bool = False,
+                        also: str = None) -> None:
   """In leavemealone the owner's word still counts, by hand (1.1.3; U22 reads such comments itself): one GitHub
   read of the comment, by a `config.owners` login, carrying a ruling `ruling_of` reads: `<fid> finding overruled`,
   or `<fid> allowed` on a `test-delta:` finding, or `test-delta <file> allowed` on a `test-delta:` finding of that
   file or on a contest's copy whose `original` claim (`delta_claim`'s) is one (U25). `unrecorded` (`decision rule`'s
-  read before the comment's first record, U103): an edited comment is refused, as on `decision rule`'s own read."""
+  read before the comment's first record, U103): an edited comment is refused, as on `decision rule`'s own read. `also`
+  (`decision rule`'s settle of a spec pair, U104): the comment may rule that fid in place of this finding's own."""
   from superegm.decision import ruling_of  # inside: `decision` imports `review`
   fid, claim = finding["id"], finding["claim"]
   original = claim if original is None else original
@@ -1258,7 +1261,7 @@ def verify_owner_ruling(config: dict, finding: dict, comment_id: str, original: 
     raise core.HandoffError(f"review settle: comment {comment_id} is by {author}, not a login in config.owners")
   found = ruling_of({**comment, "id": comment.get("id") or comment_id}, config.get("owners") or [])
   delta = claim.startswith("test-delta:")
-  if not (found and ((found.subject == fid and (found.kind == "overruled" or (found.kind == "allowed" and delta)))
+  if not (found and ((found.subject in (fid, also) and (found.kind == "overruled" or (found.kind == "allowed" and delta)))
                      or (found.kind == "allowed-file" and original.startswith(f"test-delta: {found.subject}:")))):
     raise core.HandoffError(f"review settle: comment {comment_id} does not rule {fid} overruled")
 
@@ -1333,7 +1336,7 @@ def write_owner_outcome(st: core.Store, rid: str, review: dict, runcard: str, co
   data = core.load_foreman(st, unit)
   posted = sorted((e for e in data["rounds"] if e.get("phase") == "posted"), key=lambda e: e["round"])
   rnd = load_round(st, rid, posted[-1]["round"]) if posted else None
-  if not rnd or contested_fids(rnd) or not (owner := owner_only_fids(rnd)):
+  if not rnd or (contested_fids(rnd) and not spec_fids(rnd)) or not (owner := owner_only_fids(rnd)):
     return None
   upheld = {str(r.get("ruling") or "").split(" ")[0] for r in data.get("rulings") or []  # `--ruling` is stored raw, reason and all
             if str(r.get("ruling") or "").partition(" — ")[0].strip().endswith(" finding upheld")}
@@ -1530,7 +1533,10 @@ def open_decisions(st: core.Store, unit: str) -> list[dict]:
 
 
 def point_one_open(st: core.Store, foreman: dict, decision: dict) -> bool:
-  """A point-1 decision some contested fid of its `review <id> round <n>` round names no ruling of."""
+  """A point-1 decision some contested fid of its `review <id> round <n>` round names no ruling of: only the contests its
+  question names count (a question naming no fid counts every contest, as in 1.2.1), and a contest copy counts as ruled
+  when a ruling of the decision names a fid its chain reaches (U104: a ruling on a spec finding closes its copy)."""
+  from superegm.decision import FINDING_LINE_RE  # inside: `decision` imports `review`
   words = (decision.get("source") or "").split()
   if len(words) != 4 or words[0] != "review" or words[2] != "round" or not words[3].isdigit():
     return False
@@ -1538,9 +1544,28 @@ def point_one_open(st: core.Store, foreman: dict, decision: dict) -> bool:
     return False  # a proceed closes the whole decision, as `redesign` does
   rnd = load_round(st, words[1], int(words[3])) or {}
   fids = contested_fids(rnd) or [c["fid"] for c in rnd.get("builder_contested") or []]
+  named = {a or b for a, b in FINDING_LINE_RE.findall(decision.get("question") or "")}
   ruled = {r["ruling"].partition(" — ")[0].strip().split(" ")[0]
            for r in foreman.get("rulings") or [] if r.get("decision") == decision["id"]}
-  return any(fid not in ruled for fid in fids)
+  return any(not set(contest_chain(st, words[1], fid, rnd)) & ruled for fid in fids if not named or fid in named)
+
+
+def contest_chain(st: core.Store, rid: str, fid: str, rnd: dict = None) -> list:
+  """`fid`, then each fid down its contest chain (`contested <fid>: …`, `unreplied <fid>: …`) in the review `rid`,
+  bounded; an id no round holds ends the walk (U104). A fid the round `rnd` holds is read there, the store only for
+  one it lacks."""
+  held = {f["id"]: f for f in findings_of(rnd)} if rnd and rnd.get("reviewers") else {}
+  chain = [fid]
+  for _ in range(32):
+    try:
+      claim = (held[chain[-1]].get("claim") or "") if chain[-1] in held else locate_finding(st, rid, chain[-1])[3]["claim"]
+    except core.HandoffError:
+      break
+    m = re.match(r"(?:contested|unreplied) (\S+):", claim)
+    if not m or m.group(1) in chain:
+      break
+    chain.append(m.group(1))
+  return chain
 
 
 def names_review(decision: dict, rid: str) -> bool:
@@ -1594,7 +1619,8 @@ POST_HEADER_RE = re.compile(r"^\*\*SuperEGM review round \d+ \(head [0-9a-f]{7}\
 
 def read_threads(repo: str, number: int, skip: set) -> list[dict]:
   """A PR's review threads (spec section 8, External review): a review comment with no `in_reply_to`, its
-  replies its text, and a non-empty review body of a review with no inline comments that is not `APPROVED`;
+  replies its text (with its `original_line`, `original_commit_id`, `subject_type`, `side` and `original_side`, which
+  place an outdated or LEFT-side line comment, U105), and a non-empty review body of a review with no inline comments that is not `APPROVED`;
   a review carrying `review post`'s header is the foreman's, never a thread. `skip` holds root ids left out."""
   comments = core.gh_pages(f"repos/{repo}/pulls/{number}/comments")
   reviews = core.gh_pages(f"repos/{repo}/pulls/{number}/reviews")
@@ -1611,7 +1637,9 @@ def read_threads(repo: str, number: int, skip: set) -> list[dict]:
     threads.append({"id": c["id"], "login": login(c), "bot": login(c).endswith("[bot]"),
                     "root": c.get("body") or "", "body": "\n\n".join([c.get("body") or "", *replies.get(c["id"], [])]), "path": c.get("path"),
                     "line": c.get("line"), "commit_id": c.get("commit_id"), "review_body": False,
-                    "created_at": c.get("created_at")})
+                    "created_at": c.get("created_at"), "original_line": c.get("original_line"),
+                    "original_commit_id": c.get("original_commit_id"), "subject_type": c.get("subject_type"),
+                    "side": c.get("side"), "original_side": c.get("original_side")})
   for r in reviews:
     body = r.get("body") or ""
     if POST_HEADER_RE.search(body):
@@ -2010,6 +2038,79 @@ def external_record(rnd: dict, reviewer: str) -> dict:
                                                 "model": "none:none", "effort": "none:none"})
 
 
+def respec_keeps(rows: list, spec_rel: str, path: str | None, line: int | None) -> bool:
+  """Whether a respec cycle's round takes an external finding at `path` and `line` (U105), its file read before its line:
+  one naming no file (a review body) is kept, one on another file never, one on the spec naming no line (a file-level
+  comment, or a line whose place is unknown) kept, and one on a line of the spec only inside a row of the scope (`rows`,
+  a `whole` row all), `line` counted in the same text as `rows`."""
+  if not path:
+    return True
+  if path.removeprefix("./") != spec_rel:
+    return False
+  return line is None or any(kind == "whole" or start <= line <= end for kind, _, start, end in rows)
+
+
+def finding_at(location: str) -> tuple[str | None, int | None, str | None]:
+  """`(path, line, commit)` of an ingested finding's location as `thread_line` writes it (`<file:line or file or PR> at
+  <commit7>`), its line counted in that commit: `PR`, a review body's, names no file."""
+  at = re.search(r" at ([0-9a-f]*)$", location.strip())
+  commit = (at.group(1) or None) if at else None
+  where = location.strip()[:at.start()] if at else location.strip()
+  if where == "PR":
+    return None, None, commit
+  match = re.fullmatch(r"(.*?):(\d+)", where)
+  return (match.group(1), int(match.group(2)), commit) if match else (where, None, commit)
+
+
+def thread_place(thread: dict, base_of=None) -> tuple[int | None, str | None]:
+  """`(line, commit)` a PR thread names: its `line` in its `commit_id`; an outdated line comment, whose `line` GitHub
+  nulls, its `original_line` in its `original_commit_id`; none for a file-level comment (`subject_type` `file`). A
+  comment on the diff's LEFT side (`side`, or `original_side` when outdated) counts its line in the PR's base text, the
+  text GitHub's LEFT side shows: its line in `base_of(<its commit>)`, the merge base of `config.base` and that commit,
+  and none when no `base_of` is given or the merge base cannot be read (U105)."""
+  if thread.get("subject_type") == "file":
+    return None, None
+  if thread.get("line") is not None:
+    line, commit, side = thread["line"], thread.get("commit_id"), thread.get("side")
+  elif thread.get("original_line") is not None:
+    line, commit, side = thread["original_line"], thread.get("original_commit_id"), thread.get("original_side") or thread.get("side")
+  else:
+    return None, None
+  if side != "LEFT":
+    return line, commit
+  base = base_of(commit) if base_of and commit else None
+  return (line, base) if base else (None, None)
+
+
+def merge_base_of(root: Path, base: str):
+  """A function from a commit to the merge base of `base` and that commit in `root`, each read once; None when git
+  cannot read it (U105)."""
+  found = {}
+  def of(commit: str) -> str | None:
+    if commit not in found:
+      found[commit] = core.run_git(["merge-base", base, commit], root, check=False).strip() or None
+    return found[commit]
+  return of
+
+
+def line_now(root: Path, spec_rel: str, current: list[str], commit: str | None, line: int) -> int | None:
+  """`line` of the spec as it stood at `commit`, carried to the spec's `current` lines (U105): a line of an equal block
+  moves with it, a replaced one stands at the new line in its own place in the block (the block's last new line when
+  the block shrank past it), and a removed one at the line before the gap (`max(j1, 1)`), where `scope_sections` counts
+  a deletion; unchanged with no commit named; None when no commit `commit` holds the spec, its place unknown."""
+  if not commit:
+    return line
+  try:
+    then = core.run_git(["show", f"{commit}:{spec_rel}"], root).splitlines()
+  except core.HandoffError:
+    return None
+  from superegm import respec  # at call time: respec imports this module
+  for tag, i1, i2, j1, j2 in respec.opcodes(then, current):
+    if i1 <= line - 1 < i2:
+      return j1 + min(line - 1 - i1, j2 - j1 - 1) + 1 if j2 > j1 else max(j1, 1)  # equal or replaced: its own place
+  return max(len(current), 1)  # past the text it was read in: its last line
+
+
 def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[int, list[str]]:
   """The spec PR's threads (spec section 8, External review on the elephant's own PR) recorded as `external:<login>`
   findings into the latest round of `review`'s cycle, closed by an `accept` or not; a thread whose root id is in
@@ -2018,7 +2119,10 @@ def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[
   and settling nothing: unlike the `--unit` path, which reads a ruling on the unit's issue, nothing reads one on the
   spec PR; a spec's rulings are made in the session or by the judges). Every unsettled external high or medium of an earlier round is
   carried into the round first, and a new thread's id is numbered after every id of its reviewer and round number
-  in any cycle, so no fid is reused. Recorded outside the panel and the round's byte and scope checks, so `what_ran`
+  in any cycle, so no fid is reused. A respec cycle's round neither records nor carries a finding `respec_keeps`
+  refuses: another file's, with a line or without, or one on a line of the spec outside the scope of the spec's bytes now
+  (`scope_of`, never the round's stored rows: a fix pushed since the record moved its lines), the line carried from the
+  commit it was made on (`thread_place`, `finding_at`, `line_now`) (U105). Recorded outside the panel and the round's byte and scope checks, so `what_ran`
   is untouched; each finding keeps its PR's `number` as `pr`. Then the reply pass posts `**Reply <fid>:** fixed` on
   GitHub (`reply_fixed`, whose failures are named and retried, never refused). A gh failure of the read is a
   one-line Refusal. Returns
@@ -2035,11 +2139,27 @@ def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[
               for name, record in load_round(st, other_rid, m)["reviewers"].items() if name.startswith("external:")
               for f in record["findings"] if f.get("thread") is not None]
   backfill = sorted({tid for tid in recorded if tid not in listed})
-  carried = carry_externals(st, review["artifact"], rid, rnd)
+  keep = lambda path, line, commit: True
+  try:  # a LEFT-side thread's line counts in the merge base of `config.base` and its commit (`thread_place`)
+    base_of = merge_base_of(core.git_toplevel(Path(review["artifact"]).parent), config["base"])
+  except (core.HandoffError, OSError):
+    base_of = None
+  if review.get("respec"):  # a respec cycle's remit is its correction: an external finding outside it is no finding of the round
+    spec = Path(review["artifact"])
+    root = core.git_toplevel(spec.parent)
+    # the scope of the spec's bytes now, never the round's stored rows: a fix pushed since its record moved the lines
+    rows, current = [list(row) for row in scope_of(st, review, spec)], core.read_text(spec).splitlines()
+    spec_rel = spec.resolve().relative_to(root.resolve()).as_posix()
+    def keep(path, line, commit):  # a line of the spec is carried from the commit it was made on to the text now
+      if path and path.removeprefix("./") == spec_rel and line is not None:
+        line = line_now(root, spec_rel, current, commit, line)
+      return respec_keeps(rows, spec_rel, path, line)
+  carried = carry_externals(st, review["artifact"], rid, rnd, keep)
   owners = set(config.get("owners") or [])
   try:  # an owner's `**Ruling:**` is dropped, never a finding; nothing reads it here (the `--unit` path reads its issue's)
     threads = [t for t in read_threads(config["repo"], number, listed | set(recorded))
-               if not (t["login"] in owners and ((t["body"] or "").strip().splitlines() or [""])[0].startswith("**Ruling:**"))]
+               if not (t["login"] in owners and ((t["body"] or "").strip().splitlines() or [""])[0].startswith("**Ruling:**"))
+               and keep(t.get("path"), *thread_place(t, base_of))]  # skipped, never in `ingested[]`: a later ordinary cycle reads it
     roles = {}
     for thread in threads:
       if not thread["bot"] and thread["login"] not in roles:
@@ -2058,7 +2178,9 @@ def ingest_pr(st: core.Store, review: dict, number: int, runcard: str) -> tuple[
     top = max((int(m.group(1)) for fid in held + [f["id"] for f in record["findings"]]
                if (m := re.fullmatch(rf"{re.escape(ext)}-{n}-(\d+)", fid))), default=0)
     severity = thread_severity(thread, config, None if thread["bot"] else roles[thread["login"]])
-    [finding] = parse_findings(thread_line(ext, n, top + 1, thread, severity, config), ext, n)
+    line, commit = thread_place(thread, base_of)  # recorded in the text its line counts in, so a later respec reads it (U105)
+    placed = thread | {"line": line, "commit_id": commit or thread.get("commit_id")}
+    [finding] = parse_findings(thread_line(ext, n, top + 1, placed, severity, config), ext, n)
     record["findings"].append({**finding, "thread": thread["id"], "review_body": thread["review_body"], "pr": number})
     added.append(thread["id"])
   if added or carried:
@@ -2134,10 +2256,11 @@ def reply_fixed(st: core.Store, artifact: str, number: int, runcard: str) -> lis
   return replied
 
 
-def carry_externals(st: core.Store, artifact: str, rid: str, rnd: dict) -> list[str]:
+def carry_externals(st: core.Store, artifact: str, rid: str, rnd: dict, keep=None) -> list[str]:
   """Every unsettled external high or medium of an earlier round of the spec's cycles (this cycle's earlier rounds
   included) copied into `rnd` (the latest round, in memory) when no finding there holds its `(id, claim)`, as `collect`
-  carries one on a head: the copy and the original are one finding. The fids carried."""
+  carries one on a head: the copy and the original are one finding; with `keep` (a respec cycle's scope, U105), only a
+  finding whose location (`finding_at`) it keeps. The fids carried."""
   held = {(f["id"], f["claim"]) for f in findings_of(rnd)}
   carried = []
   for other_rid, _ in spec_cycles(st, artifact):
@@ -2146,7 +2269,8 @@ def carry_externals(st: core.Store, artifact: str, rid: str, rnd: dict) -> list[
         continue
       for reviewer, record in load_round(st, other_rid, m)["reviewers"].items():
         for finding in record["findings"] if reviewer.startswith("external:") else []:
-          if blocking(finding) and finding["disposition"] is None and (finding["id"], finding["claim"]) not in held:
+          if (blocking(finding) and finding["disposition"] is None and (finding["id"], finding["claim"]) not in held
+              and (keep is None or keep(*finding_at(finding["location"])))):
             external_record(rnd, reviewer)["findings"].append(dict(finding))
             held.add((finding["id"], finding["claim"]))
             carried.append(finding["id"])
@@ -2171,12 +2295,27 @@ def contested_fids(round_json: dict) -> list:
 
 
 def owner_only_fids(round_json: dict) -> list:
-  """The unsettled `test-delta:` fids of the round when every unsettled high or medium of it is one of them, else
-  []: a remainder the owner alone can settle (U25)."""
+  """The owner's findings of the round: whenever it holds an unsettled `deviation (spec)` fid (U104, 1.3 design section
+  3.8), whatever else blocks, those fids, then its unsettled `test-delta:` fids; else the unsettled `test-delta:` fids
+  when every unsettled high or medium of it is one of them, else []: a remainder the owner alone can settle (U25)."""
   open_blocking = [f for record in (round_json.get("reviewers") or {}).values() for f in record.get("findings") or []
                    if f["disposition"] is None and blocking(f)]
   owner = [f["id"] for f in open_blocking if f["claim"].startswith("test-delta:")]
+  if spec := spec_fids(round_json):
+    return spec + owner
   return owner if owner and len(owner) == len(open_blocking) else []
+
+
+def spec_claim() -> str:
+  """`decision.SPEC_CLAIM`, the one definition, read inside: `decision` imports `review`."""
+  from superegm.decision import SPEC_CLAIM
+  return SPEC_CLAIM
+
+
+def spec_fids(round_json: dict) -> list:
+  """The round's unsettled high or medium `deviation (spec)` findings (`collect --spec`, U104): the owner's alone."""
+  return [f["id"] for record in (round_json.get("reviewers") or {}).values() for f in record.get("findings") or []
+          if f["disposition"] is None and blocking(f) and f["claim"].startswith(spec_claim())]
 
 
 def count_posted(st: core.Store, unit: str, entry: dict, posted_at: str, review_id: str, runcard: str) -> str:
@@ -2191,7 +2330,9 @@ def count_posted(st: core.Store, unit: str, entry: dict, posted_at: str, review_
     rnd["what_ran"] = derive_what_ran(review, rnd, saved)
     core.atomic_write(st.path("reviews", review_id, f"round-{entry['round']}.json"), rnd)
   store_verdict(st, review_id, review, runcard)  # the round now completed: an early accept it lapses is journaled
-  word = outcome_word(status_code(review_id, runcard), contested_fids(rnd or {}), owner_only_fids(rnd or {}))
+  # a spec finding's word is the owner's at once, beside a contest too (U104): its question carries the round's contests
+  contested = [] if spec_fids(rnd or {}) else contested_fids(rnd or {})
+  word = outcome_word(status_code(review_id, runcard), contested, owner_only_fids(rnd or {}))
   saved["outcome"] = word
   entry.update(saved)
   core.save_foreman(st, unit, data)
