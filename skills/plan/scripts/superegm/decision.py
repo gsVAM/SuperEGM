@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3/5
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
-# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63); `respec`, a `spec` deviation's option, the owner's alone, a spent `relaunch` dropped beside it, and a letter that resolves to it binding nothing unrecorded (spec §7.6, U84); the judges' ruling journalled and posted with `contest` on a normal-mode card (spec §7.8, U88); U103's rulings (1.3 design sections 3.6 and 3.7): a point-1 ruling with no fid refused as `missing <fid>`, a point-1 overrule or allowance settling the finding it rules through `review.apply_settle` after `review settle`'s ruler checks, a failed GitHub read one `gh:` line, a posted ruling comment edited before its first record refused as `ruling comment edited: post a new one`; U104's owner-only spec findings (1.3 design section 3.8): an `owner: <ids>` decision offering a spec fid `<fid> respec` beside `finding upheld` and `finding overruled`, a `## Q<n>` question's spec finding read, a mixed decision's `<fid> allowed` ruled as an `owner: <ids>` decision's.
+# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63); `respec`, a `spec` deviation's option, the owner's alone, a spent `relaunch` dropped beside it, and a letter that resolves to it binding nothing unrecorded (spec §7.6, U84); the judges' ruling journalled and posted with `contest` on a normal-mode card (spec §7.8, U88); U103's rulings (1.3 design sections 3.6 and 3.7): a point-1 ruling with no fid refused as `missing <fid>`, a point-1 overrule or allowance settling the finding it rules through `review.apply_settle` after `review settle`'s ruler checks, a failed GitHub read one `gh:` line, a posted ruling comment edited before its first record refused as `ruling comment edited: post a new one`; U104's owner-only spec findings (1.3 design section 3.8): an `owner: <ids>` decision offering a spec fid `<fid> respec` beside `finding upheld` and `finding overruled`, a `## Q<n>` question's spec finding read, a mixed decision's `<fid> allowed` ruled as an `owner: <ids>` decision's; the `<fid> respec — <reason>` form, read by `verify_posted` as a point-1 ruling on that fid, and a doubled `<fid> <fid> respec` refused as none of the options.
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
@@ -168,6 +168,7 @@ FORM_RES = (
   ("round", re.compile(r"one more round")),
   ("stop", re.compile(r"stop")),
   ("option", re.compile(rf"\((?P<subject>\d+|q\d+)\) (?P<option>\S.*?){REASON}")),
+  ("respec", re.compile(rf"(?P<subject>{FID}) respec{REASON}")),  # the owner's respec of a foreman spec finding (U104)
   ("allowed-file", re.compile(rf"test-delta (?P<subject>\S+) allowed{REASON}")),
   ("redesign", re.compile(rf"redesign{REASON}")),
   ("allowed", re.compile(rf"(?P<subject>{FID}) allowed{REASON}")),
@@ -181,7 +182,7 @@ JUDGES_MARK_RE = re.compile(r"^\(judges \S+, (?:leavemealone|contest)\)$", re.M)
 
 @dataclass(frozen=True)
 class Ruling:
-  kind: str  # upheld | overruled | round | stop | option | allowed | allowed-file | redesign | proceed
+  kind: str  # upheld | overruled | round | stop | option | allowed | allowed-file | redesign | proceed | respec
   subject: str  # the fid, the comment or decision id, the `dod-<n>` item, the file, or "" for round, stop and redesign
   option: str | None  # the option text at point 3
   reason: str | None  # the text after the first ` — `, as typed
@@ -709,7 +710,7 @@ def rule(args) -> int:
   fid_of = lambda text: text.partition(" — ")[0].strip().split(" ")[0]
   if decisions[0]["point"] == 1 and NO_FID_RE.match(head.strip()):  # U103: a ruling that opens with the verdict names no finding
     raise Refusal('decision: missing <fid>: write "<fid> finding overruled"')
-  fid = found.subject if found and found.kind in ("upheld", "overruled", "allowed") else fid_of(head)
+  fid = found.subject if found and found.kind in ("upheld", "overruled", "allowed", "respec") else fid_of(head)
   for d in decisions:
     ruled = [r for r in data["rulings"] if r.get("decision") == d["id"]]
     if ruled and (d["point"] != 1 or any(fid_of(r["ruling"]) == fid for r in ruled)):
@@ -721,6 +722,7 @@ def rule(args) -> int:
   if found:  # the record is the comment's ruling: a `--ruling` that resolves to another option is refused
     said = {"upheld": f"{found.subject} finding upheld", "overruled": f"{found.subject} finding overruled",
             "round": "one more round", "stop": "stop", "option": found.option, "redesign": "redesign",
+            "respec": f"{found.subject} respec",
             "allowed": f"{found.subject} finding overruled"}.get(found.kind) or ""  # an allowance is recorded as an overrule (§13.2)
     try:
       ruled_by_comment = check_ruling(basis["point"], basis["options"], said, args.by)
@@ -953,7 +955,7 @@ def undo(st, unit: str, data: dict, args, comment: dict, found: "Ruling", now: s
   return 0
 
 
-KIND_POINTS = {"upheld": (1,), "overruled": (1,), "allowed": (1,), "allowed-file": (1,), "round": (2,), "stop": (2,), "option": (3, 5), "redesign": (1, 2)}
+KIND_POINTS = {"upheld": (1,), "overruled": (1,), "allowed": (1,), "respec": (1,), "allowed-file": (1,), "round": (2,), "stop": (2,), "option": (3, 5), "redesign": (1, 2)}
 
 
 def dropped(store, args, reason: str):
@@ -1040,6 +1042,8 @@ def check_ruling(point: int, options: list, ruling: str, by: str = "") -> str:
   if point == 1 and f"{fid} respec" in options and by.startswith("judges:"):  # a spec finding is the owner's alone (U104)
     raise Refusal(f"decision: {fid} {said} is the owner's alone")
   for option in options:
+    if point == 1 and option.endswith((" allowed", " respec")):  # an option carrying its own fid is answered above alone, so a
+      continue  # doubled `<fid> <fid> respec`, or a respec of a fid no spec finding of the question names, is none of them (U104)
     letter, _, rest = option.partition(" ") if option.startswith("(") else ("", "", option)
     if text and text in (option, letter, rest) and (point != 1 or fid):
       if point == 3 and rest in ("amend", "respec") and by.startswith("judges:"):  # on the option the ruling resolves to, its own `(x) ` prefix dropped
@@ -1158,8 +1162,8 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int, mode=None)
     source = decision["source"]
     if found.kind == "option" and found.subject != option_name(decision):
       raise Refusal(f"decision: comment {cid} does not name {source if source.startswith('comment ') else decision['id']}")
-    if found.kind in ("upheld", "overruled", "allowed"):  # the fid must be one of this decision's, and ruled nowhere else
-      if decision not in fid_decisions(foreman, found.subject, strict=found.kind == "allowed"):
+    if found.kind in ("upheld", "overruled", "allowed", "respec"):  # the fid must be one of this decision's, and ruled nowhere else
+      if decision not in fid_decisions(foreman, found.subject, strict=found.kind in ("allowed", "respec")):
         raise Refusal(f"decision: comment {cid} rules {found.subject}, not a finding of {decision['id']}")
       if fid_ruled(foreman, found.subject, but=decision["id"]):
         dropped(store, args, f"{found.subject} already ruled")
@@ -1176,8 +1180,9 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int, mode=None)
     decisions = list({d["id"]: d for d, _ in file_targets(foreman, found.subject, store)}.values())
   elif found.kind == "redesign":
     decisions = pending if any(d["point"] in points for d in pending) else []
-  elif found.kind in ("upheld", "overruled", "allowed"):
-    decisions = [d for d in fid_decisions(foreman, found.subject, strict=found.kind == "allowed") if not fid_ruled(foreman, found.subject)][-1:]
+  elif found.kind in ("upheld", "overruled", "allowed", "respec"):  # a respec: the latest decision naming its spec finding (U104)
+    decisions = [d for d in fid_decisions(foreman, found.subject, strict=found.kind in ("allowed", "respec"))
+                 if not fid_ruled(foreman, found.subject)][-1:]
   elif found.kind in ("round", "stop"):
     decisions = [d for d in pending if d["point"] == 2][-1:]
   elif found.kind == "option":
