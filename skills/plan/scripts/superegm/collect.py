@@ -991,10 +991,11 @@ def carry(lines: list, contested: list, last: dict, prior, contest_of: dict, rul
   record (`last`, round `prior`) alone, an open derived foreman finding this round raises again with the same claim
   and location keeps its id, and an open builder contest of a finding the foreman does not derive, with no ruling
   on it or on what it contests, is copied with its `builder_contested` entry; each copy gets `carried_from` and
-  leaves `lines`. Returns `(lines left, slots, contested)`: `slots` holds a copy in a carried line's place and
-  None in a posted one's, then the contest copies."""
+  leaves `lines`. A ruling rules its subject and what that names down `contest_of` (`links_down`, as `settled_fids`
+  reads it), so a ruling on a later contest of the copy ends the copy's carry too. Returns `(lines left, slots,
+  contested)`: `slots` holds a copy in a carried line's place and None in a posted one's, then the contest copies."""
   prev = [f for f in ((last.get("reviewers") or {}).get("foreman") or {}).get("findings") or [] if f["disposition"] is None]
-  ruled = {r.subject for r in rulings}
+  ruled = {fid for r in rulings for fid in links_down(r.subject, contest_of)}
   bc = {b["fid"]: b for b in last.get("builder_contested") or []}
   contests, kept, slots = [], [], []
   for f in prev:
