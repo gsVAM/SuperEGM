@@ -114,3 +114,17 @@ def test_the_judges_never_rule_a_spec_finding(world, mode):
   assert posted_outcome == "owner: foreman-2-1"
   assert question_code == 1 and "question: nothing to ask in round 2 of " in question_out
   assert "## Q1 foreman-2-3 (" in question_with_an_ordinary_contest and "foreman-2-1" not in question_with_an_ordinary_contest
+
+
+# ---------------------------------------------------------------- S3: review settle leaves it to the owner
+
+
+@pytest.mark.parametrize("mode", ["normal", "leavemealone"])
+def test_review_settle_leaves_a_spec_finding_to_the_owner(world, mode):
+  # round 2 holds foreman-2-1 (SPEC); `superegm review settle --review <rid> --finding foreman-2-1 --disposition contested
+  # --judges <rid>-r2-abcdef`
+  w = unit_world(world, [("foreman-2-1", SPEC)], [], mode, posted=True)
+  settle_code, settle_err = world.run("review", "settle", "--review", w.rid, "--finding", "foreman-2-1", "--disposition", "contested",
+                                      "--judges", f"{w.rid}-r2-abcdef", "--runcard", w.card)
+  assert settle_code == 1 and "review settle: foreman-2-1 is the owner's alone: --owner required" in settle_err
+  assert round_json(w)["reviewers"]["foreman"]["findings"][0]["disposition"] is None
