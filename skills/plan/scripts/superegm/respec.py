@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the respec's touched units, derived marks, open and actionable respecs and `respec posted` (U85); `respec open` from a review's design finding (U91); U105's `## Units` prose and table rules (the section to the next H2), Interfaces names as `scan` reads them and the repository root through to `history` (1.3 design section 3.8).
+# Added by SuperEGM (gsVAM), 2026: the respec's touched units, derived marks, open and actionable respecs and `respec posted` (U85); `respec open` from a review's design finding (U91); U105's `## Units` prose and table rules (the section to the next H2), Interfaces names as `scan` reads them and the repository root through to `history` (1.3 design section 3.8); `load_json` refuses an unreadable or non-object file, a directory or a denied path among them, with its path (U106, 1.3 design section 3.8).
 
 """superegm respec: the units a spec correction touches (spec section 7.6), its derived marks and the posts and
 relaunches it asks for; every mark is derived on read from `respec/` and the launch records, never `state.json`."""
@@ -28,7 +28,18 @@ def respec_path(store: core.Store, *name: str) -> Path:
 
 
 def load_json(path: Path):
-  return json.loads(core.read_text(path)) if path.is_file() else None
+  """The JSON object in `path`, None when no file is there. Anything else that does not read (a directory, a denied
+  path, an unreadable file), broken JSON or JSON that is not an object (a list, a string) is refused `<path>: <reason>`
+  (U106): a failed read never stands for an absent record, so it never drops a held respec."""
+  try:
+    data = json.loads(core.read_text(path))
+  except FileNotFoundError:
+    return None
+  except (OSError, ValueError) as error:
+    raise core.HandoffError(f"{path}: {error}") from None
+  if not isinstance(data, dict):
+    raise core.HandoffError(f"{path}: not a JSON object")
+  return data
 
 
 def spec_of(store: core.Store, handoff: str, root: Path | None = None) -> Path:
