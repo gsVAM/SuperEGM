@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING`, its freshly pinned base and its `git merge-tree` brief (U62); a fix round resuming the previous launch's session, `resumed_from` or `fresh` and `profile_dir` on the entry, and the stale-paths line (U63); the `superegm-precheck` script on every launch, its allow rules and `{{precheck}}`, the whitespace refusal on every launch, `builder.precheck_attempts` and the launch's issue-comment snapshot (U67); a unit with `builder.escalate_after` failing head rounds launching on the `difficult` tier's pair, `escalated` on the entry (U68); `# Spec corrections`, reason `respec` and the record's `respecs` (U86); `builder.stall_minutes` defaults to 60 (U100, 1.3 design section 3.3); the `superegm-push` script on every launch, the allow-list's one push entry and the orders' `{{allowed}}` and `{{push}}`, the per-form author rules and their journal lines, the `**Note:**` form and `# Owner notes`, an edited issue comment left out, `managed_hooks` and each launch's record of them (U108, 1.3 design section 3.7).
+# Added by SuperEGM (gsVAM), 2026: the launch-builder subcommand (spec section 11); the prompt's # Orient section from orient (spec section 9.3); the PR block read from the launch's ref and the profile's hooks check (U14); the per-launch bin directory and the launched environment (U15); the prompt keeps rulings and decisions from `config.owners` alone (U22); every `&&`/`;` segment's first word in the allow-list and hook-free git calls (U25); the launch started detached and recorded `running`, the boot-id proof in the terminal check (U24); the builder's plugins and MCP servers passed per launch, the amendment-7 profile refusals and the session id (U27); `--effort` with the session effort level unset, and the requested pair recorded (U28); the watchdog's TERM trap (U31); the idempotent re-run, the builder key as its CONFIG_DEFAULTS and the spec range through `spec_blob` (U32); `builder.tiers` and the launch's model and effort by the unit's tier (U33); the builder's `# Repository instructions` section last in the prompt and the launch entry's `instructions` (U37); a direct revision of a unit whose recorded pull request is merged refused (U55); `builder_flags`, the one source of the launch's and the probe's flags (U60); the merge orders, `merge` and `Bash(git merge:*)` on a launch whose saved pull request reads `CONFLICTING`, its freshly pinned base and its `git merge-tree` brief (U62); a fix round resuming the previous launch's session, `resumed_from` or `fresh` and `profile_dir` on the entry, and the stale-paths line (U63); the `superegm-precheck` script on every launch, its allow rules and `{{precheck}}`, the whitespace refusal on every launch, `builder.precheck_attempts` and the launch's issue-comment snapshot (U67); a unit with `builder.escalate_after` failing head rounds launching on the `difficult` tier's pair, `escalated` on the entry (U68); `# Spec corrections`, reason `respec` and the record's `respecs` (U86); `builder.stall_minutes` defaults to 60 (U100, 1.3 design section 3.3); the `superegm-push` script on every launch, the allow-list's one push entry and the orders' `{{allowed}}` and `{{push}}`, the per-form author rules and their journal lines, the `**Note:**` form and `# Owner notes`, an edited issue comment left out and a consumed one edited before its record shown as its record, `managed_hooks` and each launch's record of them (U108, 1.3 design section 3.7).
 
 """superegm launch-builder: a fresh worktree, the prompt file and the command line of one builder launch, started
 detached and recorded `running`."""
@@ -18,7 +18,8 @@ import superegm as core
 from superegm import body, instructions, orient, scan
 from superegm.body import consumes
 from superegm.builder_token import key_path, tool
-from superegm.decision import consumed_comments, deleted_rulings, overridden_comments, parse_form, recorded_rulings
+from superegm.decision import (consumed_comments, deleted_rulings, overridden_comments, parse_form, proceed_text, record_text,
+                               recorded_rulings)
 from superegm.launch import authorizing, base_problems, builder_email, builder_login, load_launches, terminal
 from superegm.review_plan import SPEC_LINE_RE
 from superegm.status import STATUS_RE
@@ -891,13 +892,19 @@ def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr,
       leave_out(f"comment {c['id']} {match.group(0)}", login, allowed)
       return False
     # an edited comment never reaches the prompt (1.3 design section 3.7), save one the record consumed, which its record
-    # answers; a comment with no `updated_at` reads as unedited
-    if int(c["id"]) not in consumed and c.get("updated_at") is not None and c.get("updated_at") != c.get("created_at"):
-      ignored.append(f"{unit} comment {c['id']} {match.group(0)} ignored: edited")
-      return False
+    # answers: edited before its record too (`overridden_comments` reads only a later edit), it is shown as its record,
+    # never its edited body; a comment with no `updated_at` reads as unedited
+    if c.get("updated_at") is not None and c.get("updated_at") != c.get("created_at"):
+      if int(c["id"]) not in consumed:
+        ignored.append(f"{unit} comment {c['id']} {match.group(0)} ignored: edited")
+        return False
+      records[c["id"]] = recorded_text(foreman or {}, f"comment {c['id']}")
+      return records[c["id"]] is not None
     return form != "Ruling" or parse_form(c["body"]) is not None
+  records = {}  # a consumed comment edited before its record: its record's text, by id
   # an edited recorded ruling is shown as its record (spec section 13.2: a later comment never changes it)
-  kept = [c | {"body": overridden[c["id"]]} if overridden.get(c["id"]) else c for c in comments if keep(c)]
+  kept = [c | {"body": overridden.get(c["id"]) or records.get(c["id"])} if overridden.get(c["id"]) or records.get(c["id"]) else c
+          for c in comments if keep(c)]
   for gone in deleted_rulings(comments, foreman or {}):  # in its place among the comments, by id
     kept.insert(next((i for i, c in enumerate(kept) if int(c["id"]) > gone["id"]), len(kept)), gone)
   parts = [f"# Issue #{issue_number} — {unit}\n\n{body}", f"# Audit trail\n\n{audit}", f"# Builder orders\n\n{orders}"]
@@ -927,6 +934,19 @@ def prompt_text(issue_number, unit, body, orders, orient, comments, reviews, pr,
     parts.append(f"# Review comments on PR #{pr}\n\n" + "\n".join(
         f"## {r['user']['login']} · review {r['id']} on {r['commit_id'][:7]}\n{r['body']}\n" for r in kept))
   return "\n\n---\n\n".join(parts)
+
+
+EDITED_BEFORE = "the comment was edited before its record"
+
+
+def recorded_text(foreman: dict, posted: str) -> str | None:
+  """The record of a consumed comment (`posted` `comment <id>`) edited before its record, marked `EDITED_BEFORE`: its
+  `rulings[]` entry through `record_text`, else its `proceeds[]` entry through `proceed_text`; None with neither (U108)."""
+  entry = next((r for r in foreman.get("rulings") or [] if r.get("posted") == posted), None)
+  if entry is not None:
+    return record_text(foreman, entry, EDITED_BEFORE)
+  proceed = next((r for r in foreman.get("proceeds") or [] if r.get("posted") == posted), None)
+  return proceed_text(proceed, EDITED_BEFORE) if proceed is not None else None
 
 
 def add_worktree(repo_root, store, unit, rnd, branch, pr):
