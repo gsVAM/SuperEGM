@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review settle --judges` for a head's contested or declined high or medium on a normal-mode card, journalled `Ruling (judges <panel>, contest)` (U88); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76); a spec cycle's changed reference documents as whole-file `changed <path>` scope lines, their `refs` manifest on each round, in the scope filter, the settle check and the proceed ruling (U75); `review open --respec R<n>`: the diff and its sections as evidence, the `design`, `codebase-details` and Astra panel, cap 2 (U85); a plan or integrate cycle a respec approval closed by its `source_review` (U91); `review record --sha256` on a head takes the full 40-hex commit sha alone (U101, 1.3 design section 3.4); a head proceed pins the head the owner was shown, `--head <sha7>` or the posted `proceed <sha7> — <reason>`, refused once the head moved or without one (U107, 1.3 design section 3.9).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review settle --judges` for a head's contested or declined high or medium on a normal-mode card, journalled `Ruling (judges <panel>, contest)` (U88); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76); a spec cycle's changed reference documents as whole-file `changed <path>` scope lines, their `refs` manifest on each round, in the scope filter, the settle check and the proceed ruling (U75); `review open --respec R<n>`: the diff and its sections as evidence, the `design`, `codebase-details` and Astra panel, cap 2 (U85); a plan or integrate cycle a respec approval closed by its `source_review` (U91); `review record --sha256` on a head takes the full 40-hex commit sha alone (U101, 1.3 design section 3.4); the settle's writes in `apply_settle`, which `decision rule` calls on a point-1 ruling, the CI finding's refusal in `check_ci_finding` and a posted proceed comment edited before its record refused in `posted_comment` (U103, 1.3 design sections 3.6 and 3.7); a head proceed pins the head the owner was shown, `--head <sha7>` or the posted `proceed <sha7> — <reason>`, refused once the head moved or without one (U107, 1.3 design section 3.9).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest|triage: the one review loop (spec section 8)."""
 
@@ -1106,6 +1106,19 @@ def settle_finding(args) -> int:
         checked.append((fields[0], fields[1], fields[2], check_settle(st, rid, review, card, args, fields[0], fields[1])))
       except core.HandoffError as error:
         raise core.HandoffError(f"review settle: {line}: {str(error).removeprefix('review settle: ')}: nothing written")
+  word = apply_settle(st, rid, review, card, args, checked)
+  for fid, disposition, _, _ in checked:
+    print(f"{fid} {disposition}")
+  if word:
+    print(word)
+  return 0
+
+
+def apply_settle(st: core.Store, rid: str, review: dict, card: dict, args, checked: list) -> str | None:
+  """The settle `review settle` runs once its checks pass, and `decision rule` runs on a point-1 ruling (U103): each
+  `(fid, disposition, note, round)` of `checked` takes its disposition and its `ruling` (`owner`, `judges:<panel>`, or none),
+  the verdict is stored, a head's clean outcome is written, or the `owner:`/`revise`/`cap-reached` word of a remainder
+  that is not clean; the word rewritten, if any. `args` carries `owner`, `judges` and `runcard`."""
   runcard = card.get("parent") or args.runcard
   for fid, disposition, note, n in checked:
     rnd = load_round(st, rid, n)
@@ -1128,22 +1141,36 @@ def settle_finding(args) -> int:
     write_head_outcome(st, review, runcard)
   elif review["kind"] == "head":
     word = write_owner_outcome(st, rid, review, runcard, status.code)
-  for fid, disposition, _, _ in checked:
-    print(f"{fid} {disposition}")
-  if word:
-    print(word)
-  return 0
+  return word
 
 
-def check_settle(st: core.Store, rid: str, review: dict, card: dict, args, fid: str, disposition: str) -> int:
-  """The per-finding refusals of `review settle`; the round number of `fid` when none applies."""
-  n, rnd, reviewer, finding = locate_finding(st, rid, fid)
+def check_ci_finding(reviewer: str, finding: dict) -> None:
+  """D2 (a): `collect` records the CI finding afresh each round, so no one settles it (`check_settle`, and `decision rule` on
+  an overrule of it, U103)."""
+  if reviewer == "foreman" and finding["location"] == "ci":
+    raise core.HandoffError("review settle: the CI finding is settled by no one")
+
+
+def locate_in_round(st: core.Store, rid: str, n: int, fid: str):
+  """`(n, round, reviewer, finding)` of `fid` in round `n` alone (a finding id carries across rounds: U103's `decision rule`
+  settles in the round its decision's source names)."""
+  rnd = load_round(st, rid, n)
+  for reviewer, record in ((rnd or {}).get("reviewers") or {}).items():
+    for finding in record["findings"]:
+      if finding["id"] == fid:
+        return n, rnd, reviewer, finding
+  raise core.HandoffError(f"review settle: no finding {fid} in round {n}")
+
+
+def check_settle(st: core.Store, rid: str, review: dict, card: dict, args, fid: str, disposition: str, source_round: int | None = None) -> int:
+  """The per-finding refusals of `review settle`; the round number of `fid` when none applies: the newest round holding it,
+  or `source_round`, the round a `decision rule` ruling's source names, when given."""
+  n, rnd, reviewer, finding = locate_finding(st, rid, fid) if source_round is None else locate_in_round(st, rid, source_round, fid)
   if review["kind"] == "head" and disposition == "fix-design":
     raise core.HandoffError("review settle: fix-design is refused on a head")
   if review["kind"] == "integrate" and disposition == "fix-design" and frozen(st):  # its spec is the latest handoff's now
     raise core.HandoffError("review settle: fix-design is refused on a frozen handoff's integrate: settle it escalated")
-  if reviewer == "foreman" and finding["location"] == "ci":  # D2 (a): `collect` records it afresh each round
-    raise core.HandoffError("review settle: the CI finding is settled by no one")
+  check_ci_finding(reviewer, finding)
   if disposition == "fixed" and rnd["artifact_sha256"] == current_sha(st, review["kind"], review["artifact"]) \
       and not refs_moved(st, review, rnd):  # a spec round's changed reference document counts as changed bytes (U75)
     raise core.HandoffError("review settle: fixed needs changed bytes")  # a head's current bytes are unknown: never
@@ -1153,7 +1180,8 @@ def check_settle(st: core.Store, rid: str, review: dict, card: dict, args, fid: 
     if card["mode"] == "leavemealone" and not args.judges:
       if not (args.owner and getattr(args, "posted", None)):
         raise core.HandoffError(f"review settle: {fid} is {finding['severity']}: --judges required in leavemealone-mode")
-      verify_owner_ruling(st.config, finding, args.posted, delta_claim(st, rid, finding["claim"]))
+      verify_owner_ruling(st.config, finding, args.posted, delta_claim(st, rid, finding["claim"]),
+                          unrecorded=getattr(args, "unrecorded", False))
     if card["mode"] != "leavemealone" and not args.owner and not (args.judges and review["kind"] == "head"):  # U88: a head's contest goes to the panel first
       raise core.HandoffError(f"review settle: {fid} is {finding['severity']}: --owner required in normal mode")
     if args.judges and review["kind"] == "head":  # either mode: a contest settles by a panel that overruled it
@@ -1196,15 +1224,18 @@ def delta_claim(st: core.Store, rid: str, claim: str) -> str:
   return claim
 
 
-def verify_owner_ruling(config: dict, finding: dict, comment_id: str, original: str = None) -> None:
+def verify_owner_ruling(config: dict, finding: dict, comment_id: str, original: str = None, unrecorded: bool = False) -> None:
   """In leavemealone the owner's word still counts, by hand (1.1.3; U22 reads such comments itself): one GitHub
   read of the comment, by a `config.owners` login, carrying a ruling `ruling_of` reads: `<fid> finding overruled`,
   or `<fid> allowed` on a `test-delta:` finding, or `test-delta <file> allowed` on a `test-delta:` finding of that
-  file or on a contest's copy whose `original` claim (`delta_claim`'s) is one (U25)."""
+  file or on a contest's copy whose `original` claim (`delta_claim`'s) is one (U25). `unrecorded` (`decision rule`'s
+  read before the comment's first record, U103): an edited comment is refused, as on `decision rule`'s own read."""
   from superegm.decision import ruling_of  # inside: `decision` imports `review`
   fid, claim = finding["id"], finding["claim"]
   original = claim if original is None else original
   comment = core.gh_json(["api", f"repos/{config['repo']}/issues/comments/{comment_id}"]) or {}
+  if unrecorded and edited_comment(comment):
+    raise core.HandoffError("review settle: ruling comment edited: post a new one")
   author = (comment.get("user") or {}).get("login")
   if author not in (config.get("owners") or []):
     raise core.HandoffError(f"review settle: comment {comment_id} is by {author}, not a login in config.owners")
@@ -2258,11 +2289,13 @@ def rule_proceed(st: core.Store, rid: str, review: dict, card: dict, args) -> in
   state = core.load_state(st.root)
   number = state["units"][unit]["number"]
   pinned = pinned_head(st, rid, review, state)
-  live = live_head(st, state, unit, pinned)  # read before the replay too: a replay holds only while GitHub's head is the recorded one
   comment, by = None, "owner"
   if posted:
     recorded = next((e for e in foreman.get("proceeds") or [] if e.get("posted") == f"comment {posted}"), None)
-    if recorded and (recorded.get("review"), recorded.get("head"), live) == (rid, pinned, pinned):
+    # a replay holds only while GitHub's head is the recorded one too; the live read is made where it is needed, so a
+    # new comment's own refusals (edited, not a proceed, no head: U103's and `posted_comment`'s) come before it
+    if (recorded and (recorded.get("review"), recorded.get("head")) == (rid, pinned)
+        and live_head(st, state, unit, pinned) == pinned):
       print(json.dumps(recorded, sort_keys=True))  # the same comment, review and head: the recorded entry, nothing written
       return 0
     if recorded or posted_anywhere(st, f"comment {posted}"):
@@ -2272,7 +2305,7 @@ def rule_proceed(st: core.Store, rid: str, review: dict, card: dict, args) -> in
       raise core.HandoffError(f"review rule: comment {posted}: {NEEDS_HEAD}")
     ruling["reason"], by, shown = found.reason, found.login, found.subject
   refuse_moved_since(unit, shown, pinned)
-  refuse_moved_since(unit, shown, live)
+  refuse_moved_since(unit, shown, live_head(st, state, unit, pinned))
   ruling["sha256"] = pinned
   launches = st.path("launches", unit)
   launched = json.loads(core.read_text(launches))["launches"] if launches.is_file() else []
@@ -2361,12 +2394,21 @@ def posted_anywhere(st: core.Store, posted: str) -> bool:
   return False
 
 
+def edited_comment(comment: dict) -> bool:
+  """A comment whose `updated_at` and `created_at` are both present and differ: edited since it was posted, so a ruling
+  never read from it (an edited ruling comment is never recorded, `docs/reference/invariants.md`; U103). One carrying no
+  `created_at` is not read as edited."""
+  return bool(comment.get("updated_at") and comment.get("created_at") and comment["updated_at"] != comment["created_at"])
+
+
 def posted_comment(st: core.Store, comment_id, number: int):
-  """The owner's proceed comment as `review settle` checks a posted ruling: one GitHub read, its author in
+  """The owner's proceed comment as `review settle` checks a posted ruling: one GitHub read, refused when edited (U103), its author in
   `config.owners`, `ruling_of` of kind `proceed`, on the unit's issue (`issue_url`, as `decision.verify_posted`)."""
   from superegm.decision import ruling_of  # inside: `decision` imports `review`
   owners = st.config.get("owners") or []
   comment = core.gh_json(["api", f"repos/{st.config['repo']}/issues/comments/{comment_id}"]) or {}
+  if edited_comment(comment):
+    raise core.HandoffError("review rule: ruling comment edited: post a new one")
   author = (comment.get("user") or {}).get("login")
   if author not in owners:
     raise core.HandoffError(f"review rule: comment {comment_id} is by {author}, not a login in config.owners")

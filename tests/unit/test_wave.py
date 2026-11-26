@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U10b's tests of the driver: report, decision open|rule, the wave skill body; the by-hand ruling read through `ruling_of` (U22); the foreman-verifies prose and the owner-only decision's allowed form (U25); the head's fifth decision point and the accept below the cap's skill texts (U35); the watchdog's stalled line, carve-out and skill lines (U31); the stalled-line rows set their 30 minutes explicitly (U100, 1.3 design section 3.3).
-# Modified by SuperEGM (gsVAM), 2026: U99's `GhError` re-pins, now exit 1 and the `gh:` line (1.3 design section 3.2).
+# Modified by SuperEGM (gsVAM), 2026: U99's `GhError` re-pins, now exit 1 and the `gh:` line (1.3 design section 3.2); U103's re-pin of the by-hand ruling test, a comment edited before its record refused (1.3 design section 3.7).
 
 """U10b: the pure functions the wave skill cites, `report`, `decision open|rule` and the skill body.
 Fixtures: conftest's `world`, `applied` and `make_pr` (U03/U07)."""
@@ -1050,22 +1050,24 @@ def test_a_by_hand_redesign_ruling_stops_the_unit_and_posts_nothing(world, monke
 def test_a_by_hand_ruling_without_decision_rules_what_its_form_names_once(world, monkeypatch):
   """Round 3 (PR #96 review): a `redesign` with no `--decision` rules the pending head decision (one entry, one
   brief); `--decision` at point 1 takes only a fid of that decision, ruled nowhere else; a second `one more round`
-  is refused before anything is recorded; an edit before the record is the record's time; already-ruled is keyed on
-  the comment's fid."""
+  is refused before anything is recorded; a comment edited before its record is refused, an unedited one is recorded at
+  its own time (U103); already-ruled is keyed on the comment's fid."""
   monkeypatch.setenv("SUPEREGM_BUILDER_TOKEN", "builder-token")
   card = open_wave_card(world)
   s = wave_store(world, U01={"pr": 70, "head": "a" * 40, "ci": "green", "rounds": [{"round": 1, "phase": "posted", "outcome": "revise", "launch": 1}]})
   set_config(world, repo=REPO, owners=["owner"])
   fake_gh(world, {f"repos/{REPO}/issues/comments/{cid}": {"id": cid, "user": {"login": "owner"}, "body": body, "created_at": "2026-11-03T10:00:00Z",
                                                           "updated_at": at} for cid, body, at in (
-      (60, "**Ruling:** f-1-1 finding upheld\n", "2026-11-03T10:30:00Z"), (61, "**Ruling:** f-1-1 finding overruled — x\n", "2026-11-03T10:00:00Z"),
+      (60, "**Ruling:** f-1-1 finding upheld\n", "2026-11-03T10:00:00Z"), (66, "**Ruling:** f-1-1 finding upheld\n", "2026-11-03T10:30:00Z"), (61, "**Ruling:** f-1-1 finding overruled — x\n", "2026-11-03T10:00:00Z"),
       (62, "**Ruling:** f-2-2 finding upheld\n", "2026-11-03T10:00:00Z"), (63, "**Ruling:** one more round\n", "2026-11-03T10:00:00Z"),
       (64, "**Ruling:** one more round\n", "2026-11-03T10:00:00Z"), (65, "**Ruling:** redesign — the queue is wrong\n", "2026-11-03T10:00:00Z"))})
   opened = lambda point, source, text: world.run("decision", "open", "--unit", "U01", "--point", point, "--question", question(world, text), "--source", source, "--runcard", card)[1].splitlines()[0]
   rule = lambda posted, ruling, *d: world.run("decision", "rule", "--unit", "U01", *d, "--ruling", ruling, "--by", "owner", "--posted", posted, "--runcard", card)
   q1 = opened(1, "review head-U01-c1 round 1", "f-1-1 | high | a.py | regression: no | x\n")
+  assert rule("66", "f-1-1 finding upheld") == (1, "decision: ruling comment edited: post a new one\n"), "an edit before the record is refused"
+  assert foreman_of(s, "U01")["rulings"] == []
   assert rule("60", "f-1-1 finding upheld") == (0, "recorded (comment 60)\n")
-  assert foreman_of(s, "U01")["rulings"][-1]["posted_at"] == "2026-11-03T10:30:00Z", "an edit before the record is the recorded text"
+  assert foreman_of(s, "U01")["rulings"][-1]["posted_at"] == "2026-11-03T10:00:00Z", "an unedited comment is recorded at its own time"
   q2 = opened(1, "review head-U01-c1 round 2", "f-2-1 | high | a.py | regression: no | y\nf-2-2 | high | b.py | regression: no | z\n")
   assert rule("61", "f-1-1 finding overruled — x", "--decision", q2) == (1, f"decision: comment 61 rules f-1-1, not a finding of {q2}\n")
   assert rule("61", "f-2-2 finding upheld", "--decision", q2) == (1, f"decision: comment 61 rules f-1-1, not a finding of {q2}\n"), \
