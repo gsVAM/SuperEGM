@@ -12,7 +12,7 @@ import pytest
 
 import superegm as core
 from conftest import REPO, set_config
-from superegm import review
+from superegm import decision, review
 from test_wave import fake_gh, foreman_of, question, wave_store
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -190,3 +190,32 @@ def test_the_owner_decision_on_a_spec_finding_offers_respec(world, lines, word, 
   if len(lines) > 1:  # each recorded as the allowance of the test-delta fid, the spec fid left to its own ruling
     assert [r["ruling"] for r in allowance_rulings] == ["foreman-1-1 finding overruled — kept"]
     assert [r["ruling"] for r in file_rulings] == ["test-delta tests/unit/test_q.py allowed", "foreman-1-1 allowed"]
+
+
+# ---------------------------------------------------------------- S5: the respec form; a doubled fid refused
+
+
+SPEC_1_1 = "foreman-1-1 | high | docs/designs/sample.md:12 | regression: no | " + SPEC + "\n"
+
+
+def open_respec_files(w) -> list:
+  folder = w.s.path("file", "respec")
+  return sorted(p.name for p in folder.iterdir()) if folder.is_dir() else []
+
+
+def test_a_respec_ruling_parses_and_a_doubled_fid_is_refused(world):
+  # `**Ruling:** foreman-1-1 respec — the spec is wrong` posted on the unit's issue and recorded with `superegm decision rule
+  # --posted <comment id>`; then `--ruling 'foreman-1-1 foreman-1-1 respec'` typed on another spec finding's decision
+  w = word_world(world, "owner: foreman-1-1", comments={601: "**Ruling:** foreman-1-1 respec — the spec is wrong"})
+  open_q(world, w, SPEC_1_1)
+  posted_code, posted_out = rule(world, w, "foreman-1-1 respec — the spec is wrong", posted=601)
+  open_respec_files_before = open_respec_files(w)
+  world.run("decision", "open", "--unit", "U01", "--point", 1, "--question",  # the next head round's spec finding, again foreman-1-1
+            question(world, SPEC_1_1.replace("sample.md:12", "sample.md:40")), "--source", f"review {w.rid} round 2", "--runcard", w.card)
+  rulings_before = foreman_of(w.s, "U01")["rulings"]
+  doubled_code, doubled_err = rule(world, w, "foreman-1-1 foreman-1-1 respec", qid="q2")
+  rulings_after, open_respec_files_after = foreman_of(w.s, "U01")["rulings"], open_respec_files(w)
+  assert decision.parse_form("**Ruling:** foreman-1-1 respec — the spec is wrong")[:2] == ("respec", "foreman-1-1")
+  assert posted_code == 0 and open_respec_files_before == ["R1.open.json"], posted_out
+  assert doubled_code == 1 and doubled_err.startswith("decision: ") and "KeyError" not in doubled_err and "Traceback" not in doubled_err
+  assert rulings_after == rulings_before and open_respec_files_after == open_respec_files_before
