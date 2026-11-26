@@ -194,7 +194,7 @@ def unit_items(hs: core.Store, repo: str, state: dict, uid: str, foreman: dict, 
             "rulings": [r for r in foreman.get("rulings") or [] if "decision" in r]}
     settled = {f["id"] for f in (review.findings_of(rnd) if rnd else []) if f.get("disposition") is not None}
     # the outcome keeps naming a fid settled since until the round converges (review.settle_finding)
-    open_fid = lambda fid: fid not in settled and not decision.fid_ruled(book, fid)
+    open_fid = lambda fid: fid not in settled and not decision.fid_ruled(book, fid, rid=rid)  # this head cycle's rulings (U104)
     # in leavemealone-mode `decision rule` refuses an allowance naming an open point-1 decision (refuse_allowance)
     form = lambda fid: [ruling_form(1, fid, "finding overruled" if mode == "leavemealone"
                                     and decision.fid_decisions(book, fid, strict=True) else "allowed")]

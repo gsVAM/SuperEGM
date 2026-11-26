@@ -1216,7 +1216,7 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int, mode=None)
     if found.kind in ("upheld", "overruled", "allowed", "respec"):  # the fid must be one of this decision's, and ruled nowhere else
       if decision not in fid_decisions(foreman, found.subject, strict=found.kind in ("allowed", "respec")):
         raise Refusal(f"decision: comment {cid} rules {found.subject}, not a finding of {decision['id']}")
-      if fid_ruled(foreman, found.subject, but=decision["id"]):
+      if fid_ruled(foreman, found.subject, but=decision["id"], rid=source_review(decision)[0]):
         dropped(store, args, f"{found.subject} already ruled")
     if found.kind == "redesign" and decision["id"] not in {d["id"] for d in pending_decisions(foreman)}:
       dropped(store, args, f"{decision['id']} already ruled")  # a redesign rules open decisions alone, as without --decision
@@ -1233,7 +1233,7 @@ def verify_posted(store, unit: str, foreman: dict, args, number: int, mode=None)
     decisions = pending if any(d["point"] in points for d in pending) else []
   elif found.kind in ("upheld", "overruled", "allowed", "respec"):  # a respec: the latest decision naming its spec finding (U104)
     decisions = [d for d in fid_decisions(foreman, found.subject, strict=found.kind in ("allowed", "respec"))
-                 if not fid_ruled(foreman, found.subject)][-1:]
+                 if not fid_ruled(foreman, found.subject, rid=source_review(d)[0])][-1:]  # its own head cycle's (U104)
   elif found.kind in ("round", "stop"):
     decisions = [d for d in pending if d["point"] == 2][-1:]
   elif found.kind == "option":
@@ -1301,7 +1301,7 @@ def file_targets(foreman: dict, path: str, st=None) -> list:
       continue
     if any(o.endswith(" allowed") for o in options):  # an `owner: <ids>` decision, a mixed one's `<fid> allowed` too (U104)
       out += [(d, fid) for fid in line.findall(d.get("question") or "")
-              if f"{fid} allowed" in options and not fid_ruled(foreman, fid)]
+              if f"{fid} allowed" in options and not fid_ruled(foreman, fid, rid=source_review(d)[0])]
     elif st is not None and str(d.get("source") or "").startswith("review "):
       rid = d["source"].split()[1]
       for fid in dict.fromkeys(a or b for a, b in FINDING_LINE_RE.findall(d.get("question") or "")):
@@ -1310,13 +1310,14 @@ def file_targets(foreman: dict, path: str, st=None) -> list:
         except core.HandoffError:
           continue
         if (claim != (original := review.delta_claim(st, rid, claim)) and original.startswith(f"test-delta: {path}:")
-            and not fid_ruled(foreman, fid)):
+            and not fid_ruled(foreman, fid, rid=rid)):
           out.append((d, fid))
   return out
 
 
-def fid_ruled(foreman: dict, fid: str, but: str = "") -> bool:
-  """Whether a point-1 ruling on `fid` is recorded on any decision but `but` (the one `rule` checks itself)."""
-  point1 = {d["id"] for d in foreman["decisions"] if d["point"] == 1} - {but}
+def fid_ruled(foreman: dict, fid: str, but: str = "", rid: str = None) -> bool:
+  """Whether a point-1 ruling on `fid` is recorded on any decision but `but` (the one `rule` checks itself); given `rid`, on a
+  decision of that head review alone (U104: a foreman fid repeats in a later head cycle, a new finding there)."""
+  point1 = {d["id"] for d in foreman["decisions"] if d["point"] == 1 and (rid is None or source_review(d)[0] == rid)} - {but}
   return any(r.get("decision") in point1 and r["ruling"].partition(" — ")[0].strip().split(" ")[0] == fid
              for r in foreman["rulings"])
