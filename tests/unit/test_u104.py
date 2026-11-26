@@ -87,3 +87,30 @@ def test_a_foreman_spec_finding_is_the_owners_word(world, open_findings, builder
   posted_outcome = post_round(world, w)
   assert review.owner_only_fids(round_json(w)) == owner_fids
   assert posted_outcome == ("owner: " + ", ".join(owner_fids) if owner_fids else "revise")
+
+
+# ---------------------------------------------------------------- S2: the judges never ask it
+
+
+def judges_question(world, w):
+  code, out = world.run("judges", "question", "--review", w.rid, "--round", w.n, "--runcard", w.card)
+  return code, out, (Path(out.splitlines()[0]).read_text(encoding="utf-8") if code == 0 else "")
+
+
+@pytest.mark.parametrize("mode", ["normal", "leavemealone"])
+def test_the_judges_never_rule_a_spec_finding(world, mode):
+  # round 2 holds foreman-2-1 (SPEC) and the builder's contest of it, foreman-2-2 `contested foreman-2-1: the code is right`;
+  # `superegm judges question --review <rid> --round 2`; then the same round with foreman-2-3, a contest of an ordinary high, as well
+  contest = ("foreman-2-2", "contested foreman-2-1: the code is right")
+  w = unit_world(world, [("foreman-2-1", SPEC), contest], ["foreman-2-2"], mode)
+  posted_outcome = post_round(world, w)
+  question_code, question_out, _ = judges_question(world, w)
+  rnd = round_json(w)
+  rnd["reviewers"]["foreman"]["findings"].append(finding("foreman-2-3", "contested foreman-1-1: the test came first"))
+  rnd["builder_contested"].append({"fid": "foreman-2-3", "reason": "the test came first"})
+  core.atomic_write(w.s.path("reviews", w.rid, "round-2.json"), rnd)
+  code, out, question_with_an_ordinary_contest = judges_question(world, w)
+  assert code == 0, out
+  assert posted_outcome == "owner: foreman-2-1"
+  assert question_code == 1 and "question: nothing to ask in round 2 of " in question_out
+  assert "## Q1 foreman-2-3 (" in question_with_an_ordinary_contest and "foreman-2-1" not in question_with_an_ordinary_contest
