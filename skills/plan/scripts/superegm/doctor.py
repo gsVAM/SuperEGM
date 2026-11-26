@@ -162,10 +162,10 @@ def allow_prefixes(command: str) -> list:
   are plain and the group is not `api`, whose next word is an endpoint, not a command. A `git push`, or a git call
   with an option before its subcommand and the word `push` anywhere, gives None: no prefix narrower than the push
   itself keeps the launch's own-branch limit. A command runner (spec 1.3 section 3.10, U112: `git subtree`, `git rebase`,
-  `git submodule`, `git bisect` in any form, `gh alias set`, `gh extension`, `gh ext`, `gh extensions`) gives
-  `("runner", <name>)`, never a prefix, since any prefix would admit `--exec`, `foreach`, `run` or a push to any ref.
-  Every other segment gives "", no --allow: so no interpreter, runner or other first word is offered a rule that
-  admits arbitrary calls."""
+  `git submodule`, `git bisect`, `gh alias set`, `gh extension`, `gh ext`, `gh extensions`, with the subcommand right
+  after git or gh, even behind a quote shlex rejects) gives `("runner", <name>)`, never a prefix, since any prefix
+  would admit `--exec`, `foreach`, `run` or a push to any ref. Every other segment gives "", no --allow: so no
+  interpreter, runner or other first word is offered a rule that admits arbitrary calls."""
   prefixes = []
   for text in segments_of(command):
     try:
@@ -173,7 +173,7 @@ def allow_prefixes(command: str) -> list:
     except ValueError:
       # a quote shlex rejects (bash's $'..'): the subcommand right after git or gh is still read, by whitespace
       words = text.split()
-      if not (words[:1] == ["git"] and words[1:2] and words[1] in RUNNER_GIT):
+      if not runner_of(words):
         prefixes.append("")
         continue
     if not words:
@@ -185,12 +185,8 @@ def allow_prefixes(command: str) -> list:
     plain = [bool(PLAIN_WORD.fullmatch(w)) for w in words[1:3]]
     if words[0] == "git" and (words[1:2] == ["push"] or words[1:2] and words[1].startswith("-") and "push" in words):
       prefixes.append(None)
-    elif words[0] == "git" and words[1:2] and words[1] in RUNNER_GIT:
-      prefixes.append(("runner", f"git {words[1]}"))
-    elif name == "gh" and words[1:3] == ["alias", "set"]:
-      prefixes.append(("runner", "gh alias set"))
-    elif name == "gh" and words[1:2] and words[1] in RUNNER_GH:
-      prefixes.append(("runner", f"gh {words[1]}"))
+    elif runner_of(words):
+      prefixes.append(("runner", runner_of(words)))
     elif words[0] == "git" and plain[:1] == [True]:
       prefixes.append(f"git {words[1]}")
     elif name == "gh" and plain == [True, True] and words[1] != "api":
@@ -198,6 +194,18 @@ def allow_prefixes(command: str) -> list:
     else:
       prefixes.append("")
   return prefixes
+
+
+def runner_of(words: list) -> str:
+  """The command runner (U112) the words of a segment call with its subcommand right after git or gh, or ""."""
+  name = os.path.basename(words[0]) if words else ""
+  if words[:1] == ["git"] and words[1:2] and words[1] in RUNNER_GIT:
+    return f"git {words[1]}"
+  if name == "gh" and words[1:3] == ["alias", "set"]:
+    return "gh alias set"
+  if name == "gh" and words[1:2] and words[1] in RUNNER_GH:
+    return f"gh {words[1]}"
+  return ""
 
 
 def segments_of(command: str) -> list:
