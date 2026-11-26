@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3/5
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
-# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63); `respec`, a `spec` deviation's option, the owner's alone, a spent `relaunch` dropped beside it, and a letter that resolves to it binding nothing unrecorded (spec §7.6, U84); the judges' ruling journalled and posted with `contest` on a normal-mode card (spec §7.8, U88); U103's rulings (1.3 design sections 3.6 and 3.7): a point-1 ruling with no fid refused as `missing <fid>`, a point-1 overrule or allowance settling the finding it rules through `review.apply_settle` after `review settle`'s ruler checks, a failed GitHub read one `gh:` line, a posted ruling comment edited before its first record refused as `ruling comment edited: post a new one`; U104's owner-only spec findings (1.3 design section 3.8): an `owner: <ids>` decision offering a spec fid `<fid> respec` beside `finding upheld` and `finding overruled`, a `## Q<n>` question's spec finding read, a mixed decision's `<fid> allowed` ruled as an `owner: <ids>` decision's; the `<fid> respec — <reason>` form, read by `verify_posted` as a point-1 ruling on that fid, and a doubled `<fid> <fid> respec` refused as none of the options; the open respec file keyed by unit, head cycle (`cycle`) and fid; a spec fid's overrule settled `declined`, as on an `owner: <ids>` decision; a spec pair settled whole by an owner's overrule of either fid, a spec finding's contest copy refused to the judges, a spec decision recording its `word` and its findings' contest `links`, a ruling on either of a spec pair ruling both (`pair_ruled`), a fid's earlier ruling read within its own head review, and a file allowance ruling a spec decision's test-delta contest copy too.
+# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63); `respec`, a `spec` deviation's option, the owner's alone, a spent `relaunch` dropped beside it, and a letter that resolves to it binding nothing unrecorded (spec §7.6, U84); the judges' ruling journalled and posted with `contest` on a normal-mode card (spec §7.8, U88); U103's rulings (1.3 design sections 3.6 and 3.7): a point-1 ruling with no fid refused as `missing <fid>`, a point-1 overrule or allowance settling the finding it rules through `review.apply_settle` after `review settle`'s ruler checks, a failed GitHub read one `gh:` line, a posted ruling comment edited before its first record refused as `ruling comment edited: post a new one`; U104's owner-only spec findings (1.3 design section 3.8): an `owner: <ids>` decision offering a spec fid `<fid> respec` beside `finding upheld` and `finding overruled`, a `## Q<n>` question's spec finding read, a mixed decision's `<fid> allowed` ruled as an `owner: <ids>` decision's; the `<fid> respec — <reason>` form, read by `verify_posted` as a point-1 ruling on that fid, and a doubled `<fid> <fid> respec` refused as none of the options; the open respec file keyed by unit, head cycle (`cycle`) and fid; a spec fid's overrule settled `declined`, as on an `owner: <ids>` decision; a spec pair settled whole by an owner's overrule of either fid, a spec finding's contest copy refused to the judges, a spec decision recording its `word` and the contest `links` of its findings' chains that reach a spec finding, a ruling on either of a spec pair ruling both (`pair_ruled`), a fid's earlier ruling read within its own head review, and a file allowance ruling a spec decision's test-delta contest copy too.
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
@@ -612,13 +612,22 @@ def spec_pair(st, decision: dict, fid: str) -> list:
 def contest_links(st, source: str, question: str) -> dict:
   """Each contest link (a copy's fid to the fid it contests) down the chain of every finding the question names, read in
   the source's head review through every round (U104): a chain may pass through a finding of an earlier round the
-  question does not show."""
+  question does not show. Only a spec pair is ruled as one, so only a chain that reaches a spec finding is kept, up to
+  it: a test-delta finding or an ordinary one and its contest copy stay apart, each ruled by its own ruling."""
   rid, n = source_review({"source": source})
   rnd = review.load_round(st, rid, n) if rid else None
+
+  def spec(fid):
+    try:
+      return review.locate_finding(st, rid, fid)[3]["claim"].startswith(SPEC_CLAIM)
+    except core.HandoffError:
+      return False
   links = {}
   for fid in dict.fromkeys(a or b for a, b in FINDING_LINE_RE.findall(question)) if rnd else ():
     chain = review.contest_chain(st, rid, fid, rnd)
-    links.update(zip(chain, chain[1:]))
+    reached = [i for i, x in enumerate(chain) if spec(x)]
+    if reached:
+      links.update(zip(chain[:reached[-1]], chain[1:reached[-1] + 1]))
   return links
 
 

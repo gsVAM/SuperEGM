@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: the report subcommand (spec section 11): the per-batch wave report, the idle rules
-# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31); its own `ci_wait_minutes` config key, moved from `__init__` (U32); the board's tier column (U33); `waiting proceed` and a proceed closing a point-1 decision (U92); the `conflict` view and its board action (U62); a unit waiting on an open respec is not active, its board row and merge round included (U86); a point-1 decision carrying an unconverged panel's verdict line stays pending on each finding no ruling names, and the report lists each judges ruling with its panel (U88); a point-1 decision offering `<fid> respec` pending until each fid of its `<fid> respec` and `<fid> allowed` options, and each its split panel asks, is ruled, a contest copy ruled through the fid its chain reaches; read only on a decision recording its `owner:` word, pending on each fid its question names, a ruling on either of a spec pair ruling both, its recorded `links` read beside the question's, a 1.2.1 decision read as it was (U104's owner-only spec findings, 1.3 design section 3.8).
+# and the end condition, plus the pure functions the wave skill cites; the heading names its handoff, the wave counted among its handoff's cards (U20); `ready` and `waiting`, the board's `## Units` table (U30); an `owner: <ids>` decision pending until each id is ruled (U25); a pending unit holds no slot and a launch `interrupted (reboot)` is terminal (U24); a `kill_failed` launch still `running` reads `idle`, the interrupt its action (U31); its own `ci_wait_minutes` config key, moved from `__init__` (U32); the board's tier column (U33); `waiting proceed` and a proceed closing a point-1 decision (U92); the `conflict` view and its board action (U62); a unit waiting on an open respec is not active, its board row and merge round included (U86); a point-1 decision carrying an unconverged panel's verdict line stays pending on each finding no ruling names, and the report lists each judges ruling with its panel (U88); a point-1 decision offering `<fid> respec` pending until each fid of its `<fid> respec` and `<fid> allowed` options, and each its split panel asks, is ruled, a contest copy ruled through the fid its chain reaches; read only on a decision recording its `owner:` word, pending on each fid its question names, a ruling on either of a spec pair ruling both, its recorded `links` read beside the question's, a link counted only on a chain that reaches a spec fid, a 1.2.1 decision read as it was (U104's owner-only spec findings, 1.3 design section 3.8).
 
 """superegm report: rewrite `wave_<n>_report.md` from the store, the plan and the spec and print its path, the
 board and the idle, pending and loop lines. It opens the card's handoff as `status` does (`core.locate`,
@@ -376,14 +376,21 @@ def pending_decisions(foreman: dict) -> list:
         return False
       need = [o.split(" ")[0] for o in options if o.endswith((" respec", " allowed"))]
       need += [a or b for a, b in re.findall(rf"^(?:#+\s+Q\d+\s+({FID_PAT})\s+\(|({FID_PAT})\s*\|)", d.get("question") or "", re.M)]
-      links = dict(re.findall(rf"^(?:#+\s+Q\d+\s+)?({FID_PAT})\s*(?:\||\().*?(?:contested|unreplied) ({FID_PAT}):", d.get("question") or "", re.M))
-      links.update(d.get("links") or {})  # the chains `decision open` read through the store, an earlier round's link too
+      text = dict(re.findall(rf"^(?:#+\s+Q\d+\s+)?({FID_PAT})\s*(?:\||\().*?(?:contested|unreplied) ({FID_PAT}):", d.get("question") or "", re.M))
+      specs = {o.split(" ")[0] for o in options if o.endswith(" respec")}
 
-      def chain(fid):  # the fid, then each fid its contest chain reaches
+      def walk(fid, links):  # the fid, then each fid its contest chain reaches
         out = [fid]
         while links.get(out[-1]) and links[out[-1]] not in out:
           out.append(links[out[-1]])
         return out
+      links = {}  # only a spec pair is ruled as one: the question's links of a chain that reaches a spec fid, up to it
+      for x in text:
+        c = walk(x, text)
+        if reached := [i for i, y in enumerate(c) if y in specs]:
+          links.update(zip(c[:reached[-1]], c[1:reached[-1] + 1]))
+      links.update(d.get("links") or {})  # the spec chains `decision open` read through the store, an earlier round's link too
+      chain = lambda fid: walk(fid, links)
       done = {x for fid in fids for x in chain(fid)}  # a ruling on a copy rules what it contests too
       return not all(set(chain(fid)) & done for fid in need)
     if d.get("point") == 1 and options and all(o.endswith(" allowed") for o in options):
