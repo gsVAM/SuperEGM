@@ -3,7 +3,7 @@ name: writing-plans
 description: Use when you have a spec or requirements for a multi-step task, before touching code
 ---
 
-<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the SuperEGM Step form and its derived defaults; what a Step holds (1.2.1 §6.5); Q9 as the bar for a Step (U79); the 600-line target and the `units.*` limits (U42). -->
+<!-- From superpowers 7.0.0 (MIT); modified by SuperEGM (gsVAM), 2026: the SuperEGM Step form and its derived defaults; what a Step holds (1.2.1 §6.5); Q9 as the bar for a Step (U79); the 600-line target and the `units.*` limits (U42); the full suite is CI's (U119, 1.3 design section 3.3). -->
 
 # Writing Plans
 
@@ -167,6 +167,7 @@ The `Run` line and the closing line are optional: absent, the Step's command is 
 or `pytest <test path> -k <test name> -q` when the fence is parametrized, and the commits are
 `test(S<n>): <test name>` then `feat(S<n>): <test name>`; an explicit ``Run `<command>` `` line
 overrides the default and is the Step's one command.
+A unit's DoD `Run` items never run the full suite (about 11 minutes, over a Bash call's limit): a unit's own test file is a `Run` item, and the full suite is covered by `CI green on the head`.
 
 ## What a Step Contains
 
