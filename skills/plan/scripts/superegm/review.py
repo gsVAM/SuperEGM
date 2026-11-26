@@ -311,15 +311,20 @@ def out_of_scope(rows: list, spans: list, location: str, spec_name: str = "", ro
   repository-relative path after one leading `./` or the repository root (`root`, an absolute path) is taken off,
   or by its bare file name (the spec's own name wins a tie), opening the location and ending at whitespace, `:`,
   `#`, `,` or the end, whatever follows it (it may hold spaces: `domain model.md line 12 vs docs/specs/design.md`
-  names the listed document); a directory in front of the path names another file. A respec cycle (`respec`)
-  lists no reference document and its remit is the spec's correction alone: a location naming any other file
-  answers `none`."""
+  names the listed document, and so does `domain model.md:500` when the spec is `docs/specs/model.md`); a directory
+  in front of the path names another file. Two limits come with the token rule: a name that holds a space is matched
+  whole only as a listed document opening the location, never as the spec (a spec `docs/specs/my design.md` is read
+  from the token `design.md`, so `other/my design.md:8` reads as the spec's line 8 and `docs/specs/my design.md:8`
+  names no spec file), and a dotted code symbol before the spec's name (`see body.steps in design.md line 4`) ends
+  in an extension-shaped tail and reads as a file. A respec cycle (`respec`) lists no reference document and its
+  remit is the spec's correction alone: a location naming any other file answers `none`."""
   listed = {row[1] for row in rows if row[0] == "changed" and row[2] == row[3] == 0}
   loc, ends = location.removeprefix("./"), ": \t,#"
   for prefix in {root.rstrip("/"), str(Path(root).resolve()).rstrip("/")} - {"", "."}:
     loc = loc.removeprefix(prefix + "/")
   cite = CITE_RE.search(loc)
-  named = next((m for m in FILE_TOKEN_RE.finditer(loc) if cite is None or m.start() < cite.start()), None)
+  # shortcut: a dotted symbol such as body.steps before the spec's name ends in an extension-shaped tail and reads as a file
+  named =next((m for m in FILE_TOKEN_RE.finditer(loc) if cite is None or m.start() < cite.start()), None)
   spec_named = bool(named) and bool(spec_name) and (named.group(0) == spec_name or ("/" not in named.group(0) and spec_name.rsplit("/", 1)[-1] == named.group(0)))
   if respec and named and not spec_named:
     return "none"
@@ -327,11 +332,11 @@ def out_of_scope(rows: list, spans: list, location: str, spec_name: str = "", ro
     named_as = lambda name: loc.startswith(name) and (len(loc) == len(name) or loc[len(name)] in ends)
     if any(named_as(path) for path in listed):
       return None
-    if not spec_named:
-      if any(named_as(path.rsplit("/", 1)[-1]) for path in listed):
-        return None  # a listed document by its bare file name opening the location
-      if named:
-        return "none"
+    spec_bare = spec_name.rsplit("/", 1)[-1]
+    if any(named_as(bare) for bare in (path.rsplit("/", 1)[-1] for path in listed) if bare != spec_bare):
+      return None  # a listed document by its bare file name opening the location, even when its last word is the spec's own name
+    if not spec_named and named:
+      return "none"
     rows = [row for row in rows if not (row[0] == "changed" and row[2] == row[3] == 0)]
   if rows and rows[0][0] == "whole":
     return None
