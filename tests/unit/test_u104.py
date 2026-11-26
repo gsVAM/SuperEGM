@@ -13,7 +13,7 @@ import pytest
 import superegm as core
 from conftest import REPO, set_config
 from superegm import review
-from test_wave import foreman_of, wave_store
+from test_wave import fake_gh, foreman_of, question, wave_store
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = "deviation (spec) unruled: docs/designs/sample.md:12 says 3; `pytest -k t` fails"
@@ -128,3 +128,65 @@ def test_review_settle_leaves_a_spec_finding_to_the_owner(world, mode):
                                       "--judges", f"{w.rid}-r2-abcdef", "--runcard", w.card)
   assert settle_code == 1 and "review settle: foreman-2-1 is the owner's alone: --owner required" in settle_err
   assert round_json(w)["reviewers"]["foreman"]["findings"][0]["disposition"] is None
+
+
+# ---------------------------------------------------------------- S4: the owner's decision offers respec
+
+
+SPEC_LINE = "foreman-1-2 | high | docs/designs/sample.md:12 | regression: no | " + SPEC
+DELTA_LINE = "foreman-1-1 | high | tests/unit/test_q.py:3 | regression: no | test-delta: tests/unit/test_q.py:3 removed"
+
+
+def word_world(world, word, mode="normal", comments=None):
+  """A wave card in `mode`, U01 whose round 1 posted `word` (its head review never opened), and the owner's comments `comments`
+  (id to body) on U01's issue."""
+  extra = ["--mode", "leavemealone"] if mode == "leavemealone" else []
+  card = world.run("runcard", "open", "--skill", "wave", "--artifact", world.spec, *extra, card=None)[1].strip()
+  rounds = [{"round": 1, "phase": "posted", "outcome": word, "launch": 1, "runcard": card, "head": HEAD, "dispatch_id": "d1",
+             "posted_at": "2026-11-03T09:00:00Z"}]
+  s = wave_store(world, U01={"pr": 70, "head": HEAD, "ci": "green", "rounds": rounds})
+  set_config(world, repo=REPO, owners=["owner"])
+  routes = {f"repos/{REPO}/issues/comments/{cid}": {"id": cid, "user": {"login": "owner"}, "body": body}
+            for cid, body in (comments or {}).items()}
+  fake_gh(world, routes)
+  return SimpleNamespace(card=card, s=s, rid=review.review_id(s, "head", "U01", 1))
+
+
+def open_q(world, w, text, n=1, unit="U01"):
+  code, out = world.run("decision", "open", "--unit", unit, "--point", 1, "--question", question(world, text),
+                        "--source", f"review {w.rid} round {n}", "--runcard", w.card)
+  assert code == 0, out
+  return out.splitlines()[0]
+
+
+def rule(world, w, ruling, qid="q1", posted=None, unit="U01"):
+  where = ["--posted", posted] if posted else ["--decision", qid]
+  return world.run("decision", "rule", "--unit", unit, "--ruling", ruling, "--by", "owner", *where, "--runcard", w.card)
+
+
+@pytest.mark.parametrize("lines, word, options", [
+    ([SPEC_LINE], "owner: foreman-1-2", ["finding upheld", "finding overruled", "foreman-1-2 respec"]),
+    (["## Q1 foreman-1-2 (high, docs/designs/sample.md:12): " + SPEC], "owner: foreman-1-2",
+     ["finding upheld", "finding overruled", "foreman-1-2 respec"]),
+    ([SPEC_LINE, DELTA_LINE], "owner: foreman-1-2, foreman-1-1",
+     ["finding upheld", "finding overruled", "foreman-1-2 respec", "foreman-1-1 allowed"]),
+])
+def test_the_owner_decision_on_a_spec_finding_offers_respec(world, lines, word, options):
+  # `superegm decision open --point 1` on the round whose word is `word`, the question file holding `lines`;
+  # `stored_options` the decision's `options` in the unit's foreman file; on the last, `superegm decision rule --ruling
+  # 'foreman-1-1 finding overruled — kept'` (read as the allowance) exits `allowance_code`, and on a fresh copy of it
+  # `--ruling 'test-delta tests/unit/test_q.py allowed'` exits `file_code`
+  w = word_world(world, word, comments={601: "**Ruling:** test-delta tests/unit/test_q.py allowed — kept"})
+  open_q(world, w, "\n".join(lines) + "\n")
+  stored_options = foreman_of(w.s, "U01")["decisions"][-1]["options"]
+  fresh = w.s.path("foreman", "U01").read_bytes()
+  allowance_code, allowance_out = rule(world, w, "foreman-1-1 finding overruled — kept")
+  allowance_rulings = foreman_of(w.s, "U01")["rulings"]
+  w.s.path("foreman", "U01").write_bytes(fresh)
+  file_code, file_out = rule(world, w, "test-delta tests/unit/test_q.py allowed", posted=601)
+  file_rulings = foreman_of(w.s, "U01")["rulings"]
+  assert stored_options == options
+  assert len(lines) == 1 or allowance_code == file_code == 0, (allowance_out, file_out)
+  if len(lines) > 1:  # each recorded as the allowance of the test-delta fid, the spec fid left to its own ruling
+    assert [r["ruling"] for r in allowance_rulings] == ["foreman-1-1 finding overruled — kept"]
+    assert [r["ruling"] for r in file_rulings] == ["test-delta tests/unit/test_q.py allowed", "foreman-1-1 allowed"]
