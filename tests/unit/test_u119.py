@@ -3,10 +3,11 @@
 
 """U119: `ci_verdict` reads "green" as "a check ran"; the plan and builder wording says the full suite is CI's."""
 
+from pathlib import Path
+
 import pytest
 
 import superegm
-from conftest import REPO
 from superegm import status
 
 
@@ -41,7 +42,7 @@ def test_no_check_ran_is_red(conclusions, contexts, verdict):
 
 
 def read(path):
-  return (REPO / path).read_text()
+  return (Path(__file__).resolve().parents[2] / path).read_text()
 
 
 def test_full_suite_is_ci():

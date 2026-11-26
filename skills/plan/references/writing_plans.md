@@ -167,6 +167,7 @@ The `Run` line and the closing line are optional: absent, the Step's command is 
 or `pytest <test path> -k <test name> -q` when the fence is parametrized, and the commits are
 `test(S<n>): <test name>` then `feat(S<n>): <test name>`; an explicit ``Run `<command>` `` line
 overrides the default and is the Step's one command.
+A unit's DoD `Run` items never run the full suite (about 11 minutes, over a Bash call's limit): a unit's own test file is a `Run` item, and the full suite is covered by `CI green on the head`.
 
 ## What a Step Contains
 
