@@ -10,6 +10,7 @@ import json
 import pytest
 
 import superegm  # the harness reloads the package per test: read its names at call time
+from conftest import make_pr
 from superegm import atomic_write
 from superegm.inbox import inbox_items
 from test_inbox import HEAD, U, seed
@@ -41,6 +42,10 @@ def set_head(s, uid, head):
   # round 3 (astra-2-1): no `status --wait` snapshot, the pull request known from `status`'s `units[<id>].pr` alone
   ("posted **Ruling:** proceed <shown7> — ok", "pushed, no status snapshot", "moved"),
   ("typed --head <shown7> --reason ok", "pushed, no status snapshot", "moved"),
+  # round 5 (astra-3-1): `status --watch` replaced the pull request; the snapshot still names the old one at `shown`
+  ("posted **Ruling:** proceed <shown7> — ok", "watched a replacement pull request", "moved"),
+  ("typed --head <shown7> --reason ok", "watched a replacement pull request", "moved"),
+  ("posted comment 901, recorded before 1.3 from **Ruling:** proceed — ship it", "watched a replacement pull request", "moved"),
   ("posted **Ruling:** proceed — ok", "shown", NEEDS),
   ("typed --reason ok", "shown", NEEDS),
   ("posted comment 901, recorded before 1.3 from **Ruling:** proceed — ship it", "shown", "replayed"),
@@ -72,6 +77,11 @@ def test_head_proceed_pins_the_shown_head(world, how, head_now, outcome):
     state["status"]["units"].pop("U01")
     atomic_write(s.path("state"), state)
     world.gh.prs[70]["headRefOid"] = "d" * 40
+  elif head_now == "watched a replacement pull request":  # `status --watch U01=72`: #70 still at `shown`, #72 is not
+    make_pr(world.gh, 72, "d" * 40)
+    state = json.loads(s.path("state").read_text(encoding="utf-8"))
+    state["units"]["U01"].update(watch={"number": 72, "at": UPDATED}, pr={"number": 72, "head": "d" * 40})
+    atomic_write(s.path("state"), state)
   before = foreman_of(s, "U01").get("proceeds", [])
   review_before = s.path("reviews", rid, "review.json").read_bytes()
   if how.startswith("posted"):
