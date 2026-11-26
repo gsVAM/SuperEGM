@@ -2,7 +2,7 @@
 # Added by SuperEGM (gsVAM), 2026: the decision subcommand (spec sections 7, 11 and 13.2): every point-1/2/3/5
 # question and ruling of a unit, the by-hand BLOCKED ruling and the owner's close as `stop`; the redesign ruling
 # (spec section 11.1) and the store-only brainstorm brief it writes; the one ruling grammar (`ruling_of`, `ruling_form`,
-# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63); `respec`, a `spec` deviation's option, the owner's alone, a spent `relaunch` dropped beside it, and a letter that resolves to it binding nothing unrecorded (spec §7.6, U84); the judges' ruling journalled and posted with `contest` on a normal-mode card (spec §7.8, U88); U103's rulings (1.3 design sections 3.6 and 3.7): a point-1 ruling with no fid refused as `missing <fid>`, a point-1 overrule or allowance settling the finding it rules through `review.apply_settle` after `review settle`'s ruler checks, a failed GitHub read one `gh:` line, a posted ruling comment edited before its first record refused as `ruling comment edited: post a new one`; U104's owner-only spec findings (1.3 design section 3.8): an `owner: <ids>` decision offering a spec fid `<fid> respec` beside `finding upheld` and `finding overruled`, a `## Q<n>` question's spec finding read, a mixed decision's `<fid> allowed` ruled as an `owner: <ids>` decision's; the `<fid> respec — <reason>` form, read by `verify_posted` as a point-1 ruling on that fid, and a doubled `<fid> <fid> respec` refused as none of the options.
+# `recorded_rulings`) and the by-hand ruling read through it (U22); a judges' redesign needs a high finding behind it (U23); an `owner: <ids>` decision's `<fid> allowed` options, the owner's alone (U25); a head's fifth point, `accept` or `revise` (U35); a launch with no commit of its own spends no `relaunch` and a second is `stop the unit` (U31); the owner's `amend` ruling and the amendment it records (spec §6.5, 1.2.1-pre.1 P5), as the file `amendments/<comment id>.json` written before the ruling is saved (U96); a failed resume is no launch without a commit (U63); `respec`, a `spec` deviation's option, the owner's alone, a spent `relaunch` dropped beside it, and a letter that resolves to it binding nothing unrecorded (spec §7.6, U84); the judges' ruling journalled and posted with `contest` on a normal-mode card (spec §7.8, U88); U103's rulings (1.3 design sections 3.6 and 3.7): a point-1 ruling with no fid refused as `missing <fid>`, a point-1 overrule or allowance settling the finding it rules through `review.apply_settle` after `review settle`'s ruler checks, a failed GitHub read one `gh:` line, a posted ruling comment edited before its first record refused as `ruling comment edited: post a new one`; U104's owner-only spec findings (1.3 design section 3.8): an `owner: <ids>` decision offering a spec fid `<fid> respec` beside `finding upheld` and `finding overruled`, a `## Q<n>` question's spec finding read, a mixed decision's `<fid> allowed` ruled as an `owner: <ids>` decision's; the `<fid> respec — <reason>` form, read by `verify_posted` as a point-1 ruling on that fid, and a doubled `<fid> <fid> respec` refused as none of the options; the open respec file keyed by unit, head cycle (`cycle`) and fid.
 
 """superegm decision open|rule: record a unit's question (`decisions[]`) and its ruling (`rulings[]`)."""
 
@@ -79,38 +79,43 @@ def respec_files(st) -> list:
   return sorted(folder.iterdir()) if folder.is_dir() else []
 
 
-def respec_held(st, unit: str, comment_id: int = None, finding: str = None):
+def respec_held(st, unit: str, comment_id: int = None, finding: str = None, cycle: str = None):
   """The `(file, content)` of the open respec file of this unit and this deviation, a comment (`comment_id`) or the
-  foreman's finding (`finding`), else None."""
+  foreman's finding (`finding`) of head cycle `cycle` (U104: a fid repeats across head cycles), else None; a file
+  with no `cycle` (1.2.1's) matches on unit and fid alone."""
   for file in respec_files(st):
     if file.name.endswith(".open.json"):
       try:
         held = json.loads(file.read_text(encoding="utf-8"))
       except ValueError:
         continue
-      if isinstance(held, dict) and held.get("unit") == unit and held.get("comment_id") == comment_id and held.get("finding") == finding:
+      if (isinstance(held, dict) and held.get("unit") == unit and held.get("comment_id") == comment_id
+              and held.get("finding") == finding and held.get("cycle", cycle) == cycle):
         return file, held
   return None
 
 
-def open_respec(st, unit: str, comment_id: int, now: str, finding: str = None) -> str:
+def open_respec(st, unit: str, comment_id: int, now: str, finding: str = None, cycle: str = None) -> str:
   """Spec §7.6: the owner's `respec` on a `spec` deviation writes `respec/R<n>.open.json` (`{id, unit, comment_id,
   at}`, the store's `file` kind, never `state.json`) in the handoff's directory; `R<n>` is the next number no
-  `respec/` file uses. On the foreman's spec finding `finding` (its fid) takes `comment_id`'s place: `{id, unit,
-  finding, at}`. A rerun after a crash finds the file for the same unit and deviation and keeps it."""
-  if held := respec_held(st, unit, comment_id, finding):
+  `respec/` file uses. On the foreman's spec finding `finding` (its fid) takes `comment_id`'s place and `cycle`
+  names its head cycle, the decision source's review id (U104; never `review`, which `approve-spec --respec` reads
+  as a closed review cycle): `{id, unit, finding, cycle, at}`. A rerun after a crash finds the file for the same
+  unit, head cycle and deviation and keeps it."""
+  if held := respec_held(st, unit, comment_id, finding, cycle):
     return held[1]["id"]
   used = [int(m.group(1)) for f in respec_files(st) if (m := RESPEC_FILE.match(f.name))]
   rid = f"R{max(used, default=0) + 1}"
-  entry = {"id": rid, "unit": unit, "finding": finding} if finding else {"id": rid, "unit": unit, "comment_id": comment_id}
+  entry = ({"id": rid, "unit": unit, "finding": finding} | ({"cycle": cycle} if cycle else {}) if finding
+           else {"id": rid, "unit": unit, "comment_id": comment_id})
   core.atomic_write(st.path("file", "respec", f"{rid}.open.json"), entry | {"at": now})
   return rid
 
 
-def drop_respec(st, unit: str, comment_id: int = None, finding: str = None) -> None:
-  """Remove the open respec file of this unit and deviation, if any: what a crashed run left when a rerun rules
-  another option, so the file is never read as an open respec."""
-  if held := respec_held(st, unit, comment_id, finding):
+def drop_respec(st, unit: str, comment_id: int = None, finding: str = None, cycle: str = None) -> None:
+  """Remove the open respec file of this unit, head cycle and deviation, if any: what a crashed run left when a
+  rerun rules another option, so the file is never read as an open respec."""
+  if held := respec_held(st, unit, comment_id, finding, cycle):
     held[0].unlink()
 
 
@@ -823,12 +828,13 @@ def rule(args) -> int:
   if amends:
     deviation = {"comment_id": int(str(decision["source"]).split()[1])}
   elif decision["point"] == 1 and chosen.split(" ")[0] in spec_claims(decision["question"]):  # a spec finding's ruling
-    deviation = {"finding": chosen.split(" ")[0]}
+    words = str(decision.get("source") or "").split()  # its head cycle, the source's review id (U104)
+    deviation = {"finding": chosen.split(" ")[0], "cycle": words[1] if len(words) > 1 and words[0] == "review" else None}
   if deviation:
     if (chosen == "respec" if amends else bool(respec_fid)) and not closed:
-      open_respec(st, unit, deviation.get("comment_id"), now, deviation.get("finding"))
+      open_respec(st, unit, deviation.get("comment_id"), now, deviation.get("finding"), deviation.get("cycle"))
     else:
-      drop_respec(st, unit, deviation.get("comment_id"), deviation.get("finding"))
+      drop_respec(st, unit, deviation.get("comment_id"), deviation.get("finding"), deviation.get("cycle"))
   # recorded before the read-back, the session's post marked `unread` (its GitHub time not yet read), so a
   # `status --wait` pass in between compares its edits with its own `created_at` and skips the unedited post
   core.save_foreman(st, unit, data)
