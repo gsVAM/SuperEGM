@@ -94,6 +94,26 @@ def test_allow_list_admits_no_git_rule_that_reaches_a_push(configured, body_text
   assert kept == ["Bash(git add:*)", "Bash(git commit:*)", "Bash(git status:*)"]
 
 
+@pytest.mark.parametrize("configured, body_text", [
+    (["Read", "Bash(env git push:*)"], RUNS),
+    (["Read", "Bash(env -u GH_TOKEN git push:*)"], RUNS),
+    (["Read", "Bash(env:*)"], RUNS),
+    (["Read", "Bash(GIT_DIR=.git git:*)"], RUNS),
+    (["Read", "Bash(command git push:*)"], RUNS),
+    (["Read", "Bash(sh -c:*)"], RUNS),
+    (["Read", "Bash(nice -n 5 git:*)"], RUNS),
+    (["Read"], "## Definition of done\n2. Run `env FOO=1 pytest -q && pytest -q` — passes\n"),
+])
+def test_allow_list_admits_no_runner_rule_that_reaches_a_push(configured, body_text):
+  # review astra-3-1: a rule led by a runner, a shell or an assignment (`env git push`, `env:*`, `sh -c`) admits
+  # `git push` behind it; none survives, a DoD segment led by one adds none, and the push script stays the one push entry
+  tools = launch_builder.allowed_tools(configured, "superegm/h/U07", body_text, "/usr/local/bin/gh", bin=Path("/bin/U07_r1_bin"))
+  assert [t for t in tools if t not in ("Read", "Bash(pytest:*)")] == [
+      "Bash(/bin/U07_r1_bin/superegm-push:*)", "Bash(/bin/U07_r1_bin/superegm-precheck:*)", "Bash(git reset --hard:*)"]
+  assert not any("push" in t or t.startswith(("Bash(env", "Bash(sh")) for t in
+                 launch_builder.allowed_tools(configured, "superegm/h/U07", body_text, "/usr/local/bin/gh"))
+
+
 def test_orders_carry_the_allow_list_and_the_command_rules(world, monkeypatch, spawn_fake):
   # the launch prompt's orders; launch_tools: the launch's --allowedTools entries; gh: the launch's gh shim path; bin_dir: its bin directory
   s, card, hid = launch(world, monkeypatch)
