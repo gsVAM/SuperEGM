@@ -603,7 +603,8 @@ def test_a_test_delta_finding_and_its_contest_copy_are_ruled_apart(world, copy_f
   code, out = rule(world, w, second)
   assert code == 0, out
   assert pending_between == ["q1"]
-  assert ("U01/owner/2/foreman-1-1" in between) if copy_first else ("U01/contested/q1/foreman-2-2" in between)
+  # foreman-1-1 still offered by its `test-delta` item (the inbox lists a test-delta fid there, never twice), or the copy by its own
+  assert ("U01/test-delta/2/foreman-1-1" in between) if copy_first else ("U01/contested/q1/foreman-2-2" in between)
   assert dispositions(w)["foreman-1-1"] == "declined" and dispositions(w)["foreman-2-2"] == "contested"
   assert rule(world, w, "foreman-2-1 respec — the spec is wrong")[0] == 0
   assert report.pending_decisions(foreman_of(w.s, "U01")) == [] and review.open_decisions(w.s, "U01") == []
