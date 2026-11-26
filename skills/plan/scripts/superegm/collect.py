@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # From the elephant-goldfish-model (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17); an unreplied external high or medium carried forward (U21); rulings read through `ruling_of` and the record, every folded deviation heading (U22); the DoD re-run and the test delta, two gates before the word (U25); its own `foreman` config key and `init` line, moved from `__init__` and `init` (U32); both `binding_rulings` calls drop the consumed comments, so an edited recorded proceed waives no check (U94); the worktree checks in `worktree_checks`, the one function `collect` and `precheck` call, the posted rounds' settled findings in `posted_findings`, the reading both share, and the changed paths read NUL-separated, one with a control character shown JSON-quoted (U67); the `spec` deviation kind in `DEVIATION_RE`, and `--spec`, the foreman's own finding of kind `spec` held in its round (U84); it prints each foreman finding's line, and saves the round's `collected` phase last, so a failed `collect` leaves the round `prepared` (U101, 1.3 design section 3.4).
+# Modified by SuperEGM (gsVAM), 2026: EGM's `cmd_collect` as the collect module, keyed by the dispatch id; it records the foreman's own findings of a round (spec section 11); the lane record's `brief_sha256` (U17); an unreplied external high or medium carried forward (U21); rulings read through `ruling_of` and the record, every folded deviation heading (U22); the DoD re-run and the test delta, two gates before the word (U25); its own `foreman` config key and `init` line, moved from `__init__` and `init` (U32); both `binding_rulings` calls drop the consumed comments, so an edited recorded proceed waives no check (U94); the worktree checks in `worktree_checks`, the one function `collect` and `precheck` call, the posted rounds' settled findings in `posted_findings`, the reading both share, and the changed paths read NUL-separated, one with a control character shown JSON-quoted (U67); the `spec` deviation kind in `DEVIATION_RE`, and `--spec`, the foreman's own finding of kind `spec` held in its round (U84); it prints each foreman finding's line, and saves the round's `collected` phase last, so a failed `collect` leaves the round `prepared` (U101, 1.3 design section 3.4); a ruling on a contest copy settles the spec finding its chain reaches, and `SPEC_CLAIM` imported from `decision` (U104's owner-only spec findings, 1.3 design section 3.8).
 
 """superegm collect: the foreman's findings of a round through one `review record --reviewer foreman`, or a
 round that could not complete with `--not-run`."""
@@ -19,7 +19,7 @@ from pathlib import Path
 
 import superegm as core
 from superegm import body as body_mod, review, tdd_order
-from superegm.decision import PATH_LINE, binding_rulings, check_respec, cites, consumed_comments, recorded_rulings
+from superegm.decision import PATH_LINE, SPEC_CLAIM, binding_rulings, check_respec, cites, consumed_comments, recorded_rulings
 from superegm.foreman import head_review_id
 from superegm.launch_builder import DOD_RESULT_RE, SENTINEL, launched_pairs
 from superegm.orient import TEST_RE
@@ -394,7 +394,7 @@ def collect(args, card):
     if run["summary"] is not None:
       core.atomic_write(r / "dod" / f"{i}.txt", f"exit: {'none' if run['exit'] is None else run['exit']}\n"
                         f"summary: {run['summary']}\ntimed_out: {'yes' if run['timed_out'] else 'no'}\n")
-  specs += [s for s in unruled_specs(last, rulings) if s not in specs]  # a spec finding stays open until the owner rules it (§7.6)
+  specs += [s for s in unruled_specs(last, rulings, contest_of) if s not in specs]  # a spec finding stays open until the owner rules it (§7.6)
   lines, contested = foreman_findings(n, verdict, text, scope, worktree, facts["changed"], pr_body, comments, login, prior, prior_ci_fid,
                                       commits, prior_tdd, prior_scope, contest_of,
                                       external, earlier, disposed, posted, handoff.config.get("owners") or [],
@@ -443,15 +443,19 @@ def spec_findings(texts: list, spec: str) -> list:
   return found
 
 
-SPEC_CLAIM = "deviation (spec) unruled: "
-
-
-def unruled_specs(last: dict, rulings: list) -> list:
+def unruled_specs(last: dict, rulings: list, links: dict = None) -> list:
   """The foreman's spec findings the previous posted round (`last`) holds open, `(location, claim)` each as
   `spec_findings` makes them: a finding of kind `spec` blocks until the owner rules it (§7.6), so a round that is
   not given `--spec` again still raises it, and `carry` keeps its id. A finding an `upheld`, `overruled` or
-  `allowed` ruling names, or a recorded `<fid> respec` (read as an overrule), is settled and not raised again."""
-  settled = {r.subject for r in rulings if r.kind in ("upheld", "overruled", "allowed")}
+  `allowed` ruling names, or a recorded `<fid> respec` (read as an overrule), is settled and not raised again; so is
+  one a ruling on a contest copy reaches down the copy's chain (`links`, each copy to the fid it names, U104)."""
+  links, settled = links or {}, set()
+  for r in rulings:
+    if r.kind in ("upheld", "overruled", "allowed"):
+      fid = r.subject
+      while fid not in settled:
+        settled.add(fid)
+        fid = links.get(fid, fid)
   prev = ((last.get("reviewers") or {}).get("foreman") or {}).get("findings") or []
   return [(f["location"], f["claim"]) for f in prev
           if f["disposition"] is None and f["claim"].startswith(SPEC_CLAIM) and f["id"] not in settled]
