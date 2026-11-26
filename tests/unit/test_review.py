@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by the elephant-goldfish-model Astra fork (gsVAM), 2026.
-# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03); the review loop and approve-spec (U04); the `acceptable:` line (U35); the by-hand card and the lineless path (U32); an external comment read whole from its root (U73); an approval entry's `rounds`, and the spec resume's panel line (U36); the approval-entry key set takes `triage` (U39); `test_handoff_id_copy_rule` takes a refusal row (U53).
+# Modified by SuperEGM (gsVAM), 2026: EGM's tests moved here from test_helper.py (U03); the review loop and approve-spec (U04); the `acceptable:` line (U35); the by-hand card and the lineless path (U32); an external comment read whole from its root (U73); an approval entry's `rounds`, and the spec resume's panel line (U36); the approval-entry key set takes `triage` (U39); `test_handoff_id_copy_rule` takes a refusal row (U53); a head's recorded sha is a full 40-hex commit sha (U101's recovering a round, 1.3 design section 3.4).
 
 """U04: the review loop (`review open|record|settle|status|rule`) and `approve-spec` (spec section 8)."""
 
@@ -56,7 +56,7 @@ def test_repo_config_panels_start_with_panel_of():
     assert reviewers[kind][:len(panel.split(","))] == panel.split(","), kind
 SPEC = ("# Sample\n\n## 1. Intent\n\nText.\n\n## 2. Units\n\n| Unit | Scope | Blocked by | Size |\n"
         "| --- | --- | --- | --- |\n| U01 | a thing | — | S |\n")
-SLUG, HID, A = "2026-11-03-sample-design", "sample-abc123", "a" * 64
+SLUG, HID, A = "2026-11-03-sample-design", "sample-abc123", "a" * 40  # A: a head's sha, the full 40-hex commit sha (U101)
 BODY = f"<!-- superegm:handoff={HID} unit=U07 spec={'f' * 64} -->\n# U07 — Title\n"
 SKILL_OF = {"spec": "review-spec", "integrate": "integrate", "plan": "review-plan", "head": "wave"}
 
@@ -505,7 +505,7 @@ def test_a_file_allowance_closes_the_decision_on_a_contested_test_delta_copy(wor
   assert record(world, rid, 1, "foreman", ["foreman-1-1 | high | tests/unit/test_q.py:3 | regression: no | test-delta: tests/unit/test_q.py:3 removed"], cid, sha=A)[0] == 0
   head_round(world, 2, "posted", cid, "contested: foreman-2-1")
   copy = "foreman-2-1 | high | pr #70 comment 5 | regression: no | contested foreman-1-1: the assertion moved to test_r"
-  assert record(world, rid, 2, "foreman", [copy], cid, sha="b" * 64)[0] == 0
+  assert record(world, rid, 2, "foreman", [copy], cid, sha="b" * 40)[0] == 0
   served = {"id": 13, "user": {"login": "owner"}, "body": "**Ruling:** test-delta tests/unit/test_q.py allowed — by design\n",
             "created_at": "2026-11-09T10:00:00Z", "issue_url": f"https://api.github.com/repos/{REPO}/issues/7"}
   world.gh.extend("api", lambda args, cwd, token=None: world.gh.ok(served) if world.gh.endpoint_of(args) == f"repos/{REPO}/issues/comments/13" else world.gh.do_api(args))
@@ -539,7 +539,7 @@ def test_a_file_allowance_reaches_a_contested_copy_of_its_file_after_another_cop
                                            for k, f in ((1, "q"), (2, "z"))], cid, sha=A)[0] == 0
   head_round(world, 2, "posted", cid, "contested: foreman-2-1, foreman-2-2")
   copies = [f"foreman-2-{k} | high | pr #70 comment {k + 4} | regression: no | contested foreman-1-{k}: the assertion moved" for k in (1, 2)]
-  assert record(world, rid, 2, "foreman", copies, cid, sha="b" * 64)[0] == 0
+  assert record(world, rid, 2, "foreman", copies, cid, sha="b" * 40)[0] == 0
   served = {n: {"id": n, "user": {"login": "owner"}, "body": f"**Ruling:** test-delta tests/unit/test_{f}.py allowed — by design\n",
                 "created_at": "2026-11-09T10:00:00Z", "issue_url": f"https://api.github.com/repos/{REPO}/issues/7"} for n, f in ((13, "q"), (14, "z"))}
   by_endpoint = {f"repos/{REPO}/issues/comments/{n}": c for n, c in served.items()}

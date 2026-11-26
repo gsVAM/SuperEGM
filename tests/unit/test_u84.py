@@ -1,5 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U84's tests, spec §7.6 "The deviation" and "The ruling": the `spec` deviation kind and the owner's `respec`.
+# Modified by SuperEGM (gsVAM), 2026: `collected:` is pinned by its first line, and the brief's evidence wording (U101's recovering a round, 1.3 design section 3.4); the open respec file's `cycle` and `open_respec`'s calls re-pinned (U104's owner-only spec findings, 1.3 design section 3.8).
 
 """U84: a `**Deviation (spec):**` comment blocks until ruled, its decision offers `respec` (the owner's alone,
 never in the judges' question), `decision rule ... respec` writes `respec/R<n>.open.json` and never `state.json`,
@@ -30,7 +31,7 @@ def test_spec_deviation_blocks_until_ruled(world, tmp_path, monkeypatch, ruled, 
   comments = [c(12, "builder-bot", SPEC_COMMENT)] + ([c(13, "owner", "**Ruling:** (12) (a) — the spec stands")] if ruled else [])
   w = prepared(world, tmp_path, monkeypatch, comments={2: comments})
   code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
-  assert (code, out.strip()) == (0, f"collected: {blockers} foreman findings"), out
+  assert (code, out.splitlines()[0]) == (0, f"collected: {blockers} foreman findings"), out  # then each finding's line (U101)
   lines = (w.dir / "r1/foreman.findings").read_text(encoding="utf-8").splitlines()
   assert lines == (["foreman-1-1 | high | issue #2 comment 12 | regression: no | deviation (spec) unruled"] if blockers else [])
 
@@ -128,8 +129,11 @@ def test_builder_orders_and_foreman_brief_define_spec(path):
     assert "No GitHub write but the one `review post` makes." in text and "its `**Deviation (spec):**` comment" not in text
   else:  # what is refused is the owner's `respec` ruling (check_respec); the comment itself is held by collect
     assert "both or it is refused" not in text and "`respec` ruling" in text
-  # what `check_respec` counts as evidence: the command on one line in inline backticks, then its output, or a base path:line
+  # what `check_respec` counts as evidence: the command on one line in inline backticks, then its output, or a base path:line;
+  # the brief says it as the check counts it (U101): a backticked span that is not itself a `path:line`, or a `path:line` outside the spec
   assert "on one line in inline backticks" in text and "any other form is refused" in text
+  if path.endswith("foreman_brief.md"):
+    assert "a backticked span that is not itself a `path:line`, or a `path:line` outside the spec" in " ".join(text.split())
   if path.endswith("foreman_brief.md"):  # collect carries the finding until ruled; its decision offers `<fid> respec`
     assert "need not repeat `--spec`" in text and "`<fid> respec`" in text
     assert "which the owner's alone" not in text and "offered on a builder's `**Deviation (spec):**` comment, the owner's alone" not in text
@@ -177,7 +181,7 @@ def test_an_unrecorded_respec_comment_keeps_the_spec_blocker(world, tmp_path, mo
   comments = [c(12, "builder-bot", SPEC_COMMENT), c(13, "owner", "**Ruling:** (12) respec — the spec is wrong")]
   w = prepared(world, tmp_path, monkeypatch, comments={2: comments})
   code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
-  assert (code, out.strip()) == (0, "collected: 1 foreman findings"), out
+  assert (code, out.splitlines()[0]) == (0, "collected: 1 foreman findings"), out  # then its line (U101)
 
 
 def test_a_third_comment_decision_still_offers_respec(world):
@@ -267,7 +271,7 @@ def test_the_foreman_spec_finding_is_held_in_the_round_that_raises_it(world, tmp
   w = prepared(world, tmp_path, monkeypatch, comments={2: []})
   code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child,
                         "--spec", "docs/designs/sample.md:12 says 3; `pytest -k t` fails")
-  assert (code, out.strip()) == (0, "collected: 1 foreman findings"), out
+  assert (code, out.splitlines()[0]) == (0, "collected: 1 foreman findings"), out  # then its line (U101)
   lines = (w.dir / "r1/foreman.findings").read_text(encoding="utf-8").splitlines()
   assert lines == ["foreman-1-1 | high | docs/designs/sample.md:12 | regression: no | deviation (spec) unruled: "
                    "docs/designs/sample.md:12 says 3; `pytest -k t` fails"]
@@ -323,7 +327,8 @@ def test_the_decision_on_a_foreman_spec_finding_offers_respec_to_the_owner_alone
   code, out = rule_on(world, card, qid, "foreman-1-1 respec — the spec is wrong")
   assert code == 0, out
   open_file = s.path("file", "respec", "R1.open.json")
-  assert json.loads(open_file.read_text(encoding="utf-8")) == {"id": "R1", "unit": "U02", "finding": "foreman-1-1", "at": AT}
+  # keyed by unit, head cycle (the decision source's review id) and fid (U104)
+  assert json.loads(open_file.read_text(encoding="utf-8")) == {"id": "R1", "unit": "U02", "finding": "foreman-1-1", "cycle": "r1", "at": AT}
   assert state_file.read_bytes() == before
   assert [(r.kind, r.subject) for r in decision.recorded_rulings(foreman_of(s, "U02"))] == [("overruled", "foreman-1-1")]  # settles the finding
 
@@ -344,7 +349,7 @@ def test_a_rerun_that_rules_another_option_removes_the_stale_open_file(world, by
   card, s = spec_world(world)
   if by_finding:
     qid, other = finding_decision(world, card), "foreman-1-1 finding overruled — the spec stands"
-    decision.open_respec(s, "U02", None, core.now_iso(), finding="foreman-1-1")
+    decision.open_respec(s, "U02", None, core.now_iso(), finding="foreman-1-1", cycle="r1")  # the decision's head cycle (U104)
   else:
     qid, other = open_decision(world, card, SPEC_COMMENT), "(b)"
     decision.open_respec(s, "U02", 101, core.now_iso())

@@ -1,6 +1,6 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
 # Added by SuperEGM (gsVAM), 2026: U10's tests of the foreman's helper subcommands.
-# Modified by SuperEGM (gsVAM), 2026: collect reads rulings through `ruling_of` and the record (U22).; the forge check drops an outer run's `GIT_CONFIG_` pairs (1.2.1 wave fix); the cap tests set the review's stored `cap` in place of the `review.CAP` monkeypatch (U36); the Astra brief's sections pin includes `Amendments` (U97).
+# Modified by SuperEGM (gsVAM), 2026: collect reads rulings through `ruling_of` and the record (U22).; the forge check drops an outer run's `GIT_CONFIG_` pairs (1.2.1 wave fix); the cap tests set the review's stored `cap` in place of the `review.CAP` monkeypatch (U36); the Astra brief's sections pin includes `Amendments` (U97); the `prepared:` line's full head and `collected:` pinned by its first line (U101's recovering a round, 1.3 design section 3.4); the recorded `test_delta` entries carry their settlement key (U102, 1.3 design section 3.5).
 
 """U10: foreman dispatch, prepare, collect, tdd-order, review post. This file replaces U03's nine moved
 prepare/collect tests (they pin `--round`, `--run-folder`, `--verdict`, `head-moved`, `launched` and `--remove`:
@@ -309,7 +309,7 @@ def test_prepare_reviews_the_tip_it_fetches(world, tmp_path, monkeypatch, app):
   code, out = world.run("prepare", "--unit", UNIT, "--dispatch", "d9", "--runcard", child)
   assert (code, out.strip()) == (1, "dispatch: d9 is not U01's current dispatch (d1)")
   code, out = world.run("prepare", "--unit", UNIT, "--dispatch", did, "--runcard", child)
-  assert (code, out.strip()) == (0, f"prepared: head {head[:7]} merge-base {base[:7]} ci green previous - astra: off"), out
+  assert (code, out.strip()) == (0, f"prepared: head {head} merge-base {base[:7]} ci green previous - astra: off"), out
   entry = json.loads(st.path("foreman", UNIT).read_text(encoding="utf-8"))["rounds"][0]
   assert entry["phase"] == "prepared" and entry["head"] == head and entry["merge_base"] == base
   d = st.path("review", UNIT, f"pr{PR}")
@@ -508,7 +508,7 @@ def test_collect_records_foreman_findings(world, tmp_path, monkeypatch, name):
   w = prepared(world, tmp_path, monkeypatch, **kw)
   r = 2 if prior else 1
   code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
-  assert (code, out.strip()) == (0, f"collected: {len(expected)} foreman findings"), out
+  assert (code, out.splitlines()[0]) == (0, f"collected: {len(expected)} foreman findings"), out  # then each finding's line (U101)
   lines = (w.dir / f"r{r}/foreman.findings").read_text(encoding="utf-8").splitlines()
   assert lines == [f"foreman-{r}-{i} | high | {e}" for i, e in enumerate(expected, 1)]
   rnd = json.loads((w.st.path("reviews", w.rid) / f"round-{r}.json").read_text(encoding="utf-8"))
@@ -530,7 +530,7 @@ def test_collect_takes_a_fixed_reply_under_the_goldfish_id_for_an_upheld_contest
                  "foreman-1-2 | high | pr #70 comment 14 | regression: no | contested change-review-1-1: the test covers it\n"})
   w = prepared(world, tmp_path, monkeypatch, **kw)
   code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
-  assert (code, out.strip()) == (0, "collected: 0 foreman findings"), out
+  assert (code, out.strip()) == (0, "collected: 0 foreman findings"), out  # no finding: no line after the count
 
 
 def test_collect_carries_an_overruled_scope_finding_forward(world, tmp_path, monkeypatch):
@@ -546,7 +546,7 @@ def test_collect_carries_an_overruled_scope_finding_forward(world, tmp_path, mon
                  "foreman-1-2 | high | src/other.py | regression: no | changed path outside Scope paths\n"})
   w = prepared(world, tmp_path, monkeypatch, commits=commits, **kw)
   code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
-  assert (code, out.strip()) == (0, "collected: 0 foreman findings"), out
+  assert (code, out.strip()) == (0, "collected: 0 foreman findings"), out  # no finding: no line after the count
 
 
 RED, RULED, D = "echo boom; exit 1", lambda body: {2: [c(13, "owner", body)]}, lambda n, what, at=None: f"{at or f'dod/{n}.txt'} | regression: no | dod-{n}: {what}"
@@ -598,14 +598,18 @@ Q, N, R, T = "tests/unit/test_q.py", "tests/unit/test_n.py", "tests/unit/test_r.
 THREE, TWO = T("def test_a():", "  assert 1 == 1", "  assert 2 == 2"), T("def test_a():", "  assert 1 == 1")
 S1 = [("test(S1): hook", "tests/unit/test_hooks.py"), ("feat(S1): hook", "src/hooks.py")]
 E = lambda file, line, base_line, base="base": {"file": file, "line": line, "base_line": base_line, "kind": "removed", "base_commit": base}
+TEXT = {1: "def test_a():", 2: "assert 1 == 1", 3: "assert 2 == 2"}  # THREE's lines, stripped
+K = lambda file, line, base_line, base="base": {**E(file, line, base_line, base), "test": "test_a", "text": TEXT[base_line],
+                                                "base_text": TEXT[base_line], "occurrence": 1}  # a 1.3 entry, its settlement key (U102)
 CLAIM = lambda file, line: f"{file}:{line} | regression: no | test-delta: {file}:{line} removed"
-DELTA = {"removed-from-base": ({Q: THREE}, [("chore: trim", Q, TWO)], {}, [E(Q, 3, 3)], [CLAIM(Q, 3)]),
-  "created-then-trimmed": ({}, [("chore: add", N, THREE), ("chore: trim", N, TWO)], {}, [E(N, 3, 3, "created")], [CLAIM(N, 3)]),
-  "renamed": ({Q: THREE}, [("chore: move", {Q: None, R: TWO})], {}, [E(R, 3, 3)], [CLAIM(R, 3)]),
-  "created-then-renamed": ({}, [("chore: add", N, THREE), ("chore: move", {N: None, R: TWO})], {}, [E(R, 3, 3, "created")], [CLAIM(R, 3)]),
+DELTA = {"removed-from-base": ({Q: THREE}, [("chore: trim", Q, TWO)], {}, [K(Q, 3, 3)], [CLAIM(Q, 3)]),
+  "created-then-trimmed": ({}, [("chore: add", N, THREE), ("chore: trim", N, TWO)], {}, [K(N, 3, 3, "created")], [CLAIM(N, 3)]),
+  "renamed": ({Q: THREE}, [("chore: move", {Q: None, R: TWO})], {}, [K(R, 3, 3)], [CLAIM(R, 3)]),
+  "created-then-renamed": ({}, [("chore: add", N, THREE), ("chore: move", {N: None, R: TWO})], {}, [K(R, 3, 3, "created")], [CLAIM(R, 3)]),
   "allowed-entry": ({Q: THREE}, [("chore: trim", Q, TWO)], {"comments": RULED("**Ruling:** foreman-1-1 allowed — approved")}, [], []),
+  # round 1's entry is a 1.2.1 one (no test or text): its allowance binds its base commit and line
   "allowed-other-base": ({Q: THREE}, [("chore: trim", Q, TWO)], {"comments": RULED("**Ruling:** foreman-1-1 allowed — approved"), "seed_base": "0" * 40},
-                         [E(Q, 3, 3)], [CLAIM(Q, 3)]),
+                         [K(Q, 3, 3)], [CLAIM(Q, 3)]),
   "allowed-file": ({Q: THREE}, [("chore: gut", Q, T("def test_a():", "  pass"))], {"comments": RULED("**Ruling:** test-delta tests/unit/test_q.py allowed — by design")}, [], []),
   # round 4 (astra-4-1): a recorded file allowance binds from the record, its comment kept, edited to another file or deleted
   **{f"allowed-file-recorded-{how}": ({Q: THREE}, [("chore: gut", Q, T("def test_a():", "  pass"))],
@@ -616,13 +620,14 @@ DELTA = {"removed-from-base": ({Q: THREE}, [("chore: trim", Q, TWO)], {}, [E(Q, 
                                                     "posted_at": "t"} for text in ("test-delta tests/unit/test_q.py allowed", "foreman-1-1 allowed")]}, [], [])
      for how, comments in (("kept", RULED("**Ruling:** test-delta tests/unit/test_q.py allowed — by design")),
                            ("edited", RULED("**Ruling:** test-delta tests/unit/test_z.py allowed — by design")), ("deleted", {}))},
+  # U102 (spec section 3.5): the judges' recorded overrule settles the entry as the owner's does, no longer re-raised
   "judges-overruled":({Q: THREE}, [("chore: trim", Q, TWO)], {"comments": {}, "decisions": [{"id": "q1", "point": 1, "source": "review r round 1"}],
                        "rulings": [{"decision": "q1", "ruling": "foreman-1-1 finding overruled", "by": "judges:p-1", "reason": "r",
-                                    "posted": "comment 13", "posted_at": "t"}]}, [E(Q, 3, 3)], [CLAIM(Q, 3)]),
+                                    "posted": "comment 13", "posted_at": "t"}]}, [], []),
   "renamed-then-deleted": ({Q: THREE}, [("chore: move", {Q: None, R: THREE}), ("chore: drop", {R: None})], {},
-                           [E(R, n, n) for n in (1, 2, 3)], [CLAIM(R, n) for n in (1, 2, 3)]),
+                           [K(R, n, n) for n in (1, 2, 3)], [CLAIM(R, n) for n in (1, 2, 3)]),
   "renamed-out-then-deleted": ({Q: THREE}, [("chore: archive", {Q: None, "archive/q.txt": THREE}), ("chore: drop", {"archive/q.txt": None})], {},
-                               [E(Q, n, n) for n in (1, 2, 3)], [CLAIM(Q, n) for n in (1, 2, 3)])}
+                               [K(Q, n, n) for n in (1, 2, 3)], [CLAIM(Q, n) for n in (1, 2, 3)])}
 
 
 @pytest.mark.parametrize("name", list(DELTA))
@@ -670,7 +675,7 @@ def test_collect_carries_an_unreplied_external_high_forward(world, tmp_path, mon
   n == 3 and record(world, st0, rid, 2, "0" * 40, card0, {"change-review": ""})
   w = prepared(world, tmp_path, monkeypatch, **kw)
   code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
-  assert (code, out.strip()) == (0, f"collected: {len(expected)} foreman findings"), out
+  assert (code, out.splitlines()[0]) == (0, f"collected: {len(expected)} foreman findings"), out  # then each finding's line (U101)
   assert (w.dir / f"r{n}/foreman.findings").read_text(encoding="utf-8").splitlines() == [f"foreman-{n}-{i} | high | {e}" for i, e in enumerate(expected, 1)]
 
 
@@ -692,7 +697,7 @@ def test_a_reply_a_round_late_or_a_round_early_still_answers_an_external_finding
   if earlier:
     atomic_write(w.dir / "r2/comments.md", f"builder: builder-bot\n### pr #70 comment 9 by builder-bot at 2026-11-02T11:00:00Z\n{earlier}\n")
   code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
-  assert (code, out.strip()) == (0, f"collected: {len(expected)} foreman findings"), out
+  assert (code, out.splitlines()[0]) == (0, f"collected: {len(expected)} foreman findings"), out  # then each finding's line (U101)
   assert (w.dir / "r3/foreman.findings").read_text(encoding="utf-8").splitlines() == [f"foreman-3-{i} | high | {e}" for i, e in enumerate(expected, 1)]
 
 
@@ -721,7 +726,7 @@ def carried_unreplied(w, code, out, expected):
   foreman-2-1 with `carried_from: 2`; any other expectation is posted as before and nothing unreplied is held."""
   carried = expected == [CARRIED]
   posted_lines = [] if carried else expected
-  assert (code, out.strip()) == (0, f"collected: {len(posted_lines)} foreman findings"), out
+  assert (code, out.splitlines()[0]) == (0, f"collected: {len(posted_lines)} foreman findings"), out  # then each finding's line (U101)
   assert (w.dir / "r3/foreman.findings").read_text(encoding="utf-8").splitlines() == [f"foreman-3-{i} | high | {e}" for i, e in enumerate(posted_lines, 1)]
   held = json.loads(w.st.path("reviews", w.rid, "round-3.json").read_text(encoding="utf-8"))["reviewers"]["foreman"]["findings"]
   assert [(f["id"], f.get("carried_from")) for f in held if f["claim"].startswith("unreplied ")] == ([("foreman-2-1", 2)] if carried else [])
@@ -765,7 +770,7 @@ def test_a_carried_copy_settled_or_contested_ends_the_carry_of_its_original(worl
     atomic_write(w.dir / "r3/comments.md", "builder: builder-bot\n### pr #70 comment 9 by builder-bot at 2026-11-02T13:00:00Z\n"
                                            "**Reply foreman-2-1:** contested — it fires\n")
   code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
-  assert (code, out.strip()) == (0, "collected: 0 foreman findings"), out
+  assert (code, out.strip()) == (0, "collected: 0 foreman findings"), out  # no finding: no line after the count
   assert (w.dir / f"r{n}/foreman.findings").read_text(encoding="utf-8") == ""
 
 
@@ -783,7 +788,7 @@ def test_an_upheld_contest_of_a_carried_copy_takes_a_fixed_reply_under_the_origi
   atomic_write(w.dir / "r3/comments.md", "builder: builder-bot\n### pr #70 comment 9 by builder-bot at 2026-11-02T13:00:00Z\n"
                                          "**Reply foreman-2-1:** contested — it fires\n")
   code, out = world.run("collect", "--unit", UNIT, "--dispatch", w.did, "--runcard", w.child)
-  assert (code, out.strip()) == (0, "collected: 0 foreman findings"), out
+  assert (code, out.strip()) == (0, "collected: 0 foreman findings"), out  # no finding: no line after the count
 
 
 @pytest.mark.parametrize("phase, outcome, ok", [
