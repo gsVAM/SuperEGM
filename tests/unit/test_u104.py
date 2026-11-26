@@ -342,16 +342,21 @@ def test_a_ruling_on_the_spec_finding_closes_its_contest_copy(world, named, ruli
 # ---------------------------------------------------------------- S10: pending until each fid is ruled
 
 
-def ruled_file(word, options, split, rulings) -> dict:
-  """The unit's foreman file: round 2 posted `word`, q1 its point-1 decision with `options`, ruled `rulings` in order."""
-  if split:
+def ruled_file(word, options, split, rulings, found=None) -> dict:
+  """The unit's foreman file: round 2 posted `word`, q1 its point-1 decision with `options` opened on that word (its `word`,
+  as `decision open` records it, absent on a 1.2.1 decision when `word` is None), ruled `rulings` in order; its question names
+  `found` (findings), else the split panel's three findings and verdict line, else one line per option's fid."""
+  if found is not None:
+    text = "".join(line_of(f) for f in found)
+  elif split:
     found = [finding("foreman-2-1", SPEC), finding(*COPY), finding(*ORDINARY)]
     text = "".join(line_of(f) for f in found) + "The panel split: see (judges/p-1/verdict.json).\n"
   else:
     text = "".join(line_of(finding(o.split(" ")[0], SPEC if o.endswith(" respec") else "test-delta: tests/unit/test_q.py:3 removed"))
                    for o in options if o.endswith((" respec", " allowed")))
-  return {"rounds": [{"round": 2, "phase": "posted", "outcome": word}],
-          "decisions": [{"id": "q1", "point": 1, "source": "review head-U01-c1 round 2", "question": text, "options": options}],
+  return {"rounds": [{"round": 2, "phase": "posted", "outcome": word or "contested: foreman-1-2"}],
+          "decisions": [{"id": "q1", "point": 1, "source": "review head-U01-c1 round 2", "question": text, "options": options}
+                        | ({"word": word} if word else {})],
           "rulings": [{"decision": "q1", "ruling": r, "by": "owner"} for r in rulings]}
 
 
@@ -399,3 +404,114 @@ def test_the_inbox_offers_a_spec_findings_rulings(world):
   assert not any(i["kind"] in ("owner", "contested") for i in after_items)
   # the owner's overrule settles the spec finding `declined`, as on any `owner: <ids>` decision
   assert {f["id"]: f["disposition"] for f in round_json(w)["reviewers"]["foreman"]["findings"]}["foreman-2-1"] == "declined"
+
+
+# ---------------------------------------------------------------- review round 1 (PR #301)
+
+
+def pair_world(world, mode="normal", comments=None, more=()):
+  """U01's round 2 posted `owner: foreman-2-1`, holding foreman-2-1 (SPEC), its contest copy foreman-2-2 (in
+  `builder_contested`) and `more`; q1 open on the word, its question naming the pair; the owner's comments `comments` (id to
+  body) on U01's issue."""
+  w = unit_world(world, [("foreman-2-1", SPEC), COPY, *more], ["foreman-2-2"], mode, posted=True)
+  data = foreman_of(w.s, "U01")
+  data["rounds"][-1]["outcome"] = "owner: foreman-2-1"
+  core.atomic_write(w.s.path("foreman", "U01"), data)
+  core.atomic_write(w.s.path("handoffs", w.s.handoff_id), {"id": w.s.handoff_id, "spec": str(world.spec), "opened_at": "t", "closed_at": None})
+  fake_gh(world, {f"repos/{REPO}/issues/comments/{cid}": {"id": cid, "user": {"login": "owner"}, "body": body}
+                  for cid, body in (comments or {}).items()})
+  found = {f["id"]: f for f in round_json(w)["reviewers"]["foreman"]["findings"]}
+  open_q(world, w, line_of(found["foreman-2-1"]) + line_of(found["foreman-2-2"]), n=2)
+  return w
+
+
+def dispositions(w) -> dict:
+  return {f["id"]: f["disposition"] for f in round_json(w)["reviewers"]["foreman"]["findings"]}
+
+
+@pytest.mark.parametrize("mode", ["normal", "leavemealone"])
+def test_the_judges_never_rule_a_spec_findings_contest_copy(world, mode):
+  # astra-1-1: the copy foreman-2-2 `contested foreman-2-1: …` is the owner's as its spec original is: `review settle --judges`
+  # refuses it, `decision rule --by judges:<panel>` refuses it, nothing recorded; and `collect` reads no judges' ruling on a
+  # copy as settling the spec finding it reaches
+  w = pair_world(world, mode)
+  panel = f"{w.rid}-r2-abcdef"
+  settle_code, settle_err = world.run("review", "settle", "--review", w.rid, "--finding", "foreman-2-2", "--disposition", "contested",
+                                      "--judges", panel, "--runcard", w.card)
+  before = foreman_of(w.s, "U01")["rulings"]
+  rule_code, rule_err = world.run("decision", "rule", "--unit", "U01", "--decision", "q1", "--ruling",
+                                  "foreman-2-2 finding overruled — the panel", "--by", f"judges:{panel}", "--runcard", w.card)
+  assert settle_code == 1 and "review settle: foreman-2-2 is the owner's alone: --owner required" in settle_err
+  assert rule_code == 1 and "decision: foreman-2-2 is the owner's alone" in rule_err
+  assert foreman_of(w.s, "U01")["rulings"] == before and dispositions(w)["foreman-2-2"] is None
+  last = {"reviewers": {"foreman": {"findings": [finding("foreman-2-1", SPEC)]}}}
+  judges = decision.Ruling("overruled", "foreman-2-2", None, "the panel", f"judges:{panel}", 0)
+  owners = decision.Ruling("overruled", "foreman-2-2", None, "the code is right", "owner", 0)
+  links = {"foreman-2-2": "foreman-2-1"}
+  assert [claim for _, claim in collect.unruled_specs(last, [judges], links)] == [SPEC]
+  assert collect.unruled_specs(last, [owners], links) == []
+
+
+@pytest.mark.parametrize("mode, ruled", [("normal", "foreman-2-2"), ("normal", "foreman-2-1"),
+                                         ("leavemealone", "foreman-2-2"), ("leavemealone", "foreman-2-1")])
+def test_an_overrule_of_either_of_the_pair_settles_both(world, mode, ruled):
+  # astra-1-3, codebase-details-1-1: the owner's overrule of the copy settles the spec finding too; codebase-details-1-2: the
+  # owner's overrule of the spec finding closes its copy in the round record; either way the round is clean, q1 closed, and the
+  # inbox lists neither; in leavemealone-mode by the owner's posted comment
+  w = pair_world(world, mode, comments={601: f"**Ruling:** {ruled} finding overruled — the code is right"})
+  code, out = rule(world, w, f"{ruled} finding overruled — the code is right", posted=601 if mode == "leavemealone" else None)
+  assert code == 0, out
+  assert dispositions(w) == {"foreman-2-1": "declined", "foreman-2-2": "contested"}
+  assert report.pending_decisions(foreman_of(w.s, "U01")) == [] and review.open_decisions(w.s, "U01") == []
+  assert next(e for e in foreman_of(w.s, "U01")["rounds"] if e["round"] == 2)["outcome"] == "clean"
+
+
+def test_a_closed_pairs_copy_stays_out_of_the_inbox_once_the_word_moves_on(world):
+  # change-review-1-1: the spec finding ruled, the round still open on another high, its word rewritten past the spec fid: the
+  # copy, whose chain reaches a fid q1 ruled, is never a `contested` item of its own
+  w = pair_world(world, more=[("foreman-2-4", "tdd-order: S1: no test commit")])
+  code, out = rule(world, w, "foreman-2-1 finding upheld")
+  assert code == 0, out
+  data = foreman_of(w.s, "U01")
+  data["rounds"][-1]["outcome"] = "revise"
+  core.atomic_write(w.s.path("foreman", "U01"), data)
+  items = [i for i in map(json.loads, world.run("inbox", "--json")[1].splitlines()) if i["subject"] == "U01"]
+  assert not any(i["fingerprint"].endswith("/foreman-2-2") for i in items)
+
+
+@pytest.mark.parametrize("posted_with_decision", [False, True])
+def test_a_spec_fid_ruled_in_one_head_cycle_is_ruled_again_in_the_next(world, posted_with_decision):
+  # astra-1-2: foreman-1-1 ruled `respec` on c1's q1; the owner's posted `foreman-1-1 respec` for c2's q2 is recorded there,
+  # with or without --decision, and writes c2's own open file
+  w = word_world(world, "owner: foreman-1-1", comments={601: "**Ruling:** foreman-1-1 respec — again"})
+  c1, c2 = (review.review_id(w.s, "head", "U01", cycle) for cycle in (1, 2))
+  for qid, rid in (("q1", c1), ("q2", c2)):
+    code, out = world.run("decision", "open", "--unit", "U01", "--point", 1, "--question", question(world, SPEC_1_1),
+                          "--source", f"review {rid} round 1", "--runcard", w.card)
+    assert code == 0, out
+    if qid == "q1":
+      assert rule(world, w, "foreman-1-1 respec — the spec is wrong")[0] == 0
+  argv = ["decision", "rule", "--unit", "U01", "--ruling", "foreman-1-1 respec — again", "--by", "owner", "--posted", 601,
+          "--runcard", w.card] + (["--decision", "q2"] if posted_with_decision else [])
+  code, out = world.run(*argv)
+  assert code == 0, out
+  assert [r["decision"] for r in foreman_of(w.s, "U01")["rulings"]] == ["q1", "q2"]
+  assert open_respec_files(w) == ["R1.open.json", "R2.open.json"]
+
+
+def test_a_spec_decision_stays_pending_on_each_contest_its_question_names(world):
+  # astra-1-4: q1 names foreman-2-1 (SPEC) and foreman-2-3, an ordinary contest with no verdict line yet: pending until both are
+  # ruled, so `decision open` refuses a second decision meanwhile
+  found = [finding("foreman-2-1", SPEC), finding(*ORDINARY)]
+  options = ["finding upheld", "finding overruled", "foreman-2-1 respec"]
+  first = ruled_file("owner: foreman-2-1", options, False, ["foreman-2-1 respec — the spec is wrong"], found)
+  both = ruled_file("owner: foreman-2-1", options, False, ["foreman-2-1 respec — the spec is wrong", "foreman-2-3 finding upheld"], found)
+  assert [d["id"] for d in report.pending_decisions(first)] == ["q1"] and report.pending_decisions(both) == []
+
+
+def test_a_1_2_1_decision_with_a_respec_option_closes_at_its_first_ruling():
+  # codebase-details-1-4: a 1.2.1 contest decision (no `word`) holding the foreman's spec line beside an ordinary finding, as
+  # U84's `finding_decision`, closes at its first ruling as it did: a 1.2.1 store opens unchanged
+  found = [finding("foreman-1-1", SPEC), finding("foreman-1-2", "the hook never fires")]
+  options = ["finding upheld", "finding overruled", "foreman-1-1 respec"]
+  assert report.pending_decisions(ruled_file(None, options, False, ["foreman-1-2 finding upheld"], found)) == []
