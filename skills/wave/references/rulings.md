@@ -1,5 +1,6 @@
 <!-- Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0.
-Added by SuperEGM (gsVAM), 2026: the wave skill's stops and by-hand rulings, moved out of the wave skill's SKILL.md (the owner's ruling: a 24K skill body is context bloat); `decision rule` settling the point-1 finding it rules, its second line, the missing-fid, CI-finding and edited-comment refusals (U103, 1.3 design sections 3.6 and 3.7). -->
+Added by SuperEGM (gsVAM), 2026: the wave skill's stops and by-hand rulings, moved out of the wave skill's SKILL.md (the owner's ruling: a 24K skill body is context bloat); `decision rule` settling the point-1 finding it rules, its second line, the missing-fid, CI-finding and edited-comment refusals (U103, 1.3 design sections 3.6 and 3.7); U107's head proceed `<sha7>` forms, posted and typed, and the undo refused while a proceed's merge is offered (U107, 1.3 design section 3.9). -->
+
 
 # Rulings by comment, and stops
 
@@ -78,16 +79,24 @@ point's section" below is the point's section of `references/decision_points.md`
   posted `clean` reads `revise` (`cap-reached` at the cap), an accept given on the round
   has lapsed, and triage is off for the unit's remaining rounds; the next wave session
   sends the unit to revision or to the cap decision. Refused (a fid of an earlier
-  round, a stopped unit, a merged or closed pull request), the follow-up row stays for the
+  round, a stopped unit, a proceed whose merge is still offered, a merged or closed pull
+  request), the follow-up row stays for the
   owner to file as follow-up work, and the comment never blocks a round.
-- A proceed (design section 4.2): the owner's `**Ruling:** proceed — <reason>` on a unit's
-  issue ends the unit's head review whatever its state. Run
+- A proceed (design section 4.2): the owner's `**Ruling:** proceed <sha7> — <reason>` on a
+  unit's issue, `<sha7>` the head the owner was shown, ends the unit's head review whatever its
+  state. Run
   `python3 '<HELPER>' review rule --ruling proceed --owner --posted <cid> --review <rid> --runcard '<CARD>'`,
-  `<cid>` the comment's id and `<rid>` the unit's head review, never `decision rule`. It checks the
-  comment (an owner's, of the proceed form, on the unit's issue), settles every unsettled
+  `<cid>` the comment's id and `<rid>` the unit's head review, never `decision rule`; typed in
+  a session, the same proceed is
+  `python3 '<HELPER>' review rule --ruling proceed --head <sha7> --owner --reason <text> --review <rid> --runcard '<CARD>'`
+  (a spec or plan review takes `--reason` alone). It checks the comment (an owner's, of the
+  proceed form, on the unit's issue), pins the head `<sha7>` names, settles every unsettled
   finding of the cycle `declined` by the owner and records `foreman.proceeds[]`; replayed
-  for the same comment, review and head it writes nothing. Refused (`--judges`, a stopped
-  unit, `comment <cid> already ruled`: a later head needs a new comment), it writes nothing.
+  for the same comment, review and head it writes nothing (a proceed recorded before 1.3 in
+  the bare form too: it keeps its pinned head). Refused (`--judges`, a stopped unit,
+  `comment <cid> already ruled`: a later head needs a new comment; the unit's head moved since
+  `<sha7>`: the owner proceeds again on the new head; no head at all:
+  `proceed needs the head: write "proceed <sha7> — <reason>"`), it writes nothing.
 - A stopped unit keeps its branch and its open issue, is never dispatched or
   launched again, and is listed in the report with its unlanded dependants
   for the owner (design section 12).

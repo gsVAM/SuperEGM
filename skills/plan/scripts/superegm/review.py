@@ -1,5 +1,5 @@
 # Copyright 2026 gsVAM. SPDX-License-Identifier: Apache-2.0
-# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review settle --judges` for a head's contested or declined high or medium on a normal-mode card, journalled `Ruling (judges <panel>, contest)` (U88); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76); a spec cycle's changed reference documents as whole-file `changed <path>` scope lines, their `refs` manifest on each round, in the scope filter, the settle check and the proceed ruling (U75); `review open --respec R<n>`: the diff and its sections as evidence, the `design`, `codebase-details` and Astra panel, cap 2 (U85); a plan or integrate cycle a respec approval closed by its `source_review` (U91); `review record --sha256` on a head takes the full 40-hex commit sha alone (U101, 1.3 design section 3.4); the settle's writes in `apply_settle`, which `decision rule` calls on a point-1 ruling, the CI finding's refusal in `check_ci_finding` and a posted proceed comment edited before its record refused in `posted_comment` (U103, 1.3 design sections 3.6 and 3.7); U104's owner-only spec findings (1.3 design section 3.8): `owner_only_fids` and the posted word naming a `deviation (spec)` fid whatever else blocks, its settle the owner's alone, `point_one_open` counting only the contests its question names and a contest copy ruled through the fid its chain reaches; a spec finding's contest copy the owner's alone in `check_settle`, and the owner's comment on either of a spec pair read for both; U105's respec cycle ingest, which neither records nor carries an external finding outside its scope, read now with each line carried from its commit (1.3 design section 3.8).
+# Added by SuperEGM (gsVAM), 2026: the review loop (spec section 8); the Astra lane on a head and its not-installed record (U17); the amendment scope of a spec review and the batch settle (U19); `review ingest` and the external reviewer (U21); `review ingest --pr`, the carry and the fixed replies on the spec PR (U26); the gates before the word, `owner: <ids>` and the owner-only settle of a `test-delta` finding (U25); the accept below the cap, its `acceptable:` line and the head's `--decision` (U35); the stall read across a tick's `wave` cards (U24); a scoped round's lineless finding out of scope and `approved_text` reading `spec_blob` (U32); an external comment read whole from its root (U73); `review.rounds` for the cap, stored at a cycle's open, and a spec resume's narrowed panel (`panels`) with its printed line, `derive_what_ran` and `review record` reading the round's panel (U36); `review settle --judges` for a head's contested or declined high or medium on a normal-mode card, journalled `Ruling (judges <panel>, contest)` (U88); `review triage` on a head, the deferral by a frozen pattern, its follow-up row and the owner's undo (U40); each reviewer's record copying its stored instructions manifest (U38); with `driver.chain` on, the stall read across the top-level cards of every chain phase (U44); the owner's proceed, its settlement, its `foreman.proceeds[]` entry and the convergence it gives first (U57); a merge round left out of the cap's count (U66); `review open` taking a loaded repository reviewer for its kinds, and a round record carrying its `persona` (U76); a spec cycle's changed reference documents as whole-file `changed <path>` scope lines, their `refs` manifest on each round, in the scope filter, the settle check and the proceed ruling (U75); `review open --respec R<n>`: the diff and its sections as evidence, the `design`, `codebase-details` and Astra panel, cap 2 (U85); a plan or integrate cycle a respec approval closed by its `source_review` (U91); `review record --sha256` on a head takes the full 40-hex commit sha alone (U101, 1.3 design section 3.4); the settle's writes in `apply_settle`, which `decision rule` calls on a point-1 ruling, the CI finding's refusal in `check_ci_finding` and a posted proceed comment edited before its record refused in `posted_comment` (U103, 1.3 design sections 3.6 and 3.7); U104's owner-only spec findings (1.3 design section 3.8): `owner_only_fids` and the posted word naming a `deviation (spec)` fid whatever else blocks, its settle the owner's alone, `point_one_open` counting only the contests its question names and a contest copy ruled through the fid its chain reaches; a spec finding's contest copy the owner's alone in `check_settle`, and the owner's comment on either of a spec pair read for both; U105's respec cycle ingest, which neither records nor carries an external finding outside its scope, read now with each line carried from its commit (1.3 design section 3.8); a head proceed pins the head the owner was shown, `--head <sha7>` or the posted `proceed <sha7> — <reason>`, refused once the head moved or without one (U107, 1.3 design section 3.9).
 
 """superegm review open|record|settle|status|rule|scope|post|ingest|triage: the one review loop (spec section 8)."""
 
@@ -128,6 +128,7 @@ def register(subparsers):
   u.add_argument("--ruling", choices=RULINGS, required=True)
   u.add_argument("--decision", metavar="ID", help="on a head below the cap: the unit's pending point-5 decision naming this review")
   u.add_argument("--reason", help="proceed: the owner's reason, typed (else --posted names the owner's comment on a head)")
+  u.add_argument("--head", metavar="SHA7", help="proceed, typed on a head: the head the owner was shown, refused once it moved")
   by_whom(u, required=False)  # `stop` alone needs no ruler once `continue` is spent and the bytes moved
   v = core.add_parser(action, "post", "post a head round's review to its pull request, bound to the reviewed commit")
   v.add_argument("--unit", required=True)
@@ -2394,8 +2395,12 @@ def rule_review(args) -> int:
 
 def rule_proceed(st: core.Store, rid: str, review: dict, card: dict, args) -> int:
   """`review rule --ruling proceed --owner` (spec section 4.2): the owner's alone, typed with `--reason`, or on a head
-  `--posted <comment id>`, the owner's `**Ruling:** proceed — <reason>` on the unit's issue, consumed once."""
-  reason, posted = getattr(args, "reason", None), getattr(args, "posted", None)
+  `--posted <comment id>`, the owner's `**Ruling:** proceed — <reason>` on the unit's issue, consumed once. On a head
+  the proceed names the head the owner was shown (1.3 design section 3.9): `--head <sha7>` typed, `proceed <sha7> —
+  <reason>` posted; it pins that head, is refused once the unit's head moved since and, without a head, refused with
+  `proceed needs the head: …`. A `--posted` comment already recorded for the same review and head replays as
+  recorded, whatever its form (a proceed recorded under 1.2.1 keeps its pinned head)."""
+  reason, posted, shown = getattr(args, "reason", None), getattr(args, "posted", None), getattr(args, "head", None)
   if getattr(args, "judges", None) or not args.owner:
     raise core.HandoffError("review rule: proceed is the owner's")
   if bool(reason) == bool(posted):
@@ -2403,6 +2408,12 @@ def rule_proceed(st: core.Store, rid: str, review: dict, card: dict, args) -> in
   head = review["kind"] == "head"
   if posted and not head:
     raise core.HandoffError("review rule: --posted proceeds a head alone")
+  if shown and not head:
+    raise core.HandoffError("review rule: --head proceeds a head alone")
+  if posted and shown:
+    raise core.HandoffError("review rule: --posted takes its head from the comment, not --head")
+  if head and reason and not shown:
+    raise core.HandoffError(f"review rule: {NEEDS_HEAD}")
   ruling = {"id": f"R{len(review['rulings']) + 1}", "ruling": "proceed", "by": "owner", "at": core.now_iso(),
             "reason": reason}
   if not head:
@@ -2422,13 +2433,20 @@ def rule_proceed(st: core.Store, rid: str, review: dict, card: dict, args) -> in
   comment, by = None, "owner"
   if posted:
     recorded = next((e for e in foreman.get("proceeds") or [] if e.get("posted") == f"comment {posted}"), None)
-    if recorded and (recorded.get("review"), recorded.get("head")) == (rid, pinned):
+    # a replay holds only while GitHub's head is the recorded one too; the live read is made where it is needed, so a
+    # new comment's own refusals (edited, not a proceed, no head: U103's and `posted_comment`'s) come before it
+    if (recorded and (recorded.get("review"), recorded.get("head")) == (rid, pinned)
+        and live_head(st, state, unit, pinned) == pinned):
       print(json.dumps(recorded, sort_keys=True))  # the same comment, review and head: the recorded entry, nothing written
       return 0
     if recorded or posted_anywhere(st, f"comment {posted}"):
       raise core.HandoffError(f"review rule: comment {posted} already ruled")
     comment, found = posted_comment(st, posted, number)
-    ruling["reason"], by = found.reason, found.login
+    if not found.subject:
+      raise core.HandoffError(f"review rule: comment {posted}: {NEEDS_HEAD}")
+    ruling["reason"], by, shown = found.reason, found.login, found.subject
+  refuse_moved_since(unit, shown, pinned)
+  refuse_moved_since(unit, shown, live_head(st, state, unit, pinned))
   ruling["sha256"] = pinned
   launches = st.path("launches", unit)
   launched = json.loads(core.read_text(launches))["launches"] if launches.is_file() else []
@@ -2443,6 +2461,30 @@ def rule_proceed(st: core.Store, rid: str, review: dict, card: dict, args) -> in
   save_review(st, rid, review)
   core.save_foreman(st, unit, foreman)
   return proceeded(st, rid, review, ruling, card, args)
+
+
+NEEDS_HEAD = 'proceed needs the head: write "proceed <sha7> — <reason>"'  # 1.3 design section 3.9
+
+
+def refuse_moved_since(unit: str, shown: str, pinned) -> None:
+  """A head proceed names the head the owner was shown, at least its 7 leading hex digits: refused unless the head
+  the proceed would pin (`pinned_head`) still starts with it, so a push since the owner was shown it records nothing."""
+  if not (pinned and (shown == pinned or re.fullmatch(r"[0-9a-f]{7,40}", shown) and pinned.startswith(shown))):
+    now = pinned[:7] if pinned else "none"
+    raise core.HandoffError(f"review rule: {unit}'s head moved since {shown} (now {now}): proceed again on the head shown now")
+
+
+def live_head(st: core.Store, state: dict, unit: str, pinned):
+  """The unit's pull request's head read from GitHub now, so a push the wave has not saved yet refuses a head
+  proceed before anything is written (1.3 design section 3.9); `pinned` itself while the unit has no pull request. The
+  number is the unit's current one: its own record's (`units[<id>].watch`, the owner's `status --watch` selection,
+  then `units[<id>].pr`, as `status` keeps them), else the saved view's (`status --wait`), which a later `--watch`
+  leaves naming the pull request it replaced."""
+  from superegm.report import unit_view
+  record = (state.get("units") or {}).get(unit) or {}
+  pr = (record.get("watch") or {}).get("number") or record.get("pr") or unit_view(state, unit)["pr"]
+  number = pr.get("number") if isinstance(pr, dict) else pr
+  return core.read_pr(st.config["repo"], int(number))["head"] if number else pinned
 
 
 def last_proceed(review: dict):
