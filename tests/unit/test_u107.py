@@ -38,9 +38,14 @@ def set_head(s, uid, head):
   # round 2 (astra-1-1): the builder pushed and the wave has not saved the new head yet: GitHub's head is read afresh
   ("posted **Ruling:** proceed <shown7> — ok", "pushed, not yet saved", "moved"),
   ("typed --head <shown7> --reason ok", "pushed, not yet saved", "moved"),
+  # round 3 (astra-2-1): no `status --wait` snapshot, the pull request known from `status`'s `units[<id>].pr` alone
+  ("posted **Ruling:** proceed <shown7> — ok", "pushed, no status snapshot", "moved"),
+  ("typed --head <shown7> --reason ok", "pushed, no status snapshot", "moved"),
   ("posted **Ruling:** proceed — ok", "shown", NEEDS),
   ("typed --reason ok", "shown", NEEDS),
   ("posted comment 901, recorded before 1.3 from **Ruling:** proceed — ship it", "shown", "replayed"),
+  # round 3 (astra-2-2): the recorded comment replayed once GitHub's head moved: refused, nothing written
+  ("posted comment 901, recorded before 1.3 from **Ruling:** proceed — ship it", "pushed, not yet saved", "moved"),
 ])
 def test_head_proceed_pins_the_shown_head(world, how, head_now, outcome):
   # a head proceed records the head the owner saw, and is refused once the unit's head moved or without a head;
@@ -50,7 +55,7 @@ def test_head_proceed_pins_the_shown_head(world, how, head_now, outcome):
   shown7 = shown[:7]
   recorded_entry = {"ruling": "R1", "review": rid, "posted": "comment 901", "posted_at": UPDATED,
                     "issue": issue_of(s, "U01"), "head": shown, "launch": 1, "by": OWNER, "reason": "ship it"}
-  if outcome == "replayed":
+  if "recorded before 1.3" in how:
     f = foreman_of(s, "U01")
     f["proceeds"] = [recorded_entry]
     atomic_write(s.path("foreman", "U01"), f)
@@ -61,6 +66,11 @@ def test_head_proceed_pins_the_shown_head(world, how, head_now, outcome):
     set_head(s, "U01", "d" * 40)
     world.gh.prs[70]["headRefOid"] = "d" * 40
   elif head_now == "pushed, not yet saved":  # the saved head is still `shown`; the pull request's is not
+    world.gh.prs[70]["headRefOid"] = "d" * 40
+  elif head_now == "pushed, no status snapshot":  # no saved view: the head the latest round reviewed is `shown`
+    state = json.loads(s.path("state").read_text(encoding="utf-8"))
+    state["status"]["units"].pop("U01")
+    atomic_write(s.path("state"), state)
     world.gh.prs[70]["headRefOid"] = "d" * 40
   before = foreman_of(s, "U01").get("proceeds", [])
   review_before = s.path("reviews", rid, "review.json").read_bytes()
@@ -76,7 +86,7 @@ def test_head_proceed_pins_the_shown_head(world, how, head_now, outcome):
     [merge_item] = [i for i in inbox_items(s, [s.handoff_id]) if i["kind"] == "merge"]
     assert f"--match-head-commit {shown}" in merge_item["action"]
   else:
-    assert code == 1 and foreman.get("proceeds", []) == [] and (outcome == "moved" or NEEDS in out), out
+    assert code == 1 and foreman.get("proceeds", []) == before and (outcome == "moved" or NEEDS in out), out
     assert s.path("reviews", rid, "review.json").read_bytes() == review_before  # nothing recorded, no finding settled
   # a spec or plan review keeps the bare typed form
   _, cid, plan_rid, _, _ = round_zero(world)
