@@ -219,3 +219,33 @@ def test_a_respec_ruling_parses_and_a_doubled_fid_is_refused(world):
   assert posted_code == 0 and open_respec_files_before == ["R1.open.json"], posted_out
   assert doubled_code == 1 and doubled_err.startswith("decision: ") and "KeyError" not in doubled_err and "Traceback" not in doubled_err
   assert rulings_after == rulings_before and open_respec_files_after == open_respec_files_before
+
+
+# ---------------------------------------------------------------- S6: an open respec file per unit, head cycle and fid
+
+
+def test_open_respec_files_are_keyed_by_unit_cycle_and_fid(world):
+  # foreman-1-1 ruled `respec` on a decision of head cycle c1 (its source naming c1's head review), then a new
+  # foreman-1-1 of head cycle c2 ruled `respec` while R1 is still open; then c1's ruling is rerun
+  w = word_world(world, "owner: foreman-1-1")
+  c1, c2 = (review.review_id(w.s, "head", "U01", cycle) for cycle in (1, 2))
+  for cycle, rid in ((1, c1), (2, c2)):
+    code, out = world.run("decision", "open", "--unit", "U01", "--point", 1, "--question", question(world, SPEC_1_1),
+                          "--source", f"review {rid} round 1", "--runcard", w.card)
+    assert code == 0, out
+    code, out = rule(world, w, "foreman-1-1 respec — the spec is wrong", qid=f"q{cycle}")
+    assert code == 0, out
+  open_files_after_c2 = open_respec_files(w)
+  data = foreman_of(w.s, "U01")  # a crash after c1's open file and before its ruling was saved: the same ruling is rerun
+  core.atomic_write(w.s.path("foreman", "U01"), data | {"rulings": [r for r in data["rulings"] if r["decision"] != "q1"]})
+  rerun_code, rerun_out = rule(world, w, "foreman-1-1 respec — the spec is wrong", qid="q1")
+  open_files_after_c1_rerun = open_respec_files(w)
+  assert rerun_code == 0, rerun_out
+  assert open_files_after_c2 == ["R1.open.json", "R2.open.json"]
+  assert open_files_after_c1_rerun == ["R1.open.json", "R2.open.json"]
+  held = {p: json.loads(w.s.path("file", "respec", p).read_text(encoding="utf-8")) for p in open_files_after_c1_rerun}
+  assert [(h["finding"], h["cycle"]) for h in held.values()] == [("foreman-1-1", c1), ("foreman-1-1", c2)]
+  assert "review" not in held["R1.open.json"]  # `approve-spec --respec` reads `review` as a closed review cycle
+  legacy = {"id": "R1", "unit": "U01", "finding": "foreman-1-1", "at": "2026-11-03T09:00:00Z"}  # a 1.2.1 file, no `cycle`
+  core.atomic_write(w.s.path("file", "respec", "R1.open.json"), legacy)
+  assert decision.respec_held(w.s, "U01", finding="foreman-1-1", cycle=c1)[1] == legacy
