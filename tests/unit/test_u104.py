@@ -578,3 +578,32 @@ def test_a_file_allowance_on_a_spec_decision_rules_a_test_delta_contest_copy(wor
       "test-delta tests/unit/test_q.py allowed", "foreman-2-2 allowed", "foreman-2-3 finding overruled"]
   assert rule(world, w, "foreman-2-1 respec — the spec is wrong")[0] == 0
   assert report.pending_decisions(foreman_of(w.s, "U01")) == [] and review.open_decisions(w.s, "U01") == []
+
+
+# ---------------------------------------------------------------- review round 3 (PR #301)
+
+
+@pytest.mark.parametrize("copy_first", [True, False])
+def test_a_test_delta_finding_and_its_contest_copy_are_ruled_apart(world, copy_first):
+  # codebase-details-3-1: q1 names the spec finding foreman-2-1, the carried test-delta foreman-1-1 and the builder's copy
+  # foreman-2-2 `contested foreman-1-1: …`; only a spec pair is ruled as one, so the copy's overrule leaves foreman-1-1 to its
+  # own `allowed`, and foreman-1-1's allowance leaves the copy open to its own ruling, in the inbox too
+  delta = "test-delta: tests/unit/test_q.py:3 removed"
+  w = unit_world(world, [("foreman-2-1", SPEC), ("foreman-1-1", delta), ("foreman-2-2", "contested foreman-1-1: the test moved")],
+                 ["foreman-2-2"], posted=True)
+  set_round(w, 1, [("foreman-1-1", delta)])
+  set_word(w, "owner: foreman-2-1, foreman-1-1")
+  core.atomic_write(w.s.path("handoffs", w.s.handoff_id), {"id": w.s.handoff_id, "spec": str(world.spec), "opened_at": "t", "closed_at": None})
+  open_q(world, w, "".join(line_of(f) for f in round_json(w)["reviewers"]["foreman"]["findings"]), n=2)
+  order = ["foreman-2-2 finding overruled — the test moved", "foreman-1-1 allowed — kept"]
+  first, second = order if copy_first else order[::-1]
+  assert rule(world, w, first)[0] == 0
+  between = [i["fingerprint"] for i in map(json.loads, world.run("inbox", "--json")[1].splitlines()) if i["subject"] == "U01"]
+  pending_between = [d["id"] for d in report.pending_decisions(foreman_of(w.s, "U01"))]
+  code, out = rule(world, w, second)
+  assert code == 0, out
+  assert pending_between == ["q1"]
+  assert ("U01/owner/2/foreman-1-1" in between) if copy_first else ("U01/contested/q1/foreman-2-2" in between)
+  assert dispositions(w)["foreman-1-1"] == "declined" and dispositions(w)["foreman-2-2"] == "contested"
+  assert rule(world, w, "foreman-2-1 respec — the spec is wrong")[0] == 0
+  assert report.pending_decisions(foreman_of(w.s, "U01")) == [] and review.open_decisions(w.s, "U01") == []
